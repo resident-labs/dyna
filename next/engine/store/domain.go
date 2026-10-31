@@ -75,7 +75,7 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 			reply = contract.ReplyChannel{Kind: contract.ReplyFinal, Target: contract.Principal{Kind: contract.PrincipalSession, Session: parent}, Home: contract.Conversation{Kind: contract.ConversationFeed}}
 		}
 		if started, _ := event.Body.(contract.SessionStarted); goal != "" || started.Brief != "" {
-			err = insertDelivery(ctx, tx, seq, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: session.ID}, Surface: contract.SurfaceSession, Reply: reply, Wake: true})
+			err = s.insertDelivery(ctx, tx, seq, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: session.ID}, Surface: contract.SurfaceSession, Reply: reply, Wake: true})
 			if err != nil {
 				return err
 			}
@@ -177,7 +177,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 				continue
 			}
 			d := contract.Delivery{To: reply.Reply.Target, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyPost, Target: event.From, Home: reply.Reply.Home}, Wake: reply.Posted == ""}
-			if err := insertDelivery(ctx, tx, seq, d); err != nil {
+			if err := s.insertDelivery(ctx, tx, seq, d); err != nil {
 				return err
 			}
 		}
@@ -203,12 +203,15 @@ func (s *Store) SessionByName(ctx context.Context, room contract.RoomID, name st
 	return session, err
 }
 
-func insertDelivery(ctx context.Context, tx *sql.Tx, seq int64, d contract.Delivery) error {
+func (s *Store) insertDelivery(ctx context.Context, tx *sql.Tx, seq int64, d contract.Delivery) error {
 	home := string(d.Reply.Home.Kind)
 	if d.Reply.Home.Kind == contract.ConversationDM {
 		home += ":" + string(d.Reply.Home.Session)
 	}
 	_, err := tx.ExecContext(ctx, "INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state) VALUES(?,?,?,?,?,?,?,?,?,?,?)", d.To.Kind, d.To.Session, seq, d.Surface, d.Reply.Kind, d.Reply.Target.Kind, d.Reply.Target.Session, home, d.Reply.ReplyTo, d.Wake, "pending")
+	if err == nil && d.To.Kind == contract.PrincipalSession {
+		s.wakePending = append(s.wakePending, d.To.Session)
+	}
 	return err
 }
 
@@ -228,7 +231,7 @@ func (s *Store) Post(ctx context.Context, event contract.Event, deliveries []con
 			}
 		}
 		for _, delivery := range deliveries {
-			if err := insertDelivery(ctx, tx, seq, delivery); err != nil {
+			if err := s.insertDelivery(ctx, tx, seq, delivery); err != nil {
 				return err
 			}
 		}
