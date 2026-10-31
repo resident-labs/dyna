@@ -29,6 +29,8 @@ Each later patch to this folder must be its own commit. Each patch must add an e
 
 - Request-scoped credential eligibility: the engine sends encoded bound credential IDs over its private proxy socket; the handler removes the header and captures the set in context. Local selection, affinity and retries must stay within that set. The 2026-10-31 upstream search found issue [#6972](https://github.com/router-for-me/CLIProxyAPI/issues/6972) for external single-ID dispatch and PR [#5660](https://github.com/router-for-me/CLIProxyAPI/pull/5660) for provider prefixes, but neither implements a request-local multi-credential allowlist.
 
+- Force-prefix isolation: remove the exception that registered a bare model when its ID equaled the credential prefix. `engine/model` uses this to isolate provider and billing namespaces. Upstream PR #5350 hides bare names from listings but keeps them routable, so it does not meet this security boundary. Drop this patch when upstream force-prefix mode never registers bare names.
+
 ## Update
 
 Run this command from the Dyna repository root, replacing `<tag>` with the new upstream tag:
