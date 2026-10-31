@@ -256,6 +256,23 @@ func (s *Service) expireTx(tx *sql.Tx, op contract.Operation) error {
 	_, err = s.Store.TransitionOperation(tx, op.ID, contract.OpPending, contract.OpExpired, &d, nil, event, delivery(op.By.Session))
 	return err
 }
+
+// ExpireKind invalidates pending cards whose facts may have changed across a restart.
+func (s *Service) ExpireKind(ctx context.Context, kind contract.OpKind) error {
+	ops, err := s.Store.Operations(ctx, "", contract.OpPending, time.Time{})
+	if err != nil {
+		return err
+	}
+	for _, record := range ops {
+		if record.Operation.Kind == kind {
+			if err := s.Store.Write(ctx, func(tx *sql.Tx) error { return s.expireTx(tx, record.Operation) }); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (s *Service) Expire(ctx context.Context) error {
 	ops, err := s.Store.Operations(ctx, "", contract.OpPending, s.Now())
 	if err != nil {
