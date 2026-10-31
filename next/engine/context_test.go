@@ -30,8 +30,8 @@ func TestSnapshotReplayAndCap(t *testing.T) {
 	if problem != nil {
 		t.Fatal(problem)
 	}
-	if hello.AgentSurface != contract.AgentSurfaceCaller || !strings.Contains(hello.Instructions, "Use dyna post") {
-		t.Fatalf("enabled profile lost existing guidance: %+v", hello)
+	if hello.AgentSurface != contract.AgentSurfaceCaller || strings.Contains(hello.Instructions, "Use dyna post") || !strings.Contains(hello.Instructions, "context_update") {
+		t.Fatalf("enabled profile hello has the wrong guidance: %+v", hello)
 	}
 	firstCtx, cancel := context.WithCancel(ctx)
 	ch, problem := testChannel(t, s, firstCtx, caller)

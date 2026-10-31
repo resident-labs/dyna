@@ -145,15 +145,20 @@ func Run(ctx context.Context) error {
 	defer jobs.Close()
 	client.shellJobs = jobs.Running
 	mux := http.NewServeMux()
-	dynaTools, err := dynamcp.New(client.forward, dynamcp.BoxTools("/run/dyna/agent.sock"))
-	if err != nil {
-		return err
-	}
-	mux.Handle("/dyna/", dynaTools)
 	mux.Handle("/shell/", http.StripPrefix("/shell", jobs.Handler()))
 	mux.Handle("/", ModelRoute(engineSocket))
 	mcpPath := filepath.Join(piDir, "mcp.json")
-	if err = pi.WriteMCPConfig(mcpPath, "shell", "http://127.0.0.1:7781/shell/"); err != nil {
+	if hello.AgentSurface == contract.AgentSurfaceOff {
+		err = pi.WriteMCPConfig(mcpPath, "shell", "http://127.0.0.1:7781/shell/")
+	} else {
+		dynaTools, problem := dynamcp.New(client.forward, dynamcp.BoxTools("/run/dyna/agent.sock"))
+		if problem != nil {
+			return problem
+		}
+		mux.Handle("/dyna/", dynaTools)
+		err = pi.WriteAgentMCPConfig(mcpPath, dynaTools.Description(), hello.AgentSurface == contract.AgentSurfaceDeclared)
+	}
+	if err != nil {
 		return err
 	}
 	server := &http.Server{Handler: mux}
