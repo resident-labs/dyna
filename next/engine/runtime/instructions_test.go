@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	goruntime "runtime"
 	"strings"
 	"testing"
 
@@ -131,6 +133,76 @@ func TestResumeRepairsInstructionsBeforeStarting(t *testing.T) {
 	}
 	got, err := os.ReadFile(filepath.Join(remote, "instructions", "rooms", "room", "AGENTS.md"))
 	if err != nil || string(got) != "saved" {
+		t.Fatalf("got %q: %v", got, err)
+	}
+}
+
+type addHostStore struct{ instructionStore }
+
+func (addHostStore) AddHost(_ context.Context, _ box.Host) error { return nil }
+
+type admissionTransport struct{}
+
+func (admissionTransport) Run(ctx context.Context, input []byte, args ...string) ([]byte, error) {
+	for _, arg := range args {
+		if arg == "-O" || arg == "-M" {
+			return nil, nil
+		}
+	}
+	command := args[len(args)-1]
+	if strings.Contains(command, "dyna-instructions") {
+		cmd := exec.CommandContext(ctx, "bash", "-c", command)
+		cmd.Stdin = bytes.NewReader(input)
+		return cmd.Output()
+	}
+	var body string
+	switch {
+	case strings.Contains(command, "'uname' '-m'"):
+		if goruntime.GOARCH == "arm64" {
+			body = "aarch64"
+		} else {
+			body = "x86_64"
+		}
+	case strings.Contains(command, "_NPROCESSORS_ONLN"):
+		body = "8 17179869184 17179869184 107374182400"
+	case strings.Contains(command, "dyna-probe"):
+		body = "test-sum"
+	case strings.Contains(command, "SwapTotal:"):
+		body = "0"
+	case strings.Contains(command, "'curl'"):
+		match := regexp.MustCompile(`probe-([0-9a-f]{32})`).FindStringSubmatch(command)
+		if len(match) != 2 {
+			return nil, errors.New("missing forward token")
+		}
+		body = match[1]
+	case strings.Contains(command, "'/etc/machine-id'"):
+		data, err := os.ReadFile("/etc/machine-id")
+		if err != nil {
+			return nil, err
+		}
+		body = string(data)
+	}
+	return []byte(fmt.Sprintf("%sDYNA-END %020d 000\n", body, len(body))), nil
+}
+
+func TestAddHostCopiesPreviouslySavedInstructions(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	data, remote := t.TempDir(), t.TempDir()
+	source := filepath.Join(data, "rooms", "room", "AGENTS.md")
+	if err := os.MkdirAll(filepath.Dir(source), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("saved before host"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	b := &Boxes{Store: addHostStore{}, Runtime: t.TempDir(), HostData: remote, InstructionsDir: data, Version: "dev", Context: ctx, hostRunner: admissionTransport{}}
+	b.binOnce.Do(func() { b.binSum = "test-sum" })
+	if _, err := b.AddHost(ctx, contract.HostAddRequest{Name: "host", SSH: "user@host", OwnerOnlyAdmin: true}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(remote, "instructions", "rooms", "room", "AGENTS.md"))
+	if err != nil || string(got) != "saved before host" {
 		t.Fatalf("got %q: %v", got, err)
 	}
 }
