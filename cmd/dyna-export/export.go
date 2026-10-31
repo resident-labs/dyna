@@ -19,24 +19,25 @@ type limitGap struct {
 	Field string `json:"field"`
 }
 type exportReport struct {
-	Inventory             []fieldInventory `json:"inventory"`
-	SkippedHosts          []string         `json:"skippedHosts"`
-	SkippedProfiles       []string         `json:"skippedProfiles"`
-	UnknownModels         []profileGap     `json:"unknownModels"`
-	SkippedAccounts       []string         `json:"skippedAccounts"`
-	UnknownScopes         []string         `json:"unknownScopes"`
-	UnsupportedHooks      []hookGap        `json:"unsupportedHooks"`
-	RepositoryGaps        []repoGap        `json:"repositoryGaps"`
-	LimitGaps             []limitGap       `json:"limitGaps"`
-	SkippedPRs            []skippedPR      `json:"skippedPRs"`
-	SkippedServices       []string         `json:"skippedServices"`
-	SkippedWorkflowLeaves int              `json:"skippedWorkflowLeaves"`
-	Profiles              int              `json:"profiles"`
-	Repos                 int              `json:"repos"`
-	Skills                int              `json:"skills"`
+	Inventory             []fieldInventory    `json:"inventory"`
+	SkippedHosts          []string            `json:"skippedHosts"`
+	SkippedProfiles       []string            `json:"skippedProfiles"`
+	UnknownModels         []profileGap        `json:"unknownModels"`
+	SkippedAccounts       []string            `json:"skippedAccounts"`
+	UnknownScopes         []string            `json:"unknownScopes"`
+	UnsupportedHooks      []hookGap           `json:"unsupportedHooks"`
+	RepositoryGaps        []repoGap           `json:"repositoryGaps"`
+	LimitGaps             []limitGap          `json:"limitGaps"`
+	SkippedPRs            []skippedPR         `json:"skippedPRs"`
+	SkippedServices       []string            `json:"skippedServices"`
+	SkippedWorkflowLeaves int                 `json:"skippedWorkflowLeaves"`
+	PartialFeeds          []contract.RoomName `json:"partialFeeds"`
+	Profiles              int                 `json:"profiles"`
+	Repos                 int                 `json:"repos"`
+	Skills                int                 `json:"skills"`
 }
 
-func buildBundle(db *sql.DB, backup, data, config, commit string, cap capture) (contract.GlobalBundle, []contract.RoomBundle, exportReport, error) {
+func buildBundle(db *sql.DB, backup, data, feeds, config, commit string, cap capture) (contract.GlobalBundle, []contract.RoomBundle, exportReport, error) {
 	var g contract.GlobalBundle
 	report := exportReport{Inventory: inventory()}
 	records, roomIDs, err := readRooms(db)
@@ -118,9 +119,12 @@ func buildBundle(db *sql.DB, backup, data, config, commit string, cap capture) (
 			}
 			return author(id)
 		}
-		feed, err := readFeed(data, rec.ID)
+		feed, err := readFeed(feeds, rec.ID)
 		if err != nil {
 			return g, nil, report, err
+		}
+		if feed.partial {
+			report.PartialFeeds = append(report.PartialFeeds, name)
 		}
 		rules, err := readRules(db, rec.ID, roomAuthor)
 		if err != nil {
