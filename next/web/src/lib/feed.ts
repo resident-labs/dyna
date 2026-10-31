@@ -4,7 +4,7 @@ import type { Request } from "./room.svelte.ts";
 
 export type Row =
   | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[]; pending?: Pending }
-  | { kind: "failed"; key: string; seq: number; session: string; at: string; label: "Turn failed" | "Failed" | "Could not close" | "Stopped unexpectedly"; cause: string }
+  | { kind: "failed"; key: string; seq: number; session: string; at: string; label: "Turn failed" | "Failed" | "Could not start" | "Could not close" | "Stopped unexpectedly"; cause: string }
   | { kind: "work"; key: string; events: Event[]; until?: string }
   | { kind: "request"; key: string; request: Request }
   | { kind: "day"; key: string; at: string }
@@ -22,9 +22,9 @@ export const boxReason = ({ box, cause }: BoxFailure): string => {
   return reason[0].toLowerCase() + reason.slice(1);
 };
 
-// A box's failed row, in the feed and at the end of a DM.
+// A box's failed row, in the feed and at the end of a DM. A stopped box with a cause may still start, so it has not failed.
 export const boxRow = (box: BoxState, cause?: FailureCause) => ({
-  label: cause === "remove_failed" || cause === "archive_failed" ? "Could not close" as const : box === "lost" ? "Stopped unexpectedly" as const : "Failed" as const,
+  label: cause === "remove_failed" || cause === "archive_failed" ? "Could not close" as const : box === "lost" ? "Stopped unexpectedly" as const : box === "failed" ? "Failed" as const : "Could not start" as const,
   cause: cause ? causes[cause] : box === "failed" ? "Could not start" : "",
 });
 
