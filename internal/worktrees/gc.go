@@ -592,6 +592,18 @@ var inspections = struct {
 	byPath map[string]inspection
 }{byPath: map[string]inspection{}}
 
+// A branch move invalidates git status, not the expensive file-usage walk.
+// Removal and explicit inventory always bypass this cache and inspect fresh.
+type treeUsageEntry struct {
+	at, touched time.Time
+	size        int64
+}
+
+var usageCache = struct {
+	sync.Mutex
+	byPath map[string]treeUsageEntry
+}{byPath: map[string]treeUsageEntry{}}
+
 // inspectCached is inspectTree for cleanup scans of many trees. It reuses a
 // tree's inspection while its HEAD is the same and the inspection is younger
 // than inspectTTL and the default branch has not moved, unless this pass needs
@@ -599,7 +611,7 @@ var inspections = struct {
 // Inventory (nil options) and single-tree rechecks always inspect afresh.
 func inspectCached(ctx context.Context, repo, defaultRef, defaultHead string, opts *GCOptions, tp *Tree, now time.Time) {
 	if opts == nil || opts.Path != "" {
-		inspectTree(ctx, repo, defaultRef, opts, tp)
+		inspectTree(ctx, repo, defaultRef, opts, tp, false)
 		return
 	}
 	inspections.Lock()
@@ -614,7 +626,7 @@ func inspectCached(ctx context.Context, repo, defaultRef, defaultHead string, op
 			return
 		}
 	}
-	inspectTree(ctx, repo, defaultRef, opts, tp)
+	inspectTree(ctx, repo, defaultRef, opts, tp, true)
 	t := *tp
 	inspections.Lock()
 	defer inspections.Unlock()
@@ -628,7 +640,7 @@ func inspectCached(ctx context.Context, repo, defaultRef, defaultHead string, op
 }
 
 // inspectTree fills in the git state and file activity of one tree.
-func inspectTree(ctx context.Context, repo, defaultRef string, opts *GCOptions, tp *Tree) {
+func inspectTree(ctx context.Context, repo, defaultRef string, opts *GCOptions, tp *Tree, reuseUsage bool) {
 	t := *tp
 	defer func() { *tp = t }()
 	if info, err := os.Lstat(t.Path); err != nil {
@@ -658,22 +670,36 @@ func inspectTree(ctx context.Context, repo, defaultRef string, opts *GCOptions, 
 			t.Merged = e == nil
 		}
 		if usageNeeded(t, opts) {
-			size, touched, walkErr := treeUsage(ctx, t.Path)
-			t.Size, t.touched = size, touched
-			if walkErr != nil {
-				t.protected = "cannot inspect all worktree files: " + walkErr.Error()
-			}
-			// Git metadata lives outside the worktree; it records checkout and commit activity.
-			gitDir, gitErr := gitOutput(ctx, t.Path, "rev-parse", "--absolute-git-dir")
-			if gitErr != nil {
-				t.protected = "cannot inspect git metadata"
+			usageCache.Lock()
+			usage, cached := usageCache.byPath[t.Path]
+			usageCache.Unlock()
+			if reuseUsage && cached && time.Since(usage.at) < inspectTTL {
+				t.Size, t.touched = usage.size, usage.touched
 			} else {
-				_, mt, e := treeUsage(ctx, strings.TrimSpace(string(gitDir)))
-				if e != nil {
-					t.protected = "cannot inspect git metadata"
+				size, touched, walkErr := treeUsage(ctx, t.Path)
+				t.Size, t.touched = size, touched
+				if walkErr != nil {
+					t.protected = "cannot inspect all worktree files: " + walkErr.Error()
 				}
-				if mt.After(t.touched) {
-					t.touched = mt
+				// Git metadata lives outside the worktree; it records checkout and commit activity.
+				gitDir, gitErr := gitOutput(ctx, t.Path, "rev-parse", "--absolute-git-dir")
+				if gitErr != nil {
+					t.protected = "cannot inspect git metadata"
+				} else {
+					_, mt, e := treeUsage(ctx, strings.TrimSpace(string(gitDir)))
+					if e != nil {
+						t.protected = "cannot inspect git metadata"
+					}
+					if mt.After(t.touched) {
+						t.touched = mt
+					}
+				}
+				if reuseUsage && t.protected == "" && ctx.Err() == nil {
+					now := time.Now()
+					usageCache.Lock()
+					maps.DeleteFunc(usageCache.byPath, func(_ string, u treeUsageEntry) bool { return now.Sub(u.at) >= inspectTTL })
+					usageCache.byPath[t.Path] = treeUsageEntry{at: now, size: t.Size, touched: t.touched}
+					usageCache.Unlock()
 				}
 			}
 			t.Age = time.Since(t.touched)
