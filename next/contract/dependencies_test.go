@@ -30,7 +30,7 @@ func TestDependencyDirection(t *testing.T) {
 		"engine/lifecycle": {"contract", "box", "engine/store"},
 		"engine/store":     {"contract", "room", "box"},
 		"engine/approve":   {"contract", "engine/store"},
-		"engine/model":     {"contract"},
+		"engine/model":     {"contract", "engine/child"},
 	}
 	for _, line := range lines {
 		fields := strings.Fields(line)
