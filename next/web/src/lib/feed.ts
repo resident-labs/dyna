@@ -46,6 +46,7 @@ export const causes: Record<FailureCause, string> = {
   model_failed: "The model provider refused or failed the request",
   output_limit: "The reply reached the model's output limit",
   harness_failed: "The agent program stopped unexpectedly",
+  set_model_failed: "The session could not switch to its new model",
 };
 
 const sameHome = (a: Conversation, b: Conversation) => a.kind === b.kind && (a.session ?? "") === (b.session ?? "");
@@ -54,7 +55,7 @@ const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.sessio
 // The session an event is about; events without one belong to the room feed only.
 function subject(event: Event): string | undefined {
   switch (event.type) {
-    case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "rule.added": case "rule.removed": return undefined;
+    case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "rule.added": case "rule.removed": case "session.profile_changed": return undefined;
     case "op.requested": return event.body.by.session;
     case "op.decided": case "op.ran": return event.from.session;
     default: return event.body.session;
@@ -305,6 +306,7 @@ export function describe(event: Event, name: Name): string {
     case "grant.expired": return "A host execution grant expired";
     case "rule.added": return `Rule r${event.body.number} added: ${event.body.text}`;
     case "rule.removed": return `Rule r${event.body.number} removed`;
+    case "session.profile_changed": return ""; // feedRows shows no row for it.
     case "box.pressure": return event.body.kind === "max" ? "A session reached its memory limit" : "A session is short of memory";
     case "post.created": return event.body.text;
   }

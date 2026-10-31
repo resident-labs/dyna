@@ -486,7 +486,7 @@ type BundleSource struct {
 - **Owner tools.** `GET /v1/shell/watch?session=<id>` streams a session's shell job output, and `GET /v1/terminal` opens an owner terminal over a WebSocket (5.15). Only the owner can call them.
 - **Owner stream.** `GET /v1/events?after=<seq>` without a room serves the owner only. It streams `op.requested`, `op.decided`, `op.ran`, `session.started`, `turn.started`, `turn.ended` and `session.closed` from every room, so the web app keeps each room's attention state with one connection. A `session.started` from a room the page does not know is a new room: its root session starts in it, and the page reads `room.list` again. `room.list` gives each room's `waiting` operations (pending, owner class) and `working` sessions (a running turn), and the `seq` that this stream resumes after.
 - **Box model.** `box.hello` returns a `ModelChoice` with a `ModelProvider` (`anthropic` or `openai` in M1), model ID, and `ThinkingLevel` (`off`, `minimal`, `low`, `medium`, `high`, or `xhigh`). The engine gets this choice from the session profile. M1 does not change it per turn.
-- **Box channel.** The box agent holds `GET /v1/box/channel` open. The engine sends `TurnStart`, `TurnSteer`, `TurnStop` and `Upgrade` on it. The box agent posts turn output back with `POST` calls, and transcript chunks from M2.
+- **Box channel.** The box agent holds `GET /v1/box/channel` open. The engine sends `TurnStart`, `TurnSteer`, `TurnStop` and `Upgrade` on it. `TurnStart` carries the `ModelChoice` of the session's profile at dispatch. The turn runner compares it with the model it last applied (the `box.hello` model at first) and, if it differs, calls `SetModel` before it starts or continues Pi. Pi gets `set_model`, then `set_thinking_level`. A running turn keeps its model. A turn that resumes after a box restart runs on the session's current profile. If `set_model` fails, the turn ends `failed` with cause `set_model_failed`, and the box keeps running. The box agent posts turn output back with `POST` calls, and transcript chunks from M2.
 - **Box routes.** Only box sockets serve `/model/` (the model route), `/git/<repo>/` (the git route) and, from M3, `/github/` (the GitHub route for `gh`, decision 13).
 
 ```go
@@ -509,7 +509,7 @@ type Error struct {
 }
 ```
 
-M1 methods: `host.add`, `room.create`, `session.start`, `session.close`, `session.restart`, `post`, `events.list`, `box.hello`, `turn.output`. M2 adds `transcript.append`, `turn.activity`, `shell.output` and `host.list`. Each later milestone adds its methods in the same way.
+M1 methods: `host.add`, `room.create`, `session.start`, `session.close`, `session.restart`, `session.set_profile`, `post`, `events.list`, `box.hello`, `turn.output`. M2 adds `transcript.append`, `turn.activity`, `shell.output` and `host.list`. Each later milestone adds its methods in the same way.
 
 ## 4. Store
 
@@ -1261,7 +1261,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | idle-compaction | after | a convenience; Pi compacts by itself |
 | pr-comment-trust | dropped; outside text is wrapped instead (decision 13) | no hold and no state; the owner accepted the risk |
 | ci-test-budget, pr-conflict-radar, room-prs | dropped | an Actions step fails slow tests; GitHub shows conflicts and the PR list (decision 13) |
-| session-transfer | dropped | one harness, so no session format to convert |
+| session-transfer | moving a session to another model is kept as `session.set_profile`; format conversion stays dropped | one harness, so no session format to convert; Pi's session file keeps its history when the model changes |
 | jobs | dropped | CI runs on Actions runners in boxes; host-specific work uses host exec or a box on a labeled host |
 | worktrees | dropped | the box volume is the worktree; close archives to a ref; each box has its own ports |
 | load-doctor | dropped | budgets with `memory.high` and `memory.max` replace it |

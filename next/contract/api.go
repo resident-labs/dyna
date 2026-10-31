@@ -5,35 +5,36 @@ import "time"
 type Method string
 
 const (
-	MethodRuleAdd          Method = "rule.add"
-	MethodRuleRemove       Method = "rule.remove"
-	MethodRuleList         Method = "rule.list"
-	MethodWebLogin         Method = "web.login"
-	MethodConversationRead Method = "conversation.read"
-	MethodRoomList         Method = "room.list"
-	MethodSessionList      Method = "session.list"
-	MethodArchiveDone      Method = "archive.done"
-	MethodDeliveryDone     Method = "delivery.done"
-	MethodHostAdd          Method = "host.add"
-	MethodHostList         Method = "host.list"
-	MethodAccountsQuota    Method = "accounts.quota"
-	MethodRoomCreate       Method = "room.create"
-	MethodRoomRepoAdd      Method = "room.repo.add"
-	MethodRoomRepos        Method = "room.repos"
-	MethodSessionStart     Method = "session.start"
-	MethodSessionClose     Method = "session.close"
-	MethodSessionRestart   Method = "session.restart"
-	MethodSessionMove      Method = "session.move"
-	MethodPost             Method = "post"
-	MethodEventsList       Method = "events.list"
-	MethodBoxHello         Method = "box.hello"
-	MethodComputerChanged  Method = "computer.changed"
-	MethodTurnOutput       Method = "turn.output"
-	MethodTurnActivity     Method = "turn.activity"
-	MethodTranscriptAppend Method = "transcript.append"
-	MethodTranscriptRead   Method = "transcript.read"
-	MethodShellJobEnded    Method = "shell.job.ended"
-	MethodShellOutput      Method = "shell.output"
+	MethodRuleAdd           Method = "rule.add"
+	MethodRuleRemove        Method = "rule.remove"
+	MethodRuleList          Method = "rule.list"
+	MethodWebLogin          Method = "web.login"
+	MethodConversationRead  Method = "conversation.read"
+	MethodRoomList          Method = "room.list"
+	MethodSessionList       Method = "session.list"
+	MethodArchiveDone       Method = "archive.done"
+	MethodDeliveryDone      Method = "delivery.done"
+	MethodHostAdd           Method = "host.add"
+	MethodHostList          Method = "host.list"
+	MethodAccountsQuota     Method = "accounts.quota"
+	MethodRoomCreate        Method = "room.create"
+	MethodRoomRepoAdd       Method = "room.repo.add"
+	MethodRoomRepos         Method = "room.repos"
+	MethodSessionStart      Method = "session.start"
+	MethodSessionClose      Method = "session.close"
+	MethodSessionSetProfile Method = "session.set_profile"
+	MethodSessionRestart    Method = "session.restart"
+	MethodSessionMove       Method = "session.move"
+	MethodPost              Method = "post"
+	MethodEventsList        Method = "events.list"
+	MethodBoxHello          Method = "box.hello"
+	MethodComputerChanged   Method = "computer.changed"
+	MethodTurnOutput        Method = "turn.output"
+	MethodTurnActivity      Method = "turn.activity"
+	MethodTranscriptAppend  Method = "transcript.append"
+	MethodTranscriptRead    Method = "transcript.read"
+	MethodShellJobEnded     Method = "shell.job.ended"
+	MethodShellOutput       Method = "shell.output"
 )
 
 type RoomRule struct {
@@ -244,6 +245,11 @@ type SessionCloseRequest struct {
 	Discard bool      `json:"discard,omitempty"`
 }
 type SessionCloseResponse struct{}
+type SessionSetProfileRequest struct {
+	Session SessionID   `json:"session"`
+	Profile ProfileName `json:"profile"`
+}
+type SessionSetProfileResponse struct{}
 type SessionRestartRequest struct {
 	Session SessionID `json:"session"`
 }
@@ -372,6 +378,7 @@ type TurnInput struct {
 type TurnStart struct {
 	Turn   TurnID      `json:"turn"`
 	Inputs []TurnInput `json:"inputs"`
+	Model  ModelChoice `json:"model"` // the session profile's model when the turn was dispatched
 }
 type TurnQueue string
 

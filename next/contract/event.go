@@ -29,10 +29,18 @@ type RuleRemoved struct {
 	Number int `json:"number"`
 }
 
-func (RuleAdded) EventType() EventType   { return "rule.added" }
-func (RuleAdded) isEventBody()           {}
-func (RuleRemoved) EventType() EventType { return "rule.removed" }
-func (RuleRemoved) isEventBody()         {}
+// SessionProfileChanged tells a session that its profile, and so its model, changed.
+type SessionProfileChanged struct {
+	Session SessionID   `json:"session"`
+	Profile ProfileName `json:"profile"`
+}
+
+func (SessionProfileChanged) EventType() EventType { return "session.profile_changed" }
+func (SessionProfileChanged) isEventBody()         {}
+func (RuleAdded) EventType() EventType             { return "rule.added" }
+func (RuleAdded) isEventBody()                     {}
+func (RuleRemoved) EventType() EventType           { return "rule.removed" }
+func (RuleRemoved) isEventBody()                   {}
 
 type PostCreated struct {
 	Text        string       `json:"text"`
@@ -171,6 +179,7 @@ const (
 	CauseModelFailed     FailureCause = "model_failed"     // the model provider refused or failed the request
 	CauseOutputLimit     FailureCause = "output_limit"     // the reply reached the model's output limit
 	CauseHarnessFailed   FailureCause = "harness_failed"   // the agent program stopped or could not run the turn
+	CauseSetModelFailed  FailureCause = "set_model_failed" // the agent program refused the session's new model
 )
 
 // PressureKind is "high" for memory throttling that lasts 60 s, or "max" for a

@@ -32,7 +32,7 @@ func TestDeliveryReplyRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := contract.Event{ID: "started", Time: now, Room: "room", From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.TurnStarted{}}
-	turn, inputs, err := s.Dispatch(ctx, "s", "turn", start, false)
+	turn, inputs, _, err := s.Dispatch(ctx, "s", "turn", start, false)
 	if err != nil || turn != "" || len(inputs) != 0 {
 		t.Fatalf("quiet delivery started turn: %q %+v %v", turn, inputs, err)
 	}
@@ -41,7 +41,7 @@ func TestDeliveryReplyRoundTrip(t *testing.T) {
 	if _, err := s.Post(ctx, event, []contract.Delivery{delivery}); err != nil {
 		t.Fatal(err)
 	}
-	_, inputs, err = s.Dispatch(ctx, "s", "turn", start, false)
+	_, inputs, _, err = s.Dispatch(ctx, "s", "turn", start, false)
 	if err != nil || len(inputs) != 2 || inputs[0].Reply != reply || inputs[0].Surface != contract.SurfaceDM {
 		t.Fatalf("inputs %+v: %v", inputs, err)
 	}
