@@ -235,3 +235,34 @@ func TestDormancySkipsUncreatedPendingBox(t *testing.T) {
 		t.Fatal("started a box without a container")
 	}
 }
+
+func TestWakeStartsDormantBudgetParent(t *testing.T) {
+	s, room, parent, ctx := setup(t)
+	host := &dormantHost{}
+	s.boxes = host
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	if _, e := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: parent}, contract.BoxHelloRequest{}); e != nil {
+		t.Fatal(e)
+	}
+	child, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Parent: parent, Name: "child", Profile: "test"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='read' WHERE to_id IN (?,?)", parent, child.Session); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET state='dormant' WHERE id IN (?,?)", parent, child.Session); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, "UPDATE boxes SET state='stopped' WHERE session IN (?,?)", parent, child.Session)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	wakeSession(t, s, ctx, room, child.Session)
+	s.ReconcileDormancy(ctx, false, true)
+	if host.starts != 2 || stateOf(t, s, ctx, parent) != contract.BoxStarting || stateOf(t, s, ctx, child.Session) != contract.BoxStarting {
+		t.Fatalf("parent and child did not start: %d", host.starts)
+	}
+}
