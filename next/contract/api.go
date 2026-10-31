@@ -333,13 +333,14 @@ type SessionRestartRequest struct {
 }
 type SessionRestartResponse struct{}
 type PostRequest struct {
-	Room        RoomID       `json:"room"`
-	Text        string       `json:"text"`
-	Mentions    []string     `json:"mentions,omitempty"`
-	Home        Conversation `json:"home,omitempty"`
-	ReplyTo     EventID      `json:"replyTo,omitempty"`
-	Attachments []Attachment `json:"attachments,omitempty"`
-	ClientID    string       `json:"clientId,omitempty"` // at most 64 characters; a repeat from the same author in a room returns the first post
+	Room         RoomID       `json:"room"`
+	Text         string       `json:"text"`
+	Mentions     []string     `json:"mentions,omitempty"`
+	Home         Conversation `json:"home,omitempty"`
+	ReplyTo      EventID      `json:"replyTo,omitempty"`
+	Attachments  []Attachment `json:"attachments,omitempty"`
+	ClientID     string       `json:"clientId,omitempty"`     // at most 64 characters; a repeat from the same author in a room returns the first post
+	VisualUpdate EventID      `json:"visualUpdate,omitempty"` // original visual ID, for a new version
 }
 type PostResponse struct {
 	Event EventID `json:"event"`

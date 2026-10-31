@@ -76,10 +76,54 @@ type PostCreated struct {
 }
 
 type Attachment struct {
-	Name   string `json:"name"`
-	Media  string `json:"media"` // MIME type
-	Bytes  int64  `json:"bytes"`
-	SHA256 string `json:"sha256"` // the file is stored by hash
+	Name   string      `json:"name"`
+	Media  string      `json:"media"` // MIME type
+	Bytes  int64       `json:"bytes"`
+	SHA256 string      `json:"sha256"` // the file is stored by hash
+	Visual *VisualCard `json:"visual,omitempty"`
+}
+
+// VisualCard describes a checked HTML attachment. The engine assigns ID and Version.
+type VisualCard struct {
+	ID        EventID       `json:"id"`
+	Version   int           `json:"version"`
+	Title     string        `json:"title"`
+	Height    int           `json:"height"`
+	AllowNet  bool          `json:"allowNet"`
+	Banner    string        `json:"banner"`
+	Thumbnail string        `json:"thumbnail"`
+	Shots     []VisualShot  `json:"shots"`
+	Checks    []VisualCheck `json:"checks"`
+}
+
+type VisualShot struct {
+	Width int    `json:"width"`
+	File  string `json:"file"`
+}
+
+type VisualCheckName string
+
+const (
+	VisualCheckRenders  VisualCheckName = "renders"
+	VisualCheckConsole  VisualCheckName = "console"
+	VisualCheckWidths   VisualCheckName = "widths"
+	VisualCheckContrast VisualCheckName = "contrast"
+	VisualCheckNetwork  VisualCheckName = "network"
+)
+
+type VisualCheckStatus string
+
+const (
+	VisualCheckPass VisualCheckStatus = "pass"
+	VisualCheckWarn VisualCheckStatus = "warn"
+	VisualCheckFail VisualCheckStatus = "fail"
+	VisualCheckSkip VisualCheckStatus = "skip"
+)
+
+type VisualCheck struct {
+	Name   VisualCheckName   `json:"name"`
+	Status VisualCheckStatus `json:"status"`
+	Detail string            `json:"detail,omitempty"`
 }
 
 type SessionStarted struct {
