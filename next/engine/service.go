@@ -155,11 +155,16 @@ func (s *Service) roomAccess(ctx context.Context, caller contract.Principal, roo
 	return nil
 }
 
+var mentionName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
 func (s *Service) RoomCreate(ctx context.Context, caller contract.Principal, req contract.RoomCreateRequest) (contract.RoomCreateResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalOwner {
 		return contract.RoomCreateResponse{}, forbidden()
 	}
-	if strings.TrimSpace(req.Name) == "" || req.RootProfile == "" {
+	if !mentionName.MatchString(req.Name) {
+		return contract.RoomCreateResponse{}, invalid("room name must be 1–64 letters, digits, dots, underscores or hyphens and start with a letter or digit")
+	}
+	if req.RootProfile == "" {
 		return contract.RoomCreateResponse{}, invalid("room name and root profile are required")
 	}
 	now := s.now()
@@ -208,6 +213,9 @@ func (s *Service) RoomRepos(ctx context.Context, caller contract.Principal, req 
 }
 
 func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, req contract.SessionStartRequest) (contract.SessionStartResponse, *contract.Error) {
+	if !mentionName.MatchString(req.Name) {
+		return contract.SessionStartResponse{}, invalid("session name must be 1–64 letters, digits, dots, underscores or hyphens and start with a letter or digit")
+	}
 	return s.startSession(ctx, caller, req, "")
 }
 
