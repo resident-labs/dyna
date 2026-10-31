@@ -130,6 +130,24 @@ func (s *Store) ConsumeConnectNonce(ctx context.Context, epoch int64, nonce stri
 	})
 }
 
+// AdvanceConnectEpoch invalidates older sessions without permitting rollback.
+func (s *Store) AdvanceConnectEpoch(ctx context.Context, epoch int64) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		r, err := tx.ExecContext(ctx, "UPDATE connect_link_state SET epoch=? WHERE id=1 AND linked=1 AND epoch<=?", epoch, epoch)
+		if err != nil {
+			return err
+		}
+		n, err := r.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return ErrConnectEpoch
+		}
+		return nil
+	})
+}
+
 func (s *Store) ConnectLinked(ctx context.Context) (bool, error) {
 	var linked bool
 	err := s.read.QueryRowContext(ctx, "SELECT linked FROM connect_link_state WHERE id=1").Scan(&linked)
