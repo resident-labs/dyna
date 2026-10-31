@@ -22,7 +22,6 @@ func (r *Reconciler) retryAt(failures int) time.Time {
 }
 
 func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
-	// A previous step can finish after Pass reads its snapshot but before launch.
 	rows, err := r.store.LifecycleBoxes(ctx)
 	if err != nil {
 		return err
@@ -48,9 +47,8 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 	var workErr error
 	switch {
 	case b.State == contract.BoxLost:
-		var status box.ContainerStatus
-		var found bool
-		status, found, workErr = r.boxes.Inspect(ctx, b.ID)
+		status, found, inspectErr := r.boxes.Inspect(ctx, b.ID)
+		workErr = inspectErr
 		if workErr != nil || found && status.Running {
 			due = r.now().Add(60 * time.Second)
 		} else if found {
