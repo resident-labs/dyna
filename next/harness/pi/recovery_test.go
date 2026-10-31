@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
@@ -54,6 +55,31 @@ func TestDeliveryAfterInterruptedWrite(t *testing.T) {
 	delivered, err := (&Harness{session: path}).Delivered(context.Background(), 9)
 	if err != nil || !delivered {
 		t.Fatalf("delivered=%v err=%v", delivered, err)
+	}
+}
+
+func TestDeliverySkipsLongLineAndReadsAppends(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	entry := `{"type":"message","message":{"role":"user","deliveryId":"9"}}`
+	if err := os.WriteFile(path, []byte(strings.Repeat("x", 2048)+"\n"+entry[:30]), 0600); err != nil {
+		t.Fatal(err)
+	}
+	h := &Harness{session: path, deliveryLineLimit: 1024}
+	if found, err := h.Delivered(context.Background(), 9); err != nil || found {
+		t.Fatalf("partial: found=%v err=%v", found, err)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(entry[30:] + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if found, err := h.Delivered(context.Background(), 9); err != nil || !found {
+		t.Fatalf("appended: found=%v err=%v", found, err)
 	}
 }
 
