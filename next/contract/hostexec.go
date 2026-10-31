@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -35,7 +36,9 @@ func (a *HostexecGrantArgs) UnmarshalJSON(data []byte) error {
 	}
 	type plain HostexecGrantArgs
 	var v plain
-	if err := json.Unmarshal(data, &v); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&v); err != nil {
 		return err
 	}
 	if (v.To.Kind != PrincipalSession && v.To.Kind != "") || len(v.Hosts) == 0 || v.Reason == "" || !utf8.ValidString(v.Reason) || utf8.RuneCountInString(v.Reason) > 300 || strings.ContainsAny(v.Reason, "\r\n") || v.Never && !v.Expires.IsZero() {
