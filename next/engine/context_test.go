@@ -26,6 +26,13 @@ func TestSnapshotReplayAndCap(t *testing.T) {
 	profiles := &snapshotProfiles{name: "before"}
 	s.profiles = profiles
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	hello, problem := s.BoxHello(ctx, caller, contract.BoxHelloRequest{})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if hello.AgentSurface != contract.AgentSurfaceCaller || !strings.Contains(hello.Instructions, "Use dyna post") {
+		t.Fatalf("enabled profile lost existing guidance: %+v", hello)
+	}
 	firstCtx, cancel := context.WithCancel(ctx)
 	ch, problem := testChannel(t, s, firstCtx, caller)
 	if problem != nil {
