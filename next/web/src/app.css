@@ -60,8 +60,8 @@ main > header strong { font-size: 16px; }
 .empty { margin: auto; color: var(--muted); }
 .retry { all: unset; cursor: pointer; color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
 .retry:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
-/* Narrow windows hide the sessions column; the header button opens it over the feed. */
-@media (max-width: 900px) {
+/* Narrow windows hide the sessions column, as v1 does at 760 px; the header button opens it over the feed. */
+@media (max-width: 760px) {
   .shell.open { grid-template-columns: 64px minmax(0, 1fr); }
   main > header .panel-toggle { display: grid; }
   .shell > aside.members { display: none; }
