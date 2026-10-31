@@ -993,6 +993,16 @@ func (h *Handler) saveTokenRecord(ctx context.Context, record *coreauth.Auth) (s
 	if record == nil {
 		return "", fmt.Errorf("token record is nil")
 	}
+	if info := coreauth.GetRequestInfo(ctx); info != nil {
+		identity := &coreauth.OAuthIdentity{}
+		identity.AccountID, _ = record.Metadata["account_id"].(string)
+		identity.AccountUUID, _ = record.Metadata["account_uuid"].(string)
+		identity.Subject, _ = record.Metadata["sub"].(string)
+		identity.Email, _ = record.Metadata["email"].(string)
+		copy := *info
+		copy.OAuthIdentity = identity
+		ctx = coreauth.WithRequestInfo(ctx, &copy)
+	}
 	h.mergeExistingAuthFileMetadata(record)
 	store := h.tokenStoreWithBaseDir()
 	if store == nil {
@@ -1008,6 +1018,17 @@ func (h *Handler) saveTokenRecord(ctx context.Context, record *coreauth.Auth) (s
 	if h.postAuthHook != nil {
 		if err := h.postAuthHook(ctx, record); err != nil {
 			return "", fmt.Errorf("post-auth hook failed: %w", err)
+		}
+	}
+	if durable, ok := store.(coreauth.DurableAuthStore); ok && durable.RequireDurableAuth() && h.authManager != nil {
+		if _, ok := h.authManager.GetByID(record.ID); ok {
+			committed, err := h.authManager.Replace(ctx, record)
+			if err != nil {
+				return "", err
+			}
+			record.Metadata = committed.Metadata
+			record.OAuthGrantReplaced = true
+			return record.ID, nil
 		}
 	}
 	savedPath, errSave := store.Save(coreauth.WithAuthCreationIntent(ctx), record)

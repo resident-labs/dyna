@@ -109,7 +109,15 @@ func (s *proxyStore) Save(ctx context.Context, auth *proxyauth.Auth) (string, er
 	if err != nil {
 		return "", errors.New("proxy credential invalid")
 	}
-	req := model.AuthSave{Record: store.ProxyAuth{ID: copy.ID, Provider: copy.Provider, Record: raw, UpdatedAt: time.Now().UnixMilli()}, Create: proxyauth.HasAuthCreationIntent(ctx)}
+	var attempt string
+	var identity model.OAuthIdentity
+	if info := proxyauth.GetRequestInfo(ctx); info != nil {
+		attempt = info.Headers.Get("X-Dyna-Attempt")
+		if raw := info.OAuthIdentity; raw != nil {
+			identity = model.OAuthIdentity{AccountID: raw.AccountID, AccountUUID: raw.AccountUUID, Subject: raw.Subject, Email: raw.Email}
+		}
+	}
+	req := model.AuthSave{Record: store.ProxyAuth{ID: copy.ID, Provider: copy.Provider, Record: raw, UpdatedAt: time.Now().UnixMilli()}, Create: proxyauth.HasAuthCreationIntent(ctx), Attempt: attempt, Identity: identity}
 	if err := s.client.Call("Auth.Save", req, &struct{}{}); err != nil {
 		return "", errors.New("proxy store unavailable")
 	}
