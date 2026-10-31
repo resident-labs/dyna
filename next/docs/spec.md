@@ -181,8 +181,10 @@ Event types by milestone:
 | Milestone | Types |
 |---|---|
 | M1 | `post.created`, `session.started`, `session.closed`, `turn.started`, `turn.ended`, `box.changed` |
-| M2 | `op.requested`, `op.decided`, `op.ran`, `grant.created`, `grant.revoked`, `grant.expired`, `session.moved`, `box.pressure`, `image.built`, `image.failed`, `pr.opened` |
+| M2 | `op.requested`, `op.decided`, `op.ran`, `grant.created`, `grant.revoked`, `grant.expired`, `session.moved`, `box.pressure`, `image.built`, `image.failed`, `pr.opened`, `turn.activity` |
 | M3 | `goal.*`, `issue.*`, `question.asked`, `question.answered`, `rule.changed`, `pr.approved`, `pr.merged`, `pr.closed`, `ci.finished`, `repo.main_updated`, `hook.finished`, `checkin.due`, `notice.posted`, `account.quota_low`, `account.failed`, `migrate.handoff` |
+
+`turn.activity` is the only live event. It says what a running turn does now, such as `read spec.md`, so a session row can show it. The box agent reports the latest tool call at most once a second. The engine keeps the label in memory, sends it on the room stream with seq 0, and never stores it, so `events.list` never returns it and it does not move a resume point. `session.list` carries the same label, and `turn.ended` clears it.
 
 `notice.posted` carries a typed `NoticeKind` (such as `host.unreachable` or `account.exhausted`), so every owner-facing notice has a designed card (r8).
 
@@ -485,7 +487,7 @@ type Error struct {
 }
 ```
 
-M1 methods: `host.add`, `room.create`, `session.start`, `session.close`, `post`, `events.list`, `box.hello`, `turn.output`. M2 adds `transcript.append`. Each later milestone adds its methods in the same way.
+M1 methods: `host.add`, `room.create`, `session.start`, `session.close`, `post`, `events.list`, `box.hello`, `turn.output`. M2 adds `transcript.append` and `turn.activity`. Each later milestone adds its methods in the same way.
 
 ## 4. Store
 

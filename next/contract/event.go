@@ -74,6 +74,15 @@ type TurnEnded struct {
 	Error   string       `json:"error,omitempty"` // failed only
 }
 
+// TurnActivity is live only. The engine keeps each running turn's latest label in memory and
+// never stores this event, so it has seq 0, events.list never returns it, and it does not move a
+// stream's resume point. turn.ended clears it.
+type TurnActivity struct {
+	Session SessionID `json:"session"`
+	Turn    TurnID    `json:"turn"`
+	Label   string    `json:"label"` // the running tool call, masked, one line of at most 80 characters
+}
+
 type FinalReply struct {
 	Reply  ReplyChannel `json:"reply"`
 	Posted EventID      `json:"posted,omitempty"`
@@ -182,6 +191,9 @@ func (TurnStarted) isEventBody()         {}
 
 func (TurnEnded) EventType() EventType { return "turn.ended" }
 func (TurnEnded) isEventBody()         {}
+
+func (TurnActivity) EventType() EventType { return "turn.activity" }
+func (TurnActivity) isEventBody()         {}
 
 func (ShellJobEnded) EventType() EventType { return "shell.job.ended" }
 func (ShellJobEnded) isEventBody()         {}
