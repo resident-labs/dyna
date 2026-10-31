@@ -50,6 +50,23 @@ func TestConnectDeviceMappingAndRevocation(t *testing.T) {
 	}
 	x.ID = "third"
 	if err := s.StartConnectSession(ctx, x); err == nil {
-		t.Fatal("revoked mapping was reused")
+		t.Fatal("mint from before revocation was accepted")
+	}
+	x.Minted = now.Add(time.Second)
+	if err := s.StartConnectSession(ctx, x); err != nil {
+		t.Fatal(err)
+	}
+	got, scopes, ok, err = s.AuthenticateConnect(ctx, x.Hash, x.Origin, now.Add(time.Second))
+	if err != nil || !ok || got.Device != "device2" || len(scopes) != 1 || scopes[0] != contract.ScopeRead {
+		t.Fatalf("new device: %+v %v %v %v", got, scopes, ok, err)
+	}
+	if err := s.UnlinkConnect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.InitializeConnectLink(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.StartConnectSession(ctx, x); err == nil {
+		t.Fatal("old link generation was accepted")
 	}
 }
