@@ -14,6 +14,7 @@ import (
 
 func (s *Service) HostexecGrant() approve.Entry {
 	return approve.Entry{
+		Scope: contract.ScopeAdmin,
 		Class: func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassOwner },
 
 		// The title is the phrase after the asker's name, as for every card: "<session> asks for host access".

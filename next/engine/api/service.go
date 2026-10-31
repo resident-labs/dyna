@@ -19,6 +19,7 @@ type Caller struct {
 // Service implements the engine operations. It must authorize resource targets
 // against the caller as well as applying the API's listener-level policy.
 type Service interface {
+	OperationScope(contract.OpKind) contract.Scope
 	Terminal(context.Context, contract.SessionID, contract.HostName) ([]string, func(), *contract.Error)
 	ShellWatch(context.Context, contract.SessionID) (<-chan contract.ShellJobOutput, *contract.Error)
 	ShellOutput(context.Context, contract.Principal, contract.ShellOutputRequest) (contract.ShellOutputResponse, *contract.Error)
