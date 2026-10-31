@@ -1,8 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountRows, accountState, removalPrompt, canReconnect, reconnectUnavailable } from "./accounts.ts";
+import { accountRows, accountState, providerGroup, removalPrompt, canReconnect, reconnectUnavailable } from "./accounts.ts";
 import { APIError } from "./client.ts";
-import type { Account } from "./contract.gen.ts";
+import type { Account, AccountProviderInfo } from "./contract.gen.ts";
+
+test("search unfolds matching API key providers", () => {
+  const providers: AccountProviderInfo[] = Array.from({ length: 12 }, (_, i) => ({ id: "anthropic", displayName: `Provider ${i}`, connectMethod: "key", connectFlow: "key" }));
+  assert.equal(providerGroup(providers, "key", "", false).remaining, 2);
+  assert.equal(providerGroup(providers, "key", "provider 11", false).items[0].displayName, "Provider 11");
+  assert.equal(providerGroup(providers, "key", "", true).items.length, 12);
+});
 
 test("only the typed unavailable error offers remove and add again", () => {
   assert.equal(reconnectUnavailable(new APIError({ code: "reconnect_unavailable", message: "unavailable" })), true);
