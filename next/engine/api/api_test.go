@@ -27,12 +27,17 @@ type fakeService struct {
 	Service
 	caller  contract.Principal
 	request contract.SessionCloseRequest
+	restart contract.SessionRestartRequest
 	post    contract.PostRequest
 }
 
 func (f *fakeService) SessionClose(_ context.Context, c contract.Principal, r contract.SessionCloseRequest) (contract.SessionCloseResponse, *contract.Error) {
 	f.caller, f.request = c, r
 	return contract.SessionCloseResponse{}, nil
+}
+func (f *fakeService) SessionRestart(_ context.Context, c contract.Principal, r contract.SessionRestartRequest) (contract.SessionRestartResponse, *contract.Error) {
+	f.caller, f.restart = c, r
+	return contract.SessionRestartResponse{}, nil
 }
 func (f *fakeService) Post(_ context.Context, _ contract.Principal, r contract.PostRequest) (contract.PostResponse, *contract.Error) {
 	f.post = r
@@ -81,6 +86,19 @@ func TestBoxCallerIsListenerIdentity(t *testing.T) {
 	_ = res.Body.Close()
 	if res.StatusCode != http.StatusOK || f.caller.Session != "session-a" {
 		t.Fatalf("status %d, caller %+v", res.StatusCode, f.caller)
+	}
+}
+
+func TestSessionRestartOwnerOnly(t *testing.T) {
+	f := &fakeService{}
+	a := New(f, nil)
+	w := request(a.handler(boxCaller()), "/v1/session.restart", `{"session":"session-a"}`)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("box status = %d, want forbidden", w.Code)
+	}
+	w = request(a.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}}), "/v1/session.restart", `{"session":"session-a"}`)
+	if w.Code != http.StatusOK || f.caller.Kind != contract.PrincipalOwner || f.restart.Session != "session-a" {
+		t.Fatalf("owner status=%d caller=%+v request=%+v", w.Code, f.caller, f.restart)
 	}
 }
 

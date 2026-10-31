@@ -509,7 +509,7 @@ type Error struct {
 }
 ```
 
-M1 methods: `host.add`, `room.create`, `session.start`, `session.close`, `post`, `events.list`, `box.hello`, `turn.output`. M2 adds `transcript.append`, `turn.activity`, `shell.output` and `host.list`. Each later milestone adds its methods in the same way.
+M1 methods: `host.add`, `room.create`, `session.start`, `session.close`, `session.restart`, `post`, `events.list`, `box.hello`, `turn.output`. M2 adds `transcript.append`, `turn.activity`, `shell.output` and `host.list`. Each later milestone adds its methods in the same way.
 
 ## 4. Store
 
@@ -617,7 +617,7 @@ const (
 	BoxStopped  BoxState = "stopped"  // the session is dormant; volume and slice kept
 	BoxClosing  BoxState = "closing"  // archive running, children closing
 	BoxDeleted  BoxState = "deleted"  // container, volume and slice removed (end)
-	BoxFailed   BoxState = "failed"   // a step failed; Reason says which (end)
+	BoxFailed   BoxState = "failed"   // a step failed; Reason says which
 	BoxLost     BoxState = "lost"     // host unreachable; may return to ready
 )
 
@@ -646,7 +646,7 @@ type Box struct {
 }
 ```
 
-`State` is the observed lifecycle state. `Want` is what the engine wants the box to become. Only the reconciler moves `State` with a step. A step commits its result with a compare-and-set on `State`. `Want` only chooses the next step. So a step that loses a race still leaves a true record, and the next pass converges.
+`State` is the observed lifecycle state. `Want` is what the engine wants the box to become. The reconciler moves `State` with a step. The owner can also reset a failed box with `session.restart`. A step commits its result with a compare-and-set on `State`. `Want` only chooses the next step. So a step that loses a race still leaves a true record, and the next pass converges.
 
 | Want | Meaning |
 |---|---|
@@ -683,6 +683,7 @@ The table below lists the transitions. Each row is one observed change, and it e
 | stopped | starting | a delivery wakes the session, and admission fits it again |
 | stopped | pending | a delivery wakes the session, but the host has no room now |
 | pending | starting | admission fits a box that already has its container |
+| failed | pending | the owner restarts the open session |
 | pending, creating, starting, ready, stopped, failed | closing | the session closes, or its parent closes |
 | closing | deleted | archive pushed or not needed, children deleted, container removed |
 | creating, starting, ready | failed | create failed (including after an early hello), or `hello` timed out |
@@ -697,7 +698,7 @@ The owner can close a session in any box state. A close cancels a step in progre
 
 `BoxState` and `BoxSize` live in `contract`, because events and the API carry them. `Host` and `Box` are engine records.
 
-The engine refuses every other transition. Each transition emits one `box.changed` event. A failed box keeps its session open until its parent or the owner closes it, and a new session takes over the work.
+The engine refuses every other transition. Each transition emits one `box.changed` event. A failed box keeps its session open. The owner can call `session.restart` or `dyna session restart <session>` to retry it. The engine atomically moves the failed box to `pending`, sets `want=run`, clears its placement, image, failure count, deadline and reason, and emits `box.changed`. The session, its grants, history and budget parent stay unchanged. Only an open session with a failed box can restart; other states return a conflict. The reconciler admits the box again.
 
 Table: `boxes` (`id` PK, `session` UNIQUE, `parent`, `host`, `image`, `size`, `state`, `want`, `due_at`, `reason`, `slice`, `created_at`, `updated_at`; index (`host`, `state`)).
 
@@ -992,7 +993,7 @@ The owner dropped external members (D-583) on 2026-10-30 under r22: no outside a
 
 - A room has exactly one root. Every other session has a parent in the same room. No session is a sibling of root.
 - A session that the owner starts goes under root, or under the session that the owner picks.
-- **Close** closes the session and its whole subtree, deepest first, and deletes their boxes after their archives (5.9). The tracked PRs and archive refs of every closed session go to the closing session's parent. Their open goals go to that parent too, unless the parent is root: root holds no goals (7.2), so those goals stay with no holder, and the `session.closed` event lists them for root to assign, as at import (8.3). Root cannot be closed. It can be restarted in a new box with the same session ID, grants and history.
+- **Close** closes the session and its whole subtree, deepest first, and deletes their boxes after their archives (5.9). The tracked PRs and archive refs of every closed session go to the closing session's parent. Their open goals go to that parent too, unless the parent is root: root holds no goals (7.2), so those goals stay with no holder, and the `session.closed` event lists them for root to assign, as at import (8.3). Root cannot be closed. If its box fails, the owner can restart it with the same session ID, box ID, grants and history (5.3).
 - **Move**: `session.move{Session, NewParent}` by the owner or a session above both places. The engine refuses a cycle, a move to another room, and a move to a parent on another host. The engine moves only an idle subtree: no turn runs in it, and each session's last turn ended with no running shell job. Otherwise it refuses with `move_busy` and names the session; the mover waits and tries again.
   - In one transaction, under the subtree's box locks so that no turn starts, the engine checks that the subtree is idle, sets the new parent, marks each box in the subtree to be created again, and records `session.moved`.
   - It then stops and removes the subtree's containers deepest first, and keeps their volumes. Each box starts again on its next wake, as after dormancy (5.3), from the same volume under its new slice. A moved session that becomes a lead gets a top-level slice (5.5).
