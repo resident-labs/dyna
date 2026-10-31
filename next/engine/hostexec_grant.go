@@ -37,13 +37,27 @@ func (s *Service) HostexecGrant() approve.Entry {
 				}
 			}
 			for _, command := range a.Commands {
-				line := strings.Join(append([]string{command.Program}, command.Args...), " ")
+				var argv []string
+				for _, arg := range append([]string{command.Program}, command.Args...) {
+					safe := arg != ""
+					for _, c := range arg {
+						if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("_./:=@%+-", c)) {
+							safe = false
+							break
+						}
+					}
+					if !safe {
+						arg = "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
+					}
+					argv = append(argv, arg)
+				}
+				line := strings.Join(argv, " ")
 				if command.Prefix {
 					line += " …"
 				}
 				commands = append(commands, line)
 			}
-			return contract.Card{Title: "Grant host execution", Target: contract.Target{Kind: contract.TargetRoom, Name: string(a.Room)}, Body: fmt.Sprintf("Let %s run %s on %s %s, %s.", session.Name, strings.Join(commands, "; "), strings.Join(hosts, ", "), expiry, mode)}
+			return contract.Card{Title: "Grant host execution", Target: contract.Target{Kind: contract.TargetRoom, Name: string(a.Room)}, Body: fmt.Sprintf("Let %s run %s on %s %s, %s.", session.Name, strings.Join(commands, "\n"), strings.Join(hosts, ", "), expiry, mode)}
 		},
 		Check: func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
 			a := args.(contract.HostexecGrantArgs)
