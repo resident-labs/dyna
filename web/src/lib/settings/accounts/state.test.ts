@@ -89,7 +89,7 @@ test('short window labels name the model group and the period only', () => {
     'Claude and GPT models: Weekly Limit Remaining (weekly)': 'Claude/GPT weekly',
     'Session (5-hour)': '5-hour',
     'Weekly (7-day)': 'Weekly',
-    'Fable Weekly': 'Fable weekly',
+    'Weekly · Fable': 'Fable weekly',
     'Weekly usage': 'Weekly',
     'Monthly credits': 'Monthly credits',
   }
