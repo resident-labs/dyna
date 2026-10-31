@@ -37,9 +37,6 @@ type serviceWithHosts struct {
 }
 
 func (s *serviceWithHosts) AccountsQuota(ctx context.Context, caller contract.Principal, _ contract.AccountsQuotaRequest) (contract.AccountsQuotaResponse, *contract.Error) {
-	if caller.Kind != contract.PrincipalOwner {
-		return contract.AccountsQuotaResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "owner only"}
-	}
 	result, err := s.quotas.Read(ctx)
 	if err != nil {
 		return result, &contract.Error{Code: contract.ErrUnavailable, Message: "account usage unavailable"}
@@ -59,9 +56,6 @@ func (s *serviceWithHosts) HostList(ctx context.Context, caller contract.Princip
 }
 
 func (s *serviceWithHosts) HostAdd(ctx context.Context, caller contract.Principal, req contract.HostAddRequest) (contract.HostAddResponse, *contract.Error) {
-	if caller.Kind != contract.PrincipalOwner {
-		return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "owner only"}
-	}
 	if req.Name == "" || !req.OwnerOnlyAdmin || strings.Count(req.SSH, "@") != 1 || strings.HasPrefix(req.SSH, "@") || strings.HasSuffix(req.SSH, "@") {
 		return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "name, user@host, and owner-only administration are required"}
 	}
