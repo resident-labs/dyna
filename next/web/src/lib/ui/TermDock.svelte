@@ -24,7 +24,7 @@
   // Close, and for a shell the key row (v1's Esc, Tab, Ctrl and arrows).
   type Session = { id: string; name: string; root: boolean };
   let { sessions, terminal, phone, strip, element = $bindable(), onempty }: { sessions: Session[]; terminal: boolean; phone: boolean; strip: boolean; element?: HTMLElement; onempty: () => void } = $props();
-  type Tab = { key: number; label: string; root: boolean; exited?: { code?: number } } & ({ target: TerminalTarget } | { session: Session; job: string });
+  type Tab = { key: number; label: string; root: boolean; input?: boolean; exited?: { code?: number } } & ({ target: TerminalTarget } | { session: Session; job: string });
   type Pane = { focus(): void; key?: TermPane["key"] };
   let tabs: Tab[] = $state([]);
   let active = $state(0);
@@ -47,6 +47,7 @@
   $effect(() => { watches.sync(new Set(visible ? tabs.flatMap(tab => "job" in tab ? [tab.session.id] : []) : [])); });
   $effect(() => () => watches.sync(new Set()));
   const jobOf = (tab: Tab) => "job" in tab ? watches.jobs.get(tab.session.id)?.get(tab.job) : undefined;
+  export function hasInput(): boolean { return tabs.some(tab => tab.input); }
   // A job opens in its own tab, or shows the tab it already has.
   export function openJob(session: Session, job: ShellJob) {
     const tab = tabs.find(item => "job" in item && item.session.id === session.id && item.job === job.job);
@@ -198,7 +199,7 @@
       {:else}
         {#if tab.exited}<p class="exited">{tab.exited.code ? `Exited with code ${tab.exited.code}` : "The shell exited."}
           <button type="button" class="retry" onclick={() => renew(tab)}>New shell</button></p>{/if}
-        <TermPane bind:this={panes[tab.key]} bind:ctrl target={tab.target} label={tab.label} onexit={code => { tab.exited = { code }; }} />
+        <TermPane bind:this={panes[tab.key]} bind:ctrl target={tab.target} label={tab.label} oninput={() => { tab.input = true; }} onexit={code => { tab.exited = { code }; }} />
       {/if}
     </div>{/each}
     {#if full && shown && "target" in shown}<div class="keys" role="toolbar" aria-label="Terminal keys">

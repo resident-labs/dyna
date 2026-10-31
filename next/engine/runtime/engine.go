@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"time"
@@ -207,6 +208,16 @@ func Run(ctx context.Context, cfg Config) error {
 			proxy.Handler(string(session.ID), allowed).ServeHTTP(w, r)
 		}))
 	})
+	apiServer.Build = cfg.Version
+	if cfg.Version == "dev" {
+		if info, ok := debug.ReadBuildInfo(); ok {
+			for _, setting := range info.Settings {
+				if setting.Key == "vcs.revision" {
+					apiServer.Build = setting.Value
+				}
+			}
+		}
+	}
 	apiServer.SetFilesRoute(func(c api.Caller) http.Handler { return service.Files(c.Principal, c.Room) })
 	apiServer.SetGitRoute(func(c api.Caller) http.Handler {
 		return enginegit.Handler(&url.URL{Scheme: "https", Host: "github.com"}, http.DefaultTransport, token, c.Principal.Session, c.Room, st)
