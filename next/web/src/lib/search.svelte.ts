@@ -4,13 +4,14 @@ import type { Conversation, Principal } from "./contract.gen.ts";
 // Temporary boundary until post.search joins the generated contract.
 export type PostHit = { seq: number; room: string; home: Conversation; author: Principal; time: string; text: string };
 export type SearchRequest = { query: string; room?: string; before?: number; limit?: number };
-export type SearchResponse = { posts: PostHit[] | null; total: number };
+export type SearchResponse = { posts: PostHit[] | null; total: number; names: Record<string, string> | null };
 export type SearchCall = (request: SearchRequest) => Promise<SearchResponse>;
 
 export class MessageSearch {
   state: "idle" | "searching" | "failed" | "done" = "idle";
   posts: PostHit[] = [];
   total = 0;
+  names: Record<string, string> = {};
   private generation = 0;
   private query = "";
   private room: string | undefined;
@@ -28,6 +29,7 @@ export class MessageSearch {
     this.room = room;
     this.posts = [];
     this.total = 0;
+    this.names = {};
     if (!query) { this.state = "idle"; this.changed(); return; }
     this.state = "searching";
     this.changed();
@@ -45,6 +47,7 @@ export class MessageSearch {
       if (generation !== this.generation) return;
       this.posts = before === undefined ? result.posts ?? [] : [...this.posts, ...result.posts ?? []];
       this.total = result.total;
+      this.names = { ...this.names, ...result.names };
       this.state = "done";
     } catch {
       if (generation !== this.generation) return;
