@@ -21,6 +21,14 @@ type EventBody interface {
 	isEventBody()
 }
 
+type RoomPaused struct{}
+type RoomResumed struct{}
+
+func (RoomPaused) EventType() EventType  { return "room.paused" }
+func (RoomPaused) isEventBody()          {}
+func (RoomResumed) EventType() EventType { return "room.resumed" }
+func (RoomResumed) isEventBody()         {}
+
 type RuleAdded struct {
 	Number int    `json:"number"`
 	Text   string `json:"text"`
