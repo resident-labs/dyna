@@ -99,6 +99,30 @@ func TestRoomCreatesRootAndAttachesWorker(t *testing.T) {
 		t.Fatalf("root %s %q: %v", parent, name, err)
 	}
 }
+func TestSessionBoxSizeDefaults(t *testing.T) {
+	s, room, lead, ctx := setup(t)
+	var root contract.SessionID
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT parent FROM sessions WHERE id=?", lead).Scan(&root); err != nil {
+		t.Fatal(err)
+	}
+	child, problem := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: lead})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	for _, tc := range []struct {
+		id   contract.SessionID
+		want contract.BoxSizeName
+	}{{root, contract.BoxSizeAgent}, {lead, contract.BoxSizeMedium}, {child.Session, contract.BoxSizeMedium}} {
+		session, err := s.store.Session(ctx, tc.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := s.store.Box(ctx, session.Box)
+		if err != nil || b.Size.Name != tc.want {
+			t.Fatalf("%s: size %s, want %s: %v", tc.id, b.Size.Name, tc.want, err)
+		}
+	}
+}
 func TestRootCreationRollsBackAndRootCannotClose(t *testing.T) {
 	s, _, worker, ctx := setup(t)
 	var root contract.SessionID
@@ -117,7 +141,7 @@ func TestRootCreationRollsBackAndRootCannotClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = s.store.StartSession(ctx, store.Session{ID: "new-root", Room: "new-room", Name: "root", Profile: "test", Box: current.Box, NewRoomName: "new-room"}, "", "", "", event, contract.Event{}, "")
+	err = s.store.StartSession(ctx, store.Session{ID: "new-root", Room: "new-room", Name: "root", Profile: "test", Box: current.Box, NewRoomName: "new-room"}, "", "", contract.BoxSizeAgent, "", event, contract.Event{}, "")
 	if err == nil {
 		t.Fatal("expected duplicate box failure")
 	}
