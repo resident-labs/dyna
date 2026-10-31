@@ -152,8 +152,8 @@ func TestRoomRepos(t *testing.T) {
 }
 func TestSessionStartMapsFlags(t *testing.T) {
 	f := &fakeClient{}
-	runCLI(t, f, "session", "start", "--room", "r", "--name", "n", "--profile", "p", "--goal", "g", "--brief", "b", "--repo", "owner/name", "--parent", "s")
-	if f.start.Room != "r" || f.start.Name != "n" || f.start.Profile != "p" || f.start.Goal != "g" || f.start.Brief != "b" || f.start.Repo != "owner/name" || f.start.Parent != "s" {
+	runCLI(t, f, "session", "start", "--room", "r", "--name", "n", "--profile", "p", "--goal", "g", "--brief", "b", "--repo", "owner/name", "--parent", "s", "--size", "large")
+	if f.start.Size != "large" || f.start.Room != "r" || f.start.Name != "n" || f.start.Profile != "p" || f.start.Goal != "g" || f.start.Brief != "b" || f.start.Repo != "owner/name" || f.start.Parent != "s" {
 		t.Fatalf("%+v", f.start)
 	}
 }

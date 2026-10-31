@@ -120,6 +120,21 @@ func (m *Mirror) ImageContext(ctx context.Context, repo contract.RepoName) (stri
 	return images.Context(ctx, m.Runner, path)
 }
 
+// Size reads the repository's default box size from the mirror. A missing mirror has none.
+func (m *Mirror) Size(ctx context.Context, repo contract.RepoName) (contract.BoxSizeName, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	path, err := m.path(repo)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return "", nil
+	}
+	size, err := images.DefaultSize(ctx, m.Runner, path)
+	return contract.BoxSizeName(size), err
+}
+
 // Ref reads one remote reference without fetching its objects.
 func (m *Mirror) Ref(ctx context.Context, repo contract.RepoName, ref string) (string, error) {
 	out, err := m.Runner.Run(ctx, m.authEnv(), "ls-remote", "https://github.com/"+string(repo)+".git", ref)
