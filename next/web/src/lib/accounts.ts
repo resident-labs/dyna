@@ -1,6 +1,8 @@
 import type { Account, ConnectMethod } from "./contract.gen.ts";
 import { APIError } from "./client.ts";
 
+export const reconnectUnavailable = (error: unknown) => error instanceof APIError && error.detail.code === "reconnect_unavailable";
+
 export const canReconnect = (account: Account, method: ConnectMethod) => account.state === "sign_in_expired" && method === "oauth";
 
 export const removalPrompt = (method: ConnectMethod) => `Remove this account? Dyna deletes its ${method === "key" ? "key" : "sign-in"}. You can connect it again later.`;
