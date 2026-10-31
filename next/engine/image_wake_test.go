@@ -19,8 +19,8 @@ type imageWakeHost struct {
 	slice, oldSlice string
 }
 
-func (h *imageWakeHost) CurrentImage(context.Context, contract.SessionID, contract.HostName) (string, error) {
-	return h.image, h.err
+func (h *imageWakeHost) CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error) {
+	return box.Image{Tag: h.image}, h.err
 }
 func (h *imageWakeHost) Recreate(_ context.Context, spec BoxSpec, image, oldSlice string) error {
 	h.recreated = spec.Box

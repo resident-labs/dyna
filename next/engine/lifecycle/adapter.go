@@ -14,6 +14,7 @@ type BoxSpec struct {
 	Slice   string
 	Size    contract.BoxSize
 	Repos   []contract.BoxRepo
+	Needs   []box.Need
 }
 
 type BoxAdapter interface {
@@ -21,7 +22,7 @@ type BoxAdapter interface {
 	Inspect(context.Context, contract.BoxID) (box.ContainerStatus, bool, error)
 	TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error)
 	Create(context.Context, BoxSpec) (string, error)
-	CurrentImage(context.Context, contract.SessionID, contract.HostName) (string, error)
+	CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error)
 	Remove(context.Context, contract.BoxID) error
 	Start(context.Context, contract.BoxID) error
 	Stop(context.Context, contract.BoxID) error

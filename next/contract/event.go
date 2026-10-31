@@ -183,24 +183,26 @@ type BoxChanged struct {
 type FailureCause string
 
 const (
-	CauseCreateFailed    FailureCause = "create_failed"    // the box could not be created on its host
-	CauseStartFailed     FailureCause = "start_failed"     // the box container could not start on its host
-	CauseNoHello         FailureCause = "no_hello"         // the box agent did not connect in time
-	CauseEngineRestarted FailureCause = "engine_restarted" // the engine restarted while it created the box
-	CauseRemoveFailed    FailureCause = "remove_failed"    // close could not remove the box
-	CauseArchiveFailed   FailureCause = "archive_failed"   // close could not archive the session's branch
-	CauseGrantInactive   FailureCause = "grant_inactive"   // the host-exec grant expired or was revoked
-	CauseHostLost        FailureCause = "host_lost"        // the host stopped answering during the run
-	CauseHostBusy        FailureCause = "host_busy"        // the host execution limit is full
-	CauseGithubFailed    FailureCause = "github_failed"    // GitHub refused the request or did not answer
-	CauseStale           FailureCause = "stale"            // what the request needed changed before it ran
-	CauseInterrupted     FailureCause = "interrupted"      // the engine stopped during the run; the outcome is unknown
-	CauseInternal        FailureCause = "internal"         // an engine error; the detail is in the log
-	CauseSetupFailed     FailureCause = "setup_failed"     // the box could not set up the session's repository before the turn
-	CauseModelFailed     FailureCause = "model_failed"     // the model provider refused or failed the request
-	CauseOutputLimit     FailureCause = "output_limit"     // the reply reached the model's output limit
-	CauseHarnessFailed   FailureCause = "harness_failed"   // the agent program stopped or could not run the turn
-	CauseSetModelFailed  FailureCause = "set_model_failed" // the agent program refused the session's new model
+	CauseNestedDeviceMissing FailureCause = "nested_device_missing" // host lacks the TUN device for nested containers
+	CauseKVMDeviceMissing    FailureCause = "kvm_device_missing"    // host lacks the KVM device
+	CauseCreateFailed        FailureCause = "create_failed"         // the box could not be created on its host
+	CauseStartFailed         FailureCause = "start_failed"          // the box container could not start on its host
+	CauseNoHello             FailureCause = "no_hello"              // the box agent did not connect in time
+	CauseEngineRestarted     FailureCause = "engine_restarted"      // the engine restarted while it created the box
+	CauseRemoveFailed        FailureCause = "remove_failed"         // close could not remove the box
+	CauseArchiveFailed       FailureCause = "archive_failed"        // close could not archive the session's branch
+	CauseGrantInactive       FailureCause = "grant_inactive"        // the host-exec grant expired or was revoked
+	CauseHostLost            FailureCause = "host_lost"             // the host stopped answering during the run
+	CauseHostBusy            FailureCause = "host_busy"             // the host execution limit is full
+	CauseGithubFailed        FailureCause = "github_failed"         // GitHub refused the request or did not answer
+	CauseStale               FailureCause = "stale"                 // what the request needed changed before it ran
+	CauseInterrupted         FailureCause = "interrupted"           // the engine stopped during the run; the outcome is unknown
+	CauseInternal            FailureCause = "internal"              // an engine error; the detail is in the log
+	CauseSetupFailed         FailureCause = "setup_failed"          // the box could not set up the session's repository before the turn
+	CauseModelFailed         FailureCause = "model_failed"          // the model provider refused or failed the request
+	CauseOutputLimit         FailureCause = "output_limit"          // the reply reached the model's output limit
+	CauseHarnessFailed       FailureCause = "harness_failed"        // the agent program stopped or could not run the turn
+	CauseSetModelFailed      FailureCause = "set_model_failed"      // the agent program refused the session's new model
 )
 
 // PressureKind is "high" for memory throttling that lasts 60 s, or "max" for a

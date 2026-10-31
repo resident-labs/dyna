@@ -20,6 +20,7 @@ type Label struct{ Key, Value string }
 type ContainerSpec struct {
 	Box          contract.BoxID
 	Image, Slice string
+	Needs        []Need
 	Mounts       []Mount
 	Env          []EnvVar
 	Labels       []Label
