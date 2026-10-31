@@ -753,6 +753,9 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 			}
 			return startCtx.Err()
 		}
+		// A node can appear ready until another run takes its slot. Never return
+		// to a visited node: otherwise competing runs can relocate forever.
+		visited := map[string]bool{node.Name: true}
 		for {
 			req.OnQueue = func(waitCtx context.Context) *localci.Node {
 				nodes, listErr := s.registeredCINodes(waitCtx)
@@ -761,6 +764,7 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 				}
 				nodes = localci.NodesForLabels(localci.NodesForSuites(nodes, suites), plan.execution.LabelsForSuites(suites))
 				ready := s.readyCINodes(waitCtx, nodes, job, plan)
+				ready = slices.DeleteFunc(ready, func(candidate localci.Node) bool { return visited[candidate.Name] })
 				if retriedFrom != "" {
 					ready = slices.DeleteFunc(ready, func(candidate localci.Node) bool { return candidate.Name == retriedFrom })
 				}
@@ -778,6 +782,7 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 				break
 			}
 			node = move.Node
+			visited[node.Name] = true
 			runs := s.nodeRuns()
 			runs.Lock()
 			run.Node = node.Name
