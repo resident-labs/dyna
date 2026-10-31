@@ -39,6 +39,7 @@ import (
 	"dyna-agent/internal/doctor"
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/fsutil"
+	"dyna-agent/internal/ghquota"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/instructionqueue"
@@ -679,6 +680,7 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 			database.SetCallerDetail(v.DatabaseCallerDetail)
 		}
 		writer = state.For(db)
+		defer ghquota.UseStore(writer)()
 		writer.SetPublish(publishState(events, rooms, signals))
 	}
 	callers, err := identifyCallers(ctx, dataDir, readOnly, rooms.Notify.Sessions.Store)
