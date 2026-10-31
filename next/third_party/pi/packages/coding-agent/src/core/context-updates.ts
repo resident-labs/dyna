@@ -9,13 +9,8 @@ export type ContextSections = Record<string, string>;
 export function deliveredSections(branch: SessionEntry[]): ContextSections | undefined {
 	for (let i = branch.length - 1; i >= 0; i--) {
 		const entry = branch[i];
-		if (
-			entry.type === "message" &&
-			entry.message.role === "custom" &&
-			entry.message.customType === "context_update"
-		) {
-			const details = entry.message.details;
-			if (isContextDetails(details)) return details.sections;
+		if (entry.type === "custom_message" && entry.customType === "context_update") {
+			if (isContextDetails(entry.details)) return entry.details.sections;
 		}
 		const head =
 			entry.type === "compaction"
