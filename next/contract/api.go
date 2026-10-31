@@ -214,10 +214,11 @@ const (
 )
 
 type AccountUsage struct {
-	Provider string        `json:"provider"`
-	Label    string        `json:"label"`
-	Windows  []UsageWindow `json:"windows"`
-	Cause    UsageCause    `json:"cause"`
+	ObservedAt *time.Time    `json:"observedAt,omitempty"`
+	Provider   string        `json:"provider"`
+	Label      string        `json:"label"`
+	Windows    []UsageWindow `json:"windows"`
+	Cause      UsageCause    `json:"cause"`
 }
 type UsageWindow struct {
 	Name        string    `json:"name"`
