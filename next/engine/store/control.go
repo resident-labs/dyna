@@ -66,11 +66,7 @@ func (s *Store) PauseRoom(ctx context.Context, room contract.RoomID, paused bool
 		if paused {
 			return nil
 		}
-		_, err = tx.ExecContext(ctx, `WITH RECURSIVE ancestors(id,parent) AS (
-   SELECT b.id,b.parent FROM boxes b JOIN sessions s ON s.id=b.session
-   WHERE s.room=? AND EXISTS (SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=s.id AND d.state='pending' AND d.wake=1)
-   UNION SELECT b.id,b.parent FROM boxes b JOIN ancestors a ON b.id=a.parent
-  ) UPDATE boxes SET want='run' WHERE id IN (SELECT id FROM ancestors) AND want='stop'`, room)
+		_, err = tx.ExecContext(ctx, `UPDATE boxes SET want='run' WHERE want='stop' AND EXISTS (SELECT 1 FROM sessions s WHERE s.id=boxes.session AND s.room=? AND EXISTS (SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=s.id AND d.state='pending' AND d.wake=1))`, room)
 		if err != nil {
 			return err
 		}

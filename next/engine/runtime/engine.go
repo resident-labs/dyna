@@ -30,7 +30,7 @@ import (
 )
 
 type hostRegistrar interface {
-	AddHost(context.Context, contract.HostAddRequest) error
+	AddHost(context.Context, contract.HostAddRequest) (bool, error)
 	HostLoad(context.Context, []contract.HostSummary) error
 }
 
@@ -70,14 +70,15 @@ func (s *serviceWithHosts) HostAdd(ctx context.Context, caller contract.Principa
 			return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "room IDs must be nonempty and unique"}
 		}
 	}
-	if err := s.boxes.AddHost(ctx, req); err != nil {
+	noSwap, err := s.boxes.AddHost(ctx, req)
+	if err != nil {
 		var required podman.RequiredError
 		if errors.As(err, &required) {
 			return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrPodmanRequired, Message: err.Error()}
 		}
 		return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: err.Error()}
 	}
-	return contract.HostAddResponse{}, nil
+	return contract.HostAddResponse{NoSwap: noSwap}, nil
 }
 
 func loadPi(executable string) ([]byte, error) {
@@ -160,6 +161,7 @@ func Run(ctx context.Context, cfg Config) error {
 	boxes := &Boxes{Store: st, HeartbeatStore: st, Runtime: cfg.Runtime, HostData: cfg.HostData, Version: cfg.Version, PiTarball: pi, Context: boxCtx}
 	go boxes.controlPlane(cfg.Data)
 	service := engine.New(st, boxes, profiles, time.Now)
+	service.Reconciler().SetHostMemory(boxes.hostMemory)
 	service.SetHostexecRunner(boxes)
 	boxes.Pressure = service
 	hosts, err := st.Hosts(ctx)

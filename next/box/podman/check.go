@@ -46,6 +46,7 @@ type CheckResult struct {
 	Items               []CheckItem
 	CPUs                int
 	MemBytes, DiskBytes int64
+	NoSwap              bool
 }
 
 func (r CheckResult) Ready() bool {
@@ -102,7 +103,17 @@ func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
 	result.CPUs, result.MemBytes, result.DiskBytes, err = h.capacity(ctx, o)
 	add(CheckCapacity, err)
 	if err == nil {
-		_, err = h.run(ctx, "systemctl", "--user", "set-property", "--runtime", "dyna.slice", fmt.Sprintf("MemoryMax=%d", result.MemBytes))
+		var output []byte
+		output, err = h.run(ctx, "awk", `/^SwapTotal:/ {print $2; found=1} END {if (!found) exit 1}`, "/proc/meminfo")
+		if err == nil {
+			var swap int64
+			swap, err = strconv.ParseInt(strings.TrimSpace(string(output)), 10, 64)
+			result.NoSwap = swap == 0
+		}
+		add(CheckName("swap"), err)
+	}
+	if err == nil {
+		_, err = h.run(ctx, "systemctl", "--user", "set-property", "--runtime", "dyna.slice", fmt.Sprintf("MemoryMax=%d", result.MemBytes), fmt.Sprintf("MemoryHigh=%d", result.MemBytes/10*9+(result.MemBytes%10)*9/10))
 		add(CheckHostSlice, err)
 	}
 	add(CheckForward, h.checkForward(ctx, o))

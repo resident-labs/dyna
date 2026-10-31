@@ -2,27 +2,60 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
 
 type imageWakeHost struct {
 	dormantHost
-	image     string
-	err       error
-	recreated contract.BoxID
-	tag       string
+	image           string
+	err             error
+	recreated       contract.BoxID
+	tag             string
+	slice, oldSlice string
 }
 
 func (h *imageWakeHost) CurrentImage(context.Context, contract.SessionID, contract.HostName) (string, error) {
 	return h.image, h.err
 }
-func (h *imageWakeHost) Recreate(_ context.Context, spec BoxSpec, image, _ string) error {
+func (h *imageWakeHost) Recreate(_ context.Context, spec BoxSpec, image, oldSlice string) error {
 	h.recreated = spec.Box
 	h.tag = image
+	h.slice, h.oldSlice = spec.Slice, oldSlice
 	return nil
+}
+
+func TestWakeFlattensLegacySlice(t *testing.T) {
+	s, _, room, sid, ctx := quietSession(t, 0)
+	h := &imageWakeHost{image: "image"}
+	s.boxes = h
+	resetLifecycle(s)
+	passLifecycle(t, s, ctx)
+	session, err := s.store.Session(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const oldSlice = "dyna-old-child.slice"
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE boxes SET slice=? WHERE id=?", oldSlice, session.Box)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	wakeSession(t, s, ctx, room, sid)
+	passLifecycle(t, s, ctx)
+	b, err := s.store.Box(ctx, session.Box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := box.SliceName(session.Box)
+	if err != nil || h.oldSlice != oldSlice || h.slice != want || b.Slice != want || h.starts != 0 {
+		t.Fatalf("old=%q new=%q box=%q starts=%d err=%v", h.oldSlice, h.slice, b.Slice, h.starts, err)
+	}
 }
 
 func TestWakeUsesCurrentImage(t *testing.T) {
