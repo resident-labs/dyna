@@ -31,9 +31,13 @@ func cgroup(root string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	n, err := strconv.ParseInt(strings.TrimSpace(string(limit)), 10, 64)
+	value := strings.TrimSpace(string(limit))
+	if value == "max" {
+		return nil, nil
+	}
+	n, err := strconv.ParseInt(value, 10, 64)
 	if err != nil || n <= 1 {
-		return nil, fmt.Errorf("invalid memory.max: %s", strings.TrimSpace(string(limit)))
+		return nil, fmt.Errorf("invalid memory.max: %s", value)
 	}
 	for _, name := range []string{"agent", "computer"} {
 		if err := os.Mkdir(filepath.Join(root, name), 0755); err != nil && !os.IsExist(err) {
