@@ -283,7 +283,7 @@ func TestFirstUseReplacesStaleMaster(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := append(h.base(), "-O", "exit", "user@host")
-	if !reflect.DeepEqual(r.calls[0], want) || !reflect.DeepEqual(r.calls[2], []string{"ssh", "-M", "-N", "-f", "-S", h.socket, "-o", "ControlMaster=yes", "-o", "ControlPersist=10m", "-o", "StreamLocalBindUnlink=yes", "user@host"}) {
+	if !reflect.DeepEqual(r.calls[0], want) || !reflect.DeepEqual(r.calls[2], []string{"ssh", "-M", "-N", "-f", "-S", h.socket, "-o", "ControlMaster=yes", "-o", "ControlPersist=10m", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3", "-o", "StreamLocalBindUnlink=yes", "user@host"}) {
 		t.Fatalf("commands %v", r.calls)
 	}
 }
