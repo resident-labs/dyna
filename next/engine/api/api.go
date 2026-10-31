@@ -104,6 +104,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodAccountsList, c, contract.ScopeRead, owner, a.service.AccountsList)
 	call(mux, contract.MethodAccountsRemove, c, contract.ScopeAdmin, owner, a.service.AccountsRemove)
 	call(mux, contract.MethodAccountsConnect, c, contract.ScopeAdmin, owner, a.service.AccountsConnect)
+	call(mux, contract.MethodAccountsReconnect, c, contract.ScopeAdmin, owner, a.service.AccountsReconnect)
 	call(mux, contract.MethodAccountsConnectCallback, c, contract.ScopeAdmin, owner, a.service.AccountsConnectCallback)
 	call(mux, contract.MethodAccountsConnectStatus, c, contract.ScopeAdmin, owner, a.service.AccountsConnectStatus)
 	call(mux, contract.MethodAccountsSetKey, c, contract.ScopeAdmin, owner, a.service.AccountsSetKey)
