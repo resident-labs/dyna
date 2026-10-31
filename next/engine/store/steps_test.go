@@ -46,6 +46,7 @@ func TestUpgradeSessionWorkFrom42(t *testing.T) {
 	for _, statement := range []string{
 		"CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
 		"CREATE TABLE rules (room TEXT, number INTEGER)",
+		"CREATE TABLE accounts (id TEXT PRIMARY KEY, provider TEXT)",
 		"CREATE TABLE deliveries (seq INTEGER)",
 		"CREATE TABLE event_files (seq INTEGER)",
 		"INSERT INTO meta VALUES ('schema_version','42')",
@@ -71,6 +72,26 @@ func TestUpgradeSessionWorkFrom42(t *testing.T) {
 	var seq int
 	if err := db.QueryRow("SELECT started_seq FROM turns WHERE id='turn1'").Scan(&seq); err != nil || seq != 5 {
 		t.Fatalf("started_seq = %d, err = %v", seq, err)
+	}
+}
+
+func TestUpgradeKimiProviderPreservesAccount(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, q := range []string{"CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)", "INSERT INTO meta VALUES ('schema_version','53')", "CREATE TABLE accounts (id TEXT PRIMARY KEY, provider TEXT)", "INSERT INTO accounts VALUES ('account','kimi')"} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := upgrade(db, 1, "", steps, nil); err != nil {
+		t.Fatal(err)
+	}
+	var provider string
+	if err := db.QueryRow("SELECT provider FROM accounts WHERE id='account'").Scan(&provider); err != nil || provider != "kimi-coding" {
+		t.Fatalf("provider=%q err=%v", provider, err)
 	}
 }
 
@@ -112,6 +133,7 @@ func TestUpgradeDropsRules(t *testing.T) {
 	if _, err := db.Exec(`PRAGMA foreign_keys=ON;
 		CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO meta VALUES ('schema_version','45');
 		CREATE TABLE rules (room TEXT, number INTEGER, PRIMARY KEY(room,number)); INSERT INTO rules VALUES ('room',1);
+		CREATE TABLE accounts (id TEXT PRIMARY KEY, provider TEXT);
 		CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT, started_at INTEGER, ended_at INTEGER); CREATE TABLE pr_owners (session TEXT);
 		CREATE TABLE operations (id TEXT, by_kind TEXT, by_id TEXT, created_at INTEGER, state TEXT);
 		CREATE TABLE events (seq INTEGER PRIMARY KEY, id TEXT, at INTEGER, room TEXT, type TEXT, from_kind TEXT, from_id TEXT, body BLOB);

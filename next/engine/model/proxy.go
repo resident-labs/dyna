@@ -19,7 +19,7 @@ import (
 // Proxy owns the proxy listener and its private client key.
 type Proxy struct {
 	keyProviders []KeyProvider
-	planModels   map[contract.AccountProvider]string
+	planModels   map[contract.AccountProvider][]contract.CatalogModel
 	Listener     *net.UnixListener
 	Config       string
 	Socket       string
@@ -121,10 +121,10 @@ func NewProxy(dataDir, managementKey string, providers ...KeyProvider) (*Proxy, 
 
 // SetPlanModels records the pinned Pi models used to verify plan activation.
 func (p *Proxy) SetPlanModels(c Catalog) {
-	p.planModels = make(map[contract.AccountProvider]string)
+	p.planModels = make(map[contract.AccountProvider][]contract.CatalogModel)
 	for _, provider := range c.Providers {
-		if len(provider.Models) > 0 {
-			p.planModels[contract.AccountProvider(provider.ID)] = provider.Models[0].ID
+		for _, model := range provider.Models {
+			p.planModels[contract.AccountProvider(provider.ID)] = append(p.planModels[contract.AccountProvider(provider.ID)], contract.CatalogModel{ID: model.ID, Name: model.Name})
 		}
 	}
 }

@@ -14,9 +14,9 @@ var accountProviders = map[string]contract.AccountProvider{
 	"chatgpt":     contract.ProviderOpenAI,
 	"kimi-code":   contract.ProviderKimiCoding,
 	"xai":         contract.ProviderXAI,
-	"zai":         contract.ProviderZAI,
-	"opencode-go": contract.ProviderOpencodeGo,
-	"deepseek":    contract.ProviderDeepSeek,
+	"zai":         contract.AccountProvider("zai"),
+	"opencode-go": contract.AccountProvider("opencode-go"),
+	"deepseek":    contract.AccountProvider("deepseek"),
 }
 
 // Only metadata is selected. Credential schemas and payloads are not read.

@@ -26,7 +26,7 @@ func TestAccountList(t *testing.T) {
 	if err := st.BindAccount(ctx, "account", "invented-private-proxy-id", contract.ProviderAnthropic, "Invented"); err != nil {
 		t.Fatal(err)
 	}
-	proxy, err := model.NewProxy(t.TempDir(), "invented-management-key")
+	proxy, err := model.NewProxy(t.TempDir(), "invented-management-key", model.KeyProvider{Provider: "zai", DisplayName: "z.ai", KeyName: "ZAI_API_KEY", URL: "https://example.com/v1", Models: []contract.CatalogModel{{ID: "model"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,15 +43,15 @@ func TestAccountList(t *testing.T) {
 	flows := map[contract.AccountProvider]contract.ConnectFlow{
 		contract.ProviderAnthropic: contract.ConnectFlowCallback, contract.ProviderOpenAI: contract.ConnectFlowCallback,
 		contract.ProviderKimiCoding: contract.ConnectFlowDevice, contract.ProviderXAI: contract.ConnectFlowDevice,
-		contract.ProviderZAI: contract.ConnectFlowKey, contract.ProviderOpencodeGo: contract.ConnectFlowKey, contract.ProviderDeepSeek: contract.ConnectFlowKey,
+		contract.AccountProvider("zai"): contract.ConnectFlowKey,
 	}
 	for _, provider := range response.Providers {
-		if provider.ConnectFlow != flows[provider.ID] {
+		if len(provider.Flows) == 0 || provider.Flows[0] != flows[provider.ID] {
 			t.Fatalf("provider %s has wrong connection flow", provider.ID)
 		}
 	}
 	data, err := json.Marshal(response)
-	if err != nil || problem != nil || len(response.Accounts) != 1 || len(response.Providers) != 7 || response.Accounts[0].State != contract.AccountSignInExpired || strings.Contains(string(data), "invented-private-proxy-id") {
+	if err != nil || problem != nil || len(response.Accounts) != 1 || len(response.Providers) != 5 || response.Accounts[0].Flow != contract.ConnectFlowCallback || response.Accounts[0].State != contract.AccountSignInExpired || strings.Contains(string(data), "invented-private-proxy-id") {
 		t.Fatal("unsafe or incomplete account list")
 	}
 }

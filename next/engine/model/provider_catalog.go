@@ -16,7 +16,9 @@ var oauthProviders = []struct {
 func (p *Proxy) AccountProviders() []contract.AccountProviderInfo {
 	providers := make([]contract.AccountProviderInfo, 0, len(oauthProviders)+len(p.keyProviders))
 	for _, provider := range oauthProviders {
-		providers = append(providers, provider.info)
+		info := provider.info
+		info.Models = p.planModels[info.ID]
+		providers = append(providers, info)
 	}
 	for _, provider := range p.keyProviders {
 		index := -1

@@ -148,12 +148,12 @@ func (r *AuthRPC) OAuthCompleted(req OAuthCompletion, out *OAuthCompletionResult
 	defer r.Connections.mu.Unlock()
 	for _, attempt := range r.Connections.attempts {
 		if attempt.state == req.State {
-			model := r.Connections.proxy.planModels[attempt.provider]
-			if model == "" {
+			models := r.Connections.proxy.planModels[attempt.provider]
+			if len(models) == 0 {
 				return errors.New("plan model unavailable")
 			}
 			out.Prefix = "plan_" + string(attempt.provider)
-			out.Model = out.Prefix + "/" + model
+			out.Model = out.Prefix + "/" + models[0].ID
 			out.Accepted = true
 			return nil
 		}
