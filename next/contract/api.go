@@ -327,6 +327,7 @@ type RoomReposResponse struct {
 	Repos []RoomRepo `json:"repos"`
 }
 type SessionStartRequest struct {
+	ClientID string      `json:"clientId,omitempty"`
 	Room     RoomID      `json:"room"`
 	Name     string      `json:"name"`
 	Parent   SessionID   `json:"parent,omitempty"`

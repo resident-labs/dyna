@@ -15,6 +15,9 @@ import (
 )
 
 func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, req contract.SessionStartRequest) (contract.SessionStartResponse, *contract.Error) {
+	if len(req.ClientID) > 64 {
+		return contract.SessionStartResponse{}, invalid("clientId is longer than 64 characters")
+	}
 	if !mentionName.MatchString(req.Name) {
 		return contract.SessionStartResponse{}, invalid("session name must be 1–64 letters, digits, dots, underscores or hyphens and start with a letter or digit")
 	}
@@ -32,6 +35,18 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 			return contract.SessionStartResponse{}, e
 		}
 	}
+	s.treeMu.Lock()
+	defer s.treeMu.Unlock()
+	if req.ClientID != "" {
+		response, err := s.store.SessionReplay(ctx, caller, req.ClientID)
+		if err == nil {
+			return response, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return contract.SessionStartResponse{}, failure(err)
+		}
+	}
+
 	if req.Name == "" || req.Profile == "" {
 		return contract.SessionStartResponse{}, invalid("name and profile are required")
 	}
@@ -113,7 +128,7 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	if err := s.store.StartSession(ctx, session, parent, sizeName, req.Goal, event, initial, "", req.SameHost); err != nil {
+	if err := s.store.StartSession(ctx, session, parent, sizeName, req.Goal, event, initial, "", req.SameHost, req.ClientID); err != nil {
 		if errors.Is(err, store.ErrParentHostAbsent) {
 			return contract.SessionStartResponse{}, invalid(err.Error())
 		}
