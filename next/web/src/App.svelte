@@ -11,6 +11,8 @@
   import Settings from "./lib/ui/Settings.svelte";
   import { linkCode } from "./lib/devices.ts";
   import Feed from "./lib/ui/Feed.svelte";
+  import SessionWork from "./lib/ui/SessionWork.svelte";
+  import { readWork } from "./lib/session-work.ts";
   import VisualView from "./lib/ui/VisualView.svelte";
   import type { VisualVersion } from "./lib/visual.ts";
   import StatusPill from "./lib/ui/StatusPill.svelte";
@@ -303,6 +305,20 @@
   let palette = $state(false);
   let paletteOpener: HTMLElement | undefined;
   let jumpSeq: number | undefined = $state();
+  let workTab = $state(false), workTotal: number | undefined = $state();
+  $effect(() => {
+    const current = session;
+    workTab = false; workTotal = undefined;
+    let cancelled = false;
+    if (current) void readWork(current).then(page => { if (!cancelled) workTotal = page.total; }).catch(() => {});
+    return () => { cancelled = true; };
+  });
+  function workFeed(seq: number) {
+    if (!room) return;
+    history.pushState(null, "", `/r/${encodeURIComponent(room)}`);
+    follow();
+    void tick().then(() => { jumpSeq = seq; });
+  }
   const searchPosts: SearchCall = request => call("post.search", request);
   function closePalette() {
     palette = false;
@@ -562,6 +578,8 @@
   });
 </script>
 
+{#snippet workTabs(placement: string)}{#if session && store && !unavailable}<nav class="work-tabs {placement}" aria-label="Session view"><button type="button" aria-current={!workTab ? "page" : undefined} onclick={() => workTab = false}>Messages</button><button type="button" aria-current={workTab ? "page" : undefined} onclick={() => workTab = true}>Work{#if workTotal !== undefined}<span class="count">{workTotal}</span>{/if}{#if store.unseen(session)} <StatusPill tone="failed" label="Unseen failure" dot />{/if}</button></nav>{/if}{/snippet}
+
 {#snippet intro(history: boolean)}
   <!-- A DM with history needs only the one muted line. -->
   {#if session}<RoomIntro kind="session" compact={history} name={title} root={!!store?.sessions.get(session) && !store.sessions.get(session)?.parent} line={`This is the start of your direct messages with ${title}.`} />
@@ -619,7 +637,7 @@
   {#if drawer || (panel && phone.current)}<button type="button" class="scrim" tabindex="-1" aria-label={drawer ? "Close the menu" : room ? "Close the sessions" : "Close the active rooms"}
     onclick={() => void (drawer ? showDrawer(false, true, true) : showPanel(false, true))}></button>{/if}
   <main inert={drawer || (panel && phone.current) || covered || inSettings}>
-    <header class="bar">{#if room && session && phone.current}<a class="menu-toggle" href={"/r/" + encodeURIComponent(room)} aria-label={`Back to ${roomName}`} title={`Back to ${roomName}`}
+    <header class="bar" class:work-phone={!!session && workTab && phone.current}>{#if room && session && phone.current}<a class="menu-toggle" href={"/r/" + encodeURIComponent(room)} aria-label={`Back to ${roomName}`} title={`Back to ${roomName}`}
         onclick={event => { const tapped = event.detail > 0; navigate(event); void tick().then(() => menuButton?.focus({ focusVisible: !tapped })); }}><Icon name="back" /></a>
       {:else}<button type="button" class="menu-toggle" bind:this={menuButton} aria-label="Rooms and pages" title="Rooms and pages" aria-expanded={drawer}
         onclick={event => void showDrawer(true, true, event.detail > 0)}><Icon name="menu" /></button>{/if}
@@ -629,6 +647,7 @@
       <span class="heading"><strong>{title}</strong>
         {#if closed && !missing}<span class="count">closed</span>{:else if word && !missing}<span class="count word">{word}</span>{/if}
         {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session")}</span>{/if}</span>
+      {@render workTabs("desktop-tabs")}
       {#if store && !unavailable}{#if room}<JobsTool bind:this={jobsTool} sessions={toolSessions} allSessions={jobSessions} failures={toolFailures} allFailures={[...store.failedJobs]} phone={phone.current}
         onopen={(item, job) => terminals?.openJob(item, job)} onseen={key => store?.failedJobs.delete(key)} />{/if}
         <button type="button" class="requests" class:waiting={store.waiting > 0} bind:this={requestsButton} aria-pressed={section === "requests"}
@@ -645,6 +664,7 @@
           {#if busy.length > 3}<span class="more">+{busy.length - 3}</span>{/if}<span class="count">{working} working</span>
         {:else}<Icon name="people" />{#if store?.ready}<span class="count phone">{store.sessions.size}</span>{/if}{/if}
         {#if store?.counts.failed && !panelShown}<span class="attention"></span>{/if}</button>{/if}</header>
+    {@render workTabs("phone-tabs")}
     {#if reloadPending}<p class="reload-notice" role="status">Dyna updated. Reload to use the new version. <button type="button" onclick={() => location.reload()}>Reload</button></p>{/if}
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} admin={attention.can("admin")} onclose={() => void closeSection()} />{/if}
     {#if section === "rules" && store && !unavailable}<RulesPanel bind:element={page} {store} room={roomName} edit={attention.can("admin")} onback={event => void closeSection(event.detail > 0)} />
@@ -657,14 +677,14 @@
         onactive={event => { toggle = event.currentTarget; void showPanel(true, event.detail > 0); }} />
       {:else if unavailable === "unreachable"}<Blocked kind="unreachable" onretry={reopen} />
       {:else if store && !unavailable}
-        {#key key}<Feed bind:this={view} {store} {home} admin={attention.can("admin")} operate={attention.can("operate") && !closed} waiting={quotes[key]} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
+        {#if session && workTab}<SessionWork {store} {session} onfeed={workFeed} ontotal={total => workTotal = total} />{:else}{#key key}<Feed bind:this={view} {store} {home} admin={attention.can("admin")} operate={attention.can("operate") && !closed} waiting={quotes[key]} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
           onforward={forward} onclosed={() => composer?.focus()} onjobs={item => void jobsTool?.show(item)}
-          onvisual={(versions, selected, send) => { visualTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : undefined; visual = { versions, selected, send }; }} />{/key}
+          onvisual={(versions, selected, send) => { visualTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : undefined; visual = { versions, selected, send }; }} />{/key}{/if}
         <!-- The empty feed stays mounted behind the error, as it is how the page learns the session has no history. -->
         {#if missing && room}<Blocked kind="no-session" back={{ href: "/r/" + encodeURIComponent(room), label: `Back to ${roomName}` }} {navigate} />{/if}
       {:else}<p class="empty">This room is not available. <button type="button" class="retry" onclick={reopen}>Try again</button></p>{/if}
     </div>
-    {#if room && !unavailable && !closed}
+    {#if room && !unavailable && !closed && !(session && workTab)}
       <!-- A paused room's line takes the working line's place, so the composer never moves; the header still says who works. -->
       {#if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
         {#if attention.can("operate")}<button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button>{/if}</p>
@@ -725,6 +745,15 @@
 </div>{/if}
 
 <style>
+  .work-tabs { display: flex; gap: 4px; }
+  .work-tabs button { border: 0; border-radius: 6px; background: transparent; color: var(--muted); padding: 6px 10px; font: inherit; cursor: pointer; }
+  .work-tabs button[aria-current] { background: var(--selected); color: var(--text); }
+  .work-tabs .count { margin-left: 5px; color: var(--muted); }
+  .work-tabs button:focus-visible { outline: 2px solid var(--focus); }
+  .phone-tabs { display: none; }
+  .work-phone :global(.jobs), .work-phone .requests, .work-phone .tool, .work-phone .room-menu, .work-phone .word { display: none; }
+  @media (max-width: 600px) { .desktop-tabs { display: none; } .phone-tabs { display: flex; padding: 4px 12px; border-bottom: 1px solid var(--line); } }
+  @media (hover: none) { .work-tabs button { min-height: 40px; } }
   :global(.shell.open:has(.visual-pane)) { grid-template-columns: 64px minmax(0, 1fr) min(660px, calc(100vw - 64px)); }
   .visual-pane { min-width: 0; overflow: hidden; border-left: 1px solid var(--line); }
   @media (max-width: 760px) { :global(.shell.open:has(.visual-pane)) { grid-template-columns: 64px minmax(0, 1fr); } .visual-pane { position: fixed; z-index: 4; inset: 0 0 0 auto; width: min(660px, 100vw); } }

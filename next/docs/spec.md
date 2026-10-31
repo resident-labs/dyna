@@ -119,6 +119,8 @@ The versioned bundle has `global.json`, one `rooms/<name>.json` per room and a r
 
 HTTP/1.1 serves typed `POST /v1/<method>` calls and typed errors. The owner Unix socket has mode 0600. Each box has its own Unix socket. The web listener binds loopback; paired devices use remote access. The listener identifies the principal and applies device scopes. Event streams use server-sent events and resume by sequence. The owner stream spans rooms; box traffic uses a persistent channel.
 
+Owner-only `session.work` returns a newest-first page of turns, each with its start, optional end, input events and posts sent during that turn. The cursor is a turn ID. The default page has 30 turns and the maximum is 100.
+
 Visual cards use stable IDs and versioned posts. Only the author or owner updates a card, within its room. The server checks file access and serves the HTML in a sandbox with a default-deny content security policy; interactive submissions require owner confirmation.
 
 Owner-only search covers sessions and posts. Owner-only shell watch and terminal routes expose box output and terminals. The owner advances conversation read positions; room and session lists provide their current read and activity state. Session stop is available to the owner or an ancestor. Owner or room root can pause delivery and box wakes while active turns finish; resume dispatches waiting wakes. Standing-instruction reads and writes are owner-only, with hash-based stale-write protection (section 7).
