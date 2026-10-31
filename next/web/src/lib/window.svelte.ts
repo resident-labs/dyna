@@ -166,7 +166,7 @@ export class EventWindow {
     else this.seqs.splice(index, 0, event.seq);
     // A sent post stays pending until its event is in the window, so it never disappears.
     for (const [id, post] of this.pendingPosts) {
-      if (post.seq === event.seq) this.pendingPosts.delete(id);
+      if (post.seq === event.seq || event.type === "post.created" && event.body.clientId !== undefined && post.request.clientId === event.body.clientId) this.pendingPosts.delete(id);
     }
     return true;
   }
@@ -179,6 +179,8 @@ export class EventWindow {
   // Shows a post that did not send; the app keeps such posts while the owner is in another conversation.
   unsent(request: PostRequest): number {
     const id = ++this.sent;
+    // The ID stays with the request through every Retry, so the engine returns the first post for a repeat.
+    request.clientId ??= `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
     this.pendingPosts.set(id, { id, request, at: new Date().toISOString(), failed: true });
     return id;
   }
@@ -198,6 +200,8 @@ export class EventWindow {
     const jumped = this.jumpToPresent();
     // The row says "Not sent"; the error text is raw (r8).
     const response = await call("post", pending.request).catch(() => undefined);
+    // The echoed event may have replaced the row while the call was in flight; it must not come back.
+    if (!this.pendingPosts.has(id)) { await jumped; return; }
     if (!response) {
       this.pendingPosts.set(id, { ...pending, failed: true });
       this.onunsent(pending.request);
