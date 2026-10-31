@@ -221,6 +221,7 @@ checks:
     host: true
     command: >-
       dir=$(mktemp -d); trap 'rm -rf "$dir"' EXIT;
+      if [ -x "$HOME/.local/opt/dyna-next/node/bin/node" ]; then export PATH="$HOME/.local/opt/dyna-next/node/bin:$PATH"; fi;
       export DYNA_WEBDEV_BIN="$dir/dyna-webdev";
       bash scripts/ci.sh next-web-width-build && bash scripts/ci.sh next-web-width
     caches: [go-build, go-mod, npm]
