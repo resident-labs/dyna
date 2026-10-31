@@ -24,7 +24,7 @@ test("card messages accept bounded text and web links only", () => {
 
 test("a superseded reply offers the newer version", () => {
   const visual = { event: "new-event", version: 12, seq: 42 };
-  assert.deepEqual(visualReplyFailure(new APIError({ code: "visual_superseded", message: "stale", visual })), { kind: "superseded", visual });
+  assert.deepEqual(visualReplyFailure(new APIError({ code: "visual_superseded", message: "stale", visual })), { kind: "superseded", visual, pending: null });
   assert.deepEqual(visualReplyFailure(new Error("offline")), { kind: "failed" });
 });
 
