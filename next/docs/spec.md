@@ -731,6 +731,8 @@ Close ends the whole subtree, as the card decided: each child is closed and dele
 3. `podman rm`, delete the volume, stop the slice, and remove the forward and the listener.
 4. Emit `box.changed` to `deleted`, then `session.closed`.
 
+Closing a dormant session starts its box for the archive without admission. Archiving boxes are idle and short-lived, so many closed at once can briefly overcommit their host.
+
 The engine deletes archive refs after 14 days. `dyna session restore <session>` starts a new box from the archive. If an archive push fails, the box stays in `closing` with a reason. A box is never deleted without its archive, except through `dyna session close --discard` (owner only), for a box that cannot start; it deletes the box with no archive.
 
 Table: `archives` (`session`, `repo`, `ref`, `commit_sha`, `created_at`, `expires_at`, PK `(session, repo)`).
