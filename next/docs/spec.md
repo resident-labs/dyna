@@ -775,6 +775,8 @@ The owner manages every model account on one page of the v2 web app. It has the 
 
 The v2 web app stays Svelte 5 and is ported view by view. Each ported or new view follows T3 Code's design approach: quiet and dense, with few borders and few badges. T3 Code is a reference for the approach only; no code is copied.
 
+`docs/design-taste.md` holds the checkable look rules (tokens, status, cards, rows, feed and states). Every UI builder reads it before it starts, every UI brief links it, and reviewers check screenshots against it.
+
 Every PR that adds or changes a view has one required step (owner rule):
 
 - The builder attaches one side-by-side image to the PR. The left half is the new or changed view in the v2 app. The right half is the T3 Code page that is most similar to it. Both use the same window size and theme.
