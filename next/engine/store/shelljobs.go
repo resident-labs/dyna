@@ -18,6 +18,10 @@ func (s *Store) ShellJobEnded(ctx context.Context, session contract.SessionID, j
 		if n, err := result.RowsAffected(); err != nil || n == 0 {
 			return err
 		}
+		// While a turn is open its end replaces the count, so only an idle session lowers it here.
+		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET shell_jobs=MAX(0,shell_jobs-1) WHERE id=? AND NOT EXISTS (SELECT 1 FROM turns WHERE session=? AND ended_at IS NULL)", session, session); err != nil {
+			return err
+		}
 		seq, err := s.AppendEvent(tx, event)
 		if err != nil {
 			return err

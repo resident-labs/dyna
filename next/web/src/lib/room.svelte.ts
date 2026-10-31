@@ -245,7 +245,8 @@ export class RoomStore {
       case "rule.added": this.rules.set(event.body.number, { number: event.body.number, text: event.body.text, by: event.from, at: event.at }); break;
       case "rule.removed": this.rules.delete(event.body.number); break;
       case "shell.job.ended":
-        this.shellJobs.set(event.body.session, Math.max(0, (this.shellJobs.get(event.body.session) ?? 0) - 1));
+        // A running turn's end replaces the count, as in the engine.
+        if (!this.turns.has(event.body.session)) this.shellJobs.set(event.body.session, Math.max(0, (this.shellJobs.get(event.body.session) ?? 0) - 1));
         if (event.body.exitCode !== 0) this.failedJobs.add(`${event.body.session}/${event.body.job}`);
         break;
       case "op.requested": this.requests.set(event.body.id, { ...event.body, state: "pending" }); break;
