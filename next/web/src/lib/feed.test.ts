@@ -1,7 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { commandLine, feedRows, fileSize, fromNow, isImage, workSummary } from "./feed.ts";
+import { commandLine, feedRows, fileSize, formatTime, fromNow, isImage, quoted, workSummary } from "./feed.ts";
 import type { BoxState, Event, EventBody, FailureCause, Principal } from "./contract.gen.ts";
+
+test("a forward quotes every line of the post under its label, then the owner's words", () => {
+  const at = "2026-10-30T12:00:00Z";
+  assert.equal(quoted({ author: "lead", at, text: "- one\n\n@root two" }, " see this \n"),
+    `> **Forwarded from lead** · ${formatTime(at)}\n>\n> - one\n>\n> @root two\n\nsee this`);
+});
 
 test("a command line shows each argument exactly: spaces, quotes and empty arguments are quoted", () => {
   assert.equal(commandLine(["tool", "a b"]), "tool 'a b'");
