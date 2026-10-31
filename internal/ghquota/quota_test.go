@@ -50,6 +50,21 @@ func TestRunListCallerNamesTheFilterNotItsValue(t *testing.T) {
 	}
 }
 
+// Known endpoints get a stable label, and only a truly unknown path stays other.
+// Commit SHAs and artifact IDs in the path never reach the label.
+func TestGHQuotaCallerLabelsKnownEndpointsNotOther(t *testing.T) {
+	cases := map[string]string{
+		"repos/owner/repo/compare/aaaa1111...bbbb2222": "compare",
+		"repos/owner/repo/actions/artifacts/4242/zip":  "artifact-zip",
+		"repos/owner/repo/git/refs/heads/feature":      "other",
+	}
+	for path, want := range cases {
+		if got := ghQuotaCaller(path); got != want {
+			t.Errorf("ghQuotaCaller(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
 // A caller with no API path, such as a session's access check, is counted
 // under its own name so the journal shows what turn startup spends.
 func TestQuotaSummaryCountsANamedCaller(t *testing.T) {
