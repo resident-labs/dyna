@@ -219,7 +219,7 @@
 
 {#snippet computerView(id: string)}
   <!-- Another session's view is a new view, so the old image runs its cleanup and drops its stream. -->
-  {#key id}<ComputerView session={id} name={store?.names.get(id) ?? "Session"} {docked} bind:rect bind:element={computer}
+  {#key id}<ComputerView session={id} name={store?.names.get(id) ?? "Session"} activity={store?.activity.get(id)} {docked} bind:rect bind:element={computer}
     onclose={() => void stopWatching()} ondock={() => { docked = !docked; if (docked && !wide.current) void showPanel(true); }} />{/key}
 {/snippet}
 
@@ -263,9 +263,9 @@
     <aside class="members" id="sessions" class:shown={panel} class:watching={jobsOf || (watching && docked)} aria-label="Sessions" tabindex="-1" bind:this={members}>
       {#if jobsOf}
         {#if wide.current || panel}<ShellView session={jobsOf} name={store?.names.get(jobsOf) ?? "Session"} onback={() => void closeJobs()} />{/if}
-      {:else if watching && docked}
-        {#if wide.current || panel}{@render computerView(watching)}{/if}
       {:else}
+      <!-- Docked, the computer sits above the session list. -->
+      {#if watching && docked && (wide.current || panel)}{@render computerView(watching)}{/if}
       <header class="label">Sessions</header>
       {#each tree as { session: item, depth, parent, hidden, hiddenTrouble } (item.session)}
         <div class="row">{#if parent}<button type="button" class="fold" aria-expanded={!hidden} style:left="{depth * 14}px"
