@@ -237,6 +237,9 @@ type TurnEnded struct {
 	Replies []FinalReply   `json:"replies,omitempty"` // where Final was delivered
 	Usage   Usage          `json:"usage"`
 	Error   string         `json:"error,omitempty"`   // failed only
+	// ShellJobs counts the background shell jobs still running when the turn ended. Each job's
+	// end wakes the session, so the next turn.ended carries the new count (5.15).
+	ShellJobs int `json:"shellJobs,omitempty"`
 }
 
 type Usage struct {
@@ -467,6 +470,7 @@ type BundleSource struct {
 - **Identity.** The listener decides the caller: the owner socket is the owner, a box socket is its session, and a device session is the owner with the device's scopes (section 7). A request body never names its own caller.
 - **Calls.** `POST /v1/<method>` with a contract request struct. The response is the contract response struct, or `Error{Code, Message}`. Each method is a `Method` constant with its request and response types, so the generated TypeScript client is typed.
 - **Events.** `GET /v1/events?room=<id>&after=<seq>` streams `Event` values as server-sent events. The web app and `dyna room log --follow` use it.
+- **Owner tools.** `GET /v1/shell/watch?session=<id>` streams a session's shell job output, and `GET /v1/terminal` opens an owner terminal over a WebSocket (5.15). Only the owner can call them.
 - **Box model.** `box.hello` returns a `ModelChoice` with a `ModelProvider` (`anthropic` or `openai` in M1), model ID, and `ThinkingLevel` (`off`, `minimal`, `low`, `medium`, `high`, or `xhigh`). The engine gets this choice from the session profile. M1 does not change it per turn.
 - **Box channel.** The box agent holds `GET /v1/box/channel` open. The engine sends `TurnStart`, `TurnSteer`, `TurnStop` and `Upgrade` on it. The box agent posts turn output back with `POST` calls, and transcript chunks from M2.
 - **Box routes.** Only box sockets serve `/model/` (the model route), `/git/<repo>/` (the git route) and, from M3, `/github/` (the GitHub route for `gh`, decision 13).
@@ -491,7 +495,7 @@ type Error struct {
 }
 ```
 
-M1 methods: `host.add`, `room.create`, `session.start`, `session.close`, `post`, `events.list`, `box.hello`, `turn.output`. M2 adds `transcript.append` and `turn.activity`. Each later milestone adds its methods in the same way.
+M1 methods: `host.add`, `room.create`, `session.start`, `session.close`, `post`, `events.list`, `box.hello`, `turn.output`. M2 adds `transcript.append`, `turn.activity` and `shell.output`. Each later milestone adds its methods in the same way.
 
 ## 4. Store
 
@@ -817,6 +821,32 @@ A computer is one browser per box, so an agent can open a web page, act on it an
 - **Budget.** About 500 Go lines (box agent, engine route, `dyna computer`) and 200 TypeScript lines (the live view).
 
 M2 acceptance check 13 covers it.
+
+### 5.15 Shell job view and owner terminal (M2)
+
+Owner, 2026-10-30: v2 ports v1's workspace tools. The engine side has two parts, and both are for the owner only. No session can open either one, and no grant gives one to a session. In M3, a paired device needs its own `terminal` scope.
+
+**Shell job view.** The owner sees a session's background shell jobs and follows their output.
+
+- `turn.ended` carries `ShellJobs`, the number of background jobs still running when the turn ended. The box agent already reports it with `turn.output` (5.8). Each job's end wakes the session, so the next `turn.ended` carries the new count. `session.list` returns the last count. The web app shows a grey terminal icon on the session's row while the count is above 0.
+- `GET /v1/shell/watch?session=<id>` streams `ShellJobOutput` values as server-sent events. When a watcher arrives, the engine sends `ShellWatchStart` with a new generation on the box channel, so every watcher gets a fresh view. When the last watcher leaves, it sends `ShellWatchStop`.
+- While someone watches, the box agent posts `shell.output` about every 250 ms with each job's new output. The output is masked and in whole lines, as for the agent's own reads (5.8). The first post of a generation has `Reset` and each job's last 64 KiB. The agent's own read position does not move.
+- The engine drops a post of an older generation and stores no output. Nothing flows while nobody watches. A watch on a box that is not ready is refused with `conflict`.
+
+**Owner terminal.** A tabbed terminal in the web app opens a shell in a box, on a capacity host, or on the control-plane host.
+
+- `GET /v1/terminal?box=<session>` or `?host=<name>`, with `cols` and `rows`, upgrades to a WebSocket. Binary frames carry the terminal's bytes both ways. The client's JSON text frame, `TerminalResize`, sets the size. The engine's last text frame, `TerminalExit`, gives the shell's exit code.
+- The engine starts one command under a local PTY for every target:
+  - a box: `ssh -tt` through its host's master, running `podman exec -it <box> bash -l` as the box user;
+  - a capacity host: `ssh -tt` through the master, running the host user's login shell;
+  - the control-plane host: the owner's login shell, in its own `systemd-run --user --scope` unit, so that it does not count against the engine's limits.
+- When the socket closes, the engine hangs up the PTY and stops the command's process group. When the shell exits, the engine closes the socket. In M2 there is no reattach after a page reload. M3 may keep a closed tab's shell and its last output for a few minutes.
+- An open terminal keeps its box from going dormant. A terminal to a box that is not ready is refused with `conflict` before the upgrade.
+- The engine keeps no transcript of a terminal and emits no event. A shell on the control plane acts as the owner, as a local terminal does. It does not run in a host-exec scope, so the `hostexec-scope` refusal (6.4) does not apply to it.
+
+**Web renderer.** The web app reuses v1's terminal renderer, libghostty-vt in WASM from T3 Code, vendored into `next/web` with its license and README (root, 2026-10-30). v1's transport (terminal IDs, base64 writes, byte offsets and a kept buffer) exists for reattach, which waits for M3. v1's terminal pane needs only send, resize, write and exit, so a small WebSocket adapter replaces that transport.
+
+**Budget.** About 215 Go lines for the shell job view (box agent, engine, route) and about 160 for the terminal (engine, route, and the `creack/pty` module).
 
 ## 6. Host exec
 
@@ -1279,7 +1309,7 @@ Acceptance:
 
 ### M2: web room view, approvals, host exec
 
-Scope: the ported web room view (feed, DMs, composer, cards and files, session tree, approvals panel, host-exec grants), the tree with child boxes in the parent's budget, dormant boxes that stop and wake, reply channels (7.5), operations and approvals, host exec, images from `.dyna/images/`, the `box.pressure` report, the Dyna shell server with secret masking, the transcript stream, computers (5.14), rooms with repositories (7.6), the repository copy, git through the engine and close with archive (5.6 to 5.9), and opening a PR through an operation (decision 13).
+Scope: the ported web room view (feed, DMs, composer, cards and files, session tree, approvals panel, host-exec grants), the tree with child boxes in the parent's budget, dormant boxes that stop and wake, reply channels (7.5), operations and approvals, host exec, images from `.dyna/images/`, the `box.pressure` report, the Dyna shell server with secret masking, the transcript stream, computers (5.14), rooms with repositories (7.6), the repository copy, git through the engine and close with archive (5.6 to 5.9), opening a PR through an operation (decision 13), and the shell job view and owner terminal (5.15).
 
 The order inside M2:
 
@@ -1303,6 +1333,9 @@ Acceptance:
 12. manual: killing a host's master during a turn does not end the turn, and the box returns to `ready` within 15 s.
 13. manual: an agent in a box serves a web page from inside the box, opens it in its computer, takes a screenshot to a file, and attaches it to a post; the owner watches the same page live on the session page.
 14. unit: the git route refuses a push to a branch that the session does not own. Close archives before it deletes, and stays in `closing` when the archive push fails.
+15. unit: a shell watch gets each job's last output with `Reset`, then only new whole lines, masked, and the agent's own read position does not move. A post of an older generation is dropped, the last watcher leaving sends `ShellWatchStop`, and a session caller is refused (fake box).
+16. unit: the terminal route refuses a session caller and a box that is not ready. Bytes and a resize reach the PTY of a fake target command, its exit sends `TerminalExit`, and closing the socket stops its process group.
+17. manual: in the web app, the owner opens a terminal in a box on hermeslab, runs a command, resizes the pane and closes the tab; no `podman exec` process is left. The owner follows a session's running shell job from its terminal icon.
 
 ### M3: bundle import and self-hosting
 
