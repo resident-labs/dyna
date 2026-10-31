@@ -188,3 +188,21 @@ test("session.list gives running turns and failures, and a live DM answer lands 
     assert.equal(feedRows(feedWindow.ordered, feed).some(row => row.kind === "post" && row.text === "Answer"), false);
   } finally { server.restore(); }
 });
+
+test("session.list and later events set and clear the running computers", async () => {
+  const listed = { name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", goal: "" } as const;
+  const server = engine(3, [{ id: "s", ...listed, computer: "running" }, { id: "x", ...listed, computer: "stopped" }]);
+  try {
+    const room = new RoomStore("r", () => () => {});
+    await room.open();
+    assert.deepEqual([...room.computers], ["s"]);
+    // Events at or before the list's seq are already in it.
+    room.apply(event(3, { type: "computer.changed", body: { session: "x", to: "running" } }));
+    assert.equal(room.computers.has("x"), false);
+    room.apply(event(4, { type: "computer.changed", body: { session: "x", to: "running" } }));
+    room.apply(event(5, { type: "computer.changed", body: { session: "s", to: "stopped" } }));
+    assert.deepEqual([...room.computers], ["x"]);
+    room.apply(event(6, { type: "box.changed", body: { box: "b", session: "x", from: "ready", to: "lost" } }));
+    assert.equal(room.computers.size, 0);
+  } finally { server.restore(); }
+});
