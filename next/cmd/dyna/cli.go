@@ -595,14 +595,18 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		}
 		return c, nil
 	}
-	connect.AddCommand(&cobra.Command{Use: "start RELAY NAME", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+	var connectRelay, connectName string
+	connectStart := &cobra.Command{Use: "start", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		c, err := getConnect()
 		if err != nil {
 			return err
 		}
-		_, err = c.ConnectStart(cmd.Context(), contract.ConnectStartRequest{Relay: args[0], Name: args[1]})
+		_, err = c.ConnectStart(cmd.Context(), contract.ConnectStartRequest{Relay: connectRelay, Name: connectName})
 		return err
-	}}, &cobra.Command{Use: "status", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	}}
+	connectStart.Flags().StringVar(&connectRelay, "relay", "", "Relay origin")
+	connectStart.Flags().StringVar(&connectName, "name", "", "Machine name")
+	connect.AddCommand(connectStart, &cobra.Command{Use: "status", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		c, err := getConnect()
 		if err != nil {
 			return err
