@@ -2,7 +2,7 @@ import { SvelteMap, SvelteSet, createSubscriber } from "svelte/reactivity";
 import { call } from "./client.ts";
 import { stream } from "./stream.ts";
 import { EventWindow } from "./window.svelte.ts";
-import { boxFailures, countOf, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
+import { boxFailures, countOf, failedJobs, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
 import type { BoxState, Conversation, FailureCause, Decision, Event, OpRequested, OpResult, OpState, RoomRule, SessionStarted } from "./contract.gen.ts";
 
 
@@ -109,6 +109,10 @@ export class RoomStore {
     await this.opening.then(() => { this.loaded = true; }, (error: unknown) => { this.failure = error; });
     this.changed();
     if (this.closed || !this.loaded) return;
+    // A failed job counts until the owner reads past its end, as a failed turn does. The first page does not wait for this read.
+    if (this.hadJobs.size) void failedJobs(this.room, this.head + 1).then(ends => {
+      for (const { session, job, seq } of ends) if (seq > Math.max(this.readAt({ kind: "feed" }), this.readAt({ kind: "dm", session }))) this.failedJobs.add(`${session}/${job}`);
+    });
     this.stopStream = this.connect(this.room, () => this.head, event => this.apply(event));
   }
 
