@@ -51,6 +51,10 @@ func RunSuite(ctx context.Context, backend Backend, emit func(CellResult) error)
 		if err != nil {
 			return fmt.Errorf("prepare task %d: %w", cell.Task, err)
 		}
+		if err := fixture.Validate(); err != nil {
+			_ = backend.Cleanup(ctx, cell, fixture)
+			return fmt.Errorf("fixture task %d: %w", cell.Task, err)
+		}
 		start := time.Now()
 		result := CellResult{Cell: cell}
 		for {
