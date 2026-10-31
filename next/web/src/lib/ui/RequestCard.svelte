@@ -17,11 +17,12 @@
   // An agent-class request may also be decided by the requester's parent session.
   let parent = $derived(open?.parent && store.names.get(open.parent));
   // One muted line for a decided request, such as "Denied by you · just now · “Use CI”". The engine decides expiry.
+  // A decision can be newer than the panel's half-minute clock, so it never reads as in the future.
   let decided = $derived.by(() => {
     const decision = request.decision;
     return [
       outcome[request.state] + (decision && decision.by.kind !== "engine" ? ` by ${decision.by.kind === "owner" ? "you" : name(decision.by)}` : ""),
-      decision && fromNow(decision.at, now), request.state === "done" && "ran", decision?.reason && request.state !== "expired" && `“${decision.reason}”`,
+      decision && fromNow(decision.at, Math.max(now, Date.parse(decision.at))), request.state === "done" && "ran", decision?.reason && request.state !== "expired" && `“${decision.reason}”`,
       // The engine's error text is raw (r8); the Run failed pill and the exit code say what happened.
       request.state === "failed" && request.result?.exitCode && `exited with code ${request.result.exitCode}`,
     ].filter(part => typeof part === "string" && part !== "").join(" · ");
@@ -65,7 +66,7 @@
 </article>
 
 <style>
-  .request { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .request { display: grid; gap: 8px; max-width: 760px; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 14px; }
   .card { margin: 8px 16px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); }
   .yours { border-left: 3px solid var(--attention); padding-left: 14px; }
   .decided { gap: 4px; color: var(--muted); }
@@ -78,7 +79,7 @@
   .decided .who { color: inherit; }
   .exact { padding: 8px 12px; border-radius: 6px; background: var(--bg); font: 13px/1.5 var(--mono); font-variant-ligatures: none; max-height: 320px; overflow: auto; }
   .exact p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .decided .exact { padding: 0; background: none; }
+  .decided .exact { display: none; }
   .meta { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
   .cause { color: var(--text); }
   .field { color: var(--muted); }
