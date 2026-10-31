@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack, type Snippet } from "svelte";
   import { APIError, call, SignedOut } from "../client.ts";
+  import Blocked from "./Blocked.svelte";
   import AppearancePane from "./AppearancePane.svelte";
   import DevicesPane from "./DevicesPane.svelte";
   import Icon, { type IconName } from "./Icon.svelte";
@@ -27,6 +28,8 @@
   let panes: { id: string; label: string; icon: IconName }[] = $derived([{ id: "appearance", label: "Appearance", icon: "palette" },
     ...admin ? [{ id: "devices", label: "Devices", icon: "devices" } as const] : []]);
   let shown = $derived(panes.find(pane => path === `/settings/${pane.id}`) ?? (phone ? undefined : panes[0]));
+  // /settings and its trailing slash open the first pane or the list; any other path has no page.
+  let lost = $derived(!/^\/settings\/?$/.test(path) && !panes.some(pane => path === `/settings/${pane.id}`));
 </script>
 
 {#snippet bar(title: string, count?: number, action?: Snippet)}
@@ -39,7 +42,8 @@
     <nav aria-label="Settings panes">{#each panes as pane (pane.id)}
       <a href={`/settings/${pane.id}`} onclick={navigate} aria-current={shown === pane ? "page" : undefined}><Icon name={pane.icon} />{pane.label}</a>{/each}</nav></aside>{/if}
   <div class="pane">
-    {#if shown?.id === "appearance"}<AppearancePane {bar} />
+    {#if lost}<Blocked kind="no-page" back={{ href: "/settings", label: "Back to Settings" }} {navigate} />
+    {:else if shown?.id === "appearance"}<AppearancePane {bar} />
     {:else if shown?.id === "devices"}<DevicesPane {devices} {failed} {reload} {signedout} {bar} />
     {:else}
       <header class="bar"><button type="button" class="round menu" bind:this={menu} aria-label="Rooms and pages" title="Rooms and pages" onclick={onmenu}><Icon name="menu" /></button><strong>Settings</strong></header>
