@@ -39,7 +39,7 @@
       <img src={url(file)} alt={file.name} loading="lazy" /></a>{/each}</div>{/if}
   {#each others as file, i (i)}
     <a class="file" href={url(file)} target="_blank" rel="noopener" title={`Open ${file.name}`}>
-      <span class="ext">{extension(file.name)}</span>
+      <span class="ext" aria-hidden="true">{extension(file.name)}</span>
       <span class="meta"><span class="file-name">{file.name}</span><span class="size">{fileSize(file.bytes)}</span></span>
       <span class="open" aria-hidden="true">↗</span></a>{/each}
 </article>
@@ -68,7 +68,7 @@
   .ext { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: 6px; background: var(--raised);
     color: var(--muted); font: 600 10.5px var(--mono); }
   .meta { display: flex; flex-direction: column; min-width: 0; }
-  .file-name { font-weight: 500; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-name { color: var(--focus); font-weight: 500; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .size { color: var(--muted); font-size: 12px; }
   .open { margin-left: auto; color: var(--muted); font-size: 16px; }
   .file:hover .open { color: var(--text); }
