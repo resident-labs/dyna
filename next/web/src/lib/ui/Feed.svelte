@@ -187,7 +187,7 @@
 <style>
   .ring { animation: highlight 1s ease-out; }
   @keyframes highlight { from { box-shadow: inset 0 0 0 2px var(--focus); } to { box-shadow: inset 0 0 0 2px transparent; } }
-  @media (prefers-reduced-motion: reduce) { .ring { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .ring { animation: none; box-shadow: inset 0 0 0 2px var(--focus); } }
   /* The running turn's steps sit where its work line will fold, in the work list's form. */
   .steps { margin: 4px 16px 4px var(--gutter); padding: 0 0 0 12px; border-left: 1px solid var(--line); list-style: none; color: var(--muted); font-size: 12.5px; }
   .steps li { padding: 1px 0; overflow-wrap: anywhere; }
