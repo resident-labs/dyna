@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -32,12 +33,12 @@ func TestSubtreeArchivesChildBeforeParent(t *testing.T) {
 	s.SetRepositories(&fakeRepos{})
 	parentCaller := contract.Principal{Kind: contract.PrincipalSession, Session: parent}
 	childCaller := contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}
-	parentChannel, e := s.BoxChannel(ctx, parentCaller)
+	parentChannel, e := testChannel(t, s, ctx, parentCaller)
 	if e != nil {
 		t.Fatal(e)
 	}
 	<-parentChannel
-	childChannel, e := s.BoxChannel(ctx, childCaller)
+	childChannel, e := testChannel(t, s, ctx, childCaller)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -67,6 +68,114 @@ func TestSubtreeArchivesChildBeforeParent(t *testing.T) {
 		t.Fatalf("close order: %+v, %v", events, err)
 	}
 }
+
+func TestClosePendingBoxWithoutTurnsDoesNotStart(t *testing.T) {
+	s, _, sid, ctx := setupArchive(t)
+	h := &dormantHost{}
+	s.boxes = h
+	session, err := s.store.Session(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE boxes SET state='pending',image='image' WHERE id=?", session.Box)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, problem := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: sid}); problem != nil {
+		t.Fatal(problem)
+	}
+	b, err := s.store.Box(ctx, session.Box)
+	if err != nil || b.State != contract.BoxDeleted || h.starts != 0 {
+		t.Fatalf("box=%+v starts=%d err=%v", b, h.starts, err)
+	}
+}
+
+type heldArchiveStart struct {
+	fakeBoxes
+	started, release chan struct{}
+}
+
+func (h heldArchiveStart) Start(context.Context, contract.BoxID) error {
+	close(h.started)
+	<-h.release
+	return nil
+}
+
+func TestCloseBlocksDispatchBeforeArchive(t *testing.T) {
+	s, _, room, sid, ctx := quietSession(t, 0)
+	wakeSession(t, s, ctx, room, sid)
+	h := heldArchiveStart{started: make(chan struct{}), release: make(chan struct{})}
+	s.boxes = h
+	session, err := s.store.Session(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := make(chan *contract.Error, 1)
+	go func() {
+		closed <- s.closeSession(ctx, contract.Principal{Kind: contract.PrincipalOwner}, session, false)
+	}()
+	<-h.started
+	channel, problem := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if _, ok := (<-channel).Body.(contract.Archive); !ok {
+		t.Fatal("closing box dispatched a turn")
+	}
+	close(h.release)
+	if problem := <-closed; problem != nil {
+		t.Fatal(problem)
+	}
+	var count int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM turns WHERE session=?", sid).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("turns=%d err=%v", count, err)
+	}
+}
+
+func TestCloseStartsStoppedBoxForArchive(t *testing.T) {
+	s, _, sid, ctx := setupArchive(t)
+	h := &dormantHost{}
+	s.boxes = h
+	s.SetRepositories(&fakeRepos{})
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: sid}
+	channelCtx, cancel := context.WithCancel(ctx)
+	channel, problem := testChannel(t, s, channelCtx, caller)
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	start := (<-channel).Body.(contract.TurnStart)
+	cancel()
+	for range channel {
+	}
+	if _, problem = s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnCompleted}); problem != nil {
+		t.Fatal(problem)
+	}
+	s.now = func() time.Time { return time.Unix(1000, 0).Add(11 * time.Minute) }
+	s.ReconcileDormancy(ctx, false, true)
+	if stateOf(t, s, ctx, sid) != contract.BoxStopped {
+		t.Fatal("box did not stop")
+	}
+	if _, problem = s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: sid}); problem != nil {
+		t.Fatal(problem)
+	}
+	if h.starts != 1 {
+		t.Fatal("closing did not restart the box")
+	}
+	if _, problem = s.BoxHello(ctx, caller, contract.BoxHelloRequest{}); problem != nil {
+		t.Fatal(problem)
+	}
+	reconnected, problem := s.BoxChannel(ctx, caller)
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if _, ok := (<-reconnected).Body.(contract.Archive); !ok {
+		t.Fatal("archive not sent")
+	}
+}
+
 func TestCloseArchivesBeforeRemovingBox(t *testing.T) {
 	s, room, session, ctx := setupArchive(t)
 	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
@@ -74,7 +183,7 @@ func TestCloseArchivesBeforeRemovingBox(t *testing.T) {
 	}
 	verifier := &fakeRepos{}
 	s.SetRepositories(verifier)
-	channel, e := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session})
+	channel, e := testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -108,7 +217,7 @@ func TestReconnectArchivesOnlySessionRepository(t *testing.T) {
 	}
 	s.SetRepositories(&fakeRepos{})
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
-	first, e := s.BoxChannel(ctx, caller)
+	first, e := testChannel(t, s, ctx, caller)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -120,7 +229,7 @@ func TestReconnectArchivesOnlySessionRepository(t *testing.T) {
 	if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{Repo: "owner/other", Commit: "abc"}); e == nil {
 		t.Fatal("other repository archive was accepted")
 	}
-	second, e := s.BoxChannel(ctx, caller)
+	second, e := testChannel(t, s, ctx, caller)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -142,7 +251,7 @@ func TestCloseRetryResendsArchiveOnLiveChannel(t *testing.T) {
 		t.Fatal(err)
 	}
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
-	channel, e := s.BoxChannel(ctx, caller)
+	channel, e := testChannel(t, s, ctx, caller)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -171,7 +280,7 @@ func TestCloseKeepsBoxOnArchiveMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.SetRepositories(&fakeRepos{err: errors.New("archive ref mismatch")})
-	channel, e := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session})
+	channel, e := testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -211,7 +320,7 @@ func TestRestartResendsArchiveAndFinishesClose(t *testing.T) {
 	restarted := New(s.store, fakeBoxes{}, fakeProfiles{}, s.now)
 	restarted.SetRepositories(&fakeRepos{})
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
-	channel, e := restarted.BoxChannel(ctx, caller)
+	channel, e := testChannel(t, restarted, ctx, caller)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -331,12 +440,11 @@ func TestCloseWaitsForArchiveAckWithoutRepositories(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	channel, e := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: child.Session})
+	channel, e := testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: child.Session})
 	if e != nil {
 		t.Fatal(e)
 	}
 	<-channel // the initial turn
-	connectAgent(ctx, t, s, child.Session)
 	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: child.Session}); e != nil {
 		t.Fatal(e)
 	}
