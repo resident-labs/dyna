@@ -54,6 +54,7 @@ const (
 	MethodTranscriptFetch         Method = "transcript.fetch"
 	MethodTranscriptAppend        Method = "transcript.append"
 	MethodTranscriptRead          Method = "transcript.read"
+	MethodSessionWork             Method = "session.work"
 	MethodShellJobEnded           Method = "shell.job.ended"
 	MethodShellOutput             Method = "shell.output"
 )
@@ -483,6 +484,22 @@ type TurnActivityRequest struct {
 	Label string `json:"label"`
 }
 type TurnActivityResponse struct{}
+type SessionWorkRequest struct {
+	Session SessionID `json:"session"`
+	Before  TurnID    `json:"before,omitempty"`
+	Limit   int       `json:"limit,omitempty"`
+}
+type SessionWorkTurn struct {
+	Started Event   `json:"started"`
+	Ended   *Event  `json:"ended,omitempty"`
+	Inputs  []Event `json:"inputs"`
+	Posts   []Event `json:"posts"`
+}
+type SessionWorkResponse struct {
+	Turns []SessionWorkTurn `json:"turns"`
+	More  bool              `json:"more"`
+}
+
 type TranscriptReadRequest struct {
 	Session SessionID `json:"session"`
 	Turn    TurnID    `json:"turn,omitempty"`
