@@ -25,6 +25,21 @@ func TestConnectDeviceMappingAndRevocation(t *testing.T) {
 	if err := s.StartConnectSession(ctx, x); err != nil {
 		t.Fatal(err)
 	}
+	pre := x
+	pre.ID, pre.RelayDevice, pre.Device = "pending", "dev_pending", "device_pending"
+	pre.Hash = sha256.Sum256([]byte("pending"))
+	pre.Minted = now.Add(-time.Second)
+	if err := s.RevokeConnectDevice(ctx, pre.RelayDevice, 1, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.StartConnectSession(ctx, pre); err == nil {
+		t.Fatal("mint before relay revocation was accepted")
+	}
+	pre.Minted = now.Add(61 * time.Second)
+	pre.Created = pre.Minted
+	if err := s.StartConnectSession(ctx, pre); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.Write(ctx, func(tx *sql.Tx) error {
 		_, e := tx.Exec("DELETE FROM device_scopes WHERE device=? AND scope<>?", x.Device, contract.ScopeRead)
 		return e
@@ -68,11 +83,12 @@ func TestConnectDeviceMappingAndRevocation(t *testing.T) {
 	if err := s.StartConnectSession(ctx, x); err == nil {
 		t.Fatal("mint from before revocation was accepted")
 	}
-	x.Minted = now.Add(time.Second)
+	x.Minted = now.Add(61 * time.Second)
+	x.Created = x.Minted
 	if err := s.StartConnectSession(ctx, x); err != nil {
 		t.Fatal(err)
 	}
-	got, scopes, ok, err = s.AuthenticateConnect(ctx, x.Hash, x.Origin, now.Add(time.Second))
+	got, scopes, ok, err = s.AuthenticateConnect(ctx, x.Hash, x.Origin, x.Created)
 	if err != nil || !ok || got.Device != "device2" || len(scopes) != 1 || scopes[0] != contract.ScopeRead {
 		t.Fatalf("new device: %+v %v %v %v", got, scopes, ok, err)
 	}

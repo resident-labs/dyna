@@ -35,7 +35,9 @@ func (s *Store) StartConnectSession(ctx context.Context, x ConnectSession) error
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if revokedAt.Valid && x.Minted.UnixMilli() <= revokedAt.Int64 {
+		// Relay signatures allow 60 seconds of clock skew. Do not let an old
+		// future-dated mint cross a revocation within that window.
+		if revokedAt.Valid && x.Minted.UnixMilli() <= revokedAt.Int64+time.Minute.Milliseconds() {
 			return errors.New("Connect mint predates revocation")
 		}
 		var device string
@@ -45,7 +47,7 @@ func (s *Store) StartConnectSession(ctx context.Context, x ConnectSession) error
 		if err != nil && !newDevice {
 			return err
 		}
-		if revoked.Valid && x.Minted.UnixMilli() <= revoked.Int64 {
+		if revoked.Valid && x.Minted.UnixMilli() <= revoked.Int64+time.Minute.Milliseconds() {
 			return errors.New("Connect device revoked after mint")
 		}
 		if newDevice || revoked.Valid {
