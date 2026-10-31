@@ -104,8 +104,10 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 				return response, failure(err)
 			}
 			value := string(data)
+			var home *contract.Conversation
 			if body, ok := input.Body.(contract.PostCreated); ok {
 				value = body.Text
+				home = &body.Home
 			}
 			value = harness.Mask(value)
 			if req.Item != "" {
@@ -121,7 +123,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 				t.More = true
 				break
 			}
-			t.Inputs = append(t.Inputs, contract.TranscriptInput{At: input.Time, ID: input.ID, Seq: input.Seq, Room: input.Room, Type: input.Body.EventType(), From: input.From, Text: clipTranscript(value, 512), More: len(value) > 512})
+			t.Inputs = append(t.Inputs, contract.TranscriptInput{Home: home, At: input.Time, ID: input.ID, Seq: input.Seq, Room: input.Room, Type: input.Body.EventType(), From: input.From, Text: clipTranscript(value, 512), More: len(value) > 512})
 			t.After = "input:" + string(input.ID)
 		}
 		if !t.More {
