@@ -498,6 +498,7 @@ type SessionWorkTurn struct {
 type SessionWorkResponse struct {
 	Turns []SessionWorkTurn `json:"turns"`
 	More  bool              `json:"more"`
+	Total int               `json:"total"`
 }
 
 type TranscriptReadRequest struct {
