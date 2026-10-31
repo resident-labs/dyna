@@ -338,7 +338,7 @@ func (a *API) handler(c Caller) http.Handler {
 		mux.Handle("/git/", a.git(c))
 	}
 	if box(c) && a.model != nil {
-		mux.Handle("/model/", a.model(c))
+		mux.HandleFunc("/model/", func(w http.ResponseWriter, r *http.Request) { a.model(c).ServeHTTP(w, r) })
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, &contract.Error{Code: contract.ErrNotFound, Message: "route not found"})
