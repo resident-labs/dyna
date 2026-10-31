@@ -223,6 +223,7 @@ export function timeSpan(start: string, end: string): string {
 
 // Every event type has a plural group label, including types that do not currently appear in a work block.
 export const eventGroups: Record<Event["type"], string> = {
+  "account.failed": "account failures", "account.quota_low": "account quota alerts",
   "post.created": "posts", "session.started": "sessions started", "session.closed": "sessions closed",
   "session.restarted": "boxes replaced", "session.moved": "sessions moved", "session.profile_changed": "profiles changed",
   "turn.started": "turns started", "turn.ended": "turns ended", "turn.activity": "turn updates",
