@@ -899,7 +899,10 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 		return contract.TurnActivityResponse{}, failure(err)
 	}
 	body := contract.TurnActivity{Session: caller.Session, Turn: req.Turn, Label: req.Label}
-	event := contract.Event{Time: s.now(), Room: session.Room, From: caller, Body: body}
+	event, err := s.event(session.Room, caller, body)
+	if err != nil {
+		return contract.TurnActivityResponse{}, failure(err)
+	}
 	s.mu.Lock()
 	s.activity[caller.Session] = body
 	for ch, room := range s.live {
