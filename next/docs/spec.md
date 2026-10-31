@@ -11,7 +11,7 @@ Sources: the rewrite card v8, the migration inventory, the compute v2 plan and i
 The owner settled the design on the card. Writing the spec needed the decisions below, which the card does not cover. Approving the spec approves them.
 
 1. **Room events move into SQLite.** Posts and system events become rows in one `events` table, because delivery, wake rules, the web app and `dyna room log` all query them. Rule r1 keeps room messages as JSONL files today; v2 changes that for events only. Transcripts and large outputs stay files (section 4).
-2. **Leads are placement roots.** A cgroup cannot span machines. A child therefore runs on its parent's host. Root's direct children (leads) each get their own budget on any host, and the engine enforces the room limit by accounting. Below each lead, budgets nest as cgroups (section 5.5).
+2. **Every box is its own budget** (owner, q59, 2026-10-31). Every box has a top-level slice with its own size, and that size stays its hard limit. Admission counts a request well below the size for every running box, so a host can hold more boxes than their limits add up to. The owner accepted slowdown under pressure, not kills of healthy boxes. A build can still die with exit 137 when a host's RAM and swap are both full; the box and session stay. That risk is settled (5.5). The session tree holds authority, close order and event routing, and no resources, so a subtree can use every host. The engine enforces the room limit by accounting (section 5.5).
 3. **CLIProxyAPI holds every model credential.** It holds the Claude, ChatGPT, Kimi and xAI sign-ins and refreshes them, and it holds the zai, opencode-go and deepseek keys as OpenAI-compatible upstreams (M0c). The engine's own code never reads a model credential and never refreshes a model token; it adds only the proxy's client key. From M3, the proxy keeps its tokens in its own table in `store.db` (5.7). Pi holds none either. Muse is not a v2 model account: its subscription key works only in Meta's own client (M0c). M1 and M2 checks use a copied access token with no refresh token, as M0 did. From M3 on, the owner signs in on the Accounts page (5.12), which drives CLIProxyAPI's own sign-in flows. Each login has its own tokens, so v1's sign-ins keep working. The engine reads quota without any model credential, only through CLIProxyAPI (5.12).
 4. **Pi is the only harness.** The owner decided this on 2026-10-30; it replaces the card's "Claude Code and Pi". Claude models go through Pi's `anthropic` provider to the owner's Claude sign-ins in CLIProxyAPI, which presents the requests as Claude Code ("cloaking", M0c). ChatGPT goes through an `openai-responses` provider, because the native Pi `openai-codex` provider did not work through the proxy (M0b). In M0c, Pi with `claude-opus-5-5` passed tool turns, caching, compaction, steer, follow-up and abort. Pi sent effort `high` for every thinking level, so our Pi fork fixes the effort mapping in M1. Section 9.1 lists what we lose from Claude Code.
    - **Accepted risk.** Anthropic's terms allow Claude Free, Pro and Max sign-ins only in Claude Code and Claude.ai, and Anthropic blocks clients that pose as Claude Code. Pi's traffic can therefore get an account flagged, or be billed as extra usage instead of plan limits. The owner accepts this. The self-hosting trial uses one Claude account only, to limit the damage.
@@ -592,7 +592,7 @@ type Host struct {
 
 The host check sets schedulable `MemBytes` to `MemTotal` minus the memory floor, and `CPUs` to online CPUs minus one, with a minimum of one CPU.
 
-**Admission** is the only placement code. A placement root's request is its size, and its limit is its `memory.max`. A placement root goes on a `ready` host only when the sum of placement root requests on that host, plus this one, fits in `CPUs` and `MemBytes`, and free disk stays above the floor. A child counts only for disk, and must run on its parent's host. Otherwise the box waits in `pending`, and `box.changed` names the reason. Only running placement roots count for CPU and memory. A stopped (dormant) box counts only its disk. The measured free disk already includes boxes placed at or before the host's last check. Subtract the disk requests of boxes placed since that check and the new request; the result must remain at or above the floor.
+**Admission** is the only placement code. A box's request is a quarter of its size, and its limit is its `memory.max` (5.5). A box goes on a `ready` host only when the sum of placed box requests on that host, plus this one, fits in `CPUs` and `MemBytes`, measured memory is under 80%, and free disk stays above the floor. Otherwise the box waits in `pending`, and `box.changed` names the reason. A box is placed, and counts for CPU and memory, from the moment admission moves it out of `pending` or `stopped` until it reaches `stopped`, `failed` or `deleted`. So `creating`, `starting`, `ready`, `closing` and `lost` boxes all count. One reconciler admits boxes one at a time, and each admission sees the one before it, so one pass cannot place two boxes on the same free capacity. A stopped (dormant) box counts only its disk. The measured free disk already includes boxes placed at or before the host's last check. Subtract the disk requests of boxes placed since that check and the new request; the result must remain at or above the floor.
 
 Tables: `hosts` (`name` PK, `ssh`, `state`, `cpus`, `mem_bytes`, `disk_bytes`, `checked_at`), `host_labels` (`host`, `label`) and `host_rooms` (`host`, `room`). Admission waits with reason `room-host` when no eligible host serves the room.
 
@@ -633,7 +633,7 @@ type BoxSize struct {
 type Box struct {
 	ID           contract.BoxID
 	Session      contract.SessionID
-	BudgetParent contract.BoxID // the box whose slice holds this one; empty for root and leads (5.5)
+
 	Host         contract.HostName
 	Image        string // dyna-img-<name>:<hash>
 	Size         BoxSize
@@ -654,7 +654,7 @@ type Box struct {
 | `stop` | the box should stop (its session went quiet or moved). |
 | `close`, `discard` | the box should close. Close steps arrive with the close change (5.9). |
 
-Writers of `Want`: `session.start` inserts a `pending` box with `run` and does no admission or host work. The quiet policy sets `stop` on a `ready` box with no running turn, shell job or wake. A delivery with `wake=1` sets `run` on a target with `stop`, and on its budget ancestors, in the same transaction. `session.move` sets `stop` on members with a `ready` box, in the move transaction. `CanDispatch` becomes `want='run' AND state='ready'`.
+Writers of `Want`: `session.start` inserts a `pending` box with `run` and does no admission or host work. The quiet policy sets `stop` on a `ready` box with no running turn, shell job or wake. A delivery with `wake=1` sets `run` on a target with `stop`, in the same transaction. `CanDispatch` becomes `want='run' AND state='ready'`.
 
 The reconciler runs one pass when a store commit changes a box, a session or a turn, and on a 10 s ticker. A pass only reads and writes the store. It never runs SSH. A pass error is logged, and the next tick tries again. In each pass:
 
@@ -664,7 +664,7 @@ The reconciler runs one pass when a store commit changes a box, a session or a t
 | Want | State | Step | Commit |
 |---|---|---|---|
 | run | creating | `repos.Get` and `Create`. After a restart, `Remove` the partial parts first. | `starting`, `due_at=now+60 s`, unless hello already made it `ready`. Save the returned image in either state. On error: move to `pending` with reason `create-retry` and retry after 30 s, then 60 s; after the third failure, `failed` (cause `create_failed`). Each retry removes partial parts first. If hello already advanced the box, an error fails it immediately. |
-| run | starting, `due_at=0` | `Start`, or `Recreate` if the slice changed | `due_at=now+60 s`. On error: `stopped`, `due_at=now+30 s`. |
+| run | starting, `due_at=0` | `Start`, or `Recreate` if the current image tag differs from the box's image. The volume stays. | `due_at=now+60 s`. On error: `stopped`, `due_at=now+30 s`. |
 | run | starting, past `due_at` | A box with no turns: `Remove`. A box with turns: `Stop`. | No turns: `failed` (cause `no_hello`). With turns: `stopped`, reason `no hello`, `due_at=now+30 s`. The volume stays. |
 | stop | ready | `Stop` | `stopped`. On error: `due_at=now+30 s`. |
 
@@ -688,12 +688,14 @@ The table below lists the transitions. Each row is one observed change, and it e
 | pending, creating, starting, ready, stopped, failed | closing | the session closes, or its parent closes |
 | closing | deleted | archive pushed or not needed, children deleted, container removed |
 | creating, starting, ready | failed | create failed (including after an early hello), or `hello` timed out |
-| ready, stopped, closing | lost | the host is unreachable (5.10) |
+| ready, stopped, closing | lost | the host is unreachable (5.10), or a `ready` box's channel stays down for 60 s on a reachable host |
 | lost | closing | the session closes while its host is unreachable; closing waits for the host or its removal |
 | closing | failed | the host returns without the container, or the owner removes the host; there is no archive |
 | lost | ready | the host is back, the container still runs, and the box agent reconnected |
-| lost | stopped | the host is back and the container has exited |
+| lost | stopped | the host is back and the container has exited, or the container exited on a reachable host |
 | lost | failed | the host is back without the container, or the owner removes the host |
+
+**A crash.** When a container exits on a reachable host, its channel drops. After 60 s the box goes `ready` → `lost`, the engine inspects the container, and the box goes `lost` → `stopped`. The volume and the session stay. With `want=run`, the first crash restarts at once and the second waits for the retry delay. The third crash without a completed turn ends in `failed`, and `session.restart` then replaces the box. The box agent exits when Pi exits, so a killed Pi takes this same path and never leaves a live box without a harness. After the restart, the channel resends `TurnStart` for the active turn, Pi resumes its session, and each tool call that started without a result gets the result "interrupted; state unknown" (5.8). Pi never runs that call again.
 
 The owner can close a session in any box state. A close cancels a step in progress first. Removal treats a part that is already gone (forward, container, slice) as done, so a close during `creating` or `starting` removes only what exists. A close while the box is `lost` waits in `closing` until the host returns or the owner removes the host. A box that ends `failed` this way has no archive: work that was not pushed is lost.
 
@@ -701,7 +703,7 @@ The owner can close a session in any box state. A close cancels a step in progre
 
 The engine refuses every other transition. Each transition emits one `box.changed` event. A failed box keeps its session open. The owner can call `session.restart` or `dyna session restart <session>` to replace it. Restart discards the old volume, unpushed work and transcript bytes not yet acknowledged. The feed and acknowledged transcript stay. A partial final JSONL entry can be skipped by Pi. If the old host is ready, the engine keeps that host to delete the old container, volume and slice before it creates the replacement. Otherwise it clears the host and can leave those resources orphaned on the old host. The engine atomically moves the failed box to `pending`, sets `want=run`, clears its image, failure count, deadline and reason, and emits `box.changed` and `session.restarted`, with a non-waking delivery to the session. The session, its grants, history and budget parent stay unchanged. Only an open session with a failed box can restart; other states return a conflict. The reconciler admits the box again.
 
-Table: `boxes` (`id` PK, `session` UNIQUE, `parent`, `host`, `image`, `size`, `state`, `want`, `due_at`, `reason`, `slice`, `created_at`, `updated_at`; index (`host`, `state`)).
+Table: `boxes` (`id` PK, `session` UNIQUE, `host`, `image`, `size`, `state`, `want`, `due_at`, `reason`, `slice`, `created_at`, `updated_at`; index (`host`, `state`)).
 
 ### 5.4 Sizes and pressure
 
@@ -714,23 +716,31 @@ Table: `boxes` (`id` PK, `session` UNIQUE, `parent`, `host`, `image`, `size`, `s
 
 Disk requests are for admission accounting only; they do not set a volume quota.
 
-- The limits apply to the budget slice, which holds the box and all its descendants. A short peak slows the tree down instead of killing a harness.
-- Defaults: root `agent`, a lead `medium`, a child its parent's size. A repository can set a default in `.dyna/images/<name>/size`.
+- The limits apply to the box's own slice. A short peak slows the box down instead of killing a harness.
+- Any session can ask for any size on `session.start`. Defaults: root `agent`, a lead `medium`, a child `agent`. A repository can set a default in `.dyna/images/<name>/size`.
 - **Pressure.** Each host's heartbeat reads its dyna budget slices' `memory.events` on every 10 s probe, in one host command, and the engine emits `box.pressure` once per episode, when `memory.events` shows `high` throttling for 60 s, or when a process reaches `max`. It is a room event that wakes nobody. It shows whether boxes need growth.
 - **No growth until after the cutover** (owner, 2026-10-30, q40). Budgets already allow bursts to 1.5 times the size, and throttling slows a box down instead of killing it. A session that needs a larger box closes it and starts a new one at a larger size. `box.grow` comes later, when the pressure events show the need.
 
 ### 5.5 Budgets and placement
 
-Budget slices follow the tree with systemd's naming, where each dash adds a level: a lead is `dyna-<l>.slice`, its child `dyna-<l>-<c>.slice`, a grandchild `dyna-<l>-<c>-<g>.slice`. Each part is the first 12 lowercase hex characters of SHA-256(BoxID), and admission checks that it is unique on the host. A unit name has at most 255 characters, so this allows about 18 levels. A child's box starts with `podman run --cgroup-parent=<child slice>`, so its use counts against every ancestor below the lead.
+Each box has one top-level slice, `dyna-<box id>.slice`, with the limits of its size (5.4). It starts with `podman run --cgroup-parent=<slice>`. The box keeps that slice for life. The session tree has no effect on slices or hosts.
 
-Every budget sits under the host slice `dyna.slice`, whose `memory.max` is the host's `MemBytes`. Admission counts only placement root sizes against host CPU and memory; each child counts only for disk. Budgets may grow to 1.5 times their size. The host limit keeps any memory kill inside Dyna's boxes, away from sshd and the master.
+Every box slice sits under the host slice `dyna.slice`, whose `memory.max` is the host's `MemBytes`. Budgets may grow to 1.5 times their size. The host limit keeps any memory kill inside Dyna's boxes, away from sshd and the master.
 
-A cgroup nests only inside one kernel, so a child runs on its parent's host. Therefore:
+- **Request.** Admission counts every placed box (5.1) at one quarter of its size, for CPU and for `memory.high`: 512 MiB for `agent` and 4 GiB for `large`. In code, a host admits sizes up to 4 times its `CPUs` and `MemBytes`. Measured Pi use was about 90 MB idle and up to 235 MB in an active turn, so `agent`'s request leaves a margin of about 2 times the active peak. A larger size asks for more because its work uses more.
+- **Slowdown first.** The sum of limits can pass the host's memory, and the kernel can only delay an allocation, not refuse it forever. So a host answers in three steps:
+  1. **At 80% of `MemBytes`, admission stops.** A new or waking box waits with reason `memory`. Running boxes keep running. This step reads real use: `anon` and `shmem` from `memory.stat`, plus `memory.swap.current`, on `dyna.slice` at each 10 s heartbeat. `memory.current` also counts page cache, which the kernel can drop, so it would close admission on a host that only caches files.
+  2. **At 90%, the kernel slows allocation.** `dyna.slice` has `memory.high` at 90%, so the kernel reclaims and delays every allocating box in the slice.
+  3. **At `MemBytes`, the kernel swaps.** `dyna.slice` has `memory.max` at `MemBytes`, and boxes may use the host's swap, so the kernel moves memory to swap before it kills anything. `dyna host add` warns when a host has no swap.
+- **Accepted kill (settled: root for the owner, 2026-10-31, option A on #1538).** When RAM and swap are both full, the kernel kills the process with the highest OOM score in `dyna.slice`, which is normally the one that uses the most memory. That is nearly always a build or a test: the box and the session stay, and the agent sees exit 137 and can rerun the step. The victim can also be Pi, the box agent or the container's init. Then the box follows the crash path (5.3): the volume and the session stay, and the box restarts. `box.pressure` records the kill in both cases. Only a cap on the sum of limits would prevent this, and that cap takes back most of the capacity of decision 2. Engine pauses were rejected: a paused box keeps its memory, so paused boxes can stall a host until someone stops one. Add pauses only if `box.pressure` shows real kills. A process can also still die at its own box's `memory.max`, as before.
+- **QA.** Several boxes run big builds at once. RAM fills and swap takes over, the builds slow down and finish, no box or session dies, and sshd and the master stay up.
 
-- **Root's box** is agent and runs on any host.
-- **Each lead** (a direct child of root) is a placement root. It gets a top-level slice on the host with the most free memory. Room limits (`rooms.cpus`, `rooms.mem_bytes`) are not built yet. When built, the engine will count root and lead requests against the room limit; cgroups enforce each lead budget below it.
-- **A lead's subtree never splits across hosts.** A child waits in `pending` if its parent host is unavailable or lacks disk.
-- **Admission retries every reason.** The reconciler (5.3) runs admission on each pass for every `pending` or `stopped` box with `want=run`. It does this for every reason a box waits on: `cpu`, `memory`, `disk` or `parent-host`. A box that waits on `cpu`, `memory` or `disk` therefore starts once that resource frees, and no box waits forever. A `pending` box whose reason changes records a `pending → pending` transition, so the owner sees the new reason.
+- **Placement.** A new box goes to the `ready` host with the most free memory. A box that has a host stays there, because its volume is there.
+- **Root's box** is `agent` and runs on any host.
+- **Children** run on any host. A child needs no running parent, and a parent can go dormant while its children run.
+- **Room limit.** The sum of placed box requests in a room, across all hosts, plus this request, must fit `rooms.cpus` and `rooms.mem_bytes`. Zero means no limit, and zero is the default. A box over the limit waits with the reason `room-limit`.
+- **Admission retries every reason.** The reconciler (5.3) runs admission on each pass for every `pending` or `stopped` box with `want=run`. It does this for every reason a box waits on: `cpu`, `memory`, `disk` or `room-limit`. A box therefore starts once that resource frees. A `pending` box whose reason changes records a `pending → pending` transition, so the owner sees the new reason.
+- **A subtree has no shared cap.** Each box has its own limit, the host keeps its guard, and the room limit bounds the total.
 - **M1** uses one host, hermeslab.
 
 ### 5.6 Repository copy and shared caches (M2)
@@ -996,9 +1006,7 @@ The owner dropped external members (D-583) on 2026-10-30 under r22: no outside a
 - A room has exactly one root. Every other session has a parent in the same room. No session is a sibling of root.
 - A session that the owner starts goes under root, or under the session that the owner picks.
 - **Close** closes the session and its whole subtree, deepest first, and deletes their boxes after their archives (5.9). The tracked PRs and archive refs of every closed session go to the closing session's parent. Their open goals go to that parent too, unless the parent is root: root holds no goals (7.2), so those goals stay with no holder, and the `session.closed` event lists them for root to assign, as at import (8.3). Root cannot be closed. If its box fails, the owner can replace it with the same session ID, box ID, grants and history. Restart discards the old volume, unpushed work and unacknowledged transcript bytes; the feed and acknowledged transcript stay (5.3).
-- **Move**: `session.move{Session, NewParent}` by the owner or a session above both places. The engine refuses a cycle, a move to another room, and a move to a parent on another host. The engine moves only an idle subtree: no turn runs in it, and each session's last turn ended with no running shell job. Otherwise it refuses with `move_busy` and names the session; the mover waits and tries again.
-  - In one transaction, under the subtree's box locks so that no turn starts, the engine checks that the subtree is idle, sets the new parent, marks each box in the subtree to be created again, and records `session.moved`.
-  - It then stops and removes the subtree's containers deepest first, and keeps their volumes. Each box starts again on its next wake, as after dormancy (5.3), from the same volume under its new slice. A moved session that becomes a lead gets a top-level slice (5.5).
+- **Move**: `session.move{Session, NewParent}` by the owner or a session above both places. The engine refuses a cycle and a move to another room. A move changes only the tree: one update of the parent and one `session.moved` event. It touches no box, because a box does not depend on its place in the tree.
 
 ### 7.5 Reply channels (D-579)
 
@@ -1280,8 +1288,8 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | session-transfer | moving a session to another model is kept as `session.set_profile`; format conversion stays dropped | one harness, so no session format to convert; Pi's session file keeps its history when the model changes |
 | jobs | dropped | CI runs on Actions runners in boxes; host-specific work uses host exec or a box on a labeled host |
 | worktrees | dropped | the box volume is the worktree; close archives to a ref; each box has its own ports |
-| load-doctor | dropped | budgets with `memory.high` and `memory.max` replace it |
-| test-slots | dropped | box budgets bound concurrent tests |
+| load-doctor | dropped | box limits and admission replace it: work that does not fit waits in `pending` |
+| test-slots | dropped | each box has its own limit, and admission bounds how many run |
 | settings-harnesses | dropped | harness versions live in the image; sign-in moves to accounts |
 | claude-code | dropped | Pi is the only harness (section 0, decision 4) |
 
@@ -1310,7 +1318,7 @@ The owner chose this design on 2026-10-30. Workflows are ported before the cutov
 - **Agent steps.** Each agent step starts a normal child session of the run, in its own box. The step returns that child's final response.
 - **Command steps.** `run()` runs its command in the run's box. Detached steps (`job()`) run on a host through host exec (section 6), under the run's grants.
 - **Progress is saved as store events.** Each step's start and result is an event. A run therefore continues after an engine restart or update, or after its box starts again. The runner runs the script again from the start, and each step that already has a result returns it without running again. Scripts must stay deterministic, as in v1.
-- **Budgets bound fan-out.** Steps are children in the tree, so they share the run's budget slice (5.5), and the room limit bounds the whole tree. A step that does not fit waits in `pending`. The run's size (5.4) sets the budget that its steps share; the runner itself needs little.
+- **Admission bounds fan-out.** Each step has its own box with its own size (5.4), and the room limit bounds the whole tree. A step that does not fit waits in `pending`.
 - **Budget:** about 1,000 to 1,500 product lines.
 - **Open for the M3 design check:** the script runtime. It is Node from `dyna-base`, or an interpreter in `dyna box-agent` as v1 embeds goja.
 
@@ -1386,7 +1394,7 @@ Acceptance:
 
 ### M2: web room view, approvals, host exec
 
-Scope: the ported web room view (feed, DMs, composer, cards and files, session tree, approvals panel, host-exec grants), the tree with child boxes in the parent's budget, dormant boxes that stop and wake, reply channels (7.5), operations and approvals, host exec, images from `.dyna/images/`, the `box.pressure` report, the Dyna shell server with secret masking, the transcript stream, computers (5.14), rooms with repositories (7.6), the repository copy, git through the engine and close with archive (5.6 to 5.9), opening a PR through an operation (decision 13), and the shell job view and owner terminal (5.15).
+Scope: the ported web room view (feed, DMs, composer, cards and files, session tree, approvals panel, host-exec grants), the tree with child boxes, dormant boxes that stop and wake, reply channels (7.5), operations and approvals, host exec, images from `.dyna/images/`, the `box.pressure` report, the Dyna shell server with secret masking, the transcript stream, computers (5.14), rooms with repositories (7.6), the repository copy, git through the engine and close with archive (5.6 to 5.9), opening a PR through an operation (decision 13), and the shell job view and owner terminal (5.15).
 
 The order inside M2:
 
@@ -1397,16 +1405,16 @@ The order inside M2:
 Acceptance:
 
 1. unit: each decision rule in 3.5, including expiry on the injected clock and the stale check. Only the owner decides, a session may withdraw only its own request, and no test uses a root flag.
-2. unit: a session that the owner starts without a parent gets root as its parent. A move that makes a cycle fails. A move to another host, or of a subtree with a running turn or shell job, is refused and names the session. A move re-creates the subtree's containers from the same volumes under the new slices, and each box starts again on its next wake (fake host). Close closes the subtree deepest first and gives every open goal and PR to the closing session's parent. When that parent is root, the goals have no holder, and `session.closed` lists them. Close of root fails.
+2. unit: a session that the owner starts without a parent gets root as its parent. A move that makes a cycle fails. A move touches no container (fake host). Close closes the subtree deepest first and gives every open goal and PR to the closing session's parent. When that parent is root, the goals have no holder, and `session.closed` lists them. Close of root fails.
 3. unit: an owner DM turn delivers its final response to `dm:<session>` and makes no delivery for the parent. A final response to a target that the turn already posted to is delivered quietly.
-4. unit: a child's `podman run` carries `--cgroup-parent` with its slice, and a lead gets a top-level slice counted against the room limit.
-5. unit: a budget slice whose fake `memory.events` shows `high` throttling for 60 s emits one `box.pressure` and no delivery. A `stopped` box counts only its disk in admission, and a wake that does not fit goes to `pending` (fake host).
+4. unit: every box's `podman run` carries `--cgroup-parent` with its own top-level slice, and every placed box counts against its host and the room limit. One pass with more pending boxes than fit places only those that fit, by host and by room, and the rest wait, even when several are `creating` or `starting`.
+5. unit: a budget slice whose fake `memory.events` shows `high` throttling for 60 s emits one `box.pressure` and no delivery. A `stopped` box counts only its disk in admission, and a wake that does not fit goes to `pending` (fake host). Admission's 80% check reads real use, so page cache alone does not close it.
 6. unit: host-exec argv matching, mode precedence, the class from the matched grant, `no_grant`, revoke, expiry, and the `hostexec_scope` refusal.
 7. unit: every host-exec run emits its events in order: `op.requested` when it waits, then `op.decided` and `op.ran`.
 8. unit: after a reconnect, the transcript stream resends from the last acknowledged offset with no gap and no copy.
 9. manual: in the web app, the owner posts in a room, a boxed session answers, and the answer appears without a reload. An owner DM is answered in the DM. The owner approves a waiting operation in the approvals panel.
 10. manual: root runs `podman ps` on hermeslab through host exec. A child without a grant is refused. The owner grants it for one hour, it runs, and after a revoke it is refused again.
-11. manual: a lead and its child run on hermeslab; the child's cgroup is under the lead's slice; closing the lead closes the child first. A dormant session's box stops and starts again on a post.
+11. manual: a lead and its child run on hermeslab; each has its own top-level slice; closing the lead closes the child first. A dormant session's box stops and starts again on a post.
 12. manual: killing a host's master during a turn does not end the turn, and the box returns to `ready` within 15 s.
 13. manual: an agent in a box serves a web page from inside the box, opens it in its computer, takes a screenshot to a file, and attaches it to a post; the owner watches the same page live on the session page.
 14. unit: the git route refuses a push to a branch that the session does not own. Close archives before it deletes, and stays in `closing` when the archive push fails.
@@ -1440,7 +1448,7 @@ Acceptance:
 11. unit: a GitHub comment by an outside login reaches the agent between two `DANGER EXTERNAL INFORMATION` lines, and a comment by the owner's account is passed unwrapped (fake GitHub client).
 12. unit: `dyna pr approve` from the author or its child fails, and from its lead it sets the flag. A new head clears the flag. Dyna merges only when the flag matches the current head and CI is green, and it passes that head SHA (fake GitHub client).
 13. manual: one full working day in all rooms on v2 with no blocking failure.
-14. unit: a workflow runner that restarts after two of three agent steps returns their recorded results without starting them again, and starts only the third. A step that does not fit the run's budget waits in `pending` (fake box host).
+14. unit: a workflow runner that restarts after two of three agent steps returns their recorded results without starting them again, and starts only the third. A step that does not fit any host or the room limit waits in `pending` (fake box host).
 15. unit: one simulated hour of polling one repository with 20 open PRs makes under 300 GitHub requests, with one GraphQL query per poll and no REST call per PR. REST reads send `If-None-Match`. The interval doubles while nothing changes, resets on a change, and waits at least 10 minutes when less than 20% of the quota is left (fake GitHub client, injected clock).
 16. unit: through the box's GitHub route, a call reaches GitHub with the token added, and no response or request that the box sees carries the token. A merge call gets the typed error. With less than 20% of the quota left, a box call fails with the reset time (fake GitHub client).
 
