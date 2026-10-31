@@ -5,13 +5,13 @@
   import StatusPill from "./StatusPill.svelte";
 
   let { bar, phone, signedout }: { bar: Snippet<[string, number | undefined, Snippet | undefined]>; phone: boolean; signedout: () => void } = $props();
-  let providers: AccountProviderInfo[] = $state([]), accounts: Account[] = $state([]);
-  let loaded = $state(false), loadFailed = $state(false);
-  let adding = $state(false), selected: AccountProviderInfo | undefined = $state(), inline = $state(false);
-  let label = $state(""), secret = $state(""), redirect = $state("");
-  let attempt: AccountsConnectResponse | undefined = $state();
-  let state: "idle" | "pending" | "failed" | "expired" = $state("idle");
-  let busy = $state(false), keyFailed = $state(false), now = $state(Date.now());
+  let providers: AccountProviderInfo[] = $connectState([]), accounts: Account[] = $connectState([]);
+  let loaded = $connectState(false), loadFailed = $connectState(false);
+  let adding = $connectState(false), selected: AccountProviderInfo | undefined = $connectState(), inline = $connectState(false);
+  let label = $connectState(""), secret = $connectState(""), redirect = $connectState("");
+  let attempt: AccountsConnectResponse | undefined = $connectState();
+  let connectState: "idle" | "pending" | "failed" | "expired" = $connectState("idle");
+  let busy = $connectState(false), keyFailed = $connectState(false), now = $connectState(Date.now());
   let timer: ReturnType<typeof setTimeout> | undefined;
   let generation = 0;
 
@@ -23,7 +23,7 @@
   onMount(() => { reload(); return () => { generation++; clearTimeout(timer); }; });
   function close() {
     generation++; clearTimeout(timer); adding = false; selected = undefined; attempt = undefined;
-    label = ""; secret = ""; redirect = ""; state = "idle"; keyFailed = false;
+    label = ""; secret = ""; redirect = ""; connectState = "idle"; keyFailed = false;
   }
   function choose(provider: AccountProviderInfo, inPlace: boolean) {
     close(); adding = true; selected = provider; inline = inPlace;
@@ -35,13 +35,13 @@
         if (ticket !== generation) return;
         if (result.status === "connected") { close(); reload(); }
         else if (result.status === "pending") watch(id, ticket);
-        else state = result.status;
-      }, () => { if (ticket === generation) state = "failed"; });
+        else connectState = result.status;
+      }, () => { if (ticket === generation) connectState = "failed"; });
     }, 2000);
   }
   async function start() {
     if (!selected || busy) return;
-    busy = true; state = "idle"; keyFailed = false;
+    busy = true; connectState = "idle"; keyFailed = false;
     const ticket = ++generation;
     if (selected.connectMethod === "key") {
       const key = secret; secret = "";
@@ -49,15 +49,15 @@
     } else {
       await call("accounts.connect", { provider: selected.id, label }).then(result => {
         if (ticket !== generation) return;
-        attempt = result; state = "pending"; now = Date.now(); watch(result.attempt, ticket);
-      }, () => { if (ticket === generation) state = "failed"; });
+        attempt = result; connectState = "pending"; now = Date.now(); watch(result.attempt, ticket);
+      }, () => { if (ticket === generation) connectState = "failed"; });
     }
     busy = false;
   }
   async function finish() {
     if (!attempt || busy) return;
     const url = redirect, ticket = generation; redirect = ""; busy = true;
-    await call("accounts.connect_callback", { attempt: attempt.attempt, redirectUrl: url }).catch(() => { if (ticket === generation) state = "failed"; });
+    await call("accounts.connect_callback", { attempt: attempt.attempt, redirectUrl: url }).catch(() => { if (ticket === generation) connectState = "failed"; });
     busy = false;
   }
   const remaining = (at: string, time: number) => {
@@ -76,9 +76,9 @@
         <label>Key <input type="password" bind:value={secret} autocomplete="off" disabled={busy} /></label>
         {#if keyFailed}<p class="error" role="alert">{selected.displayName} refused this key. Check it and paste it again.</p>{/if}
         <button class="btn fill" type="button" disabled={busy || !secret} onclick={() => void start()}>Add key</button>
-      {:else if state === "expired"}
+      {:else if connectState === "expired"}
         <p>The code expired.</p><button class="btn fill" type="button" disabled={busy} onclick={() => { attempt = undefined; void start(); }}>Get a new code</button>
-      {:else if state === "failed"}
+      {:else if connectState === "failed"}
         <p class="error" role="alert">{selected.displayName} did not accept the sign-in.</p><button class="btn fill" type="button" disabled={busy} onclick={() => { attempt = undefined; void start(); }}>Try again</button>
       {:else if !attempt}
         <p>Connect this account to let Dyna use it.</p><button class="btn fill" type="button" disabled={busy} onclick={() => void start()}>Start sign-in</button>
