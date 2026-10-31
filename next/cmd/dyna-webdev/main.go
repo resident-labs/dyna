@@ -84,7 +84,7 @@ func (h *scripted) Start(ctx context.Context, id contract.TurnID, inputs []contr
 	}
 	result := contract.TurnEnded{Outcome: contract.TurnCompleted, Final: "Thanks. I will work on this:\n\n> " + strings.ReplaceAll(text, "\n", "\n> ")}
 	if strings.Contains(text, "[fail]") {
-		result = contract.TurnEnded{Outcome: contract.TurnFailed, Error: "Scripted development failure"}
+		result = contract.TurnEnded{Outcome: contract.TurnFailed, Error: "Scripted development failure", Cause: contract.CauseModelFailed}
 	}
 	h.Turns = []fakeharness.Turn{{Result: result}}
 	// A [wait] turn runs until it is stopped, so the working state and its activity labels can be seen.

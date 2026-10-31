@@ -72,6 +72,7 @@ type TurnEnded struct {
 	Replies []FinalReply `json:"replies,omitempty"` // where Final was delivered
 	Usage   Usage        `json:"usage"`
 	Error   string       `json:"error,omitempty"` // failed only
+	Cause   FailureCause `json:"cause,omitempty"` // failed only
 	// ShellJobs counts the background shell jobs still running when the turn ended. Each job's
 	// end wakes the session, so the next turn.ended carries the new count.
 	ShellJobs int `json:"shellJobs,omitempty"`
@@ -129,8 +130,8 @@ type BoxChanged struct {
 	Reason  string       `json:"reason,omitempty"`
 }
 
-// FailureCause says in owner terms why a box or an operation failed. The Reason or Error text
-// beside it is detail for agents and logs; owner views show only the cause (r8).
+// FailureCause says in owner terms why a box, an operation or a turn failed. The Reason or Error
+// text beside it is detail for agents and logs; owner views show only the cause (r8).
 type FailureCause string
 
 const (
@@ -145,6 +146,10 @@ const (
 	CauseStale           FailureCause = "stale"            // what the request needed changed before it ran
 	CauseInterrupted     FailureCause = "interrupted"      // the engine stopped during the run; the outcome is unknown
 	CauseInternal        FailureCause = "internal"         // an engine error; the detail is in the log
+	CauseSetupFailed     FailureCause = "setup_failed"     // the box could not set up the session's repository before the turn
+	CauseModelFailed     FailureCause = "model_failed"     // the model provider refused or failed the request
+	CauseOutputLimit     FailureCause = "output_limit"     // the reply reached the model's output limit
+	CauseHarnessFailed   FailureCause = "harness_failed"   // the agent program stopped or could not run the turn
 )
 
 // PressureKind is "high" for memory throttling that lasts 60 s, or "max" for a

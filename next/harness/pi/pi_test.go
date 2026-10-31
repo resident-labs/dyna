@@ -87,3 +87,49 @@ func TestRecordedTurnAndSteer(t *testing.T) {
 		}
 	}
 }
+
+func TestErrorStopReasonCarriesModelFailure(t *testing.T) {
+	inputReader, inputWriter := io.Pipe()
+	outputReader, outputWriter := io.Pipe()
+	h := &Harness{
+		stdin: inputWriter, pending: make(map[string]chan event),
+		events: make(chan event, 256), done: make(chan struct{}), stop: make(chan struct{}),
+	}
+	go h.read(outputReader)
+	defer inputWriter.Close()
+	defer outputWriter.Close()
+	result := make(chan contract.TurnEnded, 1)
+	errs := make(chan error, 1)
+	go func() {
+		r, err := h.Start(context.Background(), "turn_error", []contract.TurnInput{{Delivery: 31, Text: "start"}}, func() {})
+		if err != nil {
+			errs <- err
+			return
+		}
+		result <- r
+	}()
+	line, err := bufio.NewReader(inputReader).ReadBytes('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c command
+	if err := json.Unmarshal(line, &c); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.NewEncoder(outputWriter).Encode(event{ID: c.ID, Type: "response", Success: true}); err != nil {
+		t.Fatal(err)
+	}
+	stream := `{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"provider refused"}}` + "\n" +
+		`{"type":"agent_settled","aborted":false}` + "\n"
+	if _, err := outputWriter.Write([]byte(stream)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-errs:
+		t.Fatal(err)
+	case got := <-result:
+		if got.Outcome != contract.TurnOutcome("failed") || got.Cause != contract.CauseModelFailed || got.Error != "provider refused" {
+			t.Fatalf("unexpected result: %+v", got)
+		}
+	}
+}

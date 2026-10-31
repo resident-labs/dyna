@@ -393,7 +393,10 @@ func TestFailedTurnRecordsError(t *testing.T) {
 		t.Fatal(e)
 	}
 	start := (<-channel).Body.(contract.TurnStart)
-	_, e = s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnFailed, Error: "failed", Model: "model"})
+	if _, e = s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnCompleted, Cause: contract.CauseModelFailed}); e == nil || e.Code != contract.ErrInvalid {
+		t.Fatalf("completed turn with cause: %+v", e)
+	}
+	_, e = s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnFailed, Error: "failed", Cause: contract.CauseModelFailed, Model: "model"})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -405,7 +408,7 @@ func TestFailedTurnRecordsError(t *testing.T) {
 		t.Fatalf("got %d events", len(list.Events))
 	}
 	ended := list.Events[0].Body.(contract.TurnEnded)
-	if ended.Error != "failed" || ended.Usage.Model != "model" {
+	if ended.Error != "failed" || ended.Cause != contract.CauseModelFailed || ended.Usage.Model != "model" {
 		t.Fatalf("unexpected outcome: %+v", ended)
 	}
 }

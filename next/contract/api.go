@@ -212,13 +212,14 @@ type BoxHelloResponse struct {
 	Upgrade string      `json:"upgrade,omitempty"`
 }
 type TurnOutputRequest struct {
-	ShellJobs int         `json:"shellJobs"`
-	Error     string      `json:"error,omitempty"`
-	Turn      TurnID      `json:"turn"`
-	Outcome   TurnOutcome `json:"outcome"`
-	Final     string      `json:"final,omitempty"`
-	Model     string      `json:"model"`
-	Usage     Usage       `json:"usage"`
+	ShellJobs int          `json:"shellJobs"`
+	Error     string       `json:"error,omitempty"`
+	Cause     FailureCause `json:"cause,omitempty"`
+	Turn      TurnID       `json:"turn"`
+	Outcome   TurnOutcome  `json:"outcome"`
+	Final     string       `json:"final,omitempty"`
+	Model     string       `json:"model"`
+	Usage     Usage        `json:"usage"`
 }
 type TurnOutputResponse struct{}
 
