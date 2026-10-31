@@ -10,6 +10,29 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
+func TestProfilesLoadLegacySurface(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	data := `{"p":{"provider":"anthropic","model":"a","allowedModels":["a"],"thinking":"low","agentSurface":"caller"}}`
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	profiles, err := LoadProfiles(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	choice, _, err := profiles.Model("p")
+	if err != nil || choice.ID != "a" {
+		t.Fatalf("model: %+v, %v", choice, err)
+	}
+	if problem := profiles.update("p", &profile{Provider: contract.ModelProviderAnthropic, Model: "a", AllowedModels: []string{"a"}, Thinking: contract.ThinkingLow}, false); problem != nil {
+		t.Fatal(problem)
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil || strings.Contains(string(saved), "agentSurface") {
+		t.Fatalf("saved profile: %s, %v", saved, err)
+	}
+}
+
 func TestProfilesRejectModelOutsideAllowList(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	if err := os.WriteFile(path, []byte(`{"p":{"provider":"anthropic","model":"a","allowedModels":["b"],"thinking":"low"}}`), 0600); err != nil {
