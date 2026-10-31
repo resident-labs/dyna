@@ -162,6 +162,28 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			if _, err := tx.ExecContext(ctx, "UPDATE boxes SET failures=0 WHERE session=?", session); err != nil {
 				return err
 			}
+			if _, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=0,model_retries=0 WHERE id=?", session); err != nil {
+				return err
+			}
+		} else if output.Outcome == contract.TurnFailed && output.Cause == contract.CauseModelFailed {
+			var retries int
+			if err := tx.QueryRowContext(ctx, "SELECT model_retries FROM sessions WHERE id=?", session).Scan(&retries); err != nil {
+				return err
+			}
+			var retryAt int64
+			if retries < 8 {
+				delay := 5 * time.Minute * time.Duration(1<<retries)
+				if delay > time.Hour {
+					delay = time.Hour
+				}
+				retryAt = event.Time.Add(delay).UnixMilli()
+				retries++
+			}
+			if _, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=?,model_retries=? WHERE id=?", retryAt, retries, session); err != nil {
+				return err
+			}
+		} else if _, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=0 WHERE id=?", session); err != nil {
+			return err
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET shell_jobs=MAX(0,?) WHERE id=?", output.ShellJobs, session); err != nil {
 			return err
@@ -347,6 +369,9 @@ func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn c
 			}
 			if active == "" {
 				return nil
+			}
+			if _, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=0 WHERE id=?", session); err != nil {
+				return err
 			}
 			var ids []contract.EventID
 			for _, v := range items {
