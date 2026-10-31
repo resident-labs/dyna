@@ -322,7 +322,11 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		s.admit.Unlock()
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	size, _ := box.Size(contract.BoxSizeSmall)
+	sizeName := contract.BoxSizeAgent
+	if parent != "" {
+		sizeName = contract.BoxSizeMedium
+	}
+	size, _ := box.Size(sizeName)
 	current := box.Box{ID: session.Box, Session: session.ID, Size: size, State: contract.BoxPending, PlacedAt: event.Time}
 	var ancestry []contract.BoxID
 	if parent != "" && parent != tree.Root() {
@@ -333,9 +337,12 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		}
 		current.BudgetParent = p.Box
 		for _, b := range boxes {
-			if b.ID == p.Box && (b.State == contract.BoxClosing || b.State == contract.BoxDeleted) {
-				s.admit.Unlock()
-				return contract.SessionStartResponse{}, invalid("parent box is closing")
+			if b.ID == p.Box {
+				if b.State == contract.BoxClosing || b.State == contract.BoxDeleted {
+					s.admit.Unlock()
+					return contract.SessionStartResponse{}, invalid("parent box is closing")
+				}
+				current.Size = b.Size
 			}
 		}
 		path, err := s.store.BoxAncestry(ctx, p.Box)
@@ -357,7 +364,7 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		s.admit.Unlock()
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	if err = s.store.StartSession(ctx, session, parent, current.BudgetParent, req.Goal, event, initial, string(placement.Reason)); err != nil {
+	if err = s.store.StartSession(ctx, session, parent, current.BudgetParent, current.Size.Name, req.Goal, event, initial, string(placement.Reason)); err != nil {
 		s.admit.Unlock()
 		return contract.SessionStartResponse{}, failure(err)
 	}

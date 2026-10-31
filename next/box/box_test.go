@@ -57,6 +57,23 @@ func TestAdmission(t *testing.T) {
 		t.Fatal(p)
 	}
 }
+func TestAdmissionChargesPlacementRoots(t *testing.T) {
+	size, _ := box.Size(contract.BoxSizeMedium)
+	h := box.Host{Name: "host", State: box.HostReady, CPUs: 4, MemBytes: 8 * box.GiB, DiskBytes: 100 * box.GiB}
+	lead := box.Box{ID: "lead", Host: h.Name, Size: size, State: contract.BoxReady}
+	child := box.Box{ID: "child", BudgetParent: lead.ID, Size: size}
+	if p := box.Admit([]box.Host{h}, []box.Box{lead}, child, 0); p.Host != h.Name {
+		t.Fatalf("child: %+v", p)
+	}
+	if p := box.Admit([]box.Host{h}, []box.Box{lead}, box.Box{ID: "new-lead", Size: size}, 0); p.Reason != box.PendingCPU {
+		t.Fatalf("full host: %+v", p)
+	}
+	h.CPUs, h.MemBytes = 8, 16*box.GiB
+	child.Host, child.State = h.Name, contract.BoxReady
+	if p := box.Admit([]box.Host{h}, []box.Box{lead, child}, box.Box{ID: "new-lead", Size: size}, 0); p.Host != h.Name {
+		t.Fatalf("child charged host: %+v", p)
+	}
+}
 func TestStoppedCountsDiskNotCPUOrMemory(t *testing.T) {
 	now := time.Unix(100, 0)
 	size, _ := box.Size(contract.BoxSizeSmall)
