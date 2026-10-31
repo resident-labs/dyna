@@ -108,6 +108,17 @@ export function formatTime(value: string): string {
   return at.toDateString() === new Date().toDateString() ? clock : `${at.toLocaleDateString([], { month: "short", day: "numeric" })}, ${clock}`;
 }
 
+// A post the owner forwards, as the composer holds it until a send or a remove.
+export type Quote = { author: string; at: string; text: string; attachments: Attachment[] };
+
+// As in v1, a forward quotes the post above the owner's words. It travels as a markdown blockquote, so the feed
+// draws it as a quote and the session that reads the post sees the quoted text. The empty quoted line keeps the
+// label its own paragraph, so a quoted list or table still renders. Every line break, a lone CR too, starts a quoted line.
+export function quoted({ author, at, text }: Quote, note: string): string {
+  const lines = [`**Forwarded from ${author}** · ${formatTime(at)}`, "", ...text.split(/\r\n|\r|\n/)];
+  return lines.map(line => line ? `> ${line}` : ">").join("\n") + (note.trim() ? `\n\n${note.trim()}` : "");
+}
+
 // A muted time from now, such as "in 59 minutes" or "2 minutes ago".
 const relative = new Intl.RelativeTimeFormat([], { numeric: "auto" });
 export function fromNow(value: string, now: number): string {
