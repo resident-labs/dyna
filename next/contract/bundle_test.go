@@ -15,6 +15,7 @@ func filledGlobalBundle() GlobalBundle {
 	owner := ImportedAuthor{Kind: PrincipalOwner, Label: "owner"}
 	return GlobalBundle{
 		Version:  BundleV1,
+		Rooms:    []RoomName{"dyna"},
 		Exported: bundleTime,
 		Source:   BundleSource{Commit: "abc123", Backup: "dyna-final.db", BackupSHA256: "f00d"},
 		Rules:    []Rule{{Label: "u1", Text: "report bugs to root", By: owner, Created: bundleTime, Updated: bundleTime}},
@@ -23,11 +24,11 @@ func filledGlobalBundle() GlobalBundle {
 			CheckInInterval: 900000, ShellSilence: 600000,
 		},
 		Profiles: []ProfileBundle{{
-			Name: "terra", Description: "builder", Model: "gpt-5.5", Models: []string{"gpt-5.5"}, Fallback: "kimi-max",
+			Name: "terra", Description: "builder", Model: "gpt-5.5", Thinking: ThinkingXHigh, Models: []string{"gpt-5.5"}, Fallback: "kimi-max",
 			Taste: 7, Intelligence: 9, Cost: 9, Diagnostics: 10, CompactTokens: 200000, MaxConcurrent: 4, MaxCallsPerRun: 8, Default: true,
 		}},
 		Hosts:    []HostBundle{{Name: "hermeslab", SSH: "pip@hermeslab", Labels: []string{"gpu"}, Rooms: []RoomName{"dyna"}}},
-		Accounts: []AccountLabel{{Provider: ProviderAnthropic, Label: "max-1", Repos: []RepoName{"resident-labs/dyna"}}},
+		Accounts: []AccountLabel{{Provider: ProviderAnthropic, Label: "max-1", Repos: []RepoName{"resident-labs/dyna"}, Rooms: []RoomName{"dyna"}}},
 		Devices: []DeviceBundle{{
 			Name: "phone", TokenSHA256: "beef", Created: bundleTime, Expires: bundleTime.Add(time.Hour), Scopes: []DeviceScope{"rooms.read"},
 		}},
@@ -47,12 +48,15 @@ func filledGlobalBundle() GlobalBundle {
 func filledRoomBundle() RoomBundle {
 	root := ImportedAuthor{Kind: PrincipalSession, Label: "dyna:root"}
 	return RoomBundle{
-		Version: BundleV1,
-		Name:    "dyna",
-		Repos:   []RoomRepo{{Repo: "resident-labs/dyna", Default: true}},
-		Limits:  RoomLimits{CPUs: 8, MemBytes: 16 << 30},
-		Color:   "teal",
-		Rules:   []Rule{{Label: "r17", Text: "upgrade floor", By: root, Created: bundleTime, Updated: bundleTime}},
+		Version:     BundleV1,
+		Name:        "dyna",
+		Repos:       []RoomRepo{{Repo: "resident-labs/dyna", Default: true}},
+		Limits:      RoomLimits{CPUs: 8, MemBytes: 16 << 30},
+		Color:       "teal",
+		Paused:      true,
+		RootProfile: "terra",
+		Upstreams:   []RoomUpstream{{Repo: "resident-labs/dyna", Upstream: "github.com/resident-labs/dyna"}},
+		Rules:       []Rule{{Label: "r17", Text: "upgrade floor", By: root, Created: bundleTime, Updated: bundleTime}},
 		Goals: []GoalBundle{{
 			Label: "g1084", Text: "review", Detail: "brief", Setter: root, Created: bundleTime,
 			Amendments: []GoalNote{{At: bundleTime, By: root, Text: "also X"}},
@@ -64,16 +68,19 @@ func filledRoomBundle() RoomBundle {
 			Notes: []IssueNote{{At: bundleTime, By: root, Text: "note"}},
 		}},
 		NextIssue: 587,
-		PRs:       []TrackedPR{{Repo: "resident-labs/dyna", Number: 1283, Author: root, Goal: "g1084"}},
+		PRs:       []TrackedPR{{Repo: "resident-labs/dyna", Number: 1283, Author: root, Goal: "g1084", Hold: &PRHandoffHold{Reason: "review", By: root, At: bundleTime}}},
 		Questions: []QuestionBundle{{
 			Label: "q33", Kind: QuestionTerminal, Asker: root, Text: "mount the drive", Options: []string{"yes"},
-			Meanwhile: "waiting", Command: "sudo mount /dev/sdb2", Asked: bundleTime,
+			Meanwhile: "waiting", Command: "sudo mount /dev/sdb2", Argv: []string{"sudo", "mount", "/dev/sdb2"}, Cwd: "/tmp", Reason: "mount", Asked: bundleTime,
 		}},
 		Subscriptions: []Subscription{{
 			ID: "sub_2", Scope: ScopeRoom, On: []EventType{"pr.merged"}, Run: &RunSpec{Command: []string{"true"}, Image: "dyna-base", Size: "small"},
 		}},
+		HookHandoff:  []HookHandoff{{Name: "manual-hook", Fields: []string{"command", "cwd"}}},
+		LimitHandoff: []RoomLimitGap{RoomLimitMemoryMaxWithoutHigh},
+		RepoHandoff:  []RepoHandoff{{Identity: "example.org/team/repo", Reason: RepoUnsupportedForge}},
 		Handoff: []SessionHandoff{{
-			Name: "dyna:builder", Profile: "terra", Parent: "dyna:lead", Goals: []GoalID{"g1084"},
+			Name: "dyna:builder", Profile: "terra", ProfileWarning: ProfileUnsupportedMuse, Parent: "dyna:lead", Goals: []GoalID{"g1084"},
 			ArchiveRef: "refs/dyna/archive/builder", LastPost: "done",
 		}},
 		Counts: BundleCounts{Rules: 1, Goals: 1, GoalItems: 1, Issues: 1, PRs: 1, Questions: 1, Sessions: 1},
