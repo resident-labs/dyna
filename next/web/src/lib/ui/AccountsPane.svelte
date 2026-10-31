@@ -1,213 +1,205 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
-  import { count } from "../feed.ts";
-  import { accountRows, accountState, refused, removalPrompt, canReconnect, reconnectUnavailable } from "../accounts.ts";
-  import type { Account, AccountProviderInfo, AccountsConnectResponse } from "../contract.gen.ts";
+  import { accountRows, accountState, providerGroup, refused, reconnectUnavailable } from "../accounts.ts";
+  import { visibleWindows } from "../usage.ts";
+  import type { Account, AccountProviderInfo, AccountUsage, AccountsConnectResponse, RoomSummary } from "../contract.gen.ts";
   import StatusPill from "./StatusPill.svelte";
   import Icon from "./Icon.svelte";
+  import AccountMeter from "./AccountMeter.svelte";
 
-  let { bar, phone, signedout }: { bar: Snippet<[string, number | undefined, Snippet | undefined]>; phone: boolean; signedout: () => void } = $props();
-  let providers: AccountProviderInfo[] = $state([]), accounts: Account[] = $state([]);
-  let loaded = $state(false), loadFailed = $state(false);
-  let adding = $state(false), selected: AccountProviderInfo | undefined = $state(), inline = $state(false);
-  let label = $state(""), secret = $state(""), redirect = $state(""), linkText = $state("");
+  let { bar, phone, signedout, path, navigate }: { bar: Snippet<[string, number | undefined, Snippet | undefined]>; phone: boolean; signedout: () => void; path: string; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void } = $props();
+  let providers: AccountProviderInfo[] = $state([]), accounts: Account[] = $state([]), rooms: RoomSummary[] = $state([]), usage: AccountUsage[] = $state([]);
+  let loaded = $state(false), failed = $state(false), busy = $state(false);
+  let query = $state(""), expanded = $state(false), label = $state(""), secret = $state(""), redirect = $state("");
   let attempt: AccountsConnectResponse | undefined = $state();
   let connectState: "idle" | "pending" | "failed" | "expired" = $state("idle");
-  let busy = $state(false), opened = $state(false), now = $state(Date.now());
-  let reconnectId: string | undefined = $state();
-  let removing: string | undefined = $state(), removeFailed = $state(false), unreachable = $state(false);
-  let replaceAfterRemove = $state(false), cannotReconnect = $state(false), wrongAccount = $state(false);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let generation = 0, loadGeneration = 0;
-
+  let reconnectId: string | undefined = $state(), error = $state(""), copied = $state(false), opened = $state(false), now = $state(Date.now());
+  let timer: ReturnType<typeof setTimeout> | undefined, generation = 0;
+  const base = "/settings/accounts";
+  let adding = $derived(path === base + "/add" || path.startsWith(base + "/add/"));
+  let providerId = $derived(path.startsWith(base + "/add/") ? decodeURIComponent(path.slice((base + "/add/").length)) : "");
+  let selected = $derived(providers.find(p => p.id === providerId) ?? (!phone && adding && !providerId ? providers[0] : undefined));
+  let accountId = $derived(path.startsWith(base + "/account/") ? decodeURIComponent(path.slice((base + "/account/").length)) : "");
+  let account = $derived(accounts.find(a => a.id === accountId));
+  let accountProvider = $derived(providers.find(p => p.id === account?.provider));
+  let accountUsage = $derived(usage.find(u => u.accountId === accountId));
+  let selectedReportsWindows = $derived(selected?.connectFlow === "callback" && usage.some(u => accounts.some(a => a.provider === selected?.id && a.id === u.accountId) && u.windows?.some(w => w.kind === "five_hour") && u.windows?.some(w => w.kind === "weekly")));
+  const groups = [{ flow: "callback", title: "Sign in with your plan" }, { flow: "device", title: "Sign in with a code" }, { flow: "key", title: "API key" }] as const;
+  const providerPath = (id: string) => base + "/add/" + encodeURIComponent(id);
+  const accountPath = (id: string) => base + "/account/" + encodeURIComponent(id);
+  function reset() {
+    generation++; clearTimeout(timer); attempt = undefined; connectState = "idle"; redirect = ""; secret = ""; error = ""; reconnectId = undefined; copied = false; opened = false;
+  }
   function reload() {
-    const ticket = ++loadGeneration;
-    void call("accounts.list", {}).then(result => {
-      if (ticket !== loadGeneration) return;
-      providers = result.providers ?? []; accounts = result.accounts ?? []; loaded = true; loadFailed = false;
-      if (reconnectId && !accounts.some(account => account.id === reconnectId)) close();
-    }, (error: unknown) => { if (ticket !== loadGeneration) return; if (error instanceof SignedOut) signedout(); else if (!loaded) loadFailed = true; });
+    void call("accounts.list", {}).then(result => { providers = result.providers ?? []; accounts = result.accounts ?? []; loaded = true; failed = false; }, (e: unknown) => { if (e instanceof SignedOut) signedout(); else if (!loaded) failed = true; });
+    void call("accounts.quota", {}).then(result => { usage = result.accounts ?? []; }, () => {});
+    void call("room.list", {}).then(result => { rooms = result.rooms ?? []; }, () => {});
   }
-  onMount(() => {
-    reload();
-    window.addEventListener("focus", reload);
-    return () => { generation++; loadGeneration++; clearTimeout(timer); window.removeEventListener("focus", reload); };
-  });
-  function close() {
-    generation++; clearTimeout(timer); adding = false; inline = false; selected = undefined; attempt = undefined;
-    reconnectId = undefined; label = ""; secret = ""; redirect = ""; connectState = "idle"; unreachable = false; cannotReconnect = false; wrongAccount = false; opened = false;
-  }
-  function choose(provider: AccountProviderInfo, inPlace: boolean) {
-    close(); adding = true; selected = provider; inline = inPlace;
-  }
+  onMount(() => { reload(); window.addEventListener("focus", reload); return () => { reset(); window.removeEventListener("focus", reload); }; });
+  $effect(() => { path; return () => { generation++; clearTimeout(timer); attempt = undefined; connectState = "idle"; redirect = ""; secret = ""; error = ""; }; });
   function watch(id: string, ticket: number) {
     timer = setTimeout(() => {
       now = Date.now();
       void call("accounts.connect_status", { attempt: id }).then(result => {
         if (ticket !== generation) return;
-        if (result.status === "connected") { close(); reload(); }
+        if (result.status === "connected") { reset(); reload(); document.getElementById("accounts-back")?.click(); }
         else if (result.status === "pending") watch(id, ticket);
-        else { connectState = result.status; wrongAccount = result.reason === "wrong_account"; cannotReconnect = !!reconnectId && result.reason === "adoption_failed"; }
-      }, (error: unknown) => { if (ticket === generation) { connectState = "failed"; unreachable = !refused(error); } });
+        else { connectState = result.status; error = result.reason === "wrong_account" ? "That sign-in belongs to a different account." : result.reason === "adoption_failed" ? "Dyna cannot reconnect this sign-in. Remove it and add it again." : ""; }
+      }, () => { if (ticket === generation) { connectState = "failed"; error = "Could not reach the service. Try again."; } });
     }, 2000);
+  }
+  function remaining(at: string) {
+    const seconds = Math.max(0, Math.ceil((Date.parse(at) - now) / 1000));
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
   }
   async function start() {
     if (!selected || busy) return;
-    busy = true; connectState = "idle"; unreachable = false; cannotReconnect = false; wrongAccount = false;
-    const ticket = ++generation;
+    busy = true; error = ""; const ticket = ++generation;
+    label = label.trim() || `${selected.displayName} account`;
+    const popup = selected.connectMethod === "oauth" ? window.open("", "_blank") : null;
+    if (popup) popup.opener = null;
     if (selected.connectMethod === "key") {
       const key = secret; secret = "";
-      await call("accounts.set_key", { provider: selected.id, label, key }).then(() => { if (ticket === generation) { close(); reload(); } }, () => { if (ticket === generation) { unreachable = true; reload(); } });
+      await call("accounts.set_key", { provider: selected.id, label, key }).then(() => { if (ticket === generation) { reset(); reload(); document.getElementById("accounts-back")?.click(); } }, () => { if (ticket === generation) error = "Could not save the key. Try again."; });
     } else {
       const request = reconnectId ? call("accounts.reconnect", { accountId: reconnectId }) : call("accounts.connect", { provider: selected.id, label });
       await request.then(result => {
-        if (ticket !== generation) return;
-        attempt = result;
-        const url = URL.canParse(result.link) ? new URL(result.link) : undefined;
-        linkText = url ? url.host + url.pathname : result.link;
-        connectState = "pending"; now = Date.now(); watch(result.attempt, ticket);
-      }, (error: unknown) => { if (ticket === generation) { connectState = "failed"; cannotReconnect = !!reconnectId && reconnectUnavailable(error); unreachable = !cannotReconnect && !refused(error); } });
+        if (ticket !== generation) { popup?.close(); return; }
+        attempt = result; connectState = "pending"; now = Date.now(); watch(result.attempt, ticket);
+        if (popup) { popup.location.href = result.link; opened = true; }
+      }, (e: unknown) => { popup?.close(); if (ticket === generation) { connectState = "failed"; error = reconnectUnavailable(e) ? "Dyna cannot reconnect this sign-in. Remove it and add it again." : refused(e) ? "The provider did not accept the sign-in." : "Could not reach the service. Try again."; } });
     }
     busy = false;
   }
   async function finish() {
-    if (!attempt || busy) return;
-    const url = redirect, ticket = generation; redirect = ""; busy = true;
-    await call("accounts.connect_callback", { attempt: attempt.attempt, redirectUrl: url }).catch((error: unknown) => { if (ticket === generation) { connectState = "failed"; unreachable = !refused(error); } });
+    if (!attempt || busy || !redirect.trim()) return;
+    const ticket = generation, url = redirect; redirect = ""; busy = true;
+    await call("accounts.connect_callback", { attempt: attempt.attempt, redirectUrl: url }).catch(() => { if (ticket === generation) error = "Could not finish sign-in. Try again."; });
     busy = false;
   }
-  async function remove(account: Account) {
-    if (busy) return;
-    busy = true; removeFailed = false;
-    const provider = replaceAfterRemove ? providers.find(item => item.id === account.provider) : undefined;
-    await call("accounts.remove", { accountId: account.id }).then(() => {
-      removing = undefined; replaceAfterRemove = false; reload();
-      if (provider) { choose(provider, false); label = account.label; }
-    }, () => { removeFailed = true; });
+  async function remove(a: Account) {
+    busy = true;
+    await call("accounts.remove", { accountId: a.id }).then(() => { reload(); document.getElementById("accounts-back")?.click(); }, () => { error = "The account was not removed. Try again."; });
     busy = false;
   }
-  const remaining = (at: string, time: number) => {
-    const seconds = Math.max(0, Math.ceil((Date.parse(at) - time) / 1000));
-    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-  };
+  async function setRooms(a: Account, ids: string[]) {
+    busy = true;
+    await call("accounts.set_limits", { accountId: a.id, rooms: ids }).then(reload, () => { error = "Room limits could not be saved. Try again."; });
+    busy = false;
+  }
 </script>
 
-{#snippet action()}<button class="btn add-button" type="button" onclick={() => { close(); adding = true; }}>+ Add an account</button>{/snippet}
-{#snippet form()}
-  {#if selected}
-    <div class="connect">
-      <h3>{reconnectId ? `Sign in again to ${label}` : `New ${selected.displayName} account`}</h3>
-      {#if selected.connectMethod === "key"}
-        <div class="key-fields"><label>Label <input bind:value={label} placeholder="A name for this account" disabled={busy} /></label>
-        <label>Key <input type="password" bind:value={secret} autocomplete="off" disabled={busy} class:invalid={unreachable} /></label>
-        <button class="btn fill" type="button" disabled={busy || !secret || !label.trim()} onclick={() => void start()}>Save</button></div>
-        <p class="muted">Dyna hands the key to the sign-in service and never shows it again.</p>
-        {#if unreachable}<p class="error" role="alert">Could not reach the service. Try again.</p>{/if}
-      {:else}
-        {#if !cannotReconnect}<label>Label <input bind:value={label} placeholder="A name for this account" disabled={busy || !!attempt || !!reconnectId} /></label>{/if}
-        {#if connectState === "expired"}
-        <p>The code expired.</p><button class="btn fill" type="button" disabled={busy} onclick={() => { attempt = undefined; void start(); }}>Get a new code</button>
-      {:else if connectState === "failed"}
-        {#if cannotReconnect}
-          <p class="muted">Dyna cannot reconnect this saved sign-in. Remove the account and add it again.</p><button class="btn" type="button" onclick={() => { removing = reconnectId; replaceAfterRemove = true; close(); }}>Remove and add again</button>
-        {:else}
-          <p class="error" role="alert">{wrongAccount ? "That sign-in belongs to a different account. Sign in with the original account." : unreachable ? "Could not reach the service. Try again." : `${selected.displayName} did not accept the sign-in.`}</p><button class="btn fill" type="button" disabled={busy} onclick={() => { attempt = undefined; void start(); }}>Try again</button>
-        {/if}
-      {:else if !attempt}
-        <p>Connect this account to let Dyna use it.</p><button class="btn fill" type="button" disabled={busy || (!reconnectId && !label.trim())} onclick={() => void start()}>Start sign-in</button>
-      {:else if attempt.flow === "device"}
-        <p><span class="step">1</span> Open <a href={attempt.link} target="_blank" rel="noopener noreferrer">{linkText} ↗</a> and enter this code:</p><strong class="code">{attempt.code}</strong>
-        <p class="muted">Waiting for you to approve · Expires in {remaining(attempt.expiresAt, now)}</p>
-      {:else}
-        <p><span class:done={opened} class="step">{opened ? "✓" : "1"}</span> Open the {selected.displayName} sign-in and approve Dyna. <a href={attempt.link} target="_blank" rel="noopener noreferrer" onclick={() => { opened = true; }}>{opened ? "Opened ↗" : "Open sign-in ↗"}</a></p>
-        <p><span class="step">2</span> Copy the address of the page you land on and paste it here. That page may say it cannot be reached; that is expected.</p>
-        <div class="finish"><input aria-label="Address of the page you land on" bind:value={redirect} placeholder="http://localhost/..." autocomplete="off" /><button class="btn fill" type="button" disabled={busy || !redirect} onclick={() => void finish()}>Finish</button></div>
-        <p class="muted">The address holds a one-time code. Dyna hands it to the sign-in service and never keeps it. Expires in {remaining(attempt.expiresAt, now)}.</p>
-        {/if}
-      {/if}
-    </div>
-  {/if}
-{/snippet}
-{#if phone && adding && !inline}<header class="phone-bar"><button class="btn ghost" type="button" onclick={close} aria-label="Back to Accounts"><Icon name="backChevron" size={20} /></button><strong>Add an account</strong></header>
+{#snippet action()}<a class="btn add-button" href={base + "/add"} onclick={(e) => { reset(); label = ""; navigate(e); }}>+ Add an account</a>{/snippet}
+{#snippet back()}<a href={base} onclick={navigate}>Accounts</a>{/snippet}
+<a id="accounts-back" href={base} onclick={navigate} hidden>Back to Accounts</a>
+{#if adding || accountId}
+  <header class="subbar">{#if phone}<a href={adding && selected ? base + "/add" : base} onclick={navigate} aria-label={adding && selected ? "Back to providers" : "Back to Accounts"}><Icon name="backChevron" size={20} /></a>{:else}{@render back()} <span>/</span>{/if} <strong>{adding ? (phone && selected ? selected.displayName : "Add an account") : account?.label || "Account"}</strong></header>
 {:else}{@render bar("Accounts", loaded ? accounts.length : undefined, action)}{/if}
 <div class="body">
-  {#if loadFailed}<p>Accounts did not load. <button class="btn" type="button" onclick={reload}>Try again</button></p>
-  {:else if !loaded}<p class="muted">Loading accounts…</p>
-  {:else}
-    {#if adding && !inline}
-      <section class="add">
-        {#if !phone}<div class="heading"><h2>Add an account</h2><button class="btn ghost" type="button" onclick={close}>Cancel</button></div>{/if}
-        <p class="muted">Pick a provider. Each one connects in its own way.</p>
-        <div class="providers">{#each providers as provider (provider.id)}
-          <button type="button" class:chosen={selected?.id === provider.id} onclick={() => choose(provider, false)}><span class="initial">{provider.displayName.slice(0, 1)}</span>{provider.displayName} <span>{provider.connectFlow === "key" ? "key" : provider.connectFlow === "device" ? "code" : "sign-in"}</span></button>
-        {/each}</div>
-        {@render form()}
+{#if failed}<p>Accounts did not load. <button class="btn" type="button" onclick={reload}>Try again</button></p>
+{:else if !loaded}<p class="muted">Loading accounts…</p>
+{:else if adding}
+  <a id="picker-back" href={base + "/add"} onclick={navigate} hidden>Back to providers</a><div class="add-layout">
+    {#if !phone || !selected}
+      <section class="picker">
+        <div class="search"><Icon name="search" size={18} /><input aria-label="Search providers" placeholder={`Search ${providers.length} providers`} bind:value={query} /></div>
+        {#each groups as group}
+          {@const matches = providerGroup(providers, group.flow, query, expanded)}
+          {#if matches.count}<h3>{group.title} · {matches.count}</h3>
+            {#each matches.items as provider (provider.id)}
+              {@const connected = accounts.filter(a => a.provider === provider.id).length}
+              <a class:chosen={selected?.id === provider.id} href={providerPath(provider.id)} onclick={(e) => { reset(); label = ""; navigate(e); }}><span class="initial">{provider.displayName.slice(0, 1)}</span><strong>{provider.displayName}</strong>{#if connected}<span class="muted">{connected} connected</span>{/if}</a>
+            {/each}
+            {#if matches.remaining}<button class="btn ghost" type="button" onclick={() => expanded = true}>Show {matches.remaining} more</button>{/if}
+          {/if}
+        {/each}
       </section>
     {/if}
-    {#if !phone || !adding || inline}
-      <p class="muted">{accounts.length} {accounts.length === 1 ? "account" : "accounts"} with {new Set(accounts.map(a => a.provider)).size} providers{#if accounts.some(a => a.state === "sign_in_expired")}{" · "}<StatusPill tone="error" label={`${accounts.filter(a => a.state === "sign_in_expired").length} sign-in expired`} />{/if}</p>
-      {#each providers.filter(p => accounts.some(a => a.provider === p.id)) as provider (provider.id)}
-        {@const group = accountRows(accounts.filter(a => a.provider === provider.id))}
-        <section>
-          <div class="heading"><h2><span class="initial">{provider.displayName.slice(0, 1)}</span>{provider.displayName}</h2>
-            <span class="muted">{group.length} · {provider.connectMethod === "key" ? "API key" : "Sign-in"}</span>
-            <button class="btn ghost connect-button" type="button" onclick={() => inline && selected?.id === provider.id ? close() : choose(provider, true)}>{inline && selected?.id === provider.id ? "Cancel" : provider.connectMethod === "key" ? "+ Add a key" : "+ Connect another"}</button>
-          </div>
-          <div class="list">
-            {#each group as account, index (account.id)}
-              {@const status = accountState(account)}
-              <div class="row"><div><strong>{account.label || `${provider.displayName} account ${index + 1}`}</strong>
-                {#if status.pill} <StatusPill tone={status.pill.tone} label={status.pill.label} />{/if}
-                <div class="muted">{account.rooms?.length ? count(account.rooms.length, "room") : "Every room"}{#if status.line}{" · "}{status.line}{/if}</div></div>
-                {#if account.state === "sign_in_expired"}
-                  <div class="expired">{#if canReconnect(account, provider.connectMethod) && !(cannotReconnect && reconnectId === account.id)}<button class="btn fill" type="button" onclick={() => { choose(provider, true); reconnectId = account.id; label = account.label; }}>Sign in again</button>{/if}<span>Its limits show once it is signed in.</span></div>
-                {/if}
-                  {#if removing === account.id}<div class="remove-confirm"><div><span>{removalPrompt(provider.connectMethod)}</span>{#if account.rooms?.length}<div class="muted">This account's room limits will be removed too.</div>{/if}</div><button class="btn danger" type="button" disabled={busy} onclick={() => void remove(account)}>Remove</button><button class="btn ghost" type="button" disabled={busy} onclick={() => { removing = undefined; removeFailed = false; replaceAfterRemove = false; }}>Keep</button>{#if removeFailed}<span class="error" role="alert">The account was not removed. Try again.</span>{/if}</div>
-                  {:else}<button class="btn ghost" type="button" onclick={() => { removing = account.id; removeFailed = false; replaceAfterRemove = false; }}>Remove</button>{/if}
-              </div>
-              {#if reconnectId === account.id}{@render form()}{/if}
-            {/each}
-            {#if inline && !reconnectId && selected?.id === provider.id}{@render form()}{/if}
-          </div>
+    {#if selected}
+      <div class="details">
+        <section class="card connect">
+          <h2><span class="initial">{selected.displayName.slice(0, 1)}</span>{selected.displayName}{#if !attempt}<span class="muted">{accounts.filter(a => a.provider === selected.id).length} connected</span>{:else if !phone && attempt.flow === "callback"}<span class="muted">Sign in with your plan · Dyna sees your plan limits, not your chats</span>{/if}</h2>
+          {#if !attempt}
+            <p><strong>{selected.connectFlow === "callback" ? "Sign in with your plan." : selected.connectFlow === "device" ? "Sign in with a code." : "API key."}</strong> {selected.connectFlow === "callback" ? `Use a ${selected.displayName} plan you already pay for. Dyna shows its usage limits when available.` : selected.connectFlow === "device" ? "Dyna shows a short code here. You enter it on the provider’s page, and Dyna finishes by itself." : "You paste a key once. It stays on this computer, and Dyna never shows it again."}</p>
+            <p class="muted">Dyna keeps the sign-in on this computer and sends it only to {selected.displayName}.{#if selected.connectFlow === "callback"}{" "}It sees your plan limits, not your chats.{/if}</p>
+            <label class="label-field">Label <input bind:value={label} placeholder="Work, Personal, …" disabled={busy} /></label>
+            {#if selected.connectFlow === "key"}<label>API key <input type="password" bind:value={secret} autocomplete="off" disabled={busy} /></label>{/if}
+            <div class="start-actions"><button class="btn fill" type="button" disabled={busy || (selected.connectFlow === "key" && !secret.trim())} onclick={() => void start()}>{selected.connectFlow === "callback" ? `Sign in with ${selected.displayName}` : selected.connectFlow === "device" ? "Get a code" : "Save key"}</button>{#if selected.connectFlow === "key"}<a class="btn" href={base + "/add"} onclick={navigate}>Cancel</a>{/if}</div>
+          {:else}
+            <label class="label-field">Label <input value={label} disabled /></label>
+            {#if attempt.flow === "device"}
+              <p>Open the provider's page and enter this code.</p><div class="code"><strong>{attempt.code}</strong><button class="btn ghost" type="button" onclick={() => { void navigator.clipboard.writeText(attempt?.code ?? ""); copied = true; }}>{copied ? "Copied" : "Copy"}</button></div>
+              <a href={attempt.link} target="_blank" rel="noopener noreferrer">Open sign-in ↗</a><p class="muted">Waiting for you to approve · Expires in {remaining(attempt.expiresAt)}</p>
+            {:else}
+              <div class="step-row"><span class="step-badge" class:checked={opened} aria-hidden="true">{opened ? "✓" : "1"}</span><p>Open the {selected.displayName} sign-in and approve Dyna.<br /><a href={attempt.link} target="_blank" rel="noopener noreferrer" onclick={() => opened = true}>{opened ? "Opened in your browser" : "Open sign-in"} ↗</a> <button class="btn ghost" type="button" onclick={() => { void navigator.clipboard.writeText(attempt?.link ?? ""); copied = true; }}>{copied ? "Copied" : "Copy link"}</button></p></div>
+              <form onsubmit={(e) => { e.preventDefault(); void finish(); }}>
+                <div class="step-row"><span class="step-badge" aria-hidden="true">2</span><label for="callback-address">Paste the address of the page you land on. That page may say it cannot be reached; that is expected.</label></div>
+                <div class="callback-entry"><input id="callback-address" aria-label="Address of the page you land on" bind:value={redirect} placeholder="http://localhost/…" autocomplete="off" />
+                  <div class="actions"><button class="btn fill" type="submit" disabled={busy || !redirect.trim()}>Finish</button><a class="btn" href={base + "/add"} onclick={navigate}>Cancel</a>{#if phone}<span class="muted">Leaving this page cancels.</span>{/if}</div></div>
+              </form>
+              <p class="muted">{#if !phone}Enter finishes. Escape, or leaving this page, cancels.{" "}{/if}The address holds a one-time code. Dyna hands it to the sign-in service and never keeps it.{#if attempt.expiresAt}{" "}Expires in {remaining(attempt.expiresAt)}.{/if}</p>
+            {/if}
+            {#if attempt.flow === "device"}<a class="btn" href={base + "/add"} onclick={navigate}>Cancel</a>{/if}
+          {/if}
+          {#if connectState === "expired"}<p>The sign-in expired. Cancel and try again.</p>{/if}
+          {#if error}<p role="alert">{error}</p>{/if}
         </section>
-      {/each}
+        <section class="card legend">
+          <h2>{attempt ? "After you finish" : "Three ways to connect"}</h2>
+          {#if attempt}<p class="muted after"><strong>{label}</strong>{" "}joins {selected.displayName} in your account list{#if selectedReportsWindows}, with its 5-hour and Weekly limits{/if}.</p><p class="muted after">It serves every room until you choose rooms in its view.</p>
+          {:else}<p><strong>Sign in with your plan</strong> <span class="muted">You approve Dyna on the provider's page, then paste back the address it lands on. Dyna shows your plan's limits.</span></p>
+          <p><strong>Sign in with a code</strong> <span class="muted">Dyna shows a short code here. You enter it on the provider's page, and Dyna finishes by itself.</span></p>
+          <p><strong>API key</strong> <span class="muted">You paste a key once. It stays on this computer, and Dyna never shows it again.</span></p>{/if}
+        </section>
+      </div>
     {/if}
-  {/if}
+  </div>
+{:else if accountId}
+  {#if account && accountProvider}
+    <section class="account-view">
+      <h1><span class="initial">{accountProvider.displayName.slice(0, 1)}</span>{account.label}</h1>
+      <p class="muted">{accountProvider.displayName}{#if accountUsage?.observedAt}{" · "}usage at {new Date(accountUsage.observedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}{/if}</p>
+      <h2>Usage</h2>
+      {#if accountUsage && visibleWindows(accountUsage.windows ?? []).length}<div class="meters">{#each visibleWindows(accountUsage.windows ?? []) as window (window.name)}<AccountMeter {window} now={Date.now()} />{/each}</div>{:else}<p class="muted">No usage limits reported.</p>{/if}
+      <h2>Rooms</h2>
+      <p><label><input type="radio" name="room-scope" checked={!account.rooms?.length} disabled={busy} onchange={() => void setRooms(account, [])} /> Every room</label> <label><input type="radio" name="room-scope" checked={!!account.rooms?.length} disabled={busy || !rooms.length} onchange={() => void setRooms(account, [rooms[0].id])} /> Only these rooms</label></p>
+      {#if account.rooms?.length}{#each rooms as room (room.id)}<label><input type="checkbox" checked={account.rooms.includes(room.id)} disabled={busy || (account.rooms.length === 1 && account.rooms.includes(room.id))} onchange={(e) => void setRooms(account, e.currentTarget.checked ? [...(account.rooms ?? []), room.id] : (account.rooms ?? []).filter(id => id !== room.id))} /> {room.name}</label>{/each}{/if}
+      <h2>Sign-in</h2>
+      {#if accountProvider.connectMethod === "oauth"}<div class="start-actions"><a class="btn" href={providerPath(accountProvider.id)} onclick={(e) => { navigate(e); label = account.label; reconnectId = account.id; }}>Sign in again</a> <span class="muted">Use it if the account changed plans or Dyna asks.</span></div>{:else}<p class="muted">This account uses an API key.</p>{/if}
+      <div class="remove"><div><strong>Remove {account.label}</strong><p class="muted">Dyna deletes this sign-in from this computer. {#if accounts.some(a => a.provider === account.provider && a.id !== account.id)}Sessions on it move to another {accountProvider.displayName} account at their next model call.{:else}You can connect it again later.{/if}</p></div><button class="btn danger" type="button" disabled={busy} onclick={() => void remove(account)}>Remove</button></div>
+      {#if error}<p role="alert">{error}</p>{/if}
+    </section>
+  {:else}<p>Account not found. {@render back()}</p>{/if}
+{:else}
+  <p class="muted">{#if accounts.length}{accounts.length} {accounts.length === 1 ? "account" : "accounts"} with {new Set(accounts.map(a => a.provider)).size} providers{#if accounts.some(a => a.state === "sign_in_expired")}{" · "}<StatusPill tone="error" label={`${accounts.filter(a => a.state === "sign_in_expired").length} sign-in expired`} />{/if}{:else}Accounts you connect will appear here.{/if}</p>
+  {#each providers.filter(p => accounts.some(a => a.provider === p.id)) as provider (provider.id)}
+    {@const group = accountRows(accounts.filter(a => a.provider === provider.id))}
+    <section><div class="heading"><h2><span class="initial">{provider.displayName.slice(0, 1)}</span>{provider.displayName}</h2><span class="muted">{group.length} · {provider.connectMethod === "key" ? "API key" : "Sign-in"}</span><a class="btn ghost" href={providerPath(provider.id)} onclick={(e) => { reset(); label = ""; navigate(e); }}>{provider.connectMethod === "key" ? "+ Add a key" : "+ Connect another"}</a></div>
+      <div class="list">{#each group as item, index (item.id)}
+        {@const status = accountState(item)}
+        {@const rowUsage = usage.find(u => u.accountId === item.id)}
+        <div class="account-row"><a class="row" href={accountPath(item.id)} onclick={navigate}><div><strong>{item.label || `${provider.displayName} account ${index + 1}`}</strong>{#if status.pill}{" "}<StatusPill tone={status.pill.tone} label={status.pill.label} />{/if}<div class="muted">{item.rooms?.length ? `${item.rooms.length} rooms` : "Every room"}{#if status.line}{" · "}{status.line}{/if}{#if rowUsage?.observedAt}{" · "}usage at {new Date(rowUsage.observedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}{/if}</div></div>{#if rowUsage && !rowUsage.cause && visibleWindows(rowUsage.windows ?? []).length}<div class="row-meters">{#each visibleWindows(rowUsage.windows ?? []) as window (window.name)}<AccountMeter {window} now={Date.now()} />{/each}</div>{:else if item.state !== "sign_in_expired"}<span class="muted no-usage">No usage data for this provider yet.</span>{/if}</a>{#if item.state === "sign_in_expired" && provider.connectMethod === "oauth"}<div class="retry"><a class="btn fill" href={providerPath(provider.id)} onclick={(e) => { navigate(e); label = item.label; reconnectId = item.id; }}>Sign in again</a><span class="muted">Its limits show once it is signed in.</span></div>{/if}<a class="chevron" href={accountPath(item.id)} onclick={navigate} aria-label={`View ${item.label}`}>›</a></div>
+      {/each}</div>
+    </section>
+  {/each}
+{/if}
 </div>
 
+<svelte:window onkeydown={(e) => { if (e.key === "Escape" && attempt) { reset(); document.getElementById("picker-back")?.click(); } }} />
 <style>
-  .add-button { margin-left: auto; }
-  .phone-bar { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--line); }
-  .body { flex: 1; min-height: 0; overflow: auto; width: min(1096px, 100%); box-sizing: border-box; padding: 20px 24px; display: grid; align-content: start; gap: 18px; }
-  p { margin: 0; } .muted { color: var(--muted); font-size: 12.5px; }
-  .heading { display: flex; align-items: center; gap: 8px; margin: 0 8px 8px; }
-  h2, h3 { margin: 0; font-size: 14px; font-weight: 600; } h2 { display: flex; align-items: center; gap: 8px; }
-  .initial { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: var(--selected); color: var(--muted); font-size: 12px; }
-  .connect-button, .heading > .ghost { margin-left: auto; }
-  .heading > .muted { white-space: nowrap; }
-  .list, .add { border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
-  .row { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; }
-  .row + .row, .connect { border-top: 1px solid var(--line); }
-  .expired { display: flex; align-items: center; gap: 12px; margin-left: auto; color: var(--muted); font-size: 12.5px; }
-  .remove-confirm { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; }
-  .row strong { font-size: 14px; } .row .muted { margin-top: 3px; }
-  .add { padding: 16px; display: grid; gap: 12px; } .add .heading { margin: 0; }
-  .providers { display: flex; flex-wrap: wrap; gap: 8px; }
-  .providers button { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; border: 1px solid var(--line); background: transparent; color: var(--text); padding: 8px 10px; border-radius: 6px; font: inherit; cursor: pointer; }
-  .providers button.chosen { border-color: var(--focus); background: var(--selected); }
-  .providers span { color: var(--muted); font-size: 12px; }
-  .connect { display: grid; justify-items: start; gap: 12px; padding: 16px 48px; font-size: 14px; }
-  .key-fields { display: flex; align-items: end; gap: 12px; width: 100%; }
-  .connect .key-fields label { flex: 1; display: grid; grid-template-columns: 1fr; gap: 4px; }
-  .connect label { display: grid; grid-template-columns: 70px minmax(0, 450px); align-items: center; gap: 12px; width: 100%; color: var(--muted); }
-  input { min-width: 0; width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
-  input.invalid { border-color: var(--danger); }
-  .step { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 8px; border-radius: 50%; background: var(--selected); color: var(--muted); font-size: 12px; }
-  .step.done { background: transparent; border: 1px solid var(--line); }
-  .connect a { text-decoration: none; font-weight: 500; }
-  .finish { display: flex; gap: 8px; width: min(720px, 100%); } a { color: var(--focus); } .error { color: var(--danger); } .code { font-family: var(--mono); font-size: 24px; letter-spacing: 0.08em; font-variant-numeric: tabular-nums; }
-  @media (min-width: 641px) { .row:has(.remove-confirm) { flex-wrap: wrap; } .remove-confirm { width: 100%; } .remove-confirm > div:first-child { margin-right: auto; } }
-  @media (min-width: 641px) and (max-width: 1000px) { .row:has(.expired) { display: grid; grid-template-columns: minmax(0, 1fr) auto; } .row:has(.expired) > .btn { grid-column: 2; grid-row: 1; } .expired { grid-column: 1 / -1; grid-row: 2; margin: 0; } .expired + .remove-confirm { grid-column: 1 / -1; grid-row: 3; } }
-  @media (max-width: 640px) { .row { display: grid; grid-template-columns: minmax(0, 1fr) auto; } .row > .btn { grid-column: 2; grid-row: 1; } .expired, .remove-confirm { grid-column: 1 / -1; } .expired { grid-row: 2; display: grid; gap: 4px; margin: 0; } .expired .btn { min-height: 40px; } .expired + .remove-confirm { grid-row: 3; } .row > .btn, .connect-button { min-height: 40px; } .row > .btn { padding: 0 12px; border: 1px solid var(--line); } .body { padding: 12px 16px; } .connect { padding: 16px; } .key-fields { flex-direction: column; align-items: stretch; } .connect label { grid-template-columns: 1fr; gap: 4px; } .heading { flex-wrap: wrap; } .row { min-height: 44px; } }
+  .subbar { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 24px; border-bottom: 1px solid var(--line); }
+  .subbar a, .subbar span { color: var(--muted); } .subbar a { text-decoration: none; display: inline-flex; align-items: center; }
+  .body { flex: 1; min-height: 0; overflow: auto; box-sizing: border-box; padding: 20px 24px; display: grid; align-content: start; gap: 18px; }
+  p { margin: 0; line-height: 1.45; } .muted { color: var(--muted); font-size: 12.5px; }
+  h1, h2, h3 { margin: 0; font-weight: 600; } h1 { font-size: 20px; display: flex; align-items: center; gap: 12px; } h2 { font-size: 16px; } h3 { font-size: 13px; color: var(--muted); margin: 16px 8px 4px; }
+  a { color: var(--focus); } .btn { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; } .add-button { margin-left: auto; }
+  .initial { display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 6px; background: var(--selected); color: var(--muted); font-size: 12px; }
+  .heading { display: flex; align-items: center; gap: 8px; margin: 0 8px 8px; } .heading h2, .connect h2 { display: flex; align-items: center; gap: 8px; } .heading .btn { margin-left: auto; }
+  .list, .card, .picker { border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
+  .account-row { display: flex; align-items: center; } .account-row + .account-row { border-top: 1px solid var(--line); } .row { flex: 1; min-width: 0; min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; color: var(--text); text-decoration: none; } .row:hover, .picker a:hover { background: var(--hover); } .row .muted { margin-top: 4px; } .row-meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 20px; width: min(65%, 700px); margin-left: auto; }
+  .add-layout { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: 20px; align-items: start; } .picker { padding: 8px; } .search { display: flex; align-items: center; gap: 8px; padding-left: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--muted); } .picker .search input { border: 0; } .picker a { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; padding: 8px; border-radius: 6px; } .picker a .muted { margin-left: auto; } .picker a.chosen { background: var(--selected); }
+  .details { display: grid; gap: 16px; } .card { padding: 20px; } .connect { display: grid; justify-items: start; gap: 16px; } .connect h2 .muted { font-weight: 400; } .connect label, form { display: grid; gap: 8px; width: 100%; } .connect .label-field { grid-template-columns: 64px minmax(0, 320px); align-items: center; color: var(--muted); } .connect input, .picker input { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; } .step-row { display: flex; align-items: flex-start; gap: 10px; width: 100%; } .step-badge { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--selected); color: var(--muted); font-size: 12px; } .step-badge.checked { background: transparent; border: 1px solid var(--line); box-sizing: border-box; } .callback-entry { display: flex; gap: 8px; width: 100%; } .callback-entry input { flex: 1; min-width: 0; } .actions, .start-actions { display: flex; gap: 8px; align-items: center; } .retry { display: flex; align-items: center; gap: 12px; padding: 8px; text-decoration: none; } .retry .btn { text-decoration: none; } .chevron { padding: 12px 14px; color: var(--muted); text-decoration: none; } .no-usage { margin-left: auto; } .btn:not(.fill):not(.danger) { color: var(--text); } .code { display: flex; gap: 12px; align-items: center; font-family: var(--mono); font-size: 20px; }
+  .legend { display: grid; gap: 16px; } .legend .after strong { color: var(--text); } .legend p:not(.after) { display: grid; grid-template-columns: 180px 1fr; gap: 16px; } .account-view { display: grid; justify-items: start; gap: 12px; max-width: 900px; } .account-view h2 { margin-top: 28px; } .meters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; width: 100%; } .remove { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 20px; width: 100%; display: flex; justify-content: space-between; gap: 16px; }
+  @media (max-width: 640px) { .body { padding: 12px 16px; } .subbar { padding: 0 16px; } .add-layout { display: block; } .picker { border: 0; padding: 0; } .search { position: sticky; top: 0; z-index: 1; } .connect .label-field { grid-template-columns: 1fr; } .legend { display: none; } .meters { grid-template-columns: 1fr; } .account-row, .row { flex-wrap: wrap; } .account-view .start-actions { flex-direction: column; align-items: flex-start; } .remove { flex-direction: column; } .remove .btn { width: 100%; } .retry { order: 2; flex-basis: 100%; } .chevron { order: 1; } .row-meters { order: 3; width: 100%; grid-template-columns: 1fr; } .callback-entry { display: block; } .actions { position: fixed; z-index: 2; bottom: 0; left: 0; right: 0; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--bg); flex-wrap: wrap; } .actions .btn { flex: 1; min-height: 44px; } .actions .muted { width: 100%; text-align: center; } }
 </style>
