@@ -13,7 +13,7 @@
   import { LiveStream, type Phase } from "../live.ts";
   // Floating, the view is a window over the app; docked, it sits above the session list in the sessions panel. The
   // rect belongs to the app, so the window keeps its place and size for the page view.
-  // onfit gives the first frame's ratio and the height around the screen, so a floating window can show no black bars.
+  // onfit gives each frame's ratio and the height around the screen, so a floating window can show no black bars.
   let { session, name, root, activity, docked, full = false, rect = $bindable(), element = $bindable(), onclose, ondock, onfit }: {
     session: string; name: string; root: boolean; activity?: string; docked: boolean; full?: boolean; rect: Rect; element?: HTMLElement; onclose: (tapped: boolean) => void; ondock: (event: MouseEvent) => void;
     onfit: (ratio: number, chrome: number) => void;
