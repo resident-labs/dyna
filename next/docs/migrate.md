@@ -189,3 +189,49 @@ report and handoff line, not a cutover blocker.
 Subscription source count is zero by policy: no v1 shell hook maps to a typed
 subscription. The five unsupported hooks remain handoff records. The verifier
 uses an empty SQL eligibility set; it does not independently classify hooks.
+
+# Updated per-room rehearsal
+
+Export, independent verification and offline dry-run passed. This non-atomic rehearsal is not a cutover gate. The backup was last modified 2026-10-30 18:38:35 UTC. Configuration was captured 2026-10-31 17:28:34 UTC, about 22 hours 50 minutes later. Feeds were read in place later. Repository default rooms are provisional.
+
+Each cell shows SQL source / decoded bundle / dry-run. The verifier compares the SQL and bundle counts separately for each room. Subscription source is 0 by policy: no v1 shell hook maps to a typed subscription. The SQL uses an empty eligibility set and does not classify hooks independently.
+
+| Scope | Category | SQL / bundle / dry-run |
+|---|---|---|
+| global | rules | 4 / 4 / 4 |
+| global | hosts | 4 / 4 / 4 |
+| global | accounts | 10 / 10 / 10 |
+| global | devices | 2 / 2 / 2 |
+| dyna | rules | 15 / 15 / 15 |
+| dyna | goals | 5 / 5 / 5 |
+| dyna | goalItems | 2 / 2 / 2 |
+| dyna | issues | 24 / 24 / 24 |
+| dyna | prs | 2 / 2 / 2 |
+| dyna | sessions | 8 / 8 / 8 |
+| fl-rea | rules | 14 / 14 / 14 |
+| fl-rea | goals | 10 / 10 / 10 |
+| fl-rea | goalItems | 283 / 283 / 283 |
+| fl-rea | issues | 373 / 373 / 373 |
+| fl-rea | prs | 25 / 25 / 25 |
+| fl-rea | sessions | 18 / 18 / 18 |
+| horizon | rules | 11 / 11 / 11 |
+| horizon | goals | 2 / 2 / 2 |
+| horizon | issues | 14 / 14 / 14 |
+| horizon | prs | 24 / 24 / 24 |
+| horizon | sessions | 2 / 2 / 2 |
+| cozycraft | rules | 8 / 8 / 8 |
+| cozycraft | goals | 3 / 3 / 3 |
+| cozycraft | goalItems | 41 / 41 / 41 |
+| cozycraft | issues | 1 / 1 / 1 |
+| cozycraft | sessions | 8 / 8 / 8 |
+
+| Category | Checked source / bundle / dry-run |
+|---|---|
+| profiles | 8 / 8 / 8 |
+| repositories | 5 / 5 / 5 |
+| skills | 1 / 1 / 1 |
+
+Zero counts are omitted from the per-room table. The verifier checked them. Repository source counts use SQLite and the captured identity manifest. Profile and skill counts use captured files. Equal counts do not prove field equality or captured-file completeness.
+
+
+The updated run exported eight profiles and recorded no unknown model mappings. Six disabled profiles were skipped. The Muse profile is reported as unsupported, as decided above. The private report inventory still needs the approved field classifications applied.
