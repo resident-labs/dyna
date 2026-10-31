@@ -351,79 +351,19 @@ func TestSessionStartWithoutGoalOrBriefHasNoWake(t *testing.T) {
 		t.Fatalf("unexpected brief wake: %+v", start)
 	}
 }
-func TestChannelRendersUnhandledDelivery(t *testing.T) {
+func TestRejectUnhandledDelivery(t *testing.T) {
 	s, room, session, ctx := setup(t)
-	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
-	delivery := contract.Delivery{To: caller, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}
-	unknown, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionClosed{Session: "other"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	seq, err := s.store.Post(ctx, unknown, []contract.Delivery{delivery})
-	if err != nil {
-		t.Fatal(err)
-	}
-	valid, err := s.event(room, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostCreated{Text: "after"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.store.Post(ctx, valid, []contract.Delivery{delivery}); err != nil {
-		t.Fatal(err)
-	}
-	channel, problem := testChannel(t, s, ctx, caller)
-	if problem != nil {
-		t.Fatal(problem)
-	}
-	message, open := <-channel
-	start, ok := message.Body.(contract.TurnStart)
-	if !open || !ok || len(start.Inputs) != 3 || inputBody(start.Inputs[1].Text) != "Unsupported event: session.closed" || inputBody(start.Inputs[2].Text) != "after" {
-		t.Fatalf("next delivery: %+v open=%v", message, open)
-	}
-	if _, problem := s.DeliveryDone(ctx, caller, contract.DeliveryDoneRequest{Delivery: contract.DeliverySeq(seq)}); problem != nil {
-		t.Fatal(problem)
-	}
-	var state string
-	if err := s.store.Read().QueryRowContext(ctx, "SELECT state FROM deliveries WHERE to_id=? AND seq=?", session, seq).Scan(&state); err != nil || state != "read" {
-		t.Fatalf("unhandled delivery state %q: %v", state, err)
-	}
-}
-
-func TestUnhandledDeliveryStartsTurn(t *testing.T) {
-	s, room, root, ctx := setup(t)
-	child, problem := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: root, Name: "empty", Profile: "test"})
-	if problem != nil {
-		t.Fatal(problem)
-	}
-	caller := contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}
-	delivery := contract.Delivery{To: caller, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}
 	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionClosed{Session: "other"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.store.Post(ctx, event, []contract.Delivery{delivery}); err != nil {
-		t.Fatal(err)
+	delivery := contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: session}, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}
+	if _, err := s.store.Post(ctx, event, []contract.Delivery{delivery}); err == nil {
+		t.Fatal("accepted unrenderable delivery")
 	}
-	channel, problem := testChannel(t, s, ctx, caller)
-	if problem != nil {
-		t.Fatal(problem)
-	}
-	start, ok := (<-channel).Body.(contract.TurnStart)
-	if !ok || len(start.Inputs) != 1 || inputBody(start.Inputs[0].Text) != "Unsupported event: session.closed" {
-		t.Fatalf("start %+v", start)
-	}
-	if _, problem := s.DeliveryDone(ctx, caller, contract.DeliveryDoneRequest{Delivery: start.Inputs[0].Delivery}); problem != nil {
-		t.Fatal(problem)
-	}
-	event, err = s.event(room, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostCreated{Text: "after"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.store.Post(ctx, event, []contract.Delivery{delivery}); err != nil {
-		t.Fatal(err)
-	}
-	steer, ok := (<-channel).Body.(contract.TurnSteer)
-	if !ok || inputBody(steer.Input.Text) != "after" {
-		t.Fatalf("later delivery %+v", steer)
+	var count int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM events WHERE id=?", event.ID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("event persisted: count=%d err=%v", count, err)
 	}
 }
 
