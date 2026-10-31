@@ -88,10 +88,31 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	workdir := "/box/work"
+	if len(hello.Repos) > 0 {
+		workdir = filepath.Join(workdir, string(hello.Repos[0].Name))
+	}
+	if err := os.MkdirAll(workdir, 0755); err != nil {
+		return err
+	}
 	setup := func(ctx context.Context) error {
 		return setupRepos(ctx, "/box/work", hello.Repos, hello.GitName, hello.GitEmail, runGit)
 	}
 	setupErr := setup(ctx)
+	for _, link := range []struct{ path, target string }{
+		{"/box/pi/AGENTS.md", "/run/dyna/instructions/global/AGENTS.md"},
+		{"/box/work/AGENTS.md", "/run/dyna/instructions/room/AGENTS.md"},
+	} {
+		if err := os.MkdirAll(filepath.Dir(link.path), 0700); err != nil {
+			return err
+		}
+		if err := os.Remove(link.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := os.Symlink(link.target, link.path); err != nil {
+			return err
+		}
+	}
 	args, err := modelArgs(hello.Model, hello.CompactTokens)
 	if err != nil {
 		return err
@@ -132,16 +153,9 @@ func Run(ctx context.Context) error {
 	server := &http.Server{Handler: mux}
 	defer server.Close()
 	go func() { errs <- server.Serve(listener) }()
-	text := hello.Instructions
-	if len(hello.Rules) > 0 {
-		text += "\n\nRoom standing rules:"
-		for _, rule := range hello.Rules {
-			text += fmt.Sprintf("\nr%d: %s", rule.Number, rule.Text)
-		}
-	}
-	args = append(args, "--append-system-prompt", text)
+	args = append(args, "--append-system-prompt", hello.Instructions)
 	args = append(args, "--mode", "rpc", "--models-file", modelsPath, "--session-dir", sessions, "--mcp-config", mcpPath, "--exclude-tools", "bash", "--continue")
-	h, err := pi.Open(ctx, "pi", args, "")
+	h, err := pi.Open(ctx, "pi", args, "", workdir)
 	if err != nil {
 		return err
 	}

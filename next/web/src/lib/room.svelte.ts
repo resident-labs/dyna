@@ -4,7 +4,7 @@ import { stream } from "./stream.ts";
 import { EventWindow } from "./window.svelte.ts";
 import { pendingReason, type PendingReason } from "./event.ts";
 import { boxFailures, countOf, failedJobs, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
-import type { BoxState, Conversation, FailureCause, Decision, Event, OpRequested, OpResult, OpState, RoomRule, SessionStarted } from "./contract.gen.ts";
+import type { BoxState, Conversation, FailureCause, Decision, Event, OpRequested, OpResult, OpState, SessionStarted } from "./contract.gen.ts";
 import { failed } from "./jobs.ts";
 
 
@@ -50,8 +50,6 @@ export class RoomStore {
   readonly hadJobs = new SvelteSet<string>();
   // op.list gives the pending operations; decided ones stay for the time the room is open.
   readonly requests = new SvelteMap<string, Request>();
-  // The room's rules by number. rule.list reads after session.list, and rule.added and rule.removed repeat safely.
-  readonly rules = new SvelteMap<number, RoomRule>();
   // Names outlive closed sessions, so old posts still show who wrote them.
   readonly names = new SvelteMap<string, string>();
   private readonly windows = new Set<EventWindow>();
@@ -136,9 +134,7 @@ export class RoomStore {
     const list = await call("session.list", { room: this.room });
     // op.list reads after the seq, so an operation it misses arrives as a live event.
     const listed = await call("op.list", { room: this.room });
-    const rules = await call("rule.list", { room: this.room });
     this.head = list.seq;
-    for (const rule of rules.rules ?? []) this.rules.set(rule.number, rule);
     for (const session of list.sessions ?? []) {
       this.sessions.set(session.id, {
         session: session.id, name: session.name, parent: session.parent || undefined,
@@ -260,13 +256,6 @@ export class RoomStore {
         this.shellJobs.set(event.body.session, event.body.shellJobs ?? 0);
         if (event.body.shellJobs) this.hadJobs.add(event.body.session);
         break;
-      case "rule.added": this.rules.set(event.body.number, { number: event.body.number, text: event.body.text, by: event.from, at: event.at }); break;
-      case "rule.removed": this.rules.delete(event.body.number); break;
-      case "rule.edited": {
-        const known = this.rules.get(event.body.number);
-        if (known) this.rules.set(event.body.number, { ...known, text: event.body.text });
-        break;
-      }
       case "shell.job.ended":
         // A running turn's end replaces the count, as in the engine.
         if (!this.turns.has(event.body.session)) this.shellJobs.set(event.body.session, Math.max(0, (this.shellJobs.get(event.body.session) ?? 0) - 1));
