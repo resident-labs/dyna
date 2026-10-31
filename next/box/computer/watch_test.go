@@ -39,6 +39,14 @@ func TestWatchForwardsAndAcknowledgesFrame(t *testing.T) {
 			}
 			switch m.Method {
 			case "Page.enable", "Page.startScreencast":
+				if m.Method == "Page.startScreencast" {
+					var params struct {
+						EveryNthFrame int `json:"everyNthFrame"`
+					}
+					if json.Unmarshal(m.Params, &params) != nil || params.EveryNthFrame > 1 {
+						t.Error("static pages must not skip their first frame")
+					}
+				}
 				reply, _ := json.Marshal(message{ID: m.ID, Result: json.RawMessage(`{}`)})
 				if conn.Write(r.Context(), websocket.MessageText, reply) != nil {
 					return
