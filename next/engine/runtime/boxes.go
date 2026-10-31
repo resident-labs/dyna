@@ -3,7 +3,9 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,11 +50,40 @@ type Boxes struct {
 	hosts     map[contract.HostName]*podman.Host
 	loads     map[contract.HostName]contract.HostSummary
 	cpuPrev   *cpuTimes // cpuPrev is the last /proc/stat sample of this machine, nil before the first.
+	binOnce   sync.Once
+	binSum    string
+	binErr    error
 }
 
 // cpuTimes holds the cumulative jiffies of the aggregate cpu line in /proc/stat.
 type cpuTimes struct {
 	busy, total uint64
+}
+
+// installBinary installs the engine on a host. It hashes the executable once and reads its bytes only if the host differs.
+func (b *Boxes) installBinary(ctx context.Context, h *podman.Host) error {
+	b.binOnce.Do(func() { b.binSum, b.binErr = executableSum() })
+	if b.binErr != nil {
+		return b.binErr
+	}
+	return h.InstallBinary(ctx, b.HostData, b.Version, b.binSum, readExecutable)
+}
+
+func executableSum() (string, error) {
+	binary, err := readExecutable()
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(binary)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func readExecutable() ([]byte, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(executable)
 }
 
 // cache stores a host driver and starts its heartbeat until the engine stops. A cached name keeps its first driver and heartbeat. The caller holds b.mu.
@@ -189,15 +220,7 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) error 
 		}
 		return fmt.Errorf("host check failed")
 	}
-	executable, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	binary, err := os.ReadFile(executable)
-	if err != nil {
-		return err
-	}
-	if err := h.InstallBinary(ctx, b.HostData, b.Version, binary); err != nil {
+	if err := b.installBinary(ctx, h); err != nil {
 		return err
 	}
 	record := box.Host{Name: req.Name, SSH: req.SSH, State: box.HostReady, CPUs: check.CPUs, MemBytes: check.MemBytes, DiskBytes: check.DiskBytes, CheckedAt: time.Now()}
@@ -245,15 +268,7 @@ func (b *Boxes) Create(ctx context.Context, spec engine.BoxSpec) (string, error)
 		}
 		_ = b.Sockets.RemoveBox(spec.Box)
 	}()
-	executable, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	binary, err := os.ReadFile(executable)
-	if err != nil {
-		return "", err
-	}
-	if err = h.InstallBinary(ctx, b.HostData, b.Version, binary); err != nil {
+	if err = b.installBinary(ctx, h); err != nil {
 		return "", err
 	}
 	image, err := h.BuildBase(ctx, images.BaseContainerfile, b.PiTarball)
@@ -315,15 +330,7 @@ func (b *Boxes) Restore(ctx context.Context) error {
 			return err
 		}
 		if !installed[record.Host] {
-			executable, err := os.Executable()
-			if err != nil {
-				return err
-			}
-			binary, err := os.ReadFile(executable)
-			if err != nil {
-				return err
-			}
-			if err := host.InstallBinary(ctx, b.HostData, b.Version, binary); err != nil {
+			if err := b.installBinary(ctx, host); err != nil {
 				return err
 			}
 			installed[record.Host] = true
