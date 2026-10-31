@@ -92,7 +92,10 @@ func RunSuite(ctx context.Context, backend Backend, skipRepository, skipChildren
 			}
 			result.Score = ScoreTask(expect, last.Observation)
 			result.Scored = true
-			result.Measured = last.UsageAvailable
+			result.Measured = true
+			for _, attempt := range result.Attempts {
+				result.Measured = result.Measured && attempt.UsageAvailable
+			}
 		}
 		if err := emit(result); err != nil {
 			_ = backend.Cleanup(ctx, cell, fixture)
