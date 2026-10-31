@@ -50,7 +50,11 @@ test("an unknown stored id falls back to Carbon, and a known id wins", () => {
 
 test("no style in the app holds a raw color", () => {
   const raw = /#[0-9a-f]{3,8}\b|\b(?:rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch)\(\s*[\d.]|:\s*(?:black|white)\b/gi;
-  const found = globSync("src/**/*.{svelte,css}", { cwd: new URL("../..", import.meta.url).pathname })
-    .flatMap(file => (readFileSync(new URL(`../../${file}`, import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\/|<!--[\s\S]*?-->/g, "").match(raw) ?? []).map(hit => `${file}: ${hit}`));
+  const named = /(?<![-\w.#])(?:black|white|red|green|blue|yellow|orange|purple|pink|brown|gray|grey)(?![-\w])/gi;
+  const found = globSync("src/**/*.{svelte,css}", { cwd: new URL("../..", import.meta.url).pathname }).flatMap(file => {
+    const text = readFileSync(new URL(`../../${file}`, import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\/|<!--[\s\S]*?-->/g, "");
+    const styles = file.endsWith(".css") ? text : text.match(/<style[\s\S]*?<\/style>/g)?.join("\n") ?? "";
+    return [...text.match(raw) ?? [], ...styles.match(named) ?? []].map(hit => `${file}: ${hit}`);
+  });
   assert.deepEqual(found, []);
 });
