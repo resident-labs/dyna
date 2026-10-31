@@ -100,16 +100,21 @@ export class RoomStore {
       if (session.computer === "running") this.computers.add(session.id);
       this.shellJobs.set(session.id, session.shellJobs ?? 0);
     }
-    // session.list says which last turns failed but not when; the newest turn.ended events give each failure's seq.
-    // A failure older than those keeps list.seq, so an unknown failure shows again rather than hiding.
-    if (this.failed.size) {
-      const ended = await call("events.list", { room: this.room, afterSeq: 0, beforeSeq: list.seq + 1, limit: 200, types: ["turn.ended"] });
+    // session.list says which last turns failed but not when, so the room reads turn.ended pages back from the newest
+    // until it has placed each failure. One it cannot place, as when a read fails, keeps list.seq and shows.
+    const unplaced = new Set(this.failed.keys());
+    for (let before = list.seq + 1; unplaced.size;) {
+      const page = await call("events.list", { room: this.room, afterSeq: 0, beforeSeq: before, limit: 200, types: ["turn.ended"] })
+        .catch(() => undefined);
+      const events = page?.events ?? [];
       const found = new Map<string, number>();
-      for (const event of ended.events ?? []) {
-        if (event.type !== "turn.ended" || event.body.outcome !== "failed" || !this.failed.has(event.body.session)) continue;
-        found.set(event.body.session, Math.max(found.get(event.body.session) ?? 0, event.seq));
+      for (const event of events) {
+        if (event.type === "turn.ended" && unplaced.has(event.body.session)) found.set(event.body.session, Math.max(found.get(event.body.session) ?? 0, event.seq));
       }
-      for (const [session, seq] of found) this.failed.set(session, seq);
+      // A session's newest turn.ended is its failure, since its last outcome failed.
+      for (const [session, seq] of found) { this.failed.set(session, seq); unplaced.delete(session); }
+      if (events.length < 200) break;
+      before = Math.min(...events.map(event => event.seq));
     }
     for (const { id, kind, by, class: level, card, expires, state } of listed.operations ?? []) {
       this.requests.set(id, { id, kind, by, class: level, card, expires, state });
