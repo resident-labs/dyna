@@ -5,10 +5,15 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/resident-labs/dyna/contract"
 )
 
 type fakeTunnelState struct{ notices chan bool }
 
+func (f fakeTunnelState) ConnectAttempt(context.Context) (contract.ConnectAttempt, error) {
+	return contract.ConnectAttempt{State: contract.ConnectAttemptLinked}, nil
+}
 func (f fakeTunnelState) ConnectLinked(context.Context) (bool, error) { return true, nil }
 func (f fakeTunnelState) SetConnectConnector(_ context.Context, missing bool, _ time.Time) error {
 	f.notices <- missing
