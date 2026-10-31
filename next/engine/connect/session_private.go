@@ -20,7 +20,7 @@ func (s *Sessions) checkGrant(ctx context.Context, x store.ConnectSession) (bool
 	cached, ok := s.grants[x.RelayDevice]
 	s.mu.Unlock()
 	if !ok || cached.Generation != x.Generation || s.now().Sub(cached.At) > time.Minute {
-		relay, err := s.relay(ctx, l)
+		relay, err := s.relay(l)
 		if err != nil {
 			return false, false, err
 		}
