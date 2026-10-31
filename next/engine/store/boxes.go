@@ -164,7 +164,7 @@ func (s *Store) SetBoxLifecycle(ctx context.Context, old, next box.Box, due time
 		if next.Host != "" {
 			host = &next.Host
 		}
-		admission := old.State == contract.BoxPending || old.State == contract.BoxStopped
+		admission := (old.State == contract.BoxPending || old.State == contract.BoxStopped) && next.State != contract.BoxClosing
 		result, err := tx.ExecContext(ctx, `UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,updated_at=?,due_at=?,failures=? WHERE id=? AND state=? AND (NOT ? OR (want='run' AND due_at<=?))`, host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, event.Time.UnixMilli(), dueMS, failures, old.ID, old.State, admission, event.Time.UnixMilli())
 		if err != nil {
 			return err
