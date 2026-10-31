@@ -123,7 +123,7 @@ func TestCodexPassiveQuota(t *testing.T) {
 		t.Fatalf("read failed: %v", err)
 	}
 	a := got.Accounts[0]
-	if a.ObservedAt == nil || a.ObservedAt.Format(time.RFC3339) != "2026-01-02T00:00:00Z" || len(a.Windows) != 2 || a.Windows[0].UsedPercent != 42 || a.Windows[0].Kind != contract.UsageWindowFiveHour || a.Windows[0].Seconds != 18000 || !a.Windows[0].ResetsAt.Equal(a.ObservedAt.Add(time.Hour)) {
+	if a.Provider != contract.ProviderAnthropic || a.ObservedAt == nil || a.ObservedAt.Format(time.RFC3339) != "2026-01-02T00:00:00Z" || len(a.Windows) != 2 || a.Windows[0].UsedPercent != 42 || a.Windows[0].Kind != contract.UsageWindowFiveHour || a.Windows[0].Seconds != 18000 || !a.Windows[0].ResetsAt.Equal(a.ObservedAt.Add(time.Hour)) {
 		t.Fatal("Codex snapshot did not preserve its observation")
 	}
 

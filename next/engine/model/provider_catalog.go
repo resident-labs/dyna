@@ -37,6 +37,14 @@ func (p *Proxy) AccountProviders() []contract.AccountProviderInfo {
 		info.KeyName = provider.KeyName
 		info.Models = provider.Models
 	}
+	// Legacy shim: remove in catalog PR 4.
+	for i := range providers {
+		providers[i].ConnectFlow = providers[i].Flows[0]
+		providers[i].ConnectMethod = contract.ConnectOAuth
+		if providers[i].Flows[0] == contract.ConnectFlowKey {
+			providers[i].ConnectMethod = contract.ConnectKey
+		}
+	}
 	return providers
 }
 

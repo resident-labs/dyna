@@ -27,8 +27,12 @@ func TestLoadCatalogBounds(t *testing.T) {
 		return b.Bytes()
 	}
 	c, skipped, err := LoadCatalog(pack(`{"version":1,"providers":[{"id":"deepseek","models":[{"id":"deepseek-v4"}]},{"id":"plan_bad","models":[]}]}`))
-	if err != nil || len(c.Providers) != 1 || c.Providers[0].ID != "deepseek" || len(skipped) != 1 || skipped[0] != "plan_bad" {
+	if err != nil || len(c.Providers) != 1 || c.Providers[0].ID != "deepseek" || len(skipped) != 1 || skipped[0] != "plan_bad: invalid provider ID or model count" {
 		t.Fatalf("catalog=%+v skipped=%v err=%v", c, skipped, err)
+	}
+	_, skipped, err = LoadCatalog(pack(`{"version":1,"providers":[{"id":"bad","headers":{"X-Static":"$Box-Header"},"models":[]}]}`))
+	if err != nil || len(skipped) != 1 || skipped[0] != "bad: a header value cannot start with $" {
+		t.Fatalf("unsafe header: skipped=%v err=%v", skipped, err)
 	}
 	if _, _, err := LoadCatalog(pack(`{"version":2,"providers":[]}`)); err == nil {
 		t.Fatal("accepted invalid catalog")
