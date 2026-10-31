@@ -145,7 +145,7 @@ func (s *AccountActions) AccountsConnect(ctx context.Context, caller contract.Pr
 	return result.connect, problem
 }
 
-func (s *AccountActions) AccountsReconnect(ctx context.Context, caller contract.Principal, req contract.AccountsReconnectRequest) (contract.AccountsConnectResponse, *contract.Error) {
+func (s *AccountActions) AccountsReconnect(ctx context.Context, caller contract.Principal, req contract.AccountsReconnectRequest) (contract.AccountsReconnectResponse, *contract.Error) {
 	result, problem := s.runAccountAction(ctx, caller, contract.AccountActionReconnect, req.AccountID, func(ctx context.Context) accountActionResult {
 		s.removeMu.Lock()
 		defer s.removeMu.Unlock()
@@ -161,7 +161,7 @@ func (s *AccountActions) AccountsReconnect(ctx context.Context, caller contract.
 		}
 		return accountActionResult{err: errAccountAction}
 	})
-	return result.connect, problem
+	return contract.AccountsReconnectResponse(result.connect), problem
 }
 
 func (s *AccountActions) AccountsRemove(ctx context.Context, caller contract.Principal, req contract.AccountsRemoveRequest) (contract.AccountsRemoveResponse, *contract.Error) {
