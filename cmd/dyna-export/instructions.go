@@ -25,16 +25,20 @@ func renderInstructions(db *sql.DB, room string) (string, error) {
 	}
 	ids := make([]string, 0, len(set.Rules))
 	for id, rule := range set.Rules {
-		if rule == nil || rule.ID != id || strings.ContainsAny(id, "\r\n)") || id == "" {
+		if rule == nil || rule.ID != id || id == "" {
 			return "", fmt.Errorf("invalid source rule ID")
 		}
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+	if len(ids) == 0 {
+		return "", nil
+	}
 	var out strings.Builder
+	out.WriteString("# Instructions\n\n")
 	for _, id := range ids {
 		lines := strings.Split(set.Rules[id].Text, "\n")
-		fmt.Fprintf(&out, "- (%s) %s\n", id, lines[0])
+		fmt.Fprintf(&out, "- %s\n", lines[0])
 		for _, line := range lines[1:] {
 			fmt.Fprintf(&out, "  %s\n", line)
 		}
@@ -42,63 +46,55 @@ func renderInstructions(db *sql.DB, room string) (string, error) {
 	return out.String(), nil
 }
 
-// verifyInstructions compares a parsed document to a separate SQL source read.
+// verifyInstructions compares parsed list items to an independent, ordered SQL read.
 func verifyInstructions(db *sql.DB, room, text string) error {
-	rows, err := db.Query(`SELECT json_extract(value,'$.id'), json_extract(value,'$.text')
-FROM goal_rooms, json_each(goal_rooms.body,'$.rules') WHERE room=?`, room)
+	rows, err := db.Query(`SELECT key, json_extract(value,'$.id'), json_extract(value,'$.text')
+FROM goal_rooms, json_each(goal_rooms.body,'$.rules') WHERE room=? ORDER BY key`, room)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
-	source := make(map[string]string)
+	var source []string
 	for rows.Next() {
-		var id, value string
-		if err := rows.Scan(&id, &value); err != nil {
+		var key, id, value string
+		if err := rows.Scan(&key, &id, &value); err != nil {
 			return err
 		}
-		if _, exists := source[id]; exists {
-			return fmt.Errorf("duplicate source rule ID")
+		if key == "" || key != id {
+			return fmt.Errorf("invalid source rule ID")
 		}
-		source[id] = value
+		source = append(source, value)
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	if text == "" {
-		if len(source) != 0 {
+	if len(source) == 0 {
+		if text != "" {
 			return fmt.Errorf("instruction rules differ from source")
 		}
 		return nil
 	}
-	if !strings.HasSuffix(text, "\n") {
-		return fmt.Errorf("unterminated instruction document")
+	if !strings.HasPrefix(text, "# Instructions\n\n") || !strings.HasSuffix(text, "\n") {
+		return fmt.Errorf("invalid instruction document")
 	}
-	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
-	seen := make(map[string]bool)
-	last := ""
+	lines := strings.Split(strings.TrimSuffix(strings.TrimPrefix(text, "# Instructions\n\n"), "\n"), "\n")
+	index := 0
 	for i := 0; i < len(lines); {
-		line := lines[i]
-		if !strings.HasPrefix(line, "- (") {
+		if !strings.HasPrefix(lines[i], "- ") {
 			return fmt.Errorf("invalid instruction list item")
 		}
-		id, first, ok := strings.Cut(strings.TrimPrefix(line, "- ("), ") ")
-		if !ok || id == "" || (last != "" && id <= last) || seen[id] {
-			return fmt.Errorf("invalid instruction rule ID")
-		}
-		last = id
+		parts := []string{strings.TrimPrefix(lines[i], "- ")}
 		i++
-		parts := []string{first}
 		for i < len(lines) && strings.HasPrefix(lines[i], "  ") {
 			parts = append(parts, strings.TrimPrefix(lines[i], "  "))
 			i++
 		}
-		value, exists := source[id]
-		if !exists || strings.Join(parts, "\n") != value {
+		if index >= len(source) || strings.Join(parts, "\n") != source[index] {
 			return fmt.Errorf("instruction rule differs from source")
 		}
-		seen[id] = true
+		index++
 	}
-	if len(seen) != len(source) {
+	if index != len(source) {
 		return fmt.Errorf("instruction rules differ from source")
 	}
 	return nil

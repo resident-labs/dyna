@@ -71,4 +71,4 @@ The exporter creates the directory with mode 0700 and files with mode 0600.
 The bundle includes device token hashes and private room records. Do not post
 or attach it. `report.json` lists field classifications and gaps; it also
 needs private handling. A count match cannot detect substitutions or prove
-field preservation. The verifier separately compares each rendered instruction rule ID and text with the captured database. The operator must review all gaps before cutover.
+field preservation. The verifier separately compares each rendered instruction text and its order with the captured database. The operator must review all gaps before cutover.
