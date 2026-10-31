@@ -166,3 +166,27 @@ export class Finger {
     return [{ kind: "mouse.move", ...at }, { kind: "mouse.down", ...at, button: "left" }, { kind: "mouse.up", ...at, button: "left" }];
   }
 }
+
+// One request in flight: the engine keeps order only inside a batch, so a later request could pass an earlier one. Events
+// that come while one is in flight wait and go together as the next batch (at most 256, the route's limit).
+export class InputQueue {
+  private waiting: ComputerInput[] = [];
+  private frame: Size = { width: 0, height: 0 };
+  private busy = false;
+  private readonly deliver: (events: ComputerInput[], frame: Size) => Promise<void>;
+  private readonly settled: (ok: boolean) => void;
+  constructor(deliver: (events: ComputerInput[], frame: Size) => Promise<void>, settled: (ok: boolean) => void) {
+    this.deliver = deliver;
+    this.settled = settled;
+  }
+  push(events: ComputerInput[], frame: Size): void {
+    this.waiting.push(...events);
+    this.frame = frame;
+    if (!this.busy) void this.run();
+  }
+  private async run(): Promise<void> {
+    this.busy = true;
+    while (this.waiting.length) this.settled(await this.deliver(this.waiting.splice(0, 256), this.frame).then(() => true, () => false));
+    this.busy = false;
+  }
+}

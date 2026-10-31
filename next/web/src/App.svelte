@@ -5,7 +5,7 @@
   import { RoomStore } from "./lib/room.svelte.ts";
   import { ForwardExpiry } from "./lib/forward-clock.ts";
   import { replaceForward, sameForward, undoForward } from "./lib/forward-state.ts";
-  import { APIError, blockedBy, call, retryDelay, type Blocked as BlockedState } from "./lib/client.ts";
+  import { blockedBy, call, retryDelay, type Blocked as BlockedState } from "./lib/client.ts";
   import Blocked from "./lib/ui/Blocked.svelte";
   import PairScreen from "./lib/ui/PairScreen.svelte";
   import Settings from "./lib/ui/Settings.svelte";
@@ -473,9 +473,8 @@
     else if (!members?.getClientRects().length) toggle?.focus({ focusVisible: !tapped });
     else await focusRowIcon(id, tapped);
   }
-  // A batch the box cannot take now (not ready, or its queue is full) is dropped, and the next one goes on; any other failure shows.
-  const sendInput = (session: string, events: ComputerInput[], frame: Size) =>
-    call("computer.input", { session, frame, events }).then(() => undefined, (error: unknown) => { if (!(error instanceof APIError && error.detail.code === "conflict")) throw error; });
+  // Every refusal shows in the view as a notice; its next batch goes on.
+  const sendInput = (session: string, events: ComputerInput[], frame: Size) => call("computer.input", { session, frame, events }).then(() => undefined);
   $effect.pre(() => { if (watching && !store?.computers.has(watching)) void stopWatching(); });
   // A session's running background jobs while its box is ready. The header's Jobs tool, like About's Jobs row, keeps every
   // session that ever had jobs, since a finished job's output stays in its box. In a DM it lists only that session.
