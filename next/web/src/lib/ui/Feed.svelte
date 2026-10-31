@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, tick } from "svelte";
+  import { onDestroy, tick, type Snippet } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { APIError } from "../client.ts";
   import VirtualList from "./VirtualList.svelte";
@@ -11,25 +11,29 @@
   import type { RoomStore } from "../room.svelte.ts";
   import type { Conversation, PostRequest, Principal } from "../contract.gen.ts";
 
-  let { store, home, empty, element = $bindable() }: {
-    store: RoomStore; home: Conversation; empty: string; element?: HTMLDivElement;
+  let { store, home, intro, element = $bindable() }: {
+    store: RoomStore; home: Conversation; intro: Snippet; element?: HTMLDivElement;
   } = $props();
 
   // The view is keyed by its conversation, so its window lives as long as the view.
   // svelte-ignore state_referenced_locally
   const view = store.window(home);
   onDestroy(() => store.leave(view));
-  type Item = Row | { kind: "pending"; key: string; text: string } | { kind: "working"; key: string; session: string };
-  // A DM ends with one muted line while its session runs a turn.
+  type Item = Row | { kind: "pending"; key: string; text: string } | { kind: "working"; key: string; session: string } | { kind: "intro"; key: string };
+  // The intro opens the conversation once the window reaches its first event; it also stands in for an empty feed.
+  // A DM ends with one muted line while its session runs a turn, only when the window shows the present.
   let items: Item[] = $derived([
+    ...view.ready && !view.hasOlder ? [{ kind: "intro" as const, key: "intro" }] : [],
     ...feedRows(view.ordered, home),
     ...[...view.pendingPosts].map((post, index) => ({ kind: "pending" as const, key: `n${index}`, text: post.text })),
-    ...(home.session && store.turns.has(home.session) ? [{ kind: "working" as const, key: "working", session: home.session }] : []),
+    ...(home.session && view.atPresent && store.turns.has(home.session) ? [{ kind: "working" as const, key: "working", session: home.session }] : []),
   ]);
   // Opened work rows stay open while the list recycles their elements.
   const opened = new SvelteSet<string>();
   const name = (session: string) => store.names.get(session) ?? "A closed session";
   const author = (from: Principal) => from.kind === "owner" ? "You" : from.session ? name(from.session) : "Dyna";
+  // The root session is the open session with no parent.
+  const root = (session?: string) => { const open = session ? store.sessions.get(session) : undefined; return open !== undefined && !open.parent; };
   const toggle = (key: string) => { if (!opened.delete(key)) opened.add(key); };
   let list: VirtualList<Item> | undefined = $state();
   // The owner's own post and a jump always land on the newest row, even from inside the present window.
@@ -67,15 +71,14 @@
   <VirtualList bind:this={list} {items} key={item => item.key} label="Feed" follow={view.atPresent} bind:element
     onstart={() => void view.loadOlder()} onend={() => void view.loadNewer()}>
     {#snippet row(item: Item)}
-      {#if item.kind === "post"}<PostRow row={item} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} />
+      {#if item.kind === "post"}<PostRow row={item} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)} />
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} />
       {:else if item.kind === "work"}<WorkRow row={item} {name} open={opened.has(item.key)} ontoggle={() => toggle(item.key)} />
       {:else if item.kind === "working"}<p class="working"><WorkingDot />{name(item.session)} is working</p>
+      {:else if item.kind === "intro"}{@render intro()}
       {:else}<p class="pending">{item.text}</p>{/if}
     {/snippet}
   </VirtualList>
-{:else if view.ready}
-  <p class="empty">{empty}</p>
 {/if}
 {#if view.error !== undefined}
   <p class="hint" role="alert">{view.error instanceof APIError && view.error.detail.code === "forbidden"
