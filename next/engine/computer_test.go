@@ -265,7 +265,16 @@ func TestShellWatchGenerationAndStop(t *testing.T) {
 	if problem != nil {
 		t.Fatal(problem)
 	}
-	start := (<-messages).Body.(contract.ShellWatchStart)
+	var start contract.ShellWatchStart
+	for message := range messages {
+		if body, ok := message.Body.(contract.ShellWatchStart); ok {
+			start = body
+			break
+		}
+	}
+	if start.Generation == 0 {
+		t.Fatal("box channel closed before start")
+	}
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
 	s.ShellOutput(ctx, caller, contract.ShellOutputRequest{Generation: start.Generation - 1, Jobs: []contract.ShellJobOutput{{Text: "old"}}})
 	s.ShellOutput(ctx, caller, contract.ShellOutputRequest{Generation: start.Generation, Jobs: []contract.ShellJobOutput{{Text: "new"}}})
