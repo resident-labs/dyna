@@ -57,6 +57,7 @@ func TestUpgradeRemovesLegacyGrantRequestFromList(t *testing.T) {
  ALTER TABLE grants ADD COLUMN commands BLOB NOT NULL DEFAULT '[]';
  ALTER TABLE grants DROP COLUMN reason;
  DROP TABLE conversation_reads;
+ DROP TABLE rules;
  UPDATE meta SET value='17' WHERE key='schema_version';
  INSERT INTO operations(id,kind,room,by_kind,by_id,class,state,card,args,args_sha256,created_at,expires_at) VALUES
  ('old','hostexec.grant','room','session','worker','owner','pending','{}',CAST('{"room":"room","to":{"kind":"session","session":"worker"},"hosts":["host"],"commands":[{"program":"git"}],"mode":"approve"}' AS BLOB),x'01',1,9999999999999),

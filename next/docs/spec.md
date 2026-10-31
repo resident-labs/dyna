@@ -479,6 +479,7 @@ type BundleSource struct {
 - **Identity.** The listener decides the caller: the owner socket is the owner, a box socket is its session, and a device session is the owner with the device's scopes (section 7). A request body never names its own caller.
 - **Calls.** `POST /v1/<method>` with a contract request struct. The response is the contract response struct, or `Error{Code, Message}`. Each method is a `Method` constant with its request and response types, so the generated TypeScript client is typed.
 - **Events.** `GET /v1/events?room=<id>&after=<seq>` streams `Event` values as server-sent events. The web app and `dyna room log --follow` use it.
+- **Room rules.** `rule.add {room,text}` returns `number`; `rule.remove {room,number}` removes it; `rule.list {room}` returns active rules with `number`, `text`, `by` and `at`. Only the owner and room root change rules. Room members can list them. Rule text has at most 2,000 characters. Changes produce `rule.added {number,text}` and `rule.removed {number}` feed events.
 - **Read position.** `conversation.read` lets only the owner advance a room feed or session DM read position. The engine keeps the maximum sequence and broadcasts a live `conversation.read` event. Room and session lists include `lastRead`.
 - **Owner tools.** `GET /v1/shell/watch?session=<id>` streams a session's shell job output, and `GET /v1/terminal` opens an owner terminal over a WebSocket (5.15). Only the owner can call them.
 - **Owner stream.** `GET /v1/events?after=<seq>` without a room serves the owner only. It streams `op.requested`, `op.decided`, `op.ran`, `turn.started`, `turn.ended` and `session.closed` from every room, so the web app keeps each room's attention state with one connection. `room.list` gives each room's `waiting` operations (pending, owner class) and `working` sessions (a running turn), and the `seq` that this stream resumes after.
@@ -529,6 +530,7 @@ Column types follow SQLite. Times are INTEGER Unix milliseconds (`_at`). IDs are
 
 | Milestone | Table | Columns (key first) |
 |---|---|---|
+| M3 | `rules` | (`room`, `number`) PK, `text`, `by_kind`, `by_id`, `created_at`, `removed_at` NULL. Numbers increase per room and are never reused. |
 | M3 | `conversation_reads` | (`room`, `conversation`) PK, `seq` (the owner’s highest read sequence) |
 | M1 | `meta` | `key` PK, `value` (`format`, `schema_version`, `store_id`, `created_commit`) |
 | M1 | `rooms` | `id` PK, `name` UNIQUE, `created_at`, `cpus`, `mem_bytes` (room limit), `paused_at` |
@@ -911,6 +913,10 @@ Accepted risks (owner, 2026-10-30):
 ## 7. Identity, rooms and the tree
 
 Drafted by dyna:code-architectural.
+
+### Rules
+
+Each room keeps standing rules. The box agent passes active rules from `box.hello` to Pi as appended system prompt text. Each change creates one quiet delivery per open session. It reaches the session on its next turn, without starting a turn. A removal says the rule no longer applies and includes its old text. A running Pi keeps its startup system prompt, including removed rules, until the box restarts. A restarted box receives the current rules.
 
 ### 7.1 Principals
 

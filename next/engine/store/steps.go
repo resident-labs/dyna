@@ -6,10 +6,11 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 19
+const schemaVersion = 20
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	19: {`CREATE TABLE rules (room TEXT NOT NULL REFERENCES rooms(id), number INTEGER NOT NULL, text TEXT NOT NULL, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at INTEGER NOT NULL, removed_at INTEGER, PRIMARY KEY(room, number))`},
 	18: {"CREATE TABLE conversation_reads (room TEXT NOT NULL, conversation TEXT NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY(room, conversation))"},
 	5: {
 		`CREATE TABLE operations (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id), by_kind TEXT NOT NULL, by_id TEXT NOT NULL, class TEXT NOT NULL, state TEXT NOT NULL, card BLOB NOT NULL, args BLOB NOT NULL, args_sha256 BLOB NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, decision BLOB, result BLOB);`,
