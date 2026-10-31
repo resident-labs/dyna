@@ -109,6 +109,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 		_ = s.computerEvent(context.Background(), session.ID, room, contract.ComputerStopped)
 	}
 	state.computerLock.Unlock()
+	s.reconciler.Connected(session.Box)
 	out := make(chan contract.BoxMessage)
 	go func() {
 		defer func() {
