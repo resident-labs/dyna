@@ -26,6 +26,7 @@
   const keepSessions = (list: SessionListResponse, fresh: string[]) => {
     for (const item of list.sessions ?? []) sessions.set(item.id, { name: item.name, root: !item.parent });
     for (const id of fresh) answered.add(id);
+    attention.seed(list.sessions ?? []);
   };
   $effect(() => {
     void attempt;
