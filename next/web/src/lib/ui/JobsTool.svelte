@@ -82,7 +82,7 @@
 
 <svelte:document onvisibilitychange={() => { visible = document.visibilityState === "visible"; }}
   onpointerdown={event => { if (open && !phone && event.target instanceof Node && !root?.contains(event.target)) open = false; }} />
-<span class="tool" bind:this={root}>
+<span class="jobs" bind:this={root}>
   <button type="button" class="open" class:live={running || failures.length} class:phone bind:this={button} aria-haspopup="dialog" aria-expanded={open}
     aria-label={`Jobs, ${summary}`} title={summary} onclick={() => { if (open) void close(); else void show(); }}>
     <Icon name="terminal" />{#if phone}{#if failures.length}<span class="corner"><StatusPill tone="failed" dot label="Failed" /></span>
@@ -119,7 +119,7 @@
 </span>
 
 <style>
-  .tool { position: relative; margin-left: auto; display: flex; }
+  .jobs { position: relative; margin-left: auto; display: flex; }
   .open { all: unset; display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 6px; color: var(--muted);
     font-size: 13px; font-weight: 500; cursor: pointer; }
   .open.live { color: var(--text); }
