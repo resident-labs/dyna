@@ -17,7 +17,7 @@ func TestQuotaClearFencesInflightRead(t *testing.T) {
 		}
 		close(started)
 		<-release
-		_, _ = w.Write([]byte(`{"status_code":401,"body":"{}"}`))
+		_, _ = w.Write([]byte(`{"files":[{"auth_index":"index","status_code":401}]}`))
 	}))
 	defer server.Close()
 	q := (&Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}).Quotas("key", quotaStore(t), time.Now)

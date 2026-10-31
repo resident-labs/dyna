@@ -11,6 +11,32 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
+func TestExpiredCompletionRejectsWithoutBreakingOtherAttempts(t *testing.T) {
+	now := time.Unix(1000, 0)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"url":"https://provider.example/login","state":"invented"}`))
+	}))
+	defer server.Close()
+	p := &Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
+	c := p.Connections("key", nil, func() time.Time { return now })
+	start, err := c.Start(context.Background(), contract.AccountsConnectRequest{Provider: contract.ProviderKimi})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = start.ExpiresAt
+	rpc := AuthRPC{Complete: func(ctx context.Context, done OAuthCompletion) error {
+		return c.Complete(ctx, done, func(fn func() error) error { return fn() })
+	}}
+	var result OAuthCompletionResult
+	if err := rpc.OAuthCompleted(OAuthCompletion{State: "invented", AuthID: "invented-id"}, &result); err != nil || result.Accepted {
+		t.Fatal("expired completion was not safely rejected")
+	}
+	status, err := c.Status(context.Background(), contract.AccountsConnectStatusRequest{Attempt: start.Attempt}, func(fn func() error) error { return fn() })
+	if err != nil || status.Status != contract.ConnectFailed {
+		t.Fatal("rejected attempt remained bindable")
+	}
+}
+
 func TestConnectCompletionWithoutBrowserPolling(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

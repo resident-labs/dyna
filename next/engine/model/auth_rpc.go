@@ -15,6 +15,8 @@ type AuthRPC struct {
 	Complete func(context.Context, OAuthCompletion) error
 }
 
+type OAuthCompletionResult struct{ Accepted bool }
+
 type OAuthCompletion struct {
 	State  string
 	AuthID string
@@ -48,10 +50,18 @@ func (r *AuthRPC) Delete(req AuthDelete, _ *struct{}) error {
 	return nil
 }
 
-func (r *AuthRPC) OAuthCompleted(req OAuthCompletion, _ *struct{}) error {
-	if r.Complete == nil || r.Complete(context.Background(), req) != nil {
+func (r *AuthRPC) OAuthCompleted(req OAuthCompletion, out *OAuthCompletionResult) error {
+	if r.Complete == nil {
 		return errors.New("account completion unavailable")
 	}
+	err := r.Complete(context.Background(), req)
+	if errors.Is(err, ErrCompletionRejected) {
+		return nil
+	}
+	if err != nil {
+		return errors.New("account completion unavailable")
+	}
+	out.Accepted = true
 	return nil
 }
 

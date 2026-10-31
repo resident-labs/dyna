@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/rpc"
@@ -19,6 +20,33 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 	"github.com/spf13/cobra"
 )
+
+type oauthProxyService interface {
+	DeleteDynaCredential(context.Context, string) error
+	ActivateDynaCredential(context.Context, string, string) error
+}
+
+// proxyOAuthComplete keeps an ordinary rejected attempt local to its credential.
+func proxyOAuthComplete(client *rpc.Client, credentials *proxyStore, service oauthProxyService, state, id string) error {
+	var result model.OAuthCompletionResult
+	if client.Call("Auth.OAuthCompleted", model.OAuthCompletion{State: state, AuthID: id}, &result) != nil {
+		return errors.New("account completion unavailable")
+	}
+	bound, err := credentials.bound(id)
+	if err != nil {
+		return err
+	}
+	if !result.Accepted {
+		if bound {
+			return errors.New("account completion unavailable")
+		}
+		return service.DeleteDynaCredential(context.Background(), id)
+	}
+	if !bound {
+		return errors.New("account completion unavailable")
+	}
+	return service.ActivateDynaCredential(context.Background(), id, "")
+}
 
 func proxyCommand() *cobra.Command {
 	var path string
@@ -42,12 +70,8 @@ func proxyCommand() *cobra.Command {
 		cliproxy.EnableDynaMemoryOAuthCallbacks()
 		var service *cliproxy.Service
 		cliproxy.SetDynaOAuthCompletionHook(func(state, id string) {
-			var ignored struct{}
-			if client.Call("Auth.OAuthCompleted", model.OAuthCompletion{State: state, AuthID: id}, &ignored) != nil {
+			if proxyOAuthComplete(client, credentials, service, state, id) != nil {
 				// Restart removes unbound credentials before accepting requests.
-				os.Exit(1)
-			}
-			if !credentials.bound(id) || service.ActivateDynaCredential(context.Background(), id, "") != nil {
 				os.Exit(1)
 			}
 		})

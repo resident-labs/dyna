@@ -17,6 +17,9 @@ import (
 
 var errConnect = errors.New("account connection unavailable")
 
+// ErrCompletionRejected means the attempt cannot bind and its staged credential is safe to discard.
+var ErrCompletionRejected = errors.New("account completion rejected")
+
 type connectAttempt struct {
 	provider      contract.AccountProvider
 	proxyProvider string
@@ -147,11 +150,14 @@ func (c *Connections) Complete(ctx context.Context, completed OAuthCompletion, c
 	}
 	c.mu.Unlock()
 	if attempt == "" {
-		return errConnect
+		return ErrCompletionRejected
 	}
 	status, err := c.status(ctx, contract.AccountsConnectStatusRequest{Attempt: attempt}, completed.AuthID, commit)
-	if err != nil || status.Status != contract.ConnectConnected {
-		return errConnect
+	if err != nil {
+		return err
+	}
+	if status.Status != contract.ConnectConnected {
+		return ErrCompletionRejected
 	}
 	return nil
 }
@@ -165,11 +171,14 @@ func (c *Connections) status(ctx context.Context, req contract.AccountsConnectSt
 	}
 	if a.status == contract.ConnectConnected || a.status == contract.ConnectFailed {
 		if expected != "" && a.proxyID != expected {
-			return contract.AccountsConnectStatusResponse{}, errConnect
+			return contract.AccountsConnectStatusResponse{}, ErrCompletionRejected
 		}
 		return contract.AccountsConnectStatusResponse{Status: a.status, AccountID: a.account}, nil
 	}
 	if !c.now().Before(a.expires) {
+		if expected != "" {
+			a.status = contract.ConnectFailed
+		}
 		return contract.AccountsConnectStatusResponse{Status: contract.ConnectExpired}, nil
 	}
 	if a.generation != c.proxy.generation.Load() {
@@ -187,6 +196,9 @@ func (c *Connections) status(ctx context.Context, req contract.AccountsConnectSt
 	}
 	switch result.Status {
 	case "wait":
+		if expected != "" {
+			a.status = contract.ConnectFailed
+		}
 		return contract.AccountsConnectStatusResponse{Status: contract.ConnectPending}, nil
 	case "ok":
 		if result.AuthID == "" || !result.Saved || (expected != "" && result.AuthID != expected) {
@@ -194,6 +206,9 @@ func (c *Connections) status(ctx context.Context, req contract.AccountsConnectSt
 			break
 		}
 		if !result.Adopted {
+			if expected != "" {
+				a.status = contract.ConnectFailed
+			}
 			return contract.AccountsConnectStatusResponse{Status: contract.ConnectPending}, nil
 		}
 		var raw [16]byte

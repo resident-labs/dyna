@@ -21,17 +21,17 @@ type proxyStore struct {
 
 func (*proxyStore) RequireDurableAuth() bool { return true }
 
-func (s *proxyStore) bound(id string) bool {
+func (s *proxyStore) bound(id string) (bool, error) {
 	var records []store.ProxyAuth
 	if s.client.Call("Auth.List", struct{}{}, &records) != nil {
-		return false
+		return false, errors.New("proxy store unavailable")
 	}
 	for _, record := range records {
 		if record.ID == id {
-			return record.Bound
+			return record.Bound, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 func (s *proxyStore) List(context.Context) ([]*proxyauth.Auth, error) {
