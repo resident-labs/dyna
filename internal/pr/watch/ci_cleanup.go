@@ -9,19 +9,19 @@ import (
 	"time"
 )
 
-// cleanupCIRuns runs after the PR state and cleanup marker are saved.
+// cleanupCIRuns runs after the PR state is saved.
 // keepHead preserves runs for the current head; an empty value cancels all active runs.
 // Errors do not change the PR state or prevent later watcher work.
-func (s *Service) cleanupCIRuns(ctx context.Context, r Record, keepHead string) {
+func (s *Service) cleanupCIRuns(ctx context.Context, r Record, keepHead string) error {
 	if changeKind(r) != "github" || r.Number < 1 || r.Branch == "" || r.Branch == r.DefaultBranch || r.Branch == r.BaseRef {
-		return
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	st, err := s.Store.Read()
 	if err != nil {
 		log.Printf("PR CI cleanup %s: %s", r.Key, Sanitize(err.Error()))
-		return
+		return err
 	}
 	gh := s.github(r.RoomID)
 	gh.requests = &requestCache{entries: map[string]cachedResponse{}, used: map[string]cachedResponse{}, rates: st.RateLimits, legacyPause: st.LegacyPause, now: s.now}
@@ -33,6 +33,7 @@ func (s *Service) cleanupCIRuns(ctx context.Context, r Record, keepHead string) 
 	if err = errors.Join(err, saveErr); err != nil {
 		log.Printf("PR CI cleanup %s: %s", r.Key, Sanitize(err.Error()))
 	}
+	return err
 }
 
 func (g GitHub) cancelPRRuns(ctx context.Context, ref Ref, branch, keepHead string) error {

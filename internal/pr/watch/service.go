@@ -795,7 +795,6 @@ func (s *Service) closeRecord(r *Record, snap Snapshot, n *pollNotices, out *pro
 	// A later tick can recover it after a failure or engine interruption.
 	out.terminal = true
 	if changeKind(*r) == "github" && !r.CICleanupDone {
-		r.CICleanupDone = true
 		copy := *r
 		out.cleanup = &copy
 	}
@@ -1067,8 +1066,20 @@ func (n *pollNotices) deliver(r *Record) {
 // finishProcess runs the effects of a committed update: CI run cleanup, room
 // cleanup for an ended PR, and the merge hook and branch cleanup.
 func (s *Service) finishProcess(ctx context.Context, key string, snap Snapshot, out processEffects) error {
+	var cleanupErr error
 	if out.cleanup != nil {
-		s.cleanupCIRuns(ctx, *out.cleanup, out.cleanupHead)
+		cleanupErr = s.cleanupCIRuns(ctx, *out.cleanup, out.cleanupHead)
+		if out.terminal && cleanupErr == nil {
+			cleanupErr = s.Store.updateRecords([]string{key}, func(st *State) error {
+				if r := st.Records[key]; r != nil && r.State == out.cleanup.State {
+					r.CICleanupDone = true
+				}
+				return nil
+			})
+		}
+		if !out.terminal {
+			cleanupErr = nil // Head cleanup remains best effort.
+		}
 	}
 	if snap.Pull.State == "closed" {
 		r, err := s.Store.Get(key)
@@ -1083,6 +1094,9 @@ func (s *Service) finishProcess(ctx context.Context, key string, snap Snapshot, 
 		return nil
 	}
 	if out.merged == nil {
+		if cleanupErr != nil {
+			return cleanupErr
+		}
 		return s.finishTerminalWatch(key, state.PRClosed)
 	}
 	repo := out.merged.LookupDir
@@ -1099,12 +1113,12 @@ func (s *Service) finishProcess(ctx context.Context, key string, snap Snapshot, 
 			issueErr = errors.Join(issueErr, err)
 		}
 	}
-	if issueErr != nil {
-		return issueErr
+	if err := errors.Join(issueErr, cleanupErr); err != nil {
+		return err
 	}
 	// Queue the hook after retryable cleanup so an ordinary cleanup failure
 	// does not enqueue the same hook on every retry.
-	_ = hooks.New().Emit(ctx, hooks.Event{Event: hooks.PRMerged, Repo: repo, Worktree: repo, Branch: snap.Pull.Head.Ref, SHA: snap.Pull.Head.SHA, PR: fmt.Sprint(snap.Pull.Number), Session: out.merged.Author, Room: out.merged.RoomID})
+	_ = hooks.New().Emit(ctx, hooks.Event{Event: hooks.PRMerged, DedupKey: "pr-merged:" + out.merged.Key, Repo: repo, Worktree: repo, Branch: snap.Pull.Head.Ref, SHA: snap.Pull.Head.SHA, PR: fmt.Sprint(snap.Pull.Number), Session: out.merged.Author, Room: out.merged.RoomID})
 	return s.finishTerminalWatch(key, state.PRMerged)
 }
 
