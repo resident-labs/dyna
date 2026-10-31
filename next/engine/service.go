@@ -49,6 +49,7 @@ type Service struct {
 	sessions           map[contract.SessionID]*sessionState
 	live               map[chan contract.Event]contract.RoomID
 	computerGeneration uint64
+	activityCount      uint64
 	shellGeneration    uint64
 	admit              sync.Mutex
 	moveMu             sync.Mutex
@@ -76,6 +77,8 @@ type sessionState struct {
 	terminals int
 	watch     *shellWatch
 	run       *boxRun
+	// activityOrder is the s.activityCount value when activity was set, so a room's newest label wins.
+	activityOrder uint64
 }
 
 // sessionLocked creates the entry if needed. Callers hold s.mu and pass the id of a session that exists or is being started.
@@ -964,7 +967,9 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 		return contract.TurnActivityResponse{}, failure(err)
 	}
 	s.mu.Lock()
-	s.sessionLocked(caller.Session).activity = body
+	s.activityCount++
+	state := s.sessionLocked(caller.Session)
+	state.activity, state.activityOrder = body, s.activityCount
 	for ch, room := range s.live {
 		if room == session.Room || room == "" {
 			select {
