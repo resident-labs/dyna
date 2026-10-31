@@ -59,13 +59,13 @@
   <main class="screen"><div class="column">
     <svg class:danger={result?.kind === "stop"} class="logo" viewBox="0 0 24 24" width="40" height="40" aria-hidden="true"><path d="M5 4h6.2c4.6 0 7.8 3.2 7.8 8s-3.2 8-7.8 8H5z" /></svg>
     {#if loading}
-      <h1>Signing in…</h1><p>Checking this machine. This will take a moment.</p>
+      <h1>Signing in…</h1><p>Checking this machine: its key must match the one this browser trusts.</p>
     {:else if result?.kind === "stop"}
       <h1>Do not continue</h1>
       <p>{result.field === "proof" ? `This page could not prove that it is ${result.pin.name ?? "this machine"}.` : `The ${result.field === "key" ? "machine key" : "sign-in address"} changed. This could mean someone is trying to take over this connection.`}</p>
       <div class="values"><p>Trusted since {new Date(result.pin.at).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</p><code>{result.field === "relay" ? result.pin.relay : trusted}</code>
         {#if result.field !== "proof"}<p>Offered now</p><code class="danger">{result.field === "key" ? offered : result.offered}</code>{/if}</div>
-      {#if result.field !== "proof"}<p>On a trusted device, open Settings › Sharing &amp; access and compare the machine key.</p>{/if}
+      {#if result.field !== "proof"}<p>If you set this machine up again, open Settings › Sharing &amp; access on the machine and compare its key. If it matches the offered key, remove this site’s data in your browser, then sign in again.</p>{/if}
       <p>{result.field === "proof" ? "Close this tab. You have not signed in." : result.returning ? "Otherwise, close this tab. Your sign-in code was not used." : "Otherwise, close this tab. You have not signed in."}</p>
     {:else if result?.kind === "failed"}
       <h1>Did not finish</h1><p class="danger" role="alert">{errors[result.problem]}</p>
@@ -73,7 +73,8 @@
       <button class="link" onclick={() => { pairing = true; }}>Pair with a code instead</button>
     {:else if greeting}
       <h1>{pin ? "Signed out" : "Sign in to Dyna"}</h1>
-      <p><code>{pin?.name ?? location.host}</code> uses Resident Labs Connect. Sign in with your Resident Labs passkey.</p>
+      {#if pin}<p>Your Connect sign-in to {pin.name ?? location.host} on this browser ended. Sign in again to return to where you left off.</p>
+      {:else}<p><code>{location.host}</code> uses Resident Labs Connect. Sign in with your Resident Labs passkey.</p>{/if}
       <button bind:this={button} class="primary" disabled={busy} onclick={() => void begin()}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.6"/><path d="M3 20a6 6 0 0 1 9.5-4.8"/><circle cx="17.5" cy="14" r="2.4"/><path d="M17.5 16.4V22M17.5 19.5h2.2"/></svg> Sign in with Resident Labs</button>
       <p class="small">You sign in on <code>{allowedOrigin(greeting.relay) ? new URL(greeting.relay).host : "an invalid address"}</code> and come back here.{#if !pin}{" "}From then on, this browser remembers this machine's key and checks it at every sign-in.{/if}</p>
       <div class="or"><span></span>or<span></span></div>
