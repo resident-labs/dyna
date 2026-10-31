@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -103,6 +104,24 @@ func TestProfileWrites(t *testing.T) {
 	}
 	if got := request(owner, "/v1/profile.set", `{"profile":{"name":"bad","taste":11}}`); got.Code != http.StatusBadRequest {
 		t.Fatalf("invalid: %d", got.Code)
+	}
+	if err := st.Write(context.Background(), func(tx *sql.Tx) error {
+		if _, err := tx.Exec("INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,1,1)"); err != nil {
+			return err
+		}
+		_, err := tx.Exec("INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('s','r','s','new','open','',0)")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := request(owner, "/v1/profile.remove", `{"name":"new"}`); got.Code != http.StatusConflict {
+		t.Fatalf("in-use: %d %s", got.Code, got.Body)
+	}
+	if err := st.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE sessions SET closed_at=1 WHERE id='s'")
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 	if got := request(owner, "/v1/profile.remove", `{"name":"new"}`); got.Code != http.StatusOK {
 		t.Fatalf("remove: %d %s", got.Code, got.Body)
