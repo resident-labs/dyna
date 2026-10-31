@@ -18,6 +18,7 @@ Each later patch to this folder must be its own commit. Each patch must add an e
 - Durable credential writes: 18 product lines added, 1 removed. An opt-in store rejects publication after a failed save with a typed, secret-free error. If a provider already invalidated the old token, the owner must sign in again. Upstream PR #6295 makes file replacement atomic but does not reject an uncommitted refresh.
 - Codex metadata merge SDK bridge: 5 product lines added. The SQLite adapter reuses upstream’s `MergeCodexCredentialsFromDisk` rather than replacing token partitions on a metadata-only write. Upstream PR #3843 addresses the same preservation for file-backed stores.
 - Durable API-key registration and catalog-only providers: 38 product lines added, 1 removed. `cmd/dyna` registers a stored key and its fixed model catalog without a keyless fallback. Upstream issue #6201 asks for separate credentials and configuration; the checked open PRs do not implement this registration boundary.
+- Private credential discovery and typed runtime status: 83 product lines added. The SDK exposes pathless credentials and bounded numeric quota signals to the local adapter. `RequiresSignIn` is runtime-only, so an unverified credential stays unknown. Upstream issue #4585 confirms file-path listing gaps; #6201 remains open, and no checked upstream patch covers this adapter.
 
 ## Update
 
