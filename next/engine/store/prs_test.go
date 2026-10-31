@@ -31,7 +31,7 @@ func TestRecordPROpenIsAtomic(t *testing.T) {
 
 	// The second delivery repeats the first, so the transaction fails after the owner and event rows are written.
 	failing := contract.Event{ID: "failing", Time: now, Room: "room", From: from, Body: contract.PostCreated{Text: "PR opened"}}
-	if err := s.RecordPROpen(ctx, "owner/repo", 2, "s", failing, []contract.Delivery{delivery, delivery}); err == nil {
+	if err := s.RecordPROpen(ctx, "owner/repo", 2, "s", "v2/test", failing, []contract.Delivery{delivery, delivery}); err == nil {
 		t.Fatal("duplicate delivery accepted")
 	}
 	var owners, events, deliveries int
@@ -45,7 +45,7 @@ func TestRecordPROpenIsAtomic(t *testing.T) {
 		t.Fatalf("failed open kept owner %d and event %d", owners, events)
 	}
 
-	if err := s.RecordPROpen(ctx, "owner/repo", 1, "s", event, []contract.Delivery{delivery}); err != nil {
+	if err := s.RecordPROpen(ctx, "owner/repo", 1, "s", "v2/test", event, []contract.Delivery{delivery}); err != nil {
 		t.Fatal(err)
 	}
 	var session, goal, approved string
@@ -84,10 +84,10 @@ func TestCloseHandsPRsThroughSubtree(t *testing.T) {
 	event := func(id string) contract.Event {
 		return contract.Event{ID: contract.EventID(id), Time: now, Room: "room", From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.PostCreated{Text: id}}
 	}
-	if err := s.RecordPROpen(ctx, "owner/repo", 1, "leaf", event("open-leaf"), nil); err != nil {
+	if err := s.RecordPROpen(ctx, "owner/repo", 1, "leaf", "v2/test", event("open-leaf"), nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordPROpen(ctx, "owner/repo", 2, "parent", event("open-parent"), nil); err != nil {
+	if err := s.RecordPROpen(ctx, "owner/repo", 2, "parent", "v2/test", event("open-parent"), nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CloseSession(ctx, "leaf", event("close-leaf")); err != nil {
@@ -100,7 +100,7 @@ func TestCloseHandsPRsThroughSubtree(t *testing.T) {
 	if err := s.Read().QueryRowContext(ctx, "SELECT count(*) FROM pr_owners WHERE session='root'").Scan(&count); err != nil || count != 2 {
 		t.Fatalf("handed off %d PRs: %v", count, err)
 	}
-	if err := s.RecordPROpen(ctx, "owner/repo", 3, "leaf", event("late-open"), nil); err != nil {
+	if err := s.RecordPROpen(ctx, "owner/repo", 3, "leaf", "v2/test", event("late-open"), nil); err != nil {
 		t.Fatal(err)
 	}
 	var owner string
@@ -110,7 +110,7 @@ func TestCloseHandsPRsThroughSubtree(t *testing.T) {
 	if err := s.CloseSession(ctx, "root", event("close-root")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordPROpen(ctx, "owner/repo", 4, "leaf", event("no-owner"), nil); err == nil {
+	if err := s.RecordPROpen(ctx, "owner/repo", 4, "leaf", "v2/test", event("no-owner"), nil); err == nil {
 		t.Fatal("accepted PR with no open ancestor")
 	}
 }

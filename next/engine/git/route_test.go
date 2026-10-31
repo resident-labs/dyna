@@ -29,6 +29,10 @@ func (a fakeAccess) Session(context.Context, contract.SessionID) (store.Session,
 	return store.Session{Repo: "owner/repo"}, nil
 }
 
+func (a fakeAccess) OwnsPRBranch(context.Context, contract.RepoName, contract.SessionID, string) (bool, error) {
+	return false, nil
+}
+
 type roundTrip func(*http.Request) (*http.Response, error)
 
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
@@ -124,5 +128,28 @@ func TestForwardsOwnedPushAndReplacesCredential(t *testing.T) {
 	Handler(target, transport, "secret", "ses_1", "room", fakeAccess{allowed: true}).ServeHTTP(w, req)
 	if w.Code != 200 {
 		t.Fatalf("status %d", w.Code)
+	}
+}
+
+func TestTopicBranchPushAuthorization(t *testing.T) {
+	target, _ := url.Parse("https://github.com")
+	for _, tc := range []struct {
+		branch  string
+		allowed bool
+	}{{"v2/ses_1-topic", true}, {"v2/ses_2", false}, {"v2/ses_1/topic", false}} {
+		t.Run(tc.branch, func(t *testing.T) {
+			called := false
+			transport := roundTrip(func(*http.Request) (*http.Response, error) {
+				called = true
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ok"))}, nil
+			})
+			line := strings.Repeat("0", 40) + " " + strings.Repeat("1", 40) + " refs/heads/" + tc.branch + "\x00report-status\n"
+			body := fmt.Sprintf("%04x%s0000PACK", len(line)+4, line)
+			w := httptest.NewRecorder()
+			Handler(target, transport, "secret", "ses_1", "room", fakeAccess{allowed: true}).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
+			if called != tc.allowed {
+				t.Fatalf("called %v, response %s", called, w.Body.String())
+			}
+		})
 	}
 }
