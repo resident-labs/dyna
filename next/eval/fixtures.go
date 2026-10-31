@@ -7,7 +7,8 @@ import "fmt"
 type Fixture struct {
 	Room, Lead, A, B, C, AName, BName, Profile string
 	Operation, Host, File, Visual, Page        string
-	ReadValue, BranchHead, BranchBase          string
+	ReadValue, FileSHA256                      string
+	Task11Fallback                             bool
 }
 
 // Validate rejects incomplete fixtures before a model can act.
@@ -16,7 +17,7 @@ func (f Fixture) Validate() error {
 		"room": f.Room, "lead": f.Lead, "A": f.A, "B": f.B, "C": f.C,
 		"AName": f.AName, "BName": f.BName, "profile": f.Profile,
 		"operation": f.Operation, "host": f.Host, "file": f.File, "visual": f.Visual,
-		"page": f.Page, "readValue": f.ReadValue, "branchHead": f.BranchHead, "branchBase": f.BranchBase,
+		"page": f.Page, "readValue": f.ReadValue, "fileSHA256": f.FileSHA256,
 	} {
 		if value == "" {
 			return fmt.Errorf("fixture %s is empty", name)
@@ -28,8 +29,8 @@ func (f Fixture) Validate() error {
 func field(name FieldName, value string) Field { return Field{Name: name, Value: value} }
 
 // Expected returns the required calls and observed facts for one frozen task.
-// The fixture observer must obtain response facts and final state from the
-// engine or box, rather than deriving them from the model's final message.
+// The fixture observer obtains write state from the engine or box. Read tasks
+// use a unique fixture value that appears in the final answer.
 func Expected(id int, f Fixture) (Expectation, error) {
 	call := func(op Operation, args ...Field) Call { return Call{Operation: op, Arguments: args} }
 	switch id {
@@ -54,6 +55,9 @@ func Expected(id int, f Fixture) (Expectation, error) {
 	case 10:
 		return Expectation{Calls: []Call{call("session.stop", field("session", f.A))}, State: []Field{field("turn.stopped", "true")}}, nil
 	case 11:
+		if f.Task11Fallback {
+			return Expectation{ReadValue: f.ReadValue, Calls: []Call{call("room.log", field("types", "visual"))}}, nil
+		}
 		return Expectation{ReadValue: f.ReadValue, Calls: []Call{call("context.snapshot", field("section", "dyna_children"))}}, nil
 	case 12:
 		return Expectation{Calls: []Call{call("room.pause", field("room", f.Room), field("paused", "true"))}, State: []Field{field("room.paused", "true")}}, nil
@@ -66,13 +70,13 @@ func Expected(id int, f Fixture) (Expectation, error) {
 	case 16:
 		return Expectation{Calls: []Call{call("op.submit", field("kind", "hostexec.grant"), field("host", f.Host), field("reason", "inspect sandbox"))}, State: []Field{field("operations.created", "1"), field("operation.host", f.Host), field("operation.reason", "inspect sandbox")}}, nil
 	case 17:
-		return Expectation{Calls: []Call{call("visual.check", field("file", f.Visual))}, State: []Field{field("visual.check", "pass")}}, nil
+		return Expectation{Calls: []Call{call("session.restart", field("session", f.A))}, State: []Field{field("child.box.replaced", "true"), field("child.state", "idle")}}, nil
 	case 18:
-		return Expectation{Calls: []Call{call("op.submit", field("kind", "pr.open"), field("title", "Sandbox change"), field("head", f.BranchHead), field("base", f.BranchBase), field("draft", "true"))}, State: []Field{field("operations.created", "1"), field("pr.title", "Sandbox change"), field("pr.head", f.BranchHead), field("pr.base", f.BranchBase), field("pr.draft", "true")}}, nil
+		return Expectation{Calls: []Call{call("post", field("recipient", f.A), field("text", "Results attached."))}, State: []Field{field("posts", "1"), field("recipient", f.A), field("text", "Results attached."), field("attachments", "1"), field("attachment.sha256", f.FileSHA256)}}, nil
 	case 19:
 		return Expectation{ReadValue: f.ReadValue, Calls: []Call{call("computer.open", field("url", f.Page)), call("computer.text")}}, nil
 	case 20:
-		return Expectation{Calls: []Call{call("computer.screenshot")}, State: []Field{field("computer.image", "present")}}, nil
+		return Expectation{ReadValue: f.ReadValue, Calls: []Call{call("computer.input", field("action", "click"))}}, nil
 	default:
 		return Expectation{}, fmt.Errorf("unknown evaluation task %d", id)
 	}
