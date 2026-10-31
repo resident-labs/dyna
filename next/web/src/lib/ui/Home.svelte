@@ -123,7 +123,7 @@
       {#if broken.length}<h4>Needs a look</h4>
         <div class="rows">{#each broken as { id, room, value } (id)}<a class="item" href={`${roomHref(room.id)}/s/${encodeURIComponent(id)}`} onclick={navigate}>
           <SessionRow name={value.name} root={value.root} status={room.name} /><StatusPill tone="failed">Failed</StatusPill></a>{/each}</div>{/if}
-      {#if broken.length && busy.length}<h4>Rooms at work</h4>{/if}
+      {#if broken.length && busy.length}<h4>Rooms</h4>{/if}
       <div class="rows">{#each allRooms ? busy : busy.slice(0, 6) as { room, line } (room.id)}<a class="item" href={roomHref(room.id)} onclick={navigate}>
         <Avatar kind="room" name={room.name} size={28} />
         <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{line}</span></span></a>{/each}</div>
