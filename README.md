@@ -35,7 +35,7 @@ dyna demo                       # sample workflow on unsaved mock workers
 3. In the room's composer, type `/<profile> <task>` to start a session.
 4. Watch the feed, goals, pull requests and questions in the room's views.
 
-![The Goals view of a room: each goal has a holder, a status and a checklist of items](docs/images/goals.png)
+![A session card: its profile, state, goal with a done condition, and recent posts](docs/images/session.png)
 
 ## How it fits together
 
