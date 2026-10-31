@@ -8,7 +8,7 @@
   import Icon from "./Icon.svelte";
   import Avatar from "./Avatar.svelte";
   import { render } from "./PostRow.svelte";
-  import { count, fileSize, isImage, type Quote } from "../feed.ts";
+  import { count, fileSize, type Quote } from "../feed.ts";
   import type { FileDraft } from "../attach.svelte.ts";
   import { hue } from "../identity.ts";
   import { mentionToken } from "../mentions.ts";
@@ -93,7 +93,7 @@
     {#if quote.attachments.length}<p class="files">{count(quote.attachments.length, "file")}: {quote.attachments.map(file => file.name).join(", ")}</p>{/if}</div>{/if}
   {#if files.items.length}<ul class="tray" aria-label="Files">{#each files.items as item (item.id)}
     <li class="chip" class:failed={item.state === "failed"}>
-      {#if item.attachment && isImage(item.attachment)}<img src="/v1/files/{encodeURIComponent(item.attachment.sha256)}" alt="" />
+      {#if item.preview}<img src={item.preview} alt="" />
       {:else}<span class="ext" aria-hidden="true">{extension(item.file.name)}</span>{/if}
       <span class="meta"><span class="file-name" title={item.file.name}>{item.file.name}</span>
         <span class="sub">{item.state === "saving" ? "Saving…" : item.state === "failed" ? "Not saved" : fileSize(item.file.size)}</span></span>
