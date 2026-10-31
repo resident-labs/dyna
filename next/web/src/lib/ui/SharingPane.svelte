@@ -63,7 +63,7 @@
       {:else if status.linked}
         <p>Linked to this machine. {#if status.connectorMissing}<StatusPill tone="warning" label="Connector stopped" />{/if}</p>
         {#if tunnel === location.origin}<p>In use by this browser</p>{/if}
-        <dl class="key-values">{#if tunnel}<dt>Address</dt><dd><code>{tunnel}</code></dd>{/if}<dt>Machine key</dt><dd><code>{status.fingerprint}</code></dd></dl>
+        <dl class="key-values">{#if tunnel}<dt>Address</dt><dd><code>{tunnel}</code></dd>{/if}{#if status.relay}<dt>Sign-in service</dt><dd><code>{status.relay}</code></dd>{/if}<dt>Machine key</dt><dd><code>{status.fingerprint}</code></dd></dl>
         {#if status.connectorMissing}<p>The Connect connector is not running.</p>{/if}
         {#if confirm}<p>Unlink this machine? Connect sign-ins end. Paired devices stay.</p><div class="actions"><button disabled={busy} onclick={() => void act("connect.unlink")}>Unlink</button><button disabled={busy} onclick={() => { confirm = false; }}>Cancel</button></div>
         {:else}<button class="unlink" onclick={() => { confirm = true; }}>Unlink this machine…</button>{/if}
