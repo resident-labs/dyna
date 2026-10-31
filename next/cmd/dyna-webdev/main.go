@@ -543,6 +543,8 @@ func seedRoom(ctx context.Context, s *engine.Service, posts, agents int) {
 	post(owner, contract.PostRequest{Text: "Welcome to the web studio. Please build a clear room view."})
 	post(contract.Principal{Kind: contract.PrincipalSession, Session: lead.Session}, contract.PostRequest{Text: "The feed and session tree are ready for review."})
 	post(contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, contract.PostRequest{Text: "I am checking the attachment previews."})
+	// A markdown-heavy post, so the markdown look shows in the feed and the thread.
+	post(contract.Principal{Kind: contract.PrincipalSession, Session: lead.Session}, contract.PostRequest{Text: "Status for **review**:\n\n- The thread renders markdown.\n- Links open in a new tab: [docs](https://example.com/docs)\n\n| Area | State | Note |\n| --- | --- | --- |\n| Thread | Done | Cells wrap inside the table when the text is long for a narrow screen |\n| Feed | Done | Rows keep the same look |\n\n\x60\x60\x60\nnpm run check -- --a-very-long-flag-name-that-keeps-going-without-any-spaces-at-all-to-test-wrapping\n\x60\x60\x60"})
 	post(owner, contract.PostRequest{Text: "What is the next step?", Home: contract.Conversation{Kind: contract.ConversationDM, Session: lead.Session}})
 	post(owner, contract.PostRequest{Text: "Exercise the failed turn view", Mentions: []string{"builder-feed"}})
 	post(owner, contract.PostRequest{Text: "Start the dev server and run the engine tests", Mentions: []string{"lead-web"}})
