@@ -13,7 +13,7 @@ var ErrTreeForbidden = errors.New("tree access forbidden")
 // MoveSession commits the tree change and event in one transaction.
 func (s *Store) MoveSession(ctx context.Context, target, parent contract.SessionID, event contract.Event, maxDepth int) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		tree, err := transactionTree(ctx, tx, event.Room)
+		tree, err := loadTree(ctx, tx, event.Room)
 		if err != nil {
 			return err
 		}
