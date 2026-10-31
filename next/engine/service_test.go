@@ -1097,6 +1097,25 @@ func connectAgent(ctx context.Context, t *testing.T, s *Service, session contrac
 	}
 }
 
+// ownerStream opens an owner event stream, of a room or of every room, that ends before the store
+// closes. Its cleanup runs before setup's: it cancels the stream and waits for the stream's goroutine,
+// which may still be reading the store, so no read reopens a database file during TempDir cleanup.
+func ownerStream(ctx context.Context, t *testing.T, s *Service, room contract.RoomID, after int64) <-chan contract.Event {
+	t.Helper()
+	ctx, cancel := context.WithCancel(ctx)
+	stream, e := s.Events(ctx, contract.Principal{Kind: contract.PrincipalOwner}, room, after)
+	if e != nil {
+		cancel()
+		t.Fatal(e)
+	}
+	t.Cleanup(func() {
+		cancel()
+		for range stream {
+		}
+	})
+	return stream
+}
+
 func TestSessionListLastOutcomeSkipsStoppedTurns(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
@@ -1238,10 +1257,7 @@ func TestOwnerAttention(t *testing.T) {
 			t.Fatalf("room B: %+v", room)
 		}
 	}
-	stream, problem := s.Events(ctx, owner, "", list.Seq)
-	if problem != nil {
-		t.Fatal(problem)
-	}
+	stream := ownerStream(ctx, t, s, "", list.Seq)
 	err = s.store.Write(ctx, func(tx *sql.Tx) error {
 		for _, event := range []contract.Event{
 			{ID: "attention-post", Room: a, Body: contract.PostCreated{Text: "skip"}},
