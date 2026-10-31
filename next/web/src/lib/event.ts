@@ -48,6 +48,8 @@ const bodies: Record<string, Check> = {
   "box.pressure": object({ box: string, kind: oneOf("high", "max") }),
   "grant.expired": object({ grant: string }),
   "pr.opened": object({ repo: string, number: number, session: string, url: string }),
+  "rule.added": object({ number: number, text: string }),
+  "rule.removed": object({ number: number }),
   "image.built": object({ host: string, repo: string, name: string, tag: string, seconds: number }),
   "image.failed": object({ host: string, repo: string, name: string, tag: string, reason: string, logTail: string }),
 };
