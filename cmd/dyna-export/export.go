@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -180,7 +182,39 @@ func buildBundle(db *sql.DB, backup, data, feeds, config, commit string, cap cap
 		if err := db.QueryRow("SELECT COALESCE(MAX(number),0)+1 FROM room_issue_numbers WHERE room_id=?", rec.ID).Scan(&nextIssue); err != nil {
 			return g, nil, report, err
 		}
+		upstreams := make(map[string]string)
+		for path, upstream := range rec.RepoUpstreams {
+			upstreams[path] = upstream
+		}
+		if rec.Repo != "" && rec.Upstream != "" {
+			upstreams[rec.Repo] = rec.Upstream
+		}
+		paths := make([]string, 0, len(upstreams))
+		for path := range upstreams {
+			paths = append(paths, path)
+		}
+		sort.Strings(paths)
+		var handoffUpstreams []contract.RoomUpstream
+		for _, path := range paths {
+			upstream := upstreams[path]
+			if upstream == "" {
+				continue
+			}
+			if !repoIdentityPattern.MatchString(upstream) || filepath.Clean(upstream) != upstream {
+				return g, nil, report, fmt.Errorf("invalid captured upstream identity")
+			}
+			if strings.Count(upstream, "/") != 2 {
+				return g, nil, report, fmt.Errorf("invalid captured upstream identity")
+			}
+			repo, ok := githubRepo(string(cap.Repos[path]))
+			if !ok {
+				report.RepositoryGaps = append(report.RepositoryGaps, repoGap{Identity: path, Upstream: upstream, Kind: "upstream", Rooms: []contract.RoomName{name}, Reason: "unverifiedIdentity"})
+				continue
+			}
+			handoffUpstreams = append(handoffUpstreams, contract.RoomUpstream{Repo: repo, Upstream: upstream})
+		}
 		b := contract.RoomBundle{Version: contract.BundleV1, Name: name, Repos: repos.RoomRepos[name], Limits: limits, Color: string(rec.Color),
+			Paused: rec.SessionPause.Paused, RootProfile: contract.ProfileName(rec.RootProfile), Upstreams: handoffUpstreams,
 			Rules: rules, Goals: goals, Issues: issues, NextIssue: nextIssue, PRs: prs, Questions: questions,
 			Handoff: handoff, HookHandoff: hooks[name], RepoHandoff: repos.RoomHandoffs[name], LimitHandoff: warnings}
 		b.Counts = roomBundleCounts(b)

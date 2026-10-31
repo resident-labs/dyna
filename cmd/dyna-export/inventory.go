@@ -43,9 +43,9 @@ func inventory() []fieldInventory {
 		{"AccountMetadata", reflect.TypeOf(account.Metadata{}), []string{"Provider", "Label", "RoomID"}, []string{"NativeHome", "Observation", "ID", "Kind", "Harness", "Integration", "Identity", "LabelSource", "NeedsLogin", "RefreshPending", "CreatedAt", "UpdatedAt"}},
 		{"Device", reflect.TypeOf(devicestore.Device{}), []string{"Name", "Hash", "Created", "Expires", "Scopes"}, []string{"ID", "LastSeen"}},
 		{"Hook", reflect.TypeOf(hooks.Hook{}), nil, []string{"Disabled", "Builtin"}},
-		{"TrackedPR", reflect.TypeOf(prstate.Record{}), []string{"Repo", "Number", "Author", "GoalID", "Branch"}, nil},
+		{"TrackedPR", reflect.TypeOf(prstate.Record{}), []string{"Repo", "Number", "Author", "GoalID", "Branch", "Hold"}, []string{"PublishedHead", "PendingVerdict", "ReleaseReviewersAfterReplay", "MergeTrialFailure", "IsDraft", "Labels", "LabelsSeen", "Mergeable", "DefaultBranch", "ChecksAt", "CIBudgetHead", "CIBudgetErrors", "CIBudgetRuns", "CIBudgetNotes", "CIBudgetInputs", "CIBudgetSteps", "CIQueueWait", "CITestPolicy", "CITestReportNote", "CINoJUnitWarned", "CITestHead", "CITestErrors", "CITestFailures", "CITestRuns", "CITestRetries", "CIStaleCleanupHead", "Polling", "RateLimit", "ReviewHistory", "CI", "CIReason", "Checks", "CIKey", "Failures", "CIPaused", "PauseReason", "Error", "Round", "RoundHead", "RoundStarted", "ReviewPublishing", "ReviewerMode", "ReviewerOverride"}},
 		{"Settings", reflect.TypeOf(settings.Values{}), []string{"OwnerName", "RootProfile", "RulesMaxChars", "SubagentMaxDepth", "SessionCheckInInterval", "ShellSilenceMinutes"}, nil},
-		{"Room", reflect.TypeOf(room.Record{}), []string{"ID", "Name", "Repo", "ExtraRepos", "Color", "Limits"}, nil},
+		{"Room", reflect.TypeOf(room.Record{}), []string{"ID", "Name", "Repo", "ExtraRepos", "Color", "Limits", "RootProfile", "SessionPause", "Upstream", "RepoUpstreams"}, nil},
 		{"Session", reflect.TypeOf(subagent.Meta{}), []string{"ID", "Name", "RoomID", "Room", "Profile", "ParentSession"}, []string{"Status", "Closed", "Turns"}},
 	}
 	out := make([]fieldInventory, 0, len(specs))
