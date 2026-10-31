@@ -90,7 +90,12 @@ func (a *API) handler(c Caller) http.Handler {
 			writeError(w, forbidden())
 			return
 		}
-		if err := a.service.ComputerFrames(r.Context(), c.Principal, r.Body); err != nil {
+		generation, err := strconv.ParseUint(r.URL.Query().Get("generation"), 10, 64)
+		if err != nil || generation == 0 {
+			writeError(w, invalid())
+			return
+		}
+		if err := a.service.ComputerFrames(r.Context(), c.Principal, generation, r.Body); err != nil {
 			writeError(w, err)
 		}
 	})

@@ -132,14 +132,14 @@ func Run(ctx context.Context, version string) error {
 	var stopWatch context.CancelFunc
 	go func() {
 		errs <- client.Channel(ctx, func(message contract.BoxMessage) error {
-			switch message.Body.(type) {
+			switch body := message.Body.(type) {
 			case contract.ComputerWatchStart:
 				if stopWatch != nil {
 					stopWatch()
 				}
 				var watch context.Context
 				watch, stopWatch = context.WithCancel(ctx)
-				go client.watchComputer(watch)
+				go client.watchComputer(watch, body.Generation)
 				return nil
 			case contract.ComputerWatchStop:
 				if stopWatch != nil {
