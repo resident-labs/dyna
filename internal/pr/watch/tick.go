@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"maps"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -429,6 +430,15 @@ func (s *Service) finishPoll(ctx context.Context, st State, result pollResult) e
 	}
 	if err == nil && !result.unchanged {
 		entries = gh.requests.used
+	} else if err != nil {
+		// A partial poll cannot supply a complete review snapshot, even when
+		// discussion metadata did not change. Keep validators for the retry.
+		for path, response := range entries {
+			if strings.Contains(path, "/comments?") || strings.Contains(path, "/reviews?") {
+				response.Stale = true
+				entries[path] = response
+			}
+		}
 	}
 	unlock := gh.requests.lockRate()
 	rates := cloneRates(gh.requests.rates)
