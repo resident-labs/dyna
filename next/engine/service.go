@@ -53,6 +53,7 @@ type Service struct {
 	shellGeneration    uint64
 	admit              sync.Mutex
 	moveMu             sync.Mutex
+	readMu             sync.Mutex // preserves commit and live broadcast order
 	moveStops          []contract.BoxID
 	dormancy           dormancy
 	// transcriptMu serializes appends, so each offset check and write runs alone.
@@ -961,4 +962,48 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 	}
 	s.mu.Unlock()
 	return contract.TurnActivityResponse{}, nil
+}
+
+func (s *Service) ConversationRead(ctx context.Context, caller contract.Principal, req contract.ConversationReadRequest) (contract.ConversationReadResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalOwner {
+		return contract.ConversationReadResponse{}, forbidden()
+	}
+	if req.Seq < 0 || (req.Conversation.Kind != contract.ConversationFeed && req.Conversation.Kind != contract.ConversationDM) {
+		return contract.ConversationReadResponse{}, invalid("invalid conversation or seq")
+	}
+	home := string(req.Conversation.Kind)
+	if req.Conversation.Kind == contract.ConversationDM {
+		session, err := s.store.Session(ctx, req.Conversation.Session)
+		if err != nil {
+			return contract.ConversationReadResponse{}, failure(err)
+		}
+		if session.Room != req.Room {
+			return contract.ConversationReadResponse{}, invalid("session does not belong to room")
+		}
+		home += ":" + string(req.Conversation.Session)
+	}
+	s.readMu.Lock()
+	defer s.readMu.Unlock()
+	var seq int64
+	err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, "INSERT INTO conversation_reads(room,conversation,seq) VALUES(?,?,?) ON CONFLICT(room,conversation) DO UPDATE SET seq=MAX(seq,excluded.seq) RETURNING seq", req.Room, home, req.Seq).Scan(&seq)
+	})
+	if err != nil {
+		return contract.ConversationReadResponse{}, failure(err)
+	}
+	event, err := s.event(req.Room, caller, contract.ConversationRead{Room: req.Room, Conversation: req.Conversation, Seq: seq})
+	if err != nil {
+		return contract.ConversationReadResponse{}, failure(err)
+	}
+	s.mu.Lock()
+	for ch, room := range s.live {
+		if room == req.Room || room == "" {
+			select {
+			case ch <- event:
+			default:
+			}
+		}
+	}
+	s.mu.Unlock()
+	return contract.ConversationReadResponse{}, nil
 }
