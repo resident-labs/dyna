@@ -157,7 +157,6 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				case <-ctx.Done():
 					return
 				}
-				continue
 			}
 			unlock := s.lockBox(session.ID)
 			allowed, err := s.store.CanDispatch(ctx, session.ID)
