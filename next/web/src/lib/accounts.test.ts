@@ -1,7 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountRows, accountState, removalPrompt, canReconnect } from "./accounts.ts";
+import { accountRows, accountState, removalPrompt, canReconnect, reconnectUnavailable } from "./accounts.ts";
+import { APIError } from "./client.ts";
 import type { Account } from "./contract.gen.ts";
+
+test("only the typed unavailable error offers remove and add again", () => {
+  assert.equal(reconnectUnavailable(new APIError({ code: "reconnect_unavailable", message: "unavailable" })), true);
+  assert.equal(reconnectUnavailable(new APIError({ code: "unavailable", message: "offline" })), false);
+  assert.equal(reconnectUnavailable(new Error("reconnect_unavailable")), false);
+});
 
 test("only expired sign-ins offer reconnect", () => {
   const account: Account = { id: "a", provider: "anthropic", label: "Work", rooms: null, state: "sign_in_expired" };
