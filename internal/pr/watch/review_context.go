@@ -397,8 +397,10 @@ func (s *Service) reviewComments(ctx context.Context, st State, r Record) ([]Com
 		}
 	}
 	if !complete {
+		gh := s.github(r.RoomID)
+		gh.requests = &requestCache{entries: st.Responses[r.Key], now: s.now}
 		var err error
-		comments, err = s.github(r.RoomID).Comments(ctx, ref)
+		comments, err = gh.Comments(ctx, ref)
 		if err != nil {
 			return nil, fmt.Errorf("read review comments: %w", err)
 		}
