@@ -16,7 +16,8 @@ export class MessageSearch {
   private room: string | undefined;
   private changed = () => {};
   private subscribe = createSubscriber(update => { this.changed = update; });
-  constructor(private readonly search: SearchCall) {}
+  private readonly search: SearchCall;
+  constructor(search: SearchCall) { this.search = search; }
   get snapshot() {
     this.subscribe();
     return { state: this.state, posts: this.posts, total: this.total };
