@@ -19,9 +19,10 @@ import (
 type UpdateResult string
 
 const (
-	UpdatePending UpdateResult = "pending"
-	UpdatePassed  UpdateResult = "pass"
-	UpdateFailed  UpdateResult = "error"
+	UpdatePending  UpdateResult = "pending"
+	UpdatePassed   UpdateResult = "pass"
+	UpdateDeferred UpdateResult = "deferred"
+	UpdateFailed   UpdateResult = "error"
 )
 
 // UpdateRun is the owner-facing summary of one installer receipt.
@@ -42,8 +43,11 @@ func updateRuns() ([]UpdateRun, error) {
 		result := UpdatePending
 		if j.Status == "finished" {
 			result = UpdateFailed
-			if j.Result == "pass" {
+			switch j.Result {
+			case hookinstall.ResultPass:
 				result = UpdatePassed
+			case hookinstall.ResultDeferred:
+				result = UpdateDeferred
 			}
 		}
 		out = append(out, UpdateRun{ID: j.ID, Result: result, StartedAt: j.StartedAt, FinishedAt: j.FinishedAt})
