@@ -103,7 +103,8 @@ export class RoomStore {
     // session.list says which last turns failed but not when, so the room reads turn.ended pages back from the newest
     // until it has placed each failure. One it cannot place, as when a read fails, keeps list.seq and shows.
     const unplaced = new Set(this.failed.keys());
-    for (let before = list.seq + 1; unplaced.size;) {
+    // At most 5 pages, so a long room never waits on its whole history.
+    for (let before = list.seq + 1, pages = 0; unplaced.size && pages < 5; pages++) {
       const page = await call("events.list", { room: this.room, afterSeq: 0, beforeSeq: before, limit: 200, types: ["turn.ended"] })
         .catch(() => undefined);
       const events = page?.events ?? [];
