@@ -52,7 +52,9 @@
   $effect(() => {
     const query = mode.query, selected = mode.scope, target = local ? room : undefined;
     void retry;
-    const timer = setTimeout(() => void messages.start(selected && selected !== "messages" ? "" : query, target), 150);
+    const term = selected && selected !== "messages" ? "" : query;
+    messages.prepare(term);
+    const timer = setTimeout(() => void messages.start(term, target), 150);
     return () => clearTimeout(timer);
   });
   $effect(() => { void text; void scope; pick = 0; });
