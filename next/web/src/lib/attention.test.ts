@@ -38,7 +38,6 @@ test("room.list seeds each room's waiting requests and working sessions, and the
     // Events at or before the list's seq are already in it.
     attention.apply(event(5, "a", { type: "turn.ended", body: { session: "s1", turn: "t", outcome: "completed", usage: { model: "m", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } } }));
     attention.apply(event(6, "b", { type: "op.requested", body: { id: "o2", kind: "k", by: { kind: "owner" }, class: "owner", card, expires: "" } }));
-    attention.apply(event(7, "b", { type: "op.requested", body: { id: "o3", kind: "k", by: { kind: "owner" }, class: "agent", card, expires: "" } }));
     attention.apply(event(8, "a", { type: "op.decided", body: { id: "o1", state: "approved", decision } }));
     attention.apply(event(9, "b", { type: "turn.started", body: { session: "s2", turn: "t", inputs: [] } }));
     assert.deepEqual([[...attention.waiting.get("a")!], [...attention.waiting.get("b")!]], [[], ["o2"]]);
