@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/room"
 )
 
@@ -37,8 +38,56 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if len(req.Attachments) > 16 {
 		return contract.PostResponse{}, invalid("too many attachments")
 	}
+	visuals := 0
 	for i := range req.Attachments {
 		file := &req.Attachments[i]
+		if v := file.Visual; v != nil {
+			visuals++
+			if visuals > 1 || file.Media != "text/html" || strings.TrimSpace(req.Text) == "" || v.Height < 120 || v.Height > 1200 || len(v.Title) > 255 || len(v.Shots) > 16 || len(v.Checks) > 16 {
+				return contract.PostResponse{}, invalid("invalid visual")
+			}
+			refs := []string{v.Banner, v.Thumbnail}
+			for _, shot := range v.Shots {
+				if shot.Width <= 0 {
+					return contract.PostResponse{}, invalid("invalid visual width")
+				}
+				refs = append(refs, shot.File)
+			}
+			for _, check := range v.Checks {
+				switch check.Name {
+				case contract.VisualCheckRenders, contract.VisualCheckConsole, contract.VisualCheckWidths, contract.VisualCheckContrast, contract.VisualCheckNetwork:
+				default:
+					return contract.PostResponse{}, invalid("invalid visual check")
+				}
+				switch check.Status {
+				case contract.VisualCheckPass, contract.VisualCheckWarn, contract.VisualCheckFail, contract.VisualCheckSkip:
+				default:
+					return contract.PostResponse{}, invalid("invalid visual status")
+				}
+			}
+			for _, ref := range refs {
+				if ref == "" {
+					continue
+				}
+				if !validHash(ref) {
+					return contract.PostResponse{}, invalid("invalid visual file")
+				}
+				info, err := os.Stat(filepath.Join(s.filesDir, ref))
+				if err != nil || !info.Mode().IsRegular() {
+					return contract.PostResponse{}, invalid("visual file not found")
+				}
+				if caller.Kind != contract.PrincipalOwner {
+					var ok bool
+					err := s.store.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM uploads WHERE sha256=?1 AND room=?2) OR EXISTS(SELECT 1 FROM event_files f JOIN events e ON e.seq=f.seq WHERE f.sha256=?1 AND e.room=?2)", ref, req.Room).Scan(&ok)
+					if err != nil {
+						return contract.PostResponse{}, failure(err)
+					}
+					if !ok {
+						return contract.PostResponse{}, forbidden()
+					}
+				}
+			}
+		}
 		media, _, mediaErr := mime.ParseMediaType(file.Media)
 		if !validHash(file.SHA256) || file.Name == "" || len(file.Name) > 255 || mediaErr != nil {
 			return contract.PostResponse{}, invalid("invalid attachment")
@@ -59,6 +108,9 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		}
 		file.Bytes = info.Size()
 		file.Media = media
+	}
+	if req.VisualUpdate != "" && visuals != 1 {
+		return contract.PostResponse{}, invalid("visual update requires one visual")
 	}
 	if req.Home.Kind == "" {
 		req.Home.Kind = contract.ConversationFeed
@@ -132,7 +184,13 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		return contract.PostResponse{}, failure(err)
 	}
 	deliveries := tree.Deliveries(room.DeliveryInput{Event: event, Surface: surface, Recipients: recipients, HasMentions: len(req.Mentions) > 0, Home: req.Home, ReplyTo: req.ReplyTo})
-	id, seq, err := s.store.PostOnce(ctx, event, deliveries)
+	id, seq, err := s.store.PostOnce(ctx, event, deliveries, req.VisualUpdate)
+	if errors.Is(err, store.ErrVisualForbidden) {
+		return contract.PostResponse{}, forbidden()
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return contract.PostResponse{}, invalid("visual not found")
+	}
 	if err != nil {
 		return contract.PostResponse{}, failure(err)
 	}
