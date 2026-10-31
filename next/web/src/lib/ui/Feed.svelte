@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, tick } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { APIError } from "../client.ts";
   import VirtualList from "./VirtualList.svelte";
@@ -39,12 +39,30 @@
     await sending;
     await list?.toEnd();
   }
+  // Rows that do not fill the view cannot be scrolled up, so older pages load until they do.
+  // fill() stops before it would leave the present; rows that are still short then get an
+  // explicit control, so older history stays reachable.
+  const filled = async () => { await tick(); return list?.full() ?? false; };
+  let short = $state(false);
+  async function grow() {
+    await view.fill(filled);
+    short = !(await filled());
+  }
+  $effect(() => { if (view.ready) void grow(); });
+  async function older() {
+    await view.loadOlder();
+    await grow();
+  }
   async function jump() {
     await view.jumpToPresent();
     await list?.toEnd();
+    await grow();
   }
 </script>
 
+{#if short && view.hasOlder}
+  <button type="button" class="jump" onclick={older}>Show older posts</button>
+{/if}
 {#if items.length}
   <VirtualList bind:this={list} {items} key={item => item.key} label="Feed" follow={view.atPresent} bind:element
     onstart={() => void view.loadOlder()} onend={() => void view.loadNewer()}>

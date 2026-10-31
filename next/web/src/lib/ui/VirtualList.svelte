@@ -7,6 +7,7 @@
     type VirtualItem, type VirtualizerOptions,
   } from "@tanstack/virtual-core";
   import { tick, untrack, type Snippet } from "svelte";
+  import { shouldPage } from "../paging.ts";
 
   let { items, key, row, label, follow = false, estimate = 44, onstart, onend, element = $bindable() }: {
     items: T[]; key: (item: T) => string; row: Snippet<[T]>; label: string;
@@ -26,12 +27,22 @@
   });
   const virtualizer = new Virtualizer(options());
 
-  $effect.pre(() => { virtualizer.setOptions(options()); });
+  // Visible rows follow the new items before the rows render, so no row points past the end.
+  $effect.pre(() => {
+    virtualizer.setOptions(options());
+    visible = virtualizer.getVirtualItems();
+    total = virtualizer.getTotalSize();
+  });
   $effect(() => {
     void items.length;
     virtualizer._willUpdate();
-    visible = virtualizer.getVirtualItems();
-    total = virtualizer.getTotalSize();
+  });
+  // The wheel fires no scroll event at an edge, so a reader who reached it while a page
+  // was loading gets the next page when the rows change. Rows that barely overflow page
+  // nothing here; Feed's fill handles them without leaving the present.
+  $effect(() => {
+    void items;
+    void tick().then(() => scrolled());
   });
   $effect(() => {
     const cleanup = virtualizer._didMount();
@@ -45,10 +56,20 @@
     virtualizer.scrollToEnd();
   }
 
-  function scrolled() {
+  // True once the rows overflow the view far enough to scroll up to older ones.
+  export function full(): boolean {
+    return element !== undefined && virtualizer.getTotalSize() > element.clientHeight + edge;
+  }
+
+  // Reads the element itself: the scroll handler runs before the virtualizer sees the new offset.
+  let last = 0;
+  function scrolled(event?: Event) {
     if (!element) return;
-    if (element.scrollTop < edge) onstart?.();
-    if (virtualizer.getDistanceFromEnd() < edge) onend?.();
+    const top = element.scrollTop;
+    const page = shouldPage(top, element.scrollHeight, element.clientHeight, edge, event ? top - last : undefined);
+    last = top;
+    if (page.start) onstart?.();
+    if (page.end) onend?.();
   }
   const measure = (node: HTMLDivElement) => { virtualizer.measureElement(node); };
 </script>
