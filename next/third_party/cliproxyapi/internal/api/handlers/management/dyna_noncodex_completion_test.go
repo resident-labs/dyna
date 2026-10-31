@@ -13,6 +13,38 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 )
 
+type dynaDurableProviderStore struct{ dynaFakeProviderStore }
+
+func (dynaDurableProviderStore) RequireDurableAuth() bool { return true }
+
+func TestDynaReconnectAdoptsEnabledGrant(t *testing.T) {
+	previousEnabled, previousHook := DynaMemoryOAuthCallbacks, DynaOAuthCompletionHook
+	defer func() { DynaMemoryOAuthCallbacks, DynaOAuthCompletionHook = previousEnabled, previousHook }()
+	DynaMemoryOAuthCallbacks = true
+	ctx := context.Background()
+	st := dynaDurableProviderStore{}
+	manager := coreauth.NewManager(st, nil, nil)
+	if _, err := manager.Register(coreauth.WithSkipPersist(ctx), &coreauth.Auth{ID: "reconnect", Provider: "kimi", Metadata: map[string]any{"access_token": "old"}}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandlerWithoutConfigFilePath(&config.Config{}, manager)
+	h.tokenStore = st
+	h.postAuthHook = func(_ context.Context, a *coreauth.Auth) error { a.Disabled = true; return nil }
+	const state = "invented-reconnect-state"
+	RegisterOAuthSession(state, "kimi")
+	t.Cleanup(func() { oauthSessions.mu.Lock(); delete(oauthSessions.sessions, state); oauthSessions.mu.Unlock() })
+	accepted := false
+	DynaOAuthCompletionHook = func(state, _ string) { session, _ := oauthSessions.Get(state); accepted = session.Adopted }
+	record := &coreauth.Auth{ID: "reconnect", Provider: "kimi", Storage: &kimi.KimiTokenStorage{AccessToken: "new", RefreshToken: "new-refresh"}}
+	if _, err := h.saveTokenRecord(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	h.dynaCompleteOAuth(state, record)
+	if !accepted {
+		t.Fatal("enabled bound grant was not adopted")
+	}
+}
+
 type dynaFakeProviderStore struct{}
 
 func (dynaFakeProviderStore) List(context.Context) ([]*coreauth.Auth, error) { return nil, nil }
