@@ -36,6 +36,34 @@ func (devService) HostAdd(context.Context, contract.Principal, contract.HostAddR
 	return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "webdev uses only the fake host"}
 }
 
+// The fake box's jobs: the agent counts real jobs only, so after a turn whose final quotes [jobs], each turn of
+// that session reports two here, as a box whose jobs keep running would.
+var withJobs sync.Map
+
+func (d devService) TurnOutput(ctx context.Context, p contract.Principal, req contract.TurnOutputRequest) (contract.TurnOutputResponse, *contract.Error) {
+	if _, ok := withJobs.Load(p.Session); ok || strings.Contains(req.Final, "[jobs]") {
+		withJobs.Store(p.Session, true)
+		req.ShellJobs = 2
+	}
+	return d.Service.TurnOutput(ctx, p, req)
+}
+func (devService) ShellWatch(ctx context.Context, _ contract.SessionID) (<-chan contract.ShellJobOutput, *contract.Error) {
+	out, run := make(chan contract.ShellJobOutput, 2), "npm run dev -- --host 127.0.0.1 --port 5173" // a reset, then a line every 250 ms
+	out <- contract.ShellJobOutput{Job: "j1", Command: "go test ./engine/...", ExitCode: 1, Text: "--- FAIL: TestShellWatch (0.01s)\nFAIL\n", Reset: true}
+	out <- contract.ShellJobOutput{Job: "j2", Command: run, Running: true, Text: "VITE v7.1.3  ready in 312 ms\n", Reset: true}
+	go func() {
+		defer close(out)
+		for range time.Tick(250 * time.Millisecond) {
+			select {
+			case out <- contract.ShellJobOutput{Job: "j2", Command: run, Running: true, Text: "[vite] page reload src/App.svelte\n"}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
+}
+
 type profiles struct{}
 
 func (profiles) Model(contract.ProfileName) (contract.ModelChoice, []string, error) {
@@ -48,13 +76,19 @@ type scripted struct {
 }
 
 func (h *scripted) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, started func()) (contract.TurnEnded, error) {
-	result := contract.TurnEnded{Outcome: contract.TurnCompleted, Final: "Thanks. I will work on this:\n\n> " + strings.ReplaceAll(inputs[0].Text, "\n", "\n> ")}
-	if strings.Contains(inputs[0].Text, "[fail]") {
+	text := inputs[0].Text
+	for _, in := range inputs { // a turn can batch inputs; one with a [marker] wins, so the marker works in any order
+		if strings.Contains(in.Text, "[") {
+			text = in.Text
+		}
+	}
+	result := contract.TurnEnded{Outcome: contract.TurnCompleted, Final: "Thanks. I will work on this:\n\n> " + strings.ReplaceAll(text, "\n", "\n> ")}
+	if strings.Contains(text, "[fail]") {
 		result = contract.TurnEnded{Outcome: contract.TurnFailed, Error: "Scripted development failure"}
 	}
 	h.Turns = []fakeharness.Turn{{Result: result}}
 	// A [wait] turn runs until it is stopped, so the working state and its activity labels can be seen.
-	if strings.Contains(inputs[0].Text, "[wait]") {
+	if strings.Contains(text, "[wait]") {
 		h.Turns[0].Release = make(chan struct{})
 		begin := started
 		started = func() {
@@ -210,6 +244,7 @@ func seedRoom(ctx context.Context, s *engine.Service, posts int) {
 	post(contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, contract.PostRequest{Text: "I am checking the attachment previews."})
 	post(owner, contract.PostRequest{Text: "What is the next step?", Home: contract.Conversation{Kind: contract.ConversationDM, Session: lead.Session}})
 	post(owner, contract.PostRequest{Text: "[fail] Exercise the failed turn view", Mentions: []string{"builder-feed"}})
+	post(owner, contract.PostRequest{Text: "[jobs] Start the dev server and run the engine tests", Mentions: []string{"lead-web"}})
 	files := []struct{ name, media, body string }{{"preview.png", "image/png", "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDAT\x08\xd7c\xf8\xcf\xc0\xf0\x1f\x00\x05\x00\x01\xff\x89\x99=\x1d\x00\x00\x00\x00IEND\xaeB`\x82"}, {"card.html", "text/html", "<!doctype html><title>Review</title><h1>Feed review</h1><p>Ready to inspect.</p>"}}
 	attachments := make([]contract.Attachment, len(files))
 	for i, f := range files {
