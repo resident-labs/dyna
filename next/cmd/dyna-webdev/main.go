@@ -2,10 +2,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"image"
+	"image/color"
+	pngenc "image/png"
 	"io/fs"
 	"log"
 	"net"
@@ -245,16 +249,29 @@ func seedRoom(ctx context.Context, s *engine.Service, posts int) {
 	post(owner, contract.PostRequest{Text: "What is the next step?", Home: contract.Conversation{Kind: contract.ConversationDM, Session: lead.Session}})
 	post(owner, contract.PostRequest{Text: "[fail] Exercise the failed turn view", Mentions: []string{"builder-feed"}})
 	post(owner, contract.PostRequest{Text: "[jobs] Start the dev server and run the engine tests", Mentions: []string{"lead-web"}})
-	files := []struct{ name, media, body string }{{"preview.png", "image/png", "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDAT\x08\xd7c\xf8\xcf\xc0\xf0\x1f\x00\x05\x00\x01\xff\x89\x99=\x1d\x00\x00\x00\x00IEND\xaeB`\x82"}, {"card.html", "text/html", "<!doctype html><title>Review</title><h1>Feed review</h1><p>Ready to inspect.</p>"}}
-	attachments := make([]contract.Attachment, len(files))
-	for i, f := range files {
-		req := httptest.NewRequest(http.MethodPost, "/v1/files?name="+f.name, strings.NewReader(f.body))
-		req.Header.Set("Content-Type", f.media)
+	upload := func(name, media, body string) (a contract.Attachment) {
+		req := httptest.NewRequest(http.MethodPost, "/v1/files?name="+name, strings.NewReader(body))
+		req.Header.Set("Content-Type", media)
 		rec := httptest.NewRecorder()
 		s.Files(owner, room.Room).ServeHTTP(rec, req)
-		fatal(json.Unmarshal(rec.Body.Bytes(), &attachments[i]))
+		fatal(json.Unmarshal(rec.Body.Bytes(), &a))
+		return a
 	}
-	post(owner, contract.PostRequest{Text: "Review these examples.", Attachments: attachments})
+	// A 640x360 gradient, so the image thumbnail has something to show.
+	shot := image.NewRGBA(image.Rect(0, 0, 640, 360))
+	for y := range 360 {
+		for x := range 640 {
+			shot.Set(x, y, color.RGBA{uint8(40 + x/5), uint8(60 + y/3), 150, 255})
+		}
+	}
+	var png bytes.Buffer
+	fatal(pngenc.Encode(&png, shot))
+	post(owner, contract.PostRequest{Text: "Review these examples.", Attachments: []contract.Attachment{
+		upload("preview.png", "image/png", png.String()),
+		upload("card.html", "text/html", "<!doctype html><title>Review</title><h1>Feed review</h1><p>Ready to inspect.</p>"),
+	}})
+	post(contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, contract.PostRequest{Text: "My notes from the review.",
+		Attachments: []contract.Attachment{upload("notes.txt", "text/plain", "The feed rows render.\nThe previews load.\n")}})
 	by := contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}
 	for _, program := range []string{"go", "npm"} {
 		args := contract.HostexecGrantArgs{Room: room.Room, To: by, Hosts: []contract.HostName{"fake"}, Commands: []contract.CommandRule{{Program: program, Args: []string{"test"}, Prefix: true}}, Mode: contract.GrantModeApprove}
