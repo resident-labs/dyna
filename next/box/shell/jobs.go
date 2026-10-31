@@ -221,7 +221,8 @@ func (s *Server) run(cancel <-chan struct{}, command, cwd, description string) (
 		if j.stopped {
 			j.end = &contract.ShellJobEnd{Kind: contract.ShellJobStopped}
 		}
-		report := j.background
+		// Until the web understands stopped endings, do not wake on an explicit stop.
+		report := j.background && !j.stopped
 		j.mu.Unlock()
 		close(j.done)
 		if report {
