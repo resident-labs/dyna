@@ -9,7 +9,7 @@
   import Avatar from "./Avatar.svelte";
   import { render } from "./PostRow.svelte";
   import { count, fileSize, type Quote } from "../feed.ts";
-  import type { FileDraft } from "../attach.svelte.ts";
+  import { maxFiles, type FileDraft } from "../attach.svelte.ts";
   import { hue } from "../identity.ts";
   import { mentionToken } from "../mentions.ts";
   // Enter sends and Shift+Enter starts a new line. The action row keeps room for the attach and mention buttons.
@@ -24,13 +24,23 @@
   let picker: HTMLInputElement | undefined = $state();
   // The line that names a refused file and why shows until the next add or send.
   let note = $state("");
-  let canSend = $derived(!files.busy && (!!value.trim() || !!quote || files.items.length > 0));
+  // A forwarded post's files count toward the engine's limit, so a post never carries more than it accepts.
+  let forwarded = $derived(quote?.attachments.length ?? 0);
+  let over = $derived(files.items.length + forwarded - maxFiles);
+  let canSend = $derived(!files.busy && over <= 0 && (!!value.trim() || !!quote || files.items.length > 0));
   const extension = (name: string) => /\.([A-Za-z0-9]{1,6})$/.exec(name)?.[1].toUpperCase() ?? "FILE";
-  function paste(event: ClipboardEvent) {
-    const pasted = event.clipboardData?.files;
-    if (!pasted?.length || event.clipboardData?.getData("text/plain")) return;
+  // v1's order (attach.ts pastedFiles): the files, else file items, else an image from the async clipboard. Files win over
+  // text, since Finder also puts the file name in text/plain; WebKitGTK may leave both empty for a screenshot.
+  async function paste(event: ClipboardEvent) {
+    const data = event.clipboardData, pasted = [...data?.files ?? []];
+    if (!pasted.length) for (const item of data?.items ?? []) { const file = item.kind === "file" ? item.getAsFile() : null; if (file) pasted.push(file); }
+    if (!pasted.length && data?.getData("text/plain")) return;
     event.preventDefault();
-    note = files.add(pasted);
+    if (!pasted.length) for (const item of await navigator.clipboard.read().catch(() => [])) {
+      const type = item.types.find(kind => /^image\/(png|jpeg|gif|webp)$/.test(kind));
+      if (type) pasted.push(new File([await item.getType(type)], `image.${type.split("/")[1]}`, { type }));
+    }
+    if (pasted.length) note = files.add(pasted, forwarded);
   }
   const id = $props.id();
   let caret = $state(0);
@@ -100,14 +110,14 @@
       {#if item.state === "failed"}<button type="button" class="retry" onclick={() => files.save(item.id)}>Retry</button>{/if}
       <button type="button" class="remove" aria-label="Remove {item.file.name}" title="Remove {item.file.name}" onclick={() => files.remove(item.id)}><Icon name="close" size={14} /></button>
     </li>{/each}</ul>{/if}
-  {#if note}<p class="note" role="status">{note}</p>{/if}
+  {#if note || over > 0}<p class="note" role="status">{over > 0 ? `A post can carry ${maxFiles} files; remove ${over} to send.` : note}</p>{/if}
   <textarea rows="2" aria-label="Message" bind:this={element} bind:value onkeydown={keydown} onpaste={paste} {placeholder}
     oninput={() => { dismissed = -1; track(); }} onclick={track} onkeyup={track} onblur={() => { dismissed = token?.start ?? -1; }} onfocus={() => { dismissed = -1; }}
     role="combobox" aria-autocomplete="list" aria-expanded={matches.length > 0} aria-controls={matches.length ? `${id}-list` : undefined}
     aria-activedescendant={matches.length ? `${id}-${pick}` : undefined}></textarea>
   <div class="actions">
     <button type="button" class="attach" aria-label="Attach files" title="Attach files" onclick={() => picker?.click()}><Icon name="clip" /></button>
-    <input bind:this={picker} type="file" multiple hidden onchange={event => { note = files.add(event.currentTarget.files ?? []); event.currentTarget.value = ""; element?.focus(); }} />
+    <input bind:this={picker} type="file" multiple hidden onchange={event => { note = files.add(event.currentTarget.files ?? [], forwarded); event.currentTarget.value = ""; element?.focus(); }} />
     <span class="keys">Enter to send · Shift+Enter for a new line</span>
     <button type="button" class="send" aria-label="Send" title="Send" disabled={!canSend} onclick={() => { note = ""; onsend(); element?.focus(); }}><Icon name="send" /></button>
   </div>
