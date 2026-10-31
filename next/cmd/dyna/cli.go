@@ -61,10 +61,10 @@ func newClient(socket string) *socketClient {
 }
 
 type requestType interface {
-	contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.HostexecRevokeRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest
+	contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.HostexecRevokeRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest
 }
 type responseType interface {
-	contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.HostexecRevokeResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse
+	contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.HostexecRevokeResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse
 }
 
 func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
@@ -92,6 +92,19 @@ func call[Q requestType, R responseType](ctx context.Context, c *socketClient, m
 	}
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	return result, err
+}
+
+func (c *socketClient) ConnectStart(ctx context.Context, q contract.ConnectStartRequest) (contract.ConnectStartResponse, error) {
+	return call[contract.ConnectStartRequest, contract.ConnectStartResponse](ctx, c, contract.MethodConnectStart, q)
+}
+func (c *socketClient) ConnectStatus(ctx context.Context, q contract.ConnectStatusRequest) (contract.ConnectStatusResponse, error) {
+	return call[contract.ConnectStatusRequest, contract.ConnectStatusResponse](ctx, c, contract.MethodConnectStatus, q)
+}
+func (c *socketClient) ConnectCancel(ctx context.Context, q contract.ConnectCancelRequest) (contract.ConnectCancelResponse, error) {
+	return call[contract.ConnectCancelRequest, contract.ConnectCancelResponse](ctx, c, contract.MethodConnectCancel, q)
+}
+func (c *socketClient) ConnectUnlink(ctx context.Context, q contract.ConnectUnlinkRequest) (contract.ConnectUnlinkResponse, error) {
+	return call[contract.ConnectUnlinkRequest, contract.ConnectUnlinkResponse](ctx, c, contract.MethodConnectUnlink, q)
 }
 
 func (c *socketClient) HostexecRun(ctx context.Context, q contract.HostexecRunRequest) (contract.HostexecRunResponse, error) {
@@ -584,6 +597,54 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	_ = opDeny.MarkFlagRequired("reason") // fails only for an undefined flag, and "reason" is defined above
 	op.AddCommand(opList, opApprove, opDeny)
 	root.AddCommand(op)
+
+	connect := &cobra.Command{Use: "connect"}
+	type connectClient interface {
+		ConnectStart(context.Context, contract.ConnectStartRequest) (contract.ConnectStartResponse, error)
+		ConnectStatus(context.Context, contract.ConnectStatusRequest) (contract.ConnectStatusResponse, error)
+		ConnectCancel(context.Context, contract.ConnectCancelRequest) (contract.ConnectCancelResponse, error)
+		ConnectUnlink(context.Context, contract.ConnectUnlinkRequest) (contract.ConnectUnlinkResponse, error)
+	}
+	getConnect := func() (connectClient, error) {
+		c, ok := getClient().(connectClient)
+		if !ok {
+			return nil, fmt.Errorf("Connect unavailable")
+		}
+		return c, nil
+	}
+	connect.AddCommand(&cobra.Command{Use: "start RELAY NAME", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := getConnect()
+		if err != nil {
+			return err
+		}
+		_, err = c.ConnectStart(cmd.Context(), contract.ConnectStartRequest{Relay: args[0], Name: args[1]})
+		return err
+	}}, &cobra.Command{Use: "status", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		c, err := getConnect()
+		if err != nil {
+			return err
+		}
+		status, err := c.ConnectStatus(cmd.Context(), contract.ConnectStatusRequest{})
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(status)
+	}}, &cobra.Command{Use: "cancel", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		c, err := getConnect()
+		if err != nil {
+			return err
+		}
+		_, err = c.ConnectCancel(cmd.Context(), contract.ConnectCancelRequest{})
+		return err
+	}}, &cobra.Command{Use: "unlink", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		c, err := getConnect()
+		if err != nil {
+			return err
+		}
+		_, err = c.ConnectUnlink(cmd.Context(), contract.ConnectUnlinkRequest{})
+		return err
+	}})
+	root.AddCommand(connect)
 
 	device := &cobra.Command{Use: "device"}
 	var pairScopes []string

@@ -1,5 +1,30 @@
 package contract
 
+const (
+	MethodConnectStart  Method = "connect.start"
+	MethodConnectStatus Method = "connect.status"
+	MethodConnectCancel Method = "connect.cancel"
+	MethodConnectUnlink Method = "connect.unlink"
+)
+
+type ConnectStartRequest struct {
+	Relay string `json:"relay"`
+	Name  string `json:"name"`
+}
+type ConnectStartResponse struct{}
+type ConnectStatusRequest struct{}
+type ConnectStatusResponse struct {
+	Attempt     ConnectAttempt `json:"attempt"`
+	URL         string         `json:"url,omitempty"`
+	Code        string         `json:"code,omitempty"`
+	Fingerprint string         `json:"fingerprint,omitempty"`
+	Linked      bool           `json:"linked"`
+}
+type ConnectCancelRequest struct{}
+type ConnectCancelResponse struct{}
+type ConnectUnlinkRequest struct{}
+type ConnectUnlinkResponse struct{}
+
 // ConnectAttemptState is the durable state of the owner's link attempt.
 type ConnectAttemptState string
 
