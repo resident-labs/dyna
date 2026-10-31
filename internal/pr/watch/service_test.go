@@ -325,6 +325,12 @@ func stallStacks(t *testing.T) {
 	t.Cleanup(func() { timer.Stop() })
 }
 
+// fixtureClock is the real clock minus a week, once per test process, on a minute
+// boundary as nextPollTime expects. state.Write drops closed records older than 14
+// days, so a fixed date would expire, and the clock must stay inside that window.
+// One value per process keeps repeated runs identical.
+var fixtureClock = time.Now().UTC().Add(-7 * 24 * time.Hour).Truncate(time.Minute)
+
 func newEnv(t *testing.T) *testEnv {
 	t.Helper()
 	stallStacks(t)
@@ -337,7 +343,7 @@ func newEnv(t *testing.T) *testEnv {
 	}
 	roomfixture.Repository(t, room.DefaultStore(), scoped.ID, "github.com", "owner/repo", "read-write")
 	// The real clock, on a minute boundary as nextPollTime expects: state.Write drops closed records older than 14 days, so a fixed date would expire.
-	e := &testEnv{t: t, file: filepath.Join(dir, "fixture.json"), calls: filepath.Join(dir, "calls"), clock: time.Now().UTC().Truncate(time.Minute)}
+	e := &testEnv{t: t, file: filepath.Join(dir, "fixture.json"), calls: filepath.Join(dir, "calls"), clock: fixtureClock}
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
