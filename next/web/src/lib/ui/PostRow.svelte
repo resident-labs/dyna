@@ -184,7 +184,6 @@
 
 <style>
   .swipe { position: relative; }
-  @media (pointer: coarse) { .swipe { overflow: hidden; } }
   .cue { position: absolute; left: 12px; top: 29px; z-index: 1; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--selected); color: var(--muted); opacity: .4; transform: scale(.8); }
   .cue:not(.first) { top: 15px; }
   .cue.ready { background: var(--focus); color: var(--bg); opacity: 1; transform: scale(1.15); }
