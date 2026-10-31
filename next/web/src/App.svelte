@@ -1,5 +1,6 @@
 <script lang="ts">
   import { watchHello } from "./lib/stream.ts";
+  import { FormDrafts } from "./lib/form-drafts.ts";
   import { tick, untrack } from "svelte";
   import { RoomStore } from "./lib/room.svelte.ts";
   import { blockedBy, call, retryDelay, type Blocked as BlockedState } from "./lib/client.ts";
@@ -45,6 +46,13 @@
   // A pairing link leaves the address bar and history at once, whatever this browser's state. Only a signed-out page uses it.
   const pairCode = linkCode(window.location.hash);
   if (window.location.hash.includes("pair=")) history.replaceState(null, "", window.location.pathname + window.location.search);
+  const formDrafts = new FormDrafts();
+  function formEvent(event: FocusEvent | Event) {
+    const control = event.target;
+    if (control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement) {
+      if (event.type === "focusin") formDrafts.focus(control); else formDrafts.input(control);
+    }
+  }
   let firstBuild: string | undefined;
   let reloadPending = $state(false);
   watchHello(({ build }) => {
@@ -53,7 +61,7 @@
     const focused = document.activeElement;
     const hasWork = Object.values(drafts).some(Boolean) || Object.values(quotes).some(Boolean) ||
       Object.values(unsent).some(list => list.length) || [...fileDrafts.values()].some(draft => draft.items.length > 0) ||
-      terminals?.hasInput() || ((focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement) && focused.value);
+      formDrafts.pending || terminals?.hasInput() || ((focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement) && focused.value);
     if (hasWork) reloadPending = true; else location.reload();
   });
   const attention = new Attention();
@@ -548,7 +556,7 @@
     onclose={tapped => void stopWatching(tapped)} ondock={event => { docked = !docked; dockChosen = true; if (docked && !panelShown) void showPanel(true, event.detail > 0); }} />{/key}
 {/snippet}
 
-<svelte:window onkeydown={cycle} onclickcapture={dismissRequests} />
+<svelte:window onkeydown={cycle} onclickcapture={dismissRequests} onfocusin={formEvent} oninput={formEvent} />
 {#if palette}<Palette {rooms} {room} search={searchPosts} onclose={closePalette} onopen={paletteOpen} />{/if}
 {#snippet sheetHandle(of: string)}
   <button type="button" class="handle" aria-label={sheetFull ? `Shrink the ${of} sheet` : `Expand the ${of} sheet`}
