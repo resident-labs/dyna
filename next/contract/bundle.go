@@ -272,9 +272,9 @@ type IssueBundle struct {
 	Notes     []IssueNote    `json:"notes,omitempty"`
 }
 
-// TrackedPR records only which session owns an open PR. Everything else,
-// such as branch, reviews and CI, is read from GitHub.
+// TrackedPR records ownership and the branch needed to push after import.
 type TrackedPR struct {
+	Branch string         `json:"branch,omitempty"`
 	Repo   RepoName       `json:"repo"`
 	Number int            `json:"number"`
 	Author ImportedAuthor `json:"author"`

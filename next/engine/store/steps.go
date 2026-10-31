@@ -6,10 +6,11 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 28
+const schemaVersion = 29
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	28: {`ALTER TABLE pr_owners ADD COLUMN branch TEXT NOT NULL DEFAULT ''`, `UPDATE pr_owners SET branch=COALESCE((SELECT 'v2/'||json_extract(CAST(body AS TEXT),'$.session') FROM events WHERE type='pr.opened' AND json_extract(CAST(body AS TEXT),'$.repo')=pr_owners.repo AND json_extract(CAST(body AS TEXT),'$.number')=pr_owners.number ORDER BY seq DESC LIMIT 1),'')`},
 	27: {`CREATE TABLE backup_copy_status (id INTEGER PRIMARY KEY CHECK(id=1), last_success INTEGER, failure TEXT NOT NULL)`},
 	26: {`ALTER TABLE sessions ADD COLUMN model_retry_at INTEGER NOT NULL DEFAULT 0`, `ALTER TABLE sessions ADD COLUMN model_retries INTEGER NOT NULL DEFAULT 0`},
 	25: {`ALTER TABLE turns ADD COLUMN stop_requested_at INTEGER`},
