@@ -3,8 +3,12 @@ package dynamcp
 import (
 	"context"
 	"encoding/json"
+	"github.com/resident-labs/dyna/box/post"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -95,7 +99,25 @@ func TestActionDecodeIsStrict(t *testing.T) {
 	}
 }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
 func TestPostPreparesLocalAttachments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "report.txt")
+	if err := os.WriteFile(path, []byte("report"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/files" || r.URL.Query().Get("name") != "report.txt" || string(data) != "report" {
+			t.Fatalf("upload: %s %s %q", r.Method, r.URL, data)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"name":"report.txt","sha256":"hash"}`)), Header: make(http.Header)}, nil
+	})}
 	var sent contract.PostRequest
 	server, err := New(func(_ context.Context, method contract.Method, body []byte) ([]byte, *contract.Error) {
 		if method != contract.MethodPost {
@@ -105,17 +127,20 @@ func TestPostPreparesLocalAttachments(t *testing.T) {
 			t.Fatal(err)
 		}
 		return []byte(`{"event":"e"}`), nil
-	}, nil, func(_ context.Context, path string) (contract.Attachment, error) {
-		if path != "report.txt" {
-			t.Fatalf("path %q", path)
-		}
-		return contract.Attachment{Name: "report.txt", SHA256: "hash"}, nil
+	}, nil, func(ctx context.Context, path string) (contract.Attachment, error) {
+		return post.UploadHTTP(ctx, client, path)
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	arguments, _ := json.Marshal(struct {
+		Action   string   `json:"action"`
+		Text     string   `json:"text"`
+		Paths    []string `json:"paths"`
+		ClientID string   `json:"clientId"`
+	}{"send", "hello", []string{path}, "retry"})
 	var args map[string]json.RawMessage
-	_ = json.Unmarshal([]byte(`{"action":"send","text":"hello","paths":["report.txt"],"clientId":"retry"}`), &args)
+	_ = json.Unmarshal(arguments, &args)
 	res := server.call(context.Background(), callParams{Name: "post", Arguments: args})
 	if res.IsError || sent.ClientID != "retry" || len(sent.Attachments) != 1 || sent.Attachments[0].SHA256 != "hash" {
 		t.Fatalf("result %+v post %+v", res, sent)
