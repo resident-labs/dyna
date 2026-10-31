@@ -205,8 +205,7 @@ export class EventWindow {
   }
 
   discard(id: number): void {
-    const request = this.pendingPosts.get(id)?.request;
-    this.pendingPosts.delete(id);
-    if (request) this.onsettled(request);
+    const post = this.pendingPosts.get(id);
+    if (post && this.pendingPosts.delete(id)) this.onsettled(post.request);
   }
 }
