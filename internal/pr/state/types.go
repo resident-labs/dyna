@@ -544,6 +544,7 @@ type RateLimit struct {
 	Remaining         *int      `json:"remaining,omitempty"`
 	Reset             time.Time `json:"reset,omitempty"`
 	PauseUntil        time.Time `json:"pauseUntil,omitempty"`
+	PauseObservedAt   time.Time `json:"pauseObservedAt,omitzero"`
 	Reason            string    `json:"reason,omitempty"`
 	SecondaryFailures int       `json:"secondaryFailures,omitempty"`
 }
