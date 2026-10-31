@@ -5,7 +5,7 @@
   import type { Attention } from "../attention.svelte.ts";
   import type { AccountUsage, Card, HostSummary, Principal, SessionListResponse } from "../contract.gen.ts";
   import { boxReason, fromNow, requestLine } from "../feed.ts";
-  import { hostMeters, watchHosts } from "../hosts.ts";
+  import { hostLabel, hostMeters, watchHosts } from "../hosts.ts";
   import { busiestWindow } from "../usage.ts";
   import { distinctInitials, hue, initials as letters } from "../identity.ts";
   import Avatar from "./Avatar.svelte";
@@ -146,8 +146,11 @@
   let roomsWorking = $derived(workingCounts.filter(Boolean).length);
   let unreachable = $derived(hosts?.filter(h => !h.reachable).length ?? 0);
   let failing = $derived(total(attention.broken));
+  let low = $derived(hosts?.filter(h => h.diskLow) ?? []);
+  let lowDisk = $derived(low.length === 1 ? `${hostLabel(low[0].name)} is low on disk` : `${low.length} machines are low on disk`);
   let summary = $derived([
     asks && failing && `${count(failing, "session")} failed`,
+    (asks || failing) && low.length && lowDisk,
     roomsWorking && `${count(roomsWorking, "room")} working`,
     hosts?.length && count(hosts.length, "machine") + (unreachable ? `, ${unreachable} unreachable` : ""),
     accounts && busiestWindow(accounts),
@@ -157,7 +160,7 @@
 <div class="home">
   <!-- Until room.list answers, the sentence is a skeleton of the same height: Home never claims nothing waits before it knows. -->
   {#if !loaded}<p class="hero skeleton" aria-hidden="true"><i></i><i></i></p>
-  {:else}<p class="hero">{asks ? `${count(asks, "request")} ${asks === 1 ? "waits" : "wait"} for you.` : failing ? `${count(failing, "session")} failed.` : "Nothing needs you."}{#if summary}<span>{summary}</span>{/if}</p>{/if}
+  {:else}<p class="hero">{asks ? `${count(asks, "request")} ${asks === 1 ? "waits" : "wait"} for you.` : failing ? `${count(failing, "session")} failed.` : low.length ? `${lowDisk}.` : "Nothing needs you."}{#if summary}<span>{summary}</span>{/if}</p>{/if}
   <!-- Requests while any wait, then Activity, each a full-width card whose rows fill a grid of about 280 px columns. -->
   <div class="top">
     {#if asks || decided.size}<section class="card requests"><h2 tabindex="-1" bind:this={requestsHeading}>Requests{#if waiting.length}<span>{waiting.length}</span>{/if}</h2>

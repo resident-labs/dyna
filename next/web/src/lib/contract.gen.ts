@@ -29,7 +29,7 @@ export type HostAddRequest = { name: HostName; ssh: string; ownerOnlyAdmin: bool
 export type HostAddResponse = { };
 export type HostListRequest = { };
 export type HostListResponse = { hosts: Array<HostSummary> | null; };
-export type HostSummary = { name: HostName; reachable: boolean; boxes: number; cpus: number; memBytes: number; cpuUsed: number; memUsed: number; diskBytes: number; diskUsed: number; lastSeen?: string; history: Array<HostLoadPoint> | null; };
+export type HostSummary = { name: HostName; reachable: boolean; boxes: number; cpus: number; memBytes: number; cpuUsed: number; memUsed: number; diskBytes: number; diskUsed: number; diskLow: boolean; lastSeen?: string; history: Array<HostLoadPoint> | null; };
 export type HostLoadPoint = { at: string; cpuUsed: number; memUsed: number; };
 export type RoomCreateRequest = { name: string; rootProfile: ProfileName; };
 export type RoomCreateResponse = { room: RoomID; };
@@ -159,6 +159,7 @@ export type ComputerChanged = { session: SessionID; to: ComputerState; };
 export type BoxChanged = { box: BoxID; session: SessionID; host?: HostName; from?: BoxState; to: BoxState; cause?: FailureCause; reason?: string; };
 export type FailureCause = "create_failed" | "start_failed" | "no_hello" | "engine_restarted" | "remove_failed" | "archive_failed" | "grant_inactive" | "host_lost" | "host_busy" | "github_failed" | "stale" | "interrupted" | "internal" | "setup_failed" | "model_failed" | "output_limit" | "harness_failed";
 export type PressureKind = "high" | "max";
+export type HostDiskLow = { host: HostName; freeBytes: number; floorBytes: number; };
 export type BoxPressure = { box: BoxID; kind: PressureKind; };
 export type ImageBuilt = { host: HostName; repo: RepoName; name: string; tag: string; seconds: number; };
 export type ImageFailed = { host: HostName; repo: RepoName; name: string; tag: string; reason: string; logTail: string; };
@@ -222,6 +223,7 @@ export type EventBody =
   | { type: "computer.changed"; body: ComputerChanged }
   | { type: "conversation.read"; body: ConversationRead }
   | { type: "grant.expired"; body: GrantExpired }
+  | { type: "host.disk_low"; body: HostDiskLow }
   | { type: "image.built"; body: ImageBuilt }
   | { type: "image.failed"; body: ImageFailed }
   | { type: "op.decided"; body: OpDecided }
