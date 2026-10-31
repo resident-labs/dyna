@@ -81,9 +81,10 @@
 </script>
 
 {#snippet action()}<a class="btn add-button" href={base + "/add"} onclick={(e) => { reset(); label = ""; navigate(e); }}>+ Add an account</a>{/snippet}
-{#snippet back()}<a id="accounts-back" href={base} onclick={navigate}>Accounts</a>{/snippet}
+{#snippet back()}<a href={base} onclick={navigate}>Accounts</a>{/snippet}
+<a id="accounts-back" href={base} onclick={navigate} hidden>Back to Accounts</a>
 {#if adding || accountId}
-  <header class="subbar">{@render back()} <span>/</span> <strong>{adding ? (phone && selected ? selected.displayName : "Add an account") : account?.label || "Account"}</strong></header>
+  <header class="subbar">{#if phone && adding && selected}<a href={base + "/add"} onclick={navigate}>Back</a>{:else}{@render back()}{/if} <span>/</span> <strong>{adding ? (phone && selected ? selected.displayName : "Add an account") : account?.label || "Account"}</strong></header>
 {:else}{@render bar("Accounts", loaded ? accounts.length : undefined, action)}{/if}
 <div class="body">
 {#if failed}<p>Accounts did not load. <button class="btn" type="button" onclick={reload}>Try again</button></p>
@@ -160,7 +161,7 @@
     </section>
   {:else}<p>Account not found. {@render back()}</p>{/if}
 {:else}
-  <p class="muted">{accounts.length} {accounts.length === 1 ? "account" : "accounts"} with {new Set(accounts.map(a => a.provider)).size} providers</p>
+  <p class="muted">{#if accounts.length}{accounts.length} {accounts.length === 1 ? "account" : "accounts"} with {new Set(accounts.map(a => a.provider)).size} providers{:else}Accounts you connect will appear here.{/if}</p>
   {#each providers.filter(p => accounts.some(a => a.provider === p.id)) as provider (provider.id)}
     {@const group = accountRows(accounts.filter(a => a.provider === provider.id))}
     <section><div class="heading"><h2><span class="initial">{provider.displayName.slice(0, 1)}</span>{provider.displayName}</h2><span class="muted">{group.length} · {provider.connectMethod === "key" ? "API key" : "Sign-in"}</span><a class="btn ghost" href={providerPath(provider.id)} onclick={(e) => { reset(); label = ""; navigate(e); }}>{provider.connectMethod === "key" ? "+ Add a key" : "+ Connect another"}</a></div>
