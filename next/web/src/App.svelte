@@ -404,11 +404,12 @@
   <aside class="rail" aria-label="Rooms" tabindex="-1" bind:this={rail} inert={phone.current && !drawer} role={drawer ? "dialog" : undefined} aria-modal={drawer || undefined}
     onclick={event => { if (drawer && event.target instanceof Element && event.target.closest("a, button")) void showDrawer(false, false); }}>
     <nav aria-label="Rooms"><a class="home" href="/" onclick={navigate} aria-current={room ? undefined : "page"} aria-label="Home" title="Home"><Icon name="home" /></a>
-      <!-- A room with requests that wait for the owner gets an amber dot on its corner, with no number (spec 5.13). -->
-      {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}
+      <!-- A room with requests that wait for the owner gets an amber dot on its corner, with no number (spec 5.13). A room
+           with a failed session gets a red one instead, in the priority order of status.ts. -->
+      {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}{@const failing = attention.failing(item.id)}
       <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id ? "page" : undefined}
-        aria-label={waiting ? `${item.name}, ${count(waiting, "request")} waiting` : item.name} title={item.name}>
-        <Avatar kind="room" name={item.name} label={initials.get(item.name)} size={40} />{#if waiting}<StatusPill tone="warning" label="Waiting" dot />{/if}</a>
+        aria-label={[item.name, failing && `${count(failing, "session")} failed`, waiting && `${count(waiting, "request")} waiting`].filter(Boolean).join(", ")} title={item.name}>
+        <Avatar kind="room" name={item.name} label={initials.get(item.name)} size={40} />{#if failing}<StatusPill tone="failed" label="Failed" dot />{:else if waiting}<StatusPill tone="warning" label="Waiting" dot />{/if}</a>
     {/each}</nav>
     <!-- The owner's face from the feed; v2 has no owner name or account menu yet. -->
     <footer><span role="img" aria-label="You" title="You"><Avatar kind="owner" name="You" size={32} /></span></footer>
