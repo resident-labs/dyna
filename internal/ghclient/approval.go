@@ -75,13 +75,13 @@ func decideCommand(ctx context.Context, cmd *exec.Cmd, r repository, login strin
 			_, comment := ownCommentCall(cmd.Args[1:])
 			write = isRepoFork(cmd.Args[1:]) || comment
 		}
-		// Editing a comment requires authorship, not repository push access.
-		if commentWrite {
-			write = false
-		}
 		priorLogin := login
 		var accountErr error
-		login, commentToken, accountErr = selectAccountForRoom(ctx, cmd, r, rec, write)
+		if commentWrite {
+			login, commentToken, accountErr = selectCommentAccount(ctx, cmd, r, rec)
+		} else {
+			login, commentToken, accountErr = selectAccountForRoom(ctx, cmd, r, rec, write)
+		}
 		if (accountErr != nil || login == "" || commentToken == "" || priorLogin != "" && !strings.EqualFold(priorLogin, login)) && commentWrite {
 			d := Decision{Rule: "comment-account", Refusal: ReasonCommentAccount}
 			return w, d, &RefusalError{Write: w, Decision: d}
