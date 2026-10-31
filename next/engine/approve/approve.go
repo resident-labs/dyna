@@ -103,16 +103,8 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 		return contract.Operation{}, err
 	}
 	if clientID != "" {
-		var previous store.StoredOperation
-		err := s.Store.Write(ctx, func(tx *sql.Tx) error {
-			var err error
-			previous, err = s.Store.ReplayOperation(tx, who, clientID)
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil
-			}
-			return err
-		})
-		if err != nil {
+		previous, err := s.Store.ReadReplayOperation(ctx, who, clientID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return contract.Operation{}, err
 		}
 		if previous.Operation.ID != "" {
@@ -165,11 +157,13 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 		}
 	}
 	var previous store.StoredOperation
+	var replay bool
 	err = s.Store.Write(ctx, func(tx *sql.Tx) error {
 		if clientID != "" {
 			found, err := s.Store.ReplayOperation(tx, who, clientID)
 			if err == nil {
 				previous = found
+				replay = true
 				return nil
 			}
 			if !errors.Is(err, sql.ErrNoRows) {
@@ -187,8 +181,7 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 		} else if err == nil {
 			previous = found
 			if clientID != "" {
-				_, err := tx.Exec("INSERT INTO operation_replays(caller_kind,caller_id,client_id,operation) VALUES(?,?,?,?)", who.Kind, who.Session, clientID, found.Operation.ID)
-				return err
+				return s.Store.InsertOperationReplay(tx, who, clientID, found.Operation.ID)
 			}
 			return nil
 		}
@@ -199,8 +192,7 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 			return err
 		}
 		if clientID != "" {
-			_, err := tx.Exec("INSERT INTO operation_replays(caller_kind,caller_id,client_id,operation) VALUES(?,?,?,?)", who.Kind, who.Session, clientID, op.ID)
-			return err
+			return s.Store.InsertOperationReplay(tx, who, clientID, op.ID)
 		}
 		return nil
 	})
@@ -208,7 +200,11 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 		return contract.Operation{}, err
 	}
 	if previous.Operation.ID != "" {
-		return s.decodeReplay(previous, input)
+		if replay {
+			return s.decodeReplay(previous, input)
+		}
+		previous.Operation.Args = input.Args
+		return previous.Operation, nil
 	}
 	if !immediate {
 		return op, nil

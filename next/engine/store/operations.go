@@ -55,6 +55,16 @@ func (s *Store) Operation(ctx context.Context, id contract.OpID) (StoredOperatio
 	return scanOperation(s.read.QueryRowContext(ctx, "SELECT "+operationColumns+" FROM operations WHERE id=?", id))
 }
 
+// ReadReplayOperation finds a caller's keyed operation outside a write transaction.
+func (s *Store) ReadReplayOperation(ctx context.Context, caller contract.Principal, clientID string) (StoredOperation, error) {
+	return scanOperation(s.read.QueryRowContext(ctx, "SELECT "+operationColumns+" FROM operations WHERE id=(SELECT operation FROM operation_replays WHERE caller_kind=? AND caller_id=? AND client_id=?)", caller.Kind, caller.Session, clientID))
+}
+
+func (s *Store) InsertOperationReplay(tx *sql.Tx, caller contract.Principal, clientID string, op contract.OpID) error {
+	_, err := tx.Exec("INSERT INTO operation_replays(caller_kind,caller_id,client_id,operation) VALUES(?,?,?,?)", caller.Kind, caller.Session, clientID, op)
+	return err
+}
+
 // ReplayOperation finds a caller's keyed operation in the active write transaction.
 func (s *Store) ReplayOperation(tx *sql.Tx, caller contract.Principal, clientID string) (StoredOperation, error) {
 	return scanOperation(tx.QueryRow("SELECT "+operationColumns+" FROM operations WHERE id=(SELECT operation FROM operation_replays WHERE caller_kind=? AND caller_id=? AND client_id=?)", caller.Kind, caller.Session, clientID))
