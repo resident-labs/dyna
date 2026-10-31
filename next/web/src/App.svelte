@@ -83,6 +83,7 @@
   let view: Feed | undefined = $state();
   let rail: HTMLElement;
   let feed: HTMLDivElement | undefined = $state();
+  let requests: HTMLElement | undefined = $state();
   let composer: HTMLTextAreaElement | undefined = $state();
   let members: HTMLElement | undefined = $state();
   // F6 (mod+F6 in a browser) moves focus between areas; Shift goes back.
@@ -92,7 +93,8 @@
     if (event.key !== "F6") return;
     event.preventDefault();
     // Only areas on screen take part; below 900 px the closed sessions panel has no boxes.
-    const areas = [rail, feed, composer, members].filter(area => area !== undefined)
+    // A panel from the room menu takes the place of the feed and the composer.
+    const areas = [rail, section ? requests : feed, section ? undefined : composer, members].filter(area => area != null)
       .filter(area => area.getClientRects().length > 0);
     const index = areas.findIndex(area => area.contains(document.activeElement));
     areas[(index + (event.shiftKey ? areas.length - 1 : 1)) % areas.length].focus();
@@ -171,7 +173,7 @@
       {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={store?.failed.size ? "Sessions, a turn failed" : "Sessions"}
         title="Sessions" aria-controls="sessions" aria-expanded={panel} onclick={() => void showPanel(!panel)}><Icon name="people" />
         {#if store?.failed.size && !panel}<span class="attention"></span>{/if}</button>{/if}</header>
-    {#if section === "requests" && store && !unavailable}<RequestsPanel {store} room={roomName} onback={() => void closeSection()} />
+    {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={requests} {store} room={roomName} onback={() => void closeSection()} />
     {:else}<div class="feed">
       {#if store && !unavailable}
         {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} {intro} />{/key}

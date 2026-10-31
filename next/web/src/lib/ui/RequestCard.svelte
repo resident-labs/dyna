@@ -15,13 +15,14 @@
   let root = $derived(open !== undefined && !open.parent);
   // An agent-class request may also be decided by the requester's parent session.
   let parent = $derived(open?.parent && store.names.get(open.parent));
-  let target = $derived(request.card.target.kind === "room" ? "this room" : `${request.card.target.kind} ${request.card.target.name}`);
   // One muted line for a decided request, such as "Denied by You · 2 minutes ago · “Use CI”". The engine decides expiry.
   let decided = $derived.by(() => {
     const decision = request.decision;
     return [
       outcome[request.state] + (decision && decision.by.kind !== "engine" ? ` by ${name(decision.by)}` : ""),
-      decision && fromNow(decision.at, now), decision?.reason && request.state !== "expired" && `“${decision.reason}”`, request.result?.error,
+      decision && fromNow(decision.at, now), decision?.reason && request.state !== "expired" && `“${decision.reason}”`,
+      // The engine's error text is raw (r8); the Run failed pill and the exit code say what happened.
+      request.state === "failed" && request.result?.exitCode && `exited with code ${request.result.exitCode}`,
     ].filter(part => typeof part === "string" && part !== "").join(" · ");
   });
   let reason = $state("");
@@ -41,7 +42,7 @@
 <article class="request" class:decided={request.state !== "pending"}>
   <strong>{request.card.title}</strong>
   <p class="meta"><Avatar kind={request.by.kind} name={name(request.by)} {root} size={20} /><span class="who">{name(request.by)}</span>
-    <span>· {target}</span>{#if request.state === "pending"}<span>· expires {fromNow(request.expires, now)}</span>
+    {#if request.card.target.kind !== "room"}<span>· {request.card.target.kind} {request.card.target.name}</span>{/if}{#if request.state === "pending"}<span>· expires {fromNow(request.expires, now)}</span>
       {#if request.class === "agent" && parent}<span>· {parent} can also decide</span>{/if}{/if}</p>
   {#if request.card.body}<p class="body">{request.card.body}</p>{/if}
   {#if request.card.command?.length}<pre>{commandLine(request.card.command)}</pre>{/if}
