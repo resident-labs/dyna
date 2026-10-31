@@ -12,6 +12,9 @@ import (
 // DynaMemoryOAuthCallbacks is set before the proxy starts.
 var DynaMemoryOAuthCallbacks bool
 
+// DynaOAuthCompletionHook handles a saved OAuth result before the flow returns.
+var DynaOAuthCompletionHook func(state, authID string)
+
 type dynaCallback struct {
 	ch        chan oauthCallbackFilePayload
 	delivered bool
