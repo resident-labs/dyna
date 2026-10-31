@@ -85,7 +85,7 @@
 <span class="jobs" bind:this={root}>
   <button type="button" class="open" class:live={running || failures.length} class:phone bind:this={button} aria-haspopup="dialog" aria-expanded={open}
     aria-label={`Jobs, ${summary}`} title={summary} onclick={() => { if (open) void close(); else void show(); }}>
-    <Icon name="terminal" />{#if phone}{#if failures.length}<span class="corner"><StatusPill tone="failed" dot label="Failed" /></span>
+    <Icon name="prompt" />{#if phone}{#if failures.length}<span class="corner"><StatusPill tone="failed" dot label="Failed" /></span>
       {:else if running}<span class="corner"><StatusPill tone="working" dot label="Running" /></span>{/if}
     {:else}<span>Jobs</span>
       {#if running}<StatusPill tone="working" dot label="Running" /><span class="n">{running}</span>{/if}
