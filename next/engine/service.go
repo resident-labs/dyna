@@ -33,19 +33,21 @@ type Repositories interface {
 }
 
 type Service struct {
-	store     *store.Store
-	boxes     BoxAdapter
-	profiles  Profiles
-	repos     Repositories
-	approvals *approve.Service
-	now       func() time.Time
-	mu        sync.Mutex
-	channels  map[contract.SessionID]*boxChannel
-	admit     sync.Mutex
-	boxLockMu sync.Mutex
-	boxLocks  map[contract.SessionID]*sync.Mutex
-	boxRuns   map[contract.SessionID]*boxRun
-	dormancy  dormancy
+	store           *store.Store
+	boxes           BoxAdapter
+	profiles        Profiles
+	repos           Repositories
+	approvals       *approve.Service
+	hostexec        HostexecRunner
+	hostexecTimeout func(context.Context, time.Duration) (context.Context, context.CancelFunc)
+	now             func() time.Time
+	mu              sync.Mutex
+	channels        map[contract.SessionID]*boxChannel
+	admit           sync.Mutex
+	boxLockMu       sync.Mutex
+	boxLocks        map[contract.SessionID]*sync.Mutex
+	boxRuns         map[contract.SessionID]*boxRun
+	dormancy        dormancy
 	// transcriptMu serializes appends, so each offset check and write runs alone.
 	transcriptMu  sync.Mutex
 	transcriptDir string
@@ -58,7 +60,7 @@ type boxRun struct {
 }
 
 func New(st *store.Store, boxes BoxAdapter, profiles Profiles, now func() time.Time) *Service {
-	return &Service{store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun), dormancy: dormancy{unconfirmed: make(map[contract.BoxID]bool), failedStarts: make(map[contract.BoxID]bool)}}
+	return &Service{hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun), dormancy: dormancy{unconfirmed: make(map[contract.BoxID]bool), failedStarts: make(map[contract.BoxID]bool)}}
 }
 
 // SetRepositories configures repository lookup before the service starts.

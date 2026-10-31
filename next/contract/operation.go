@@ -93,7 +93,8 @@ type OpResult struct {
 	PR         *PrOpenResult `json:"pr,omitempty"`
 	ExitCode   int           `json:"exitCode"`
 	Error      string        `json:"error,omitempty"`
-	Output     string        `json:"output,omitempty"`     // up to 64 KiB inline
+	Output     string        `json:"output,omitempty"` // up to 64 KiB inline
+	Truncated  bool          `json:"truncated,omitempty"`
 	OutputFile string        `json:"outputFile,omitempty"` // the rest, by hash
 }
 

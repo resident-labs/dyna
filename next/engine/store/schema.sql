@@ -30,3 +30,5 @@ CREATE INDEX operations_state_expires ON operations(state, expires_at);
 CREATE TABLE grants (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id), to_kind TEXT NOT NULL, to_id TEXT NOT NULL, mode TEXT NOT NULL, hosts BLOB NOT NULL, commands BLOB NOT NULL, expires_at INTEGER, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at INTEGER NOT NULL, revoked_at INTEGER, expired_at INTEGER);
 CREATE INDEX grants_expiry ON grants(expires_at) WHERE expired_at IS NULL AND revoked_at IS NULL;
 CREATE INDEX grants_room_principal ON grants(room, to_id);
+CREATE TABLE hostexec_runs (op TEXT PRIMARY KEY REFERENCES operations(id), grant_id TEXT NOT NULL REFERENCES grants(id), host TEXT NOT NULL, scope TEXT NOT NULL, started_at INTEGER NOT NULL, timeout_ms INTEGER NOT NULL, ended_at INTEGER, output_bytes INTEGER NOT NULL DEFAULT 0, stopped TEXT NOT NULL DEFAULT '');
+CREATE INDEX hostexec_runs_grant ON hostexec_runs(grant_id, ended_at);
