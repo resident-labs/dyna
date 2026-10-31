@@ -2,6 +2,7 @@
 package contract
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -231,7 +232,9 @@ func (o *Operation) UnmarshalJSON(data []byte) error {
 	}
 	var p plain
 	w.plain = &p
-	if err := json.Unmarshal(data, &w); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&w); err != nil {
 		return err
 	}
 	args, err := decodeOpArgs(p.Kind, w.Args)
@@ -246,25 +249,33 @@ func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs, error) {
 	switch k {
 	case "accounts.action":
 		var v AccountsActionArgs
-		if err := json.Unmarshal(data, &v); err != nil {
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&v); err != nil {
 			return nil, err
 		}
 		return v, nil
 	case "hostexec.grant":
 		var v HostexecGrantArgs
-		if err := json.Unmarshal(data, &v); err != nil {
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&v); err != nil {
 			return nil, err
 		}
 		return v, nil
 	case "hostexec.run":
 		var v HostexecRunArgs
-		if err := json.Unmarshal(data, &v); err != nil {
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&v); err != nil {
 			return nil, err
 		}
 		return v, nil
 	case "pr.open":
 		var v PrOpenArgs
-		if err := json.Unmarshal(data, &v); err != nil {
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&v); err != nil {
 			return nil, err
 		}
 		return v, nil
@@ -362,3 +373,9 @@ func (m *BoxMessage) UnmarshalJSON(data []byte) error {
 }
 
 var boxMessageTypes = []BoxMessageType{"archive", "computer.input", "computer.watch.start", "computer.watch.stop", "shell.watch.start", "shell.watch.stop", "turn.start", "turn.steer", "turn.stop"}
+
+// AllOpKinds lists every operation kind.
+var AllOpKinds = []OpKind{"accounts.action", "hostexec.grant", "hostexec.run", "pr.open"}
+
+// AllMethods lists every Method constant.
+var AllMethods = []Method{"accounts.connect", "accounts.connect_callback", "accounts.connect_status", "accounts.list", "accounts.quota", "accounts.reconnect", "accounts.remove", "accounts.set_key", "accounts.set_limits", "archive.done", "box.hello", "computer.changed", "computer.input", "connect.cancel", "connect.start", "connect.status", "connect.unlink", "context.snapshot", "conversation.read", "delivery.done", "device.list", "device.pair", "device.revoke", "device.scopes", "device.set_scopes", "events.list", "host.add", "host.list", "hostexec.revoke", "hostexec.run", "instructions.get", "instructions.set", "op.decide", "op.list", "op.submit", "op.withdraw", "post", "post.search", "profile.list", "profile.remove", "profile.set", "room.create", "room.list", "room.pause", "room.repo.add", "room.repos", "room.set_limits", "session.close", "session.list", "session.move", "session.restart", "session.search", "session.set_profile", "session.start", "session.stop", "session.work", "shell.job.ended", "shell.output", "transcript.append", "transcript.fetch", "transcript.read", "turn.activity", "turn.output", "web.login"}
