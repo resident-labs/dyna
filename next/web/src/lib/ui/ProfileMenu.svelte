@@ -22,6 +22,7 @@
   }
   onMount(() => { void load(); });
   async function show(next: boolean, refocus = false) {
+    if (busy) return;
     if (next && !profiles) await load();
     open = next && Boolean(profiles);
     if (open) { await tick(); (items().find(item => item.ariaChecked === "true") ?? items()[0])?.focus(); } else if (refocus) button.focus();
@@ -47,7 +48,7 @@
 
 <svelte:window onpointerdown={event => { if (open && event.target instanceof Node && !root.contains(event.target)) void show(false); }} />
 <div class="menu" bind:this={root}>
-  <button type="button" class="open" bind:this={button} disabled={busy} aria-haspopup="menu" aria-expanded={open} aria-label={`Profile: ${label.model} ${label.detail}. Change profile`}
+  <button type="button" class="open" bind:this={button} aria-disabled={busy} aria-haspopup="menu" aria-expanded={open} aria-label={`Profile: ${label.model} ${label.detail}. Change profile`}
     onclick={() => void show(!open)} onkeydown={event => { if (event.key === "ArrowDown") { event.preventDefault(); void show(true); } }}>
     <span class="names">{label.model}{#if label.detail}<small>{label.detail}</small>{/if}</span><Icon name="chevron" /></button>
   {#if open && profiles}
@@ -65,8 +66,8 @@
   .open :global(svg) { flex: none; width: 14px; height: 14px; margin-top: 3px; color: var(--muted); }
   .names { display: grid; min-width: 0; }
   small { color: var(--muted); font-size: 12.5px; line-height: 18px; }
-  .open:hover:not(:disabled), .open[aria-expanded="true"] { background: var(--hover); }
-  .open:disabled { opacity: 0.6; cursor: default; }
+  .open:hover:not([aria-disabled="true"]), .open[aria-expanded="true"] { background: var(--hover); }
+  .open[aria-disabled="true"] { opacity: 0.6; cursor: default; }
   .open:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 2; width: 232px; max-width: calc(100vw - 32px); padding: 4px; display: grid;
     background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 18%); }
