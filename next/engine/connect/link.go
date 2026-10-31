@@ -37,7 +37,7 @@ type pendingLink struct {
 }
 
 // LinkMachine resumes a pending attempt with its original key and poll secret.
-func LinkMachine(ctx context.Context, relay *Relay, files *Files, state LinkState, o LinkOptions) (Link, error) {
+func LinkMachine(ctx context.Context, relay *Relay, files *Files, state LinkState, o LinkOptions) (_ Link, resultErr error) {
 	files.mu.Lock()
 	defer files.mu.Unlock()
 	lock, err := os.OpenFile(filepath.Join(files.dir, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
@@ -98,6 +98,15 @@ func LinkMachine(ctx context.Context, relay *Relay, files *Files, state LinkStat
 	switch attempt.State {
 	case contract.ConnectAttemptStarting, contract.ConnectAttemptPending:
 		b, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) && attempt.State == contract.ConnectAttemptStarting {
+			if err := finish(contract.ConnectAttemptFailed); err != nil {
+				return Link{}, err
+			}
+			if err := os.Remove(filepath.Join(files.dir, "machine.key")); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return Link{}, err
+			}
+			return Link{}, errors.New("interrupted link start")
+		}
 		if err != nil {
 			return Link{}, errors.New("incomplete pending link")
 		}
@@ -129,6 +138,19 @@ func LinkMachine(ctx context.Context, relay *Relay, files *Files, state LinkStat
 		if err := state.SetConnectAttempt(ctx, contract.ConnectAttempt{State: contract.ConnectAttemptStarting}); err != nil {
 			return Link{}, err
 		}
+		saved := false
+		defer func() {
+			if saved {
+				return
+			}
+			if err := finish(contract.ConnectAttemptFailed); err != nil {
+				resultErr = errors.Join(resultErr, err)
+				return
+			}
+			if err := os.Remove(filepath.Join(files.dir, "machine.key")); err != nil && !errors.Is(err, os.ErrNotExist) {
+				resultErr = errors.Join(resultErr, err)
+			}
+		}()
 		if err := os.Remove(filepath.Join(files.dir, "machine.key")); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return Link{}, err
 		}
@@ -153,6 +175,7 @@ func LinkMachine(ctx context.Context, relay *Relay, files *Files, state LinkStat
 		if err := files.write("pending.json", b); err != nil {
 			return Link{}, err
 		}
+		saved = true
 	default:
 		return Link{}, errors.New("invalid link attempt state")
 	}

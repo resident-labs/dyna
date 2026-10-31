@@ -217,12 +217,20 @@ func (o *Operations) Cancel(ctx context.Context) error {
 	if a.State == contract.ConnectAttemptUnlinking {
 		return errors.New("unlink is in progress")
 	}
-	o.stop()
 	linked, err := o.state.ConnectLinked(ctx)
 	if err != nil {
 		return err
 	}
 	if linked {
+		return errors.New("link is already active")
+	}
+	o.stop()
+	linked, err = o.state.ConnectLinked(ctx)
+	if err != nil {
+		return err
+	}
+	if linked {
+		o.launch(contract.ConnectStartRequest{})
 		return errors.New("link is already active")
 	}
 	return o.unlink(ctx)
