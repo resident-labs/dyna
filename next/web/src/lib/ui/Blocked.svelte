@@ -7,9 +7,9 @@
     navigate?: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void } = $props();
   const states: Record<Kind, { icon: IconName; title: string; line: string; command?: string }> = {
     unreachable: { icon: "plug", title: "Dyna is not reachable.", line: "This page tries again by itself. Check that the Dyna engine is running." },
-    "no-room": { icon: "room", title: "This room does not exist.", line: "The link may be old, or the room may be gone. Pick a room on the left." },
-    "no-session": { icon: "chat", title: "This session does not exist.", line: "The link may be old, or the session may be gone." },
-    "no-page": { icon: "room", title: "This page does not exist.", line: "The link may be old or mistyped." },
+    "no-room": { icon: "room", title: "This room does not exist.", line: "The address may be old, or the room may be gone. Pick a room on the left." },
+    "no-session": { icon: "chat", title: "There is nothing to show for this session.", line: "It may be closed with no messages, or the address may be old." },
+    "no-page": { icon: "room", title: "This page does not exist.", line: "The address may be old or mistyped." },
     "no-rooms": { icon: "room", title: "Create your first room", line: "Run this on the computer where Dyna runs. The room shows here as soon as it exists.",
       command: "dyna room create <name> --root-profile <profile>" },
   };
