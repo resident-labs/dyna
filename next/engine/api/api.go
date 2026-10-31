@@ -53,6 +53,12 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 		return a.service.RuleRemove(ctx, p, req)
 	})
+	call(mux, contract.MethodRuleEdit, c, user, func(ctx context.Context, p contract.Principal, req contract.RuleEditRequest) (contract.RuleEditResponse, *contract.Error) {
+		if box(c) && req.Room == "" {
+			req.Room = c.Room
+		}
+		return a.service.RuleEdit(ctx, p, req)
+	})
 	call(mux, contract.MethodRuleList, c, user, func(ctx context.Context, p contract.Principal, req contract.RuleListRequest) (contract.RuleListResponse, *contract.Error) {
 		if box(c) && req.Room == "" {
 			req.Room = c.Room
