@@ -55,7 +55,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			next.State, next.Reason = contract.BoxReady, ""
 		} else if found {
 			next.State, next.Reason = contract.BoxStopped, "container stopped"
-			if row.Want == store.WantRun && b.Reason == "box disconnected" {
+			if row.Want == store.WantRun && b.Reason == boxDisconnectedReason {
 				failures++
 				if failures >= 3 {
 					next.State, cause = contract.BoxFailed, contract.CauseStartFailed
