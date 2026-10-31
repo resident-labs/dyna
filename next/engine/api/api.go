@@ -159,7 +159,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodShellOutput, c, contract.ScopeRead, box, a.service.ShellOutput)
 	mux.HandleFunc("GET /v1/shell/watch", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		if !owner(c) || !hasScope(c, contract.ScopeRead) {
+		if !owner(c) || !hasScope(c, contract.ScopeTerminal) {
 			writeError(w, forbidden())
 			return
 		}
