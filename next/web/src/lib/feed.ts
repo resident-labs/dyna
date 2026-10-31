@@ -20,6 +20,10 @@ export const causes: Record<FailureCause, string> = {
   stale: "Something it depended on changed before it ran",
   interrupted: "Dyna stopped during the run, so the outcome is unknown",
   internal: "Dyna had an internal error",
+  setup_failed: "Its workspace could not set up the repository",
+  model_failed: "The model provider refused or failed the request",
+  output_limit: "The reply reached the model's output limit",
+  harness_failed: "The agent program stopped unexpectedly",
 };
 
 const sameHome = (a: Conversation, b: Conversation) => a.kind === b.kind && (a.session ?? "") === (b.session ?? "");
@@ -78,10 +82,11 @@ export function feedRows(events: Event[], home: Conversation): Row[] {
         post(`a${event.seq}`, { kind: "session", session: event.body.session }, event.at, event.body.final, [], answer.reply.target ? [answer.reply.target] : []);
       }
       // A failed turn always gets its own row, even after its answer; it never folds into a work row. Its error is the
-      // harness's raw text (r8), so the row says only "Turn failed" until the engine gives a typed cause.
+      // harness's raw text (r8), so the row shows only the owner words for its typed cause.
       if (event.body.outcome === "failed") {
         flush();
-        rows.push({ kind: "failed", key: `f${event.seq}`, session: event.body.session, at: event.at, label: "Turn failed", cause: "" });
+        const cause = event.body.cause;
+        rows.push({ kind: "failed", key: `f${event.seq}`, session: event.body.session, at: event.at, label: "Turn failed", cause: cause ? causes[cause] : "" });
       }
       if (answer || event.body.outcome === "failed") continue;
     }
