@@ -154,7 +154,7 @@
   .cancel { display: none; }
   kbd { font: inherit; font-size: 11px; color: var(--muted); background: var(--selected); border: 1px solid var(--line); border-radius: 4px; padding: 2px 5px; }
   .list { overflow: auto; padding: 8px; min-height: 0; }
-  .group { padding: 12px 10px 6px; font-size: 13px; font-weight: 600; color: var(--text); }
+  .group { padding: 12px 10px 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
   .group span { color: var(--muted); font-weight: 400; margin-left: 6px; }
   .row { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 6px 10px; border: 0; border-radius: 6px; background: none; color: var(--text); text-align: left; }
   .row.chosen { background: var(--selected); }
@@ -168,7 +168,7 @@
   .excerpt { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4; }
   .meta { display: flex; gap: 7px; color: var(--muted); font-size: 11px; }
   .meta strong { color: oklch(var(--id-initials) var(--hue)); }
-  mark { color: var(--text); background: var(--attention-fill); border-radius: 3px; }
+  mark { color: var(--text); background: color-mix(in srgb, var(--attention) 25%, transparent); border-radius: 3px; }
   .note { margin: 0; padding: 10px; color: var(--muted); font-size: 13px; }
   .retry { color: var(--focus); background: none; border: 0; }
   .skeleton { height: 8px; width: 70%; margin-top: 10px; border-radius: 4px; background: var(--selected); }
