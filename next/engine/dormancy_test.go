@@ -348,3 +348,29 @@ func TestRoomListCountsFailedSessionsAndSessionListShowsTimes(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionListHadJobsStaysAfterTheJobEnds(t *testing.T) {
+	s, _, room, sid, ctx := quietSession(t, 1)
+	hadJobs := func() bool {
+		list, problem := s.SessionList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionListRequest{Room: room})
+		if problem != nil {
+			t.Fatal(problem)
+		}
+		for _, session := range list.Sessions {
+			if session.ID == sid {
+				return session.HadJobs
+			}
+		}
+		t.Fatal("session not listed")
+		return false
+	}
+	if hadJobs() {
+		t.Fatal("hadJobs before any job ended")
+	}
+	if _, problem := s.ShellJobEnded(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid}, contract.ShellJobEndedRequest{Job: "job_1"}); problem != nil {
+		t.Fatal(problem)
+	}
+	if !hadJobs() {
+		t.Fatal("hadJobs is false after a job ended")
+	}
+}
