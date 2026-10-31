@@ -4,6 +4,10 @@ type Plan struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
 }
+
+// ModelWindowPrefix marks a window limited to one model family, such as Fable.
+const ModelWindowPrefix = "scoped:"
+
 type Window struct {
 	Reason      WindowReason `json:"reason,omitempty"`
 	Period      string       `json:"period,omitempty"`
