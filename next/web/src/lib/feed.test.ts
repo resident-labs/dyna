@@ -14,7 +14,7 @@ test("a time less than a minute ahead is 'in under a minute', not 'just now'", (
   assert.equal(fromNow(new Date(0).toISOString(), 20_000), "just now");
 });
 
-const lead: Principal ={ kind: "session", session: "l" };
+const lead: Principal = { kind: "session", session: "l" };
 function event(seq: number, body: EventBody, from: Principal = { kind: "engine" }): Event {
   return { seq, id: String(seq), at: "", from, ...body };
 }

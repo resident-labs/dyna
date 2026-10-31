@@ -17,7 +17,7 @@ export const causes: Record<FailureCause, string> = {
   grant_inactive: "The host execution grant expired or was revoked",
   host_lost: "The host stopped answering during the run",
   github_failed: "GitHub refused the request or did not answer",
-  stale: "What the request needed changed before it ran",
+  stale: "Something it depended on changed before it ran",
   interrupted: "Dyna stopped during the run, so the outcome is unknown",
   internal: "Dyna had an internal error",
 };
