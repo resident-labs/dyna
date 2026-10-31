@@ -61,7 +61,7 @@ func TestRoomRules(t *testing.T) {
 	}
 	var removal bool
 	for _, input := range start.Inputs {
-		if input.Text == "Rule r1 is removed and no longer applies: First." {
+		if inputBody(input.Text) == "Rule r1 is removed and no longer applies: First." {
 			removal = true
 		}
 	}

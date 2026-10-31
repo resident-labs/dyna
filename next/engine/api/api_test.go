@@ -31,6 +31,11 @@ type fakeService struct {
 	post    contract.PostRequest
 }
 
+func (f *fakeService) SessionStart(_ context.Context, c contract.Principal, r contract.SessionStartRequest) (contract.SessionStartResponse, *contract.Error) {
+	f.caller = c
+	return contract.SessionStartResponse{}, nil
+}
+
 func (f *fakeService) SessionClose(_ context.Context, c contract.Principal, r contract.SessionCloseRequest) (contract.SessionCloseResponse, *contract.Error) {
 	f.caller, f.request = c, r
 	return contract.SessionCloseResponse{}, nil
@@ -344,5 +349,13 @@ func TestOwnerStreamRejectsSession(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest("GET", "/v1/events?after=0", nil))
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestBoxCanStartChild(t *testing.T) {
+	f := &fakeService{}
+	w := request(New(f, nil).handler(boxCaller()), "/v1/session.start", `{"room":"room-a","name":"child","profile":"test"}`)
+	if w.Code != http.StatusOK || f.caller.Session != "session-a" {
+		t.Fatalf("status=%d caller=%+v", w.Code, f.caller)
 	}
 }
