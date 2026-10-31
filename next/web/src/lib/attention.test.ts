@@ -24,8 +24,23 @@ test("room.list seeds each room's waiting requests and working sessions, and the
     attention.apply(event(9, "b", { type: "turn.started", body: { session: "s2", turn: "t", inputs: [] } }));
     assert.deepEqual([[...attention.waiting.get("a")!], [...attention.waiting.get("b")!]], [[], ["o2"]]);
     assert.deepEqual([[...attention.working.get("a")!], [...attention.working.get("b")!]], [["s1"], ["s2"]]);
+    // Activity has seq 0 and counts for a working session's current turn only.
+    const label = (session: string, turn: string, text: string) => attention.apply(event(0, session === "s1" ? "a" : "b", { type: "turn.activity", body: { session, turn, label: text } }));
+    label("s1", "t0", "read spec.md");
+    label("s2", "t", "edited App.svelte");
+    label("s2", "old", "stale");
+    label("s3", "t", "not working");
+    assert.deepEqual([...attention.activity], [["s1", "read spec.md"], ["s2", "edited App.svelte"]]);
+    // session.list seeds a working session's turn and label once; a live label and turn stay.
+    const summary = (id: string, turn: string, activity: string) => ({ id, turn, activity });
+    attention.seed([summary("s1", "t1", "older"), summary("s2", "t", "older"), summary("s3", "t", "not working")]);
+    assert.deepEqual([...attention.activity], [["s1", "read spec.md"], ["s2", "edited App.svelte"]]);
+    label("s1", "t0", "stale turn");
+    label("s1", "t1", "ran node --test");
+    assert.equal(attention.activity.get("s1"), "ran node --test");
     // A session closed during its turn sends no turn.ended.
     attention.apply(event(10, "a", { type: "session.closed", body: { session: "s1" } }));
     assert.equal(attention.working.get("a")!.size, 0);
+    assert.deepEqual([...attention.activity.keys()], ["s2"]);
   } finally { globalThis.fetch = original; }
 });
