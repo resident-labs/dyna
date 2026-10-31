@@ -95,7 +95,7 @@
   // more idle siblings fold into one "N idle" row that opens in place, so a room of 100 sessions shows its work first.
   const folded = new SvelteSet<string>();
   const openIdle = new SvelteSet<string>();
-  type TreeRow = { kind: "session"; session: SessionStarted; depth: number; parent: boolean; hidden: number; state: Status; mark?: string }
+  type TreeRow = { kind: "session"; session: SessionStarted; depth: number; parent: boolean; hidden: number; state: Status; dot: Status; mark?: string }
     | { kind: "idle"; key: string; depth: number; count: number; open: boolean };
   const folds: Record<Status, string> = { waiting: "A folded session waits for you", failed: "A folded session failed", working: "A folded session is working", idle: "" };
   let tree = $derived.by(() => {
@@ -122,7 +122,7 @@
         // A folded row shows the most urgent status it hides when that is more urgent than its own.
         const inside = most(hidden), state = own.get(item.session) ?? "idle";
         const shown = urgency(inside) < urgency(state) ? inside : state;
-        rows.push({ kind: "session", session: item, depth, parent: children(item.session).length > 0, hidden: hidden.length, state: shown,
+        rows.push({ kind: "session", session: item, depth, parent: children(item.session).length > 0, hidden: hidden.length, state, dot: shown,
           mark: shown === state ? undefined : folds[shown] });
         if (!hidden.length) walk(item.session, depth + 1);
       }
@@ -188,11 +188,11 @@
     const index = areas.findIndex(area => area.contains(document.activeElement));
     areas[(index + (event.shiftKey ? areas.length - 1 : 1)) % areas.length].focus();
   }
-  // Up and Down move between the sessions in the tree; Enter opens one.
-  function walkTree(event: KeyboardEvent & { currentTarget: HTMLAnchorElement }) {
+  // Up and Down move between the sessions in the tree and its idle folds; Enter opens one.
+  function walkTree(event: KeyboardEvent & { currentTarget: HTMLElement }) {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp" || !members) return;
     event.preventDefault();
-    const links = Array.from(members.querySelectorAll<HTMLAnchorElement>("a.member"));
+    const links = Array.from(members.querySelectorAll<HTMLElement>("a.member, button.idle"));
     const index = links.indexOf(event.currentTarget);
     links[Math.max(0, Math.min(links.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)))]?.focus();
   }
@@ -344,9 +344,9 @@
       {#if watching && docked && (wide.current || panel)}{@render computerView(watching)}{/if}
       <header><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}</header>
       {#each tree as row (row.kind === "idle" ? `idle ${row.key}` : row.session.session)}
-        {#if row.kind === "idle"}<button type="button" class="idle" aria-expanded={row.open} style:padding-left="{row.depth * 14}px"
+        {#if row.kind === "idle"}<button type="button" class="idle" aria-expanded={row.open} style:padding-left="{row.depth * 14}px" onkeydown={walkTree}
           onclick={() => { if (!openIdle.delete(row.key)) openIdle.add(row.key); }}><Icon name="chevron" size={12} />{count(row.count, "idle session")}</button>
-        {:else}{@const { session: item, depth, parent, hidden, state, mark } = row}
+        {:else}{@const { session: item, depth, parent, hidden, state, dot, mark } = row}
         <div class="row">{#if parent}<button type="button" class="fold" aria-expanded={!hidden} style:left="{depth * 14}px"
           aria-label={hidden ? `Show ${count(hidden, "session")} under ${item.name}` : `Hide the sessions under ${item.name}`}
           title={hidden ? `${count(hidden, "session")} folded` : "Fold"} onclick={() => { if (!folded.delete(item.session)) folded.add(item.session); }}
@@ -355,7 +355,7 @@
           onclick={event => { navigate(event); if (!wide.current && event.defaultPrevented) void showPanel(false); }}
           onkeydown={event => { walkTree(event); if (parent) fold(event, item.session); }}
           aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{28 + depth * 14}px">
-          <SessionRow name={item.name} root={!item.parent} {state} line={status(item.session)} {mark} /></a>
+          <SessionRow name={item.name} root={!item.parent} {state} {dot} line={status(item.session)} {mark} /></a>
           {#if jobs(item.session)}<button type="button" class="watch" class:open={jobsOf === item.session} data-jobs={item.session} aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
             title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={() => { jobsOf = item.session; }}><Icon name="terminal" /></button>{/if}
           {#if store?.computers.has(item.session)}<button type="button" class="watch" class:open={watching === item.session} data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
