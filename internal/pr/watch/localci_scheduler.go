@@ -158,16 +158,15 @@ func registeredCIJobs(st State) []registeredCIJob {
 		if !valid {
 			continue
 		}
-		// A local trial enters the queue once its branch is built, because the
-		// trial asks for CI then. A hosted trial also takes its turn while the
-		// branch builds: its push run starts before the branch exists.
+		// The trial head is saved before the branch is pushed. Do not fetch it
+		// until the build has published the branch and entered running phase.
 		switch {
 		case local && b.Phase == state.MergeTrialPhaseRunning:
 		case !local && (b.Phase == state.MergeTrialPhaseRunning || b.Phase == state.MergeTrialPhaseBuilding || b.Phase == state.MergeTrialPhasePassed):
 		default:
 			continue
 		}
-		if b.Head != "" {
+		if b.Head != "" && b.Phase != state.MergeTrialPhaseBuilding {
 			jobs = append(jobs, registeredCIJob{record: *r, head: b.Head, branch: b.Branch, base: b.Base, trial: true, wholeSuite: true, created: b.Created})
 		}
 		for _, stack := range b.Stacks {
