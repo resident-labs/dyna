@@ -248,6 +248,20 @@ func (m *BoxMessage) UnmarshalJSON(data []byte) error {
 		}
 		m.Body = v
 		return nil
+	case "shell.watch.start":
+		var v ShellWatchStart
+		if err := json.Unmarshal(w.Body, &v); err != nil {
+			return err
+		}
+		m.Body = v
+		return nil
+	case "shell.watch.stop":
+		var v ShellWatchStop
+		if err := json.Unmarshal(w.Body, &v); err != nil {
+			return err
+		}
+		m.Body = v
+		return nil
 	case "turn.start":
 		var v TurnStart
 		if err := json.Unmarshal(w.Body, &v); err != nil {
@@ -281,4 +295,4 @@ func (m *BoxMessage) UnmarshalJSON(data []byte) error {
 	}
 }
 
-var boxMessageTypes = []BoxMessageType{"archive", "computer.watch.start", "computer.watch.stop", "turn.start", "turn.steer", "turn.stop", "upgrade"}
+var boxMessageTypes = []BoxMessageType{"archive", "computer.watch.start", "computer.watch.stop", "shell.watch.start", "shell.watch.stop", "turn.start", "turn.steer", "turn.stop", "upgrade"}
