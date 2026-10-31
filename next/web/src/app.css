@@ -40,6 +40,8 @@ aside.members { display: flex; flex-direction: column; border-right: 0; border-l
 .rail a.gear:hover, .rail a.gear[aria-current="page"] { color: var(--text); }
 .rail a.gear[aria-current="page"] { background: var(--selected); }
 .shell.settings .rail a.home { background: none; }
+/* Settings covers the room: floating terminals stay inside main's stacking context, under Settings, and keep running. */
+.shell.settings main { isolation: isolate; }
 .label { font-size: 12.5px; font-weight: 600; color: var(--muted); }
 /* A card on Home's grid: a machine now, model usage later. */
 .card { container-type: inline-size; min-width: 0; padding: 12px 14px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
