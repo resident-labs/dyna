@@ -13,7 +13,7 @@
   // Floating, the view is a window over the app; docked, it sits above the session list in the sessions panel. The
   // rect belongs to the app, so the window keeps its place and size for the page view.
   let { session, name, activity, docked, rect = $bindable(), element = $bindable(), onclose, ondock }: {
-    session: string; name: string; activity?: string; docked: boolean; rect: Rect; element?: HTMLElement; onclose: () => void; ondock: () => void;
+    session: string; name: string; activity?: string; docked: boolean; rect: Rect; element?: HTMLElement; onclose: () => void; ondock: (event: MouseEvent) => void;
   } = $props();
   let visible = $state(document.visibilityState === "visible");
   // A stopped computer closes this view, so a failure here is a broken or silent stream. The owner's retry or the
