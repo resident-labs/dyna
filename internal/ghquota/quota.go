@@ -230,7 +230,17 @@ func ghQuotaCaller(path string) string {
 	case rest == "pulls":
 		return "pulls"
 	case strings.HasPrefix(rest, "issues/"):
-		return "comments"
+		_, tail, found := strings.Cut(strings.TrimPrefix(rest, "issues/"), "/")
+		if !found {
+			return "issue-detail"
+		}
+		switch tail {
+		case "comments":
+			return "issue-comments"
+		case "events":
+			return "issue-events"
+		}
+		return "issue-other"
 	case strings.HasPrefix(rest, "pulls/"):
 		// pulls/{number}/{kind}: the number names the same caller everywhere.
 		_, tail, found := strings.Cut(strings.TrimPrefix(rest, "pulls/"), "/")
