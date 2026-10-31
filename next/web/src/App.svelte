@@ -28,6 +28,7 @@
   import { urgency, type Status } from "./lib/status.ts";
   import { FileDraft } from "./lib/attach.svelte.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
+  import type { Size } from "./lib/computerInput.ts";
   import JobsTool from "./lib/ui/JobsTool.svelte";
   import TermDock from "./lib/ui/TermDock.svelte";
   import Home from "./lib/ui/Home.svelte";
@@ -44,7 +45,7 @@
   import { mentionable, parseMentions } from "./lib/mentions.ts";
   import { distinctInitials } from "./lib/identity.ts";
   import { computerPlace, fitted, type Rect } from "./lib/float.ts";
-  import type { Conversation, PostRequest, SessionStarted } from "./lib/contract.gen.ts";
+  import type { ComputerInput, Conversation, PostRequest, SessionStarted } from "./lib/contract.gen.ts";
   // A pairing link leaves the address bar and history at once, whatever this browser's state. Only a signed-out page uses it.
   const pairCode = linkCode(window.location.hash);
   if (window.location.hash.includes("pair=")) history.replaceState(null, "", window.location.pathname + window.location.search);
@@ -472,6 +473,8 @@
     else if (!members?.getClientRects().length) toggle?.focus({ focusVisible: !tapped });
     else await focusRowIcon(id, tapped);
   }
+  // Every refusal shows in the view as a notice; its next batch goes on.
+  const sendInput = (session: string, events: ComputerInput[], frame: Size) => call("computer.input", { session, frame, events }).then(() => undefined);
   $effect.pre(() => { if (watching && !store?.computers.has(watching)) void stopWatching(); });
   // A session's running background jobs while its box is ready. The header's Jobs tool, like About's Jobs row, keeps every
   // session that ever had jobs, since a finished job's output stays in its box. In a DM it lists only that session.
@@ -568,7 +571,7 @@
 
 {#snippet computerView(id: string)}
   <!-- Another session's view is a new view, so the old image runs its cleanup and drops its stream. -->
-  {#key id}<ComputerView session={id} name={store?.names.get(id) ?? "Session"} root={!store?.sessions.get(id)?.parent} activity={store?.activity.get(id)} steps={store?.steps.get(id) ?? []} {docked} full={phone.current && !docked} bind:rect bind:element={computer}
+  {#key id}<ComputerView session={id} name={store?.names.get(id) ?? "Session"} root={!store?.sessions.get(id)?.parent} activity={store?.activity.get(id)} steps={store?.steps.get(id) ?? []} {docked} full={phone.current && !docked} bind:rect bind:element={computer} input={attention.can("computers") ? (events, frame) => sendInput(id, events, frame) : undefined}
     onfit={(ratio, chrome) => { if (!places.has(id)) places.set(id, rect = fitted(rect, ratio, chrome, (feed?.getBoundingClientRect().bottom ?? window.innerHeight) - 16)); }}
     onclose={tapped => void stopWatching(tapped)} ondock={event => { docked = !docked; dockChosen = true; if (docked && !panelShown) void showPanel(true, event.detail > 0); }} />{/key}
 {/snippet}
