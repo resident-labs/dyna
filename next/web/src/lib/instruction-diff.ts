@@ -5,21 +5,35 @@ export type DiffHunk = { line: number; lines: DiffLine[] };
 // Keep unchanged lines between changes so the review gives each change context.
 export function instructionDiff(before: string, after: string): DiffLine[] {
   const a = before ? before.split("\n") : [], b = after ? after.split("\n") : [];
-  const rows = Array.from({ length: a.length + 1 }, () => new Uint32Array(b.length + 1));
-  for (let i = a.length - 1; i >= 0; i--)
-    for (let j = b.length - 1; j >= 0; j--)
-      rows[i][j] = a[i] === b[j] ? rows[i + 1][j + 1] + 1 : Math.max(rows[i + 1][j], rows[i][j + 1]);
+  let start = 0, aEnd = a.length, bEnd = b.length;
+  while (start < aEnd && start < bEnd && a[start] === b[start]) start++;
+  while (aEnd > start && bEnd > start && a[aEnd - 1] === b[bEnd - 1]) { aEnd--; bEnd--; }
+
   const out: DiffLine[] = [];
-  let i = 0, j = 0;
-  while (i < a.length || j < b.length) {
-    if (i < a.length && j < b.length && a[i] === b[j]) {
+  for (let n = 0; n < start; n++) out.push({ kind: "same", text: a[n], line: n + 1 });
+
+  const height = aEnd - start, width = bEnd - start;
+  // Bound both allocation and work on unrelated large documents. The fallback
+  // still shows all changed lines and preserves their target line positions.
+  const rows = (height + 1) * (width + 1) <= 1_000_000 && height && width
+    ? Array.from({ length: height + 1 }, () => new Uint32Array(width + 1))
+    : null;
+  if (rows) {
+    for (let x = height - 1; x >= 0; x--)
+      for (let y = width - 1; y >= 0; y--)
+        rows[x][y] = a[start + x] === b[start + y] ? rows[x + 1][y + 1] + 1 : Math.max(rows[x + 1][y], rows[x][y + 1]);
+  }
+  let i = start, j = start;
+  while (i < aEnd || j < bEnd) {
+    if (i < aEnd && j < bEnd && a[i] === b[j]) {
       out.push({ kind: "same", text: a[i++], line: ++j });
-    } else if (i < a.length && (j === b.length || rows[i + 1][j] >= rows[i][j + 1])) {
+    } else if (i < aEnd && (j === bEnd || !rows || rows[i - start + 1][j - start] >= rows[i - start][j - start + 1])) {
       out.push({ kind: "remove", text: a[i++], line: j + 1 });
     } else {
       out.push({ kind: "add", text: b[j++], line: j });
     }
   }
+  while (i < a.length) out.push({ kind: "same", text: a[i++], line: ++j });
   return out;
 }
 
