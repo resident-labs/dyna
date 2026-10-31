@@ -8,7 +8,7 @@
   import WorkRow from "./WorkRow.svelte";
   import RequestCard from "./RequestCard.svelte";
   import { TurnTranscripts } from "../transcripts.svelte.ts";
-  import { closedSession, shortPaths, dayLabel, feedRows, type Quote, type Row } from "../feed.ts";
+  import { causes, closedSession, shortPaths, dayLabel, feedRows, type Quote, type Row } from "../feed.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { Conversation, PostRequest, Principal } from "../contract.gen.ts";
 
@@ -59,13 +59,17 @@
   // The intro opens the conversation once the window reaches its first event; it also stands in for an empty feed.
   // Requests stay in the room feed and the Requests panel: a DM reads only its posts and the turns that answered in it (spec 5.13).
   // A DM ends with the running turn's finished steps; the live line has the current one, and they fold into its work row
-  // when the turn ends.
+  // when the turn ends. A failed box keeps its turn open but runs nothing, so no live line follows: every step is
+  // finished, and the failure ends the DM, as a DM's read leaves box events out.
   let rows = $derived(feedRows(view.ordered, home, pending, since));
-  let steps = $derived(home.kind === "dm" && home.session && view.atPresent ? (store.steps.get(home.session) ?? []).slice(0, -1) : []);
+  let failure = $derived(home.kind === "dm" && home.session && view.atPresent ? store.boxFailures.get(home.session) : undefined);
+  let steps = $derived(home.kind === "dm" && home.session && view.atPresent ? (store.steps.get(home.session) ?? []).slice(0, failure ? undefined : -1) : []);
   let items: Item[] = $derived([
     ...view.ready && !view.hasOlder ? [{ kind: "intro" as const, key: "intro" }] : [],
     ...rows,
     ...steps.length ? [{ kind: "steps" as const, key: "steps", labels: steps }] : [],
+    ...failure && home.kind === "dm" && home.session ? [{ kind: "failed" as const, key: "box-failed", seq: 0, session: home.session, at: failure.at ?? "",
+      label: failure.box === "lost" || failure.cause === "host_lost" ? "Stopped unexpectedly" as const : "Could not start" as const, cause: failure.cause ? causes[failure.cause] : "" }] : [],
   ]);
   // Opened work rows, steps and transcripts stay while the list recycles their elements.
   const opened = new SvelteSet<string>();
