@@ -47,6 +47,8 @@ export const causes: Record<FailureCause, string> = {
   grant_inactive: "The host execution grant expired or was revoked",
   host_lost: "The host stopped answering during the run",
   host_busy: "host busy, try again later",
+  nested_device_missing: "The host lacks the TUN device needed for nested containers",
+  kvm_device_missing: "The host lacks the KVM device",
   github_failed: "GitHub refused the request or did not answer",
   stale: "Something it depended on changed before it ran",
   interrupted: "Dyna stopped during the run, so the outcome is unknown",
