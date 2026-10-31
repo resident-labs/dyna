@@ -3,6 +3,7 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -81,7 +82,7 @@ func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host,
 			return h, nil
 		}
 	}
-	return nil, fmt.Errorf("host %q not found", name)
+	return nil, fmt.Errorf("host %q: %w", name, sql.ErrNoRows)
 }
 
 func (b *Boxes) CacheHost(ctx context.Context, name contract.HostName) (enginegit.CacheHost, string, error) {
