@@ -10,7 +10,15 @@ import (
 )
 
 // AuthRPC exchanges opaque proxy records over the inherited private connection.
-type AuthRPC struct{ Store *store.Store }
+type AuthRPC struct {
+	Store    *store.Store
+	Complete func(context.Context, OAuthCompletion) error
+}
+
+type OAuthCompletion struct {
+	State  string
+	AuthID string
+}
 type AuthDelete struct{ ID string }
 type AuthSave struct {
 	Record store.ProxyAuth
@@ -40,8 +48,15 @@ func (r *AuthRPC) Delete(req AuthDelete, _ *struct{}) error {
 	return nil
 }
 
-func serveAuthRPC(conn io.ReadWriteCloser, st *store.Store) {
+func (r *AuthRPC) OAuthCompleted(req OAuthCompletion, _ *struct{}) error {
+	if r.Complete == nil || r.Complete(context.Background(), req) != nil {
+		return errors.New("account completion unavailable")
+	}
+	return nil
+}
+
+func serveAuthRPC(conn io.ReadWriteCloser, st *store.Store, complete func(context.Context, OAuthCompletion) error) {
 	server := rpc.NewServer()
-	_ = server.RegisterName("Auth", &AuthRPC{Store: st})
+	_ = server.RegisterName("Auth", &AuthRPC{Store: st, Complete: complete})
 	server.ServeConn(conn)
 }

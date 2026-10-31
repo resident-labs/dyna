@@ -16,8 +16,18 @@ type ProxyAuth struct {
 func (s *Store) SaveProxyAuth(ctx context.Context, auth ProxyAuth, create bool) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		if create {
-			_, err := tx.ExecContext(ctx, `INSERT INTO proxy_auths(id,provider,record,updated_at) VALUES(?,?,?,?)`, auth.ID, auth.Provider, auth.Record, auth.UpdatedAt)
-			return err
+			result, err := tx.ExecContext(ctx, `INSERT INTO proxy_auths(id,provider,record,updated_at) SELECT ?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE proxy_id=?)`, auth.ID, auth.Provider, auth.Record, auth.UpdatedAt, auth.ID)
+			if err != nil {
+				return err
+			}
+			n, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if n == 0 {
+				return sql.ErrNoRows
+			}
+			return nil
 		}
 		result, err := tx.ExecContext(ctx, `UPDATE proxy_auths SET provider=?,record=?,updated_at=? WHERE id=?`, auth.Provider, auth.Record, auth.UpdatedAt, auth.ID)
 		if err != nil {

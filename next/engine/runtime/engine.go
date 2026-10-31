@@ -157,8 +157,6 @@ func Run(ctx context.Context, cfg Config) error {
 	defer proxy.Listener.Close()
 	proxyCtx, stopProxy := context.WithCancel(context.WithoutCancel(ctx))
 	done := make(chan struct{})
-	go func() { defer close(done); proxy.Supervise(proxyCtx, executable, st) }()
-	defer func() { stopProxy(); <-done }()
 	drain := model.NewDrain()
 	boxCtx, stopBoxes := context.WithCancel(ctx)
 	defer stopBoxes()
@@ -191,6 +189,8 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := service.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": accounts.Entry(), "pr.open": service.PrOpen(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport), "hostexec.grant": service.HostexecGrant(), "hostexec.run": service.HostexecRunEntry()}, cfg.ApprovalsExpiry); err != nil {
 		return err
 	}
+	go func() { defer close(done); proxy.Supervise(proxyCtx, executable, st, accounts.CompleteOAuth) }()
+	defer func() { stopProxy(); <-done }()
 	if err := service.ExpireHostexecGrantRequests(ctx); err != nil {
 		return fmt.Errorf("expire host grant requests: %w", err)
 	}
