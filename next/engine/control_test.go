@@ -7,7 +7,7 @@ import (
 )
 
 func TestStopPersistsAcrossReconnect(t *testing.T) {
-	s, _, session, ctx := setup(t)
+	s, room, session, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
 	ch, problem := testChannel(t, s, ctx, caller)
@@ -15,6 +15,9 @@ func TestStopPersistsAcrossReconnect(t *testing.T) {
 		t.Fatal(problem)
 	}
 	start := (<-ch).Body.(contract.TurnStart)
+	if _, problem := s.RoomPause(ctx, owner, contract.RoomPauseRequest{Room: room, Paused: true}); problem != nil {
+		t.Fatal(problem)
+	}
 	result, problem := s.SessionStop(ctx, owner, contract.SessionStopRequest{Session: session})
 	if problem != nil || !result.Stopping {
 		t.Fatalf("stop: %+v %v", result, problem)
@@ -35,9 +38,28 @@ func TestStopPersistsAcrossReconnect(t *testing.T) {
 	if _, problem := s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnStopped}); problem != nil {
 		t.Fatal(problem)
 	}
+	var read int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM deliveries WHERE to_id=? AND turn=? AND state='read'", session, start.Turn).Scan(&read); err != nil || read != 1 {
+		t.Fatalf("read inputs=%d: %v", read, err)
+	}
 	result, problem = s.SessionStop(ctx, owner, contract.SessionStopRequest{Session: session})
 	if problem != nil || result.Stopping {
 		t.Fatalf("idle stop: %+v %v", result, problem)
+	}
+}
+
+func TestControlsEnforceAuthority(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
+	if _, problem := s.RoomPause(ctx, caller, contract.RoomPauseRequest{Room: room, Paused: true}); problem == nil || problem.Code != contract.ErrForbidden {
+		t.Fatalf("worker paused room: %v", problem)
+	}
+	var root contract.SessionID
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT parent FROM sessions WHERE id=?", worker).Scan(&root); err != nil {
+		t.Fatal(err)
+	}
+	if _, problem := s.SessionStop(ctx, caller, contract.SessionStopRequest{Session: root}); problem == nil || problem.Code != contract.ErrForbidden {
+		t.Fatalf("worker stopped ancestor: %v", problem)
 	}
 }
 
