@@ -401,3 +401,16 @@ func (h *Host) ListContainers(ctx context.Context) ([]box.ContainerStatus, error
 }
 
 var _ box.HostDriver = (*Host)(nil)
+
+// MachineID reads the host identity over the authenticated SSH transport.
+func (h *Host) MachineID(ctx context.Context) (string, error) {
+	b, err := h.run(ctx, "cat", "/etc/machine-id")
+	if err != nil {
+		return "", err
+	}
+	value := strings.TrimSpace(string(b))
+	if len(value) != 32 || strings.Trim(value, "0123456789abcdef") != "" {
+		return "", errors.New("invalid host machine-id")
+	}
+	return value, nil
+}
