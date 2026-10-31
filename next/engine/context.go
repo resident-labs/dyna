@@ -9,7 +9,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-func renderContextSection(key string, lines []string, cap int, full bool, rowLimit int) contract.ContextSection {
+func renderContextSection(key contract.ContextSectionKey, lines []string, maxChars int, full bool, rowLimit int) contract.ContextSection {
 	if full {
 		return contract.ContextSection{Key: key, Text: strings.Join(lines, "\n")}
 	}
@@ -29,20 +29,14 @@ func renderContextSection(key string, lines []string, cap int, full bool, rowLim
 		if len(kept) > 0 {
 			sep = 1
 		}
-		if chars+sep+n+utf8.RuneCountInString(suffix) > cap {
+		if chars+sep+n+utf8.RuneCountInString(suffix) > maxChars {
 			break
 		}
 		kept = append(kept, line)
 		chars += sep + n
 	}
 	if more := len(lines) - len(kept); more > 0 {
-		suffix := fmt.Sprintf("%d more: context show", more)
-		for len(kept) > 0 && utf8.RuneCountInString(strings.Join(append(kept, suffix), "\n")) > cap {
-			kept = kept[:len(kept)-1]
-			more++
-			suffix = fmt.Sprintf("%d more: context show", more)
-		}
-		kept = append(kept, suffix)
+		kept = append(kept, fmt.Sprintf("%d more: context show", more))
 	}
 	return contract.ContextSection{Key: key, Text: strings.Join(kept, "\n")}
 }
@@ -51,60 +45,46 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	if caller.Kind != contract.PrincipalSession {
 		return contract.ContextSnapshotResponse{}, forbidden()
 	}
-	session, err := s.store.Session(ctx, caller.Session)
+	switch req.Section {
+	case "", contract.ContextChildren, contract.ContextRequests, contract.ContextPRs, contract.ContextProfiles:
+	default:
+		return contract.ContextSnapshotResponse{}, invalid("unknown context section")
+	}
+	data, err := s.store.ContextDataForSession(ctx, caller.Session)
 	if err != nil {
 		return contract.ContextSnapshotResponse{}, failure(err)
 	}
-	if req.Section != "" && req.Section != "dyna_goal" && req.Section != "dyna_children" && req.Section != "dyna_requests" && req.Section != "dyna_prs" && req.Section != "dyna_profiles" && req.Section != "dyna_usage" {
-		return contract.ContextSnapshotResponse{}, invalid("unknown context section")
-	}
 	result := contract.ContextSnapshotResponse{Sections: []contract.ContextSection{}}
-	add := func(key string, lines []string, cap, limit int) {
+	add := func(key contract.ContextSectionKey, lines []string, maxChars, limit int) {
 		if len(lines) > 0 && (req.Section == "" || req.Section == key) {
-			result.Sections = append(result.Sections, renderContextSection(key, lines, cap, req.Section != "", limit))
+			result.Sections = append(result.Sections, renderContextSection(key, lines, maxChars, req.Section != "", limit))
 		}
 	}
-	children, err := s.store.ContextChildren(ctx, session.ID)
-	if err != nil {
-		return result, failure(err)
-	}
 	var lines []string
-	for _, c := range children {
+	for _, c := range data.Children {
 		lines = append(lines, fmt.Sprintf("%s: %s, %s", c.Name, c.Profile, c.State))
 	}
-	add("dyna_children", lines, 1000, 8)
-	requests, err := s.store.ContextRequests(ctx, session.ID)
-	if err != nil {
-		return result, failure(err)
-	}
+	add(contract.ContextChildren, lines, 1000, 8)
 	lines = nil
-	for _, r := range requests {
+	for _, r := range data.Requests {
 		lines = append(lines, fmt.Sprintf("%s: %s, waiting", r.ID, r.Kind))
 	}
-	add("dyna_requests", lines, 600, 0)
-	prs, err := s.store.ContextPRs(ctx, session.ID)
-	if err != nil {
-		return result, failure(err)
-	}
+	add(contract.ContextRequests, lines, 600, 0)
 	lines = nil
-	for _, p := range prs {
+	for _, p := range data.PRs {
 		approval := "not approved"
 		if p.Approved {
 			approval = "approved"
 		}
 		lines = append(lines, fmt.Sprintf("%s #%d: %s", p.Repo, p.Number, approval))
 	}
-	add("dyna_prs", lines, 600, 0)
-	depth, err := s.store.ContextDepth(ctx, session.ID)
-	if err != nil {
-		return result, failure(err)
-	}
-	if s.maxDepth == 0 || depth < s.maxDepth {
+	add(contract.ContextPRs, lines, 600, 0)
+	if s.maxDepth == 0 || data.Depth < s.maxDepth {
 		lines = nil
 		for _, p := range s.profiles.List() {
 			lines = append(lines, fmt.Sprintf("%s: taste %d, diagnostics %d, intelligence %d, cost %d; max concurrent %d, max calls %d", p.Name, p.Taste, p.Diagnostics, p.Intelligence, p.Cost, p.MaxConcurrent, p.MaxCallsPerRun))
 		}
-		add("dyna_profiles", lines, 1200, 0)
+		add(contract.ContextProfiles, lines, 1200, 0)
 	}
 	return result, nil
 }
