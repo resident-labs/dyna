@@ -29,6 +29,7 @@ type Service interface {
 	RoomRepoAdd(context.Context, contract.Principal, contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, *contract.Error)
 	RoomRepos(context.Context, contract.Principal, contract.RoomReposRequest) (contract.RoomReposResponse, *contract.Error)
 	SessionStart(context.Context, contract.Principal, contract.SessionStartRequest) (contract.SessionStartResponse, *contract.Error)
+	SessionMove(context.Context, contract.Principal, contract.SessionMoveRequest) (contract.SessionMoveResponse, *contract.Error)
 	SessionClose(context.Context, contract.Principal, contract.SessionCloseRequest) (contract.SessionCloseResponse, *contract.Error)
 	Post(context.Context, contract.Principal, contract.PostRequest) (contract.PostResponse, *contract.Error)
 	EventsList(context.Context, contract.Principal, contract.EventsListRequest) (contract.EventsListResponse, *contract.Error)
