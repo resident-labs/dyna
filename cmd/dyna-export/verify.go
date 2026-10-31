@@ -50,7 +50,7 @@ func verifyBundle(db *sql.DB, bundle, backup string, cap capture) error {
 	if got != global.Counts {
 		return fmt.Errorf("global declared counts differ from decoded records")
 	}
-	source, err := countGlobalSQL(db)
+	source, err := countGlobalSQL(db, cap)
 	if err != nil {
 		return err
 	}
