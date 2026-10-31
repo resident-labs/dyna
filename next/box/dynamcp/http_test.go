@@ -158,10 +158,14 @@ func TestPostPreparesAttachmentsAndVisual(t *testing.T) {
 		ClientID     string           `json:"clientId"`
 		VisualUpdate contract.EventID `json:"visualUpdate"`
 	}
+	argsJSON, _ := json.Marshal(arguments{"send", "hello", []string{"report.txt"}, "card.html", "retry", "original"})
+	var args map[string]json.RawMessage
+	_ = json.Unmarshal(argsJSON, &args)
+	args[contract.ToolCallIDArgument] = json.RawMessage(`"outer-call"`)
 	params, _ := json.Marshal(struct {
-		Name      string    `json:"name"`
-		Arguments arguments `json:"arguments"`
-	}{"post", arguments{"send", "hello", []string{"report.txt"}, "card.html", "retry", "original"}})
+		Name      string                     `json:"name"`
+		Arguments map[string]json.RawMessage `json:"arguments"`
+	}{"post", args})
 	rpc, _ := json.Marshal(struct {
 		JSONRPC string          `json:"jsonrpc"`
 		ID      int             `json:"id"`
@@ -173,7 +177,7 @@ func TestPostPreparesAttachmentsAndVisual(t *testing.T) {
 	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), `"isError":true`) || !strings.Contains(w.Body.String(), `"checks":[{"name":"renders","status":"pass"}]`) {
 		t.Fatalf("response: %s", w.Body.String())
 	}
-	if sent.ClientID != "retry" || sent.VisualUpdate != "original" || len(sent.Attachments) != 2 || sent.Attachments[0].SHA256 != "hash-report.txt" {
+	if sent.ClientID != "retry" || sent.ToolCallID != "outer-call" || sent.VisualUpdate != "original" || len(sent.Attachments) != 2 || sent.Attachments[0].SHA256 != "hash-report.txt" {
 		t.Fatalf("post: %+v", sent)
 	}
 	file := sent.Attachments[1]
