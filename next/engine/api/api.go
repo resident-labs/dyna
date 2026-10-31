@@ -62,6 +62,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodOpWithdraw, c, user, a.service.OpWithdraw)
 	call(mux, contract.MethodOpList, c, user, a.service.OpList)
 	call(mux, contract.MethodHostAdd, c, owner, a.service.HostAdd)
+	call(mux, contract.MethodHostList, c, owner, a.service.HostList)
 	call(mux, contract.MethodRoomCreate, c, owner, a.service.RoomCreate)
 	call(mux, contract.MethodRoomRepoAdd, c, owner, a.service.RoomRepoAdd)
 	call(mux, contract.MethodRoomRepos, c, owner, a.service.RoomRepos)
@@ -133,6 +134,27 @@ func (a *API) handler(c Caller) http.Handler {
 		if err := a.service.ComputerFrames(r.Context(), c.Principal, generation, r.Body); err != nil {
 			writeError(w, err)
 		}
+	})
+	mux.HandleFunc("GET /v1/terminal", func(w http.ResponseWriter, r *http.Request) {
+		if !owner(c) {
+			writeError(w, forbidden())
+			return
+		}
+		q := r.URL.Query()
+		session, host := contract.SessionID(q.Get("box")), contract.HostName(q.Get("host"))
+		cols, e1 := strconv.Atoi(q.Get("cols"))
+		rows, e2 := strconv.Atoi(q.Get("rows"))
+		if (session == "") == (host == "") || e1 != nil || e2 != nil || cols < 1 || cols > 1000 || rows < 1 || rows > 1000 {
+			writeError(w, invalid())
+			return
+		}
+		argv, release, err := a.service.Terminal(r.Context(), session, host)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		defer release()
+		terminal(w, r, argv, uint16(cols), uint16(rows))
 	})
 	mux.HandleFunc("GET /v1/computers/watch", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
