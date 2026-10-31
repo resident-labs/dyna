@@ -4,6 +4,7 @@ package model
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net"
@@ -24,8 +25,8 @@ type RouteError struct {
 
 // Handler returns a route bound to one session and its allowed models.
 // socket is the proxy listener; clientKey never leaves the engine.
-func Handler(socket string, clientKey, sessionID string, allowedModels []string) http.Handler {
-	return handler(unixClient(socket), clientKey, sessionID, allowedModels)
+func Handler(socket string, clientKey, sessionID string, allowedModels, eligibleIDs []string) http.Handler {
+	return handler(unixClient(socket), clientKey, sessionID, allowedModels, eligibleIDs)
 }
 
 func unixClient(socket string) *http.Client {
@@ -34,7 +35,7 @@ func unixClient(socket string) *http.Client {
 	}}, Timeout: 30 * time.Second}
 }
 
-func handler(client *http.Client, clientKey, sessionID string, allowedModels []string) http.Handler {
+func handler(client *http.Client, clientKey, sessionID string, allowedModels, eligibleIDs []string) http.Handler {
 	allowed := make(map[string]struct{}, len(allowedModels))
 	for _, name := range allowedModels {
 		allowed[name] = struct{}{}
@@ -102,6 +103,10 @@ func handler(client *http.Client, clientKey, sessionID string, allowedModels []s
 			refuse(w, http.StatusForbidden, "model_forbidden", "The profile does not allow this model.")
 			return
 		}
+		if len(eligibleIDs) == 0 {
+			refuse(w, http.StatusForbidden, "account_forbidden", "No account is available to this room.")
+			return
+		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		r.ContentLength = int64(len(body))
 		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/model")
@@ -111,10 +116,17 @@ func handler(client *http.Client, clientKey, sessionID string, allowedModels []s
 			query.Del(name)
 		}
 		r.URL.RawQuery = query.Encode()
+		// Drop Connection before adding the policy: ReverseProxy removes headers
+		// named by Connection, which otherwise lets a box strip the policy.
 		// Do not forward box-controlled credentials or affinity headers.
-		for _, name := range []string{"Authorization", "X-Api-Key", "Proxy-Authorization", "X-Goog-Api-Key", "Api-Key", "X-Auth-Token", "X-Claude-Code-Session-Id", "Session-Id", "Session_id", "X-Session-Id", "X-Session-Affinity", "X-Client-Request-Id"} {
+		for _, name := range []string{"Authorization", "X-Api-Key", "Proxy-Authorization", "X-Goog-Api-Key", "Api-Key", "X-Auth-Token", "X-Claude-Code-Session-Id", "Session-Id", "Session_id", "X-Session-Id", "X-Session-Affinity", "X-Client-Request-Id", "X-Dyna-Eligible-Auth", "Connection"} {
 			r.Header.Del(name)
 		}
+		encodedIDs := make([]string, len(eligibleIDs))
+		for i, id := range eligibleIDs {
+			encodedIDs[i] = base64.RawURLEncoding.EncodeToString([]byte(id))
+		}
+		r.Header.Set("X-Dyna-Eligible-Auth", strings.Join(encodedIDs, ","))
 		r.Header.Set("Authorization", "Bearer "+clientKey)
 		r.Header.Set("X-Api-Key", clientKey)
 		r.Header.Set("X-Claude-Code-Session-Id", sessionID)

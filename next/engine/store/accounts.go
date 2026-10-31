@@ -88,3 +88,21 @@ func (s *Store) SetAccountRooms(ctx context.Context, account contract.AccountID,
 		return nil
 	})
 }
+
+// EligibleAccountProxyIDs reads a room's complete credential policy in one snapshot.
+func (s *Store) EligibleAccountProxyIDs(ctx context.Context, room contract.RoomID) ([]string, error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT a.proxy_id FROM accounts a WHERE NOT EXISTS (SELECT 1 FROM account_rooms r WHERE r.account=a.id) OR EXISTS (SELECT 1 FROM account_rooms r WHERE r.account=a.id AND r.room=?) ORDER BY a.id`, room)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
