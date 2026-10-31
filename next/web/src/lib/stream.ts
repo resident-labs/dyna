@@ -10,6 +10,12 @@ export interface EventConnection {
 export type EventFactory = (url: string) => EventConnection;
 export type Schedule = (callback: () => void, delay: number) => () => void;
 
+const transcriptListeners = new Set<(session?: string) => void>();
+export function watchTranscripts(listener: (session?: string) => void): () => void {
+  transcriptListeners.add(listener);
+  return () => { transcriptListeners.delete(listener); };
+}
+
 let onHello: (hello: StreamHello) => void = () => {};
 export function watchHello(listener: (hello: StreamHello) => void): void { onHello = listener; }
 
@@ -33,11 +39,15 @@ export function stream(
       if (typeof value === "object" && value !== null && "build" in value && typeof value.build === "string") {
         const hello: StreamHello = { build: value.build };
         onHello(hello);
+        if (!room) for (const listener of transcriptListeners) listener();
       }
     });
     source.onmessage = message => {
       const event = decodeEvent(JSON.parse(message.data));
-      if (event) apply(event);
+      if (event) {
+        if (!room && event.type === "transcript.changed") for (const listener of transcriptListeners) listener(event.body.session);
+        apply(event);
+      }
       delay = 500;
     };
     source.onerror = () => {
