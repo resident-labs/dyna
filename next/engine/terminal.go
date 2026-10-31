@@ -13,6 +13,10 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 	if err != nil {
 		return contract.HostListResponse{}, failure(err)
 	}
+	shared, err := s.store.RoomShared(ctx)
+	if err != nil {
+		return contract.HostListResponse{}, failure(err)
+	}
 	status, err := s.store.BackupCopyStatus(ctx)
 	if err != nil {
 		return contract.HostListResponse{}, failure(err)
@@ -24,9 +28,9 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 			copyFailure = contract.BackupCopyNoSpace
 		}
 	}
-	result := contract.HostListResponse{Hosts: []contract.HostSummary{{Name: contract.ControlPlane, BackupCopyAt: status.LastSuccess, BackupCopyFailure: copyFailure}}}
+	result := contract.HostListResponse{Hosts: []contract.HostSummary{{Name: contract.ControlPlane, Shared: []contract.RoomShared{}, BackupCopyAt: status.LastSuccess, BackupCopyFailure: copyFailure}}}
 	for _, host := range hosts {
-		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.CheckedAt.IsZero() && host.DiskBytes < 20*box.GiB})
+		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, Shared: append([]contract.RoomShared{}, shared[host.Name]...), CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.CheckedAt.IsZero() && host.DiskBytes < 20*box.GiB})
 	}
 	return result, nil
 }

@@ -230,7 +230,13 @@ const (
 	BackupCopyFailed  BackupCopyFailure = "failed"
 )
 
+type RoomShared struct {
+	Room  RoomID `json:"room"`
+	Bytes int64  `json:"bytes"`
+}
+
 type HostSummary struct {
+	Shared            []RoomShared      `json:"shared"`
 	Name              HostName          `json:"name"`
 	Reachable         bool              `json:"reachable"`
 	Boxes             int               `json:"boxes"`
