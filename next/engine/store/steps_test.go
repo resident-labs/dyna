@@ -236,11 +236,30 @@ func TestUpgradeIndexesExistingPosts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = upgrade(db, 1, "", map[int][]string{37: steps[37]}, nil); err != nil {
+	if err = upgrade(db, 1, "", map[int][]string{37: steps[37], 38: {}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	var count int
 	if err = db.QueryRow(`SELECT count(*) FROM post_search WHERE post_search MATCH 'deploy* AND work*'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("backfilled posts: %d, %v", count, err)
+	}
+}
+
+func TestUpgradeMarksLegacyApprovedAsRunning(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, err = db.Exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO meta VALUES ('schema_version','38'); CREATE TABLE operations (state TEXT); INSERT INTO operations VALUES ('approved'),('done');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := upgrade(db, 1, "", steps, nil); err != nil {
+		t.Fatal(err)
+	}
+	var running, done int
+	if err := db.QueryRow(`SELECT count(*) FILTER (WHERE state='running'), count(*) FILTER (WHERE state='done') FROM operations`).Scan(&running, &done); err != nil || running != 1 || done != 1 {
+		t.Fatalf("running %d done %d: %v", running, done, err)
 	}
 }
