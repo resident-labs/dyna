@@ -306,12 +306,10 @@
     else await focusRowIcon(id, tapped);
   }
   $effect.pre(() => { if (watching && !store?.computers.has(watching)) void stopWatching(); });
-  // A session's running background jobs while its box is ready. The dock's Jobs tab lists every session that had
-  // jobs during this page view, since a finished job's output stays in its box.
+  // A session's running background jobs while its box is ready. The dock's Jobs tab, like About's Jobs row, keeps every
+  // session that ever had jobs, since a finished job's output stays in its box.
   const jobs = (id: string) => store?.boxes.get(id) === "ready" ? store.shellJobs.get(id) ?? 0 : 0;
-  const hadJobs = new SvelteSet<string>();
-  $effect(() => { for (const [id, count] of store?.shellJobs ?? []) if (count > 0) hadJobs.add(id); });
-  let jobSessions = $derived([...store?.sessions.values() ?? []].filter(item => hadJobs.has(item.session) && store?.boxes.get(item.session) === "ready")
+  let jobSessions = $derived([...store?.sessions.values() ?? []].filter(item => store?.hadJobs.has(item.session) && store?.boxes.get(item.session) === "ready")
     .map(item => ({ id: item.session, name: item.name, root: !item.parent, running: jobs(item.session) })));
   let jobFailures = $derived([...store?.failedJobs ?? []].filter(key => jobSessions.some(item => key.startsWith(`${item.id}/`))));
   const wide = new MediaQuery("min-width: 761px");
