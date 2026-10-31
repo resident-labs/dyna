@@ -4,7 +4,7 @@ import { decodeEvent } from "./event.ts";
 export interface EventConnection {
   onmessage: ((event: MessageEvent<string>) => void) | null;
   onerror: ((event: globalThis.Event) => void) | null;
-  addEventListener(type: "hello", listener: (event: globalThis.Event) => void): void;
+  addEventListener(type: "hello", listener: (event: MessageEvent<string>) => void): void;
   close(): void;
 }
 export type EventFactory = (url: string) => EventConnection;
@@ -29,7 +29,6 @@ export function stream(
   function connect() {
     source = factory(`/v1/events?${new URLSearchParams({ ...(room && { room }), after: String(after()) })}`);
     source.addEventListener("hello", message => {
-      if (!(message instanceof MessageEvent) || typeof message.data !== "string") return;
       const value: unknown = JSON.parse(message.data);
       if (typeof value === "object" && value !== null && "build" in value && typeof value.build === "string") {
         const hello: StreamHello = { build: value.build };

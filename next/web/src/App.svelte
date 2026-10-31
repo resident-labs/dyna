@@ -1,6 +1,5 @@
 <script lang="ts">
   import { watchHello } from "./lib/stream.ts";
-  import { reloadDecision } from "./lib/reload.ts";
   import { tick, untrack } from "svelte";
   import { RoomStore } from "./lib/room.svelte.ts";
   import { blockedBy, call, retryDelay, type Blocked as BlockedState } from "./lib/client.ts";
@@ -51,8 +50,11 @@
   watchHello(({ build }) => {
     if (firstBuild === undefined) { firstBuild = build; return; }
     if (build === firstBuild || reloadPending) return;
-    const decision = reloadDecision(Object.values(drafts).some(Boolean) || Object.values(quotes).some(Boolean), [...fileDrafts.values()].some(draft => draft.items.length > 0), terminals?.hasInput() ?? false);
-    if (decision === "reload") location.reload(); else reloadPending = true;
+    const focused = document.activeElement;
+    const hasWork = Object.values(drafts).some(Boolean) || Object.values(quotes).some(Boolean) ||
+      Object.values(unsent).some(list => list.length) || [...fileDrafts.values()].some(draft => draft.items.length > 0) ||
+      terminals?.hasInput() || ((focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement) && focused.value);
+    if (hasWork) reloadPending = true; else location.reload();
   });
   const attention = new Attention();
   let rooms = $derived([...attention.rooms.values()]);
@@ -700,7 +702,7 @@
   @media (max-width: 760px) { :global(.shell.open:has(.visual-pane)) { grid-template-columns: 64px minmax(0, 1fr); } .visual-pane { position: fixed; z-index: 4; inset: 0 0 0 auto; width: min(660px, 100vw); } }
   @media (max-width: 640px) { :global(.shell.open:has(.visual-pane)) { grid-template-columns: minmax(0, 1fr); } .visual-pane { width: 100%; height: var(--app-height, 100dvh); } }
   .reload-notice { margin: 0; padding: 7px 16px; color: var(--muted); border-bottom: 1px solid var(--line); font-size: 13px; }
-  .reload-notice button { margin-left: 8px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
+  .reload-notice button { margin-left: 4px; padding: 8px 4px; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
   /* Two-line rows around the 28 px avatar, as in the chosen mockup: the name, then what the session does. */
   a.member { min-height: 48px; color: var(--text); text-decoration: none; }
   /* The panel's header matches the room header: a 16 px title with its muted counts beside it. */
