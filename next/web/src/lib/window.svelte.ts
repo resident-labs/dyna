@@ -14,7 +14,8 @@ export const WINDOW = 1000;
 export function dmOf(event: Event): string | undefined {
   if (event.type === "session.restarted") return event.body.session;
   if (event.type === "post.created") return event.body.home.kind === "dm" ? event.body.home.session : undefined;
-  if (event.type === "turn.ended") return event.body.replies?.find(({ reply }) => reply.home?.kind === "dm")?.reply.home?.session;
+  if (event.type === "turn.ended") return event.body.replies?.find(({ reply }) => reply.home?.kind === "dm")?.reply.home?.session
+    ?? (event.body.outcome === "stopped" ? event.body.session : undefined);
   return undefined;
 }
 

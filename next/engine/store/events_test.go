@@ -205,3 +205,44 @@ func TestEventsPageDM(t *testing.T) {
 	}
 	check("upgrade")
 }
+
+func TestStopAndPauseReachTheirViews(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.CreateRoom(ctx, "room", "room", time.UnixMilli(1)); err != nil {
+		t.Fatal(err)
+	}
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	err = s.Write(ctx, func(tx *sql.Tx) error {
+		for i, body := range []contract.EventBody{contract.TurnEnded{Session: "s", Turn: "t", Outcome: contract.TurnStopped}, contract.RoomPaused{}, contract.RoomResumed{}} {
+			if _, err := s.AppendEvent(tx, contract.Event{ID: contract.EventID(rune('a' + i)), Time: time.UnixMilli(10), Room: "room", From: owner, Body: body}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dm, err := s.EventsPage(ctx, "room", 0, 0, 10, []contract.EventType{"turn.ended"}, "s")
+	if err != nil || len(dm) != 1 {
+		t.Fatalf("a stopped turn belongs to its DM: events %+v, error %v", dm, err)
+	}
+	all, err := s.OwnerEvents(ctx, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var paused int
+	for _, event := range all {
+		if kind := event.Body.EventType(); kind == "room.paused" || kind == "room.resumed" {
+			paused++
+		}
+	}
+	if paused != 2 {
+		t.Fatalf("the owner stream carries a room's pause: events %+v", all)
+	}
+}

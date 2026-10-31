@@ -162,6 +162,11 @@ export class Attention {
       // Only the owner decides owner-class requests; an ancestor agent decides the rest.
       case "op.requested": if (event.body.class === "owner") waiting.add(event.body.id); break;
       case "op.decided": case "op.ran": if (event.body.state !== "pending") waiting.delete(event.body.id); break;
+      case "room.paused": case "room.resumed": {
+        const room = this.rooms.get(event.room ?? "");
+        if (room) this.rooms.set(room.id, { ...room, paused: event.type === "room.paused" });
+        break;
+      }
       case "turn.started": working.add(event.body.session); this.turns.set(event.body.session, event.body.turn); this.activity.delete(event.body.session); break;
       case "turn.ended":
         working.delete(event.body.session); this.turns.delete(event.body.session); this.activity.delete(event.body.session); break;

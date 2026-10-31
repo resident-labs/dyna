@@ -41,6 +41,8 @@
 <div class="about">
   {#if open?.goal}<h3>Goal</h3><p class="goal">{open.goal}</p>{/if}
   <dl>
+    {#if store.turns.has(session)}<dt>Turn</dt><dd>{#if store.stopping.has(session)}Stopping{:else}Running · <button type="button" onclick={() => store.stop(session)}>Stop</button>{/if}
+      {#if store.stopFailed.has(session)}<span class="failed">The stop did not reach the engine.</span>{/if}</dd>{/if}
     {#if parent && open?.parent}<dt>Parent</dt><dd><a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(open.parent)}`} onclick={navigate}>{parent}</a></dd>{/if}
     {#if open?.profile}<dt>Profile</dt><dd><ProfileMenu {session} profile={open.profile} /></dd>{/if}
     {#if box}<dt>Box</dt><dd>{#if failure}<StatusPill tone="failed" word label="Failed" /> · {boxReason(failure)}{:else}{boxes[box]}{/if}</dd>{/if}
@@ -59,6 +61,7 @@
   dd { margin: 0; line-height: 20px; overflow-wrap: anywhere; }
   .muted { color: var(--muted); }
   a, button { padding: 0; border: 0; border-radius: 4px; background: none; color: var(--focus); font: inherit; text-decoration: none; cursor: pointer; }
+  .failed { display: block; color: var(--muted); font-size: 12.5px; }
   a:hover, button:hover { text-decoration: underline; }
   a:focus-visible, button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 </style>
