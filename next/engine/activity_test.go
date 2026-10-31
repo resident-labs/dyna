@@ -21,6 +21,10 @@ func TestTurnActivity(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	ownerEvents, e := s.Events(ctx, owner, "", list.Seq)
+	if e != nil {
+		t.Fatal(e)
+	}
 	for _, label := range []string{"\xff", "a\nb", "a\rb", strings.Repeat("x", 81)} {
 		if _, e := s.TurnActivity(ctx, caller, contract.TurnActivityRequest{Turn: turn, Label: label}); e == nil || e.Code != contract.ErrInvalid {
 			t.Fatalf("label %q: %v", label, e)
@@ -30,9 +34,10 @@ func TestTurnActivity(t *testing.T) {
 		if _, e := s.TurnActivity(ctx, caller, contract.TurnActivityRequest{Turn: turn, Label: label}); e != nil {
 			t.Fatal(e)
 		}
-		event := <-events
-		if event.Seq != 0 || event.Body.(contract.TurnActivity).Label != label {
-			t.Fatalf("activity event: %+v", event)
+		for _, stream := range []<-chan contract.Event{events, ownerEvents} {
+			if event := <-stream; event.Seq != 0 || event.Body.(contract.TurnActivity).Label != label {
+				t.Fatalf("activity event: %+v", event)
+			}
 		}
 	}
 	list, e = s.SessionList(ctx, owner, contract.SessionListRequest{Room: room})
