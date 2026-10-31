@@ -1,12 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { commandLine, dayLabel, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, quoted, workSummary } from "./feed.ts";
+import { commandLine, dayLabel, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, quoted, requestLine, workSummary } from "./feed.ts";
 import type { BoxState, Event, EventBody, FailureCause, Principal } from "./contract.gen.ts";
 
 test("a forward quotes every line of the post under its label, then the owner's words", () => {
   const at = "2026-10-30T12:00:00Z";
   assert.equal(quoted({ author: "lead", at, text: "- one\n\n@root two\rthree", attachments: [] }, " see this \n"),
     `> **Forwarded from lead** · ${formatTime(at)}\n>\n> - one\n>\n> @root two\n> three\n\nsee this`);
+});
+
+test("a single-host grant for another session keeps who gets access and for how long", () => {
+  const target = { kind: "host", name: "build-server" } as const;
+  assert.deepEqual(requestLine({ body: "Let builder-feed run any command on build-server for 24 hours.\nReason: tests", target }),
+    { text: "Let builder-feed run any command on ", named: "build-server", after: " for 24 hours." });
+  assert.equal(requestLine({ body: "timeout: 30s", target }).named, "");
 });
 
 test("a command line shows each argument exactly: spaces, quotes and empty arguments are quoted", () => {
