@@ -147,6 +147,18 @@ func (m *Mirror) DeleteArchiveRef(ctx context.Context, repo contract.RepoName, r
 	if err != nil {
 		return err
 	}
+	remote := "https://github.com/" + string(repo) + ".git"
+	out, err := m.Runner.Run(ctx, m.authEnv(), "ls-remote", remote, ref)
+	if err != nil {
+		return err
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		return nil
+	}
+	if len(fields) != 2 || fields[0] != commit || fields[1] != ref {
+		return errors.New("archive ref changed")
+	}
 	if _, err = os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 			return err
@@ -157,7 +169,7 @@ func (m *Mirror) DeleteArchiveRef(ctx context.Context, repo contract.RepoName, r
 	} else if err != nil {
 		return err
 	}
-	_, err = m.Runner.Run(ctx, m.authEnv(), "--git-dir", path, "push", "--force-with-lease="+ref+":"+commit, "https://github.com/"+string(repo)+".git", ":"+ref)
+	_, err = m.Runner.Run(ctx, m.authEnv(), "--git-dir", path, "push", "--force-with-lease="+ref+":"+commit, remote, ":"+ref)
 	return err
 }
 
