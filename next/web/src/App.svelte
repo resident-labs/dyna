@@ -475,12 +475,13 @@
   <aside class="rail" aria-label="Rooms" tabindex="-1" bind:this={rail} inert={phone.current && !drawer} role={drawer ? "dialog" : undefined} aria-modal={drawer || undefined}
     onclick={event => { if (drawer && event.target instanceof Element && event.target.closest("a, button")) void showDrawer(false, false); }}>
     <nav aria-label="Rooms"><a class="home" href="/" onclick={navigate} aria-current={room || inSettings ? undefined : "page"} aria-label="Home" title="Home"><Icon name="home" /></a>
-      <!-- A room with requests that wait for the owner gets an amber dot on its corner, with no number (spec 5.13). A room
-           with a failed session gets a red one instead, in the priority order of status.ts. -->
-      {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}{@const failing = attention.failing(item.id)}
+      <!-- A room with requests, or with sessions whose box waits for a host that takes the room, waits for the owner and
+           gets an amber dot on its corner, with no number (spec 5.13). A room with a failed session gets a red one
+           instead, in the priority order of status.ts. -->
+      {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}{@const hostless = attention.hostless.get(item.id)?.size ?? 0}{@const failing = attention.failing(item.id)}
       <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id && !inSettings ? "page" : undefined}
-        aria-label={[item.name, failing && `${count(failing, "session")} failed`, waiting && `${count(waiting, "request")} waiting`].filter(Boolean).join(", ")} title={item.name}>
-        <Avatar kind="room" name={item.name} label={initials.get(item.name)} size={40} />{#if failing}<StatusPill tone="failed" label="Failed" dot />{:else if waiting}<StatusPill tone="warning" label="Waiting" dot />{/if}</a>
+        aria-label={[item.name, failing && `${count(failing, "session")} failed`, waiting && `${count(waiting, "request")} waiting`, hostless && `${count(hostless, "session")} waiting for a host`].filter(Boolean).join(", ")} title={item.name}>
+        <Avatar kind="room" name={item.name} label={initials.get(item.name)} size={40} />{#if failing}<StatusPill tone="failed" label="Failed" dot />{:else if waiting || hostless}<StatusPill tone="warning" label="Waiting" dot />{/if}</a>
     {/each}</nav>
     <footer><a class="gear" href="/settings" onclick={navigate} aria-current={inSettings ? "page" : undefined} aria-label="Settings" title="Settings"><Icon name="gear" size={20} /></a></footer>
     <!-- The drawer's second column: the open room's pages, or on Home every room by name. Counts are muted; only Requests
