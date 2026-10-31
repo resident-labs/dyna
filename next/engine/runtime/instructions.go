@@ -81,3 +81,22 @@ func (b *Boxes) syncInstructions(ctx context.Context, h *podman.Host, extra ...c
 	}
 	return nil
 }
+
+// instructionHeartbeat retries failed repairs and skips unchanged masters.
+func (b *Boxes) instructionHeartbeat(ctx context.Context, name contract.HostName, h *podman.Host) func(bool) {
+	var repaired uint64
+	return func(ok bool) {
+		if !ok {
+			return
+		}
+		generation := h.Generation()
+		if generation != 0 && generation == repaired {
+			return
+		}
+		if err := b.syncInstructions(ctx, h); err != nil {
+			log.Printf("host %s: instructions: %v", name, err)
+			return
+		}
+		repaired = generation
+	}
+}

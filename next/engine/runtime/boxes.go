@@ -118,13 +118,10 @@ func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
 	ticker := time.NewTicker(10 * time.Second)
 	go func() {
 		defer ticker.Stop()
+		repair := b.instructionHeartbeat(b.Context, name, h)
 		h.Heartbeat(b.Context, ticker.C, b.HostData, func(ok bool, load podman.Load) {
 			now := time.Now()
-			if ok {
-				if err := b.syncInstructions(b.Context, h); err != nil {
-					log.Printf("host %s: instructions: %v", name, err)
-				}
-			}
+			repair(ok)
 			b.record(name, ok, load, now)
 			b.reportHeartbeat(b.Context, name, ok, load, now)
 		}, b.pressure(name))
