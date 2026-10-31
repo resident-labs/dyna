@@ -19,7 +19,7 @@ func TestGlobalOperationUpgradePreservesReferences(t *testing.T) {
 		CREATE TABLE event_files (seq INTEGER);
 		INSERT INTO meta VALUES ('schema_version','42');
 		CREATE TABLE events (seq INTEGER PRIMARY KEY, room TEXT, from_kind TEXT, from_id TEXT, type TEXT, body BLOB);
-		CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT, started_seq INTEGER);
+		CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT, started_seq INTEGER, started_at INTEGER, ended_at INTEGER);
 		CREATE TABLE pr_owners (session TEXT);
 		CREATE TABLE rooms(id TEXT PRIMARY KEY);
 		INSERT INTO rooms VALUES ('room');
