@@ -14,19 +14,16 @@ paints a Canvas 2D frame. It is not an xterm.js compatibility layer.
 - `shims.ts` replaces the few T3 app helpers that the files import.
 - `vendor/` holds `ghostty-vt.wasm` and the 112-byte `ghostty-write-pty.wasm`
   trampoline that carries terminal replies back to the PTY.
-- `fonts/` holds the symbols-only Nerd Font.
 
 The wasm comes from ghostty revision `9f62873bf195e4d8a762d768a1405a5f2f7b1697`
-(T3's `native/libghostty-vt/VERSION`). `LICENSE` holds the T3, libghostty-vt
-and Nerd Font licenses.
+(T3's `native/libghostty-vt/VERSION`). `LICENSE` holds the T3 and libghostty-vt
+licenses.
 
 ## Loading
 
 `TermPane` imports `surface.ts` dynamically, so the main bundle carries none
-of this. The wasm loads when the first terminal opens. The symbol font has a
-Nerd Font `unicodeRange`, so the browser fetches it only when a symbol glyph
-draws. The web app's CSP needs `'wasm-unsafe-eval'` in `script-src`
-(`internal/websvc/server.go`).
+of this. The wasm loads when the first terminal opens. The web app's CSP needs `'wasm-unsafe-eval'` in `script-src`
+(`next/engine/api/web.go`).
 
 ## Changes from upstream
 
@@ -41,7 +38,12 @@ The behavior changes carry a `Dyna:` comment.
   `refreshLinkActivation`, `resendSize`, `getSelectionPosition`,
   `getSelectionEndClientRect`, and `isAtBottom`. The unused
   `GhosttySelectionPosition` type is also removed.
-- The symbol font loads lazily and a late font load repaints the frame.
+- A late font load repaints the frame.
+- Dyna v2 bundles no font: `fonts/` and the symbols-only Nerd Font are
+  dropped, `ensureTerminalSymbolsFont` and its call in `create` are removed,
+  and `TERMINAL_GLYPH_FALLBACKS` is only `monospace`. The family is the app's
+  `--mono` stack, so Nerd Font symbols draw only when the owner has such a
+  font installed.
 
 To update, copy the new upstream files over these, then apply the changes
 above again.
