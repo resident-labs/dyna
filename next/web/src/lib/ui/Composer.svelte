@@ -126,7 +126,7 @@
   {#if note || over > 0}<p class="note" class:over={over > 0} role="status">{over > 0 ? `A post can carry ${maxFiles} files; remove ${over} to send.` : note}</p>{/if}
   {#if stop?.failed && empty}<p class="note" role="status">The stop did not reach the engine. Try again.</p>{/if}
   <div class="inputline">
-  {#if files.items.length && touch.current}<details class="files-toggle"><summary><Icon name="file" size={14} />{filesSummary(files.items)}</summary>{@render fileTray()}</details>{/if}
+  {#if files.items.length && touch.current}<details class="files-toggle"><summary class:unsaved={files.items.some(item => item.state === "failed")}><Icon name="file" size={14} />{filesSummary(files.items)}</summary>{@render fileTray()}</details>{/if}
   <textarea rows="2" aria-label="Message" bind:this={element} bind:value onkeydown={keydown} onpaste={paste} {placeholder}
     oninput={() => { dismissed = -1; track(); }} onclick={track} onkeyup={track} onblur={() => { dismissed = token?.start ?? -1; }} onfocus={() => { dismissed = -1; }}
     role="combobox" aria-autocomplete="list" aria-expanded={matches.length > 0} aria-controls={matches.length ? `${id}-list` : undefined}
@@ -208,6 +208,8 @@
     .inputline { display: flex; align-items: center; gap: 6px; min-width: 0; grid-column: 2; grid-row: 4; }
     .files-toggle { flex: none; z-index: 1; }
     .files-toggle summary { display: flex; align-items: center; gap: 4px; padding: 6px; border-radius: 6px; background: var(--selected); color: var(--muted); font-size: 12px; cursor: pointer; list-style: none; white-space: nowrap; }
+    .files-toggle summary.unsaved { color: var(--danger); }
+    textarea::placeholder { white-space: nowrap; }
     .files-toggle .tray { position: absolute; left: 0; right: 0; bottom: 100%; max-height: 180px; overflow-y: auto; padding: 8px; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; }
     textarea { min-width: 0; flex: 1; min-height: 40px; max-height: 30vh; padding: 8px 0; }
     .actions { display: contents; }
