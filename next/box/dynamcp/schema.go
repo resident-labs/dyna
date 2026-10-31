@@ -23,17 +23,26 @@ type schema struct {
 }
 
 type action struct {
-	method  contract.Method
-	op      contract.OpKind
-	request reflect.Type
-	local   tools.BoxHandler
-	help    string
+	method   contract.Method
+	op       contract.OpKind
+	request  reflect.Type
+	local    tools.BoxHandler
+	help     string
+	readOnly bool
 }
 
+type annotations struct {
+	ReadOnly    bool `json:"readOnlyHint"`
+	Destructive bool `json:"destructiveHint"`
+	Idempotent  bool `json:"idempotentHint"`
+	OpenWorld   bool `json:"openWorldHint"`
+}
 type tool struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	InputSchema schema `json:"inputSchema"`
+	Name        string      `json:"name"`
+	Title       string      `json:"title"`
+	Description string      `json:"description"`
+	InputSchema schema      `json:"inputSchema"`
+	Annotations annotations `json:"annotations"`
 }
 
 func typeSchema(t reflect.Type) schema {
@@ -90,7 +99,7 @@ func registry() ([]tool, map[string]map[string]action, error) {
 			continue
 		}
 		for _, a := range row.Actions {
-			add(a.Tool, a.Name, action{method: row.Method, op: a.Op, request: a.Request, help: a.Help})
+			add(a.Tool, a.Name, action{method: row.Method, op: a.Op, request: a.Request, help: a.Help, readOnly: row.Scope == contract.ScopeRead})
 		}
 	}
 	for _, a := range tools.BoxActions() {
@@ -104,6 +113,11 @@ func registry() ([]tool, map[string]map[string]action, error) {
 	var result []tool
 	for _, name := range names {
 		var verbs, help []string
+		metadata, ok := tools.ToolkitFor(name)
+		if !ok {
+			return nil, nil, fmt.Errorf("missing toolkit metadata for %s", name)
+		}
+		readOnly := true
 		props := map[string]schema{}
 		for verb := range actions[name] {
 			verbs = append(verbs, verb)
@@ -111,6 +125,7 @@ func registry() ([]tool, map[string]map[string]action, error) {
 		sort.Strings(verbs)
 		for _, verb := range verbs {
 			a := actions[name][verb]
+			readOnly = readOnly && a.readOnly
 			help = append(help, verb+": "+a.help)
 			for key, value := range typeSchema(a.request).Properties {
 				if old, ok := props[key]; ok && !reflect.DeepEqual(old, value) {
@@ -123,7 +138,7 @@ func registry() ([]tool, map[string]map[string]action, error) {
 			}
 		}
 		props["action"] = schema{Type: "string", Enum: verbs}
-		result = append(result, tool{Name: name, Description: strings.Join(help, "\n"), InputSchema: schema{Type: "object", Properties: props, Required: []string{"action"}}})
+		result = append(result, tool{Name: name, Title: metadata.Title, Description: strings.Join(help, "\n"), InputSchema: schema{Type: "object", Properties: props, Required: []string{"action"}}, Annotations: annotations{ReadOnly: readOnly, Destructive: metadata.Destructive, Idempotent: metadata.Idempotent, OpenWorld: metadata.OpenWorld}})
 	}
 	return result, actions, nil
 }
