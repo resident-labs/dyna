@@ -41,6 +41,24 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 		return a.web.login(ctx, p, req)
 	})
+	call(mux, contract.MethodRuleAdd, c, user, func(ctx context.Context, p contract.Principal, req contract.RuleAddRequest) (contract.RuleAddResponse, *contract.Error) {
+		if box(c) && req.Room == "" {
+			req.Room = c.Room
+		}
+		return a.service.RuleAdd(ctx, p, req)
+	})
+	call(mux, contract.MethodRuleRemove, c, user, func(ctx context.Context, p contract.Principal, req contract.RuleRemoveRequest) (contract.RuleRemoveResponse, *contract.Error) {
+		if box(c) && req.Room == "" {
+			req.Room = c.Room
+		}
+		return a.service.RuleRemove(ctx, p, req)
+	})
+	call(mux, contract.MethodRuleList, c, user, func(ctx context.Context, p contract.Principal, req contract.RuleListRequest) (contract.RuleListResponse, *contract.Error) {
+		if box(c) && req.Room == "" {
+			req.Room = c.Room
+		}
+		return a.service.RuleList(ctx, p, req)
+	})
 	call(mux, contract.MethodConversationRead, c, owner, a.service.ConversationRead)
 	call(mux, contract.MethodRoomList, c, owner, a.service.RoomList)
 	call(mux, contract.MethodSessionList, c, user, a.service.SessionList)

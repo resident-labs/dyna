@@ -5,6 +5,9 @@ import "time"
 type Method string
 
 const (
+	MethodRuleAdd          Method = "rule.add"
+	MethodRuleRemove       Method = "rule.remove"
+	MethodRuleList         Method = "rule.list"
 	MethodWebLogin         Method = "web.login"
 	MethodConversationRead Method = "conversation.read"
 	MethodRoomList         Method = "room.list"
@@ -30,6 +33,31 @@ const (
 	MethodShellJobEnded    Method = "shell.job.ended"
 	MethodShellOutput      Method = "shell.output"
 )
+
+type RoomRule struct {
+	Number int       `json:"number"`
+	Text   string    `json:"text"`
+	By     Principal `json:"by"`
+	At     time.Time `json:"at"`
+}
+type RuleAddRequest struct {
+	Room RoomID `json:"room"`
+	Text string `json:"text"`
+}
+type RuleAddResponse struct {
+	Number int `json:"number"`
+}
+type RuleRemoveRequest struct {
+	Room   RoomID `json:"room"`
+	Number int    `json:"number"`
+}
+type RuleRemoveResponse struct{}
+type RuleListRequest struct {
+	Room RoomID `json:"room"`
+}
+type RuleListResponse struct {
+	Rules []RoomRule `json:"rules"`
+}
 
 type ErrorCode string
 
@@ -269,6 +297,7 @@ type BoxHelloResponse struct {
 	Box     BoxID       `json:"box"`
 	Model   ModelChoice `json:"model"`
 	Repos   []BoxRepo   `json:"repos,omitempty"`
+	Rules   []RoomRule  `json:"rules,omitempty"`
 	Upgrade string      `json:"upgrade,omitempty"`
 }
 type TurnOutputRequest struct {

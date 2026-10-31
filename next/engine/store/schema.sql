@@ -35,4 +35,5 @@ CREATE TABLE hostexec_runs (op TEXT PRIMARY KEY REFERENCES operations(id), grant
 CREATE INDEX hostexec_runs_grant ON hostexec_runs(grant_id, ended_at);
 CREATE INDEX hostexec_runs_pending ON hostexec_runs(ended_at) WHERE ended_at IS NULL;
 
+CREATE TABLE rules (room TEXT NOT NULL REFERENCES rooms(id), number INTEGER NOT NULL, text TEXT NOT NULL, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at INTEGER NOT NULL, removed_at INTEGER, PRIMARY KEY(room, number));
 CREATE TABLE conversation_reads (room TEXT NOT NULL, conversation TEXT NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY(room, conversation));
