@@ -175,13 +175,19 @@ func (s Service) ReconcileInstall(ctx context.Context) error {
 				// not. Warnings from the checkout stay on the same card, and the
 				// run's log holds them too.
 				state := room.HookPassed
-				if j.Result != string(ResultPass) {
+				switch j.Result {
+				case hookinstall.ResultDeferred:
+					state = room.HookDeferred
+				case hookinstall.ResultPass:
+				default:
 					state = room.HookError
 				}
 				detail := warningText(j.Warnings)
-				if state == room.HookPassed {
+				if state == room.HookPassed || state == room.HookDeferred {
 					s.emit(event, hookEvent(event, h, ev, state, detail))
-					s.clearNotices(r.ID, h)
+					if state == room.HookPassed {
+						s.clearNotices(r.ID, h)
+					}
 				} else {
 					s.alert(r, event, h, ev, state, installCause(j), detail)
 				}
@@ -205,7 +211,7 @@ func (s Service) ReconcileInstall(ctx context.Context) error {
 // create the repo's room. Every warning cause counts, so two different
 // checkouts do not collapse into one claim.
 func installCause(j *hookinstall.Job) string {
-	cause := "install unit " + j.Result
+	cause := "install unit " + string(j.Result)
 	for _, w := range j.Warnings {
 		cause += " " + w.Cause
 	}

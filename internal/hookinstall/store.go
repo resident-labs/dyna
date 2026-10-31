@@ -41,6 +41,14 @@ type Warning struct {
 	Cause string `json:"cause"`
 	Text  string `json:"text"`
 }
+type Result string
+
+const (
+	ResultPass     Result = "pass"
+	ResultError    Result = "error"
+	ResultDeferred Result = "deferred"
+)
+
 type Job struct {
 	ID         string    `json:"id"`
 	Unit       string    `json:"unit"`
@@ -54,7 +62,7 @@ type Job struct {
 	HookLog    string    `json:"hookLog"`
 	WorkerLog  string    `json:"workerLog,omitempty"`
 	Status     string    `json:"status"`
-	Result     string    `json:"result,omitempty"`
+	Result     Result    `json:"result,omitempty"`
 	Cause      string    `json:"cause,omitempty"`
 	Warnings   []Warning `json:"warnings,omitempty"`
 	Installed  string    `json:"installed,omitempty"`

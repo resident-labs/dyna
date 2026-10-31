@@ -100,7 +100,7 @@ export type RuleVerb = "added" | "edited" | "removed"
 export type WorktreeReason = "not-merged" | "dirty" | "manual-handoff" | "keep-failed" | "other"
 
 // HookState is a named string type of an event payload.
-export type HookState = "running" | "passed" | "failed" | "error"
+export type HookState = "running" | "passed" | "failed" | "error" | "deferred"
 
 // MergeReasonKind is a named string type of an event payload.
 export type MergeReasonKind = "checks-failed" | "conflict" | "root-return" | "tested-head" | "other"
@@ -1727,7 +1727,7 @@ const TURN_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stoppe
 const CANDIDATE_STATE: ReadonlySet<unknown> = new Set(["available", "unavailable", "unknown"])
 const RULE_VERB: ReadonlySet<unknown> = new Set(["added", "edited", "removed"])
 const WORKTREE_REASON: ReadonlySet<unknown> = new Set(["not-merged", "dirty", "manual-handoff", "keep-failed", "other"])
-const HOOK_STATE: ReadonlySet<unknown> = new Set(["running", "passed", "failed", "error"])
+const HOOK_STATE: ReadonlySet<unknown> = new Set(["running", "passed", "failed", "error", "deferred"])
 const MERGE_REASON_KIND: ReadonlySet<unknown> = new Set(["checks-failed", "conflict", "root-return", "tested-head", "other"])
 const REVIEW_KIND: ReadonlySet<unknown> = new Set(["approve", "changes", "approve-fast", "stop-early"])
 const REVIEW_SEVERITY: ReadonlySet<unknown> = new Set(["blocking", "should-fix", "nit"])
