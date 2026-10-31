@@ -94,7 +94,7 @@ export function build(text: string, scope: Scope | undefined, sources: Sources):
   };
   const rooms = section("rooms", ranked(sources.rooms, query, () => false).map((room): Item => ({ kind: "room", room })));
   const foundSessions = ranked(sources.sessions, query, item => item.closed).map((session): Item => ({ kind: "session", session }));
-  const sessions = section("sessions", foundSessions, sources.sessionsTotal ?? foundSessions.length);
+  const sessions = section("sessions", foundSessions.slice(0, 50), sources.sessionsTotal ?? foundSessions.length);
   const messages = sources.messages;
   const post = section("messages", messages.posts.map((found): Item => ({ kind: "message", post: found })), Math.max(messages.total, messages.posts.length),
     messages.state === "searching" || messages.state === "failed" ? messages.state : undefined);
