@@ -81,6 +81,15 @@ export function formatTime(value: string): string {
   return at.toDateString() === new Date().toDateString() ? clock : `${at.toLocaleDateString([], { month: "short", day: "numeric" })}, ${clock}`;
 }
 
+// A muted time from now, such as "in 59 minutes" or "2 minutes ago".
+const relative = new Intl.RelativeTimeFormat([], { numeric: "auto" });
+export function fromNow(value: string, now: number): string {
+  const minutes = Math.round((new Date(value).getTime() - now) / 60_000);
+  if (Math.abs(minutes) < 60) return relative.format(minutes, "minute");
+  const hours = Math.round(minutes / 60);
+  return Math.abs(hours) < 24 ? relative.format(hours, "hour") : relative.format(Math.round(hours / 24), "day");
+}
+
 const count = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;

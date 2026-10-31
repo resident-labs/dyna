@@ -11,6 +11,8 @@
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
   import ComputerView from "./lib/ui/ComputerView.svelte";
   import { MediaQuery } from "svelte/reactivity";
+  import RoomMenu, { type Section } from "./lib/ui/RoomMenu.svelte";
+  import RequestsPanel from "./lib/ui/RequestsPanel.svelte";
   import type { Conversation, RoomSummary, SessionStarted } from "./lib/contract.gen.ts";
   const signedOut = (error: unknown) => error instanceof APIError && error.detail.code === "forbidden";
   let rooms: RoomSummary[] = $state([]);
@@ -19,7 +21,15 @@
     roomsError = signedOut(error) ? "Your sign-in ended. Run dyna web to sign in again." : "Rooms are not available.";
   });
   let path = $state(window.location.pathname);
-  window.addEventListener("popstate", () => { path = window.location.pathname; });
+  window.addEventListener("popstate", () => { path = window.location.pathname; section = undefined; });
+  // A room view from the header menu shows in place of the conversation until Back or Escape.
+  let section: Section | undefined = $state();
+  let menu: RoomMenu | undefined = $state();
+  async function closeSection() {
+    section = undefined;
+    await tick();
+    menu?.focus();
+  }
   const segment = (pattern: RegExp) => { const match = pattern.exec(path)?.[1]; return match && decodeURIComponent(match); };
   let room = $derived(segment(/^\/r\/([^/]+)/));
   let session = $derived(segment(/^\/r\/[^/]+\/s\/([^/]+)/));
@@ -39,6 +49,7 @@
     event.preventDefault();
     history.pushState(null, "", event.currentTarget.href);
     path = window.location.pathname;
+    section = undefined;
   }
   let home: Conversation = $derived(session ? { kind: "dm", session } : { kind: "feed" });
   // The sessions panel lists each child under its parent. Closed sessions leave it.
@@ -77,6 +88,7 @@
   // F6 (mod+F6 in a browser) moves focus between areas; Shift goes back.
   function cycle(event: KeyboardEvent) {
     if (event.key === "Escape" && panel) void showPanel(false);
+    else if (event.key === "Escape" && section) void closeSection();
     if (event.key !== "F6") return;
     event.preventDefault();
     // Only areas on screen take part; below 900 px the closed sessions panel has no boxes.
@@ -126,7 +138,7 @@
   }
   let title = $derived(!room ? "Welcome" : session ? store?.names.get(session) ?? "Session" : roomName);
   // The open room's icon gets a dot while a request waits for the owner; other rooms need cross-room counts first.
-  let waiting = $derived([...(store?.operations.values() ?? [])].some(op => op.class === "owner"));
+  let waiting = $derived((store?.waiting ?? 0) > 0);
   // Each fact shows once: profile, state and trouble live on the session's row. A closed session has no row.
   let closed = $derived(!!session && !!store?.ready && !store.sessions.has(session));
   const trouble = (id: string) => {
@@ -155,10 +167,12 @@
     <header>{#if room && session}<a class="crumb" href={"/r/" + encodeURIComponent(room)} onclick={navigate}>{roomName}</a><span class="count">/</span>
       {:else if room}<Icon name="room" />{/if}<strong>{title}</strong>
       {#if closed}<span class="count">· closed</span>{/if}
+      {#if store && !unavailable}<RoomMenu bind:this={menu} waiting={store.waiting} onchoose={next => { section = next; }} />{/if}
       {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={store?.failed.size ? "Sessions, a turn failed" : "Sessions"}
         title="Sessions" aria-controls="sessions" aria-expanded={panel} onclick={() => void showPanel(!panel)}><Icon name="people" />
         {#if store?.failed.size && !panel}<span class="attention"></span>{/if}</button>{/if}</header>
-    <div class="feed">
+    {#if section === "requests" && store && !unavailable}<RequestsPanel {store} room={roomName} onback={() => void closeSection()} />
+    {:else}<div class="feed">
       {#if store && !unavailable}
         {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} {intro} />{/key}
       {:else}<p class="empty">{unavailable || roomsError || (rooms.length ? "Select a room." : "Your rooms will appear here.")}
@@ -167,7 +181,7 @@
     {#if room && !unavailable}
       <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title} />
       {#if failed === key}<p class="hint" role="alert">Your message was not sent. Press Enter to try again.</p>{/if}
-    {/if}
+    {/if}{/if}
   </main>
   {#if room}
     <aside class="members" id="sessions" class:shown={panel} class:watching={watching !== undefined} aria-label="Sessions" tabindex="-1" bind:this={members}>
