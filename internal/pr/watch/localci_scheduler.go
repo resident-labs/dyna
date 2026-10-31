@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/ghclient"
+	"dyna-agent/internal/ghquota"
 	"dyna-agent/internal/gitexec"
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/localci"
@@ -990,6 +991,7 @@ func (s *Service) scheduledCIConclusive(ctx context.Context, job registeredCIJob
 		return headVerified(r) && job.head == r.Head && r.Polling.PullHead == r.Head && verdictFromHosted(string(r.CI)).Conclusive(), nil
 	}
 	gh := s.github(r.RoomID)
+	gh.runPhase = ghquota.RunTrialSchedule
 	runs, err := gh.readCommitRuns(ctx, refRecord(r), job.head)
 	if err != nil {
 		return false, err

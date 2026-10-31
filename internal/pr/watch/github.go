@@ -558,6 +558,9 @@ func (g GitHub) Pull(ctx context.Context, r Ref) (Pull, error) {
 }
 
 func (g GitHub) Snapshot(ctx context.Context, r Ref) (Snapshot, error) {
+	if g.runPhase == ghquota.RunOther {
+		g.runPhase = ghquota.RunDirectSnapshot
+	}
 	var s Snapshot
 	if err := g.api(ctx, r, r.path(""), &s.Pull); err != nil {
 		return s, err
