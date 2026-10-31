@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -22,7 +24,7 @@ func TestSetupRepos(t *testing.T) {
 			git := func(_ context.Context, _, _ string, args ...string) (string, error) {
 				calls = append(calls, append([]string(nil), args...))
 				if args[0] == "clone" {
-					return "", os.MkdirAll(args[len(args)-1], 0755)
+					return "", os.MkdirAll(filepath.Join(args[len(args)-1], ".git"), 0755)
 				}
 				if args[0] == "show-ref" && !existingBranch {
 					return "", errors.New("not found")
@@ -33,7 +35,7 @@ func TestSetupRepos(t *testing.T) {
 				t.Fatal(err)
 			}
 			dir := filepath.Join(root, "owner/repo")
-			if !reflect.DeepEqual(calls[0], []string{"clone", "--no-checkout", "--reference", repo.Cache, repo.Cache, filepath.Join(root, "owner/.repo.setup")}) {
+			if !reflect.DeepEqual(calls[0], []string{"clone", "--no-checkout", "--reference", repo.Cache, repo.Cache, filepath.Join(root, "owner/repo")}) {
 				t.Fatal(calls[0])
 			}
 			base := "refs/remotes/origin/main"
@@ -60,7 +62,7 @@ func TestSetupRetryAfterCheckoutFailure(t *testing.T) {
 	fail := true
 	git := func(_ context.Context, _, _ string, args ...string) (string, error) {
 		if args[0] == "clone" {
-			return "", os.MkdirAll(args[len(args)-1], 0755)
+			return "", os.MkdirAll(filepath.Join(args[len(args)-1], ".git"), 0755)
 		}
 		if args[0] == "checkout" && fail {
 			return "", errors.New("checkout failed")
@@ -70,8 +72,8 @@ func TestSetupRetryAfterCheckoutFailure(t *testing.T) {
 	if err := setupRepos(context.Background(), root, []contract.BoxRepo{repo}, "", "", git); err == nil {
 		t.Fatal("expected failure")
 	}
-	if _, err := os.Stat(filepath.Join(root, "owner/repo")); !os.IsNotExist(err) {
-		t.Fatalf("partial repository visible: %v", err)
+	if entries, err := os.ReadDir(filepath.Join(root, "owner/repo")); err != nil || len(entries) != 0 {
+		t.Fatalf("partial repository visible: %v %v", entries, err)
 	}
 	fail = false
 	if err := setupRepos(context.Background(), root, []contract.BoxRepo{repo}, "", "", git); err != nil {
@@ -79,6 +81,56 @@ func TestSetupRetryAfterCheckoutFailure(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "owner/repo")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSetupRetryFillsRunningProcessDirectory(t *testing.T) {
+	root := t.TempDir()
+	repo := contract.BoxRepo{Name: "owner/repo", Cache: "/cache", Branch: "branch", Base: "main"}
+	dir := filepath.Join(root, string(repo.Name))
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	fail := true
+	git := func(_ context.Context, dir, _ string, args ...string) (string, error) {
+		if args[0] == "clone" && fail {
+			return "", errors.New("offline")
+		}
+		if args[0] == "clone" {
+			return "", os.MkdirAll(filepath.Join(args[len(args)-1], ".git"), 0755)
+		}
+		if args[0] == "checkout" {
+			return "", os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("repository"), 0600)
+		}
+		return "", nil
+	}
+	if err := setupRepos(context.Background(), root, []contract.BoxRepo{repo}, "", "", git); err == nil {
+		t.Fatal("expected setup failure")
+	}
+	cmd := exec.Command("sh", "-c", "read -r go; cat AGENTS.md")
+	cmd.Dir = dir
+	input, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	fail = false
+	if err := setupRepos(context.Background(), root, []contract.BoxRepo{repo}, "", "", git); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(input, "go\n"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(output)
+	if err != nil || string(got) != "repository" {
+		t.Fatalf("got %q: %v", got, err)
 	}
 }
 
