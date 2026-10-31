@@ -20,7 +20,7 @@ func (s *Service) ShellJobEnded(ctx context.Context, caller contract.Principal, 
 	if err != nil {
 		return contract.ShellJobEndedResponse{}, failure(err)
 	}
-	event, err := s.event(session.Room, caller, contract.ShellJobEnded{Session: session.ID, Job: req.Job, ExitCode: req.ExitCode, Tail: req.Tail})
+	event, err := s.event(session.Room, caller, contract.ShellJobEnded{Session: session.ID, Job: req.Job, Description: req.Description, End: req.End, ExitCode: req.ExitCode, Tail: req.Tail})
 	if err != nil {
 		return contract.ShellJobEndedResponse{}, failure(err)
 	}
@@ -31,5 +31,20 @@ func (s *Service) ShellJobEnded(ctx context.Context, caller contract.Principal, 
 }
 
 func shellJobText(job contract.ShellJobEnded) string {
-	return fmt.Sprintf("Shell job %s ended with exit code %d. Last output:\n%s", job.Job, job.ExitCode, job.Tail)
+	name := string(job.Job)
+	if job.Description != "" {
+		name = "'" + job.Description + "'"
+	}
+	result := fmt.Sprintf("exited with code %d", job.ExitCode)
+	if job.End != nil {
+		switch job.End.Kind {
+		case contract.ShellJobExited:
+			result = fmt.Sprintf("exited with code %d", job.End.Code)
+		case contract.ShellJobSignaled:
+			result = fmt.Sprintf("ended by a signal (%s)", job.End.Signal)
+		case contract.ShellJobStopped:
+			result = "was stopped"
+		}
+	}
+	return fmt.Sprintf("Background job %s %s. Last output:\n%s", name, result, job.Tail)
 }
