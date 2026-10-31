@@ -51,6 +51,11 @@ func proxyOAuthComplete(client *rpc.Client, credentials *proxyStore, service oau
 func proxyCommand() *cobra.Command {
 	var path string
 	cmd := &cobra.Command{Use: "proxy", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		evalMiddleware, closeEval, err := proxyEvalMiddleware()
+		if err != nil {
+			return err
+		}
+		defer closeEval()
 		cfg, err := config.LoadConfig(path)
 		if err != nil {
 			return err
@@ -105,9 +110,13 @@ func proxyCommand() *cobra.Command {
 			}
 		}()
 		gated := &readyListener{Listener: listener, ready: ready, done: ctx.Done()}
-		service, err = cliproxy.NewBuilder().WithPostAuthHook(cliproxy.StageDynaCredential).WithConfig(cfg).WithConfigPath(path).WithListener(gated).WithServerOptions(sdkapi.WithRouterConfigurator(func(router *gin.Engine, _ *handlers.BaseAPIHandler, _ *config.Config) {
+		options := []sdkapi.ServerOption{sdkapi.WithRouterConfigurator(func(router *gin.Engine, _ *handlers.BaseAPIHandler, _ *config.Config) {
 			proxyKeyRoutes(router, &service, credentials, cfg.RemoteManagement.SecretKey)
-		})).Build()
+		})}
+		if evalMiddleware != nil {
+			options = append(options, sdkapi.WithMiddleware(evalMiddleware))
+		}
+		service, err = cliproxy.NewBuilder().WithPostAuthHook(cliproxy.StageDynaCredential).WithConfig(cfg).WithConfigPath(path).WithListener(gated).WithServerOptions(options...).Build()
 		if err != nil {
 			return err
 		}
