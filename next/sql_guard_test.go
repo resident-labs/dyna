@@ -31,7 +31,7 @@ var sqlCallNames = map[string]bool{
 var sqlAllowlist = map[string]int{
 	"engine/post_api.go":    4,
 	"engine/service.go":     1,
-	"engine/session_api.go": 4,
+	"engine/session_api.go": 1,
 	"engine/turn_api.go":    4,
 }
 
