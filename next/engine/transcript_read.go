@@ -121,7 +121,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 				t.More = true
 				break
 			}
-			t.Inputs = append(t.Inputs, contract.TranscriptInput{ID: input.ID, Seq: input.Seq, Room: input.Room, Type: input.Body.EventType(), From: input.From, Text: clipTranscript(value, 512), More: len(value) > 512})
+			t.Inputs = append(t.Inputs, contract.TranscriptInput{At: input.Time, ID: input.ID, Seq: input.Seq, Room: input.Room, Type: input.Body.EventType(), From: input.From, Text: clipTranscript(value, 512), More: len(value) > 512})
 			t.After = "input:" + string(input.ID)
 		}
 		if !t.More {
