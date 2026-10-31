@@ -6,7 +6,10 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -36,6 +39,7 @@ type Web struct {
 type DeviceStore interface {
 	CreateDevice(context.Context, store.Device) error
 	AuthenticateDevice(context.Context, [32]byte, time.Time) (store.Device, bool, error)
+	RedeemPairCode(context.Context, string, string, []contract.Scope, time.Time) (string, store.Device, error)
 }
 
 func NewWeb(a *API, address string, app fs.FS, now func() time.Time, devices DeviceStore) (*Web, error) {
@@ -108,6 +112,39 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 	}
 	if (r.Method != http.MethodGet && r.Method != http.MethodHead || strings.EqualFold(r.Header.Get("Upgrade"), "websocket")) && r.Header.Get("Origin") != origin {
 		http.Error(out, "forbidden", http.StatusForbidden)
+		return
+	}
+	if r.URL.Path == "/v1/pair" && r.Method == http.MethodPost {
+		var req struct {
+			Code string `json:"code"`
+			Name string `json:"name"`
+		}
+		dec := json.NewDecoder(http.MaxBytesReader(out, r.Body, 4096))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil || len(req.Name) > 200 {
+			http.Error(out, "invalid request", http.StatusBadRequest)
+			return
+		}
+		if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+			http.Error(out, "invalid request", http.StatusBadRequest)
+			return
+		}
+		defaults := []contract.Scope{contract.ScopeRead, contract.ScopeOperate}
+		if origin == "http://"+w.host {
+			defaults = store.FullDeviceScopes
+		}
+		value, _, err := w.devices.RedeemPairCode(r.Context(), req.Code, req.Name, defaults, w.now())
+		if errors.Is(err, store.ErrPair) {
+			http.Error(out, "invalid pairing code", http.StatusForbidden)
+			return
+		}
+		if err != nil {
+			http.Error(out, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		http.SetCookie(out, &http.Cookie{Name: "dyna_device", Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: strings.HasPrefix(origin, "https://"), MaxAge: int(store.DeviceLife / time.Second)})
+		out.Header().Set("Content-Type", "application/json")
+		_, _ = out.Write([]byte("{}"))
 		return
 	}
 	if r.URL.Path == "/login" && r.Method == http.MethodGet {
