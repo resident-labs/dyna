@@ -16,9 +16,9 @@ test("a session whose box failed with its turn open is broken, not working, unti
     await attention.open();
     const box = (seq: number, to: "failed" | "ready") => attention.apply(event(seq, "a", { type: "box.changed", body: { box: "b", session: "s1", to } }));
     box(2, "failed");
-    assert.deepEqual([attention.busy("a"), [...attention.broken.get("a")!]], [["s2"], [["s1", { box: "failed", cause: undefined, at: "" }]]]);
+    assert.deepEqual([attention.busy("a"), [...attention.broken.get("a")!], attention.failing("a")], [["s2"], [["s1", { box: "failed", cause: undefined, at: "" }]], 1]);
     box(3, "ready");
-    assert.deepEqual([attention.busy("a"), attention.broken.get("a")!.size], [["s1", "s2"], 0]);
+    assert.deepEqual([attention.busy("a"), attention.broken.get("a")!.size, attention.failing("a")], [["s1", "s2"], 0, 0]);
     attention.seed([{ id: "s2", boxState: "lost" }], { id: "a", seq: 3 });
     assert.deepEqual(attention.busy("a"), ["s1"]);
     assert.equal(boxReason({ box: "failed", cause: "host_lost" }), "the host stopped answering during the run");
