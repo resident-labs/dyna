@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -125,6 +126,15 @@ func TestReconnectSaveAttributionAndExpiry(t *testing.T) {
 	if err := st.BindAccount(ctx, "account", "bound", contract.ProviderAnthropic, "label"); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('room','room',0,1,1)")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetAccountRooms(ctx, "account", []contract.RoomID{"room"}); err != nil {
+		t.Fatal(err)
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v8/management/oauth/auth-url":
@@ -165,5 +175,9 @@ func TestReconnectSaveAttributionAndExpiry(t *testing.T) {
 	records, err = st.ListProxyAuths(ctx)
 	if err != nil || string(records[0].Record) != "new" || !records[0].Bound {
 		t.Fatal("committed grant lost")
+	}
+	accounts, err := st.Accounts(ctx)
+	if err != nil || len(accounts) != 1 || accounts[0].Account.Label != "label" || len(accounts[0].Account.Rooms) != 1 || accounts[0].Account.Rooms[0] != "room" {
+		t.Fatal("reconnect changed account label or rooms")
 	}
 }
