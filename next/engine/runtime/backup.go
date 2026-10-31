@@ -1,7 +1,10 @@
 package runtime
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -13,6 +16,7 @@ import (
 	"time"
 
 	"filippo.io/age"
+	"github.com/resident-labs/dyna/contract"
 )
 
 const backupStamp = "20060102T150405.000000000Z"
@@ -30,8 +34,15 @@ func sshBackup(ctx context.Context, dest, name string, size int64, input *os.Fil
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", dest, fmt.Sprintf("%s %d", name, size))
 	cmd.Stdin = input
-	return cmd.Run()
+	err := cmd.Run()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 66 {
+		return errBackupNoSpace
+	}
+	return err
 }
+
+var errBackupNoSpace = errors.New(string(contract.BackupCopyNoSpace))
 
 type backupLoop struct {
 	store     backupStore
@@ -58,20 +69,79 @@ func (b *backupLoop) copy(ctx context.Context, path string, now time.Time) error
 	if err != nil {
 		return err
 	}
-	if _, err = io.Copy(out, src); err != nil {
+	gz := gzip.NewWriter(out)
+	tarWriter := tar.NewWriter(gz)
+	info, err := src.Stat()
+	if err != nil {
+		return err
+	}
+	if err = tarWriter.WriteHeader(&tar.Header{Name: "store.db", Mode: 0600, Size: info.Size()}); err != nil {
+		return err
+	}
+	if _, err = io.CopyN(tarWriter, src, info.Size()); err != nil {
+		return err
+	}
+	dataDir := filepath.Dir(b.dir)
+	for _, name := range []string{"files", "transcripts", "cliproxy/auth"} {
+		root := filepath.Join(dataDir, name)
+		err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+			if errors.Is(walkErr, os.ErrNotExist) {
+				return nil
+			}
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() || !entry.Type().IsRegular() {
+				return nil
+			}
+			f, err := os.Open(path)
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			info, err := f.Stat()
+			if err != nil {
+				return err
+			}
+			rel, err := filepath.Rel(dataDir, path)
+			if err != nil {
+				return err
+			}
+			header, err := tar.FileInfoHeader(info, "")
+			if err != nil {
+				return err
+			}
+			header.Name = filepath.ToSlash(rel)
+			if err = tarWriter.WriteHeader(header); err != nil {
+				return err
+			}
+			_, err = io.Copy(tarWriter, io.LimitReader(f, info.Size()))
+			return err
+		})
+		if err != nil {
+			return err
+		}
+	}
+	if err = tarWriter.Close(); err != nil {
+		return err
+	}
+	if err = gz.Close(); err != nil {
 		return err
 	}
 	if err = out.Close(); err != nil {
 		return err
 	}
-	info, err := tmp.Stat()
+	info, err = tmp.Stat()
 	if err != nil {
 		return err
 	}
 	if _, err = tmp.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	return b.run(ctx, b.dest, "dyna-"+now.UTC().Format(copyStamp)+".db.age", info.Size(), tmp)
+	return b.run(ctx, b.dest, "dyna-"+now.UTC().Format(copyStamp)+".tar.gz.age", info.Size(), tmp)
 }
 
 func (b *backupLoop) backup(ctx context.Context) {
