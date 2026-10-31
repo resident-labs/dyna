@@ -15,8 +15,9 @@ async function post(path: string, body: object): Promise<Response> {
 export async function watchConnect(): Promise<{ stream(up: boolean): void; stop(): void } | undefined> {
   const response = await post("/api/connect/routes", {}).catch(() => undefined);
   if (!response?.ok) return;
-  const data: unknown = await response.json();
-  if (!isRoutes(data) || data.current !== location.origin) return;
+  const value: unknown = await response.json();
+  if (!isRoutes(value) || value.current !== location.origin) return;
+  const data: Routes = value;
   const saved = await getPin(data.machine);
   if (!saved) return;
   const pin: Pin = saved;
