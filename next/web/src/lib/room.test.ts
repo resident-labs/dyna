@@ -202,6 +202,28 @@ test("a search jump reaches a newer post after the window has moved back", async
   } finally { server.restore(); }
 });
 
+test("keeps the older page boundary when a live event arrives during scroll settling", async () => {
+  const server = engine(1500);
+  try {
+    const window = await opened();
+    for (let i = 0; i < 4; i++) await window.loadOlder();
+    let release!: () => void, fetched!: () => void;
+    const settling = new Promise<void>(resolve => { release = resolve; });
+    const ready = new Promise<void>(resolve => { fetched = resolve; });
+    const older = window.loadOlder(() => { fetched(); return settling; });
+    await ready;
+    const post = event(1501, { type: "post.created", body: { text: "new", home: feed } });
+    server.posts.push(post);
+    window.apply(post);
+    release();
+    await older;
+    assert.deepEqual(window.seqs, Array.from({ length: WINDOW }, (_, i) => i + 301));
+    assert.equal(window.atPresent, false);
+    await window.jumpToPresent();
+    assert.equal(window.newest, 1501);
+  } finally { server.restore(); }
+});
+
 test("holds live events while the window is away from the present", async () => {
   const server = engine(1500);
   try {
