@@ -16,6 +16,10 @@ import (
 
 type fakeBoxes struct{}
 
+func (fakeBoxes) TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error) {
+	return []string{"sh"}, nil
+}
+
 func (fakeBoxes) Recreate(context.Context, BoxSpec, string, string) error { return nil }
 
 func (fakeBoxes) Create(context.Context, BoxSpec) (string, error) { return "image", nil }
