@@ -2,12 +2,12 @@ package engine
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"regexp"
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 var mentionName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
@@ -39,7 +39,7 @@ func (s *Service) RoomRepoAdd(ctx context.Context, caller contract.Principal, re
 		return contract.RoomRepoAddResponse{}, invalid("repository must be owner/name")
 	}
 	if err := s.store.AddRoomRepo(ctx, req.Room, req.Repo, req.Default); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, store.ErrRoomNotFound) {
 			return contract.RoomRepoAddResponse{}, invalid("unknown room")
 		}
 		return contract.RoomRepoAddResponse{}, failure(err)
@@ -49,7 +49,7 @@ func (s *Service) RoomRepoAdd(ctx context.Context, caller contract.Principal, re
 
 func (s *Service) RoomRepos(ctx context.Context, caller contract.Principal, req contract.RoomReposRequest) (contract.RoomReposResponse, *contract.Error) {
 	repos, err := s.store.RoomRepos(ctx, req.Room)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, store.ErrRoomNotFound) {
 		return contract.RoomReposResponse{}, invalid("unknown room")
 	}
 	if err != nil {
