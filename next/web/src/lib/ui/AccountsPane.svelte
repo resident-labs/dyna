@@ -5,13 +5,13 @@
   import StatusPill from "./StatusPill.svelte";
 
   let { bar, phone, signedout }: { bar: Snippet<[string, number | undefined, Snippet | undefined]>; phone: boolean; signedout: () => void } = $props();
-  let providers: AccountProviderInfo[] = $connectState([]), accounts: Account[] = $connectState([]);
-  let loaded = $connectState(false), loadFailed = $connectState(false);
-  let adding = $connectState(false), selected: AccountProviderInfo | undefined = $connectState(), inline = $connectState(false);
-  let label = $connectState(""), secret = $connectState(""), redirect = $connectState("");
-  let attempt: AccountsConnectResponse | undefined = $connectState();
-  let connectState: "idle" | "pending" | "failed" | "expired" = $connectState("idle");
-  let busy = $connectState(false), keyFailed = $connectState(false), now = $connectState(Date.now());
+  let providers: AccountProviderInfo[] = $state([]), accounts: Account[] = $state([]);
+  let loaded = $state(false), loadFailed = $state(false);
+  let adding = $state(false), selected: AccountProviderInfo | undefined = $state(), inline = $state(false);
+  let label = $state(""), secret = $state(""), redirect = $state("");
+  let attempt: AccountsConnectResponse | undefined = $state();
+  let connectState: "idle" | "pending" | "failed" | "expired" = $state("idle");
+  let busy = $state(false), keyFailed = $state(false), now = $state(Date.now());
   let timer: ReturnType<typeof setTimeout> | undefined;
   let generation = 0;
 
