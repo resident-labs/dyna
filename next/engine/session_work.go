@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -18,9 +20,12 @@ func (s *Service) SessionWork(ctx context.Context, caller contract.Principal, re
 	if _, err := s.store.Session(ctx, req.Session); err != nil {
 		return contract.SessionWorkResponse{}, failure(err)
 	}
-	turns, more, err := s.store.SessionWork(ctx, req.Session, req.Before, req.Limit)
+	turns, more, total, err := s.store.SessionWork(ctx, req.Session, req.Before, req.Limit)
+	if errors.Is(err, sql.ErrNoRows) {
+		return contract.SessionWorkResponse{}, invalid("invalid turn cursor")
+	}
 	if err != nil {
 		return contract.SessionWorkResponse{}, failure(err)
 	}
-	return contract.SessionWorkResponse{Turns: turns, More: more}, nil
+	return contract.SessionWorkResponse{Turns: turns, More: more, Total: total}, nil
 }
