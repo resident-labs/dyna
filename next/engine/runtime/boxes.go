@@ -55,7 +55,7 @@ type Boxes struct {
 	hostRunner        podman.Runner
 	machineIDFile     string
 	instructionSaves  atomic.Uint64
-	instructionSynced map[*podman.Host]instructionVersion
+	instructionSynced map[*podman.Host]*instructionHost
 	Version           string
 	PiTarball         []byte
 	Mirror            *enginegit.Mirror
@@ -701,8 +701,8 @@ func (b *Boxes) container(spec lifecycle.BoxSpec, image string) (box.Slice, box.
 		{HostPath: filepath.Join(b.HostData, "bin"), BoxPath: "/opt/dyna/bin", ReadOnly: true},
 		{HostPath: filepath.Join(b.HostData, "cache"), BoxPath: "/box/cache"},
 		{HostPath: filepath.Join(b.HostData, "rooms", string(spec.Room)), BoxPath: "/box/shared"},
-		{HostPath: filepath.Join(b.HostData, "instructions", "global"), BoxPath: "/run/dyna/instructions/global", ReadOnly: true},
-		{HostPath: filepath.Join(b.HostData, "instructions", "rooms", string(spec.Room)), BoxPath: "/run/dyna/instructions/room", ReadOnly: true},
+		{HostPath: filepath.Join(b.HostData, "instructions", "global"), BoxPath: "/run/dyna/instructions/global", ReadOnly: true, MakeDir: true},
+		{HostPath: filepath.Join(b.HostData, "instructions", "rooms", string(spec.Room)), BoxPath: "/run/dyna/instructions/room", ReadOnly: true, MakeDir: true},
 	}, Env: []box.EnvVar{{Name: "GOMODCACHE", Value: "/box/cache/gomod"}, {Name: "GOCACHE", Value: "/box/cache/gocache"}, {Name: "CARGO_HOME", Value: "/box/cache/cargo"}, {Name: "npm_config_store_dir", Value: "/box/cache/pnpm"}}}
 	for _, repo := range spec.Repos {
 		c.Mounts = append(c.Mounts, box.Mount{HostPath: repo.Cache, BoxPath: repo.Cache, ReadOnly: true})
