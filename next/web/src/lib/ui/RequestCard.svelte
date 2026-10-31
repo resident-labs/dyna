@@ -67,8 +67,8 @@
   .who { color: var(--text); }
   .decided .who { color: inherit; }
   .body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-  pre { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--sidebar); font: 13px ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .changes { margin: 0; padding: 0; list-style: none; font: 13px ui-monospace, monospace; }
+  pre { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--sidebar); font: 13px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .changes { margin: 0; padding: 0; list-style: none; font: 13px var(--mono); }
   .field { color: var(--muted); }
   .actions { display: flex; gap: 8px; margin-top: 4px; }
   input { flex: 1; min-width: 0; max-width: 320px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
