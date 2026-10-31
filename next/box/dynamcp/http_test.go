@@ -29,7 +29,7 @@ func TestStreamCancellationAndTypedErrors(t *testing.T) {
 		close(started)
 		<-ctx.Done()
 		return nil, &contract.Error{Code: contract.ErrConflict, Message: "retry with clientId"}
-	}, nil, nil)
+	}, nil, post.Preparer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestOperationActionForwardsReplayKey(t *testing.T) {
 			t.Fatalf("%+v", req)
 		}
 		return []byte(`{"ok":true}`), nil
-	}, nil, nil)
+	}, nil, post.Preparer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestActionDecodeIsStrict(t *testing.T) {
 	server, err := New(func(context.Context, contract.Method, []byte) ([]byte, *contract.Error) {
 		t.Fatal("forwarded invalid action")
 		return nil, nil
-	}, nil, nil)
+	}, nil, post.Preparer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,6 +129,7 @@ func TestPostPreparesAttachmentsAndVisual(t *testing.T) {
 		body, _ := json.Marshal(contract.Attachment{Name: name, SHA256: "hash-" + name})
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(body))), Header: make(http.Header)}, nil
 	})}
+	check := contract.VisualCheck{Name: contract.VisualCheckRenders, Status: contract.VisualCheckPass}
 	var sent contract.PostRequest
 	server, err := New(func(_ context.Context, method contract.Method, body []byte) ([]byte, *contract.Error) {
 		if method != contract.MethodPost {
@@ -138,18 +139,16 @@ func TestPostPreparesAttachmentsAndVisual(t *testing.T) {
 			t.Fatal(err)
 		}
 		return []byte(`{"event":"e"}`), nil
-	}, nil, func(ctx context.Context, path string) (contract.Attachment, error) {
+	}, nil, post.Preparer{Dir: dir, Upload: func(ctx context.Context, path string) (contract.Attachment, error) {
 		return post.UploadHTTP(ctx, client, path)
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	check := contract.VisualCheck{Name: contract.VisualCheckRenders, Status: contract.VisualCheckPass}
-	server.preparer.Render = func(_ context.Context, data []byte, csp string, allowNet bool) visual.Result {
+	}, Render: func(_ context.Context, data []byte, csp string, allowNet bool) visual.Result {
 		if string(data) != doc || csp != visual.CSP(false) || allowNet {
 			t.Fatal("incorrect preview input")
 		}
 		return visual.Result{Banner: []byte("banner"), Thumb: []byte("thumb"), Widths: []visual.Shot{{Width: 320, Image: []byte("shot")}}, Checks: []contract.VisualCheck{check}}
+	}})
+	if err != nil {
+		t.Fatal(err)
 	}
 	type arguments struct {
 		Action       string           `json:"action"`
@@ -162,7 +161,7 @@ func TestPostPreparesAttachmentsAndVisual(t *testing.T) {
 	params, _ := json.Marshal(struct {
 		Name      string    `json:"name"`
 		Arguments arguments `json:"arguments"`
-	}{"post", arguments{"send", "hello", []string{path}, html, "retry", "original"}})
+	}{"post", arguments{"send", "hello", []string{"report.txt"}, "card.html", "retry", "original"}})
 	rpc, _ := json.Marshal(struct {
 		JSONRPC string          `json:"jsonrpc"`
 		ID      int             `json:"id"`
@@ -171,7 +170,7 @@ func TestPostPreparesAttachmentsAndVisual(t *testing.T) {
 	}{"2.0", 1, "tools/call", params})
 	w := httptest.NewRecorder()
 	server.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/dyna/", strings.NewReader(string(rpc))))
-	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), `"isError":true`) {
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), `"isError":true`) || !strings.Contains(w.Body.String(), `"checks":[{"name":"renders","status":"pass"}]`) {
 		t.Fatalf("response: %s", w.Body.String())
 	}
 	if sent.ClientID != "retry" || sent.VisualUpdate != "original" || len(sent.Attachments) != 2 || sent.Attachments[0].SHA256 != "hash-report.txt" {
