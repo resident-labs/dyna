@@ -962,3 +962,45 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 	s.mu.Unlock()
 	return contract.TurnActivityResponse{}, nil
 }
+
+func (s *Service) ConversationRead(ctx context.Context, caller contract.Principal, req contract.ConversationReadRequest) (contract.ConversationReadResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalOwner {
+		return contract.ConversationReadResponse{}, forbidden()
+	}
+	if req.Seq < 0 || (req.Conversation.Kind != contract.ConversationFeed && req.Conversation.Kind != contract.ConversationDM) {
+		return contract.ConversationReadResponse{}, invalid("invalid conversation or seq")
+	}
+	home := string(req.Conversation.Kind)
+	if req.Conversation.Kind == contract.ConversationDM {
+		session, err := s.store.Session(ctx, req.Conversation.Session)
+		if err != nil {
+			return contract.ConversationReadResponse{}, failure(err)
+		}
+		if session.Room != req.Room {
+			return contract.ConversationReadResponse{}, invalid("session does not belong to room")
+		}
+		home += ":" + string(req.Conversation.Session)
+	}
+	err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT INTO conversation_reads(room,conversation,seq) VALUES(?,?,?) ON CONFLICT(room,conversation) DO UPDATE SET seq=MAX(seq,excluded.seq)", req.Room, home, req.Seq)
+		return err
+	})
+	if err != nil {
+		return contract.ConversationReadResponse{}, failure(err)
+	}
+	event, err := s.event(req.Room, caller, contract.ConversationRead{Room: req.Room, Conversation: req.Conversation, Seq: req.Seq})
+	if err != nil {
+		return contract.ConversationReadResponse{}, failure(err)
+	}
+	s.mu.Lock()
+	for ch, room := range s.live {
+		if room == req.Room || room == "" {
+			select {
+			case ch <- event:
+			default:
+			}
+		}
+	}
+	s.mu.Unlock()
+	return contract.ConversationReadResponse{}, nil
+}
