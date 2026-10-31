@@ -11,6 +11,8 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
+const boxDisconnectedReason = "box disconnected"
+
 type eventFunc func(contract.RoomID, contract.Principal, contract.EventBody) (contract.Event, error)
 
 type activeStep struct {
@@ -169,7 +171,10 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			}
 			if lost {
 				next := b
-				next.State, next.Reason = contract.BoxLost, "host or box disconnected"
+				next.State, next.Reason = contract.BoxLost, boxDisconnectedReason
+				if hostState[b.Host] == box.HostUnreachable {
+					next.Reason = "host unreachable"
+				}
 				changed, err := r.change(ctx, b, next, time.Time{}, row.Failures, contract.CauseHostLost)
 				if err != nil {
 					return err
