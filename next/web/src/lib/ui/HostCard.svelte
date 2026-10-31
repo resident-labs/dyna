@@ -12,7 +12,7 @@
 
 <section class="card" aria-label={hostLabel(host.name)}>
   <h3>{hostLabel(host.name)}
-    {#if !host.reachable}<span class="aside"><StatusPill tone="warning">Unreachable</StatusPill></span>
+    {#if !host.reachable}<span class="aside"><StatusPill tone="warning" label="Unreachable" /></span>
     {:else if host.name !== "control-plane"}<span class="aside">{host.boxes} {host.boxes === 1 ? "workspace" : "workspaces"}</span>{/if}</h3>
   {#if host.reachable || seen}<div class="tiles" class:dimmed={!host.reachable}>{#each hostMeters(host) as meter (meter.label)}<MeterTile {meter} />{/each}</div>{/if}
   {#if seen}<p class="aside seen">{seen}</p>{/if}
