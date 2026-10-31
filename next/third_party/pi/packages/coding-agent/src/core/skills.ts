@@ -4,6 +4,7 @@ import { basename, dirname, join, relative, resolve, sep } from "path";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { parseFrontmatter } from "../utils/frontmatter.ts";
 import { canonicalizePath, resolvePath } from "../utils/paths.ts";
+import type { ContextFileCache } from "./context-file-cache.ts";
 import type { ResourceDiagnostic } from "./diagnostics.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 
@@ -16,6 +17,7 @@ const MAX_DESCRIPTION_LENGTH = 1024;
 const IGNORE_FILE_NAMES = [".gitignore", ".ignore", ".fdignore"];
 
 type IgnoreMatcher = ReturnType<typeof ignore>;
+type SkillCache = { files: ContextFileCache; directories: Set<string> };
 
 function toPosixPath(p: string): string {
 	return p.split(sep).join("/");
@@ -44,7 +46,7 @@ function prefixIgnorePattern(line: string, prefix: string): string | null {
 	return negated ? `!${prefixed}` : prefixed;
 }
 
-function addIgnoreRules(ig: IgnoreMatcher, dir: string, rootDir: string): void {
+function addIgnoreRules(ig: IgnoreMatcher, dir: string, rootDir: string, cache?: SkillCache): void {
 	const relativeDir = relative(rootDir, dir);
 	const prefix = relativeDir ? `${toPosixPath(relativeDir)}/` : "";
 
@@ -52,7 +54,8 @@ function addIgnoreRules(ig: IgnoreMatcher, dir: string, rootDir: string): void {
 		const ignorePath = join(dir, filename);
 		if (!existsSync(ignorePath)) continue;
 		try {
-			const content = readFileSync(ignorePath, "utf-8");
+			const content = cache ? cache.files.readFile(ignorePath) : readFileSync(ignorePath, "utf-8");
+			if (content === undefined) continue;
 			const patterns = content
 				.split(/\r?\n/)
 				.map((line) => prefixIgnorePattern(line, prefix))
@@ -176,7 +179,9 @@ function loadSkillsFromDirInternal(
 	includeRootFiles: boolean,
 	ignoreMatcher?: IgnoreMatcher,
 	rootDir?: string,
+	cache?: SkillCache,
 ): LoadSkillsResult {
+	cache?.directories.add(dir);
 	const skills: Skill[] = [];
 	const diagnostics: ResourceDiagnostic[] = [];
 
@@ -186,7 +191,7 @@ function loadSkillsFromDirInternal(
 
 	const root = rootDir ?? dir;
 	const ig = ignoreMatcher ?? ignore();
-	addIgnoreRules(ig, dir, root);
+	addIgnoreRules(ig, dir, root, cache);
 
 	try {
 		const entries = readdirSync(dir, { withFileTypes: true });
@@ -212,7 +217,7 @@ function loadSkillsFromDirInternal(
 				continue;
 			}
 
-			const result = loadSkillFromFile(fullPath, source);
+			const result = loadSkillFromFile(fullPath, source, cache);
 			if (result.skill) {
 				skills.push(result.skill);
 			}
@@ -253,7 +258,7 @@ function loadSkillsFromDirInternal(
 			}
 
 			if (isDirectory) {
-				const subResult = loadSkillsFromDirInternal(fullPath, source, false, ig, root);
+				const subResult = loadSkillsFromDirInternal(fullPath, source, false, ig, root, cache);
 				skills.push(...subResult.skills);
 				diagnostics.push(...subResult.diagnostics);
 				continue;
@@ -263,7 +268,7 @@ function loadSkillsFromDirInternal(
 				continue;
 			}
 
-			const result = loadSkillFromFile(fullPath, source);
+			const result = loadSkillFromFile(fullPath, source, cache);
 			if (result.skill) {
 				skills.push(result.skill);
 			}
@@ -277,13 +282,16 @@ function loadSkillsFromDirInternal(
 function loadSkillFromFile(
 	filePath: string,
 	source: string,
+	cache?: SkillCache,
 ): { skill: Skill | null; diagnostics: ResourceDiagnostic[] } {
 	const diagnostics: ResourceDiagnostic[] = [];
 	const isDeclaredSkill = basename(filePath) === "SKILL.md";
 
 	let rawContent: string;
 	try {
-		rawContent = readFileSync(filePath, "utf-8");
+		const content = cache ? cache.files.readFile(filePath) : readFileSync(filePath, "utf-8");
+		if (content === undefined) throw new Error("skill file disappeared");
+		rawContent = content;
 	} catch (error) {
 		const message = error instanceof Error ? error.message : "failed to read skill file";
 		diagnostics.push({ type: "warning", message, path: filePath });
@@ -405,6 +413,7 @@ export interface LoadSkillsOptions {
 	skillPaths: string[];
 	/** Include default skills directories. */
 	includeDefaults: boolean;
+	cache?: SkillCache;
 }
 
 /**
@@ -412,7 +421,7 @@ export interface LoadSkillsOptions {
  * Returns skills and any validation diagnostics.
  */
 export function loadSkills(options: LoadSkillsOptions): LoadSkillsResult {
-	const { agentDir, skillPaths, includeDefaults } = options;
+	const { agentDir, skillPaths, includeDefaults, cache } = options;
 
 	// Resolve agentDir - if not provided, use default from config
 	const resolvedCwd = resolvePath(options.cwd);
@@ -455,8 +464,17 @@ export function loadSkills(options: LoadSkillsOptions): LoadSkillsResult {
 	}
 
 	if (includeDefaults) {
-		addSkills(loadSkillsFromDirInternal(join(resolvedAgentDir, "skills"), "user", true));
-		addSkills(loadSkillsFromDirInternal(resolve(resolvedCwd, CONFIG_DIR_NAME, "skills"), "project", true));
+		addSkills(loadSkillsFromDirInternal(join(resolvedAgentDir, "skills"), "user", true, undefined, undefined, cache));
+		addSkills(
+			loadSkillsFromDirInternal(
+				resolve(resolvedCwd, CONFIG_DIR_NAME, "skills"),
+				"project",
+				true,
+				undefined,
+				undefined,
+				cache,
+			),
+		);
 	}
 
 	const userSkillsDir = join(resolvedAgentDir, "skills");
@@ -490,9 +508,9 @@ export function loadSkills(options: LoadSkillsOptions): LoadSkillsResult {
 			const stats = statSync(resolvedPath);
 			const source = getSource(resolvedPath);
 			if (stats.isDirectory()) {
-				addSkills(loadSkillsFromDirInternal(resolvedPath, source, true));
+				addSkills(loadSkillsFromDirInternal(resolvedPath, source, true, undefined, undefined, cache));
 			} else if (stats.isFile() && resolvedPath.endsWith(".md")) {
-				const result = loadSkillFromFile(resolvedPath, source);
+				const result = loadSkillFromFile(resolvedPath, source, cache);
 				if (result.skill) {
 					addSkills({ skills: [result.skill], diagnostics: result.diagnostics });
 				} else {

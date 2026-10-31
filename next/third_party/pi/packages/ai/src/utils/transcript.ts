@@ -1,5 +1,5 @@
 import type { Context, Message, SystemMessage, Tool, ToolReference, TranscriptContext } from "../types.ts";
-import { contentText, getSystemMessageText } from "./text.ts";
+import { getSystemMessageText } from "./text.ts";
 
 export type { TranscriptContext } from "../types.ts";
 
@@ -65,37 +65,21 @@ export function getCurrentTools(messages: TranscriptMessages): Tool[] {
 	return [...tools.values()];
 }
 
-/**
- * Replay every system message into one leading system message holding the current
- * prompt and tools. Later `content` is appended to the base prompt, `sections` are
- * patched by name, and tools are resolved with {@link getCurrentTools}.
- */
+/** Preserve the leading prompt while resolving legacy tool declarations. */
 export function getCurrentSystemMessage(messages: TranscriptMessages): SystemMessage | undefined {
-	const content: string[] = [];
-	const sections = new Map<string, string>();
-	let timestamp: number | undefined;
-	for (const message of messages) {
-		if (!isSystemMessage(message)) continue;
-		timestamp ??= message.timestamp;
-		const text = contentText(message.content);
-		if (text.length > 0) content.push(text);
-		for (const [name, value] of Object.entries(message.sections ?? {})) {
-			if (value === null) sections.delete(name);
-			else sections.set(name, value);
-		}
-	}
+	const head = getInitialSystemMessage(messages);
 	const tools = getCurrentTools(messages);
-	if (timestamp === undefined && tools.length === 0) return undefined;
+	if (!head && tools.length === 0) return undefined;
 	return {
 		role: "system",
-		content: content.join("\n\n"),
-		...(sections.size > 0 ? { sections: Object.fromEntries(sections) } : {}),
+		content: head?.content ?? "",
+		...(head?.sections ? { sections: head.sections } : {}),
 		...(tools.length > 0 ? { toolsAdded: tools } : {}),
-		timestamp: timestamp ?? 0,
+		timestamp: head?.timestamp ?? 0,
 	};
 }
 
-/** Render the current system prompt text after replaying every system message. */
+/** Render the leading system prompt text. */
 export function getCurrentSystemPrompt(messages: TranscriptMessages): string {
 	const message = getCurrentSystemMessage(messages);
 	return message ? getSystemMessageText(message) : "";

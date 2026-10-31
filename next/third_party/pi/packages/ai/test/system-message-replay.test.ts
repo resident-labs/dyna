@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { describe, expect, test } from "vitest";
 import type { Message, Tool, TranscriptContext } from "../src/types.ts";
-import { getSystemMessageText, renderSystemMessageUpdate } from "../src/utils/text.ts";
+import { getSystemMessageText } from "../src/utils/text.ts";
 import {
 	collapseSystemMessages,
 	declarationsEqual,
@@ -40,17 +40,17 @@ const transcript = normalizeContext({
 	],
 });
 
-describe("system message replay", () => {
-	test("replays content, sections, and tools into one leading message", () => {
+describe("system message and tool state", () => {
+	test("keeps the leading prompt while resolving tool changes", () => {
 		const current = getCurrentSystemMessage(transcript.messages);
 		expect(current).toEqual({
 			role: "system",
-			content: "base\n\nalso do this",
-			sections: { a: "<a>2</a>", c: "<c>1</c>" },
+			content: "base",
+			sections: { a: "<a>1</a>", b: "<b>1</b>" },
 			toolsAdded: [tool("second")],
 			timestamp: 10,
 		});
-		expect(getCurrentSystemPrompt(transcript.messages)).toBe("base\n\nalso do this\n\n<a>2</a>\n\n<c>1</c>");
+		expect(getCurrentSystemPrompt(transcript.messages)).toBe("base\n\n<a>1</a>\n\n<b>1</b>");
 	});
 
 	test("collapse keeps only non-system messages after the replayed head", () => {
@@ -66,7 +66,7 @@ describe("system message replay", () => {
 		expect(collapseSystemMessages(context).messages).toEqual(context.messages);
 	});
 
-	test("a late full patch on a transcript without a leading message replays as the prompt", () => {
+	test("a late system message cannot patch the prompt", () => {
 		const context: TranscriptContext = normalizeContext({
 			messages: [
 				{ role: "user", content: "old session", timestamp: 1 },
@@ -79,22 +79,14 @@ describe("system message replay", () => {
 				},
 			],
 		});
-		expect(getCurrentSystemPrompt(context.messages)).toBe("You are pi.");
+		expect(getCurrentSystemPrompt(context.messages)).toBe("");
 		expect(collapseSystemMessages(context).messages[0]).toMatchObject({ role: "system", toolsAdded: [tool("x")] });
 	});
 
-	test("renders complete prompts and framed updates", () => {
+	test("renders the leading prompt", () => {
 		const leading = transcript.messages[0];
-		const update = transcript.messages[4];
-		if (leading?.role !== "system" || update?.role !== "system") throw new Error("expected system messages");
+		if (leading?.role !== "system") throw new Error("expected system message");
 		expect(getSystemMessageText(leading)).toBe("base\n\n<a>1</a>\n\n<b>1</b>");
-		expect(renderSystemMessageUpdate(update)).toBe(
-			[
-				'Updated system prompt section "a":\n\n<a>2</a>',
-				'Removed system prompt section "b".',
-				'Updated system prompt section "c":\n\n<c>1</c>',
-			].join("\n\n"),
-		);
 	});
 
 	test("normalizes the legacy prompt and tool fields into a leading system message", () => {

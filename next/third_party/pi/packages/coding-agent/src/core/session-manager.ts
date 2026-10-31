@@ -504,7 +504,15 @@ export function buildContextEntries(
 		if (entry.id === compaction.firstKeptEntryId) {
 			foundFirstKept = true;
 		}
-		if (foundFirstKept && !(entry.type === "message" && entry.message.role === "system")) {
+		if (
+			foundFirstKept &&
+			!(entry.type === "message" && entry.message.role === "system") &&
+			!(
+				compaction.systemMessage?.sections &&
+				entry.type === "custom_message" &&
+				entry.customType === "context_update"
+			)
+		) {
 			contextEntries.push(entry);
 		}
 	}
@@ -1269,9 +1277,11 @@ export class SessionManager {
 		details?: T,
 		fromHook?: boolean,
 		usage?: Usage,
+		sections?: Record<string, string>,
 	): string {
 		const timestamp = new Date().toISOString();
-		const systemMessage = getCurrentSystemMessage(this.buildSessionProjection().messages);
+		const current = getCurrentSystemMessage(this.buildSessionProjection().messages);
+		const systemMessage = current && (sections ? { ...current, sections: { ...sections } } : current);
 		const id = generateId(this.byId);
 		const entry: CompactionEntry<T> = {
 			type: "compaction",
