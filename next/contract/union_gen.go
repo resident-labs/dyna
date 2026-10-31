@@ -338,7 +338,7 @@ func (m *BoxMessage) UnmarshalJSON(data []byte) error {
 		m.Body = v
 		return nil
 	default:
-		return fmt.Errorf("unknown box message type %q", w.Type)
+		return fmt.Errorf("%w %q", ErrUnknownBoxMessage, w.Type)
 	}
 }
 
