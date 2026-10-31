@@ -176,12 +176,12 @@ func (s *Service) mergeFailureJobs(ctx context.Context, r Record, b state.MergeT
 		return
 	}
 	g := s.github(r.RoomID)
-	var snap Snapshot
-	if err := g.readCommitCI(ctx, refRecord(r), b.Head, &snap); err != nil {
+	observed, err := g.readCommitRuns(ctx, refRecord(r), b.Head)
+	if err != nil {
 		return
 	}
 	var runs []Run
-	for _, run := range snap.Runs {
+	for _, run := range observed {
 		if run.Event == "push" && run.HeadSHA == b.Head && run.HeadBranch == b.Branch {
 			runs = append(runs, run)
 		}

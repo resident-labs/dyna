@@ -14,6 +14,37 @@ import (
 	"dyna-agent/internal/pr/state"
 )
 
+func TestMergeFailureJobsReadsOnlyRuns(t *testing.T) {
+	f := mergeTrialEnv(t, 1)
+	f.branch, f.ci, f.conclusion = "dyna/merge-trial/1", "completed", "failure"
+	f.jobs = []budgetJob{{Name: "Go tests", Status: "completed", Conclusion: "failure"}}
+	st, err := f.e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var member Record
+	for _, r := range st.Records {
+		member = *r
+		break
+	}
+	counts := map[string]int{}
+	run := f.e.s.GH.run
+	f.e.s.GH.run = func(ctx context.Context, cmd *exec.Cmd) error {
+		args := strings.Join(cmd.Args, " ")
+		for _, name := range []string{"/actions/runs?", "/check-runs?", "/statuses?"} {
+			if strings.Contains(args, name) {
+				counts[name]++
+			}
+		}
+		return run(ctx, cmd)
+	}
+	jobs, links := f.e.s.mergeFailureJobs(t.Context(), member, state.MergeTrial{Branch: f.branch, Head: f.head})
+	if counts["/actions/runs?"] != 1 || counts["/check-runs?"] != 0 || counts["/statuses?"] != 0 ||
+		len(jobs) != 1 || !strings.Contains(jobs[0], "Go tests") || len(links) != 1 || !strings.Contains(links[0], "/actions/runs/81/attempts/1") {
+		t.Fatalf("calls=%v jobs=%v links=%v", counts, jobs, links)
+	}
+}
+
 func TestMergeFailureReportFrozenEvidence(t *testing.T) {
 	f := mergeTrialEnv(t, 1, 2, 3)
 	f.branch, f.ci, f.conclusion = "dyna/merge-trial/1", "completed", "failure"
