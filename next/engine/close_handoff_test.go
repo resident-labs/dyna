@@ -35,6 +35,26 @@ func TestCloseHandsPendingInputToParent(t *testing.T) {
 	if origin != child || surface != contract.SurfaceSession || kind != contract.ReplyPost || !wake {
 		t.Fatalf("handoff %s %s %s %v", origin, surface, kind, wake)
 	}
+	if _, problem := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: parent}, contract.BoxHelloRequest{}); problem != nil {
+		t.Fatal(problem)
+	}
+	started, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.TurnStarted{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, inputs, _, err := s.store.Dispatch(ctx, parent, "handoff-turn", started, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inputFound bool
+	for _, input := range inputs {
+		if int64(input.Seq) == post.Seq {
+			inputFound = input.HandoffFrom == child
+		}
+	}
+	if !inputFound {
+		t.Fatalf("handoff not dispatched: %+v", inputs)
+	}
 	frame, err := s.inputFrame(ctx, parent, contract.Event{From: owner, Body: contract.PostCreated{Text: "hello"}}, contract.Delivery{Surface: surface, Reply: contract.ReplyChannel{Kind: kind}, HandoffFrom: origin})
 	if err != nil || !strings.Contains(frame, "worker") || !strings.Contains(frame, "closed") {
 		t.Fatalf("frame %q: %v", frame, err)
