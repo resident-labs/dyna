@@ -69,11 +69,10 @@ func (s *Store) RevokeGrant(ctx context.Context, id contract.GrantID, now time.T
 		if n == 0 {
 			return sql.ErrNoRows
 		}
-		return nil
+		_, err = tx.Exec("UPDATE hostexec_runs SET stopped='revoked' WHERE grant_id=? AND ended_at IS NULL", id)
+		return err
 	})
 }
-
-// H2 must stop pending and running commands after a revoke.
 
 // ExpireGrants marks due grants and appends each event in the same transaction.
 func (s *Store) ExpireGrants(ctx context.Context, now time.Time, event func(contract.RoomID, contract.GrantID) (contract.Event, error)) error {

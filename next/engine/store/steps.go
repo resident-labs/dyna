@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 13
+const schemaVersion = 14
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
@@ -30,6 +30,10 @@ var steps = map[int][]string{
 		`CREATE INDEX grants_expiry ON grants(expires_at) WHERE expired_at IS NULL AND revoked_at IS NULL;`,
 		`CREATE INDEX grants_room_principal ON grants(room, to_id);`,
 		`INSERT INTO grants(id,kind,room,to_kind,to_id,mode,hosts,commands,by_kind,by_id,created_at) SELECT 'grant_'||id,'hostexec',room,'session',id,'preapproved','["*"]','[{"program":"*","prefix":true}]','engine','',created_at FROM sessions WHERE parent IS NULL AND closed_at IS NULL;`,
+	},
+	13: {
+		`CREATE TABLE hostexec_runs (op TEXT PRIMARY KEY REFERENCES operations(id), grant_id TEXT NOT NULL REFERENCES grants(id), host TEXT NOT NULL, scope TEXT NOT NULL, started_at INTEGER NOT NULL, timeout_ms INTEGER NOT NULL, ended_at INTEGER, output_bytes INTEGER NOT NULL DEFAULT 0, stopped TEXT NOT NULL DEFAULT '');`,
+		`CREATE INDEX hostexec_runs_grant ON hostexec_runs(grant_id, ended_at);`,
 	},
 }
 

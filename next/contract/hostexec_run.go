@@ -1,0 +1,55 @@
+package contract
+
+import (
+	"encoding/json"
+	"errors"
+	"time"
+)
+
+const (
+	MethodHostexecRun    Method    = "hostexec.run"
+	MethodHostexecRevoke Method    = "hostexec.revoke"
+	ErrNoGrant           ErrorCode = "no-grant"
+	ErrHostexecScope     ErrorCode = "hostexec-scope"
+)
+
+type HostexecRunRequest struct {
+	Host    HostName   `json:"host"`
+	Argv    []string   `json:"argv"`
+	Cwd     string     `json:"cwd"`
+	Timeout DurationMS `json:"timeout"`
+}
+type HostexecRunResponse struct {
+	Operation Operation `json:"operation"`
+}
+type HostexecRevokeRequest struct {
+	Grant GrantID `json:"grant"`
+}
+type HostexecRevokeResponse struct{}
+
+type HostexecRunArgs struct {
+	Room    RoomID     `json:"room"`
+	Host    HostName   `json:"host"`
+	Argv    []string   `json:"argv"`
+	Cwd     string     `json:"cwd"`
+	Timeout DurationMS `json:"timeout"`
+	Grant   GrantID    `json:"grant"`
+	Mode    GrantMode  `json:"mode"`
+}
+
+func (HostexecRunArgs) OpKind() OpKind          { return "hostexec.run" }
+func (HostexecRunArgs) isOpArgs()               {}
+func (a HostexecRunArgs) OperationRoom() RoomID { return a.Room }
+
+func (a *HostexecRunArgs) UnmarshalJSON(data []byte) error {
+	type plain HostexecRunArgs
+	var v plain
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	if v.Room == "" || v.Host == "" || len(v.Argv) == 0 || v.Argv[0] == "" || v.Timeout <= 0 || v.Timeout > DurationMS((2*time.Hour).Milliseconds()) || v.Grant == "" || (v.Mode != GrantModeApprove && v.Mode != GrantModePreapproved) {
+		return errors.New("invalid hostexec run")
+	}
+	*a = HostexecRunArgs(v)
+	return nil
+}

@@ -97,6 +97,11 @@ func (s *Store) operationEvent(tx *sql.Tx, event contract.Event, deliveries []co
 	if err != nil {
 		return err
 	}
+	if ran, ok := event.Body.(contract.OpRan); ok && ran.Result.OutputFile != "" {
+		if _, err := tx.Exec("INSERT OR IGNORE INTO event_files(seq,sha256,media) VALUES(?,?,?)", seq, ran.Result.OutputFile, "text/plain"); err != nil {
+			return err
+		}
+	}
 	for _, delivery := range deliveries {
 		if err := insertDelivery(context.Background(), tx, seq, delivery); err != nil {
 			return err
