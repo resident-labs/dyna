@@ -478,7 +478,7 @@ func writeError(w http.ResponseWriter, err *contract.Error) {
 		status = http.StatusNotFound
 	case contract.ErrConflict, contract.ErrStale, contract.ErrVisualSuperseded, contract.ErrMoveBusy, contract.ErrHasChildren, contract.ErrParentClosing, contract.ErrSessionClosing:
 		status = http.StatusConflict
-	case contract.ErrUnavailable:
+	case contract.ErrUnavailable, contract.ErrReconnectUnavailable:
 		status = http.StatusServiceUnavailable
 	}
 	w.Header().Set("Content-Type", "application/json")

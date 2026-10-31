@@ -16,6 +16,9 @@ import (
 
 var errConnect = errors.New("account connection unavailable")
 
+// ErrReconnectUnavailable means the saved credential has no usable identity.
+var ErrReconnectUnavailable = errors.New("account reconnect unavailable")
+
 // ErrCompletionRejected means the attempt cannot bind and its staged credential is safe to discard.
 var ErrCompletionRejected = errors.New("account completion rejected")
 
@@ -75,7 +78,19 @@ func (c *Connections) Start(ctx context.Context, req contract.AccountsConnectReq
 }
 
 func (c *Connections) Reconnect(ctx context.Context, account contract.AccountID, proxyID string, provider contract.AccountProvider) (contract.AccountsConnectResponse, error) {
-	return c.start(ctx, contract.AccountsConnectRequest{Provider: provider}, account, proxyID)
+	records, err := c.store.ListProxyAuths(ctx)
+	if err != nil {
+		return contract.AccountsConnectResponse{}, errConnect
+	}
+	for _, record := range records {
+		if record.ID == proxyID {
+			if _, value := rawCredentialIdentity(record.Record); value != "" {
+				return c.start(ctx, contract.AccountsConnectRequest{Provider: provider}, account, proxyID)
+			}
+			break
+		}
+	}
+	return contract.AccountsConnectResponse{}, ErrReconnectUnavailable
 }
 
 func (c *Connections) start(ctx context.Context, req contract.AccountsConnectRequest, account contract.AccountID, proxyID string) (contract.AccountsConnectResponse, error) {

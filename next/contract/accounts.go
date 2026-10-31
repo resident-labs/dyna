@@ -109,7 +109,10 @@ type AccountsConnectStatusRequest struct {
 }
 type ConnectFailureReason string
 
-const ConnectAdoptionFailed ConnectFailureReason = "adoption_failed"
+const (
+	ConnectAdoptionFailed ConnectFailureReason = "adoption_failed"
+	ConnectWrongAccount   ConnectFailureReason = "wrong_account"
+)
 
 type AccountsConnectStatusResponse struct {
 	Status    ConnectStatus        `json:"status"`

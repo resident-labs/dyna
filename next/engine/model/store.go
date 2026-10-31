@@ -9,6 +9,7 @@ import (
 
 // AccountStore is the model route's narrow account persistence boundary.
 type AccountStore interface {
+	ListProxyAuths(context.Context) ([]private.ProxyAuth, error)
 	Accounts(context.Context) ([]private.AccountBinding, error)
 	BindAccount(context.Context, contract.AccountID, string, contract.AccountProvider, string) error
 	RemoveAccount(context.Context, contract.AccountID) error
