@@ -178,19 +178,28 @@ func TestRegisteredCIRelocationCoolsDownVisitedNode(t *testing.T) {
 			}
 			return localci.Result{}, &localci.RelocateError{Node: *next}
 		}
-		if next := req.OnQueue(ctx); next != nil {
-			t.Fatalf("relocation returned too soon to %s", next.Name)
+		if starts == 2 {
+			if next := req.OnQueue(ctx); next != nil {
+				t.Fatalf("relocation returned too soon to %s", next.Name)
+			}
 		}
 		now = now.Add(time.Minute)
-		if next := req.OnQueue(ctx); next == nil || next.Name != "first" {
-			t.Fatalf("relocation after cooldown = %v, want first", next)
+		next := req.OnQueue(ctx)
+		if starts <= 8 {
+			if next == nil || next.Name == node.Name {
+				t.Fatalf("relocation after cooldown = %v from %s", next, node.Name)
+			}
+			return localci.Result{}, &localci.RelocateError{Node: *next}
+		}
+		if next != nil {
+			t.Fatalf("relocation limit did not stop at %s", next.Name)
 		}
 		return localci.Result{Status: "passed"}, nil
 	}
 	run := &registeredCIRun{Cancel: func() {}, Ended: make(chan struct{}), Stopped: make(chan struct{})}
 	s.executeRegisteredCI(context.Background(), job, localCIPlan{execution: watchDynaDefinition(t), suites: []localci.Suite{"go-static"}}, "repo", localci.Node{Name: "first"}, "key", run, "", false)
-	if starts != 2 {
-		t.Fatalf("starts = %d, want 2", starts)
+	if starts != 9 {
+		t.Fatalf("starts = %d, want 9", starts)
 	}
 }
 
