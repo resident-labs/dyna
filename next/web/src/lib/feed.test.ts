@@ -137,4 +137,9 @@ test("says how long the work in a row took, from the first turn's start to the l
   ];
   assert.equal(workSummary(events, session => names[session]), "lead-web worked for 6 min · 2 turns · 1 job");
   assert.equal(workSummary([events[0], ended(2, 80, "t1")], session => names[session]), "lead-web worked for 1 h 20 min · 1 turn");
+  // A turn that answers here ends in the answer's row, which still gives the work row above it its end.
+  const answered = at(2, 4, { type: "turn.ended", body: { session: "l", turn: "t1", outcome: "completed", usage, final: "Done", replies: [{ reply: { kind: "final" } }] } });
+  const rows = dayRows([events[0], answered], { kind: "feed" });
+  const work = rows.find(row => row.kind === "work");
+  assert.equal(work?.kind === "work" && workSummary(work.events, session => names[session], work.until), "lead-web worked for 4 min · 1 turn");
 });
