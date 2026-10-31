@@ -2,7 +2,7 @@
   import { onMount, tick } from "svelte";
   import { call } from "../client.ts";
   import type { RoomSummary } from "../contract.gen.ts";
-  import { build, rows, marks, count, showAll, move, parse, escape, backspace, stamp, type Action, type Item, type Person, type Place, type Scope } from "../palette.ts";
+  import { build, rows, marks, count, showAll, move, parse, escape, backspace, stamp, type Action, visits, type Item, type Person, type Place, type Scope, type Visit } from "../palette.ts";
   import { MessageSearch, type SearchCall } from "../search.svelte.ts";
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
@@ -15,6 +15,7 @@
   let list: HTMLDivElement;
   let text = $state(""), scope: Scope | undefined = $state(), local = $state(false), pick = $state(0);
   let people: Person[] = $state.raw([]);
+  let recent: Visit[] = $state.raw([]);
   let retry = $state(0);
   const messages = new MessageSearch(search);
   const actions: Action[] = [
@@ -26,11 +27,20 @@
   let places: Place[] = $derived(rooms.map(found => ({ id: found.id, name: found.name, paused: found.paused,
     sessions: people.filter(person => person.room === found.id).length, working: found.working?.length ?? 0 })));
   let mode = $derived(parse(text, scope));
-  let sections = $derived(build(text, scope, { rooms: places, sessions: people, actions, recent: [], messages: messages.snapshot }));
+  let recentItems: Item[] = $derived(recent.flatMap((visit): Item[] => {
+    if (visit.session) {
+      const person = people.find(found => found.id === visit.session && found.room === visit.room);
+      return person ? [{ kind: "session", session: person }] : [];
+    }
+    const place = places.find(found => found.id === visit.room);
+    return place ? [{ kind: "room", room: place }] : [];
+  }));
+  let sections = $derived(build(text, scope, { rooms: places, sessions: people, actions, recent: recentItems, messages: messages.snapshot }));
   let items = $derived(rows(sections));
 
   onMount(() => {
     input.focus();
+    recent = visits(localStorage.getItem("dyna.recent-places"));
     for (const found of rooms) {
       void call("session.list", { room: found.id }).then(result => {
         people = [...people, ...(result.sessions ?? []).map(person => ({ id: person.id, name: person.name, room: found.id,
@@ -119,7 +129,7 @@
 
 <style>
   .shade { position: fixed; inset: 0; z-index: 100; display: flex; justify-content: center; align-items: flex-start; padding: 96px 16px 16px; background: var(--scrim); }
-  .palette { width: min(680px, 100%); max-height: min(720px, calc(100dvh - 112px)); display: flex; flex-direction: column; background: var(--raised); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 24px 64px var(--shadow); overflow: hidden; }
+  .palette { width: min(680px, 100%); max-height: min(720px, calc(100dvh - 112px)); display: flex; flex-direction: column; background: var(--raised); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 24px 64px var(--shadow-lg); overflow: hidden; }
   .input { min-height: 56px; display: flex; gap: 10px; align-items: center; padding: 0 16px; border-bottom: 1px solid var(--line); color: var(--muted); }
   input { flex: 1; min-width: 0; border: 0; background: none; color: var(--text); font: inherit; font-size: 16px; outline: none; }
   input::placeholder { color: var(--muted); }
