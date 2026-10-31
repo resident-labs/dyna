@@ -8,19 +8,19 @@
   let { request, store, now }: { request: Request; store: RoomStore; now: number } = $props();
   const name = (who: Principal) => who.kind === "owner" ? "You" : who.session ? store.names.get(who.session) ?? "A closed session" : "Dyna";
   const outcome: Record<OpState, string> = {
-    pending: "", approved: "Approved", denied: "Denied", expired: "Expired", withdrawn: "Withdrawn", done: "Approved and ran", failed: "Approved",
+    pending: "", approved: "Approved", denied: "Denied", expired: "Expired", withdrawn: "Withdrawn", done: "Approved", failed: "Approved",
   };
   // The root session is the open session with no parent.
   let open = $derived(request.by.session ? store.sessions.get(request.by.session) : undefined);
   let root = $derived(open !== undefined && !open.parent);
   // An agent-class request may also be decided by the requester's parent session.
   let parent = $derived(open?.parent && store.names.get(open.parent));
-  // One muted line for a decided request, such as "Denied by You · 2 minutes ago · “Use CI”". The engine decides expiry.
+  // One muted line for a decided request, such as "Denied by you · just now · “Use CI”". The engine decides expiry.
   let decided = $derived.by(() => {
     const decision = request.decision;
     return [
-      outcome[request.state] + (decision && decision.by.kind !== "engine" ? ` by ${name(decision.by)}` : ""),
-      decision && fromNow(decision.at, now), decision?.reason && request.state !== "expired" && `“${decision.reason}”`,
+      outcome[request.state] + (decision && decision.by.kind !== "engine" ? ` by ${decision.by.kind === "owner" ? "you" : name(decision.by)}` : ""),
+      decision && fromNow(decision.at, now), request.state === "done" && "ran", decision?.reason && request.state !== "expired" && `“${decision.reason}”`,
       // The engine's error text is raw (r8); the Run failed pill and the exit code say what happened.
       request.state === "failed" && request.result?.exitCode && `exited with code ${request.result.exitCode}`,
     ].filter(part => typeof part === "string" && part !== "").join(" · ");
@@ -50,7 +50,7 @@
     <li><span class="field">{change.field}:</span> {change.old || "none"} → {change.new || "none"}</li>{/each}</ul>{/if}
   {#if request.state === "pending"}
     <div class="actions">
-      <input type="text" bind:value={reason} placeholder="Reason for Deny (optional)" aria-label="Reason for Deny (optional)" disabled={busy} />
+      <input type="text" bind:value={reason} placeholder="Reason (optional)" aria-label="Reason for Deny (optional)" disabled={busy} />
       <button type="button" onclick={() => void decide(false)} disabled={busy}>Deny</button>
       <button type="button" class="approve" onclick={() => void decide(true)} disabled={busy}>Approve</button>
     </div>
