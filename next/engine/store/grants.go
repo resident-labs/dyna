@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+// CreateGrant inserts a grant in its own transaction.
+func (s *Store) CreateGrant(ctx context.Context, g contract.Grant) error {
+	return s.Write(ctx, func(tx *sql.Tx) error { return s.InsertGrant(tx, g) })
+}
+
 func (s *Store) InsertGrant(tx *sql.Tx, g contract.Grant) error {
 	hosts, err := json.Marshal(g.Hosts)
 	if err != nil {

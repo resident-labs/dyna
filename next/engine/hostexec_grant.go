@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"github.com/resident-labs/dyna/contract"
@@ -111,7 +110,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 				expiry = now.Add(24 * time.Hour)
 			}
 			g := contract.Grant{ID: contract.GrantID(value), Kind: contract.GrantHostExec, Room: a.Room, To: a.To, Hosts: a.Hosts, Reason: a.Reason, Expires: expiry, By: contract.Principal{Kind: contract.PrincipalOwner}, Created: now}
-			err = s.store.Write(ctx, func(tx *sql.Tx) error { return s.store.InsertGrant(tx, g) })
+			err = s.store.CreateGrant(ctx, g)
 			if err != nil {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
 			}
