@@ -511,15 +511,16 @@ type Polling struct {
 	// that a quiet pull would otherwise skip.
 	LocalCI string `json:"localCI,omitempty"`
 	// PullVersion identifies metadata and policy from the last complete poll.
-	PullVersion       string    `json:"pullVersion,omitempty"`
-	DiscussionVersion string    `json:"discussionVersion,omitempty"`
-	PullHead          string    `json:"pullHead,omitempty"`
-	FullChecked       time.Time `json:"fullChecked,omitempty"`
-	DiscussionChecked time.Time `json:"discussionChecked,omitempty"`
-	Next              time.Time `json:"next,omitempty"`
-	LastChange        time.Time `json:"lastChange,omitempty"`
-	IntervalMinutes   int       `json:"intervalMinutes,omitempty"`
-	Fingerprint       string    `json:"fingerprint,omitempty"`
+	PullVersion          string    `json:"pullVersion,omitempty"`
+	DiscussionVersion    string    `json:"discussionVersion,omitempty"`
+	DiscussionGeneration uint64    `json:"discussionGeneration,omitempty"`
+	PullHead             string    `json:"pullHead,omitempty"`
+	FullChecked          time.Time `json:"fullChecked,omitempty"`
+	DiscussionChecked    time.Time `json:"discussionChecked,omitempty"`
+	Next                 time.Time `json:"next,omitempty"`
+	LastChange           time.Time `json:"lastChange,omitempty"`
+	IntervalMinutes      int       `json:"intervalMinutes,omitempty"`
+	Fingerprint          string    `json:"fingerprint,omitempty"`
 }
 
 type CachedResponse struct {
