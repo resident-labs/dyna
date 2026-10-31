@@ -182,8 +182,8 @@ func (b *Boxes) Create(ctx context.Context, spec engine.BoxSpec) (string, error)
 			}
 		}
 	}
-	size := spec.Size
-	if err = h.EnsureSlice(ctx, box.Slice{Name: spec.Slice, CPUs: size.CPUs, MemHigh: size.MemBytes, MemMax: size.MemBytes * 3 / 2, Pids: size.Pids}); err != nil {
+	slice, c := b.container(spec, image)
+	if err = h.EnsureSlice(ctx, slice); err != nil {
 		return "", err
 	}
 	sliced = true
@@ -191,13 +191,6 @@ func (b *Boxes) Create(ctx context.Context, spec engine.BoxSpec) (string, error)
 		return "", err
 	}
 	forwarded = true
-	c := box.ContainerSpec{Box: spec.Box, Image: image, Slice: spec.Slice, Mounts: []box.Mount{
-		{HostPath: filepath.Dir(forward.HostPath), BoxPath: "/run/dyna/engine", ReadOnly: true},
-		{HostPath: filepath.Join(b.HostData, "bin"), BoxPath: "/opt/dyna/bin", ReadOnly: true},
-	}}
-	for _, repo := range spec.Repos {
-		c.Mounts = append(c.Mounts, box.Mount{HostPath: repo.Cache, BoxPath: repo.Cache, ReadOnly: true})
-	}
 	if err = h.CreateContainer(ctx, c); err != nil {
 		return "", err
 	}
@@ -360,10 +353,19 @@ func (b *Boxes) Recreate(ctx context.Context, spec engine.BoxSpec, image string)
 	if err := h.RemoveContainer(ctx, spec.Box); err != nil {
 		return err
 	}
-	size := spec.Size
-	if err := h.EnsureSlice(ctx, box.Slice{Name: spec.Slice, CPUs: size.CPUs, MemHigh: size.MemBytes, MemMax: size.MemBytes * 3 / 2, Pids: size.Pids}); err != nil {
+	slice, c := b.container(spec, image)
+	if err := h.EnsureSlice(ctx, slice); err != nil {
 		return err
 	}
+	if err := h.CreateContainer(ctx, c); err != nil {
+		return err
+	}
+	return h.StartContainer(ctx, spec.Box)
+}
+
+func (b *Boxes) container(spec engine.BoxSpec, image string) (box.Slice, box.ContainerSpec) {
+	size := spec.Size
+	slice := box.Slice{Name: spec.Slice, CPUs: size.CPUs, MemHigh: size.MemBytes, MemMax: size.MemBytes * 3 / 2, Pids: size.Pids}
 	c := box.ContainerSpec{Box: spec.Box, Image: image, Slice: spec.Slice, Mounts: []box.Mount{
 		{HostPath: filepath.Join(b.HostData, "sock", string(spec.Box)), BoxPath: "/run/dyna/engine", ReadOnly: true},
 		{HostPath: filepath.Join(b.HostData, "bin"), BoxPath: "/opt/dyna/bin", ReadOnly: true},
@@ -371,8 +373,5 @@ func (b *Boxes) Recreate(ctx context.Context, spec engine.BoxSpec, image string)
 	for _, repo := range spec.Repos {
 		c.Mounts = append(c.Mounts, box.Mount{HostPath: repo.Cache, BoxPath: repo.Cache, ReadOnly: true})
 	}
-	if err := h.CreateContainer(ctx, c); err != nil {
-		return err
-	}
-	return h.StartContainer(ctx, spec.Box)
+	return slice, c
 }
