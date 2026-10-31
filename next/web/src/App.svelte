@@ -16,6 +16,7 @@
   import RoomMenu, { type Section } from "./lib/ui/RoomMenu.svelte";
   import RequestsPanel from "./lib/ui/RequestsPanel.svelte";
   import { Attention } from "./lib/attention.svelte.ts";
+  import { parseMentions } from "./lib/mentions.ts";
   import type { Conversation, SessionStarted } from "./lib/contract.gen.ts";
   const signedOut = (error: unknown) => error instanceof APIError && error.detail.code === "forbidden";
   const attention = new Attention();
@@ -94,7 +95,9 @@
     if (!text.trim()) return;
     drafts[sent] = "";
     failed = undefined;
-    view?.send({ room, text, home: session ? home : undefined }).catch(() => { drafts[sent] = text; failed = sent; });
+    // The engine refuses mentions on a DM post; in the feed, @names of open sessions become mentions.
+    const post = session ? { text, mentions: [] } : parseMentions(text, store.sessions.values());
+    view?.send({ room, text: post.text, mentions: post.mentions.length ? post.mentions : undefined, home: session ? home : undefined }).catch(() => { drafts[sent] = text; failed = sent; });
   }
   let view: Feed | undefined = $state();
   let rail: HTMLElement;
