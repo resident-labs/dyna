@@ -154,7 +154,8 @@
   .session:first-child { margin-top: 4px; }
   .job { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 5px 10px; border-radius: 6px;
     color: var(--muted); cursor: pointer; }
-  .job:hover, .job:focus-visible { background: var(--selected); outline: none; }
+  .job:hover, .job:focus-visible { background: var(--selected); }
+  .job:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .dot { flex: none; display: grid; place-items: center; width: 14px; }
   .lines { flex: 1; min-width: 0; display: grid; line-height: 1.3; }
   .title { overflow: hidden; color: var(--text); font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
