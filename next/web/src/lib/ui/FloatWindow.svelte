@@ -47,8 +47,8 @@
   style:width={docked || full ? null : `${rect.w}px`} style:height={docked || full ? null : `${rect.h}px`}
 >
   <!-- svelte-ignore a11y_no_static_element_interactions (dragging is for the pointer; Alt with an arrow key moves the window) -->
-  <header class="label" onpointerdown={event => grab(event, [1, 1, 1, 1])}>{@render header()}</header>
-  {@render children()}
+  <header class="bar label" onpointerdown={event => grab(event, [1, 1, 1, 1])}>{@render header()}</header>
+  <div class="body">{@render children()}</div>
   {#if !docked && !full}{#each handles as [side, edges] (side)}
     <!-- svelte-ignore a11y_no_static_element_interactions (resizing is for the pointer) -->
     <div class="handle {side}" onpointerdown={event => grab(event, edges)}></div>{/each}{/if}
@@ -58,7 +58,11 @@
   .window { position: relative; display: flex; flex-direction: column; min-height: 0; }
   .window:focus { outline: none; }
   .window:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-  .floating { position: fixed; z-index: 3; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 12px 32px var(--shadow-lg); }
+  /* A float has a clear edge over the feed. Only its body clips, so the resize handles past the edge and the
+     header's menus stay whole. */
+  .floating { position: fixed; z-index: 3; background: var(--raised); border: 1px solid var(--firm); border-radius: 16px; box-shadow: 0 12px 32px var(--shadow-lg); }
+  .body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .floating:not(.full) .body { overflow: hidden; border-radius: 0 0 15px 15px; }
   header { gap: 6px; padding: 0 6px 0 12px; }
   .floating header { height: 40px; cursor: grab; user-select: none; touch-action: none; }
   /* Full screen: no frame, clear of the notch and the home bar; its one focus is the window itself, so no ring. */
