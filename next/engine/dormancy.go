@@ -166,6 +166,7 @@ func (s *Service) startBox(ctx context.Context, current box.Box) error {
 				return err
 			}
 		}
+		// Keep the old slice until recreation or close removes it.
 		startErr = s.boxes.Recreate(ctx, BoxSpec{Box: current.ID, Session: current.Session, Host: current.Host, Slice: slice, Size: current.Size, Repos: repos}, current.Image, current.Slice)
 		if startErr == nil {
 			startErr = s.store.SetRecreated(ctx, current.ID, slice)
