@@ -17,7 +17,7 @@
   import TermDock from "./lib/ui/TermDock.svelte";
   import Home from "./lib/ui/Home.svelte";
   import { MediaQuery, SvelteSet } from "svelte/reactivity";
-  import RoomMenu, { type Section } from "./lib/ui/RoomMenu.svelte";
+  import RoomMenu from "./lib/ui/RoomMenu.svelte";
   import RequestsPanel from "./lib/ui/RequestsPanel.svelte";
   import { Attention } from "./lib/attention.svelte.ts";
   import { mentionable, parseMentions } from "./lib/mentions.ts";
@@ -54,13 +54,13 @@
   connect();
   let path = $state(window.location.pathname);
   window.addEventListener("popstate", () => { path = window.location.pathname; section = undefined; });
-  // A room view from the header menu shows in place of the conversation until Back or Escape.
-  let section: Section | undefined = $state();
-  let menu: RoomMenu | undefined = $state();
+  // The requests view shows in place of the conversation until Back, Escape or its header button.
+  let section: "requests" | undefined = $state();
+  let requestsButton: HTMLButtonElement | undefined = $state();
   async function closeSection() {
     section = undefined;
     await tick();
-    menu?.focus();
+    requestsButton?.focus();
   }
   const segment = (pattern: RegExp) => { const match = pattern.exec(path)?.[1]; return match && decodeURIComponent(match); };
   let room = $derived(segment(/^\/r\/([^/]+)/));
@@ -159,7 +159,7 @@
     if (event.key !== "F6") return;
     event.preventDefault();
     // Only areas on screen take part; below 761 px the closed sessions panel has no boxes.
-    // A panel from the room menu takes the place of the feed and the composer.
+    // The requests view takes the place of the feed and the composer.
     const areas = [rail, section ? requests : feed, section ? undefined : composer, dock, members, docked ? undefined : computer]
       .filter(area => area != null)
       .filter(area => area.getClientRects().length > 0);
@@ -234,6 +234,8 @@
   let mentions = $derived(session ? [] : [...store?.sessions.values() ?? []].filter(mentionable)
     .map(item => ({ name: item.name, root: !item.parent, status: status(item.session) }))
     .sort((a, b) => Number(b.root) - Number(a.root) || a.name.localeCompare(b.name)));
+  // The panel's header counts, and the room header's below 761 px where the panel is hidden.
+  let working = $derived([...store?.sessions.keys() ?? []].filter(id => store?.turns.has(id)).length);
   let title = $derived(!room ? "Home" : session ? store?.names.get(session) ?? "Session" : roomName);
   // Each fact shows once: profile, state and trouble live on the session's row. A closed session has no row.
   let closed = $derived(!!session && !!store?.ready && !store.sessions.has(session));
@@ -271,7 +273,7 @@
       {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}
       <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id ? "page" : undefined}
         aria-label={waiting ? `${item.name}, ${count(waiting, "request")} waiting` : item.name} title={item.name}>
-        <Avatar kind="room" name={item.name} size={40} />{#if waiting}<span class="waiting">{waiting > 99 ? "99+" : waiting}</span>{/if}</a>
+        <Avatar kind="room" name={item.name} size={40} />{#if waiting}<StatusPill tone="warning" label="Waiting" count={waiting} />{/if}</a>
     {/each}</nav>
     <!-- The owner's face from the feed; v2 has no owner name or account menu yet. -->
     <footer><span role="img" aria-label="You" title="You"><Avatar kind="owner" name="You" size={32} /></span></footer>
@@ -280,7 +282,11 @@
     <header>{#if room && session}<a class="crumb" href={"/r/" + encodeURIComponent(room)} onclick={navigate}>{roomName}</a><span class="count">/</span>
       {:else if room}<Icon name="room" />{/if}<strong>{title}</strong>
       {#if closed}<span class="count">· closed</span>{/if}
-      {#if store && !unavailable}<RoomMenu bind:this={menu} waiting={store.waiting} onchoose={next => { if (next === "terminal") void terminals?.pick(); else section = next; }} />{/if}
+      {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session") + (working ? ` · ${working} working` : "")}</span>{/if}
+      {#if store && !unavailable}<button type="button" class="requests" bind:this={requestsButton} aria-pressed={section === "requests"}
+        aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section ? undefined : "requests"; }}>
+        <Icon name="inbox" />{#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
+        <RoomMenu onterminal={() => void terminals?.pick()} />{/if}
       {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={store?.unseenCount ? "Sessions, a turn failed" : "Sessions"}
         title="Sessions" aria-controls="sessions" aria-expanded={panel} onclick={() => void showPanel(!panel)}><Icon name="people" />
         {#if store?.unseenCount && !panel}<span class="attention"></span>{/if}</button>{/if}</header>
@@ -309,7 +315,7 @@
       {:else}
       <!-- Docked, the computer sits above the session list. -->
       {#if watching && docked && (wide.current || panel)}{@render computerView(watching)}{/if}
-      <header class="label">Sessions</header>
+      <header><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}</header>
       {#each tree as { session: item, depth, parent, hidden, hiddenTrouble } (item.session)}
         <div class="row">{#if parent}<button type="button" class="fold" aria-expanded={!hidden} style:left="{depth * 14}px"
           aria-label={hidden ? `Show ${count(hidden, "session")} under ${item.name}` : `Hide the sessions under ${item.name}`}
@@ -333,7 +339,19 @@
 </div>
 
 <style>
-  a.member { color: var(--text); text-decoration: none; }
+  /* v1's density: 40 px rows around the 28 px avatar. */
+  a.member { min-height: 40px; color: var(--text); text-decoration: none; }
+  /* The panel's header matches the room header: a 16 px title with its muted counts beside it. */
+  aside.members > header strong { font-size: 16px; }
+  /* Requests is a header icon, as the menu and the panel toggle are: 16 px in a 28 px hit area. While requests wait for
+     the owner, StatusPill's count sits on its corner, as on the rail. */
+  .requests { position: relative; margin-left: auto; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px;
+    background: none; color: var(--muted); cursor: pointer; }
+  .requests:hover, .requests[aria-pressed="true"] { background: var(--hover); color: var(--text); }
+  .requests ~ :global(.panel-toggle) { margin-left: 0; }
+  .requests > :global(.count) { top: -5px; right: -7px; }
+  .narrow { display: none; }
+  @media (max-width: 760px) { .narrow { display: inline; } }
   a.member[aria-current="page"] { background: var(--selected); }
   .row { position: relative; display: flex; align-items: center; }
   /* The chevron sits in the gutter left of the avatar. As in v1, a folded row's hidden count is part of the same

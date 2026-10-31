@@ -1,21 +1,12 @@
-<script lang="ts" module>
-  // Each room view behind the menu is one entry; a new view adds one line here.
-  const entries = [{ id: "requests", label: "Requests" }, { id: "terminal", label: "New terminal" }] as const;
-  export type Section = (typeof entries)[number]["id"];
-</script>
-
 <script lang="ts">
   import { tick } from "svelte";
   import Icon from "./Icon.svelte";
-  import StatusPill from "./StatusPill.svelte";
-  let { waiting, onchoose }: { waiting: number; onchoose: (section: Section) => void } = $props();
-  // The count each entry shows at its right, only while it is above zero.
-  let counts: Record<Section, number> = $derived({ requests: waiting, terminal: 0 });
+  // The room's less frequent actions. Requests has its own header button.
+  let { onterminal }: { onterminal: () => void } = $props();
   let open = $state(false);
   let root: HTMLDivElement;
   let button: HTMLButtonElement;
   let list: HTMLDivElement | undefined = $state();
-  export function focus() { button.focus(); }
   const items = () => Array.from(list?.querySelectorAll<HTMLButtonElement>("[role=menuitem]") ?? []);
   async function show(next: boolean, refocus = false) {
     open = next;
@@ -35,24 +26,19 @@
 <svelte:window onpointerdown={event => { if (open && event.target instanceof Node && !root.contains(event.target)) void show(false); }} />
 <div class="menu" bind:this={root}>
   <button type="button" class="open" bind:this={button} aria-haspopup="menu" aria-expanded={open} aria-controls="room-menu"
-    aria-label={waiting ? `Room menu, ${waiting} ${waiting === 1 ? "request waits" : "requests wait"} for you` : "Room menu"} title="Room menu"
+    aria-label="Room menu" title="Room menu"
     onclick={() => void show(!open)} onkeydown={event => { if (event.key === "ArrowDown") { event.preventDefault(); void show(true); } }}>
-    <Icon name="more" />{#if waiting}<StatusPill tone="warning" label={String(waiting)} title={`${waiting} waiting for you`} />{/if}</button>
+    <Icon name="more" /></button>
   {#if open}
     <div class="list" role="menu" id="room-menu" tabindex="-1" bind:this={list} onkeydown={move}>
-      {#each entries as entry (entry.id)}
-        <button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false); onchoose(entry.id); }}>{entry.label}
-          {#if counts[entry.id]}<StatusPill tone="warning" label={String(counts[entry.id])} title={`${counts[entry.id]} waiting for you`} />{/if}</button>
-      {/each}
+      <button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false); onterminal(); }}>New terminal</button>
     </div>
   {/if}
 </div>
 
 <style>
-  /* The menu takes the free header space, so the sessions toggle after it sits at the edge. */
-  .menu { position: relative; margin-left: auto; }
-  :global(.menu ~ .panel-toggle) { margin-left: 0; }
-  .open { display: flex; align-items: center; gap: 6px; padding: 6px; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+  .menu { position: relative; }
+  .open { display: flex; align-items: center; padding: 6px; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
   .open:hover, .open[aria-expanded="true"] { background: var(--hover); color: var(--text); }
   .list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 2; min-width: 180px; padding: 4px; display: grid;
     background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 18%); }
