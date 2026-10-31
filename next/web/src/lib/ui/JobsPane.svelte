@@ -1,9 +1,10 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { SvelteMap } from "svelte/reactivity";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import Avatar from "./Avatar.svelte";
+  import Icon from "./Icon.svelte";
   import StatusPill from "./StatusPill.svelte";
-  import { failed, failingLine, jobGroups } from "../jobs.ts";
+  import { failed, failingLine, jobGroups, jobTime } from "../jobs.ts";
   import { watchShell, type ShellJob } from "../shell.ts";
   // The dock's Jobs tab (round 2 winners, Jobs design B): the room's background jobs on the left, the chosen job's
   // output on the right. It watches each session's jobs only while it is mounted and the page is visible, so closing
@@ -33,9 +34,10 @@
   $effect(() => () => { for (const stop of stops.values()) stop(); stops.clear(); });
 
   let names = $derived(new Map(sessions.map(session => [session.id, session])));
-  let groups = $derived(jobGroups([...outputs].filter(([id]) => !only || id === only).map(([id, jobs]) => ({ id, jobs: jobs.values() }))));
+  let groups = $derived(jobGroups([...outputs].filter(([id]) => !only || id === only).map(([id, jobs]) => ({ id, jobs: jobs.values() })), Date.now()));
   // With 2 or more sessions, each group has its session's name above it (fix 2).
   let grouped = $derived(groups.length > 1);
+  const unfolded = new SvelteSet<string>();
   const keyOf = (session: string, job: ShellJob) => `${session}/${job.job}`;
   $effect(() => {
     const seen = [...outputs.values()].flatMap(jobs => [...jobs.values()]);
@@ -45,11 +47,11 @@
   // The first job shows until the owner picks one: running jobs come first.
   let chosen: string | undefined = $state();
   let shown = $derived.by(() => {
-    const rows = groups.flatMap(group => group.jobs.map(job => ({ session: group.session, job })));
+    const rows = groups.flatMap(group => [...group.jobs, ...group.older].map(job => ({ session: group.session, job })));
     return rows.find(row => keyOf(row.session, row.job) === chosen) ?? rows[0];
   });
   let fail = $derived(shown && failed(shown.job) ? failingLine(shown.job.text) : undefined);
-  const outcome = (job: ShellJob) => job.running ? "running" : failed(job) ? `failed · exit ${job.exitCode}` : "passed";
+  const outcome = (job: ShellJob) => job.running ? "running" : failed(job) ? `failed · exit ${job.exitCode}` : `passed · ${jobTime(job)}`;
 
   // A running job's output follows its end unless the owner scrolls up. A failed job opens at its first failing line
   // (fix 3), marked; with none, at its end.
@@ -75,11 +77,21 @@
   function walk(event: KeyboardEvent) {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp" || !list) return;
     event.preventDefault();
-    const rows = Array.from(list.querySelectorAll<HTMLElement>("button.job"));
+    const rows = Array.from(list.querySelectorAll<HTMLElement>("button.job, button.older"));
     const index = rows.findIndex(row => row === document.activeElement); // -1 when focus is elsewhere; Down then takes the first
     rows[Math.max(0, Math.min(rows.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)))]?.focus();
   }
 </script>
+
+{#snippet jobRow(session: string, job: ShellJob)}
+  <button type="button" class="job" aria-current={shown?.job === job && shown.session === session} title={job.command}
+    onclick={() => { chosen = keyOf(session, job); if (failed(job)) opened.add(chosen); }}>
+    <span class="dot">{#if job.running}<StatusPill tone="working" dot label="Running" />{:else if failed(job)}<StatusPill tone="failed" dot label="Failed" />
+      {:else}<i></i>{/if}</span>
+    <code>{job.command}</code>
+    {#if failed(job)}<StatusPill tone="failed" word label={outcome(job)} />{:else}<span class="state">{outcome(job)}</span>{/if}
+  </button>
+{/snippet}
 
 <svelte:document onvisibilitychange={() => { visible = document.visibilityState === "visible"; }} />
 <div class="pane"><div class="jobs">
@@ -90,25 +102,22 @@
     {#each groups as group (group.session)}
       {#if grouped}<p class="session"><Avatar kind="session" name={names.get(group.session)?.name ?? ""} root={names.get(group.session)?.root} size={16} />
         {names.get(group.session)?.name}</p>{/if}
-      {#each group.jobs as job (job.job)}
-        <button type="button" class="job" aria-current={shown?.job === job && shown.session === group.session} title={job.command}
-          onclick={() => { chosen = keyOf(group.session, job); if (failed(job)) opened.add(chosen); }}>
-          <span class="dot">{#if job.running}<StatusPill tone="working" dot label="Running" />{:else if failed(job)}<StatusPill tone="failed" dot label="Failed" />
-            {:else}<i></i>{/if}</span>
-          <code>{job.command}</code>
-          {#if failed(job)}<StatusPill tone="failed" word label={outcome(job)} />{:else}<span class="state">{outcome(job)}</span>{/if}
-        </button>
-      {/each}
+      {#each group.jobs as job (job.job)}{@render jobRow(group.session, job)}{/each}
+      {#if group.older.length}
+        <button type="button" class="older" aria-expanded={unfolded.has(group.session)}
+          onclick={() => { if (!unfolded.delete(group.session)) unfolded.add(group.session); }}><Icon name="chevron" size={12} />{group.older.length === 1 ? "1 older job" : `${group.older.length} older jobs`}</button>
+        {#if unfolded.has(group.session)}{#each group.older as job (job.job)}{@render jobRow(group.session, job)}{/each}{/if}
+      {/if}
     {:else}<p class="hint">No job output yet.</p>{/each}
   </div>
   <section class="output" aria-label="Job output">
     {#if shown}
       <header><code class="command">{shown.job.command}</code>
-        <span class="meta">{names.get(shown.session)?.name} · {#if failed(shown.job)}<StatusPill tone="failed" word label={outcome(shown.job)} />{:else}{outcome(shown.job)}{/if}</span></header>
+        <span class="meta">{names.get(shown.session)?.name} · {#if failed(shown.job)}<StatusPill tone="failed" word label={outcome(shown.job)} /> · {jobTime(shown.job)}{:else}{outcome(shown.job)}{/if}</span></header>
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (the keyboard scrolls the output) -->
       <pre bind:this={output} tabindex="0" aria-label={`Output of ${shown.job.command}`}
         onscroll={() => { if (output) following = output.scrollHeight - output.scrollTop - output.clientHeight < 40; }}
-        >{#if fail}{shown.job.text.slice(0, fail.start)}<mark bind:this={failing}>{shown.job.text.slice(fail.start, fail.end)}</mark>{shown.job.text.slice(fail.end)}{:else}{shown.job.text || "No output yet."}{/if}</pre>
+        >{#if fail}{shown.job.text.slice(0, fail.start)}<mark bind:this={failing}>{shown.job.text.slice(fail.start, fail.end)}</mark>{shown.job.text.slice(fail.end)}{:else}{shown.job.text || (shown.job.running ? "No output yet." : "No output.")}{/if}</pre>
       {#if !following && shown.job.running}<button type="button" class="retry resume" onclick={() => { following = true; }}>Resume following</button>{/if}
     {/if}
   </section>
@@ -128,6 +137,11 @@
   .job:hover { background: var(--hover); }
   .job[aria-current="true"] { background: var(--selected); color: var(--text); }
   .job:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .older { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 0 9px; border-radius: 6px;
+    color: var(--muted); font-size: 12.5px; cursor: pointer; }
+  .older:hover { background: var(--hover); color: var(--text); }
+  .older:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .older[aria-expanded="false"] :global(svg) { transform: rotate(-90deg); }
   .dot { flex: none; display: grid; place-items: center; width: 14px; }
   .dot > i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); opacity: 0.6; }
   .job code { flex: 1; min-width: 0; overflow: hidden; color: var(--text); font: 12.5px/1.4 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
