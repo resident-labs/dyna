@@ -84,9 +84,10 @@
   header button { all: unset; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--muted); cursor: pointer; }
   header button:hover { background: var(--hover); color: var(--text); }
   header button:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
-  /* Docked, the image keeps its ratio in a 16:9 box; floating, it fills the window below the title bar. */
+  /* Docked, the image keeps its ratio in a 16:9 box; floating, the frame fills the window body edge to
+     edge, and the window's own background fills the letterbox. */
   .screen { position: relative; display: grid; place-items: center; aspect-ratio: 16 / 9; margin: 12px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  .floating .screen { flex: 1; aspect-ratio: auto; margin: 0 8px 8px; }
+  .floating .screen { flex: 1; aspect-ratio: auto; margin: 0; border: 0; border-radius: 0 0 7px 7px; }
   img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
   p { margin: 0 12px; color: var(--muted); font-size: 13px; text-align: center; }
   /* Invisible 6 px resize handles on the edges, 12 px in the corners. */
