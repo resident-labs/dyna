@@ -50,6 +50,8 @@ const bodies: Record<string, Check> = {
   "grant.expired": object({ grant: string }),
   "pr.opened": object({ repo: string, number: number, session: string, url: string }),
   "room.paused": object({}),
+  // Whole counts, zero for no limit. The engine allows memBytes past 2^53, about 8 PB; such a limit is skipped here.
+  "room.limits_changed": object({ cpus: value => Number.isSafeInteger(value) && Number(value) >= 0, memBytes: value => Number.isSafeInteger(value) && Number(value) >= 0 }),
   "room.resumed": object({}),
   "rule.added": object({ number: number, text: string }),
   "rule.removed": object({ number: number }),

@@ -20,6 +20,7 @@ const (
 	MethodProfileList       Method = "profile.list"
 	MethodAccountsQuota     Method = "accounts.quota"
 	MethodRoomPause         Method = "room.pause"
+	MethodRoomSetLimits     Method = "room.set_limits"
 	MethodRoomCreate        Method = "room.create"
 	MethodRoomRepoAdd       Method = "room.repo.add"
 	MethodRoomRepos         Method = "room.repos"
@@ -112,6 +113,13 @@ type ProfileSummary struct {
 type ProfileListResponse struct {
 	Profiles []ProfileSummary `json:"profiles"`
 }
+
+type RoomSetLimitsRequest struct {
+	Room     RoomID `json:"room"`
+	CPUs     int    `json:"cpus"`
+	MemBytes int64  `json:"memBytes"`
+}
+type RoomSetLimitsResponse struct{}
 
 type RoomPauseRequest struct {
 	Room   RoomID `json:"room"`

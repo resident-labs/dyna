@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"mime"
 	"net"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dustin/go-humanize"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/spf13/cobra"
 )
@@ -30,6 +32,7 @@ type client interface {
 	File(context.Context, string, io.Writer) error
 	Upload(context.Context, string) (contract.Attachment, error)
 	HostAdd(context.Context, contract.HostAddRequest) (contract.HostAddResponse, error)
+	RoomSetLimits(context.Context, contract.RoomSetLimitsRequest) (contract.RoomSetLimitsResponse, error)
 	RoomPause(context.Context, contract.RoomPauseRequest) (contract.RoomPauseResponse, error)
 	SessionStop(context.Context, contract.SessionStopRequest) (contract.SessionStopResponse, error)
 	RoomCreate(context.Context, contract.RoomCreateRequest) (contract.RoomCreateResponse, error)
@@ -60,10 +63,10 @@ func newClient(socket string) *socketClient {
 }
 
 type requestType interface {
-	contract.RoomPauseRequest | contract.SessionStopRequest | contract.RuleAddRequest | contract.RuleRemoveRequest | contract.RuleListRequest | contract.HostexecRunRequest | contract.HostexecRevokeRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest
+	contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.RuleAddRequest | contract.RuleRemoveRequest | contract.RuleListRequest | contract.HostexecRunRequest | contract.HostexecRevokeRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest
 }
 type responseType interface {
-	contract.RoomPauseResponse | contract.SessionStopResponse | contract.RuleAddResponse | contract.RuleRemoveResponse | contract.RuleListResponse | contract.HostexecRunResponse | contract.HostexecRevokeResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse
+	contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.RuleAddResponse | contract.RuleRemoveResponse | contract.RuleListResponse | contract.HostexecRunResponse | contract.HostexecRevokeResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse
 }
 
 func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
@@ -159,6 +162,9 @@ type commandExit int
 func (e commandExit) Error() string { return fmt.Sprintf("command exited with status %d", e) }
 func (c *socketClient) HostAdd(ctx context.Context, q contract.HostAddRequest) (contract.HostAddResponse, error) {
 	return call[contract.HostAddRequest, contract.HostAddResponse](ctx, c, contract.MethodHostAdd, q)
+}
+func (c *socketClient) RoomSetLimits(ctx context.Context, q contract.RoomSetLimitsRequest) (contract.RoomSetLimitsResponse, error) {
+	return call[contract.RoomSetLimitsRequest, contract.RoomSetLimitsResponse](ctx, c, contract.MethodRoomSetLimits, q)
 }
 func (c *socketClient) RoomPause(ctx context.Context, q contract.RoomPauseRequest) (contract.RoomPauseResponse, error) {
 	return call[contract.RoomPauseRequest, contract.RoomPauseResponse](ctx, c, contract.MethodRoomPause, q)
@@ -392,6 +398,21 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			return err
 		}})
 	}
+	var limitCPUs int
+	var limitMem string
+	limit := &cobra.Command{Use: "limit ROOM --cpus N --mem SIZE", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		mem, err := humanize.ParseBytes(limitMem)
+		if err != nil || mem > math.MaxInt64 {
+			return fmt.Errorf("invalid memory size %q", limitMem)
+		}
+		_, err = getClient().RoomSetLimits(cmd.Context(), contract.RoomSetLimitsRequest{Room: contract.RoomID(args[0]), CPUs: limitCPUs, MemBytes: int64(mem)})
+		return err
+	}}
+	limit.Flags().IntVar(&limitCPUs, "cpus", 0, "CPU limit; 0 means unlimited")
+	limit.Flags().StringVar(&limitMem, "mem", "", "Memory limit; 0 means unlimited")
+	_ = limit.MarkFlagRequired("cpus")
+	_ = limit.MarkFlagRequired("mem")
+	room.AddCommand(limit)
 	var rootProfile string
 	create := &cobra.Command{Use: "create NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		r, err := getClient().RoomCreate(cmd.Context(), contract.RoomCreateRequest{Name: args[0], RootProfile: contract.ProfileName(rootProfile)})
