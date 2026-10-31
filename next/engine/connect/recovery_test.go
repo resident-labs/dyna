@@ -3,16 +3,22 @@ package connect
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestFailedAndInterruptedStartCanRetry(t *testing.T) {
 	ctx := context.Background()
@@ -50,20 +56,19 @@ func TestFailedAndInterruptedStartCanRetry(t *testing.T) {
 
 func TestCancelPreservesLinkedRecovery(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
-	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1/machine/tunnel-token":
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body := `{"keys":[{"kty":"OKP","crv":"Ed25519","kid":"test","x":"invented"}]}`
+		if r.URL.Path == "/v1/machine/tunnel-token" {
 			close(entered)
 			select {
 			case <-release:
-				w.Write([]byte(`{"token":"invented"}`))
+				body = `{"token":"invented"}`
 			case <-r.Context().Done():
+				return nil, r.Context().Err()
 			}
-		case "/.well-known/jwks.json":
-			w.Write([]byte(`{"keys":[{"kty":"OKP","crv":"Ed25519","kid":"test","x":"invented"}]}`))
 		}
-	}))
-	defer relay.Close()
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})
 	dir := t.TempDir()
 	st, err := store.Open(dir)
 	if err != nil {
@@ -77,13 +82,14 @@ func TestCancelPreservesLinkedRecovery(t *testing.T) {
 	if _, err := files.Key(); err != nil {
 		t.Fatal(err)
 	}
-	if err := files.SaveLink(Link{Relay: relay.URL, Machine: "invented-machine"}); err != nil {
+	if err := files.SaveLink(Link{Relay: "https://example.invalid", Machine: "invented-machine"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.InitializeConnectLink(context.Background(), 1); err != nil {
 		t.Fatal(err)
 	}
 	ops := NewOperations(context.Background(), files, st, 1001, 1002)
+	ops.relay = func(base string) *Relay { return &Relay{Base: base, Client: &http.Client{Transport: transport}} }
 	defer ops.Close()
 	if err := ops.Resume(context.Background()); err != nil {
 		t.Fatal(err)
