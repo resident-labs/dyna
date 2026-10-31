@@ -67,7 +67,7 @@ func Admit(hosts []Host, boxes []Box, request Box, diskFloor int64) Placement {
 			if b.Host != h.Name || b.ID == request.ID || b.State == contract.BoxDeleted || b.State == contract.BoxFailed {
 				continue
 			}
-			if b.PlacedAt.After(h.CheckedAt) {
+			if b.PlacedAt.After(h.CheckedAt) && !(b.State == contract.BoxPending && b.Image == "") {
 				disk -= diskRequest(b.Size.Name)
 			}
 			if b.State != contract.BoxStopped && b.State != contract.BoxPending {
@@ -83,7 +83,7 @@ func Admit(hosts []Host, boxes []Box, request Box, diskFloor int64) Placement {
 			reason = PendingMemory
 			continue
 		}
-		if existing == nil {
+		if existing == nil || (existing.State == contract.BoxPending && existing.Image == "") {
 			disk -= diskRequest(request.Size.Name)
 		} else if existing.PlacedAt.After(h.CheckedAt) {
 			disk -= diskRequest(existing.Size.Name)
