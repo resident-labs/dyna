@@ -3,9 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"github.com/resident-labs/dyna/contract"
 	"time"
 )
+
+var ErrGrantInactive = errors.New("grant no longer active")
 
 type HostexecStop string
 
@@ -36,7 +39,7 @@ func (s *Store) StartHostexec(ctx context.Context, run HostexecRun, who contract
 			return err
 		}
 		if n == 0 {
-			return sql.ErrNoRows
+			return ErrGrantInactive
 		}
 		return nil
 	})
