@@ -2,9 +2,9 @@ import type { VisualCard, VisualCheck, VisualCheckName, VisualSuperseded } from 
 import { APIError } from "./client.ts";
 import type { PostEvent } from "./window.svelte.ts";
 
-export function visualReplyFailure(error: unknown): { kind: "failed" } | { kind: "superseded"; visual: VisualSuperseded } {
+export function visualReplyFailure(error: unknown): { kind: "failed" } | { kind: "superseded"; visual: VisualSuperseded; pending: null } {
   return error instanceof APIError && error.detail.code === "visual_superseded" && error.detail.visual
-    ? { kind: "superseded", visual: error.detail.visual } : { kind: "failed" };
+    ? { kind: "superseded", visual: error.detail.visual, pending: null } : { kind: "failed" };
 }
 
 export type VisualVersion = { event: PostEvent; visual: VisualCard };
