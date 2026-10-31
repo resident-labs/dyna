@@ -299,7 +299,7 @@ func TestHostexecDeadlineRecordsLost(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, e := s.HostexecRun(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.HostexecRunRequest{Host: "host", Argv: []string{"true"}, Timeout: contract.DurationMS(time.Minute.Milliseconds())})
-	if e != nil || res.Operation.Result == nil || !strings.Contains(res.Operation.Result.Error, context.DeadlineExceeded.Error()) || duration != 75*time.Second {
+	if e != nil || res.Operation.Result == nil || !strings.Contains(res.Operation.Result.Error, context.DeadlineExceeded.Error()) || res.Operation.Result.Cause != contract.CauseHostLost || duration != 75*time.Second {
 		t.Fatalf("result %+v error %+v deadline %s", res, e, duration)
 	}
 	var stopped string
