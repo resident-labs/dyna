@@ -12,6 +12,11 @@ import (
 )
 
 type profile struct {
+	Description    string                 `json:"description"`
+	Taste          int                    `json:"taste"`
+	Diagnostics    int                    `json:"diagnostics"`
+	Intelligence   int                    `json:"intelligence"`
+	Cost           int                    `json:"cost"`
 	Provider       contract.ModelProvider `json:"provider"`
 	Model          string                 `json:"model"`
 	AllowedModels  []string               `json:"allowedModels"`
@@ -40,6 +45,11 @@ func LoadProfiles(path string) (ProfileConfig, error) {
 		return nil, fmt.Errorf("profiles: no profiles")
 	}
 	for name, p := range profiles {
+		for _, rating := range []int{p.Taste, p.Diagnostics, p.Intelligence, p.Cost} {
+			if rating < 0 || rating > 10 {
+				return nil, fmt.Errorf("profile %q: ratings must be 0..10", name)
+			}
+		}
 		if p.MaxConcurrent < 0 || p.MaxCallsPerRun < 0 {
 			return nil, fmt.Errorf("profile %q: limits must be non-negative", name)
 		}
@@ -66,7 +76,7 @@ func LoadProfiles(path string) (ProfileConfig, error) {
 func (p ProfileConfig) List() []contract.ProfileSummary {
 	result := make([]contract.ProfileSummary, 0, len(p))
 	for name, profile := range p {
-		result = append(result, contract.ProfileSummary{Name: name, Provider: profile.Provider, Model: profile.Model, Thinking: profile.Thinking})
+		result = append(result, contract.ProfileSummary{Name: name, Provider: profile.Provider, Model: profile.Model, Thinking: profile.Thinking, Description: profile.Description, Taste: profile.Taste, Diagnostics: profile.Diagnostics, Intelligence: profile.Intelligence, Cost: profile.Cost, AllowedModels: profile.AllowedModels, CompactTokens: profile.CompactTokens, MaxConcurrent: profile.MaxConcurrent, MaxCallsPerRun: profile.MaxCallsPerRun})
 	}
 	slices.SortFunc(result, func(a, b contract.ProfileSummary) int { return strings.Compare(string(a.Name), string(b.Name)) })
 	return result
