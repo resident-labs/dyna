@@ -6,7 +6,8 @@
   import SharingPane from "./SharingPane.svelte";
   import AccountsPane from "./AccountsPane.svelte";
   import ProfilesPane from "./ProfilesPane.svelte";
-  import Icon, { type IconName } from "./Icon.svelte";
+  import Icon from "./Icon.svelte";
+  import { settingsPanes } from "../routes.ts";
   import type { Device } from "../contract.gen.ts";
   // The Settings page, in the feed's and the sidebar's place. It opens over the app, so the room behind keeps its feed,
   // its position and its draft. A wide page opens the first pane. A phone opens the pane list, and a pane's arrow returns to it.
@@ -27,8 +28,7 @@
   untrack(reload);
 
   // Appearance is on every device; Devices only on one with admin.
-  let panes: { id: string; label: string; icon: IconName }[] = $derived([{ id: "appearance", label: "Appearance", icon: "palette" },
-    ...admin ? [{ id: "devices", label: "Sharing & access", icon: "devices" }, { id: "accounts", label: "Accounts", icon: "plug" }, { id: "profiles", label: "Profiles", icon: "tool" }] as const : []]);
+  let panes = $derived(settingsPanes.filter(pane => !pane.admin || admin));
   let shown = $derived(panes.find(pane => path === `/settings/${pane.id}` || (pane.id === "accounts" && path.startsWith("/settings/accounts/"))) ?? (phone ? undefined : panes[0]));
   // /settings and its trailing slash open the first pane or the list; any other path has no page.
   let lost = $derived(!/^\/settings\/?$/.test(path) && !panes.some(pane => path === `/settings/${pane.id}` || (pane.id === "accounts" && /^\/settings\/accounts\/(?:add(?:\/[^/]+)?|account\/[^/]+)$/.test(path))));
