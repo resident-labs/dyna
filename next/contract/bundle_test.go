@@ -20,7 +20,7 @@ func filledGlobalBundle() GlobalBundle {
 		Rules:    []Rule{{Label: "u1", Text: "report bugs to root", By: owner, Created: bundleTime, Updated: bundleTime}},
 		Settings: SettingsBundle{
 			OwnerName: "Ari", RootProfile: "opus", RulesMaxChars: 4000, SubagentMaxDepth: 3,
-			CheckInInterval: 900000, ShellSilence: 600000, LibraryProfile: "haiku",
+			CheckInInterval: 900000, ShellSilence: 600000,
 		},
 		Profiles: []ProfileBundle{{
 			Name: "terra", Description: "builder", Model: "gpt-5.5", Models: []string{"gpt-5.5"}, Fallback: "kimi-max",
@@ -34,18 +34,13 @@ func filledGlobalBundle() GlobalBundle {
 		Repos: []RepoBundle{{
 			Repo: "resident-labs/dyna", DefaultRoom: "dyna", MergePolicy: MergeQueue, CIMode: CIBox,
 			Attribution: []AttributionLine{{Kind: AttributionPR, Line: "Made with Dyna"}},
-			Library: []LibraryEntry{{
-				ID: "rooms", Name: "rooms", Kind: LibraryFeature, Parent: "", Summary: "feeds", Differs: "typed",
-				Owns: []string{"internal/room"}, Docs: []string{"docs/rooms.md"}, Tests: []string{"internal/room"},
-				Relates: []string{"sessions"}, VerifiedAt: "abc123",
-			}},
 		}},
 		Skills: []SkillBundle{{Name: "rea", Description: "reverse engineering", Package: "rea-agents@6.8.0"}},
 		Subscriptions: []Subscription{{
 			ID: "sub_1", Scope: ScopeMachine, Every: 1800000,
 			Run: &RunSpec{Command: []string{"sh", "watch.sh"}, Image: "dyna-base", Size: "small", Files: []RunFile{{Path: "watch.sh", Body: "echo ok"}}},
 		}},
-		Counts: BundleCounts{Rules: 1, Hosts: 1, Accounts: 1, Devices: 1, LibraryEntries: 1, Subscriptions: 1},
+		Counts: BundleCounts{Rules: 1, Hosts: 1, Accounts: 1, Devices: 1, Subscriptions: 1},
 	}
 }
 
