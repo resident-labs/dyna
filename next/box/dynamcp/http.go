@@ -58,6 +58,7 @@ type Local func(context.Context, tools.BoxHandler, []byte) (result, *contract.Er
 
 type Server struct {
 	list    []tool
+	names   string
 	actions map[string]map[string]action
 	forward Forward
 	local   Local
@@ -70,33 +71,31 @@ func New(forward Forward, local Local) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Server{list: list, actions: actions, forward: forward, local: local, pending: make(map[string]context.CancelFunc)}, nil
+	names := make([]string, 0, len(list))
+	for _, tool := range list {
+		names = append(names, tool.Name)
+	}
+	return &Server{list: list, names: strings.Join(names, ", "), actions: actions, forward: forward, local: local, pending: make(map[string]context.CancelFunc)}, nil
 }
 
 // Description names the areas from the same registry as tools/list.
-func (s *Server) Description() string {
-	names := make([]string, 0, len(s.list))
-	for _, tool := range s.list {
-		names = append(names, tool.Name)
-	}
-	return "Dyna tools cover " + strings.Join(names, ", ") + "."
-}
+func (s *Server) Description() string { return "Dyna tools cover " + s.names + "." }
 
 func marshal[T any](v T) json.RawMessage { data, _ := json.Marshal(v); return data }
 
+func failed(problem contract.Error) result {
+	detail := marshal(problem)
+	return result{Content: []content{{Type: "text", Text: string(detail)}}, IsError: true, StructuredContent: detail}
+}
+
 func failure(code contract.ErrorCode, message string) result {
-	detail := contract.Error{Code: code, Message: message}
-	return result{Content: []content{{Type: "text", Text: string(marshal(detail))}}, IsError: true, StructuredContent: marshal(detail)}
+	return failed(contract.Error{Code: code, Message: message})
 }
 
 func (s *Server) call(ctx context.Context, p callParams) result {
 	verbs, ok := s.actions[p.Name]
 	if !ok {
-		var names []string
-		for _, tool := range s.list {
-			names = append(names, tool.Name)
-		}
-		return failure(contract.ErrUnknownAction, "Unknown tool. Valid tools: "+strings.Join(names, ", "))
+		return failure(contract.ErrUnknownAction, "Unknown tool. Valid tools: "+s.names)
 	}
 	var verb string
 	if err := json.Unmarshal(p.Arguments["action"], &verb); err != nil {
@@ -133,7 +132,7 @@ func (s *Server) call(ctx context.Context, p callParams) result {
 		}
 		out, problem := s.local(ctx, a.local, data)
 		if problem != nil {
-			return result{Content: []content{{Type: "text", Text: string(marshal(problem))}}, IsError: true, StructuredContent: marshal(problem)}
+			return failed(*problem)
 		}
 		return out
 	}
@@ -151,9 +150,16 @@ func (s *Server) call(ctx context.Context, p callParams) result {
 	}
 	out, problem := s.forward(ctx, a.method, data)
 	if problem != nil {
-		return result{Content: []content{{Type: "text", Text: string(marshal(problem))}}, IsError: true, StructuredContent: marshal(problem)}
+		return failed(*problem)
 	}
 	return result{Content: []content{{Type: "text", Text: string(out)}}, StructuredContent: out}
+}
+
+func writeEvent[T any](w http.ResponseWriter, value T) {
+	_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", marshal(value))
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func sendProgress(w http.ResponseWriter, token json.RawMessage, count int) {
@@ -166,9 +172,26 @@ func sendProgress(w http.ResponseWriter, token json.RawMessage, count int) {
 		} `json:"params"`
 	}{JSONRPC: "2.0", Method: "notifications/progress"}
 	notice.Params.ProgressToken, notice.Params.Progress = token, count
-	_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", marshal(notice))
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
+	writeEvent(w, notice)
+}
+
+func (s *Server) stream(ctx context.Context, w http.ResponseWriter, p callParams) result {
+	sendProgress(w, p.Meta.ProgressToken, 0)
+	done := make(chan result, 1)
+	go func() { done <- s.call(ctx, p) }()
+	tick := time.NewTicker(30 * time.Second)
+	defer tick.Stop()
+	progress := 0
+	for {
+		select {
+		case out := <-done:
+			return out
+		case <-ctx.Done():
+			return failure(contract.ErrUnavailable, ctx.Err().Error())
+		case <-tick.C:
+			progress++
+			sendProgress(w, p.Meta.ProgressToken, progress)
+		}
 	}
 }
 
@@ -249,41 +272,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.mu.Unlock()
 			cancel()
 		}()
-		stream := len(p.Meta.ProgressToken) > 0 && strings.Contains(r.Header.Get("Accept"), "text/event-stream")
-		if stream {
+		if len(p.Meta.ProgressToken) > 0 && strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Header().Set("Cache-Control", "no-cache")
-			sendProgress(w, p.Meta.ProgressToken, 0)
-		}
-		if stream {
-			done := make(chan result, 1)
-			go func() { done <- s.call(ctx, p) }()
-			tick := time.NewTicker(30 * time.Second)
-			defer tick.Stop()
-			progress := 0
-			for {
-				select {
-				case out := <-done:
-					resp.Result = marshal(out)
-					goto complete
-				case <-ctx.Done():
-					resp.Result = marshal(failure(contract.ErrUnavailable, ctx.Err().Error()))
-					goto complete
-				case <-tick.C:
-					progress++
-					sendProgress(w, p.Meta.ProgressToken, progress)
-				}
-			}
-		}
-		resp.Result = marshal(s.call(ctx, p))
-	complete:
-		if stream {
-			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", marshal(resp))
-			if f, ok := w.(http.Flusher); ok {
-				f.Flush()
-			}
+			resp.Result = marshal(s.stream(ctx, w, p))
+			writeEvent(w, resp)
 			return
 		}
+		resp.Result = marshal(s.call(ctx, p))
 	default:
 		resp.Error = &rpcError{-32601, "Method not found."}
 	}
