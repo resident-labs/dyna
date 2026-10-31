@@ -60,38 +60,47 @@ func TestHeadChunkWaitsLongerThanThreeSeconds(t *testing.T) {
 	}
 }
 
-// A stalled chunk and its retries must not use up the time that a later chunk needs.
+// Stalled chunks and their retries must leave time for the chunks after them.
 func TestHeadChunkRetriesDoNotStarveLaterChunks(t *testing.T) {
-	old := withHeadChunkTimeout
-	defer func() { withHeadChunkTimeout = old }()
-	start := time.Now()
-	var elapsed time.Duration
-	withHeadChunkTimeout = func(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
-		return context.WithDeadline(ctx, start.Add(elapsed+d))
-	}
-	parent, cancel := context.WithDeadline(t.Context(), start.Add(15*time.Second))
-	defer cancel()
-	g := GitHub{run: func(ctx context.Context, cmd *exec.Cmd) error {
-		// Simulated GitHub: the first 20 heads stall for a minute; head 21 answers in one second.
-		latency := 60 * time.Second
-		if strings.Contains(cmd.Args[len(cmd.Args)-1], "p21:") {
-			latency = time.Second
-		}
-		if deadline, ok := ctx.Deadline(); ok && deadline.Before(start.Add(elapsed+latency)) {
-			elapsed = deadline.Sub(start)
-			return context.DeadlineExceeded
-		}
-		elapsed += latency
-		fmt.Fprint(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n"+`{"data":{"r0":{"defaultBranchRef":{"name":"main"},"p21":{"number":21,"state":"OPEN","headRefOid":"`+strings.Repeat("a", 40)+`"}}}}`)
-		return nil
-	}}
-	var records []*Record
-	for i := 1; i <= 21; i++ {
-		records = append(records, &Record{Key: fmt.Sprint(i), Host: "github.com", Repo: "owner/repo", Number: i})
-	}
-	heads, _, _ := g.readHeads(parent, records)
-	if heads["21"].Err != nil || heads["21"].Pull.Number != 21 {
-		t.Fatalf("head 21=%+v elapsed=%v", heads["21"], elapsed)
+	for _, tc := range []struct {
+		name    string
+		records int
+	}{{"one stalled chunk", 21}, {"two stalled chunks", 41}} {
+		t.Run(tc.name, func(t *testing.T) {
+			old := withHeadChunkTimeout
+			defer func() { withHeadChunkTimeout = old }()
+			start := time.Now()
+			var elapsed time.Duration
+			withHeadChunkTimeout = func(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+				return context.WithDeadline(ctx, start.Add(elapsed+d))
+			}
+			parent, cancel := context.WithDeadline(t.Context(), start.Add(15*time.Second))
+			defer cancel()
+			last := fmt.Sprintf("p%d:", tc.records)
+			g := GitHub{run: func(ctx context.Context, cmd *exec.Cmd) error {
+				// Simulated GitHub: every head but the last stalls for a minute; the last answers in one second.
+				latency := 60 * time.Second
+				if strings.Contains(cmd.Args[len(cmd.Args)-1], last) {
+					latency = time.Second
+				}
+				if deadline, ok := ctx.Deadline(); ok && deadline.Before(start.Add(elapsed+latency)) {
+					elapsed = deadline.Sub(start)
+					return context.DeadlineExceeded
+				}
+				elapsed += latency
+				fmt.Fprint(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n"+`{"data":{"r0":{"defaultBranchRef":{"name":"main"},"`+last[:len(last)-1]+`":{"number":`+fmt.Sprint(tc.records)+`,"state":"OPEN","headRefOid":"`+strings.Repeat("a", 40)+`"}}}}`)
+				return nil
+			}}
+			var records []*Record
+			for i := 1; i <= tc.records; i++ {
+				records = append(records, &Record{Key: fmt.Sprint(i), Host: "github.com", Repo: "owner/repo", Number: i})
+			}
+			heads, _, _ := g.readHeads(parent, records)
+			key := fmt.Sprint(tc.records)
+			if heads[key].Err != nil || heads[key].Pull.Number != tc.records {
+				t.Fatalf("last head=%+v elapsed=%v", heads[key], elapsed)
+			}
+		})
 	}
 }
 
