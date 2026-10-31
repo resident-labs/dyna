@@ -54,7 +54,7 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 type boxChannel struct {
 	stop     context.CancelFunc
 	wake     chan struct{}
-	watching bool
+	watching uint64
 }
 
 func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-chan contract.BoxMessage, *contract.Error) {
@@ -93,14 +93,17 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 		for {
 			s.mu.Lock()
 			c := s.computers[session.ID]
-			desired := c != nil && len(c.watchers) != 0
+			var desired uint64
+			if c != nil && len(c.watchers) != 0 {
+				desired = c.generation
+			}
 			changed := desired != channel.watching
 			channel.watching = desired
 			s.mu.Unlock()
 			if changed {
 				var body contract.BoxMessageBody = contract.ComputerWatchStop{}
-				if desired {
-					body = contract.ComputerWatchStart{}
+				if desired != 0 {
+					body = contract.ComputerWatchStart{Generation: desired}
 				}
 				select {
 				case out <- contract.BoxMessage{Body: body}:
