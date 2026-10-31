@@ -202,7 +202,7 @@ Event types by milestone:
 |---|---|
 | M1 | `post.created`, `session.started`, `session.closed`, `turn.started`, `turn.ended`, `box.changed` |
 | M2 | `op.requested`, `op.decided`, `op.ran`, `grant.created`, `grant.revoked`, `grant.expired`, `session.moved`, `box.pressure`, `image.built`, `image.failed`, `pr.opened`, `turn.activity` |
-| M3 | `goal.*`, `issue.*`, `question.asked`, `question.answered`, `rule.changed`, `pr.approved`, `pr.merged`, `pr.closed`, `ci.finished`, `repo.main_updated`, `hook.finished`, `checkin.due`, `notice.posted`, `account.quota_low`, `account.failed`, `migrate.handoff` |
+| M3 | `goal.*`, `issue.*`, `question.asked`, `question.answered`, `pr.approved`, `pr.merged`, `pr.closed`, `ci.finished`, `repo.main_updated`, `hook.finished`, `checkin.due`, `notice.posted`, `account.quota_low`, `account.failed`, `migrate.handoff` |
 
 `turn.activity` is a live event. It says what a running turn does now, such as `read spec.md`, so a session row can show it. The box agent reports the latest tool call at most once a second. The engine keeps the label in memory, sends it on the room stream and the owner stream with seq 0, and never stores it, so `events.list` never returns it and it does not move a resume point. `session.list` carries the same label, and `turn.ended` clears it.
 
@@ -485,7 +485,7 @@ type BundleSource struct {
 - **Visual cards.** `post` accepts one HTML attachment with a `visual` record. The engine assigns its stable `id` and version. `visualUpdate` names the original ID; only its author or the owner may update it, and the update must stay in its room. Each update is a new post and retains earlier versions. Banner, thumbnail and width-shot fields name uploaded SHA-256 files; the engine checks room access and associates them with the post. `GET /v1/files/visual/<event ID>` serves that event's HTML with a sandbox and a default-deny content security policy. `allowNet` permits HTTPS resource connections. The URL uses the event ID, not the file hash, so another attachment's metadata cannot change its policy. An interactive card sends `dyna:submit` to its parent; the owner confirms the exact text before the app posts a reply (5.13 and 7).
 - **Session search.** `session.search {query,limit?}` returns `{sessions:[{id,name,room,closed}],total}` across all rooms. It needs owner read scope and uses the post search query and limit rules. Open sessions come first, then closed sessions, newest first.
 - **Post search.** `post.search {query,room?,before?,limit?}` returns newest matching posts, their page author session names in `names` (including closed sessions), and the total across the selected rooms. It needs read scope and is owner-only. Every query word matches a word prefix in the text or author; the query has at most 8 words and 200 bytes. Limit defaults to 20 and is at most 50. `before` excludes that sequence and newer posts.
-- **Room rules.** `rule.add {room,text}` returns `number`; `rule.remove {room,number}` removes it; `rule.edit {room,number,text}` changes the text of an active rule and keeps its number (not found for a removed or unknown rule); `rule.list {room}` returns active rules with `number`, `text`, `by` and `at`. Only the owner and room root change rules. Room members can list them. Rule text has at most 2,000 characters. Changes produce `rule.added {number,text}`, `rule.edited {number,text}` and `rule.removed {number}` feed events. `room.list` gives each room a `failed` count (open sessions whose last turn that was not stopped failed), and `session.list` gives each session `startedAt` and `lastTurnAt` (empty before the first ended turn).
+- **Standing instructions.** `instructions.get {room?}` returns the global file, or a room's, with its content hash; `instructions.set {room?, text, base}` writes it when `base` matches the current hash, else returns `stale`. Both are owner-only. They are the engine's only rules-like methods (7, Standing instructions). `room.list` gives each room a `failed` count (open sessions whose last turn that was not stopped failed), and `session.list` gives each session `startedAt` and `lastTurnAt` (empty before the first ended turn).
 - **Session and room control.** `session.stop {session}` requests a running turn to stop, or returns `stopping=false` when none runs. The owner or an ancestor may stop it. The request survives reconnect; the stopped turn keeps its inputs read. `room.pause {room,paused}` is for the owner or room root. It emits `room.paused` or `room.resumed`, holds pending delivery and box wakes, and lets active turns finish. Resume dispatches waiting wakes. `room.list` includes `paused`.
 - **Read position.** `conversation.read` lets only the owner advance a room feed or session DM read position. The engine keeps the maximum sequence and broadcasts a live `conversation.read` event. Room and session lists include `lastRead`.
 - **Owner tools.** `GET /v1/shell/watch?session=<id>` streams a session's shell job output, and `GET /v1/terminal` opens an owner terminal over a WebSocket (5.15). Only the owner can call them.
@@ -537,7 +537,6 @@ Column types follow SQLite. Times are INTEGER Unix milliseconds (`_at`). IDs are
 
 | Milestone | Table | Columns (key first) |
 |---|---|---|
-| M3 | `rules` | (`room`, `number`) PK, `text`, `by_kind`, `by_id`, `created_at`, `removed_at` NULL. Numbers increase per room and are never reused. |
 | M3 | `conversation_reads` | (`room`, `conversation`) PK, `seq` (the owner’s highest read sequence) |
 | M1 | `meta` | `key` PK, `value` (`format`, `schema_version`, `store_id`, `created_commit`) |
 | M1 | `rooms` | `id` PK, `name` UNIQUE, `created_at`, `cpus`, `mem_bytes` (room limit), `paused_at` |
@@ -559,7 +558,7 @@ Column types follow SQLite. Times are INTEGER Unix milliseconds (`_at`). IDs are
 | M3 | `subscriptions`, `subscription_events`, `subscription_args` | section 8.5; hooks and the default notice subscription need them |
 | M3 | `repo_attribution`, `devices`, `device_scopes` | section 7 |
 | M3 | `imports` | section 8.5 |
-| M3 | the imported records | `rules`, `goals`, `goal_items`, `issues`, `questions`, `accounts` (labels and limits only), `counters`. The import also fills `pr_owners`. Each area owner writes the columns in its M3 plan. Profiles, harness config and skills stay config files. |
+| M3 | the imported records | `goals`, `goal_items`, `issues`, `questions`, `accounts` (labels and limits only), `counters`. The import also fills `pr_owners`. Each area owner writes the columns in its M3 plan. Profiles, harness config, skills and the standing-instruction files stay config files. |
 | M3 | `proxy_auths` | `id` PK, `provider`, `record` (the proxy's auth record, which holds tokens), `updated_at`. Only the embedded proxy's token store reads and writes it (5.7). |
 
 `counters` holds keyed counters (D-580), such as the next issue number per room. A counter update is one primary-key write with prebuilt SQL.
@@ -776,7 +775,7 @@ New objects go into the box volume, so a box cannot change the cache. Shared dep
 
 ### 5.7 Box socket, model route and git
 
-**Box socket.** The engine listens on one Unix socket per box, `<runtime>/boxes/<box>.sock`. Over the host's master it adds `ssh -O forward -R <hostdata>/sock/<box>/engine.sock:<runtime>/boxes/<box>.sock` (StreamLocalForward, with `StreamLocalBindUnlink=yes`). The host creates the per-box directory with mode 0700 and bind-mounts it read-only at `/run/dyna/engine`. The box connects to `/run/dyna/engine/engine.sock`, and no other box socket is mounted. The directory stays in place across master restarts and is removed after the forward is cancelled on box removal. The listener maps to one box, the box to one session, and the session to its Principal. No token is sent.
+**Box socket.** The engine listens on one Unix socket per box, `<runtime>/boxes/<box>.sock`. Over the host's master it adds `ssh -O forward -R <hostdata>/sock/<box>/engine.sock:<runtime>/boxes/<box>.sock` (StreamLocalForward, with `StreamLocalBindUnlink=yes`). The host creates the per-box directory with mode 0700 and bind-mounts it read-only at `/run/dyna/engine`. The box connects to `/run/dyna/engine/engine.sock`, and no other box socket is mounted. The directory stays in place across master restarts and is removed after the forward is cancelled on box removal. The engine also writes the standing-instruction files to `<hostdata>/instructions/` over the same master when they are saved, and boxes mount that folder read-only (7, Standing instructions). The listener maps to one box, the box to one session, and the session to its Principal. No token is sent.
 
 If a master dies, the engine starts it again and adds every forward again. The box agent retries with backoff (0.5 s, doubling to 10 s) and buffers outgoing data up to 64 MiB, so a short loss never ends a turn.
 
@@ -987,9 +986,19 @@ Accepted risks (owner, 2026-10-30):
 
 Drafted by dyna:code-architectural.
 
-### Rules
+### Standing instructions
 
-Each room keeps standing rules. A session sees the active global and room rules as `rule_<id>` sections of its context snapshot (7.9), which the engine renders from the current rules at each dispatch. A change reaches every open session at its next run, without starting a turn, through Pi's context update: an added or edited rule appears in full, and a removed rule is named as a removed key. The system prompt picks up the change at the next fold, at compaction. No box restart is needed. Rule changes create no deliveries; the `rule.*` feed events stay for the owner's view.
+Owner, 2026-10-31: v2 has no rules feature. Pi owns standing instructions through its normal context files, which Pi loads as it does today:
+
+- **Global:** `AGENTS.md` in Pi's agent folder (`/box/pi/AGENTS.md`).
+- **Room:** `AGENTS.md` in the work folder one level above the repository checkouts (`/box/work/AGENTS.md`). Pi walks up from its working directory, so it finds this file from every checkout.
+- **Repository:** the repository's own `AGENTS.md`, unchanged.
+
+The engine keeps the global file and one file per room in its data folder, under `files/instructions/`, which the daily backup already includes (4.1). They are owner config, not queried runtime state, so they are plain files, not SQLite rows (r1). The engine saves a file by renaming a new one into place, so a box mounts each file's folder read-only, never the file itself: a bind-mounted file would keep the old inode. The box agent links `/box/pi/AGENTS.md` and `/box/work/AGENTS.md` to the mounted files. A box restart keeps them, and nothing in the box can write them. A box on another host cannot mount a folder from the engine host, so the engine writes both files to each host over its SSH master when they are saved (5.7), and the box mounts the host's copy read-only. The room file sits outside every checkout, at `/box/work/`, which is not a git work tree, so no `git add` in a checkout can stage it.
+
+The web app's rules page becomes a plain markdown editor for the global file and the current room's file. It saves with `instructions.set` and the content hash it read, so a stale save returns a typed conflict instead of overwriting. Only the owner edits them. An agent that wants a change asks the owner in a post.
+
+A change reaches every running session at its next run as a diff in Pi's context update (7.9), and it folds into the system prompt at the next compaction. The owner sees that diff in the session's context update; the engine emits no event and creates no delivery for it. The v1 import writes v1's global and room rules into the two files, one list item per rule with its v1 number as a heading, so references such as "r22" keep their meaning.
 
 ### 7.1 Principals
 
@@ -1139,15 +1148,16 @@ Upstream check, 2026-10-31: no upstream issue or PR delivers prompt, tool or ski
 
 **The update message.** Between those points, every change reaches the model through one `context_update` message, sent as a user message with a fixed Pi frame. It goes in at one point: where Pi already places steering messages, at the start of a run or after the current tool results and before the next model request. That point also covers the first request of a `continue` run, so it is not a new transcript path. There Pi compares the current state with the delivered state, and if they differ it appends one update that holds:
 
-- **Sections:** each changed keyed section in full, and each removed key by name. This covers every section source: the host's sections, Pi's `mcp_servers` lines, and the skills section.
+- **Sections:** one rule for every section: a changed section goes as a line diff against the text the model last saw, a new section goes whole, and a removed one is named. This covers every section source: the host's sections, Pi's `mcp_servers` lines, the skills section, and context files.
+- **Context files:** every `AGENTS.md` or `CLAUDE.md` that Pi loads is a section keyed by its path. Pi re-reads them at run start and in the compaction step, so a change to the global, room or repository file reaches the model as a diff in the next update, and the current files fold into the head at compaction.
 - **Tools:** each newly announced tool with its name, description and parameter schema; each announced tool whose description or schema changed under the same name, again in full and marked as changed; and each tool that is no longer available, by name. Exposure decides what is announced, by one rule for every MCP server, Dyna's included. A `deferred` or `codemode` server that connects announces only its one-line description in `mcp_servers`; a deferred tool is announced only on a `tool_search` hit. A server with `direct` tools announces those tools in full. A server's tool list changes through the standard MCP `notifications/tools/list_changed`, so Pi has no host-specific path.
 - **Skills:** Pi renders the skills section from its own skills folder, the one source. A skill added, changed or removed changes the section: name, description and path, as Pi lists skills at startup. The model still reads `SKILL.md` on demand.
 
 A request with no change adds nothing. The update stays in the transcript, so later requests repeat the same bytes and the cache holds.
 
-**Calling a tool that is not declared yet.** Pi declares a generic `call_tool {name, arguments}` from the first request. It runs a named tool through the agent loop's tool pipeline, as codemode's nested calls already do (`ctx.executeTool`), so the call gets the same validation, events and result as a direct call. A tool that arrived in an update is called through `call_tool` until the next compaction declares it in the head; from then on the model may call it directly. A tool already declared in the head whose definition changes is announced as changed, and the update says to call it through `call_tool` until the next compaction declares the new definition. Every call, direct or through `call_tool`, is validated against the current definition, so a direct call that uses the old schema fails with the typed validation error, which names `call_tool`. A test changes a declared tool's schema under the same name and checks the update, the `call_tool` call, and the declaration after compaction. A session that never compacts keeps working through `call_tool`. `tool_search` loads nothing; its result is one short line, such as "3 tools found; their schemas are in the update below", with no copy of the schema.
+**Calling a tool that is not declared yet.** Pi declares a generic `call_tool {name, arguments}` from the first request. It runs a named tool through the agent loop's tool pipeline, as codemode's nested calls already do (`ctx.executeTool`), so the call gets the same validation, events and result as a direct call. Each tool has one way in at any moment. `call_tool` runs only tools that are announced but not declared; for a declared tool it returns a typed error that names the direct tool. A tool that arrived in an update is called through `call_tool` until the next compaction declares it, and directly from then on. A declared tool whose definition changes under the same name is announced as changed and counts as announced but not declared, so it is called through `call_tool` until the next compaction declares the new definition; a direct call to it returns a typed error that names `call_tool`. Every call is validated against the current definition. A test changes a declared tool's schema under the same name and checks the update, the `call_tool` call, and the declaration after compaction. A session that never compacts keeps working through `call_tool`. `tool_search` loads nothing; its result is one short line, such as "3 tools found; their schemas are in the update below", with no copy of the schema.
 
-**One state.** Each update stores the full delivered state in its `details`, in the same session-file entry: the sections (skills included) and the tools announced but not yet declared. The compaction entry holds the folded head and the declared list. Pi derives the delivered state from the active branch: the newest update, or the newest compaction entry, or the first head. Nothing is stored apart from what the model received, and crash repair compares the same state: a box that dies before an update entry is written resumes with that update sent first, and nothing repeats, because no entry existed. These claims cover a process restart only, because Pi appends its JSONL session file without fsync.
+**One state.** Each update stores the full delivered state in its `details`, in the same session-file entry: the sections (skills and context files included) and every tool definition delivered but not yet declared in the head, which includes the new definition of a declared tool that changed under the same name. The compaction entry holds the folded head and the declared list. Pi derives the delivered state from the active branch: the newest update, or the newest compaction entry, or the first head. Nothing is stored apart from what the model received, and crash repair compares the same state: a box that dies before an update entry is written resumes with that update sent first, and nothing repeats, because no entry existed. Tests restart Pi after an update that announced a changed declared tool and check that no second update is sent.
 
 **Host interface.** Two RPC commands, with matching `AgentSession` methods:
 
@@ -1170,9 +1180,9 @@ A request with no change adds nothing. The update stays in the transcript, so la
 
 `supportsMidConvoEffort` is a separate feature and stays.
 
-**Size, measured on the vendored tree.** The blocks above hold about 480 code lines, without comments; about 450 of them go, since the head rendering stays. The change adds about 380: a new `core/context-updates.ts` (state, diff, derive, render) about 170, `call_tool` about 60, the two RPC commands about 50, compaction and `continue` wiring about 60, and the `tool_search` result change and settings about 40. Net about −70 Pi lines before tests. `system-message-replay.test.ts` and `transcript-tool-changes.test.ts` are replaced by tests of the update. The real figure is the build's diff stat.
+**Size, measured on the vendored tree.** The blocks above hold about 480 code lines, without comments; about 450 of them go, since the head rendering stays. The change adds about 450: a new `core/context-updates.ts` (state, diff, derive, render) about 170, a line-diff renderer for changed sections about 40, re-reading context files at run start and in the compaction step in `core/resource-loader.ts` and `core/system-prompt.ts` about 30, `call_tool` about 60, the two RPC commands about 50, compaction and `continue` wiring about 60, and the `tool_search` result change and settings about 40. Net about 0 Pi lines before tests. `system-message-replay.test.ts` and `transcript-tool-changes.test.ts` are replaced by tests of the update. The real figure is the build's diff stat.
 
-**What the box agent does.** It sends the turn's snapshot sections from `TurnStart` with `set_prompt_sections` before each `prompt` and `continue`, on the same stdin, so the pipe orders them; a failed command fails the turn. When the engine reports a skill change or a room MCP server change, the box agent writes the new skill files into Pi's skills folder or the new entry into `mcp.json`, then sends `reload_resources`. The new server connects without a restart, and its line reaches the model through the next update. When a session's reachable Dyna tools change, for example after a grant, the `dyna` server sends `notifications/tools/list_changed`.
+**What the box agent does.** It sends the turn's snapshot sections from `TurnStart` with `set_prompt_sections` before each `prompt` and `continue`, on the same stdin, so the pipe orders them; a failed command fails the turn. When the engine reports a skill change or a room MCP server change, the box agent writes the new skill files into Pi's skills folder or the new entry into `mcp.json`, then sends `reload_resources`. The new server connects without a restart, and its line reaches the model through the next update.
 
 #### Tools
 
@@ -1191,15 +1201,14 @@ The base is T3 Code's MCP server (`apps/server/src/mcp/` in pingdotgg/t3code, re
 | Tool | Actions | Methods | Phase |
 |---|---|---|---|
 | `post` | send, update_visual | `post` | 1 |
-| `session` | start, list, stop, close, restart, set_profile, move, profiles | `session.*`, `profile.list` | 1 |
+| `session` | start, list, stop, close, restart, set_profile, move | `session.*`; profiles are in the `dyna_profiles` section | 1 |
 | `room` | log, repos, pause | `events.list`, `room.repos`, `room.pause` | 1 |
-| `rules` | list, add, edit, remove | `rule.*` | 1 |
-| `op` | list, withdraw | `op.list` (own operations), `op.withdraw` (own pending ones); deciding is the owner's (3.5 classes) | 1 |
+| `op` | withdraw | `op.withdraw` (own pending ones; they are in `dyna_requests`); deciding is the owner's (3.5 classes) | 1 |
 | `hostexec` | run, request_grant | `hostexec.run`, `op.submit` with `hostexec.grant` | 1 |
 | `pr` | open, approve, status | `pr.open`; `pr.approve` and status in M3 | 1, 2 |
 | `visual` | check | the visual checker in the box | 1 |
 | `computer` | open, click, type, text, screenshot | the box computer (5.14); screenshots return as image results | 1 |
-| `context` | show, usage | `context.snapshot` for both (show: one section in full; usage: the usage section) | 1 |
+| `context` | show | `context.snapshot` (one section in full, past its cap) | 1 |
 | `goal` | set, list, item, done, journal | `goal.*` | 2 |
 | `issue` | file, list, show, close | `issue.*` | 2 |
 | `question` | ask, list | `question.*`; ask needs the `ask-owner` grant | 2 |
@@ -1210,10 +1219,10 @@ The base is T3 Code's MCP server (`apps/server/src/mcp/` in pingdotgg/t3code, re
 - **One route, one check.** A direct call and a `call_tool` call arrive at the box as the same MCP `tools/call`. The box resolves the tool name and `action` against the registry, because it must do that to route. An unknown one returns `isError` with code `unknown_action` and the valid names. The args are checked once, by the handler's strict decode of the registry's typed request: the engine method, or the box's own handler for `visual` and `computer`. Its typed error passes through unchanged, with the field name and "the schema is in the update that brought this tool". The box does not check the args again, because the CLI reaches the same engine decode.
 - **Room MCP servers** keep `codemode` exposure (owner, q62). Pi keeps MCP tools out of the codemode description, so they do not change the tool list either; a server that connects changes the `mcp_servers` line, which arrives in an update. Each tool has one way in: Dyna tools through search, the update and the caller; room MCP tools through codemode.
 - **Owner-only methods are not tools.** `host.add`, `device.*`, `room.create`, `room.set_limits`, `op.decide`, `accounts.quota`, the accounts sign-in methods, the terminal and the shell watch stay in the CLI and the web app.
-- **Access changes.** These change engine authority. `profile.list` opens to sessions that may start children, and it returns no account binding or credential. `session.restart` takes `tree` access, as stop and close do. `room.repos` takes `session` access for the caller's own room.
+- **Access changes.** These change engine authority. `session.restart` takes `tree` access, as stop and close do. `room.repos` takes `session` access for the caller's own room.
 - **Long calls.** Pi's MCP client times out a call after 60 seconds by default, and T3 Code hit this. The box agent sets the `dyna` server's `timeout` to 600 seconds and sends MCP progress notifications while a call runs; a progress notification resets Pi's timer. Work that can outlast that, such as `hostexec run` or `workflow run`, returns its operation at once, and the session wakes on `op.ran` (6.3).
 
-**Discovery.** Pi's `mcp_servers` section shows `dyna` as a `tool_search` server with the first line of its description (checked in `extensions/mcp/index.ts`). The box agent generates that line from the registry at box start: one sentence naming the areas the session may reach. It is the one place that says which areas exist. The update that brings a tool is the one place that carries its schema. The startup prompt names no tools.
+**Discovery.** Pi's `mcp_servers` section shows `dyna` as a `tool_search` server with the first line of its description (checked in `extensions/mcp/index.ts`). The box agent generates that line from the registry: one sentence naming the areas. The `dyna` server's tool list and this line follow the registry only, every entry except owner-only ones, so they are the same for every session of a Dyna version. The engine refuses an unauthorized call with its typed cause and the fix, for example `no_grant`. It is the one place that says which areas exist. The update that brings a tool is the one place that carries its schema. The startup prompt names no tools.
 
 **One source for each fact.**
 
@@ -1222,7 +1231,8 @@ The base is T3 Code's MCP server (`apps/server/src/mcp/` in pingdotgg/t3code, re
 | Which Dyna areas exist | the `dyna` server description, shown by Pi's `mcp_servers` line | the startup prompt, the snapshot |
 | How to call a tool | its description in the registry, carried by the update that brings it, or by the head after compaction | the `tool_search` result, the startup prompt; the CLI reuses the same text |
 | Identity and the sender-trust rule | the startup prompt from `box.hello` (7.5) | the snapshot |
-| Rules, goal, children, requests, PRs, profiles, usage | the snapshot sections | the startup prompt, deliveries |
+| Standing instructions | the global, room and repository `AGENTS.md` files, through Pi's context files | the snapshot, the startup prompt, deliveries |
+| Goal, children, requests, PRs, profiles, usage | the snapshot sections | the startup prompt, deliveries |
 | Skills | Pi's skills section, in the head or an update | the startup prompt, the snapshot |
 | Which actions exist, who may call them, help text | the registry in `contract/tools/` | the CLI and MCP code, which derive from it |
 | Authority | the engine method | the box agent, the MCP adapter and the CLI, which do not check |
@@ -1233,11 +1243,10 @@ A unit test fails when an action that a session may call has no CLI command, or 
 
 Owner decision, 2026-10-31: the snapshot uses v1's model on every provider. The system prompt changes only at the first run and at each compaction, where the cached prefix is rebuilt anyway. Changes between those points go as user-turn updates. Pi's context update carries this (above); there is no model branch.
 
-The engine renders the snapshot from current state when it dispatches a turn, and `TurnStart` carries it as `Sections []ContextSection{Key, Text}`, in order. The box agent passes them to Pi unchanged with `set_prompt_sections`. Each rule is its own keyed section, owner rules first and then the others by ID, so Pi's key diff names a removed rule as a removed key, with no rule parsing and no second diff. The startup prompt's sender-trust rule names the `context_update` message as engine text, as it does for the `[Dyna]` frame (7.5). A steer during a run sends no update, because the steer already carries its news.
+The engine renders the snapshot from current state when it dispatches a turn, and `TurnStart` carries it as `Sections []ContextSection{Key, Text}`, in order. The box agent passes them to Pi unchanged with `set_prompt_sections`. The startup prompt's sender-trust rule names the `context_update` message as engine text, as it does for the `[Dyna]` frame (7.5). A steer during a run sends no update, because the steer already carries its news.
 
 | Section key | Contents | Cap (tokens) |
 |---|---|---|
-| `rule_<id>`, one per rule | the rule's full text and who set it; never cut | none |
 | `dyna_goal` | own goal, its done condition and open items | 200 |
 | `dyna_children` | open children, stalest first: profile, state, current item, PR state; at most 8 rows | 250 |
 | `dyna_requests` | operations and questions waiting on this session, and its own that wait on others | 150 |
@@ -1247,12 +1256,10 @@ The engine renders the snapshot from current state when it dispatches a turn, an
 
 Caps count characters, at 4 per token, so the renderer needs no tokenizer and tests are exact.
 
-- **Budget.** The sections other than rules hold about 1,600 characters typically and 4,520 characters at most. A section over its cap ends with "N more: context show". An update holds only changed sections, so it is usually far smaller.
+- **Budget.** The sections hold about 1,600 characters typically and 4,520 characters at most. A section over its cap ends with "N more: context show". An update holds only changed sections, so it is usually far smaller.
 - **Account names.** `dyna_usage` names each account by provider and number ("Claude 1"), never by its label or sign-in name, because those can carry the owner's identity.
-- **Rules are never cut.** Every active rule reaches every session in full at its next run, because rules bind every session and a session may never call `context show`. Rule text is already capped at 2,000 characters per rule (3.7), so the owner and root bound the total by the rules they keep. When the rule sections pass 8,000 characters, `rule.list` and the web app's rules view show their size, so the owner can consolidate rules; nothing is dropped.
 - **Pace.** It compares the share used with the share of the window that has passed. "Ahead" means more than 10 points above, "under" means more than 10 points below, and anything else is "on". Agents use it to choose a cheaper profile.
 - **No churn.** Sections hold no timestamps or durations, so a run where nothing changed sends no update.
-- **Removed rules.** A removed rule leaves at the next run, as a removed key in the update, and it leaves the system prompt at the next fold (section 7, Rules).
 
 #### Skills and room MCP servers
 
@@ -1266,7 +1273,7 @@ T3 sees work as threads that an agent spawns, waits for and reads inside one app
 - **Authentication.** T3 shares one host loopback endpoint among all agents, so each provider session gets a bearer token with a lifetime, an idle expiry and capabilities. Each Dyna box has its own socket, and the MCP endpoint exists only inside the box, so there is no token (3.7, 7.1).
 - **Waiting.** T3's `delegate_task` in wait mode, `task_status` and `t3_thread_wait` block a tool call on a child. In Dyna, a child's final response is a delivery that wakes the parent (7.5), and `dyna_children` shows its state. A blocking wait would hold a turn, a box and a model context open, and break on a restart.
 - **Authority.** T3 forbids a child or target to run with broader runtime or interaction modes than its caller. Dyna has no such modes: boxes isolate work, the tree decides control (7.2, 7.4), and grants carry extra powers.
-- **Child context.** A T3 child gets only its task and a role. A Dyna child gets its brief and goal, plus the snapshot, because room rules bind every session in the room.
+- **Child context.** A T3 child gets only its task and a role. A Dyna child gets its brief and goal, plus the snapshot and the room's `AGENTS.md`, because standing instructions bind every session in the room.
 - **Reach.** T3 lets a thread send to, steer or interrupt any thread in its environment. In Dyna, anyone in the room reaches a session through a mention, and only ancestors stop, close or move it.
 - **Not taken:** batch thread creation (fan-out uses child sessions or a workflow, 9.2), reading another thread's timeline (agents read the feed; transcripts stay owner-only), outside OAuth clients and linked peer environments (external members are dropped, 7.3), and `request_secret` (no secret enters a box, goal 3).
 
@@ -1283,7 +1290,7 @@ These are source checks, not live captures. The evaluation confirms them.
 
 dyna:lead-rewrite schedules the build after the M2 trial parts (section 11).
 
-1. **Phase 1.** The registry and the 10 phase-1 toolkits, the `dyna` MCP server in the box agent, `context.snapshot` with every section whose data exists, the `client_id` retry key, the shorter `box.hello` text (7.5), the end of rule-change deliveries (section 7, Rules), the two upstream Pi cherry-picks and Pi's context update. Pi's change is not behind the switch: it replaces Pi's old delivery for every session. Phase 1 ships behind one setting, `agentSurface`, a typed per-profile enum: `off` (the default), `caller` or `declared`. `caller` is the design above; `declared` declares every Dyna tool from the first request. Both turn on the snapshot. `off` keeps today's `box.hello` text, today's quiet rule-change deliveries, and no `dyna` MCP server or snapshot. Once the evaluation picks a shape, the switch and the losing shape go.
+1. **Phase 1.** The registry and the 10 phase-1 toolkits, the `dyna` MCP server in the box agent, `context.snapshot` with every section whose data exists, the `client_id` retry key, the shorter `box.hello` text (7.5), the removal of the rules feature (section 7, Standing instructions), the two upstream Pi cherry-picks and Pi's context update. Pi's change is not behind the switch: it replaces Pi's old delivery for every session. Phase 1 ships behind one setting, `agentSurface`, a typed per-profile enum: `off` (the default), `caller` or `declared`. `caller` is the design above; `declared` declares every Dyna tool from the first request. Both turn on the snapshot. `off` keeps today's `box.hello` text, today's quiet rule-change deliveries, and no `dyna` MCP server or snapshot. Once the evaluation picks a shape, the switch and the losing shape go.
 2. **Evaluation**, run once in a sandbox by a terra agent (10.1), with the setting on. It settles the tool shape. When the gate passes, the default becomes on. The setting and the old `box.hello` text go in the next release, so 7.5 then describes the only behavior.
 3. **Phase 2, in M3.** Each M3 feature ships its toolkit with its methods: `goal`, `issue`, `question`, `workflow`, `subscription`, and `pr` approve and status. The `dyna_goal` section and the skills port land with their features.
 
@@ -1327,7 +1334,7 @@ type GlobalBundle struct {
 	Version       BundleVersion  `json:"version"`
 	Exported      time.Time      `json:"exported"`
 	Source        BundleSource   `json:"source"`
-	Rules         []Rule         `json:"rules"`         // global rules
+	Rules         []Rule         `json:"rules"`         // global rules; the import writes them to the global AGENTS.md
 	Settings      SettingsBundle `json:"settings"`      // cleaned settings.json; subagentMaxDepth becomes --session.max-depth at cutover
 	Profiles      []ProfileBundle `json:"profiles"`
 	Hosts         []HostBundle   `json:"hosts"`         // from machines
@@ -1345,7 +1352,7 @@ type RoomBundle struct {
 	Repos         []RoomRepo       `json:"repos"`
 	Limits        RoomLimits       `json:"limits"`
 	Color         string           `json:"color"`
-	Rules         []Rule           `json:"rules"`
+	Rules         []Rule           `json:"rules"`     // the import writes them to the room AGENTS.md
 	Goals         []GoalBundle     `json:"goals"`     // active, with items; no holder
 	Issues        []IssueBundle    `json:"issues"`    // open and goal-linked; D-numbers kept
 	NextIssue     int              `json:"nextIssue"`
