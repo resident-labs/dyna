@@ -13,7 +13,7 @@ import (
 )
 
 // Supervise restarts the proxy until the engine stops.
-func (p *Proxy) Supervise(ctx context.Context, executable string, st *store.Store) {
+func (p *Proxy) Supervise(ctx context.Context, executable string, st *store.Store, complete func(context.Context, OAuthCompletion) error) {
 	file, err := p.Listener.File()
 	if err != nil {
 		log.Printf("model proxy listener: %v", err)
@@ -56,7 +56,7 @@ func (p *Proxy) Supervise(ctx context.Context, executable string, st *store.Stor
 			return done
 		}
 		_ = child.Close()
-		go serveAuthRPC(parent, st)
+		go serveAuthRPC(parent, st, complete)
 		go func() {
 			done <- cmd.Wait()
 			_ = parent.Close()
