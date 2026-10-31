@@ -28,6 +28,7 @@ type exportReport struct {
 	Inventory             []fieldInventory    `json:"inventory"`
 	SkippedHosts          []string            `json:"skippedHosts"`
 	SkippedProfiles       []string            `json:"skippedProfiles"`
+	DroppedProfiles       []profileGap        `json:"droppedProfiles"`
 	UnknownModels         []profileGap        `json:"unknownModels"`
 	SkippedAccounts       []string            `json:"skippedAccounts"`
 	UnknownScopes         []string            `json:"unknownScopes"`
@@ -87,11 +88,11 @@ func buildBundle(db *sql.DB, backup, data, feeds, config, commit string, cap cap
 	if err != nil {
 		return g, nil, report, err
 	}
-	profiles, disabled, unknownModels, err := readProfiles(config)
+	profiles, disabled, unknownModels, droppedProfiles, err := readProfiles(config)
 	if err != nil {
 		return g, nil, report, err
 	}
-	report.SkippedProfiles, report.UnknownModels = disabled, unknownModels
+	report.SkippedProfiles, report.UnknownModels, report.DroppedProfiles = disabled, unknownModels, droppedProfiles
 	hosts, skippedHosts, err := readHosts(db, roomIDs)
 	if err != nil {
 		return g, nil, report, err
@@ -167,7 +168,7 @@ func buildBundle(db *sql.DB, backup, data, feeds, config, commit string, cap cap
 		if err != nil {
 			return g, nil, report, err
 		}
-		handoff, err := readHandoff(db, rec.ID, rec.Name, feed, cap.Refs, roomAuthor)
+		handoff, err := readHandoff(db, rec.ID, rec.Name, feed, cap.Refs, droppedProfiles, roomAuthor)
 		if err != nil {
 			return g, nil, report, err
 		}
