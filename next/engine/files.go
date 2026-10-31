@@ -60,6 +60,15 @@ func (s *Service) Files(caller contract.Principal, room contract.RoomID) http.Ha
 				http.Error(w, "unavailable", 500)
 				return
 			}
+			if caller.Kind == contract.PrincipalSession {
+				if err = s.store.Write(r.Context(), func(tx *sql.Tx) error {
+					_, err := tx.Exec("INSERT OR IGNORE INTO uploads(sha256,room) VALUES(?,?)", sum, room)
+					return err
+				}); err != nil {
+					http.Error(w, "unavailable", 500)
+					return
+				}
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(contract.Attachment{Name: name, Media: media, Bytes: n, SHA256: sum})
 			return
