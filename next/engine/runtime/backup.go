@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -28,6 +27,18 @@ type backupStore interface {
 }
 
 type backupRunner func(context.Context, string, string, int64, *os.File) error
+
+type backupReader struct {
+	ctx context.Context
+	io.Reader
+}
+
+func (r backupReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.Reader.Read(p)
+}
 
 func sshBackup(ctx context.Context, dest, name string, size int64, input *os.File) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -78,11 +89,16 @@ func (b *backupLoop) copy(ctx context.Context, path string, now time.Time) error
 	if err = tarWriter.WriteHeader(&tar.Header{Name: "store.db", Mode: 0600, Size: info.Size()}); err != nil {
 		return err
 	}
-	if _, err = io.CopyN(tarWriter, src, info.Size()); err != nil {
+	if _, err = io.CopyN(tarWriter, backupReader{ctx, src}, info.Size()); err != nil {
 		return err
 	}
 	dataDir := filepath.Dir(b.dir)
-	for _, name := range []string{"files", "transcripts", "cliproxy/auth"} {
+	rootDir, err := os.OpenRoot(dataDir)
+	if err != nil {
+		return err
+	}
+	defer rootDir.Close()
+	for _, name := range []string{"files", "transcripts", "archive", "connect", "cliproxy/auth"} {
 		root := filepath.Join(dataDir, name)
 		err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 			if errors.Is(walkErr, os.ErrNotExist) {
@@ -94,7 +110,11 @@ func (b *backupLoop) copy(ctx context.Context, path string, now time.Time) error
 			if entry.IsDir() || !entry.Type().IsRegular() {
 				return nil
 			}
-			f, err := os.Open(path)
+			rel, err := filepath.Rel(dataDir, path)
+			if err != nil {
+				return err
+			}
+			f, err := rootDir.Open(rel)
 			if errors.Is(err, os.ErrNotExist) {
 				return nil
 			}
@@ -106,9 +126,8 @@ func (b *backupLoop) copy(ctx context.Context, path string, now time.Time) error
 			if err != nil {
 				return err
 			}
-			rel, err := filepath.Rel(dataDir, path)
-			if err != nil {
-				return err
+			if !info.Mode().IsRegular() {
+				return nil
 			}
 			header, err := tar.FileInfoHeader(info, "")
 			if err != nil {
@@ -118,7 +137,7 @@ func (b *backupLoop) copy(ctx context.Context, path string, now time.Time) error
 			if err = tarWriter.WriteHeader(header); err != nil {
 				return err
 			}
-			_, err = io.Copy(tarWriter, io.LimitReader(f, info.Size()))
+			_, err = io.Copy(tarWriter, io.LimitReader(backupReader{ctx, f}, info.Size()))
 			return err
 		})
 		if err != nil {
@@ -165,28 +184,31 @@ func (b *backupLoop) backup(ctx context.Context) {
 	}
 }
 
-func (b *backupLoop) start(ctx context.Context, ticks <-chan time.Time) {
+func (b *backupLoop) start(ctx context.Context) {
 	names, err := filepath.Glob(filepath.Join(b.dir, "store-*.db"))
 	if err != nil {
 		log.Printf("list backups: %v", err)
 	}
-	sort.Strings(names)
-	due := true
+	wait := time.Duration(0)
 	if len(names) > 0 {
 		stamp := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(names[len(names)-1]), "store-"), ".db")
-		if at, err := time.Parse(backupStamp, stamp); err == nil && b.now().Sub(at) < 24*time.Hour {
-			due = false
+		if at, err := time.Parse(backupStamp, stamp); err == nil {
+			wait = max(0, at.Add(24*time.Hour).Sub(b.now()))
 		}
 	}
-	if due {
+	if wait == 0 {
 		b.backup(ctx)
+		wait = 24 * time.Hour
 	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticks:
+		case <-timer.C:
 			b.backup(ctx)
+			timer.Reset(24 * time.Hour)
 		}
 	}
 }
