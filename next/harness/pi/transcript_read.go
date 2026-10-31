@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/harness"
 )
 
 // ReadSteps reads complete Pi JSONL records. An oversized record is skipped rather than
@@ -88,7 +89,7 @@ func ReadSteps(r io.Reader, deliveries map[contract.DeliverySeq]contract.TurnID,
 					truncated = true
 					continue
 				}
-				label := activityLabel(event{ToolName: b.Name, Args: b.Arguments})
+				label := harness.Mask(activityLabel(event{ToolName: b.Name, Args: b.Arguments}))
 				if runes := []rune(label); len(runes) > 80 {
 					label = string(runes[:79]) + "…"
 				}
