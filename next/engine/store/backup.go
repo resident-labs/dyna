@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -20,7 +21,11 @@ func (s *Store) Backup(ctx context.Context, now time.Time) (string, error) {
 	if err := s.read.QueryRowContext(ctx, "SELECT file FROM pragma_database_list WHERE name='main'").Scan(&dbPath); err != nil {
 		return "", err
 	}
-	dir := filepath.Join(filepath.Dir(dbPath), "backups")
+	return backup(ctx, s.read, filepath.Dir(dbPath), "store-", "store-*.db", now)
+}
+
+func backup(ctx context.Context, db *sql.DB, dataDir, prefix, pattern string, now time.Time) (string, error) {
+	dir := filepath.Join(dataDir, "backups")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", err
 	}
@@ -33,7 +38,7 @@ func (s *Store) Backup(ctx context.Context, now time.Time) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	name := filepath.Join(dir, "store-"+now.UTC().Format(backupStamp)+".db")
+	name := filepath.Join(dir, prefix+now.UTC().Format(backupStamp)+".db")
 	partial := name + ".partial"
 	f, err := os.OpenFile(partial, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
@@ -44,8 +49,20 @@ func (s *Store) Backup(ctx context.Context, now time.Time) (string, error) {
 		return "", err
 	}
 	defer os.Remove(partial)
-	if _, err := s.read.ExecContext(ctx, "VACUUM INTO ?", partial); err != nil {
+	if _, err := db.ExecContext(ctx, "VACUUM INTO ?", partial); err != nil {
 		return "", err
+	}
+	f, err = os.OpenFile(partial, os.O_RDWR, 0)
+	if err != nil {
+		return "", err
+	}
+	err = f.Sync()
+	closeErr := f.Close()
+	if err != nil {
+		return "", err
+	}
+	if closeErr != nil {
+		return "", closeErr
 	}
 	if err := os.Rename(partial, name); err != nil {
 		return "", err
@@ -58,11 +75,13 @@ func (s *Store) Backup(ctx context.Context, now time.Time) (string, error) {
 	if err := folder.Sync(); err != nil {
 		return "", err
 	}
-	names, err := filepath.Glob(filepath.Join(dir, "store-*.db"))
+	names, err := filepath.Glob(filepath.Join(dir, pattern))
 	if err != nil {
 		return "", err
 	}
-	sort.Strings(names)
+	sort.Slice(names, func(i, j int) bool {
+		return names[i][strings.LastIndex(names[i], "-")+1:] < names[j][strings.LastIndex(names[j], "-")+1:]
+	})
 	if len(names) > 3 {
 		for _, old := range names[:len(names)-3] {
 			if err := os.Remove(old); err != nil && !errors.Is(err, os.ErrNotExist) {
