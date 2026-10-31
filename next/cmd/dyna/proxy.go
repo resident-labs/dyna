@@ -10,6 +10,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	sdkapi "github.com/router-for-me/CLIProxyAPI/v8/sdk/api"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
 	sdkauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
@@ -69,7 +72,10 @@ func proxyCommand() *cobra.Command {
 			}
 		}()
 		gated := &readyListener{Listener: listener, ready: ready, done: ctx.Done()}
-		service, err := cliproxy.NewBuilder().WithConfig(cfg).WithConfigPath(path).WithListener(gated).Build()
+		var service *cliproxy.Service
+		service, err = cliproxy.NewBuilder().WithConfig(cfg).WithConfigPath(path).WithListener(gated).WithServerOptions(sdkapi.WithRouterConfigurator(func(router *gin.Engine, _ *handlers.BaseAPIHandler, _ *config.Config) {
+			proxyKeyRoutes(router, &service, cfg.RemoteManagement.SecretKey)
+		})).Build()
 		if err != nil {
 			return err
 		}

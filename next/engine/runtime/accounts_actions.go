@@ -18,7 +18,7 @@ var errAccountAction = errors.New("account action unavailable")
 
 type accountActionResult struct {
 	connect contract.AccountsConnectResponse
-	status  contract.AccountsConnectStatusResponse
+	key     contract.AccountsSetKeyResponse
 	err     error
 }
 
@@ -135,6 +135,18 @@ func (s *serviceWithHosts) AccountsConnect(ctx context.Context, caller contract.
 		return accountActionResult{connect: out, err: err}
 	})
 	return result.connect, problem
+}
+
+func (s *serviceWithHosts) AccountsSetKey(ctx context.Context, caller contract.Principal, req contract.AccountsSetKeyRequest) (contract.AccountsSetKeyResponse, *contract.Error) {
+	req.Label = strings.TrimSpace(req.Label)
+	if req.Label == "" || len(req.Label) > 128 || strings.ContainsAny(req.Label, "\r\n") || strings.TrimSpace(req.Key) == "" || len(req.Key) > 4096 {
+		return contract.AccountsSetKeyResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "invalid account input"}
+	}
+	result, problem := s.runAccountAction(ctx, caller, contract.AccountActionSetKey, func(ctx context.Context) accountActionResult {
+		out, err := s.accounts.connections.SetKey(ctx, req)
+		return accountActionResult{key: out, err: err}
+	})
+	return result.key, problem
 }
 
 func (s *serviceWithHosts) AccountsConnectCallback(ctx context.Context, caller contract.Principal, req contract.AccountsConnectCallbackRequest) (contract.AccountsConnectCallbackResponse, *contract.Error) {
