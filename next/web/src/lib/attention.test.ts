@@ -1,11 +1,29 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Attention } from "./attention.svelte.ts";
+import { boxReason } from "./feed.ts";
 import type { Event, EventBody } from "./contract.gen.ts";
 
 const event = (seq: number, room: string, body: EventBody): Event => ({ seq, id: String(seq), at: "", room, from: { kind: "owner" }, ...body });
 const card = { title: "Push", target: { kind: "room", name: "a" } } as const;
 const decision = { by: { kind: "owner" }, approved: true, at: "" } as const;
+
+test("a session whose box failed with its turn open is broken, not working, until the box is ready again", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ seq: 1, rooms: [{ id: "a", name: "A", created: "", waiting: [], working: ["s1", "s2"] }] }));
+  try {
+    const attention = new Attention(() => () => {});
+    await attention.open();
+    const box = (seq: number, to: "failed" | "ready") => attention.apply(event(seq, "a", { type: "box.changed", body: { box: "b", session: "s1", to } }));
+    box(2, "failed");
+    assert.deepEqual([attention.busy("a"), [...attention.broken.get("a")!]], [["s2"], [["s1", { box: "failed", cause: undefined, at: "" }]]]);
+    box(3, "ready");
+    assert.deepEqual([attention.busy("a"), attention.broken.get("a")!.size], [["s1", "s2"], 0]);
+    attention.seed([{ id: "s2", boxState: "lost" }], { id: "a", seq: 3 });
+    assert.deepEqual(attention.busy("a"), ["s1"]);
+    assert.equal(boxReason({ box: "failed", cause: "host_lost" }), "the host stopped answering during the run");
+  } finally { globalThis.fetch = original; }
+});
 
 test("room.list seeds each room's waiting requests and working sessions, and the owner stream updates them", async () => {
   const original = globalThis.fetch;
@@ -33,7 +51,7 @@ test("room.list seeds each room's waiting requests and working sessions, and the
     label("s3", "t", "not working");
     assert.deepEqual([...attention.activity], [["s1", "read spec.md"], ["s2", "edited App.svelte"]]);
     // session.list seeds a working session's turn and label once; a live label and turn stay.
-    const summary = (id: string, turn: string, activity: string) => ({ id, turn, activity });
+    const summary = (id: string, turn: string, activity: string) => ({ id, turn, activity, boxState: "ready" as const });
     attention.seed([summary("s1", "t1", "older"), summary("s2", "t", "older"), summary("s3", "t", "not working")]);
     assert.deepEqual([...attention.activity], [["s1", "read spec.md"], ["s2", "edited App.svelte"]]);
     label("s1", "t0", "stale turn");
