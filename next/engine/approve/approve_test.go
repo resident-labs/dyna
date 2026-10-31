@@ -324,3 +324,15 @@ func TestInterruptedExecutionIsNotRetried(t *testing.T) {
 		t.Fatalf("record %+v err %v", record, err)
 	}
 }
+
+type scopedArgs struct{ fakeArgs }
+
+func (scopedArgs) OperationRoom() contract.RoomID { return "other" }
+
+func TestSubmitRejectsMismatchedArgumentRoom(t *testing.T) {
+	f := setup(t)
+	_, err := f.s.Submit(context.Background(), principal("worker"), contract.Operation{Room: "room", Args: scopedArgs{}})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("mismatched room: %v", err)
+	}
+}
