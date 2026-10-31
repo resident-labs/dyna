@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -89,9 +90,15 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 				if item.data.UsedPercent == nil {
 					continue
 				}
-				window := contract.UsageWindow{Name: item.name, UsedPercent: *item.data.UsedPercent}
+				window := contract.UsageWindow{Name: item.name, Kind: contract.UsageWindowOther, UsedPercent: *item.data.UsedPercent}
 				if item.data.WindowMinutes != nil {
 					window.Seconds = int64(*item.data.WindowMinutes) * 60
+					switch window.Seconds {
+					case 18000:
+						window.Kind = contract.UsageWindowFiveHour
+					case 604800:
+						window.Kind = contract.UsageWindowWeekly
+					}
 				}
 				if item.data.ResetAt != nil {
 					window.ResetsAt = time.Unix(*item.data.ResetAt, 0).UTC()
@@ -102,6 +109,15 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 			}
 		}
 		if file.Provider != "claude" {
+			slices.SortStableFunc(usage.Windows, func(a, b contract.UsageWindow) int {
+				if a.Kind == contract.UsageWindowFiveHour && b.Kind != contract.UsageWindowFiveHour {
+					return -1
+				}
+				if b.Kind == contract.UsageWindowFiveHour && a.Kind != contract.UsageWindowFiveHour {
+					return 1
+				}
+				return 0
+			})
 			result.Accounts = append(result.Accounts, usage)
 			continue
 		}
@@ -142,6 +158,7 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 			usage.Cause = contract.UsageUnreachable
 		default:
 			usage.ObservedAt = reply.Files[0].ObservedAt
+			var session *contract.UsageWindow
 			var weekly *contract.UsageWindow
 			var oauthWeekly *contract.UsageWindow
 			for _, w := range reply.Files[0].Windows {
@@ -149,17 +166,17 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 				window := contract.UsageWindow{UsedPercent: w.Utilization, ResetsAt: reset}
 				switch w.Kind {
 				case "session":
-					window.Name, window.Seconds = "five_hour", 18000
-					usage.Windows = append(usage.Windows, window)
+					window.Name, window.Kind, window.Seconds = "five_hour", contract.UsageWindowFiveHour, 18000
+					session = &window
 				case "weekly_all":
-					window.Name, window.Seconds = "seven_day", 604800
+					window.Name, window.Kind, window.Seconds = "seven_day", contract.UsageWindowWeekly, 604800
 					weekly = &window
 				case "weekly_scoped":
 					if strings.EqualFold(w.Scope, "Oauth Apps") {
-						window.Name, window.Seconds = "seven_day", 604800
+						window.Name, window.Kind, window.Seconds = "seven_day", contract.UsageWindowWeekly, 604800
 						oauthWeekly = &window
 					} else if w.Scope != "" {
-						window.Name, window.Seconds = w.Scope+" Weekly", 604800
+						window.Name, window.Kind, window.Model, window.Seconds = w.Scope+" Weekly", contract.UsageWindowWeekly, w.Scope, 604800
 						usage.Windows = append(usage.Windows, window)
 					}
 				}
@@ -169,6 +186,9 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 			}
 			if weekly != nil {
 				usage.Windows = append([]contract.UsageWindow{*weekly}, usage.Windows...)
+			}
+			if session != nil {
+				usage.Windows = append([]contract.UsageWindow{*session}, usage.Windows...)
 			}
 		}
 		q.mu.Lock()
