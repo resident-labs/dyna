@@ -18,10 +18,31 @@ func (s *Store) TranscriptOffset(ctx context.Context, session contract.SessionID
 	return offset, err
 }
 
+// TranscriptTurnStart identifies a turn's first byte in a transcript file.
+type TranscriptTurnStart struct {
+	Turn  contract.TurnID
+	Start int64
+}
+
+// CommitTranscriptOffset commits an acknowledged offset and discovered turn starts together.
+func (s *Store) CommitTranscriptOffset(ctx context.Context, session contract.SessionID, path string, offset int64, starts []TranscriptTurnStart) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO transcript_offsets(session,path,acked) VALUES(?,?,?) ON CONFLICT(session,path) DO UPDATE SET acked=max(transcript_offsets.acked,excluded.acked)", session, path, offset); err != nil {
+			return err
+		}
+		for _, start := range starts {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO transcript_turns(session,turn,path,start) VALUES(?,?,?,?) ON CONFLICT(session,turn,path) DO UPDATE SET start=min(transcript_turns.start,excluded.start)", session, start.Turn, path, start.Start); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // SetTranscriptOffset records the acknowledged offset of a transcript file.
 func (s *Store) SetTranscriptOffset(ctx context.Context, session contract.SessionID, path string, offset int64) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "INSERT INTO transcript_offsets(session,path,acked) VALUES(?,?,?) ON CONFLICT(session,path) DO UPDATE SET acked=excluded.acked", session, path, offset)
+		_, err := tx.ExecContext(ctx, "INSERT INTO transcript_offsets(session,path,acked) VALUES(?,?,?) ON CONFLICT(session,path) DO UPDATE SET acked=max(transcript_offsets.acked,excluded.acked)", session, path, offset)
 		return err
 	})
 }
