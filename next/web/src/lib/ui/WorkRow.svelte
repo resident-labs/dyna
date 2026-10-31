@@ -107,6 +107,7 @@
   li span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   p { margin: 0; padding: 2px 0; }
   .retry, .detail { all: unset; cursor: pointer; color: var(--focus); }
+  @media (hover: none) { .retry { display: inline-flex; align-items: center; min-height: 40px; } }
   .detail { display: inline-flex; align-items: center; gap: 6px; color: inherit; overflow-wrap: anywhere; }
   li > .detail { flex: 1; min-width: 0; }
   .detail:focus-visible { outline: 2px solid var(--focus); }
