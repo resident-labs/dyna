@@ -2,9 +2,181 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
 	"github.com/resident-labs/dyna/contract"
 )
+
+// TranscriptTurnRange is a turn's range in one file. End is nil for the last turn in that file.
+type TranscriptTurnRange struct {
+	Turn  contract.TurnID
+	Path  string
+	Start int64
+	End   *int64
+}
+
+// TranscriptPathIndexed reports whether a path has any indexed turn starts.
+func (s *Store) TranscriptPathIndexed(ctx context.Context, session contract.SessionID, path string) (bool, error) {
+	var indexed bool
+	err := s.Read().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM transcript_turns WHERE session=? AND path=?)`, session, path).Scan(&indexed)
+	return indexed, err
+}
+
+// TranscriptTurnRanges returns each file range for a turn, with the next start as its exclusive end.
+func (s *Store) TranscriptTurnRanges(ctx context.Context, session contract.SessionID, turn contract.TurnID) ([]TranscriptTurnRange, error) {
+	rows, err := s.Read().QueryContext(ctx, `SELECT t.turn,t.path,t.start,(SELECT min(n.start) FROM transcript_turns n WHERE n.session=t.session AND n.path=t.path AND n.start>t.start) FROM transcript_turns t WHERE t.session=? AND t.turn=? ORDER BY t.path,t.start`, session, turn)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ranges []TranscriptTurnRange
+	for rows.Next() {
+		var r TranscriptTurnRange
+		if err := rows.Scan(&r.Turn, &r.Path, &r.Start, &r.End); err != nil {
+			return nil, err
+		}
+		ranges = append(ranges, r)
+	}
+	return ranges, rows.Err()
+}
+
+// TranscriptTurnsIntersecting returns turns intersecting the half-open append range [start,end).
+func (s *Store) TranscriptTurnsIntersecting(ctx context.Context, session contract.SessionID, path string, start, end int64) ([]contract.TurnID, error) {
+	if start >= end {
+		return nil, nil
+	}
+	rows, err := s.Read().QueryContext(ctx, `SELECT turn FROM transcript_turns WHERE session=? AND path=? AND start<? AND (start>=? OR start=(SELECT max(start) FROM transcript_turns WHERE session=? AND path=? AND start<=?)) ORDER BY start`, session, path, end, start, session, path, start)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var turns []contract.TurnID
+	for rows.Next() {
+		var turn contract.TurnID
+		if err := rows.Scan(&turn); err != nil {
+			return nil, err
+		}
+		turns = append(turns, turn)
+	}
+	return turns, rows.Err()
+}
+
+// TranscriptTurnMetadata returns a bounded newest-first page without loading sent posts.
+func (s *Store) TranscriptTurnMetadata(ctx context.Context, session contract.SessionID, before, exactTurn contract.TurnID, limit int) ([]contract.SessionWorkTurn, error) {
+	if before != "" {
+		var cursor int64
+		err := s.Read().QueryRowContext(ctx, `SELECT started_seq FROM turns WHERE id=? AND session=? AND started_seq IS NOT NULL`, before, session).Scan(&cursor)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrInvalidWorkCursor
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	rows, err := s.Read().QueryContext(ctx, `SELECT started_seq FROM turns WHERE session=? AND started_seq IS NOT NULL AND (?='' OR started_seq < (SELECT started_seq FROM turns WHERE id=? AND session=?)) AND (?='' OR id=?) ORDER BY started_seq DESC LIMIT ?`, session, before, before, session, exactTurn, exactTurn, limit)
+	if err != nil {
+		return nil, err
+	}
+	var seqs []int64
+	for rows.Next() {
+		var seq int64
+		if err := rows.Scan(&seq); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		seqs = append(seqs, seq)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]contract.SessionWorkTurn, 0, len(seqs))
+	for _, seq := range seqs {
+		started, err := s.Event(ctx, seq)
+		if err != nil {
+			return nil, err
+		}
+		body := started.Body.(contract.TurnStarted)
+		row := contract.SessionWorkTurn{Started: started, Inputs: []contract.Event{}, Posts: []contract.Event{}}
+		for _, id := range body.Inputs {
+			input, err := s.EventInRoom(ctx, started.Room, id)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			row.Inputs = append(row.Inputs, input)
+		}
+		var endSeq sql.NullInt64
+		err = s.Read().QueryRowContext(ctx, `SELECT min(seq) FROM events WHERE room=? AND type='turn.ended' AND from_kind='session' AND from_id=? AND json_extract(CAST(body AS TEXT),'$.turn')=? AND seq>?`, started.Room, session, body.Turn, seq).Scan(&endSeq)
+		if err != nil {
+			return nil, err
+		}
+		if endSeq.Valid {
+			end, err := s.Event(ctx, endSeq.Int64)
+			if err != nil {
+				return nil, err
+			}
+			row.Ended = &end
+		}
+		result = append(result, row)
+	}
+	return result, nil
+}
+
+const transcriptPostsQuery = `SELECT e.seq FROM events e JOIN turns t ON t.session=? AND t.id=?
+WHERE e.type='post.created' AND e.from_kind='session' AND e.from_id=t.session
+AND e.seq>t.started_seq
+AND NOT EXISTS (SELECT 1 FROM turns n WHERE n.session=t.session AND n.started_seq>t.started_seq AND n.started_seq<=e.seq)
+AND NOT EXISTS (SELECT 1 FROM events ended WHERE ended.room=(SELECT room FROM sessions WHERE id=t.session) AND ended.type='turn.ended' AND ended.from_kind='session' AND ended.from_id=t.session AND json_extract(CAST(ended.body AS TEXT),'$.turn')=t.id AND ended.seq>t.started_seq AND ended.seq<=e.seq)`
+
+// TranscriptTurnPost finds a session post made during a turn, including posts in other rooms.
+func (s *Store) TranscriptTurnPost(ctx context.Context, session contract.SessionID, turn contract.TurnID, id contract.EventID) (contract.Event, bool, error) {
+	var seq int64
+	err := s.Read().QueryRowContext(ctx, transcriptPostsQuery+` AND e.id=?`, session, turn, id).Scan(&seq)
+	if errors.Is(err, sql.ErrNoRows) {
+		return contract.Event{}, false, nil
+	}
+	if err != nil {
+		return contract.Event{}, false, err
+	}
+	event, err := s.Event(ctx, seq)
+	return event, err == nil, err
+}
+
+// TranscriptSentPosts returns a bounded page ordered by event time and sequence.
+func (s *Store) TranscriptSentPosts(ctx context.Context, session contract.SessionID, turn contract.TurnID, limit, offset int) ([]contract.Event, error) {
+	rows, err := s.Read().QueryContext(ctx, transcriptPostsQuery+` ORDER BY e.at,e.seq LIMIT ? OFFSET ?`, session, turn, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	var seqs []int64
+	for rows.Next() {
+		var seq int64
+		if err := rows.Scan(&seq); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		seqs = append(seqs, seq)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	posts := make([]contract.Event, 0, len(seqs))
+	for _, seq := range seqs {
+		post, err := s.Event(ctx, seq)
+		if err != nil {
+			return nil, err
+		}
+		posts = append(posts, post)
+	}
+	return posts, nil
+}
 
 type TranscriptFile struct {
 	Path  string
@@ -44,4 +216,11 @@ func (s *Store) TranscriptDeliveries(ctx context.Context, session contract.Sessi
 		result[seq] = turn
 	}
 	return result, rows.Err()
+}
+
+// TranscriptSessionExists includes closed sessions in transcript history.
+func (s *Store) TranscriptSessionExists(ctx context.Context, session contract.SessionID) (bool, error) {
+	var exists bool
+	err := s.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?)", session).Scan(&exists)
+	return exists, err
 }
