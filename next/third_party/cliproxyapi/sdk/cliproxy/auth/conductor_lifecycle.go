@@ -363,11 +363,6 @@ func (m *Manager) updateInternalLocked(ctx context.Context, base, auth *Auth, mo
 		m.authEpochs[auth.ID] = existing.RegistrationEpoch
 	}
 	if (mode == updateModeRefresh || mode == updateModePrepare) && base != nil && existing.RegistrationEpoch != base.RegistrationEpoch {
-		if mode == updateModeRefresh {
-			current := existing.Clone()
-			m.mu.Unlock()
-			return current, false, false, nil
-		}
 		m.mu.Unlock()
 		return nil, false, false, fmt.Errorf("update auth %s: stale registration epoch %d != %d", auth.ID, base.RegistrationEpoch, existing.RegistrationEpoch)
 	}
