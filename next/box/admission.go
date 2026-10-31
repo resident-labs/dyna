@@ -86,7 +86,7 @@ func Admit(hosts []Host, boxes []Box, request Box, diskFloor int64) Placement {
 			if b.PlacedAt.After(h.CheckedAt) {
 				disk -= diskRequest(b.Size.Name)
 			}
-			if b.State != contract.BoxStopped && b.State != contract.BoxPending {
+			if b.BudgetParent == "" && b.State != contract.BoxStopped && b.State != contract.BoxPending {
 				cpu += b.Size.CPUs
 				mem += b.Size.MemBytes
 			}
@@ -99,11 +99,11 @@ func Admit(hosts []Host, boxes []Box, request Box, diskFloor int64) Placement {
 			reason = PendingSliceCollision
 			continue
 		}
-		if cpu+request.Size.CPUs > h.CPUs {
+		if request.BudgetParent == "" && cpu+request.Size.CPUs > h.CPUs {
 			reason = PendingCPU
 			continue
 		}
-		if mem+request.Size.MemBytes > h.MemBytes {
+		if request.BudgetParent == "" && mem+request.Size.MemBytes > h.MemBytes {
 			reason = PendingMemory
 			continue
 		}
