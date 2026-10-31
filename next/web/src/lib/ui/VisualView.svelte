@@ -1,13 +1,19 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import { cardMessage, checkLabel, worstCheck, type VisualVersion } from "../visual.ts";
+  import { cardMessage, checkLabel, visualReplyFailure, worstCheck, type VisualVersion } from "../visual.ts";
+  import { call } from "../client.ts";
+  import { decodeEvent } from "../event.ts";
+  import type { VisualSuperseded } from "../contract.gen.ts";
 
-  let { versions, selected, onclose }: {
-    versions: VisualVersion[]; selected: number; onclose: () => void;
+  let { versions, selected, room, names, send, onclose }: {
+    versions: VisualVersion[]; selected: number; room: string; names: Map<string, string>;
+    send: (text: string, session: string, event: string) => Promise<void>; onclose: () => void;
   } = $props();
   let version = $state(untrack(() => selected));
-  let current = $derived(versions.find(item => item.visual.version === version) ?? versions[0]);
-  let latest = $derived(versions[0]);
+  let extra = $state<VisualVersion[]>([]);
+  let allVersions = $derived([...extra, ...versions]);
+  let current = $derived(allVersions.find(item => item.visual.version === version) ?? allVersions[0]);
+  let latest = $derived(allVersions[0]);
   let older = $derived(current.visual.version < latest.visual.version);
   let checks = $derived(current.visual.checks ?? []);
   let passed = $derived(checks.filter(check => check.status === "pass").length);
@@ -18,20 +24,26 @@
   let frame = $state<HTMLIFrameElement>();
   let panel: HTMLElement;
   onMount(() => panel.focus());
+  let pending = $state<string | null>(null);
   let loading = $state(true);
   let failed = $state(false);
   let navigated = $state(false);
+  let sendFailed = $state(false);
+  let sending = $state(false);
+  let superseded = $state<VisualSuperseded>();
+  let openFailed = $state(false);
   let attempt = $state(0);
   let loaded = 0;
-  let lastOpen = 0;
+  let lastSubmit = 0, lastOpen = 0;
   let url = $derived(`/v1/files/visual/${encodeURIComponent(current.event.id)}`);
   let scale = $derived(width === "fit" ? 1 : Math.min(1, stageWidth / width));
+  let recipient = $derived(current.event.from.session ? names.get(current.event.from.session) : undefined);
 
   $effect(() => {
     const source = url;
     attempt;
     const controller = new AbortController();
-    loading = true; failed = false; navigated = false; loaded = 0;
+    loading = true; failed = false; navigated = false; loaded = 0; pending = null;
     void fetch(source, { signal: controller.signal }).then(response => {
       if (!response.ok) failed = true;
       void response.body?.cancel();
@@ -39,18 +51,53 @@
     }, () => { if (!controller.signal.aborted) { failed = true; loading = false; } });
     return () => controller.abort();
   });
-  function pick(value: number) { version = value; menu = ""; }
+  function pick(value: number) { version = value; menu = ""; pending = null; superseded = undefined; openFailed = false; }
+  function reply(ok: boolean, error?: string) {
+    frame?.contentWindow?.postMessage({ type: "dyna:submitted", ok, ...error && { error } }, "*");
+  }
   function message(event: MessageEvent<unknown>) {
     if (!frame || event.source !== frame.contentWindow || event.origin !== "null") return;
     const data = cardMessage(event.data);
     if (!data || document.activeElement !== frame || navigator.userActivation?.isActive !== true) return;
     const now = Date.now();
-    if (now - lastOpen >= 2000) { lastOpen = now; window.open(data.url, "_blank", "noopener,noreferrer"); }
+    if (data.type === "open") {
+      if (now - lastOpen >= 2000) { lastOpen = now; window.open(data.url, "_blank", "noopener,noreferrer"); }
+      return;
+    }
+    if (now - lastSubmit < 2000) return;
+    lastSubmit = now;
+    if (older || superseded || !recipient) { reply(false, "unavailable"); return; }
+    if (pending !== null) reply(false, "replaced");
+    sendFailed = false; pending = data.text;
+  }
+  function cancel() { pending = null; sendFailed = false; reply(false, "cancelled"); }
+  async function confirm() {
+    if (pending === null || !recipient || older || superseded || sending) return;
+    sending = true; sendFailed = false;
+    const text = pending;
+    await send(text, recipient, current.event.id).then(() => { pending = null; reply(true); }, error => {
+      const result = visualReplyFailure(error);
+      if (result.kind === "superseded") { superseded = result.visual; reply(false, "superseded"); }
+      else sendFailed = true;
+    });
+    sending = false;
+  }
+  async function openNew() {
+    if (!superseded) return;
+    const target = superseded;
+    openFailed = false;
+    const page = await call("events.list", { room, afterSeq: target.seq - 1, limit: 1 }).catch(() => undefined);
+    const event = page?.events?.[0] && decodeEvent(page.events[0]);
+    if (!event || event.type !== "post.created" || event.id !== target.event) { openFailed = true; return; }
+    const visual = event.body.attachments?.find(file => file.visual?.version === target.version)?.visual;
+    if (!visual || visual.id !== current.visual.id) { openFailed = true; return; }
+    extra = [{ event, visual }, ...extra.filter(item => item.event.id !== event.id)];
+    pick(visual.version);
   }
   function frameLoaded() {
     loaded++;
     // A second load is navigation initiated by the card. Stop it rather than displaying another document.
-    if (loaded > 1) navigated = true;
+    if (loaded > 1) { navigated = true; pending = null; }
   }
 </script>
 
@@ -64,7 +111,7 @@
   </header>
   <div class="toolbar">
     <div class="anchor"><button type="button" aria-expanded={menu === "versions"} onclick={() => menu = menu === "versions" ? "" : "versions"}>v{version} ▾</button>
-      {#if menu === "versions"}<div class="popover versions">{#each versions as item (item.event.id)}<button type="button" onclick={() => pick(item.visual.version)}>v{item.visual.version}</button>{/each}</div>{/if}
+      {#if menu === "versions"}<div class="popover versions">{#each allVersions as item (item.event.id)}<button type="button" onclick={() => pick(item.visual.version)}>v{item.visual.version}</button>{/each}</div>{/if}
     </div>
     <div class="widths" aria-label="Preview width">{#each widths as size}<button type="button" aria-pressed={width === size} onclick={() => width = size}>{size === "fit" ? "Fit" : size}</button>{/each}</div>
     <div class="spacer"></div>
@@ -78,7 +125,8 @@
       </div>{/if}
     </div>
   </div>
-  {#if older}<div class="older">A newer loaded version is available. <button type="button" onclick={() => pick(latest.visual.version)}>Show v{latest.visual.version}</button></div>{/if}
+  {#if superseded}<div class="older" role="alert">This card has a newer version. <button type="button" onclick={openNew}>Open v{superseded.version}</button>{#if openFailed} The version did not open. Try again.{/if}</div>
+  {:else if older}<div class="older">A newer loaded version is available. <button type="button" onclick={() => pick(latest.visual.version)}>Show v{latest.visual.version}</button></div>{/if}
   <div class="stage" bind:clientWidth={stageWidth}>
     {#if failed}<div class="failure">The card did not load. <button type="button" onclick={() => attempt++}>Retry</button></div>
     {:else if navigated}<div class="failure">The card tried to navigate away. Close it to stop the card.</div>
@@ -92,6 +140,11 @@
       {/key}
     {/if}
   </div>
+  {#if pending !== null}<div class="confirm" role="group" aria-label="Confirm what the card sends">
+    <p>{current.visual.title} v{version} asks to send this to {recipient}:</p><pre>{pending}</pre>
+    {#if sendFailed}<p role="alert">The reply did not send. Try again.</p>{/if}
+    <div><button type="button" onclick={confirm} disabled={sending || !!superseded}>Send</button><button type="button" onclick={cancel} disabled={sending}>Cancel</button></div>
+  </div>{/if}
 </section>
 
 <style>
@@ -125,6 +178,10 @@
   iframe { display: block; border: 0; transform-origin: top left; }
   .failure { margin: auto; color: var(--muted); font-size: 13px; }
   .failure button { text-decoration: underline; }
+  .confirm { flex: none; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--raised); }
+  .confirm p { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; }
+  .confirm pre { margin: 0 0 8px; max-height: 120px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px var(--mono); }
+  .confirm button { margin-right: 8px; border: 1px solid var(--firm); color: var(--text); }
   @media (max-width: 640px) {
     header strong { white-space: nowrap; display: block; text-overflow: ellipsis; }
     .back { display: block; white-space: nowrap; }

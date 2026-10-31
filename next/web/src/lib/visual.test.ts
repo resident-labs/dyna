@@ -15,8 +15,9 @@ test("console checks name the result without a contradiction", () => {
   assert.equal(checkLabel({ name: "console", status: "fail" }), "Console errors");
 });
 
-test("read-only card messages allow web links but never a submit", () => {
-  assert.equal(cardMessage({ type: "dyna:submit", text: "exact" }), undefined);
+test("card messages accept bounded text and web links only", () => {
+  assert.deepEqual(cardMessage({ type: "dyna:submit", text: "exact" }), { type: "submit", text: "exact" });
+  assert.equal(cardMessage({ type: "dyna:submit", text: "x".repeat(16385) }), undefined);
   assert.equal(cardMessage({ type: "dyna:open", url: "javascript:alert(1)" }), undefined);
   assert.deepEqual(cardMessage({ type: "dyna:open", url: "https://example.org/" }), { type: "open", url: "https://example.org/" });
 });
