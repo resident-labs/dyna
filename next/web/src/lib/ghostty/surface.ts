@@ -16,15 +16,13 @@ import {
   type GhosttyCellRange,
   type GhosttyCellMetrics,
 } from "./renderer";
-import symbolsFontUrl from "./fonts/SymbolsNerdFontMono-Regular.woff2?url";
 
 export const DEFAULT_TERMINAL_FONT_SIZE = 12;
 const MIN_TERMINAL_FONT_SIZE = 6;
 const MAX_TERMINAL_FONT_SIZE = 32;
-const TERMINAL_GLYPH_FALLBACKS =
-  '"Symbols Nerd Font Mono", "Symbols Nerd Font", "JetBrainsMono Nerd Font", ' +
-  '"JetBrainsMono NF", "FiraCode Nerd Font", "Hack Nerd Font", "MesloLGS NF", ' +
-  '"CaskaydiaCove Nerd Font", "PowerlineSymbols", monospace';
+// Dyna v2: no bundled or named symbol fonts; the caller's family (the app's
+// --mono stack) falls back only to the platform monospace.
+const TERMINAL_GLYPH_FALLBACKS = "monospace";
 // The platform's own monospace faces; concrete names only, because an
 // unknown keyword (like ui-monospace) makes canvas font shorthand parsing
 // reject the whole string.
@@ -44,24 +42,6 @@ const TERMINAL_FONT_LOAD_VARIANTS = [
 export interface GhosttyTerminalFont {
   readonly family?: string;
   readonly size?: number;
-}
-
-let symbolsFontLoad: Promise<void> | null = null;
-
-function ensureTerminalSymbolsFont(): Promise<void> {
-  if (symbolsFontLoad !== null) return symbolsFontLoad;
-  // Dyna: the face covers only the Nerd Font symbol ranges, so the browser
-  // downloads its 1.1 MB the first time a symbol glyph draws, not on every
-  // terminal open. onFontsLoaded repaints when it arrives.
-  symbolsFontLoad = (async () => {
-    try {
-      const face = new FontFace("Symbols Nerd Font Mono", `url(${symbolsFontUrl})`, {
-        unicodeRange: "U+23FB-23FE, U+2665, U+26A1, U+2B58, U+E000-F8FF, U+F0000-FFFFD",
-      });
-      document.fonts.add(face);
-    } catch {}
-  })();
-  return symbolsFontLoad;
 }
 
 function quoteTerminalFontFamilies(list: string): string {
@@ -670,11 +650,6 @@ export class GhosttyTerminalSurface {
     context.fillStyle = `rgb(${options.theme.background.r}, ${options.theme.background.g}, ${options.theme.background.b})`;
     context.fillRect(0, 0, canvas.width, canvas.height);
     const fontSize = terminalFontSize(options.font?.size);
-    try {
-      // Cell metrics must come from the faces that will render; measuring before
-      // the bundled webfonts load would size the grid from a fallback font.
-      await ensureTerminalSymbolsFont();
-    } catch {}
     const fontFamily = await loadTerminalFontFamily(options.font?.family, fontSize);
     const metrics = measureGhosttyCell(context, fontSize, fontFamily);
     const grid = terminalGridSize(mount.clientWidth, mount.clientHeight, metrics, CONTENT_PADDING);
