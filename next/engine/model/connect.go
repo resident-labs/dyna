@@ -32,6 +32,7 @@ type connectAttempt struct {
 	proxyID       string
 	callbackSent  bool
 	saved         bool
+	reason        contract.ConnectFailureReason
 	ready         chan struct{}
 }
 
@@ -228,10 +229,13 @@ func (c *Connections) status(ctx context.Context, req contract.AccountsConnectSt
 		return contract.AccountsConnectStatusResponse{Status: contract.ConnectFailed}, nil
 	}
 	if expected != "" && a.proxyID != "" && a.proxyID != expected {
+		if a.saved {
+			return contract.AccountsConnectStatusResponse{}, errConnect
+		}
 		return contract.AccountsConnectStatusResponse{}, ErrCompletionRejected
 	}
 	if a.status == contract.ConnectConnected || a.status == contract.ConnectFailed {
-		return contract.AccountsConnectStatusResponse{Status: a.status, AccountID: a.account}, nil
+		return contract.AccountsConnectStatusResponse{Status: a.status, AccountID: a.account, Reason: a.reason}, nil
 	}
 	if !a.saved && !c.now().Before(a.expires) {
 		if expected != "" {
@@ -278,7 +282,7 @@ func (c *Connections) status(ctx context.Context, req contract.AccountsConnectSt
 		}
 		if !result.Adopted {
 			if a.saved {
-				a.status = contract.ConnectFailed
+				a.status, a.reason = contract.ConnectFailed, contract.ConnectAdoptionFailed
 				return contract.AccountsConnectStatusResponse{}, errConnect
 			}
 			if expected != "" {
