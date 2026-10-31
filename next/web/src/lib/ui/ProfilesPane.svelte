@@ -61,16 +61,17 @@
   {:else if !loaded}<p class="muted">Loading profiles…</p>
   {:else}
     {#if creating}<div class="table"><ProfileEditor profile={blank} isNew={true} {busy} {error} {save} cancel={close} remove={() => {}} /></div>{/if}
-    <p class="summary">{profiles.length} {profiles.length === 1 ? "profile" : "profiles"} · {profiles.filter(unrated).length} not rated · Type /name in a room to start a session with one.</p>
+    <p class="summary">{profiles.length} {profiles.length === 1 ? "profile" : "profiles"} · {profiles.filter(unrated).length} not rated</p>
     {#if !profiles.length}<p class="muted">No profiles yet.</p>
     {:else}<div class="table">
       <div class="head"><span></span><span>Taste</span><span>Diagnostics</span><span>Intelligence</span><span>Thrift</span><span>Limits</span><span></span></div>
       {#each profiles as profile (profile.name)}
         <div class="row">
           <div class="identity"><strong title={profile.name}>{profile.name}</strong><span>{slugName(profile.model)} · {thinking[profile.thinking]}</span>
-            <span class="mobile-ratings">{#if unrated(profile)}Not rated{:else}Taste {rating(profile.taste)} · Diagnostics {rating(profile.diagnostics)} · Intelligence {rating(profile.intelligence)} · Thrift {rating(profile.cost)}{/if}</span></div>
+            <span class="mobile-ratings">{#if unrated(profile)}Not rated{:else}Taste {rating(profile.taste)} · Diagnostics {rating(profile.diagnostics)} · Intelligence {rating(profile.intelligence)} · Thrift {rating(profile.cost)}{/if}</span>
+            {#if profile.maxConcurrent}<span class="mobile-ratings">At most {profile.maxConcurrent} at once</span>{/if}</div>
           <span class="number">{rating(profile.taste)}</span><span class="number">{rating(profile.diagnostics)}</span><span class="number">{rating(profile.intelligence)}</span><span class="number">{rating(profile.cost)}</span>
-          <span class="limits">{profile.maxCallsPerRun ? `${profile.maxCallsPerRun} calls per run` : "No limits"}</span>
+          <span class="limits">{#if profile.maxConcurrent}At most {profile.maxConcurrent} at once{#if profile.maxCallsPerRun} · {/if}{/if}{#if profile.maxCallsPerRun}{profile.maxCallsPerRun} calls per run{:else if !profile.maxConcurrent}No limits{/if}</span>
           <button type="button" class="edit" onclick={() => { const name = editing === profile.name ? undefined : profile.name; close(); editing = name; }} aria-label={`Edit ${profile.name}`}>{#if phone}<Icon name="forwardChevron" />{:else}Edit{/if}</button>
         </div>
         {#if !phone && editing === profile.name}<ProfileEditor {profile} isNew={false} {busy} {error} {save} cancel={close} remove={() => void remove(profile.name)} />{/if}
