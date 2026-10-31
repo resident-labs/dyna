@@ -25,9 +25,6 @@ import (
 )
 
 type client interface {
-	RuleAdd(context.Context, contract.RuleAddRequest) (contract.RuleAddResponse, error)
-	RuleRemove(context.Context, contract.RuleRemoveRequest) (contract.RuleRemoveResponse, error)
-	RuleList(context.Context, contract.RuleListRequest) (contract.RuleListResponse, error)
 	HostexecRun(context.Context, contract.HostexecRunRequest) (contract.HostexecRunResponse, error)
 	HostexecRevoke(context.Context, contract.HostexecRevokeRequest) (contract.HostexecRevokeResponse, error)
 	File(context.Context, string, io.Writer) error
@@ -64,10 +61,10 @@ func newClient(socket string) *socketClient {
 }
 
 type requestType interface {
-	contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.RuleAddRequest | contract.RuleRemoveRequest | contract.RuleListRequest | contract.HostexecRunRequest | contract.HostexecRevokeRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest
+	contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.HostexecRevokeRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest
 }
 type responseType interface {
-	contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.RuleAddResponse | contract.RuleRemoveResponse | contract.RuleListResponse | contract.HostexecRunResponse | contract.HostexecRevokeResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse
+	contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.HostexecRevokeResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse
 }
 
 func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
@@ -97,15 +94,6 @@ func call[Q requestType, R responseType](ctx context.Context, c *socketClient, m
 	return result, err
 }
 
-func (c *socketClient) RuleAdd(ctx context.Context, q contract.RuleAddRequest) (contract.RuleAddResponse, error) {
-	return call[contract.RuleAddRequest, contract.RuleAddResponse](ctx, c, contract.MethodRuleAdd, q)
-}
-func (c *socketClient) RuleRemove(ctx context.Context, q contract.RuleRemoveRequest) (contract.RuleRemoveResponse, error) {
-	return call[contract.RuleRemoveRequest, contract.RuleRemoveResponse](ctx, c, contract.MethodRuleRemove, q)
-}
-func (c *socketClient) RuleList(ctx context.Context, q contract.RuleListRequest) (contract.RuleListResponse, error) {
-	return call[contract.RuleListRequest, contract.RuleListResponse](ctx, c, contract.MethodRuleList, q)
-}
 func (c *socketClient) HostexecRun(ctx context.Context, q contract.HostexecRunRequest) (contract.HostexecRunResponse, error) {
 	return call[contract.HostexecRunRequest, contract.HostexecRunResponse](ctx, c, contract.MethodHostexecRun, q)
 }
@@ -272,36 +260,6 @@ func defaultSocket() string {
 }
 
 func addCLI(root *cobra.Command, getClient func() client) {
-	var rulesRoom string
-	rules := &cobra.Command{Use: "rules", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		result, err := getClient().RuleList(cmd.Context(), contract.RuleListRequest{Room: contract.RoomID(rulesRoom)})
-		if err != nil {
-			return err
-		}
-		for _, rule := range result.Rules {
-			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "r%d: %s\n", rule.Number, rule.Text); err != nil {
-				return err
-			}
-		}
-		return nil
-	}}
-	rules.PersistentFlags().StringVar(&rulesRoom, "room", "", "Room ID")
-	rules.AddCommand(&cobra.Command{Use: "add TEXT", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		result, err := getClient().RuleAdd(cmd.Context(), contract.RuleAddRequest{Room: contract.RoomID(rulesRoom), Text: args[0]})
-		if err == nil {
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "r%d\n", result.Number)
-		}
-		return err
-	}})
-	rules.AddCommand(&cobra.Command{Use: "rm NUMBER", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		number, err := strconv.Atoi(strings.TrimPrefix(args[0], "r"))
-		if err != nil {
-			return err
-		}
-		_, err = getClient().RuleRemove(cmd.Context(), contract.RuleRemoveRequest{Room: contract.RoomID(rulesRoom), Number: number})
-		return err
-	}})
-	root.AddCommand(rules)
 	hostexec := &cobra.Command{Use: "hostexec"}
 	var runHost, cwd string
 	var timeout time.Duration

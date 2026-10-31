@@ -103,8 +103,9 @@ type Harness struct {
 var _ harness.Harness = (*Harness)(nil)
 
 // Open starts Pi in RPC mode using the caller's image configuration and session file.
-func Open(ctx context.Context, executable string, args []string, session string) (*Harness, error) {
+func Open(ctx context.Context, executable string, args []string, session, dir string) (*Harness, error) {
 	cmd := exec.CommandContext(ctx, executable, args...)
+	cmd.Dir = dir
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

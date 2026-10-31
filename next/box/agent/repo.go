@@ -28,7 +28,12 @@ func runGit(ctx context.Context, dir, index string, args ...string) (string, err
 	return strings.TrimSpace(string(out)), nil
 }
 
-func setupRepos(ctx context.Context, root string, repos []contract.BoxRepo, name, email string, git gitRunner) error {
+const (
+	setupStarted = "started"
+	setupDone    = "done"
+)
+
+func setupRepos(ctx context.Context, root, stateRoot string, repos []contract.BoxRepo, name, email string, git gitRunner) error {
 	for _, entry := range []struct{ key, value string }{{"user.name", name}, {"user.email", email}} {
 		if entry.value != "" {
 			if _, err := git(ctx, "", "", "config", "--global", entry.key, entry.value); err != nil {
@@ -37,39 +42,92 @@ func setupRepos(ctx context.Context, root string, repos []contract.BoxRepo, name
 		}
 	}
 	for _, repo := range repos {
-		dir := filepath.Join(root, string(repo.Name))
-		if _, err := os.Stat(dir); err == nil {
-			continue
-		} else if !os.IsNotExist(err) {
-			return err
-		}
-		if err := os.MkdirAll(filepath.Dir(dir), 0755); err != nil {
-			return err
-		}
-		tmp := filepath.Join(filepath.Dir(dir), "."+filepath.Base(dir)+".setup")
-		if err := os.RemoveAll(tmp); err != nil {
-			return err
-		}
-		if _, err := git(ctx, "", "", "clone", "--no-checkout", "--reference", repo.Cache, repo.Cache, tmp); err != nil {
-			return err
-		}
-		if _, err := git(ctx, tmp, "", "remote", "set-url", "origin", "http://127.0.0.1:7781/git/"+string(repo.Name)+".git"); err != nil {
-			return err
-		}
-		_, err := git(ctx, tmp, "", "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+repo.Branch)
-		if err == nil {
-			_, err = git(ctx, tmp, "", "checkout", "-b", repo.Branch, "refs/remotes/origin/"+repo.Branch)
-		} else {
-			_, err = git(ctx, tmp, "", "checkout", "-b", repo.Branch, "refs/remotes/origin/"+repo.Base)
-		}
-		if err != nil {
-			return err
-		}
-		if err := os.Rename(tmp, dir); err != nil {
-			return err
+		if err := setupRepo(ctx, root, stateRoot, repo, git); err != nil {
+			return fmt.Errorf("set up %s: %w", repo.Name, err)
 		}
 	}
 	return nil
+}
+
+// setupRepo builds the checkout in root/<repo>. Its state file lives outside the checkout, so Pi and
+// git never change it. A checkout marked done is never inspected. A checkout marked started holds only
+// setup's own files, because Pi gets no turn before done, so setup empties it first. A checkout with
+// no state that already has files is legacy or unknown, so setup marks it done and leaves it as it is.
+func setupRepo(ctx context.Context, root, stateRoot string, repo contract.BoxRepo, git gitRunner) error {
+	dir := filepath.Join(root, string(repo.Name))
+	state := filepath.Join(stateRoot, string(repo.Name))
+	value, err := os.ReadFile(state)
+	switch {
+	case err == nil && string(value) == setupDone:
+		return nil
+	case err == nil && string(value) == setupStarted:
+		entries, err := os.ReadDir(dir)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		for _, entry := range entries {
+			if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+				return err
+			}
+		}
+	case err == nil:
+		return fmt.Errorf("unknown setup state %q", value)
+	case !os.IsNotExist(err):
+		return err
+	default:
+		entries, err := os.ReadDir(dir)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if len(entries) > 0 {
+			return writeSetupState(state, setupDone)
+		}
+	}
+	if err := writeSetupState(state, setupStarted); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dir), 0755); err != nil {
+		return err
+	}
+	if _, err := git(ctx, "", "", "clone", "--no-checkout", "--reference", repo.Cache, repo.Cache, dir); err != nil {
+		return err
+	}
+	if _, err := git(ctx, dir, "", "remote", "set-url", "origin", "http://127.0.0.1:7781/git/"+string(repo.Name)+".git"); err != nil {
+		return err
+	}
+	base := "refs/remotes/origin/" + repo.Branch
+	if _, err := git(ctx, dir, "", "show-ref", "--verify", "--quiet", base); err != nil {
+		base = "refs/remotes/origin/" + repo.Base
+	}
+	if _, err := git(ctx, dir, "", "checkout", "-b", repo.Branch, base); err != nil {
+		return err
+	}
+	return writeSetupState(state, setupDone)
+}
+
+// writeSetupState replaces the state file with an atomic rename, so a crash leaves the old or the new state.
+// The temporary file gets a unique name in the same folder, so no repository name can collide with it.
+func writeSetupState(path, value string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	_, err = f.WriteString(value)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+	}
+	return err
 }
 
 func archiveRepo(ctx context.Context, root string, session contract.SessionID, repo contract.BoxRepo, git gitRunner) (result contract.ArchiveDoneRequest) {
