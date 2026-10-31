@@ -1,3 +1,4 @@
+import { SvelteMap } from "svelte/reactivity";
 import type { ShellJobOutput } from "./contract.gen.ts";
 import { decodeShellOutput } from "./event.ts";
 
@@ -41,4 +42,20 @@ export function watchShell(session: string, jobs: Map<string, ShellJob>, refused
   source.onmessage = message => { const output = decodeShellOutput(JSON.parse(message.data)); if (output) applyOutput(jobs, output); };
   source.onerror = () => refused(source.readyState === 2); // EventSource.CLOSED: it stops retrying
   return () => source.close();
+}
+
+// The jobs of several sessions, one watch per session: each sync starts a watch for a new session and stops the watch
+// of one that left, so the others keep their output. The engine refuses a session that is not running; its jobs leave.
+export class ShellWatches {
+  readonly jobs = new SvelteMap<string, SvelteMap<string, ShellJob>>();
+  readonly #stops = new Map<string, () => void>();
+  sync(ids: Set<string>): void {
+    for (const [id, stop] of this.#stops) if (!ids.has(id)) { stop(); this.#stops.delete(id); this.jobs.delete(id); }
+    for (const id of ids) {
+      if (this.#stops.has(id)) continue;
+      const jobs = new SvelteMap<string, ShellJob>();
+      this.jobs.set(id, jobs);
+      this.#stops.set(id, watchShell(id, jobs, closed => { if (closed) jobs.clear(); }));
+    }
+  }
 }

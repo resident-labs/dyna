@@ -14,9 +14,9 @@
   import type { Conversation, PostRequest, Principal } from "../contract.gen.ts";
 
   // unsent holds the app's failed sends of this conversation; see EventWindow.onunsent.
-  let { store, home, intro, unsent, onunsent, onsettled, onforward, onclosed, element = $bindable() }: {
+  let { store, home, intro, unsent, onunsent, onsettled, onforward, onclosed, onjobs, element = $bindable() }: {
     store: RoomStore; home: Conversation; intro: Snippet<[boolean]>; unsent: PostRequest[];
-    onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onforward: (quote: Quote) => void; onclosed: () => void; element?: HTMLDivElement;
+    onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onforward: (quote: Quote) => void; onclosed: () => void; onjobs: (session: string) => void; element?: HTMLDivElement;
   } = $props();
 
   // The view is keyed by its conversation, so its window lives as long as the view.
@@ -146,7 +146,7 @@
         shows as waiting that the store lacks was decided outside the window, so it gets no buttons. -->
       {:else if item.kind === "request"}{@const live = store.requests.get(item.request.id)}
         <RequestCard request={live ?? item.request} gone={!live && item.request.state === "pending"} {store} {now} feed />
-      {:else if item.kind === "work"}<WorkRow row={item} {name} {opened} ontoggle={toggle} {transcripts} />
+      {:else if item.kind === "work"}<WorkRow row={item} {name} {opened} ontoggle={toggle} {transcripts} {onjobs} />
       {:else if item.kind === "new"}<p class="new"><span>New</span></p>
       {:else if item.kind === "day"}<p class="day"><span>{dayLabel(item.at, Date.now())}</span></p>
       {:else if item.kind === "steps"}<ul class="steps" aria-label="Finished steps">

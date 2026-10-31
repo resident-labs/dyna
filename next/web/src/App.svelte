@@ -22,6 +22,7 @@
   import { urgency, type Status } from "./lib/status.ts";
   import { FileDraft } from "./lib/attach.svelte.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
+  import JobsTool from "./lib/ui/JobsTool.svelte";
   import TermDock from "./lib/ui/TermDock.svelte";
   import Home from "./lib/ui/Home.svelte";
   import { MediaQuery, SvelteMap, SvelteSet } from "svelte/reactivity";
@@ -242,6 +243,7 @@
   let members: HTMLElement | undefined = $state();
   let computer: HTMLElement | undefined = $state();
   let terminals: TermDock | undefined = $state();
+  let jobsTool: JobsTool | undefined = $state();
   let settings: HTMLElement | undefined = $state();
   let settingsMenu: HTMLButtonElement | undefined = $state();
   let dock: HTMLElement | undefined = $state();
@@ -372,12 +374,13 @@
     else await focusRowIcon(id, tapped);
   }
   $effect.pre(() => { if (watching && !store?.computers.has(watching)) void stopWatching(); });
-  // A session's running background jobs while its box is ready. The dock's Jobs tab, like About's Jobs row, keeps every
-  // session that ever had jobs, since a finished job's output stays in its box.
+  // A session's running background jobs while its box is ready. The header's Jobs tool, like About's Jobs row, keeps every
+  // session that ever had jobs, since a finished job's output stays in its box. In a DM it lists only that session.
   const jobs = (id: string) => store?.boxes.get(id) === "ready" ? store.shellJobs.get(id) ?? 0 : 0;
   let jobSessions = $derived([...store?.sessions.values() ?? []].filter(item => store?.hadJobs.has(item.session) && store?.boxes.get(item.session) === "ready")
     .map(item => ({ id: item.session, name: item.name, root: !item.parent, running: jobs(item.session) })));
-  let jobFailures = $derived([...store?.failedJobs ?? []].filter(key => jobSessions.some(item => key.startsWith(`${item.id}/`))));
+  let toolSessions = $derived(session ? jobSessions.filter(item => item.id === session) : jobSessions);
+  let toolFailures = $derived([...store?.failedJobs ?? []].filter(key => toolSessions.some(item => key.startsWith(`${item.id}/`))));
   const wide = new MediaQuery("min-width: 761px");
   let panelShown = $derived(wide.current ? !tucked : panel);
   // Below 641 px the rail is a drawer, as in Discord's phone app: the rooms on the left and the open room's pages beside
@@ -500,7 +503,6 @@
           <button type="button" aria-pressed={section === "requests"} onclick={() => { section = "requests"; }}><Icon name="inbox" />Requests
             {#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
           <button type="button" onclick={event => void showPanel(true, event.detail > 0)}><Icon name="people" />Sessions<span class="count">{store.sessions.size}</span></button>
-          <button type="button" onclick={() => void terminals?.pick()}><Icon name="terminal" />Terminal</button>
           <button type="button" aria-pressed={section === "rules"} onclick={() => { section = "rules"; }}><Icon name="rules" />Rules<span class="count">{store.rules.size}</span></button>
           <button type="button" onclick={pause}><Icon name="pause" />{paused ? "Resume room" : "Pause room"}</button>
         {/if}
@@ -524,13 +526,15 @@
       <span class="heading"><strong>{title}</strong>
         {#if closed && !missing}<span class="count">closed</span>{:else if word && !missing}<span class="count word">{word}</span>{/if}
         {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session")}</span>{/if}</span>
-      {#if store && !unavailable}<button type="button" class="requests" class:waiting={store.waiting > 0} bind:this={requestsButton} aria-pressed={section === "requests"}
+      {#if store && !unavailable}{#if room}<JobsTool bind:this={jobsTool} sessions={toolSessions} allSessions={jobSessions} failures={toolFailures} allFailures={[...store.failedJobs]} phone={phone.current}
+        onopen={(item, job) => terminals?.openJob(item, job)} onseen={key => store?.failedJobs.delete(key)} />{/if}
+        <button type="button" class="requests" class:waiting={store.waiting > 0} bind:this={requestsButton} aria-pressed={section === "requests"}
         aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section === "requests" ? undefined : "requests"; }}>
         <Icon name="inbox" />{#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
         <!-- One click to the session's shell and computer; neither shows when the session has none. -->
         {#if session && !closed && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title={terminals?.hasShell(session) ? "Show this session's terminal" : "Open a terminal in this session's box"} aria-pressed={terminals?.hasShell(session) ?? false} onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /><span>Terminal</span></button>{/if}
         {#if session && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /><span>Computer</span></button>{/if}
-        <span class="room-menu"><RoomMenu bind:this={roomMenu} {paused} onterminal={() => void terminals?.pick()} onrules={() => { section = "rules"; }} onpause={pause} /></span>{/if}
+        <span class="room-menu"><RoomMenu bind:this={roomMenu} {paused} onrules={() => { section = "rules"; }} onpause={pause} /></span>{/if}
       <!-- While the panel is closed, who works shows on its button, as at most 3 faces, "+n" and the count from status.ts. -->
       {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={"Sessions" + (faces ? `, ${working} working` : "") + (store?.counts.failed ? ", a session failed" : "")}
         title={faces ? busy.map(item => item.name).join(", ") : "Sessions"} aria-controls="sessions" aria-expanded={panelShown} onclick={event => void showPanel(!panelShown, event.detail > 0)}>
@@ -550,7 +554,7 @@
       {:else if unavailable === "unreachable"}<Blocked kind="unreachable" onretry={reopen} />
       {:else if store && !unavailable}
         {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
-          onforward={quote => { quotes[key] = quote; composer?.focus(); }} onclosed={() => composer?.focus()} />{/key}
+          onforward={quote => { quotes[key] = quote; composer?.focus(); }} onclosed={() => composer?.focus()} onjobs={item => void jobsTool?.show(item)} />{/key}
         <!-- The empty feed stays mounted behind the error, as it is how the page learns the session has no history. -->
         {#if missing && room}<Blocked kind="no-session" back={{ href: "/r/" + encodeURIComponent(room), label: `Back to ${roomName}` }} {navigate} />{/if}
       {:else}<p class="empty">This room is not available. <button type="button" class="retry" onclick={reopen}>Try again</button></p>{/if}
@@ -563,7 +567,7 @@
       <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title}
         quote={quotes[key]} onunquote={() => { quotes[key] = undefined; }} sessions={mentions} files={files(key)} {stop} />
     {/if}{/if}
-    <TermDock bind:this={terminals} bind:element={dock} onempty={() => composer?.focus()} jobs={jobSessions} failures={jobFailures}
+    <TermDock bind:this={terminals} bind:element={dock} onempty={() => composer?.focus()} phone={phone.current} strip={!!room && !unavailable}
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
   </main>
   {#if room}
@@ -576,7 +580,7 @@
         <button type="button" aria-pressed={about} onclick={() => tabs.set(key, "about")}>About</button></header>
       {:else}<header class="bar"><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}</header>{/if}
       <!-- A long tree renders only its visible rows, through the feed's shared list (spec: long lists are virtual). -->
-      {#if about && session && store}<AboutPanel {store} room={room} {session} navigate={openSession} onjobs={async event => { if (!wide.current) await showPanel(false, event.detail > 0); terminals?.showJobs(session); }} />
+      {#if about && session && store}<AboutPanel {store} room={room} {session} navigate={openSession} onjobs={async event => { if (!wide.current) await showPanel(false, event.detail > 0); void jobsTool?.show(session); }} />
       {:else if tree.length}<div class="tree"><VirtualList bind:this={sessionList} items={tree} key={treeKey}
         label="Session list" role="group" align="top" estimate={48}>
         {#snippet row(entry: TreeRow)}
@@ -593,7 +597,7 @@
           aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{28 + depth * 14}px">
           <SessionRow name={item.name} root={!item.parent} {state} {dot} line={status(item.session)} {mark} /></a>
           {#if jobs(item.session)}<button type="button" class="watch" aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
-            title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={async event => { if (!wide.current) await showPanel(false, event.detail > 0); terminals?.showJobs(item.session); }}><Icon name="terminal" /></button>{/if}
+            title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={async event => { if (!wide.current) await showPanel(false, event.detail > 0); void jobsTool?.show(item.session); }}><Icon name="terminal" /></button>{/if}
           {#if store?.computers.has(item.session)}<button type="button" class="watch" class:open={watching === item.session} data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
             title={`Watch ${item.name}'s computer`} onclick={() => watch(item.session)}><Icon name="monitor" /></button>{/if}</div>{/if}
         {/snippet}</VirtualList></div>
@@ -638,6 +642,7 @@
   .requests.waiting { height: 40px; padding: 0 12px; border-radius: 8px; background: color-mix(in srgb, var(--attention) 14%, transparent); color: var(--attention); }
   .requests.waiting:hover, .requests.waiting[aria-pressed="true"] { background: color-mix(in srgb, var(--attention) 22%, transparent); }
   .requests ~ :global(.panel-toggle) { margin-left: 0; }
+  :global(.jobs ~ .requests) { margin-left: 0; }
   main > header :global(.panel-toggle) { display: flex; align-items: center; gap: 8px; }
   /* One quiet line of the working line's size and edge; only its Resume acts. */
   .paused { flex: none; display: flex; gap: 6px; height: 20px; margin: 0 0 4px; padding: 0 16px 0 30px; color: var(--muted); font-size: 12.5px; line-height: 20px; white-space: nowrap; }
