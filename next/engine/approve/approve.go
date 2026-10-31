@@ -181,7 +181,7 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 		} else if err == nil {
 			previous = found
 			if clientID != "" {
-				return s.Store.InsertOperationReplay(tx, who, clientID, found.Operation.ID)
+				return s.Store.InsertOperationReplay(tx, who, clientID, found.Operation.ID, now)
 			}
 			return nil
 		}
@@ -192,7 +192,7 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 			return err
 		}
 		if clientID != "" {
-			return s.Store.InsertOperationReplay(tx, who, clientID, op.ID)
+			return s.Store.InsertOperationReplay(tx, who, clientID, op.ID, now)
 		}
 		return nil
 	})
