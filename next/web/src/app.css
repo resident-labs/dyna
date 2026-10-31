@@ -2,7 +2,7 @@
   color-scheme: light dark;
   /* Warm off-white. --focus is the one accent, for focus rings, selection and links. */
   --bg: #fbf9f6; --sidebar: #f3efe9; --raised: #ffffff; --line: rgb(60 40 20 / 11%); --selected: rgb(60 40 20 / 8%);
-  --hover: rgb(60 40 20 / 4%); --focus: #3d5bd0; --text: #2a2723; --muted: #6b6b66; --attention: #a45500; --danger: #b3332e;
+  --hover: rgb(60 40 20 / 4%); --focus: #3d5bd0; --text: #2a2723; --muted: #63605a; --attention: #a45500; --danger: #b3332e;
   /* Identity colors: the hue comes from the name, these set lightness and chroma per theme. */
   --id-name: 47% 0.13; --id-face: 89% 0.05; --id-initials: 38% 0.1;
   /* The left edge of post text: the 16 px row padding, the 32 px avatar and a 12 px gap. */
@@ -21,15 +21,16 @@ body { margin: 0; background: var(--bg); color: var(--text); }
 /* The app fills the viewport exactly; only the feed and the side panels scroll. */
 .shell { display: grid; grid-template-columns: 240px 1fr; grid-template-rows: minmax(0, 1fr); height: 100dvh; overflow: hidden; }
 .shell.open { grid-template-columns: 240px 1fr 260px; }
-@media (max-width: 1000px) {
-  .shell { grid-template-columns: 200px minmax(0, 1fr); }
-  .shell.open { grid-template-columns: 200px minmax(0, 1fr) 220px; }
+/* Narrow windows drop the sessions column; a phone shows the feed with the rooms as one top row. */
+@media (max-width: 900px) {
+  .shell.open { grid-template-columns: 240px minmax(0, 1fr); }
+  .shell > aside.members { display: none; }
 }
-/* On a phone the rooms, the feed and the sessions stack; each side panel keeps a short scrolling strip. */
-@media (max-width: 720px) {
-  .shell, .shell.open { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
-  .shell > aside { max-height: 22dvh; border: 0; border-bottom: 1px solid var(--line); }
-  .shell > aside.members { border-bottom: 0; border-top: 1px solid var(--line); }
+@media (max-width: 640px) {
+  .shell, .shell.open { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .shell > aside:first-child { border: 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
+  .shell > aside:first-child > :is(header, .section-title) { display: none; }
+  .shell > aside:first-child nav { grid-auto-flow: column; justify-content: start; }
 }
 main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 aside { background: var(--sidebar); border-right: 1px solid var(--line); overflow-y: auto; }
