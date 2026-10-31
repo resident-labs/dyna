@@ -20,7 +20,7 @@
   import { theme } from "../theme.svelte.ts";
   // One live terminal, drawn by libghostty-vt on a canvas (see ../ghostty, vendored from v1). The socket
   // opens at the size the first fit measures; leaving closes it, and the engine hangs up the shell.
-  let { target, label, onexit, ctrl = $bindable(false) }: { target: TerminalTarget; label: string; onexit: (code?: number) => void; ctrl?: boolean } = $props();
+  let { target, label, onexit, oninput, ctrl = $bindable(false) }: { target: TerminalTarget; label: string; onexit: (code?: number) => void; oninput: () => void; ctrl?: boolean } = $props();
   let host: HTMLElement;
   let surface: GhosttyTerminalSurface | undefined;
   let failed = $state(false);
@@ -29,6 +29,7 @@
   // The phone key row (v1's send and key): a held Ctrl turns the next letter into its control character, and arrows
   // follow the shell's cursor mode.
   function send(text: string) {
+    oninput();
     socket?.send(ctrl ? withCtrl(text) : text);
     ctrl = false;
   }
