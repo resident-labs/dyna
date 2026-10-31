@@ -39,6 +39,7 @@ const (
 
 type Event struct {
 	Event    string `json:"event"`
+	DedupKey string `json:"dedupKey,omitempty"`
 	Repo     string `json:"repo"`
 	Worktree string `json:"worktree,omitempty"`
 	Branch   string `json:"branch,omitempty"`

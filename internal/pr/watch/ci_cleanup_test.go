@@ -3,10 +3,12 @@ package watch
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTerminalPRCleansUpRunsOnce(t *testing.T) {
@@ -62,6 +64,56 @@ func TestTerminalPRCleansUpRunsOnce(t *testing.T) {
 	}
 }
 
+func TestTerminalCleanupSurvivesInterruptedCommit(t *testing.T) {
+	e := newEnv(t)
+	e.f.Pull.Head.Ref = "feature"
+	e.write()
+	r := e.track()
+	e.f.Pull.State = "closed"
+	e.f.Runs = []Run{{ID: 100, HeadBranch: "feature", Event: "pull_request", Status: "queued"}}
+	if err := e.s.Store.update(func(st *State) error {
+		var out processEffects
+		e.s.closeRecord(st.Records[r.Key], Snapshot{Pull: e.f.Pull}, newPollNotices(st.Records[r.Key]), &out)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.tick()
+	calls, _ := os.ReadFile(e.calls)
+	if !strings.Contains(string(calls), "/runs/100/cancel") {
+		t.Fatal("interrupted terminal cleanup was not retried")
+	}
+}
+
+func TestTerminalEffectsRetryAfterFailure(t *testing.T) {
+	e := newEnv(t)
+	e.f.Pull.Head.Ref = "feature"
+	e.write()
+	e.track()
+	e.f.Pull.State, e.f.Pull.Merged = "closed", true
+	attempts := 0
+	e.s.CleanupMerged = func(context.Context, Record, string) error {
+		attempts++
+		if attempts == 1 {
+			return fmt.Errorf("temporary cleanup failure")
+		}
+		return nil
+	}
+	e.clock = e.clock.Add(time.Minute)
+	e.write()
+	if _, err := e.s.Tick(context.Background()); err == nil {
+		t.Fatal("expected cleanup failure")
+	}
+	if attempts != 1 || !e.record().Watching {
+		t.Fatalf("failed cleanup was not retained for retry: attempts=%d record=%+v", attempts, e.record())
+	}
+	e.clock = e.record().Polling.Next.Add(-time.Minute)
+	e.tick()
+	if attempts != 2 || e.record().Watching {
+		t.Fatalf("cleanup was not retried: attempts=%d record=%+v", attempts, e.record())
+	}
+}
+
 func TestCICleanupProtectsUntrackedOpenPR(t *testing.T) {
 	e := newEnv(t)
 	e.f.Pull.Head.Ref = "shared"
@@ -99,11 +151,14 @@ func TestCICleanupFailureDoesNotBlock(t *testing.T) {
 	old := log.Writer()
 	log.SetOutput(&logs)
 	defer log.SetOutput(old)
-	e.tick()
-	if !cleaned || e.record().Watching || !e.record().CICleanupDone {
-		t.Fatal("cancel failure blocked the merge path")
+	e.clock = e.clock.Add(time.Minute)
+	e.write()
+	if _, err := e.s.Tick(context.Background()); err == nil {
+		t.Fatal("expected CI cleanup failure")
 	}
-	e.tick()
+	if !cleaned || !e.record().Watching || e.record().CICleanupDone {
+		t.Fatal("cancel failure blocked merge cleanup or lost the retry")
+	}
 	if strings.Count(logs.String(), "PR CI cleanup") != 1 {
 		t.Fatalf("expected one failure log: %s", logs.String())
 	}
@@ -163,9 +218,13 @@ func TestCICleanupSkipsCancelWhenOpenPRCheckFails(t *testing.T) {
 	e.f.Pull.State = "closed"
 	e.f.Fail = "/pulls?"
 	e.f.Runs = []Run{{ID: 100, HeadBranch: "feature", Event: "pull_request", Status: "queued"}}
-	e.tick()
+	e.clock = e.clock.Add(time.Minute)
+	e.write()
+	if _, err := e.s.Tick(context.Background()); err == nil {
+		t.Fatal("expected open PR check failure")
+	}
 	calls, _ := os.ReadFile(e.calls)
-	if strings.Contains(string(calls), "/cancel") || !e.record().CICleanupDone {
+	if strings.Contains(string(calls), "/cancel") || e.record().CICleanupDone || !e.record().Watching {
 		t.Fatalf("cleanup did not fail safely: %s", calls)
 	}
 }
