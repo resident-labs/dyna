@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
@@ -186,5 +187,51 @@ func TestLostBoxChannelReconnect(t *testing.T) {
 				t.Fatal("lost-to-ready event missing")
 			}
 		})
+	}
+}
+
+type stoppedContainerBoxes struct{ fakeBoxes }
+
+func (stoppedContainerBoxes) Inspect(_ context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
+	return box.ContainerStatus{Box: id, Running: false}, true, nil
+}
+
+func TestFirstCrashRestartsAtOnceAndLaterCrashesBackOff(t *testing.T) {
+	s, _, sid, ctx := setup(t)
+	s.boxes = stoppedContainerBoxes{}
+	s.reconciler = lifecycle.New(s.store, s.boxes, s, s.repos, s.event, func() time.Time { return s.now() })
+	if _, problem := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid}, contract.BoxHelloRequest{}); problem != nil {
+		t.Fatal(problem)
+	}
+	session, err := s.store.Session(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	crash := func() (state string, delay time.Duration, failures int) {
+		t.Helper()
+		if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, "UPDATE boxes SET state='lost',reason='box disconnected',due_at=0 WHERE id=?", session.Box)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		passLifecycle(t, s, ctx)
+		var due int64
+		if err := s.store.Read().QueryRowContext(ctx, "SELECT state,due_at,failures FROM boxes WHERE id=?", session.Box).Scan(&state, &due, &failures); err != nil {
+			t.Fatal(err)
+		}
+		if due != 0 {
+			delay = time.UnixMilli(due).Sub(s.now())
+		}
+		return state, delay, failures
+	}
+	if state, delay, failures := crash(); state == "failed" || delay != 0 || failures != 1 {
+		t.Fatalf("first crash: state %s, delay %v, failures %d", state, delay, failures)
+	}
+	if state, delay, failures := crash(); state == "failed" || delay != 60*time.Second || failures != 2 {
+		t.Fatalf("second crash: state %s, delay %v, failures %d", state, delay, failures)
+	}
+	if state, _, failures := crash(); state != "failed" || failures != 3 {
+		t.Fatalf("third crash: state %s, failures %d", state, failures)
 	}
 }
