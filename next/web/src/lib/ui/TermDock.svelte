@@ -263,7 +263,7 @@
   .exited .retry { margin-left: 8px; }
   /* v1's key row above the phone keyboard; a held Ctrl shows the focus ring. */
   .keys { flex: none; display: flex; gap: 8px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); overflow-x: auto; }
-  .keys button { all: unset; flex: none; display: grid; place-items: center; min-width: 44px; height: 40px; padding: 0 10px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--firm);
+  .keys button { all: unset; box-sizing: border-box; flex: 1; display: grid; place-items: center; min-width: 0; height: 40px; padding: 0 4px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--firm);
     color: var(--text); font-size: 14px; font-weight: 500; cursor: pointer; }
   .keys button:active { background: var(--hover); }
   .keys button[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--focus); }
