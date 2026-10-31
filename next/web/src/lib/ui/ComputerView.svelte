@@ -72,6 +72,9 @@
   .live { padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
   .connecting { color: var(--muted); font-weight: 400; }
   .first { margin-left: auto; }
+  /* Full screen, the whole window is one near-black surface, as the screen is, from the notch to the home bar; the
+     dark theme's colors keep its text and buttons legible in both themes. */
+  :global(.window.computer.full) { --text: #ece6de; --muted: #a39b91; --line: rgb(255 235 210 / 8%); --hover: rgb(255 235 210 / 4%); --focus: #93a6f5; background: #0d0d0f; }
   /* The screen is near-black in both themes, as a display is. Docked, it takes the panel width at the screen's ratio;
      floating, it fills the window body edge to edge and the dark background fills the letterbox. */
   .screen { position: relative; display: grid; place-items: center; flex: 1; margin: 0; border-radius: 0 0 7px 7px; overflow: hidden; background: #0d0d0f; }
