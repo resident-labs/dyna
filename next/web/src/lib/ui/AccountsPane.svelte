@@ -96,7 +96,7 @@
 {#if adding || accountId}
   <header class="subbar">{#if phone}<a href={adding && selected ? base + "/add" : base} onclick={navigate} aria-label={adding && selected ? "Back to providers" : "Back to Accounts"}><Icon name="backChevron" size={20} /></a>{:else}{@render back()} <span>/</span>{/if} <strong>{adding ? (phone && selected ? selected.displayName : "Add an account") : account?.label || "Account"}</strong></header>
 {:else}{@render bar("Accounts", loaded ? accounts.length : undefined, action)}{/if}
-<div class="body">
+<div class="body" data-page-ready={loaded}>
 {#if failed}<p>Accounts did not load. <button class="btn" type="button" onclick={reload}>Try again</button></p>
 {:else if !loaded}<p class="muted">Loading accounts…</p>
 {:else if adding}
