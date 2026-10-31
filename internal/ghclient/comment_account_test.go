@@ -12,6 +12,8 @@ import (
 )
 
 func TestCommentEditWithoutPushAccess(t *testing.T) {
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
 	records := setupRooms(t, "owner/project")
 	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
 		t.Fatal(err)
