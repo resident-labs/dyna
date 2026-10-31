@@ -13,6 +13,7 @@ import (
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -64,12 +65,30 @@ func TestInstructionsRepairAfterOfflineSave(t *testing.T) {
 	}
 	b := &Boxes{Store: instructionStore{}, InstructionsDir: data, HostData: hostData, hosts: map[contract.HostName]*podman.Host{"host": host}}
 	b.PublishInstructions(ctx)
+	heartbeat := b.instructionHeartbeat(ctx, "host", host)
+	heartbeat(true) // Failed repair stays pending.
 	transport.offline = false
-	if err := b.syncInstructions(ctx, host); err != nil {
-		t.Fatal(err)
-	}
+	heartbeat(true) // The next healthy heartbeat retries.
 	got, err := os.ReadFile(filepath.Join(hostData, "instructions", "rooms", "room", "AGENTS.md"))
 	if err != nil || string(got) != "new" {
 		t.Fatalf("got %q: %v", got, err)
+	}
+}
+
+func TestInstructionMountsAreRoomScoped(t *testing.T) {
+	b := &Boxes{HostData: "/host"}
+	_, spec := b.container(lifecycle.BoxSpec{Room: "room"}, "image")
+	found := map[string]box.Mount{}
+	for _, mount := range spec.Mounts {
+		found[mount.BoxPath] = mount
+	}
+	for path, source := range map[string]string{
+		"/run/dyna/instructions/global": "/host/instructions/global",
+		"/run/dyna/instructions/room":   "/host/instructions/rooms/room",
+	} {
+		mount := found[path]
+		if mount.HostPath != source || !mount.ReadOnly {
+			t.Fatalf("mount %s: %+v", path, mount)
+		}
 	}
 }
