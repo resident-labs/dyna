@@ -208,7 +208,7 @@ func (h *Handler) RequestAnthropicToken(c *gin.Context) {
 			fmt.Println("API key obtained and saved")
 		}
 		fmt.Println("You can now use Claude services through this CLI")
-		dynaCompleteOAuth(state, record)
+		h.dynaCompleteOAuth(state, record)
 	}()
 
 	c.JSON(200, gin.H{"status": "ok", "url": authURL, "state": state})
@@ -776,7 +776,7 @@ func (h *Handler) RequestXAIToken(c *gin.Context) {
 			return
 		}
 
-		dynaCompleteOAuth(state, record)
+		h.dynaCompleteOAuth(state, record)
 		fmt.Printf("Authentication successful! Token saved to %s\n", savedPath)
 		fmt.Println("You can now use xAI services through this CLI")
 	}()
@@ -1064,7 +1064,7 @@ func (h *Handler) requestKimiTokenWithDomain(c *gin.Context, domain string) {
 
 		fmt.Printf("Authentication successful! Token saved to %s\n", savedPath)
 		fmt.Printf("You can now use %s services through this CLI\n", displayName)
-		dynaCompleteOAuth(state, record)
+		h.dynaCompleteOAuth(state, record)
 	}()
 
 	response := gin.H{"status": "ok", "url": authURL, "state": state, "flow": "device"}
