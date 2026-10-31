@@ -14,24 +14,36 @@ import (
 func (s *Service) HostexecGrant() approve.Entry {
 	return approve.Entry{
 		Class: func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassOwner },
-		Card: func(args contract.OpArgs, _ contract.Principal) contract.Card {
+
+		Card: func(ctx context.Context, args contract.OpArgs, _ contract.Principal) contract.Card {
 			a := args.(contract.HostexecGrantArgs)
-			expiry := "24 hours from approval"
-			if !a.Expires.IsZero() {
-				expiry = a.Expires.UTC().Format(time.RFC3339)
-			}
+			session, _ := s.store.Session(ctx, a.To.Session)
+			expiry := "for 24 hours"
 			if a.Never {
-				expiry = "never"
+				expiry = "without expiry"
+			} else if !a.Expires.IsZero() {
+				expiry = "until " + a.Expires.UTC().Format(time.RFC3339)
 			}
-			mode := "approve (each run asks the owner)"
+			mode := "asking you before each run"
 			if a.Mode == contract.GrantModePreapproved {
-				mode = "preapproved (runs without asking)"
+				mode = "without asking each time"
 			}
-			var lines []string
-			for _, c := range a.Commands {
-				lines = append(lines, fmt.Sprintf("%q (prefix: %t)", append([]string{c.Program}, c.Args...), c.Prefix))
+			var hosts, commands []string
+			for _, host := range a.Hosts {
+				if host == contract.AllHosts {
+					hosts = append(hosts, "every host, including the control plane")
+				} else {
+					hosts = append(hosts, string(host))
+				}
 			}
-			return contract.Card{Title: "Grant host execution", Target: contract.Target{Kind: contract.TargetRoom, Name: string(a.Room)}, Body: fmt.Sprintf("Session: %s\nHosts: %v\nCommands: %s\nMode: %s\nExpiry: %s", a.To.Session, a.Hosts, strings.Join(lines, ", "), mode, expiry)}
+			for _, command := range a.Commands {
+				line := strings.Join(append([]string{command.Program}, command.Args...), " ")
+				if command.Prefix {
+					line += " …"
+				}
+				commands = append(commands, line)
+			}
+			return contract.Card{Title: "Grant host execution", Target: contract.Target{Kind: contract.TargetRoom, Name: string(a.Room)}, Body: fmt.Sprintf("Let %s run %s on %s %s, %s.", session.Name, strings.Join(commands, "; "), strings.Join(hosts, ", "), expiry, mode)}
 		},
 		Check: func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
 			a := args.(contract.HostexecGrantArgs)

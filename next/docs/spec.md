@@ -517,8 +517,7 @@ Column types follow SQLite. Times are INTEGER Unix milliseconds (`_at`). IDs are
 | M2 | `transcripts` | (`session`, `path`) PK, `acked_offset`, `file` |
 | M2 | `images` | section 5.2 |
 | M2 | `operations` | `id` PK, `kind`, `room`, `by_kind`, `by_id`, `class`, `state`, `card` BLOB, `args` BLOB, `args_sha256`, `created_at`, `expires_at`, `decided_by_kind`, `decided_by_id`, `decided_at`, `reason`, `exit_code`, `output_file` |
-| M2 | `grants` | `id` PK, `kind`, `room`, `to_kind`, `to_id`, `mode`, `expires_at`, `by_kind`, `by_id`, `created_at`, `revoked_at` |
-| M2 | `grant_hosts`, `grant_commands`, `grant_command_args` | section 6.1; no JSON columns |
+| M2 | `grants` | `id` PK, `kind`, `room`, `to_kind`, `to_id`, `mode`, `hosts` JSON, `commands` JSON, `expires_at`, `by_kind`, `by_id`, `created_at`, `revoked_at`, `expired_at` |
 | M2 | `hostexec_runs` | section 6.3 |
 | M2 | `subscriptions`, `subscription_events`, `subscription_args` | section 8.5; the default notice subscription needs them |
 | M2 | `archives` | section 5.9 |
@@ -823,7 +822,7 @@ A host-exec grant is a `contract.Grant` with `Kind: hostexec` (3.5).
 - When several grants match, `preapproved` wins over `approve`. When none matches, the call fails with `no-grant`, and nothing runs.
 - The class of `hostexec.run` comes from the grant that matched: `auto` when a `preapproved` grant matches, and `owner` when only an `approve` grant matches.
 
-Tables: `grant_hosts` (`grant`, `host`), `grant_commands` (`grant`, `idx`, `program`, `prefix`) and `grant_command_args` (`grant`, `idx`, `pos`, `arg`).
+The `grants` table stores hosts and command rules as JSON columns.
 
 ### 6.2 Default grant, owner grants, revoke and expiry
 

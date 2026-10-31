@@ -34,11 +34,11 @@ func TestGrantOperation(t *testing.T) {
 }
 
 func TestGrantCardShowsMode(t *testing.T) {
-	s, _, _, _ := setup(t)
+	s, room, worker, ctx := setup(t)
 	entry := s.HostexecGrant()
-	approve := entry.Card(contract.HostexecGrantArgs{Mode: contract.GrantModeApprove}, contract.Principal{})
-	auto := entry.Card(contract.HostexecGrantArgs{Mode: contract.GrantModePreapproved}, contract.Principal{})
-	if !strings.Contains(approve.Body, "approve (each run asks the owner)") || !strings.Contains(auto.Body, "preapproved (runs without asking)") {
+	approve := entry.Card(ctx, contract.HostexecGrantArgs{Room: room, To: contract.Principal{Kind: contract.PrincipalSession, Session: worker}, Mode: contract.GrantModeApprove}, contract.Principal{})
+	auto := entry.Card(ctx, contract.HostexecGrantArgs{Room: room, To: contract.Principal{Kind: contract.PrincipalSession, Session: worker}, Mode: contract.GrantModePreapproved}, contract.Principal{})
+	if !strings.Contains(approve.Body, "asking you before each run") || !strings.Contains(auto.Body, "without asking each time") {
 		t.Fatalf("cards: %q / %q", approve.Body, auto.Body)
 	}
 }

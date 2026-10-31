@@ -183,6 +183,8 @@ func TestHistoryQueriesUseIndexes(t *testing.T) {
 		"SELECT id FROM sessions WHERE room='r' AND closed_at IS NULL",
 		"SELECT id FROM sessions WHERE parent='s'",
 		"SELECT id FROM operations WHERE state='pending' AND expires_at<=1",
+		"SELECT id FROM grants WHERE expired_at IS NULL AND revoked_at IS NULL AND expires_at<=1",
+		"SELECT id FROM grants WHERE room='r' AND to_id='s'",
 	}
 	for _, tt := range tests {
 		t.Run(tt, func(t *testing.T) {
