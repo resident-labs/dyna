@@ -2,6 +2,7 @@
   import { SvelteMap } from "svelte/reactivity";
   import StatusPill from "./StatusPill.svelte";
   import { count } from "../feed.ts";
+  import { failed } from "../jobs.ts";
   import { watchShell, type ShellJob } from "../shell.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { BoxState } from "../contract.gen.ts";
@@ -27,6 +28,7 @@
     return () => { stop(); listed.clear(); };
   });
   let running = $derived([...listed.values()].filter(job => job.running).length);
+  let failures = $derived([...listed.values()].filter(failed).length);
 </script>
 
 <svelte:document onvisibilitychange={() => { visible = document.visibilityState === "visible"; }} />
@@ -36,7 +38,7 @@
     {#if parent && open?.parent}<dt>Parent</dt><dd><a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(open.parent)}`} onclick={navigate}>{parent}</a></dd>{/if}
     {#if open?.profile}<dt>Profile</dt><dd>{open.profile}</dd>{/if}
     {#if box}<dt>Box</dt><dd>{#if box === "failed" || box === "lost"}<StatusPill tone="failed" label={boxes[box]} />{:else}{boxes[box]}{/if}</dd>{/if}
-    {#if hasJobs}<dt>Jobs</dt><dd><button type="button" onclick={onjobs}>{running ? `${count(running, "job")} running` : "Jobs"}</button></dd>{/if}
+    {#if hasJobs}<dt>Jobs</dt><dd><button type="button" onclick={onjobs}>{running ? `${count(running, "job")} running` : "Jobs"}</button>{#if failures}{" · "}<StatusPill tone="failed" label="{failures} failed" word />{/if}</dd>{/if}
   </dl>
 </div>
 
