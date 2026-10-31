@@ -117,13 +117,30 @@ type ComputerChanged struct {
 }
 
 type BoxChanged struct {
-	Box     BoxID     `json:"box"`
-	Session SessionID `json:"session"`
-	Host    HostName  `json:"host,omitempty"`
-	From    BoxState  `json:"from,omitempty"` // empty for a new box
-	To      BoxState  `json:"to"`
-	Reason  string    `json:"reason,omitempty"`
+	Box     BoxID        `json:"box"`
+	Session SessionID    `json:"session"`
+	Host    HostName     `json:"host,omitempty"`
+	From    BoxState     `json:"from,omitempty"` // empty for a new box
+	To      BoxState     `json:"to"`
+	Cause   FailureCause `json:"cause,omitempty"` // a failed box, or a close that could not archive
+	Reason  string       `json:"reason,omitempty"`
 }
+
+// FailureCause says in owner terms why a box or an operation failed. The Reason or Error text
+// beside it is detail for agents and logs; owner views show only the cause (r8).
+type FailureCause string
+
+const (
+	CauseCreateFailed    FailureCause = "create_failed"    // the box could not be created on its host
+	CauseNoHello         FailureCause = "no_hello"         // the box agent did not connect in time
+	CauseEngineRestarted FailureCause = "engine_restarted" // the engine restarted while it created the box
+	CauseRemoveFailed    FailureCause = "remove_failed"    // close could not remove the box
+	CauseArchiveFailed   FailureCause = "archive_failed"   // close could not archive the session's branch
+	CauseGrantInactive   FailureCause = "grant_inactive"   // the host-exec grant expired or was revoked
+	CauseHostLost        FailureCause = "host_lost"        // the host stopped answering during the run
+	CauseInterrupted     FailureCause = "interrupted"      // the engine stopped during the run; the outcome is unknown
+	CauseInternal        FailureCause = "internal"         // an engine error; the detail is in the log
+)
 
 // PressureKind is "high" for memory throttling that lasts 60 s, or "max" for a
 // reached memory.max or an OOM kill.
