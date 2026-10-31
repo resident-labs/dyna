@@ -136,7 +136,8 @@
         <Avatar kind="room" name={room.name} size={28} />
         <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{line}</span></span></a>{/each}</div>
       {#if busy.length > 6 && !allRooms}<button type="button" class="retry more" onclick={() => { allRooms = true; }}>{busy.length - 6} more {busy.length === 7 ? "room" : "rooms"}</button>{/if}
-      {#if !busy.length}<p class="none">No session is open.</p>{/if}</section>
+      {#if !busy.length}{#if loaded}<p class="none">No session is open.</p>
+        {:else}<div class="item skeleton" aria-hidden="true"><i class="avatar"></i><span class="lines"><i></i><i></i></span></div>{/if}{/if}</section>
   </div>
   {#if failed && missing}<p class="failed">Some items could not load. <button type="button" class="retry" onclick={() => { failed = false; attempt++; }}>Try again</button></p>{/if}
   {#if hosts?.length || hostsFailed}<h2>Machines{#if hosts?.length}<span>{hosts.length}</span>{/if}</h2>{/if}
@@ -156,6 +157,9 @@
   .hero { display: grid; gap: 4px; margin: 8px 8px 16px; font-size: 20px; font-weight: 600; line-height: 1.25; }
   .skeleton i { width: min(280px, 70%); height: 25px; border-radius: 6px; background: var(--hover); }
   .skeleton i + i { width: min(440px, 90%); height: 20px; }
+  .item.skeleton i { width: 120px; height: 12px; }
+  .item.skeleton i + i { width: 80px; height: 10px; margin-top: 4px; }
+  .item.skeleton .avatar { flex: none; width: 28px; height: 28px; border-radius: 8px; margin: 0; }
   .hero span { color: var(--muted); font-size: 14px; font-weight: 400; line-height: 1.45; font-variant-numeric: tabular-nums; }
   .rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); column-gap: 12px; margin: 0 -8px; }
   h2 { display: flex; align-items: baseline; gap: 8px; margin: 24px 8px 12px; font-size: 18px; font-weight: 600; line-height: 1.25; }
