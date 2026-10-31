@@ -13,8 +13,8 @@
   import { LiveStream, type Phase } from "../live.ts";
   // Floating, the view is a window over the app; docked, it sits above the session list in the sessions panel. The
   // rect belongs to the app, so the window keeps its place and size for the page view.
-  let { session, name, activity, docked, rect = $bindable(), element = $bindable(), onclose, ondock }: {
-    session: string; name: string; activity?: string; docked: boolean; rect: Rect; element?: HTMLElement; onclose: () => void; ondock: (event: MouseEvent) => void;
+  let { session, name, root, activity, docked, rect = $bindable(), element = $bindable(), onclose, ondock }: {
+    session: string; name: string; root: boolean; activity?: string; docked: boolean; rect: Rect; element?: HTMLElement; onclose: () => void; ondock: (event: MouseEvent) => void;
   } = $props();
   let visible = $state(document.visibilityState === "visible");
   // A stopped computer closes this view, so a failure here is a broken or silent stream. The owner's retry or the
@@ -45,7 +45,7 @@
 
 <svelte:document onvisibilitychange={() => { visible = document.visibilityState === "visible"; if (visible && phase === "failed") attempt++; }} />
 <FloatWindow label={`${name}'s computer`} kind="computer" {docked} bind:rect bind:element onkeydown={key}>
-  {#snippet header()}<Avatar kind="session" {name} size={20} /><span class="title">{name}'s computer</span>
+  {#snippet header()}<Avatar kind="session" {name} {root} size={20} /><span class="title">{name}'s computer</span>
     {#if phase === "live"}<span class="live">Live</span>{:else if phase === "connecting"}<span class="connecting">Connecting</span>{/if}
     <button type="button" class="first" aria-label={docked ? "Undock" : "Dock in the sessions panel"} title={docked ? "Undock" : "Dock"} onclick={ondock}>
       <Icon name={docked ? "undock" : "dock"} /></button>
@@ -62,7 +62,7 @@
 <style>
   .title { flex: none; }
   /* A neutral outline label, the window's only uppercase text; it shows only once frames arrive. */
-  .live { padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+  .live { padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
   .connecting { color: var(--muted); font-weight: 400; }
   .first { margin-left: auto; }
   /* The screen is near-black in both themes, as a display is. Docked, it takes the panel width at the screen's ratio;
