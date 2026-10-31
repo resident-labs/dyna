@@ -11,6 +11,7 @@ const (
 
 // OpSubmitRequest reads only Room, Kind and Args. The engine sets all other operation fields.
 type OpSubmitRequest struct {
+	ClientID  string    `json:"clientId,omitempty"`
 	Operation Operation `json:"operation"`
 }
 type OpSubmitResponse struct {
