@@ -86,20 +86,17 @@
     event.preventDefault();
     if (event.key === "ArrowLeft") folded.add(id); else folded.delete(id);
   }
-  // Drafts and send errors belong to one conversation, keyed by room and session.
+  // Drafts belong to one conversation, keyed by room and session. A failed send stays in the feed with Retry.
   let drafts: Record<string, string> = $state({});
-  let failed: string | undefined = $state();
   let key = $derived(`${room}/${session ?? ""}`);
   function send() {
     if (!store || !room) return;
-    const sent = key;
-    const text = drafts[sent] ?? "";
+    const text = drafts[key] ?? "";
     if (!text.trim()) return;
-    drafts[sent] = "";
-    failed = undefined;
+    drafts[key] = "";
     // The engine refuses mentions on a DM post; in the feed, @names of open sessions become mentions.
     const post = session ? { text, mentions: [] } : parseMentions(text, store.sessions.values());
-    view?.send({ room, text: post.text, mentions: post.mentions.length ? post.mentions : undefined, home: session ? home : undefined }).catch(() => { drafts[sent] = text; failed = sent; });
+    void view?.send({ room, text: post.text, mentions: post.mentions.length ? post.mentions : undefined, home: session ? home : undefined });
   }
   let view: Feed | undefined = $state();
   let rail: HTMLElement;
@@ -241,7 +238,6 @@
     </div>
     {#if room && !unavailable}
       <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title} />
-      {#if failed === key}<p class="hint" role="alert">Your message was not sent. Press Enter to try again.</p>{/if}
     {/if}{/if}
     <TermDock bind:this={terminals} bind:element={dock} onempty={() => composer?.focus()}
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name }))} />

@@ -12,23 +12,44 @@ const feed: Conversation = { kind: "feed" };
 const dm: Conversation = { kind: "dm", session: "s" };
 const usage = { model: "m", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 
-test("merges sorted events and replaces a pending post", async () => {
+test("a pending post gives way to its event in either order, and a failed one stays until a retry sends it", async () => {
   const window = new EventWindow("r", feed);
   let resolve!: (response: Response) => void;
   const original = globalThis.fetch;
   globalThis.fetch = () => new Promise<Response>(done => { resolve = done; });
+  const rows = () => feedRows(window.ordered, feed, [...window.pendingPosts.values()].map(({ id, at, failed, request }) =>
+    ({ id, at, failed, text: request.text, attachments: [], to: [] }))).map(row => row.kind === "post" ? `${row.key} ${row.text}` : row.kind);
   try {
-    const sending = window.post({ room: "r", text: "hello" });
-    assert.equal(window.pendingPosts.size, 1);
+    // The event arrives before the call returns.
+    let sending = window.post({ room: "r", text: "hello" });
+    assert.deepEqual(rows(), ["n1 hello"]);
     const post = event(2, { type: "post.created", body: { text: "hello", home: feed } });
     window.apply(post);
     window.apply(event(1, { type: "session.started", body: { session: "s", name: "Agent", profile: "p" } }));
     window.apply(post);
     resolve(new Response(JSON.stringify({ seq: 2, event: "2" })));
     await sending;
-    assert.deepEqual(window.seqs, [1, 2]);
+    assert.deepEqual([window.seqs, rows()], [[1, 2], ["work", "p2 hello"]]);
+    // The call returns first; a post with the same text is not its event.
+    sending = window.post({ room: "r", text: "hello" });
+    resolve(new Response(JSON.stringify({ seq: 4, event: "4" })));
+    await sending;
+    window.apply(event(3, { type: "post.created", body: { text: "hello", home: feed } }));
+    assert.deepEqual(rows(), ["work", "p2 hello", "p3 hello", "n2 hello"]);
+    window.apply(event(4, { type: "post.created", body: { text: "hello", home: feed } }));
+    assert.deepEqual(rows(), ["work", "p2 hello", "p3 hello", "p4 hello"]);
+    // A failed call keeps the row; a retry sends the same body once.
+    const bodies: unknown[] = [];
+    globalThis.fetch = (_, init) => { bodies.push(init?.body); return Promise.reject(new Error("offline")); };
+    await window.post({ room: "r", text: "later" });
+    assert.deepEqual([...window.pendingPosts.values()].map(({ failed, seq }) => [failed, seq]), [[true, undefined]]);
+    globalThis.fetch = (_, init) => { bodies.push(init?.body); return Promise.resolve(new Response(JSON.stringify({ seq: 5, event: "5" }))); };
+    await window.retry(3);
+    assert.deepEqual([...window.pendingPosts.values()].map(({ failed, seq }) => [failed, seq]), [[false, 5]]);
+    assert.deepEqual([bodies.length, bodies[0] === bodies[1]], [2, true]);
+    window.apply(event(5, { type: "post.created", body: { text: "later", home: feed } }));
+    assert.deepEqual(rows().at(-1), "p5 later");
     assert.equal(window.pendingPosts.size, 0);
-    assert.equal(window.posts().length, 1);
   } finally { globalThis.fetch = original; }
 });
 
