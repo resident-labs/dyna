@@ -32,6 +32,8 @@ test("a room's hostless count loads which sessions wait for a host that takes th
   globalThis.fetch = async input => {
     const method = String(input).replace("/v1/", "");
     if (method === "room.list") return new Response(JSON.stringify({ seq: 3, rooms: [{ id: "a", name: "A", created: "", waiting: [], working: ["s1"], failed: 0, hostless: 1 }] }));
+    if (method === "device.scopes") return new Response(JSON.stringify({ scopes: ["read"] }));
+    assert.equal(method, "session.list", `Unexpected fetch: ${method}`);
     if (offline) throw new Error("offline");
     return new Response(JSON.stringify({ seq: 3, sessions: [{ id: "s1", boxState: "pending", boxReason: "room-host" }, { id: "s2", boxState: "pending", boxReason: "cpu" }] }));
   };
@@ -53,6 +55,8 @@ test("Home's session read and the room's own seed share one read, so a box chang
   let reads = 0, answer!: () => void;
   globalThis.fetch = async input => {
     if (String(input).endsWith("room.list")) return new Response(JSON.stringify({ seq: 3, rooms: [{ id: "a", name: "A", created: "", waiting: [], working: [], failed: 0, hostless: 1 }] }));
+    if (String(input).endsWith("device.scopes")) return new Response(JSON.stringify({ scopes: ["read"] }));
+    assert.ok(String(input).endsWith("session.list"), `Unexpected fetch: ${String(input)}`);
     reads++;
     await new Promise<void>(done => { answer = done; });
     return new Response(JSON.stringify({ seq: 3, sessions: [{ id: "s1", boxState: "pending", boxReason: "room-host" }] }));
