@@ -74,7 +74,7 @@ const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.sessio
 // The session an event is about; events without one belong to the room feed only.
 function subject(event: Event): string | undefined {
   switch (event.type) {
-    case "room.paused": case "room.resumed": case "room.limits_changed": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "rule.added": case "rule.removed": case "rule.edited": case "session.profile_changed": return undefined;
+    case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "rule.added": case "rule.removed": case "rule.edited": case "session.profile_changed": return undefined;
     case "op.requested": return event.body.by.session;
     case "op.decided": case "op.ran": return event.from.session;
     default: return event.body.session;
@@ -351,7 +351,7 @@ export function describe(event: Event, name: Name): string {
     case "turn.started": return `${name(event.body.session)} started a turn`;
     case "turn.ended": return event.body.outcome === "stopped" ? `${name(event.body.session)}'s turn stopped` : `${name(event.body.session)} finished a turn`;
     // Live only: the room store keeps it out of every feed window.
-    case "host.disk_low": case "conversation.read": return "";
+    case "account.failed": case "account.quota_low": case "host.disk_low": case "conversation.read": return "";
     case "turn.activity": return event.body.label;
     case "shell.job.ended": {
       const who = name(event.body.session), job = event.body.description ? `job "${event.body.description}"` : "job";
