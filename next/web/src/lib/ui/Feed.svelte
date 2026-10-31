@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { APIError } from "../client.ts";
   import VirtualList from "./VirtualList.svelte";
   import PostRow from "./PostRow.svelte";
   import FailedTurnRow from "./FailedTurnRow.svelte";
   import WorkRow from "./WorkRow.svelte";
+  import WorkingDot from "./WorkingDot.svelte";
   import { feedRows, type Row } from "../feed.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { Conversation, PostRequest, Principal } from "../contract.gen.ts";
@@ -13,11 +15,16 @@
     store: RoomStore; home: Conversation; empty: string; element?: HTMLDivElement;
   } = $props();
 
-  type Item = Row | { kind: "pending"; key: string; text: string };
+  // The view is keyed by its conversation, so its window lives as long as the view.
+  // svelte-ignore state_referenced_locally
+  const view = store.window(home);
+  onDestroy(() => store.leave(view));
+  type Item = Row | { kind: "pending"; key: string; text: string } | { kind: "working"; key: string; session: string };
+  // A DM ends with one muted line while its session runs a turn.
   let items: Item[] = $derived([
-    ...feedRows(store.ordered, home),
-    ...[...store.pendingPosts].filter(post => post.home.session === home.session)
-      .map((post, index) => ({ kind: "pending" as const, key: `n${index}`, text: post.text })),
+    ...feedRows(view.ordered, home),
+    ...[...view.pendingPosts].map((post, index) => ({ kind: "pending" as const, key: `n${index}`, text: post.text })),
+    ...(home.session && store.turns.has(home.session) ? [{ kind: "working" as const, key: "working", session: home.session }] : []),
   ]);
   // Opened work rows stay open while the list recycles their elements.
   const opened = new SvelteSet<string>();
@@ -27,40 +34,43 @@
   let list: VirtualList<Item> | undefined = $state();
   // The owner's own post and a jump always land on the newest row, even from inside the present window.
   export async function send(request: PostRequest): Promise<void> {
-    const sending = store.post(request);
+    const sending = view.post(request);
     void list?.toEnd();
     await sending;
     await list?.toEnd();
   }
   async function jump() {
-    await store.jumpToPresent();
+    await view.jumpToPresent();
     await list?.toEnd();
   }
 </script>
 
 {#if items.length}
-  <VirtualList bind:this={list} {items} key={item => item.key} label="Feed" follow={store.atPresent} bind:element
-    onstart={() => void store.loadOlder()} onend={() => void store.loadNewer()}>
+  <VirtualList bind:this={list} {items} key={item => item.key} label="Feed" follow={view.atPresent} bind:element
+    onstart={() => void view.loadOlder()} onend={() => void view.loadNewer()}>
     {#snippet row(item: Item)}
-      {#if item.kind === "post"}<PostRow row={item} author={author(item.from)} to={item.to.map(author).join(", ")} />
+      {#if item.kind === "post"}<PostRow row={item} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} />
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} />
       {:else if item.kind === "work"}<WorkRow row={item} {name} open={opened.has(item.key)} ontoggle={() => toggle(item.key)} />
+      {:else if item.kind === "working"}<p class="working"><WorkingDot />{name(item.session)} is working</p>
       {:else}<p class="pending">{item.text}</p>{/if}
     {/snippet}
   </VirtualList>
-{:else if store.ready}
+{:else if view.ready}
   <p class="empty">{empty}</p>
 {/if}
-{#if store.ready && store.error !== undefined}
-  <p class="hint" role="alert">{store.error instanceof APIError && store.error.detail.code === "forbidden"
-    ? "Your sign-in ended. Run dyna web to sign in again." : "Some posts did not load. Scroll or jump to try again."}</p>
+{#if view.error !== undefined}
+  <p class="hint" role="alert">{view.error instanceof APIError && view.error.detail.code === "forbidden"
+    ? "Your sign-in ended. Run dyna web to sign in again." : view.ready ? "Some posts did not load. Scroll or jump to try again." : "Posts did not load."}
+    {#if !view.ready}<button type="button" class="jump" onclick={() => void view.open()}>Try again</button>{/if}</p>
 {/if}
-{#if !store.atPresent}
+{#if !view.atPresent}
   <button type="button" class="jump" onclick={jump}>New posts below. Jump to present</button>
 {/if}
 
 <style>
   .pending { margin: 0; padding: 1px 16px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .working { margin: 0; padding: 6px 16px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
   .hint { margin: 0; padding: 6px 16px; color: var(--muted); font-size: 12px; }
   .jump { all: unset; cursor: pointer; padding: 6px 16px; color: var(--muted); font-size: 12px; }
   .jump:hover { color: var(--text); }

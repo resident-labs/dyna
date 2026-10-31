@@ -1094,3 +1094,25 @@ func TestClosedSessionNamesRemainInEvents(t *testing.T) {
 		t.Fatalf("events: %+v, names: %+v", events.Events, events.Names)
 	}
 }
+
+func TestSessionListTurnState(t *testing.T) {
+	s, room, session, ctx := setup(t)
+	connectAgent(ctx, t, s, session)
+	posted, e := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: room, Text: "hello"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	list, e := s.SessionList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionListRequest{Room: room})
+	if e != nil || len(list.Sessions) != 2 || list.Seq != posted.Seq {
+		t.Fatalf("list %+v, error %v", list, e)
+	}
+	for _, item := range list.Sessions {
+		want := contract.TurnID("")
+		if item.ID == session {
+			want = contract.TurnID("turn_" + session)
+		}
+		if item.Turn != want {
+			t.Fatalf("session %s turn %q, want %q", item.Name, item.Turn, want)
+		}
+	}
+}
