@@ -690,6 +690,7 @@ The table below lists the transitions. Each row is one observed change, and it e
 | lost | closing | the session closes while its host is unreachable; closing waits for the host or its removal |
 | closing | failed | the host returns without the container, or the owner removes the host; there is no archive |
 | lost | ready | the host is back, the container still runs, and the box agent reconnected |
+| lost | stopped | the host is back and the container has exited |
 | lost | failed | the host is back without the container, or the owner removes the host |
 
 The owner can close a session in any box state. A close cancels a step in progress first. Removal treats a part that is already gone (forward, container, slice) as done, so a close during `creating` or `starting` removes only what exists. A close while the box is `lost` waits in `closing` until the host returns or the owner removes the host. A box that ends `failed` this way has no archive: work that was not pushed is lost.
@@ -799,7 +800,7 @@ Table: `archives` (`session`, `repo`, `ref`, `commit_sha`, `created_at`, `expire
 
 ### 5.10 Host failure and relocation
 
-**Host failure.** The engine sends a heartbeat over each master every 10 s. After 3 misses, the host is `unreachable`, and its boxes are `lost`. A lost box waits for its host. When the host returns, the engine reconciles by the container label `dyna.box=<id>`: a running container goes back to `ready` when its box agent reconnects, and a missing one becomes `failed`. If the owner removes a host for good, its boxes become `failed`, and work that was not pushed is lost. No box starts again on another host (owner, 2026-10-30, r22). `dyna host drain` stops new placement on a host.
+**Host failure.** The engine sends a heartbeat over each master every 10 s. After 3 misses, the host is `unreachable`, and its boxes are `lost`. A lost box waits for its host. When the host returns, the engine reconciles by the container label `dyna.box=<id>`: a running container goes back to `ready` when its box agent reconnects, an exited container becomes `stopped`, and a missing one becomes `failed`. The engine performs the same inventory at startup. Each good heartbeat records free disk and its check time for admission. If the owner removes a host for good, its boxes become `failed`, and work that was not pushed is lost. No box starts again on another host (owner, 2026-10-30, r22). `dyna host drain` stops new placement on a host.
 
 **Control-plane relocation.** The control plane stays relocatable, and a written manual procedure moves it (owner, 2026-10-30, r22). Boxes keep running throughout, and their box agents buffer.
 
