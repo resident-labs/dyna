@@ -23,6 +23,9 @@ type Service interface {
 	ComputerChanged(context.Context, contract.Principal, contract.ComputerChangedRequest) (contract.ComputerChangedResponse, *contract.Error)
 	ComputerWatch(context.Context, contract.SessionID) (<-chan []byte, *contract.Error)
 	ComputerFrames(context.Context, contract.Principal, uint64, io.Reader) *contract.Error
+	RuleAdd(context.Context, contract.Principal, contract.RuleAddRequest) (contract.RuleAddResponse, *contract.Error)
+	RuleRemove(context.Context, contract.Principal, contract.RuleRemoveRequest) (contract.RuleRemoveResponse, *contract.Error)
+	RuleList(context.Context, contract.Principal, contract.RuleListRequest) (contract.RuleListResponse, *contract.Error)
 	RoomList(context.Context, contract.Principal, contract.RoomListRequest) (contract.RoomListResponse, *contract.Error)
 	SessionList(context.Context, contract.Principal, contract.SessionListRequest) (contract.SessionListResponse, *contract.Error)
 	HostexecRun(context.Context, contract.Principal, contract.HostexecRunRequest) (contract.HostexecRunResponse, *contract.Error)

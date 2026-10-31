@@ -892,7 +892,11 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 			return contract.BoxHelloResponse{}, failure(err)
 		}
 	}
-	return contract.BoxHelloResponse{Session: session.ID, Box: session.Box, Model: model, Repos: repos}, nil
+	rules, problem := s.RuleList(ctx, caller, contract.RuleListRequest{Room: session.Room})
+	if problem != nil {
+		return contract.BoxHelloResponse{}, problem
+	}
+	return contract.BoxHelloResponse{Session: session.ID, Box: session.Box, Model: model, Repos: repos, Rules: rules.Rules}, nil
 }
 
 func (s *Service) DeliveryDone(ctx context.Context, caller contract.Principal, req contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error) {
