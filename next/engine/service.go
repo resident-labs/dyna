@@ -46,7 +46,6 @@ type Service struct {
 	hostexecTimeout    func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 	now                func() time.Time
 	mu                 sync.Mutex
-	treeMu             sync.Mutex // serializes depth checks with tree changes
 	wakeMu             sync.Mutex
 	wakePending        map[contract.SessionID]bool
 	wakeSignal         chan struct{}

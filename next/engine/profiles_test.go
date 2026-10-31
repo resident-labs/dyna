@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 func TestProfileSurfaceValidation(t *testing.T) {
@@ -96,5 +97,56 @@ func TestProfileRatings(t *testing.T) {
 		if _, err := LoadProfiles(path); err == nil {
 			t.Fatalf("accepted rating %s", invalid)
 		}
+	}
+}
+
+// A removal cannot pass its usage check while an assignment is committing.
+
+func TestProfileRemovalWaitsForAssignment(t *testing.T) {
+	s, room, root, ctx := setupRoot(t)
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	data := `{"p":{"provider":"anthropic","model":"a","allowedModels":["a"],"thinking":"low"},"q":{"provider":"anthropic","model":"a","allowedModels":["a"],"thinking":"low"}}`
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := LoadProfiles(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.profiles = p
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	session := store.Session{ID: "profile-race", Room: room, Name: "profile-race", Profile: "p", Box: "profile-race-box"}
+	event, err := s.event(room, owner, contract.SessionStarted{Session: session.ID, Parent: root, Name: session.Name, Profile: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	boxEvent, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Box: session.Box, Session: session.ID, To: contract.BoxPending})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	started := make(chan *contract.Error, 1)
+	go func() {
+		started <- p.WithProfile("p", func() *contract.Error {
+			close(entered)
+			<-release
+			if _, err := s.store.StartSession(ctx, session, root, contract.BoxSizeAgent, "", event, boxEvent, "", false, "", 0); err != nil {
+				return failure(err)
+			}
+			return nil
+		})
+	}()
+	<-entered
+	removed := make(chan *contract.Error, 1)
+	go func() {
+		_, problem := s.ProfileRemove(ctx, owner, contract.ProfileRemoveRequest{Name: "p"})
+		removed <- problem
+	}()
+	close(release)
+	if problem := <-started; problem != nil {
+		t.Fatal(problem)
+	}
+	if problem := <-removed; problem == nil || problem.Code != contract.ErrConflict {
+		t.Fatalf("removal: %v", problem)
 	}
 }
