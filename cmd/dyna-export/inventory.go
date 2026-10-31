@@ -33,7 +33,7 @@ func inventory() []fieldInventory {
 		typ              reflect.Type
 		carried, dropped []string
 	}{
-		{"Rule", reflect.TypeOf(goals.Rule{}), []string{"ID", "Text"}, []string{"Setter", "SetterName", "CreatedAt", "UpdatedAt", "Edits"}},
+		{"Rule", reflect.TypeOf(goals.Rule{}), []string{"Text"}, []string{"ID", "Setter", "SetterName", "CreatedAt", "UpdatedAt", "Edits"}},
 		{"Goal", reflect.TypeOf(goals.Goal{}), []string{"ID", "Room", "Text", "Detail", "Amendments", "Setter", "CreatedAt"}, []string{"Holders", "Shared", "NextItem", "ItemsClosed", "State", "UpdatedAt", "Edits", "Done", "ExpediteUntil", "LegacyOwnerHeld"}},
 		{"Item", reflect.TypeOf(goals.Item{}), []string{"ID", "Text", "State", "Assignee"}, []string{"UpdatedAt"}},
 		{"Question", reflect.TypeOf(questions.Question{}), []string{"ID", "Room", "Asker", "AskerKind", "Text", "Options", "Meanwhile", "AskedAt", "Kind", "Terminal"}, []string{"To", "Post", "State", "Answer", "Withdrawn", "GroupKey", "AskedTurn", "AnswerDelivered", "Human"}},
