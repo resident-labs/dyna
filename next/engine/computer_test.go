@@ -250,3 +250,31 @@ func TestOldComputerStreamDoesNotEndNewWatch(t *testing.T) {
 	default:
 	}
 }
+
+func TestShellWatchGenerationAndStop(t *testing.T) {
+	s, _, id, ctx := setup(t)
+	connectAgent(ctx, t, s, id)
+	channelCtx, cancelChannel := context.WithCancel(ctx)
+	defer cancelChannel()
+	messages, problem := s.BoxChannel(channelCtx, contract.Principal{Kind: contract.PrincipalSession, Session: id})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	watchCtx, cancel := context.WithCancel(ctx)
+	ch, problem := s.ShellWatch(watchCtx, id)
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	start := (<-messages).Body.(contract.ShellWatchStart)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
+	s.ShellOutput(ctx, caller, contract.ShellOutputRequest{Generation: start.Generation - 1, Jobs: []contract.ShellJobOutput{{Text: "old"}}})
+	s.ShellOutput(ctx, caller, contract.ShellOutputRequest{Generation: start.Generation, Jobs: []contract.ShellJobOutput{{Text: "new"}}})
+	if got := <-ch; got.Text != "new" {
+		t.Fatalf("got %+v", got)
+	}
+	cancel()
+	<-ch
+	if _, ok := (<-messages).Body.(contract.ShellWatchStop); !ok {
+		t.Fatal("missing stop")
+	}
+}
