@@ -11,8 +11,8 @@
   // A row without a value does not show. Jobs opens the dock's list on this session, and stays while the box is ready so a
   // finished job can be reached. It counts the jobs the engine lists, as that list does, because session.list's count can
   // lag, and a job's shell.job.ended takes it off at once; until they load, or with none running, it reads Jobs.
-  let { store, room, session, hadJobs, navigate, onjobs }: {
-    store: RoomStore; room: string; session: string; hadJobs: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onjobs: (event: MouseEvent) => void;
+  let { store, room, session, navigate, onjobs }: {
+    store: RoomStore; room: string; session: string; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onjobs: (event: MouseEvent) => void;
   } = $props();
   const boxes: Record<BoxState, string> = {
     pending: "Starting", creating: "Starting", starting: "Starting", ready: "Ready", stopped: "Stopped",
@@ -22,7 +22,7 @@
   let parent = $derived(open?.parent && store.names.get(open.parent));
   let box = $derived(store.boxes.get(session));
   let failure = $derived(store.boxFailures.get(session));
-  let hasJobs = $derived(box === "ready" && hadJobs);
+  let hasJobs = $derived(box === "ready" && store.hadJobs.has(session));
   const listed = new SvelteMap<string, ShellJob>();
   let visible = $state(document.visibilityState === "visible");
   $effect(() => {
