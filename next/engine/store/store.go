@@ -55,6 +55,8 @@ type Store struct {
 	done          chan struct{}
 	checkDone     chan struct{}
 	mu            sync.Mutex
+	dispatchMu    sync.RWMutex
+	draining      bool
 	errMu         sync.Mutex
 	closed        bool
 	first         error
