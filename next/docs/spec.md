@@ -401,7 +401,7 @@ For speed, stat context files and the skills folder first; read only changed fil
 
 #### Tools
 
-Each `contract/tools/` toolkit registers one area tool with a flat `action` enum, title, MCP hints, action help and typed `Access` (`OwnerAccess`, `UserAccess`, `BoxAccess`, `OwnerLocalAccess`). Tree and grant checks stay in the services. CLI help uses the same registry. The server omits owner entries. Refusals return `isError` and shared typed `{code, message}` with a fix. Creating actions accept optional `client_id`; the same caller's retry returns the first result. This covers post, session start, hostexec request_grant, goal set and issue file.
+Each `contract/tools/` toolkit registers one area tool with a flat `action` enum, title, MCP hints, action help and typed `Access` (`OwnerAccess`, `UserAccess`, `BoxAccess`, `OwnerLocalAccess`). Tree and grant checks stay in the services. CLI help uses the same registry. The server omits owner entries. Refusals return `isError` and shared typed `{code, message}` with a fix. Creating actions accept optional `client_id`; the same caller's retry returns the first result. This covers post, session start, hostexec request_grant, goal set and issue file. Posts deduplicate on `events.client_id`; only non-event creations use `client_replays`. Archive maintenance removes replay keys older than the 24-hour retry window.
 
 | Tool | Actions | Methods | Phase |
 |---|---|---|---|
@@ -430,12 +430,12 @@ At dispatch, the engine renders ordered `Sections []ContextSection{Key, Text}` i
 
 | Section key | Contents | Cap (tokens) |
 |---|---|---|
-| `dyna_goal` | own goal, its done condition and open items | 200 |
+| `dyna_goal` (phase 2) | own goal, its done condition and open items | 200 |
 | `dyna_children` | open children, stalest first: profile, state, current item, PR state; at most 8 rows | 250 |
 | `dyna_requests` | operations and questions waiting on this session, and its own that wait on others | 150 |
 | `dyna_prs` | tracked PRs: approval, CI, merge state | 150 |
 | `dyna_profiles` | ratings and limits; only for a session that may start children | 300 |
-| `dyna_usage` | each account window in 10% steps, with pace: ahead, on or under | 80 |
+| `dyna_usage` (phase 2) | each account window in 10% steps, with pace: ahead, on or under | 80 |
 
 Usage names accounts by provider and number, not identity-bearing labels. Pace compares usage share to elapsed window share: over 10 points above is ahead, over 10 below is under, otherwise on. No section contains timestamps or durations.
 
@@ -449,7 +449,7 @@ After the M2 trial parts, phase 1 ships the registry, ten phase-1 toolkits, MCP 
 
 A sandbox evaluation compares CLI, caller and declared on 20 fixed tasks across Opus, Sonnet, ChatGPT, zai and Kimi through CLIProxyAPI. Measure accuracy, wrong and extra calls, tokens, cache share and time. Per provider, check byte-identical tool arrays after the proxy between compactions. Report cache share and model behavior after instructions are added or removed, a child finishes, usage pace changes, a tool search hits, a skill is added and compaction occurs. Check aliased tools, long calls and Pi's no-change time. On every provider, MCP accuracy must meet CLI and tokens per task fall at least 20%. A failing provider stays off until fixed; the better shape wins. Once the gate passes the default turns on; the next release removes the switch and old hello.
 
-Phase 2 in M3 adds `goal`, `issue`, `question`, `workflow`, `subscription`, PR approval and status, `dyna_goal`, and skills with their features.
+Phase 2 in M3 adds `goal`, `issue`, `question`, `workflow`, `subscription`, PR approval and status, `dyna_goal`, `dyna_usage`, and skills with their features.
 
 ## 8. Migration bundle and cutover
 
