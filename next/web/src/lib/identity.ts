@@ -14,10 +14,10 @@ export function initials(name: string): string {
   return (parts.length > 1 ? parts[0][0] + parts[1][0] : name.slice(0, 2)).toUpperCase();
 }
 
-// Initials that tell rooms apart, as the rail shows them: each name, in name order, takes the first free of its two
-// words' first letters, its first two letters, then its first letter and a digit. "design-system" and "docs-site"
-// give "DS" and "DO"; the order makes every page agree.
-export function roomInitials(names: string[]): Map<string, string> {
+// Initials that tell names apart, the rooms on the rail or the sessions in one room: each name, in name order, takes
+// the first free of its two words' first letters, its first two letters, then its first letter and a digit.
+// "design-system" and "docs-site" give "DS" and "DO"; the order makes every page agree.
+export function distinctInitials(names: string[]): Map<string, string> {
   const taken = new Set<string>(), result = new Map<string, string>();
   for (const name of [...new Set(names)].sort((a, b) => a.localeCompare(b))) {
     const first = (words(name)[0] ?? name).charAt(0);
