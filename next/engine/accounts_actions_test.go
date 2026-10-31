@@ -50,7 +50,7 @@ func TestAccountActionKeepsSecretOutOfAudit(t *testing.T) {
 	}
 	defer st.Close()
 	ctx := context.Background()
-	proxy, err := model.NewProxy(t.TempDir(), "invented-management-key")
+	proxy, err := model.NewProxy(t.TempDir(), "invented-management-key", model.KeyProvider{Provider: "zai", DisplayName: "z.ai", KeyName: "ZAI_API_KEY", URL: "https://example.com/v1", Models: []contract.CatalogModel{{ID: "model"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestAccountActionKeepsSecretOutOfAudit(t *testing.T) {
 	if err := core.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": actions.Entry()}, time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	_, problem := actions.AccountsSetKey(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.AccountsSetKeyRequest{Provider: contract.ProviderZAI, Label: "Invented", Key: secret})
+	_, problem := actions.AccountsSetKey(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.AccountsSetKeyRequest{Provider: contract.AccountProvider("zai"), Label: "Invented", Key: secret})
 	if problem != nil {
 		t.Fatal("account action failed")
 	}

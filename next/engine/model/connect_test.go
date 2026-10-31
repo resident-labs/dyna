@@ -24,7 +24,7 @@ func TestProviderFlowsMatchOAuthDispatch(t *testing.T) {
 	connections := proxy.Connections("invented", nil, time.Now)
 	for _, option := range oauthProviders {
 		result, err := connections.Start(context.Background(), contract.AccountsConnectRequest{Provider: option.info.ID})
-		if err != nil || result.Flow != option.info.ConnectFlow || <-received != option.proxy {
+		if err != nil || result.Flow != option.info.Flows[0] || <-received != option.proxy {
 			t.Fatalf("flow dispatch disagreed with catalog for %s", option.info.ID)
 		}
 	}

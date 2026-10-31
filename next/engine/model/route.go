@@ -68,7 +68,8 @@ func handler(client *http.Client, clientKey, sessionID, namespace string, allowe
 		}
 		if gemini {
 			modelAction := strings.TrimPrefix(r.URL.Path, "/model/v1beta/models/")
-			model, action, _ := strings.Cut(modelAction, ":")
+			split := strings.LastIndexByte(modelAction, ':')
+			model, action := modelAction[:split], modelAction[split+1:]
 			if _, ok := allowed[model]; !ok || len(eligibleIDs) == 0 {
 				refuse(w, http.StatusForbidden, "model_forbidden", "The profile does not allow this model.")
 				return

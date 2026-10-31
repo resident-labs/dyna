@@ -137,9 +137,6 @@ const (
 	ProviderOpenAI     AccountProvider = "openai"
 	ProviderKimiCoding AccountProvider = "kimi-coding"
 	ProviderXAI        AccountProvider = "xai"
-	ProviderZAI        AccountProvider = "zai"
-	ProviderOpencodeGo AccountProvider = "opencode-go"
-	ProviderDeepSeek   AccountProvider = "deepseek"
 )
 
 // AccountLabel holds no credential; the owner signs in again in CLIProxyAPI.

@@ -13,6 +13,8 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
+var testKeyProviders = []KeyProvider{{Provider: "zai", DisplayName: "z.ai", KeyName: "ZAI_API_KEY", URL: "https://example.com/v1", Models: []contract.CatalogModel{{ID: "glm-test", Name: "GLM"}}}}
+
 type failingAccountCleanup struct{ *store.Store }
 
 func (f failingAccountCleanup) RemoveAccount(context.Context, contract.AccountID) error {
@@ -58,9 +60,9 @@ func TestKeyActivationFailureRollbackIsRecoverable(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	p := &Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
+	p := &Proxy{keyProviders: testKeyProviders, client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
 	c := p.Connections("key", failingAccountCleanup{st}, time.Now)
-	if result, err := c.SetKey(context.Background(), contract.AccountsSetKeyRequest{Provider: contract.ProviderZAI, Label: "Invented", Key: "invented-key"}); err == nil || result.AccountID != "" {
+	if result, err := c.SetKey(context.Background(), contract.AccountsSetKeyRequest{Provider: contract.AccountProvider("zai"), Label: "Invented", Key: "invented-key"}); err == nil || result.AccountID != "" {
 		t.Fatal("partial rollback reported success")
 	}
 	accounts, err := st.Accounts(context.Background())
@@ -111,9 +113,9 @@ func TestKeyActivationFailureRollsBack(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	p := &Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
+	p := &Proxy{keyProviders: testKeyProviders, client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
 	c := p.Connections("key", st, time.Now)
-	if _, err := c.SetKey(context.Background(), contract.AccountsSetKeyRequest{Provider: contract.ProviderZAI, Label: "Invented", Key: "invented-key"}); err == nil {
+	if _, err := c.SetKey(context.Background(), contract.AccountsSetKeyRequest{Provider: contract.AccountProvider("zai"), Label: "Invented", Key: "invented-key"}); err == nil {
 		t.Fatal("activation failure reported success")
 	}
 	accounts, err := st.Accounts(context.Background())
@@ -157,9 +159,9 @@ func TestKeyProvidersBindOnlyDurableCredentials(t *testing.T) {
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
-	p := &Proxy{client: &http.Client{Transport: quotaTestTransport{url: server.URL, base: http.DefaultTransport}}}
+	p := &Proxy{keyProviders: testKeyProviders, client: &http.Client{Transport: quotaTestTransport{url: server.URL, base: http.DefaultTransport}}}
 	c := p.Connections("invented-management-key", st, time.Now)
-	for _, provider := range KeyProviders() {
+	for _, provider := range testKeyProviders {
 		response, err := c.SetKey(ctx, contract.AccountsSetKeyRequest{Provider: provider.Provider, Label: "Invented", Key: "invented-key"})
 		if err != nil || response.AccountID == "" || string(response.AccountID) == lastID {
 			t.Fatal("key was not bound privately")
