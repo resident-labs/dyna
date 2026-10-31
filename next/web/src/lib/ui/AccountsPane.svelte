@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
+  import { count } from "../feed.ts";
   import { accountRows, accountState, refused, removalPrompt, canReconnect, reconnectUnavailable } from "../accounts.ts";
   import type { Account, AccountProviderInfo, AccountsConnectResponse } from "../contract.gen.ts";
   import StatusPill from "./StatusPill.svelte";
@@ -158,11 +159,11 @@
               {@const status = accountState(account)}
               <div class="row"><div><strong>{account.label || `${provider.displayName} account ${index + 1}`}</strong>
                 {#if status.pill} <StatusPill tone={status.pill.tone} label={status.pill.label} />{/if}
-                <div class="muted">{account.rooms?.length ? `${account.rooms.length} rooms` : "Every room"}{#if status.line}{" · "}{status.line}{/if}</div></div>
+                <div class="muted">{account.rooms?.length ? count(account.rooms.length, "room") : "Every room"}{#if status.line}{" · "}{status.line}{/if}</div></div>
                 {#if account.state === "sign_in_expired"}
                   <div class="expired">{#if canReconnect(account, provider.connectMethod)}<button class="btn fill" type="button" onclick={() => { choose(provider, true); reconnectId = account.id; label = account.label; }}>Sign in again</button>{/if}<span>Its limits show once it is signed in.</span></div>
                 {/if}
-                  {#if removing === account.id}<div class="remove-confirm"><span>{removalPrompt(provider.connectMethod)}{#if account.rooms?.length} Its room limits will be removed too.{/if}</span><button class="btn danger" type="button" disabled={busy} onclick={() => void remove(account)}>Remove</button><button class="btn ghost" type="button" disabled={busy} onclick={() => { removing = undefined; removeFailed = false; replaceAfterRemove = false; }}>Keep</button>{#if removeFailed}<span class="error" role="alert">The account was not removed. Try again.</span>{/if}</div>
+                  {#if removing === account.id}<div class="remove-confirm"><span>{removalPrompt(provider.connectMethod)}{#if account.rooms?.length}{" Its room limits will be removed too."}{/if}</span><button class="btn danger" type="button" disabled={busy} onclick={() => void remove(account)}>Remove</button><button class="btn ghost" type="button" disabled={busy} onclick={() => { removing = undefined; removeFailed = false; replaceAfterRemove = false; }}>Keep</button>{#if removeFailed}<span class="error" role="alert">The account was not removed. Try again.</span>{/if}</div>
                   {:else}<button class="btn ghost" type="button" onclick={() => { removing = account.id; removeFailed = false; replaceAfterRemove = false; }}>Remove</button>{/if}
               </div>
               {#if reconnectId === account.id}{@render form()}{/if}
