@@ -6,6 +6,7 @@ type Method string
 
 const (
 	MethodWebLogin         Method = "web.login"
+	MethodConversationRead Method = "conversation.read"
 	MethodRoomList         Method = "room.list"
 	MethodSessionList      Method = "session.list"
 	MethodArchiveDone      Method = "archive.done"
@@ -51,12 +52,20 @@ type Error struct {
 	Message string    `json:"message"`
 }
 
+type ConversationReadRequest struct {
+	Room         RoomID       `json:"room"`
+	Conversation Conversation `json:"conversation"`
+	Seq          int64        `json:"seq"`
+}
+type ConversationReadResponse struct{}
+
 type RoomListRequest struct{}
 type RoomSummary struct {
-	ID      RoomID      `json:"id"`
-	Name    string      `json:"name"`
-	Waiting []OpID      `json:"waiting"` // pending owner-class operations, which only the owner decides
-	Working []SessionID `json:"working"` // open sessions with a running turn
+	ID       RoomID      `json:"id"`
+	Name     string      `json:"name"`
+	LastRead int64       `json:"lastRead"`
+	Waiting  []OpID      `json:"waiting"` // pending owner-class operations, which only the owner decides
+	Working  []SessionID `json:"working"` // open sessions with a running turn
 }
 type RoomListResponse struct {
 	Rooms []RoomSummary `json:"rooms"`
@@ -67,6 +76,7 @@ type SessionListRequest struct {
 	Room RoomID `json:"room"`
 }
 type SessionSummary struct {
+	LastRead    int64         `json:"lastRead"`
 	ID          SessionID     `json:"id"`
 	Name        string        `json:"name"`
 	Parent      SessionID     `json:"parent"`

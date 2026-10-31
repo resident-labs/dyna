@@ -41,6 +41,7 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 		return a.web.login(ctx, p, req)
 	})
+	call(mux, contract.MethodConversationRead, c, owner, a.service.ConversationRead)
 	call(mux, contract.MethodRoomList, c, owner, a.service.RoomList)
 	call(mux, contract.MethodSessionList, c, user, a.service.SessionList)
 	call(mux, contract.MethodHostexecRun, c, box, a.service.HostexecRun)
