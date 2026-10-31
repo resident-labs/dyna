@@ -7,14 +7,14 @@
   import FailedTurnRow from "./FailedTurnRow.svelte";
   import WorkRow from "./WorkRow.svelte";
   import WorkingDot from "./WorkingDot.svelte";
-  import { feedRows, type Row } from "../feed.ts";
+  import { feedRows, type Quote, type Row } from "../feed.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { Conversation, PostRequest, Principal } from "../contract.gen.ts";
 
   // unsent holds the app's failed sends of this conversation; see EventWindow.onunsent.
-  let { store, home, intro, unsent, onunsent, onsettled, element = $bindable() }: {
+  let { store, home, intro, unsent, onunsent, onsettled, onforward, element = $bindable() }: {
     store: RoomStore; home: Conversation; intro: Snippet; unsent: PostRequest[];
-    onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; element?: HTMLDivElement;
+    onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onforward: (quote: Quote) => void; element?: HTMLDivElement;
   } = $props();
 
   // The view is keyed by its conversation, so its window lives as long as the view.
@@ -89,7 +89,7 @@
     onstart={() => void view.loadOlder()} onend={() => void view.loadNewer()}>
     {#snippet row(item: Item)}
       {#if item.kind === "post"}<PostRow row={item} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
-        onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} />
+        onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} onforward={() => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments })} />
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} root={root(item.session)} />
       {:else if item.kind === "work"}<WorkRow row={item} {name} open={opened.has(item.key)} ontoggle={() => toggle(item.key)} />
       {:else if item.kind === "working"}<p class="working"><WorkingDot />{name(item.session)} is working</p>

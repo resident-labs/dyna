@@ -1,5 +1,6 @@
 <script lang="ts" module>
   import DOMPurify from "dompurify";
+  import { marked } from "marked";
   // Links in posts open in a new tab without access to this page.
   DOMPurify.addHook("afterSanitizeAttributes", node => {
     if (node instanceof HTMLAnchorElement) {
@@ -7,19 +8,28 @@
       node.rel = "noopener noreferrer";
     }
   });
+  // Markdown from any author is sanitized before it reaches the page. Images wait for the files view.
+  export const render = (text: string) => DOMPurify.sanitize(marked.parse(text, { async: false, gfm: true, breaks: true }), { FORBID_TAGS: ["img"] });
 </script>
 
 <script lang="ts">
-  import { marked } from "marked";
   import Avatar from "./Avatar.svelte";
+  import Icon from "./Icon.svelte";
   import { fileSize, formatTime, isImage, type Row } from "../feed.ts";
   import type { Attachment } from "../contract.gen.ts";
   import { hue } from "../identity.ts";
-  let { row, author, to, root, onretry, ondiscard }: {
-    row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void;
+  let { row, author, to, root, onretry, ondiscard, onforward }: {
+    row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward: () => void;
   } = $props();
-  // Markdown from any author is sanitized before it reaches the page. Images wait for the files view.
-  let html = $derived(DOMPurify.sanitize(marked.parse(row.text, { async: false, gfm: true, breaks: true }), { FORBID_TAGS: ["img"] }));
+  let html = $derived(render(row.text));
+  // Copy text answers in the bar for 2 seconds, as in v1.
+  let copied = $state("");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  function copy() {
+    clearTimeout(timer);
+    navigator.clipboard.writeText(row.text).then(() => { copied = "Copied"; }, () => { copied = "Could not copy"; })
+      .finally(() => { timer = setTimeout(() => { copied = ""; }, 2000); });
+  }
   // The engine serves each file sandboxed; the owner's cookie covers the request.
   const url = (file: Attachment) => `/v1/files/${encodeURIComponent(file.sha256)}`;
   // The type badge on a file card, such as "TXT", as in v1.
@@ -28,7 +38,11 @@
   let others = $derived(row.attachments.filter(file => !isImage(file)));
 </script>
 
-<article class="post" class:first={row.first} class:pending={row.pending} aria-busy={row.pending && !row.pending.failed}>
+<!-- A tap focuses the row on a touch screen, so focus shows its action bar as hover does. -->
+<article class="post" class:first={row.first} class:pending={row.pending} aria-busy={row.pending && !row.pending.failed} tabindex="-1">
+  {#if !row.pending}<div class="bar"><span class="status" role="status">{copied}</span>
+    <button type="button" aria-label="Forward" title="Forward" onclick={onforward}><Icon name="forward" /></button>
+    <button type="button" aria-label="Copy text" title="Copy text" onclick={copy}><Icon name={copied === "Copied" ? "check" : "copy"} /></button></div>{/if}
   {#if row.first}
     <Avatar kind={row.from.kind} name={author} {root} />
     <p class="name"><strong class={row.from.kind} style:--hue={hue(author)}>{author}</strong>
@@ -51,8 +65,21 @@
 <style>
   /* The avatar sits in a 32 px gutter; later posts of a run align under the first one's text. */
   .post { display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: 12px; padding: 1px 16px; }
-  .post:hover { background: var(--hover); }
+  .post { position: relative; }
+  .post:hover, .post:focus-within { background: var(--hover); }
+  .post:focus { outline: none; }
   .post > :not(:global(.avatar)) { grid-column: 2; }
+  /* v1's bar: it floats over the row's top right and is laid out while hidden, so showing it never moves the row. */
+  .post > .bar { grid-column: auto; position: absolute; top: -14px; right: 16px; z-index: 1; display: flex; align-items: center; gap: 2px; padding: 2px;
+    background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 14px rgb(0 0 0 / 18%); opacity: 0; pointer-events: none; }
+  /* Hidden by opacity, not visibility, so Tab still reaches the buttons and shows the bar. */
+  .post:hover > .bar, .post:focus-within > .bar { opacity: 1; pointer-events: auto; }
+  .bar button { all: unset; display: grid; place-items: center; width: 28px; height: 26px; border-radius: 6px; color: var(--muted); cursor: pointer; }
+  .bar button:hover { background: var(--selected); color: var(--text); }
+  .bar button:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+  @media (hover: none) { .bar button { width: 40px; height: 40px; } }
+  .status { color: var(--muted); font-size: 12px; }
+  .status:not(:empty) { padding: 0 6px; }
   .post > :global(.avatar) { grid-row: 1 / span 3; margin-top: 2px; }
   .first { padding-top: 14px; }
   /* A post the engine has not confirmed is dimmed; its Not sent line keeps full contrast in the danger color, because the owner must act. */
