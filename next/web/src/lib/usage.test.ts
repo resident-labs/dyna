@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { busiestWindow, providerName, windowMeter } from "./usage.ts";
+import { busiestWindow, causeText, providerName, windowMeter } from "./usage.ts";
+
+test("unreachable usage is muted while expired sign-in needs attention", () => {
+  assert.equal(causeText.unreachable.tone, undefined);
+  assert.equal(causeText.sign_in_expired.tone, "warning");
+});
 
 test("names a usage account by its provider, never by its label", () => {
   assert.equal(providerName("claude"), "Claude");
