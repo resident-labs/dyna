@@ -16,21 +16,29 @@ import (
 // Pi discovers room instructions from its working directory.
 func TestOpenUsesWorkDirectory(t *testing.T) {
 	work := t.TempDir()
-	room := filepath.Join(t.TempDir(), "AGENTS.md")
-	if err := os.WriteFile(room, []byte("room-instructions"), 0600); err != nil {
+	repo := filepath.Join(work, "owner", "repo")
+	if err := os.MkdirAll(repo, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(room, filepath.Join(work, "AGENTS.md")); err != nil {
-		t.Fatal(err)
+	agent := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", agent)
+	for path, content := range map[string]string{
+		filepath.Join(agent, "AGENTS.md"): "global",
+		filepath.Join(work, "AGENTS.md"):  "room",
+		filepath.Join(repo, "AGENTS.md"):  "repository",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	script := `read -r request; printf '{"id":"1","type":"response","success":true,"data":{"sessionFile":"%s"}}\n' "$(cat AGENTS.md)"; read -r wait`
-	h, err := Open(context.Background(), "sh", []string{"-c", script}, "", work)
+	script := `read -r request; files="$(cat "$PI_CODING_AGENT_DIR/AGENTS.md")-$(cat ../../AGENTS.md)-$(cat AGENTS.md)"; printf '{"id":"1","type":"response","success":true,"data":{"sessionFile":"%s"}}\n' "$files"; read -r wait`
+	h, err := Open(context.Background(), "sh", []string{"-c", script}, "", repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
-	if got := h.SessionFile(); got != "room-instructions" {
-		t.Fatalf("work directory exposed %q, want room instructions", got)
+	if got := h.SessionFile(); got != "global-room-repository" {
+		t.Fatalf("work directory exposed %q, want global, room, and repository instructions", got)
 	}
 }
 
