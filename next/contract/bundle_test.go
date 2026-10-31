@@ -12,7 +12,6 @@ import (
 var bundleTime = time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
 
 func filledGlobalBundle() GlobalBundle {
-	owner := ImportedAuthor{Kind: PrincipalOwner, Label: "owner"}
 	return GlobalBundle{
 		Version:      BundleV1,
 		Rooms:        []RoomName{"dyna"},
