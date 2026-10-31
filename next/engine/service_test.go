@@ -1568,3 +1568,21 @@ func TestPostWakesOnlyTargetBox(t *testing.T) {
 		t.Fatalf("post woke %v, want only %s", ids, a.Session)
 	}
 }
+
+func TestSessionStartSize(t *testing.T) {
+	s, room, lead, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	sized, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "sized", Profile: "test", Size: contract.BoxSizeLarge})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if got, err := s.store.Box(ctx, sized.Box); err != nil || got.Size.Name != contract.BoxSizeLarge {
+		t.Fatalf("size %v: %v", got.Size.Name, err)
+	}
+	if _, e = s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "bad", Profile: "test", Size: "huge"}); e == nil || e.Code != contract.ErrInvalid {
+		t.Fatalf("unknown size: %v", e)
+	}
+	if _, e = s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: lead, Size: contract.BoxSizeSmall}); e == nil || e.Code != contract.ErrInvalid {
+		t.Fatalf("child size: %v", e)
+	}
+}
