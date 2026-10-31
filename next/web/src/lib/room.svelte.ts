@@ -2,10 +2,9 @@ import { SvelteMap, SvelteSet, createSubscriber } from "svelte/reactivity";
 import { call } from "./client.ts";
 import { stream } from "./stream.ts";
 import { EventWindow } from "./window.svelte.ts";
-import { boxFailures, countOf, statusOf, type BoxFailure, type Counts, type Status } from "./status.ts";
+import { boxFailures, countOf, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
 import type { BoxState, Conversation, FailureCause, Decision, Event, OpRequested, OpResult, OpState, RoomRule, SessionStarted } from "./contract.gen.ts";
 
-type TurnEndedEvent = Extract<Event, { type: "turn.ended" }>;
 
 // An operation of the room as the Requests panel shows it: its card, then its decision and run.
 export type Request = OpRequested & { state: OpState; decision?: Decision; result?: OpResult };
@@ -16,7 +15,7 @@ const readKey = (conversation: Conversation) => conversation.kind === "dm" ? con
 // Sessions, boxes, turns and operations come from session.list and op.list once, then from
 // live events, never from history. Each open conversation reads its events in its own window.
 export class RoomStore {
-  readonly sessions = new SvelteMap<string, SessionStarted>();
+  readonly sessions = new SvelteMap<string, SessionStarted & { startedAt: string; lastTurnAt?: string }>();
   readonly boxes = new SvelteMap<string, BoxState>();
   readonly turns = new SvelteMap<string, string>();
   // The running turn's latest activity label per session, such as "read spec.md".
@@ -119,7 +118,7 @@ export class RoomStore {
     for (const session of list.sessions ?? []) {
       this.sessions.set(session.id, {
         session: session.id, name: session.name, parent: session.parent || undefined,
-        profile: session.profile, goal: session.goal || undefined,
+        profile: session.profile, goal: session.goal || undefined, startedAt: session.startedAt, lastTurnAt: session.lastTurnAt,
       });
       this.names.set(session.id, session.name);
       this.noteRead({ kind: "dm", session: session.id }, session.lastRead);
@@ -132,26 +131,10 @@ export class RoomStore {
       this.shellJobs.set(session.id, session.shellJobs ?? 0);
     }
     if (this.boxFailures.size) for (const [id, failure] of await boxFailures(this.room, list.seq + 1)) if (this.boxFailures.has(id)) this.boxFailures.set(id, failure);
-    // session.list says which last turns failed but not when, so the room reads turn.ended pages back from the newest
-    // until it has placed each failure. One it cannot place, as when a read fails, keeps list.seq and shows.
-    const unplaced = new Set(this.failed.keys());
-    // At most 5 pages, so a long room never waits on its whole history.
-    for (let before = list.seq + 1, pages = 0; unplaced.size && pages < 5; pages++) {
-      const page = await call("events.list", { room: this.room, afterSeq: 0, beforeSeq: before, limit: 200, types: ["turn.ended"] })
-        .catch(() => undefined);
-      const events = page?.events ?? [];
-      const found = new Map<string, TurnEndedEvent>();
-      for (const event of events) {
-        if (event.type === "turn.ended" && unplaced.has(event.body.session) && event.seq > (found.get(event.body.session)?.seq ?? 0)) found.set(event.body.session, event);
-      }
-      // A session's newest turn.ended is its failure, since its last outcome failed.
-      for (const [session, { seq, body }] of found) {
-        this.failed.set(session, seq);
-        if (body.cause) this.causes.set(session, body.cause);
-        unplaced.delete(session);
-      }
-      if (events.length < 200) break;
-      before = Math.min(...events.map(event => event.seq));
+    // A failure turnFailures cannot place keeps list.seq and shows.
+    for (const [session, { seq, body }] of await turnFailures(this.room, list.seq + 1, this.failed.keys())) {
+      this.failed.set(session, seq);
+      if (body.cause) this.causes.set(session, body.cause);
     }
     for (const { id, kind, by, class: level, card, expires, state } of listed.operations ?? []) {
       this.requests.set(id, { id, kind, by, class: level, card, expires, state });
@@ -191,9 +174,11 @@ export class RoomStore {
   }
 
   private step(event: Event): void {
+    const ended = event.type === "turn.ended" && this.sessions.get(event.body.session);
+    if (event.type === "turn.ended" && ended) this.sessions.set(event.body.session, { ...ended, lastTurnAt: event.at });
     switch (event.type) {
       case "session.started":
-        this.sessions.set(event.body.session, event.body);
+        this.sessions.set(event.body.session, { ...event.body, startedAt: event.at });
         this.names.set(event.body.session, event.body.name);
         break;
       case "session.closed":

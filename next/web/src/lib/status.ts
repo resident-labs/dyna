@@ -1,5 +1,5 @@
 import { call } from "./client.ts";
-import type { FailureCause } from "./contract.gen.ts";
+import type { Event, FailureCause } from "./contract.gen.ts";
 
 // One status per session, in one priority order, so the room header and the session panel count the same way. A box
 // that failed or was lost comes first, since approving a request does not repair it. Then what waits for the owner,
@@ -27,6 +27,25 @@ export async function boxFailures(room: string, beforeSeq: number): Promise<Map<
     if (to === "failed" || to === "lost") found.set(session, { box: to, cause, at: event.at, seq: event.seq });
   }
   return found;
+}
+
+// session.list says which last turns failed but not when, so this reads turn.ended pages back from the newest until it
+// has placed each failure, at most 5 pages, so a long room never waits on its whole history. A session's newest
+// turn.ended is its failure, since its last outcome failed. One it cannot place, as when a read fails, stays out.
+export async function turnFailures(room: string, beforeSeq: number, sessions: Iterable<string>): Promise<Map<string, Extract<Event, { type: "turn.ended" }>>> {
+  const unplaced = new Set(sessions);
+  const placed = new Map<string, Extract<Event, { type: "turn.ended" }>>();
+  for (let before = beforeSeq, pages = 0; unplaced.size && pages < 5; pages++) {
+    const page = await call("events.list", { room, afterSeq: 0, beforeSeq: before, limit: 200, types: ["turn.ended"] }).catch(() => undefined);
+    const events = page?.events ?? [];
+    for (const event of events) {
+      if (event.type === "turn.ended" && unplaced.has(event.body.session) && event.seq > (placed.get(event.body.session)?.seq ?? 0)) placed.set(event.body.session, event);
+    }
+    for (const session of placed.keys()) unplaced.delete(session);
+    if (events.length < 200) break;
+    before = Math.min(...events.map(event => event.seq));
+  }
+  return placed;
 }
 
 export type Counts = Record<Status, number> & { sessions: number };
