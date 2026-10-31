@@ -72,7 +72,10 @@ func (r *Reconciler) closeStep(ctx context.Context, row store.LifecycleBox) erro
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return r.store.SetArchiveRetry(ctx, row.ID, r.now().Add(30*time.Second))
+		if retryErr := r.store.SetArchiveRetry(ctx, row.ID, r.now().Add(30*time.Second)); retryErr != nil {
+			return retryErr
+		}
+		return err
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
