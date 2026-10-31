@@ -186,7 +186,8 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := st.RecoverHostexec(ctx, time.Now()); err != nil {
 		return fmt.Errorf("recover hostexec runs: %w", err)
 	}
-	accounts := engine.NewAccountActions(service, proxy.Connections(managementKey, st, time.Now))
+	quotas := proxy.Quotas(managementKey, st, time.Now)
+	accounts := engine.NewAccountActions(service, proxy.Connections(managementKey, st, time.Now), quotas)
 	if err := service.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": accounts.Entry(), "pr.open": service.PrOpen(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport), "hostexec.grant": service.HostexecGrant(), "hostexec.run": service.HostexecRunEntry()}, cfg.ApprovalsExpiry); err != nil {
 		return err
 	}
@@ -195,7 +196,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	boxes.Mirror = mirror
 	boxes.Images = &images.Builder{Recorder: service, Now: time.Now}
-	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes, quotas: proxy.Quotas(managementKey, st, time.Now), AccountActions: accounts, backupEnabled: recipient != nil}, func(c api.Caller) http.Handler {
+	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes, quotas: quotas, AccountActions: accounts, backupEnabled: recipient != nil}, func(c api.Caller) http.Handler {
 		return drain.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			session, err := st.Session(r.Context(), c.Principal.Session)
 			if err != nil {

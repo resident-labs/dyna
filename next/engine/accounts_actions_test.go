@@ -47,7 +47,7 @@ func TestAccountActionKeepsSecretOutOfAudit(t *testing.T) {
 	go func() { _ = server.Serve(proxy.Listener) }()
 	defer server.Close()
 	core := New(st, nil, nil, time.Now)
-	actions := NewAccountActions(core, proxy.Connections("invented-management-key", st, time.Now))
+	actions := NewAccountActions(core, proxy.Connections("invented-management-key", st, time.Now), proxy.Quotas("invented-management-key", st, time.Now))
 	if err := core.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": actions.Entry()}, time.Minute); err != nil {
 		t.Fatal(err)
 	}
