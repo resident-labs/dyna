@@ -46,7 +46,7 @@ func newRootCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer cancel()
-			return agent.Run(ctx, version)
+			return agent.Run(ctx)
 		},
 	})
 	var socket string

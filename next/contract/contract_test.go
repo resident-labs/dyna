@@ -113,7 +113,7 @@ func TestGeneratedWireTypes(t *testing.T) {
 }
 
 func TestBoxMessageRegistry(t *testing.T) {
-	bodies := []BoxMessageBody{TurnStart{Turn: "turn_a"}, TurnSteer{Queue: QueueSteer}, TurnStop{Reason: "stop"}, Upgrade{Version: "v2"}, Archive{}, ComputerWatchStart{Generation: 42}, ComputerWatchStop{}, ShellWatchStart{Generation: 7}, ShellWatchStop{}}
+	bodies := []BoxMessageBody{TurnStart{Turn: "turn_a"}, TurnSteer{Queue: QueueSteer}, TurnStop{Reason: "stop"}, Archive{}, ComputerWatchStart{Generation: 42}, ComputerWatchStop{}, ShellWatchStart{Generation: 7}, ShellWatchStop{}}
 	want := []BoxMessageType{"turn.start", "turn.steer", "turn.stop", "upgrade", "archive", "computer.watch.start", "computer.watch.stop", "shell.watch.start", "shell.watch.stop"}
 	if len(boxMessageTypes) != len(bodies) {
 		t.Fatalf("registry has %d entries, want %d", len(boxMessageTypes), len(bodies))

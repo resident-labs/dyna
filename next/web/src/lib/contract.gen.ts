@@ -47,12 +47,12 @@ export type PostRequest = { room: RoomID; text: string; mentions?: Array<string>
 export type PostResponse = { event: EventID; seq: number; };
 export type EventsListRequest = { room: RoomID; afterSeq: number; beforeSeq?: number; limit: number; types?: Array<EventType> | null; home?: Conversation | null; };
 export type EventsListResponse = { events: Array<Event> | null; names: Record<SessionID, string> | null; next: number; };
-export type BoxHelloRequest = { version: string; };
+export type BoxHelloRequest = {  };
 export type ModelProvider = "anthropic" | "openai";
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 export type ModelChoice = { provider: ModelProvider; id: string; thinking: ThinkingLevel; };
 export type BoxRepo = { name: RepoName; cache: string; branch: string; base: string; };
-export type BoxHelloResponse = { session: SessionID; box: BoxID; model: ModelChoice; repos?: Array<BoxRepo> | null; rules?: Array<RoomRule> | null; upgrade?: string; };
+export type BoxHelloResponse = { session: SessionID; box: BoxID; model: ModelChoice; repos?: Array<BoxRepo> | null; rules?: Array<RoomRule> | null; };
 export type TurnOutputRequest = { shellJobs: number; error?: string; cause?: FailureCause; turn: TurnID; outcome: TurnOutcome; final?: string; model: string; usage: Usage; };
 export type TurnOutputResponse = { };
 export type TurnActivityRequest = { turn: TurnID; label: string; };
@@ -69,7 +69,6 @@ export type TurnStart = { turn: TurnID; inputs: Array<TurnInput> | null; };
 export type TurnQueue = "steer" | "follow_up";
 export type TurnSteer = { input: TurnInput; queue: TurnQueue; };
 export type TurnStop = { turn: TurnID; reason: string; };
-export type Upgrade = { version: string; };
 export type ComputerWatchStart = { generation: number; };
 export type ComputerWatchStop = { };
 export type ShellWatchStart = { generation: number; };
@@ -248,7 +247,6 @@ export type BoxMessageBody =
   | { type: "turn.start"; body: TurnStart }
   | { type: "turn.steer"; body: TurnSteer }
   | { type: "turn.stop"; body: TurnStop }
-  | { type: "upgrade"; body: Upgrade }
 ;
 export interface MethodMap {
   "rule.add": { request: RuleAddRequest; response: RuleAddResponse };

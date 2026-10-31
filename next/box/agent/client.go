@@ -144,8 +144,8 @@ func (c *Client) call(ctx context.Context, method contract.Method, body []byte) 
 	}
 }
 
-func (c *Client) Hello(ctx context.Context, version string) (contract.BoxHelloResponse, error) {
-	body, err := json.Marshal(contract.BoxHelloRequest{Version: version})
+func (c *Client) Hello(ctx context.Context) (contract.BoxHelloResponse, error) {
+	body, err := json.Marshal(contract.BoxHelloRequest{})
 	if err != nil {
 		return contract.BoxHelloResponse{}, err
 	}
