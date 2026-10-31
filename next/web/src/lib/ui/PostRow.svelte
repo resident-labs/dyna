@@ -214,7 +214,7 @@
   .status { color: var(--muted); font-size: 12px; }
   .status:not(:empty) { padding: 0 6px; }
   .post > :global(.avatar) { grid-row: 1 / span 3; margin-top: 2px; }
-  .first { padding-top: 14px; }
+  .post.first { padding-top: 14px; }
   /* A post the engine has not confirmed is dimmed; its Not sent line keeps full contrast in the danger color, because the owner must act. */
   .pending > :global(:not(.unsent, .sheet)) { opacity: 0.5; }
   .unsent { margin: 2px 0 0; display: flex; align-items: baseline; gap: 12px; color: var(--danger); font-size: 12px; }
