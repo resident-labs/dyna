@@ -522,6 +522,7 @@ export class AgentSession {
 		this._unsubscribeAgent = this.agent.subscribe(this._handleAgentEvent);
 		this._installAgentToolHooks();
 		this._installAgentNextTurnRefresh();
+		this._installContextUpdates();
 		this._installAgentRequestProjection();
 		this._installAgentBoundaryHooks();
 		this._installHiddenDeclarationsProjection();
@@ -932,7 +933,7 @@ export class AgentSession {
 				toolSnippets: { ...this._baseSystemPromptOptions.toolSnippets, ...runOptions.toolSnippets },
 				toolGuidelines: { ...this._baseSystemPromptOptions.toolGuidelines, ...runOptions.toolGuidelines },
 			});
-			const updateMessage = this._preparePromptAndToolLoadout(options, nextContext.messages);
+			this._applyToolLoadout(options.selectedTools);
 			// Keep session.systemPrompt and ctx.getSystemPrompt() in step with what the provider sees.
 			this._runSystemPromptOptions = options;
 
@@ -942,11 +943,23 @@ export class AgentSession {
 					...nextContext,
 					tools: this.agent.state.tools.slice(),
 				},
-				messages: updateMessage
-					? [...(previousSnapshot?.messages ?? []), updateMessage]
-					: previousSnapshot?.messages,
+				messages: previousSnapshot?.messages,
 				model: this.agent.state.model,
 				thinkingLevel: this.agent.state.thinkingLevel,
+			};
+		};
+	}
+
+	private _installContextUpdates(): void {
+		const previousPrepareRequest = this.agent.prepareRequest;
+		this.agent.prepareRequest = async (request, signal) => {
+			const prepared = await previousPrepareRequest?.(request, signal);
+			const context = prepared?.context ?? request.context;
+			const options = this._runSystemPromptOptions ?? this._baseSystemPromptOptions;
+			const update = this._preparePromptAndToolLoadout(options, context.messages);
+			return {
+				...prepared,
+				messages: update ? [...(prepared?.messages ?? []), update] : prepared?.messages,
 			};
 		};
 	}
@@ -1744,6 +1757,18 @@ export class AgentSession {
 		this._baseSystemPromptOptions.sections = { ...this._hostSections };
 	}
 
+	private _refreshPromptResources(): void {
+		this._resourceLoader.refreshPromptResources?.();
+		const skills = this._resourceLoader.getSkills().skills;
+		const contextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
+		this._baseSystemPromptOptions.skills = skills;
+		this._baseSystemPromptOptions.contextFiles = contextFiles;
+		if (this._runSystemPromptOptions) {
+			this._runSystemPromptOptions.skills = skills;
+			this._runSystemPromptOptions.contextFiles = contextFiles;
+		}
+	}
+
 	private _rebuildSystemPrompt(toolNames: string[]): void {
 		const validToolNames = toolNames.filter((name) => this._toolRegistry.has(name));
 		const toolSnippets: Record<string, string> = {};
@@ -1904,6 +1929,7 @@ export class AgentSession {
 		deliveryId?: string,
 		additionalInputs: AgentMessage[] = [],
 	): Promise<void> {
+		this._refreshPromptResources();
 		this._isAgentRunActive = true;
 		this._agentRunAbortRequested = false;
 		let messages: AgentMessage[];
@@ -1930,11 +1956,7 @@ export class AgentSession {
 		this._pendingToolNames.clear();
 		try {
 			if (trigger) await this.agent.prompt(messages);
-			else {
-				const update = this._preparePromptAndToolLoadout(this._baseSystemPromptOptions);
-				if (update) this.agent.steer(update);
-				await this.agent.continue();
-			}
+			else await this.agent.continue();
 			while (!this._agentRunAbortRequested) {
 				if (await this._handlePostAgentRun()) {
 					if (this._agentRunAbortRequested) break;
@@ -2014,10 +2036,15 @@ export class AgentSession {
 				timestamp: Date.now(),
 			});
 		}
-		const updateMessage = this._preparePromptAndToolLoadout(result.systemPromptOptions);
 		this._runSystemPromptOptions = result.systemPromptOptions;
-		if (updateMessage?.role === "system") messages.unshift(updateMessage);
-		else if (updateMessage) messages.push(updateMessage);
+		if (!getCurrentSystemMessage(this.agent.state.messages)) {
+			const head = this._preparePromptAndToolLoadout(result.systemPromptOptions);
+			if (head?.role === "system") messages.unshift(head);
+		} else {
+			result.systemPromptOptions.selectedTools = this._applyToolLoadout(
+				result.systemPromptOptions.selectedTools,
+			).map((tool) => tool.name);
+		}
 		return messages;
 	}
 
@@ -2938,6 +2965,7 @@ export class AgentSession {
 	 */
 	async compact(customInstructions?: string): Promise<CompactionResult> {
 		await this.abort();
+		this._refreshPromptResources();
 		this._compactionAbortController = new AbortController();
 		this._emit({ type: "compaction_start", reason: "manual" });
 		let fromExtension = false;
@@ -3274,6 +3302,7 @@ export class AgentSession {
 	 * @returns Whether the post-run loop should call `agent.continue()`
 	 */
 	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
+		this._refreshPromptResources();
 		const model = this.model;
 		const settings = this._compactionSettings(model);
 		let abortController: AbortController | undefined;
