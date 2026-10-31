@@ -110,7 +110,7 @@
   // Derived, not set in the effect below: the room's views render with the store of the room they show.
   let store = $derived(room ? new RoomStore(room) : undefined);
   // The same rule per room for its open sessions.
-  let sessionInitials = $derived(distinctInitials([...store?.sessions.values() ?? []].map(item => item.name)));
+  let sessionInitials = $derived(distinctInitials([...store?.names.values() ?? []]));
   setSessionLabels(() => sessionInitials);
   // Opens the shown room again; the effect below sets it for each room.
   let reopen = $state(() => {});
@@ -295,14 +295,14 @@
   // A session's line says what it does, from its one status (status.ts). A waiting one names what the owner must do;
   // a box no host takes for its room comes first, since its requests show in the feed and Requests too. A failed
   // session's line is the reason after "Failed", which the row draws; an idle one says why its pending box waits, or
-  // Starting while its box starts, else Idle. Its profile is the row's hover title.
+  // Starting while its box starts, else nothing. Its profile is the row's hover title.
   const status = (id: string) => {
     const broken = store?.boxFailures.get(id), cause = store?.causes.get(id), reason = store?.pendingReasons.get(id);
     switch (store?.status(id)) {
       case "waiting": return reason === "room-host" ? waits[reason] : "Waiting for your approval";
       case "working": { const label = store?.activity.get(id); return label ? `Working · ${label}` : "Working"; }
       case "failed": return broken ? boxReason(broken) : turnReason(cause);
-      default: return reason ? waits[reason] : starting(id) ? "Starting" : "Idle";
+      default: return reason ? waits[reason] : starting(id) ? "Starting" : "";
     }
   };
   // A DM's header says only the status word; the live line and About say what the session does. A failed session has
@@ -588,14 +588,15 @@
         {#if entry.kind === "idle"}<button type="button" class="idle" data-key={treeKey(entry)} aria-expanded={entry.open} style:padding-left="{entry.depth * 14}px" onkeydown={walkTree}
           onclick={() => { if (!openIdle.delete(entry.key)) openIdle.add(entry.key); }}><Icon name="chevron" size={12} />{count(entry.count, "idle session")}</button>
         {:else}{@const { session: item, depth, parent, hidden, state, dot, mark } = entry}
-        <div class="row">{#if parent}<button type="button" class="fold" aria-expanded={!hidden} style:left="{depth * 14}px"
+        <div class="row">{#if parent}<button type="button" class="fold" aria-expanded={!hidden} style:left="{6 + depth * 14}px"
           aria-label={hidden ? `Show ${count(hidden, "session")} under ${item.name}` : `Hide the sessions under ${item.name}`}
           title={hidden ? `${count(hidden, "session")} folded` : "Fold"} onclick={() => { if (!folded.delete(item.session)) folded.add(item.session); }}
           onkeydown={event => fold(event, item.session)}><Icon name="chevron" size={12} />{#if hidden}<span>{hidden}</span>{/if}</button>{/if}
+        <!-- Reserve about 7 px per hidden-count digit beside the chevron. -->
         <a class="member" data-key={item.session} href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.session)}`}
           onclick={openSession}
           onkeydown={event => { void walkTree(event); if (parent) fold(event, item.session); }}
-          aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{28 + depth * 14}px">
+          aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{34 + depth * 14 + (hidden ? String(hidden).length * 7 : 0)}px">
           <SessionRow name={item.name} root={!item.parent} {state} {dot} line={status(item.session)} {mark} /></a>
           {#if jobs(item.session)}<button type="button" class="watch" aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
             title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={async event => { if (!wide.current) await showPanel(false, event.detail > 0); void jobsTool?.show(item.session); }}><Icon name="terminal" /></button>{/if}
@@ -664,6 +665,7 @@
   .heading strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .heading:has(.word) strong { flex: none; }
   .crumb { flex: none; white-space: nowrap; }
+  .hash { display: inline-flex; align-items: center; }
   /* A phone's header: the menu button, the title over its muted counts, Requests only while something waits (40 px
      targets), and the Sessions button with its count. The room menu's one action, Terminal, moves into the drawer. */
   @media (max-width: 640px) {
@@ -707,7 +709,7 @@
      button, but it sits on the row line beside the chevron. */
   .fold { all: unset; position: absolute; z-index: 1; top: 50%; transform: translateY(-50%); min-width: 16px; min-height: 24px; display: flex; align-items: center; justify-content: center;
     padding: 0 1px; border-radius: 4px; color: var(--muted); font-size: 11px; line-height: 1.1; font-variant-numeric: tabular-nums; cursor: pointer; }
-  @media (hover: hover) { .fold:hover { background: var(--hover); color: var(--text); } }
+  @media (hover: hover) { .fold:hover { color: var(--text); } }
   .fold:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
   .fold[aria-expanded="false"] :global(svg) { transform: rotate(-90deg); }
   .row a.member { flex: 1; min-width: 0; }
