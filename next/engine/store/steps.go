@@ -6,10 +6,11 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 47
+const schemaVersion = 48
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	47: {`CREATE TABLE connect_attempt (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL, expires INTEGER NOT NULL)`, `CREATE TABLE connect_connector (id INTEGER PRIMARY KEY CHECK(id=1), missing INTEGER NOT NULL CHECK(missing IN (0,1)))`},
 	46: {`CREATE TABLE connect_link_state (id INTEGER PRIMARY KEY CHECK(id=1), epoch INTEGER NOT NULL CHECK(epoch>=0), linked INTEGER NOT NULL CHECK(linked IN (0,1)))`, `CREATE TABLE connect_nonces (nonce TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)`},
 	45: {
 		// Legacy rule events are retired with the rules feature. Remove dependent

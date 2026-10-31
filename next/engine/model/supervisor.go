@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"syscall"
 	"time"
+
+	"github.com/resident-labs/dyna/engine/child"
 )
 
 // Supervise restarts the proxy until the engine stops.
@@ -18,14 +20,14 @@ func (p *Proxy) Supervise(ctx context.Context, executable string, st AuthStore, 
 		return
 	}
 	defer file.Close()
-	supervise(ctx, time.Now, time.After, func() <-chan error {
+	child.Run(ctx, nil, time.Now, time.After, func(childCtx context.Context) <-chan error {
 		done := make(chan error, 1)
 		p.generation.Add(1)
 		if err := st.PruneUnboundProxyAuths(ctx); err != nil {
 			done <- err
 			return done
 		}
-		cmd := exec.CommandContext(ctx, executable, "proxy", "--config", p.Config)
+		cmd := exec.CommandContext(childCtx, executable, "proxy", "--config", p.Config)
 		fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
 		if err != nil {
 			done <- err
@@ -61,31 +63,5 @@ func (p *Proxy) Supervise(ctx context.Context, executable string, st AuthStore, 
 			_ = stdin.Close()
 		}()
 		return done
-	})
-}
-
-func supervise(ctx context.Context, now func() time.Time, after func(time.Duration) <-chan time.Time, start func() <-chan error) {
-	delay := time.Second
-	for ctx.Err() == nil {
-		began := now()
-		err := <-start()
-		if ctx.Err() != nil {
-			return
-		}
-		log.Printf("model proxy exited: %v", err)
-		if now().Sub(began) >= time.Minute {
-			delay = time.Second
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-after(delay):
-		}
-		if delay < 30*time.Second {
-			delay *= 2
-			if delay > 30*time.Second {
-				delay = 30 * time.Second
-			}
-		}
-	}
+	}, func(err error) { log.Printf("model proxy exited: %v", err) })
 }
