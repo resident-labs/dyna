@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -385,7 +386,8 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	if err != nil {
 		return "", err
 	}
-	slice, c := b.container(spec, image)
+	spec.Needs = image.Needs
+	slice, c := b.container(spec, image.Tag)
 	if err = h.EnsureSlice(ctx, slice); err != nil {
 		return "", err
 	}
@@ -395,6 +397,11 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	}
 	forwarded = true
 	if err = h.CreateContainer(ctx, c); err != nil {
+		var missing box.MissingDevice
+		if errors.As(err, &missing) {
+			missing.Host = string(spec.Host)
+			return "", missing
+		}
 		return "", err
 	}
 	created = true
@@ -402,7 +409,7 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 		return "", err
 	}
 	ok = true
-	return image, nil
+	return image.Tag, nil
 }
 
 // Restore creates local sockets first and attempts each host independently.
@@ -594,32 +601,34 @@ func (b *Boxes) RunHostexec(ctx context.Context, a contract.HostexecRunArgs, op 
 	}
 	return r.RunHostexec(ctx, a, op)
 }
-func (b *Boxes) CurrentImage(ctx context.Context, sessionID contract.SessionID, host contract.HostName) (string, error) {
+func (b *Boxes) CurrentImage(ctx context.Context, sessionID contract.SessionID, host contract.HostName) (box.Image, error) {
 	h, err := b.host(ctx, host)
 	if err != nil {
-		return "", err
+		return box.Image{}, err
 	}
 	session, err := b.Store.Session(ctx, sessionID)
 	if err != nil {
-		return "", err
+		return box.Image{}, err
 	}
-	image, err := h.BuildBase(ctx, images.BaseContainerfile, b.PiTarball)
+	tag, err := h.BuildBase(ctx, images.BaseContainerfile, b.PiTarball)
 	if err != nil {
-		return "", err
+		return box.Image{}, err
 	}
+	var needs []box.Need
 	if session.Repo != "" {
-		name, tree, data, err := b.Mirror.ImageContext(ctx, session.Repo)
+		name, tree, data, imageNeeds, err := b.Mirror.ImageContext(ctx, session.Repo)
 		if err != nil {
-			return "", err
+			return box.Image{}, err
 		}
+		needs = imageNeeds
 		if name != "" {
-			image, err = b.Images.Build(ctx, h, session.Room, host, session.Repo, name, image, tree, data)
+			tag, err = b.Images.Build(ctx, h, session.Room, host, session.Repo, name, tag, tree, data)
 			if err != nil {
-				return "", err
+				return box.Image{}, err
 			}
 		}
 	}
-	return image, nil
+	return box.Image{Tag: tag, Needs: needs}, nil
 }
 
 func (b *Boxes) StopHostexec(ctx context.Context, host contract.HostName, scope string) error {
@@ -650,6 +659,11 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, _ s
 		return err
 	}
 	if err := h.CreateContainer(ctx, c); err != nil {
+		var missing box.MissingDevice
+		if errors.As(err, &missing) {
+			missing.Host = string(spec.Host)
+			return missing
+		}
 		return err
 	}
 	return h.StartContainer(ctx, spec.Box)
@@ -658,7 +672,7 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, _ s
 func (b *Boxes) container(spec lifecycle.BoxSpec, image string) (box.Slice, box.ContainerSpec) {
 	size := spec.Size
 	slice := box.Slice{Name: spec.Slice, CPUs: size.CPUs, MemHigh: size.MemBytes, MemMax: size.MemBytes * 3 / 2, Pids: size.Pids}
-	c := box.ContainerSpec{Box: spec.Box, Image: image, Slice: spec.Slice, Mounts: []box.Mount{
+	c := box.ContainerSpec{Box: spec.Box, Image: image, Slice: spec.Slice, Needs: spec.Needs, Mounts: []box.Mount{
 		{HostPath: filepath.Join(b.HostData, "sock", string(spec.Box)), BoxPath: "/run/dyna/engine", ReadOnly: true},
 		{HostPath: filepath.Join(b.HostData, "bin"), BoxPath: "/opt/dyna/bin", ReadOnly: true},
 		{HostPath: filepath.Join(b.HostData, "cache"), BoxPath: "/box/cache"},
