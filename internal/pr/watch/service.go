@@ -1103,24 +1103,27 @@ func (s *Service) finishProcess(ctx context.Context, key string, snap Snapshot, 
 	if repo == "" {
 		repo = out.merged.Dir
 	}
+	if _, err := os.Stat(repo); errors.Is(err, os.ErrNotExist) && s.CleanupMerged == nil {
+		st, err := s.Store.Read()
+		if err != nil {
+			return err
+		}
+		candidate := *out.merged
+		candidate.RepoPath = ""
+		s.resolveCheckout(ctx, st, &candidate)
+		if candidate.RepoPath == "" {
+			return checkoutError(candidate)
+		}
+		repo = candidate.RepoPath
+	}
 	// The merged PR closes the issues it names, whichever trigger saw the merge.
 	issueErr := s.closeFixedIssues(ctx, *out.merged, out.merged.MergeCommit)
 	if snap.Pull.Head.Ref != "" {
 		if s.CleanupMerged != nil {
 			issueErr = errors.Join(issueErr, s.CleanupMerged(ctx, *out.merged, snap.Pull.Head.Ref))
 		} else {
-			// The author checkout can disappear before this retry. There is
-			// nothing left to clean there; use another saved checkout if present.
-			cleanupRepo := repo
-			if _, err := os.Stat(cleanupRepo); errors.Is(err, os.ErrNotExist) {
-				cleanupRepo = out.merged.RepoPath
-			}
-			if cleanupRepo != "" {
-				if _, err := os.Stat(cleanupRepo); !errors.Is(err, os.ErrNotExist) {
-					_, err = maintenance.CleanBranch(ctx, []string{cleanupRepo}, snap.Pull.Head.Ref)
-					issueErr = errors.Join(issueErr, err)
-				}
-			}
+			_, err := maintenance.CleanBranch(ctx, []string{repo}, snap.Pull.Head.Ref)
+			issueErr = errors.Join(issueErr, err)
 		}
 	}
 	if err := errors.Join(issueErr, cleanupErr); err != nil {
