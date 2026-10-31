@@ -536,6 +536,23 @@ func (s *Service) process(ctx context.Context, key string, snap Snapshot, ci, ci
 		if r == nil || !r.Watching || (snap.headConfirmed && r.Head != snap.Pull.Head.SHA) {
 			return nil
 		}
+		if snap.Pull.State == "open" && r.State != state.PROpen {
+			// Only the recovery of this exact closure can reopen it. An older
+			// observation must not overwrite a concurrent terminal update.
+			if r.State != state.PRClosed || !snap.recoverClosed || !r.ClosedAt.Equal(snap.recoverClosedAt) || r.CloseEpisode != snap.recoverEpisode {
+				return nil
+			}
+			// A closed PR can reopen before its terminal recovery runs.
+			r.State = state.PROpen
+			r.ClosedAt = time.Time{}
+			r.CloseEpisode++
+			for i := range r.Notices {
+				n := &r.Notices[i]
+				if n.Kind == "closed" && n.SupersededBy == "" {
+					n.SupersededBy = "pr-reopened"
+				}
+			}
+		}
 		r.Title = Sanitize(snap.Pull.Title)
 		r.Fixes = state.MergeFixes(r.Fixes, state.ParseFixLines(snap.Pull.Body))
 		r.HeadRepo = snap.Pull.Head.Repo.FullName

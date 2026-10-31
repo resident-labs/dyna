@@ -78,13 +78,14 @@ func oomCount(root string) uint64 {
 
 // Process owns Chromium until its context is cancelled.
 type Process struct {
-	mu    sync.Mutex
-	cmd   *exec.Cmd
-	done  chan struct{}
-	exit  string
-	root  string
-	once  sync.Once
-	group *os.File
+	mu     sync.Mutex
+	cmd    *exec.Cmd
+	done   chan struct{}
+	exit   string
+	root   string
+	once   sync.Once
+	group  *os.File
+	notify func(bool)
 }
 
 func NewProcess() *Process { return &Process{root: "/sys/fs/cgroup"} }
@@ -134,6 +135,9 @@ func (p *Process) Start(ctx context.Context) (string, error) {
 		return "", err
 	}
 	p.cmd = cmd
+	if p.notify != nil {
+		p.notify(true)
+	}
 	p.done = make(chan struct{})
 	done := p.done
 	go func() {
@@ -142,6 +146,9 @@ func (p *Process) Start(ctx context.Context) (string, error) {
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		p.cmd = nil
+		if p.notify != nil {
+			p.notify(false)
+		}
 		if ctx.Err() != nil {
 			return
 		}
@@ -171,7 +178,7 @@ func (p *Process) Close() {
 }
 
 // Serve starts the private agent socket and returns its cleanup function.
-func Serve(ctx context.Context, socket string, errs chan<- error) (func(), error) {
+func Serve(ctx context.Context, socket string, errs chan<- error, notify func(bool)) (func(), error) {
 	if err := os.MkdirAll(filepath.Dir(socket), 0755); err != nil {
 		return nil, err
 	}
@@ -183,6 +190,7 @@ func Serve(ctx context.Context, socket string, errs chan<- error) (func(), error
 		return nil, err
 	}
 	browser := NewProcess()
+	browser.notify = notify
 	browser.setup()
 	server := &http.Server{Handler: browser.Handler(ctx)}
 	go func() { errs <- server.Serve(listener) }()

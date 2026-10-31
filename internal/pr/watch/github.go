@@ -185,6 +185,9 @@ type Snapshot struct {
 	ciReused          bool // A discussion refresh does not advance the full CI safety clock.
 	discussionReused  bool
 	headConfirmed     bool
+	recoverClosed     bool
+	recoverClosedAt   time.Time
+	recoverEpisode    uint64
 	ciProbe           string
 	// NoPRWorkflows is true only after a successful workflow inspection.
 	NoPRWorkflows bool
