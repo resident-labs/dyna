@@ -30,19 +30,19 @@
 </script>
 
 {#snippet bar(title: string, count?: number, action?: Snippet)}
-  <header>{#if phone}<a class="round" href="/settings" onclick={navigate} aria-label="Back to Settings" title="Back to Settings"><Icon name="backChevron" /></a>{/if}
+  <header class="bar">{#if phone}<a class="round" href="/settings" onclick={navigate} aria-label="Back to Settings" title="Back to Settings"><Icon name="backChevron" /></a>{/if}
     <strong>{title}</strong>{#if count !== undefined}<span class="count">{count}</span>{/if}{@render action?.()}</header>
 {/snippet}
 
 <section class="settings" aria-label="Settings" tabindex="-1" bind:this={element}>
-  {#if !phone}<aside class="nav"><header><strong>Settings</strong></header>
+  {#if !phone}<aside class="nav"><header class="bar"><strong>Settings</strong></header>
     <nav aria-label="Settings panes">{#each panes as pane (pane.id)}
       <a href={`/settings/${pane.id}`} onclick={navigate} aria-current={shown === pane ? "page" : undefined}><Icon name={pane.icon} />{pane.label}</a>{/each}</nav></aside>{/if}
   <div class="pane">
     {#if shown?.id === "appearance"}<AppearancePane {bar} />
     {:else if shown?.id === "devices"}<DevicesPane {devices} {failed} {reload} {signedout} {bar} />
     {:else}
-      <header><button type="button" class="round menu" bind:this={menu} aria-label="Rooms and pages" title="Rooms and pages" onclick={onmenu}><Icon name="menu" /></button><strong>Settings</strong></header>
+      <header class="bar"><button type="button" class="round menu" bind:this={menu} aria-label="Rooms and pages" title="Rooms and pages" onclick={onmenu}><Icon name="menu" /></button><strong>Settings</strong></header>
       <nav class="list" aria-label="Settings panes">{#each panes as pane (pane.id)}
         <a href={`/settings/${pane.id}`} onclick={navigate}><Icon name={pane.icon} />{pane.label}<Icon name="forwardChevron" /></a>{/each}</nav>
     {/if}

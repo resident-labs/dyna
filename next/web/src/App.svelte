@@ -507,7 +507,7 @@
   {#if drawer || (panel && phone.current)}<button type="button" class="scrim" tabindex="-1" aria-label={drawer ? "Close the menu" : room ? "Close the sessions" : "Close the active rooms"}
     onclick={() => void (drawer ? showDrawer(false, true, true) : showPanel(false, true))}></button>{/if}
   <main inert={drawer || (panel && phone.current) || covered || inSettings}>
-    <header>{#if room && session && phone.current}<a class="menu-toggle" href={"/r/" + encodeURIComponent(room)} aria-label={`Back to ${roomName}`} title={`Back to ${roomName}`}
+    <header class="bar">{#if room && session && phone.current}<a class="menu-toggle" href={"/r/" + encodeURIComponent(room)} aria-label={`Back to ${roomName}`} title={`Back to ${roomName}`}
         onclick={event => { const tapped = event.detail > 0; navigate(event); void tick().then(() => menuButton?.focus({ focusVisible: !tapped })); }}><Icon name="back" /></a>
       {:else}<button type="button" class="menu-toggle" bind:this={menuButton} aria-label="Rooms and pages" title="Rooms and pages" aria-expanded={drawer}
         onclick={event => void showDrawer(true, true, event.detail > 0)}><Icon name="menu" /></button>{/if}
@@ -560,10 +560,10 @@
       <!-- Docked, the computer sits above the session list. -->
       {#if watching && docked && panelShown}{@render computerView(watching)}{/if}
       {#if phone.current}{@render sheetHandle("sessions")}{/if}
-      {#if session && !closed}<header class="tabs">
+      {#if session && !closed}<header class="bar tabs">
         <button type="button" aria-pressed={!about} onclick={() => tabs.set(key, "sessions")}>Sessions</button>
         <button type="button" aria-pressed={about} onclick={() => tabs.set(key, "about")}>About</button></header>
-      {:else}<header><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}</header>{/if}
+      {:else}<header class="bar"><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}</header>{/if}
       <!-- A long tree renders only its visible rows, through the feed's shared list (spec: long lists are virtual). -->
       {#if about && session && store}<AboutPanel {store} room={room} {session} navigate={openSession} onjobs={async event => { if (!wide.current) await showPanel(false, event.detail > 0); terminals?.showJobs(session); }} />
       {:else if tree.length}<div class="tree"><VirtualList bind:this={sessionList} items={tree} key={treeKey}
@@ -594,7 +594,7 @@
   {:else if activity.active.length}
     <aside class="members" id="active" class:shown={panel} class:full={sheetFull} aria-label="Active now" tabindex="-1" role={panel && phone.current ? "dialog" : undefined} aria-modal={(panel && phone.current) || undefined} bind:this={members} inert={drawer || inSettings}>
       {#if phone.current}{@render sheetHandle("active rooms")}{/if}
-      <header><strong>Active now</strong><span class="count active">{activity.active.length}</span></header>
+      <header class="bar"><strong>Active now</strong><span class="count active">{activity.active.length}</span></header>
       <div class="tree rooms"><ActiveNow {...activity} {initials} navigate={openSession} /></div>
     </aside>
   {/if}
