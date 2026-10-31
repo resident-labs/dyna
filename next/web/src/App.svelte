@@ -273,7 +273,7 @@
       {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}
       <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id ? "page" : undefined}
         aria-label={waiting ? `${item.name}, ${count(waiting, "request")} waiting` : item.name} title={item.name}>
-        <Avatar kind="room" name={item.name} size={40} />{#if waiting}<span class="waiting">{waiting > 99 ? "99+" : waiting}</span>{/if}</a>
+        <Avatar kind="room" name={item.name} size={40} />{#if waiting}<StatusPill tone="warning" label="Waiting" count={waiting} />{/if}</a>
     {/each}</nav>
     <!-- The owner's face from the feed; v2 has no owner name or account menu yet. -->
     <footer><span role="img" aria-label="You" title="You"><Avatar kind="owner" name="You" size={32} /></span></footer>
@@ -285,7 +285,7 @@
       {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session") + (working ? ` · ${working} working` : "")}</span>{/if}
       {#if store && !unavailable}<button type="button" class="requests" bind:this={requestsButton} aria-pressed={section === "requests"}
         aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section ? undefined : "requests"; }}>
-        <Icon name="inbox" />{#if store.waiting}<span class="badge">{store.waiting > 99 ? "99+" : store.waiting}</span>{/if}</button>
+        <Icon name="inbox" />{#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
         <RoomMenu onterminal={() => void terminals?.pick()} />{/if}
       {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={store?.unseenCount ? "Sessions, a turn failed" : "Sessions"}
         title="Sessions" aria-controls="sessions" aria-expanded={panel} onclick={() => void showPanel(!panel)}><Icon name="people" />
@@ -344,13 +344,12 @@
   /* The panel's header matches the room header: a 16 px title with its muted counts beside it. */
   aside.members > header strong { font-size: 16px; }
   /* Requests is a header icon, as the menu and the panel toggle are: 16 px in a 28 px hit area. While requests wait for
-     the owner, a count badge sits on its corner in the rail badge's style, ringed in the header color. */
+     the owner, StatusPill's count sits on its corner, as on the rail. */
   .requests { position: relative; margin-left: auto; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px;
     background: none; color: var(--muted); cursor: pointer; }
   .requests:hover, .requests[aria-pressed="true"] { background: var(--hover); color: var(--text); }
   .requests ~ :global(.panel-toggle) { margin-left: 0; }
-  .badge { position: absolute; top: -5px; right: -7px; min-width: 18px; height: 18px; padding: 0 5px; display: grid; place-items: center; border-radius: 9px;
-    background: var(--attention); color: var(--bg); box-shadow: 0 0 0 2px var(--bg); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
+  .requests > :global(.count) { top: -5px; right: -7px; }
   .narrow { display: none; }
   @media (max-width: 760px) { .narrow { display: inline; } }
   a.member[aria-current="page"] { background: var(--selected); }
