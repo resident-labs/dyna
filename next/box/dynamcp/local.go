@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -32,9 +33,17 @@ func BoxTools(socket string) Local {
 		case tools.VisualCheck:
 			var req tools.FileRequest
 			_ = json.Unmarshal(raw, &req)
-			data, err := os.ReadFile(req.File)
+			file, err := os.Open(req.File)
 			if err != nil {
 				return fail(err)
+			}
+			data, err := io.ReadAll(io.LimitReader(file, 25<<20+1))
+			_ = file.Close()
+			if err != nil {
+				return fail(err)
+			}
+			if len(data) > 25<<20 {
+				return fail(fmt.Errorf("visual exceeds 25 MiB"))
 			}
 			const csp = "default-src 'none'; script-src 'unsafe-inline'; connect-src data: blob:; img-src data: blob:; font-src data: blob:; media-src data: blob:; style-src 'unsafe-inline' data: blob:; frame-src 'none'; child-src 'none'; object-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts"
 			checked, err := visual.Inspect(ctx, data, csp, false)
