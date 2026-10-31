@@ -19,14 +19,22 @@ export class ContextFileCache {
 	private readonly stamps = new Map<string, FileStamp | undefined>();
 	private readonly files = new Map<string, CachedFile>();
 
+	private readonly stat: (path: string) => FileStamp | undefined;
+	private readonly read: (path: string) => string;
+	private readonly hash: (text: string) => string;
+
 	constructor(
-		private readonly stat = (path: string): FileStamp | undefined => {
+		stat = (path: string): FileStamp | undefined => {
 			const value = statSync(path, { throwIfNoEntry: false });
 			return value && { ino: value.ino, size: value.size, mtimeMs: value.mtimeMs, isFile: value.isFile() };
 		},
-		private readonly read = (path: string) => readFileSync(path, "utf8"),
-		private readonly hash = (text: string) => createHash("sha256").update(text).digest("hex"),
-	) {}
+		read = (path: string) => readFileSync(path, "utf8"),
+		hash = (text: string) => createHash("sha256").update(text).digest("hex"),
+	) {
+		this.stat = stat;
+		this.read = read;
+		this.hash = hash;
+	}
 
 	changed(paths: string[]): boolean {
 		let changed = false;

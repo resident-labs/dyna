@@ -86,6 +86,32 @@ describe("AgentSession prompt characterization", () => {
 		expect(updates[0]?.role === "custom" && updates[0].content).toContain("+second");
 	});
 
+	it("repairs a section update missing after a persisted user message on continue", async () => {
+		const first = await createHarness();
+		harnesses.push(first);
+		first.setResponses([fauxAssistantMessage("done")]);
+		first.session.setPromptSections([{ key: "goal", text: "before" }]);
+		await first.session.prompt("first request");
+		const manager = first.sessionManager;
+		const user = { role: "user" as const, content: "continue request", timestamp: 1 };
+		manager.appendMessage(user);
+		first.cleanup();
+		harnesses.pop();
+
+		const resumed = await createHarness({ sessionManager: manager });
+		harnesses.push(resumed);
+		resumed.session.agent.replaceMessages(manager.buildSessionContext().messages);
+		resumed.session.setPromptSections([{ key: "goal", text: "after" }]);
+		resumed.setResponses([fauxAssistantMessage("done")]);
+		await resumed.session.continueRun();
+
+		const updates = resumed.session.messages.filter(
+			(message) => message.role === "custom" && message.customType === "context_update",
+		);
+		expect(updates).toHaveLength(1);
+		expect(updates[0]?.role === "custom" && updates[0].content).toContain("+after");
+	});
+
 	it("handles a tool call turn and waits for the follow-up LLM response", async () => {
 		const toolRuns: string[] = [];
 		const echoTool: AgentTool = {
