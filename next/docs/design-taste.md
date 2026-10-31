@@ -164,7 +164,7 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
    - Draw in v2's own tokens and bundled fonts, never in a generic style. [lead]
    - Render the mockup, look at it, and fix it before you send it. [lead]
    - Number each change, and give its reason and its reference. [lead]
-2. Three opus judges pick one design each, with a short review. A judge may add a mockup of its changes to the design it picks, but never proposes a new design. If no design has a majority, the judges vote again on the two designs that got votes, after reading each other's reviews. [owner r23] [lead]
+2. Three opus judges pick one design each, with a short review. A judge may add a mockup of its changes to the design it picks, but never proposes a new design. If no design has a majority, the judges read each other's reviews and vote once more. If that vote is also split, root picks one of the designs that got votes. [owner r23] [lead]
 3. An opus builder builds the design with the majority of votes, with the judges' reviews applied. An owner reaction to a design outranks the vote; the judges then review it for fixes only. [owner r23] [root]
 4. The judges review the built page. Repeat steps 1 to 3 until the judges agree that the page is solid. [owner r23]
 5. The PR attaches the mockups, the votes and the reviews. [root]
