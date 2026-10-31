@@ -51,4 +51,21 @@ func TestRoomRules(t *testing.T) {
 	if _, problem := s.RuleRemove(ctx, owner, contract.RuleRemoveRequest{Room: room, Number: first.Number}); problem == nil || problem.Code != contract.ErrInvalid {
 		t.Fatalf("remove missing rule: %v", problem)
 	}
+	messages, problem := testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	start, ok := (<-messages).Body.(contract.TurnStart)
+	if !ok {
+		t.Fatal("expected a turn start")
+	}
+	var removal bool
+	for _, input := range start.Inputs {
+		if input.Text == "Rule r1 is removed and no longer applies: First." {
+			removal = true
+		}
+	}
+	if !removal {
+		t.Fatalf("missing removal notice: %+v", start.Inputs)
+	}
 }

@@ -906,7 +906,7 @@ Drafted by dyna:code-architectural.
 
 ### Rules
 
-Each room keeps standing rules. The box agent passes active rules from `box.hello` to Pi as appended system prompt text. Each change creates one quiet delivery per open session. It reaches the session on its next turn, without starting a turn.
+Each room keeps standing rules. The box agent passes active rules from `box.hello` to Pi as appended system prompt text. Each change creates one quiet delivery per open session. It reaches the session on its next turn, without starting a turn. A removal says the rule no longer applies and includes its old text. A running Pi keeps its startup system prompt, including removed rules, until the box restarts. A restarted box receives the current rules.
 
 ### 7.1 Principals
 
