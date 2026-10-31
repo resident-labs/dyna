@@ -26,6 +26,9 @@ import (
 //go:embed schema.sql
 var schema string
 
+// ErrNotFound reports a missing store record.
+var ErrNotFound = sql.ErrNoRows
+
 type ErrorCode string
 
 const (
