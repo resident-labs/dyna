@@ -124,15 +124,21 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 			r.Model = start.Model
 			return nil
 		}
+		prepare := func() error {
+			if err := applyModel(); err != nil {
+				return err
+			}
+			return r.Harness.SetPromptSections(ctx, start.Sections)
+		}
 		if len(pending) > 0 {
-			if err = applyModel(); err == nil {
+			if err = prepare(); err == nil {
 				result, err = r.Harness.Start(ctx, start.Turn, pending, started)
 			}
 		} else {
 			var settled bool
 			result, settled, err = r.Harness.Recover(start.Turn, start.Inputs)
 			if err == nil && !settled {
-				if err = applyModel(); err == nil {
+				if err = prepare(); err == nil {
 					result, err = r.Harness.Continue(ctx, start.Turn, started)
 				}
 			}
