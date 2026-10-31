@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 type API struct {
@@ -49,6 +50,12 @@ func (a *API) handler(c Caller) http.Handler {
 		return out, problem
 	})
 	call(mux, contract.MethodDeviceList, c, contract.ScopeAdmin, owner, a.service.DeviceList)
+	call(mux, contract.MethodDeviceScopes, c, contract.ScopeRead, owner, func(context.Context, contract.Principal, contract.DeviceScopesRequest) (contract.DeviceScopesResponse, *contract.Error) {
+		if c.Web {
+			return contract.DeviceScopesResponse{Scopes: c.Scopes}, nil
+		}
+		return contract.DeviceScopesResponse{Scopes: store.FullDeviceScopes}, nil
+	})
 	call(mux, contract.MethodDeviceRevoke, c, contract.ScopeAdmin, owner, a.service.DeviceRevoke)
 	call(mux, contract.MethodDeviceSetScopes, c, contract.ScopeAdmin, owner, a.service.DeviceSetScopes)
 	call(mux, contract.MethodRuleAdd, c, contract.ScopeAdmin, user, func(ctx context.Context, p contract.Principal, req contract.RuleAddRequest) (contract.RuleAddResponse, *contract.Error) {
