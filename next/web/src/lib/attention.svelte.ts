@@ -1,5 +1,5 @@
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
-import { call, retryDelay } from "./client.ts";
+import { blockedBy, call, retryDelay } from "./client.ts";
 import { stream } from "./stream.ts";
 import { boxFailures, turnFailures, type BoxFailure } from "./status.ts";
 import { pendingReason } from "./event.ts";
@@ -56,9 +56,13 @@ export class Attention {
   }
 
   // A room whose failures or host waits only its sessions name reads them until one read seeds it, with the client's
-  // capped backoff. The read that seeds covers every event up to its seq, so a failed one loses nothing.
+  // capped backoff, and not once the owner is signed out. The read that seeds covers every event up to its seq, so a
+  // failed one loses nothing.
+  private readonly seedTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private seedRoom(room: string, tries = 0): void {
-    this.listSessions(room).catch(() => setTimeout(() => { if (!this.sessions.has(room)) this.seedRoom(room, tries + 1); }, retryDelay(tries)));
+    this.listSessions(room).catch((error: unknown) => {
+      if (blockedBy(error) !== "signed-out") this.seedTimers.set(room, setTimeout(() => { if (!this.sessions.has(room)) this.seedRoom(room, tries + 1); }, retryDelay(tries)));
+    });
   }
 
   // A room created after the page loaded first shows as an event from a room the page does not know, such as its
@@ -90,7 +94,7 @@ export class Attention {
     });
   }
 
-  close(): void { this.stop(); clearTimeout(this.timer); }
+  close(): void { this.stop(); clearTimeout(this.timer); for (const timer of this.seedTimers.values()) clearTimeout(timer); }
 
   // The sessions that really work in a room.
   busy(room: string): string[] { return [...this.working.get(room) ?? []].filter(id => !this.broken.get(room)?.has(id) && !this.hostless.get(room)?.has(id)); }
