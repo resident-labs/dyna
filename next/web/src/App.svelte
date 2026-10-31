@@ -8,6 +8,7 @@
   import Composer from "./lib/ui/Composer.svelte";
   import SessionRow from "./lib/ui/SessionRow.svelte";
   import HostFoot from "./lib/ui/HostFoot.svelte";
+  import VirtualList from "./lib/ui/VirtualList.svelte";
   import Icon from "./lib/ui/Icon.svelte";
   import Avatar, { setSessionLabels } from "./lib/ui/Avatar.svelte";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
@@ -105,6 +106,8 @@
   const openIdle = new SvelteSet<string>();
   type TreeRow = { kind: "session"; session: SessionStarted; depth: number; parent: boolean; hidden: number; state: Status; dot: Status; mark?: string }
     | { kind: "idle"; key: string; depth: number; count: number; open: boolean };
+  const treeKey = (entry: TreeRow) => entry.kind === "idle" ? `idle ${entry.key}` : entry.session.session;
+  let sessionList: VirtualList<TreeRow> | undefined = $state();
   const folds: Record<Status, string> = { waiting: "A folded session waits for you", failed: "A folded session failed", working: "A folded session is working", idle: "" };
   let tree = $derived.by(() => {
     const sessions = [...(store?.sessions.values() ?? [])];
@@ -198,12 +201,29 @@
     areas[(index + (event.shiftKey ? areas.length - 1 : 1)) % areas.length].focus();
   }
   // Up and Down move between the sessions in the tree and its idle folds; Enter opens one.
-  function walkTree(event: KeyboardEvent & { currentTarget: HTMLElement }) {
+  // The tree is virtual, so the next row may not be rendered yet: the list scrolls to it first. A held key's presses
+  // that come meanwhile move on from that row, and only the newest one focuses.
+  let walkingTo: number | undefined;
+  // Focus goes back to a row's icon when a view over the list closes. The list mounts again at its top, so the row is
+  // scrolled back in first; and a row shows its icons only on hover or focus, so its link takes focus before the icon.
+  async function focusRowIcon(id: string, icon: string) {
+    const index = tree.findIndex(entry => entry.kind === "session" && entry.session.session === id);
+    if (index >= 0) await sessionList?.reveal(index);
+    const button = members?.querySelector<HTMLElement>(`[${icon}="${CSS.escape(id)}"]`);
+    button?.closest(".row")?.querySelector<HTMLElement>("a.member")?.focus();
+    (button ?? members)?.focus();
+  }
+  async function walkTree(event: KeyboardEvent & { currentTarget: HTMLElement }) {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp" || !members) return;
     event.preventDefault();
-    const links = Array.from(members.querySelectorAll<HTMLElement>("a.member, button.idle"));
-    const index = links.indexOf(event.currentTarget);
-    links[Math.max(0, Math.min(links.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)))]?.focus();
+    const index = walkingTo ?? tree.findIndex(entry => treeKey(entry) === event.currentTarget.dataset.key);
+    const next = Math.max(0, Math.min(tree.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
+    const target = () => members?.querySelector<HTMLElement>(`[data-key="${CSS.escape(treeKey(tree[next]))}"]`);
+    walkingTo = next;
+    if (!target()) await sessionList?.reveal(next);
+    if (walkingTo !== next) return;
+    walkingTo = undefined;
+    target()?.focus();
   }
   let roomName = $derived(attention.rooms.get(room ?? "")?.name ?? "Room");
   // A session's line says what it does, from its one status (status.ts). A failed session's line is the reason
@@ -249,7 +269,7 @@
     await tick();
     if (!held) return;
     if (!members?.getClientRects().length) toggle?.focus();
-    else (members.querySelector<HTMLElement>(`[data-watch="${CSS.escape(id)}"]`) ?? members).focus();
+    else await focusRowIcon(id, "data-watch");
   }
   $effect.pre(() => { if (watching && !store?.computers.has(watching)) void stopWatching(); });
   // The session whose jobs the panel shows instead of the list, while its box is ready; it closes as the computer does.
@@ -259,7 +279,7 @@
     const id = jobsOf ?? "", held = members?.contains(document.activeElement);
     jobsOf = undefined;
     await tick();
-    if (held) (members?.querySelector<HTMLElement>(`[data-jobs="${CSS.escape(id)}"]`) ?? members)?.focus();
+    if (held) await focusRowIcon(id, "data-jobs");
   }
   $effect.pre(() => { if (jobsOf && store?.boxes.get(jobsOf) !== "ready") void closeJobs(); });
   const wide = new MediaQuery("min-width: 761px");
@@ -388,24 +408,28 @@
       <!-- Docked, the computer sits above the session list. -->
       {#if watching && docked && (wide.current || panel)}{@render computerView(watching)}{/if}
       <header><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}</header>
-      {#each tree as row (row.kind === "idle" ? `idle ${row.key}` : row.session.session)}
-        {#if row.kind === "idle"}<button type="button" class="idle" aria-expanded={row.open} style:padding-left="{row.depth * 14}px" onkeydown={walkTree}
-          onclick={() => { if (!openIdle.delete(row.key)) openIdle.add(row.key); }}><Icon name="chevron" size={12} />{count(row.count, "idle session")}</button>
-        {:else}{@const { session: item, depth, parent, hidden, state, dot, mark } = row}
+      <!-- A long tree renders only its visible rows, through the feed's shared list (spec: long lists are virtual). -->
+      {#if tree.length}<div class="tree"><VirtualList bind:this={sessionList} items={tree} key={treeKey}
+        label="Session list" role="group" align="top" estimate={48}>
+        {#snippet row(entry: TreeRow)}
+        {#if entry.kind === "idle"}<button type="button" class="idle" data-key={treeKey(entry)} aria-expanded={entry.open} style:padding-left="{entry.depth * 14}px" onkeydown={walkTree}
+          onclick={() => { if (!openIdle.delete(entry.key)) openIdle.add(entry.key); }}><Icon name="chevron" size={12} />{count(entry.count, "idle session")}</button>
+        {:else}{@const { session: item, depth, parent, hidden, state, dot, mark } = entry}
         <div class="row">{#if parent}<button type="button" class="fold" aria-expanded={!hidden} style:left="{depth * 14}px"
           aria-label={hidden ? `Show ${count(hidden, "session")} under ${item.name}` : `Hide the sessions under ${item.name}`}
           title={hidden ? `${count(hidden, "session")} folded` : "Fold"} onclick={() => { if (!folded.delete(item.session)) folded.add(item.session); }}
           onkeydown={event => fold(event, item.session)}><Icon name="chevron" size={12} />{#if hidden}<span>{hidden}</span>{/if}</button>{/if}
-        <a class="member" href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.session)}`}
+        <a class="member" data-key={item.session} href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.session)}`}
           onclick={event => { navigate(event); if (!wide.current && event.defaultPrevented) void showPanel(false); }}
-          onkeydown={event => { walkTree(event); if (parent) fold(event, item.session); }}
+          onkeydown={event => { void walkTree(event); if (parent) fold(event, item.session); }}
           aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{28 + depth * 14}px">
           <SessionRow name={item.name} root={!item.parent} {state} {dot} line={status(item.session)} {mark} /></a>
           {#if jobs(item.session)}<button type="button" class="watch" class:open={jobsOf === item.session} data-jobs={item.session} aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
             title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={() => { jobsOf = item.session; }}><Icon name="terminal" /></button>{/if}
           {#if store?.computers.has(item.session)}<button type="button" class="watch" class:open={watching === item.session} data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
             title={`Watch ${item.name}'s computer`} onclick={() => watch(item.session)}><Icon name="monitor" /></button>{/if}</div>{/if}
-      {:else}<p class="hint">No sessions yet.</p>{/each}
+        {/snippet}</VirtualList></div>
+      {:else}<p class="hint">No sessions yet.</p>{/if}
       <!-- The foot polls hosts, so it mounts only while the panel shows; a phone's closed panel polls nothing. -->
       {#if wide.current || panel}<HostFoot {navigate} />{/if}
       {/if}
@@ -457,6 +481,7 @@
   .pages a:focus-visible, .pages button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .pages .count, .pages :global(.count) { position: static; margin-left: auto; }
   a.member[aria-current="page"] { background: var(--selected); }
+  .tree { flex: 1; min-height: 0; }
   .row { position: relative; display: flex; align-items: center; }
   /* The chevron sits in the gutter left of the avatar. As in v1, a folded row's hidden count is part of the same
      button, but it sits on the row line beside the chevron. */

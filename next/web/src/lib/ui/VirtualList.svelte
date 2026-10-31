@@ -1,7 +1,8 @@
 <script lang="ts" generics="T">
   // The app's only windowing code. Rows have any height and are measured after render.
   // anchorTo "end" keeps the top visible row in place when rows are added or released at
-  // either end; followOnAppend sticks to the bottom only while the reader is already there.
+  // either end; followOnAppend sticks to the bottom only while the reader is already there. A short list sits at the
+  // bottom, as chat does, unless align is "top", as for the sessions panel; role names what the rows are.
   import {
     Virtualizer, elementScroll, measureElement, observeElementOffset, observeElementRect,
     type VirtualItem, type VirtualizerOptions,
@@ -9,8 +10,8 @@
   import { tick, untrack, type Snippet } from "svelte";
   import { shouldPage } from "../paging.ts";
 
-  let { items, key, row, label, follow = false, estimate = 44, onstart, onend, element = $bindable() }: {
-    items: T[]; key: (item: T) => string; row: Snippet<[T]>; label: string;
+  let { items, key, row, label, role = "feed", align = "bottom", follow = false, estimate = 44, onstart, onend, element = $bindable() }: {
+    items: T[]; key: (item: T) => string; row: Snippet<[T]>; label: string; role?: "feed" | "group"; align?: "top" | "bottom";
     // Chat mode: open at the newest row and follow new rows while the reader is at the bottom.
     follow?: boolean; estimate?: number;
     onstart?: () => void; onend?: () => void; element?: HTMLDivElement;
@@ -56,6 +57,13 @@
     virtualizer.scrollToEnd();
   }
 
+  // Scrolls a row into the window and waits for it to render, so a caller can focus it.
+  export async function reveal(index: number): Promise<void> {
+    virtualizer.scrollToIndex(index);
+    await new Promise(requestAnimationFrame);
+    await tick();
+  }
+
   // True once the rows overflow the view far enough to scroll up to older ones.
   export function full(): boolean {
     return element !== undefined && virtualizer.getTotalSize() > element.clientHeight + edge;
@@ -82,8 +90,8 @@
   const measure = (node: HTMLDivElement) => { virtualizer.measureElement(node); };
 </script>
 
-<div class="virtual" role="feed" aria-label={label} tabindex="-1" bind:this={element} onscroll={scrolled}>
-  <div class="space" style:height="{total}px">
+<div class="virtual" {role} aria-label={label} tabindex="-1" bind:this={element} onscroll={scrolled}>
+  <div class="space" class:top={align === "top"} style:height="{total}px">
     {#each visible as item (item.key)}
       <div class="item" data-index={item.index} style:transform="translateY({item.start}px)" {@attach measure}>
         {@render row(items[item.index])}
@@ -95,5 +103,6 @@
 <style>
   .virtual { height: 100%; overflow-y: auto; display: flex; flex-direction: column; }
   .space { position: relative; flex: none; margin-top: auto; }
+  .space.top { margin-top: 0; }
   .item { position: absolute; top: 0; left: 0; width: 100%; }
 </style>
