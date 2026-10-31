@@ -6,6 +6,14 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+// BindAccount associates an opaque account with a private proxy credential.
+func (s *Store) BindAccount(ctx context.Context, id contract.AccountID, proxyID string, provider contract.AccountProvider, label string) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT INTO accounts(id,proxy_id,provider,label) VALUES(?,?,?,?)", id, proxyID, provider, label)
+		return err
+	})
+}
+
 // SetAccountRooms replaces the allowlist in one transaction.
 func (s *Store) SetAccountRooms(ctx context.Context, account contract.AccountID, rooms []contract.RoomID) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {

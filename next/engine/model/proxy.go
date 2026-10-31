@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 	"golang.org/x/crypto/bcrypt"
@@ -16,11 +17,12 @@ import (
 
 // Proxy owns the proxy listener and its private client key.
 type Proxy struct {
-	Listener  *net.UnixListener
-	Config    string
-	Socket    string
-	clientKey string
-	client    *http.Client
+	Listener   *net.UnixListener
+	Config     string
+	Socket     string
+	clientKey  string
+	client     *http.Client
+	generation atomic.Uint64
 }
 
 // NewProxy creates a private proxy configuration. managementKey is held by the engine.
