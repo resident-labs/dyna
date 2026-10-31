@@ -136,6 +136,7 @@
             {/if}
           </button>
         {/each}
+        {#if scope === "sessions" && section.group === "sessions" && section.shown < section.total}<p class="note">Showing {section.shown.toLocaleString()} of {section.total.toLocaleString()} sessions. Narrow the search to see the rest.</p>{/if}
         {#if section.state === "searching"}<div class="note">Searching messages…<div class="skeleton"></div><div class="skeleton short"></div></div>
         {:else if section.state === "failed"}<div class="note">Could not search messages. <button class="retry" onclick={() => retry++}>Retry</button></div>{/if}
       {/each}
