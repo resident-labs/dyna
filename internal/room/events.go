@@ -107,16 +107,18 @@ const (
 
 	FamilyMerge EventFamily = "merge"
 
-	FamilyGoal     EventFamily = "goal"
-	FamilyCheckin  EventFamily = "checkin"
-	FamilyCIHealth EventFamily = "ci-health"
-	FamilyRule     EventFamily = "rule"
-	FamilySession  EventFamily = "session"
-	FamilyAlert    EventFamily = "alert"
-	FamilyService  EventFamily = "service"
-	FamilyEngine   EventFamily = "engine"
-	FamilyQuestion EventFamily = "question"
-	FamilyApproval EventFamily = "approval"
+	FamilyGoal        EventFamily = "goal"
+	FamilyCheckin     EventFamily = "checkin"
+	FamilyCIHealth    EventFamily = "ci-health"
+	FamilyGitHubQuota EventFamily = "github-quota"
+	TypeQuotaLow      EventType   = "low"
+	FamilyRule        EventFamily = "rule"
+	FamilySession     EventFamily = "session"
+	FamilyAlert       EventFamily = "alert"
+	FamilyService     EventFamily = "service"
+	FamilyEngine      EventFamily = "engine"
+	FamilyQuestion    EventFamily = "question"
+	FamilyApproval    EventFamily = "approval"
 	// FamilyTerminal is a session's request for the owner to run a command in
 	// a terminal, and how it ended.
 	FamilyTerminal  EventFamily = "terminal"
