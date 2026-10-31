@@ -6,8 +6,25 @@ export function hue(name: string): number {
   return ((hash >>> 0) % 24) * 15;
 }
 
+const words = (name: string) => name.split(/[\s_.-]+/).filter(Boolean);
+
 // Up to two initials: "lead-web" gives "LW", "root" gives "RO".
 export function initials(name: string): string {
-  const words = name.split(/[\s_.-]+/).filter(Boolean);
-  return (words.length > 1 ? words[0][0] + words[1][0] : name.slice(0, 2)).toUpperCase();
+  const parts = words(name);
+  return (parts.length > 1 ? parts[0][0] + parts[1][0] : name.slice(0, 2)).toUpperCase();
+}
+
+// Initials that tell rooms apart, as the rail shows them: each name, in name order, takes the first free of its two
+// words' first letters, its first two letters, then its first letter and a digit. "design-system" and "docs-site"
+// give "DS" and "DO"; the order makes every page agree.
+export function roomInitials(names: string[]): Map<string, string> {
+  const taken = new Set<string>(), result = new Map<string, string>();
+  for (const name of [...new Set(names)].sort((a, b) => a.localeCompare(b))) {
+    const first = (words(name)[0] ?? name).charAt(0);
+    const label = [initials(name), name.slice(0, 2).toUpperCase(), ...Array.from({ length: 9 }, (_, i) => `${first.toUpperCase()}${i + 1}`)]
+      .find(candidate => !taken.has(candidate)) ?? initials(name);
+    taken.add(label);
+    result.set(name, label);
+  }
+  return result;
 }

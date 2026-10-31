@@ -1,11 +1,11 @@
 <script lang="ts">
   import Avatar from "./Avatar.svelte";
   // The top of a conversation, as in Discord: its avatar, its name large and one muted line.
-  let { kind, name, line, root = false }: { kind: "room" | "session"; name: string; line: string; root?: boolean } = $props();
+  let { kind, name, label, line, root = false }: { kind: "room" | "session"; name: string; label?: string; line: string; root?: boolean } = $props();
 </script>
 
 <div class="intro">
-  <Avatar {kind} {name} {root} size={64} />
+  <Avatar {kind} {name} {label} {root} size={64} />
   <h1>{kind === "room" ? `#${name}` : name}</h1>
   <p>{line}</p>
 </div>
