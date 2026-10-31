@@ -3,6 +3,7 @@ package engine
 import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
+	"strings"
 	"testing"
 	"time"
 )
@@ -29,5 +30,15 @@ func TestGrantOperation(t *testing.T) {
 	g, err := s.store.ListActiveGrants(ctx, room, target, s.now())
 	if err != nil || len(g) != 1 || !g[0].Expires.Equal(s.now().Add(24*time.Hour)) {
 		t.Fatalf("grant %+v %v", g, err)
+	}
+}
+
+func TestGrantCardShowsMode(t *testing.T) {
+	s, _, _, _ := setup(t)
+	entry := s.HostexecGrant()
+	approve := entry.Card(contract.HostexecGrantArgs{Mode: contract.GrantModeApprove}, contract.Principal{})
+	auto := entry.Card(contract.HostexecGrantArgs{Mode: contract.GrantModePreapproved}, contract.Principal{})
+	if !strings.Contains(approve.Body, "approve (each run asks the owner)") || !strings.Contains(auto.Body, "preapproved (runs without asking)") {
+		t.Fatalf("cards: %q / %q", approve.Body, auto.Body)
 	}
 }

@@ -23,11 +23,15 @@ func (s *Service) HostexecGrant() approve.Entry {
 			if a.Never {
 				expiry = "never"
 			}
+			mode := "approve (each run asks the owner)"
+			if a.Mode == contract.GrantModePreapproved {
+				mode = "preapproved (runs without asking)"
+			}
 			var lines []string
 			for _, c := range a.Commands {
 				lines = append(lines, fmt.Sprintf("%q (prefix: %t)", append([]string{c.Program}, c.Args...), c.Prefix))
 			}
-			return contract.Card{Title: "Grant host execution", Target: contract.Target{Kind: contract.TargetRoom, Name: string(a.Room)}, Body: fmt.Sprintf("Session: %s\nHosts: %v\nCommands: %s\nExpiry: %s", a.To.Session, a.Hosts, strings.Join(lines, ", "), expiry)}
+			return contract.Card{Title: "Grant host execution", Target: contract.Target{Kind: contract.TargetRoom, Name: string(a.Room)}, Body: fmt.Sprintf("Session: %s\nHosts: %v\nCommands: %s\nMode: %s\nExpiry: %s", a.To.Session, a.Hosts, strings.Join(lines, ", "), mode, expiry)}
 		},
 		Check: func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
 			a := args.(contract.HostexecGrantArgs)
