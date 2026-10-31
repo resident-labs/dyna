@@ -36,6 +36,16 @@ func TestWebScopeRefusals(t *testing.T) {
 	}
 }
 
+func TestShellWatchNeedsTerminalScope(t *testing.T) {
+	a := New(&fakeService{}, nil)
+	c := Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true, Scopes: []contract.Scope{contract.ScopeRead}}
+	w := httptest.NewRecorder()
+	a.handler(c).ServeHTTP(w, httptest.NewRequest("GET", "/v1/shell/watch?session=session-a", nil))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestFileRouteScopes(t *testing.T) {
 	a := New(&fakeService{}, nil)
 	a.SetFilesRoute(func(Caller) http.Handler {
