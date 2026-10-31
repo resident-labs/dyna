@@ -5,7 +5,26 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+
+	"github.com/resident-labs/dyna/contract"
 )
+
+// ConnectAttempt reads the public status, never the approval material.
+func (s *Store) ConnectAttempt(ctx context.Context) (contract.ConnectAttempt, error) {
+	var a contract.ConnectAttempt
+	err := s.read.QueryRowContext(ctx, "SELECT state,expires FROM connect_attempt WHERE id=1").Scan(&a.State, &a.Expires)
+	if errors.Is(err, sql.ErrNoRows) {
+		return a, nil
+	}
+	return a, err
+}
+
+func (s *Store) SetConnectAttempt(ctx context.Context, a contract.ConnectAttempt) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT INTO connect_attempt(id,state,expires) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,expires=excluded.expires", a.State, a.Expires)
+		return err
+	})
+}
 
 // ConnectLinkState is the durable revocation boundary for a machine link.
 type ConnectLinkState struct {
