@@ -7,7 +7,7 @@
 # and a docs-only change would run the Go tests.
 set -euo pipefail
 if [ "${EVENT:-}" != "pull_request" ]; then
-  for k in relay go computers web pi next_pi; do echo "$k=true"; done
+  for k in relay go computers web pi next_pi next_web; do echo "$k=true"; done
   exit 0
 fi
 if git rev-parse -q --verify HEAD^2 >/dev/null; then
@@ -28,3 +28,4 @@ echo "computers=$(has '^internal/(computers|computerweb)/|^\.github/')"
 echo "web=$(has '^web/|^internal/filesvc/files\.go$|^internal/voice/realtime/testdata/page-protocol\.json$|^\.github/|^scripts/ci\.sh$')"
 echo "pi=$(has '^third_party/pi/|^scripts/pi-(hydrate|pack)\.sh$|^scripts/ci\.sh$|^\.github/')"
 echo "next_pi=$(has '^next/third_party/pi/|^scripts/ci-changes\.sh$|^scripts/ci\.sh$|^\.github/')"
+echo "next_web=$(has '^next/web/|^next/cmd/dyna-webdev/|^scripts/ci-changes\.sh$|^scripts/ci\.sh$|^\.github/')" 
