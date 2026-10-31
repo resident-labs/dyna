@@ -49,7 +49,7 @@
   {#if workingCount}<h2 class="label">Working<span>{workingCount}</span></h2>
     {#each working as { id, room, value } (id)}<a class="item" href={`${roomHref(room.id)}/s/${encodeURIComponent(id)}`} onclick={navigate}>
       <SessionRow name={value.name} root={value.root} status={room.name} /></a>{/each}{/if}
-  {#if failed}<p class="failed">Some of these did not load. <button type="button" class="retry" onclick={() => { failed = false; attempt++; }}>Try again</button></p>{/if}
+  {#if failed && (requests.length < waitingCount || working.length < workingCount)}<p class="failed">Some items could not load. <button type="button" class="retry" onclick={() => { failed = false; attempt++; }}>Try again</button></p>{/if}
   {#if !waitingCount && !workingCount}<p class="empty">Nothing waits for you, and no session is working.</p>{/if}
 </div>
 

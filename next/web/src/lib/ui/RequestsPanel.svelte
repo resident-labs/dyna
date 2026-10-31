@@ -25,7 +25,7 @@
   <div class="list">
     <h2 class="label">Waiting for you</h2>
     {#each waiting as request (request.id)}<RequestCard {request} {store} {now} />
-    {:else}<p class="none">No requests are waiting.</p>{/each}
+    {:else}{#if store.ready}<p class="none">No requests are waiting.</p>{/if}{/each}
     {#if decided.length}
       <h2 class="label">Decided</h2>
       {#each decided as request (request.id)}<RequestCard {request} {store} {now} />{/each}
