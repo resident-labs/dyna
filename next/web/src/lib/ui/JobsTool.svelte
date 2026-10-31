@@ -5,7 +5,6 @@
   import Icon from "./Icon.svelte";
   import JobOutput from "./JobOutput.svelte";
   import StatusPill from "./StatusPill.svelte";
-  import { count } from "../feed.ts";
   import { endCause, failed, jobGroups, jobTime, jobTitle } from "../jobs.ts";
   import { ShellWatches, type ShellJob } from "../shell.ts";
   // The room header's Jobs tool (dock design C). Its slot never moves; only its counts change: the running jobs with
@@ -34,8 +33,9 @@
   let names = $derived(new Map(sessions.map(session => [session.id, session])));
   let groups = $derived(jobGroups([...watches.jobs].filter(([id]) => !only || id === only).map(([id, jobs]) => ({ id, jobs: jobs.values() }))));
   let listed = $derived(groups.flatMap(group => group.jobs.concat(group.older)));
-  let counts = $derived([count(listed.filter(job => job.running).length, "running"), count(listed.filter(failed).length, "failed")]
-    .filter(part => !part.startsWith("0 ")).join(" · "));
+  let listedRunning = $derived(listed.filter(job => job.running).length);
+  let listedFailed = $derived(listed.filter(failed).length);
+  let counts = $derived([listedRunning && `${listedRunning} running`, listedFailed && `${listedFailed} failed`].filter(Boolean).join(" · "));
   const older = new SvelteSet<string>();
 
   // A session row, About's Jobs row or a work row's jobs open the list on that session's jobs.
