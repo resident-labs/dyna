@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { windowMeter } from "./usage.ts";
+import { busiestWindow, windowMeter } from "./usage.ts";
 
 test("words a usage window by its span, percent used, percent left and time to reset; busy at 90% used", () => {
   const now = Date.parse("2026-10-31T00:00:00Z");
@@ -11,4 +11,13 @@ test("words a usage window by its span, percent used, percent left and time to r
   // An unused window comes with Go's zero time: no reset part, and a span from seconds, never the raw name.
   assert.deepEqual(windowMeter({ name: "one_day", usedPercent: 0, seconds: 86400, resetsAt: "0001-01-01T00:00:00Z" }, now),
     { label: "1 day", percent: 0, unit: "used", busy: false, text: "100% left" });
+});
+
+test("names the busiest usage window of any account by its provider, skipping accounts with a cause", () => {
+  const w = (usedPercent: number, seconds: number) => ({ name: "", usedPercent, seconds, resetsAt: "" });
+  assert.equal(busiestWindow([
+    { provider: "claude", label: "me@example.com", cause: "", windows: [w(61.6, 18000), w(40, 604800)] },
+    { provider: "codex", label: "team", cause: "sign_in_expired", windows: [w(99, 604800)] },
+    { provider: "kimi", label: "spare", cause: "", windows: null }]), "Claude at 62% of the 5-hour window");
+  assert.equal(busiestWindow([]), undefined);
 });
