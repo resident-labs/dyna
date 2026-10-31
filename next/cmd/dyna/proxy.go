@@ -4,11 +4,13 @@ import (
 	"context"
 	"io"
 	"net"
+	"net/rpc"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	sdkauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 	"github.com/spf13/cobra"
@@ -28,6 +30,15 @@ func proxyCommand() *cobra.Command {
 			return err
 		}
 		defer listener.Close()
+		storeConn := os.NewFile(4, "proxy-store.sock")
+		client := rpc.NewClient(storeConn)
+		defer client.Close()
+		credentials := &proxyStore{client: client}
+		if err := credentials.importLegacy(cmd.Context(), cfg.AuthDir); err != nil {
+			return err
+		}
+		sdkauth.RegisterTokenStore(credentials)
+		cliproxy.EnableDynaMemoryOAuthCallbacks()
 		ctx, cancel := signal.NotifyContext(cmd.Context(), syscall.SIGTERM)
 		defer cancel()
 		ready := make(chan struct{})

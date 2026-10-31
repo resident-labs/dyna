@@ -6,10 +6,23 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 42
+const schemaVersion = 44
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{}
+=======
+var steps = map[int][]string{
+	43: {
+		`PRAGMA defer_foreign_keys=ON`,
+		`CREATE TABLE operations_new (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT REFERENCES rooms(id), by_kind TEXT NOT NULL, by_id TEXT NOT NULL, class TEXT NOT NULL, state TEXT NOT NULL, card BLOB NOT NULL, args BLOB NOT NULL, args_sha256 BLOB NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, decision BLOB, result BLOB)`,
+		`INSERT INTO operations_new SELECT * FROM operations`,
+		`DROP TABLE operations`,
+		`ALTER TABLE operations_new RENAME TO operations`,
+		`CREATE UNIQUE INDEX operations_pending_dedup ON operations(room, by_kind, by_id, kind, args_sha256) WHERE state = 'pending'`,
+		`CREATE INDEX operations_state_expires ON operations(state, expires_at)`,
+	},
+	42: {`CREATE TABLE proxy_auths (id TEXT PRIMARY KEY, provider TEXT NOT NULL, record BLOB NOT NULL, updated_at INTEGER NOT NULL)`},
+}
 
 // upgrade applies each future numbered step in the same transaction as its version.
 func upgrade(db *sql.DB, floor int, commit string, steps map[int][]string, before func(int) error) error {
