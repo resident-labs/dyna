@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/textproto"
 	"net/url"
@@ -184,7 +185,23 @@ func (g GitHub) requestBody(ctx context.Context, r Ref, path, method string, raw
 	}
 	primary := matching && headers.Get("X-Ratelimit-Remaining") == "0" && !reset.Before(rate.Reset)
 	secondary := strings.Contains(strings.ToLower(string(body)), "secondary rate limit") || strings.Contains(strings.ToLower(string(body)), "abuse detection")
-	if (status == 403 || status == 429) && (primary || secondary || headers.Get("Retry-After") != "") {
+	graphqlLimited := false
+	if scope.Resource == "graphql" && status == http.StatusOK {
+		var response struct {
+			Errors []struct {
+				Type string `json:"type"`
+			} `json:"errors"`
+		}
+		if json.Unmarshal(body, &response) == nil {
+			for _, item := range response.Errors {
+				if item.Type == "RATE_LIMITED" {
+					graphqlLimited = true
+					break
+				}
+			}
+		}
+	}
+	if graphqlLimited || (status == 403 || status == 429) && (primary || secondary || headers.Get("Retry-After") != "") {
 		delay := time.Minute
 		if secondary {
 			rate.SecondaryFailures++
@@ -194,16 +211,29 @@ func (g GitHub) requestBody(ctx context.Context, r Ref, path, method string, raw
 		if primary && rate.Reset.After(now) {
 			until = rate.Reset.Add(time.Second)
 		}
+		var retryAfter time.Time
 		if seconds, err := strconv.Atoi(headers.Get("Retry-After")); err == nil && seconds >= 0 {
-			if retry := now.Add(time.Duration(seconds) * time.Second); retry.After(until) {
+			retryAfter = now.Add(time.Duration(seconds) * time.Second)
+			if retry := retryAfter; retry.After(until) {
 				until = retry
 			}
-		} else if retry, err := http.ParseTime(headers.Get("Retry-After")); err == nil && retry.After(until) {
-			until = retry
+		} else if retry, err := http.ParseTime(headers.Get("Retry-After")); err == nil {
+			retryAfter = retry
+			if retry.After(until) {
+				until = retry
+			}
 		}
+		limitType := "unknown"
+		if secondary {
+			limitType = "secondary"
+		} else if primary {
+			limitType = "primary"
+		}
+		slog.Info("GitHub polling rate limit", "type", limitType, "endpoint_class", scope.Resource, "retry_after", retryAfter, "pause_until", until)
 		if until.After(rate.PauseUntil) {
 			rate.PauseUntil, rate.Reason, rate.PauseScope = until, "GitHub rate limit", scope
 		}
+		rate.PauseObservedAt = time.Now().UTC()
 		return nil, "", &rateLimitError{until}
 	}
 	if status == http.StatusNotModified {
@@ -327,19 +357,38 @@ func (c *requestCache) lockRate() func() {
 
 // applyRateLimits updates scoped entries and spreads only the recovered records.
 func applyRateLimits(st *State, rates map[string]RateLimit, now time.Time) {
+	applyRateLimitsWithRecovery(st, rates, now, "")
+}
+
+func applyRateLimitsWithRecovery(st *State, rates map[string]RateLimit, now time.Time, recoveryKey string) {
 	recovered := map[string]bool{}
 	for key, rate := range rates {
 		previous := st.RateLimits[key]
-		if rate.ObservedAt.Before(previous.ObservedAt) {
+		// Concurrent responses can complete in either order. Keep newer quota
+		// readings, but merge active pauses independently of their reset window.
+		if rate.ObservedAt.Before(previous.ObservedAt) || previous.Reset.After(rate.Reset) {
+			if now.Before(rate.PauseUntil) && rate.PauseUntil.After(previous.PauseUntil) && (!previous.PauseUntil.IsZero() || rate.PauseObservedAt.After(previous.ObservedAt)) {
+				previous.PauseUntil, previous.Reason, previous.PauseScope = rate.PauseUntil, rate.Reason, rate.PauseScope
+			}
+			if rate.PauseObservedAt.After(previous.PauseObservedAt) {
+				previous.PauseObservedAt = rate.PauseObservedAt
+			}
+			previous.SecondaryFailures = max(previous.SecondaryFailures, rate.SecondaryFailures)
+			st.RateLimits[key] = previous
 			continue
 		}
 		// A stale snapshot must not increase quota or erase a later pause.
-		if previous.Reset.After(rate.Reset) {
-			continue
-		}
 		if previous.Reset.Equal(rate.Reset) && previous.Remaining != nil && rate.Remaining != nil && *previous.Remaining < *rate.Remaining {
 			rate.Remaining = previous.Remaining
 		}
+		// A concurrent snapshot cannot clear a pause that has not expired.
+		if key != recoveryKey && now.Before(previous.PauseUntil) && previous.PauseUntil.After(rate.PauseUntil) {
+			rate.PauseUntil, rate.Reason, rate.PauseScope = previous.PauseUntil, previous.Reason, previous.PauseScope
+		}
+		if previous.PauseObservedAt.After(rate.PauseObservedAt) {
+			rate.PauseObservedAt = previous.PauseObservedAt
+		}
+		rate.SecondaryFailures = max(rate.SecondaryFailures, previous.SecondaryFailures)
 		if !previous.PauseUntil.IsZero() && rate.PauseUntil.IsZero() {
 			recovered[key] = true
 		}
@@ -418,7 +467,7 @@ func (s *Service) recoverPolling(rate RateLimit, scope RateLimitScope) error {
 	}
 	return s.Store.update(func(st *State) error {
 		previous := st.RateLimits[scope.Key()]
-		if previous.PauseUntil.IsZero() || rate.ObservedAt.Before(previous.ObservedAt) {
+		if previous.PauseUntil.IsZero() || rate.ObservedAt.Before(previous.ObservedAt) || rate.ObservedAt.Before(previous.PauseObservedAt) {
 			return nil
 		}
 		if rate.Reset.IsZero() {
@@ -432,7 +481,7 @@ func (s *Service) recoverPolling(rate RateLimit, scope RateLimitScope) error {
 		// Fresh same-scope proof can restore quota within the saved outage window.
 		previous.Remaining = nil
 		st.RateLimits[scope.Key()] = previous
-		applyRateLimits(st, map[string]RateLimit{scope.Key(): rate}, s.now())
+		applyRateLimitsWithRecovery(st, map[string]RateLimit{scope.Key(): rate}, s.now(), scope.Key())
 		return nil
 	})
 }

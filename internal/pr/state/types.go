@@ -283,6 +283,7 @@ type Record struct {
 	HeadVerifiedAt   time.Time                    `json:"headVerifiedAt,omitempty"`
 	State            PRState                      `json:"state"`
 	ClosedAt         time.Time                    `json:"closedAt,omitempty"`
+	CloseEpisode     uint64                       `json:"closeEpisode,omitempty"`
 	CICleanupDone    bool                         `json:"ciCleanupDone,omitempty"`
 	Watching         bool                         `json:"watching"`
 	Created          time.Time                    `json:"created"`
@@ -544,6 +545,7 @@ type RateLimit struct {
 	Remaining         *int      `json:"remaining,omitempty"`
 	Reset             time.Time `json:"reset,omitempty"`
 	PauseUntil        time.Time `json:"pauseUntil,omitempty"`
+	PauseObservedAt   time.Time `json:"pauseObservedAt,omitzero"`
 	Reason            string    `json:"reason,omitempty"`
 	SecondaryFailures int       `json:"secondaryFailures,omitempty"`
 }
