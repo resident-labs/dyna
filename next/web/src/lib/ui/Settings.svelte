@@ -40,6 +40,7 @@
 {/snippet}
 
 <section class="settings" aria-label="Settings" tabindex="-1" bind:this={element}>
+  <div class="settings-layout">
   {#if !phone}<aside class="nav"><header class="bar"><strong>Settings</strong></header>
     <nav aria-label="Settings panes">{#each panes as pane (pane.id)}
       <a href={`/settings/${pane.id}`} onclick={navigate} aria-current={shown === pane ? "page" : undefined}><Icon name={pane.icon} />{pane.label}</a>{/each}</nav></aside>{/if}
@@ -55,12 +56,14 @@
         <a href={`/settings/${pane.id}`} onclick={navigate}><Icon name={pane.icon} />{pane.label}<Icon name="forwardChevron" /></a>{/each}</nav>
     {/if}
   </div>
+  </div>
 </section>
 
 <style>
   /* Over the room column and the sessions panel, under the phone's drawer; the rail stays. */
   .settings { position: fixed; z-index: 1; top: env(safe-area-inset-top); right: 0; left: calc(64px + env(safe-area-inset-left)); height: calc(var(--app-height, 100dvh) - env(safe-area-inset-top));
-    display: grid; grid-template-columns: 220px minmax(0, 1fr); background: var(--bg); }
+    container: settings / inline-size; background: var(--bg); }
+  .settings-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: 100%; }
   .settings:focus-visible { outline: none; }
   header strong, header .count { font-size: 16px; }
   .nav { min-height: 0; }
@@ -74,8 +77,14 @@
   .list { padding: 8px; }
   .list a { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 8px; border-radius: 6px; color: var(--text); font-size: 15px; font-weight: 500; text-decoration: none; }
   .list a :global(svg:last-child) { margin-left: auto; color: var(--muted); }
+  @container settings (max-width: 720px) {
+    .settings-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+    .nav nav { display: flex; overflow-x: auto; }
+    .nav a { flex: none; }
+  }
   @media (max-width: 640px) {
-    .settings { left: env(safe-area-inset-left); grid-template-columns: minmax(0, 1fr); }
+    .settings { left: env(safe-area-inset-left); }
+    .settings-layout { grid-template-columns: minmax(0, 1fr); }
     .menu { display: grid; }
   }
 </style>
