@@ -3,10 +3,12 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/harness/fakeharness"
 )
 
 type harnessFake struct {
@@ -33,6 +35,7 @@ func (h *harnessFake) Start(_ context.Context, id contract.TurnID, inputs []cont
 	<-h.release
 	return contract.TurnEnded{Turn: id, Outcome: contract.TurnOutcome("completed")}, nil
 }
+func (h *harnessFake) SetModel(context.Context, contract.ModelChoice) error { return nil }
 func (h *harnessFake) Continue(context.Context, contract.TurnID, func()) (contract.TurnEnded, error) {
 	panic("unexpected continuation")
 }
@@ -187,5 +190,24 @@ func TestRunnerSkipsReplayedSteer(t *testing.T) {
 	sink.mu.Unlock()
 	if count != 1 || !acked {
 		t.Fatalf("steers=%d acked=%v", count, acked)
+	}
+}
+
+func TestRunnerAppliesModelOnlyWhenItChanges(t *testing.T) {
+	anthropic := contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "a", Thinking: contract.ThinkingLow}
+	openai := contract.ModelChoice{Provider: contract.ModelProviderOpenAI, ID: "b", Thinking: contract.ThinkingLow}
+	completed := fakeharness.Turn{Result: contract.TurnEnded{Outcome: "completed"}}
+	h := &fakeharness.Harness{Turns: []fakeharness.Turn{completed, completed, completed}}
+	sink := &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 1)}
+	runner := &Runner{Harness: h, Sink: sink, Model: anthropic}
+	for i, model := range []contract.ModelChoice{anthropic, openai, openai} {
+		start := contract.TurnStart{Turn: contract.TurnID(fmt.Sprint("turn_", i)), Inputs: []contract.TurnInput{{Delivery: contract.DeliverySeq(i + 1)}}, Model: model}
+		if err := runner.Handle(context.Background(), contract.BoxMessage{Body: start}); err != nil {
+			t.Fatal(err)
+		}
+		<-sink.done
+	}
+	if len(h.Models) != 1 || h.Models[0] != openai {
+		t.Fatalf("SetModel calls: %+v", h.Models)
 	}
 }

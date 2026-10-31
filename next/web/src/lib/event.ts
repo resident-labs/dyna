@@ -26,7 +26,7 @@ const card = object({
   command: optional(nullable(array(string))),
 });
 const state = oneOf("pending", "approved", "denied", "expired", "withdrawn", "done", "failed");
-const cause = optional(oneOf("create_failed", "start_failed", "no_hello", "engine_restarted", "remove_failed", "archive_failed", "grant_inactive", "host_lost", "host_busy", "github_failed", "stale", "interrupted", "internal", "setup_failed", "model_failed", "output_limit", "harness_failed"));
+const cause = optional(oneOf("create_failed", "start_failed", "no_hello", "engine_restarted", "remove_failed", "archive_failed", "grant_inactive", "host_lost", "host_busy", "github_failed", "stale", "interrupted", "internal", "setup_failed", "model_failed", "output_limit", "harness_failed", "set_model_failed"));
 const boxState = oneOf("pending", "creating", "starting", "ready", "stopped", "closing", "deleted", "failed", "lost");
 const bodies: Record<string, Check> = {
   "post.created": object({ text: string, home: conversation, mentions: optional(nullable(array(principal))), replyTo: optional(string),
@@ -50,6 +50,7 @@ const bodies: Record<string, Check> = {
   "pr.opened": object({ repo: string, number: number, session: string, url: string }),
   "rule.added": object({ number: number, text: string }),
   "rule.removed": object({ number: number }),
+  "session.profile_changed": object({ session: string, profile: string }),
   "image.built": object({ host: string, repo: string, name: string, tag: string, seconds: number }),
   "image.failed": object({ host: string, repo: string, name: string, tag: string, reason: string, logTail: string }),
 };

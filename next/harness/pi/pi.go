@@ -31,6 +31,9 @@ type command struct {
 	Message    string        `json:"message,omitempty"`
 	DeliveryID string        `json:"deliveryId,omitempty"`
 	Inputs     []promptInput `json:"inputs,omitempty"`
+	Provider   string        `json:"provider,omitempty"`
+	ModelID    string        `json:"modelId,omitempty"`
+	Level      string        `json:"level,omitempty"`
 }
 
 type contentBlock struct {
@@ -160,8 +163,7 @@ func (h *Harness) send(ctx context.Context, typ string, input *contract.TurnInpu
 }
 
 func (h *Harness) request(ctx context.Context, typ string, input *contract.TurnInput, inputs []contract.TurnInput) (event, error) {
-	id := strconv.FormatUint(h.sequence.Add(1), 10)
-	c := command{ID: id, Type: typ}
+	c := command{Type: typ}
 	for _, item := range inputs {
 		c.Inputs = append(c.Inputs, promptInput{Message: item.Text, DeliveryID: strconv.FormatInt(int64(item.Delivery), 10)})
 	}
@@ -169,6 +171,12 @@ func (h *Harness) request(ctx context.Context, typ string, input *contract.TurnI
 		c.Message = input.Text
 		c.DeliveryID = strconv.FormatInt(int64(input.Delivery), 10)
 	}
+	return h.requestCommand(ctx, c)
+}
+
+func (h *Harness) requestCommand(ctx context.Context, c command) (event, error) {
+	id, typ := strconv.FormatUint(h.sequence.Add(1), 10), c.Type
+	c.ID = id
 	ch := make(chan event, 1)
 	h.mu.Lock()
 	h.pending[id] = ch
@@ -272,6 +280,16 @@ func (h *Harness) Steer(ctx context.Context, input contract.TurnInput) error {
 func (h *Harness) FollowUp(ctx context.Context, input contract.TurnInput) error {
 	return h.send(ctx, "follow_up", &input, nil)
 }
+
+// SetModel sends Pi's set_model and then set_thinking_level.
+func (h *Harness) SetModel(ctx context.Context, model contract.ModelChoice) error {
+	if _, err := h.requestCommand(ctx, command{Type: "set_model", Provider: string(model.Provider), ModelID: model.ID}); err != nil {
+		return err
+	}
+	_, err := h.requestCommand(ctx, command{Type: "set_thinking_level", Level: string(model.Thinking)})
+	return err
+}
+
 func (h *Harness) Abort(ctx context.Context) error { return h.send(ctx, "abort", nil, nil) }
 
 func (h *Harness) SessionFile() string { return h.session }
