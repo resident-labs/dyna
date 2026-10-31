@@ -112,6 +112,11 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	defer proxy.Listener.Close()
+	proxyCtx, stopProxy := context.WithCancel(context.WithoutCancel(ctx))
+	done := make(chan struct{})
+	go func() { defer close(done); proxy.Supervise(proxyCtx, executable) }()
+	defer func() { stopProxy(); <-done }()
+	drain := model.NewDrain()
 	boxCtx, stopBoxes := context.WithCancel(ctx)
 	defer stopBoxes()
 	boxes := &Boxes{Store: st, HeartbeatStore: st, Runtime: cfg.Runtime, HostData: cfg.HostData, Version: cfg.Version, PiTarball: pi, Context: boxCtx}
@@ -141,19 +146,19 @@ func Run(ctx context.Context, cfg Config) error {
 	boxes.Mirror = mirror
 	boxes.Images = &images.Builder{Recorder: service, Now: time.Now}
 	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes, quotas: proxy.Quotas(managementKey, time.Now)}, func(c api.Caller) http.Handler {
-		session, err := st.Session(ctx, c.Principal.Session)
-		if err != nil {
-			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		return drain.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			session, err := st.Session(r.Context(), c.Principal.Session)
+			if err != nil {
 				http.Error(w, "session unavailable", http.StatusServiceUnavailable)
-			})
-		}
-		_, allowed, err := profiles.Model(session.Profile)
-		if err != nil {
-			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				return
+			}
+			_, allowed, err := profiles.Model(session.Profile)
+			if err != nil {
 				http.Error(w, "profile unavailable", http.StatusServiceUnavailable)
-			})
-		}
-		return proxy.Handler(string(session.ID), allowed)
+				return
+			}
+			proxy.Handler(string(session.ID), allowed).ServeHTTP(w, r)
+		}))
 	})
 	apiServer.SetFilesRoute(func(c api.Caller) http.Handler { return service.Files(c.Principal, c.Room) })
 	apiServer.SetGitRoute(func(c api.Caller) http.Handler {
@@ -184,10 +189,6 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 
-	proxyCtx, stopProxy := context.WithCancel(ctx)
-	done := make(chan struct{})
-	go func() { defer close(done); proxy.Supervise(proxyCtx, executable) }()
-	defer func() { stopProxy(); <-done }()
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 	reconcilerTicks := time.NewTicker(10 * time.Second)
@@ -204,6 +205,8 @@ func Run(ctx context.Context, cfg Config) error {
 	for {
 		select {
 		case <-ctx.Done():
+			st.DrainDispatch()
+			waitForDrain(drain.Begin(), time.After(60*time.Second))
 			return nil
 		case <-ticker.C:
 			if err := service.ExpireOperations(ctx); err != nil {
