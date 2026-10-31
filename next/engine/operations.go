@@ -12,6 +12,9 @@ func (s *Service) ConfigureOperations(ctx context.Context, kinds map[contract.Op
 	s.approvals = approve.New(s.store, ctx, kinds, s.now, expiry, func(prefix string) (string, error) { return id(prefix, s.now()) })
 	return s.approvals.Recover(ctx)
 }
+func (s *Service) ExpireHostexecGrantRequests(ctx context.Context) error {
+	return s.approvals.ExpireKind(ctx, "hostexec.grant")
+}
 func (s *Service) ExpireOperations(ctx context.Context) error { return s.approvals.Expire(ctx) }
 func (s *Service) OpSubmit(ctx context.Context, caller contract.Principal, req contract.OpSubmitRequest) (contract.OpSubmitResponse, *contract.Error) {
 	op, err := s.approvals.Submit(ctx, caller, req.Operation)
