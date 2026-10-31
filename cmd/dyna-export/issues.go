@@ -29,6 +29,9 @@ WHERE i.room_id=? AND i.state IN ('open','goal') ORDER BY i.seq`, roomID)
 		if err := json.Unmarshal(body, &issue); err != nil {
 			return nil, fmt.Errorf("decode issue: %w", err)
 		}
+		if feed.legacyIssueRefs[issue.ID] {
+			return nil, fmt.Errorf("selected issue has a legacy feed event without a typed payload")
+		}
 		events, ok := feed.issues[issue.ID]
 		if !ok || events.filed.Type != room.IssueFiled || number < 1 {
 			return nil, fmt.Errorf("issue is missing its filing event or number")

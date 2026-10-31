@@ -17,9 +17,11 @@ type issueFeed struct {
 }
 
 type roomFeed struct {
-	issues    map[string]issueFeed
-	lastPosts map[string]string
-	partial   bool
+	issues          map[string]issueFeed
+	lastPosts       map[string]string
+	partial         bool
+	legacyIssueRefs map[string]bool
+	legacyIssues    int
 }
 
 // readFeed opens the append-only feed without using live store APIs.
@@ -37,7 +39,7 @@ func readFeed(feeds, roomID string) (roomFeed, error) {
 		return roomFeed{}, fmt.Errorf("captured room feed: %w", err)
 	}
 	defer f.Close()
-	out := roomFeed{issues: make(map[string]issueFeed), lastPosts: make(map[string]string)}
+	out := roomFeed{issues: make(map[string]issueFeed), lastPosts: make(map[string]string), legacyIssueRefs: make(map[string]bool)}
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 4096), 16<<20)
 	scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
@@ -66,7 +68,12 @@ func readFeed(feeds, roomID string) (roomFeed, error) {
 		if !ok {
 			if msg.Kind == string(room.FamilyIssue) {
 				if msg.Payload.IsZero() {
-					return roomFeed{}, fmt.Errorf("issue feed payload is missing")
+					out.legacyIssues++
+					out.legacyIssueRefs[msg.ID] = true
+					if msg.ReplyTo != "" {
+						out.legacyIssueRefs[msg.ReplyTo] = true
+					}
+					continue
 				}
 				raw, err := msg.Payload.MarshalJSON()
 				if err != nil {
