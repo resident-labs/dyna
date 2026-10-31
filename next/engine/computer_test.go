@@ -41,6 +41,8 @@ func TestComputerWatchFanoutAndState(t *testing.T) {
 	default:
 	}
 	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
 	done := make(chan *contract.Error, 1)
 	generation := s.computers[id].generation
 	go func() { done <- s.ComputerFrames(ctx, caller, generation, reader) }()
@@ -57,8 +59,8 @@ func TestComputerWatchFanoutAndState(t *testing.T) {
 		t.Fatal("first frame missing")
 	}
 	send("two")
-	if string(<-second) != "two" || string(<-first) != "one" {
-		t.Fatal("slow watcher blocked fanout")
+	if string(<-second) != "two" || string(<-first) != "two" {
+		t.Fatal("slow watcher did not receive the newest frame")
 	}
 	cancelFirst()
 	// Cancellation is synchronized by the stopped channel.
@@ -203,6 +205,8 @@ func TestOldComputerStreamDoesNotEndNewWatch(t *testing.T) {
 	}
 	generation := s.computers[id].generation
 	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
 	done := make(chan *contract.Error, 1)
 	go func() { done <- s.ComputerFrames(ctx, caller, generation, reader) }()
 	if err := binary.Write(writer, binary.BigEndian, uint32(1)); err != nil {
