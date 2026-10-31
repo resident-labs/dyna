@@ -127,6 +127,22 @@ func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal,
 	if caller.Kind != contract.PrincipalSession {
 		return forbidden()
 	}
+	s.mu.Lock()
+	channel, computer := s.channels[caller.Session], s.computers[caller.Session]
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if computer == nil || channel == nil || s.computers[caller.Session] != computer || s.channels[caller.Session] != channel {
+			return
+		}
+		for ch := range computer.watchers {
+			close(ch)
+			delete(computer.watchers, ch)
+		}
+		channel.watching = false
+		wakeComputer(channel)
+	}()
 	for {
 		var size uint32
 		if err := binary.Read(r, binary.BigEndian, &size); err != nil {

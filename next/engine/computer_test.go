@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"io"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
@@ -39,11 +40,14 @@ func TestComputerWatchFanoutAndState(t *testing.T) {
 		t.Fatal("second watcher started again")
 	default:
 	}
+	reader, writer := io.Pipe()
+	done := make(chan *contract.Error, 1)
+	go func() { done <- s.ComputerFrames(ctx, caller, reader) }()
 	send := func(frame string) {
-		frames := new(bytes.Buffer)
-		_ = binary.Write(frames, binary.BigEndian, uint32(len(frame)))
-		frames.WriteString(frame)
-		if err := s.ComputerFrames(ctx, caller, frames); err != nil {
+		if err := binary.Write(writer, binary.BigEndian, uint32(len(frame))); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Write([]byte(frame)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -70,6 +74,10 @@ func TestComputerWatchFanoutAndState(t *testing.T) {
 		t.Fatal("watcher stayed open")
 	}
 	<-channel.wake
+	_ = writer.Close()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
 	list, problem := s.SessionList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionListRequest{Room: room})
 	if problem != nil {
 		t.Fatal(problem)
@@ -123,6 +131,22 @@ func TestComputerWatchControlsBoxChannel(t *testing.T) {
 			}
 		}
 		t.Fatalf("box channel closed before %s", want)
+	}
+	wait("computer.watch.start")
+	if err := s.ComputerFrames(ctx, caller, bytes.NewReader(nil)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case _, ok := <-frames:
+		if ok {
+			t.Fatal("unexpected frame")
+		}
+	default:
+		t.Fatal("failed frame stream kept watcher open")
+	}
+	frames, err = s.ComputerWatch(watchCtx, id)
+	if err != nil {
+		t.Fatal(err)
 	}
 	wait("computer.watch.start")
 	cancel()
