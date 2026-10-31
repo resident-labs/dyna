@@ -15,6 +15,7 @@ func filledGlobalBundle() GlobalBundle {
 	owner := ImportedAuthor{Kind: PrincipalOwner, Label: "owner"}
 	return GlobalBundle{
 		Version:  BundleV1,
+		Rooms:    []RoomName{"dyna"},
 		Exported: bundleTime,
 		Source:   BundleSource{Commit: "abc123", Backup: "dyna-final.db", BackupSHA256: "f00d"},
 		Rules:    []Rule{{Label: "u1", Text: "report bugs to root", By: owner, Created: bundleTime, Updated: bundleTime}},
@@ -27,7 +28,7 @@ func filledGlobalBundle() GlobalBundle {
 			Taste: 7, Intelligence: 9, Cost: 9, Diagnostics: 10, CompactTokens: 200000, MaxConcurrent: 4, MaxCallsPerRun: 8, Default: true,
 		}},
 		Hosts:    []HostBundle{{Name: "hermeslab", SSH: "pip@hermeslab", Labels: []string{"gpu"}, Rooms: []RoomName{"dyna"}}},
-		Accounts: []AccountLabel{{Provider: ProviderAnthropic, Label: "max-1", Repos: []RepoName{"resident-labs/dyna"}}},
+		Accounts: []AccountLabel{{Provider: ProviderAnthropic, Label: "max-1", Repos: []RepoName{"resident-labs/dyna"}, Rooms: []RoomName{"dyna"}}},
 		Devices: []DeviceBundle{{
 			Name: "phone", TokenSHA256: "beef", Created: bundleTime, Expires: bundleTime.Add(time.Hour), Scopes: []DeviceScope{"rooms.read"},
 		}},
@@ -67,7 +68,7 @@ func filledRoomBundle() RoomBundle {
 		PRs:       []TrackedPR{{Repo: "resident-labs/dyna", Number: 1283, Author: root, Goal: "g1084"}},
 		Questions: []QuestionBundle{{
 			Label: "q33", Kind: QuestionTerminal, Asker: root, Text: "mount the drive", Options: []string{"yes"},
-			Meanwhile: "waiting", Command: "sudo mount /dev/sdb2", Asked: bundleTime,
+			Meanwhile: "waiting", Command: "sudo mount /dev/sdb2", Argv: []string{"sudo", "mount", "/dev/sdb2"}, Cwd: "/tmp", Reason: "mount", Asked: bundleTime,
 		}},
 		Subscriptions: []Subscription{{
 			ID: "sub_2", Scope: ScopeRoom, On: []EventType{"pr.merged"}, Run: &RunSpec{Command: []string{"true"}, Image: "dyna-base", Size: "small"},

@@ -1,0 +1,89 @@
+package migrate
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/resident-labs/dyna/contract"
+)
+
+// Report contains counts derived from decoded records, not declared counts.
+type Report struct {
+	Global contract.BundleCounts                       `json:"global"`
+	Rooms  map[contract.RoomName]contract.BundleCounts `json:"rooms"`
+}
+
+// DryRun validates every part without opening or writing a store.
+func DryRun(dir string) (Report, error) {
+	var report Report
+	f, err := os.Open(filepath.Join(dir, "global.json"))
+	if err != nil {
+		return report, err
+	}
+	global, err := contract.DecodeBundle[contract.GlobalBundle](f)
+	f.Close()
+	if err != nil {
+		return report, fmt.Errorf("global: %w", err)
+	}
+	report.Global = contract.BundleCounts{
+		Rules: len(global.Rules), Hosts: len(global.Hosts), Accounts: len(global.Accounts),
+		Devices: len(global.Devices), Subscriptions: len(global.Subscriptions),
+	}
+	if report.Global != global.Counts {
+		return report, fmt.Errorf("global: count mismatch")
+	}
+	if global.Rooms == nil {
+		return report, fmt.Errorf("global: missing room manifest")
+	}
+	names := make(map[string]bool, len(global.Rooms))
+	for _, name := range global.Rooms {
+		s := string(name)
+		if s == "" || s == "." || s == ".." || strings.ContainsAny(s, "/\\") || strings.IndexByte(s, 0) >= 0 {
+			return report, fmt.Errorf("invalid room name")
+		}
+		if names[s] {
+			return report, fmt.Errorf("duplicate room name")
+		}
+		names[s] = true
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, "rooms"))
+	if err != nil {
+		return report, err
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !entry.Type().IsRegular() || !strings.HasSuffix(name, ".json") || !names[strings.TrimSuffix(name, ".json")] {
+			return report, fmt.Errorf("unexpected room file")
+		}
+	}
+	report.Rooms = make(map[contract.RoomName]contract.BundleCounts, len(names))
+	for _, name := range global.Rooms {
+		f, err := os.Open(filepath.Join(dir, "rooms", string(name)+".json"))
+		if err != nil {
+			return report, err
+		}
+		room, err := contract.DecodeBundle[contract.RoomBundle](f)
+		f.Close()
+		if err != nil {
+			return report, fmt.Errorf("room %s: %w", name, err)
+		}
+		if room.Name != name {
+			return report, fmt.Errorf("room %s: name mismatch", name)
+		}
+		counts := contract.BundleCounts{
+			Rules: len(room.Rules), Goals: len(room.Goals), Issues: len(room.Issues),
+			PRs: len(room.PRs), Questions: len(room.Questions),
+			Subscriptions: len(room.Subscriptions), Sessions: len(room.Handoff),
+		}
+		for _, goal := range room.Goals {
+			counts.GoalItems += len(goal.Items)
+		}
+		if counts != room.Counts {
+			return report, fmt.Errorf("room %s: count mismatch", name)
+		}
+		report.Rooms[name] = counts
+	}
+	return report, nil
+}
