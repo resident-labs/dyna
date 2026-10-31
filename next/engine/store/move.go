@@ -51,7 +51,7 @@ func (s *Store) MoveSession(ctx context.Context, target, parent contract.Session
 					return err
 				}
 			}
-			if _, err := tx.ExecContext(ctx, "UPDATE boxes SET state=?,reason='',slice='',updated_at=? WHERE id=?", state, event.Time.UnixMilli(), b.ID); err != nil {
+			if _, err := tx.ExecContext(ctx, "UPDATE boxes SET state=?,reason='',updated_at=? WHERE id=?", state, event.Time.UnixMilli(), b.ID); err != nil {
 				return err
 			}
 		}

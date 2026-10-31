@@ -13,22 +13,21 @@ import (
 
 type movingHost struct {
 	fakeBoxes
-	removed   []contract.BoxID
+	stopped   []contract.BoxID
+	oldSlices []string
 	recreated []BoxSpec
 	failStop  bool
 }
 
-func (h *movingHost) Stop(context.Context, contract.BoxID) error {
+func (h *movingHost) Stop(_ context.Context, id contract.BoxID) error {
+	h.stopped = append(h.stopped, id)
 	if h.failStop {
 		return errors.New("stop failed")
 	}
 	return nil
 }
-func (h *movingHost) RemoveContainer(_ context.Context, id contract.BoxID) error {
-	h.removed = append(h.removed, id)
-	return nil
-}
-func (h *movingHost) Recreate(_ context.Context, spec BoxSpec, _ string) error {
+func (h *movingHost) Recreate(_ context.Context, spec BoxSpec, _, oldSlice string) error {
+	h.oldSlices = append(h.oldSlices, oldSlice)
 	h.recreated = append(h.recreated, spec)
 	return nil
 }
@@ -112,13 +111,11 @@ func TestMoveIdleSubtree(t *testing.T) {
 	if changed != 2 {
 		t.Fatalf("expected two stopped box events, got %d", changed)
 	}
-	if len(host.removed) != 2 || host.removed[0] != leaf.Box || host.removed[1] != child.Box {
-		t.Fatalf("remove order: %v", host.removed)
-	}
 	b, err := s.store.Box(ctx, child.Box)
-	if err != nil || b.BudgetParent != destination.Box || b.Slice != "" || b.State != contract.BoxStopped {
+	if err != nil || b.BudgetParent != destination.Box || b.Slice == "" || b.State != contract.BoxStopped {
 		t.Fatalf("moved box: %+v %v", b, err)
 	}
+	oldSlice := b.Slice
 	wakeSession(t, s, ctx, room, leaf.Session)
 	s.ReconcileDormancy(ctx, false, true)
 	if len(host.recreated) != 2 || host.recreated[0].Box != child.Box || host.recreated[1].Box != leaf.Box {
@@ -126,6 +123,9 @@ func TestMoveIdleSubtree(t *testing.T) {
 	}
 	wantParent, _ := box.SliceName([]contract.BoxID{destination.Box, child.Box})
 	wantLeaf, _ := box.SliceName([]contract.BoxID{destination.Box, child.Box, leaf.Box})
+	if len(host.stopped) != 2 || len(host.oldSlices) != 2 || host.oldSlices[0] != oldSlice {
+		t.Fatalf("cleanup did not preserve old slice: stops=%v slices=%v", host.stopped, host.oldSlices)
+	}
 	if host.recreated[0].Slice != wantParent || host.recreated[1].Slice != wantLeaf {
 		t.Fatalf("wrong new slices: %+v", host.recreated)
 	}
@@ -147,5 +147,16 @@ func TestMoveUnderCallerAfterStopFailure(t *testing.T) {
 	s.boxes = &movingHost{failStop: true}
 	if _, e := s.SessionMove(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: parent}, contract.SessionMoveRequest{Session: child.Session, NewParent: parent}); e != nil {
 		t.Fatal(e)
+	}
+	wakeSession(t, s, ctx, room, child.Session)
+	s.ReconcileDormancy(ctx, false, true)
+	host := s.boxes.(*movingHost)
+	if len(host.stopped) == 0 || len(host.recreated) != 0 {
+		t.Fatal("failed stop must prevent wake")
+	}
+	host.failStop = false
+	s.ReconcileDormancy(ctx, false, true)
+	if stateOf(t, s, ctx, child.Session) != contract.BoxStarting {
+		t.Fatal("box did not wake after retry")
 	}
 }
