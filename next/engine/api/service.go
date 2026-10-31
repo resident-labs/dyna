@@ -17,6 +17,8 @@ type Caller struct {
 // Service implements the engine operations. It must authorize resource targets
 // against the caller as well as applying the API's listener-level policy.
 type Service interface {
+	ShellWatch(context.Context, contract.SessionID) (<-chan contract.ShellJobOutput, *contract.Error)
+	ShellOutput(context.Context, contract.Principal, contract.ShellOutputRequest) (contract.ShellOutputResponse, *contract.Error)
 	ComputerChanged(context.Context, contract.Principal, contract.ComputerChangedRequest) (contract.ComputerChangedResponse, *contract.Error)
 	ComputerWatch(context.Context, contract.SessionID) (<-chan []byte, *contract.Error)
 	ComputerFrames(context.Context, contract.Principal, uint64, io.Reader) *contract.Error

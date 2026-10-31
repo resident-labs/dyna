@@ -68,7 +68,7 @@ func (s *Service) ComputerChanged(ctx context.Context, caller contract.Principal
 	}
 	c.state = req.To
 	if req.To == contract.ComputerStopped {
-		wakeComputer(s.channels[session.ID])
+		wakeChannel(s.channels[session.ID])
 		for ch := range c.watchers {
 			close(ch)
 			delete(c.watchers, ch)
@@ -77,7 +77,7 @@ func (s *Service) ComputerChanged(ctx context.Context, caller contract.Principal
 	return contract.ComputerChangedResponse{}, nil
 }
 
-func wakeComputer(channel *boxChannel) {
+func wakeChannel(channel *boxChannel) {
 	select {
 	case channel.wake <- struct{}{}:
 	default:
@@ -107,7 +107,7 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 	if len(c.watchers) == 0 {
 		s.computerGeneration++
 		c.generation = s.computerGeneration
-		wakeComputer(channel)
+		wakeChannel(channel)
 	}
 	c.watchers[ch] = struct{}{}
 	go func() {
@@ -120,7 +120,7 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 		delete(c.watchers, ch)
 		close(ch)
 		if len(c.watchers) == 0 && s.channels[id] == channel {
-			wakeComputer(channel)
+			wakeChannel(channel)
 		}
 	}()
 	return ch, nil
@@ -144,7 +144,7 @@ func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal,
 			delete(computer.watchers, ch)
 		}
 		channel.watching = 0
-		wakeComputer(channel)
+		wakeChannel(channel)
 	}()
 	for {
 		var size uint32
