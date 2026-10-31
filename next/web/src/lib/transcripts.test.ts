@@ -17,9 +17,7 @@ test("Work tab marks the 200-step limit before following another cursor", async 
     const reads = new TurnTranscripts("s");
     await reads.read(events);
     const result = reads.of(events);
-    assert.notEqual(result, "loading");
-    assert.notEqual(result, "failed");
-    assert.ok(result);
+    if (!result || typeof result === "string") assert.fail("Work transcript did not load");
     assert.equal(result.steps.length, 200);
     assert.equal(result.truncated, true);
   } finally { globalThis.fetch = original; }
