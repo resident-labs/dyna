@@ -25,7 +25,8 @@ func TestRestartFailedSessions(t *testing.T) {
 	}
 	for _, id := range []contract.SessionID{"root", "child"} {
 		event := contract.Event{ID: contract.EventID("restart-" + id), Room: "r", Time: time.UnixMilli(200), From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.BoxChanged{}}
-		ok, err := s.RestartSession(ctx, id, event)
+		notice := contract.Event{ID: contract.EventID("notice-" + id), Room: "r", Time: event.Time, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionRestarted{Session: id}}
+		ok, err := s.RestartSession(ctx, id, event, notice)
 		if err != nil || !ok {
 			t.Fatalf("%s restart: %v %v", id, ok, err)
 		}
@@ -36,10 +37,18 @@ func TestRestartFailedSessions(t *testing.T) {
 		if err != nil || state != "pending" || want != "run" || image != "" || reason != "" || (id == "root" && (!host.Valid || host.String != "h")) || (id == "child" && host.Valid) || due != 0 || failures != 0 || goal != string(id)+" goal" || (id == "child" && parent.String != "br") {
 			t.Fatalf("%s reset: %s %s %q %q %v %v %d %d %q: %v", id, state, want, image, reason, host, parent, due, failures, goal, err)
 		}
-		ok, err = s.RestartSession(ctx, id, event)
+		dm, err := s.EventsPage(ctx, "r", 0, 0, 10, []contract.EventType{"session.restarted"}, id)
+		if err != nil || len(dm) != 1 {
+			t.Fatalf("restart DM %v: %v", dm, err)
+		}
+		ok, err = s.RestartSession(ctx, id, event, notice)
 		if err != nil || ok {
 			t.Fatalf("%s repeated restart: %v %v", id, ok, err)
 		}
+	}
+	var pending int
+	if err := s.Read().QueryRowContext(ctx, `SELECT count(*) FROM deliveries WHERE wake=0 AND state='pending'`).Scan(&pending); err != nil || pending != 2 {
+		t.Fatalf("quiet restart deliveries %d: %v", pending, err)
 	}
 	events, err := s.Events(ctx, "r", 0, 10, []contract.EventType{"box.changed"})
 	if err != nil || len(events) != 2 {
