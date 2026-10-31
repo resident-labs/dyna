@@ -392,7 +392,7 @@ Each update entry stores its full delivered sections and announced-but-undeclare
 
 `set_prompt_sections {sections: [{key, text}]}` replaces host sections; `reload_resources` reloads skills, MCP config and settings without a new conversation. Both have RPC and `AgentSession` methods; failure is an RPC error. Before each prompt or continue the box sends sections on the same stdin and fails the turn on error. Resource changes write files then reload. Remove old mid-conversation system and tool-change paths; retain `supportsMidConvoEffort`.
 
-For speed, stat context files and the skills folder first; read and hash only changed stats, diff only changed hashes. Section hashes likewise gate diffs. The no-change budget is under 5 ms per run, measured in evaluation; an injected-filesystem test asserts zero reads, hashes and diffs. Snapshot queries use indexes, not full scans, with a query-count test. The engine writes instruction files only on save.
+For speed, stat context files and the skills folder first; read only changed files. Section equality gates diffs. The no-change budget is under 5 ms per run, measured in evaluation; an injected-filesystem test asserts zero reads and diffs. Snapshot queries use indexes, not full scans, with a query-count test. The engine writes instruction files only on save.
 
 #### Tools
 
