@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"dyna-agent/internal/ghquota"
 	"dyna-agent/internal/localci"
 )
 
@@ -84,6 +85,7 @@ func (s *Service) cancelQueuedHostedCI(ctx context.Context, job registeredCIJob,
 		gate.mu.Unlock()
 	}()
 	gh := s.github(job.record.RoomID)
+	gh.runPhase = ghquota.RunCancellation
 	runs, err := gh.readCommitRuns(ctx, refRecord(job.record), job.head)
 	if err != nil {
 		return err
