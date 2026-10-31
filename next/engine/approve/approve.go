@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -40,7 +41,12 @@ type Service struct {
 
 type waiter struct {
 	ctx  context.Context
-	done chan contract.Operation
+	done chan runResult
+}
+
+type runResult struct {
+	op  contract.Operation
+	err error
 }
 
 func New(st *store.Store, ctx context.Context, kinds map[contract.OpKind]Entry, now func() time.Time, expiry time.Duration, id func(string) (string, error)) *Service {
@@ -141,19 +147,19 @@ func (s *Service) Submit(ctx context.Context, who contract.Principal, input cont
 		return op, nil
 	}
 	s.mu.Lock()
-	resultCh := make(chan contract.Operation, 1)
+	resultCh := make(chan runResult, 1)
 	s.waiters[op.ID] = waiter{ctx: ctx, done: resultCh}
 	s.mu.Unlock()
-	go s.run(op, entry)
+	go s.start(op, entry)
 	select {
 	case result := <-resultCh:
-		return result, nil
+		return result.op, result.err
 	case <-ctx.Done():
 		s.mu.Lock()
 		select {
 		case result := <-resultCh:
 			s.mu.Unlock()
-			return result, nil
+			return result.op, result.err
 		default:
 		}
 		delete(s.waiters, op.ID)
@@ -220,7 +226,7 @@ func (s *Service) Decide(ctx context.Context, who contract.Principal, id contrac
 	if state == contract.OpApproved {
 		op.State = state
 		op.Decision = &decision
-		go s.run(op, entry)
+		go s.start(op, entry)
 	}
 	return nil
 }
@@ -263,7 +269,35 @@ func (s *Service) Expire(ctx context.Context) error {
 	}
 	return nil
 }
-func (s *Service) run(op contract.Operation, entry Entry) {
+func (s *Service) start(op contract.Operation, entry Entry) {
+	err := s.run(op, entry)
+	if err == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if w, ok := s.waiters[op.ID]; ok {
+		delete(s.waiters, op.ID)
+		w.done <- runResult{op: op, err: err}
+	} else {
+		slog.Error("operation execution failed", "operation", op.ID, "error", err)
+	}
+}
+func (s *Service) run(op contract.Operation, entry Entry) error {
+	err := s.Store.Write(s.Context, func(tx *sql.Tx) error {
+		changed, err := s.Store.TransitionOperation(tx, op.ID, contract.OpApproved, contract.OpRunning, nil, nil, contract.Event{}, nil)
+		if err != nil {
+			return err
+		}
+		if !changed {
+			return fmt.Errorf("operation %s is not approved", op.ID)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
 	result := contract.OpResult{}
 	if err := entry.Check(s.Context, op.Args, op.By); err != nil {
 		result.Error = "stale: " + err.Error()
@@ -271,9 +305,13 @@ func (s *Service) run(op contract.Operation, entry Entry) {
 	} else {
 		result = entry.Execute(s.Context, op.ID, op.Args, op.By)
 	}
-	_ = s.finish(op, result)
+	err = s.finish(s.Context, op, result)
+	if err != nil {
+		err = s.finish(context.WithoutCancel(s.Context), op, result)
+	}
+	return err
 }
-func (s *Service) finish(op contract.Operation, result contract.OpResult) error {
+func (s *Service) finish(ctx context.Context, op contract.Operation, result contract.OpResult) error {
 	state := contract.OpDone
 	if result.Error != "" || result.ExitCode != 0 {
 		state = contract.OpFailed
@@ -293,8 +331,8 @@ func (s *Service) finish(op contract.Operation, result contract.OpResult) error 
 	if !present {
 		notify = delivery(op.By.Session)
 	}
-	err = s.Store.Write(context.WithoutCancel(s.Context), func(tx *sql.Tx) error {
-		changed, err := s.Store.TransitionOperation(tx, op.ID, contract.OpApproved, state, nil, &result, event, notify)
+	err = s.Store.Write(ctx, func(tx *sql.Tx) error {
+		changed, err := s.Store.TransitionOperation(tx, op.ID, contract.OpRunning, state, nil, &result, event, notify)
 		if err != nil {
 			return err
 		}
@@ -310,17 +348,38 @@ func (s *Service) finish(op contract.Operation, result contract.OpResult) error 
 		delete(s.waiters, op.ID)
 		op.State = state
 		op.Result = &result
-		waiting.done <- op
+		waiting.done <- runResult{op: op}
 	}
 	return nil
 }
 func (s *Service) Recover(ctx context.Context) error {
-	ops, err := s.Store.Operations(ctx, "", contract.OpApproved, time.Time{})
+	running, err := s.Store.Operations(ctx, "", contract.OpRunning, time.Time{})
 	if err != nil {
 		return err
 	}
-	for _, record := range ops {
-		if err := s.finish(record.Operation, contract.OpResult{Error: "interrupted: outcome unknown", Cause: contract.CauseInterrupted}); err != nil {
+	for _, record := range running {
+		message := "interrupted: outcome unknown"
+		if record.Operation.Kind == "pr.open" {
+			message += "; check whether the PR exists before opening another"
+		}
+		if err := s.finish(ctx, record.Operation, contract.OpResult{Error: message, Cause: contract.CauseInterrupted}); err != nil {
+			return err
+		}
+	}
+	approved, err := s.Store.Operations(ctx, "", contract.OpApproved, time.Time{})
+	if err != nil {
+		return err
+	}
+	for _, record := range approved {
+		entry, ok := s.Kinds[record.Operation.Kind]
+		if !ok {
+			return ErrInvalid
+		}
+		record.Operation.Args, err = entry.Decode(record.Args)
+		if err != nil {
+			return err
+		}
+		if err := s.run(record.Operation, entry); err != nil {
 			return err
 		}
 	}

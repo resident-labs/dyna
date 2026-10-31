@@ -12,7 +12,7 @@ const (
 	ClassOwner Class = "owner" // only the owner approves
 )
 
-type OpState string // "pending" | "approved" | "denied" | "expired" | "withdrawn" | "done" | "failed"
+type OpState string // "pending" | "approved" | "running" | "denied" | "expired" | "withdrawn" | "done" | "failed"
 
 type Operation struct {
 	ID       OpID      `json:"id"`
@@ -102,6 +102,7 @@ type OpResult struct {
 const (
 	OpPending   OpState = "pending"
 	OpApproved  OpState = "approved"
+	OpRunning   OpState = "running"
 	OpDenied    OpState = "denied"
 	OpExpired   OpState = "expired"
 	OpWithdrawn OpState = "withdrawn"
