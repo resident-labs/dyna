@@ -6,10 +6,11 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 26
+const schemaVersion = 27
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	26: {`ALTER TABLE sessions ADD COLUMN model_retry_at INTEGER NOT NULL DEFAULT 0`, `ALTER TABLE sessions ADD COLUMN model_retries INTEGER NOT NULL DEFAULT 0`},
 	25: {`ALTER TABLE turns ADD COLUMN stop_requested_at INTEGER`},
 	24: {`ALTER TABLE hosts ADD COLUMN engine_host INTEGER`},
 	23: {
