@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { decodeShellOutput } from "./event.ts";
-import { endCause, failed, failingLine, jobGroups, jobTime, jobTitle } from "./jobs.ts";
+import { endCause, failed, failingLine, jobGroups, jobsMark, jobTime, jobTitle } from "./jobs.ts";
 
 test("jobs group by session, running then failed then passed, newest first, and a failure opens at its first failing line", () => {
   const job = (id: string, running: boolean, exitCode = 0) => ({ job: id, command: id, running, exitCode, text: "", started: "" });
@@ -34,6 +34,11 @@ test("an end cause reads from the end field, and an older event falls back on it
     { exitCode: 0 }, { exitCode: 3 }, { exitCode: -1 }].map(end => [endCause(end as never, "lead"), failed(end as never)]),
     [["Exit 2", true], ["Ended by a signal (SIGTERM)", true], ["Stopped by lead", false], ["Passed", false], ["Exit 3", true], ["Ended by a signal", true]]);
   assert.equal(jobTitle({ job: "j", command: "make test\nmake lint", description: "", running: false, exitCode: 0, text: "", started: "" }), "make test");
+});
+
+test("the jobs tool marks only an unopened failure, so running jobs alone show no mark", () => {
+  assert.deepEqual([jobsMark({ running: 2, failures: 0 }), jobsMark({ running: 0, failures: 0 }), jobsMark({ running: 2, failures: 1 })],
+    [undefined, undefined, "failed"]);
 });
 
 test("the output decoder keeps the description and end, and still takes a message without them", () => {
