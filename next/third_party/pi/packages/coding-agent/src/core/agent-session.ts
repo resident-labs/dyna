@@ -38,7 +38,6 @@ import type {
 	ImageContent,
 	Model,
 	ProviderHeaders,
-	SystemMessage,
 	TextContent,
 	ToolResultMessage,
 	Usage,
@@ -78,6 +77,7 @@ import {
 	shouldCompact,
 	withCompactionTriggerOverride,
 } from "./compaction/index.ts";
+import { createContextUpdate, deliveredSections } from "./context-updates.ts";
 import { DEFAULT_THINKING_LEVEL, THINKING_LEVEL_OPTIONS } from "./defaults.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
@@ -142,7 +142,6 @@ import { BUILTIN_PATH_PREFIX, createSyntheticSourceInfo, isSyntheticPath, type S
 import {
 	buildSystemPrompt,
 	buildSystemPromptSections,
-	diffSystemPromptSections,
 	type NormalizedBuildSystemPromptOptions,
 	normalizeBuildSystemPromptOptions,
 } from "./system-prompt.ts";
@@ -486,6 +485,7 @@ export class AgentSession {
 	private _toolPromptGuidelines: Map<string, string[]> = new Map();
 
 	private _baseSystemPromptOptions!: NormalizedBuildSystemPromptOptions;
+	private _hostSections: Record<string, string> = {};
 	/** Prompt options after before_agent_start mutations for the active run. */
 	private _runSystemPromptOptions?: NormalizedBuildSystemPromptOptions;
 
@@ -521,10 +521,10 @@ export class AgentSession {
 		this._unsubscribeAgent = this.agent.subscribe(this._handleAgentEvent);
 		this._installAgentToolHooks();
 		this._installAgentNextTurnRefresh();
+		this._installContextUpdates();
 		this._installAgentRequestProjection();
 		this._installAgentBoundaryHooks();
 		this._installHiddenDeclarationsProjection();
-		this._installAgentForcedPromptProjection();
 
 		this._buildRuntime({
 			activeToolNames: this._initialActiveToolNames,
@@ -776,7 +776,10 @@ export class AgentSession {
 
 	/** Compaction settings for model with the --compaction-trigger-tokens override applied. */
 	private _compactionSettings(model: Pick<Model<any>, "provider" | "id"> | undefined) {
-		return withCompactionTriggerOverride(this.settingsManager.getCompactionSettings(model), this._compactionTriggerTokens);
+		return withCompactionTriggerOverride(
+			this.settingsManager.getCompactionSettings(model),
+			this._compactionTriggerTokens,
+		);
 	}
 
 	/** Whether `projection`, the current session projection, exceeds the compaction threshold of `model`. */
@@ -928,7 +931,7 @@ export class AgentSession {
 				toolSnippets: { ...this._baseSystemPromptOptions.toolSnippets, ...runOptions.toolSnippets },
 				toolGuidelines: { ...this._baseSystemPromptOptions.toolGuidelines, ...runOptions.toolGuidelines },
 			});
-			const updateMessage = this._preparePromptAndToolLoadout(options, nextContext.messages);
+			this._applyToolLoadout(options.selectedTools);
 			// Keep session.systemPrompt and ctx.getSystemPrompt() in step with what the provider sees.
 			this._runSystemPromptOptions = options;
 
@@ -938,11 +941,23 @@ export class AgentSession {
 					...nextContext,
 					tools: this.agent.state.tools.slice(),
 				},
-				messages: updateMessage
-					? [...(previousSnapshot?.messages ?? []), updateMessage]
-					: previousSnapshot?.messages,
+				messages: previousSnapshot?.messages,
 				model: this.agent.state.model,
 				thinkingLevel: this.agent.state.thinkingLevel,
+			};
+		};
+	}
+
+	private _installContextUpdates(): void {
+		const previousPrepareRequest = this.agent.prepareRequest;
+		this.agent.prepareRequest = async (request, signal) => {
+			const prepared = await previousPrepareRequest?.(request, signal);
+			const context = prepared?.context ?? request.context;
+			const options = this._runSystemPromptOptions ?? this._baseSystemPromptOptions;
+			const update = this._preparePromptAndToolLoadout(options, context.messages);
+			return {
+				...prepared,
+				messages: update ? [...(prepared?.messages ?? []), update] : prepared?.messages,
 			};
 		};
 	}
@@ -990,6 +1005,7 @@ export class AgentSession {
 						draft.details,
 						true,
 						draft.usage,
+						buildSystemPromptSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions),
 					);
 					break;
 				}
@@ -1733,6 +1749,32 @@ export class AgentSession {
 		return Array.from(unique);
 	}
 
+	/** Replace host-supplied sections for the next request. */
+	setPromptSections(sections: Array<{ key: string; text: string }>): void {
+		const reserved = new Set(["preamble", "tools", "rules", "docs", "addendum", "skills", "cwd"]);
+		for (const { key } of sections) {
+			if (reserved.has(key) || key.startsWith("file:")) throw new Error(`Reserved prompt section: ${key}`);
+		}
+		if (this._runSystemPromptOptions) {
+			for (const key of Object.keys(this._hostSections)) delete this._runSystemPromptOptions.sections[key];
+		}
+		this._hostSections = Object.fromEntries(sections.map(({ key, text }) => [key, text]));
+		this._baseSystemPromptOptions.sections = { ...this._hostSections };
+		if (this._runSystemPromptOptions) Object.assign(this._runSystemPromptOptions.sections, this._hostSections);
+	}
+
+	private async _refreshPromptResources(): Promise<void> {
+		await this._resourceLoader.refreshPromptResources?.();
+		const skills = this._resourceLoader.getSkills().skills;
+		const contextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
+		this._baseSystemPromptOptions.skills = skills;
+		this._baseSystemPromptOptions.contextFiles = contextFiles;
+		if (this._runSystemPromptOptions) {
+			this._runSystemPromptOptions.skills = skills;
+			this._runSystemPromptOptions.contextFiles = contextFiles;
+		}
+	}
+
 	private _rebuildSystemPrompt(toolNames: string[]): void {
 		const validToolNames = toolNames.filter((name) => this._toolRegistry.has(name));
 		const toolSnippets: Record<string, string> = {};
@@ -1750,6 +1792,7 @@ export class AgentSession {
 
 		this._baseSystemPromptOptions = normalizeBuildSystemPromptOptions({
 			cwd: this._cwd,
+			sections: this._hostSections,
 			skills: loadedSkills,
 			contextFiles: loadedContextFiles,
 			customPrompt: loaderSystemPrompt,
@@ -1762,39 +1805,23 @@ export class AgentSession {
 	}
 
 	/**
-	 * Apply a prompt and tool loadout for the next request. Sets the executable tools and
-	 * returns a system message patching the prompt sections the model currently has (replayed
-	 * from `messages`), or undefined when the prompt is unchanged. Tool changes are declared by
-	 * the agent loop before the request.
-	 *
-	 * A forced prompt does not affect the transcript: the structured sections are still diffed
-	 * and persisted, and the forced text is projected onto the request by
-	 * {@link _installAgentForcedPromptProjection}.
+	 * Apply the tool loadout and produce the initial head or a context update.
+	 * The active branch records the last delivered sections.
 	 */
 	private _preparePromptAndToolLoadout(
 		options: NormalizedBuildSystemPromptOptions,
 		messages: AgentMessage[] = this.agent.state.messages,
-	): SystemMessage | undefined {
+	): AgentMessage | undefined {
 		options.selectedTools = this._applyToolLoadout(options.selectedTools).map((tool) => tool.name);
-		// The tool list and rules must match the declarations the request carries.
 		options.hiddenTools = [...this._hiddenDeclarations];
-		const sections = diffSystemPromptSections(
-			getCurrentSystemMessage(messages)?.sections ?? {},
-			buildSystemPromptSections(options),
-		);
-		return sections ? { role: "system", content: "", sections, timestamp: Date.now() } : undefined;
+		const sections = buildSystemPromptSections(options);
+		const previous = deliveredSections(this.sessionManager.getBranch());
+		if (previous === undefined && !getCurrentSystemMessage(messages)) {
+			return { role: "system", content: "", sections, timestamp: Date.now() };
+		}
+		return createContextUpdate(previous ?? {}, sections);
 	}
 
-	/**
-	 * Send a forced prompt as the provider's leading system prompt without recording it.
-	 *
-	 * A `before_agent_start` handler that returns `systemPrompt` needs that exact text at the
-	 * head of the request; a mid-conversation system message would leave the original prompt
-	 * in place. The forced text is a rendering of the current prompt, so the transcript keeps
-	 * its structured sections and the request is projected instead: the system messages
-	 * collapse into one head holding the forced text and the current tools. Runs after the
-	 * `context` extension handlers.
-	 */
 	/**
 	 * Remove the declarations that `prepareLoadout` hooks hide from every request. The whole
 	 * transcript is filtered with the current set, so the projected declarations stay consistent
@@ -1817,23 +1844,6 @@ export class AgentSession {
 					...(removed.length > 0 ? { toolsRemoved: removed } : {}),
 				};
 			});
-		};
-	}
-
-	private _installAgentForcedPromptProjection(): void {
-		const previousTransformContext = this.agent.transformContext;
-		this.agent.transformContext = async (messages, signal) => {
-			const transformed = previousTransformContext ? await previousTransformContext(messages, signal) : messages;
-			const forced = this._runSystemPromptOptions?.forceSystemPrompt;
-			if (forced === undefined) return transformed;
-			const current = getCurrentSystemMessage(transformed);
-			const head: SystemMessage = {
-				role: "system",
-				content: forced,
-				...(current?.toolsAdded ? { toolsAdded: current.toolsAdded } : {}),
-				timestamp: current?.timestamp ?? Date.now(),
-			};
-			return [head, ...transformed.filter((message) => message.role !== "system")];
 		};
 	}
 
@@ -1886,11 +1896,17 @@ export class AgentSession {
 	 * starting another, and an abort requested meanwhile aborts the run as soon as it exists.
 	 * @param onStarted Called once the run's messages are prepared, before the first request.
 	 */
-	private async _startRun(trigger: BeforeAgentStartTrigger | undefined, onStarted?: () => void, deliveryId?: string, additionalInputs: AgentMessage[] = []): Promise<void> {
+	private async _startRun(
+		trigger: BeforeAgentStartTrigger | undefined,
+		onStarted?: () => void,
+		deliveryId?: string,
+		additionalInputs: AgentMessage[] = [],
+	): Promise<void> {
 		this._isAgentRunActive = true;
 		this._agentRunAbortRequested = false;
 		let messages: AgentMessage[];
 		try {
+			await this._refreshPromptResources();
 			messages = trigger ? await this._prepareRun(trigger, deliveryId, additionalInputs) : [];
 		} catch (error) {
 			this._isAgentRunActive = false;
@@ -1940,7 +1956,11 @@ export class AgentSession {
 	 * message followed by pending nextTurn messages (consumed here) and handler messages, with a
 	 * system patch first when the prompt changed.
 	 */
-	private async _prepareRun(trigger: BeforeAgentStartTrigger, deliveryId?: string, additionalInputs: AgentMessage[] = []): Promise<AgentMessage[]> {
+	private async _prepareRun(
+		trigger: BeforeAgentStartTrigger,
+		deliveryId?: string,
+		additionalInputs: AgentMessage[] = [],
+	): Promise<AgentMessage[]> {
 		// Check if we need to compact before sending (catches aborted responses).
 		// The starting message is sent below, so do not call agent.continue() here.
 		const lastAssistant = this._findLastAssistantMessage();
@@ -1989,9 +2009,19 @@ export class AgentSession {
 				timestamp: Date.now(),
 			});
 		}
-		const updateMessage = this._preparePromptAndToolLoadout(result.systemPromptOptions);
 		this._runSystemPromptOptions = result.systemPromptOptions;
-		if (updateMessage) messages.unshift(updateMessage);
+		const initial = this.agent.state.messages[0];
+		if (initial?.role === "system" && this.sessionManager.getBranch().length === 0) {
+			this.sessionManager.appendMessage(initial);
+		}
+		if (!getCurrentSystemMessage(this.agent.state.messages)) {
+			const head = this._preparePromptAndToolLoadout(result.systemPromptOptions);
+			if (head?.role === "system") messages.unshift(head);
+		} else {
+			result.systemPromptOptions.selectedTools = this._applyToolLoadout(
+				result.systemPromptOptions.selectedTools,
+			).map((tool) => tool.name);
+		}
 		return messages;
 	}
 
@@ -2207,8 +2237,9 @@ export class AgentSession {
 				timestamp: Date.now(),
 			});
 		}
-		await this._startRun({ messageType: "user", prompt: expandedText, images: currentImages }, () =>
-			preflightResult?.("started"),
+		await this._startRun(
+			{ messageType: "user", prompt: expandedText, images: currentImages },
+			() => preflightResult?.("started"),
 			options?.deliveryId,
 			additionalInputs,
 		);
@@ -2222,19 +2253,27 @@ export class AgentSession {
 		const messages = this.agent.state.messages;
 		let assistantIndex = -1;
 		for (let i = messages.length - 1; i >= 0; i--) {
-			if (messages[i].role === "assistant") { assistantIndex = i; break; }
+			if (messages[i].role === "assistant") {
+				assistantIndex = i;
+				break;
+			}
 		}
 		if (assistantIndex >= 0) {
 			const assistant = messages[assistantIndex] as AssistantMessage;
-			const results = new Set(messages.slice(assistantIndex + 1).flatMap((message) =>
-				message.role === "toolResult" ? [message.toolCallId] : [],
-			));
+			const results = new Set(
+				messages
+					.slice(assistantIndex + 1)
+					.flatMap((message) => (message.role === "toolResult" ? [message.toolCallId] : [])),
+			);
 			for (const block of assistant.content) {
 				if (block.type !== "toolCall" || results.has(block.id)) continue;
 				const result: ToolResultMessage = {
-					role: "toolResult", toolCallId: block.id, toolName: block.name,
+					role: "toolResult",
+					toolCallId: block.id,
+					toolName: block.name,
 					content: [{ type: "text", text: "interrupted; state unknown" }],
-					isError: true, timestamp: Date.now(),
+					isError: true,
+					timestamp: Date.now(),
 				};
 				this.sessionManager.appendMessage(result);
 				this.agent.state.messages = [...this.agent.state.messages, result];
@@ -2903,6 +2942,7 @@ export class AgentSession {
 	 */
 	async compact(customInstructions?: string): Promise<CompactionResult> {
 		await this.abort();
+		await this._refreshPromptResources();
 		this._compactionAbortController = new AbortController();
 		this._emit({ type: "compaction_start", reason: "manual" });
 		let fromExtension = false;
@@ -2984,7 +3024,15 @@ export class AgentSession {
 				throw new Error("Compaction cancelled");
 			}
 
-			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
+			this.sessionManager.appendCompaction(
+				summary,
+				firstKeptEntryId,
+				tokensBefore,
+				details,
+				fromExtension,
+				usage,
+				buildSystemPromptSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions),
+			);
 			const newEntries = this.sessionManager.getEntries();
 			this._refreshFinalizedContext();
 			const estimatedTokensAfter = estimateMessagesTokens(this.sessionManager.buildSessionProjection().messages);
@@ -3231,6 +3279,7 @@ export class AgentSession {
 	 * @returns Whether the post-run loop should call `agent.continue()`
 	 */
 	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
+		await this._refreshPromptResources();
 		const model = this.model;
 		const settings = this._compactionSettings(model);
 		let abortController: AbortController | undefined;
@@ -3310,7 +3359,15 @@ export class AgentSession {
 			}
 			abortController.signal.throwIfAborted();
 
-			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
+			this.sessionManager.appendCompaction(
+				summary,
+				firstKeptEntryId,
+				tokensBefore,
+				details,
+				fromExtension,
+				usage,
+				buildSystemPromptSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions),
+			);
 			const newEntries = this.sessionManager.getEntries();
 			this._refreshFinalizedContext();
 			const estimatedTokensAfter = estimateMessagesTokens(this.sessionManager.buildSessionProjection().messages);

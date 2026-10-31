@@ -392,7 +392,15 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			// =================================================================
 
 			case "prompt": {
-				if (command.inputs && (!Array.isArray(command.inputs) || command.inputs.length === 0 || command.message !== undefined || command.inputs.some((input) => !input || typeof input.message !== "string" || typeof input.deliveryId !== "string"))) {
+				if (
+					command.inputs &&
+					(!Array.isArray(command.inputs) ||
+						command.inputs.length === 0 ||
+						command.message !== undefined ||
+						command.inputs.some(
+							(input) => !input || typeof input.message !== "string" || typeof input.deliveryId !== "string",
+						))
+				) {
 					return error(id, "prompt", "Provide either message or a nonempty inputs array");
 				}
 				const first = command.inputs?.[0];
@@ -422,23 +430,31 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			}
 
 			case "steer": {
-				const disposition = await session.steer(command.message, command.images, { source: "rpc", deliveryId: command.deliveryId });
+				const disposition = await session.steer(command.message, command.images, {
+					source: "rpc",
+					deliveryId: command.deliveryId,
+				});
 				return success(id, "steer", { disposition });
 			}
 
 			case "follow_up": {
-				const disposition = await session.followUp(command.message, command.images, { source: "rpc", deliveryId: command.deliveryId });
+				const disposition = await session.followUp(command.message, command.images, {
+					source: "rpc",
+					deliveryId: command.deliveryId,
+				});
 				return success(id, "follow_up", { disposition });
 			}
 
 			case "continue": {
 				let started = false;
-				void session.continueRun(() => {
-					started = true;
-					output(success(id, "continue"));
-				}).catch((e) => {
-					if (!started) output(error(id, "continue", e.message));
-				});
+				void session
+					.continueRun(() => {
+						started = true;
+						output(success(id, "continue"));
+					})
+					.catch((e) => {
+						if (!started) output(error(id, "continue", e.message));
+					});
 				return undefined;
 			}
 
@@ -463,6 +479,26 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			// =================================================================
 			// State
 			// =================================================================
+
+			case "set_prompt_sections": {
+				if (
+					!Array.isArray(command.sections) ||
+					command.sections.some(
+						(section) =>
+							!section || typeof section.key !== "string" || !section.key || typeof section.text !== "string",
+					) ||
+					new Set(command.sections.map((section) => section.key)).size !== command.sections.length
+				) {
+					return error(id, "set_prompt_sections", "Sections need unique, nonempty keys and text.");
+				}
+				session.setPromptSections(command.sections);
+				return success(id, "set_prompt_sections");
+			}
+
+			case "reload_resources": {
+				await session.reload();
+				return success(id, "reload_resources");
+			}
 
 			case "get_state": {
 				const state: RpcSessionState = {
