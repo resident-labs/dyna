@@ -19,10 +19,10 @@ import (
 
 type evalRecord struct {
 	Session     string `json:"session"`
-	Provider    string `json:"provider"`
+	Host        string `json:"host"`
+	Path        string `json:"path"`
 	Ordinal     uint64 `json:"ordinal"`
 	ToolsSHA256 string `json:"tools_sha256"`
-	Compaction  string `json:"compaction"`
 }
 
 type evalSink struct {
@@ -38,7 +38,7 @@ type evalTransport struct {
 
 func (t evalTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.Body == nil {
-		return nil, errors.New("evaluation: missing request body")
+		return t.next.RoundTrip(req)
 	}
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
@@ -47,13 +47,13 @@ func (t evalTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	_ = req.Body.Close()
 	req.Body = io.NopCloser(bytes.NewReader(body))
 	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(body, &fields); err != nil {
-		return nil, errors.New("evaluation: invalid request JSON")
+	if err := json.Unmarshal(body, &fields); err != nil || fields == nil {
+		return t.next.RoundTrip(req)
 	}
 	sum := sha256.Sum256(fields["tools"])
 	t.sink.mu.Lock()
 	t.sink.ordinals[t.session]++
-	record := evalRecord{t.session, "unknown", t.sink.ordinals[t.session], hex.EncodeToString(sum[:]), "unknown"}
+	record := evalRecord{t.session, req.URL.Host, req.URL.Path, t.sink.ordinals[t.session], hex.EncodeToString(sum[:])}
 	err = json.NewEncoder(t.sink.file).Encode(record)
 	t.sink.mu.Unlock()
 	if err != nil {
