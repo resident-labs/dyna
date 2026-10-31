@@ -1,11 +1,26 @@
-import type { Attachment, Conversation, Event, Principal } from "./contract.gen.ts";
+import type { Attachment, Conversation, Event, FailureCause, Principal } from "./contract.gen.ts";
 
 export type Row =
   | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[] }
-  | { kind: "failed"; key: string; session: string; at: string; label: "Turn failed" | "Could not start" | "Stopped unexpectedly"; error: string }
+  | { kind: "failed"; key: string; session: string; at: string; label: "Turn failed" | "Could not start" | "Could not close" | "Stopped unexpectedly"; cause: string }
   | { kind: "work"; key: string; events: Event[] };
 
 type Name = (session: string) => string;
+
+// Why a box or a request failed, in the owner's words. The engine's reason and error texts are raw (r8), so they never show.
+export const causes: Record<FailureCause, string> = {
+  create_failed: "Its workspace could not be created on the host",
+  no_hello: "Its workspace did not connect in time",
+  engine_restarted: "Dyna restarted while it set up the workspace",
+  remove_failed: "Dyna could not remove its workspace",
+  archive_failed: "Dyna could not save the session's branch",
+  grant_inactive: "The host execution grant expired or was revoked",
+  host_lost: "The host stopped answering during the run",
+  github_failed: "GitHub refused the request or did not answer",
+  stale: "Something it depended on changed before it ran",
+  interrupted: "Dyna stopped during the run, so the outcome is unknown",
+  internal: "Dyna had an internal error",
+};
 
 const sameHome = (a: Conversation, b: Conversation) => a.kind === b.kind && (a.session ?? "") === (b.session ?? "");
 const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.session === b.session;
@@ -44,13 +59,14 @@ export function feedRows(events: Event[], home: Conversation): Row[] {
     }
     const session = subject(event);
     if (home.kind === "dm" && session !== home.session) continue;
-    // Box lifecycle stays out of the feed; only a failed or lost box shows, as a failed row in the owner's
-    // terms. Its reason is raw engine error text, so it never shows.
+    // Box lifecycle stays out of the feed; only a failed or lost box, or a close that failed to archive,
+    // shows as a failed row with its cause in the owner's words.
     if (event.type === "box.changed") {
-      if (event.body.to === "failed" || event.body.to === "lost") {
+      const { to, cause } = event.body;
+      if (to === "failed" || to === "lost" || cause) {
         flush();
-        rows.push({ kind: "failed", key: `f${event.seq}`, session: event.body.session, at: event.at,
-          label: event.body.to === "failed" ? "Could not start" : "Stopped unexpectedly", error: "" });
+        rows.push({ kind: "failed", key: `f${event.seq}`, session: event.body.session, at: event.at, cause: cause ? causes[cause] : "",
+          label: cause === "remove_failed" || cause === "archive_failed" ? "Could not close" : to === "lost" ? "Stopped unexpectedly" : "Could not start" });
       }
       continue;
     }
@@ -61,10 +77,11 @@ export function feedRows(events: Event[], home: Conversation): Row[] {
       if (event.body.final && answer) {
         post(`a${event.seq}`, { kind: "session", session: event.body.session }, event.at, event.body.final, [], answer.reply.target ? [answer.reply.target] : []);
       }
-      // A failed turn always gets its own row, even after its answer; it never folds into a work row.
+      // A failed turn always gets its own row, even after its answer; it never folds into a work row. Its error is the
+      // harness's raw text (r8), so the row says only "Turn failed" until the engine gives a typed cause.
       if (event.body.outcome === "failed") {
         flush();
-        rows.push({ kind: "failed", key: `f${event.seq}`, session: event.body.session, at: event.at, label: "Turn failed", error: event.body.error ?? "" });
+        rows.push({ kind: "failed", key: `f${event.seq}`, session: event.body.session, at: event.at, label: "Turn failed", cause: "" });
       }
       if (answer || event.body.outcome === "failed") continue;
     }
@@ -85,7 +102,7 @@ export function formatTime(value: string): string {
 const relative = new Intl.RelativeTimeFormat([], { numeric: "auto" });
 export function fromNow(value: string, now: number): string {
   const minutes = Math.round((new Date(value).getTime() - now) / 60_000);
-  if (minutes === 0) return "just now";
+  if (minutes === 0) return new Date(value).getTime() > now ? "in under a minute" : "just now";
   if (Math.abs(minutes) < 60) return relative.format(minutes, "minute");
   const hours = Math.round(minutes / 60);
   return Math.abs(hours) < 24 ? relative.format(hours, "hour") : relative.format(Math.round(hours / 24), "day");
@@ -131,7 +148,7 @@ export function workSummary(events: Event[], name: Name): string {
     turns.size > 1 ? `${who([...turns.keys()].map(name))} ran turns` : ran && `${name(ran[0])} ran ${count(ran[1].size, "turn")}`,
     jobs && count(jobs, "job"), requests.size && count(requests.size, "request"), images && `${count(images, "image")} built`,
     failedImages && `${count(failedImages, "image build")} failed`, prs && count(prs, "pull request"),
-    memory && count(memory, "memory warning"), grants && `${count(grants, "host-exec grant")} expired`,
+    memory && count(memory, "memory warning"), grants && `${count(grants, "host execution grant")} expired`,
     opened.length && `${who(opened)} opened a computer`, shut.length && `${who(shut)} closed a computer`, moved.length && `${who(moved)} moved`, closed.length && `${who(closed)} closed`,
   ].filter(part => typeof part === "string");
   return parts.length ? parts.join(", ") : count(events.length, "update");
@@ -153,11 +170,15 @@ export function describe(event: Event, name: Name): string {
     case "shell.job.ended": return event.body.exitCode === 0 ? `${name(event.body.session)}'s job finished` : `${name(event.body.session)}'s job failed with exit code ${event.body.exitCode}`;
     case "op.requested": return `${who(event.body.by)} asked to ${event.body.card.title}`;
     case "op.decided": return `A request was ${event.body.state}`;
-    case "op.ran": return event.body.state === "done" ? "A request ran" : `A request ${event.body.state}`;
+    case "op.ran": {
+      const { state, result: { cause } } = event.body;
+      return state === "done" ? "A request ran" : cause ? `A request ${state}: ${causes[cause]}` : `A request ${state}`;
+    }
     case "image.built": return `Image ${event.body.name}:${event.body.tag} built in ${event.body.seconds} s`;
-    case "image.failed": return `Image ${event.body.name}:${event.body.tag} failed: ${event.body.reason}`;
+    // The reason is raw build output (r8); the build log holds it.
+    case "image.failed": return `Image ${event.body.name}:${event.body.tag} failed`;
     case "pr.opened": return `${name(event.body.session)} opened pull request ${event.body.repo}#${event.body.number}`;
-    case "grant.expired": return "A host-exec grant expired";
+    case "grant.expired": return "A host execution grant expired";
     case "box.pressure": return event.body.kind === "max" ? "A session reached its memory limit" : "A session is short of memory";
     case "post.created": return event.body.text;
   }
