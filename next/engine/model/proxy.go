@@ -78,6 +78,13 @@ func NewProxy(dataDir, managementKey string) (*Proxy, error) {
 		return nil, err
 	}
 	cfg.AuthDir = authDir
+	for _, provider := range KeyProviders() {
+		catalog := config.OpenAICompatibility{Name: string(provider.Provider), BaseURL: provider.URL, DynaCatalogOnly: true}
+		for _, name := range provider.Models {
+			catalog.Models = append(catalog.Models, config.OpenAICompatibilityModel{Name: name, Alias: name})
+		}
+		cfg.OpenAICompatibility = append(cfg.OpenAICompatibility, catalog)
+	}
 	cfg.APIKeys = []string{key}
 	// Unix clients have no loopback IP; the private socket limits access.
 	cfg.RemoteManagement.AllowRemote = true
