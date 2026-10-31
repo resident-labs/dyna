@@ -74,6 +74,13 @@ func (a *API) handler(c Caller) http.Handler {
 			} else if req.Operation.Room != c.Room {
 				return contract.OpSubmitResponse{}, forbidden()
 			}
+			if grant, ok := req.Operation.Args.(contract.HostexecGrantArgs); ok {
+				grant.Room = c.Room
+				if grant.To.Kind == "" {
+					grant.To = c.Principal
+				}
+				req.Operation.Args = grant
+			}
 		}
 		return a.service.OpSubmit(ctx, p, req)
 	})
