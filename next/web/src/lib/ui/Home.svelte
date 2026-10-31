@@ -4,13 +4,14 @@
   import type { Attention } from "../attention.svelte.ts";
   import type { AccountUsage, HostSummary, Principal, SessionListResponse } from "../contract.gen.ts";
   import { hostMeters } from "../hosts.ts";
+  import { busiestWindow } from "../usage.ts";
   import { hue } from "../identity.ts";
   import Avatar from "./Avatar.svelte";
   import HostCard from "./HostCard.svelte";
   import UsageCard from "./UsageCard.svelte";
   type Navigate = (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void;
-  // onrequests opens the Requests panel once the link has moved to that room.
-  let { attention, navigate, onrequests }: { attention: Attention; navigate: Navigate; onrequests: () => void } = $props();
+  // onrequests opens the Requests panel once the link has moved to that room. loaded is false until room.list answers.
+  let { attention, loaded, navigate, onrequests }: { attention: Attention; loaded: boolean; navigate: Navigate; onrequests: () => void } = $props();
   // Each room's sessions load once while Home is open, for Activity's counts and names. Requests load per room, and
   // again only when a room gains a request or requester that no answer named yet. A failed load forgets its IDs and
   // offers Try again.
@@ -102,12 +103,26 @@
   $effect(() => {
     void call("accounts.quota", {}).then(list => { accounts = list.accounts ?? []; loadedAt = Date.now(); }, () => { accountsFailed = true; });
   });
+  // One sentence says what needs the owner, counted from the same store as the header's Requests button. Under it, a
+  // muted line sums rooms, machines and the busiest usage window; a part with nothing to say is left out.
+  const count = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
+  let asks = $derived(total(attention.waiting));
+  let roomsWorking = $derived([...attention.working.values()].filter(set => set.size).length);
+  let unreachable = $derived(hosts?.filter(h => !h.reachable).length ?? 0);
+  let summary = $derived([
+    roomsWorking && `${count(roomsWorking, "room")} working`,
+    hosts?.length && count(hosts.length, "machine") + (unreachable ? `, ${unreachable} unreachable` : ""),
+    accounts && busiestWindow(accounts),
+  ].filter(Boolean).join(" · "));
 </script>
 
 <div class="home">
-  <!-- Waiting for you, then Activity, each a full-width card whose rows fill a grid of about 280 px columns. -->
+  <!-- Until room.list answers, the sentence is a skeleton of the same height: Home never claims nothing waits before it knows. -->
+  {#if !loaded}<p class="hero skeleton" aria-hidden="true"><i></i><i></i></p>
+  {:else}<p class="hero">{asks ? `${count(asks, "request")} ${asks === 1 ? "waits" : "wait"} for you.` : "Nothing needs you."}{#if summary}<span>{summary}</span>{/if}</p>{/if}
+  <!-- Requests while any wait, then Activity, each a full-width card whose rows fill a grid of about 280 px columns. -->
   <div class="top">
-    <section class="card"><h2>Waiting for you{#if waiting.length}<span>{waiting.length}</span>{/if}</h2>
+    {#if asks}<section class="card"><h2>Requests{#if waiting.length}<span>{waiting.length}</span>{/if}</h2>
       <div class="rows">{#each groups as { room, count } (room.id)}<a class="item" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>
         <Avatar kind="room" name={room.name} size={28} />
         <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{count} waiting</span></span></a>
@@ -115,13 +130,14 @@
         onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>
         <Avatar kind={value.by.kind} name={who} {root} size={28} />
         <span class="lines"><span class="title">{value.title}</span><span class="line">{who} · {room.name}</span></span></a>{/each}{/each}</div>
-      {#if !total(attention.waiting)}<p class="none">Nothing is waiting for you.</p>{/if}</section>
+      </section>{/if}
     <section class="card"><h2>Activity{#if total(attention.working)}<span>{total(attention.working)} working</span>{/if}</h2>
       <div class="rows">{#each allRooms ? busy : busy.slice(0, 6) as { room, line } (room.id)}<a class="item" href={roomHref(room.id)} onclick={navigate}>
         <Avatar kind="room" name={room.name} size={28} />
         <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{line}</span></span></a>{/each}</div>
       {#if busy.length > 6 && !allRooms}<button type="button" class="retry more" onclick={() => { allRooms = true; }}>{busy.length - 6} more {busy.length === 7 ? "room" : "rooms"}</button>{/if}
-      {#if !busy.length}<p class="none">No session is open.</p>{/if}</section>
+      {#if !busy.length}{#if loaded}<p class="none">No session is open.</p>
+        {:else}<div class="item skeleton" aria-hidden="true"><i class="avatar"></i><span class="lines"><i></i><i></i></span></div>{/if}{/if}</section>
   </div>
   {#if failed && missing}<p class="failed">Some items could not load. <button type="button" class="retry" onclick={() => { failed = false; attempt++; }}>Try again</button></p>{/if}
   {#if hosts?.length || hostsFailed}<h2>Machines{#if hosts?.length}<span>{hosts.length}</span>{/if}</h2>{/if}
@@ -138,6 +154,13 @@
   /* 340 px columns keep three metric tiles' figures on one line. */
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 12px; margin: 0 8px; }
   .top { display: grid; gap: 12px; margin: 8px 8px 0; }
+  .hero { display: grid; gap: 4px; margin: 8px 8px 16px; font-size: 20px; font-weight: 600; line-height: 1.25; }
+  .skeleton i { width: min(280px, 70%); height: 25px; border-radius: 6px; background: var(--hover); }
+  .skeleton i + i { width: min(440px, 90%); height: 20px; }
+  .item.skeleton i { width: 120px; height: 12px; }
+  .item.skeleton i + i { width: 80px; height: 10px; margin-top: 4px; }
+  .item.skeleton .avatar { flex: none; width: 28px; height: 28px; border-radius: 8px; margin: 0; }
+  .hero span { color: var(--muted); font-size: 14px; font-weight: 400; line-height: 1.45; font-variant-numeric: tabular-nums; }
   .rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); column-gap: 12px; margin: 0 -8px; }
   h2 { display: flex; align-items: baseline; gap: 8px; margin: 24px 8px 12px; font-size: 18px; font-weight: 600; line-height: 1.25; }
   .card h2 { margin: 0 0 8px; font-size: 16px; }
