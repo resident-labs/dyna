@@ -145,6 +145,11 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 			_ = json.Unmarshal([]byte(reply.Body), &shape)
 			kinds := make(map[string]string, len(shape))
 			for key, raw := range shape {
+				switch key {
+				case "five_hour", "seven_day", "seven_day_oauth_apps", "limits", "error", "type", "message":
+				default:
+					continue
+				}
 				switch raw[0] {
 				case '{':
 					kinds[key] = "object"
