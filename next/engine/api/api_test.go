@@ -116,12 +116,12 @@ func TestBoxCallerIsListenerIdentity(t *testing.T) {
 	}
 }
 
-func TestSessionRestartOwnerOnly(t *testing.T) {
+func TestSessionRestartPassesCaller(t *testing.T) {
 	f := &fakeService{}
 	a := New(f, nil)
 	w := request(a.handler(boxCaller()), "/v1/session.restart", `{"session":"session-a"}`)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("box status = %d, want forbidden", w.Code)
+	if w.Code != http.StatusOK || f.caller.Session != "session-a" {
+		t.Fatalf("box status = %d, caller %+v", w.Code, f.caller)
 	}
 	w = request(a.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}}), "/v1/session.restart", `{"session":"session-a"}`)
 	if w.Code != http.StatusOK || f.caller.Kind != contract.PrincipalOwner || f.restart.Session != "session-a" {
