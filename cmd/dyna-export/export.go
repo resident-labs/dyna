@@ -55,7 +55,7 @@ func buildBundle(db *sql.DB, backup, data, config, commit string, cap capture) (
 		return g, nil, report, err
 	}
 	report.RepositoryGaps = repos.Gaps
-	hooks, hookGaps, err := readHooks(db, repos.RepoRooms, names)
+	hooks, hookGaps, err := readHooks(db, repos.RepoRooms, cap, names)
 	if err != nil {
 		return g, nil, report, err
 	}
