@@ -49,8 +49,14 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 	case b.State == contract.BoxLost:
 		status, found, inspectErr := r.boxes.Inspect(ctx, b.ID)
 		workErr = inspectErr
-		if workErr != nil || found && status.Running {
+		if workErr != nil {
 			due = r.now().Add(60 * time.Second)
+		} else if found && status.Running {
+			if r.view.Connected(b.Session) {
+				next.State, next.Reason = contract.BoxReady, ""
+			} else {
+				due = r.now().Add(60 * time.Second)
+			}
 		} else if found {
 			next.State, next.Reason = contract.BoxStopped, "container stopped"
 		} else {
