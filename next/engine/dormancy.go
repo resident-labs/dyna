@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"log"
-	"sync"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -13,14 +12,15 @@ import (
 const quietPeriod = 10 * time.Minute
 
 type dormancy struct {
-	mu          sync.Mutex
-	unconfirmed map[contract.BoxID]bool
+	unconfirmed  map[contract.BoxID]bool
+	failedStarts map[contract.BoxID]bool
 }
 
-// ReconcileDormancy is level-triggered by committed events and the runtime tick.
+// ReconcileDormancy is level-triggered. The runtime serializes its calls.
 func (s *Service) ReconcileDormancy(ctx context.Context, startup, retry bool) {
-	s.dormancy.mu.Lock()
-	defer s.dormancy.mu.Unlock()
+	if retry {
+		clear(s.dormancy.failedStarts)
+	}
 	boxes, err := s.store.Boxes(ctx)
 	if err != nil {
 		log.Printf("dormancy: %v", err)
@@ -77,7 +77,7 @@ func (s *Service) reconcileBox(ctx context.Context, id contract.SessionID) error
 	if err != nil {
 		return err
 	}
-	if s.dormancy.unconfirmed[current.ID] {
+	if s.dormancy.unconfirmed[current.ID] || s.dormancy.failedStarts[current.ID] {
 		return nil
 	}
 	if current.State == contract.BoxReady {
@@ -128,6 +128,7 @@ func (s *Service) stopBox(ctx context.Context, id contract.BoxID) error {
 
 func (s *Service) startBox(ctx context.Context, current box.Box) error {
 	if err := s.boxes.Start(ctx, current.ID); err != nil {
+		s.dormancy.failedStarts[current.ID] = true
 		session, e := s.store.Session(ctx, current.Session)
 		if e != nil {
 			return e
