@@ -123,7 +123,7 @@ describe("RPC unknown command responses (#5868)", () => {
 			});
 			await harness.session.prompt("hello");
 			const head = harness.session.agent.state.messages.find((message) => message.role === "system");
-			expect(head?.sections?.goal).toBe("one");
+			expect(head?.sections?.goal).toBe("<goal>\none\n</goal>");
 		} finally {
 			harness.cleanup();
 			restoreListeners(listenerSnapshot);
