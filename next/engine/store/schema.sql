@@ -5,8 +5,9 @@ CREATE TABLE room_repos (room TEXT NOT NULL REFERENCES rooms(id), repo TEXT NOT 
 CREATE UNIQUE INDEX room_repos_default ON room_repos(room) WHERE is_default = 1;
 CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT NOT NULL REFERENCES rooms(id), name TEXT NOT NULL, parent TEXT REFERENCES sessions(id), profile TEXT NOT NULL, state TEXT NOT NULL, goal TEXT NOT NULL, created_at INTEGER NOT NULL, closed_at INTEGER, repo TEXT NOT NULL DEFAULT '', shell_jobs INTEGER NOT NULL DEFAULT 0, model_retry_at INTEGER NOT NULL DEFAULT 0, model_retries INTEGER NOT NULL DEFAULT 0);
 CREATE UNIQUE INDEX sessions_open_name ON sessions(room, name) WHERE closed_at IS NULL;
-CREATE TABLE events (seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, at INTEGER NOT NULL, room TEXT REFERENCES rooms(id), type TEXT NOT NULL, from_kind TEXT NOT NULL, from_id TEXT NOT NULL, body BLOB NOT NULL, home TEXT);
+CREATE TABLE events (seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, at INTEGER NOT NULL, room TEXT REFERENCES rooms(id), type TEXT NOT NULL, from_kind TEXT NOT NULL, from_id TEXT NOT NULL, body BLOB NOT NULL, home TEXT, client_id TEXT);
 CREATE INDEX events_room_seq ON events(room, seq);
+CREATE UNIQUE INDEX events_client_id ON events(room, from_kind, from_id, client_id) WHERE client_id IS NOT NULL;
 CREATE INDEX events_room_home ON events(room, home, seq) WHERE home IS NOT NULL;
 CREATE INDEX events_type_seq ON events(type, seq);
 CREATE TABLE deliveries (to_kind TEXT NOT NULL, to_id TEXT NOT NULL, seq INTEGER NOT NULL REFERENCES events(seq), surface TEXT NOT NULL, reply_kind TEXT NOT NULL, reply_target_kind TEXT NOT NULL, reply_target_id TEXT NOT NULL, reply_home TEXT NOT NULL, reply_to TEXT NOT NULL, wake INTEGER NOT NULL, state TEXT NOT NULL, turn TEXT, queue TEXT, PRIMARY KEY(to_kind, to_id, seq));

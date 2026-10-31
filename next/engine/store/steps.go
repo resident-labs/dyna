@@ -10,6 +10,7 @@ const schemaVersion = 32
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	31: {`ALTER TABLE events ADD COLUMN client_id TEXT`, `CREATE UNIQUE INDEX events_client_id ON events(room, from_kind, from_id, client_id) WHERE client_id IS NOT NULL`},
 	30: {`CREATE TABLE host_rooms (host TEXT NOT NULL REFERENCES hosts(name), room TEXT NOT NULL REFERENCES rooms(id), PRIMARY KEY(host, room))`},
 	31: {`ALTER TABLE boxes DROP COLUMN parent`},
 	28: {`ALTER TABLE pr_owners ADD COLUMN branch TEXT NOT NULL DEFAULT ''`, `UPDATE pr_owners SET branch=COALESCE((SELECT 'v2/'||json_extract(CAST(body AS TEXT),'$.session') FROM events WHERE type='pr.opened' AND json_extract(CAST(body AS TEXT),'$.repo')=pr_owners.repo AND json_extract(CAST(body AS TEXT),'$.number')=pr_owners.number ORDER BY seq DESC LIMIT 1),'')`},

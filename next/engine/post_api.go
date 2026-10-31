@@ -17,6 +17,19 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if e := s.roomAccess(ctx, caller, req.Room); e != nil {
 		return contract.PostResponse{}, e
 	}
+	if len(req.ClientID) > 64 {
+		return contract.PostResponse{}, invalid("clientId is longer than 64 characters")
+	}
+	// A repeat answers from the first post, before anything that can change since then (a closed session, a removed file).
+	if req.ClientID != "" {
+		id, seq, found, err := s.store.PostByClientID(ctx, req.Room, caller, req.ClientID)
+		if err != nil {
+			return contract.PostResponse{}, failure(err)
+		}
+		if found {
+			return contract.PostResponse{Event: id, Seq: seq}, nil
+		}
+	}
 	// A post carries text, files or both.
 	if strings.TrimSpace(req.Text) == "" && len(req.Attachments) == 0 {
 		return contract.PostResponse{}, invalid("post text or a file is required")
@@ -114,16 +127,16 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if surface == contract.SurfaceDM {
 		recipients = append(recipients, room.Recipient{Session: req.Home.Session, Explicit: true})
 	}
-	event, err := s.event(req.Room, caller, contract.PostCreated{Text: req.Text, Mentions: mentions, Home: req.Home, ReplyTo: req.ReplyTo, Attachments: req.Attachments})
+	event, err := s.event(req.Room, caller, contract.PostCreated{Text: req.Text, Mentions: mentions, Home: req.Home, ReplyTo: req.ReplyTo, Attachments: req.Attachments, ClientID: req.ClientID})
 	if err != nil {
 		return contract.PostResponse{}, failure(err)
 	}
 	deliveries := tree.Deliveries(room.DeliveryInput{Event: event, Surface: surface, Recipients: recipients, HasMentions: len(req.Mentions) > 0, Home: req.Home, ReplyTo: req.ReplyTo})
-	seq, err := s.store.Post(ctx, event, deliveries)
+	id, seq, err := s.store.PostOnce(ctx, event, deliveries)
 	if err != nil {
 		return contract.PostResponse{}, failure(err)
 	}
-	return contract.PostResponse{Event: event.ID, Seq: seq}, nil
+	return contract.PostResponse{Event: id, Seq: seq}, nil
 }
 
 func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req contract.EventsListRequest) (contract.EventsListResponse, *contract.Error) {
