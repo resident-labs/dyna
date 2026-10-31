@@ -10,9 +10,10 @@ import (
 )
 
 type computerState struct {
-	state    contract.ComputerState
-	room     contract.RoomID
-	watchers map[chan []byte]struct{}
+	generation uint64
+	state      contract.ComputerState
+	room       contract.RoomID
+	watchers   map[chan []byte]struct{}
 }
 
 func (s *Service) computerEvent(ctx context.Context, session contract.SessionID, room contract.RoomID, state contract.ComputerState) error {
@@ -104,6 +105,8 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 	}
 	ch := make(chan []byte, 1)
 	if len(c.watchers) == 0 {
+		s.computerGeneration++
+		c.generation = s.computerGeneration
 		wakeComputer(channel)
 	}
 	c.watchers[ch] = struct{}{}
@@ -123,7 +126,7 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 	return ch, nil
 }
 
-func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal, r io.Reader) *contract.Error {
+func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal, generation uint64, r io.Reader) *contract.Error {
 	if caller.Kind != contract.PrincipalSession {
 		return forbidden()
 	}
@@ -133,14 +136,14 @@ func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal,
 	defer func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if computer == nil || channel == nil || s.computers[caller.Session] != computer || s.channels[caller.Session] != channel {
+		if computer == nil || channel == nil || s.computers[caller.Session] != computer || s.channels[caller.Session] != channel || computer.generation != generation {
 			return
 		}
 		for ch := range computer.watchers {
 			close(ch)
 			delete(computer.watchers, ch)
 		}
-		channel.watching = false
+		channel.watching = 0
 		wakeComputer(channel)
 	}()
 	for {
@@ -156,7 +159,7 @@ func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal,
 			return nil
 		}
 		s.mu.Lock()
-		if c := s.computers[caller.Session]; c != nil && c.state == contract.ComputerRunning {
+		if c := s.computers[caller.Session]; c != nil && c.state == contract.ComputerRunning && c.generation == generation {
 			for ch := range c.watchers {
 				select {
 				case ch <- frame:

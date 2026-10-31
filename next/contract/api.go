@@ -249,7 +249,9 @@ type Upgrade struct {
 	Version string `json:"version"`
 }
 
-type ComputerWatchStart struct{}
+type ComputerWatchStart struct {
+	Generation uint64 `json:"generation"`
+}
 type ComputerWatchStop struct{}
 
 type ComputerChangedRequest struct {
