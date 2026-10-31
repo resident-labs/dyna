@@ -1,8 +1,15 @@
 package engine
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"os"
+	"strconv"
+
+	"github.com/resident-labs/dyna/engine/store"
 	"path/filepath"
 
 	"github.com/resident-labs/dyna/contract"
@@ -34,7 +41,7 @@ func (s *Service) TranscriptAppend(ctx context.Context, caller contract.Principa
 	if err := os.MkdirAll(filepath.Dir(name), 0700); err != nil {
 		return contract.TranscriptAppendResponse{}, failure(err)
 	}
-	file, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE, 0600)
+	file, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
 		return contract.TranscriptAppendResponse{}, failure(err)
 	}
@@ -46,9 +53,37 @@ func (s *Service) TranscriptAppend(ctx context.Context, caller contract.Principa
 	if err := file.Sync(); err != nil {
 		return contract.TranscriptAppendResponse{}, failure(err)
 	}
-	if err := s.store.SetTranscriptOffset(ctx, caller.Session, req.Path, end); err != nil {
+
+	if err := s.indexTranscript(ctx, caller.Session, req.Path, file, acked, end); err != nil {
 		return contract.TranscriptAppendResponse{}, failure(err)
 	}
+	turns, err := s.store.TranscriptTurnsIntersecting(ctx, caller.Session, req.Path, acked, end)
+	if err != nil {
+		return contract.TranscriptAppendResponse{}, failure(err)
+	}
+	session, err := s.store.Session(ctx, caller.Session)
+	if err != nil {
+		return contract.TranscriptAppendResponse{}, failure(err)
+	}
+	for _, turn := range turns {
+		event, err := s.event(session.Room, caller, contract.TranscriptChanged{Session: caller.Session, Turn: turn})
+		if err != nil {
+			return contract.TranscriptAppendResponse{}, failure(err)
+		}
+		s.mu.Lock()
+		for ch, room := range s.live {
+			if room == "" {
+				select {
+				case ch <- event:
+				default:
+					close(ch)
+					delete(s.live, ch)
+				}
+			}
+		}
+		s.mu.Unlock()
+	}
+
 	return contract.TranscriptAppendResponse{AckedOffset: end}, nil
 }
 
@@ -88,4 +123,79 @@ func (s *Service) TranscriptFetch(ctx context.Context, caller contract.Principal
 		}
 	}
 	return contract.TranscriptFetchResponse{Bytes: buf}, nil
+}
+
+// indexTranscript records complete user records and the file acknowledgment in one transaction.
+// An old unindexed file is scanned from its start; later appends revisit only the split record.
+func (s *Service) indexTranscript(ctx context.Context, session contract.SessionID, path string, file *os.File, acked, end int64) error {
+	indexed, err := s.store.TranscriptPathIndexed(ctx, session, path)
+	if err != nil {
+		return err
+	}
+	start := int64(0)
+	if indexed && acked > 0 {
+		const window = 16 << 20
+		from := max(0, acked-window)
+		buf := make([]byte, acked-from)
+		if _, err := file.ReadAt(buf, from); err != nil {
+			return err
+		}
+		if at := bytes.LastIndexByte(buf, '\n'); at >= 0 {
+			start = from + int64(at) + 1
+		} else {
+			start = from
+		}
+	}
+	deliveries, err := s.store.TranscriptDeliveries(ctx, session)
+	if err != nil {
+		return err
+	}
+	reader := bufio.NewReaderSize(io.NewSectionReader(file, start, end-start), 64<<10)
+	var starts []store.TranscriptTurnStart
+	pos := start
+	for {
+		recordStart := pos
+		var line []byte
+		oversized := false
+		for {
+			part, e := reader.ReadSlice('\n')
+			pos += int64(len(part))
+			if !oversized && len(line)+len(part) <= 16<<20 {
+				line = append(line, part...)
+			} else {
+				oversized = true
+				line = nil
+			}
+			if e == bufio.ErrBufferFull {
+				continue
+			}
+			if e == io.EOF {
+				return s.store.CommitTranscriptOffset(ctx, session, path, end, starts)
+			}
+			if e != nil {
+				return e
+			}
+			break
+		}
+		if oversized {
+			continue
+		}
+		var entry struct {
+			Type    string `json:"type"`
+			Message struct {
+				Role       string `json:"role"`
+				DeliveryID string `json:"deliveryId"`
+			} `json:"message"`
+		}
+		if json.Unmarshal(line, &entry) != nil || entry.Type != "message" || entry.Message.Role != "user" {
+			continue
+		}
+		id, err := strconv.ParseInt(entry.Message.DeliveryID, 10, 64)
+		if err != nil {
+			continue
+		}
+		if turn := deliveries[contract.DeliverySeq(id)]; turn != "" {
+			starts = append(starts, store.TranscriptTurnStart{Turn: turn, Start: recordStart})
+		}
+	}
 }

@@ -115,9 +115,14 @@ export type TurnActivityResponse = { };
 export type SessionWorkRequest = { session: SessionID; before?: TurnID; limit?: number; };
 export type SessionWorkTurn = { started: Event; ended?: Event | null; inputs: Array<Event> | null; posts: Array<Event> | null; };
 export type SessionWorkResponse = { turns: Array<SessionWorkTurn> | null; more: boolean; total: number; };
-export type TranscriptReadRequest = { session: SessionID; turn?: TurnID; };
+export type TranscriptReadRequest = { session: SessionID; turn?: TurnID; before?: TurnID; limit?: number; item?: string; part?: TranscriptPart; offset?: number; afterItem?: string; itemIndex?: number; tail?: boolean; postIndex?: number; };
+export type TranscriptPart = "output" | "text" | "arguments";
+export type TranscriptItemKind = "text" | "thinking" | "tool" | "post" | "too_large";
+export type TranscriptItem = { id: string; turn: TurnID; kind: TranscriptItemKind; at: string; text?: string; tool?: string; arguments?: string; output?: string; failed?: boolean; more?: boolean; event?: EventID; room?: RoomID; seq?: number; home?: Conversation | null; bytes?: number; attachments?: Array<Attachment> | null; };
+export type TranscriptInput = { id: EventID; seq: number; room: RoomID; type: EventType; from: Principal; text: string; more?: boolean; };
+export type TranscriptTurn = { id: TurnID; started: string; ended?: string | null; durationMs?: number; outcome?: TurnOutcome; cause?: FailureCause; inputs: Array<TranscriptInput> | null; items: Array<TranscriptItem> | null; more: boolean; after?: string; nextItem?: number; tail?: boolean; nextPost?: number; };
 export type TranscriptStep = { turn: TurnID; tool: string; label: string; started: string; ended?: string | null; failed: boolean; preview: string; };
-export type TranscriptReadResponse = { steps: Array<TranscriptStep> | null; truncated: boolean; };
+export type TranscriptReadResponse = { steps: Array<TranscriptStep> | null; truncated: boolean; turns: Array<TranscriptTurn> | null; before?: TurnID; more: boolean; chunk?: string; nextOffset?: number; };
 export type TranscriptAppendRequest = { path: string; offset: number; bytes: string | null; };
 export type TranscriptAppendResponse = { ackedOffset: number; };
 export type ShellJobEndKind = "exit" | "signal" | "stopped";
@@ -244,7 +249,7 @@ export type RoomLimitsChanged = { cpus: number; memBytes: number; };
 export type RoomPaused = { };
 export type RoomResumed = { };
 export type SessionProfileChanged = { session: SessionID; profile: ProfileName; };
-export type PostCreated = { text: string; mentions?: Array<Principal> | null; home: Conversation; replyTo?: EventID; attachments?: Array<Attachment> | null; clientId?: string; };
+export type PostCreated = { text: string; turn?: TurnID; mentions?: Array<Principal> | null; home: Conversation; replyTo?: EventID; attachments?: Array<Attachment> | null; clientId?: string; };
 export type Attachment = { name: string; media: string; bytes: number; sha256: string; visual?: VisualCard | null; };
 export type VisualCard = { id: EventID; version: number; title: string; height: number; allowNet: boolean; banner: string; thumbnail: string; shots: Array<VisualShot> | null; checks: Array<VisualCheck> | null; };
 export type VisualShot = { width: number; file: string; };
@@ -261,6 +266,7 @@ export type TurnOutcome = "completed" | "failed" | "stopped";
 export type TurnEnded = { session: SessionID; turn: TurnID; outcome: TurnOutcome; final?: string; replies?: Array<FinalReply> | null; usage: Usage; error?: string; cause?: FailureCause; shellJobs?: number; };
 export type ConversationRead = { room: RoomID; conversation: Conversation; seq: number; };
 export type TurnActivity = { session: SessionID; turn: TurnID; label: string; };
+export type TranscriptChanged = { session: SessionID; turn: TurnID; };
 export type FinalReply = { reply: ReplyChannel; posted?: EventID; };
 export type Usage = { model: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; };
 export type ShellJobEnded = { description?: string; end?: ShellJobEnd | null; session: SessionID; job: ShellJobID; exitCode: number; tail: string; };
@@ -354,6 +360,7 @@ export type EventBody =
   | { type: "session.restarted"; body: SessionRestarted }
   | { type: "session.started"; body: SessionStarted }
   | { type: "shell.job.ended"; body: ShellJobEnded }
+  | { type: "transcript.changed"; body: TranscriptChanged }
   | { type: "turn.activity"; body: TurnActivity }
   | { type: "turn.ended"; body: TurnEnded }
   | { type: "turn.started"; body: TurnStarted }

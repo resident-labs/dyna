@@ -432,6 +432,13 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 				return ErrSessionClosing
 			}
 		}
+		if post, ok := event.Body.(contract.PostCreated); ok && event.From.Kind == contract.PrincipalSession {
+			err := tx.QueryRowContext(ctx, "SELECT id FROM turns WHERE session=? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1", event.From.Session).Scan(&post.Turn)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			event.Body = post
+		}
 		seq, err = s.AppendEvent(tx, event)
 		if err != nil {
 			return err
