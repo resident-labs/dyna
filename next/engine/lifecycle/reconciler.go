@@ -114,6 +114,9 @@ func (r *Reconciler) change(ctx context.Context, old, next box.Box, due time.Tim
 func (r *Reconciler) Pass(ctx context.Context) error {
 	r.pass.Lock()
 	defer r.pass.Unlock()
+	if err := r.store.WakeModelRetries(ctx, r.now()); err != nil {
+		return err
+	}
 	rows, err := r.store.LifecycleBoxes(ctx)
 	if err != nil {
 		return err
