@@ -114,6 +114,8 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 		body, _ := json.Marshal(map[string]string{"code": code, "proof": p})
 		r := httptest.NewRequest("POST", origin+"/api/connect/session", bytes.NewReader(body))
 		r.Header.Set("Origin", origin)
+		r.Header.Set("X-Dyna", "1")
+		r.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		service.ServePublic(w, r, origin, []string{origin})
 		return w
@@ -134,6 +136,8 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 	}
 	r := httptest.NewRequest("POST", origin+"/api/connect/renew", bytes.NewBufferString(`{"proof":"`+proof("/api/connect/renew", "abcdefghijklmnopr")+`"}`))
 	r.Header.Set("Origin", origin)
+	r.Header.Set("X-Dyna", "1")
+	r.Header.Set("Content-Type", "application/json")
 	r.AddCookie(cookies[0])
 	x, _, ok, err := service.Authenticate(r.Context(), r, origin)
 	if err != nil || !ok {
@@ -152,6 +156,8 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 	refused.Store(true)
 	r = httptest.NewRequest("POST", origin+"/api/connect/renew", bytes.NewBufferString(`{"proof":"`+proof("/api/connect/renew", "abcdefghijklmnops")+`"}`))
 	r.Header.Set("Origin", origin)
+	r.Header.Set("X-Dyna", "1")
+	r.Header.Set("Content-Type", "application/json")
 	r.AddCookie(rotated)
 	x, _, ok, err = service.Authenticate(r.Context(), r, origin)
 	if err != nil || !ok {
