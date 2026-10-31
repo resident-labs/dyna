@@ -2,7 +2,7 @@ import type { Attachment, Conversation, Event, FailureCause, Principal } from ".
 
 export type Row =
   | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[] }
-  | { kind: "failed"; key: string; session: string; at: string; label: "Turn failed" | "Could not start" | "Could not close" | "Stopped unexpectedly"; error: string }
+  | { kind: "failed"; key: string; session: string; at: string; label: "Turn failed" | "Could not start" | "Could not close" | "Stopped unexpectedly"; cause: string }
   | { kind: "work"; key: string; events: Event[] };
 
 type Name = (session: string) => string;
@@ -65,7 +65,7 @@ export function feedRows(events: Event[], home: Conversation): Row[] {
       const { to, cause } = event.body;
       if (to === "failed" || to === "lost" || cause) {
         flush();
-        rows.push({ kind: "failed", key: `f${event.seq}`, session: event.body.session, at: event.at, error: cause ? causes[cause] : "",
+        rows.push({ kind: "failed", key: `f${event.seq}`, session: event.body.session, at: event.at, cause: cause ? causes[cause] : "",
           label: cause === "remove_failed" || cause === "archive_failed" ? "Could not close" : to === "lost" ? "Stopped unexpectedly" : "Could not start" });
       }
       continue;
@@ -77,10 +77,11 @@ export function feedRows(events: Event[], home: Conversation): Row[] {
       if (event.body.final && answer) {
         post(`a${event.seq}`, { kind: "session", session: event.body.session }, event.at, event.body.final, [], answer.reply.target ? [answer.reply.target] : []);
       }
-      // A failed turn always gets its own row, even after its answer; it never folds into a work row.
+      // A failed turn always gets its own row, even after its answer; it never folds into a work row. Its error is the
+      // harness's raw text (r8), so the row says only "Turn failed" until the engine gives a typed cause.
       if (event.body.outcome === "failed") {
         flush();
-        rows.push({ kind: "failed", key: `f${event.seq}`, session: event.body.session, at: event.at, label: "Turn failed", error: event.body.error ?? "" });
+        rows.push({ kind: "failed", key: `f${event.seq}`, session: event.body.session, at: event.at, label: "Turn failed", cause: "" });
       }
       if (answer || event.body.outcome === "failed") continue;
     }
@@ -147,7 +148,7 @@ export function workSummary(events: Event[], name: Name): string {
     turns.size > 1 ? `${who([...turns.keys()].map(name))} ran turns` : ran && `${name(ran[0])} ran ${count(ran[1].size, "turn")}`,
     jobs && count(jobs, "job"), requests.size && count(requests.size, "request"), images && `${count(images, "image")} built`,
     failedImages && `${count(failedImages, "image build")} failed`, prs && count(prs, "pull request"),
-    memory && count(memory, "memory warning"), grants && `${count(grants, "host-exec grant")} expired`,
+    memory && count(memory, "memory warning"), grants && `${count(grants, "host execution grant")} expired`,
     opened.length && `${who(opened)} opened a computer`, shut.length && `${who(shut)} closed a computer`, moved.length && `${who(moved)} moved`, closed.length && `${who(closed)} closed`,
   ].filter(part => typeof part === "string");
   return parts.length ? parts.join(", ") : count(events.length, "update");
@@ -177,7 +178,7 @@ export function describe(event: Event, name: Name): string {
     // The reason is raw build output (r8); the build log holds it.
     case "image.failed": return `Image ${event.body.name}:${event.body.tag} failed`;
     case "pr.opened": return `${name(event.body.session)} opened pull request ${event.body.repo}#${event.body.number}`;
-    case "grant.expired": return "A host-exec grant expired";
+    case "grant.expired": return "A host execution grant expired";
     case "box.pressure": return event.body.kind === "max" ? "A session reached its memory limit" : "A session is short of memory";
     case "post.created": return event.body.text;
   }
