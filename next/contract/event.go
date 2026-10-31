@@ -138,6 +138,7 @@ const (
 	CauseArchiveFailed   FailureCause = "archive_failed"   // close could not archive the session's branch
 	CauseGrantInactive   FailureCause = "grant_inactive"   // the host-exec grant expired or was revoked
 	CauseHostLost        FailureCause = "host_lost"        // the host stopped answering during the run
+	CauseGithubFailed    FailureCause = "github_failed"    // GitHub refused the request or did not answer
 	CauseInterrupted     FailureCause = "interrupted"      // the engine stopped during the run; the outcome is unknown
 	CauseInternal        FailureCause = "internal"         // an engine error; the detail is in the log
 )

@@ -77,7 +77,7 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 			client := http.Client{Transport: transport, Timeout: time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 			response, err := client.Do(request)
 			if err != nil {
-				return contract.OpResult{Cause: contract.CauseInternal, Error: "GitHub request failed; outcome unknown, reconcile before retrying"}
+				return contract.OpResult{Cause: contract.CauseGithubFailed, Error: "GitHub request failed; outcome unknown, reconcile before retrying"}
 			}
 			defer response.Body.Close()
 			var payload struct {
@@ -93,10 +93,10 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 				for _, item := range payload.Errors {
 					parts = append(parts, item.Message)
 				}
-				return contract.OpResult{Cause: contract.CauseInternal, Error: strings.ReplaceAll(strings.Join(parts, ": "), token, "***")}
+				return contract.OpResult{Cause: contract.CauseGithubFailed, Error: strings.ReplaceAll(strings.Join(parts, ": "), token, "***")}
 			}
 			if err != nil || payload.Number <= 0 {
-				return contract.OpResult{Cause: contract.CauseInternal, Error: "GitHub may have opened the PR but returned an invalid response; reconcile before retrying"}
+				return contract.OpResult{Cause: contract.CauseGithubFailed, Error: "GitHub may have opened the PR but returned an invalid response; reconcile before retrying"}
 			}
 			link := fmt.Sprintf("https://github.com/%s/pull/%d", session.Repo, payload.Number)
 			result := contract.OpResult{Output: link, PR: &contract.PrOpenResult{Number: payload.Number, URL: link}}
