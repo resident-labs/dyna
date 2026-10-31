@@ -18,12 +18,14 @@ func (f fakeTunnelState) SetConnectConnector(_ context.Context, missing bool, _ 
 func TestTunnelRestartsAndStops(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	wake := make(chan struct{}, 1)
+	ticks := make(chan time.Time)
 	notices := make(chan bool, 8)
 	starts := make(chan chan error, 2)
 	stopped := make(chan struct{})
 	missing := true
 	h := tunnelHooks{
-		now: func() time.Time { return time.Unix(1, 0) },
+		now:   func() time.Time { return time.Unix(1, 0) },
+		after: func(time.Duration) <-chan time.Time { return ticks },
 		find: func() (string, error) {
 			if missing {
 				return "", errors.New("missing")
@@ -31,20 +33,20 @@ func TestTunnelRestartsAndStops(t *testing.T) {
 			return "fake", nil
 		},
 		prepare: func(context.Context) (string, error) { return "invented", nil },
-		retry:   func() {},
-		start: func(context.Context, string, string) (context.CancelFunc, <-chan error, error) {
+		start: func(ctx context.Context, _, _ string) <-chan error {
 			done := make(chan error, 1)
 			starts <- done
-			return func() {
+			go func() {
+				<-ctx.Done()
 				select {
 				case done <- nil:
 				default:
 				}
-			}, done, nil
+			}()
+			return done
 		},
 	}
 	go func() { defer close(stopped); superviseTunnel(ctx, fakeTunnelState{notices}, true, wake, h) }()
-	wake <- struct{}{}
 	if !<-notices {
 		t.Fatal("missing connector was not reported")
 	}
@@ -55,6 +57,7 @@ func TestTunnelRestartsAndStops(t *testing.T) {
 	}
 	first := <-starts
 	first <- errors.New("connector stopped")
+	ticks <- time.Time{}
 	if <-notices {
 		t.Fatal("connector unexpectedly missing")
 	}

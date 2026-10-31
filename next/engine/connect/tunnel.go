@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/resident-labs/dyna/engine/child"
 )
 
 type tunnelState interface {
@@ -18,19 +20,15 @@ type tunnelState interface {
 type tunnelHooks struct {
 	find    func() (string, error)
 	prepare func(context.Context) (string, error)
-	start   func(context.Context, string, string) (context.CancelFunc, <-chan error, error)
+	start   func(context.Context, string, string) <-chan error
 	now     func() time.Time
-	ticks   <-chan time.Time
-	retry   func()
+	after   func(time.Duration) <-chan time.Time
 }
 
 // SuperviseTunnel runs cloudflared as a child and retries failures until shutdown.
 func SuperviseTunnel(ctx context.Context, files *Files, state tunnelState, appPort, cardPort int, wake <-chan struct{}) {
-	timer := time.NewTimer(0)
-	defer timer.Stop()
 	h := tunnelHooks{
-		find: func() (string, error) { return exec.LookPath("cloudflared") },
-		now:  time.Now, ticks: timer.C, retry: func() { timer.Reset(5 * time.Second) },
+		find: func() (string, error) { return exec.LookPath("cloudflared") }, now: time.Now, after: time.After,
 		prepare: func(ctx context.Context) (string, error) {
 			link, err := files.Link()
 			if err != nil {
@@ -61,77 +59,43 @@ func SuperviseTunnel(ctx context.Context, files *Files, state tunnelState, appPo
 			}
 			return token, nil
 		},
-		start: func(ctx context.Context, path, token string) (context.CancelFunc, <-chan error, error) {
-			childCtx, stop := context.WithCancel(ctx)
-			cmd := exec.CommandContext(childCtx, path, "tunnel", "--no-autoupdate", "run", "--token-file", token)
+		start: func(ctx context.Context, path, token string) <-chan error {
+			done := make(chan error, 1)
+			cmd := exec.CommandContext(ctx, path, "tunnel", "--no-autoupdate", "run", "--token-file", token)
 			cmd.Env = []string{"HOME=" + os.Getenv("HOME"), "PATH=" + os.Getenv("PATH")}
 			cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 			if err := cmd.Start(); err != nil {
-				stop()
-				return nil, nil, err
+				done <- err
+				return done
 			}
-			done := make(chan error, 1)
 			go func() { done <- cmd.Wait() }()
-			return stop, done, nil
+			return done
 		},
 	}
 	superviseTunnel(ctx, state, appPort != 0, wake, h)
 }
 
 func superviseTunnel(ctx context.Context, state tunnelState, enabled bool, wake <-chan struct{}, h tunnelHooks) {
-	var cancel context.CancelFunc
-	var done <-chan error
-	defer func() {
-		if cancel != nil {
-			cancel()
-			<-done
-		}
-	}()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-wake:
-		case <-h.ticks:
-		case <-done:
-			cancel()
-			cancel, done = nil, nil
-		}
+	child.Run(ctx, wake, h.now, h.after, func(ctx context.Context) <-chan error {
+		fail := func(err error) <-chan error { done := make(chan error, 1); done <- err; return done }
 		linked, err := state.ConnectLinked(ctx)
 		if err != nil {
-			h.retry()
-			continue
+			return fail(err)
 		}
 		if !linked || !enabled {
-			if cancel != nil {
-				cancel()
-				<-done
-				cancel, done = nil, nil
-			}
 			_ = state.SetConnectConnector(ctx, false, h.now())
-			h.retry()
-			continue
-		}
-		if cancel != nil {
-			h.retry()
-			continue
+			return nil
 		}
 		path, err := h.find()
 		if err != nil {
 			_ = state.SetConnectConnector(ctx, true, h.now())
-			h.retry()
-			continue
+			return fail(err)
 		}
 		_ = state.SetConnectConnector(ctx, false, h.now())
 		token, err := h.prepare(ctx)
 		if err != nil {
-			h.retry()
-			continue
+			return fail(err)
 		}
-		cancel, done, err = h.start(ctx, path, token)
-		if err != nil {
-			cancel, done = nil, nil
-		}
-		h.retry()
-	}
+		return h.start(ctx, path, token)
+	}, func(error) {})
 }
