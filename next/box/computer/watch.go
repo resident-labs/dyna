@@ -34,10 +34,10 @@ func watch(ctx context.Context, base string, out io.Writer, pace func(context.Co
 	if _, err = d.Call(ctx, "Page.enable", nil); err != nil {
 		return err
 	}
-	if _, err = d.Call(ctx, "Page.startScreencast", json.RawMessage(`{"format":"jpeg","quality":70,"maxWidth":1280,"everyNthFrame":1}`)); err != nil {
+	if err = captureFrame(ctx, d, out); err != nil {
 		return err
 	}
-	if err = captureFrame(ctx, d, out); err != nil {
+	if _, err = d.Call(ctx, "Page.startScreencast", json.RawMessage(`{"format":"jpeg","quality":70,"maxWidth":1280,"everyNthFrame":1}`)); err != nil {
 		return err
 	}
 	for {
@@ -58,26 +58,24 @@ func watch(ctx context.Context, base string, out io.Writer, pace func(context.Co
 			continue
 		}
 		var frame struct {
-			SessionID int `json:"sessionId"`
+			Data      string `json:"data"`
+			SessionID int    `json:"sessionId"`
 		}
 		if err := json.Unmarshal(m.Params, &frame); err != nil {
 			return err
 		}
-		// Acknowledge first so updates during capture trigger another frame.
-		if err = ackFrame(ctx, d, frame.SessionID); err != nil {
-			return err
-		}
-		if err = captureFrame(ctx, d, out); err != nil {
+		if err = writeFrame(out, frame.Data); err != nil {
 			return err
 		}
 		if err = pace(ctx); err != nil {
 			return err
 		}
+		if err = ackFrame(ctx, d, frame.SessionID); err != nil {
+			return err
+		}
 	}
 }
 
-// Each screencast event triggers a fresh capture. Event and screenshot replies
-// can interleave, so displaying the event image itself could show stale pixels.
 func captureFrame(ctx context.Context, d *DevTools, out io.Writer) error {
 	result, err := d.Call(ctx, "Page.captureScreenshot", json.RawMessage(`{"format":"jpeg","quality":70}`))
 	if err != nil {
@@ -89,7 +87,11 @@ func captureFrame(ctx context.Context, d *DevTools, out io.Writer) error {
 	if err = json.Unmarshal(result, &shot); err != nil {
 		return err
 	}
-	jpeg, err := base64.StdEncoding.DecodeString(shot.Data)
+	return writeFrame(out, shot.Data)
+}
+
+func writeFrame(out io.Writer, data string) error {
+	jpeg, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
 		return err
 	}
