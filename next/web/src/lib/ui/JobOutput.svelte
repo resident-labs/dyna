@@ -74,7 +74,7 @@
       <p class="meta"><Avatar kind="session" name={session.name} root={session.root} size={16} /><span>{session.name}</span><span class="sep">·</span>
         <span class:bad>{cause}{time ? ` after ${time}` : ""}</span><span class="sep">·</span>
         <time datetime={job.started}>{new Date(job.started).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time></p>
-      <code class="command" class:whole bind:this={block}>{job.command}</code>
+      <code class="command" class:whole><span bind:this={block}>{job.command}</span></code>
       {#if clipped || whole}<button type="button" class="more" aria-expanded={whole} onclick={() => { whole = !whole; }}>{whole ? "Show less" : "Show the whole command"}</button>{/if}
     {/if}
   </header>
@@ -102,9 +102,10 @@
   .meta { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .sep { opacity: 0.6; }
   .bad { color: var(--danger); }
-  .command { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; padding: 0 10px; border-radius: 6px;
+  .command { display: block; padding: 6px 10px; border-radius: 6px;
     background: var(--hover); color: var(--muted); font: 12px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-  .command.whole { display: block; }
+  .command span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+  .command.whole span { display: block; }
   .more { all: unset; justify-self: start; color: var(--focus); font-size: 12.5px; font-weight: 500; cursor: pointer; }
   .more:hover { text-decoration: underline; }
   .mini:focus-visible, .back:focus-visible, .more:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
