@@ -1753,12 +1753,20 @@ export class AgentSession {
 
 	/** Replace host-supplied sections for the next request. */
 	setPromptSections(sections: Array<{ key: string; text: string }>): void {
+		const reserved = new Set(["preamble", "tools", "rules", "docs", "addendum", "skills", "cwd"]);
+		for (const { key } of sections) {
+			if (reserved.has(key) || key.startsWith("file:")) throw new Error(`Reserved prompt section: ${key}`);
+		}
+		if (this._runSystemPromptOptions) {
+			for (const key of Object.keys(this._hostSections)) delete this._runSystemPromptOptions.sections[key];
+		}
 		this._hostSections = Object.fromEntries(sections.map(({ key, text }) => [key, text]));
 		this._baseSystemPromptOptions.sections = { ...this._hostSections };
+		if (this._runSystemPromptOptions) Object.assign(this._runSystemPromptOptions.sections, this._hostSections);
 	}
 
-	private _refreshPromptResources(): void {
-		this._resourceLoader.refreshPromptResources?.();
+	private async _refreshPromptResources(): Promise<void> {
+		await this._resourceLoader.refreshPromptResources?.();
 		const skills = this._resourceLoader.getSkills().skills;
 		const contextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
 		this._baseSystemPromptOptions.skills = skills;
@@ -1929,7 +1937,7 @@ export class AgentSession {
 		deliveryId?: string,
 		additionalInputs: AgentMessage[] = [],
 	): Promise<void> {
-		this._refreshPromptResources();
+		await this._refreshPromptResources();
 		this._isAgentRunActive = true;
 		this._agentRunAbortRequested = false;
 		let messages: AgentMessage[];
@@ -2965,7 +2973,7 @@ export class AgentSession {
 	 */
 	async compact(customInstructions?: string): Promise<CompactionResult> {
 		await this.abort();
-		this._refreshPromptResources();
+		await this._refreshPromptResources();
 		this._compactionAbortController = new AbortController();
 		this._emit({ type: "compaction_start", reason: "manual" });
 		let fromExtension = false;
@@ -3302,7 +3310,7 @@ export class AgentSession {
 	 * @returns Whether the post-run loop should call `agent.continue()`
 	 */
 	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
-		this._refreshPromptResources();
+		await this._refreshPromptResources();
 		const model = this.model;
 		const settings = this._compactionSettings(model);
 		let abortController: AbortController | undefined;

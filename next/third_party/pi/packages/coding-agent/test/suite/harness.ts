@@ -197,6 +197,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		streamFn: streamSimple,
 		initialState: {
 			model,
+			messages: options.sessionManager?.buildSessionContext().messages,
 			systemPrompt: "",
 			tools: [],
 		},

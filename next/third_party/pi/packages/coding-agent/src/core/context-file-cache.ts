@@ -5,6 +5,7 @@ interface FileStamp {
 	ino: number;
 	size: number;
 	mtimeMs: number;
+	ctimeMs: number;
 	isFile: boolean;
 }
 
@@ -26,7 +27,15 @@ export class ContextFileCache {
 	constructor(
 		stat = (path: string): FileStamp | undefined => {
 			const value = statSync(path, { throwIfNoEntry: false });
-			return value && { ino: value.ino, size: value.size, mtimeMs: value.mtimeMs, isFile: value.isFile() };
+			return (
+				value && {
+					ino: value.ino,
+					size: value.size,
+					mtimeMs: value.mtimeMs,
+					ctimeMs: value.ctimeMs,
+					isFile: value.isFile(),
+				}
+			);
 		},
 		read = (path: string) => readFileSync(path, "utf8"),
 		hash = (text: string) => createHash("sha256").update(text).digest("hex"),
@@ -66,6 +75,12 @@ export class ContextFileCache {
 function sameStamp(a: FileStamp | undefined, b: FileStamp | undefined): boolean {
 	return (
 		a === b ||
-		(!!a && !!b && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs && a.isFile === b.isFile)
+		(!!a &&
+			!!b &&
+			a.ino === b.ino &&
+			a.size === b.size &&
+			a.mtimeMs === b.mtimeMs &&
+			a.ctimeMs === b.ctimeMs &&
+			a.isFile === b.isFile)
 	);
 }

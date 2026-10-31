@@ -100,7 +100,6 @@ describe("AgentSession prompt characterization", () => {
 
 		const resumed = await createHarness({ sessionManager: manager });
 		harnesses.push(resumed);
-		resumed.session.agent.replaceMessages(manager.buildSessionContext().messages);
 		resumed.session.setPromptSections([{ key: "goal", text: "after" }]);
 		resumed.setResponses([fauxAssistantMessage("done")]);
 		await resumed.session.continueRun();
