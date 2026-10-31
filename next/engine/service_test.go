@@ -7,9 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
+	"slices"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1364,36 +1363,32 @@ func TestPostWakesOnlyTargetBox(t *testing.T) {
 	if problem != nil {
 		t.Fatal(problem)
 	}
-	ready := make(chan contract.SessionID, 16)
-	var bCalls atomic.Int32
-	s.dispatch = func(ctx context.Context, id contract.SessionID, turn contract.TurnID, event contract.Event, replay bool) (contract.TurnID, []store.FeedInput, error) {
-		if id == b.Session {
-			bCalls.Add(1)
+	// Box b's own earlier wakes reach its loop late, so the test records the sessions the post's commit wakes.
+	// The write loop calls wake before the post returns, and no other commit carries a post.
+	var woken []contract.SessionID
+	s.store.SetWake(func(ids []contract.SessionID, events []contract.Event) {
+		for _, event := range events {
+			if _, ok := event.Body.(contract.PostCreated); ok {
+				woken = append(woken, ids...)
+			}
 		}
-		result, inputs, err := s.store.Dispatch(ctx, id, turn, event, replay)
-		ready <- id
-		return result, inputs, err
-	}
+		s.queueWakes(ids, events)
+	})
 	aMessages, problem := testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: a.Session})
 	if problem != nil {
 		t.Fatal(problem)
 	}
-	_, problem = testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: b.Session})
-	if problem != nil {
+	if _, problem = testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: b.Session}); problem != nil {
 		t.Fatal(problem)
 	}
-	<-ready
-	<-ready
-	before := bCalls.Load()
 	_, problem = s.Post(ctx, owner, contract.PostRequest{Room: room, Text: "hello", Mentions: []string{"a"}})
 	if problem != nil {
 		t.Fatal(problem)
 	}
+	if !slices.Equal(woken, []contract.SessionID{a.Session}) {
+		t.Fatalf("post woke %v, want only %s", woken, a.Session)
+	}
 	if start, ok := (<-aMessages).Body.(contract.TurnStart); !ok || len(start.Inputs) != 1 || start.Inputs[0].Text != "hello" {
 		t.Fatalf("unexpected start: %+v", start)
-	}
-	runtime.Gosched()
-	if got := bCalls.Load(); got != before {
-		t.Fatalf("untargeted box dispatched %d times", got-before)
 	}
 }
