@@ -258,7 +258,7 @@ type BoxChanged struct {
 }
 ```
 
-A failed box and a failed operation carry a typed `FailureCause`, such as `create_failed`, `no_hello`, `host_lost`, `github_failed` or `interrupted`. The `Reason` or `Error` text beside it is detail for agents and the log. Owner views show only the cause, in owner words (r8).
+A failed box and a failed operation carry a typed `FailureCause`, such as `create_failed`, `no_hello`, `host_lost`, `github_failed`, `stale` or `interrupted`. The `Reason` or `Error` text beside it is detail for agents and the log. Owner views show only the cause, in owner words (r8).
 
 ### 3.4 Delivery and reply channels
 
