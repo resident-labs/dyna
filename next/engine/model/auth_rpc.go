@@ -79,7 +79,11 @@ func (r *AuthRPC) Save(req AuthSave, _ *struct{}) error {
 			c.mu.Lock()
 		}
 		defer c.mu.Unlock()
-		if a := c.attempts[req.Attempt]; a != nil && a.account != "" && a.status == contract.ConnectPending && !a.saved && c.now().Before(a.expires) && a.generation == c.proxy.generation.Load() {
+		a := c.attempts[req.Attempt]
+		if req.Attempt != "" && (a == nil || a.status != contract.ConnectPending || a.saved || !c.now().Before(a.expires) || a.generation != c.proxy.generation.Load()) {
+			return errors.New("account completion rejected")
+		}
+		if a != nil && a.account != "" {
 			records, err := r.Store.ListProxyAuths(ctx)
 			if err != nil {
 				return errors.New("proxy store unavailable")
