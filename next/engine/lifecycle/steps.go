@@ -139,24 +139,16 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			due = r.retryAt(failures)
 		}
 	default:
-		path, err := r.store.BoxAncestry(ctx, b.ID)
-		if err != nil {
-			return err
-		}
-		ids := make([]contract.BoxID, len(path))
-		for i := range path {
-			ids[i] = path[i].ID
-		}
-		slice, err := box.SliceName(ids)
-		if err != nil {
-			return err
-		}
 		image, imageErr := r.boxes.CurrentImage(ctx, b.Session, b.Host)
 		if imageErr != nil {
 			image = b.Image
 			next.Reason = imageErr.Error()
 		}
-		if slice != b.Slice || image != b.Image {
+		slice, err := box.SliceName(b.ID)
+		if err != nil {
+			return err
+		}
+		if image != b.Image || slice != b.Slice {
 			r.mu.Lock()
 			repos := r.repos
 			r.mu.Unlock()
@@ -169,8 +161,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			}
 			if workErr == nil {
 				workErr = r.store.SetRecreated(ctx, b.ID, slice, image)
-				next.Slice = slice
-				next.Image = image
+				next.Image, next.Slice = image, slice
 			}
 		} else {
 			workErr = r.boxes.Start(ctx, b.ID)

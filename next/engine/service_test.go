@@ -155,7 +155,7 @@ func TestSessionBoxSizeDefaults(t *testing.T) {
 	for _, tc := range []struct {
 		id   contract.SessionID
 		want contract.BoxSizeName
-	}{{root, contract.BoxSizeAgent}, {lead, contract.BoxSizeMedium}, {child.Session, contract.BoxSizeMedium}} {
+	}{{root, contract.BoxSizeAgent}, {lead, contract.BoxSizeMedium}, {child.Session, contract.BoxSizeAgent}} {
 		session, err := s.store.Session(ctx, tc.id)
 		if err != nil {
 			t.Fatal(err)
@@ -184,7 +184,7 @@ func TestRootCreationRollsBackAndRootCannotClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = s.store.StartSession(ctx, store.Session{ID: "new-root", Room: "new-room", Name: "root", Profile: "test", Box: current.Box, NewRoomName: "new-room"}, "", "", contract.BoxSizeAgent, "", event, contract.Event{}, "")
+	err = s.store.StartSession(ctx, store.Session{ID: "new-root", Room: "new-room", Name: "root", Profile: "test", Box: current.Box, NewRoomName: "new-room"}, "", contract.BoxSizeAgent, "", event, contract.Event{}, "")
 	if err == nil {
 		t.Fatal("expected duplicate box failure")
 	}
@@ -1086,37 +1086,14 @@ func TestChildPlacement(t *testing.T) {
 	}
 	child := start(lead.Session, "child")
 	grandchild := start(child.Session, "grandchild")
-	for i, ids := range [][]contract.BoxID{{lead.Box}, {lead.Box, child.Box}, {lead.Box, child.Box, grandchild.Box}} {
-		want, err := box.SliceName(ids)
+	for i, id := range []contract.BoxID{lead.Box, child.Box, grandchild.Box} {
+		want, err := box.SliceName(id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if recorder.specs[i].Slice != want || recorder.specs[i].Host != "host" {
+		if recorder.specs[i].Slice != want || recorder.specs[i].Host != []contract.HostName{"host", "larger", "larger"}[i] {
 			t.Fatalf("placement %d: %+v, want %s on host", i, recorder.specs[i], want)
 		}
-	}
-}
-
-func TestChildWaitsForParentBox(t *testing.T) {
-	s, room, root, ctx := setupRoot(t)
-	s.boxes = unavailableBoxes{}
-	resetLifecycle(s)
-	lead, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "lead", Profile: "test", Parent: root, Goal: "goal"})
-	if e != nil {
-		t.Fatal(e)
-	}
-	passLifecycle(t, s, ctx)
-	child, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: lead.Session, Goal: "goal"})
-	if e != nil {
-		t.Fatal(e)
-	}
-	passLifecycle(t, s, ctx)
-	b, err := s.store.Box(ctx, child.Box)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if b.State != contract.BoxPending || b.Reason != string(box.PendingParentHost) {
-		t.Fatalf("unexpected box: %+v", b)
 	}
 }
 
@@ -1177,7 +1154,7 @@ func TestPendingChildrenRetryIndependently(t *testing.T) {
 	}
 	for range 2 {
 		child := <-adapter.children
-		want, err := box.SliceName([]contract.BoxID{spec.Box, child.Box})
+		want, err := box.SliceName(child.Box)
 		if err != nil || child.Slice != want || child.Host != spec.Host || len(child.Repos) != 1 || child.Repos[0].Name != "owner/repo" {
 			t.Fatalf("placement: %+v", child)
 		}
@@ -1658,7 +1635,7 @@ func TestSessionStartSize(t *testing.T) {
 	if _, e = s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "bad", Profile: "test", Size: "huge"}); e == nil || e.Code != contract.ErrInvalid {
 		t.Fatalf("unknown size: %v", e)
 	}
-	if _, e = s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: lead, Size: contract.BoxSizeSmall}); e == nil || e.Code != contract.ErrInvalid {
+	if _, e = s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: lead, Size: contract.BoxSizeSmall}); e != nil {
 		t.Fatalf("child size: %v", e)
 	}
 }
