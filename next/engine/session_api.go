@@ -53,8 +53,6 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	if _, ok := box.Size(req.Size); req.Size != "" && !ok {
 		return contract.SessionStartResponse{}, invalid("unknown size")
 	}
-	s.treeMu.Lock()
-	defer s.treeMu.Unlock()
 	if _, _, err := s.profiles.Model(req.Profile); err != nil {
 		if roomName != "" {
 			return contract.SessionStartResponse{}, invalid("unknown profile")
