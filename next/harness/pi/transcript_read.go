@@ -64,10 +64,9 @@ func ReadSteps(r io.Reader, deliveries map[contract.DeliverySeq]contract.TurnID,
 		m := entry.Message
 		if m.Role == "user" {
 			id, err := strconv.ParseInt(m.DeliveryID, 10, 64)
+			current = ""
 			if err == nil {
-				if t, ok := deliveries[contract.DeliverySeq(id)]; ok {
-					current = t
-				}
+				current = deliveries[contract.DeliverySeq(id)]
 			}
 			continue
 		}
