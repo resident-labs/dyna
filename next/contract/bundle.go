@@ -334,7 +334,7 @@ const (
 
 // Subscription is a hook as a typed event subscription (spec 8.5). Exactly
 // one of On and Every, and exactly one of Wake and Run, is set. A bundle
-// holds only Run subscriptions.
+// can hold Wake subscriptions when a v1 hook maps cleanly.
 type Subscription struct {
 	ID      SubscriptionID    `json:"id"`
 	Scope   SubscriptionScope `json:"scope"`
