@@ -103,11 +103,19 @@ func (p *ProfileConfig) List() []contract.ProfileSummary {
 	return result
 }
 
-func (s *Service) ProfileList(_ context.Context, who contract.Principal, _ contract.ProfileListRequest) (contract.ProfileListResponse, *contract.Error) {
+func (s *Service) ProfileList(ctx context.Context, who contract.Principal, _ contract.ProfileListRequest) (contract.ProfileListResponse, *contract.Error) {
 	if who.Kind != contract.PrincipalOwner {
 		return contract.ProfileListResponse{}, forbidden()
 	}
-	return contract.ProfileListResponse{Profiles: s.profiles.List()}, nil
+	counts, err := s.store.ProfileUsage(ctx)
+	if err != nil {
+		return contract.ProfileListResponse{}, failure(err)
+	}
+	profiles := s.profiles.List()
+	for i := range profiles {
+		profiles[i].InUse = counts[profiles[i].Name]
+	}
+	return contract.ProfileListResponse{Profiles: profiles}, nil
 }
 
 func (p *ProfileConfig) Surface(name contract.ProfileName) contract.AgentSurface {
