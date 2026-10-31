@@ -771,7 +771,7 @@ func TestStartErrorReturnsReachableFailedSession(t *testing.T) {
 			last, found = change, true
 		}
 	}
-	if !found || last.Session != response.Session || last.To != contract.BoxFailed || last.Reason != "host unavailable" || last.Cause != contract.CauseCreateFailed {
+	if !found || last.Session != response.Session || last.To != contract.BoxFailed || last.Reason != string(contract.CauseCreateFailed) || last.Cause != contract.CauseCreateFailed {
 		t.Fatalf("unexpected placement: %+v", last)
 	}
 }
