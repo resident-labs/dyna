@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"io"
 	"net"
 	"net/http"
@@ -91,7 +92,7 @@ func TestProxyConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = proxy.Listener.Close() })
+	t.Cleanup(proxy.Close)
 	path := filepath.Join(dir, "cliproxy", "config.yaml")
 	info, err := os.Stat(path)
 	if err != nil || info.Mode().Perm() != 0600 {
@@ -125,4 +126,53 @@ func unixServer(t *testing.T, handler http.Handler) *httptest.Server {
 	up.Listener = listener
 	up.Start()
 	return up
+}
+
+func TestProxyRejectsSecondOwner(t *testing.T) {
+	dir := t.TempDir()
+	first, err := NewProxy(dir, "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	before, err := os.ReadFile(first.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second, err := NewProxy(dir, "second"); err == nil {
+		second.Close()
+		t.Fatal("second owner succeeded")
+	}
+	after, err := os.ReadFile(first.Config)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("second owner changed config")
+	}
+	conn, err := net.Dial("unix", first.Socket)
+	if err != nil {
+		t.Fatalf("first socket unavailable: %v", err)
+	}
+	_ = conn.Close()
+}
+
+func TestProxyRejectsForeignLiveSocket(t *testing.T) {
+	dir := t.TempDir()
+	proxyDir := filepath.Join(dir, "cliproxy")
+	if err := os.Mkdir(proxyDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(proxyDir, "proxy.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	if proxy, err := NewProxy(dir, "key"); err == nil {
+		proxy.Close()
+		t.Fatal("accepted a live socket")
+	}
+	conn, err := net.Dial("unix", socket)
+	if err != nil {
+		t.Fatalf("live socket was removed: %v", err)
+	}
+	_ = conn.Close()
 }
