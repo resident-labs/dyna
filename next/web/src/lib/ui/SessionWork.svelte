@@ -136,7 +136,7 @@
   .day strong { color: var(--text); }
   .rule { height: 1px; background: var(--line); flex: 1; }
   .turn { padding: 12px 16px 16px; }
-  .cause { display: grid; grid-template-columns: 56px minmax(0,1fr); gap: 8px; color: var(--muted); font-size: 13px; }
+  .cause { display: grid; grid-template-columns: minmax(64px, max-content) minmax(0,1fr); gap: 8px; color: var(--muted); font-size: 13px; }
   .cause-line { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; overflow-wrap: anywhere; }
   .identity { display: inline-flex; align-items: center; gap: 5px; vertical-align: middle; }
   .identity strong { color: oklch(var(--id-name) var(--hue)); }
@@ -153,7 +153,6 @@
   .older { padding: 8px 16px; align-self: center; }
   @media (max-width: 600px) {
     .post, .failure, .answer { margin-left: 0; }
-    .cause { grid-template-columns: 48px minmax(0,1fr); }
   }
   @media (pointer: coarse) { button, summary { min-height: 40px; } }
 </style>

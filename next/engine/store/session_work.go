@@ -8,6 +8,8 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+var ErrInvalidWorkCursor = errors.New("invalid session work cursor")
+
 // SessionWork returns complete turns, newest first. Sequence numbers, not clocks,
 // join posts to turns, because multiple events can share a millisecond.
 func (s *Store) SessionWork(ctx context.Context, session contract.SessionID, before contract.TurnID, limit int) ([]contract.SessionWorkTurn, bool, int, error) {
@@ -18,6 +20,9 @@ func (s *Store) SessionWork(ctx context.Context, session contract.SessionID, bef
 	if before != "" {
 		var cursor int64
 		if err := s.read.QueryRowContext(ctx, `SELECT started_seq FROM turns WHERE id=? AND session=? AND started_seq IS NOT NULL`, before, session).Scan(&cursor); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, false, 0, ErrInvalidWorkCursor
+			}
 			return nil, false, 0, err
 		}
 	}
