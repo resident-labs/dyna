@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { RoomStore } from "./room.svelte.ts";
 import { EventWindow, PAGE, WINDOW, dmOf } from "./window.svelte.ts";
 import { feedRows as dayRows } from "./feed.ts";
+import { decodeEvent } from "./event.ts";
 import type { Conversation, Event, EventBody, EventsListRequest, PostRequest, SessionSummary } from "./contract.gen.ts";
 
 // These cases leave out the day rows, which feed.test.ts covers.
@@ -319,4 +320,14 @@ test("a session counts once: a broken box, then waiting, then a running turn, th
   assert.deepEqual(store.counts, { sessions: 2, waiting: 0, failed: 1, working: 1, idle: 0 });
   store.apply(event(10, { type: "turn.started", body: { session: "b", turn: "t3", inputs: [] } }));
   assert.deepEqual(store.counts, { sessions: 2, waiting: 0, failed: 0, working: 2, idle: 0 });
+});
+
+test("rule events pass the stream's decoder and keep the room's rules current", () => {
+  const room = new RoomStore("r", () => () => {});
+  for (const sent of [event(1, { type: "rule.added", body: { number: 1, text: "Keep" } }), event(2, { type: "rule.added", body: { number: 2, text: "Drop" } }), event(3, { type: "rule.removed", body: { number: 2 } })]) {
+    const decoded = decodeEvent(sent);
+    assert.ok(decoded);
+    room.apply(decoded);
+  }
+  assert.deepEqual([...room.rules.keys()], [1]);
 });
