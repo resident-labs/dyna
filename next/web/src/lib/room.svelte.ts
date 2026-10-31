@@ -5,6 +5,7 @@ import { EventWindow } from "./window.svelte.ts";
 import { pendingReason, type PendingReason } from "./event.ts";
 import { boxFailures, countOf, failedJobs, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
 import type { BoxState, Conversation, FailureCause, Decision, Event, OpRequested, OpResult, OpState, RoomRule, SessionStarted } from "./contract.gen.ts";
+import { failed } from "./jobs.ts";
 
 
 // An operation of the room as the Requests panel shows it: its card, then its decision and run.
@@ -271,7 +272,7 @@ export class RoomStore {
         if (!this.turns.has(event.body.session)) this.shellJobs.set(event.body.session, Math.max(0, (this.shellJobs.get(event.body.session) ?? 0) - 1));
         this.endedJobs.add(`${event.body.session}/${event.body.job}`);
         this.hadJobs.add(event.body.session);
-        if (event.body.exitCode !== 0) this.failedJobs.add(`${event.body.session}/${event.body.job}`);
+        if (failed(event.body)) this.failedJobs.add(`${event.body.session}/${event.body.job}`);
         break;
       case "op.requested": this.requests.set(event.body.id, { ...event.body, state: "pending" }); break;
       case "op.decided": case "op.ran": {
