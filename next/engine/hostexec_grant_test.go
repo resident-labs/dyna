@@ -69,6 +69,7 @@ func TestUpgradeRemovesLegacyGrantRequestFromList(t *testing.T) {
 	}
 	err = st.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('room','room',1,1,1);
+ ALTER TABLE pr_owners DROP COLUMN branch;
  ALTER TABLE hosts DROP COLUMN maintained_at;
  ALTER TABLE hosts DROP COLUMN engine_host;
  ALTER TABLE turns DROP COLUMN stop_requested_at;
