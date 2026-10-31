@@ -56,6 +56,7 @@ type Boxes struct {
 	Proc           string // Proc is the folder with stat and meminfo; empty means /proc.
 	mu             sync.Mutex
 	hosts          map[contract.HostName]*podman.Host
+	restored       map[contract.HostName]bool
 	loads          map[contract.HostName]hostLoad
 	cpuPrev        *cpuTimes // cpuPrev is the last /proc/stat sample of this machine, nil before the first.
 	binOnce        sync.Once
@@ -387,13 +388,13 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	return image, nil
 }
 
-// Restore reconnects live allocations without starting their containers.
+// Restore creates local sockets first and attempts each host independently.
 func (b *Boxes) Restore(ctx context.Context) error {
 	records, err := b.Store.Boxes(ctx)
 	if err != nil {
 		return err
 	}
-	installed := make(map[contract.HostName]bool)
+	hosts := make(map[contract.HostName]bool)
 	for _, record := range records {
 		if record.Host == "" || record.State == contract.BoxDeleted || record.State == contract.BoxFailed {
 			continue
@@ -405,28 +406,66 @@ func (b *Boxes) Restore(ctx context.Context) error {
 		if err := b.Sockets.AddBox(record.ID, record.Session, session.Room); err != nil {
 			return err
 		}
-		host, err := b.host(ctx, record.Host)
-		if err != nil {
-			return err
-		}
-		if !installed[record.Host] {
-			if err := b.installBinary(ctx, host); err != nil {
-				log.Printf("host %s: restore binary: %v", record.Host, err)
-				continue
+		hosts[record.Host] = true
+	}
+	var wg sync.WaitGroup
+	for name := range hosts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			hostCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+			if err := b.restoreHost(hostCtx, name); err != nil {
+				log.Printf("host %s: restore: %v", name, err)
 			}
-			installed[record.Host] = true
+		}()
+	}
+	wg.Wait()
+	return ctx.Err()
+}
+
+func (b *Boxes) restoreHost(ctx context.Context, name contract.HostName) error {
+	b.mu.Lock()
+	restored := b.restored[name]
+	b.mu.Unlock()
+	if restored {
+		return nil
+	}
+	host, err := b.host(ctx, name)
+	if err != nil {
+		return err
+	}
+	if err := b.installBinary(ctx, host); err != nil {
+		return err
+	}
+	records, err := b.Store.Boxes(ctx)
+	if err != nil {
+		return err
+	}
+	for _, record := range records {
+		if record.Host != name || record.State == contract.BoxDeleted || record.State == contract.BoxFailed {
+			continue
 		}
 		forward := box.Forward{Box: record.ID, HostPath: filepath.Join(b.HostData, "sock", string(record.ID), "engine.sock"), EnginePath: filepath.Join(b.Runtime, "boxes", string(record.ID)+".sock")}
 		if err := host.AddForward(ctx, forward); err != nil {
-			log.Printf("host %s: restore forward: %v", record.Host, err)
+			return err
 		}
 	}
+	b.mu.Lock()
+	if b.restored == nil {
+		b.restored = make(map[contract.HostName]bool)
+	}
+	b.restored[name] = true
+	b.mu.Unlock()
 	return nil
 }
 
 func (b *Boxes) containerHost(ctx context.Context, id contract.BoxID) (*podman.Host, error) {
 	record, err := b.Store.Box(ctx, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := b.restoreHost(ctx, record.Host); err != nil {
 		return nil, err
 	}
 	return b.host(ctx, record.Host)
@@ -437,22 +476,16 @@ func (b *Boxes) Inspect(ctx context.Context, id contract.BoxID) (box.ContainerSt
 	if err != nil {
 		return box.ContainerStatus{}, false, err
 	}
-	forward := box.Forward{Box: id, HostPath: filepath.Join(b.HostData, "sock", string(id), "engine.sock"), EnginePath: filepath.Join(b.Runtime, "boxes", string(id)+".sock")}
-	return inspectContainer(ctx, host, forward)
+	return inspectContainer(ctx, host, id)
 }
 
-func inspectContainer(ctx context.Context, host box.HostDriver, forward box.Forward) (box.ContainerStatus, bool, error) {
+func inspectContainer(ctx context.Context, host box.HostDriver, id contract.BoxID) (box.ContainerStatus, bool, error) {
 	statuses, err := host.ListContainers(ctx)
 	if err != nil {
 		return box.ContainerStatus{}, false, err
 	}
 	for _, status := range statuses {
-		if status.Box == forward.Box {
-			if status.Running {
-				if err := host.AddForward(ctx, forward); err != nil {
-					return box.ContainerStatus{}, false, err
-				}
-			}
+		if status.Box == id {
 			return status, true, nil
 		}
 	}
@@ -554,6 +587,9 @@ func (b *Boxes) StopHostexec(ctx context.Context, host contract.HostName, scope 
 
 // Recreate replaces a moved container without touching its volume.
 func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, oldSlice string) error {
+	if err := b.restoreHost(ctx, spec.Host); err != nil {
+		return err
+	}
 	h, err := b.host(ctx, spec.Host)
 	if err != nil {
 		return err
