@@ -28,9 +28,9 @@
   // Appearance is on every device; Devices only on one with admin.
   let panes: { id: string; label: string; icon: IconName }[] = $derived([{ id: "appearance", label: "Appearance", icon: "palette" },
     ...admin ? [{ id: "devices", label: "Devices", icon: "devices" }, { id: "accounts", label: "Accounts", icon: "plug" }] as const : []]);
-  let shown = $derived(panes.find(pane => path === `/settings/${pane.id}`) ?? (phone ? undefined : panes[0]));
+  let shown = $derived(panes.find(pane => path === `/settings/${pane.id}` || (pane.id === "accounts" && path.startsWith("/settings/accounts/"))) ?? (phone ? undefined : panes[0]));
   // /settings and its trailing slash open the first pane or the list; any other path has no page.
-  let lost = $derived(!/^\/settings\/?$/.test(path) && !panes.some(pane => path === `/settings/${pane.id}`));
+  let lost = $derived(!/^\/settings\/?$/.test(path) && !panes.some(pane => path === `/settings/${pane.id}` || (pane.id === "accounts" && /^\/settings\/accounts\/(?:add(?:\/[^/]+)?|account\/[^/]+)$/.test(path))));
 </script>
 
 {#snippet bar(title: string, count?: number, action?: Snippet)}
@@ -46,7 +46,7 @@
     {#if lost}<Blocked kind="no-page" back={{ href: "/settings", label: "Back to Settings" }} {navigate} />
     {:else if shown?.id === "appearance"}<AppearancePane {bar} />
     {:else if shown?.id === "devices"}<DevicesPane {devices} {failed} {reload} {signedout} {bar} />
-    {:else if shown?.id === "accounts"}<AccountsPane {bar} {phone} {signedout} />
+    {:else if shown?.id === "accounts"}<AccountsPane {bar} {phone} {signedout} {path} {navigate} />
     {:else}
       <header class="bar"><button type="button" class="round menu" bind:this={menu} aria-label="Rooms and pages" title="Rooms and pages" onclick={onmenu}><Icon name="menu" /></button><strong>Settings</strong></header>
       <nav class="list" aria-label="Settings panes">{#each panes as pane (pane.id)}
