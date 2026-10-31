@@ -28,7 +28,7 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 	}
 	return approve.Entry{
 		Class: func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassAuto },
-		Card: func(args contract.OpArgs, _ contract.Principal) contract.Card {
+		Card: func(_ context.Context, args contract.OpArgs, _ contract.Principal) contract.Card {
 			return contract.Card{Title: args.(contract.PrOpenArgs).Title}
 		},
 		Check: func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {

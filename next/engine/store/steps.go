@@ -26,13 +26,10 @@ var steps = map[int][]string{
 	},
 	11: {"ALTER TABLE turns ADD COLUMN shell_jobs INTEGER NOT NULL DEFAULT -1"},
 	12: {
-		`CREATE TABLE grants (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id), to_kind TEXT NOT NULL, to_id TEXT NOT NULL, mode TEXT NOT NULL, expires_at INTEGER, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at INTEGER NOT NULL, revoked_at INTEGER, expired_at INTEGER);`,
-		`CREATE TABLE grant_hosts (grant_id TEXT NOT NULL REFERENCES grants(id), host TEXT NOT NULL, PRIMARY KEY(grant_id, host));`,
-		`CREATE TABLE grant_commands (grant_id TEXT NOT NULL REFERENCES grants(id), idx INTEGER NOT NULL, program TEXT NOT NULL, prefix INTEGER NOT NULL, PRIMARY KEY(grant_id, idx));`,
-		`CREATE TABLE grant_command_args (grant_id TEXT NOT NULL, idx INTEGER NOT NULL, pos INTEGER NOT NULL, arg TEXT NOT NULL, PRIMARY KEY(grant_id, idx, pos), FOREIGN KEY(grant_id, idx) REFERENCES grant_commands(grant_id, idx));`,
-		`INSERT INTO grants(id,kind,room,to_kind,to_id,mode,by_kind,by_id,created_at) SELECT 'grant_'||id,'hostexec',room,'session',id,'preapproved','engine','',created_at FROM sessions WHERE parent IS NULL AND closed_at IS NULL;`,
-		`INSERT INTO grant_hosts(grant_id,host) SELECT 'grant_'||id,'*' FROM sessions WHERE parent IS NULL AND closed_at IS NULL;`,
-		`INSERT INTO grant_commands(grant_id,idx,program,prefix) SELECT 'grant_'||id,0,'*',1 FROM sessions WHERE parent IS NULL AND closed_at IS NULL;`,
+		`CREATE TABLE grants (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id), to_kind TEXT NOT NULL, to_id TEXT NOT NULL, mode TEXT NOT NULL, hosts BLOB NOT NULL, commands BLOB NOT NULL, expires_at INTEGER, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at INTEGER NOT NULL, revoked_at INTEGER, expired_at INTEGER);`,
+		`CREATE INDEX grants_expiry ON grants(expires_at) WHERE expired_at IS NULL AND revoked_at IS NULL;`,
+		`CREATE INDEX grants_room_principal ON grants(room, to_id);`,
+		`INSERT INTO grants(id,kind,room,to_kind,to_id,mode,hosts,commands,by_kind,by_id,created_at) SELECT 'grant_'||id,'hostexec',room,'session',id,'preapproved','["*"]','[{"program":"*","prefix":true}]','engine','',created_at FROM sessions WHERE parent IS NULL AND closed_at IS NULL;`,
 	},
 }
 
