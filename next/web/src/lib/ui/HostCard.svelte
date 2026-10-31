@@ -13,7 +13,7 @@
 
 <section class="card" aria-label={hostLabel(host.name)}>
   <h3>{hostLabel(host.name)}
-    <span class="aside state">{#if backup}<StatusPill tone={backup.tone} label={backup.label} />{/if}
+    <span class="aside state">{#if backup}<StatusPill tone={backup.tone} label={backup.label} title={backup.title} />{/if}
       {#if host.diskLow}<StatusPill tone="warning" label="Disk low" />{/if}
       {#if !host.reachable}<StatusPill tone="error" label="Unreachable" />
       {:else if host.name !== "control-plane"}{host.boxes} {host.boxes === 1 ? "workspace" : "workspaces"}{/if}</span></h3>
@@ -22,7 +22,7 @@
 </section>
 
 <style>
-  .state { display: flex; align-items: center; gap: 8px; }
+  .state { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 2px 8px; }
   .dimmed { opacity: 0.4; }
   .seen { margin: 10px 0 0; }
 </style>
