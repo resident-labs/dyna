@@ -24,7 +24,7 @@ func TestStreamCancellationAndTypedErrors(t *testing.T) {
 		close(started)
 		<-ctx.Done()
 		return nil, &contract.Error{Code: contract.ErrConflict, Message: "retry with clientId"}
-	}, nil)
+	}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestOperationActionForwardsReplayKey(t *testing.T) {
 			t.Fatalf("%+v", req)
 		}
 		return []byte(`{"ok":true}`), nil
-	}, nil)
+	}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestActionDecodeIsStrict(t *testing.T) {
 	server, err := New(func(context.Context, contract.Method, []byte) ([]byte, *contract.Error) {
 		t.Fatal("forwarded invalid action")
 		return nil, nil
-	}, nil)
+	}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,5 +92,32 @@ func TestActionDecodeIsStrict(t *testing.T) {
 	res = server.call(context.Background(), callParams{Name: "session", Arguments: args})
 	if !res.IsError || !strings.Contains(string(res.StructuredContent), "unknown_action") || !strings.Contains(string(res.StructuredContent), "start") {
 		t.Fatalf("%+v", res)
+	}
+}
+
+func TestPostPreparesLocalAttachments(t *testing.T) {
+	var sent contract.PostRequest
+	server, err := New(func(_ context.Context, method contract.Method, body []byte) ([]byte, *contract.Error) {
+		if method != contract.MethodPost {
+			t.Fatalf("method %s", method)
+		}
+		if err := json.Unmarshal(body, &sent); err != nil {
+			t.Fatal(err)
+		}
+		return []byte(`{"event":"e"}`), nil
+	}, nil, func(_ context.Context, path string) (contract.Attachment, error) {
+		if path != "report.txt" {
+			t.Fatalf("path %q", path)
+		}
+		return contract.Attachment{Name: "report.txt", SHA256: "hash"}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var args map[string]json.RawMessage
+	_ = json.Unmarshal([]byte(`{"action":"send","text":"hello","paths":["report.txt"],"clientId":"retry"}`), &args)
+	res := server.call(context.Background(), callParams{Name: "post", Arguments: args})
+	if res.IsError || sent.ClientID != "retry" || len(sent.Attachments) != 1 || sent.Attachments[0].SHA256 != "hash" {
+		t.Fatalf("result %+v post %+v", res, sent)
 	}
 }
