@@ -116,7 +116,7 @@ test("puts one New row before the first later post by someone else, and none wit
 });
 
 test("a request is its own row where it happened, and its decision updates that row instead of folding into work", () => {
-  const card = { title: "Grant host access", target: { kind: "room" as const, name: "r" } };
+  const card = { title: "asks for host access", target: { kind: "room" as const, name: "r" } };
   const decision = { by: { kind: "owner" as const }, approved: true, at: "" };
   const rows = feedRows([
     event(1, { type: "turn.started", body: { session: "l", turn: "t1", inputs: [] } }),
