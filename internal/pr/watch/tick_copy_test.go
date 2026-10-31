@@ -19,7 +19,15 @@ func TestTickCopiesOnlyChangedRowsAcrossPhasesAndTicks(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.tick()
-	e.tick() // Include the previous tick's delivered notice in the retained view.
+	// The safety poll runs on a 9-minute clock slot. An idle tick that lands on the
+	// slot writes FullChecked, which copies one row. Move the next safety poll past this window.
+	if err := e.s.Store.update(func(st *State) error {
+		st.Records[r.Key].Polling.FullChecked = e.clock.Add(time.Hour)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.tick() // Include the previous tick's delivered notice and the poll-time write in the retained view.
 	whole, rows := 0, 0
 	read, copyRow := readStore, copyTickRecord
 	readStore = func(root string) (State, error) { whole++; return read(root) }
