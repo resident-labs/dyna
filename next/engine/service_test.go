@@ -1190,6 +1190,11 @@ func TestRoomAndSessionNamesAreMentionSafe(t *testing.T) {
 			}
 		})
 	}
+	for _, name := range []string{"root", "parent", "children", "siblings"} {
+		if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: name, Profile: "test"}); e == nil || e.Code != contract.ErrInvalid {
+			t.Fatalf("role name %s: %v", name, e)
+		}
+	}
 }
 
 func TestSessionListTurnState(t *testing.T) {
