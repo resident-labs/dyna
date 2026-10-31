@@ -296,7 +296,7 @@
       rect = first.rect;
       if (!dockChosen && !phone.current) {
         docked = !first.clear;
-        if (docked && !panelShown) void showPanel(true);
+        if (docked && !panelShown) void showPanel(true).then(() => computer?.focus());
       }
     }
     opener = from;

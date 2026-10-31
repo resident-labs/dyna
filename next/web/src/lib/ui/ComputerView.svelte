@@ -9,6 +9,7 @@
   import Icon from "./Icon.svelte";
   import Avatar from "./Avatar.svelte";
   import FloatWindow from "./FloatWindow.svelte";
+  import { shortPaths } from "../feed.ts";
   import type { Rect } from "../float.ts";
   import { LiveStream, type Phase } from "../live.ts";
   // Floating, the view is a window over the app; docked, it sits above the session list in the sessions panel. The
@@ -66,7 +67,7 @@
   <!-- The current step, one muted line under the screen: "qa-runner · reading the review state". Floating, the line
        stays between steps, so the screen keeps the shape the window was fitted to. -->
   {#if activity || (!docked && !full)}<p class="activity">{activity ? `${name} · ${activity}` : name}</p>{/if}
-  {#if earlier.length}<ol class="earlier" aria-label="Earlier steps">{#each earlier as step, i (i)}<li>{step}</li>{/each}</ol>{/if}
+  {#if earlier.length}<ol class="earlier" aria-label="Earlier steps">{#each earlier as step, i (i)}<li>{shortPaths(step)}</li>{/each}</ol>{/if}
 </FloatWindow>
 
 <style>
