@@ -68,7 +68,7 @@ func (s *Store) EventsPage(ctx context.Context, room contract.RoomID, afterSeq, 
 
 // OwnerEvents pages the cross-room attention events.
 func (s *Store) OwnerEvents(ctx context.Context, afterSeq int64, limit int) ([]contract.Event, error) {
-	return s.eventsPage(ctx, "", afterSeq, 0, limit, []contract.EventType{"op.requested", "op.decided", "op.ran", "turn.started", "turn.ended", "session.closed"}, "", true)
+	return s.eventsPage(ctx, "", afterSeq, 0, limit, []contract.EventType{"op.requested", "op.decided", "op.ran", "turn.started", "turn.ended", "session.started", "session.closed"}, "", true)
 }
 
 func (s *Store) eventsPage(ctx context.Context, room contract.RoomID, afterSeq, beforeSeq int64, limit int, types []contract.EventType, dm contract.SessionID, allRooms bool) ([]contract.Event, error) {

@@ -42,5 +42,15 @@ test("room.list seeds each room's waiting requests and working sessions, and the
     attention.apply(event(10, "a", { type: "session.closed", body: { session: "s1" } }));
     assert.equal(attention.working.get("a")!.size, 0);
     assert.deepEqual([...attention.activity.keys()], ["s2"]);
+    // A room's session.list seeds its sessions. Events that arrive before the answer wait, and those after its seq
+    // apply on top; later ones apply at once.
+    globalThis.fetch = async () => new Response(JSON.stringify({ seq: 11, sessions: [{ id: "s2" }, { id: "s4" }] }));
+    const listed = attention.listSessions("b");
+    const started = (seq: number, session: string) => event(seq, "b", { type: "session.started", body: { session, name: "n", profile: "p" } });
+    attention.apply(started(11, "s4"));
+    attention.apply(started(12, "s5"));
+    await listed;
+    attention.apply(event(13, "b", { type: "session.closed", body: { session: "s4" } }));
+    assert.deepEqual([...attention.sessions.get("b")!], ["s2", "s5"]);
   } finally { globalThis.fetch = original; }
 });
