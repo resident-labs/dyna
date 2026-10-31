@@ -1,6 +1,10 @@
 import type { VisualCard, VisualCheck, VisualCheckName } from "./contract.gen.ts";
 import type { PostEvent } from "./window.svelte.ts";
 
+export function visualReplyFailure(_error: unknown): { kind: "failed" } | { kind: "superseded"; visual: import("./contract.gen.ts").VisualSuperseded } {
+  return { kind: "failed" };
+}
+
 export type VisualVersion = { event: PostEvent; visual: VisualCard };
 
 // The iframe is untrusted. Parse its message once before it reaches the viewer.
