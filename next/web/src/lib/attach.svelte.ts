@@ -4,7 +4,6 @@ import type { Attachment } from "./contract.gen.ts";
 // The engine's limits: a post carries at most 16 files of at most 25 MiB each.
 export const maxFiles = 16;
 export const maxBytes = 25 << 20;
-export const limits = "A post can carry 16 files of up to 25 MB each.";
 
 // A file in the composer: it uploads at once, and the post carries its Attachment.
 // An image has a local preview URL, since the engine serves a file only once a post refers to it.
@@ -19,14 +18,18 @@ export class FileDraft {
   // Send waits while a file saves or has failed.
   get busy(): boolean { return this.items.some(item => item.state !== "ready"); }
 
-  // Adds the files that fit the limits; it returns the limits line when any did not fit.
+  // Adds the files that fit the limits; it returns one line that names what was left out and why, or "".
   add(files: Iterable<File>): string {
-    const all = [...files], fit = all.filter(file => file.size <= maxBytes).slice(0, Math.max(0, maxFiles - this.items.length));
+    const all = [...files], big = all.filter(file => file.size > maxBytes), small = all.filter(file => file.size <= maxBytes);
+    const fit = small.slice(0, Math.max(0, maxFiles - this.items.length)), over = small.length - fit.length;
     for (const file of fit) {
       this.items.push({ id: this.next++, file, state: "saving", preview: /^image\/(png|jpeg|gif|webp)$/.test(file.type) ? URL.createObjectURL(file) : undefined });
       this.save(this.next - 1);
     }
-    return fit.length < all.length ? limits : "";
+    return [
+      big.length === 1 ? `${big[0].name} is over 25 MB and was not added.` : big.length ? `${big.length} files are over 25 MB and were not added.` : "",
+      over ? `A post can carry ${maxFiles} files; ${over} ${over === 1 ? "was" : "were"} not added.` : "",
+    ].filter(Boolean).join(" ");
   }
   remove(id: number): void { this.release(this.items.filter(item => item.id === id)); this.items = this.items.filter(item => item.id !== id); }
   // The ready files leave the draft with the post.
