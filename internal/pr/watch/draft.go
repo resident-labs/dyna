@@ -70,6 +70,9 @@ func (s *Service) SetDraft(ctx context.Context, key string, draft bool, reason s
 		return err
 	}
 	if draft {
+		if r.PublishedHead != "" && r.PublishedHead == r.Head {
+			return fmt.Errorf("PR already landed by direct publication")
+		}
 		st, err := s.Store.Read()
 		if err != nil {
 			return err

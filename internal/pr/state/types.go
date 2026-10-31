@@ -199,6 +199,9 @@ const (
 )
 
 type Record struct {
+	// PublishedHead records a direct landing before GitHub reports the PR closed.
+	PublishedHead string `json:"publishedHead,omitempty"`
+
 	PendingVerdict *PendingVerdict `json:"pendingVerdict,omitempty"`
 	// ReleaseReviewersAfterReplay holds closed reviewers until their saved verdicts replay.
 	ReleaseReviewersAfterReplay []string           `json:"releaseReviewersAfterReplay,omitempty"`
