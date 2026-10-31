@@ -340,6 +340,26 @@ func TestRuleEditKeepsTheNumberAndWakesNoOne(t *testing.T) {
 	}
 }
 
+func TestSessionListShowsBoxReason(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE boxes SET state='pending',reason='room-host' WHERE session=?", worker)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	list, problem := s.SessionList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionListRequest{Room: room})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	for _, session := range list.Sessions {
+		if session.ID == worker && session.BoxReason == "room-host" {
+			return
+		}
+	}
+	t.Fatalf("room-host reason missing: %+v", list.Sessions)
+}
+
 func TestRoomListCountsFailedSessionsAndSessionListShowsTimes(t *testing.T) {
 	s, room, worker, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
