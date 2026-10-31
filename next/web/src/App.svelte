@@ -98,13 +98,14 @@
     if (was === "rules") (phone.current ? menuButton ?? toggle : roomMenu)?.focus({ focusVisible: !tapped });
     else (phone.current && !store?.waiting ? menuButton ?? toggle : requestsButton)?.focus({ focusVisible: !tapped });
   }
-  const segment = (pattern: RegExp) => { const match = pattern.exec(behind)?.[1]; return match && decodeURIComponent(match); };
   // A link to a room the engine does not list, or to a path the app has no page for, shows a load error in Home's
   // place. Until the room list loads, a room link is trusted, so a known room opens without a flash.
-  const asked = $derived(segment(/^\/r\/([^/]+)/));
+  // Only /r/<room> and /r/<room>/s/<session> are routes; any other path, a typo after a room included, is no page.
+  const route = $derived(/^\/r\/([^/]+)(?:\/s\/([^/]+))?\/?$/.exec(behind));
+  const asked = $derived(route?.[1] && decodeURIComponent(route[1]));
   let room = $derived(asked && (!roomsLoaded || attention.rooms.has(asked)) ? asked : undefined);
   let lost: "room" | "page" | undefined = $derived(room || behind === "/" ? undefined : asked ? "room" : "page");
-  let session = $derived(room ? segment(/^\/r\/[^/]+\/s\/([^/]+)/) : undefined);
+  let session = $derived(room && route?.[2] ? decodeURIComponent(route[2]) : undefined);
   // Derived, not set in the effect below: the room's views render with the store of the room they show.
   let store = $derived(room ? new RoomStore(room) : undefined);
   // The same rule per room for its open sessions.
