@@ -533,6 +533,9 @@ func CompleteOAuthSessionWithAuth(state, authID string) {
 
 func CompleteOAuthSessionWithOutcome(state, authID, savedGrantHash string, saved, adopted, baselineExisted bool, baselineVersion, baselineEpoch, adoptedVersion, adoptedEpoch uint64, adoptErr, verifyErr string) {
 	oauthSessions.CompleteWithOutcome(state, authID, savedGrantHash, saved, adopted, baselineExisted, baselineVersion, baselineEpoch, adoptedVersion, adoptedEpoch, adoptErr, verifyErr)
+	if DynaMemoryOAuthCallbacks && saved && DynaOAuthCompletionHook != nil {
+		DynaOAuthCompletionHook(state, authID)
+	}
 }
 
 func SetOAuthSessionTarget(state string, target oauthRecoveryTarget) {
