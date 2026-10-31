@@ -35,6 +35,7 @@ type Repositories interface {
 
 type Service struct {
 	store              *store.Store
+	dispatch           func(context.Context, contract.SessionID, contract.TurnID, contract.Event, bool) (contract.TurnID, []store.FeedInput, error)
 	boxes              BoxAdapter
 	profiles           Profiles
 	repos              Repositories
@@ -43,6 +44,9 @@ type Service struct {
 	hostexecTimeout    func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 	now                func() time.Time
 	mu                 sync.Mutex
+	wakeMu             sync.Mutex
+	wakePending        map[contract.SessionID]bool
+	wakeSignal         chan struct{}
 	sessions           map[contract.SessionID]*sessionState
 	live               map[chan contract.Event]contract.RoomID
 	computerGeneration uint64
@@ -85,7 +89,13 @@ func (s *Service) sessionLocked(id contract.SessionID) *sessionState {
 }
 
 func New(st *store.Store, boxes BoxAdapter, profiles Profiles, now func() time.Time) *Service {
-	return &Service{sessions: make(map[contract.SessionID]*sessionState), live: make(map[chan contract.Event]contract.RoomID), hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now, dormancy: dormancy{unconfirmed: make(map[contract.BoxID]bool), failedStarts: make(map[contract.BoxID]bool)}}
+	s := &Service{sessions: make(map[contract.SessionID]*sessionState), live: make(map[chan contract.Event]contract.RoomID), hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now, dormancy: dormancy{unconfirmed: make(map[contract.BoxID]bool), failedStarts: make(map[contract.BoxID]bool)}}
+	s.wakePending = make(map[contract.SessionID]bool)
+	s.wakeSignal = make(chan struct{}, 1)
+	s.dispatch = st.Dispatch
+	st.SetWake(s.queueWakes)
+	go s.wakeSessions(st.Done())
+	return s
 }
 
 // SetRepositories configures repository lookup before the service starts.

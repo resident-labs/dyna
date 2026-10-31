@@ -103,7 +103,7 @@ func (s *Store) operationEvent(tx *sql.Tx, event contract.Event, deliveries []co
 		}
 	}
 	for _, delivery := range deliveries {
-		if err := insertDelivery(context.Background(), tx, seq, delivery); err != nil {
+		if err := s.insertDelivery(context.Background(), tx, seq, delivery); err != nil {
 			return err
 		}
 	}
