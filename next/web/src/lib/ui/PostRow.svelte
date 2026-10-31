@@ -148,7 +148,7 @@
 
 <!-- A long press opens the action sheet; a right swipe forwards on release. -->
 <div class="swipe" use:swipe>
-  {#if dragging && !row.pending}<div class="cue" class:ready aria-hidden="true"><Icon name="forward" /></div>{/if}
+  {#if dragging && !row.pending}<div class="cue" class:ready class:first={row.first} aria-hidden="true"><Icon name="forward" /></div>{/if}
 <article style:transform="translateX({distance}px)" class:dragging class="post" class:first={row.first} class:pending={row.pending} aria-busy={row.pending && !row.pending.failed} tabindex="-1"
   style:--lift="{lift}px" onpointerenter={event => raise(event, event.currentTarget)} onpointerdown={press} onpointermove={drift} onpointerup={release} onpointercancel={release}
   oncontextmenu={event => { if (sheet) event.preventDefault(); }}>
@@ -186,6 +186,7 @@
   .swipe { position: relative; }
   @media (pointer: coarse) { .swipe { overflow: hidden; } }
   .cue { position: absolute; left: 12px; top: 20px; z-index: 1; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--selected); color: var(--muted); opacity: .4; transform: scale(.8); }
+  .cue:not(.first) { top: 6px; }
   .cue.ready { background: var(--focus); color: var(--bg); opacity: 1; transform: scale(1.15); }
   .post { transition: transform 150ms ease; }
   .post.dragging { transition: none; }
