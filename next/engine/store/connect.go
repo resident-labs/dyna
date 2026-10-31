@@ -34,6 +34,15 @@ func (s *Store) SetConnectConnector(ctx context.Context, missing bool, at time.T
 	})
 }
 
+func (s *Store) ConnectConnectorMissing(ctx context.Context) (bool, error) {
+	var missing bool
+	err := s.read.QueryRowContext(ctx, "SELECT missing FROM connect_connector WHERE id=1").Scan(&missing)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return missing, err
+}
+
 // ConnectAttempt reads the public status, never the approval material.
 func (s *Store) ConnectAttempt(ctx context.Context) (contract.ConnectAttempt, error) {
 	var a contract.ConnectAttempt
