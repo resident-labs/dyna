@@ -74,7 +74,7 @@
 
 {#snippet row(session: JobSession, job: ShellJob)}
   <button type="button" class="job" onclick={() => pick(session, job)}>
-    <span class="dot">{#if job.running}<StatusPill tone="working" dot label="Running" />{:else if failed(job)}<StatusPill tone="failed" dot label="Failed" />{:else}<i></i>{/if}</span>
+    <span class="dot">{#if job.running}<StatusPill tone="working" dot label="Running" />{:else if failed(job)}<StatusPill tone="failed" dot label="Failed" />{/if}</span>
     <span class="lines"><span class="title">{jobTitle(job)}</span><code>{job.command}</code></span>
     <span class="state" class:bad={failed(job)}>{state(job, session)}</span>
   </button>
@@ -161,7 +161,6 @@
     color: var(--muted); cursor: pointer; }
   .job:hover, .job:focus-visible { background: var(--selected); outline: none; }
   .dot { flex: none; display: grid; place-items: center; width: 14px; }
-  .dot > i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); opacity: 0.55; }
   .lines { flex: 1; min-width: 0; display: grid; line-height: 1.3; }
   .title { overflow: hidden; color: var(--text); font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
   code { overflow: hidden; color: var(--muted); font: 12px/1.35 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
