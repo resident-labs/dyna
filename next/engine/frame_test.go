@@ -44,7 +44,7 @@ func TestInputFrameRejectsForgedSender(t *testing.T) {
 type frameProfiles struct{ fakeProfiles }
 
 func (frameProfiles) List() []contract.ProfileSummary {
-	return []contract.ProfileSummary{{Name: "zeta"}, {Name: "alpha"}}
+	return []contract.ProfileSummary{{Name: "zeta"}, {Name: "alpha", Description: "Careful reviewer", Taste: 9, Diagnostics: 10, Intelligence: 8, Cost: 7}}
 }
 
 func TestHelloInstructionsForWorkerAndRoot(t *testing.T) {
@@ -58,7 +58,7 @@ func TestHelloInstructionsForWorkerAndRoot(t *testing.T) {
 		id    contract.SessionID
 		parts []string
 	}{
-		{worker, []string{"worker", string(worker), "room", string(room) + " as ROOM", "parent is root", "Each input has one line that starts with [Dyna]", "Profiles: alpha, zeta", "dyna post"}},
+		{worker, []string{"worker", string(worker), "room", string(room) + " as ROOM", "parent is root", "Each input has one line that starts with [Dyna]", "Profiles: alpha, zeta", "alpha: taste 9, diagnostics 10, intelligence 8, cost 7", "Careful reviewer", "dyna post"}},
 		{root, []string{"root of room room", string(room) + " as ROOM", "owner talks to you", "hold no goals", "--size agent, small, medium or large", "Each input has one line that starts with [Dyna]", "dyna session start"}},
 	} {
 		hello, problem := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: tt.id}, contract.BoxHelloRequest{})
