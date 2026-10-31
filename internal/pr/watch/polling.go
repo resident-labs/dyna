@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"dyna-agent/internal/ghquota"
 	"dyna-agent/internal/pr/state"
 )
 
@@ -128,6 +129,7 @@ func (g GitHub) pollSnapshot(ctx context.Context, r Record, policy ChangePolicy)
 }
 
 func (g GitHub) pollSnapshotFromPull(ctx context.Context, r Record, policy ChangePolicy, pull Pull, ciProbe string) (Snapshot, bool, error) {
+	g.runPhase = ghquota.RunWatchSnapshot
 	ref := refRecord(r)
 	now := time.Now()
 	if g.requests != nil {
