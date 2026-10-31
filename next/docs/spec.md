@@ -104,7 +104,9 @@ The old module (`dyna-agent`) adds only `cmd/dyna-export`. It imports `next/cont
 
 **Dependency direction.** `contract` imports nothing from the module. `room` imports only `contract`, and it does no I/O: it decides, and the engine acts. `harness` imports only `contract`. `box` imports `contract` and `harness`, because the box agent runs the adapters. `engine` imports `room`, `box`, `harness` and `contract`. `cmd/dyna` wires them. `migrate` imports `contract` and `engine/store`. A unit test enforces this with `go list -deps`.
 
-Sub-packages are the area lead's choice. The expected ones are `engine/store`, `engine/api`, `engine/approve`, `engine/model`, `engine/git`, `engine/sched`, `box/podman`, `box/fakehost`, `harness/pi` and `harness/fakeharness`.
+Sub-packages are the area lead's choice. The expected ones are `engine/store`, `engine/api`, `engine/approve`, `engine/model`, `engine/git`, `engine/sched`, `engine/lifecycle`, `box/podman`, `box/fakehost`, `harness/pi` and `harness/fakeharness`.
+
+`engine/lifecycle` is the box reconciler (5.3). It holds the reconcile loop, box admission (5.5) and the box steps. It imports `engine/store`, `box` and `contract`. It reads the engine only through a small interface: `OpenTerminal(session)` and `Connected(session)`. `engine` imports `engine/lifecycle`, never the reverse. API methods in `engine` write box rows and call `Kick()`; they do no host work.
 
 Third-party Go dependencies are allowed only with a reason in the PR. Expected: `modernc.org/sqlite` (pure Go, as in v1), `github.com/spf13/cobra` for the CLI, and the vendored CLIProxyAPI with the modules it needs (5.7). The web app keeps Svelte 5, Vite and strict TypeScript (r7).
 
@@ -278,7 +280,7 @@ type BoxChanged struct {
 }
 ```
 
-A failed box, a failed operation and a failed turn carry a typed `FailureCause`, such as `create_failed`, `no_hello`, `host_lost`, `github_failed`, `stale` or `interrupted`. A failed turn uses `setup_failed`, `model_failed`, `output_limit` or `harness_failed`. The `Reason` or `Error` text beside it is detail for agents and the log. Owner views show only the cause, in owner words (r8).
+A failed box, a failed operation and a failed turn carry a typed `FailureCause`, such as `create_failed`, `start_failed`, `no_hello`, `host_lost`, `github_failed`, `stale` or `interrupted`. A failed turn uses `setup_failed`, `model_failed`, `output_limit` or `harness_failed`. The `Reason` or `Error` text beside it is detail for agents and the log. Owner views show only the cause, in owner words (r8).
 
 ### 3.4 Delivery and reply channels
 
@@ -539,7 +541,7 @@ Column types follow SQLite. Times are INTEGER Unix milliseconds (`_at`). IDs are
 | M1 | `deliveries` | (`to_kind`, `to_id`, `seq`) PK, `surface`, `reply_kind`, `reply_target_kind`, `reply_target_id`, `reply_home`, `reply_to`, `wake`, `state` (pending, taken, read), `turn`, `queue` (NULL for turn start, otherwise steer or follow_up) |
 | M1 | `turns` | `id` PK, `session`, `started_at`, `ended_at`, `outcome`, `model`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens` |
 | M1 | `hosts`, `host_labels` | section 5.1 |
-| M1 | `boxes` | section 5.3 |
+| M1 | `boxes` | section 5.3; schema step 19 adds `want` (`run`, `stop`, `close`, `discard`; default `run`) and `due_at` (Unix ms, 0 for none) |
 | M2 | `transcripts` | (`session`, `path`) PK, `acked_offset`, `file` |
 | M2 | `images` | section 5.2 |
 | M2 | `operations` | `id` PK, `kind`, `room`, `by_kind`, `by_id`, `class`, `state`, `card` BLOB, `args` BLOB, `args_sha256`, `created_at`, `expires_at`, `decided_by_kind`, `decided_by_id`, `decided_at`, `reason`, `exit_code`, `output_file` |
@@ -619,6 +621,8 @@ const (
 	BoxLost     BoxState = "lost"     // host unreachable; may return to ready
 )
 
+type BoxWant string // run, stop, close or discard (below)
+
 type BoxSize struct {
 	Name     string // "agent" | "small" | "medium" | "large"
 	CPUs     int    // cpu.max in whole CPUs
@@ -634,14 +638,43 @@ type Box struct {
 	Image        string // dyna-img-<name>:<hash>
 	Size         BoxSize
 	State        BoxState
-	Reason       string // pending, failed and lost only
-	Slice        string // the systemd slice of this box's budget
+	Want         BoxWant // desired state; the reconciler acts on it (below)
+	DueAt        int64   // Unix ms; the hello deadline, next retry or archive start; 0 for none
+	Reason       string  // pending, failed and lost only
+	Slice        string  // the systemd slice of this box's budget
 	Updated      time.Time
 }
 ```
 
+`State` is the observed lifecycle state. `Want` is what the engine wants the box to become. Only the reconciler moves `State` with a step. A step commits its result with a compare-and-set on `State`. `Want` only chooses the next step. So a step that loses a race still leaves a true record, and the next pass converges.
+
+| Want | Meaning |
+|---|---|
+| `run` | the box should be running, so admission and the start steps apply. The default. |
+| `stop` | the box should stop (its session went quiet or moved). |
+| `close`, `discard` | the box should close. Close steps arrive with the close change (5.9). |
+
+Writers of `Want`: `session.start` inserts a `pending` box with `run` and does no admission or host work. The quiet policy sets `stop` on a `ready` box with no running turn, shell job or wake. A delivery with `wake=1` sets `run` on a target with `stop`, and on its budget ancestors, in the same transaction. `session.move` sets `stop` on members with a `ready` box, in the move transaction. `CanDispatch` becomes `want='run' AND state='ready'`.
+
+The reconciler runs one pass when a store commit changes a box, a session or a turn, and on a 10 s ticker. A pass only reads and writes the store. It never runs SSH. A pass error is logged, and the next tick tries again. In each pass:
+
+1. **Admission** for each `pending` or `stopped` box with `want=run`, in `created_at` order (5.5). A box with no container goes to `creating`. A box with a container goes to `starting` with `due_at=0`.
+2. **Steps.** For each box with no step in flight and `due_at <= now`, the reconciler starts the step below in a goroutine. It runs at most one step per box and at most 4 per host. Each step commits its result and wakes the reconciler again.
+
+| Want | State | Step | Commit |
+|---|---|---|---|
+| run | creating | `repos.Get` and `Create`. After a restart, `Remove` the partial parts first. | `starting`, `due_at=now+60 s`. On error: `failed` (cause `create_failed`). |
+| run | starting, `due_at=0` | `Start`, or `Recreate` if the slice changed | `due_at=now+60 s`. On error: `stopped`, `due_at=now+30 s`. |
+| run | starting, past `due_at` | A box with no turns: `Remove`. A box with turns: `Stop`. | No turns: `failed` (cause `no_hello`). With turns: `stopped`, reason `no hello`, `due_at=now+30 s`. The volume stays. |
+| stop | ready | `Stop` | `stopped`. On error: `due_at=now+30 s`. |
+
+`box.hello` commits only `starting` or `lost` to `ready`, and clears `due_at`. A restart resumes all work, because the in-flight set lives in memory only. An interrupted create is redone, and a `starting` box with `due_at=0` is started.
+
+The table below lists the transitions. Each row is one observed change, and it emits one `box.changed` event.
+
 | From | To | Cause |
 |---|---|---|
+| pending | pending | admission still does not fit; the reason changed, and the new reason is recorded |
 | pending | creating | admission placed it |
 | creating | starting | volume, repository copy and slice are ready, and `podman run` succeeded |
 | starting | ready | the box agent sent `hello` on the box socket within 60 s |
@@ -665,7 +698,7 @@ The owner can close a session in any box state. A close cancels a step in progre
 
 The engine refuses every other transition. Each transition emits one `box.changed` event. A failed box keeps its session open until its parent or the owner closes it, and a new session takes over the work.
 
-Table: `boxes` (`id` PK, `session` UNIQUE, `parent`, `host`, `image`, `size`, `state`, `reason`, `slice`, `created_at`, `updated_at`; index (`host`, `state`)).
+Table: `boxes` (`id` PK, `session` UNIQUE, `parent`, `host`, `image`, `size`, `state`, `want`, `due_at`, `reason`, `slice`, `created_at`, `updated_at`; index (`host`, `state`)).
 
 ### 5.4 Sizes and pressure
 
@@ -694,6 +727,7 @@ A cgroup nests only inside one kernel, so a child runs on its parent's host. The
 - **Root's box** is agent and runs on any host.
 - **Each lead** (a direct child of root) is a placement root. It gets a top-level slice on the host with the most free memory. Room limits (`rooms.cpus`, `rooms.mem_bytes`) are not built yet. When built, the engine will count root and lead requests against the room limit; cgroups enforce each lead budget below it.
 - **A lead's subtree never splits across hosts.** A child waits in `pending` if its parent host is unavailable or lacks disk.
+- **Admission retries every reason.** The reconciler (5.3) runs admission on each pass for every `pending` or `stopped` box with `want=run`. It does this for every reason a box waits on: `cpu`, `memory`, `disk` or `parent-host`. A box that waits on `cpu`, `memory` or `disk` therefore starts once that resource frees, and no box waits forever. A `pending` box whose reason changes records a `pending → pending` transition, so the owner sees the new reason.
 - **M1** uses one host, hermeslab.
 
 ### 5.6 Repository copy and shared caches (M2)

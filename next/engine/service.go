@@ -19,6 +19,7 @@ import (
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
+	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/room"
 )
@@ -35,7 +36,9 @@ type Repositories interface {
 
 type Service struct {
 	store              *store.Store
-	boxes              BoxAdapter
+	dispatch           func(context.Context, contract.SessionID, contract.TurnID, contract.Event, bool) (contract.TurnID, []store.FeedInput, error)
+	boxes              lifecycle.BoxAdapter
+	reconciler         *lifecycle.Reconciler
 	profiles           Profiles
 	repos              Repositories
 	approvals          *approve.Service
@@ -51,20 +54,11 @@ type Service struct {
 	computerGeneration uint64
 	activityCount      uint64
 	shellGeneration    uint64
-	admit              sync.Mutex
-	moveMu             sync.Mutex
 	readMu             sync.Mutex // preserves commit and live broadcast order
-	moveStops          []contract.BoxID
-	dormancy           dormancy
 	// transcriptMu serializes appends, so each offset check and write runs alone.
 	transcriptMu  sync.Mutex
 	transcriptDir string
 	filesDir      string
-}
-
-type boxRun struct {
-	cancel  context.CancelFunc
-	closing bool
 }
 
 // sessionState is the engine's in-memory state for one session. s.mu guards every field except
@@ -76,7 +70,6 @@ type sessionState struct {
 	computer  *computerState
 	terminals int
 	watch     *shellWatch
-	run       *boxRun
 	// activityOrder is the s.activityCount value when activity was set, so a room's newest label wins.
 	activityOrder uint64
 }
@@ -91,8 +84,9 @@ func (s *Service) sessionLocked(id contract.SessionID) *sessionState {
 	return state
 }
 
-func New(st *store.Store, boxes BoxAdapter, profiles Profiles, now func() time.Time) *Service {
-	s := &Service{sessions: make(map[contract.SessionID]*sessionState), live: make(map[chan contract.Event]contract.RoomID), hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now, dormancy: dormancy{unconfirmed: make(map[contract.BoxID]bool), failedStarts: make(map[contract.BoxID]bool)}}
+func New(st *store.Store, boxes lifecycle.BoxAdapter, profiles Profiles, now func() time.Time) *Service {
+	s := &Service{sessions: make(map[contract.SessionID]*sessionState), live: make(map[chan contract.Event]contract.RoomID), hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now}
+	s.reconciler = lifecycle.New(st, boxes, s, nil, s.event, now)
 	s.wakePending = make(map[contract.SessionID]bool)
 	s.wakeSignal = make(chan struct{}, 1)
 	st.SetWake(s.queueWakes)
@@ -101,7 +95,18 @@ func New(st *store.Store, boxes BoxAdapter, profiles Profiles, now func() time.T
 }
 
 // SetRepositories configures repository lookup before the service starts.
-func (s *Service) SetRepositories(repos Repositories) { s.repos = repos }
+func (s *Service) SetRepositories(repos Repositories) {
+	s.repos = repos
+	s.reconciler.SetRepositories(repos)
+}
+
+func (s *Service) Reconciler() *lifecycle.Reconciler { return s.reconciler }
+
+func (s *Service) OpenTerminal(id contract.SessionID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessions[id] != nil && s.sessions[id].terminals > 0
+}
 
 // SetTranscriptDir sets where transcript copies are kept, one folder per session.
 func (s *Service) SetTranscriptDir(dir string) { s.transcriptDir = dir }
@@ -314,216 +319,34 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	unlock := s.lockBox(session.ID)
-	defer unlock()
-	createCtx, cancel := context.WithCancel(ctx)
-	run := &boxRun{cancel: cancel}
-	s.mu.Lock()
-	s.sessionLocked(session.ID).run = run
-	s.mu.Unlock()
-	defer func() {
-		cancel()
-		s.mu.Lock()
-		s.sessionLocked(session.ID).run = nil
-		s.mu.Unlock()
-	}()
-	response := contract.SessionStartResponse{Session: session.ID, Box: session.Box}
-	s.admit.Lock()
-	boxes, err := s.store.Boxes(ctx)
-	if err != nil {
-		s.admit.Unlock()
-		return contract.SessionStartResponse{}, failure(err)
-	}
 	sizeName := contract.BoxSizeAgent
+	var budgetParent contract.BoxID
 	if parent != "" {
 		sizeName = contract.BoxSizeMedium
 	}
-	size, _ := box.Size(sizeName)
-	current := box.Box{ID: session.Box, Session: session.ID, Size: size, State: contract.BoxPending, PlacedAt: event.Time}
-	var ancestry []contract.BoxID
 	if parent != "" && parent != tree.Root() {
 		p, err := s.store.Session(ctx, parent)
 		if err != nil {
-			s.admit.Unlock()
 			return contract.SessionStartResponse{}, failure(err)
 		}
-		current.BudgetParent = p.Box
-		for _, b := range boxes {
-			if b.ID == p.Box {
-				if b.State == contract.BoxClosing || b.State == contract.BoxDeleted {
-					s.admit.Unlock()
-					return contract.SessionStartResponse{}, invalid("parent box is closing")
-				}
-				current.Size = b.Size
-			}
-		}
-		path, err := s.store.BoxAncestry(ctx, p.Box)
+		parentBox, err := s.store.Box(ctx, p.Box)
 		if err != nil {
-			s.admit.Unlock()
 			return contract.SessionStartResponse{}, failure(err)
 		}
-		for _, b := range path {
-			ancestry = append(ancestry, b.ID)
+		if parentBox.State == contract.BoxClosing || parentBox.State == contract.BoxDeleted {
+			return contract.SessionStartResponse{}, invalid("parent box is closing")
 		}
+		budgetParent = p.Box
+		sizeName = parentBox.Size.Name
 	}
-	placement, err := s.place(ctx, current, boxes)
+	initial, err := s.event(req.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Box: session.Box, Session: session.ID, To: contract.BoxPending})
 	if err != nil {
-		s.admit.Unlock()
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	initial, err := s.event(req.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Box: session.Box, Session: session.ID, To: contract.BoxPending, Reason: string(placement.Reason)})
-	if err != nil {
-		s.admit.Unlock()
+	if err := s.store.StartSession(ctx, session, parent, budgetParent, sizeName, req.Goal, event, initial, ""); err != nil {
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	if err = s.store.StartSession(ctx, session, parent, current.BudgetParent, current.Size.Name, req.Goal, event, initial, string(placement.Reason)); err != nil {
-		s.admit.Unlock()
-		return contract.SessionStartResponse{}, failure(err)
-	}
-	writeCtx := context.WithoutCancel(ctx)
-	if placement.Reason != "" {
-		s.admit.Unlock()
-		return response, nil
-	}
-	slice, err := box.SliceName(append(ancestry, session.Box))
-	if err != nil {
-		s.admit.Unlock()
-		return response, failure(err)
-	}
-	current.Host, current.Slice = placement.Host, slice
-	current, err = s.transition(writeCtx, session.Room, current, contract.BoxCreating, "", "")
-	s.admit.Unlock()
-	if err != nil {
-		return response, failure(err)
-	}
-	if err := s.createPlaced(createCtx, writeCtx, session.Room, current, run); err != nil {
-		return response, failure(err)
-	}
-	return response, nil
-}
-
-// createPlaced completes a reserved box and wakes children waiting for its host.
-func (s *Service) createPlaced(ctx, writeCtx context.Context, room contract.RoomID, current box.Box, run *boxRun) error {
-	var repos []contract.BoxRepo
-	var createErr error
-	if s.repos != nil {
-		repos, createErr = s.repos.Get(ctx, current.Session, current.Host, true)
-	}
-	var image string
-	if createErr == nil {
-		image, createErr = s.boxes.Create(ctx, BoxSpec{Box: current.ID, Session: current.Session, Host: current.Host, Slice: current.Slice, Size: current.Size, Repos: repos})
-	}
-	if createErr != nil {
-		s.mu.Lock()
-		closing := run.closing
-		s.mu.Unlock()
-		if closing {
-			return nil
-		}
-		_, err := s.transition(writeCtx, room, current, contract.BoxFailed, createErr.Error(), contract.CauseCreateFailed)
-		return err
-	}
-	current.Image = image
-	s.admit.Lock()
-	s.mu.Lock()
-	closing := run.closing
-	s.mu.Unlock()
-	if closing {
-		s.admit.Unlock()
-		return nil
-	}
-	_, err := s.transition(writeCtx, room, current, contract.BoxStarting, "", "")
-	s.admit.Unlock()
-	if err != nil {
-		return err
-	}
-	return s.retryChildren(writeCtx, current.ID)
-}
-
-func (s *Service) place(ctx context.Context, current box.Box, boxes []box.Box) (box.Placement, error) {
-	hosts, err := s.store.Hosts(ctx)
-	if err != nil {
-		return box.Placement{}, err
-	}
-	return box.Admit(hosts, boxes, current, 20*box.GiB), nil
-}
-
-func (s *Service) retryChildren(ctx context.Context, parent contract.BoxID) error {
-	boxes, err := s.store.Boxes(ctx)
-	if err != nil {
-		return err
-	}
-	for _, child := range boxes {
-		if child.BudgetParent != parent || child.State != contract.BoxPending || child.Reason != string(box.PendingParentHost) {
-			continue
-		}
-		go func(id contract.SessionID) { _ = s.retryChild(ctx, id) }(child.Session)
-	}
-	return nil
-}
-
-func (s *Service) retryChild(ctx context.Context, id contract.SessionID) error {
-	unlock := s.lockBox(id)
-	defer unlock()
-	s.admit.Lock()
-	boxes, err := s.store.Boxes(ctx)
-	if err != nil {
-		s.admit.Unlock()
-		return err
-	}
-	var current box.Box
-	for _, b := range boxes {
-		if b.Session == id {
-			current = b
-			break
-		}
-	}
-	if current.State != contract.BoxPending || current.Reason != string(box.PendingParentHost) {
-		s.admit.Unlock()
-		return nil
-	}
-	placement, err := s.place(ctx, current, boxes)
-	if err != nil {
-		s.admit.Unlock()
-		return err
-	}
-	if placement.Reason != "" {
-		s.admit.Unlock()
-		return nil
-	}
-	path, err := s.store.BoxAncestry(ctx, current.ID)
-	if err != nil {
-		s.admit.Unlock()
-		return err
-	}
-	var ancestry []contract.BoxID
-	for _, b := range path {
-		ancestry = append(ancestry, b.ID)
-	}
-	current.Slice, err = box.SliceName(ancestry)
-	if err != nil {
-		s.admit.Unlock()
-		return err
-	}
-	current.Host = placement.Host
-	session, err := s.store.Session(ctx, current.Session)
-	if err != nil {
-		s.admit.Unlock()
-		return err
-	}
-	createCtx, cancel := context.WithCancel(ctx)
-	run := &boxRun{cancel: cancel}
-	s.mu.Lock()
-	s.sessionLocked(id).run = run
-	s.mu.Unlock()
-	defer func() { cancel(); s.mu.Lock(); s.sessionLocked(id).run = nil; s.mu.Unlock() }()
-	current, err = s.transition(ctx, session.Room, current, contract.BoxCreating, "", "")
-	s.admit.Unlock()
-	if err != nil {
-		return err
-	}
-	return s.createPlaced(createCtx, ctx, session.Room, current, run)
-
+	return contract.SessionStartResponse{Session: session.ID, Box: session.Box}, nil
 }
 
 func (s *Service) closeGuard(ctx context.Context, parent contract.BoxID) *contract.Error {
@@ -553,8 +376,6 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	var tree room.Tree
 	var order []contract.SessionID
 	if e := func() *contract.Error {
-		s.admit.Lock()
-		defer s.admit.Unlock()
 		tree, err = s.store.RoomTree(ctx, session.Room)
 		if err != nil {
 			return failure(err)
@@ -566,14 +387,6 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 		if err != nil {
 			return &contract.Error{Code: contract.ErrForbidden, Message: err.Error()}
 		}
-		s.mu.Lock()
-		for _, id := range order {
-			if id != session.ID && s.sessionLocked(id).run != nil {
-				s.mu.Unlock()
-				return &contract.Error{Code: contract.ErrConflict, Message: "child is starting"}
-			}
-		}
-		s.mu.Unlock()
 		if err := s.store.MarkClosing(ctx, session.ID); err != nil {
 			return failure(err)
 		}
@@ -597,31 +410,20 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 }
 
 func (s *Service) closeSession(ctx context.Context, caller contract.Principal, session store.Session, discard bool) *contract.Error {
-	s.admit.Lock()
 	if e := s.closeGuard(ctx, session.Box); e != nil {
-		s.admit.Unlock()
 		return e
 	}
-	s.mu.Lock()
-	if run := s.sessionLocked(session.ID).run; run != nil {
-		run.closing = true
-		run.cancel()
-	}
-	s.mu.Unlock()
-	s.admit.Unlock()
+	s.reconciler.Cancel(session.Box)
 	unlock := s.lockBox(session.ID)
 	defer unlock()
-	s.admit.Lock()
 	current, err := s.store.Box(ctx, session.Box)
 	if err != nil {
-		s.admit.Unlock()
 		return failure(err)
 	}
 	hasTurns, err := s.store.SessionHasTurns(ctx, session.ID)
 	if err == nil && current.State != contract.BoxClosing && current.State != contract.BoxDeleted {
 		current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, "", "")
 	}
-	s.admit.Unlock()
 	if err != nil {
 		return failure(err)
 	}

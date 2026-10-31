@@ -57,7 +57,7 @@ func TestUpgradeGrantsExistingRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = upgrade(db, 1, "", steps); err != nil {
+	if err = upgrade(db, 1, "", map[int][]string{12: steps[12], 13: steps[13], 14: steps[14], 15: steps[15], 16: steps[16], 17: steps[17], 18: {}, 19: {}, 20: {}, 21: {}}); err != nil {
 		t.Fatal(err)
 	}
 	s := &Store{read: db}
@@ -83,7 +83,7 @@ func TestUpgradeSetsOpenTurnStartSeq(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = upgrade(db, 1, "", map[int][]string{16: steps[16], 17: {}, 18: steps[18], 19: {}, 20: steps[20]}); err != nil {
+	if err = upgrade(db, 1, "", map[int][]string{16: steps[16], 17: {}, 18: steps[18], 19: {}, 20: steps[20], 21: {}}); err != nil {
 		t.Fatal(err)
 	}
 	var seq sql.NullInt64
@@ -115,7 +115,7 @@ func TestUpgradeRevokesOldGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = upgrade(db, 1, "", steps); err != nil {
+	if err = upgrade(db, 1, "", map[int][]string{17: steps[17], 18: {}, 19: {}, 20: {}, 21: {}}); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := db.Query(`SELECT id,revoked_at,reason FROM grants ORDER BY id`)
@@ -147,5 +147,46 @@ func TestUpgradeRevokesOldGrants(t *testing.T) {
 	}
 	if _, err := db.Exec(`SELECT mode,commands FROM grants`); err == nil {
 		t.Fatal("old columns remain")
+	}
+}
+
+func TestUpgradeBoxIntent(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, err = db.Exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+ INSERT INTO meta VALUES ('schema_version','21');
+ CREATE TABLE sessions (id TEXT PRIMARY KEY, state TEXT NOT NULL);
+ CREATE TABLE boxes (id TEXT PRIMARY KEY, session TEXT NOT NULL);
+ INSERT INTO sessions VALUES ('a','dormant'),('b','closing'),('c','open'),('d','pending');
+ INSERT INTO boxes VALUES ('a','a'),('b','b'),('c','c'),('d','d');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := upgrade(db, 1, "", steps); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query(`SELECT b.want,s.state,b.due_at,b.failures FROM boxes b JOIN sessions s ON s.id=b.session ORDER BY b.id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for _, want := range []struct{ intent, state string }{{"stop", "open"}, {"close", "closing"}, {"run", "open"}, {"run", "open"}} {
+		if !rows.Next() {
+			t.Fatal("missing box")
+		}
+		var intent, state string
+		var due, failures int
+		if err := rows.Scan(&intent, &state, &due, &failures); err != nil {
+			t.Fatal(err)
+		}
+		if intent != want.intent || state != want.state || due != 0 || failures != 0 {
+			t.Fatalf("got %s %s %d %d", intent, state, due, failures)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 }

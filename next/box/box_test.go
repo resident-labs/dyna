@@ -14,7 +14,7 @@ import (
 func TestTransitions(t *testing.T) {
 	states := []contract.BoxState{contract.BoxPending, contract.BoxCreating, contract.BoxStarting, contract.BoxReady, contract.BoxStopped, contract.BoxClosing, contract.BoxDeleted, contract.BoxFailed, contract.BoxLost}
 	allowed := map[contract.BoxState][]contract.BoxState{
-		contract.BoxPending:  {contract.BoxCreating, contract.BoxStarting, contract.BoxClosing},
+		contract.BoxPending:  {contract.BoxPending, contract.BoxCreating, contract.BoxStarting, contract.BoxClosing},
 		contract.BoxCreating: {contract.BoxStarting, contract.BoxFailed, contract.BoxClosing},
 		contract.BoxStarting: {contract.BoxReady, contract.BoxStopped, contract.BoxFailed, contract.BoxClosing},
 		contract.BoxReady:    {contract.BoxStopped, contract.BoxClosing, contract.BoxLost},
