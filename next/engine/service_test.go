@@ -1086,7 +1086,7 @@ func connectAgent(ctx context.Context, t *testing.T, s *Service, session contrac
 		t.Fatal(err)
 	}
 	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) SELECT 'turn_'||?,?,0,'','',0,0,0,0 WHERE NOT EXISTS (SELECT 1 FROM turns WHERE session=?)", session, session, session)
+		_, err := tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_seq) SELECT 'turn_'||?,?,0,'','',0,0,0,0,0 WHERE NOT EXISTS (SELECT 1 FROM turns WHERE session=?)", session, session, session)
 		return err
 	}); err != nil {
 		t.Fatal(err)
