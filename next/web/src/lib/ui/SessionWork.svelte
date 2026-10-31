@@ -21,8 +21,7 @@
   let refreshPending = false;
   let active: Promise<void> | undefined;
   let list: VirtualList<WorkTurn> | undefined = $state();
-  let failures = $derived(turns.filter(turn => turn.ended?.body.outcome === "failed"));
-  let failureIndex = 0;
+  let newestVisible = $state(true);
   const opened = new SvelteSet<string>();
   // The keyed view belongs to one session; transcript state survives virtual row recycling.
   const transcripts = untrack(() => new TurnTranscripts(session));
@@ -69,11 +68,6 @@
     void store.failed.get(session);
     untrack(() => { void load(); });
   });
-  async function nextFailure() {
-    const turn = failures[failureIndex++ % failures.length];
-    const index = turns.indexOf(turn);
-    if (index >= 0) await list?.reveal(index);
-  }
   async function latest() {
     await load();
     await tick();
@@ -89,12 +83,10 @@
   <div class="day"><strong>{dayLabel(turn.started.at, Date.now())}</strong>{#if dayCounts(turn)}<span>{dayCounts(turn)}</span>{/if}<span class="rule"></span></div>
 {/snippet}
 
-<div class="work-head">
-  {#if failures.length}<button type="button" class="failed-link" onclick={nextFailure}><StatusPill tone="failed" label={`Failed ${failures.length}`} /></button>{/if}
-  <button type="button" class="latest" onclick={() => void latest()}>Jump to latest</button>
-</div>
+<div class="work-view">
+{#if turns.length && !newestVisible}<button type="button" class="latest" onclick={() => void latest()}>Jump to latest</button>{/if}
 {#if turns.length}
-  <VirtualList bind:this={list} items={turns} key={turn => turn.started.body.turn} label="Session work" role="group" align="top">
+  <VirtualList bind:this={list} items={turns} key={turn => turn.started.body.turn} label="Session work" role="group" align="top" ontop={shown => newestVisible = shown}>
     {#snippet sticky(turn: WorkTurn)}{@render dayHeader(turn)}{/snippet}
     {#snippet row(turn: WorkTurn)}
       {@const previous = turns[turns.indexOf(turn) - 1]}
@@ -133,13 +125,14 @@
   </VirtualList>
 {:else if !loading && !failed}<p class="hint">This session has not worked yet.</p>{/if}
 {#if failed}<p class="hint" role="alert">Work did not load. <button type="button" onclick={() => void load()}>Try again</button></p>{/if}
+</div>
 
 <style>
-  .work-head { display: flex; align-items: center; gap: 12px; padding: 4px 16px; }
+  .work-view { position: relative; height: 100%; min-height: 0; }
   button { border: 0; background: none; color: var(--muted); cursor: pointer; font: inherit; }
   button:hover { color: var(--text); }
   button:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-  .latest { margin-left: auto; }
+  .latest { position: absolute; z-index: 2; top: 8px; right: 16px; padding: 6px 12px; border-radius: 6px; background: var(--sidebar); box-shadow: 0 2px 8px var(--line); }
   .day { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--bg); color: var(--muted); font-size: 12.5px; }
   .day strong { color: var(--text); }
   .rule { height: 1px; background: var(--line); flex: 1; }
