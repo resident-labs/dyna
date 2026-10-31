@@ -121,7 +121,7 @@ func TestQuotasThroughManagement(t *testing.T) {
 
 func TestCodexPassiveQuota(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"files":[{"provider":"codex","quota":{"observed_at":"2026-01-02T00:00:00Z","signals":{"X-Codex-Primary-Used-Percent":"42","X-Codex-Primary-Window-Minutes":"300","X-Codex-Primary-Reset-At":"1767405600"}}},{"provider":"codex","quota":{"signals":{}}}]}`))
+		_, _ = w.Write([]byte(`{"files":[{"provider":"codex","quota":{"observed_at":"2026-01-02T00:00:00Z","signals":{"X-Codex-Primary-Used-Percent":"42","X-Codex-Primary-Window-Minutes":"300","X-Codex-Primary-Reset-After-Seconds":"3600"}}},{"provider":"codex","quota":{"signals":{}}}]}`))
 	}))
 	defer server.Close()
 	q := (&Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}).Quotas("key", time.Now)
@@ -130,7 +130,7 @@ func TestCodexPassiveQuota(t *testing.T) {
 		t.Fatalf("read failed: %v", err)
 	}
 	a := got.Accounts[0]
-	if a.ObservedAt == nil || a.ObservedAt.Format(time.RFC3339) != "2026-01-02T00:00:00Z" || len(a.Windows) != 1 || a.Windows[0].UsedPercent != 42 || a.Windows[0].Seconds != 18000 || a.Windows[0].ResetsAt.IsZero() {
+	if a.ObservedAt == nil || a.ObservedAt.Format(time.RFC3339) != "2026-01-02T00:00:00Z" || len(a.Windows) != 1 || a.Windows[0].UsedPercent != 42 || a.Windows[0].Seconds != 18000 || !a.Windows[0].ResetsAt.Equal(a.ObservedAt.Add(time.Hour)) {
 		t.Fatal("Codex snapshot did not preserve its observation")
 	}
 	if got.Accounts[1].ObservedAt != nil || len(got.Accounts[1].Windows) != 0 {
