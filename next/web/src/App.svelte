@@ -235,7 +235,8 @@
     .map(item => ({ name: item.name, root: !item.parent, status: status(item.session) }))
     .sort((a, b) => Number(b.root) - Number(a.root) || a.name.localeCompare(b.name)));
   // The panel's header counts, and the room header's below 761 px where the panel is hidden.
-  let working = $derived([...store?.sessions.keys() ?? []].filter(id => store?.turns.has(id)).length);
+  // One count source (status.ts): a session that waits for the owner is waiting, not working.
+  let working = $derived(store?.counts.working ?? 0);
   let title = $derived(!room ? "Home" : session ? store?.names.get(session) ?? "Session" : roomName);
   // Each fact shows once: profile, state and trouble live on the session's row. A closed session has no row.
   let closed = $derived(!!session && !!store?.ready && !store.sessions.has(session));
