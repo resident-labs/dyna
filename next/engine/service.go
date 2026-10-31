@@ -18,6 +18,7 @@ import (
 )
 
 type Profiles interface {
+	List() []contract.ProfileSummary
 	Model(contract.ProfileName) (contract.ModelChoice, []string, error)
 }
 
