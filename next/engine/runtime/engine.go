@@ -197,7 +197,7 @@ func Run(ctx context.Context, cfg Config) error {
 		if err != nil {
 			return err
 		}
-		webServer, err := api.NewWeb(apiServer, cfg.WebListen, app, time.Now)
+		webServer, err := api.NewWeb(apiServer, cfg.WebListen, app, time.Now, st)
 		if err != nil {
 			return err
 		}
