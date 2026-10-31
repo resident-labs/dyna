@@ -139,7 +139,7 @@
       {#if jobs.length}<span class="tab" class:active={active === JOBS}>
         <button type="button" role="tab" class="jobs" aria-selected={active === JOBS} onclick={() => { only = undefined; void show(JOBS); }}>Jobs
           {#if running}<span class="muted">{running}</span>{/if}
-          {#if unopened}<span class="muted">·</span><StatusPill tone="failed" word label="{unopened} failed" />{/if}</button></span>{/if}
+          {#if unopened}<span class="muted">·</span><StatusPill tone="failed" word label="{unopened} failed in room" />{/if}</button></span>{/if}
     </div>
     <span class="menu">
       <button type="button" bind:this={plus} aria-label="New terminal" title="New terminal" aria-haspopup="menu" aria-expanded={picking}
