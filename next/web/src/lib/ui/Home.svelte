@@ -5,7 +5,7 @@
   import type { Attention } from "../attention.svelte.ts";
   import type { AccountUsage, Card, HostSummary, Principal, SessionListResponse } from "../contract.gen.ts";
   import { fromNow } from "../feed.ts";
-  import { hostMeters } from "../hosts.ts";
+  import { hostMeters, watchHosts } from "../hosts.ts";
   import { busiestWindow } from "../usage.ts";
   import { hue } from "../identity.ts";
   import Avatar from "./Avatar.svelte";
@@ -110,30 +110,18 @@
   let missing = $derived(waiting.length < total(attention.waiting)
     || [...attention.rooms.keys()].some(room => !listed.has(room)));
   const roomHref = (room: string) => "/r/" + encodeURIComponent(room);
-  // Hosts load when Home opens, then every 10 s to match the engine's beat, only while the page is visible.
-  // A failed call keeps the last answer, and the next tick tries again. A tick skips while a call is out, so
-  // calls never pile up on a slow engine and answers arrive in order.
+  // Hosts load when Home opens and stay current while the page is visible (watchHosts). A failed call keeps the last
+  // answer, and the next tick tries again. A control plane that reports no load shows no card, never an empty one.
   let hosts: HostSummary[] | undefined = $state();
   let hostsFailed = $state(false);
   let hostsAt = $state(0);
-  // The hosts timer also moves the clock that request expiry counts from.
+  // Each host answer or failure also moves the clock that request expiry counts from.
   let now = $state(Date.now());
-  $effect(() => {
-    let timer: ReturnType<typeof setInterval> | undefined;
-    let loading = false;
-    const tick = () => {
-      now = Date.now();
-      if (loading) return;
-      loading = true;
-      // A control plane that reports no load shows no card, never an empty one.
-      void call("host.list", {}).then(list => { hosts = (list.hosts ?? []).filter(h => h.name !== "control-plane" || hostMeters(h).length); hostsAt = Date.now(); hostsFailed = false; }, () => { hostsFailed = true; })
-        .finally(() => { loading = false; });
-    };
-    const sync = () => { clearInterval(timer); if (document.hidden) return; tick(); timer = setInterval(tick, 10_000); };
-    sync();
-    document.addEventListener("visibilitychange", sync);
-    return () => { clearInterval(timer); document.removeEventListener("visibilitychange", sync); };
-  });
+  $effect(() => watchHosts(list => { hosts = list.filter(h => h.name !== "control-plane" || hostMeters(h).length); now = hostsAt = Date.now(); hostsFailed = false; },
+    () => { now = Date.now(); hostsFailed = true; }));
+  // The sessions panel's host foot links to /#machines, so Machines scrolls into view once it shows.
+  let machines: HTMLElement | undefined = $state();
+  $effect(() => { if (machines && location.hash === "#machines") machines.scrollIntoView({ block: "start" }); });
   // Model usage loads once when Home opens: the engine caches it for 5 min. Reset times count from that answer.
   let accounts: AccountUsage[] | undefined = $state();
   let accountsFailed = $state(false);
@@ -189,7 +177,7 @@
         {:else}<div class="item skeleton" aria-hidden="true"><i class="avatar"></i><span class="lines"><i></i><i></i></span></div>{/if}{/if}</section>
   </div>
   {#if failed && missing}<p class="failed">Some items could not load. <button type="button" class="retry" onclick={() => { failed = false; attempt++; }}>Try again</button></p>{/if}
-  {#if hosts?.length || hostsFailed}<h2>Machines{#if hosts?.length}<span>{hosts.length}</span>{/if}</h2>{/if}
+  {#if hosts?.length || hostsFailed}<h2 id="machines" bind:this={machines}>Machines{#if hosts?.length}<span>{hosts.length}</span>{/if}</h2>{/if}
   {#if !hosts && hostsFailed}<p class="failed">Machines could not load.</p>{/if}
   {#if hosts?.length}<div class="cards">{#each hosts as host (host.name)}<HostCard {host} now={hostsAt} />{/each}</div>{/if}
   {#if accounts?.length || accountsFailed}<h2>Usage{#if accounts?.length}<span>{accounts.length}</span>{/if}</h2>{/if}
