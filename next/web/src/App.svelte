@@ -40,7 +40,6 @@
   import { MediaQuery, SvelteMap, SvelteSet } from "svelte/reactivity";
   import RoomMenu from "./lib/ui/RoomMenu.svelte";
   import RequestsPanel from "./lib/ui/RequestsPanel.svelte";
-  import RulesPanel from "./lib/ui/RulesPanel.svelte";
   import ActiveNow from "./lib/ui/ActiveNow.svelte";
   import { activeRooms } from "./lib/active.ts";
   import { Attention } from "./lib/attention.svelte.ts";
@@ -120,19 +119,15 @@
   function dismissRequests(event: MouseEvent) {
     if (section === "requests" && event.target instanceof Node && !page?.contains(event.target) && !requestsButton?.contains(event.target)) section = undefined;
   }
-  // The requests and rules views show in place of the conversation until Back, Escape or the control that opened them.
-  let section: "requests" | "rules" | undefined = $state();
+  // The requests view shows in place of the conversation until Back, Escape or the control that opened it.
+  let section: "requests" | undefined = $state();
   let visual: { versions: VisualVersion[]; selected: number; send: (text: string, event: string) => Promise<void> } | undefined = $state();
   let visualTrigger: HTMLElement | undefined;
   let requestsButton: HTMLButtonElement | undefined = $state();
-  let roomMenu: RoomMenu | undefined = $state();
   async function closeSection(tapped = false) {
-    const was = section;
     section = undefined;
     await tick();
-    // On a phone the room menu is hidden in favour of the drawer, so Rules returns focus to ☰.
-    if (was === "rules") (phone.current ? menuButton ?? toggle : roomMenu)?.focus({ focusVisible: !tapped });
-    else requestsButton?.focus({ focusVisible: !tapped });
+    requestsButton?.focus({ focusVisible: !tapped });
   }
   // A link to a room the engine does not list, or to a path the app has no page for, shows a load error in Home's
   // place. Until the room list loads, a room link is trusted, so a known room opens without a flash.
@@ -372,7 +367,7 @@
     event.preventDefault();
     if (covered) return;
     // Only areas on screen take part; below 761 px the closed sessions panel has no boxes.
-    // The requests and rules views take the place of the feed and the composer.
+    // The requests view takes the place of the feed and the composer.
     const areas = (inSettings ? [rail, settings] : [rail, section ? page : feed, section ? undefined : composer, dock, members, docked ? undefined : computer])
       .filter(area => area != null)
       .filter(area => area.getClientRects().length > 0);
@@ -624,7 +619,6 @@
           <button type="button" aria-pressed={section === "requests"} onclick={() => { section = "requests"; }}><Icon name="inbox" />Requests
             {#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
           <button type="button" onclick={event => void showPanel(true, event.detail > 0)}><Icon name="people" />Sessions<span class="count">{store.sessions.size}</span></button>
-          <button type="button" aria-pressed={section === "rules"} onclick={() => { section = "rules"; }}><Icon name="rules" />Rules<span class="count">{store.rules.size}</span></button>
           {#if attention.can("operate")}<button type="button" onclick={pause}><Icon name="pause" />{paused ? "Resume room" : "Pause room"}</button>{/if}
         {/if}
       {:else}
@@ -656,7 +650,7 @@
         <!-- One click to the session's shell and computer; neither shows when the session has none. -->
         {#if session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title={terminals?.hasShell(session) ? "Show this session's terminal" : "Open a terminal in this session's box"} aria-pressed={terminals?.hasShell(session) ?? false} onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /><span>Terminal</span></button>{/if}
         {#if session && attention.can("computers") && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /><span>Computer</span></button>{/if}
-        <span class="room-menu"><RoomMenu bind:this={roomMenu} {paused} operate={attention.can("operate")} onrules={() => { section = "rules"; }} onpause={pause} /></span>{/if}
+        <span class="room-menu"><RoomMenu {paused} operate={attention.can("operate")} onpause={pause} /></span>{/if}
       <!-- While the panel is closed, who works shows on its button, as at most 3 faces, "+n" and the count from status.ts. -->
       {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={"Sessions" + (faces ? `, ${working} working` : "") + (store?.counts.failed ? ", a session failed" : "")}
         title={faces ? busy.map(item => item.name).join(", ") : "Sessions"} aria-controls="sessions" aria-expanded={panelShown} onclick={event => void showPanel(!panelShown, event.detail > 0)}>
@@ -667,8 +661,7 @@
     {@render workTabs("phone-tabs")}
     {#if reloadPending}<p class="reload-notice" role="status">Dyna updated. Reload to use the new version. <button type="button" onclick={() => location.reload()}>Reload</button></p>{/if}
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} admin={attention.can("admin")} onclose={() => void closeSection()} />{/if}
-    {#if section === "rules" && store && !unavailable}<RulesPanel bind:element={page} {store} room={roomName} edit={attention.can("admin")} onback={event => void closeSection(event.detail > 0)} />
-    {:else}<div class="feed">
+    <div class="feed">
       {#if blocked}<Blocked kind="unreachable" onretry={connect} />
       {:else if !room && roomsLoaded && !rooms.length}<Blocked kind="no-rooms" />
       {:else if lost === "room"}<Blocked kind="no-room" back={{ href: "/", label: "Go to Home" }} {navigate} />
@@ -692,7 +685,7 @@
       {#if attention.can("operate")}<Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; clearReplacement(); }} onsend={send} placeholder={"Message " + title}
         quote={quotes[key]} replacement={replaced[key]} onundo={() => { quotes[key] = undoForward({ quote: quotes[key], previous: replaced[key] }).quote; clearReplacement(); }} onunquote={() => { quotes[key] = undefined; clearReplacement(); }} sessions={mentions} files={files(key)} {stop} />
       {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
-    {/if}{/if}
+    {/if}
     <TermDock bind:this={terminals} terminal={attention.can("terminal")} bind:element={dock} onempty={() => composer?.focus()} phone={phone.current} strip={!!room && !unavailable}
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
   </main>

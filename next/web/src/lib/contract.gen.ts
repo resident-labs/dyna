@@ -30,16 +30,11 @@ export type ProfileRemoveResponse = { };
 export type AccountFailureReason = "sign_in_rejected" | "refresh_failed" | "proxy_failed" | "credential_missing";
 export type AccountFailed = { accountId: AccountID; reason: AccountFailureReason; };
 export type AccountQuotaLow = { accountId: AccountID; window: string; remainingPercent: number; floor: number; };
-export type Method = "rule.add" | "rule.remove" | "rule.edit" | "rule.list" | "web.login" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.remove" | "accounts.set_limits" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.repo.add" | "room.repos" | "session.start" | "session.close" | "session.stop" | "session.set_profile" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "hostexec.run" | "hostexec.revoke" | "op.submit" | "op.decide" | "op.withdraw" | "op.list";
-export type RoomRule = { number: number; text: string; by: Principal; at: string; };
-export type RuleAddRequest = { room: RoomID; text: string; };
-export type RuleAddResponse = { number: number; };
-export type RuleRemoveRequest = { room: RoomID; number: number; };
-export type RuleRemoveResponse = { };
-export type RuleEditRequest = { room: RoomID; number: number; text: string; };
-export type RuleEditResponse = { };
-export type RuleListRequest = { room: RoomID; };
-export type RuleListResponse = { rules: Array<RoomRule> | null; };
+export type InstructionsGetRequest = { room?: RoomID; };
+export type InstructionsGetResponse = { text: string; hash: string; savedAt?: string | null; };
+export type InstructionsSetRequest = { room?: RoomID; text: string; base: string; };
+export type InstructionsSetResponse = { hash: string; };
+export type Method = "instructions.get" | "instructions.set" | "web.login" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.remove" | "accounts.set_limits" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.repo.add" | "room.repos" | "session.start" | "session.close" | "session.stop" | "session.set_profile" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "hostexec.run" | "hostexec.revoke" | "op.submit" | "op.decide" | "op.withdraw" | "op.list";
 export type ErrorCode = "podman_required" | "invalid" | "not_found" | "forbidden" | "conflict" | "move_busy" | "has_children" | "parent_closing" | "session_closing" | "stale" | "visual_superseded" | "unavailable" | "store_from_v1" | "store_too_old" | "no_grant" | "hostexec_scope";
 export type Error = { code: ErrorCode; message: string; visual?: VisualSuperseded | null; };
 export type VisualSuperseded = { event: EventID; version: number; seq: number; };
@@ -108,7 +103,7 @@ export type ModelProvider = "anthropic" | "openai";
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 export type ModelChoice = { provider: ModelProvider; id: string; thinking: ThinkingLevel; };
 export type BoxRepo = { name: RepoName; cache: string; branch: string; base: string; };
-export type BoxHelloResponse = { gitName?: string; gitEmail?: string; compactTokens?: number; instructions: string; session: SessionID; box: BoxID; model: ModelChoice; repos?: Array<BoxRepo> | null; rules?: Array<RoomRule> | null; transcripts?: Array<TranscriptFile> | null; };
+export type BoxHelloResponse = { gitName?: string; gitEmail?: string; compactTokens?: number; instructions: string; session: SessionID; box: BoxID; model: ModelChoice; repos?: Array<BoxRepo> | null; transcripts?: Array<TranscriptFile> | null; };
 export type TurnOutputRequest = { shellJobs: number; error?: string; cause?: FailureCause; turn: TurnID; outcome: TurnOutcome; final?: string; model: string; usage: Usage; };
 export type TurnOutputResponse = { };
 export type TurnActivityRequest = { turn: TurnID; label: string; };
@@ -230,10 +225,7 @@ export type Event = { seq: number; id: EventID; at: string; room?: RoomID; from:
 export type RoomLimitsChanged = { cpus: number; memBytes: number; };
 export type RoomPaused = { };
 export type RoomResumed = { };
-export type RuleAdded = { number: number; text: string; };
-export type RuleRemoved = { number: number; };
 export type SessionProfileChanged = { session: SessionID; profile: ProfileName; };
-export type RuleEdited = { number: number; text: string; };
 export type PostCreated = { text: string; mentions?: Array<Principal> | null; home: Conversation; replyTo?: EventID; attachments?: Array<Attachment> | null; clientId?: string; };
 export type Attachment = { name: string; media: string; bytes: number; sha256: string; visual?: VisualCard | null; };
 export type VisualCard = { id: EventID; version: number; title: string; height: number; allowNet: boolean; banner: string; thumbnail: string; shots: Array<VisualShot> | null; checks: Array<VisualCheck> | null; };
@@ -337,9 +329,6 @@ export type EventBody =
   | { type: "room.limits_changed"; body: RoomLimitsChanged }
   | { type: "room.paused"; body: RoomPaused }
   | { type: "room.resumed"; body: RoomResumed }
-  | { type: "rule.added"; body: RuleAdded }
-  | { type: "rule.edited"; body: RuleEdited }
-  | { type: "rule.removed"; body: RuleRemoved }
   | { type: "session.closed"; body: SessionClosed }
   | { type: "session.moved"; body: SessionMoved }
   | { type: "session.profile_changed"; body: SessionProfileChanged }
@@ -363,10 +352,8 @@ export type BoxMessageBody =
   | { type: "turn.stop"; body: TurnStop }
 ;
 export interface MethodMap {
-  "rule.add": { request: RuleAddRequest; response: RuleAddResponse };
-  "rule.remove": { request: RuleRemoveRequest; response: RuleRemoveResponse };
-  "rule.edit": { request: RuleEditRequest; response: RuleEditResponse };
-  "rule.list": { request: RuleListRequest; response: RuleListResponse };
+  "instructions.get": { request: InstructionsGetRequest; response: InstructionsGetResponse };
+  "instructions.set": { request: InstructionsSetRequest; response: InstructionsSetResponse };
   "web.login": { request: WebLoginRequest; response: WebLoginResponse };
   "conversation.read": { request: ConversationReadRequest; response: ConversationReadResponse };
   "room.list": { request: RoomListRequest; response: RoomListResponse };

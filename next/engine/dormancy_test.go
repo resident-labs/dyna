@@ -311,35 +311,6 @@ func TestSessionListLowersJobCountForAJobEndingInTheTurnEndMillisecond(t *testin
 	}
 }
 
-func TestRuleEditKeepsTheNumberAndWakesNoOne(t *testing.T) {
-	s, room, worker, ctx := setup(t)
-	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	added, problem := s.RuleAdd(ctx, owner, contract.RuleAddRequest{Room: room, Text: "Old"})
-	if problem != nil {
-		t.Fatal(problem)
-	}
-	if _, problem := s.RuleEdit(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.RuleEditRequest{Room: room, Number: added.Number, Text: "New"}); problem == nil || problem.Code != contract.ErrForbidden {
-		t.Fatalf("worker edit: %v", problem)
-	}
-	if _, problem := s.RuleEdit(ctx, owner, contract.RuleEditRequest{Room: room, Number: added.Number, Text: "New"}); problem != nil {
-		t.Fatal(problem)
-	}
-	list, problem := s.RuleList(ctx, owner, contract.RuleListRequest{Room: room})
-	if problem != nil || len(list.Rules) != 1 || list.Rules[0].Number != added.Number || list.Rules[0].Text != "New" {
-		t.Fatalf("list: %+v, %v", list, problem)
-	}
-	var deliveries, wakes int
-	if err := s.store.Read().QueryRowContext(ctx, "SELECT COUNT(*), COALESCE(SUM(wake),0) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_id=? AND e.type='rule.edited'", worker).Scan(&deliveries, &wakes); err != nil || deliveries != 1 || wakes != 0 {
-		t.Fatalf("deliveries %d wakes %d: %v", deliveries, wakes, err)
-	}
-	if _, problem := s.RuleRemove(ctx, owner, contract.RuleRemoveRequest{Room: room, Number: added.Number}); problem != nil {
-		t.Fatal(problem)
-	}
-	if _, problem := s.RuleEdit(ctx, owner, contract.RuleEditRequest{Room: room, Number: added.Number, Text: "Gone"}); problem == nil || problem.Code != contract.ErrNotFound {
-		t.Fatalf("edit of a removed rule: %v", problem)
-	}
-}
-
 func TestSessionListShowsBoxReason(t *testing.T) {
 	s, room, worker, ctx := setup(t)
 	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
