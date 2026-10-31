@@ -355,3 +355,21 @@ func TestShellWatchGenerationAndStop(t *testing.T) {
 	}
 	t.Fatal("box channel closed before stop")
 }
+
+// Input blocked on a replaced box returns a conflict instead of hanging.
+func TestComputerInputReplacement(t *testing.T) {
+	done := make(chan struct{})
+	handle := computerInputHandle{queue: make(chan contract.ComputerInputBatch), done: done}
+	entered := make(chan struct{})
+	result := make(chan *contract.Error, 1)
+	go func() {
+		close(entered)
+		result <- handle.send(context.Background(), contract.ComputerInputBatch{})
+	}()
+	<-entered
+	close(done)
+	problem := <-result
+	if problem == nil || problem.Code != contract.ErrConflict || problem.Message != "box replaced" {
+		t.Fatalf("replacement: %v", problem)
+	}
+}
