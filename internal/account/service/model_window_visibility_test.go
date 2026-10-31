@@ -7,6 +7,26 @@ import (
 	"dyna-agent/internal/account/store"
 )
 
+func TestModelWindowStaysWhileItsPoolHasUse(t *testing.T) {
+	fable := func(used float64) []Window {
+		return []Window{{ID: store.ModelWindowPrefix + "fable", Label: "Weekly · Fable", UsedPercent: pct(used)}}
+	}
+	shown := visibleSnapshot(Snapshot{Accounts: []Account{
+		{ID: "unused", Provider: store.ProviderAnthropic, Windows: fable(0)},
+		{ID: "used", Provider: store.ProviderAnthropic, Windows: fable(80)},
+		{ID: "other-pool", Provider: store.ProviderZAI, Windows: fable(0)},
+	}}).Accounts
+	if len(shown[0].Windows) != 1 {
+		t.Fatalf("unused account lost its Fable window while a pool member has use: %+v", shown[0].Windows)
+	}
+	if len(shown[1].Windows) != 1 {
+		t.Fatalf("used account lost its Fable window: %+v", shown[1].Windows)
+	}
+	if len(shown[2].Windows) != 0 {
+		t.Fatalf("a pool with no use still shows its Fable window: %+v", shown[2].Windows)
+	}
+}
+
 func TestModelWindowReturnsAfterCachedReset(t *testing.T) {
 	reset := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
 	cached := Snapshot{Accounts: []Account{{ObservedAt: reset.Add(-time.Hour), Windows: []Window{
