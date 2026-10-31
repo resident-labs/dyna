@@ -1,7 +1,6 @@
 package model
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -37,33 +36,16 @@ func (c *Connections) SetKey(ctx context.Context, req contract.AccountsSetKeyReq
 	if err != nil {
 		return contract.AccountsSetKeyResponse{}, errConnect
 	}
-	call, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://cliproxy/dyna/keys", bytes.NewReader(body))
-	if err != nil {
-		return contract.AccountsSetKeyResponse{}, errConnect
-	}
-	call.Header.Set("Authorization", "Bearer "+c.key)
-	call.Header.Set("Content-Type", "application/json")
 	bound := false
 	defer func() {
 		if bound {
 			return
 		}
-		cleanup, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, "http://cliproxy/dyna/keys/"+proxyID, nil)
-		if err != nil {
-			return
-		}
-		cleanup.Header.Set("Authorization", "Bearer "+c.key)
-		if response, err := c.proxy.client.Do(cleanup); err == nil {
-			response.Body.Close()
-		}
+		_, _ = c.management.request(context.Background(), http.MethodDelete, "/dyna/keys/"+proxyID, nil)
 	}()
 	generation := c.proxy.generation.Load()
-	res, err := c.proxy.client.Do(call)
-	if err != nil {
-		return contract.AccountsSetKeyResponse{}, errConnect
-	}
-	res.Body.Close()
-	if res.StatusCode != http.StatusOK || generation != c.proxy.generation.Load() {
+	_, err = c.management.request(ctx, http.MethodPost, "/dyna/keys", body)
+	if err != nil || generation != c.proxy.generation.Load() {
 		return contract.AccountsSetKeyResponse{}, errConnect
 	}
 	if err := c.store.BindAccount(ctx, accountID, proxyID, req.Provider, req.Label); err != nil {
