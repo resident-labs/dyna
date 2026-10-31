@@ -47,6 +47,9 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 	var workErr error
 	switch {
 	case row.Want == store.WantStop:
+		if r.view.OpenTerminal(b.Session) {
+			return r.store.WakeTerminal(ctx, b.ID)
+		}
 		workErr = r.boxes.Stop(ctx, b.ID)
 		if workErr == nil {
 			next.State = contract.BoxStopped
