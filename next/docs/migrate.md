@@ -6,13 +6,14 @@ import or the owner-approved cutover gate.
 
 ## Boundary
 
-The old module adds `cmd/dyna-export`, requires
-`github.com/resident-labs/dyna`, and replaces it with `./next`.
-The exporter imports the standard-library-only `next/contract`; it never
-copies its types. Old CI compares `go list -m all` with and without that
-require and replace; only that module may differ. Every build context that
-copies the old `go.mod` also copies `next/go.mod`. Production export is
-built from `v1-final`; the rehearsal builds the review commit.
+`cmd/dyna-export` is its own module, `dyna-agent/cmd/dyna-export`, with
+Go 1.26.10. It replaces `dyna-agent` with `../..` and
+`github.com/resident-labs/dyna` with `../../next`. It imports the
+standard-library-only `next/contract` without copying its types. The v1
+module and its dependency graph stay unchanged. The next CI gate builds and
+tests the exporter module. Production export is built from `v1-final`; the
+rehearsal builds the review commit. This module layout supersedes spec 8.2's
+old-module replacement (lead decision, 2026-10-31).
 
 The exporter opens an explicitly supplied backup with SQLite read-only, never
 calls v1 store open functions that migrate, and fails on unsupported schema.
