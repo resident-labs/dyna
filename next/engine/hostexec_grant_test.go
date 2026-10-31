@@ -140,7 +140,7 @@ func TestHostGrantAfterEngineMove(t *testing.T) {
 		t.Fatalf("old request: %+v %v", old, err)
 	}
 	card := s.HostexecGrant().Card(ctx, args, to)
-	if !strings.Contains(card.Body, "cannot confirm whether a host holds the model sign-ins") {
+	if !strings.Contains(card.Body, "may hold the model sign-ins. Approve only if you trust this session with them.") {
 		t.Fatal(card.Body)
 	}
 }
