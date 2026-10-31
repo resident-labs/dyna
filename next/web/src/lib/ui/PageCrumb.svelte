@@ -1,7 +1,7 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
   // One way back from a room's page: the room name in the crumb when wide, a 40 px arrow on a phone.
-  let { room, page, onback }: { room: string; page: string; onback: () => void } = $props();
+  let { room, page, onback }: { room: string; page: string; onback: (event: MouseEvent) => void } = $props();
 </script>
 
 <button type="button" class="back" onclick={onback} aria-label={`Back to ${room}`} title={`Back to ${room}`}><Icon name="back" /></button>

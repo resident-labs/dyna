@@ -69,14 +69,14 @@
   let section: "requests" | "rules" | undefined = $state();
   let requestsButton: HTMLButtonElement | undefined = $state();
   let roomMenu: RoomMenu | undefined = $state();
-  async function closeSection() {
+  async function closeSection(tapped = false) {
     const was = section;
     section = undefined;
     await tick();
     // On a phone the room menu is hidden in favour of the drawer, so Rules returns focus to ☰.
     // So does Requests when nothing waits, as its header button then hides.
-    if (was === "rules") (phone.current ? menuButton ?? toggle : roomMenu)?.focus();
-    else (phone.current && !store?.waiting ? menuButton ?? toggle : requestsButton)?.focus();
+    if (was === "rules") (phone.current ? menuButton ?? toggle : roomMenu)?.focus({ focusVisible: !tapped });
+    else (phone.current && !store?.waiting ? menuButton ?? toggle : requestsButton)?.focus({ focusVisible: !tapped });
   }
   const segment = (pattern: RegExp) => { const match = pattern.exec(path)?.[1]; return match && decodeURIComponent(match); };
   let room = $derived(segment(/^\/r\/([^/]+)/));
@@ -133,13 +133,16 @@
     const own = new Map(sessions.map(item => [item.session, store?.status(item.session) ?? "idle"]));
     const most = (list: string[]) => list.reduce<Status>((best, id) => urgency(own.get(id) ?? "idle") < urgency(best) ? own.get(id) ?? "idle" : best, "idle");
     const top = new Map(sessions.map(item => [item.session, most([item.session, ...under(item.session)])]));
+    // Only rows that read Idle fold, by the words the row itself shows, so a starting session stays out.
+    const quiet = new Map(sessions.map(item => [item.session, [item.session, ...under(item.session)].every(id => status(id) === "Idle")]));
     // The open DM's row and its ancestors never fold away as idle.
     const keep = new Set<string>();
     for (let id = session; id && ids.has(id); id = store?.sessions.get(id)?.parent) keep.add(id);
     const rows: TreeRow[] = [];
     const walk = (parent: string | undefined, depth: number) => {
-      const kids = children(parent).sort((a, b) => urgency(top.get(a.session) ?? "idle") - urgency(top.get(b.session) ?? "idle"));
-      const idle = kids.filter(item => top.get(item.session) === "idle" && !keep.has(item.session));
+      const kids = children(parent).sort((a, b) => urgency(top.get(a.session) ?? "idle") - urgency(top.get(b.session) ?? "idle")
+        || Number(quiet.get(a.session)) - Number(quiet.get(b.session)));
+      const idle = kids.filter(item => quiet.get(item.session) && !keep.has(item.session));
       const key = parent ?? "";
       const open = idle.length < 2 || openIdle.has(key);
       for (const item of kids) {
@@ -206,6 +209,7 @@
     else if (event.key === "Escape" && section) void closeSection();
     if (event.key !== "F6") return;
     event.preventDefault();
+    if (covered) return;
     // Only areas on screen take part; below 761 px the closed sessions panel has no boxes.
     // The requests and rules views take the place of the feed and the composer.
     const areas = [rail, section ? page : feed, section ? undefined : composer, dock, members, docked ? undefined : computer]
@@ -221,12 +225,12 @@
   // Focus goes back to a row's computer icon when the docked computer closes. The list may have scrolled, so
   // the row is scrolled back in first; and a row shows its icons only on hover or focus, so its link takes focus
   // before the icon. With the icon gone, focus stays on the link.
-  async function focusRowIcon(id: string) {
+  async function focusRowIcon(id: string, tapped = false) {
     const index = tree.findIndex(entry => entry.kind === "session" && entry.session.session === id);
     if (index >= 0) await sessionList?.reveal(index);
     const link = members?.querySelector<HTMLElement>(`a.member[data-key="${CSS.escape(id)}"]`);
-    link?.focus();
-    (members?.querySelector<HTMLElement>(`[data-watch="${CSS.escape(id)}"]`) ?? link ?? members)?.focus();
+    link?.focus({ focusVisible: !tapped });
+    (members?.querySelector<HTMLElement>(`[data-watch="${CSS.escape(id)}"]`) ?? link ?? members)?.focus({ focusVisible: !tapped });
   }
   async function walkTree(event: KeyboardEvent & { currentTarget: HTMLElement }) {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp" || !members) return;
@@ -276,7 +280,7 @@
   let docked = $state(false);
   let rect = $state({ x: window.innerWidth - 504, y: window.innerHeight - 420, w: 480, h: 300 });
   // A session's first window opens at the top right of the feed, clear of the composer below it (round 2, page 6);
-  // it then opens where the owner left it.
+  // it then opens where the owner left it. On a phone the window fills the screen (fix 3).
   const places = new Map<string, Rect>();
   // The header's Computer button when it opened the view; focus goes back to it, as the row's icon has no place under About.
   let opener: HTMLElement | undefined;
@@ -291,16 +295,16 @@
   // The view closes when its computer stops or the room changes, before the DOM updates, so it never
   // streams again unasked. Focus that was in the view returns to the row's button, or to the panel;
   // below 761 px with the panel closed, it returns to the panel's toggle button.
-  async function stopWatching() {
+  async function stopWatching(tapped = false) {
     const id = watching ?? "";
     if (watching) places.set(watching, rect);
     const held = members?.contains(document.activeElement) || computer?.contains(document.activeElement);
     watching = undefined;
     await tick();
     if (!held) return;
-    if (opener?.isConnected) opener.focus();
-    else if (!members?.getClientRects().length) toggle?.focus();
-    else await focusRowIcon(id);
+    if (opener?.isConnected) opener.focus({ focusVisible: !tapped });
+    else if (!members?.getClientRects().length) toggle?.focus({ focusVisible: !tapped });
+    else await focusRowIcon(id, tapped);
   }
   $effect.pre(() => { if (watching && !store?.computers.has(watching)) void stopWatching(); });
   // A session's running background jobs while its box is ready. The dock's Jobs tab lists every session that had
@@ -317,6 +321,8 @@
   // them. A pick closes it; the scrim and Escape close it and return focus to the menu button. A keyboard open or
   // close (Escape) shows the ring; a tap open focuses the dialog itself, and no ring follows a tap either way.
   const phone = new MediaQuery("max-width: 640px");
+  // On a phone the full-screen computer covers everything else, so nothing behind it takes focus.
+  let covered = $derived(phone.current && !!watching && !docked);
   let drawer = $state(false);
   let menuButton: HTMLButtonElement | undefined = $state();
   async function showDrawer(open: boolean, refocus = true, tapped = false) {
@@ -385,8 +391,8 @@
 
 {#snippet computerView(id: string)}
   <!-- Another session's view is a new view, so the old image runs its cleanup and drops its stream. -->
-  {#key id}<ComputerView session={id} name={store?.names.get(id) ?? "Session"} root={!store?.sessions.get(id)?.parent} activity={store?.activity.get(id)} {docked} bind:rect bind:element={computer}
-    onclose={() => void stopWatching()} ondock={event => { docked = !docked; if (docked && !panelShown) void showPanel(true, event.detail > 0); }} />{/key}
+  {#key id}<ComputerView session={id} name={store?.names.get(id) ?? "Session"} root={!store?.sessions.get(id)?.parent} activity={store?.activity.get(id)} {docked} full={phone.current && !docked} bind:rect bind:element={computer}
+    onclose={tapped => void stopWatching(tapped)} ondock={event => { docked = !docked; if (docked && !panelShown) void showPanel(true, event.detail > 0); }} />{/key}
 {/snippet}
 
 <svelte:window onkeydown={cycle} />
@@ -423,7 +429,7 @@
   </aside>
   {#if drawer || (panel && phone.current)}<button type="button" class="scrim" tabindex="-1" aria-label={drawer ? "Close the menu" : "Close the sessions"}
     onclick={() => void (drawer ? showDrawer(false, true, true) : showPanel(false, true))}></button>{/if}
-  <main inert={drawer || (panel && phone.current)}>
+  <main inert={drawer || (panel && phone.current) || covered}>
     <header>{#if room && session && phone.current}<a class="menu-toggle" href={"/r/" + encodeURIComponent(room)} aria-label={`Back to ${roomName}`} title={`Back to ${roomName}`}
         onclick={event => { const tapped = event.detail > 0; navigate(event); void tick().then(() => menuButton?.focus({ focusVisible: !tapped })); }}><Icon name="back" /></a>
       {:else}<button type="button" class="menu-toggle" bind:this={menuButton} aria-label="Rooms and pages" title="Rooms and pages" aria-expanded={drawer}
@@ -448,8 +454,8 @@
           {#if busy.length > 3}<span class="more">+{busy.length - 3}</span>{/if}<span class="count">{working} working</span>
         {:else}<Icon name="people" />{#if store?.ready}<span class="count phone">{store.sessions.size}</span>{/if}{/if}
         {#if store?.counts.failed && !panelShown}<span class="attention"></span>{/if}</button>{/if}</header>
-    {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} room={roomName} onback={() => void closeSection()} />
-    {:else if section === "rules" && store && !unavailable}<RulesPanel bind:element={page} {store} room={roomName} onback={() => void closeSection()} />
+    {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} room={roomName} onback={event => void closeSection(event.detail > 0)} />
+    {:else if section === "rules" && store && !unavailable}<RulesPanel bind:element={page} {store} room={roomName} onback={event => void closeSection(event.detail > 0)} />
     {:else}<div class="feed">
       {#if blocked}<Blocked kind={blocked} onretry={blocked === "unreachable" ? connect : undefined} />
       {:else if !room && roomsLoaded && !rooms.length}<Blocked kind="no-rooms" />
@@ -469,7 +475,7 @@
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name }))} />
   </main>
   {#if room}
-    <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} class:watching={watching && docked} aria-label="Sessions" tabindex="-1" role={panel && phone.current ? "dialog" : undefined} aria-modal={(panel && phone.current) || undefined} bind:this={members} inert={drawer}>
+    <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} class:watching={watching && docked} aria-label="Sessions" tabindex="-1" role={panel && phone.current && !covered ? "dialog" : undefined} aria-modal={(panel && phone.current && !covered) || undefined} bind:this={members} inert={drawer || covered}>
       <!-- Docked, the computer sits above the session list. -->
       {#if watching && docked && panelShown}{@render computerView(watching)}{/if}
       {#if phone.current}<button type="button" class="handle" aria-label={sheetFull ? "Shrink the sessions sheet" : "Expand the sessions sheet"}
@@ -561,7 +567,7 @@
   }
   .handle { display: none; }
   @media (max-width: 640px) {
-    .handle { all: unset; position: relative; display: block; width: 100%; height: 22px; cursor: grab; touch-action: none; }
+    .handle { all: unset; position: relative; display: block; width: 100%; height: 22px; flex: none; cursor: grab; touch-action: none; }
     .handle::before { content: ""; position: absolute; left: calc(50% - 18px); top: 9px; width: 36px; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--muted) 45%, transparent); }
     .handle:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
     aside.members > header { border-bottom: 0; }
@@ -582,11 +588,9 @@
      button, but it sits on the row line beside the chevron. */
   .fold { all: unset; position: absolute; z-index: 1; top: 50%; transform: translateY(-50%); min-width: 16px; min-height: 24px; display: flex; align-items: center; justify-content: center;
     padding: 0 1px; border-radius: 4px; color: var(--muted); font-size: 11px; line-height: 1.1; font-variant-numeric: tabular-nums; cursor: pointer; }
-  .fold:hover { background: var(--hover); color: var(--text); }
+  @media (hover: hover) { .fold:hover { background: var(--hover); color: var(--text); } }
   .fold:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
   .fold[aria-expanded="false"] :global(svg) { transform: rotate(-90deg); }
-  /* A thumb gets v1's taller target, so a near miss does not open the DM. */
-  @media (hover: none) { .fold { width: 24px; min-height: 44px; } .idle { height: 44px; } }
   .row a.member { flex: 1; min-width: 0; }
   /* "N idle sessions" stands for idle siblings until opened. Its chevron sits in the fold gutter and its words line
      up with the names. */
@@ -594,11 +598,13 @@
     font-size: 12.5px; cursor: pointer; }
   .idle :global(svg) { flex: none; width: 16px; }
   .idle[aria-expanded="false"] :global(svg) { transform: rotate(-90deg); }
-  .idle:hover { background: var(--hover); color: var(--text); }
+  @media (hover: hover) { .idle:hover { background: var(--hover); color: var(--text); } }
   .idle:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .watch { all: unset; display: grid; place-items: center; width: 24px; height: 24px; margin-right: 8px; border-radius: 6px; color: var(--muted); cursor: pointer; }
-  .watch:hover { background: var(--hover); color: var(--text); }
+  @media (hover: hover) { .watch:hover { background: var(--hover); color: var(--text); } }
   .watch:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+  /* A thumb gets v1's taller target, so a near miss does not open the DM. This follows the base rules it overrides. */
+  @media (hover: none) { .fold { width: 24px; min-height: 44px; } .idle { height: 44px; } .watch { width: 40px; height: 40px; margin-right: 0; } }
   /* The name wins: a pointer shows a row's icons on hover, and the keyboard on focus; an open view keeps its icon. */
   @media (hover: hover) { .row:not(:hover, :focus-within) .watch:not(.open) { display: none; } }
   /* The docked computer needs 420 px. It docks beside the feed from 1024 px, where the feed keeps 540 px; below
