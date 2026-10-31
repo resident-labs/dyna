@@ -12,6 +12,7 @@ import (
 )
 
 const backupStamp = "20060102T150405.000000000Z"
+const BackupCopyNoSpace = "no room on the second machine"
 
 // Backup writes a consistent online copy and retains the newest three copies.
 func (s *Store) Backup(ctx context.Context, now time.Time) (string, error) {
