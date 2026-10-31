@@ -18,7 +18,7 @@ func TestConnectEpochSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Unix(1700000000, 0)
-	if err := s.ConsumeConnectNonce(ctx, 4, "first", now, now.Add(time.Minute)); err != nil {
+	if err := s.ConsumeConnectNonceForLink(ctx, 4, 1, "first", now, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -33,10 +33,10 @@ func TestConnectEpochSurvivesRestart(t *testing.T) {
 	if err != nil || !state.Linked || state.Epoch != 4 {
 		t.Fatalf("state = %+v, error = %v", state, err)
 	}
-	if err := s.ConsumeConnectNonce(ctx, 3, "nonce", now, now.Add(time.Minute)); !errors.Is(err, ErrConnectEpoch) {
+	if err := s.ConsumeConnectNonceForLink(ctx, 3, 1, "nonce", now, now.Add(time.Minute)); !errors.Is(err, ErrConnectEpoch) {
 		t.Fatalf("stale nonce: %v", err)
 	}
-	if err := s.ConsumeConnectNonce(ctx, 4, "nonce", now, now.Add(time.Minute)); err != nil {
+	if err := s.ConsumeConnectNonceForLink(ctx, 4, 1, "nonce", now, now.Add(time.Minute)); err != nil {
 		t.Fatalf("stale request consumed nonce: %v", err)
 	}
 }

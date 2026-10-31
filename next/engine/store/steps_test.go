@@ -5,8 +5,37 @@ import (
 	"database/sql"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
+
+func TestUpgradeConnectSessionsFrom48(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var old []string
+	for _, line := range strings.Split(schema, "\n") {
+		if strings.HasPrefix(line, "CREATE TABLE connect_devices ") || strings.HasPrefix(line, "CREATE TABLE connect_sessions ") || strings.HasPrefix(line, "CREATE TABLE connect_revocations ") || strings.HasPrefix(line, "CREATE TABLE transcript_turns ") || strings.HasPrefix(line, "CREATE UNIQUE INDEX transcript_turns_path_start ") || strings.HasPrefix(line, "CREATE INDEX pr_owners_session ") || strings.HasPrefix(line, "CREATE INDEX operations_pending_caller ") {
+			continue
+		}
+		line = strings.Replace(line, ", generation INTEGER NOT NULL DEFAULT 0", "", 1)
+		old = append(old, strings.Replace(line, ", sections BLOB", "", 1))
+	}
+	if _, err = db.Exec(strings.Join(old, "\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec("INSERT INTO meta(key,value) VALUES ('schema_version','48')"); err != nil {
+		t.Fatal(err)
+	}
+	if err = upgrade(db, 48, "", steps, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = compareSchema(db); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestUpgradeSessionWorkFrom42(t *testing.T) {
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
