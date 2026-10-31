@@ -32,6 +32,7 @@ type connectAttempt struct {
 	proxyID       string
 	callbackSent  bool
 	saved         bool
+	ready         chan struct{}
 }
 
 type Connections struct {
@@ -104,14 +105,30 @@ func (c *Connections) start(ctx context.Context, req contract.AccountsConnectReq
 		return contract.AccountsConnectResponse{}, errConnect
 	}
 	attempt := hex.EncodeToString(id[:])
-	var result oauthResponse
 	generation := c.proxy.generation.Load()
+	a := &connectAttempt{provider: req.Provider, proxyProvider: provider, flow: flow, label: req.Label, expires: c.now().Add(time.Hour), generation: generation, status: contract.ConnectPending, account: account, proxyID: proxyID, ready: make(chan struct{})}
+	c.mu.Lock()
+	if len(c.attempts) >= 128 {
+		c.mu.Unlock()
+		return contract.AccountsConnectResponse{}, errConnect
+	}
+	c.attempts[attempt] = a
+	c.mu.Unlock()
+	var result oauthResponse
 	data, err := c.management.requestAttempt(ctx, http.MethodGet, "/v8/management/oauth/auth-url?provider="+provider, nil, attempt)
 	if err != nil || json.Unmarshal(data, &result) != nil {
+		c.mu.Lock()
+		delete(c.attempts, attempt)
+		close(a.ready)
+		c.mu.Unlock()
 		return contract.AccountsConnectResponse{}, errConnect
 	}
 	link, err := url.Parse(result.URL)
 	if err != nil || link.Scheme != "https" || link.Host == "" || result.State == "" || generation != c.proxy.generation.Load() {
+		c.mu.Lock()
+		delete(c.attempts, attempt)
+		close(a.ready)
+		c.mu.Unlock()
 		return contract.AccountsConnectResponse{}, errConnect
 	}
 	seconds := result.ExpiresIn
@@ -121,10 +138,13 @@ func (c *Connections) start(ctx context.Context, req contract.AccountsConnectReq
 	expires := c.now().Add(time.Duration(seconds) * time.Second)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if len(c.attempts) >= 128 || generation != c.proxy.generation.Load() {
+	if generation != c.proxy.generation.Load() || a.status != contract.ConnectPending {
+		delete(c.attempts, attempt)
+		close(a.ready)
 		return contract.AccountsConnectResponse{}, errConnect
 	}
-	c.attempts[attempt] = &connectAttempt{provider: req.Provider, proxyProvider: provider, flow: flow, label: req.Label, state: result.State, expires: expires, generation: generation, status: contract.ConnectPending, account: account, proxyID: proxyID}
+	a.state, a.expires = result.State, expires
+	close(a.ready)
 	return contract.AccountsConnectResponse{Attempt: attempt, Flow: flow, Link: result.URL, Code: result.UserCode, ExpiresAt: expires}, nil
 }
 

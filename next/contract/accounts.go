@@ -92,6 +92,13 @@ type AccountsConnectResponse struct {
 	Code      string      `json:"code,omitempty"`
 	ExpiresAt time.Time   `json:"expiresAt"`
 }
+type AccountsReconnectResponse struct {
+	Attempt   string      `json:"attempt"`
+	Flow      ConnectFlow `json:"flow"`
+	Link      string      `json:"link"`
+	Code      string      `json:"code,omitempty"`
+	ExpiresAt time.Time   `json:"expiresAt"`
+}
 type AccountsConnectCallbackRequest struct {
 	Attempt     string `json:"attempt"`
 	RedirectURL string `json:"redirectUrl"`
