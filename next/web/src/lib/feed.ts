@@ -1,4 +1,4 @@
-import type { Attachment, Conversation, Event, Principal } from "./contract.gen.ts";
+import type { Attachment, BoxState, Conversation, Event, Principal } from "./contract.gen.ts";
 
 export type Row =
   | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[] }
@@ -73,11 +73,19 @@ export function formatTime(value: string): string {
 
 const count = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-// One muted line per work row, such as "lead-web: 2 turns, box ready".
+// What a box change means in a work row's sentence.
+const boxPhrase: Record<BoxState, string> = {
+  pending: "is starting its box", creating: "is starting its box", starting: "is starting its box", ready: "started its box",
+  stopped: "stopped its box", closing: "closed its box", deleted: "closed its box", failed: "had its box fail", lost: "lost its box",
+};
+const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
+
+// One quiet sentence per work row, such as "lead-web finished 2 turns and started its box".
+// Several sessions read as "root, lead-web and builder-feed worked"; the opened row lists each event.
 export function workSummary(events: Event[], name: Name): string {
   const groups = new Map<string, {
     turns: number; jobs: number; operations: Set<string>; images: number; prs: number; pressure: number; grants: number;
-    box?: string; started: boolean; closed: boolean;
+    box?: BoxState; started: boolean; closed: boolean;
   }>();
   for (const event of events) {
     const session = subject(event);
@@ -99,16 +107,16 @@ export function workSummary(events: Event[], name: Name): string {
       case "grant.expired": group.grants++; break;
     }
   }
-  return [...groups].map(([label, group]) => {
-    const parts = [
-      group.started && "started", group.turns && count(group.turns, "turn"), group.jobs && count(group.jobs, "job"),
-      group.operations.size && count(group.operations.size, "request"), group.images && count(group.images, "image"),
-      group.prs && count(group.prs, "pull request"), group.pressure && count(group.pressure, "memory warning"),
-      group.grants && count(group.grants, "host-exec grant") + " expired",
-      group.box && `box ${group.box}`, group.closed && "closed",
-    ].filter(part => typeof part === "string");
-    return parts.length ? `${label}: ${parts.join(", ")}` : `${label}: working`;
-  }).join("; ");
+  const labels = [...groups.keys()];
+  if (labels.length > 1) return `${list(labels.length > 3 ? [...labels.slice(0, 2), `${labels.length - 2} more`] : labels)} worked`;
+  const [label, group] = [...groups][0];
+  const parts = [
+    group.started && "started", group.turns && `finished ${count(group.turns, "turn")}`, group.jobs && `ran ${count(group.jobs, "job")}`,
+    group.operations.size && `made ${count(group.operations.size, "request")}`, group.images && `built ${count(group.images, "image")}`,
+    group.prs && `opened ${count(group.prs, "pull request")}`, group.pressure && `had ${count(group.pressure, "memory warning")}`,
+    group.grants && `had ${count(group.grants, "host-exec grant")} expire`, group.box && boxPhrase[group.box], group.closed && "closed",
+  ].filter(part => typeof part === "string");
+  return `${label} ${parts.length ? list(parts) : "is working"}`;
 }
 
 // One plain line for an event inside an opened work row.
