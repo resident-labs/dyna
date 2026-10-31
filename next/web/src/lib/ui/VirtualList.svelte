@@ -113,11 +113,11 @@
     if (page.end) onend?.();
   }
   const measure = (node: HTMLDivElement) => { virtualizer.measureElement(node); };
-  // The browser checks the end mark after its own layout of each frame. A scroll handler that read scrollHeight after
+  // The browser checks the end mark after its own layout of each frame; the last queued entry is the current state. A scroll handler that read scrollHeight after
   // the rows changed forced an extra layout on each scroll event: 637 ms in a 20 second trace.
   const bottom = (node: HTMLDivElement) => {
     if (!element || !onbottom) return;
-    const report = onbottom, observer = new IntersectionObserver(([entry]) => report(entry.isIntersecting), { root: element, rootMargin: "0px 0px 24px 0px" });
+    const report = onbottom, observer = new IntersectionObserver(entries => report(entries.at(-1)!.isIntersecting), { root: element, rootMargin: "0px 0px 24px 0px" });
     observer.observe(node);
     return () => observer.disconnect();
   };
