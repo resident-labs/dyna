@@ -41,7 +41,7 @@ CREATE TABLE goal_items(room TEXT,goal TEXT,id TEXT,text TEXT,state TEXT,assigne
 CREATE TABLE room_issues(seq INTEGER,room_id TEXT,id TEXT,state TEXT,body TEXT);
 CREATE TABLE room_issue_numbers(room_id TEXT,number INTEGER,message_id TEXT);
 CREATE TABLE questions(key TEXT,room TEXT,state TEXT,body TEXT);
-CREATE TABLE pr_records(room TEXT,repo TEXT,number INTEGER,closed INTEGER,body TEXT);
+CREATE TABLE pr_rows(room TEXT,repo TEXT,number INTEGER,closed INTEGER,body TEXT);
 CREATE TABLE session_records(id TEXT,room_id TEXT,room TEXT,name TEXT,parent TEXT,closed INTEGER,history_only INTEGER,service INTEGER,meta TEXT);
 CREATE TABLE machines(name TEXT,ssh TEXT,enabled INTEGER,local INTEGER,labels TEXT,rooms TEXT);
 CREATE TABLE accounts(id TEXT,ord INTEGER,metadata TEXT);
