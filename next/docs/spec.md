@@ -37,7 +37,7 @@ The owner settled the design on the card. Writing the spec needed the decisions 
    - **Web app and desktop window.** The web listener binds only loopback. Until remote access lands (M3), the owner reaches it through an SSH local forward. After that, a paired device opens it directly, and the desktop window is such a paired client.
    - **CLI.** The owner forwards the owner socket over SSH and passes `--socket`, or runs `dyna` on the engine host over SSH. The engine's `SO_PEERCRED` check sees the owner's UID, because sshd serves the forward as that user. A connection through sshd carries no `dyna-hostexec-` scope, so it is one more way to leave the scope, an accepted risk in 6.4. When remote access lands, the desktop CLI can use a paired device token with scopes instead.
    - **GitHub token.** It stays in `gh`'s own store on the engine host. The engine reads it when it starts, so Dyna's files and unit files hold no token.
-   - **Backups.** The daily `store.db` backup is also copied over SSH to a second machine. A setting names that machine; the owner chooses it.
+   - **Backups.** Each daily backup is also copied over SSH to a second machine, as one archive of `store.db`, `files/`, `transcripts/` and the proxy sign-ins. The archive is encrypted with age to a recipient whose private key is not on the engine host, so the second machine can hold it even when other work runs there. Two engine flags name the machine and the recipient; the owner chooses both. The engine's SSH key can only add a copy (`docs/backup-recv.sh`): it gets no shell and cannot read older copies. Without the flags the engine keeps local copies only.
    - **Reboot.** The user unit starts the engine again. Rootless containers do not restart after a host reboot, so the host check (5.10) marks them `stopped`, and the next wake starts them.
 
 ### Settled owner decisions (do not reopen)
@@ -524,7 +524,7 @@ M1 methods: `host.add`, `room.create`, `session.start`, `session.close`, `sessio
 - **Checkpoints off the writer path (D-582).** The writer connection sets `wal_autocheckpoint=0`. A checkpointer goroutine with its own connection runs `PRAGMA wal_checkpoint(PASSIVE)` when the WAL passes 64 MiB or 30 seconds pass, and `TRUNCATE` when the writer is idle. A `COMMIT` never waits for a checkpoint.
 - **No JSON state.** JSON appears only as typed body columns (`events.body`, `operations.args`, `operations.card`, `grants.hosts`, `grants.commands`), which decode only into contract types and no query reads by field. One exception: a one-time upgrade step may read body fields to fill a new column, as step 15 fills `events.home`. Settings, profiles and harness config stay JSON config files (r1).
 - **Files.** Transcripts are append-only JSONL files per session. Attachments and large outputs are files stored by SHA-256. Rows hold the hash and the size.
-- **Backups.** Each day the engine runs `VACUUM INTO` from a read connection to `backups/`, and keeps 3. Daily backups are for disasters only. Relocation never uses them; it takes a fresh snapshot after writes stop (section 5.10).
+- **Backups.** Each day the engine runs `VACUUM INTO` from a read connection to `backups/`, and keeps 3. Before the first schema step of an upgrade it takes one more copy, stops the upgrade if that copy fails, and keeps the last 3 of these. The second machine keeps 14 archives (decision 14). It refuses one over 16 GiB, or one that would leave it under 50 GiB free, so the backup cannot fill a disk that other work needs. `host.list` carries the last off-host copy and the last failure, and Home marks a copy that is over 48 hours old. Daily backups are for disasters only. Relocation never uses them; it takes a fresh snapshot after writes stop (section 5.10).
 - **Budget.** `store.db` stays under 1 GiB. An archiver moves events older than 180 days for closed sessions to monthly JSONL files under `archive/`. It lands after the cutover, when the growth rate is measured.
 
 ### 4.2 Tables
@@ -1059,7 +1059,7 @@ type RepoSettings struct {
 }
 ```
 
-Tables: `room_repos` ((`room`, `repo`) PK, `is_default`), `repos` (`repo` PK, `default_room`, `merge_policy`, `ci_mode`), `repo_attribution` (`repo`, `kind`, `line`), `devices` (`id` PK, `name`, `token_sha256`, `paired_at`, `revoked_at`) and `device_scopes` (`device`, `scope`).
+Tables: `room_repos` ((`room`, `repo`) PK, `is_default`), `repos` (`repo` PK, `default_room`, `merge_policy`, `ci_mode`), `repo_attribution` (`repo`, `kind`, `line`), `devices` (`id` PK, `name`, `token_sha256`, `paired_at`, `last_seen_at`, `expires_at`, `revoked_at`), `device_scopes` (`device`, `scope`), `pairing_codes` (one live row: `code_hash`, `scopes`, `expires_at`, `tries`) and `connect_sessions` (7.8).
 
 ### 7.7 GitHub request budget (M3)
 
@@ -1071,6 +1071,18 @@ The PR layer (decision 13) reads GitHub instead of keeping state, so it must kee
 4. **Target:** under 300 requests per hour per repository with 20 open PRs. GraphQL has its own point limit, so the target counts REST requests and GraphQL queries together.
 5. **Agent calls share the quota.** `gh` calls from boxes (decision 13) count in the same budget as the poll. When less than 20% of the quota is left, a call from a box fails at once with a typed error that names the reset time, so the poll keeps what is left.
 6. **Later:** webhooks from a GitHub App, through the relay, replace polling after the cutover.
+
+### 7.8 Remote access (M3)
+
+Root approved this design on 2026-10-31. v1's rules carry over. v2 keeps Connect's wire protocol and paths, so the relay does not change (r24). It keeps device state in SQLite instead of JSON files (r1).
+
+- **Listener.** The web listener binds only loopback. The owner puts a proxy in front of it: Tailscale, a named Cloudflare tunnel or Connect's managed tunnel. No proxy counts as proof of who the caller is. Each `--web.route <origin>` names one address, and any other host name gets 421. Each request that changes state, and each WebSocket, must carry that route's own Origin.
+- **Pairing.** `dyna device pair` makes a 10-character code. It works once, lives 5 minutes and dies after 5 wrong tries, and a new code replaces the old one. A code with no `--scope` grants every scope on a loopback route, and `read` and `operate` elsewhere. Settings shows the code and a QR code of `<address>/#pair=<code>`.
+- **Device.** The cookie `dyna_device` is a random 256-bit token: `HttpOnly`, `SameSite=Strict`, and `Secure` on HTTPS. The store keeps only its SHA-256, as v1 does, so imported devices stay paired. Its 30-day expiry slides forward with use, and the engine writes this at most once a day. `dyna web` makes a device too, so an engine restart signs nobody out.
+- **Scopes.** `read`, `operate`, `files`, `terminal`, `computers` and `admin`. Every API method and every operation kind names one in its registration, as a required typed value. The owner socket holds every scope. Only `admin` may pair, list or revoke devices. A session cannot call these methods, because the listener refuses it.
+- **Revoke.** A revoked device fails on its next request. An open stream or terminal rechecks its device every 15 seconds and ends.
+- **Connect.** `engine/connect` ports the machine side: link, mint, session exchange, renew, revoke and hello. Sign-in by passkey stays on the relay, and linking a machine needs the owner's passkey. `cloudflared` runs as an engine child under the supervisor that runs the proxy. `connect_sessions` holds session token hashes, and the machine key, link, relay key set and tunnel token stay files in `<data>/connect`, mode 0700 (8.3). Route handoff, route ranking and the long-poll fallback stay out until a need shows.
+- **Web Push.** A port after the Devices page. The machine sends it, the relay is not involved, and a paired device needs no Connect link. Post text is never in a push.
 
 ## 8. Migration bundle and cutover
 
@@ -1161,7 +1173,7 @@ The external Opus agent runs steps 3 to 10 from a prompt we write. The owner doe
 5. **Tag `v1-final`** on main. Main holds `cmd/dyna-export` and `next/` at M3.
 6. **Export.** Build `cmd/dyna-export` at `v1-final` on hermeslab (r19). Run it on the desktop against the final backup, read-only. `dyna-export verify` compares the counts with SQL counts. Any difference stops the cutover. Copy the bundle and the Connect secrets (`machine.key`, `jwks.json`, `link.json`, `tunnel-token`) to the engine host over SSH, with mode 0600 (decision 14).
 7. **Cutover commit.** One commit moves `next/*` to the repository root and deletes the old tree. The owner merges it on GitHub, because the v1 merge service is stopped.
-8. **Install v2 on the engine host** (hermeslab) from the cutover commit, built there. Its store is `~/.local/share/dyna/store.db`. Its systemd user unit replaces the trial's `dyna-next` unit, and the trial's CLIProxyAPI auth folder is copied into the new data folder on the same host. The unit uses `KillMode=mixed` and `TimeoutStopSec` greater than 60 seconds to protect model calls during shutdown (5.7).
+8. **Install v2 on the engine host** (hermeslab) from the cutover commit, built there. Its store is `~/.local/share/dyna/store.db`. Its systemd user unit replaces the trial's `dyna-next` unit, and the trial's CLIProxyAPI auth folder is copied into the new data folder on the same host. The unit uses `KillMode=mixed` and `TimeoutStopSec` greater than 60 seconds to protect model calls during shutdown (5.7). It starts the engine with `--web.listen 127.0.0.1:7457`, because the linked tunnel's ingress names v1's port.
 9. **Import.** `dyna import <bundle>` writes the store in one transaction and records the bundle hash. It copies the Connect secrets file to file with mode 0600, so they never enter the bundle, and deletes the copies it read. On the desktop, the v1 data folder moves to `~/.local/share/dyna-v1/`. The owner deletes that folder after the first good week.
 10. **Start.** `dyna engine` starts each room's root in a box. Each root gets one `migrate.handoff` event with its open goals, PRs, questions, issue count and handoff cards.
 11. **Owner checks.** The owner checks that the CLIProxyAPI sign-ins from the trial work (the auth folder moves with the engine), opens a room from a paired device, and turns auto-update back on.
@@ -1234,7 +1246,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | accounts | M1 one sign-in in CLIProxyAPI; M3 the Accounts page (5.12) with sign-in, keys and quota | model calls need one account at M1 |
 | shells | M1 Pi's bash tool in the box; M2 the Dyna shell server with secret masking | every turn runs commands |
 | nodes | M1 hermeslab; M3 Boat and pve | renamed hosts |
-| settings | M1 store; M3 import and daily backups, also copied to a second machine that a setting names (decision 14) | backups are required at the gate |
+| settings | M1 store; M3 import, daily backups and the encrypted copy to a second machine (4.1, decision 14) | backups are required at the gate |
 | approvals | M2 | one Submit |
 | sessions, session-dormancy | M1 one session; M2 the tree, children, session dormancy, turn stop and room pause | dormant boxes stop to save memory; room pause holds delivery without interrupting active work |
 | web-app, web-server, room-feed, session-view | M2 | the room view, ported |
@@ -1249,6 +1261,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | hooks | M3 | typed subscriptions, imported |
 | maintenance | daily backups (4.1), 14-day expiry of archive refs (5.9), and daily host maintenance | Each ready host prunes dangling Podman images and runs `git gc --no-prune` on bare repository caches. The latter preserves objects borrowed by boxes. |
 | remote-access, connect, device-scopes | M3, right after the box reconciler and before workflows (root, 2026-10-31) | phone access must work on cutover day, and the desktop is a client of the always-on engine (decision 14) |
+| web-push | M3, a port after the Devices page (root, 2026-10-31; 7.8) | a phone client needs alerts; a paired device can use it with no Connect link |
 | settings-accounts, settings-devices | M3 | sign in again and pair devices after the cutover |
 | skills | M3 | small catalog; fl-rea uses it |
 | install | M3 the install script and guard path; after: release pipeline, WSL image, branch QA | other installs need the guard at the cutover |
