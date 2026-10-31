@@ -39,7 +39,7 @@ func TestReconnectRequiresRawMatchingIdentity(t *testing.T) {
 	next := old
 	next.Record = []byte(`{"metadata":{"email":"a-b@example.test","sub":"two"}}`)
 	rpc := AuthRPC{Store: st, Connections: c}
-	if err := rpc.Save(AuthSave{Record: next, Create: true, Attempt: a.Attempt}, &struct{}{}); err == nil {
+	if err := rpc.Save(AuthSave{Record: next, Create: true, Attempt: a.Attempt, Identity: OAuthIdentity{Subject: "two"}}, &struct{}{}); err == nil {
 		t.Fatal("different identity replaced the saved credential")
 	}
 	rows, err := st.ListProxyAuths(ctx)
@@ -70,6 +70,19 @@ func TestReconnectRequiresRawMatchingIdentity(t *testing.T) {
 	}
 }
 
+type pausedReconnectStore struct {
+	*store.Store
+	entered, release chan struct{}
+}
+
+func (s pausedReconnectStore) SaveProxyAuth(ctx context.Context, record private.ProxyAuth, create bool) error {
+	if !create {
+		close(s.entered)
+		<-s.release
+	}
+	return s.Store.SaveProxyAuth(ctx, record, create)
+}
+
 func TestReconnectPreventsConcurrentReplacement(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.Open(t.TempDir())
@@ -86,7 +99,8 @@ func TestReconnectPreventsConcurrentReplacement(t *testing.T) {
 	}))
 	defer server.Close()
 	p := &Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
-	c := p.Connections("key", st, time.Now)
+	paused := pausedReconnectStore{Store: st, entered: make(chan struct{}), release: make(chan struct{})}
+	c := p.Connections("key", paused, time.Now)
 	a, err := c.Reconnect(ctx, "account", old.ID, contract.ProviderAnthropic)
 	if err != nil {
 		t.Fatal(err)
@@ -94,12 +108,20 @@ func TestReconnectPreventsConcurrentReplacement(t *testing.T) {
 	if _, err := c.Reconnect(ctx, "account", old.ID, contract.ProviderAnthropic); err == nil {
 		t.Fatal("concurrent reconnect started")
 	}
-	rpc := AuthRPC{Store: st, Connections: c}
+	rpc := AuthRPC{Store: paused, Connections: c}
 	old.Record = []byte(`{"metadata":{"email":"invented@example.test"},"grant":"new"}`)
-	if err := rpc.Save(AuthSave{Record: old, Create: true, Attempt: a.Attempt}, &struct{}{}); err != nil {
+	saved := make(chan error, 1)
+	go func() {
+		saved <- rpc.Save(AuthSave{Record: old, Create: true, Attempt: a.Attempt, Identity: OAuthIdentity{Email: "invented@example.test"}}, &struct{}{})
+	}()
+	<-paused.entered
+	started := make(chan error, 1)
+	go func() { _, err := c.Reconnect(ctx, "account", old.ID, contract.ProviderAnthropic); started <- err }()
+	close(paused.release)
+	if err := <-saved; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Reconnect(ctx, "account", old.ID, contract.ProviderAnthropic); err == nil {
+	if err := <-started; err == nil {
 		t.Fatal("reconnect started before saved grant adoption")
 	}
 }
@@ -143,7 +165,7 @@ func TestStatusDoesNotBlockReconnectSave(t *testing.T) {
 	<-entered
 	rpc := AuthRPC{Store: st, Connections: c}
 	old.Record = []byte(`{"metadata":{"email":"invented@example.test"},"grant":"new"}`)
-	if err := rpc.Save(AuthSave{Record: old, Create: true, Attempt: a.Attempt}, &struct{}{}); err != nil {
+	if err := rpc.Save(AuthSave{Record: old, Create: true, Attempt: a.Attempt, Identity: OAuthIdentity{Email: "invented@example.test"}}, &struct{}{}); err != nil {
 		close(release)
 		t.Fatal(err)
 	}
@@ -177,7 +199,7 @@ func TestRemoveCancelsUnsavedReconnect(t *testing.T) {
 	}
 	c.CancelReconnect("account")
 	rpc := AuthRPC{Store: st, Connections: c}
-	if err := rpc.Save(AuthSave{Record: old, Create: true, Attempt: a.Attempt}, &struct{}{}); err == nil {
+	if err := rpc.Save(AuthSave{Record: old, Create: true, Attempt: a.Attempt, Identity: OAuthIdentity{Email: "invented@example.test"}}, &struct{}{}); err == nil {
 		t.Fatal("cancelled attempt overwrote bound credential")
 	}
 	if err := st.DeleteProxyAuth(ctx, old.ID); err != nil {
@@ -186,7 +208,7 @@ func TestRemoveCancelsUnsavedReconnect(t *testing.T) {
 	if err := st.RemoveAccount(ctx, "account"); err != nil {
 		t.Fatal(err)
 	}
-	if err := rpc.Save(AuthSave{Record: old, Create: true, Attempt: a.Attempt}, &struct{}{}); err == nil {
+	if err := rpc.Save(AuthSave{Record: old, Create: true, Attempt: a.Attempt, Identity: OAuthIdentity{Email: "invented@example.test"}}, &struct{}{}); err == nil {
 		t.Fatal("late reconnect recreated a removed credential")
 	}
 	rows, err := st.ListProxyAuths(ctx)
@@ -255,11 +277,11 @@ func TestReconnectSaveAttributionAndExpiry(t *testing.T) {
 		t.Fatal("bound record changed")
 	}
 	now = a.ExpiresAt
-	if err := rpc.Save(AuthSave{Record: next, Create: true, Attempt: a.Attempt}, &struct{}{}); err == nil {
+	if err := rpc.Save(AuthSave{Record: next, Create: true, Attempt: a.Attempt, Identity: OAuthIdentity{Email: "invented@example.test"}}, &struct{}{}); err == nil {
 		t.Fatal("expired attempt saved")
 	}
 	now = now.Add(-time.Second)
-	if err := rpc.Save(AuthSave{Record: next, Create: true, Attempt: a.Attempt}, &struct{}{}); err != nil {
+	if err := rpc.Save(AuthSave{Record: next, Create: true, Attempt: a.Attempt, Identity: OAuthIdentity{Email: "invented@example.test"}}, &struct{}{}); err != nil {
 		t.Fatal(err)
 	}
 	now = a.ExpiresAt

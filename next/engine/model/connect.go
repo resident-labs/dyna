@@ -128,6 +128,14 @@ func (c *Connections) start(ctx context.Context, req contract.AccountsConnectReq
 		c.mu.Unlock()
 		return contract.AccountsConnectResponse{}, errConnect
 	}
+	if account != "" {
+		for _, entry := range c.attempts {
+			if entry.account == account && entry.generation == generation && ((entry.status == contract.ConnectPending && c.now().Before(entry.expires)) || (entry.saved && entry.status != contract.ConnectConnected)) {
+				c.mu.Unlock()
+				return contract.AccountsConnectResponse{}, errConnect
+			}
+		}
+	}
 	c.attempts[attempt] = a
 	c.mu.Unlock()
 	var result oauthResponse
