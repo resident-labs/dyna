@@ -29,6 +29,8 @@ type exportReport struct {
 	UnknownModels         []profileGap        `json:"unknownModels"`
 	SkippedAccounts       []string            `json:"skippedAccounts"`
 	UnknownScopes         []string            `json:"unknownScopes"`
+	UnverifiedHooks       int                 `json:"unverifiedHooks"`
+	UnassignedHooks       int                 `json:"unassignedHooks"`
 	UnsupportedHooks      []hookGap           `json:"unsupportedHooks"`
 	RepositoryGaps        []repoGap           `json:"repositoryGaps"`
 	LimitGaps             []limitGap          `json:"limitGaps"`
@@ -61,11 +63,19 @@ func buildBundle(db *sql.DB, backup, data, feeds, config, commit string, cap cap
 		return g, nil, report, err
 	}
 	report.RepositoryGaps = repos.Gaps
-	hooks, hookGaps, err := readHooks(db, repos.RepoRooms, cap, names)
+	hooks, hookGaps, err := readHooks(db, repos.RepoRooms, repos.PathRooms, cap, names)
 	if err != nil {
 		return g, nil, report, err
 	}
 	report.UnsupportedHooks = hookGaps
+	for _, gap := range hookGaps {
+		if gap.UnverifiedCheckout {
+			report.UnverifiedHooks++
+		}
+		if gap.WithoutRoom {
+			report.UnassignedHooks++
+		}
+	}
 	author := func(id string) (contract.ImportedAuthor, error) { return resolveAuthor(db, id) }
 	globalRules, err := readRules(db, "*", author)
 	if err != nil {

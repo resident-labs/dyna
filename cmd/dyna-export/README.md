@@ -27,9 +27,13 @@ append-only room feeds in place, without copying them.
   that holds each repository. The operator records the archive refs created
   during cutover, and captures enabled skills into the data tree. Include each
   active repository hook's main checkout path, even when a room uses a worktree
-  or another clone. Give both paths the same verified identity. When no identity
-  is verified, omit the room checkout mapping or set its identity to an empty
-  string. The exporter skips it and records a room handoff.
+  or another clone. Give both paths the same verified identity when known.
+  When no identity is verified, omit the room checkout mapping or set its
+  identity to an empty string. The exporter skips it and records a room handoff.
+  For an unverified hook checkout alias, the operator may supply `hookRooms`
+  with the registered room names. Otherwise the exporter uses only exact
+  checkout matches; an unassigned hook appears in the private report only.
+  Global hooks also appear in the private report only.
 - `--commit` is the full 40-character reviewed source commit.
 - `--out` names a new directory; the exporter never replaces one.
 
