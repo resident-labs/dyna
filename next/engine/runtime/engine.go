@@ -250,6 +250,7 @@ func Run(ctx context.Context, cfg Config) error {
 		<-reconcilerDone
 		service.Reconciler().Wait()
 	}()
+	lastDormant := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
@@ -257,6 +258,12 @@ func Run(ctx context.Context, cfg Config) error {
 			waitForDrain(drain.Begin(), time.After(60*time.Second))
 			return nil
 		case <-ticker.C:
+			if now := time.Now(); !now.Before(lastDormant.Add(time.Hour)) {
+				if err := service.CloseDormant(ctx); err != nil {
+					log.Printf("dormant close sweep: %v", err)
+				}
+				lastDormant = now
+			}
 			if err := service.ExpireOperations(ctx); err != nil {
 				log.Printf("operation expiry sweep: %v", err)
 			}
