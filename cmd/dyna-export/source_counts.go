@@ -18,7 +18,7 @@ func countRoomSQL(db *sql.DB, roomID string) (roomSQLCounts, error) {
  (SELECT COUNT(*) FROM goal_items i JOIN goals g ON g.room=i.room AND g.id=i.goal WHERE i.room=? AND g.state='active'),
  (SELECT COUNT(*) FROM room_issues WHERE room_id=? AND state IN ('open','goal')),
  (SELECT COUNT(*) FROM questions WHERE room=? AND state='open'),
- (SELECT COUNT(*) FROM pr_records WHERE room=? AND closed=0 AND lower(json_extract(body,'$.record.host'))='github.com'),
+ (SELECT COUNT(*) FROM pr_rows WHERE room=? AND closed=0 AND lower(json_extract(body,'$.record.host'))='github.com'),
  (SELECT COUNT(*) FROM session_records WHERE room_id=? AND closed=0 AND history_only=0 AND service=0 AND json_extract(meta,'$.run') IS NULL)`,
 		roomID, roomID, roomID, roomID, roomID, roomID, roomID).Scan(&c.Rules, &c.Goals, &c.GoalItems, &c.Issues, &c.Questions, &c.PRs, &c.Sessions)
 	if err != nil {
