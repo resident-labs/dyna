@@ -47,7 +47,8 @@ func (in *Input) Run(ctx context.Context) {
 		select {
 		case batch := <-in.queue:
 			sendCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			if err := in.Send(sendCtx, batch); err != nil {
+			batches, release := in.collect(batch)
+			if err := in.Send(sendCtx, release, batches...); err != nil {
 				log.Printf("computer input: %v", err)
 			}
 			cancel()
@@ -84,8 +85,22 @@ var virtualKeys = map[string]int{
 	"ArrowDown": 40, "Delete": 46,
 }
 
-// Send dispatches a batch in order. It drops the connection on an error so the next batch reconnects.
-func (in *Input) Send(ctx context.Context, batch contract.ComputerInputBatch) error {
+// collect adds to first every batch already queued when a drop happened, so the release that follows
+// comes after all of them. The queue is only drained from one worker, so len is exact.
+func (in *Input) collect(first contract.ComputerInputBatch) ([]contract.ComputerInputBatch, bool) {
+	batches := []contract.ComputerInputBatch{first}
+	if !in.overflow.Swap(false) {
+		return batches, false
+	}
+	for range len(in.queue) {
+		batches = append(batches, <-in.queue)
+	}
+	return batches, true
+}
+
+// Send dispatches batches in order, then lifts every held key and button if release is set. It drops the
+// connection on an error so the next batch reconnects.
+func (in *Input) Send(ctx context.Context, release bool, batches ...contract.ComputerInputBatch) error {
 	if in.d == nil {
 		d, err := Connect(ctx, in.Base)
 		if err != nil {
@@ -93,19 +108,20 @@ func (in *Input) Send(ctx context.Context, batch contract.ComputerInputBatch) er
 		}
 		in.d = d
 	}
-	if in.overflow.Swap(false) {
-		if err := in.releaseAll(ctx, in.d); err != nil {
-			in.d.Close()
-			in.d = nil
-			return err
+	var err error
+	for _, batch := range batches {
+		if err = in.send(ctx, in.d, batch); err != nil {
+			break
 		}
 	}
-	if err := in.send(ctx, in.d, batch); err != nil {
+	if err == nil && release {
+		err = in.releaseAll(ctx, in.d)
+	}
+	if err != nil {
 		in.d.Close()
 		in.d = nil
-		return err
 	}
-	return nil
+	return err
 }
 
 // releaseAll lifts every key and mouse button the owner holds, at the last mouse position.
