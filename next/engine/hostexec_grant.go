@@ -29,29 +29,19 @@ func (s *Service) HostexecGrant() approve.Entry {
 			if a.Mode == contract.GrantModePreapproved {
 				mode = "without asking each time"
 			}
-			quote := func(value string) string {
-				if value == "" {
-					return strconv.Quote(value)
-				}
-				for _, c := range value {
-					if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("_./:=@%+-", c)) {
-						return strconv.Quote(value)
-					}
-				}
-				return value
-			}
+
 			var hosts, commands []string
 			for _, host := range a.Hosts {
 				if host == contract.AllHosts {
 					hosts = append(hosts, "every host, including the control plane")
 				} else {
-					hosts = append(hosts, quote(string(host)))
+					hosts = append(hosts, quoteHostexec(string(host)))
 				}
 			}
 			for _, command := range a.Commands {
 				var argv []string
 				for _, arg := range append([]string{command.Program}, command.Args...) {
-					argv = append(argv, quote(arg))
+					argv = append(argv, quoteHostexec(arg))
 				}
 				if command.Program == "*" {
 					argv[0] = "any program"
@@ -84,7 +74,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 			err := json.Unmarshal(data, &a)
 			return a, err
 		},
-		Execute: func(ctx context.Context, args contract.OpArgs, _ contract.Principal) contract.OpResult {
+		Execute: func(ctx context.Context, _ contract.OpID, args contract.OpArgs, _ contract.Principal) contract.OpResult {
 			a := args.(contract.HostexecGrantArgs)
 			now := s.now()
 			value, err := id("grant_", now)
@@ -109,4 +99,16 @@ func (s *Service) ExpireHostexecGrants(ctx context.Context) error {
 	return s.store.ExpireGrants(ctx, s.now(), func(room contract.RoomID, grant contract.GrantID) (contract.Event, error) {
 		return s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.GrantExpired{Grant: grant})
 	})
+}
+
+func quoteHostexec(value string) string {
+	if value == "" {
+		return strconv.Quote(value)
+	}
+	for _, c := range value {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("_./:=@%+-", c)) {
+			return strconv.Quote(value)
+		}
+	}
+	return value
 }

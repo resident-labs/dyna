@@ -172,6 +172,12 @@ func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs, error) {
 			return nil, err
 		}
 		return v, nil
+	case "hostexec.run":
+		var v HostexecRunArgs
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case "pr.open":
 		var v PrOpenArgs
 		if err := json.Unmarshal(data, &v); err != nil {
