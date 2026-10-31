@@ -8,7 +8,33 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestHeadChunkDeadlineDoesNotBlockLaterChunk(t *testing.T) {
+	old := withHeadChunkTimeout
+	defer func() { withHeadChunkTimeout = old }()
+	calls := 0
+	withHeadChunkTimeout = func(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+		calls++
+		if calls <= 3 {
+			return context.WithDeadline(ctx, time.Unix(0, 0))
+		}
+		return context.WithTimeout(ctx, d)
+	}
+	g := GitHub{run: func(ctx context.Context, cmd *exec.Cmd) error {
+		fmt.Fprint(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n"+`{"data":{"r0":{"defaultBranchRef":{"name":"main"},"p21":{"number":21,"state":"OPEN","headRefOid":"`+strings.Repeat("a", 40)+`"}}}}`)
+		return nil
+	}}
+	var records []*Record
+	for i := 1; i <= 21; i++ {
+		records = append(records, &Record{Key: fmt.Sprint(i), Host: "github.com", Repo: "owner/repo", Number: i})
+	}
+	heads, _, err := g.readHeads(t.Context(), records)
+	if err == nil || heads["1"].Err == nil || heads["21"].Err != nil || heads["21"].Pull.Number != 21 || calls != 4 {
+		t.Fatalf("calls=%d first=%+v last=%+v err=%v", calls, heads["1"], heads["21"], err)
+	}
+}
 
 func TestHeadChunksSplitFailedBatch(t *testing.T) {
 	var sizes []int
