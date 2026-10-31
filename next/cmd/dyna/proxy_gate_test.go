@@ -82,6 +82,11 @@ func TestCompletionsProxyGate(t *testing.T) {
 			http.Redirect(w, r, strings.Replace(redirect.URL, "127.0.0.1", "localhost", 1), http.StatusTemporaryRedirect)
 			return
 		}
+		if r.URL.Path == "/v1/messages" {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"id":"fixture","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
+			return
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"id\":\"fixture\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n")
 	}))
@@ -161,6 +166,26 @@ func TestCompletionsProxyGate(t *testing.T) {
 		if err := service.ActivateDynaCredential(ctx, item.id, item.prefix+"/"+item.model, item.prefix); err != nil {
 			t.Fatal(err)
 		}
+	}
+	plan := &coreauth.Auth{ID: "real-plan", Provider: "claude", Status: coreauth.StatusActive, Attributes: map[string]string{"base_url": upstream.URL}, Metadata: map[string]any{"access_token": "sk-ant-oat-fixture"}}
+	if err := service.RegisterDynaCredential(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ActivateDynaCredential(ctx, plan.ID, "plan_anthropic/claude-sonnet-4-6", "plan_anthropic"); err != nil {
+		t.Fatal(err)
+	}
+	planBody := `{"model":"plan_anthropic/claude-sonnet-4-6","max_tokens":20,"messages":[{"role":"user","content":"hello"}]}`
+	planRequest, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+listener.Addr().String()+"/v1/messages", strings.NewReader(planBody))
+	planRequest.Header.Set("Authorization", "Bearer client")
+	planRequest.Header.Set("Content-Type", "application/json")
+	planResponse, err := http.DefaultClient.Do(planRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planData, _ := io.ReadAll(planResponse.Body)
+	planResponse.Body.Close()
+	if planResponse.StatusCode != http.StatusOK || !strings.Contains(string(planData), "hello") || gotPath != "/v1/messages" || gotModel != "claude-sonnet-4-6" || gotAuth != "Bearer sk-ant-oat-fixture" {
+		t.Fatalf("Claude plan status=%d body=%q path=%q model=%q", planResponse.StatusCode, planData, gotPath, gotModel)
 	}
 	call := func(model string) (int, string) {
 		payload, _ := json.Marshal(struct {
