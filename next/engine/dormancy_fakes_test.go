@@ -144,42 +144,42 @@ func (*retryHost) Inspect(_ context.Context, id contract.BoxID) (box.ContainerSt
 	return box.ContainerStatus{Box: id, Running: true}, true, nil
 }
 
-func (checkingBoxes) CurrentImage(context.Context, contract.SessionID, contract.HostName) (string, error) {
-	return "image", nil
+func (checkingBoxes) CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error) {
+	return box.Image{Tag: "image"}, nil
 }
-func (*recoveryBoxes) CurrentImage(context.Context, contract.SessionID, contract.HostName) (string, error) {
-	return "image", nil
+func (*recoveryBoxes) CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error) {
+	return box.Image{Tag: "image"}, nil
 }
-func (*retryTimeoutBoxes) CurrentImage(context.Context, contract.SessionID, contract.HostName) (string, error) {
-	return "image", nil
+func (*retryTimeoutBoxes) CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error) {
+	return box.Image{Tag: "image"}, nil
 }
-func (*blockingTimeoutBoxes) CurrentImage(context.Context, contract.SessionID, contract.HostName) (string, error) {
-	return "image", nil
+func (*blockingTimeoutBoxes) CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error) {
+	return box.Image{Tag: "image"}, nil
 }
-func (unavailableBoxes) CurrentImage(context.Context, contract.SessionID, contract.HostName) (string, error) {
-	return "image", nil
+func (unavailableBoxes) CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error) {
+	return box.Image{Tag: "image"}, nil
 }
-func (blockingBoxes) CurrentImage(context.Context, contract.SessionID, contract.HostName) (string, error) {
-	return "image", nil
+func (blockingBoxes) CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error) {
+	return box.Image{Tag: "image"}, nil
 }
-func (cancelOnRemove) CurrentImage(context.Context, contract.SessionID, contract.HostName) (string, error) {
-	return "image", nil
+func (cancelOnRemove) CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error) {
+	return box.Image{Tag: "image"}, nil
 }
-func (*recordingBoxes) CurrentImage(context.Context, contract.SessionID, contract.HostName) (string, error) {
-	return "image", nil
+func (*recordingBoxes) CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error) {
+	return box.Image{Tag: "image"}, nil
 }
-func (*heldParentBox) CurrentImage(context.Context, contract.SessionID, contract.HostName) (string, error) {
-	return "image", nil
+func (*heldParentBox) CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error) {
+	return box.Image{Tag: "image"}, nil
 }
-func (closingInterleaveBox) CurrentImage(context.Context, contract.SessionID, contract.HostName) (string, error) {
-	return "image", nil
+func (closingInterleaveBox) CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error) {
+	return box.Image{Tag: "image"}, nil
 }
-func (heldRemoveBox) CurrentImage(context.Context, contract.SessionID, contract.HostName) (string, error) {
-	return "image", nil
+func (heldRemoveBox) CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error) {
+	return box.Image{Tag: "image"}, nil
 }
-func (fakeBoxes) CurrentImage(context.Context, contract.SessionID, contract.HostName) (string, error) {
-	return "image", nil
+func (fakeBoxes) CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error) {
+	return box.Image{Tag: "image"}, nil
 }
-func (*retryHost) CurrentImage(context.Context, contract.SessionID, contract.HostName) (string, error) {
-	return "image", nil
+func (*retryHost) CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error) {
+	return box.Image{Tag: "image"}, nil
 }

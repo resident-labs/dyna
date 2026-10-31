@@ -357,7 +357,32 @@ func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 		args = append(args, "--label", l.Key+"="+l.Value)
 	}
 	args = append(args, c.Image, "--", "/opt/dyna/bin/current/dyna", "box-agent")
-	_, err := h.run(ctx, args...)
+	var checks string
+	for _, need := range c.Needs {
+		switch need {
+		case box.NeedNestedContainers:
+			checks += "test -c /dev/net/tun || { printf nested-containers; exit 254; }; "
+			args = append(args[:len(args)-4], append([]string{"--device", "/dev/net/tun", "--security-opt", "unmask=/proc/sys"}, args[len(args)-4:]...)...)
+		case box.NeedKVM:
+			checks += "test -c /dev/kvm || { printf kvm; exit 254; }; "
+			args = append(args[:len(args)-4], append([]string{"--device", "/dev/kvm"}, args[len(args)-4:]...)...)
+		}
+	}
+	if checks == "" {
+		_, err := h.run(ctx, args...)
+		return err
+	}
+	command := append([]string{"bash", "-c", checks + `exec "$@"`, "dyna-devices"}, args...)
+	out, err := h.run(ctx, command...)
+	var exit remoteExit
+	if errors.As(err, &exit) && exit == 254 {
+		switch string(out) {
+		case string(box.NeedNestedContainers):
+			return box.MissingDevice{Need: box.NeedNestedContainers}
+		case string(box.NeedKVM):
+			return box.MissingDevice{Need: box.NeedKVM}
+		}
+	}
 	return err
 }
 func (h *Host) StartContainer(ctx context.Context, id contract.BoxID) error {
