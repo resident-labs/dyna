@@ -104,11 +104,17 @@ func (d devService) SessionList(ctx context.Context, p contract.Principal, req c
 	return list, problem
 }
 
-// ComputerWatch streams a 16:10 desktop with a bar that moves each frame, twice a second.
+// ComputerWatch streams a 16:10 desktop with a bar that moves each frame, twice a second. The first frame comes after
+// 4 s, as after an engine restart, so the Connecting state can be seen.
 func (devService) ComputerWatch(ctx context.Context, _ contract.SessionID) (<-chan []byte, *contract.Error) {
 	frames := make(chan []byte)
 	go func() {
 		defer close(frames)
+		select {
+		case <-time.After(4 * time.Second):
+		case <-ctx.Done():
+			return
+		}
 		for i := 0; ; i++ {
 			shot := image.NewRGBA(image.Rect(0, 0, 1280, 800))
 			for y := range 800 {
