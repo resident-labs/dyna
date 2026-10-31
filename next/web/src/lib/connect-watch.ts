@@ -1,11 +1,11 @@
 import { allowedOrigin, deviceKey, getPin, hello, proof, verifyHello, type Pin } from "./connect.ts";
 
 interface Routes { machine: string; current: string; routes: string[]; expires: string }
-function isRoutes(value: unknown): value is Routes {
-  if (typeof value !== "object" || value === null) return false;
-  return "machine" in value && typeof value.machine === "string" && "current" in value && typeof value.current === "string" &&
-    "expires" in value && typeof value.expires === "string" && "routes" in value && Array.isArray(value.routes) &&
-    value.routes.every((route: unknown) => typeof route === "string" && allowedOrigin(route));
+export function parseRoutes(value: unknown): Routes | undefined {
+  if (typeof value !== "object" || value === null || !("machine" in value) || typeof value.machine !== "string" ||
+    !("current" in value) || typeof value.current !== "string" || !("expires" in value) || typeof value.expires !== "string" ||
+    !("routes" in value) || !Array.isArray(value.routes) || !value.routes.every((route: unknown) => typeof route === "string")) return;
+  return { machine: value.machine, current: value.current, expires: value.expires, routes: value.routes.filter(allowedOrigin) };
 }
 async function post(path: string, body: object): Promise<Response> {
   return fetch(path, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-Dyna": "1" }, body: JSON.stringify(body) });
@@ -15,9 +15,8 @@ async function post(path: string, body: object): Promise<Response> {
 export async function watchConnect(): Promise<{ stream(up: boolean): void; stop(): void } | undefined> {
   const response = await post("/api/connect/routes", {}).catch(() => undefined);
   if (!response?.ok) return;
-  const value: unknown = await response.json();
-  if (!isRoutes(value) || value.current !== location.origin) return;
-  const data: Routes = value;
+  const data = parseRoutes(await response.json());
+  if (!data || data.current !== location.origin) return;
   const saved = await getPin(data.machine);
   if (!saved) return;
   const pin: Pin = saved;

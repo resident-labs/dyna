@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
-  import { allowedOrigin, hello, getPin, fingerprint, type Hello, type Pin } from "../connect.ts";
+  import { allowedOrigin, hello, getOriginPin, getPin, putPin, fingerprint, type Hello, type Pin } from "../connect.ts";
   import { beginConnect, checkPin, finishConnect, type Landing, type ConnectProblem } from "../connect-flow.ts";
   import PairScreen from "./PairScreen.svelte";
 
@@ -34,9 +34,10 @@
         const found = await hello(location.origin);
         if (!found) { pairing = true; return; }
         greeting = found;
-        pin = await getPin(found.machine);
+        pin = await getOriginPin(location.origin) ?? await getPin(found.machine);
         const checked = await checkPin(found, pin);
         if (checked) await show(checked);
+        else if (pin) await putPin(pin);
       } catch { result = { kind: "failed", problem: "unreachable" }; }
       finally { loading = false; }
       await tick();
