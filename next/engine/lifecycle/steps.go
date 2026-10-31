@@ -155,11 +155,10 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		if imageErr != nil {
 			image.Tag = b.Image
 			next.Reason = imageErr.Error()
-			if slice != b.Slice {
-				return imageErr
-			}
 		}
-		if slice != b.Slice || image.Tag != b.Image {
+		if imageErr != nil && slice != b.Slice {
+			workErr = imageErr
+		} else if slice != b.Slice || image.Tag != b.Image {
 			r.mu.Lock()
 			repos := r.repos
 			r.mu.Unlock()
