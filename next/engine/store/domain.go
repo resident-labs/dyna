@@ -15,6 +15,14 @@ import (
 var ErrParentClosing = errors.New("parent session is closing")
 var ErrSessionClosing = errors.New("session is closing")
 var ErrVisualForbidden = errors.New("visual belongs to another room or author")
+
+type VisualSupersededError struct {
+	Event   contract.EventID
+	Version int
+}
+
+func (e *VisualSupersededError) Error() string { return "visual has a newer version" }
+
 var ErrParentHostAbsent = errors.New("sameHost requires a parent with an assigned host")
 
 // Session describes the stored session and its box.
@@ -303,7 +311,7 @@ func (s *Store) InsertDelivery(ctx context.Context, tx *sql.Tx, seq int64, d con
 }
 
 func (s *Store) Post(ctx context.Context, event contract.Event, deliveries []contract.Delivery) (int64, error) {
-	_, seq, err := s.PostOnce(ctx, event, deliveries)
+	_, seq, err := s.PostOnce(ctx, event, deliveries, "", "")
 	return seq, err
 }
 
@@ -322,7 +330,7 @@ func (s *Store) PostByClientID(ctx context.Context, room contract.RoomID, from c
 
 // PostOnce appends a post. When the same author already posted the same client ID in the room, it appends
 // nothing and returns that first post.
-func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries []contract.Delivery, visualUpdate ...contract.EventID) (contract.EventID, int64, error) {
+func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries []contract.Delivery, visualUpdate, visualReply contract.EventID) (contract.EventID, int64, error) {
 	var seq int64
 	id := event.ID
 	err := s.Write(ctx, func(tx *sql.Tx) error {
@@ -336,6 +344,29 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 				return err
 			}
 		}
+		if visualReply != "" {
+			var visualID contract.EventID
+			var version, current int
+			err := tx.QueryRowContext(ctx, `SELECT json_extract(a.value,'$.visual.id'), json_extract(a.value,'$.visual.version')
+				FROM events e, json_each(e.body,'$.attachments') a
+				WHERE e.id=? AND e.room=? AND e.type='post.created' AND json_type(a.value,'$.visual')='object'`, visualReply, event.Room).Scan(&visualID, &version)
+			if err != nil {
+				return err
+			}
+			if err := tx.QueryRowContext(ctx, "SELECT version FROM visuals WHERE id=? AND room=?", visualID, event.Room).Scan(&current); err != nil {
+				return err
+			}
+			if version != current {
+				var latest contract.EventID
+				err := tx.QueryRowContext(ctx, `SELECT e.id FROM events e, json_each(e.body,'$.attachments') a
+					WHERE e.room=? AND e.type='post.created' AND json_extract(a.value,'$.visual.id')=? AND json_extract(a.value,'$.visual.version')=?
+					ORDER BY e.seq DESC LIMIT 1`, event.Room, visualID, current).Scan(&latest)
+				if err != nil {
+					return err
+				}
+				return &VisualSupersededError{Event: latest, Version: current}
+			}
+		}
 		post, isPost := event.Body.(contract.PostCreated)
 		if isPost {
 			for i := range post.Attachments {
@@ -344,8 +375,8 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 					continue
 				}
 				v.ID, v.Version = event.ID, 1
-				if len(visualUpdate) > 0 && visualUpdate[0] != "" {
-					v.ID = visualUpdate[0]
+				if visualUpdate != "" {
+					v.ID = visualUpdate
 					var room, kind, author string
 					if err := tx.QueryRowContext(ctx, "SELECT room,author_kind,author_id,version FROM visuals WHERE id=?", v.ID).Scan(&room, &kind, &author, &v.Version); err != nil {
 						return err
