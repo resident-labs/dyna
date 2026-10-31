@@ -89,10 +89,25 @@ func (s *Store) InitializeConnectLink(ctx context.Context, epoch int64) error {
 }
 
 // UnlinkConnect invalidates the link and all replay nonces atomically.
-func (s *Store) UnlinkConnect(ctx context.Context) error {
+func (s *Store) UnlinkConnect(ctx context.Context) error { return s.unlinkConnect(ctx, 0) }
+
+// UnlinkConnectGeneration ignores a response for a replaced link.
+func (s *Store) UnlinkConnectGeneration(ctx context.Context, generation int64) error {
+	return s.unlinkConnect(ctx, generation)
+}
+
+func (s *Store) unlinkConnect(ctx context.Context, generation int64) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, "UPDATE connect_link_state SET linked=0 WHERE id=1"); err != nil {
+		r, err := tx.ExecContext(ctx, "UPDATE connect_link_state SET linked=0 WHERE id=1 AND linked=1 AND (?=0 OR generation=?)", generation, generation)
+		if err != nil {
 			return err
+		}
+		n, err := r.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if generation != 0 && n != 1 {
+			return ErrConnectEpoch
 		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM connect_nonces"); err != nil {
 			return err
