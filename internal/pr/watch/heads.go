@@ -382,7 +382,7 @@ func (s *Service) refreshHeads(ctx context.Context, st State, polledAt time.Time
 		pauses = map[string]bool{}
 	}
 	for _, r := range st.Records {
-		if !r.Watching || changeKind(*r) == "local" {
+		if !r.Watching || r.State != state.PROpen || changeKind(*r) == "local" {
 			continue
 		}
 		paused, err := s.roomPausedCached(r.RoomID, pauses)
@@ -700,7 +700,7 @@ func (s *Service) confirmedHeads(ctx context.Context, keys ...string) (map[strin
 		return nil, err
 	}
 	for key, r := range st.Records {
-		if r.Watching && changeKind(*r) != "local" {
+		if r.Watching && r.State == state.PROpen && changeKind(*r) != "local" {
 			paused, err := s.RoomPaused(r.RoomID)
 			if err != nil {
 				return nil, err
