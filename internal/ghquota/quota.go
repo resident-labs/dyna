@@ -38,6 +38,7 @@ type quotaLog struct {
 	runPhasesFree map[RunPhase]int
 	now           func() time.Time
 	logf          func(format string, args ...any)
+	save          func(time.Time, string, string, bool)
 }
 
 // engineGHQuota is shared by every engine request. Tests replace it.
@@ -50,13 +51,13 @@ func Record(path string, notModified bool) {
 
 // RecordRunPhase preserves endpoint totals and adds a fixed phase for exact-head lists.
 func RecordRunPhase(path string, phase RunPhase, notModified bool) {
-	engineGHQuota.recordPhase(ghQuotaCaller(path), phase, notModified)
+	engineGHQuota.recordPhaseKind(ghQuotaCaller(path), phase, notModified, "endpoint")
 }
 
 // RecordCaller counts one request from a named caller that has no API path,
 // such as a session's GitHub access check.
 func RecordCaller(caller string, notModified bool) {
-	engineGHQuota.record(caller, notModified)
+	engineGHQuota.recordPhaseKind(caller, RunOther, notModified, "source")
 }
 
 // record adds one completed request and writes a summary every window.
@@ -65,6 +66,10 @@ func (q *quotaLog) record(caller string, notModified bool) {
 }
 
 func (q *quotaLog) recordPhase(caller string, phase RunPhase, notModified bool) {
+	q.recordPhaseKind(caller, phase, notModified, "endpoint")
+}
+
+func (q *quotaLog) recordPhaseKind(caller string, phase RunPhase, notModified bool, kind string) {
 	if q == nil {
 		return
 	}
@@ -73,6 +78,9 @@ func (q *quotaLog) recordPhase(caller string, phase RunPhase, notModified bool) 
 	now := time.Now()
 	if q.now != nil {
 		now = q.now()
+	}
+	if q.save != nil {
+		q.save(now, kind, caller, notModified)
 	}
 	if q.since.IsZero() {
 		q.since = now
