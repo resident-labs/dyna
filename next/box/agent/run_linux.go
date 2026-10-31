@@ -136,22 +136,29 @@ func Run(ctx context.Context, version string) error {
 	var closing atomic.Bool
 	var stopWatch context.CancelFunc
 	var stopShellWatch context.CancelFunc
+	var shellDone chan struct{}
+	stopShell := func() {
+		if stopShellWatch != nil {
+			stopShellWatch()
+			<-shellDone
+			stopShellWatch = nil
+		}
+	}
 	go func() {
 		errs <- client.Channel(ctx, func(message contract.BoxMessage) error {
 			switch body := message.Body.(type) {
 			case contract.ShellWatchStart:
-				if stopShellWatch != nil {
-					stopShellWatch()
-				}
+				stopShell()
 				var watch context.Context
 				watch, stopShellWatch = context.WithCancel(ctx)
-				go client.watchShell(watch, jobs, body.Generation, time.NewTicker(250*time.Millisecond))
+				shellDone = make(chan struct{})
+				go func() {
+					defer close(shellDone)
+					client.watchShell(watch, jobs, body.Generation, time.NewTicker(250*time.Millisecond))
+				}()
 				return nil
 			case contract.ShellWatchStop:
-				if stopShellWatch != nil {
-					stopShellWatch()
-					stopShellWatch = nil
-				}
+				stopShell()
 				return nil
 			case contract.ComputerWatchStart:
 				if stopWatch != nil {
@@ -190,9 +197,8 @@ func Run(ctx context.Context, version string) error {
 				default:
 				}
 			}
-			if !connected && stopShellWatch != nil {
-				stopShellWatch()
-				stopShellWatch = nil
+			if !connected {
+				stopShell()
 			}
 			if !connected && stopWatch != nil {
 				stopWatch()
