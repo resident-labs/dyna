@@ -1,12 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountRows, accountState, showLoadError } from "./accounts.ts";
+import { accountRows, accountState } from "./accounts.ts";
 import type { Account } from "./contract.gen.ts";
-
-test("a failed refresh preserves an already loaded pane", () => {
-  assert.equal(showLoadError(false), true);
-  assert.equal(showLoadError(true), false);
-});
 
 test("unknown is muted and expired accounts sort first", () => {
   const unknown: Account = { id: "a", provider: "anthropic", label: "Alpha", rooms: null, state: "unknown" };

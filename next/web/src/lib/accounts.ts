@@ -1,7 +1,6 @@
 import type { Account } from "./contract.gen.ts";
 import { APIError } from "./client.ts";
 
-export const showLoadError = (loaded: boolean) => !loaded;
 export const refused = (error: unknown) => error instanceof APIError && error.detail.code === "conflict";
 
 // Problems come first; unknown accounts remain in label order with connected accounts.
