@@ -10,6 +10,8 @@ test("gives each name a stable hue that differs between similar names", () => {
 });
 
 test("gives names initials that tell them apart", () => {
+  const many = Array.from({ length: 60 }, (_, i) => `bench-fan-${i}`);
+  assert.equal(new Set(distinctInitials(many).values()).size, many.length);
   const rooms = distinctInitials(["root", "docs-site", "design-system", "dove"]);
   assert.deepEqual(Object.fromEntries(rooms), { "design-system": "DS", dove: "DO", root: "RO", "docs-site": "D1" });
   // A name keeps its own initials before others fall back; digits of the name's own come before a counting digit.
