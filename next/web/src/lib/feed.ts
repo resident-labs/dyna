@@ -4,7 +4,7 @@ import type { Request } from "./room.svelte.ts";
 export type Row =
   | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[]; pending?: Pending }
   | { kind: "failed"; key: string; seq: number; session: string; at: string; label: "Turn failed" | "Could not start" | "Could not close" | "Stopped unexpectedly"; cause: string }
-  | { kind: "work"; key: string; events: Event[] }
+  | { kind: "work"; key: string; events: Event[]; until?: string }
   | { kind: "request"; key: string; request: Request }
   | { kind: "day"; key: string; at: string }
   | { kind: "new"; key: string };
@@ -66,8 +66,9 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
   const fresh = (seq: number, from: Principal) => {
     if (unread && seq > since && from.kind !== "owner") { rows.push({ kind: "new", key: "new" }); unread = false; }
   };
-  const flush = () => {
-    if (work.length) { dated(work[0].at); rows.push({ kind: "work", key: `w${work[0].seq}`, events: work }); }
+  // until is the end of a turn that answers or fails in its own row, so the work row above it still knows when the work ended.
+  const flush = (until?: string) => {
+    if (work.length) { dated(work[0].at); rows.push({ kind: "work", key: `w${work[0].seq}`, events: work, ...until && { until } }); }
     work = [];
   };
   // A post to other people, its mentions or a final reply's target, starts a new run with its own name line.
@@ -118,6 +119,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       // A final reply that no post of the session already carried is the session's answer here.
       const answer = event.body.final && (event.body.replies ?? []).find(({ reply, posted }) =>
         reply.kind === "final" && !posted && sameHome(reply.home ?? { kind: "feed" }, home));
+      if ((event.body.final && answer) || event.body.outcome === "failed") flush(event.at);
       if (event.body.final && answer) {
         post(`a${event.seq}`, event.seq, { kind: "session", session: event.body.session }, event.at, event.body.final, [], answer.reply.target ? [answer.reply.target] : []);
       }
@@ -198,7 +200,7 @@ const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.s
 // "builder-feed started · 3 sessions worked for 12 min · 4 turns"; the opened row lists each event.
 // The time runs from the first turn's start to the last turn's end in the row, in whole minutes as T3 Code's
 // "Worked for 20s"; without both ends the line says "lead-web worked · 2 turns".
-export function workSummary(events: Event[], name: Name): string {
+export function workSummary(events: Event[], name: Name, until?: string): string {
   const started: string[] = [], moved: string[] = [], closed: string[] = [], opened: string[] = [], shut: string[] = [];
   const turns = new Map<string, Set<string>>();
   let jobs = 0, images = 0, failedImages = 0, prs = 0, memory = 0, grants = 0, rules = 0, first = Infinity, last = -Infinity;
@@ -221,6 +223,7 @@ export function workSummary(events: Event[], name: Name): string {
       case "rule.added": case "rule.removed": rules++; break;
     }
   }
+  if (until) last = Math.max(last, Date.parse(until));
   const who = (sessions: string[]) => sessions.length > 2 ? `${sessions.length} sessions` : list(sessions);
   const minutes = Math.round((last - first) / 60_000);
   const took = minutes < 1 ? "under a minute" : minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${minutes % 60} min` : ""}`;
