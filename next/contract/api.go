@@ -406,6 +406,7 @@ type PostSearchResponse struct {
 	Total int                  `json:"total"`
 }
 type EventsListRequest struct {
+	Event     EventID     `json:"event,omitempty"` // return this room event by ID
 	Room      RoomID      `json:"room"`
 	AfterSeq  int64       `json:"afterSeq"`
 	BeforeSeq int64       `json:"beforeSeq,omitempty"`
