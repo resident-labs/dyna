@@ -27,6 +27,10 @@ func TestAccountActionKeepsSecretOutOfAudit(t *testing.T) {
 	}
 	secret := "invented-private-api-key"
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/dyna/credentials/activate" {
+			_, _ = w.Write([]byte("{}"))
+			return
+		}
 		var input struct {
 			ID       string `json:"id"`
 			Provider string `json:"provider"`
