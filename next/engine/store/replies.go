@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"math"
 	"strings"
-	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -33,20 +32,10 @@ func (s *Store) turnReplies(ctx context.Context, tx *sql.Tx, room contract.RoomI
 		return nil, nil, err
 	}
 	var start int64
-	if err := tx.QueryRowContext(ctx, "SELECT started_at FROM turns WHERE id=? AND session=?", turn, session).Scan(&start); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT started_seq FROM turns WHERE id=? AND session=?", turn, session).Scan(&start); err != nil {
 		return nil, nil, err
 	}
 	// The single writer prevents a post from committing during this read.
-	posts, err := s.Events(ctx, room, 0, math.MaxInt, []contract.EventType{"post.created"})
-	if err != nil {
-		return nil, nil, err
-	}
-	// A same-millisecond prior post is safe: the target already received it.
-	kept := posts[:0]
-	for _, post := range posts {
-		if !post.Time.Before(time.UnixMilli(start)) {
-			kept = append(kept, post)
-		}
-	}
-	return inputs, kept, nil
+	posts, err := s.Events(ctx, room, start, math.MaxInt, []contract.EventType{"post.created"})
+	return inputs, posts, err
 }

@@ -297,16 +297,17 @@ func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn c
 			if active == "" {
 				return nil
 			}
-			_, err = tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES(?,?,?,?,?,?,?,?,?)", active, session, started.Time.UnixMilli(), "", "", 0, 0, 0, 0)
-			if err != nil {
-				return err
-			}
 			var ids []contract.EventID
 			for _, v := range items {
 				ids = append(ids, v.event)
 			}
 			started.Body = contract.TurnStarted{Session: session, Turn: active, Inputs: ids}
-			if _, err := s.AppendEvent(tx, started); err != nil {
+			seq, err := s.AppendEvent(tx, started)
+			if err != nil {
+				return err
+			}
+			_, err = tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,started_seq,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES(?,?,?,?,?,?,?,?,?,?)", active, session, started.Time.UnixMilli(), seq, "", "", 0, 0, 0, 0)
+			if err != nil {
 				return err
 			}
 		}
