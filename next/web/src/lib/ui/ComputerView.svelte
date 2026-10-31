@@ -5,6 +5,7 @@
   // A stopped computer closes this view, so an error here is a broken stream. The owner's retry
   // or the page becoming visible again tries once more; no timer does.
   let failed = $state(false);
+  let back: HTMLButtonElement;
   // Chromium may keep a multipart request open until a removed <img> is garbage-collected, so the
   // image drops its stream before it leaves. The error that the clearing fires is not a failure.
   function watch(image: HTMLImageElement) {
@@ -16,10 +17,10 @@
 
 <svelte:document onvisibilitychange={() => { visible = document.visibilityState === "visible"; if (visible) failed = false; }} />
 <header class="label"><button type="button" class="back" aria-label="Back to sessions" title="Back to sessions" onclick={onback}
-  {@attach button => button.focus()}><Icon name="chevron" /></button>{name}'s computer{#if !failed}<span class="live">Live</span>{/if}</header>
+  bind:this={back} {@attach button => button.focus()}><Icon name="chevron" /></button>{name}'s computer{#if !failed}<span class="live">Live</span>{/if}</header>
 <!-- The image streams only while the owner can see it: this view open, the page visible. -->
 <div class="screen">
-  {#if failed}<p>The live view stopped. <button type="button" class="retry" onclick={() => { failed = false; }}>Try again</button></p>
+  {#if failed}<p>The live view stopped. <button type="button" class="retry" onclick={() => { failed = false; back.focus(); }}>Try again</button></p>
   {:else if visible}<img src={`/v1/computers/watch?session=${encodeURIComponent(session)}`} alt={`${name}'s screen, live`} {@attach watch} />{/if}
 </div>
 

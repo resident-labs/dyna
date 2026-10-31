@@ -110,7 +110,16 @@
   // The session whose computer the sessions panel shows instead of the list, while it runs. The view
   // mounts only where the panel is on screen: always when wide, below 900 px only while it is open.
   let watching: string | undefined = $state();
-  let watched = $derived(watching && store?.computers.has(watching) ? watching : undefined);
+  // The view closes when its computer stops or the room changes, before the DOM updates, so it never
+  // streams again unasked. Focus that was in the view returns to the row's button, or to the panel.
+  async function stopWatching() {
+    const id = watching ?? "";
+    const held = members?.contains(document.activeElement);
+    watching = undefined;
+    await tick();
+    if (held) (members?.querySelector<HTMLElement>(`[data-watch="${CSS.escape(id)}"]`) ?? members)?.focus();
+  }
+  $effect.pre(() => { if (watching && !store?.computers.has(watching)) void stopWatching(); });
   const wide = new MediaQuery("min-width: 901px");
   let toggle: HTMLButtonElement | undefined = $state();
   async function showPanel(open: boolean) {
@@ -176,10 +185,9 @@
     {/if}
   </main>
   {#if room}
-    <aside class="members" id="sessions" class:shown={panel} class:watching={watched !== undefined} aria-label="Sessions" tabindex="-1" bind:this={members}>
-      {#if watched}
-        {#if wide.current || panel}<ComputerView session={watched} name={store?.names.get(watched) ?? "Session"}
-          onback={() => { watching = undefined; members?.focus(); }} />{/if}
+    <aside class="members" id="sessions" class:shown={panel} class:watching={watching !== undefined} aria-label="Sessions" tabindex="-1" bind:this={members}>
+      {#if watching}
+        {#if wide.current || panel}<ComputerView session={watching} name={store?.names.get(watching) ?? "Session"} onback={() => void stopWatching()} />{/if}
       {:else}
       <header class="label">Sessions</header>
       {#each tree as { session: item, depth } (item.session)}
@@ -188,7 +196,7 @@
           <SessionRow name={item.name} root={!item.parent} status={status(item.session, item.profile)} />
           {#if store?.turns.has(item.session)}<WorkingDot label="Working" />
           {:else if trouble(item.session)}<StatusPill tone="failed">{store?.failed.has(item.session) ? "Failed" : trouble(item.session)}</StatusPill>{/if}</a>
-          {#if store?.computers.has(item.session)}<button type="button" class="watch" aria-label={`Watch ${item.name}'s computer`}
+          {#if store?.computers.has(item.session)}<button type="button" class="watch" data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
             title={`Watch ${item.name}'s computer`} onclick={() => { watching = item.session; }}><Icon name="monitor" /></button>{/if}</div>
       {:else}<p class="hint">No sessions yet.</p>{/each}
       {/if}
