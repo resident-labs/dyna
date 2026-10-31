@@ -1,6 +1,7 @@
 <script lang="ts">
   import { APIError, call } from "../client.ts";
   import { causes, commandLine, fromNow } from "../feed.ts";
+  import { hue } from "../identity.ts";
   import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
   import type { Request, RoomStore } from "../room.svelte.ts";
@@ -39,20 +40,22 @@
   }
 </script>
 
-<article class="request" class:decided={request.state !== "pending"}>
-  <strong>{request.card.title}</strong>
-  <p class="meta"><Avatar kind={request.by.kind} name={name(request.by)} {root} size={20} /><span class="who">{name(request.by)}</span>
-    {#if request.card.target.kind !== "room"}<span>· {request.card.target.kind} {request.card.target.name}</span>{/if}{#if request.state === "pending"}<span>· expires {fromNow(request.expires, now)}</span>
-      {#if request.class === "agent" && parent}<span>· {parent} can also decide</span>{/if}{/if}</p>
-  {#if request.card.body}<p class="body">{request.card.body}</p>{/if}
-  {#if request.card.command?.length}<pre>{commandLine(request.card.command)}</pre>{/if}
-  {#if request.card.changes?.length}<ul class="changes">{#each request.card.changes as change (change.field)}
-    <li><span class="field">{change.field}:</span> {change.old || "none"} → {change.new || "none"}</li>{/each}</ul>{/if}
+<!-- While it waits, a request is a card with the exact text that runs; an owner-class card has the attention edge. Decided, it is a quiet row. -->
+<article class="request" class:decided={request.state !== "pending"} class:card={request.state === "pending"} class:yours={request.state === "pending" && request.class === "owner"}>
+  <p class="title"><Avatar kind={request.by.kind} name={name(request.by)} {root} size={20} />
+    <span class="who {request.by.kind}" class:root style:--hue={hue(name(request.by))}>{name(request.by)}</span><span class="asks">requests</span>{request.card.title}
+    {#if request.card.target.kind !== "room"}<span class="asks">on {request.card.target.kind} {request.card.target.name}</span>{/if}</p>
+  {#if request.card.body || request.card.command?.length || request.card.changes?.length}<div class="exact">
+    {#if request.card.command?.length}<p>{commandLine(request.card.command)}</p>{/if}
+    {#if request.card.body}<p>{request.card.body}</p>{/if}
+    {#each request.card.changes ?? [] as change (change.field)}<p><span class="field">{change.field}:</span> {change.old || "none"} → {change.new || "none"}</p>{/each}
+  </div>{/if}
   {#if request.state === "pending"}
+    <p class="meta">{request.class === "owner" ? "Nothing runs until you approve." : parent ? `${parent} or you can decide.` : ""} Expires {fromNow(request.expires, now)}.</p>
+    <input type="text" bind:value={reason} placeholder="Note (optional)" aria-label="Note to the session (optional)" disabled={busy} />
     <div class="actions">
-      <input type="text" bind:value={reason} placeholder="Note (optional)" aria-label="Note to the session (optional)" disabled={busy} />
-      <button type="button" onclick={() => void decide(false)} disabled={busy}>Deny</button>
       <button type="button" class="approve" onclick={() => void decide(true)} disabled={busy}>Approve</button>
+      <button type="button" onclick={() => void decide(false)} disabled={busy}>Deny</button>
     </div>
     {#if failure}<p class="meta" role="alert">{failure}</p>{/if}
   {:else}
@@ -62,21 +65,29 @@
 </article>
 
 <style>
-  .request { display: grid; gap: 4px; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 14px; }
-  .decided { color: var(--muted); }
-  .meta { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-  .who, .cause { color: var(--text); }
+  .request { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .card { margin: 8px 16px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); }
+  .yours { border-left: 3px solid var(--attention); padding-left: 14px; }
+  .decided { gap: 4px; color: var(--muted); }
+  .title { margin: 0; display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; font-weight: 600; overflow-wrap: anywhere; }
+  .who { color: oklch(var(--id-name) var(--hue)); }
+  .who.owner { color: var(--focus); }
+  .who.engine, .who.root { color: var(--text); }
+  .asks { color: var(--muted); font-weight: 400; }
+  .decided .title { font-weight: 500; }
   .decided .who { color: inherit; }
-  .body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-  pre { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--sidebar); font: 13px var(--mono); font-variant-ligatures: none; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .changes { margin: 0; padding: 0; list-style: none; font: 13px var(--mono); font-variant-ligatures: none; }
+  .exact { padding: 8px 12px; border-radius: 6px; background: var(--bg); font: 13px/1.5 var(--mono); font-variant-ligatures: none; max-height: 320px; overflow: auto; }
+  .exact p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .decided .exact { padding: 0; background: none; }
+  .meta { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .cause { color: var(--text); }
   .field { color: var(--muted); }
-  .actions { display: flex; gap: 8px; margin-top: 4px; }
-  input { flex: 1; min-width: 0; max-width: 320px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
-  button { padding: 5px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+  .actions { display: flex; gap: 8px; }
+  input { max-width: 480px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
+  button { padding: 6px 14px; border: 1px solid var(--line); border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
   button:hover:not(:disabled) { background: var(--hover); }
-  .approve { background: var(--text); color: var(--bg); border-color: var(--text); }
-  .approve:hover:not(:disabled) { background: var(--text); opacity: 0.88; }
+  .approve { background: var(--focus); color: var(--bg); border-color: var(--focus); font-weight: 600; }
+  .approve:hover:not(:disabled) { background: var(--focus); filter: brightness(1.08); }
   :disabled { opacity: 0.6; cursor: default; }
-  :focus-visible { outline-offset: 2px; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 </style>
