@@ -86,7 +86,10 @@
   // The same rule per room for its open sessions.
   let sessionInitials = $derived(distinctInitials([...store?.sessions.values() ?? []].map(item => item.name)));
   setSessionLabels(() => sessionInitials);
-  $effect(() => {
+  // Opens the shown room again; the effect below sets it for each room.
+  let reopen = $state(() => {});
+  // Before the template renders: a window waits for the room's lists, so the stream resumes after everything it read.
+  $effect.pre(() => {
     // Home has no room, so no room controls or panels may show one.
     const current = store;
     if (!current) return;
@@ -96,8 +99,6 @@
     return () => { opening.stop(); current.close(); };
   });
   // A room that failed to open is unavailable, for the same reasons as the page or its own; later load errors show inside the feed.
-  // Opens the shown room again; the effect above sets it for each room.
-  let reopen = $state(() => {});
   let unavailable: BlockedState | "room" | undefined = $derived(!store || store.ready || store.error === undefined ? undefined : blockedBy(store.error) ?? "room");
   function navigate(event: MouseEvent & { currentTarget: HTMLAnchorElement }) {
     if (event.button || event.metaKey || event.ctrlKey || event.shiftKey) return;
@@ -182,10 +183,12 @@
   let key = $derived(`${room}/${session ?? ""}`);
   // Pausing stops new turns in the room; attention keeps the state current from the stream.
   let paused = $derived(attention.rooms.get(room ?? "")?.paused ?? false);
-  let pauseFailed = $state(false);
+  // The room whose last pause or resume failed, so another room keeps its own line.
+  let pauseFailed: string | undefined = $state();
   function pause() {
-    pauseFailed = false;
-    if (room) void call("room.pause", { room, paused: !paused }).catch(() => { pauseFailed = true; });
+    pauseFailed = undefined;
+    const target = room;
+    if (target) void call("room.pause", { room: target, paused: !paused }).catch(() => { pauseFailed = target; });
   }
   // A DM's running turn, which the composer can stop.
   let stop = $derived.by(() => {
@@ -481,8 +484,8 @@
     </div>
     {#if room && !unavailable}
       <!-- A paused room's line takes the working line's place, so the composer never moves; the header still says who works. -->
-      {#if paused || pauseFailed}<p class="paused" role="status"><span>{pauseFailed ? "The room did not change. Try again." : "Room paused. No session starts a new turn."}</span>
-        {#if paused}<button type="button" class="retry" onclick={pause}>Resume</button>{/if}</p>
+      {#if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
+        <button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button></p>
       {:else if store}<WorkingLine {store} {home} />{/if}
       <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title}
         quote={quotes[key]} onunquote={() => { quotes[key] = undefined; }} sessions={mentions} files={files(key)} {stop} />
