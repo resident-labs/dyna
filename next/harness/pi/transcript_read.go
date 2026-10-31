@@ -122,7 +122,7 @@ func ReadSteps(r io.Reader, deliveries map[contract.DeliverySeq]contract.TurnID,
 							out.WriteString(b.Text)
 						}
 					}
-					preview := out.String()
+					preview := harness.Mask(out.String())
 					if len(preview) > 1024 {
 						preview = string(bytes.ToValidUTF8([]byte(preview[:1024]), nil))
 						truncated = true
