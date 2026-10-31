@@ -58,10 +58,24 @@ func (s *Store) CompleteArchives(ctx context.Context, session contract.SessionID
 	})
 }
 
-// SetArchiveRetry schedules another archive start unless close intent changed.
-func (s *Store) SetArchiveRetry(ctx context.Context, id contract.BoxID, due time.Time) error {
+// SetArchiveRetry records a retry only if the observed close intent still matches.
+func (s *Store) SetArchiveRetry(ctx context.Context, id contract.BoxID, want BoxWant, due time.Time, reason string, event contract.Event) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "UPDATE boxes SET due_at=? WHERE id=? AND state='closing' AND want='close'", due.UnixMilli(), id)
+		var previous string
+		err := tx.QueryRowContext(ctx, "SELECT reason FROM boxes WHERE id=? AND state='closing' AND want=?", id, want).Scan(&previous)
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE boxes SET due_at=?,reason=?,updated_at=? WHERE id=? AND state='closing' AND want=?", due.UnixMilli(), reason, event.Time.UnixMilli(), id, want)
+		if err != nil {
+			return err
+		}
+		if previous != reason {
+			_, err = s.AppendEvent(tx, event)
+		}
 		return err
 	})
 }
