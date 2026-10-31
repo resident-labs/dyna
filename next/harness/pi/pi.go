@@ -243,11 +243,14 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, typ string, input
 				result.Usage.CacheReadTokens += m.Usage.CacheRead
 				result.Usage.CacheWriteTokens += m.Usage.CacheWrite
 				if m.StopReason == "error" || m.StopReason == "length" {
-					result.Outcome, result.Error = contract.TurnOutcome("failed"), m.ErrorMessage
+					result.Outcome, result.Error, result.Cause = contract.TurnOutcome("failed"), m.ErrorMessage, contract.CauseModelFailed
+					if m.StopReason == "length" {
+						result.Cause = contract.CauseOutputLimit
+					}
 				} else if m.StopReason == "aborted" {
 					result.Outcome = contract.TurnOutcome("stopped")
 				} else {
-					result.Outcome, result.Error = contract.TurnOutcome("completed"), ""
+					result.Outcome, result.Error, result.Cause = contract.TurnOutcome("completed"), "", ""
 				}
 			case "agent_settled":
 				if e.Aborted {
