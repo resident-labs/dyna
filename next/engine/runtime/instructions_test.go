@@ -115,7 +115,7 @@ func TestInstructionMountsAreRoomScoped(t *testing.T) {
 		"/run/dyna/instructions/room":   "/host/instructions/rooms/room",
 	} {
 		mount := found[path]
-		if mount.HostPath != source || !mount.ReadOnly {
+		if mount.HostPath != source || !mount.ReadOnly || !mount.MakeDir {
 			t.Fatalf("mount %s: %+v", path, mount)
 		}
 	}
