@@ -1,4 +1,4 @@
-import type { Event } from "./contract.gen.ts";
+import type { Event, ShellJobOutput } from "./contract.gen.ts";
 
 type Check = (value: unknown) => boolean;
 const string: Check = value => typeof value === "string";
@@ -65,6 +65,13 @@ export function decodeEvent(value: unknown): Event | undefined {
   }
   // The validators above cover every member of the generated Event union.
   return value as Event;
+}
+
+const shellOutput = object({ job: string, command: string, running: boolean, exitCode: number, text: string, reset: optional(boolean) });
+// Each message of /v1/shell/watch passes here once; one that does not match is skipped like an event.
+export function decodeShellOutput(value: unknown): ShellJobOutput | undefined {
+  // The check covers every field of the generated type.
+  return shellOutput(value) ? value as ShellJobOutput : skip(value);
 }
 
 function skip(value: unknown): undefined {
