@@ -1,7 +1,8 @@
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { call, retryDelay } from "./client.ts";
 import { stream } from "./stream.ts";
-import { boxFailures, turnFailures, type BoxFailure } from "./status.ts";
+import { lastBoxChanges, turnFailures, type BoxFailure } from "./status.ts";
+import { pendingReason } from "./event.ts";
 import type { Event, FailureCause, RoomSummary, SessionListResponse, SessionSummary } from "./contract.gen.ts";
 
 // The rooms, and per room the requests waiting for the owner and the sessions with an open turn. room.list
@@ -21,6 +22,11 @@ export class Attention {
   // Per room, the sessions whose last turn failed, with that turn.ended's seq and cause. room.list gives only a count, so a room
   // with one reads its sessions when it loads; the stream keeps every room current.
   readonly failed = new SvelteMap<string, SvelteMap<string, { seq: number; cause?: FailureCause }>>();
+  // Per room, the sessions whose box waits for a host that takes the room, which only the owner can end. room.list
+  // gives only a count, so a room with one reads its sessions as for a failure; the stream keeps every room current.
+  readonly hostless = new SvelteMap<string, SvelteSet<string>>();
+  // Sessions with a live box.changed, which is newer than any history read that answers after it.
+  private readonly boxMoved = new Set<string>();
   // Each session's DM read position, for the same rule as RoomStore.unseen.
   private readonly read = new SvelteMap<string, number>();
   // Per room asked but not yet seeded, the session events the stream sent meanwhile; seeding replays the newer ones.
@@ -46,7 +52,8 @@ export class Attention {
     this.working.set(room.id, new SvelteSet(room.working));
     this.broken.set(room.id, new SvelteMap());
     this.failed.set(room.id, new SvelteMap());
-    if (room.failed) void this.listSessions(room.id).catch(() => {});
+    this.hostless.set(room.id, new SvelteSet());
+    if (room.failed || room.hostless) void this.listSessions(room.id).catch(() => {});
     if (room.latest && !this.activity.has(room.latest.session)) this.activity.set(room.latest.session, room.latest.label);
   }
 
@@ -82,7 +89,7 @@ export class Attention {
   close(): void { this.stop(); clearTimeout(this.timer); }
 
   // The sessions that really work in a room.
-  busy(room: string): string[] { return [...this.working.get(room) ?? []].filter(id => !this.broken.get(room)?.has(id)); }
+  busy(room: string): string[] { return [...this.working.get(room) ?? []].filter(id => !this.broken.get(room)?.has(id) && !this.hostless.get(room)?.has(id)); }
 
   // A room's failed sessions, as RoomStore.status counts them: a broken box, or a failed turn the owner has not read
   // past. The rail mark and Home's Needs you and Active now all read this, so they clear together.
@@ -105,9 +112,14 @@ export class Attention {
         for (const id of failing) this.failed.get(room)?.set(id, { seq: placed.get(id)?.seq ?? list.seq, cause: placed.get(id)?.body.cause });
       }
       this.seed(list.sessions ?? [], { id: room, seq: list.seq });
-      const broken = this.broken.get(room);
-      if (broken?.size) void boxFailures(room, list.seq + 1, broken.keys()).then(found => {
-        for (const [id, failure] of found) if (broken.has(id)) broken.set(id, failure);
+      const broken = this.broken.get(room), hostless = this.hostless.get(room);
+      const pending = (list.sessions ?? []).flatMap(({ id, boxState }) => boxState === "pending" ? [id] : []);
+      if (broken?.size || pending.length) void lastBoxChanges(room, list.seq + 1, [...broken?.keys() ?? [], ...pending]).then(found => {
+        for (const [id, { at, body }] of found) {
+          if (this.boxMoved.has(id)) continue;
+          if (broken?.has(id) && (body.to === "failed" || body.to === "lost")) broken.set(id, { box: body.to, cause: body.cause, at });
+          if (pendingReason(body) === "room-host") hostless?.add(id);
+        }
       });
       return list;
     }, (error: unknown) => { this.pending.delete(room); throw error; });
@@ -186,6 +198,7 @@ export class Attention {
     if (event.type === "session.closed") broken?.delete(event.body.session);
     const failed = this.failed.get(event.room ?? "");
     if (event.type === "session.closed") failed?.delete(event.body.session);
+    if (event.type === "session.closed") this.hostless.get(event.room ?? "")?.delete(event.body.session);
     // Only a completed turn clears the failure, as in RoomStore; a stopped turn did not succeed.
     if (event.type === "turn.ended" && event.body.outcome === "failed") failed?.set(event.body.session, { seq: event.seq, cause: event.body.cause });
     if (event.type === "turn.ended" && event.body.outcome === "completed") failed?.delete(event.body.session);
@@ -193,6 +206,8 @@ export class Attention {
     if (event.type === "box.changed") {
       const { session, to, cause } = event.body;
       if (to === "failed" || to === "lost") broken?.set(session, { box: to, cause: cause ?? broken.get(session)?.cause, at: event.at }); else broken?.delete(session);
+      this.boxMoved.add(session);
+      if (pendingReason(event.body) === "room-host") this.hostless.get(event.room ?? "")?.add(session); else this.hostless.get(event.room ?? "")?.delete(session);
     }
   }
 }

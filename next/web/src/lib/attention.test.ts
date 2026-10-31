@@ -25,6 +25,26 @@ test("a session whose box failed with its turn open is broken, not working, unti
   } finally { globalThis.fetch = original; }
 });
 
+test("a room's hostless count loads which sessions wait for a host that takes the room, until the box leaves pending", async () => {
+  const original = globalThis.fetch;
+  const pending = (seq: number, reason: string) => event(seq, "a", { type: "box.changed", body: { box: "b", session: "s1", from: "pending", to: "pending", reason } });
+  globalThis.fetch = async input => {
+    const method = String(input).replace("/v1/", "");
+    if (method === "room.list") return new Response(JSON.stringify({ seq: 3, rooms: [{ id: "a", name: "A", created: "", waiting: [], working: [], failed: 0, hostless: 1 }] }));
+    if (method === "session.list") return new Response(JSON.stringify({ seq: 3, sessions: [{ id: "s1", boxState: "pending" }, { id: "s2", boxState: "pending" }] }));
+    return new Response(JSON.stringify({ events: [pending(1, "room-host"), event(2, "a", { type: "box.changed", body: { box: "c", session: "s2", to: "pending", reason: "cpu" } })] }));
+  };
+  try {
+    const attention = new Attention(() => () => {});
+    await attention.open();
+    // session.list, then the box history read.
+    for (let i = 0; i < 4; i++) await new Promise(setImmediate);
+    assert.deepEqual([...attention.hostless.get("a")!], ["s1"]);
+    attention.apply(event(4, "a", { type: "box.changed", body: { box: "b", session: "s1", from: "pending", to: "creating" } }));
+    assert.equal(attention.hostless.get("a")!.size, 0);
+  } finally { globalThis.fetch = original; }
+});
+
 test("room.list seeds each room's waiting requests and working sessions, and the owner stream updates them", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({ seq: 5, rooms: [
