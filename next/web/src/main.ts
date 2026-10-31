@@ -10,7 +10,14 @@ import "./app.css";
 // As v1's viewport.ts: a phone's keyboard and browser bars shrink the visible area, and 100dvh follows neither on
 // every browser. --app-height carries the visible height, so the composer stays above the keyboard.
 const viewport = window.visualViewport;
-const fit = () => document.documentElement.style.setProperty("--app-height", `${Math.round(viewport?.height ?? window.innerHeight)}px`);
+// A hidden or prerendered tab may report 0, as v1 guards. --keyboard is the covered height: iOS keeps the bottom
+// safe-area inset while the keyboard is open, and the shell drops that padding then.
+const fit = () => {
+  const height = viewport?.height ?? window.innerHeight, style = document.documentElement.style;
+  if (height <= 0) return;
+  style.setProperty("--app-height", `${Math.round(height)}px`);
+  style.setProperty("--keyboard", `${Math.max(0, Math.round(window.innerHeight - height))}px`);
+};
 fit();
 viewport?.addEventListener("resize", fit);
 window.addEventListener("resize", fit);

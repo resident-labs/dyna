@@ -27,7 +27,7 @@ body { margin: 0; background: var(--bg); color: var(--text); }
 /* The app fills the viewport exactly; only the feed and the side panels scroll. */
 .shell { display: grid; grid-template-columns: 64px 1fr; grid-template-rows: minmax(0, 1fr); height: var(--app-height, 100dvh); overflow: hidden;
   /* viewport-fit=cover: the notch, the home bar and a landscape phone's sides stay clear. */
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) max(0px, env(safe-area-inset-bottom) - var(--keyboard, 0px)) env(safe-area-inset-left); }
 .shell.open { grid-template-columns: 64px 1fr 264px; }
 main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 aside { background: var(--sidebar); border-right: 1px solid var(--line); overflow-y: auto; }
@@ -71,7 +71,7 @@ main > header strong { font-size: 16px; }
   .shell.open { grid-template-columns: 64px minmax(0, 1fr); }
   main > header .panel-toggle { display: grid; }
   .shell > aside.members { display: none; }
-  .shell > aside.members.shown { display: block; position: fixed; top: calc(var(--panel-top, 52px) + env(safe-area-inset-top)); right: 0; bottom: 0; padding-bottom: env(safe-area-inset-bottom); width: min(300px, 100vw); z-index: 1; box-shadow: -8px 0 24px rgb(0 0 0 / 25%); }
+  .shell > aside.members.shown { display: block; position: fixed; top: calc(var(--panel-top, 52px) + env(safe-area-inset-top)); right: 0; bottom: 0; padding-bottom: max(0px, env(safe-area-inset-bottom) - var(--keyboard, 0px)); width: min(300px, 100vw); z-index: 1; box-shadow: -8px 0 24px rgb(0 0 0 / 25%); }
 }
 /* A phone shows the rooms as one scrolling row above the feed. */
 @media (max-width: 640px) {
