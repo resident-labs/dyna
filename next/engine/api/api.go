@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 type API struct {
@@ -49,6 +50,12 @@ func (a *API) handler(c Caller) http.Handler {
 		return out, problem
 	})
 	call(mux, contract.MethodDeviceList, c, contract.ScopeAdmin, owner, a.service.DeviceList)
+	call(mux, contract.MethodDeviceScopes, c, contract.ScopeRead, owner, func(context.Context, contract.Principal, contract.DeviceScopesRequest) (contract.DeviceScopesResponse, *contract.Error) {
+		if c.Web {
+			return contract.DeviceScopesResponse{Scopes: c.Scopes}, nil
+		}
+		return contract.DeviceScopesResponse{Scopes: store.FullDeviceScopes}, nil
+	})
 	call(mux, contract.MethodDeviceRevoke, c, contract.ScopeAdmin, owner, a.service.DeviceRevoke)
 	call(mux, contract.MethodDeviceSetScopes, c, contract.ScopeAdmin, owner, a.service.DeviceSetScopes)
 	call(mux, contract.MethodRuleAdd, c, contract.ScopeAdmin, user, func(ctx context.Context, p contract.Principal, req contract.RuleAddRequest) (contract.RuleAddResponse, *contract.Error) {
@@ -406,9 +413,11 @@ func box(c Caller) bool {
 }
 func user(c Caller) bool { return owner(c) || box(c) }
 
+// op.submit checks its own scope by operation kind. device.scopes answers every owner device, whatever it holds, so a client can learn
+// what it may use.
 func call[Req, Resp any](mux *http.ServeMux, method contract.Method, c Caller, scope contract.Scope, allowed func(Caller) bool, fn func(context.Context, contract.Principal, Req) (Resp, *contract.Error)) {
 	mux.HandleFunc("POST /v1/"+string(method), func(w http.ResponseWriter, r *http.Request) {
-		if !allowed(c) || (method != contract.MethodOpSubmit && !hasScope(c, scope)) {
+		if !allowed(c) || (method != contract.MethodOpSubmit && method != contract.MethodDeviceScopes && !hasScope(c, scope)) {
 			writeError(w, forbidden())
 			return
 		}
