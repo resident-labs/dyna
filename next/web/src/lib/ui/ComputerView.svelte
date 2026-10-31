@@ -13,7 +13,7 @@
   import type { Rect } from "../float.ts";
   import PhoneKeys from "./PhoneKeys.svelte";
   import { LiveStream, type Phase } from "../live.ts";
-  import { Finger, PhoneKeys as PhoneState, buttonOf, escTwice, keyboardInput, pictureScale, screenPoint, type ComputerInput, type Modifiers, type Size } from "../computerInput.ts";
+  import { Finger, InputQueue, PhoneKeys as PhoneState, buttonOf, escTwice, keyboardInput, pictureScale, screenPoint, type ComputerInput, type Modifiers, type Size } from "../computerInput.ts";
   import { softKeyboard } from "../softKeyboard.ts";
   // Floating, the view is a window over the app; docked, it sits above the session list in the sessions panel. The
   // rect belongs to the app, so the window keeps its place and size for the page view.
@@ -69,17 +69,12 @@
   const phoneKeys = new PhoneState(state => { held = state; });
   const twice = escTwice();
   // A batch goes with the size of the picture the owner sees, which its positions are in. A batch the engine refuses
-  // for another reason than a full queue shows as a notice under the screen; the next batch that lands clears it.
+  // shows as a notice under the screen; the next batch that lands clears it.
   let stuck = $state(false);
-  async function send(events: ComputerInput[]) {
-    if (!input || !picture || !events.length) return;
-    try {
-      await input(events, { width: picture.naturalWidth, height: picture.naturalHeight });
-      stuck = false;
-    } catch {
-      stuck = true;
-    }
-  }
+  const queue = new InputQueue(async (events, frame) => { await input?.(events, frame); }, ok => { stuck = !ok; });
+  const send = (events: ComputerInput[]) => {
+    if (input && picture && events.length) queue.push(events, { width: picture.naturalWidth, height: picture.naturalHeight });
+  };
   async function take() { control = true; await tick(); screen?.focus(); }
   function release() { control = false; keyboardOpen = false; field?.blur(); }
   $effect(() => { if (phase !== "live") release(); });
