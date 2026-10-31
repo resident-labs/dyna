@@ -53,7 +53,7 @@
   <section class="ways">
     {@render sectionBar("Ways in")}
     <div class="ways-body">
-    {#if current || status?.connectorMissing}<p class="summary">{#if current}This browser uses {current === tunnel ? "the Connect tunnel" : routeLabel(current)}.{/if}{#if status?.connectorMissing} The Connect connector is not running.{/if}</p>{/if}
+    {#if current || status?.connectorMissing}<p class="summary">{#if current}This browser uses {current === tunnel ? "the Connect tunnel" : routeLabel(current).replace(/^./, letter => letter.toLowerCase())}.{/if}{#if status?.connectorMissing} The Connect connector is not running.{/if}</p>{/if}
     <div class="route-card">
     {#each localRoutes as route, index (route)}<div class="row"><span class="route-icon"><Icon name={routeLabel(route) === "This computer" ? "laptop" : "globe"} size={20} /></span><span class="number">{index + 1}</span><div><strong>{routeLabel(route)}</strong><p><code>{route}</code></p>{#if route === location.origin}<p>In use by this browser</p>{:else if routeLabel(route) !== "This computer"}<p>Set in this machine’s configuration</p>{/if}</div></div>{/each}
     <div class="row"><span class="route-icon"><Icon name="globe" size={20} /></span><span class="number">{status?.linked ? localRoutes.length + 1 : ""}</span><div class="detail"><strong>Resident Labs Connect</strong>
