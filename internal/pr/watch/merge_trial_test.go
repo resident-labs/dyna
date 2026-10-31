@@ -15,8 +15,11 @@ import (
 	"testing"
 
 	"dyna-agent/internal/ghclient"
+	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
+	statewrite "dyna-agent/internal/state"
+	"dyna-agent/internal/store"
 	"dyna-agent/internal/subagent"
 )
 
@@ -590,6 +593,46 @@ func TestBatchTrialFailureLeavesMainUntouched(t *testing.T) {
 	b := st.MergeTrials["github.com/owner/repo"]
 	if b == nil || b.Phase != "awaiting-root" || b.Logs == "" || len(*f.merged) != 0 {
 		t.Fatalf("failure state=%+v merged=%v", b, *f.merged)
+	}
+}
+
+func TestPublishedTrialFinishesWhenCheckoutWasRemoved(t *testing.T) {
+	f := mergeTrialEnv(t, 1)
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	repo := t.TempDir()
+	for _, args := range [][]string{{"init", "-q", repo}, {"-C", repo, "remote", "add", "origin", "https://github.com/owner/repo.git"}} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s: %v", args, out, err)
+		}
+	}
+	if err := statewrite.MigrateMirrors(store.DataDir()); err != nil {
+		t.Fatal(err)
+	}
+	h := hooks.New()
+	if err := h.Add(t.Context(), repo, hooks.Hook{Name: "after", Cwd: "worktree", Event: hooks.PRMerged, Command: "true", Timeout: "1m", OnFail: "alert"}); err != nil {
+		t.Fatal(err)
+	}
+	f.e.s.CleanupMerged = nil
+	if err := f.e.s.Store.update(func(st *State) error {
+		r := st.Records["github.com/owner/repo#1"]
+		r.LookupDir, r.Dir, r.RepoPath = t.TempDir()+"/removed", "", repo
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.ci = "completed"
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	st, err := f.e.s.Store.Read()
+	if err != nil || len(st.MergeTrials) != 0 || st.Records["github.com/owner/repo#1"].Watching {
+		t.Fatalf("published trial did not finish: trials=%+v error=%v", st.MergeTrials, err)
+	}
+	queued, err := h.QueuedEvents(t.Context())
+	if err != nil || len(queued) != 1 || queued[0].Event != hooks.PRMerged {
+		t.Fatalf("merge hook not queued: %+v, %v", queued, err)
 	}
 }
 
