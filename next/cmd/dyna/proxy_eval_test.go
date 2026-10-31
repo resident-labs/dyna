@@ -42,6 +42,13 @@ func TestEvalTransportRecordsOnlyHashes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	pass := evalTransport{next: evalRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: http.NoBody}, nil
+	}), sink: sink, session: "s"}
+	bodyless, _ := http.NewRequest("GET", "https://example.invalid", nil)
+	if _, err := pass.RoundTrip(bodyless); err != nil {
+		t.Fatal(err)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -53,9 +60,13 @@ func TestEvalTransportRecordsOnlyHashes(t *testing.T) {
 			t.Fatal(err)
 		}
 		hash := sha256.Sum256([]byte(raw))
-		if record != (evalRecord{"s", "unknown", uint64(i + 1), hex.EncodeToString(hash[:]), "unknown"}) {
+		if record != (evalRecord{"s", "example.invalid", "", uint64(i + 1), hex.EncodeToString(hash[:])}) {
 			t.Fatalf("bad record: %+v", record)
 		}
+	}
+	var extra evalRecord
+	if err := dec.Decode(&extra); err != io.EOF {
+		t.Fatalf("unexpected extra record: %+v, %v", extra, err)
 	}
 	if bytes.Contains(data, []byte("secret")) || bytes.Contains(data, []byte("private")) {
 		t.Fatal("record leaked request data")
