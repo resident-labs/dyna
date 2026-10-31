@@ -2,7 +2,7 @@
   import { tick } from "svelte";
   import Icon from "./Icon.svelte";
   // The room's less frequent actions. Requests has its own header button.
-  let { onterminal }: { onterminal: () => void } = $props();
+  let { onterminal, onrules }: { onterminal: () => void; onrules: () => void } = $props();
   let open = $state(false);
   let root: HTMLDivElement;
   let button: HTMLButtonElement;
@@ -12,6 +12,8 @@
     open = next;
     if (next) { await tick(); items()[0]?.focus(); } else if (refocus) button.focus();
   }
+  // A page the menu opened returns focus here when it closes.
+  export function focus() { button.focus(); }
   // Up and Down move between entries, Home and End jump, Escape closes and Tab leaves.
   function move(event: KeyboardEvent) {
     const all = items();
@@ -32,6 +34,7 @@
   {#if open}
     <div class="list" role="menu" id="room-menu" tabindex="-1" bind:this={list} onkeydown={move}>
       <button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false); onterminal(); }}>New terminal</button>
+      <button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false); onrules(); }}>Rules</button>
     </div>
   {/if}
 </div>

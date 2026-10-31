@@ -400,6 +400,31 @@ func seedRoom(ctx context.Context, s *engine.Service, posts, agents int) {
 	post(owner, contract.PostRequest{Text: "Exercise the failed turn view", Mentions: []string{"builder-feed"}})
 	post(owner, contract.PostRequest{Text: "Start the dev server and run the engine tests", Mentions: []string{"lead-web"}})
 	post(owner, contract.PostRequest{Text: "Then tidy the room menu", Mentions: []string{"builder-feed"}})
+	// Room rules from the owner and from the root session, the only session that may add them.
+	listed, e := s.SessionList(ctx, owner, contract.SessionListRequest{Room: room.Room})
+	if e != nil {
+		log.Fatal(e.Message)
+	}
+	root := owner
+	for _, item := range listed.Sessions {
+		if item.Parent == "" {
+			root = contract.Principal{Kind: contract.PrincipalSession, Session: item.ID}
+		}
+	}
+	for _, rule := range []struct {
+		by   contract.Principal
+		text string
+	}{
+		{owner, "Tests must be fast and high-signal: one fail-first test per fix, under 1 second, with no sleeps."},
+		{root, "Never poll GitHub or Dyna in shell loops; wait for the engine's notices."},
+		{owner, "Builds and test runs go to hermeslab, never to the desktop node."},
+		{owner, "Every UI change must be an obvious, tasteful improvement over v1's matching screen. Builders screenshot v1's screen and a strong product's piece first, and each UI change shows them beside its own."},
+		{root, "Each reviewer reads spec.md first and never reopens settled owner decisions."},
+	} {
+		if _, e := s.RuleAdd(ctx, rule.by, contract.RuleAddRequest{Room: room.Room, Text: rule.text}); e != nil {
+			log.Fatal(e.Message)
+		}
+	}
 	// A session may attach only files uploaded in its room, so each file is uploaded by the principal that posts it.
 	upload := func(by contract.Principal, name, media, body string) (a contract.Attachment) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/files?name="+name, strings.NewReader(body))
