@@ -107,11 +107,11 @@
   .edit { border: 0; background: none; color: var(--muted); cursor: pointer; font: inherit; padding: 8px; }
   @container (max-width: 800px) {
     .head { display: none; }
-    .row { grid-template-columns: repeat(2, minmax(0, 1fr)) auto; gap: 8px 12px; padding: 14px; }
-    .identity { grid-column: 1 / 3; }
-    .edit { grid-column: 3; grid-row: 1; }
+    .row { position: relative; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; padding: 14px; }
+    .identity { grid-column: 1 / -1; padding-right: 48px; }
+    .edit { position: absolute; right: 14px; top: 10px; }
     .number { grid-column: span 1; }
-    .rating-label { display: inline; }
+    .rating-label { display: inline; margin-right: 4px; }
     .unrated, .limits { grid-column: 1 / -1; }
   }
 </style>
