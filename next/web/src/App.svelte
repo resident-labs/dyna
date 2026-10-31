@@ -3,6 +3,9 @@
   import { RoomStore } from "./lib/room.svelte.ts";
   import { blockedBy, call, retryDelay, type Blocked as BlockedState } from "./lib/client.ts";
   import Blocked from "./lib/ui/Blocked.svelte";
+  import PairScreen from "./lib/ui/PairScreen.svelte";
+  import Settings from "./lib/ui/Settings.svelte";
+  import { linkCode } from "./lib/devices.ts";
   import Feed from "./lib/ui/Feed.svelte";
   import StatusPill from "./lib/ui/StatusPill.svelte";
   import Composer from "./lib/ui/Composer.svelte";
@@ -32,6 +35,9 @@
   import { distinctInitials } from "./lib/identity.ts";
   import { computerPlace, fitted, type Rect } from "./lib/float.ts";
   import type { Conversation, PostRequest, SessionStarted } from "./lib/contract.gen.ts";
+  // A pairing link leaves the address bar and history at once, whatever this browser's state. Only a signed-out page uses it.
+  const pairCode = linkCode(window.location.hash);
+  if (window.location.hash.includes("pair=")) history.replaceState(null, "", window.location.pathname + window.location.search);
   const attention = new Attention();
   let rooms = $derived([...attention.rooms.values()]);
   // Distinct initials for every room avatar, so two rooms never look alike on the rail.
@@ -68,7 +74,17 @@
     (error: unknown) => (blocked = blockedBy(error) ?? "unreachable"))).run;
   connect();
   let path = $state(window.location.pathname);
-  window.addEventListener("popstate", () => { path = window.location.pathname; section = undefined; });
+  // Settings opens over the app, so the page behind it keeps its stream, its draft and its feed position.
+  const isSettings = (where: string) => /^\/settings(\/|$)/.test(where);
+  let behind = $state(isSettings(window.location.pathname) ? "/" : window.location.pathname);
+  let inSettings = $derived(isSettings(path));
+  function follow() {
+    path = window.location.pathname;
+    if (inSettings) return;
+    behind = path;
+    section = undefined;
+  }
+  window.addEventListener("popstate", follow);
   // The requests and rules views show in place of the conversation until Back, Escape or the control that opened them.
   let section: "requests" | "rules" | undefined = $state();
   let requestsButton: HTMLButtonElement | undefined = $state();
@@ -82,7 +98,7 @@
     if (was === "rules") (phone.current ? menuButton ?? toggle : roomMenu)?.focus({ focusVisible: !tapped });
     else (phone.current && !store?.waiting ? menuButton ?? toggle : requestsButton)?.focus({ focusVisible: !tapped });
   }
-  const segment = (pattern: RegExp) => { const match = pattern.exec(path)?.[1]; return match && decodeURIComponent(match); };
+  const segment = (pattern: RegExp) => { const match = pattern.exec(behind)?.[1]; return match && decodeURIComponent(match); };
   let room = $derived(segment(/^\/r\/([^/]+)/));
   let session = $derived(segment(/^\/r\/[^/]+\/s\/([^/]+)/));
   // Derived, not set in the effect below: the room's views render with the store of the room they show.
@@ -108,8 +124,7 @@
     if (event.button || event.metaKey || event.ctrlKey || event.shiftKey) return;
     event.preventDefault();
     history.pushState(null, "", event.currentTarget.href);
-    path = window.location.pathname;
-    section = undefined;
+    follow();
   }
   // A link to a DM closes a phone's panel. When wide, the link may leave with the list as About opens, and focus goes to the panel.
   function openSession(event: MouseEvent & { currentTarget: HTMLAnchorElement }) {
@@ -215,25 +230,27 @@
       home: session ? home : undefined, attachments: attachments.length ? attachments : undefined });
   }
   let view: Feed | undefined = $state();
-  let rail: HTMLElement;
+  let rail: HTMLElement | undefined = $state();
   let feed: HTMLDivElement | undefined = $state();
   let page: HTMLElement | undefined = $state();
   let composer: HTMLTextAreaElement | undefined = $state();
   let members: HTMLElement | undefined = $state();
   let computer: HTMLElement | undefined = $state();
   let terminals: TermDock | undefined = $state();
+  let settings: HTMLElement | undefined = $state();
+  let settingsMenu: HTMLButtonElement | undefined = $state();
   let dock: HTMLElement | undefined = $state();
   // F6 (mod+F6 in a browser) moves focus between areas; Shift goes back.
   function cycle(event: KeyboardEvent) {
     if (event.key === "Escape" && drawer) void showDrawer(false);
     else if (event.key === "Escape" && panel && !wide.current) void showPanel(false);
-    else if (event.key === "Escape" && section) void closeSection();
+    else if (event.key === "Escape" && section && !inSettings) void closeSection();
     if (event.key !== "F6") return;
     event.preventDefault();
     if (covered) return;
     // Only areas on screen take part; below 761 px the closed sessions panel has no boxes.
     // The requests and rules views take the place of the feed and the composer.
-    const areas = [rail, section ? page : feed, section ? undefined : composer, dock, members, docked ? undefined : computer]
+    const areas = (inSettings ? [rail, settings] : [rail, section ? page : feed, section ? undefined : composer, dock, members, docked ? undefined : computer])
       .filter(area => area != null)
       .filter(area => area.getClientRects().length > 0);
     const index = areas.findIndex(area => area.contains(document.activeElement));
@@ -362,15 +379,15 @@
   // close (Escape) shows the ring; a tap open focuses the dialog itself, and no ring follows a tap either way.
   const phone = new MediaQuery("max-width: 640px");
   // On a phone the full-screen computer covers everything else, so nothing behind it takes focus.
-  let covered = $derived(phone.current && !!watching && !docked);
+  let covered = $derived(phone.current && !!watching && !docked && !inSettings);
   let drawer = $state(false);
   let menuButton: HTMLButtonElement | undefined = $state();
   async function showDrawer(open: boolean, refocus = true, tapped = false) {
     drawer = open;
     await tick();
-    if (open && tapped) rail.focus({ focusVisible: false });
-    else if (open) (rail.querySelector<HTMLElement>(".pages [aria-current=page]") ?? rail.querySelector<HTMLElement>(".pages a"))?.focus();
-    else if (refocus) menuButton?.focus({ focusVisible: !tapped });
+    if (open && tapped) rail?.focus({ focusVisible: false });
+    else if (open) (rail?.querySelector<HTMLElement>(".pages [aria-current=page]") ?? rail?.querySelector<HTMLElement>(".pages a"))?.focus();
+    else if (refocus) (inSettings ? settingsMenu : menuButton)?.focus({ focusVisible: !tapped });
   }
   $effect(() => { if (!phone.current) drawer = false; });
   // A room's open sheet closes on the way Home, and Home's own closes when its last active room leaves.
@@ -419,6 +436,11 @@
   let closed = $derived(!!session && !!store?.ready && !store.sessions.has(session));
   let about = $derived(!!session && !closed && (tabs.get(key) ?? "about") === "about");
   // room.list gives the feed's read position. Opening a session's DM shows the owner its failure, which clears the mark.
+  // This device was revoked while its page stayed open.
+  let revoked = $state(false);
+  let signedOut = $derived(revoked || blocked === "signed-out" || unavailable === "signed-out");
+  // Inside Settings the drawer lists rooms, as its room pages act on a view that Settings covers.
+  let pagesRoom = $derived(inSettings ? undefined : room);
   $effect(() => { const read = attention.rooms.get(room ?? "")?.lastRead; if (store && read) store.noteRead({ kind: "feed" }, read); });
   // Only opening counts: a failure that arrives while the DM is open clears once its row is on screen.
   $effect(() => {
@@ -447,24 +469,24 @@
     onpointerdown={drag} onclick={() => { if (!dragged) sheetFull = !sheetFull; dragged = false; }}></button>
 {/snippet}
 
-<div class="shell" class:open={room || activity.active.length} class:drawer class:tucked={room && wide.current && tucked}>
+{#if signedOut}<PairScreen code={pairCode} />
+{:else}<div class="shell" class:open={room || activity.active.length} class:drawer class:tucked={room && wide.current && tucked} class:settings={inSettings}>
   <aside class="rail" aria-label="Rooms" tabindex="-1" bind:this={rail} inert={phone.current && !drawer} role={drawer ? "dialog" : undefined} aria-modal={drawer || undefined}
     onclick={event => { if (drawer && event.target instanceof Element && event.target.closest("a, button")) void showDrawer(false, false); }}>
-    <nav aria-label="Rooms"><a class="home" href="/" onclick={navigate} aria-current={room ? undefined : "page"} aria-label="Home" title="Home"><Icon name="home" /></a>
+    <nav aria-label="Rooms"><a class="home" href="/" onclick={navigate} aria-current={room || inSettings ? undefined : "page"} aria-label="Home" title="Home"><Icon name="home" /></a>
       <!-- A room with requests that wait for the owner gets an amber dot on its corner, with no number (spec 5.13). A room
            with a failed session gets a red one instead, in the priority order of status.ts. -->
       {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}{@const failing = attention.failing(item.id)}
-      <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id ? "page" : undefined}
+      <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id && !inSettings ? "page" : undefined}
         aria-label={[item.name, failing && `${count(failing, "session")} failed`, waiting && `${count(waiting, "request")} waiting`].filter(Boolean).join(", ")} title={item.name}>
         <Avatar kind="room" name={item.name} label={initials.get(item.name)} size={40} />{#if failing}<StatusPill tone="failed" label="Failed" dot />{:else if waiting}<StatusPill tone="warning" label="Waiting" dot />{/if}</a>
     {/each}</nav>
-    <!-- The owner's face from the feed; v2 has no owner name or account menu yet. -->
-    <footer><span role="img" aria-label="You" title="You"><Avatar kind="owner" name="You" size={32} /></span></footer>
+    <footer><a class="gear" href="/settings" onclick={navigate} aria-current={inSettings ? "page" : undefined} aria-label="Settings" title="Settings"><Icon name="gear" size={20} /></a></footer>
     <!-- The drawer's second column: the open room's pages, or on Home every room by name. Counts are muted; only Requests
          uses the warning tone. -->
-    {#if phone.current}<nav class="pages" aria-label={room ? `${roomName} pages` : "Rooms by name"}><strong>{room ? roomName : "Home"}</strong>
-      {#if room}
-        <a href={"/r/" + encodeURIComponent(room)} onclick={navigate} aria-current={!session && !section ? "page" : undefined}><Icon name="chat" />Chat</a>
+    {#if phone.current}<nav class="pages" aria-label={pagesRoom ? `${roomName} pages` : "Rooms by name"}><strong>{pagesRoom ? roomName : "Home"}</strong>
+      {#if pagesRoom}
+        <a href={"/r/" + encodeURIComponent(pagesRoom)} onclick={navigate} aria-current={!session && !section ? "page" : undefined}><Icon name="chat" />Chat</a>
         {#if store && !unavailable}
           <button type="button" aria-pressed={section === "requests"} onclick={() => { section = "requests"; }}><Icon name="inbox" />Requests
             {#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
@@ -482,7 +504,7 @@
   </aside>
   {#if drawer || (panel && phone.current)}<button type="button" class="scrim" tabindex="-1" aria-label={drawer ? "Close the menu" : room ? "Close the sessions" : "Close the active rooms"}
     onclick={() => void (drawer ? showDrawer(false, true, true) : showPanel(false, true))}></button>{/if}
-  <main inert={drawer || (panel && phone.current) || covered}>
+  <main inert={drawer || (panel && phone.current) || covered || inSettings}>
     <header>{#if room && session && phone.current}<a class="menu-toggle" href={"/r/" + encodeURIComponent(room)} aria-label={`Back to ${roomName}`} title={`Back to ${roomName}`}
         onclick={event => { const tapped = event.detail > 0; navigate(event); void tick().then(() => menuButton?.focus({ focusVisible: !tapped })); }}><Icon name="back" /></a>
       {:else}<button type="button" class="menu-toggle" bind:this={menuButton} aria-label="Rooms and pages" title="Rooms and pages" aria-expanded={drawer}
@@ -510,11 +532,11 @@
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} room={roomName} onback={event => void closeSection(event.detail > 0)} />
     {:else if section === "rules" && store && !unavailable}<RulesPanel bind:element={page} {store} room={roomName} onback={event => void closeSection(event.detail > 0)} />
     {:else}<div class="feed">
-      {#if blocked}<Blocked kind={blocked} onretry={blocked === "unreachable" ? connect : undefined} />
+      {#if blocked}<Blocked kind="unreachable" onretry={connect} />
       {:else if !room && roomsLoaded && !rooms.length}<Blocked kind="no-rooms" />
       {:else if !room}<Home {attention} {initials} loaded={roomsLoaded} {navigate} onrequests={() => { section = "requests"; }} active={activity.active}
         onactive={event => { toggle = event.currentTarget; void showPanel(true, event.detail > 0); }} />
-      {:else if unavailable && unavailable !== "room"}<Blocked kind={unavailable} onretry={unavailable === "unreachable" ? reopen : undefined} />
+      {:else if unavailable === "unreachable"}<Blocked kind="unreachable" onretry={reopen} />
       {:else if store && !unavailable}
         {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
           onforward={quote => { quotes[key] = quote; composer?.focus(); }} onclosed={() => composer?.focus()} />{/key}
@@ -532,7 +554,7 @@
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
   </main>
   {#if room}
-    <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} class:watching={watching && docked} aria-label="Sessions" tabindex="-1" role={panel && phone.current && !covered ? "dialog" : undefined} aria-modal={(panel && phone.current && !covered) || undefined} bind:this={members} inert={drawer || covered}>
+    <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} class:watching={watching && docked} aria-label="Sessions" tabindex="-1" role={panel && phone.current && !covered ? "dialog" : undefined} aria-modal={(panel && phone.current && !covered) || undefined} bind:this={members} inert={drawer || covered || inSettings}>
       <!-- Docked, the computer sits above the session list. -->
       {#if watching && docked && panelShown}{@render computerView(watching)}{/if}
       {#if phone.current}{@render sheetHandle("sessions")}{/if}
@@ -566,15 +588,16 @@
       <!-- The foot polls hosts, so it mounts only while the panel shows; a phone's closed panel polls nothing. -->
       {#if panelShown}<HostFoot {navigate} />{/if}
     </aside>
-    {#if watching && !docked}{@render computerView(watching)}{/if}
+    {#if watching && !docked && !inSettings}{@render computerView(watching)}{/if}
   {:else if activity.active.length}
-    <aside class="members" id="active" class:shown={panel} class:full={sheetFull} aria-label="Active now" tabindex="-1" role={panel && phone.current ? "dialog" : undefined} aria-modal={(panel && phone.current) || undefined} bind:this={members} inert={drawer}>
+    <aside class="members" id="active" class:shown={panel} class:full={sheetFull} aria-label="Active now" tabindex="-1" role={panel && phone.current ? "dialog" : undefined} aria-modal={(panel && phone.current) || undefined} bind:this={members} inert={drawer || inSettings}>
       {#if phone.current}{@render sheetHandle("active rooms")}{/if}
       <header><strong>Active now</strong><span class="count active">{activity.active.length}</span></header>
       <div class="tree rooms"><ActiveNow {...activity} {initials} navigate={openSession} /></div>
     </aside>
   {/if}
-</div>
+  {#if inSettings}<Settings {path} phone={phone.current} {navigate} onmenu={event => void showDrawer(true, true, event.detail > 0)} signedout={() => { revoked = true; }} bind:element={settings} bind:menu={settingsMenu} />{/if}
+</div>{/if}
 
 <style>
   /* Two-line rows around the 28 px avatar, as in the chosen mockup: the name, then what the session does. */

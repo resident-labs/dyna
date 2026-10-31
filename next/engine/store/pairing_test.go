@@ -9,6 +9,29 @@ import (
 	"time"
 )
 
+func TestPairTellsAWrongCodeFromAnEndedOne(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Unix(100000, 0)
+	if _, _, err = s.RedeemPairCode(ctx, "ABCDE23456", "phone", nil, now); !errors.Is(err, ErrPairEnded) {
+		t.Fatalf("no live code: %v", err)
+	}
+	code, err := s.NewPairCode(ctx, nil, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = s.RedeemPairCode(ctx, "incorrect", "phone", nil, now); !errors.Is(err, ErrPair) || errors.Is(err, ErrPairEnded) {
+		t.Fatalf("wrong code: %v", err)
+	}
+	if _, _, err = s.RedeemPairCode(ctx, code, "phone", nil, now.Add(5*time.Minute)); !errors.Is(err, ErrPairEnded) {
+		t.Fatalf("expired code: %v", err)
+	}
+}
+
 func TestPairLifecycle(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(t.TempDir())

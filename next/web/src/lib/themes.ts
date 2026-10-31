@@ -5,6 +5,8 @@ export type ThemeMode = "dark" | "light";
 export type Token =
   // Surfaces, then the washes and lines drawn over them.
   | "--bg" | "--sidebar" | "--raised" | "--line" | "--selected" | "--hover" | "--track"
+  // --firm is a firmer line for inputs and outlined buttons, at 14% of the theme's wash.
+  | "--firm"
   // --focus is the one accent, for focus rings, selection and links.
   | "--focus" | "--text" | "--muted" | "--attention" | "--attention-fill" | "--danger" | "--success"
   // Identity colors: the hue comes from the name, these set lightness and chroma per theme.
@@ -12,7 +14,9 @@ export type Token =
   | "--shadow-sm" | "--shadow-md" | "--shadow-lg" | "--scrim"
   // A remote desktop is near-black whatever the theme, as a display is, so these never change with it.
   | "--screen" | "--screen-chip" | "--screen-text" | "--screen-muted" | "--screen-line" | "--screen-hover" | "--screen-focus"
-  | "--screen-id-face" | "--screen-id-alpha" | "--screen-id-initials";
+  | "--screen-id-face" | "--screen-id-alpha" | "--screen-id-initials"
+  // A QR code must stay dark on white to scan, so every theme holds the same pair.
+  | "--qr-ink" | "--qr-paper";
 // Black, red, green, yellow, blue, magenta, cyan and white, then the bright set.
 type Ansi = readonly [string, string, string, string, string, string, string, string, string, string, string, string, string, string, string, string];
 
@@ -29,6 +33,7 @@ const glass = { "--id-name": "80% 0.12", "--id-face": "72% 0.13", "--id-alpha": 
 // A shadow needs more alpha to show on a dark page.
 const darkShadows = { "--shadow-sm": "rgb(0 0 0 / 24%)", "--shadow-md": "rgb(0 0 0 / 36%)", "--shadow-lg": "rgb(0 0 0 / 44%)", "--scrim": "rgb(0 0 0 / 50%)" };
 const lightShadows = { "--shadow-sm": "rgb(0 0 0 / 12%)", "--shadow-md": "rgb(0 0 0 / 18%)", "--shadow-lg": "rgb(0 0 0 / 28%)", "--scrim": "rgb(0 0 0 / 50%)" };
+const qr = { "--qr-ink": "#151416", "--qr-paper": "#ffffff" };
 const screen = { "--screen": "#0d0d0f", "--screen-chip": "rgb(20 20 22 / 82%)", "--screen-text": "#e8e9eb", "--screen-muted": "#9c9fa6",
   "--screen-line": "rgb(255 255 255 / 8%)", "--screen-hover": "rgb(255 255 255 / 4%)", "--screen-focus": "#93a6f5",
   "--screen-id-face": glass["--id-face"], "--screen-id-alpha": glass["--id-alpha"], "--screen-id-initials": glass["--id-initials"] };
@@ -42,9 +47,9 @@ const darkTerminal = {
 
 export const carbon: Theme = {
   id: "carbon", label: "Carbon", mode: "dark",
-  tokens: { "--bg": "#131416", "--sidebar": "#0c0d0e", "--raised": "#1b1c1f", "--line": "rgb(255 255 255 / 8%)", "--selected": "rgb(255 255 255 / 9%)",
+  tokens: { "--bg": "#131416", "--sidebar": "#0c0d0e", "--raised": "#1b1c1f", "--line": "rgb(255 255 255 / 8%)", "--firm": "rgb(255 255 255 / 14%)", "--selected": "rgb(255 255 255 / 9%)",
     "--hover": "rgb(255 255 255 / 4%)", "--track": "rgb(255 255 255 / 8%)", "--focus": "#93a6f5", "--text": "#e8e9eb", "--muted": "#9c9fa6",
-    "--attention": "#efb66d", "--attention-fill": "#efb66d", "--danger": "#ec8480", "--success": "#86c79b", ...glass, ...darkShadows, ...screen },
+    "--attention": "#efb66d", "--attention-fill": "#efb66d", "--danger": "#ec8480", "--success": "#86c79b", ...glass, ...darkShadows, ...screen, ...qr },
   terminal: darkTerminal,
 };
 
@@ -52,17 +57,17 @@ export const themes: readonly Theme[] = [
   carbon,
   {
     id: "oled", label: "OLED black", mode: "dark",
-    tokens: { "--bg": "#000000", "--sidebar": "#000000", "--raised": "#121315", "--line": "rgb(255 255 255 / 13%)", "--selected": "rgb(255 255 255 / 12%)",
+    tokens: { "--bg": "#000000", "--sidebar": "#000000", "--raised": "#121315", "--line": "rgb(255 255 255 / 13%)", "--firm": "rgb(255 255 255 / 14%)", "--selected": "rgb(255 255 255 / 12%)",
       "--hover": "rgb(255 255 255 / 7%)", "--track": "rgb(255 255 255 / 8%)", "--focus": "#9db0f7", "--text": "#ececee", "--muted": "#a0a2a9",
-      "--attention": "#f2bb74", "--attention-fill": "#f2bb74", "--danger": "#f08b87", "--success": "#8ccda1", ...glass, ...darkShadows, ...screen },
+      "--attention": "#f2bb74", "--attention-fill": "#f2bb74", "--danger": "#f08b87", "--success": "#8ccda1", ...glass, ...darkShadows, ...screen, ...qr },
     terminal: darkTerminal,
   },
   {
     id: "light", label: "Light", mode: "light",
-    tokens: { "--bg": "#fafafb", "--sidebar": "#f1f2f4", "--raised": "#ffffff", "--line": "rgb(20 24 34 / 11%)", "--selected": "rgb(20 24 34 / 8%)",
+    tokens: { "--bg": "#fafafb", "--sidebar": "#f1f2f4", "--raised": "#ffffff", "--line": "rgb(20 24 34 / 11%)", "--firm": "rgb(20 24 34 / 14%)", "--selected": "rgb(20 24 34 / 8%)",
       "--hover": "rgb(20 24 34 / 4%)", "--track": "rgb(20 24 34 / 8%)", "--focus": "#3d5bd0", "--text": "#24262b", "--muted": "#5f636c",
       "--attention": "#a45500", "--attention-fill": "#c27412", "--danger": "#b3332e", "--success": "#2f7d4a",
-      "--id-name": "47% 0.13", "--id-face": "62% 0.13", "--id-alpha": "12%", "--id-initials": "38% 0.11", ...lightShadows, ...screen },
+      "--id-name": "47% 0.13", "--id-face": "62% 0.13", "--id-alpha": "12%", "--id-initials": "38% 0.11", ...lightShadows, ...screen, ...qr },
     terminal: {
       ansi: ["#24262b", "#b3332e", "#3d7a3a", "#8a6100", "#3d5bd0", "#8a3fae", "#1f7a8c", "#6f737c",
         "#5f636c", "#c9463f", "#4c8f48", "#a37300", "#5571db", "#a050c2", "#2a8ea3", "#8a8e96"],
