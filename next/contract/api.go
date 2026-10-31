@@ -221,7 +221,10 @@ type HostListResponse struct {
 
 type BackupCopyFailure string
 
-const BackupCopyNoSpace BackupCopyFailure = "no room on the second machine"
+const (
+	BackupCopyNoSpace BackupCopyFailure = "no_space"
+	BackupCopyFailed  BackupCopyFailure = "failed"
+)
 
 type HostSummary struct {
 	Name              HostName          `json:"name"`
@@ -234,7 +237,7 @@ type HostSummary struct {
 	DiskBytes         int64             `json:"diskBytes"`
 	DiskUsed          int64             `json:"diskUsed"`
 	DiskLow           bool              `json:"diskLow"`
-	BackupCopyEnabled bool              `json:"backupCopyEnabled"`
+	BackupCopyEnabled bool              `json:"backupCopyEnabled,omitempty"`
 	BackupCopyAt      time.Time         `json:"backupCopyAt,omitzero"`
 	BackupCopyFailure BackupCopyFailure `json:"backupCopyFailure,omitempty"`
 	LastSeen          time.Time         `json:"lastSeen,omitzero"`
