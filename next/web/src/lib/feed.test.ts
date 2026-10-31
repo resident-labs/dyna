@@ -160,6 +160,7 @@ test("a decided request folds into the activity block", () => {
   const work = rows[0];
   assert.equal(work.kind === "work" && workSummary(work.events, id => id), "l worked · 1 approval by you");
   assert.equal(work.kind === "work" && describe(work.events[1], id => id), "l asks for host access · r");
+  assert.equal(describe(event(2, { type: "op.requested", body: { id: "op1", kind: "hostexec.grant", by: { kind: "owner" }, class: "owner", card, expires: "" } }), id => id), "You ask for host access · r");
   const retained = dayRows([
     event(1, { type: "turn.started", body: { session: "l", turn: "t1", inputs: [] } }),
     event(2, { type: "op.requested", body: { id: "op1", kind: "hostexec.grant", by: lead, class: "owner", card, expires: "" } }, lead),
