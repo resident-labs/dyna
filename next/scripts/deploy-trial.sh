@@ -31,17 +31,17 @@ tree=$(git -C "$root" rev-parse HEAD:next)
 mkdir -p "$prefix"
 exec 9>"$prefix/deploy.lock"
 flock -n 9 || { echo 'Another deploy is running; skipped.'; exit 0; }
-if [[ -f $prefix/failed-next && $(<"$prefix/failed-next") == "$tree" ]]; then
+if ! "$dry_run" && [[ -f $prefix/failed-next && $(<"$prefix/failed-next") == "$tree" ]]; then
   echo "Deploy of $sha already failed; waiting for a new next/ change." >&2
   exit 1
 fi
-if [[ -f $prefix/deployed-next && $(<"$prefix/deployed-next") == "$tree" ]]; then
+if ! "$dry_run" && [[ -f $prefix/deployed-next && $(<"$prefix/deployed-next") == "$tree" ]]; then
   echo 'No next/ change since the last deploy; skipped.'
   exit 0
 fi
 step=build
 failure() {
-  printf '%s\n' "$tree" > "$prefix/failed-next"
+  if ! "$dry_run"; then printf '%s\n' "$tree" > "$prefix/failed-next"; fi
   echo "Deploy of $sha failed: $step. The trial keeps the new binary; fix forward on main." >&2
 }
 trap failure ERR
