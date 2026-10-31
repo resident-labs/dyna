@@ -10,7 +10,7 @@
 </script>
 
 <div class="work">
-  <button type="button" aria-expanded={open} onclick={ontoggle}><span class="chevron" class:open><Icon name="chevron" size={14} /></span>{workSummary(row.events, name)}</button>
+  <button type="button" aria-expanded={open} onclick={ontoggle}><span class="chevron" class:open><Icon name="chevron" size={14} /></span>{workSummary(row.events, name, row.until)}</button>
   {#if open}<ul>{#each row.events as event (event.seq)}{@const line = describe(event, name)}{#if line}<li>{line}</li>{/if}{/each}</ul>{/if}
 </div>
 
