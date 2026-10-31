@@ -21,13 +21,15 @@ body { margin: 0; background: var(--bg); color: var(--text); }
 /* The app fills the viewport exactly; only the feed and the side panels scroll. */
 .shell { display: grid; grid-template-columns: 240px 1fr; grid-template-rows: minmax(0, 1fr); height: 100dvh; overflow: hidden; }
 .shell.open { grid-template-columns: 240px 1fr 260px; }
-/* Narrow windows drop the sessions column; a phone shows the feed with the rooms as one top row. */
+/* Narrow windows hide the sessions column; the header button opens it over the feed. A phone shows the rooms as one top row. */
 @media (max-width: 900px) {
   .shell.open { grid-template-columns: 240px minmax(0, 1fr); }
+  main > header .panel-toggle { display: grid; }
   .shell > aside.members { display: none; }
+  .shell > aside.members.shown { display: block; position: fixed; top: var(--panel-top, 52px); right: 0; bottom: 0; width: min(300px, 100vw); z-index: 1; box-shadow: -8px 0 24px rgb(0 0 0 / 25%); }
 }
 @media (max-width: 640px) {
-  .shell, .shell.open { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .shell, .shell.open { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); --panel-top: 102px; }
   .shell > aside:first-child { border: 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
   .shell > aside:first-child > :is(header, .section-title) { display: none; }
   .shell > aside:first-child nav { grid-auto-flow: column; justify-content: start; }
@@ -39,6 +41,8 @@ aside.members { border-right: 0; border-left: 1px solid var(--line); }
 .member { padding: 5px 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 header { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--line); }
 main > header strong { font-size: 16px; }
+.panel-toggle { display: none; margin-left: auto; padding: 6px; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+.panel-toggle:hover, .panel-toggle[aria-expanded="true"] { background: var(--hover); color: var(--text); }
 .count { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .section-title { padding: 16px 16px 0; font-size: 12px; font-weight: 600; color: var(--muted); }
 nav { display: grid; gap: 1px; padding: 6px 8px; }
