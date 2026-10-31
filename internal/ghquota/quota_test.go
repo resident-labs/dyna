@@ -72,9 +72,12 @@ func TestRunListCallerNamesTheFilterNotItsValue(t *testing.T) {
 // Commit SHAs and artifact IDs in the path never reach the label.
 func TestGHQuotaCallerLabelsKnownEndpointsNotOther(t *testing.T) {
 	cases := map[string]string{
-		"repos/owner/repo/compare/aaaa1111...bbbb2222": "compare",
-		"repos/owner/repo/actions/artifacts/4242/zip":  "artifact-zip",
-		"repos/owner/repo/git/refs/heads/feature":      "other",
+		"repos/owner/repo/issues/12":                     "issue-detail",
+		"repos/owner/repo/issues/12/events?per_page=100": "issue-events",
+		"repos/owner/repo/issues/12/comments?since=x":    "issue-comments",
+		"repos/owner/repo/compare/aaaa1111...bbbb2222":   "compare",
+		"repos/owner/repo/actions/artifacts/4242/zip":    "artifact-zip",
+		"repos/owner/repo/git/refs/heads/feature":        "other",
 	}
 	for path, want := range cases {
 		if got := ghQuotaCaller(path); got != want {

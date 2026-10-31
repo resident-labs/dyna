@@ -58,6 +58,57 @@ func TestIssueWatchSharesRateLimitPause(t *testing.T) {
 	}
 }
 
+// Repeated metadata changes revalidate the same comment page without quota.
+func TestIssueWatchRevalidatesCommentPages(t *testing.T) {
+	e := newEnv(t)
+	const stamp = "2026-10-29T10:00:00Z"
+	base := "repos/owner/repo/issues/3"
+	comments := base + "/comments?per_page=100&since=2026-10-29T10%3A00%3A00Z"
+	e.f.Raw[base] = "HTTP/2.0 200 OK\r\n\r\n{\"title\":\"Crash\",\"state\":\"open\",\"updated_at\":\"" + stamp + "\"}"
+	e.f.Raw[comments] = "HTTP/2.0 200 OK\r\nETag: \"comments-v1\"\r\n\r\n[]"
+	e.f.Raw[base+"/events?per_page=100"] = "HTTP/2.0 200 OK\r\n\r\n[]"
+	e.write()
+	store := issuewatch.Store{DataDir: e.s.dataDir()}
+	if err := store.Save(t.Context(), issuewatch.Watch{Room: e.author.RoomID, Host: "github.com", Repo: "owner/repo", Number: 3, CommentAt: stamp}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.s.pollIssueWatches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	e.f.Raw[comments] = "HTTP/2.0 304 Not Modified\r\n\r\n"
+	e.write()
+	if _, err := e.s.pollIssueWatches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	calls, err := os.ReadFile(e.calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(calls), "If-None-Match: \"comments-v1\""); got != 1 {
+		t.Fatalf("comment conditional requests = %d, want 1: %s", got, calls)
+	}
+	watches, err := store.List(t.Context())
+	if err != nil || len(watches) != 1 {
+		t.Fatalf("watches: %v, %v", watches, err)
+	}
+	watches[0].CommentAt = "2026-10-29T10:01:00Z"
+	if err := store.Save(t.Context(), watches[0]); err != nil {
+		t.Fatal(err)
+	}
+	e.f.Raw[base+"/comments?per_page=100&since=2026-10-29T10%3A01%3A00Z"] = "HTTP/2.0 200 OK\r\n\r\n[]"
+	e.write()
+	if _, err := e.s.pollIssueWatches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	calls, err = os.ReadFile(e.calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(calls), "If-None-Match: \"comments-v1\""); got != 1 {
+		t.Fatalf("old cursor ETag sent for new cursor: %s", calls)
+	}
+}
+
 // A watched issue reports a new comment and a close once each. An edit to a
 // comment the cursor already passed is not news.
 func TestIssueWatchReportsOnlyNewFacts(t *testing.T) {

@@ -85,13 +85,12 @@ func issuePath(ref Ref) string {
 	return fmt.Sprintf("repos/%s/issues/%d", ref.Repo, ref.Number)
 }
 
-// eventsPrefix starts the request cache keys of one issue's events pages.
-func eventsPrefix(ref Ref) string {
-	return strings.ToLower(ref.Host) + "/" + issuePath(ref) + "/events"
+// issuePagesPrefix starts the request cache keys of one issue's child pages.
+func issuePagesPrefix(ref Ref) string {
+	return strings.ToLower(ref.Host) + "/" + issuePath(ref) + "/"
 }
 
-// savedEvents loads the saved events pages as request cache entries, so the
-// next poll sends their ETags and a GitHub 304 reuses each saved page.
+// savedEvents loads saved event and comment pages as request cache entries.
 func savedEvents(raw string) (map[string]cachedResponse, error) {
 	pages := map[string]cachedResponse{}
 	if raw == "" {
@@ -100,11 +99,11 @@ func savedEvents(raw string) (map[string]cachedResponse, error) {
 	return pages, json.Unmarshal([]byte(raw), &pages)
 }
 
-// eventsJSON keeps the events pages a read used, for the next poll.
+// eventsJSON keeps the event and comment pages a read used, for the next poll.
 func eventsJSON(used map[string]cachedResponse, prefix string) (string, error) {
 	pages := map[string]cachedResponse{}
 	for key, page := range used {
-		if strings.HasPrefix(key, prefix) {
+		if strings.HasPrefix(key, prefix+"events?") || strings.HasPrefix(key, prefix+"comments?") {
 			pages[key] = page
 		}
 	}
@@ -221,7 +220,7 @@ func (s *Service) WatchIssue(ctx context.Context, rec room.Record, ref Ref) erro
 	}
 	saved := cache.used[strings.ToLower(ref.Host)+"/"+issuePath(ref)]
 	w.ETag, w.Body = saved.ETag, string(saved.Body)
-	if w.Events, err = eventsJSON(cache.used, eventsPrefix(ref)); err != nil {
+	if w.Events, err = eventsJSON(cache.used, issuePagesPrefix(ref)); err != nil {
 		return err
 	}
 	return s.issueStore().Save(ctx, w)
@@ -296,6 +295,13 @@ func (s *Service) pollIssueWatch(ctx context.Context, w issuewatch.Watch, rates 
 		if comments, err = issueComments(ctx, gh, ref, w.CommentAt); err != nil {
 			return err
 		}
+	} else {
+		// Preserve the last comment pages when the issue itself is unchanged.
+		for pageKey, page := range entries {
+			if strings.HasPrefix(pageKey, issuePagesPrefix(ref)+"comments?") {
+				cache.used[pageKey] = page
+			}
+		}
 	}
 	if log, err = issueEvents(ctx, gh, ref); err != nil {
 		return err
@@ -310,7 +316,7 @@ func (s *Service) pollIssueWatch(ctx context.Context, w issuewatch.Watch, rates 
 	}
 	saved := cache.used[key]
 	next.ETag, next.Body = saved.ETag, string(saved.Body)
-	if next.Events, err = eventsJSON(cache.used, eventsPrefix(ref)); err != nil {
+	if next.Events, err = eventsJSON(cache.used, issuePagesPrefix(ref)); err != nil {
 		return err
 	}
 	// A stale token means the watch was removed or re-watched during this poll.
