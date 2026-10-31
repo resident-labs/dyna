@@ -427,14 +427,20 @@ func (s *Service) refreshHeads(ctx context.Context, st State, polledAt time.Time
 			if r.Head != pull.Head.SHA || !headVerified(*r) || r.HeadVerifiedAt.IsZero() {
 				r.HeadVerifiedAt = s.now()
 			}
-			if r.Polling.PullVersion != pullVersion(pull, EffectivePolicy(*current, *r)) || pull.DiscussionVersion == "" || r.Polling.DiscussionVersion != pull.DiscussionVersion {
-				r.Polling.DiscussionGeneration++
-				for path := range current.Responses[key] {
-					if discussionResponse(path) {
-						response := current.Responses[key][path]
+			version := pullVersion(pull, EffectivePolicy(*current, *r))
+			if r.Polling.PullVersion != version || pull.DiscussionVersion == "" || r.Polling.DiscussionVersion != pull.DiscussionVersion {
+				invalidation := digest(version + "/" + pull.DiscussionVersion)
+				changed := r.Polling.DiscussionInvalidation != invalidation
+				for path, response := range current.Responses[key] {
+					if discussionResponse(path) && !response.Stale {
 						response.Stale = true
 						current.Responses[key][path] = response
+						changed = true
 					}
+				}
+				if changed {
+					r.Polling.DiscussionInvalidation = invalidation
+					r.Polling.DiscussionGeneration++
 				}
 			}
 			if r.Head != pull.Head.SHA {
