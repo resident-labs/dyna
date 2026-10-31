@@ -83,6 +83,35 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 	transport := &relayTransport{base: client.Transport}
 	client.Transport = transport
 	service := NewSessions(files, st, func() time.Time { return now }, client)
+	const helloNonce = "abcdefghijklmnop"
+	hello := httptest.NewRecorder()
+	service.ServePublic(hello, httptest.NewRequest("GET", origin+"/connect/v1/hello?nonce="+helloNonce, nil), origin, []string{origin})
+	var greeting struct {
+		Machine string `json:"machine"`
+		Origin  string `json:"origin"`
+		Nonce   string `json:"nonce"`
+		Sig     string `json:"sig"`
+		Relay   string `json:"relay"`
+		Key     string `json:"key"`
+	}
+	if err := json.Unmarshal(hello.Body.Bytes(), &greeting); err != nil || hello.Code != 200 || greeting.Relay != relay.URL {
+		t.Fatalf("hello: %d %s %v", hello.Code, hello.Body.String(), err)
+	}
+	key, err := files.Key()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if greeting.Key != b64.EncodeToString(key.Public().(ed25519.PublicKey)) {
+		t.Fatal("hello returned the wrong public key")
+	}
+	status, err := NewOperations(context.Background(), files, st, 0, 0).Status(context.Background())
+	if err != nil || status.Fingerprint != Fingerprint(key.Public().(ed25519.PublicKey)) {
+		t.Fatalf("linked fingerprint: %q %v", status.Fingerprint, err)
+	}
+	signature, err := b64.DecodeString(greeting.Sig)
+	if err != nil || !ed25519.Verify(key.Public().(ed25519.PublicKey), []byte("dyna-connect-hello.v1\n"+greeting.Machine+"\n"+greeting.Origin+"\n"+greeting.Nonce), signature) {
+		t.Fatal("invalid hello signature")
+	}
 	browser, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)

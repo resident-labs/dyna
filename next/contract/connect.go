@@ -20,6 +20,8 @@ type ConnectStatusResponse struct {
 	Fingerprint      string         `json:"fingerprint,omitempty"`
 	Linked           bool           `json:"linked"`
 	ConnectorMissing bool           `json:"connectorMissing"`
+	Routes           []string       `json:"routes"`
+	Tunnel           string         `json:"tunnel,omitempty"`
 }
 type ConnectCancelRequest struct{}
 type ConnectCancelResponse struct{}

@@ -37,11 +37,12 @@ func TestHandoffReplacesLiveSourceOnce(t *testing.T) {
 	}
 	listed := httptest.NewRecorder()
 	s.routeList(listed, httptest.NewRequest("POST", "https://tunnel.example/api/connect/routes", nil), "https://tunnel.example",
-		[]string{"https://tunnel.example", "http://remote.example", "https://custom.example", "https://host.ts.net", "http://localhost:3000"})
+		[]string{"https://tunnel.example", "http://remote.example", "https://custom.example", "https://host.ts.net", "http://localhost:3000"}, store.ConnectSession{Access: now.Add(time.Minute), End: now.Add(30 * time.Second)})
 	var list struct {
-		Routes []string `json:"routes"`
+		Routes  []string  `json:"routes"`
+		Expires time.Time `json:"expires"`
 	}
-	if err := json.Unmarshal(listed.Body.Bytes(), &list); err != nil || !slices.Equal(list.Routes, []string{"http://localhost:3000", "https://host.ts.net", "https://custom.example", "https://tunnel.example"}) {
+	if err := json.Unmarshal(listed.Body.Bytes(), &list); err != nil || (!list.Expires.Equal(now.Add(30*time.Second)) || !slices.Equal(list.Routes, []string{"http://localhost:3000", "https://host.ts.net", "https://custom.example", "https://tunnel.example"})) {
 		t.Fatalf("route order: %s %v", listed.Body.String(), err)
 	}
 	makeProof := func(origin, path, nonce string) (string, string) {

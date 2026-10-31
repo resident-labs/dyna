@@ -25,6 +25,8 @@ type machineClaims struct {
 	Bh  string `json:"bh"`
 }
 
+const DefaultRelay = "https://connect.residentlabs.dev"
+
 type RelayError struct{ Status int }
 
 func (e *RelayError) Error() string { return fmt.Sprintf("relay returned HTTP %d", e.Status) }
@@ -143,31 +145,6 @@ func (r *Relay) ReportOrigin(ctx context.Context, machine string, appPort, cardP
 		OK bool `json:"ok"`
 	}
 	return call(ctx, r, machine, "/v1/machine/origin", originBody{machine, appPort, cardPort}, &out)
-}
-
-type Route struct {
-	Kind  string `json:"kind"`
-	App   string `json:"app"`
-	Cards string `json:"cards"`
-}
-
-func (r *Relay) Status(ctx context.Context, machine string) (MachineInfo, error) {
-	var out struct {
-		Machine MachineInfo `json:"machine"`
-	}
-	err := call(ctx, r, machine, "/v1/machine/status", machineBody{machine}, &out)
-	return out.Machine, err
-}
-
-func (r *Relay) ReportRoutes(ctx context.Context, machine string, routes []Route) error {
-	var out struct {
-		OK bool `json:"ok"`
-	}
-	body := struct {
-		Machine string  `json:"machine"`
-		Routes  []Route `json:"routes"`
-	}{machine, routes}
-	return call(ctx, r, machine, "/v1/machine/routes", body, &out)
 }
 
 func (r *Relay) Unlink(ctx context.Context, machine string) error {
