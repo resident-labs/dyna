@@ -371,6 +371,7 @@ type PostRequest struct {
 	ReplyTo      EventID      `json:"replyTo,omitempty"`
 	Attachments  []Attachment `json:"attachments,omitempty"`
 	ClientID     string       `json:"clientId,omitempty"`     // at most 64 characters; a repeat from the same author in a room returns the first post
+	ToolCallID   string       `json:"toolCallId,omitempty"`   // Pi transcript call that sent this post
 	VisualUpdate EventID      `json:"visualUpdate,omitempty"` // original visual ID, for a new version
 	VisualReply  EventID      `json:"visualReply,omitempty"`  // visual version this post answers
 }

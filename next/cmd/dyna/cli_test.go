@@ -243,9 +243,10 @@ func TestSessionCloseMapsID(t *testing.T) {
 	}
 }
 func TestPostMapsFlags(t *testing.T) {
+	t.Setenv(contract.ToolCallIDEnv, "call-1")
 	f := &fakeClient{}
 	runCLI(t, f, "post", "hello", "--room", "r", "--mention", "bob")
-	if f.post.Room != "r" || f.post.Text != "hello" || len(f.post.Mentions) != 1 || f.post.Mentions[0] != "bob" {
+	if f.post.Room != "r" || f.post.Text != "hello" || f.post.ToolCallID != "call-1" || len(f.post.Mentions) != 1 || f.post.Mentions[0] != "bob" {
 		t.Fatalf("%+v", f.post)
 	}
 }
