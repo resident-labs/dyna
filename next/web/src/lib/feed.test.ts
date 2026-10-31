@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { commandLine, feedRows, fromNow, workSummary } from "./feed.ts";
+import { commandLine, feedRows, fileSize, fromNow, isImage, workSummary } from "./feed.ts";
 import type { BoxState, Event, EventBody, FailureCause, Principal } from "./contract.gen.ts";
 
 test("a command line shows each argument exactly: spaces, quotes and empty arguments are quoted", () => {
@@ -12,6 +12,12 @@ test("a command line shows each argument exactly: spaces, quotes and empty argum
 test("a time less than a minute ahead is 'in under a minute', not 'just now'", () => {
   assert.equal(fromNow(new Date(20_000).toISOString(), 0), "in under a minute");
   assert.equal(fromNow(new Date(0).toISOString(), 20_000), "just now");
+});
+
+test("shows only browser image types as thumbnails, and sizes in B, KB and MB", () => {
+  const file = (media: string) => ({ name: "f", media, bytes: 0, sha256: "" });
+  assert.deepEqual(["image/png", "image/webp", "image/svg+xml", "text/plain"].map(media => isImage(file(media))), [true, true, false, false]);
+  assert.deepEqual([512, 12_700, 3_250_000].map(fileSize), ["512 B", "12.4 KB", "3.1 MB"]);
 });
 
 const lead: Principal = { kind: "session", session: "l" };
