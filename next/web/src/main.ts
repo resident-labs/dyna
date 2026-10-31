@@ -11,10 +11,11 @@ import "./app.css";
 // every browser. --app-height carries the visible height, so the composer stays above the keyboard.
 const viewport = window.visualViewport;
 // A hidden or prerendered tab may report 0, as v1 guards. --keyboard is the covered height: iOS keeps the bottom
-// safe-area inset while the keyboard is open, and the shell drops that padding then.
+// safe-area inset while the keyboard is open, and the shell drops that padding then. Pinch zoom also shrinks the
+// visible height; the shell keeps its size while zoomed, so the reader pans over it, and fits again at scale 1.
 const fit = () => {
   const height = viewport?.height ?? window.innerHeight, style = document.documentElement.style;
-  if (height <= 0) return;
+  if (height <= 0 || Math.abs((viewport?.scale ?? 1) - 1) > 0.01) return;
   style.setProperty("--app-height", `${Math.round(height)}px`);
   style.setProperty("--keyboard", `${Math.max(0, Math.round(window.innerHeight - height))}px`);
 };
