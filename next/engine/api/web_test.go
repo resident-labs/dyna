@@ -203,6 +203,38 @@ func TestPairAnswersGoneWithNoLiveCode(t *testing.T) {
 	}
 }
 
+func TestListenRegistersDiscoveredRouteBeforeServing(t *testing.T) {
+	w, err := NewWeb(New(&fakeService{}, nil), "127.0.0.1:0", fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, time.Now, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := w.Listen(func(port int) {
+		if port == 0 {
+			t.Error("missing actual app port")
+		}
+		if err := w.SetRoutes([]string{"https://host.example.ts.net"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	rec := httptest.NewRecorder()
+	w.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "https://host.example.ts.net/", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Header().Get("Content-Security-Policy"), "https://host.example.ts.net") {
+		t.Fatalf("route not admitted: %d %s", rec.Code, rec.Header())
+	}
+	if err := w.SetRoutes([]string{"https://new.example.ts.net"}); err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	w.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "https://new.example.ts.net/", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Header().Get("Content-Security-Policy"), "https://new.example.ts.net") {
+		t.Fatalf("refreshed route not admitted: %d %s", rec.Code, rec.Header())
+	}
+}
+
 func TestPublicRoutesLeaveOutLoopback(t *testing.T) {
 	w, err := NewWeb(New(&fakeService{}, nil), "127.0.0.1:7790", fstest.MapFS{}, time.Now, nil)
 	if err != nil {

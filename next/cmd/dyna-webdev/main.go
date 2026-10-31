@@ -440,7 +440,7 @@ func main() {
 	webServer, err := api.NewWeb(a, *listen, app, time.Now, st)
 	fatal(err)
 	fatal(webServer.SetRoutes(routes))
-	listener, err := webServer.Listen()
+	listener, err := webServer.Listen(nil)
 	fatal(err)
 	defer listener.Close()
 	b.sockets = api.NewSockets(a, runtime, uint32(os.Getuid()), nil)
