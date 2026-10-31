@@ -32,7 +32,8 @@ const lightShadows = { "--shadow-sm": "rgb(0 0 0 / 12%)", "--shadow-md": "rgb(0 
 const screen = { "--screen": "#0d0d0f", "--screen-chip": "rgb(20 20 22 / 82%)", "--screen-text": "#e8e9eb", "--screen-muted": "#9c9fa6",
   "--screen-line": "rgb(255 255 255 / 8%)", "--screen-hover": "rgb(255 255 255 / 4%)", "--screen-focus": "#93a6f5",
   "--screen-id-face": glass["--id-face"], "--screen-id-alpha": glass["--id-alpha"], "--screen-id-initials": glass["--id-initials"] };
-// Black stays readable on a dark page, and white on a light one, so a program's choice of color never hides text.
+// Black stays readable on a dark page, and white on a light one, as most programs print those on the page. The cost is
+// text on a colored background: on Light, white on a color falls to about 1.0 to 1.3:1, as in other light terminal themes.
 const darkTerminal = {
   ansi: ["#54575e", "#ef8a80", "#9ccf9a", "#e8c27a", "#8fa8f0", "#d3a6ef", "#8cc8e3", "#d8d9dc",
     "#7b7f87", "#f4a59c", "#b4dcb2", "#f0d39c", "#bccbff", "#e6c6f7", "#b0d9ee", "#f1f2f4"],
