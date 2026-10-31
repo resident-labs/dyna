@@ -23,7 +23,7 @@ func TestSessionStartClientID(t *testing.T) {
 	if problems[0] != nil || problems[1] != nil || results[0] != results[1] {
 		t.Fatalf("concurrent retries: %+v %+v", results, problems)
 	}
-	req.Name = ""
+	req.Name = "changed"
 	if got, problem := s.SessionStart(ctx, owner, req); problem != nil || got != results[0] {
 		t.Fatalf("retry: %+v %v", got, problem)
 	}

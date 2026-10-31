@@ -54,24 +54,15 @@ func (s *Store) CreateRoom(ctx context.Context, id contract.RoomID, name string,
 
 // SessionReplay returns the response saved for a caller's session start key.
 func (s *Store) SessionReplay(ctx context.Context, caller contract.Principal, clientID string) (contract.SessionStartResponse, error) {
-	var data []byte
 	var response contract.SessionStartResponse
-	err := s.read.QueryRowContext(ctx, "SELECT response FROM client_replays WHERE method=? AND caller_kind=? AND caller_id=? AND client_id=?", contract.MethodSessionStart, caller.Kind, caller.Session, clientID).Scan(&data)
-	if err != nil {
-		return response, err
-	}
-	err = json.Unmarshal(data, &response)
+	err := s.read.QueryRowContext(ctx, "SELECT s.id,b.id FROM client_replays r JOIN sessions s ON s.id=r.ref JOIN boxes b ON b.session=s.id WHERE r.method=? AND r.caller_kind=? AND r.caller_id=? AND r.client_id=?", contract.MethodSessionStart, caller.Kind, caller.Session, clientID).Scan(&response.Session, &response.Box)
 	return response, err
 }
 
 func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, size contract.BoxSizeName, goal string, event, boxEvent contract.Event, reason string, sameHost bool, clientID string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		if clientID != "" {
-			response, err := json.Marshal(contract.SessionStartResponse{Session: session.ID, Box: session.Box})
-			if err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO client_replays(method,caller_kind,caller_id,client_id,response) VALUES(?,?,?,?,?)", contract.MethodSessionStart, event.From.Kind, event.From.Session, clientID, response); err != nil {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO client_replays(method,caller_kind,caller_id,client_id,ref,created_at) VALUES(?,?,?,?,?,?)", contract.MethodSessionStart, event.From.Kind, event.From.Session, clientID, session.ID, event.Time.UnixMilli()); err != nil {
 				return err
 			}
 		}
