@@ -102,6 +102,8 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 				var reset time.Time
 				if n, err := strconv.ParseInt(headers.Get(prefix+"Reset-At"), 10, 64); err == nil && n > 0 {
 					reset = time.Unix(n, 0).UTC()
+				} else if n, err := strconv.ParseInt(headers.Get(prefix+"Reset-After-Seconds"), 10, 32); err == nil && n >= 0 {
+					reset = file.Quota.ObservedAt.Add(time.Duration(n) * time.Second)
 				}
 				usage.Windows = append(usage.Windows, contract.UsageWindow{Name: name, UsedPercent: used, Seconds: seconds, ResetsAt: reset})
 			}
