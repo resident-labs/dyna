@@ -56,7 +56,8 @@
   async function remove(rule: RoomRule) {
     menuFor = undefined;
     failure = "";
-    if (await call("rule.remove", { room: store.room, number: rule.number }).then(() => true, () => false) === false) {
+    const done = await call("rule.remove", { room: store.room, number: rule.number }).then(() => true, () => false);
+    if (!done) {
       failure = `Rule r${rule.number} was not removed. Try again.`;
       return;
     }
@@ -107,8 +108,9 @@
                   · <time datetime={rule.at} title={new Date(rule.at).toLocaleString()}>{when(rule.at)}</time></p></div>
               <button type="button" class="remove" onclick={() => void remove(rule)} aria-label={`Remove rule r${rule.number}`}>Remove</button>
               <span class="more"><button type="button" aria-label={`Rule r${rule.number} actions`} aria-haspopup="menu" aria-expanded={menuFor === rule.number}
-                onclick={() => { menuFor = menuFor === rule.number ? undefined : rule.number; }}><Icon name="more" /></button>
-                {#if menuFor === rule.number}<span class="menu" role="menu"><button type="button" role="menuitem" onclick={() => void remove(rule)}>Remove rule r{rule.number}</button></span>{/if}</span>
+                onclick={async () => { menuFor = menuFor === rule.number ? undefined : rule.number; await tick(); list?.querySelector<HTMLElement>(".menu [role=menuitem]")?.focus(); }}><Icon name="more" /></button>
+                {#if menuFor === rule.number}
+                <span class="menu" role="menu" tabindex="-1" onkeydown={event => { if (event.key === "Escape") { event.stopPropagation(); menuFor = undefined; } }}><button type="button" role="menuitem" onclick={() => void remove(rule)}>Remove rule r{rule.number}</button></span>{/if}</span>
             </li>
           {/if}
         {/each}
