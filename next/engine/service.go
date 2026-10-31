@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -367,11 +368,25 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	if !tree.CanManage(caller, session.ID) {
 		return contract.SessionCloseResponse{}, forbidden()
 	}
-	if _, err := tree.CloseOrder(session.ID); err != nil {
+	order, err := tree.CloseOrder(session.ID)
+	if err != nil {
 		return contract.SessionCloseResponse{}, forbidden()
 	}
 	if err := s.store.MarkClosing(ctx, session.ID, req.Discard); err != nil {
 		return contract.SessionCloseResponse{}, failure(err)
+	}
+	if !req.Discard {
+		boxes, err := s.store.LifecycleBoxes(ctx)
+		if err != nil {
+			return contract.SessionCloseResponse{}, failure(err)
+		}
+		for _, b := range boxes {
+			if slices.Contains(order, b.Session) && b.Want == store.WantClose && b.State == contract.BoxClosing && b.Reason != "" {
+				if err := s.archiveReason(ctx, session.Room, b.Box, ""); err != nil {
+					return contract.SessionCloseResponse{}, failure(err)
+				}
+			}
+		}
 	}
 	s.reconciler.Kick()
 	return contract.SessionCloseResponse{}, nil
