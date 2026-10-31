@@ -23,7 +23,7 @@ func (p *Proxy) Supervise(ctx context.Context, executable string, st *store.Stor
 	supervise(ctx, time.Now, time.After, func() <-chan error {
 		done := make(chan error, 1)
 		p.generation.Add(1)
-		if err := st.PruneUnboundProxyKeys(ctx); err != nil {
+		if err := st.PruneUnboundProxyAuths(ctx); err != nil {
 			done <- err
 			return done
 		}
