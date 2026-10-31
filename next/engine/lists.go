@@ -91,10 +91,11 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 			return contract.SessionListResponse{}, failure(err)
 		}
 		s.mu.Lock()
-		activity := s.activity[session.ID]
+		state := s.sessionLocked(session.ID)
+		activity := state.activity
 		session.Computer = contract.ComputerStopped
-		if c := s.computers[session.ID]; c != nil {
-			session.Computer = c.state
+		if state.computer != nil {
+			session.Computer = state.computer.state
 		}
 		s.mu.Unlock()
 		if session.Turn != "" && activity.Turn == session.Turn {
