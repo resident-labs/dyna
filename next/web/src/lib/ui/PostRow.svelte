@@ -15,7 +15,9 @@
   import { fileSize, formatTime, isImage, type Row } from "../feed.ts";
   import type { Attachment } from "../contract.gen.ts";
   import { hue } from "../identity.ts";
-  let { row, author, to, root }: { row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean } = $props();
+  let { row, author, to, root, onretry, ondiscard }: {
+    row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void;
+  } = $props();
   // Markdown from any author is sanitized before it reaches the page. Images wait for the files view.
   let html = $derived(DOMPurify.sanitize(marked.parse(row.text, { async: false, gfm: true, breaks: true }), { FORBID_TAGS: ["img"] }));
   // The engine serves each file sandboxed; the owner's cookie covers the request.
@@ -26,7 +28,7 @@
   let others = $derived(row.attachments.filter(file => !isImage(file)));
 </script>
 
-<article class="post" class:first={row.first}>
+<article class="post" class:first={row.first} class:pending={row.pending} aria-busy={row.pending && !row.pending.failed}>
   {#if row.first}
     <Avatar kind={row.from.kind} name={author} {root} />
     <p class="name"><strong class={row.from.kind} style:--hue={hue(author)}>{author}</strong>
@@ -42,6 +44,8 @@
       <span class="ext" aria-hidden="true">{extension(file.name)}</span>
       <span class="meta"><span class="file-name">{file.name}</span><span class="size">{fileSize(file.bytes)}</span></span>
       <span class="open" aria-hidden="true">↗</span></a>{/each}
+  {#if row.pending?.failed}{@const id = row.pending.id}<p class="unsent" role="alert">Not sent
+    <button type="button" onclick={() => onretry(id)}>Retry</button><button type="button" onclick={() => ondiscard(id)}>Discard</button></p>{/if}
 </article>
 
 <style>
@@ -51,6 +55,12 @@
   .post > :not(:global(.avatar)) { grid-column: 2; }
   .post > :global(.avatar) { grid-row: 1 / span 3; margin-top: 2px; }
   .first { padding-top: 14px; }
+  /* A post the engine has not confirmed is dimmed; its Not sent line keeps full contrast in the danger color, because the owner must act. */
+  .pending > :global(:not(.unsent)) { opacity: 0.5; }
+  .unsent { margin: 2px 0 0; display: flex; align-items: baseline; gap: 12px; color: var(--danger); font-size: 12px; }
+  .unsent button { all: unset; cursor: pointer; color: var(--focus); border-radius: 3px; }
+  .unsent button:hover { text-decoration: underline; }
+  .unsent button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .name { margin: 0; display: flex; align-items: baseline; gap: 8px; }
   strong { color: oklch(var(--id-name) var(--hue)); }
   strong.owner { color: var(--focus); }
