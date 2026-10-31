@@ -3,7 +3,7 @@
   import PageCrumb from "./PageCrumb.svelte";
   import RequestCard from "./RequestCard.svelte";
   import type { Request, RoomStore } from "../room.svelte.ts";
-  let { store, room, onback, element = $bindable() }: { store: RoomStore; room: string; onback: () => void; element?: HTMLElement } = $props();
+  let { store, room, onback, element = $bindable() }: { store: RoomStore; room: string; onback: (event: MouseEvent) => void; element?: HTMLElement } = $props();
   // Relative times refresh each half minute while the page is open; this reads nothing from the engine.
   let now = $state(Date.now());
   // Waiting requests in the order they expire: first the owner's own, which Home and the room header count, then the ones
