@@ -1,0 +1,77 @@
+package engine
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/resident-labs/dyna/contract"
+)
+
+func (s *Service) framePrincipal(ctx context.Context, viewer contract.SessionID, principal contract.Principal) (string, error) {
+	switch principal.Kind {
+	case contract.PrincipalOwner:
+		return "the owner", nil
+	case contract.PrincipalEngine:
+		return "the Dyna engine", nil
+	case contract.PrincipalSession:
+		var name string
+		var parent, viewerParent contract.SessionID
+		err := s.store.Read().QueryRowContext(ctx, "SELECT name,COALESCE(parent,''),(SELECT COALESCE(parent,'') FROM sessions WHERE id=?) FROM sessions WHERE id=?", viewer, principal.Session).Scan(&name, &parent, &viewerParent)
+		if err != nil {
+			return "", err
+		}
+		if principal.Session == viewerParent {
+			name = "your parent " + name
+		} else if parent == viewer {
+			name = "your child " + name
+		}
+		return name, nil
+	}
+	return "the Dyna engine", nil
+}
+
+func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, event contract.Event, delivery contract.Delivery) (string, error) {
+	sender, err := s.framePrincipal(ctx, viewer, event.From)
+	if err != nil {
+		return "", err
+	}
+	var surface string
+	switch delivery.Surface {
+	case contract.SurfaceFeed:
+		surface = "in the room feed"
+	case contract.SurfaceDM:
+		surface = "in your DM"
+	case contract.SurfaceSession:
+		surface = "as a session brief or result"
+	case contract.SurfaceCard:
+		surface = "through a card"
+	case contract.SurfaceEngine, contract.SurfaceService:
+		surface = "as a system notice"
+	}
+	frame := fmt.Sprintf("[Dyna] From %s, %s.", sender, surface)
+	if post, ok := event.Body.(contract.PostCreated); ok && len(post.Attachments) > 0 {
+		names := make([]string, 0, len(post.Attachments))
+		for _, file := range post.Attachments {
+			names = append(names, fmt.Sprintf("%q", file.Name))
+		}
+		frame += " Attached: " + strings.Join(names, ", ") + "."
+	}
+	switch delivery.Reply.Kind {
+	case contract.ReplyFinal:
+		target, err := s.framePrincipal(ctx, viewer, delivery.Reply.Target)
+		if err != nil {
+			return "", err
+		}
+		home := "in the feed"
+		if delivery.Reply.Home.Kind == contract.ConversationDM {
+			home = "in your DM"
+		}
+		frame += fmt.Sprintf(" Your final response goes to %s %s.", target, home)
+	case contract.ReplyPost:
+		frame += fmt.Sprintf(" No reply is delivered. Run dyna post only if %s must act.", sender)
+	case contract.ReplyNone:
+		frame += " No reply is expected. End your turn with one line."
+	}
+	return frame, nil
+}

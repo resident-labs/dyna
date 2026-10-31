@@ -323,7 +323,7 @@ func TestSessionStartCreatesWake(t *testing.T) {
 		t.Fatal(e)
 	}
 	start, ok := (<-channel).Body.(contract.TurnStart)
-	if !ok || len(start.Inputs) != 1 || start.Inputs[0].Text != "Goal: goal\n\nbrief" {
+	if !ok || len(start.Inputs) != 1 || inputBody(start.Inputs[0].Text) != "Goal: goal\n\nbrief" {
 		t.Fatalf("unexpected wake: %+v", start)
 	}
 }
@@ -347,7 +347,7 @@ func TestSessionStartWithoutGoalOrBriefHasNoWake(t *testing.T) {
 		t.Fatal(e)
 	}
 	start, ok := (<-channel).Body.(contract.TurnStart)
-	if !ok || len(start.Inputs) != 1 || start.Inputs[0].Text != "brief only" {
+	if !ok || len(start.Inputs) != 1 || inputBody(start.Inputs[0].Text) != "brief only" {
 		t.Fatalf("unexpected brief wake: %+v", start)
 	}
 }
@@ -376,7 +376,7 @@ func TestChannelRendersUnhandledDelivery(t *testing.T) {
 	}
 	message, open := <-channel
 	start, ok := message.Body.(contract.TurnStart)
-	if !open || !ok || len(start.Inputs) != 3 || start.Inputs[1].Text != "Unsupported event: session.closed" || start.Inputs[2].Text != "after" {
+	if !open || !ok || len(start.Inputs) != 3 || inputBody(start.Inputs[1].Text) != "Unsupported event: session.closed" || inputBody(start.Inputs[2].Text) != "after" {
 		t.Fatalf("next delivery: %+v open=%v", message, open)
 	}
 	if _, problem := s.DeliveryDone(ctx, caller, contract.DeliveryDoneRequest{Delivery: contract.DeliverySeq(seq)}); problem != nil {
@@ -408,7 +408,7 @@ func TestUnhandledDeliveryStartsTurn(t *testing.T) {
 		t.Fatal(problem)
 	}
 	start, ok := (<-channel).Body.(contract.TurnStart)
-	if !ok || len(start.Inputs) != 1 || start.Inputs[0].Text != "Unsupported event: session.closed" {
+	if !ok || len(start.Inputs) != 1 || inputBody(start.Inputs[0].Text) != "Unsupported event: session.closed" {
 		t.Fatalf("start %+v", start)
 	}
 	if _, problem := s.DeliveryDone(ctx, caller, contract.DeliveryDoneRequest{Delivery: start.Inputs[0].Delivery}); problem != nil {
@@ -422,7 +422,7 @@ func TestUnhandledDeliveryStartsTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	steer, ok := (<-channel).Body.(contract.TurnSteer)
-	if !ok || steer.Input.Text != "after" {
+	if !ok || inputBody(steer.Input.Text) != "after" {
 		t.Fatalf("later delivery %+v", steer)
 	}
 }
@@ -442,7 +442,7 @@ func TestMentionSteersRunningTurn(t *testing.T) {
 		t.Fatal(e)
 	}
 	steer, ok := (<-channel).Body.(contract.TurnSteer)
-	if !ok || steer.Queue != contract.QueueSteer || steer.Input.Text != "hello" {
+	if !ok || steer.Queue != contract.QueueSteer || inputBody(steer.Input.Text) != "hello" {
 		t.Fatalf("unexpected steer: %+v", steer)
 	}
 }
@@ -494,7 +494,7 @@ func TestFailedResultReachesParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	steer := (<-channel).Body.(contract.TurnSteer)
-	if steer.Input.Text != "turn failed: tool failed" {
+	if inputBody(steer.Input.Text) != "turn failed: tool failed" {
 		t.Fatalf("text %q", steer.Input.Text)
 	}
 }
@@ -646,7 +646,7 @@ func TestPostAcrossRooms(t *testing.T) {
 		t.Fatal(e)
 	}
 	steer := (<-channel).Body.(contract.TurnSteer)
-	if steer.Input.Text != "cross-room" || steer.Input.Reply.Kind != contract.ReplyPost || steer.Input.Reply.Target.Session != sender {
+	if inputBody(steer.Input.Text) != "cross-room" || steer.Input.Reply.Kind != contract.ReplyPost || steer.Input.Reply.Target.Session != sender {
 		t.Fatalf("got %+v", steer)
 	}
 }
@@ -1317,7 +1317,7 @@ func TestShellJobEndWakesOnceAndSteersARunningTurn(t *testing.T) {
 		}
 	}
 	steer, ok := (<-channel).Body.(contract.TurnSteer)
-	if !ok || steer.Queue != contract.QueueSteer || steer.Input.Text != "Shell job job_1 ended with exit code 2. Last output:\nboom" {
+	if !ok || steer.Queue != contract.QueueSteer || inputBody(steer.Input.Text) != "Shell job job_1 ended with exit code 2. Last output:\nboom" {
 		t.Fatalf("unexpected steer: %+v", steer)
 	}
 	var wakes int
@@ -1633,7 +1633,7 @@ func TestPostWakesOnlyTargetBox(t *testing.T) {
 	if problem != nil {
 		t.Fatal(problem)
 	}
-	if start, ok := (<-aMessages).Body.(contract.TurnStart); !ok || len(start.Inputs) != 1 || start.Inputs[0].Text != "hello" {
+	if start, ok := (<-aMessages).Body.(contract.TurnStart); !ok || len(start.Inputs) != 1 || inputBody(start.Inputs[0].Text) != "hello" {
 		t.Fatalf("unexpected start: %+v", start)
 	}
 	if ids := <-wakes; len(ids) != 1 || ids[0] != a.Session {
