@@ -35,6 +35,7 @@ const (
 	MethodSessionMove       Method = "session.move"
 	MethodPost              Method = "post"
 	MethodPostSearch        Method = "post.search"
+	MethodSessionSearch     Method = "session.search"
 	MethodEventsList        Method = "events.list"
 	MethodBoxHello          Method = "box.hello"
 	MethodComputerChanged   Method = "computer.changed"
@@ -344,6 +345,20 @@ type PostResponse struct {
 	Event EventID `json:"event"`
 	Seq   int64   `json:"seq"`
 }
+type SessionSearchRequest struct {
+	Query string `json:"query"`
+	Limit int    `json:"limit,omitempty"`
+}
+type SearchSession struct {
+	ID     SessionID `json:"id"`
+	Name   string    `json:"name"`
+	Room   RoomID    `json:"room"`
+	Closed bool      `json:"closed"`
+}
+type SessionSearchResponse struct {
+	Sessions []SearchSession `json:"sessions"`
+	Total    int             `json:"total"`
+}
 type PostSearchRequest struct {
 	Query  string `json:"query"`
 	Room   RoomID `json:"room,omitempty"`
@@ -359,8 +374,9 @@ type SearchPost struct {
 	Text   string       `json:"text"`
 }
 type PostSearchResponse struct {
-	Posts []SearchPost `json:"posts"`
-	Total int          `json:"total"`
+	Names map[SessionID]string `json:"names"`
+	Posts []SearchPost         `json:"posts"`
+	Total int                  `json:"total"`
 }
 type EventsListRequest struct {
 	Room      RoomID      `json:"room"`
