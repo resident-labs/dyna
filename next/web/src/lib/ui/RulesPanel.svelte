@@ -11,7 +11,7 @@
   import type { RoomRule } from "../contract.gen.ts";
   // The room's rules as a short numbered document, with the add box where the composer sits. Numbers are stable:
   // removing a rule never renumbers the others, and Undo adds the same text again under the next number.
-  let { store, room, onback, element = $bindable() }: { store: RoomStore; room: string; onback: () => void; element?: HTMLElement } = $props();
+  let { store, room, onback, element = $bindable() }: { store: RoomStore; room: string; onback: (event: MouseEvent) => void; element?: HTMLElement } = $props();
   type Filter = "all" | "owner" | "agents";
   let filter: Filter = $state("all");
   // A removed rule keeps its place for 10 seconds as "Rule r4 removed · Undo".
