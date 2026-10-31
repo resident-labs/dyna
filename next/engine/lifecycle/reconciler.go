@@ -113,9 +113,9 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	readyHost := make(map[contract.HostName]bool, len(hosts))
+	hostState := make(map[contract.HostName]box.HostState, len(hosts))
 	for _, host := range hosts {
-		readyHost[host.Name] = host.State == box.HostReady
+		hostState[host.Name] = host.State
 	}
 	all := make([]box.Box, len(rows))
 	for i := range rows {
@@ -131,7 +131,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 				since = r.now()
 				r.disconnected[b.ID] = since
 			}
-			if !readyHost[b.Host] || !r.now().Before(since.Add(60*time.Second)) {
+			if hostState[b.Host] == box.HostUnreachable || !r.now().Before(since.Add(60*time.Second)) {
 				next := b
 				next.State, next.Reason = contract.BoxLost, "host or box disconnected"
 				changed, err := r.change(ctx, b, next, time.Time{}, row.Failures, contract.CauseHostLost)
@@ -222,7 +222,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 				continue
 			}
 		}
-		if row.State == contract.BoxLost && readyHost[row.Host] && row.Want != store.WantClose && row.Want != store.WantDiscard {
+		if row.State == contract.BoxLost && hostState[row.Host] == box.HostReady && row.Want != store.WantClose && row.Want != store.WantDiscard {
 			if row.DueAt.IsZero() || !row.DueAt.After(r.now()) {
 				r.launch(ctx, row)
 			}
