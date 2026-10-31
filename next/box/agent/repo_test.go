@@ -162,6 +162,28 @@ func TestSetupLegacyCheckoutWithoutStateIsKept(t *testing.T) {
 	}
 }
 
+func TestSetupStateNamesDoNotCollide(t *testing.T) {
+	root, stateRoot := t.TempDir(), t.TempDir()
+	repos := []contract.BoxRepo{
+		{Name: "owner/repo.tmp", Cache: "/cache", Branch: "branch", Base: "main"},
+		{Name: "owner/repo", Cache: "/cache", Branch: "branch", Base: "main"},
+	}
+	git := func(_ context.Context, _, _ string, args ...string) (string, error) {
+		if args[0] == "clone" {
+			return "", os.MkdirAll(args[len(args)-1], 0755)
+		}
+		return "", nil
+	}
+	if err := setupRepos(context.Background(), root, stateRoot, repos, "", "", git); err != nil {
+		t.Fatal(err)
+	}
+	for _, repo := range repos {
+		if got, err := os.ReadFile(filepath.Join(stateRoot, string(repo.Name))); err != nil || string(got) != setupDone {
+			t.Fatalf("%s state: %q %v", repo.Name, got, err)
+		}
+	}
+}
+
 func TestSetupRetryFillsRunningProcessDirectory(t *testing.T) {
 	root, stateRoot := t.TempDir(), t.TempDir()
 	repo := contract.BoxRepo{Name: "owner/repo", Cache: "/cache", Branch: "branch", Base: "main"}
