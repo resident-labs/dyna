@@ -6,14 +6,15 @@ type HookState string
 
 // Hook run states.
 const (
-	HookRunning HookState = "running"
-	HookPassed  HookState = "passed"
-	HookFailed  HookState = "failed"
-	HookError   HookState = "error"
+	HookRunning  HookState = "running"
+	HookDeferred HookState = "deferred"
+	HookPassed   HookState = "passed"
+	HookFailed   HookState = "failed"
+	HookError    HookState = "error"
 )
 
 // hookStates lists every state the web needs as a union type.
-var hookStates = []HookState{HookRunning, HookPassed, HookFailed, HookError}
+var hookStates = []HookState{HookRunning, HookPassed, HookFailed, HookError, HookDeferred}
 
 // HookEvent tells a room that a hook run started and how it ended. The two
 // types share the payload: a running state is the start, every other state is

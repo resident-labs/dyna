@@ -19,6 +19,7 @@
   const stateWords: Record<HookState, string> = {
     running: 'running',
     passed: 'passed',
+    deferred: 'deferred',
     failed: 'failed',
     error: 'error',
   }
@@ -26,6 +27,7 @@
   const stateTone: Record<HookState, string> = {
     running: 'gold',
     passed: 'sage',
+    deferred: 'gold',
     failed: 'coral',
     error: 'coral',
   }
