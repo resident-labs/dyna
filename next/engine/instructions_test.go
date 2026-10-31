@@ -11,7 +11,7 @@ func TestInstructionsStaleSave(t *testing.T) {
 	s.SetFilesDir(t.TempDir())
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	before, problem := s.InstructionsGet(ctx, owner, contract.InstructionsGetRequest{Room: room})
-	if problem != nil || before.Text != "" || before.Hash == "" {
+	if problem != nil || before.Text != "" || before.Hash == "" || before.SavedAt != nil {
 		t.Fatalf("empty instructions: %+v, %v", before, problem)
 	}
 	saved, problem := s.InstructionsSet(ctx, owner, contract.InstructionsSetRequest{Room: room, Base: before.Hash, Text: "First"})
@@ -23,7 +23,7 @@ func TestInstructionsStaleSave(t *testing.T) {
 		t.Fatalf("stale save: %v", problem)
 	}
 	after, problem := s.InstructionsGet(ctx, owner, contract.InstructionsGetRequest{Room: room})
-	if problem != nil || after.Text != "First" || after.Hash != saved.Hash {
+	if problem != nil || after.Text != "First" || after.Hash != saved.Hash || after.SavedAt == nil {
 		t.Fatalf("read after stale save: %+v, %v", after, problem)
 	}
 	_, problem = s.InstructionsGet(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.InstructionsGetRequest{Room: room})
