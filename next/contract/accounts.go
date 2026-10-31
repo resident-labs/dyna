@@ -3,6 +3,25 @@ package contract
 import "time"
 
 type AccountID string
+
+type AccountAction string
+
+const (
+	AccountActionConnect  AccountAction = "connect"
+	AccountActionCallback AccountAction = "callback"
+	AccountActionSetKey   AccountAction = "set_key"
+	AccountActionComplete AccountAction = "complete"
+)
+
+// AccountsActionArgs contains only an ephemeral ticket, never account secrets.
+type AccountsActionArgs struct {
+	Action AccountAction `json:"action"`
+	Ticket string        `json:"ticket"`
+}
+
+func (AccountsActionArgs) OpKind() OpKind { return "accounts.action" }
+func (AccountsActionArgs) isOpArgs()      {}
+
 type ConnectMethod string
 
 const (

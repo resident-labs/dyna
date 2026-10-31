@@ -67,16 +67,17 @@ func TestConnectBindsAttemptsAndNeverExposesProxyID(t *testing.T) {
 	if err := c.Callback(ctx, contract.AccountsConnectCallbackRequest{Attempt: a.Attempt, RedirectURL: "http://localhost/callback?state=state-1&code=invented"}); err == nil || callbacks != 1 {
 		t.Fatal("callback was forwarded twice")
 	}
-	status, err := c.Status(ctx, contract.AccountsConnectStatusRequest{Attempt: a.Attempt})
+	commit := func(fn func() error) error { return fn() }
+	status, err := c.Status(ctx, contract.AccountsConnectStatusRequest{Attempt: a.Attempt}, commit)
 	if err != nil || status.Status != contract.ConnectConnected || status.AccountID == "" || string(status.AccountID) == "private-proxy-id" {
 		t.Fatal("connection was not bound privately")
 	}
-	again, err := c.Status(ctx, contract.AccountsConnectStatusRequest{Attempt: a.Attempt})
+	again, err := c.Status(ctx, contract.AccountsConnectStatusRequest{Attempt: a.Attempt}, commit)
 	if err != nil || again.AccountID != status.AccountID {
 		t.Fatal("completion was not idempotent")
 	}
 	p.generation.Add(1)
-	status, err = c.Status(ctx, contract.AccountsConnectStatusRequest{Attempt: b.Attempt})
+	status, err = c.Status(ctx, contract.AccountsConnectStatusRequest{Attempt: b.Attempt}, commit)
 	if err != nil || status.Status != contract.ConnectFailed {
 		t.Fatal("restart did not fail pending attempt")
 	}
