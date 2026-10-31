@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 12
+const schemaVersion = 13
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
@@ -25,6 +25,12 @@ var steps = map[int][]string{
 		`CREATE INDEX operations_state_expires ON operations(state, expires_at)`,
 	},
 	11: {"ALTER TABLE turns ADD COLUMN shell_jobs INTEGER NOT NULL DEFAULT -1"},
+	12: {
+		`CREATE TABLE grants (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id), to_kind TEXT NOT NULL, to_id TEXT NOT NULL, mode TEXT NOT NULL, expires_at INTEGER, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at INTEGER NOT NULL, revoked_at INTEGER, expired_at INTEGER);`,
+		`CREATE TABLE grant_hosts (grant_id TEXT NOT NULL REFERENCES grants(id), host TEXT NOT NULL, PRIMARY KEY(grant_id, host));`,
+		`CREATE TABLE grant_commands (grant_id TEXT NOT NULL REFERENCES grants(id), idx INTEGER NOT NULL, program TEXT NOT NULL, prefix INTEGER NOT NULL, PRIMARY KEY(grant_id, idx));`,
+		`CREATE TABLE grant_command_args (grant_id TEXT NOT NULL, idx INTEGER NOT NULL, pos INTEGER NOT NULL, arg TEXT NOT NULL, PRIMARY KEY(grant_id, idx, pos), FOREIGN KEY(grant_id, idx) REFERENCES grant_commands(grant_id, idx));`,
+	},
 }
 
 // upgrade applies each future numbered step in the same transaction as its version.
