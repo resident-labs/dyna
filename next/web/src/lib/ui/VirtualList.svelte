@@ -28,9 +28,10 @@
   // True from hold until the list's height changes. The virtualizer follows growth at the end by itself, so a threshold
   // no distance can meet turns that off.
   let held = false;
+  const browserAnchors = CSS.supports("overflow-anchor", "auto");
   const options = (): VirtualizerOptions<HTMLDivElement, HTMLDivElement> => ({
     count: rows.length, getScrollElement: () => element ?? null, estimateSize: () => estimate,
-    getItemKey: index => key(rows[index]), overscan: 8, anchorTo: "end", followOnAppend: follow, scrollEndThreshold: held ? -1 : 1,
+    getItemKey: index => key(rows[index]), overscan: 8, anchorTo: browserAnchors ? "start" : "end", followOnAppend: follow, scrollEndThreshold: held ? -1 : 1,
     scrollToFn: elementScroll, observeElementRect, observeElementOffset, measureElement,
     onChange: instance => { visible = instance.getVirtualItems(); total = instance.getTotalSize(); },
   });
@@ -39,7 +40,8 @@
   // row above them gets its real height. The virtualizer would set scrollTop for that instead, and each such write
   // stops the browser's smooth wheel scroll: a trace counted 256 writes in 300 wheel steps. Safari has no scroll
   // anchoring and keeps the virtualizer's writes.
-  if (CSS.supports("overflow-anchor", "auto")) virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => false;
+  // The virtualizer's own anchor for rows added above would write scrollTop on top of the browser's, so it is off too.
+  if (browserAnchors) virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => false;
 
   $effect.pre(() => {
     rows = items;
