@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net"
+	"net/http"
 	"net/rpc"
 	"testing"
 
@@ -16,6 +17,31 @@ type inventedToken struct {
 }
 
 func (*inventedToken) SaveTokenToFile(string) error { panic("must not write a file") }
+
+type captureIdentityRPC struct{ saved model.AuthSave }
+
+func (r *captureIdentityRPC) Save(req model.AuthSave, _ *struct{}) error { r.saved = req; return nil }
+
+func TestProxyStoreForwardsRawIdentity(t *testing.T) {
+	server, client := net.Pipe()
+	r := rpc.NewServer()
+	capture := &captureIdentityRPC{}
+	if err := r.RegisterName("Auth", capture); err != nil {
+		t.Fatal(err)
+	}
+	go r.ServeConn(server)
+	p := &proxyStore{client: rpc.NewClient(client)}
+	defer p.client.Close()
+	info := &proxyauth.RequestInfo{Headers: http.Header{"X-Dyna-Attempt": {"attempt"}}, OAuthIdentity: &proxyauth.OAuthIdentity{Email: "new@example.test"}}
+	ctx := proxyauth.WithAuthCreationIntent(proxyauth.WithRequestInfo(context.Background(), info))
+	auth := &proxyauth.Auth{ID: "invented", Provider: "claude", Metadata: map[string]any{"email": "old@example.test"}}
+	if _, err := p.Save(ctx, auth); err != nil {
+		t.Fatal(err)
+	}
+	if capture.saved.Identity.Email != "new@example.test" || capture.saved.Attempt != "attempt" {
+		t.Fatal("raw identity was not forwarded")
+	}
+}
 
 func TestProxyStoreReloadsCredentialAndRejectsDuplicate(t *testing.T) {
 	db, err := store.Open(t.TempDir())
