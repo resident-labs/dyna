@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"slices"
-	"sort"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
@@ -30,17 +29,6 @@ func (s *Service) SessionMove(ctx context.Context, caller contract.Principal, re
 	if err != nil {
 		return response, invalid(err.Error())
 	}
-	ids := slices.Clone(order)
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	var unlocks []func()
-	for _, id := range ids {
-		unlocks = append(unlocks, s.lockBox(id))
-	}
-	defer func() {
-		for i := len(unlocks) - 1; i >= 0; i-- {
-			unlocks[i]()
-		}
-	}()
 	tree, err = s.store.RoomTree(ctx, session.Room)
 	if err != nil {
 		return response, failure(err)
