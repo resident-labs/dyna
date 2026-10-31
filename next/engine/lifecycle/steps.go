@@ -46,6 +46,18 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 	var cause contract.FailureCause
 	var workErr error
 	switch {
+	case b.State == contract.BoxLost:
+		var status box.ContainerStatus
+		var found bool
+		status, found, workErr = r.boxes.Inspect(ctx, b.ID)
+		if workErr != nil || found && status.Running {
+			due = r.now().Add(60 * time.Second)
+		} else if found {
+			next.State, next.Reason = contract.BoxStopped, "container stopped"
+		} else {
+			next.State, next.Reason = contract.BoxFailed, "container missing"
+			cause = contract.CauseHostLost
+		}
 	case row.Want == store.WantStop:
 		// A terminal admitted after this check ends with the box. WakeTerminal already set
 		// want=run, so the box restarts; serializing admission would bring back the per-session lock.
