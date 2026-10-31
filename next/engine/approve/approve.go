@@ -3,7 +3,6 @@ package approve
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -104,7 +103,7 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 	}
 	if clientID != "" {
 		previous, err := s.Store.ReadReplayOperation(ctx, who, clientID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err != nil {
 			return contract.Operation{}, err
 		}
 		if previous.Operation.ID != "" {
@@ -156,46 +155,7 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 			return contract.Operation{}, err
 		}
 	}
-	var previous store.StoredOperation
-	var replay bool
-	err = s.Store.Write(ctx, func(tx *sql.Tx) error {
-		if clientID != "" {
-			found, err := s.Store.ReplayOperation(tx, who, clientID)
-			if err == nil {
-				previous = found
-				replay = true
-				return nil
-			}
-			if !errors.Is(err, sql.ErrNoRows) {
-				return err
-			}
-		}
-		found, err := s.Store.PendingOperation(tx, op.Room, who, op.Kind, args)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if err == nil && !found.Operation.Expires.After(now) {
-			if err := s.expireTx(tx, found.Operation); err != nil {
-				return err
-			}
-		} else if err == nil {
-			previous = found
-			if clientID != "" {
-				return s.Store.InsertOperationReplay(tx, who, clientID, found.Operation.ID, now)
-			}
-			return nil
-		}
-		if checkErr != nil {
-			return checkErr
-		}
-		if err := s.Store.InsertOperation(tx, store.StoredOperation{Operation: op, Args: args}, request, nil); err != nil {
-			return err
-		}
-		if clientID != "" {
-			return s.Store.InsertOperationReplay(tx, who, clientID, op.ID, now)
-		}
-		return nil
-	})
+	previous, replay, err := s.Store.SubmitOperation(ctx, store.StoredOperation{Operation: op, Args: args}, request, clientID, now, checkErr, s.expiry)
 	if err != nil {
 		return contract.Operation{}, err
 	}
@@ -279,25 +239,11 @@ func (s *Service) Decide(ctx context.Context, who contract.Principal, id contrac
 	if state == contract.OpDenied || state == contract.OpWithdrawn && who != op.By {
 		notify = delivery(op.By.Session)
 	}
-	expired := false
-	err = s.Store.Write(ctx, func(tx *sql.Tx) error {
-		if !op.Expires.After(s.Now()) {
-			expired = true
-			return s.expireTx(tx, op)
-		}
-		changed, err := s.Store.TransitionOperation(tx, id, contract.OpPending, state, &decision, nil, event, notify)
-		if err != nil {
-			return err
-		}
-		if !changed {
-			return ErrConflict
-		}
-		return nil
-	})
+	expired, changed, err := s.Store.DecideOperation(ctx, op, state, decision, event, notify, s.Now, s.expiry)
 	if err != nil {
 		return err
 	}
-	if expired {
+	if expired || !changed {
 		return ErrConflict
 	}
 	if state == contract.OpApproved {
@@ -308,14 +254,10 @@ func (s *Service) Decide(ctx context.Context, who contract.Principal, id contrac
 	return nil
 }
 
-func (s *Service) expireTx(tx *sql.Tx, op contract.Operation) error {
+func (s *Service) expiry(op contract.Operation) (contract.Decision, contract.Event, []contract.Delivery, error) {
 	d := contract.Decision{By: contract.Principal{Kind: contract.PrincipalEngine}, At: s.Now(), Reason: "expired"}
 	event, err := s.event(op.Room, d.By, contract.OpDecided{ID: op.ID, State: contract.OpExpired, Decision: d})
-	if err != nil {
-		return err
-	}
-	_, err = s.Store.TransitionOperation(tx, op.ID, contract.OpPending, contract.OpExpired, &d, nil, event, delivery(op.By.Session))
-	return err
+	return d, event, delivery(op.By.Session), err
 }
 
 // ExpireKind invalidates pending cards whose facts may have changed across a restart.
@@ -326,7 +268,7 @@ func (s *Service) ExpireKind(ctx context.Context, kind contract.OpKind) error {
 	}
 	for _, record := range ops {
 		if record.Operation.Kind == kind {
-			if err := s.Store.Write(ctx, func(tx *sql.Tx) error { return s.expireTx(tx, record.Operation) }); err != nil {
+			if err := s.Store.ExpireOperation(ctx, record.Operation, s.expiry); err != nil {
 				return err
 			}
 		}
@@ -340,7 +282,7 @@ func (s *Service) Expire(ctx context.Context) error {
 		return err
 	}
 	for _, record := range ops {
-		if err := s.Store.Write(ctx, func(tx *sql.Tx) error { return s.expireTx(tx, record.Operation) }); err != nil {
+		if err := s.Store.ExpireOperation(ctx, record.Operation, s.expiry); err != nil {
 			return err
 		}
 	}
@@ -361,18 +303,12 @@ func (s *Service) start(op contract.Operation, entry Entry) {
 	}
 }
 func (s *Service) run(op contract.Operation, entry Entry) error {
-	err := s.Store.Write(s.Context, func(tx *sql.Tx) error {
-		changed, err := s.Store.TransitionOperation(tx, op.ID, contract.OpApproved, contract.OpRunning, nil, nil, contract.Event{}, nil)
-		if err != nil {
-			return err
-		}
-		if !changed {
-			return fmt.Errorf("operation %s is not approved", op.ID)
-		}
-		return nil
-	})
+	changed, err := s.Store.ChangeOperation(s.Context, op.ID, contract.OpApproved, contract.OpRunning, nil, contract.Event{}, nil)
 	if err != nil {
 		return err
+	}
+	if !changed {
+		return fmt.Errorf("operation %s is not approved", op.ID)
 	}
 
 	result := contract.OpResult{}
@@ -408,18 +344,12 @@ func (s *Service) finish(ctx context.Context, op contract.Operation, result cont
 	if !present {
 		notify = delivery(op.By.Session)
 	}
-	err = s.Store.Write(ctx, func(tx *sql.Tx) error {
-		changed, err := s.Store.TransitionOperation(tx, op.ID, contract.OpRunning, state, nil, &result, event, notify)
-		if err != nil {
-			return err
-		}
-		if !changed {
-			return fmt.Errorf("operation %s is not claimed", op.ID)
-		}
-		return nil
-	})
+	changed, err := s.Store.ChangeOperation(ctx, op.ID, contract.OpRunning, state, &result, event, notify)
 	if err != nil {
 		return err
+	}
+	if !changed {
+		return fmt.Errorf("operation %s is not claimed", op.ID)
 	}
 	if present {
 		delete(s.waiters, op.ID)
