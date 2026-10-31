@@ -563,6 +563,9 @@ var onRowsRead = func() {}
 // unmarshalRecord is replaced by tests.
 var unmarshalRecord = func(data []byte, record *diskRecord) error { return json.Unmarshal(data, record) }
 
+// The revision index covers this scan, so unchanged record bodies stay on disk.
+const snapshotRowsQuery = "SELECT key, rev FROM pr_rows INDEXED BY pr_records_revision"
+
 // fetch copies the store's revision, its index and the rows newer than the
 // cached snapshot. It decodes nothing. The caller holds snapshot.
 func fetch(q querier, root string) (fetched, error) {
@@ -593,24 +596,72 @@ func fetch(q querier, root string) (fetched, error) {
 		return fetched{unchanged: true}, nil
 	}
 	onRowsRead()
-	rows, err = q.QueryContext(ctx, "SELECT key, rev, body FROM pr_rows")
+	if snapshot.index == nil {
+		rows, err = q.QueryContext(ctx, "SELECT key, rev, body FROM pr_rows")
+		if err != nil {
+			return fetched{}, err
+		}
+		for rows.Next() {
+			var row storedRow
+			if err = rows.Scan(&row.key, &row.rev, &row.body); err != nil {
+				rows.Close()
+				return fetched{}, err
+			}
+			f.rows = append(f.rows, row)
+		}
+		err = rows.Err()
+		closeErr := rows.Close()
+		if err != nil {
+			return fetched{}, err
+		}
+		if closeErr != nil {
+			return fetched{}, closeErr
+		}
+		return f, fetchParts(ctx, q, &f)
+	}
+	rows, err = q.QueryContext(ctx, snapshotRowsQuery)
 	if err != nil {
 		return fetched{}, err
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var row storedRow
-		var body sql.RawBytes
-		if err = rows.Scan(&row.key, &row.rev, &body); err != nil {
+		if err = rows.Scan(&row.key, &row.rev); err != nil {
+			rows.Close()
 			return fetched{}, err
-		}
-		if cached := snapshot.state.Records[row.key]; cached == nil || row.rev > snapshot.revision {
-			row.body = append([]byte{}, body...)
 		}
 		f.rows = append(f.rows, row)
 	}
-	if err := rows.Err(); err != nil {
+	if err = rows.Err(); err != nil {
+		rows.Close()
 		return fetched{}, err
+	}
+	if err = rows.Close(); err != nil {
+		return fetched{}, err
+	}
+	for i := range f.rows {
+		row := &f.rows[i]
+		if snapshot.state.Records[row.key] != nil && row.rev <= snapshot.revision {
+			continue
+		}
+		bodyRows, err := q.QueryContext(ctx, "SELECT body FROM pr_rows WHERE key=?", row.key)
+		if err != nil {
+			return fetched{}, err
+		}
+		if bodyRows.Next() {
+			err = bodyRows.Scan(&row.body)
+		} else {
+			err = bodyRows.Err()
+			if err == nil {
+				err = sql.ErrNoRows
+			}
+		}
+		closeErr := bodyRows.Close()
+		if err != nil {
+			return fetched{}, err
+		}
+		if closeErr != nil {
+			return fetched{}, closeErr
+		}
 	}
 	return f, fetchParts(ctx, q, &f)
 }
