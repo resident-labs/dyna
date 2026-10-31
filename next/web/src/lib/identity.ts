@@ -14,16 +14,19 @@ export function initials(name: string): string {
   return (parts.length > 1 ? parts[0][0] + parts[1][0] : name.slice(0, 2)).toUpperCase();
 }
 
-// Initials that tell names apart, the rooms on the rail or the sessions in one room: each name, in name order, takes
-// the first free of its two words' first letters, its first two letters, its first letter and a digit of its own (the
-// last first), then its first letter and a counting digit. "design-system" and "docs-site" give "DS" and "DO", and
-// "reviewer-2", "reviewer-22" and "reviewer-27" give "R2", "RE" and "R7"; the order makes every page agree.
+// Initials that tell names apart, the rooms on the rail or the sessions in one room. First each name, in name order,
+// takes its two words' first letters while they are free, so a fallback never takes another name's own initials. Each
+// name left then takes the first free of its first two letters, its first letter and a digit of its own (the last
+// first), then its first letter and a counting digit. "design-system" and "docs-site" give "DS" and "DO", and
+// "reviewer-2", "reviewer-7" and "reviewer-22" give "R2", "R7" and "RE"; the order makes every page agree.
 export function distinctInitials(names: string[]): Map<string, string> {
-  const taken = new Set<string>(), result = new Map<string, string>();
-  for (const name of [...new Set(names)].sort((a, b) => a.localeCompare(b))) {
+  const sorted = [...new Set(names)].sort((a, b) => a.localeCompare(b));
+  const result = new Map<string, string>(), taken = new Set<string>();
+  for (const name of sorted) if (!taken.has(initials(name))) { taken.add(initials(name)); result.set(name, initials(name)); }
+  for (const name of sorted.filter(name => !result.has(name))) {
     const first = (words(name)[0] ?? name).charAt(0).toUpperCase();
     const own = [...name.match(/\d/g) ?? []].reverse();
-    const label = [initials(name), name.slice(0, 2).toUpperCase(), ...[...own, ..."123456789"].map(digit => first + digit)]
+    const label = [name.slice(0, 2).toUpperCase(), ...[...own, ..."123456789"].map(digit => first + digit)]
       .find(candidate => !taken.has(candidate)) ?? initials(name);
     taken.add(label);
     result.set(name, label);
