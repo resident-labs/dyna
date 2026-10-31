@@ -37,6 +37,16 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 			if err != nil {
 				return err
 			}
+			if input.Head != "" {
+				head = input.Head
+			}
+			allowed, err := enginegit.CanPushBranch(ctx, s.store, session.Repo, who.Session, head)
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				return approve.ErrForbidden
+			}
 			if session.Repo == "" || strings.TrimSpace(input.Title) == "" || strings.TrimSpace(input.Base) == "" {
 				return approve.ErrInvalid
 			}
@@ -55,14 +65,16 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 			if err != nil {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: "session repository unavailable"}
 			}
+			if input := args.(contract.PrOpenArgs); input.Head != "" {
+				head = input.Head
+			}
 			if token == "" {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: "GitHub token is not set"}
 			}
 			// The request has only strings and a boolean, which JSON always encodes.
-			body, _ := json.Marshal(struct {
-				contract.PrOpenArgs
-				Head string `json:"head"`
-			}{args.(contract.PrOpenArgs), head})
+			input := args.(contract.PrOpenArgs)
+			input.Head = head
+			body, _ := json.Marshal(input)
 			target := *endpoint
 			target.Path = strings.TrimRight(target.Path, "/") + "/repos/" + string(session.Repo) + "/pulls"
 			request, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(body))
@@ -102,7 +114,7 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 				if err != nil {
 					return err
 				}
-				return s.store.RecordPROpen(ctx, session.Repo, payload.Number, who.Session, event, nil)
+				return s.store.RecordPROpen(ctx, session.Repo, payload.Number, who.Session, head, event, nil)
 			}()
 			if err != nil {
 				result.Cause = contract.CauseInternal

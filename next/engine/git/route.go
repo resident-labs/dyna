@@ -4,6 +4,7 @@ package git
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -68,7 +69,7 @@ func Handler(upstream *url.URL, transport http.RoundTripper, token string, sessi
 				http.Error(w, "unsupported content encoding", http.StatusUnsupportedMediaType)
 				return
 			}
-			body, rejected, sideband, err := commands(r.Body, session)
+			body, rejected, sideband, err := commands(r.Context(), r.Body, session, repo, rooms)
 			if err != nil {
 				http.Error(w, "invalid receive-pack commands", http.StatusBadRequest)
 				return
@@ -118,7 +119,7 @@ func pkt(w io.Writer, value string) {
 	fmt.Fprintf(w, "%04x%s", len(value)+4, value)
 }
 
-func commands(body io.ReadCloser, session contract.SessionID) (io.ReadCloser, []string, bool, error) {
+func commands(ctx context.Context, body io.ReadCloser, session contract.SessionID, repo contract.RepoName, rooms RoomRepositories) (io.ReadCloser, []string, bool, error) {
 	reader := bufio.NewReader(body)
 	var prefix bytes.Buffer
 	var refs []string
@@ -154,7 +155,14 @@ func commands(body io.ReadCloser, session contract.SessionID) (io.ReadCloser, []
 			return nil, nil, false, fmt.Errorf("bad command")
 		}
 		ref := fields[2]
-		allowed := ref == "refs/heads/"+SessionBranchPrefix+string(session) || ref == "refs/dyna/archive/"+string(session)
+		allowed := ref == "refs/dyna/archive/"+string(session)
+		if branch, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
+			var err error
+			allowed, err = CanPushBranch(ctx, rooms, repo, session, branch)
+			if err != nil {
+				return nil, nil, false, err
+			}
+		}
 		refs = append(refs, ref)
 		if !allowed {
 			denied = true
@@ -167,4 +175,16 @@ func commands(body io.ReadCloser, session contract.SessionID) (io.ReadCloser, []
 		io.Reader
 		io.Closer
 	}{io.MultiReader(&prefix, reader), body}, refs, sideband, nil
+}
+
+// CanPushBranch checks a session branch or a branch registered to an owned PR.
+func CanPushBranch(ctx context.Context, rooms RoomRepositories, repo contract.RepoName, session contract.SessionID, branch string) (bool, error) {
+	base := SessionBranchPrefix + string(session)
+	if branch == base {
+		return true, nil
+	}
+	if topic, ok := strings.CutPrefix(branch, base+"-"); ok && validPart(topic) && !strings.HasSuffix(topic, ".") && !strings.HasSuffix(topic, ".lock") && !strings.Contains(topic, "..") {
+		return true, nil
+	}
+	return rooms.OwnsPRBranch(ctx, repo, session, branch)
 }
