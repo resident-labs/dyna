@@ -75,7 +75,7 @@ const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.sessio
 // The session an event is about; events without one belong to the room feed only.
 export function subject(event: Event): string | undefined {
   switch (event.type) {
-    case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "rule.added": case "rule.removed": case "rule.edited": case "session.profile_changed": return undefined;
+    case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": return undefined;
     case "op.requested": return event.body.by.session;
     case "op.decided": case "op.ran": return event.from.session;
     default: return event.body.session;
@@ -153,7 +153,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     }
     const session = subject(event);
     if (home.kind === "dm" && session !== home.session) continue;
-    if (event.type === "room.paused" || event.type === "room.resumed" || event.type === "room.limits_changed" || event.type === "rule.added" || event.type === "rule.removed" || event.type === "rule.edited") {
+    if (event.type === "room.paused" || event.type === "room.resumed" || event.type === "room.limits_changed") {
       const previous = deferred.at(-1);
       if (event.type === "room.resumed" && previous?.kind === "notice" && previous.event.type === "room.paused" && sameAuthor(previous.event.from, event.from) && Date.parse(event.at) - Date.parse(previous.event.at) <= 300_000) previous.resumedAt = event.at;
       else deferred.push({ kind: "notice", key: `n${event.seq}`, event });
@@ -229,7 +229,6 @@ export const eventGroups: Record<Event["type"], string> = {
   "turn.started": "turns started", "turn.ended": "turns ended", "turn.activity": "turn updates",
   "computer.changed": "computer changes", "box.changed": "box changes", "box.pressure": "memory warnings",
   "room.paused": "pauses", "room.resumed": "resumes", "room.limits_changed": "room limits changed",
-  "rule.added": "rules added", "rule.edited": "rules changed", "rule.removed": "rules removed",
   "op.requested": "requests", "op.decided": "requests decided", "op.ran": "requests run",
   "image.built": "images built", "image.failed": "image builds failed", "pr.opened": "pull requests opened",
   "shell.job.ended": "jobs finished", "grant.expired": "host grants expired",
@@ -404,9 +403,6 @@ export function describe(event: Event, name: Name): string {
       const mem = !memBytes ? "no memory limit" : gb < 1 ? `${Math.max(1, Math.round(memBytes / 2 ** 20))} MB` : `${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB`;
       return `You set the room limit to ${cpu} and ${mem}`;
     }
-    case "rule.added": return `Rule r${event.body.number} added: ${event.body.text}`;
-    case "rule.removed": return `Rule r${event.body.number} removed`;
-    case "rule.edited": return `Rule r${event.body.number} changed: ${event.body.text}`;
     case "session.profile_changed": return ""; // feedRows shows no row for it.
     case "box.pressure": return event.body.kind === "max" ? "A session reached its memory limit" : "A session is short of memory";
     case "post.created": return event.body.text;
