@@ -2,12 +2,9 @@ package engine
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
-	"sync"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
@@ -22,28 +19,21 @@ type accountActionResult struct {
 	err     error
 }
 
-type accountAction struct {
-	kind   contract.AccountAction
-	run    func(context.Context) accountActionResult
-	result chan accountActionResult
-}
-
 type AccountActions struct {
 	service     *Service
-	mu          sync.Mutex
-	pending     map[string]accountAction
 	connections *model.Connections
 }
 
 func NewAccountActions(service *Service, connections *model.Connections) *AccountActions {
-	return &AccountActions{service: service, connections: connections, pending: make(map[string]accountAction)}
+	return &AccountActions{service: service, connections: connections}
 }
 
 func (a *AccountActions) Entry() approve.Entry {
 	return approve.Entry{
-		Global: true,
-		Scope:  contract.ScopeAdmin,
-		Class:  func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassOwner },
+		Global:    true,
+		Ephemeral: true,
+		Scope:     contract.ScopeAdmin,
+		Class:     func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassOwner },
 		Card: func(_ context.Context, args contract.OpArgs, _ contract.Principal) contract.Card {
 			name := "Account action"
 			switch args.(contract.AccountsActionArgs).Action {
@@ -58,31 +48,9 @@ func (a *AccountActions) Entry() approve.Entry {
 			}
 			return contract.Card{Title: name, Target: contract.Target{Kind: contract.TargetAccount}}
 		},
-		Check: func(_ context.Context, args contract.OpArgs, who contract.Principal) error {
-			action := args.(contract.AccountsActionArgs)
-			a.mu.Lock()
-			pending, ok := a.pending[action.Ticket]
-			a.mu.Unlock()
-			if who.Kind != contract.PrincipalOwner || !ok || pending.kind != action.Action {
-				return errAccountAction
-			}
-			return nil
-		},
-		Execute: func(ctx context.Context, _ contract.OpID, args contract.OpArgs, _ contract.Principal) contract.OpResult {
-			action := args.(contract.AccountsActionArgs)
-			a.mu.Lock()
-			pending, ok := a.pending[action.Ticket]
-			delete(a.pending, action.Ticket)
-			a.mu.Unlock()
-			if !ok {
-				return contract.OpResult{Error: "account action unavailable"}
-			}
-			result := pending.run(ctx)
-			pending.result <- result
-			if result.err != nil {
-				return contract.OpResult{Error: "account action failed"}
-			}
-			return contract.OpResult{}
+		Check: func(context.Context, contract.OpArgs, contract.Principal) error { return nil },
+		Execute: func(context.Context, contract.OpID, contract.OpArgs, contract.Principal) contract.OpResult {
+			return contract.OpResult{Error: "account action interrupted", Cause: contract.CauseInterrupted}
 		},
 		Decode: func(raw json.RawMessage) (contract.OpArgs, error) {
 			var args contract.AccountsActionArgs
@@ -96,31 +64,23 @@ func (s *AccountActions) runAccountAction(ctx context.Context, caller contract.P
 	if caller.Kind != contract.PrincipalOwner {
 		return accountActionResult{}, &contract.Error{Code: contract.ErrForbidden, Message: "forbidden"}
 	}
-	var id [16]byte
-	if _, err := rand.Read(id[:]); err != nil {
+	resultCh := make(chan accountActionResult, 1)
+	op, err := s.service.approvals.SubmitEphemeral(ctx, caller, contract.Operation{Args: contract.AccountsActionArgs{Action: kind}}, func(ctx context.Context) contract.OpResult {
+		result := run(ctx)
+		resultCh <- result
+		if result.err != nil {
+			return contract.OpResult{Error: "account action failed"}
+		}
+		return contract.OpResult{}
+	})
+	if err != nil {
 		return accountActionResult{}, &contract.Error{Code: contract.ErrUnavailable, Message: "account action unavailable"}
 	}
-	ticket := hex.EncodeToString(id[:])
-	action := accountAction{kind: kind, run: run, result: make(chan accountActionResult, 1)}
-	s.mu.Lock()
-	if len(s.pending) >= 128 {
-		s.mu.Unlock()
-		return accountActionResult{}, &contract.Error{Code: contract.ErrUnavailable, Message: "account action unavailable"}
-	}
-	s.pending[ticket] = action
-	s.mu.Unlock()
-	response, problem := s.service.OpSubmit(ctx, caller, contract.OpSubmitRequest{Operation: contract.Operation{Args: contract.AccountsActionArgs{Action: kind, Ticket: ticket}}})
-	if problem != nil {
-		s.mu.Lock()
-		delete(s.pending, ticket)
-		s.mu.Unlock()
-		return accountActionResult{}, &contract.Error{Code: contract.ErrUnavailable, Message: "account action unavailable"}
-	}
-	if response.Operation.State == contract.OpFailed {
+	if op.State == contract.OpFailed {
 		return accountActionResult{}, &contract.Error{Code: contract.ErrUnavailable, Message: "account action failed"}
 	}
 	select {
-	case result := <-action.result:
+	case result := <-resultCh:
 		if result.err != nil {
 			return accountActionResult{}, &contract.Error{Code: contract.ErrUnavailable, Message: "account action failed"}
 		}
@@ -128,6 +88,25 @@ func (s *AccountActions) runAccountAction(ctx context.Context, caller contract.P
 	case <-ctx.Done():
 		return accountActionResult{}, &contract.Error{Code: contract.ErrUnavailable, Message: "account action unavailable"}
 	}
+}
+
+func (s *AccountActions) AccountsList(ctx context.Context, caller contract.Principal, _ contract.AccountsListRequest) (contract.AccountsListResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalOwner {
+		return contract.AccountsListResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "forbidden"}
+	}
+	accounts, err := s.service.store.Accounts(ctx)
+	if err != nil {
+		return contract.AccountsListResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable"}
+	}
+	return contract.AccountsListResponse{Accounts: accounts, Providers: []contract.AccountProviderInfo{
+		{ID: contract.ProviderAnthropic, DisplayName: "Claude", ConnectMethod: contract.ConnectOAuth},
+		{ID: contract.ProviderOpenAI, DisplayName: "ChatGPT", ConnectMethod: contract.ConnectOAuth},
+		{ID: contract.ProviderKimi, DisplayName: "Kimi Code", ConnectMethod: contract.ConnectOAuth},
+		{ID: contract.ProviderXAI, DisplayName: "xAI", ConnectMethod: contract.ConnectOAuth},
+		{ID: contract.ProviderZAI, DisplayName: "z.ai", ConnectMethod: contract.ConnectKey},
+		{ID: contract.ProviderOpencodeGo, DisplayName: "OpenCode Go", ConnectMethod: contract.ConnectKey},
+		{ID: contract.ProviderDeepSeek, DisplayName: "DeepSeek", ConnectMethod: contract.ConnectKey},
+	}}, nil
 }
 
 func (s *AccountActions) AccountsConnect(ctx context.Context, caller contract.Principal, req contract.AccountsConnectRequest) (contract.AccountsConnectResponse, *contract.Error) {

@@ -49,6 +49,7 @@ type Service interface {
 	HostAdd(context.Context, contract.Principal, contract.HostAddRequest) (contract.HostAddResponse, *contract.Error)
 	ProfileList(context.Context, contract.Principal, contract.ProfileListRequest) (contract.ProfileListResponse, *contract.Error)
 	HostList(context.Context, contract.Principal, contract.HostListRequest) (contract.HostListResponse, *contract.Error)
+	AccountsList(context.Context, contract.Principal, contract.AccountsListRequest) (contract.AccountsListResponse, *contract.Error)
 	AccountsConnect(context.Context, contract.Principal, contract.AccountsConnectRequest) (contract.AccountsConnectResponse, *contract.Error)
 	AccountsConnectCallback(context.Context, contract.Principal, contract.AccountsConnectCallbackRequest) (contract.AccountsConnectCallbackResponse, *contract.Error)
 	AccountsConnectStatus(context.Context, contract.Principal, contract.AccountsConnectStatusRequest) (contract.AccountsConnectStatusResponse, *contract.Error)

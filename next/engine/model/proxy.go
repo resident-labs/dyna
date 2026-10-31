@@ -46,7 +46,8 @@ func NewProxy(dataDir, managementKey string) (*Proxy, error) {
 	if err := os.Chmod(dir, 0700); err != nil {
 		return nil, err
 	}
-	authDir := filepath.Join(dir, "auth")
+	// M1 file credentials are not imported; the owner reconnects accounts.
+	authDir := filepath.Join(dir, "auth-v2")
 	if err := os.MkdirAll(authDir, 0700); err != nil {
 		return nil, err
 	}
