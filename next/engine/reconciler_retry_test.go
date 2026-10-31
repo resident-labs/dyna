@@ -337,3 +337,44 @@ func TestReconcilerArchiveStartFailureAndRetry(t *testing.T) {
 		t.Fatalf("successful archive retry: starts=%d box=%+v err=%v", host.starts, current, err)
 	}
 }
+
+type retryHelloHost struct {
+	fakeBoxes
+	service            *Service
+	session            contract.SessionID
+	oldHello, newHello *contract.Error
+}
+
+func (h *retryHelloHost) Remove(ctx context.Context, _ contract.BoxID) error {
+	_, h.oldHello = h.service.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: h.session}, contract.BoxHelloRequest{})
+	return nil
+}
+
+func (h *retryHelloHost) Create(ctx context.Context, _ lifecycle.BoxSpec) (string, error) {
+	_, h.newHello = h.service.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: h.session}, contract.BoxHelloRequest{})
+	return "image", nil
+}
+
+func TestCreateRetryAcceptsNewHelloAfterCleanup(t *testing.T) {
+	s, _, sid, ctx := setup(t)
+	session, err := s.store.Session(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE boxes SET state='creating', image='', want='run', due_at=?, failures=1 WHERE id=?", s.now().UnixMilli()-1, session.Box)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	host := &retryHelloHost{service: s, session: sid}
+	r := lifecycle.New(s.store, host, retryView{}, nil, s.event, s.now)
+	if err := r.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.Wait()
+	b, err := s.store.Box(ctx, session.Box)
+	if err != nil || host.oldHello == nil || host.newHello != nil || b.State != contract.BoxReady {
+		t.Fatalf("old hello=%v new hello=%v box=%+v err=%v", host.oldHello, host.newHello, b, err)
+	}
+}
