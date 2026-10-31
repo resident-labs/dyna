@@ -43,7 +43,7 @@ func TestQuotasThroughManagement(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(struct {
 				Status int    `json:"status_code"`
 				Body   string `json:"body"`
-			}{200, `{"five_hour":{"utilization":25.5,"resets_at":"2026-10-31T01:00:00Z"},"seven_day_oauth_apps":{"utilization":42,"resets_at":"2026-11-06T01:00:00Z"}}`})
+			}{200, `{"five_hour":{"utilization":25.5,"resets_at":"2026-10-31T01:00:00Z"},"seven_day_oauth_apps":{"utilization":42,"resets_at":"2026-11-06T01:00:00Z"},"limits":[{"kind":"weekly_scoped","percent":0,"scope":{"model":{"id":"opus"}}}]}`})
 		default:
 			t.Error("unexpected request")
 		}
