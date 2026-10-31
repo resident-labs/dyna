@@ -38,6 +38,8 @@ export class RoomStore {
   private loaded = false;
   // The page request in flight; a jump to the present waits for it instead of being dropped.
   private busy: Promise<void> | undefined;
+  // The last load error, kept until a load succeeds, so the owner sees it instead of a silent gap.
+  private failure: unknown;
   private latest = 0;
   private stopStream = () => {};
   private closed = false;
@@ -59,9 +61,16 @@ export class RoomStore {
   get atPresent(): boolean { this.subscribe(); return this.present; }
   // True once the first page has loaded, so an empty feed is really empty.
   get ready(): boolean { this.subscribe(); return this.loaded; }
+  get error(): unknown { this.subscribe(); return this.failure; }
 
   async open(): Promise<void> {
-    await this.run(() => this.loadLatest());
+    await this.run(() => this.opening());
+    if (this.closed || !this.loaded) return;
+    this.stopStream = this.connect(this.room, () => this.latest, event => this.apply(event));
+  }
+
+  private async opening(): Promise<void> {
+    await this.loadLatest();
     const sessionList = await call("session.list", { room: this.room });
     this.sessionBaseline = this.latest;
     this.initialSessions = new Map((sessionList.sessions ?? []).map(session => [session.id, {
@@ -75,8 +84,7 @@ export class RoomStore {
     this.initialOperations = new Map((listed.operations ?? [])
       .filter(op => op.state === "pending").map(op => [op.id, op]));
     this.fold();
-    if (this.closed) return;
-    this.stopStream = this.connect(this.room, () => this.latest, event => this.apply(event));
+    this.loaded = true;
   }
 
   close(): void { this.closed = true; this.stopStream(); }
@@ -113,12 +121,13 @@ export class RoomStore {
   }
 
   async jumpToPresent(): Promise<void> {
-    while (this.busy) await this.busy.catch(() => {});
+    while (this.busy) await this.busy;
     if (!this.present) await this.run(() => this.loadLatest());
   }
 
+  // Runs one load at a time. It never rejects: an error is kept in error for the view.
   private run(task: () => Promise<void>): Promise<void> {
-    const busy = task().finally(() => {
+    const busy = task().then(() => { this.failure = undefined; }, (error: unknown) => { this.failure = error; }).finally(() => {
       if (this.busy === busy) this.busy = undefined;
       this.changed();
     });
@@ -141,7 +150,6 @@ export class RoomStore {
     }
     this.release("oldest");
     this.present = true;
-    this.loaded = true;
   }
 
   private async page(range: { beforeSeq: number } | { afterSeq: number }): Promise<{ events: Event[]; full: boolean }> {
