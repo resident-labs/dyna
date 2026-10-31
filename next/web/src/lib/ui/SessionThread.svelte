@@ -11,7 +11,7 @@
   import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
 
-  let { session, roomName, store, unsent, onunsent, onsettled, clock = Date.now }: { session: string; roomName: string; store: RoomStore; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; clock?: () => number } = $props();
+  let { session, roomName, store, unsent, onunsent, onsettled, onpostlocation, clock = Date.now }: { session: string; roomName: string; store: RoomStore; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; clock?: () => number } = $props();
   const view = untrack(() => store.window({ kind: "dm", session }));
   view.onunsent = request => onunsent(request);
   view.onsettled = request => onsettled(request);
@@ -37,7 +37,7 @@
   let atBottom = $state(true);
   let loaded = $state(false);
   let destroyed = false;
-  let lastSeq = $derived(Math.max(0, ...turns.flatMap(turn => [...(turn.inputs ?? []).map(input => input.seq), ...(turn.items ?? []).map(item => item.seq ?? 0)])));
+  let lastSeq = $derived(Math.max(0, ...turns.flatMap(turn => [...(turn.inputs ?? []).map(input => input.seq), ...(turn.items ?? []).flatMap(item => [item.seq ?? 0, ...(item.posts ?? []).map(post => post.seq ?? 0)])])));
   let queuedPosts = $derived(view.posts().filter(post => post.seq > lastSeq));
 
   async function load(older = false) {
@@ -89,7 +89,7 @@
     if (!next) { failed = true; return; }
     turns = turns.map(item => item.id === turn.id ? { ...item, inputs: [...item.inputs ?? [], ...next.inputs ?? []], items: [...item.items ?? [], ...next.items ?? []], more: next.more, after: next.after, nextItem: next.nextItem, tail: next.tail, nextPost: next.nextPost } : item);
   }
-  type Group = { kind: "work"; id: string; items: TranscriptItem[] } | { kind: "item"; id: string; item: TranscriptItem };
+  type Group = { kind: "work"; id: string; items: TranscriptItem[] } | { kind: "item" | "posts"; id: string; item: TranscriptItem };
   function groups(items: TranscriptItem[]): Group[] {
     const result: Group[] = [];
     for (const item of items) {
@@ -97,6 +97,7 @@
       if (item.kind === "tool" && last?.kind === "work") last.items.push(item);
       else if (item.kind === "tool") result.push({ kind: "work", id: item.id, items: [item] });
       else result.push({ kind: "item", id: item.id, item });
+      if (item.kind === "tool" && ((item.posts?.length ?? 0) > 0 || item.postsOmitted)) result.push({ kind: "posts", id: "posts:" + item.id, item });
     }
     return result;
   }
@@ -120,6 +121,10 @@
   const sender = (kind: string, id?: string) => kind === "owner" ? "You" : id ? store.names.get(id) ?? "Session" : "Dyna";
   const duration = (ms?: number) => ms === undefined ? "" : ms < 60000 ? `${Math.floor(ms / 1000)} s` : `${Math.floor(ms / 60000)} m ${Math.floor(ms / 1000) % 60} s`;
 </script>
+
+{#snippet postItem(turn: TranscriptTurn, item: TranscriptItem)}
+  <p class="message">{chunks[item.id + "/text"] ?? item.text}</p>{#if item.more && chunks[item.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Show all</button>{/if}
+{/snippet}
 
 <div class="thread" bind:this={scroller} onscroll={() => { atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; }}>
   <div class="body">
@@ -145,10 +150,15 @@
                 </details>
               {/each}</div>
             </details>
+          {:else if group.kind === "posts"}
+            {#each group.item.posts ?? [] as post (post.id)}
+              {@render postItem(turn, post)}
+            {/each}
+            {#if group.item.postsOmitted && group.item.postsNext}<button class="muted" onclick={() => onpostlocation(group.item.postsNext!.room, group.item.postsNext!.seq)}>+{group.item.postsOmitted} more posts</button>{/if}
           {:else if group.item.kind === "thinking"}
             <details><summary><span class="chevron"><Icon name="chevron" size={14} /></span> Thought</summary><p>{chunks[group.item.id + "/text"] ?? group.item.text}</p>{#if group.item.more && chunks[group.item.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, group.item.id, "text")}>Show all</button>{/if}</details>
           {:else if group.item.kind === "text" || group.item.kind === "post"}
-            <p class="message">{chunks[group.item.id + "/text"] ?? group.item.text}</p>{#if group.item.more && chunks[group.item.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, group.item.id, "text")}>Show all</button>{/if}
+            {@render postItem(turn, group.item)}
           {:else if group.item.kind === "too_large"}<p class="muted">This item is too large to show.</p>{/if}
         {/each}
         {#if turn.outcome === "failed"}<div class="failure"><Icon name="warning" size={16} /><div><strong>{turn.cause ? causes[turn.cause] : "The turn failed"}</strong></div></div>{/if}
@@ -200,7 +210,7 @@
   .time { margin-left: auto; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
   code { min-width: 0; overflow-wrap: anywhere; font: 12.5px var(--mono); }
   pre { margin: 4px 0 8px 20px; padding: 8px 12px; background: var(--sidebar); border-radius: 6px; overflow-wrap: anywhere; white-space: pre-wrap; font: 12.5px/1.45 var(--mono); }
-  button { border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
+  button { padding: 0; border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
   button:hover { color: var(--text); }
   button:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); }
   .older { display: block; margin: auto; padding: 8px; }

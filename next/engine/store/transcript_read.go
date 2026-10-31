@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 
 	"github.com/resident-labs/dyna/contract"
@@ -127,7 +128,7 @@ func (s *Store) TranscriptTurnMetadata(ctx context.Context, session contract.Ses
 	return result, nil
 }
 
-const transcriptPostsQuery = `SELECT e.seq FROM events e JOIN turns t ON t.session=? AND t.id=?
+const transcriptPostsQuery = ` FROM events e JOIN turns t ON t.session=? AND t.id=?
 WHERE e.type='post.created' AND e.from_kind='session' AND e.from_id=t.session
 AND e.seq>t.started_seq
 AND NOT EXISTS (SELECT 1 FROM turns n WHERE n.session=t.session AND n.started_seq>t.started_seq AND n.started_seq<=e.seq)
@@ -136,7 +137,7 @@ AND NOT EXISTS (SELECT 1 FROM events ended WHERE ended.room=(SELECT room FROM se
 // TranscriptTurnPost finds a session post made during a turn, including posts in other rooms.
 func (s *Store) TranscriptTurnPost(ctx context.Context, session contract.SessionID, turn contract.TurnID, id contract.EventID) (contract.Event, bool, error) {
 	var seq int64
-	err := s.Read().QueryRowContext(ctx, transcriptPostsQuery+` AND e.id=?`, session, turn, id).Scan(&seq)
+	err := s.Read().QueryRowContext(ctx, `SELECT e.seq`+transcriptPostsQuery+` AND e.id=?`, session, turn, id).Scan(&seq)
 	if errors.Is(err, sql.ErrNoRows) {
 		return contract.Event{}, false, nil
 	}
@@ -147,35 +148,64 @@ func (s *Store) TranscriptTurnPost(ctx context.Context, session contract.Session
 	return event, err == nil, err
 }
 
-// TranscriptSentPosts returns a bounded page ordered by event time and sequence.
-func (s *Store) TranscriptSentPosts(ctx context.Context, session contract.SessionID, turn contract.TurnID, limit, offset int) ([]contract.Event, error) {
-	rows, err := s.Read().QueryContext(ctx, transcriptPostsQuery+` ORDER BY e.at,e.seq LIMIT ? OFFSET ?`, session, turn, limit, offset)
+// TranscriptCallPostPage contains the bounded posts and total for a call.
+type TranscriptCallPostPage struct {
+	Posts []contract.Event
+	Total int
+}
+
+// TranscriptCallPosts returns up to nine posts and the total for each requested call.
+func (s *Store) TranscriptCallPosts(ctx context.Context, session contract.SessionID, turn contract.TurnID, callIDs []string) (map[string]TranscriptCallPostPage, error) {
+	result := make(map[string]TranscriptCallPostPage, len(callIDs))
+	if len(callIDs) == 0 {
+		return result, nil
+	}
+	ids, err := json.Marshal(callIDs)
 	if err != nil {
 		return nil, err
 	}
-	var seqs []int64
+	query := `SELECT e.seq,e.id,e.at,e.room,e.type,e.from_kind,e.from_id,e.body,
+ json_extract(CAST(e.body AS TEXT),'$.toolCallId') AS call_id` + transcriptPostsQuery
+	rows, err := s.Read().QueryContext(ctx, `SELECT seq,id,at,room,type,from_kind,from_id,body,call_id,total FROM (
+ SELECT *, row_number() OVER (PARTITION BY call_id ORDER BY at,seq) AS rn,
+ count(*) OVER (PARTITION BY call_id) AS total FROM (`+query+` AND json_extract(CAST(e.body AS TEXT),'$.toolCallId') IN (SELECT value FROM json_each(?)))
+ ) WHERE rn<=9 ORDER BY call_id,at,seq`, session, turn, string(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 	for rows.Next() {
-		var seq int64
-		if err := rows.Scan(&seq); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		seqs = append(seqs, seq)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return nil, err
-	}
-	posts := make([]contract.Event, 0, len(seqs))
-	for _, seq := range seqs {
-		post, err := s.Event(ctx, seq)
+		var callID string
+		var total int
+		event, err := scanEvent(rows, &callID, &total)
 		if err != nil {
 			return nil, err
 		}
-		posts = append(posts, post)
+		page := result[callID]
+		page.Posts = append(page.Posts, event)
+		page.Total = total
+		result[callID] = page
 	}
-	return posts, nil
+	return result, rows.Err()
+}
+
+// TranscriptSentPosts returns a bounded page ordered by event time and sequence.
+func (s *Store) TranscriptSentPosts(ctx context.Context, session contract.SessionID, turn contract.TurnID, limit, offset int) ([]contract.Event, error) {
+	query := `SELECT e.seq,e.id,e.at,e.room,e.type,e.from_kind,e.from_id,e.body` + transcriptPostsQuery
+	rows, err := s.Read().QueryContext(ctx, query+` ORDER BY e.at,e.seq LIMIT ? OFFSET ?`, session, turn, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	posts := []contract.Event{}
+	for rows.Next() {
+		event, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		posts = append(posts, event)
+	}
+	return posts, rows.Err()
 }
 
 type TranscriptFile struct {
