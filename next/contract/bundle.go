@@ -319,8 +319,9 @@ type RepoHandoff struct {
 type RepoHandoffReason string
 
 const (
-	RepoUnsupportedForge RepoHandoffReason = "unsupportedForge"
-	RepoLocalCI          RepoHandoffReason = "localCI"
+	RepoUnsupportedForge   RepoHandoffReason = "unsupportedForge"
+	RepoUnverifiedIdentity RepoHandoffReason = "unverifiedIdentity"
+	RepoLocalCI            RepoHandoffReason = "localCI"
 )
 
 // RoomLimitGap identifies a v1 limit that needs manual review.
