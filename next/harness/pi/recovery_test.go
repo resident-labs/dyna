@@ -58,13 +58,13 @@ func TestDeliveryAfterInterruptedWrite(t *testing.T) {
 	}
 }
 
-func TestDeliverySkipsLongLineAndReadsAppends(t *testing.T) {
+func TestDeliverySkipsMalformedLineAndReadsAppends(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	entry := `{"type":"message","message":{"role":"user","deliveryId":"9"}}`
 	if err := os.WriteFile(path, []byte(strings.Repeat("x", 2048)+"\n"+entry[:30]), 0600); err != nil {
 		t.Fatal(err)
 	}
-	h := &Harness{session: path, deliveryLineLimit: 1024}
+	h := &Harness{session: path}
 	if found, err := h.Delivered(context.Background(), 9); err != nil || found {
 		t.Fatalf("partial: found=%v err=%v", found, err)
 	}
@@ -85,11 +85,11 @@ func TestDeliverySkipsLongLineAndReadsAppends(t *testing.T) {
 
 func TestDeliveryOfLargeUserMessage(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
-	entry := `{"type":"message","message":{"role":"user","deliveryId":"9","content":"` + strings.Repeat("x", 2048) + `"}}` + "\n"
+	entry := `{"type":"message","message":{"role":"user","deliveryId":"9","content":"` + strings.Repeat("x", 100<<10) + `"}}` + "\n"
 	if err := os.WriteFile(path, []byte(entry), 0600); err != nil {
 		t.Fatal(err)
 	}
-	h := &Harness{session: path, deliveryLineLimit: 4096}
+	h := &Harness{session: path}
 	if found, err := h.Delivered(context.Background(), 9); err != nil || !found {
 		t.Fatalf("large user message: found=%v err=%v", found, err)
 	}
