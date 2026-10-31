@@ -31,6 +31,30 @@ func (p *Proxy) Quotas(key string, st *store.Store, now func() time.Time) *Quota
 	return &Quotas{management: managementClient{client: p.client, key: key}, store: st, now: now, cache: make(map[string]quotaEntry)}
 }
 
+// Clear drops observations after an account is removed.
+func (q *Quotas) Clear() {
+	q.mu.Lock()
+	clear(q.cache)
+	q.mu.Unlock()
+}
+
+// ObservedState uses the existing bounded usage cache; it never starts a usage read.
+func (q *Quotas) ObservedState(index string) CredentialState {
+	q.mu.Lock()
+	entry, ok := q.cache[index]
+	q.mu.Unlock()
+	if !ok || q.now().Sub(entry.at) >= 5*time.Minute {
+		return CredentialUnknown
+	}
+	if entry.usage.Cause == contract.UsageSignInExpired {
+		return CredentialExpired
+	}
+	if entry.usage.Cause == "" {
+		return CredentialConnected
+	}
+	return CredentialUnknown
+}
+
 func (q *Quotas) request(ctx context.Context, method, path string, body []byte) (json.RawMessage, error) {
 	return q.management.request(ctx, method, "/v0/management/"+path, body)
 }

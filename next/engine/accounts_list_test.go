@@ -13,7 +13,7 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
-func TestAccountsListIsOwnerOnlyAndOmitsProxyIdentity(t *testing.T) {
+func TestAccountList(t *testing.T) {
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +35,7 @@ func TestAccountsListIsOwnerOnlyAndOmitsProxyIdentity(t *testing.T) {
 	})}
 	go func() { _ = server.Serve(proxy.Listener) }()
 	defer server.Close()
-	actions := NewAccountActions(New(st, nil, nil, time.Now), proxy.Connections("invented-management-key", st, time.Now))
+	actions := NewAccountActions(New(st, nil, nil, time.Now), proxy.Connections("invented-management-key", st, time.Now), proxy.Quotas("invented-management-key", st, time.Now))
 	if _, problem := actions.AccountsList(ctx, contract.Principal{Kind: contract.PrincipalSession}, contract.AccountsListRequest{}); problem == nil {
 		t.Fatal("session could list accounts")
 	}

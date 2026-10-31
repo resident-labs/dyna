@@ -12,7 +12,7 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
-func TestAccountRemoveRetriesAfterCredentialDeletion(t *testing.T) {
+func TestAccountRemoveRetry(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -36,7 +36,7 @@ func TestAccountRemoveRetriesAfterCredentialDeletion(t *testing.T) {
 	go func() { _ = server.Serve(proxy.Listener) }()
 	defer server.Close()
 	core := New(st, nil, nil, time.Now)
-	actions := NewAccountActions(core, proxy.Connections("invented-key", st, time.Now))
+	actions := NewAccountActions(core, proxy.Connections("invented-key", st, time.Now), proxy.Quotas("invented-key", st, time.Now))
 	if err := core.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": actions.Entry()}, time.Minute); err != nil {
 		t.Fatal(err)
 	}
