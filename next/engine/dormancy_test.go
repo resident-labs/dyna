@@ -77,6 +77,33 @@ func TestDormancyStopsAndWakes(t *testing.T) {
 	}
 }
 
+func TestDormancyKeepsClosingAncestor(t *testing.T) {
+	s, h, _, sid, ctx := quietSession(t, 0)
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE sessions SET state='closing' WHERE id=?", sid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s.ReconcileDormancy(ctx, false, true)
+	session, err := s.store.Session(ctx, sid)
+	if err != nil || string(session.State) != "closing" || h.stops != 0 {
+		t.Fatalf("closing ancestor changed: session=%+v stops=%d err=%v", session, h.stops, err)
+	}
+}
+
+func TestDormancyKeepsParentWithLiveChild(t *testing.T) {
+	s, h, room, sid, ctx := quietSession(t, 0)
+	_, problem := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: sid, Name: "child", Profile: "test"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	s.ReconcileDormancy(ctx, false, true)
+	if h.stops != 0 || stateOf(t, s, ctx, sid) != contract.BoxReady {
+		t.Fatal("parent with a live child stopped")
+	}
+}
+
 func TestDormancyKeepsShellJobs(t *testing.T) {
 	s, h, _, sid, ctx := quietSession(t, 1)
 	s.ReconcileDormancy(ctx, false, true)
