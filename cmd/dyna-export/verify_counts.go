@@ -33,7 +33,7 @@ func verifyRoomCounts(b contract.RoomBundle, source roomSQLCounts) error {
 	}
 	if got.Rules != source.Rules || got.Goals != source.Goals || got.GoalItems != source.GoalItems ||
 		got.Issues != source.Issues || got.Questions != source.Questions ||
-		got.PRs != source.PRs || got.Sessions != source.Sessions {
+		got.PRs != source.PRs || got.Sessions != source.Sessions || got.Subscriptions != source.Subscriptions {
 		return fmt.Errorf("room SQL counts differ from decoded records")
 	}
 	return nil

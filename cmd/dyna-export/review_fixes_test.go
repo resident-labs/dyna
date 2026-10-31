@@ -16,6 +16,7 @@ func TestCountGlobalScopesUseCapturedPaths(t *testing.T) {
 	defer db.Close()
 	_, err = db.Exec(`
 CREATE TABLE goal_rooms(room TEXT,body TEXT);
+CREATE TABLE hook_documents(body TEXT);
 CREATE TABLE machines(enabled INTEGER,local INTEGER);
 CREATE TABLE accounts(id TEXT,metadata TEXT);
 CREATE TABLE account_repo_scopes(account_id TEXT,repo TEXT);
