@@ -89,6 +89,8 @@ func (h *Harness) SetModel(_ context.Context, model contract.ModelChoice) error 
 	return nil
 }
 
+func (*Harness) SetPromptSections(context.Context, []contract.ContextSection) error { return nil }
+
 func (h *Harness) Continue(ctx context.Context, id contract.TurnID, started func()) (contract.TurnEnded, error) {
 	return h.Start(ctx, id, nil, started)
 }

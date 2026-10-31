@@ -42,6 +42,48 @@ func TestOpenUsesWorkDirectory(t *testing.T) {
 	}
 }
 
+func TestSetPromptSectionsRPC(t *testing.T) {
+	inputReader, inputWriter := io.Pipe()
+	outputReader, outputWriter := io.Pipe()
+	h := &Harness{stdin: inputWriter, pending: make(map[string]chan event), events: make(chan event, 1), done: make(chan struct{}), stop: make(chan struct{})}
+	go h.read(outputReader)
+	defer inputWriter.Close()
+	defer outputWriter.Close()
+	reader := bufio.NewReader(inputReader)
+	for _, tc := range []struct {
+		sections []contract.ContextSection
+		want     string
+		success  bool
+	}{
+		{[]contract.ContextSection{{Key: "goal", Text: "work"}}, `[{"key":"goal","text":"work"}]`, true},
+		{nil, `[]`, false},
+	} {
+		done := make(chan error, 1)
+		go func() { done <- h.SetPromptSections(context.Background(), tc.sections) }()
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		var c struct {
+			ID       string          `json:"id"`
+			Type     string          `json:"type"`
+			Sections json.RawMessage `json:"sections"`
+		}
+		if err := json.Unmarshal(line, &c); err != nil {
+			t.Fatal(err)
+		}
+		if c.Type != "set_prompt_sections" || string(c.Sections) != tc.want {
+			t.Fatalf("command = %s", line)
+		}
+		if err := json.NewEncoder(outputWriter).Encode(event{ID: c.ID, Type: "response", Success: tc.success, Error: "rejected"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-done; (err == nil) != tc.success {
+			t.Fatalf("success=%v error=%v", tc.success, err)
+		}
+	}
+}
+
 // The fixture contains selected, sanitized events from Pi 1.4.0-dyna.10,
 // session ses_20261030-143118-fad2075a, turn 7.
 func TestRecordedTurnAndSteer(t *testing.T) {
