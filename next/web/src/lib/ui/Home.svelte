@@ -10,8 +10,8 @@
   import HostCard from "./HostCard.svelte";
   import UsageCard from "./UsageCard.svelte";
   type Navigate = (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void;
-  // onrequests opens the Requests panel once the link has moved to that room.
-  let { attention, navigate, onrequests }: { attention: Attention; navigate: Navigate; onrequests: () => void } = $props();
+  // onrequests opens the Requests panel once the link has moved to that room. loaded is false until room.list answers.
+  let { attention, loaded, navigate, onrequests }: { attention: Attention; loaded: boolean; navigate: Navigate; onrequests: () => void } = $props();
   // Each room's sessions load once while Home is open, for Activity's counts and names. Requests load per room, and
   // again only when a room gains a request or requester that no answer named yet. A failed load forgets its IDs and
   // offers Try again.
@@ -117,7 +117,9 @@
 </script>
 
 <div class="home">
-  <p class="hero">{asks ? `${count(asks, "request")} ${asks === 1 ? "waits" : "wait"} for you.` : "Nothing needs you."}{#if summary}<span>{summary}</span>{/if}</p>
+  <!-- Until room.list answers, the sentence is a skeleton of the same height: Home never claims nothing waits before it knows. -->
+  {#if !loaded}<p class="hero skeleton" aria-hidden="true"><i></i><i></i></p>
+  {:else}<p class="hero">{asks ? `${count(asks, "request")} ${asks === 1 ? "waits" : "wait"} for you.` : "Nothing needs you."}{#if summary}<span>{summary}</span>{/if}</p>{/if}
   <!-- Requests while any wait, then Activity, each a full-width card whose rows fill a grid of about 280 px columns. -->
   <div class="top">
     {#if asks}<section class="card"><h2>Requests{#if waiting.length}<span>{waiting.length}</span>{/if}</h2>
@@ -152,6 +154,8 @@
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 12px; margin: 0 8px; }
   .top { display: grid; gap: 12px; margin: 8px 8px 0; }
   .hero { display: grid; gap: 4px; margin: 8px 8px 16px; font-size: 20px; font-weight: 600; line-height: 1.25; }
+  .skeleton i { width: min(280px, 70%); height: 25px; border-radius: 6px; background: var(--hover); }
+  .skeleton i + i { width: min(440px, 90%); height: 20px; }
   .hero span { color: var(--muted); font-size: 14px; font-weight: 400; line-height: 1.45; font-variant-numeric: tabular-nums; }
   .rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); column-gap: 12px; margin: 0 -8px; }
   h2 { display: flex; align-items: baseline; gap: 8px; margin: 24px 8px 12px; font-size: 18px; font-weight: 600; line-height: 1.25; }
