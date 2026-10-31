@@ -1,0 +1,174 @@
+# Design taste
+
+The rules that every v2 web screen (`next/web`) follows. Builders check a screenshot against them before a PR goes up. Reviewers, dyna:lead-rewrite and root reject a PR that breaks one. Spec 5.13 sets the layout and the review steps; this file sets the look.
+
+Each rule is one line, imperative and checkable on a screenshot. The tag at the end says where it comes from:
+
+- **[owner]**: an owner decision or room rule (r16, r23, r24).
+- **[root]**: root's review notes, 2026-10-30 to 2026-10-31.
+- **[lead]**: dyna:lead-rewrite's design approvals.
+- **[v1]**: v1's web app (`web/src`), the bar v2 must beat.
+- **[T3]**: T3 Code (github.com/pingdotgg/t3code, `apps/web/src/index.css` and `components/ui/`), read in code.
+- **[Discord]**, **[Linear]**: their public apps, from use and memory, not from code.
+
+## Principles
+
+1. Every change is an obvious, tasteful improvement over v1's matching screen. "Different" is not enough. [owner r23]
+2. Calm never means bare. Keep or beat v1's bars, cards, meters and headers. [owner r23]
+3. Color means "look here". Everything else is the text color or the muted color. [owner r16]
+4. Dense like Discord and T3 Code: many rows on one screen, few borders, few badges. [Discord] [T3]
+5. Show real data. Never show an empty card, an empty page or a hollow placeholder. [root]
+6. A thing looks clickable only if it is clickable. [root]
+7. Reuse v1's proven parts (fonts, tokens, meters, the ghostty terminal renderer). Do not reuse v1's architecture. [owner r24]
+8. A line budget never justifies a weaker screen. [owner r23]
+
+## Tokens
+
+Use tokens from `next/web/src/app.css`. Never write a literal color in a component. Add a token when no token fits.
+
+### Fonts
+
+- Bundle IBM Plex Sans 400, 500, 600 and 700 and JetBrains Mono 400 and 500 through `@fontsource`, as v1's `web/src/main.ts` does. [lead, 2026-10-31] [v1]
+- Never rely on installed fonts. A fallback face (DejaVu Sans) looks wide and heavy. [lead]
+- Keep the terminal's symbol font out of the bundle. [lead]
+- Use mono only for code, commands, paths, hashes and figures. [v1 `.ui-num`]
+- Show every figure with `font-variant-numeric: tabular-nums`, so that columns align. [v1] [T3]
+
+### Type scale
+
+Use v1's scale. Pick the nearest step; never write another font size. [v1 `tokens.css`]
+
+| Token | Size | Use |
+|---|---|---|
+| cap | 11 px | Timestamps, meta lines, chip text |
+| sm | 12.5 px | Muted second lines, "X of Y" |
+| ui | 13 px | Controls, menu items, panel rows |
+| body | 14 px | Default UI text |
+| lead | 15 px | Post text in the feed |
+| title | 16 px | Header title, card title |
+| head | 18 px | Section header |
+| page | 20 px | Page title |
+| stat | 24 px | Metric figure in a tile |
+| hero | 32 px | One hero figure per page, at most |
+
+- Use two weights for most text: 400 for running text and 600 for names, titles and figures. Use 500 for controls. [v1]
+- Use a line height of 1.45 for running text and 1.25 for headers, chips and figures. [v1]
+- Do not use uppercase labels for section headers. Uppercase is only for a small state label, such as LIVE. [root]
+
+### Spacing and size
+
+- Use the 4 px scale: 4, 8, 12, 16, 24 and 32 px. [v1 `--s1`..`--s6`] [T3 Tailwind spacing]
+- Keep the header at 52 px and the rail at 64 px. [T3 `--workspace-topbar-height`] [Discord]
+- Make controls 28 to 32 px high, and list rows 32 to 44 px high. [T3 `button.tsx` `h-8`/`h-7`] [v1]
+- Give touch targets at least 40 px on `(hover: none)` screens. [v1 PostActions] [T3 `pointer-coarse` 44 px]
+- Cap reading surfaces (the feed) near 920 px. Let dashboards and grids fill the page width. [v1 `--feed-reading-width`] [root]
+
+### Radii
+
+- Use 6 px for rows, chips and controls, 12 px for cards, and 16 px for floating windows. Dots and pills are fully round. [v1 `--r-xs`, `--r-card`, `--r-lg`] [T3 `--radius` 8 px ± 4]
+- Keep rail squares at Discord's 30% radius. [Discord]
+
+### Colors and tones
+
+- Keep the warm dark and light themes. Never use pure black or pure white as the page. [lead, polish pass] [v1]
+- Build surfaces from three levels: sidebar (sunk), page, and raised (card or popover). [v1] [T3 `--sidebar`, `--background`, `--card`]
+- Draw borders as low-alpha lines (about 8%). Use a firmer line (about 14%) only for inputs. [v1 `--border`] [T3 dark `--border` white 8%]
+- Draw hover and selection as washes of the text color (about 4% and 8%), so that they work on every surface. [v1] [T3 `--accent` white 4%]
+- Use one accent (`--focus`) for focus rings, selection and links. Do not use it for data. [v1 `--iris`] [T3 `--ring`]
+- Use the tones success, warning, danger, info and neutral. Each tone has a dot or bar color, a text color, a wash (about 14%) and an edge (about 28%). [v1 `tone.ts`] [T3 badge `bg-warning/8`]
+- Show online as a green dot. Never show it as a grey dot. [root]
+- Show unknown (not probed yet) as a hollow ring. Show switched off as a grey dot. Use red only for unreachable or failed. [v1 MachineRow]
+- Turn a figure and its bar to the warning color only at or above 90%. Below that, use the normal colors. [root]
+- Color a name with its identity hue, and draw an avatar as initials on that hue. [lead, polish pass] [spec 5.13]
+
+### Motion
+
+- Use 150 ms for hover and 200 ms for panels, with v1's ease curve. [v1 `--motion`] [T3 `duration-150`]
+- Animate only Working (one pulse). Stop every animation under `prefers-reduced-motion`. [spec 5.13] [v1] [T3 `motion-safe`]
+
+## Components
+
+### Status
+
+- Use only the shared `StatusPill` with a typed tone. Never draw a one-off chip. [owner r16]
+- Show a colored chip only for state that needs attention (warning, error, failed, blocked) or that the owner cannot see otherwise. [owner r16]
+- Never add a chip that repeats a control, such as "On" beside a switch. [owner r16]
+- Show plain facts (next run time, profile name, Idle) as muted text. [owner r16]
+- Use a neutral outline badge for labels such as Default. [owner r16]
+- Give a session one status at most: Working, Pending approval or Failed. [spec 5.13]
+- In a dense list, use a dot with a hover label instead of a full pill. [v1 StatusPill `mark`] [T3 ConnectionStatusDot]
+
+### Section headers and counts
+
+- Give each section a real header at the head size and weight 600. Never use a tiny grey label. [root]
+- Put a count beside its header, in muted tabular text: "Machines 3". Never push it to the far edge. [root]
+- Put the folded count of a session-tree group beside its chevron, on the row line. [root, #1448]
+
+### Cards and metric tiles
+
+- Use a card only for a thing with its own data, such as a machine or a model account. Never use a card as a frame around one line of text. [root]
+- Lead each metric tile with a large percent (the stat size, 24 px), then a thin bar, then muted "X of Y" below it. [root] [v1 `.stat-grid`, UsageMeter]
+- Draw meters 6 px high on a track of about 7% alpha. Use 3 px bars in list rows. [v1 `--meter-h`, MachineRow]
+- Never show an empty or hollow card. When live data is missing, show the last known data dimmed (about 40% opacity) with its age. [root] [v1 `.dimmed`]
+- When a card has no data at all, leave it out. Do not show "No data". [root, #1461]
+- Lay out card grids with `repeat(auto-fit, minmax(…, 1fr))`, so that they use the page width. [root] [v1 `.stat-grid`]
+- Never leave a page mostly empty. Widen the grid or add the next useful section. [root]
+
+### Rows and hover
+
+- Give a hover state only to things that link or act. A card that opens nothing has no hover. [root]
+- Draw a row's hover as the hover wash, its selection as the select wash, and keep the text color the same or lighter. [v1 MachineRow] [T3 `--sidebar-row-hover`]
+- Show row icons (jobs, computer) only on hover, keyboard focus, or while their view is open. [root, #1448]
+- Show a row name in full. Truncate the muted second line first. [root, #1448]
+- Give a session row an avatar, its name, and one muted line that says what it is doing. [lead, polish pass] [v1]
+- Make the session tree collapsible with a chevron. [owner]
+
+### Feed and messages
+
+- Lay out posts as Discord does: no bubbles and no borders, left-aligned, with one name line per run of posts from one sender. [spec 5.13] [Discord]
+- Show a hover bar on the selected post with Forward and Copy only. [owner]
+- Float the hover bar over the top-right corner of the post. Showing it never moves the post. [v1 PostActions] [Discord]
+- Confirm Copy in place for 2 seconds ("Copied"). Never use a toast. [v1 PostActions]
+- Dim a pending post (about 50% opacity) until the engine confirms it. [owner, #1458]
+- Show a failed send as "Not sent" in the danger color at full contrast, with Retry and Discard. [owner, #1458]
+- Give a failed turn its own row with the avatar column and the name line, like a post. [root, #1448] [v1 TurnCompletionRow]
+- Fold agent work into one muted line that expands in place. [spec 5.13] [T3 "Worked for 20s"]
+- Write failures in the owner's words. Never show raw stderr, IDs or engine log text in the row; put details behind a fold. [owner r8] [v1]
+
+### Layout
+
+- Use a Discord-style server rail: Home first, one square per room, and a short pill on the edge of the selected room. [owner]
+- Open direct messages from the session list on the right. [owner]
+- Show a computer in a floating window over the feed. [owner]
+- Dock the terminal at the bottom, in tabs, with v1's ghostty renderer. [owner]
+
+### Empty, loading and error states
+
+- Show loading as skeleton rows in the shape of the real rows, or as the old data dimmed. Never use a full-page spinner. [T3 `skeleton.tsx`] [v1 `.dimmed`]
+- Give an empty state one muted line that says what will appear and, if useful, one action. No pictures. [spec 5.13] [T3 sidebar empty]
+- Show a load error as one line in the owner's words, with Retry. [v1 LoadFailed]
+- Before a builder shows an empty state on a screenshot, it seeds real-looking data, so that the reviewer sees the full screen. [spec 5.13]
+
+### Focus and keyboard
+
+- Show a visible 2 px focus ring in the accent on every focusable control, in light and dark. [spec 5.13] [T3 `focus-visible:ring-2`]
+- Never remove an outline without a replacement. [T3]
+
+## Process
+
+### Each UI PR
+
+1. Read v1's matching screen and its components first. Say in the PR which v1 parts it keeps and why. [owner r24]
+2. Take screenshots of v1's matching screen and of one strong product (T3 Code, Discord or Linear) at the same window size and theme. [owner r23]
+3. Show v2's screen beside them in the PR, in dark and light when the view has both. [owner r23] [spec 5.13]
+4. Check the screenshot against this file before you ask for review. List any rule that you broke on purpose, and give the reason.
+5. The reviewer and the lead reject the PR unless v2 is clearly better than v1. [owner r23]
+
+### Adding or changing a rule
+
+- Any reviewer, dyna:lead-rewrite or root may propose a rule.
+- A rule goes into this file when two of them agree. The owner's word alone is enough.
+- The PR that adds a rule cites the case: the PR number or post, and what was wrong.
+- Keep each rule to one imperative line that someone can check on a screenshot.
+- When a new rule conflicts with an old one, the PR removes or changes the old one. This file never holds two rules that disagree.
+- Spec 5.13 wins over this file. Change spec 5.13 first when a rule must change the layout or the review steps.
