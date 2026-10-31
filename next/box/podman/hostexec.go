@@ -9,11 +9,14 @@ import (
 )
 
 func (h *Host) RunHostexec(ctx context.Context, a contract.HostexecRunArgs, op contract.OpID) ([]byte, int, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, false, err
+	}
 	select {
 	case h.hostexecGate <- struct{}{}:
 		defer func() { <-h.hostexecGate }()
-	case <-ctx.Done():
-		return nil, 0, false, ctx.Err()
+	default:
+		return nil, 0, false, hostexec.ErrHostBusy
 	}
 	out, err := h.runUnbounded(ctx, nil, hostexec.RunArgs(a, op)...)
 	code := 0

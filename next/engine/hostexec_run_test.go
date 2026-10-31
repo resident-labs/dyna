@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	boxhostexec "github.com/resident-labs/dyna/box/hostexec"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/store"
@@ -97,6 +98,23 @@ func (f completedHostexec) RunHostexec(context.Context, contract.HostexecRunArgs
 	return f.output, 0, false, f.err
 }
 func (completedHostexec) StopHostexec(context.Context, contract.HostName, string) error { return nil }
+
+func TestHostexecBusyFinishesRun(t *testing.T) {
+	s, _, root, ctx := setupRoot(t)
+	s.SetHostexecRunner(completedHostexec{err: boxhostexec.ErrHostBusy})
+	if err := s.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.run": s.HostexecRunEntry()}, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	res, problem := s.HostexecRun(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.HostexecRunRequest{Host: "host", Argv: []string{"true"}})
+	if problem != nil || res.Operation.Result == nil || res.Operation.Result.Cause != contract.CauseHostBusy || !strings.Contains(res.Operation.Result.Error, "retry") {
+		t.Fatalf("busy result %+v: %v", res, problem)
+	}
+	var stopped string
+	var ended sql.NullInt64
+	if err := s.store.Read().QueryRow("SELECT stopped,ended_at FROM hostexec_runs WHERE op=?", res.Operation.ID).Scan(&stopped, &ended); err != nil || stopped != "" || !ended.Valid {
+		t.Fatalf("busy run stopped=%q ended=%+v: %v", stopped, ended, err)
+	}
+}
 
 func TestHostexecLostFinishesOperationAndNotifies(t *testing.T) {
 	s, _, root, ctx := setupRoot(t)
