@@ -19,6 +19,7 @@ import (
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/pr/state"
 	cisched "dyna-agent/internal/pr/watch/ci"
+	"dyna-agent/internal/updatedrain"
 )
 
 type localCIRegistry = cisched.Registry
@@ -803,7 +804,7 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 	}
 	// A competing process reserved the head after admission checked it. Leave
 	// the saved result untouched; the next pass waits for or adopts that run.
-	if errors.Is(err, localci.ErrAttachmentBusy) {
+	if errors.Is(err, localci.ErrAttachmentBusy) || errors.Is(err, updatedrain.ErrDraining) {
 		return
 	}
 	// A resumed run replaces one Dyna stopped, and says so in its own result, so a
