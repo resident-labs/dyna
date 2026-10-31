@@ -13,6 +13,8 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+var errSignInExpired = errors.New("sign-in expired")
+
 type quotaEntry struct {
 	at    time.Time
 	usage contract.AccountUsage
@@ -43,10 +45,13 @@ func (q *Quotas) request(ctx context.Context, method, path string, body []byte) 
 		return nil, errors.New("management request failed")
 	}
 	defer res.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	if res.StatusCode == http.StatusBadRequest && bytes.Contains(data, []byte("auth token refresh failed")) {
+		return nil, errSignInExpired
+	}
 	if res.StatusCode != http.StatusOK {
 		return nil, errors.New("management request failed")
 	}
-	data, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if err != nil || !json.Valid(data) {
 		return nil, errors.New("management response invalid")
 	}
@@ -103,6 +108,8 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 			ResetsAt    time.Time `json:"resets_at"`
 		}
 		switch {
+		case errors.Is(err, errSignInExpired):
+			usage.Cause = contract.UsageSignInExpired
 		case err != nil || json.Unmarshal(data, &reply) != nil:
 			usage.Cause = contract.UsageUnreachable
 		case reply.Status == 401 || reply.Status == 403:
