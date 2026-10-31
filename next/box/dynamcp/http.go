@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/resident-labs/dyna/box/post"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/contract/tools"
 )
@@ -64,9 +65,10 @@ type Server struct {
 	local   Local
 	mu      sync.Mutex
 	pending map[string]context.CancelFunc
+	upload  post.Upload
 }
 
-func New(forward Forward, local Local) (*Server, error) {
+func New(forward Forward, local Local, upload post.Upload) (*Server, error) {
 	list, actions, err := registry()
 	if err != nil {
 		return nil, err
@@ -75,7 +77,7 @@ func New(forward Forward, local Local) (*Server, error) {
 	for _, tool := range list {
 		names = append(names, tool.Name)
 	}
-	return &Server{list: list, names: strings.Join(names, ", "), actions: actions, forward: forward, local: local, pending: make(map[string]context.CancelFunc)}, nil
+	return &Server{list: list, names: strings.Join(names, ", "), actions: actions, forward: forward, local: local, pending: make(map[string]context.CancelFunc), upload: upload}, nil
 }
 
 // Description names the areas from the same registry as tools/list.
@@ -125,6 +127,17 @@ func (s *Server) call(ctx context.Context, p callParams) result {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(decoded); err != nil {
 		return failure(contract.ErrInvalid, err.Error())
+	}
+	if a.method == contract.MethodPost {
+		if s.upload == nil {
+			return failure(contract.ErrUnavailable, "Post preparation is unavailable.")
+		}
+		input := decoded.(*tools.PostInput)
+		req, _, err := post.Prepare(ctx, s.upload, *input)
+		if err != nil {
+			return failure(contract.ErrInvalid, err.Error())
+		}
+		data = marshal(req)
 	}
 	if a.local != tools.NoBoxHandler {
 		if s.local == nil {
