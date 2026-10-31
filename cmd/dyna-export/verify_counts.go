@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -9,7 +10,7 @@ import (
 // roomBundleCounts counts decoded records independently of declared counts.
 func roomBundleCounts(b contract.RoomBundle) contract.BundleCounts {
 	counts := contract.BundleCounts{
-		Goals: len(b.Goals), Issues: len(b.Issues),
+		InstructionChars: utf8.RuneCountInString(b.Instructions), Goals: len(b.Goals), Issues: len(b.Issues),
 		PRs: len(b.PRs), Questions: len(b.Questions),
 		Subscriptions: len(b.Subscriptions), Sessions: len(b.Handoff),
 	}
@@ -21,7 +22,7 @@ func roomBundleCounts(b contract.RoomBundle) contract.BundleCounts {
 
 func globalBundleCounts(b contract.GlobalBundle) contract.BundleCounts {
 	return contract.BundleCounts{
-		Hosts: len(b.Hosts), Accounts: len(b.Accounts),
+		InstructionChars: utf8.RuneCountInString(b.Instructions), Hosts: len(b.Hosts), Accounts: len(b.Accounts),
 		Devices: len(b.Devices), Subscriptions: len(b.Subscriptions),
 	}
 }
