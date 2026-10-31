@@ -18,7 +18,7 @@
      not each activity label. -->
 <p class="working" aria-live="polite">
   {#if working.length}<WorkingDot />
-    <span class="text">{#each named as open, i (open.session)}{#if i}{i === named.length - 1 && !more ? " and " : ", "}{/if}<strong style:--hue={hue(open.name)}>{open.name}</strong>{/each}{#if more} and {more} more{/if}
+    <span class="text">{#each named as open, i (open.session)}{#if i}{i === named.length - 1 && !more ? " and " : ", "}{/if}<strong style:--hue={hue(open.name)}>{open.name}</strong>{/each}{#if more}{` and ${more} more`}{/if}
       {working.length > 1 ? "are" : "is"} working{#if activity}<span aria-hidden="true">{` · ${shortPaths(activity)}`}</span>{/if}</span>
   {/if}
 </p>
