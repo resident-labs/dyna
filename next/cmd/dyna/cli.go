@@ -362,11 +362,17 @@ func addCLI(root *cobra.Command, getClient func() client) {
 
 	host := &cobra.Command{Use: "host"}
 	var ssh string
+	var hostRooms []string
 	var admin bool
 	add := &cobra.Command{Use: "add NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := getClient().HostAdd(cmd.Context(), contract.HostAddRequest{Name: contract.HostName(args[0]), SSH: ssh, OwnerOnlyAdmin: admin})
+		rooms := make([]contract.RoomID, len(hostRooms))
+		for i, room := range hostRooms {
+			rooms[i] = contract.RoomID(room)
+		}
+		_, err := getClient().HostAdd(cmd.Context(), contract.HostAddRequest{Name: contract.HostName(args[0]), SSH: ssh, OwnerOnlyAdmin: admin, Rooms: rooms})
 		return err
 	}}
+	add.Flags().StringSliceVar(&hostRooms, "room", nil, "Room ID allowed on this host (repeatable; default: all rooms)")
 	add.Flags().StringVar(&ssh, "ssh", "", "SSH destination")
 	add.Flags().BoolVar(&admin, "owner-only-admin", false, "Only the owner has host admin rights")
 	host.AddCommand(add)
