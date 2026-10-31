@@ -51,8 +51,14 @@ export class Attention {
     this.broken.set(room.id, new SvelteMap());
     this.failed.set(room.id, new SvelteMap());
     this.hostless.set(room.id, new SvelteSet());
-    if (room.failed || room.hostless) void this.listSessions(room.id).catch(() => {});
+    if (room.failed || room.hostless) this.seedRoom(room.id);
     if (room.latest && !this.activity.has(room.latest.session)) this.activity.set(room.latest.session, room.latest.label);
+  }
+
+  // A room whose failures or host waits only its sessions name reads them until one read seeds it, with the client's
+  // capped backoff. The read that seeds covers every event up to its seq, so a failed one loses nothing.
+  private seedRoom(room: string, tries = 0): void {
+    this.listSessions(room).catch(() => setTimeout(() => { if (!this.sessions.has(room)) this.seedRoom(room, tries + 1); }, retryDelay(tries)));
   }
 
   // A room created after the page loaded first shows as an event from a room the page does not know, such as its
