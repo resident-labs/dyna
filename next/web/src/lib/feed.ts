@@ -35,7 +35,7 @@ const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.sessio
 // The session an event is about; events without one belong to the room feed only.
 function subject(event: Event): string | undefined {
   switch (event.type) {
-    case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": return undefined;
+    case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": return undefined;
     case "op.requested": return event.body.by.session;
     case "op.decided": case "op.ran": return event.from.session;
     default: return event.body.session;
@@ -195,6 +195,7 @@ export function describe(event: Event, name: Name): string {
     case "turn.started": return `${name(event.body.session)} started a turn`;
     case "turn.ended": return event.body.outcome === "stopped" ? `${name(event.body.session)}'s turn stopped` : `${name(event.body.session)} finished a turn`;
     // Live only: the room store keeps it out of every feed window.
+    case "conversation.read": return "";
     case "turn.activity": return event.body.label;
     case "shell.job.ended": return event.body.exitCode === 0 ? `${name(event.body.session)}'s job finished` : `${name(event.body.session)}'s job failed with exit code ${event.body.exitCode}`;
     case "op.requested": return `${who(event.body.by)} asked to ${event.body.card.title}`;
