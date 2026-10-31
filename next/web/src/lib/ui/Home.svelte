@@ -49,9 +49,10 @@
       load(attention.waiting.get(room) ?? [], requests, () => call("op.list", { room }), list => {
         for (const op of list.operations ?? []) requests.set(op.id, { title: op.card.title, body: op.card.body?.split("\n")[0] ?? "", by: op.by, target: op.card.target, expires: op.expires });
       });
-      // A requester that started after the room's list loads it again.
+      // A requester or a failed session that started after the room's list loads it again.
       const by = [...attention.waiting.get(room) ?? []].flatMap(id => requests.get(id)?.by.session ?? []);
-      if (listed.has(room)) load(by, sessions, () => attention.listSessions(room), keepSessions(room));
+      const down = [...attention.broken.get(room)?.keys() ?? [], ...attention.unseen(room).map(({ id }) => id)];
+      if (listed.has(room)) load([...by, ...down], sessions, () => attention.listSessions(room), keepSessions(room));
     }
   });
   const rows = <T,>(sets: Map<string, Set<string>>, known: SvelteMap<string, T>) => [...attention.rooms.values()].flatMap(room =>
