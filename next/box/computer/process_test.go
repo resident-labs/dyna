@@ -36,6 +36,23 @@ func TestCgroupLimitAndFallback(t *testing.T) {
 	}
 }
 
+func TestCgroupUnlimitedMemory(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "memory.max"), []byte("max\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	group, err := cgroup(root)
+	if err != nil || group != nil {
+		if group != nil {
+			group.Close()
+		}
+		t.Fatalf("unlimited memory: group=%v err=%v", group, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "computer")); !os.IsNotExist(err) {
+		t.Fatalf("unexpected computer cgroup: %v", err)
+	}
+}
+
 func TestLaunchArgs(t *testing.T) {
 	args := strings.Join(launchArgs, " ")
 	for _, flag := range []string{"--headless=new", "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222", "--user-data-dir=/box/computer", "--disable-dev-shm-usage", "--no-first-run", "about:blank"} {
