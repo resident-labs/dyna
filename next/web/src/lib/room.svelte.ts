@@ -3,7 +3,7 @@ import { call } from "./client.ts";
 import { stream } from "./stream.ts";
 import { EventWindow } from "./window.svelte.ts";
 import { pendingReason, type PendingReason } from "./event.ts";
-import { lastBoxChanges, countOf, failedJobs, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
+import { boxFailures, countOf, failedJobs, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
 import type { BoxState, Conversation, FailureCause, Decision, Event, OpRequested, OpResult, OpState, RoomRule, SessionStarted } from "./contract.gen.ts";
 
 
@@ -147,6 +147,8 @@ export class RoomStore {
       this.noteRead({ kind: "dm", session: session.id }, session.lastRead);
       this.boxes.set(session.id, session.boxState);
       if (session.boxState === "failed" || session.boxState === "lost") this.boxFailures.set(session.id, { box: session.boxState });
+      const reason = pendingReason(session.boxState, session.boxReason);
+      if (reason) this.pendingReasons.set(session.id, reason);
       if (session.turn) this.turns.set(session.id, session.turn);
       if (session.turn && session.activity) { this.activity.set(session.id, session.activity); this.steps.set(session.id, [session.activity]); }
       if (session.lastOutcome === "failed") this.failed.set(session.id, list.seq);
@@ -154,15 +156,7 @@ export class RoomStore {
       this.shellJobs.set(session.id, session.shellJobs ?? 0);
       if (session.hadJobs || session.shellJobs) this.hadJobs.add(session.id);
     }
-    const unsure = [...this.boxes].flatMap(([id, box]) => box === "pending" || box === "failed" || box === "lost" ? [id] : []);
-    if (unsure.length) {
-      for (const [id, { at, body }] of await lastBoxChanges(this.room, list.seq + 1, unsure)) {
-        if (body.to !== this.boxes.get(id)) continue;
-        if (body.to === "failed" || body.to === "lost") this.boxFailures.set(id, { box: body.to, cause: body.cause, at });
-        const reason = pendingReason(body);
-        if (reason) this.pendingReasons.set(id, reason);
-      }
-    }
+    if (this.boxFailures.size) for (const [id, failure] of await boxFailures(this.room, list.seq + 1)) if (this.boxFailures.has(id)) this.boxFailures.set(id, failure);
     // A failure turnFailures cannot place keeps list.seq and shows.
     for (const [session, { seq, body }] of await turnFailures(this.room, list.seq + 1, this.failed.keys())) {
       this.failed.set(session, seq);
@@ -229,7 +223,7 @@ export class RoomStore {
         break;
       }
       case "box.changed": {
-        const { session, to, cause } = event.body, reason = pendingReason(event.body);
+        const { session, to, cause } = event.body, reason = pendingReason(to, event.body.reason);
         this.boxes.set(session, to);
         if (to === "failed" || to === "lost") this.boxFailures.set(session, { box: to, cause: cause ?? this.boxFailures.get(session)?.cause, at: event.at });
         else this.boxFailures.delete(session);
