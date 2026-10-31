@@ -88,6 +88,16 @@ func (h *Host) unlock() { <-h.gate }
 func (h *Host) base() []string {
 	return []string{"ssh", "-S", h.socket, "-o", "ControlMaster=no", "-o", "StreamLocalBindUnlink=yes"}
 }
+
+// TerminalArgv uses the same SSH transport as other host operations.
+func (h *Host) TerminalArgv(id contract.BoxID) []string {
+	args := append(h.base(), "-tt", h.destination)
+	if id != "" {
+		args = append(args, "podman", "exec", "-it", "-e", "TERM=xterm-256color", string(id), "bash", "-l")
+	}
+	return args
+}
+
 func (h *Host) control(ctx context.Context, op string, extra ...string) error {
 	args := append(h.base(), "-O", op)
 	args = append(args, extra...)
