@@ -10,8 +10,8 @@
   // although its decision is unknown here, so it shows as decided without one. On the Requests page a waiting request
   // is folded to one row until it opens; current marks the row the keys act on. Approve is filled only on the open
   // card and the current row.
-  let { request, store, now, feed = false, gone = false, folded = false, current = false, onopen }: {
-    request: Request; store: RoomStore; now: number; feed?: boolean; gone?: boolean; folded?: boolean; current?: boolean; onopen?: () => void;
+  let { request, store, now, admin, feed = false, gone = false, folded = false, current = false, onopen }: {
+    request: Request; store: RoomStore; now: number; admin: boolean; feed?: boolean; gone?: boolean; folded?: boolean; current?: boolean; onopen?: () => void;
   } = $props();
   const name = (who: Principal) => who.kind === "owner" ? "You" : who.session ? store.names.get(who.session) ?? "A closed session" : "Dyna";
   const outcome: Record<OpState, string> = {
@@ -74,11 +74,11 @@
   <article class="row" class:current>
     <button type="button" class="head" aria-expanded="false" onclick={onopen}><span class="top">{@render who()}</span>
       {#if lead}<span class="sub">{@render ask()}{#if request.class === "owner"} · {@render expiry()}{/if}</span>{/if}
-      {#if !lead}<span class="sub">You can decide · {@render expiry()}</span>{/if}</button>
-    <div class="actions">
+      {#if !lead}<span class="sub">{admin ? "You can decide" : "Needs a device with full access"} · {@render expiry()}</span>{/if}</button>
+    {#if admin}<div class="actions">
       <button type="button" class:approve={current} onclick={() => void decide(true)} disabled={busy}>Approve</button>
       <button type="button" onclick={() => void decide(false)} disabled={busy}>Deny</button>
-    </div>
+    </div>{/if}
     {#if failure}<p class="why" role="alert">{failure}</p>{/if}
   </article>
 {:else if pending}
@@ -90,14 +90,14 @@
     {#if request.card.command?.length}<pre class="exact">{commandLine(request.card.command)}</pre>{/if}
     {#each request.card.changes ?? [] as change (change.field)}<p class="what"><span class="field">{change.field}:</span> {change.old || "none"} → {change.new || "none"}</p>{/each}
     <!-- The page says who decides on every open card; the card body already says what the grant allows. -->
-    {#if !feed}<p class="why">You can decide.</p>{/if}
+    {#if !feed && admin}<p class="why">You can decide.</p>{/if}
     {#if noting}<!-- svelte-ignore a11y_autofocus -->
       <input type="text" bind:value={reason} placeholder="Note to {name(request.by)}" aria-label="Note to the session" disabled={busy} autofocus />{/if}
-    <div class="actions">
+    {#if admin}<div class="actions">
       <button type="button" class="approve" onclick={() => void decide(true)} disabled={busy}>Approve</button>
       <button type="button" onclick={() => void decide(false)} disabled={busy}>Deny</button>
       {#if !noting}<button type="button" class="ghost" onclick={() => { noting = true; }}>Add a note</button>{/if}
-    </div>
+    </div>{:else}<p class="why">Approve from a device with full access.</p>{/if}
     {#if failure}<p class="why" role="alert">{failure}</p>{/if}
   </article>
 {:else}
