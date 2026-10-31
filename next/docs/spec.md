@@ -381,7 +381,7 @@ Connect keeps its wire protocol and relay paths. `engine/connect` ports link, mi
 
 ### 7.9 Agent surface: MCP tools and the context snapshot
 
-Pi is the only harness. The box agent serves one `dyna` MCP server at `127.0.0.1:7781/dyna/`, beside `/shell/`; each call routes to `POST /v1/<method>` on the box socket. The CLI uses the same methods and principal. The engine alone authorizes and renders `context.snapshot`. Pi owns MCP, search, `call_tool`, codemode, skills, keyed sections, compaction and context updates. The box agent configures Pi and passes state; it has no authority or credentials. Dyna ships no Pi extension. Cherry-pick upstream Pi fixes #11625 and #11632 and record them and the core change in `third_party/pi/DYNA.md`.
+Pi is the only harness. The box agent serves one `dyna` MCP server at `127.0.0.1:7781/dyna/`, beside `/shell/`; each call routes to `POST /v1/<method>` on the box socket. The CLI uses the same methods and principal. The engine alone authorizes and renders `context.snapshot`. Pi owns MCP, search, codemode, skills, keyed sections, compaction and context updates. The box agent configures Pi and passes state; it has no authority or credentials. Dyna ships no Pi extension. Cherry-pick upstream Pi fixes #11625 and #11632 and record them and the core change in `third_party/pi/DYNA.md`.
 
 #### Pi core change: context updates
 
@@ -389,11 +389,11 @@ Replace mid-conversation system messages for every provider with one general Pi 
 
 The first head and each `appendCompaction` contain current keyed sections and declared tools. Neither changes between compactions. At the steering insertion point, including the first request of `continue`, Pi compares current and delivered state and adds one fixed-frame user `context_update` only when changed. Changed sections use line diffs, new sections appear whole, and removals are named. Context files (`AGENTS.md` and `CLAUDE.md`) are path-keyed sections, reread at run start and compaction. Skills come from Pi's skills folder and list name, description and path; the model reads `SKILL.md` on demand.
 
-Updates announce new or changed tools in full and removed tools by name. Direct servers announce their tools; deferred and codemode servers announce their description in `mcp_servers`, and deferred tools appear on a `tool_search` hit. Standard MCP `notifications/tools/list_changed` carries list changes. Search returns a short count, not schemas.
+Context updates carry sections only; Dyna tool definitions stay fixed for a box's lifetime. Direct servers announce their tools; deferred and codemode servers announce their description in `mcp_servers`, and deferred tools appear on a `tool_search` hit. Standard MCP `notifications/tools/list_changed` carries list changes. Search returns a short count, not schemas.
 
-Pi declares the Dyna tools directly. It does not declare `call_tool`; it activates `tool_search` only when a deferred server requires it. The Dyna and shell servers are direct.
+Pi declares the Dyna and shell tools directly. It activates `tool_search` only when a deferred server requires it.
 
-Each update entry stores its full delivered sections and announced-but-undeclared tool definitions in `details`; compaction stores the folded head and declarations. Pi derives delivered state from the active branch's latest update, compaction or first head. Crash recovery sends only an update not yet recorded. Tests cover restart and same-name schema changes.
+Each update entry stores its full delivered sections in `details`; compaction stores the folded head and declarations. Pi derives delivered state from the active branch's latest update, compaction or first head. Crash recovery sends only an update not yet recorded. Tests cover restart.
 
 `set_prompt_sections {sections: [{key, text}]}` replaces host sections; `reload_resources` reloads skills, MCP config and settings without a new conversation. Both have RPC and `AgentSession` methods; failure is an RPC error. Before each prompt or continue the box sends sections on the same stdin and fails the turn on error. Resource changes write files then reload. Remove old mid-conversation system and tool-change paths; retain `supportsMidConvoEffort`.
 
@@ -420,9 +420,9 @@ Each `contract/tools/` toolkit registers one area tool with a flat `action` enum
 | `workflow` | run, status, list | `workflow.*` | 2 |
 | `subscription` | list, add, remove | `subscription.*` | 2 |
 
-Every session initially declares all Dyna tools and four shell tools, without `tool_search` or `call_tool`. Pi waits for direct servers before the first prompt. Maximum-depth starts fail with a typed refusal. Dyna calls use the MCP route; the box resolves names and actions, returning `unknown_action` with valid names. The handler strictly decodes arguments once and returns its typed error unchanged. Room MCP servers use codemode exposure; owner-only methods stay in CLI and web. `session.restart` requires tree access; `room.repos` allows a session its own room. The Dyna MCP timeout is 600 seconds with progress notifications; longer work returns an operation immediately and wakes the session on `op.ran`.
+Every session initially declares all Dyna tools and four shell tools, without `tool_search`. Pi waits for direct servers before the first prompt. Maximum-depth starts fail with a typed refusal. Dyna calls use the MCP route; the box resolves names and actions, returning `unknown_action` with valid names. The handler strictly decodes arguments once and returns its typed error unchanged. Room MCP servers use codemode exposure; owner-only methods stay in CLI and web. `session.restart` requires tree access; `room.repos` allows a session its own room. The Dyna MCP timeout is 600 seconds with progress notifications; longer work returns an operation immediately and wakes the session on `op.ran`.
 
-The registry generates the server description's one sentence naming areas, and the tool list is the same for all sessions. The startup prompt does not name tools. Tool schemas and help appear in the declaring update or head; identity and trust come from `box.hello`; instructions from context files; state from snapshot sections; skills from Pi; authority from the engine. A test checks registry and CLI action coverage.
+The registry generates the server description's one sentence naming areas, and the tool list is the same for all sessions. The startup prompt does not name tools. Tool schemas and help appear in the declarations; identity and trust come from `box.hello`; instructions from context files; state from snapshot sections; skills from Pi; authority from the engine. A test checks registry and CLI action coverage.
 
 #### The context snapshot
 
