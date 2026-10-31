@@ -182,3 +182,51 @@ func TestReconcilerRemoveBackoff(t *testing.T) {
 		t.Fatalf("after retry: calls=%d box=%+v err=%v", host.calls, current, err)
 	}
 }
+
+func TestReconcilerArchiveStartFailureAndRetry(t *testing.T) {
+	s, room, sid, ctx := setup(t)
+	connectAgent(ctx, t, s, sid)
+	session, err := s.store.Session(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1000, 0)
+	s.now = func() time.Time { return now }
+	host := &retryHost{startErr: errors.New("host unavailable")}
+	r := lifecycle.New(s.store, host, retryView{}, nil, s.event, s.now)
+	if _, problem := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: sid}); problem != nil {
+		t.Fatal(problem)
+	}
+	if err := r.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.Wait()
+	current, err := s.store.Box(ctx, session.Box)
+	if err != nil || host.starts != 1 || current.State != contract.BoxClosing || current.Reason != "host unavailable" {
+		t.Fatalf("failed archive start: starts=%d box=%+v err=%v", host.starts, current, err)
+	}
+	events, err := s.store.Events(ctx, room, 0, 1000, []contract.EventType{"box.changed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, event := range events {
+		change := event.Body.(contract.BoxChanged)
+		if change.Box == session.Box && change.From == contract.BoxClosing && change.To == contract.BoxClosing && change.Reason == "host unavailable" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("archive start failure did not publish box.changed")
+	}
+	host.startErr = nil
+	now = now.Add(30 * time.Second)
+	if err := r.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.Wait()
+	current, err = s.store.Box(ctx, session.Box)
+	if err != nil || host.starts != 2 || current.State != contract.BoxClosing || current.Reason != "" {
+		t.Fatalf("successful archive retry: starts=%d box=%+v err=%v", host.starts, current, err)
+	}
+}
