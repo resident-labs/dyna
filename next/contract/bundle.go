@@ -20,7 +20,6 @@ const BundleV1 BundleVersion = 1
 
 // V1 labels, as the owner knows them.
 type (
-	RuleLabel     string // "r17"
 	QuestionLabel string // "q33"
 	RoomName      string // "dyna"
 	V1Address     string // "dyna:code-architectural", or "owner"
@@ -41,17 +40,17 @@ type BundleSource struct {
 }
 
 type BundleCounts struct {
-	Rules         int `json:"rules"`
-	Goals         int `json:"goals"`
-	GoalItems     int `json:"goalItems"`
-	Issues        int `json:"issues"`
-	PRs           int `json:"prs"`
-	Questions     int `json:"questions"`
-	Subscriptions int `json:"subscriptions"`
-	Hosts         int `json:"hosts"`
-	Accounts      int `json:"accounts"`
-	Devices       int `json:"devices"`
-	Sessions      int `json:"sessions"`
+	InstructionChars int `json:"instructionChars"`
+	Goals            int `json:"goals"`
+	GoalItems        int `json:"goalItems"`
+	Issues           int `json:"issues"`
+	PRs              int `json:"prs"`
+	Questions        int `json:"questions"`
+	Subscriptions    int `json:"subscriptions"`
+	Hosts            int `json:"hosts"`
+	Accounts         int `json:"accounts"`
+	Devices          int `json:"devices"`
+	Sessions         int `json:"sessions"`
 }
 
 // GlobalBundle is global.json.
@@ -60,7 +59,7 @@ type GlobalBundle struct {
 	Rooms         []RoomName      `json:"rooms"`
 	Exported      time.Time       `json:"exported"`
 	Source        BundleSource    `json:"source"`
-	Rules         []Rule          `json:"rules"`
+	Instructions  string          `json:"instructions"`
 	Settings      SettingsBundle  `json:"settings"`
 	Profiles      []ProfileBundle `json:"profiles"`
 	Hosts         []HostBundle    `json:"hosts"`
@@ -82,7 +81,7 @@ type RoomBundle struct {
 	Paused        bool             `json:"paused"`
 	RootProfile   ProfileName      `json:"rootProfile,omitempty"`
 	Upstreams     []RoomUpstream   `json:"upstreams,omitempty"`
-	Rules         []Rule           `json:"rules"`
+	Instructions  string           `json:"instructions"`
 	Goals         []GoalBundle     `json:"goals"`
 	Issues        []IssueBundle    `json:"issues"`
 	NextIssue     int              `json:"nextIssue"`
@@ -96,19 +95,10 @@ type RoomBundle struct {
 	Counts        BundleCounts     `json:"counts"`
 }
 
-type Rule struct {
-	Label   RuleLabel      `json:"label"`
-	Text    string         `json:"text"`
-	By      ImportedAuthor `json:"by"`
-	Created time.Time      `json:"created"`
-	Updated time.Time      `json:"updated"`
-}
-
 // SettingsBundle keeps only the v1 settings that v2 uses.
 type SettingsBundle struct {
 	OwnerName        string      `json:"ownerName"`
 	RootProfile      ProfileName `json:"rootProfile"`
-	RulesMaxChars    int         `json:"rulesMaxChars"`
 	SubagentMaxDepth int         `json:"subagentMaxDepth"`
 	CheckInInterval  DurationMS  `json:"checkInInterval"`
 	ShellSilence     DurationMS  `json:"shellSilence"`

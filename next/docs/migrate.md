@@ -27,7 +27,7 @@ and its files 0600. The archive is outside this counts-only rehearsal.
 
 | Bundle part | v1 source | Selection / conversion |
 |---|---|---|
-| Global and room rules | `goal_rooms.body`, `internal/goals/sqlite.go` | global room `*`; each room's rules |
+| Standing instructions | `goal_rooms.body`, `internal/goals/sqlite.go` | Render global room `*` and each room's rules as separate documents; verify IDs and exact text against SQL. |
 | Settings | `settings.json`, `internal/settings/settings.go` | only contract fields; minutes to milliseconds |
 | Profiles | `profiles.json`, `internal/profile/profile.go` | proxy-supported models; mapping needs review below |
 | Hosts | `machines`, `internal/machines/store.go` | enabled remote hosts only; room IDs resolved to names |
@@ -235,3 +235,10 @@ Zero counts are omitted from the per-room table. The verifier checked them. Repo
 
 
 The updated run exported eight profiles and recorded no unknown model mappings. Six disabled profiles were skipped. The Muse profile is reported as unsupported. The field classifications above apply to this run.
+
+## Standing instruction documents
+
+The exporter renders each scope's v1 rules in ID order under `# Instructions`. Each rule is one plain Markdown list item. The first line starts with `- `; each later line, including blank lines and code fences, has two leading spaces. Empty scopes produce empty documents. The verifier parses each document and independently compares its texts against v1 SQL in order. Rule IDs, authors and timestamps are dropped.
+
+The bundle carries the rendered documents, not rule records. After the store commit, the real import writes each file unchanged by rename to `<data>/files/instructions/global/AGENTS.md` and `<data>/files/instructions/rooms/<room-id>/AGENTS.md`. The room ID is the new ID created by the import. The offline dry run writes neither file.
+
