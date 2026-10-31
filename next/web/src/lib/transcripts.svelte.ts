@@ -17,7 +17,7 @@ export class TurnTranscripts {
     const { turns, key } = rowTurns(events);
     if (!turns.length || (this.#reads.has(key) && !again)) return;
     this.#reads.set(key, "loading");
-    Promise.all(turns.map(async turn => {
+    return Promise.all(turns.map(async turn => {
       const steps: TranscriptStep[] = [];
       let itemIndex = 0;
       let tail = false;
