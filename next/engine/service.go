@@ -18,6 +18,7 @@ import (
 )
 
 type Profiles interface {
+	Surface(contract.ProfileName) contract.AgentSurface
 	List() []contract.ProfileSummary
 	CompactionTokens(contract.ProfileName) int
 	Model(contract.ProfileName) (contract.ModelChoice, []string, error)
