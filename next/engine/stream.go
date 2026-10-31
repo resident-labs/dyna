@@ -92,25 +92,41 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 	ctx, stop := context.WithCancel(ctx)
 	s.mu.Lock()
 	state := s.sessionLocked(session.ID)
+	s.mu.Unlock()
+	state.computerLock.Lock()
+	s.mu.Lock()
+	var room contract.RoomID
+	var stopped bool
 	if previous := state.channel; previous != nil {
-		s.clearComputerLocked(session.ID)
+		room, stopped = s.clearComputerLocked(session.ID)
 		s.clearShellLocked(session.ID)
 		previous.stop()
 	}
 	channel := &boxChannel{stop: stop, wake: make(chan struct{}, 1)}
 	state.channel = channel
 	s.mu.Unlock()
+	if stopped {
+		_ = s.computerEvent(context.Background(), session.ID, room, contract.ComputerStopped)
+	}
+	state.computerLock.Unlock()
 	out := make(chan contract.BoxMessage)
 	go func() {
 		defer func() {
 			stop()
+			state.computerLock.Lock()
 			s.mu.Lock()
+			var room contract.RoomID
+			var stopped bool
 			if state.channel == channel {
 				state.channel = nil
-				s.clearComputerLocked(session.ID)
+				room, stopped = s.clearComputerLocked(session.ID)
 				s.clearShellLocked(session.ID)
 			}
 			s.mu.Unlock()
+			if stopped {
+				_ = s.computerEvent(context.Background(), session.ID, room, contract.ComputerStopped)
+			}
+			state.computerLock.Unlock()
 		}()
 		defer close(out)
 		replay := true
@@ -158,14 +174,11 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 					return
 				}
 			}
-			unlock := s.lockBox(session.ID)
 			allowed, err := s.store.CanDispatch(ctx, session.ID)
 			if err != nil {
-				unlock()
 				return
 			}
 			if !allowed {
-				unlock()
 				select {
 				case <-channel.wake:
 					continue
@@ -175,16 +188,13 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			}
 			turnID, err := id("turn_", s.now())
 			if err != nil {
-				unlock()
 				return
 			}
 			started, err := s.event(session.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.TurnStarted{})
 			if err != nil {
-				unlock()
 				return
 			}
 			turn, deliveries, err := s.store.Dispatch(ctx, session.ID, contract.TurnID(turnID), started, replay)
-			unlock()
 			if err != nil {
 				return
 			}

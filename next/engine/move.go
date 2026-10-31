@@ -2,11 +2,12 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"slices"
-	"sort"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 // SessionMove moves an idle subtree and leaves its volumes for the next wake.
@@ -30,17 +31,6 @@ func (s *Service) SessionMove(ctx context.Context, caller contract.Principal, re
 	if err != nil {
 		return response, invalid(err.Error())
 	}
-	ids := slices.Clone(order)
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	var unlocks []func()
-	for _, id := range ids {
-		unlocks = append(unlocks, s.lockBox(id))
-	}
-	defer func() {
-		for i := len(unlocks) - 1; i >= 0; i-- {
-			unlocks[i]()
-		}
-	}()
 	tree, err = s.store.RoomTree(ctx, session.Room)
 	if err != nil {
 		return response, failure(err)
@@ -87,6 +77,9 @@ func (s *Service) SessionMove(ctx context.Context, caller contract.Principal, re
 		}
 	}
 	busy, uncreated, err := s.store.MoveSession(ctx, req.Session, req.NewParent, budgetParent, event, members, boxEvents)
+	if errors.Is(err, store.ErrMoveCycle) {
+		return response, invalid(err.Error())
+	}
 	if err != nil {
 		return response, failure(err)
 	}

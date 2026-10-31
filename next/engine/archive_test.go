@@ -46,6 +46,8 @@ func TestSubtreeArchivesChildBeforeParent(t *testing.T) {
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	if _, ok := (<-childChannel).Body.(contract.Archive); !ok {
 		t.Fatal("child archive not sent")
 	}
@@ -57,12 +59,16 @@ func TestSubtreeArchivesChildBeforeParent(t *testing.T) {
 	if _, e := s.ArchiveDone(ctx, childCaller, contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc"}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	if _, ok := (<-parentChannel).Body.(contract.Archive); !ok {
 		t.Fatal("parent archive not sent")
 	}
 	if _, e := s.ArchiveDone(ctx, parentCaller, contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc"}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	events, err := s.store.Events(ctx, room, 0, 100, []contract.EventType{"session.closed"})
 	if err != nil || len(events) != 2 || events[0].Body.(contract.SessionClosed).Session != child.Session || events[1].Body.(contract.SessionClosed).Session != parent {
 		t.Fatalf("close order: %+v, %v", events, err)
@@ -88,6 +94,8 @@ func TestClosePendingBoxWithoutTurnsDoesNotStart(t *testing.T) {
 	if _, problem := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: sid}); problem != nil {
 		t.Fatal(problem)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	b, err := s.store.Box(ctx, session.Box)
 	if err != nil || b.State != contract.BoxDeleted || h.starts != 0 {
 		t.Fatalf("box=%+v starts=%d err=%v", b, h.starts, err)
@@ -111,14 +119,12 @@ func TestCloseBlocksDispatchBeforeArchive(t *testing.T) {
 	h := heldArchiveStart{started: make(chan struct{}), release: make(chan struct{})}
 	s.boxes = h
 	resetLifecycle(s)
-	session, err := s.store.Session(ctx, sid)
-	if err != nil {
+	if _, problem := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: sid}); problem != nil {
+		t.Fatal(problem)
+	}
+	if err := s.reconciler.Pass(ctx); err != nil {
 		t.Fatal(err)
 	}
-	closed := make(chan *contract.Error, 1)
-	go func() {
-		closed <- s.closeSession(ctx, contract.Principal{Kind: contract.PrincipalOwner}, session, false)
-	}()
 	<-h.started
 	channel, problem := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid})
 	if problem != nil {
@@ -128,9 +134,7 @@ func TestCloseBlocksDispatchBeforeArchive(t *testing.T) {
 		t.Fatal("closing box dispatched a turn")
 	}
 	close(h.release)
-	if problem := <-closed; problem != nil {
-		t.Fatal(problem)
-	}
+	s.reconciler.Wait()
 	var count int
 	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM turns WHERE session=?", sid).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("turns=%d err=%v", count, err)
@@ -164,6 +168,8 @@ func TestCloseStartsStoppedBoxForArchive(t *testing.T) {
 	if _, problem = s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: sid}); problem != nil {
 		t.Fatal(problem)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	if h.starts != 1 {
 		t.Fatal("closing did not restart the box")
 	}
@@ -194,6 +200,8 @@ func TestCloseArchivesBeforeRemovingBox(t *testing.T) {
 	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	msg := <-channel
 	if _, ok := msg.Body.(contract.Archive); !ok {
 		t.Fatalf("expected archive, got %+v", msg.Body)
@@ -202,6 +210,8 @@ func TestCloseArchivesBeforeRemovingBox(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	var commit string
 	err := s.store.Read().QueryRowContext(ctx, "SELECT commit_sha FROM archives WHERE session=? AND repo=?", session, "owner/repo").Scan(&commit)
 	if err != nil || commit != "abc" || verifier.calls != 1 {
@@ -228,6 +238,8 @@ func TestReconnectArchivesOnlySessionRepository(t *testing.T) {
 	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	<-first
 	if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{Repo: "owner/other", Commit: "abc"}); e == nil {
 		t.Fatal("other repository archive was accepted")
@@ -242,6 +254,8 @@ func TestReconnectArchivesOnlySessionRepository(t *testing.T) {
 	if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc"}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	var count int
 	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM archives WHERE session=? AND repo=?", session, "owner/repo").Scan(&count); err != nil || count != 1 {
 		t.Fatalf("archive rows: %d, %v", count, err)
@@ -263,14 +277,28 @@ func TestCloseRetryResendsArchiveOnLiveChannel(t *testing.T) {
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: session}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	if _, ok := (<-channel).Body.(contract.Archive); !ok {
 		t.Fatal("expected archive")
 	}
 	if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{Repo: "owner/repo", Error: "failed"}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: session}); e != nil {
 		t.Fatal(e)
+	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
+	record, err := s.store.Session(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.store.Box(ctx, record.Box)
+	if err != nil || current.State != contract.BoxClosing || current.Reason != "" {
+		t.Fatalf("retry did not clear archive failure: box=%+v err=%v", current, err)
 	}
 	if _, ok := (<-channel).Body.(contract.Archive); !ok {
 		t.Fatal("expected archive on retry")
@@ -291,11 +319,15 @@ func TestCloseKeepsBoxOnArchiveMismatch(t *testing.T) {
 	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	<-channel
 	_, e = s.ArchiveDone(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session}, contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc"})
 	if e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	record, err := s.store.Session(ctx, session)
 	if err != nil {
 		t.Fatal(err)
@@ -306,23 +338,47 @@ func TestCloseKeepsBoxOnArchiveMismatch(t *testing.T) {
 	}
 }
 
+type archiveRestartBoxes struct {
+	fakeBoxes
+	started chan contract.BoxID
+}
+
+func (b archiveRestartBoxes) Start(_ context.Context, id contract.BoxID) error {
+	b.started <- id
+	return nil
+}
+
 func TestRestartResendsArchiveAndFinishesClose(t *testing.T) {
 	s, room, session, ctx := setupArchive(t)
 	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
 		t.Fatal(err)
 	}
 	connectAgent(ctx, t, s, session)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	if _, e := testChannel(t, s, ctx, caller); e != nil {
+		t.Fatal(e)
+	}
 	_, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session})
 	if e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
 	record, err := s.store.Session(ctx, session)
 	if err != nil {
 		t.Fatal(err)
 	}
-	restarted := New(s.store, fakeBoxes{}, fakeProfiles{}, s.now)
+	boxes := archiveRestartBoxes{started: make(chan contract.BoxID, 1)}
+	restarted := New(s.store, boxes, fakeProfiles{}, s.now)
 	restarted.SetRepositories(&fakeRepos{})
-	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	passLifecycle(t, restarted, ctx)
+	select {
+	case id := <-boxes.started:
+		if id != record.Box {
+			t.Fatalf("started box %s, want %s", id, record.Box)
+		}
+	default:
+		t.Fatal("restart did not start the box for archive")
+	}
 	channel, e := testChannel(t, restarted, ctx, caller)
 	if e != nil {
 		t.Fatal(e)
@@ -334,6 +390,8 @@ func TestRestartResendsArchiveAndFinishesClose(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, restarted, ctx)
+	passLifecycle(t, restarted, ctx)
 	current, err := s.store.Box(ctx, record.Box)
 	if err != nil || current.State != contract.BoxDeleted {
 		t.Fatalf("box %+v, error %v", current, err)
@@ -357,9 +415,11 @@ func TestRestoreFinishesSessionAfterBoxDeleted(t *testing.T) {
 	if _, err = s.transition(ctx, record.Room, current, contract.BoxDeleted, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ResumeClosures(ctx); err != nil {
+	if err := s.store.MarkClosing(ctx, session, false); err != nil {
 		t.Fatal(err)
 	}
+	restarted := New(s.store, fakeBoxes{}, fakeProfiles{}, s.now)
+	passLifecycle(t, restarted, ctx)
 	if _, err := s.store.Session(ctx, session); err == nil {
 		t.Fatal("session remained open")
 	}
@@ -384,26 +444,23 @@ func TestRestoreStartsMarkedLeaf(t *testing.T) {
 	if _, err := s.transition(ctx, room, current, contract.BoxClosing, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "UPDATE boxes SET id='000' WHERE session=?", child.Session)
-		return err
-	}); err != nil {
+	if err := s.store.MarkClosing(ctx, parent, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.MarkClosing(ctx, parent); err != nil {
-		t.Fatal(err)
-	}
-	if e := s.ResumeClosures(ctx); e != nil {
-		t.Fatal(e)
-	}
+	restarted := New(s.store, fakeBoxes{}, fakeProfiles{}, s.now)
+	passLifecycle(t, restarted, ctx)
 	childAck := contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}
-	if _, e := s.ArchiveDone(ctx, childAck, contract.ArchiveDoneRequest{}); e != nil {
+	if _, e := restarted.ArchiveDone(ctx, childAck, contract.ArchiveDoneRequest{}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, restarted, ctx)
+	passLifecycle(t, restarted, ctx)
 	parentAck := contract.Principal{Kind: contract.PrincipalSession, Session: parent}
-	if _, e := s.ArchiveDone(ctx, parentAck, contract.ArchiveDoneRequest{}); e != nil {
+	if _, e := restarted.ArchiveDone(ctx, parentAck, contract.ArchiveDoneRequest{}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, restarted, ctx)
+	passLifecycle(t, restarted, ctx)
 	events, err := s.store.Events(ctx, room, 0, 100, []contract.EventType{"session.closed"})
 	if err != nil || len(events) != 2 || events[0].Body.(contract.SessionClosed).Session != child.Session || events[1].Body.(contract.SessionClosed).Session != parent {
 		t.Fatalf("close order: %+v, %v", events, err)
@@ -428,9 +485,11 @@ func TestRestoreWaitsForArchiveAckWithoutRepositories(t *testing.T) {
 	if _, err := s.transition(ctx, record.Room, current, contract.BoxClosing, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ResumeClosures(ctx); err != nil {
+	if err := s.store.MarkClosing(ctx, session, false); err != nil {
 		t.Fatal(err)
 	}
+	restarted := New(s.store, fakeBoxes{}, fakeProfiles{}, s.now)
+	passLifecycle(t, restarted, ctx)
 	current, err = s.store.Box(ctx, record.Box)
 	if err != nil || current.State != contract.BoxClosing {
 		t.Fatalf("box %+v, error %v, want closing until the box acknowledges the archive", current, err)
@@ -451,6 +510,8 @@ func TestCloseWaitsForArchiveAckWithoutRepositories(t *testing.T) {
 	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: child.Session}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	msg := <-channel
 	if _, ok := msg.Body.(contract.Archive); !ok {
 		t.Fatalf("expected archive, got %+v", msg.Body)
@@ -466,6 +527,8 @@ func TestCloseWaitsForArchiveAckWithoutRepositories(t *testing.T) {
 	if _, e := s.ArchiveDone(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, contract.ArchiveDoneRequest{}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	current, err = s.store.Box(ctx, record.Box)
 	if err != nil || current.State != contract.BoxDeleted {
 		t.Fatalf("box %+v, error %v, want deleted after the archive ack", current, err)
@@ -485,6 +548,8 @@ func TestDiscardSkipsArchive(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	box, err := s.store.Box(ctx, record.Box)
 	if err != nil || box.State != contract.BoxDeleted {
 		t.Fatalf("box %+v, error %v", box, err)

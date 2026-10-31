@@ -22,7 +22,7 @@ func TestDeliveryReplyRoundTrip(t *testing.T) {
 	if err := s.CreateRoom(ctx, "room", "room", now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.writer.ExecContext(ctx, "INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('s','room','s','p','ready','',0)"); err != nil {
+	if _, err := s.writer.ExecContext(ctx, "INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('s','room','s','p','open','',0); INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES('b','s','','agent','ready','','',0,0)"); err != nil {
 		t.Fatal(err)
 	}
 	reply := contract.ReplyChannel{Kind: contract.ReplyFinal, Target: contract.Principal{Kind: contract.PrincipalOwner}, Home: contract.Conversation{Kind: contract.ConversationDM, Session: "s"}, ReplyTo: "post"}
