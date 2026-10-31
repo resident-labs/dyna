@@ -113,7 +113,7 @@ func TestPollWriteKeepsCrossRecordQuotaScheduling(t *testing.T) {
 			if err := e.s.Store.updateRecords(nil, func(st *State) error {
 				previous := rate
 				if mode == "recovery" {
-					previous.PauseUntil = e.clock.Add(time.Hour)
+					previous.PauseUntil = e.clock.Add(-time.Second)
 				}
 				st.RateLimits[scope.Key()] = previous
 				return nil
