@@ -399,6 +399,8 @@ type ShellJobOutput struct {
 	ExitCode int        `json:"exitCode"` // when Running is false
 	Text     string     `json:"text"`
 	Reset    bool       `json:"reset,omitempty"`
+	Started  time.Time  `json:"started"`        // by the box's clock
+	Ended    time.Time  `json:"ended,omitzero"` // by the box's clock, once the job has ended
 }
 
 // TerminalResize is the JSON text frame a client sends on GET /v1/terminal to set the terminal's size.
