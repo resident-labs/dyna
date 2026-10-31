@@ -199,13 +199,22 @@ func (s *Service) ProfileSet(_ context.Context, who contract.Principal, req cont
 	return contract.ProfileSetResponse{}, err
 }
 
-func (s *Service) ProfileRemove(_ context.Context, who contract.Principal, req contract.ProfileRemoveRequest) (contract.ProfileRemoveResponse, *contract.Error) {
+func (s *Service) ProfileRemove(ctx context.Context, who contract.Principal, req contract.ProfileRemoveRequest) (contract.ProfileRemoveResponse, *contract.Error) {
 	if who.Kind != contract.PrincipalOwner {
 		return contract.ProfileRemoveResponse{}, forbidden()
 	}
 	p, ok := s.profiles.(*ProfileConfig)
 	if !ok {
 		return contract.ProfileRemoveResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "profile configuration is read-only"}
+	}
+	s.treeMu.Lock()
+	defer s.treeMu.Unlock()
+	var inUse bool
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sessions WHERE profile=? AND closed_at IS NULL)", req.Name).Scan(&inUse); err != nil {
+		return contract.ProfileRemoveResponse{}, failure(err)
+	}
+	if inUse {
+		return contract.ProfileRemoveResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "profile is used by an open session"}
 	}
 	return contract.ProfileRemoveResponse{}, p.update(req.Name, nil)
 }
