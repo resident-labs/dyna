@@ -78,6 +78,7 @@ test("a stopped turn and a room's pause show as their own lines", () => {
   const stopped = event(1, { type: "turn.ended", body: { session: "s", turn: "t", outcome: "stopped", usage } });
   const rows = feedRows([stopped, event(2, { type: "room.paused", body: {} }), event(3, { type: "room.resumed", body: {} })], { kind: "feed" });
   assert.deepEqual(rows.flatMap(row => row.kind === "notice" ? [describe(row.event, id => id)] : []), ["s's turn stopped", "Room paused", "Room resumed"]);
+  assert.equal(dmOf(stopped), "s");
   assert.deepEqual(feedRows([stopped], { kind: "dm", session: "s" }).map(row => row.kind), ["work", "notice"]);
   assert.deepEqual(feedRows([event(2, { type: "room.paused", body: {} })], { kind: "dm", session: "s" }), []);
 });
