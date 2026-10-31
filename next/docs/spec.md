@@ -42,7 +42,7 @@ The owner settled the design on the card. Writing the spec needed the decisions 
 2. **One contract.** Events, operations, grants, the API and the migration bundle are defined once in `contract/`. The engine, the CLI, the box agent and the web app use the same types. TypeScript is generated.
 3. **No secret in a box.** Model calls, git, GitHub writes and host commands go through the engine. The engine knows the caller by its socket.
 4. **Small and legible.** v1 has about 260,000 lines of Go (without tests) in 138 packages. v2 targets under 60,000 lines at the cutover, in nine top-level packages, with no compatibility code.
-5. **Fast, honest tests.** The repository holds only fast unit tests. A person or agent checks integration by hand in a sandbox (section 10).
+5. **Fast, honest tests.** The repository holds fast unit tests, plus one or two fast integration tests for each important owner-facing feature. A person or agent checks each milestone end to end by hand in a sandbox (section 10).
 6. **A clean cutover.** One bundle, one commit, no rollback. The store guard protects every other install.
 7. **Useful to any owner (r9).** Any repository and toolchain (images from `.dyna/images/`), any Linux host with rootless Podman and SSH, and every model account that CLIProxyAPI supports.
 
@@ -56,7 +56,7 @@ The owner settled the design on the card. Writing the spec needed the decisions 
 - No JSON state files. JSON stays for settings and config.
 - No new web framework. The Svelte app is ported, and each view takes the quiet, dense look of 5.13 as it is ported.
 - No shared or untrusted hosts. Boxes run only where only we have admin.
-- No integration or end-to-end tests in the repository.
+- No end-to-end tests in the repository, and only one or two fast integration tests per important owner-facing feature (10.1).
 - No box-lite step. M1 goes straight to the full box.
 
 ## 2. Layout
@@ -1244,8 +1244,8 @@ The owner chose this design on 2026-10-30. Workflows are ported before the cutov
 ### 10.1 Owner policy
 
 1. The repository holds only solid, worthwhile unit tests. Each is fast (under 1 s), tests one behavior, and uses fakes at the package boundary. No snapshot tests and no implementation-detail tests.
-2. The repository holds no end-to-end and no integration tests.
-3. When a milestone needs an integration or end-to-end check, a terra agent runs it once by hand in a sandbox (a box on hermeslab or Boat). It reports the result in the PR or the milestone report. Nothing is committed.
+2. The repository holds one or two integration tests per important feature that an owner relies on, such as a box that starts, a reconnect after an SSH drop, or a terminal that opens (owner, 2026-10-30). Each test checks behavior the owner would notice, never an implementation detail, and reviewers reject an integration test that checks internals. Each runs in under 1 s against real local parts, and CI provides those parts. SSH, socket forwards, reconnects and Podman come first. The repository holds no end-to-end tests.
+3. When a milestone needs an end-to-end check, a terra agent runs it once by hand in a sandbox (a box on hermeslab or Boat). It reports the result in the PR or the milestone report. Nothing is committed.
 
 ### 10.2 Boundaries and their fakes
 
@@ -1270,7 +1270,7 @@ Each package boundary has one interface and one fake, kept next to the real one.
 - `harness`: each adapter turns recorded harness output into the typed turn result. Recorded output is test input, not a snapshot of our output.
 - `web`: `svelte-check` and strict `tsc`, plus unit tests for pure logic only.
 
-A test that needs a real Podman, SSH, harness, GitHub or browser is a manual sandbox check instead.
+SSH, socket forwards, reconnects and Podman get the integration tests of 10.1. A test that needs a real harness, GitHub or browser is a manual sandbox check instead.
 
 ### 10.4 Where tests run
 
