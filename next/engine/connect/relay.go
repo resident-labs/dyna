@@ -177,6 +177,22 @@ func (r *Relay) Unlink(ctx context.Context, machine string) error {
 	return call(ctx, r, machine, "/v1/machine/unlink", machineBody{machine}, &out)
 }
 
+type Grant struct {
+	Active bool  `json:"active"`
+	Epoch  int64 `json:"epoch"`
+}
+
+func (r *Relay) CheckGrant(ctx context.Context, machine, user, device string) (Grant, error) {
+	var out Grant
+	body := struct {
+		Machine string `json:"machine"`
+		User    string `json:"user"`
+		Device  string `json:"dev"`
+	}{machine, user, device}
+	err := call(ctx, r, machine, "/v1/machine/grant", body, &out)
+	return out, err
+}
+
 // FetchKeys retrieves the relay public keys without following redirects.
 func (r *Relay) FetchKeys(ctx context.Context) (KeySet, error) {
 	var keys KeySet
