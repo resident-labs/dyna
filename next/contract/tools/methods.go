@@ -71,7 +71,7 @@ var methodTable = []MethodEntry{
 		act("op", "withdraw", typ[contract.OpWithdrawRequest](), "Withdraw your pending operation by id.", "op withdraw"),
 	),
 	method(contract.MethodPost, contract.ScopeOperate, UserAccess,
-		act("post", "send", typ[contract.PostRequest](), "Send or update a post. Give room and text; use visualUpdate to update a visual. Mentions and attachments are optional.", "post"),
+		act("post", "send", typ[PostInput](), "Send or update a post. paths holds attachment paths; html names a visual file. Set visualUpdate to update a visual.", "post"),
 	),
 	method(contract.MethodPostSearch, contract.ScopeRead, OwnerAccess),
 	method(contract.MethodProfileList, contract.ScopeRead, OwnerAccess),
