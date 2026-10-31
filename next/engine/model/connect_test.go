@@ -20,7 +20,7 @@ func TestProviderFlowsMatchOAuthDispatch(t *testing.T) {
 		_, _ = w.Write([]byte(`{"url":"https://provider.example/login","state":"invented"}`))
 	}))
 	defer server.Close()
-	proxy := &Proxy{client: &http.Client{Transport: quotaTestTransport{url: server.URL, base: http.DefaultTransport}}}
+	proxy := &Proxy{planModels: testPlanModels(), client: &http.Client{Transport: quotaTestTransport{url: server.URL, base: http.DefaultTransport}}}
 	connections := proxy.Connections("invented", nil, time.Now)
 	for _, option := range oauthProviders {
 		result, err := connections.Start(context.Background(), contract.AccountsConnectRequest{Provider: option.info.ID})
@@ -61,7 +61,7 @@ func TestConnectBindsAttemptsAndNeverExposesProxyID(t *testing.T) {
 	}
 	defer st.Close()
 	now := time.Unix(1000, 0)
-	p := &Proxy{client: &http.Client{Transport: quotaTestTransport{url: proxy.URL, base: http.DefaultTransport}}}
+	p := &Proxy{planModels: testPlanModels(), client: &http.Client{Transport: quotaTestTransport{url: proxy.URL, base: http.DefaultTransport}}}
 	c := p.Connections("invented-management-key", st, func() time.Time { return now })
 	ctx := context.Background()
 	if err := st.SaveProxyAuth(ctx, store.ProxyAuth{ID: "private-proxy-id", Provider: "claude", Record: []byte("{}")}, true); err != nil {

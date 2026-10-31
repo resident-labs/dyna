@@ -15,7 +15,10 @@ func (c *Connections) SetKey(ctx context.Context, req contract.AccountsSetKeyReq
 	var model string
 	for _, provider := range c.proxy.keyProviders {
 		if provider.Provider == req.Provider {
-			model = provider.Models[0].ID
+			model = provider.DefaultModel
+			if model == "" && len(provider.Models) > 0 {
+				model = provider.Models[0].ID
+			}
 			break
 		}
 	}

@@ -108,7 +108,7 @@ func (c *Connections) start(ctx context.Context, req contract.AccountsConnectReq
 	var provider string
 	var flow contract.ConnectFlow
 	for _, option := range oauthProviders {
-		if option.info.ID == req.Provider {
+		if option.info.ID == req.Provider && len(c.proxy.planModels[req.Provider]) > 0 {
 			provider, flow = option.proxy, option.info.Flows[0]
 			break
 		}

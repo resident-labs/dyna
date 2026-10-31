@@ -17,6 +17,9 @@ func (p *Proxy) AccountProviders() []contract.AccountProviderInfo {
 	providers := make([]contract.AccountProviderInfo, 0, len(oauthProviders)+len(p.keyProviders))
 	for _, provider := range oauthProviders {
 		info := provider.info
+		if len(p.planModels[info.ID]) == 0 {
+			continue
+		}
 		info.Models = p.planModels[info.ID]
 		providers = append(providers, info)
 	}

@@ -11,7 +11,7 @@ func (p *Proxy) Namespace(choice contract.ModelChoice, allowed []string) (string
 	provider := string(choice.Provider)
 	plan := false
 	for _, entry := range oauthProviders {
-		if string(entry.info.ID) == provider {
+		if string(entry.info.ID) == provider && len(p.planModels[entry.info.ID]) > 0 {
 			plan = true
 			break
 		}
@@ -25,6 +25,18 @@ func (p *Proxy) Namespace(choice contract.ModelChoice, allowed []string) (string
 		}
 	}
 	if billing == contract.ModelBillingPlan && plan {
+		for _, id := range append([]string{choice.ID}, allowed...) {
+			found := false
+			for _, model := range p.planModels[contract.AccountProvider(provider)] {
+				if model.ID == id {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return "", fmt.Errorf("model %q is not in provider %q plan catalog", id, provider)
+			}
+		}
 		return "plan_" + provider, nil
 	}
 	if billing == contract.ModelBillingKey {

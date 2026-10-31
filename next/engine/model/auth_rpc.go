@@ -153,7 +153,11 @@ func (r *AuthRPC) OAuthCompleted(req OAuthCompletion, out *OAuthCompletionResult
 				return errors.New("plan model unavailable")
 			}
 			out.Prefix = "plan_" + string(attempt.provider)
-			out.Model = out.Prefix + "/" + models[0].ID
+			selected := r.Connections.proxy.planDefaults[attempt.provider]
+			if selected == "" {
+				selected = models[0].ID
+			}
+			out.Model = out.Prefix + "/" + planProxyModel(attempt.provider, selected)
 			out.Accepted = true
 			return nil
 		}

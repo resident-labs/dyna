@@ -17,7 +17,7 @@ func TestExpiredCompletionRejectsWithoutBreakingOtherAttempts(t *testing.T) {
 		_, _ = w.Write([]byte(`{"url":"https://provider.example/login","state":"invented"}`))
 	}))
 	defer server.Close()
-	p := &Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
+	p := &Proxy{planModels: testPlanModels(), client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
 	c := p.Connections("key", nil, func() time.Time { return now })
 	start, err := c.Start(context.Background(), contract.AccountsConnectRequest{Provider: contract.ProviderKimiCoding})
 	if err != nil {
@@ -55,7 +55,7 @@ func TestConnectCompletionWithoutBrowserPolling(t *testing.T) {
 	}
 	defer st.Close()
 	ctx := context.Background()
-	p := &Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
+	p := &Proxy{planModels: testPlanModels(), client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
 	c := p.Connections("invented-key", st, time.Now)
 	if _, err := c.Start(ctx, contract.AccountsConnectRequest{Provider: contract.ProviderAnthropic, Label: "Invented"}); err != nil {
 		t.Fatal(err)
