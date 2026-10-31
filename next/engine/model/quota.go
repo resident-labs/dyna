@@ -25,6 +25,7 @@ type Quotas struct {
 	now        func() time.Time
 	mu         sync.Mutex
 	cache      map[string]quotaEntry
+	generation uint64
 }
 
 func (p *Proxy) Quotas(key string, st *store.Store, now func() time.Time) *Quotas {
@@ -35,6 +36,7 @@ func (p *Proxy) Quotas(key string, st *store.Store, now func() time.Time) *Quota
 func (q *Quotas) Clear() {
 	q.mu.Lock()
 	clear(q.cache)
+	q.generation++
 	q.mu.Unlock()
 }
 
@@ -85,6 +87,7 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 		}
 		q.mu.Lock()
 		entry, ok := q.cache[file.Index]
+		generation := q.generation
 		q.mu.Unlock()
 		if ok && q.now().Sub(entry.at) < 5*time.Minute {
 			usage = entry.usage
@@ -171,7 +174,9 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 			log.Printf("model quota failed: upstream_status=%d keys_and_kinds=%q", reply.Status, kinds)
 		}
 		q.mu.Lock()
-		q.cache[file.Index] = quotaEntry{at: q.now(), usage: usage}
+		if q.generation == generation {
+			q.cache[file.Index] = quotaEntry{at: q.now(), usage: usage}
+		}
 		q.mu.Unlock()
 		result.Accounts = append(result.Accounts, usage)
 	}
