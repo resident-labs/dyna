@@ -261,7 +261,7 @@
           onkeydown={event => fold(event, item.session)}><Icon name="chevron" size={12} />{#if hidden}<span>{hidden}</span>{/if}</button>{/if}
         <a class="member" href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.session)}`} onclick={navigate}
           onkeydown={event => { walkTree(event); if (parent) fold(event, item.session); }}
-          aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{22 + depth * 14}px">
+          aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{24 + depth * 14}px">
           <SessionRow name={item.name} root={!item.parent} status={status(item.session)} />
           {#if trouble(item.session)}<StatusPill tone="failed">{store?.failed.has(item.session) ? "Failed" : trouble(item.session)}</StatusPill>
           {:else if hiddenTrouble}<StatusPill tone="failed">Failed</StatusPill>{/if}</a>
