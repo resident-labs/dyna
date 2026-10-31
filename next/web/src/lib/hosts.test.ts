@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { backupProblem, hostLoads, hostMeters, largeShared, lastSeen } from "./hosts.ts";
+import { backupProblem, hostLabel, hostLoads, hostMeters, largeShared, lastSeen } from "./hosts.ts";
+
+test("labels the Dyna host without implying that it runs this browser", () => {
+  assert.equal(hostLabel("control-plane"), "Dyna host");
+  assert.equal(hostLabel("build-server"), "build-server");
+});
 
 test("words a host's load, marks meters at 90% of their limit as busy, and has none without capacity", () => {
   const gib = 2 ** 30;
