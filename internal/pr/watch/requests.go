@@ -453,3 +453,8 @@ func (c *requestCache) pauseUntil(scope RateLimitScope) time.Time {
 	}
 	return until
 }
+
+// discussionResponse identifies pages that only a complete poll may publish.
+func discussionResponse(path string) bool {
+	return strings.Contains(path, "/comments?") || strings.Contains(path, "/reviews?")
+}
