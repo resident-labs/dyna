@@ -126,7 +126,6 @@
                 {#if account.state === "sign_in_expired"} <StatusPill tone="error" label="Sign-in expired" />
                 {:else if account.state === "quota_low"} <StatusPill tone="warning" label="Low usage" />{/if}
                 <div class="muted">{account.rooms?.length ? `${account.rooms.length} rooms` : "Every room"}</div></div>
-                {#if account.state === "sign_in_expired"}<button class="btn fill" type="button" onclick={() => choose(provider, true)}>Sign in again</button>{/if}
               </div>
             {/each}
             {#if inline && selected?.id === provider.id}{@render form()}{/if}
