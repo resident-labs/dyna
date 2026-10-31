@@ -45,53 +45,35 @@ const feedRows = (...args: Parameters<typeof dayRows>) => dayRows(...args).filte
 const usage = { model: "m", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 const names: Record<string, string> = { l: "lead-web" };
 
-test("folds the work between two posts into one row", () => {
+test("groups work, stopped turns and failures without letting dividers split the block", () => {
   const rows = feedRows([
-    event(1, { type: "post.created", body: { text: "go", home: { kind: "feed" } } }, { kind: "owner" }),
-    event(2, { type: "turn.started", body: { session: "l", turn: "t1", inputs: [] } }),
-    event(3, { type: "turn.ended", body: { session: "l", turn: "t1", outcome: "completed", usage } }),
-    event(4, { type: "box.changed", body: { box: "b", session: "l", to: "ready" } }),
-    event(5, { type: "turn.ended", body: { session: "l", turn: "t2", outcome: "completed", usage } }),
-    event(6, { type: "turn.ended", body: { session: "l", turn: "t3", outcome: "failed", usage, error: "Broke" } }),
-    event(7, { type: "post.created", body: { text: "done", home: { kind: "feed" } } }, lead),
+    event(1, { type: "turn.started", body: { session: "l", turn: "t", inputs: [] } }),
+    event(2, { type: "room.paused", body: {} }, { kind: "owner" }),
+    event(3, { type: "turn.ended", body: { session: "l", turn: "t", outcome: "stopped", usage } }),
+    event(4, { type: "turn.ended", body: { session: "l", turn: "f", outcome: "failed", usage, cause: "model_failed" } }),
+    event(5, { type: "post.created", body: { text: "done", home: { kind: "feed" } } }, lead),
   ], { kind: "feed" });
-  assert.deepEqual(rows.map(row => row.kind), ["post", "work", "failed", "post"]);
-  const work = rows[1];
-  assert.equal(work.kind === "work" && workSummary(work.events, session => names[session]), "lead-web worked · 2 turns");
+  assert.deepEqual(rows.map(row => row.kind), ["work", "notice", "failed", "post"]);
+  const work = rows[0];
+  assert.equal(work.kind === "work" && workSummary(work.events, id => id), "l worked · 1 turn stopped");
 });
 
-test("names two sessions that ran turns and counts more", () => {
-  const started = (seq: number, session: string) => event(seq, { type: "turn.started", body: { session, turn: `t${seq}`, inputs: [] } });
-  const begun = (seq: number, session: string) => event(seq, { type: "session.started", body: { session, name: session, profile: "p", goal: "" } });
-  const name = (session: string) => session;
-  assert.equal(workSummary([started(1, "designer"), started(2, "lead-web")], name), "designer and lead-web worked · 2 turns");
-  assert.equal(workSummary([begun(1, "a"), started(2, "a"), started(3, "b"), started(4, "c")], name), "a started · 3 sessions worked · 3 turns");
-});
-
-test("a dormant close says why in the work line and its opened row, and a normal close does not", () => {
-  const closed = (seq: number, session: string, reason?: "dormant") => decodeEvent(event(seq, { type: "session.closed", body: { session, reason } }));
-  const name = (session: string) => session;
-  const quiet = closed(1, "scout", "dormant"), plain = closed(2, "builder");
+test("keeps dormant closes out of the summary and explains them in detail", () => {
+  const quiet = decodeEvent(event(1, { type: "session.closed", body: { session: "scout", reason: "dormant" } }));
+  const plain = decodeEvent(event(2, { type: "session.closed", body: { session: "builder" } }));
   assert.ok(quiet && plain);
-  assert.equal(workSummary([quiet, plain], name), "builder closed · scout closed after 7 quiet days");
-  assert.deepEqual([describe(quiet, name), describe(plain, name)], ["scout closed after 7 quiet days", "builder closed"]);
+  assert.equal(workSummary([quiet, plain], id => id), "1 closed");
+  assert.equal(describe(quiet, id => id), "scout closed after 7 quiet days");
 });
 
-test("collapses repeated names in the work line", () => {
-  const started = (seq: number, session: string) => event(seq, { type: "turn.started", body: { session, turn: `t${seq}`, inputs: [] } });
-  const unknown = () => "A closed session";
-  assert.equal(workSummary([started(1, "gone-1"), started(2, "gone-2")], unknown), "Closed sessions worked · 2 turns");
-  assert.equal(workSummary([started(1, "gone"), started(2, "lead-web")], session => session === "gone" ? "A closed session" : session), "A closed session and lead-web worked · 2 turns");
-});
-
-test("a stopped turn and a room's pause show as their own lines", () => {
-  const stopped = event(1, { type: "turn.ended", body: { session: "s", turn: "t", outcome: "stopped", usage } });
-  const rows = feedRows([stopped, event(2, { type: "room.paused", body: {} }, { kind: "owner" }), event(3, { type: "room.resumed", body: {} }, { kind: "session", session: "root" })], { kind: "feed" });
-  assert.deepEqual(rows.flatMap(row => row.kind === "notice" ? [describe(row.event, id => id)] : []), ["s's turn stopped", "You paused the room", "root resumed the room"]);
-  assert.equal(dmOf(stopped), "s");
-  assert.equal(decodeEvent({ seq: 2, id: "2", at: "", room: "r", from: { kind: "owner" }, type: "room.paused", body: {} })?.type, "room.paused");
-  assert.deepEqual(feedRows([stopped], { kind: "dm", session: "s" }).map(row => row.kind), ["work", "notice"]);
-  assert.deepEqual(feedRows([event(2, { type: "room.paused", body: {} })], { kind: "dm", session: "s" }), []);
+test("splits activity at midnight and caps failures", () => {
+  const failure = (seq: number) => event(seq, { type: "turn.ended", body: { session: "l", turn: `t${seq}`, outcome: "failed", usage } });
+  const rows = feedRows(Array.from({ length: 7 }, (_, i) => failure(i + 1)), { kind: "feed" });
+  assert.deepEqual(rows.map(row => row.kind), ["failed", "failed", "failed", "failed", "failed", "more-failures"]);
+  assert.equal(rows[5].kind === "more-failures" && rows[5].failures.length, 2);
+  const start = event(8, { type: "turn.started", body: { session: "l", turn: "t", inputs: [] } });
+  const events = [{ ...start, at: new Date(2026, 9, 30, 23).toISOString() }, { ...start, seq: 9, at: new Date(2026, 9, 31, 1).toISOString() }];
+  assert.deepEqual(dayRows(events, { kind: "feed" }).map(row => row.kind), ["day", "work", "day", "work"]);
 });
 
 test("a room limit change is one plain line, and zero means no limit", () => {
@@ -103,14 +85,6 @@ test("a room limit change is one plain line, and zero means no limit", () => {
   const raw = { seq: 6, id: "6", at: "", room: "r", from: { kind: "owner" }, type: "room.limits_changed" };
   assert.equal(decodeEvent({ ...raw, body: { cpus: 8, memBytes: 0 } })?.type, "room.limits_changed");
   assert.equal(decodeEvent({ ...raw, body: { cpus: -1, memBytes: 0 } }), undefined);
-});
-
-test("names failed image builds and computers in the work line", () => {
-  const image = { host: "h", repo: "r", name: "base", tag: "1" };
-  const failed = event(1, { type: "image.failed", body: { ...image, reason: "no space", logTail: "" } });
-  assert.equal(workSummary([failed], session => session), "1 image build failed");
-  const computer = event(2, { type: "computer.changed", body: { session: "l", to: "running" } });
-  assert.equal(workSummary([computer], session => names[session]), "lead-web opened a computer");
 });
 
 test("keeps box changes out of the feed except a failed or lost box or a failed close, in the owner's words", () => {
@@ -162,7 +136,18 @@ test("puts one New row before the first later post by someone else, and none wit
   assert.deepEqual(kinds(0), ["1", "2", "3", "4", "5"]);
 });
 
-test("a request is its own row where it happened, and its decision updates that row instead of folding into work", () => {
+test("a nearby resume merges with its pause unless a post separates them", () => {
+  const owner: Principal = { kind: "owner" };
+  const paused = { ...event(1, { type: "room.paused", body: {} }, owner), at: "2026-10-30T12:00:00Z" };
+  const resumed = { ...event(3, { type: "room.resumed", body: {} }, owner), at: "2026-10-30T12:04:00Z" };
+  const post = { ...event(2, { type: "post.created", body: { text: "hello", home: { kind: "feed" } } }, owner), at: "2026-10-30T12:02:00Z" };
+  const joined = feedRows([paused, resumed], { kind: "feed" });
+  assert.equal(joined.length, 1);
+  assert.equal(joined[0].kind === "notice" && joined[0].resumedAt, resumed.at);
+  assert.deepEqual(feedRows([paused, post, resumed], { kind: "feed" }).map(row => row.kind), ["notice", "post", "notice"]);
+});
+
+test("a decided request folds into the activity block", () => {
   const card = { title: "asks for host access", target: { kind: "room" as const, name: "r" } };
   const decision = { by: { kind: "owner" as const }, approved: true, at: "" };
   const rows = feedRows([
@@ -171,8 +156,18 @@ test("a request is its own row where it happened, and its decision updates that 
     event(3, { type: "op.decided", body: { id: "op1", state: "approved", decision } }, { kind: "owner" }),
     event(4, { type: "turn.ended", body: { session: "l", turn: "t1", outcome: "completed", usage } }),
   ], { kind: "feed" });
-  assert.deepEqual(rows.map(row => row.kind), ["work", "request", "work"]);
-  assert.deepEqual(rows[1].kind === "request" && rows[1].request, { id: "op1", kind: "hostexec.grant", by: lead, class: "owner", card, expires: "", state: "approved", decision });
+  assert.deepEqual(rows.map(row => row.kind), ["work"]);
+  const work = rows[0];
+  assert.equal(work.kind === "work" && workSummary(work.events, id => id), "l worked · 1 approval by you");
+  const retained = dayRows([
+    event(1, { type: "turn.started", body: { session: "l", turn: "t1", inputs: [] } }),
+    event(2, { type: "op.requested", body: { id: "op1", kind: "hostexec.grant", by: lead, class: "owner", card, expires: "" } }, lead),
+    event(3, { type: "op.decided", body: { id: "op1", state: "approved", decision } }, { kind: "owner" }),
+    event(4, { type: "turn.ended", body: { session: "l", turn: "t1", outcome: "completed", usage } }),
+  ], { kind: "feed" }, [], 0, new Set(["op1"])).filter(row => row.kind !== "day");
+  assert.deepEqual(retained.map(row => row.kind), ["work", "request"]);
+  assert.equal(retained[1].kind === "request" && retained[1].request.state, "approved");
+  assert.deepEqual(feedRows([event(3, { type: "op.decided", body: { id: "op1", state: "approved", decision } }, { kind: "owner" })], { kind: "dm", session: "l" }), []);
 });
 
 test("says how long the work in a row took, from the first turn's start to the last turn's end", () => {
@@ -182,13 +177,13 @@ test("says how long the work in a row took, from the first turn's start to the l
     at(1, 0, { type: "turn.started", body: { session: "l", turn: "t1", inputs: [] } }), ended(2, 2, "t1"),
     at(3, 3, { type: "shell.job.ended", body: { session: "l", job: "j", exitCode: 0, tail: "" } }), ended(4, 6, "t2"),
   ];
-  assert.equal(workSummary(events, session => names[session]), "lead-web worked for 6 min · 2 turns · 1 job");
-  assert.equal(workSummary([events[0], ended(2, 80, "t1")], session => names[session]), "lead-web worked for 1 h 20 min · 1 turn");
+  assert.equal(workSummary(events, session => names[session]), "lead-web worked for 6 min");
+  assert.equal(workSummary([events[0], ended(2, 80, "t1")], session => names[session]), "lead-web worked for 1 h 20 min");
   // A turn that answers here ends in the answer's row, which still gives the work row above it its end.
   const answered = at(2, 4, { type: "turn.ended", body: { session: "l", turn: "t1", outcome: "completed", usage, final: "Done", replies: [{ reply: { kind: "final" } }] } });
   const rows = dayRows([events[0], answered], { kind: "feed" });
   const work = rows.find(row => row.kind === "work");
-  assert.equal(work?.kind === "work" && workSummary(work.events, session => names[session], work.until), "lead-web worked for 4 min · 1 turn");
+  assert.equal(work?.kind === "work" && workSummary(work.events, session => names[session], work.until), "lead-web worked for 4 min");
 });
 
 test("a long path in an activity label keeps its first folder and its file, and short paths stay whole", () => {
@@ -200,7 +195,7 @@ test("a decoded restart appears as a quiet row in the session DM", () => {
   const notice = decodeEvent(event(2, { type: "session.restarted", body: { session: "l" } }));
   assert.ok(notice);
   assert.equal(dmOf(notice), "l");
-  assert.deepEqual(feedRows([notice], { kind: "dm", session: "l" }, [], 1).map(row => row.kind), ["restarted"]);
+  assert.deepEqual(feedRows([notice], { kind: "dm", session: "l" }, [], 1).map(row => row.kind), ["work"]);
 });
 
 test("an image that failed to load becomes a file card, and the others stay thumbnails", () => {
