@@ -78,6 +78,7 @@ type boxChannel struct {
 	wake          chan struct{}
 	watching      uint64
 	shellWatching uint64
+	archiveRetry  bool
 }
 
 func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-chan contract.BoxMessage, *contract.Error) {
@@ -99,7 +100,6 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 	channel := &boxChannel{stop: stop, wake: make(chan struct{}, 1)}
 	state.channel = channel
 	s.mu.Unlock()
-	sub, cancel := s.store.Subscribe()
 	out := make(chan contract.BoxMessage)
 	go func() {
 		defer func() {
@@ -113,11 +113,14 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			s.mu.Unlock()
 		}()
 		defer close(out)
-		defer func() { cancel() }()
 		replay := true
 		archiveSent := false
 		for {
 			s.mu.Lock()
+			if channel.archiveRetry {
+				archiveSent = false
+				channel.archiveRetry = false
+			}
 			c := state.computer
 			var desired uint64
 			if c != nil && len(c.watchers) != 0 {
@@ -151,13 +154,6 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				select {
 				case <-channel.wake:
 					continue
-				case event, ok := <-sub:
-					if !ok {
-						return
-					}
-					if body, ok := event.Body.(contract.BoxChanged); ok && body.Box == session.Box && body.To == contract.BoxClosing && body.Reason != "" {
-						archiveSent = false
-					}
 				case <-ctx.Done():
 					return
 				}
@@ -174,27 +170,21 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				select {
 				case <-channel.wake:
 					continue
-				case <-sub:
-					continue
 				case <-ctx.Done():
 					return
 				}
 			}
-			s.mu.Lock()
 			turnID, err := id("turn_", s.now())
 			if err != nil {
-				s.mu.Unlock()
 				unlock()
 				return
 			}
 			started, err := s.event(session.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.TurnStarted{})
 			if err != nil {
-				s.mu.Unlock()
 				unlock()
 				return
 			}
-			turn, deliveries, err := s.store.Dispatch(ctx, session.ID, contract.TurnID(turnID), started, replay)
-			s.mu.Unlock()
+			turn, deliveries, err := s.dispatch(ctx, session.ID, contract.TurnID(turnID), started, replay)
 			unlock()
 			if err != nil {
 				return
@@ -266,15 +256,6 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			select {
 			case <-channel.wake:
 				continue
-			case _, ok := <-sub:
-				if !ok {
-					if ctx.Err() != nil {
-						return
-					}
-					cancel()
-					sub, cancel = s.store.Subscribe()
-					replay = true
-				}
 			case <-ctx.Done():
 				return
 			}
@@ -300,5 +281,54 @@ func (s *Service) sendWatch(ctx context.Context, out chan<- contract.BoxMessage,
 		return true
 	case <-ctx.Done():
 		return false
+	}
+}
+
+// queueWakes never waits for the engine mutex or the box loops.
+func (s *Service) queueWakes(ids []contract.SessionID, events []contract.Event) {
+	s.wakeMu.Lock()
+	defer s.wakeMu.Unlock()
+	for _, id := range ids {
+		if _, ok := s.wakePending[id]; !ok {
+			s.wakePending[id] = false
+		}
+	}
+	for _, event := range events {
+		switch body := event.Body.(type) {
+		case contract.TurnEnded:
+			if _, ok := s.wakePending[body.Session]; !ok {
+				s.wakePending[body.Session] = false
+			}
+		case contract.BoxChanged:
+			s.wakePending[body.Session] = s.wakePending[body.Session] || (body.To == contract.BoxClosing && body.Reason != "")
+		}
+	}
+	if len(s.wakePending) != 0 {
+		select {
+		case s.wakeSignal <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (s *Service) wakeSessions(done <-chan struct{}) {
+	for {
+		select {
+		case <-done:
+			return
+		case <-s.wakeSignal:
+		}
+		s.wakeMu.Lock()
+		pending := s.wakePending
+		s.wakePending = make(map[contract.SessionID]bool)
+		s.wakeMu.Unlock()
+		s.mu.Lock()
+		for id, retry := range pending {
+			if state := s.sessions[id]; state != nil && state.channel != nil {
+				state.channel.archiveRetry = state.channel.archiveRetry || retry
+				wakeChannel(state.channel)
+			}
+		}
+		s.mu.Unlock()
 	}
 }
