@@ -57,19 +57,22 @@ func (devService) AccountsQuota(context.Context, contract.Principal, contract.Ac
 	}}, nil
 }
 
-// HostList gives the dev host a busy beat (CPU near its limit) and adds a host that has not answered, so Home
-// shows both looks; engine/runtime fills the real load.
+// HostList gives the dev host a busy beat (CPU and disk near their limits) and adds a host that has stopped
+// answering, so Home shows each look; engine/runtime fills the real load.
 func (d devService) HostList(ctx context.Context, p contract.Principal, req contract.HostListRequest) (contract.HostListResponse, *contract.Error) {
 	list, problem := d.Service.HostList(ctx, p, req)
 	for i, h := range list.Hosts {
 		switch h.Name {
 		case contract.ControlPlane: // the load engine/runtime reports for its own machine
-			list.Hosts[i] = contract.HostSummary{Name: h.Name, Reachable: true, CPUs: 16, MemBytes: 31 * box.GiB, CPUUsed: 3.1, MemUsed: 10 * box.GiB}
+			list.Hosts[i] = contract.HostSummary{Name: h.Name, Reachable: true, CPUs: 16, MemBytes: 31 * box.GiB, CPUUsed: 3.1, MemUsed: 10 * box.GiB, DiskBytes: 931 * box.GiB, DiskUsed: 519 * box.GiB}
 		case host:
 			list.Hosts[i].Reachable, list.Hosts[i].Boxes, list.Hosts[i].CPUUsed, list.Hosts[i].MemUsed = true, 2, 118.4, 96*box.GiB
+			list.Hosts[i].DiskBytes, list.Hosts[i].DiskUsed = 1024*box.GiB, 960*box.GiB
 		}
 	}
-	list.Hosts = append(list.Hosts, contract.HostSummary{Name: "gpu-box", CPUs: 32, MemBytes: 128 * box.GiB})
+	// gpu-box stopped answering 4 min ago, so Home shows its last figures dimmed.
+	list.Hosts = append(list.Hosts, contract.HostSummary{Name: "gpu-box", CPUs: 32, MemBytes: 128 * box.GiB, CPUUsed: 6.5, MemUsed: 41 * box.GiB,
+		DiskBytes: 2048 * box.GiB, DiskUsed: 700 * box.GiB, LastSeen: time.Now().Add(-4 * time.Minute)})
 	return list, problem
 }
 
@@ -273,6 +276,7 @@ func main() {
 	listen := flag.String("web.listen", "127.0.0.1:7790", "web listen address")
 	seed := flag.Bool("seed", false, "create example room")
 	posts := flag.Int("posts", 0, "with -seed, add this many posts across the sessions for long-list checks")
+	agents := flag.Int("agents", 0, "with -seed, add this many sessions across six more rooms for crowded Home checks")
 	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -309,7 +313,7 @@ func main() {
 	defer b.sockets.Close()
 	fatal(st.AddHost(ctx, box.Host{Name: host, State: box.HostReady, CPUs: 128, MemBytes: 256 * box.GiB, DiskBytes: 1024 * box.GiB}))
 	if *seed {
-		seedRoom(ctx, svc, *posts)
+		seedRoom(ctx, svc, *posts, *agents)
 	}
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(runtime, "owner.sock"))
@@ -322,7 +326,38 @@ func main() {
 	fmt.Println(login.URL)
 	<-ctx.Done()
 }
-func seedRoom(ctx context.Context, s *engine.Service, posts int) {
+// seedAgents spreads n sessions with invented names over six more rooms: every third one works until stopped,
+// every seventeenth fails, and the rest are idle, so Home's room activity has a crowd to sum.
+func seedAgents(ctx context.Context, s *engine.Service, n int) {
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	names := []string{"engine-core", "docs-site", "mobile-app", "data-pipeline", "billing", "design-system"}
+	roles := []string{"builder", "reviewer", "tester", "writer", "scout"}
+	rooms := make([]contract.RoomID, len(names))
+	for i, name := range names {
+		room, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: name, RootProfile: "fake"})
+		if e != nil {
+			log.Fatal(e.Message)
+		}
+		rooms[i] = room.Room
+	}
+	for i := range n {
+		brief := ""
+		switch {
+		case i%17 == 5:
+			brief = "[fail]"
+		case i%3 == 0:
+			brief = "[wait]"
+		}
+		// Rooms fill unevenly (the first takes a third), so the busiest-first order shows.
+		room := rooms[[]int{0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 5}[i%21]]
+		name := fmt.Sprintf("%s-%d", roles[i%len(roles)], i+1)
+		if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: name, Profile: "fake", Goal: "Help the room", Brief: brief}); e != nil {
+			log.Fatal(e.Message)
+		}
+	}
+}
+
+func seedRoom(ctx context.Context, s *engine.Service, posts, agents int) {
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	room, e1 := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "web-studio", RootProfile: "fake"})
 	lead, e2 := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "lead-web", Profile: "fake", Goal: "Build the room view"})
@@ -375,6 +410,7 @@ func seedRoom(ctx context.Context, s *engine.Service, posts int) {
 			log.Fatal(e.Message)
 		}
 	}
+	seedAgents(ctx, s, agents)
 	for i := range posts {
 		text := fmt.Sprintf("Long-list post %d of %d.", i+1, posts)
 		if i%5 == 0 { // every fifth post is taller, so rows have different heights
