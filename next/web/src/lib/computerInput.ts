@@ -212,6 +212,11 @@ export class InputQueue {
     this.paused = false;
     if (!this.busy) void this.run();
   }
+  // The owner takes control again: input from here on is a new session's, so a refusal pauses it for Retry, whatever a
+  // finish before it left to retry.
+  begin(): void {
+    this.tries = 0;
+  }
   // Control ends or the view closes: with a refused batch paused, only the releases that wait go on, then `events`. The
   // queue sends them even when a request now in flight is refused, so the computer is not left with a key or button down.
   finish(events: ComputerInput[]): void {

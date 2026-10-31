@@ -147,6 +147,30 @@ test("a release goes on when the request in flight at finish is refused", async 
   assert.deepEqual(sent, [["mouse.down"], ["mouse.up"]]);
 });
 
+test("input after control is taken again pauses on a refusal, not discarded as a teardown", async () => {
+  const sent: string[][] = [];
+  const refuse: (() => void)[] = [];
+  let settle = () => {};
+  const next = () => new Promise<void>(resolve => { settle = resolve; });
+  const queue = new InputQueue(events => {
+    sent.push(events.map(event => event.kind));
+    return sent.length === 1 ? new Promise<void>((_, reject) => refuse.push(() => reject(new Error("refused")))) : Promise.resolve();
+  }, () => settle());
+  const frame = { width: 10, height: 10 };
+  queue.push([{ kind: "mouse.down", x: 1, y: 1, button: "left" }], frame);
+  queue.finish([{ kind: "mouse.up", x: 1, y: 1, button: "left" }]);
+  queue.begin();
+  queue.push([{ kind: "key.down", key: "a", x: 0, y: 0 }], frame);
+  let done = next();
+  refuse[0]();
+  await done;
+  assert.deepEqual(sent, [["mouse.down"]]);
+  done = next();
+  queue.retry();
+  await done;
+  assert.deepEqual(sent, [["mouse.down"], ["mouse.down", "mouse.up", "key.down"]]);
+});
+
 test("two held buttons are let go one at a time, each where it was", () => {
   const hold = new MouseHold();
   hold.down("left", { x: 1, y: 1 });
