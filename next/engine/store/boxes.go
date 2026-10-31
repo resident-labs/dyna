@@ -206,24 +206,30 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 		}
 		b.State = state
 		to := state
+		reason := ""
 		if failure != "" {
-			to = contract.BoxFailed
+			if state != contract.BoxCreating || failures >= 3 {
+				to, reason = contract.BoxFailed, failure
+			}
 		} else if state == contract.BoxCreating {
 			to = contract.BoxStarting
 		}
 		if to != state {
-			_, body, err := box.Transition(b, to, failure, event.Time)
+			_, body, err := box.Transition(b, to, reason, event.Time)
 			if err != nil {
 				return err
 			}
 			body.Cause = event.Body.(contract.BoxChanged).Cause
+			if to == contract.BoxFailed {
+				body.Cause = contract.CauseCreateFailed
+			}
 			event.Body = body
 		}
 		dueMS := int64(0)
-		if to == contract.BoxStarting && !due.IsZero() {
+		if (to == contract.BoxStarting || to == contract.BoxCreating) && !due.IsZero() {
 			dueMS = due.UnixMilli()
 		}
-		result, err := tx.ExecContext(ctx, `UPDATE boxes SET image=?,state=?,reason=?,due_at=?,failures=? WHERE id=? AND state=?`, image, to, failure, dueMS, failures, b.ID, state)
+		result, err := tx.ExecContext(ctx, `UPDATE boxes SET image=?,state=?,reason=?,due_at=?,failures=? WHERE id=? AND state=?`, image, to, reason, dueMS, failures, b.ID, state)
 		if err != nil {
 			return err
 		}
