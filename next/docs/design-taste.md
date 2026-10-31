@@ -40,8 +40,8 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 
 | Token | Size | Use |
 |---|---|---|
-| cap | 11 px | Timestamps, meta lines, chip text |
-| sm | 12.5 px | Muted second lines, "X of Y" |
+| cap | 11 px | Timestamps, meta lines |
+| sm | 12.5 px | Muted second lines, "X of Y", status labels |
 | ui | 13 px | Controls, menu items, panel rows |
 | body | 14 px | Default UI text |
 | lead | 15 px | Post text in the feed |
@@ -76,7 +76,7 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 - Draw hover and selection as washes of the text color (about 4% and 8%), so that they work on every surface. [v1] [T3 `--accent` white 4%]
 - Use one accent (`--focus`) for focus rings, selection and links. Do not use it for data. [v1 `--iris`] [T3 `--ring`]
 - Use the tones success, warning, danger, info and neutral. Each tone has a dot or bar color, a text color, a wash (about 14%) and an edge (about 28%). [v1 `tone.ts`] [T3 badge `bg-warning/8`]
-- Show online as a green dot. Never show it as a grey dot. [root]
+- Show nothing for a healthy, online or idle state: no green dot, no "OK" and no "Idle" mark. [root, 2026-10-31, owner found the pills and green dots ugly] [T3 `Sidebar.logic.ts` `resolveThreadStatusPill` returns null]
 - Show unknown (not probed yet) as a hollow ring. Show switched off as a grey dot. Use red only for unreachable or failed. [v1 MachineRow]
 - Turn a figure and its bar to the warning color only at or above 90%. Below that, use the normal colors. [root]
 - Color a name with its identity hue, and draw an avatar as initials on that hue. [lead, polish pass] [spec 5.13]
@@ -91,12 +91,15 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 ### Status
 
 - Use only the shared `StatusPill` with a typed tone. Never draw a one-off chip. [owner r16]
-- Show a colored chip only for state that needs attention (warning, error, failed, blocked) or that the owner cannot see otherwise. [owner r16]
-- Never add a chip that repeats a control, such as "On" beside a switch. [owner r16]
+- Draw a status as a 6 px dot and a short label in the tone's text color at about 90% opacity, with no fill, no border and a tooltip. [root, 2026-10-31] [T3 `ThreadStatusIndicators.tsx` `ThreadStatusLabel`]
+- Show a status only for state that needs attention (warning, error, failed, blocked) or that the owner cannot see otherwise. [owner r16]
+- Never add a status that repeats a control, such as "On" beside a switch. [owner r16]
 - Show plain facts (next run time, profile name, Idle) as muted text. [owner r16]
 - Use a neutral outline badge for labels such as Default. [owner r16]
 - Give a session one status at most: Working, Pending approval or Failed. [spec 5.13]
-- In a dense list, use a dot with a hover label instead of a full pill. [v1 StatusPill `mark`] [T3 ConnectionStatusDot]
+- In a dense list, show a 9 px dot alone; its label goes in the tooltip and the aria-label. [v1 StatusPill `mark`] [T3 `ThreadStatusLabel` compact, `ConnectionStatusDot.tsx`]
+- Clear a failure's mark once the owner has seen it: opened the session or scrolled its failed row into view. [root, 2026-10-31] [T3 `Sidebar.logic.ts` `hasUnseenFailure`]
+- If Working shows a mark, make it a soft dot that pulses gently, and stop the pulse under reduced motion. [root, 2026-10-31] [T3 `motion-safe:animate-status-pulse`]
 
 ### Section headers and counts
 

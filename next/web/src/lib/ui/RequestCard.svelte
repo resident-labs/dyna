@@ -63,7 +63,7 @@
     </div>
     {#if failure}<p class="meta" role="alert">{failure}</p>{/if}
   {:else}
-    <p class="meta">{#if request.state === "failed"}<StatusPill tone="failed">Run failed</StatusPill>
+    <p class="meta">{#if request.state === "failed"}<StatusPill tone="failed" label="Run failed" />
       {#if request.result?.cause}<span class="cause">{causes[request.result.cause]}</span>{/if}{/if}<span>{decided}</span></p>
   {/if}
 </article>

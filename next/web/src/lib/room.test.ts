@@ -235,7 +235,8 @@ test("session.list gives running turns and failures, and a live DM answer lands 
     const feedWindow = room.window(feed);
     const dmWindow = room.window(dm);
     await Promise.all([feedWindow.jumpToPresent(), dmWindow.jumpToPresent()]);
-    assert.deepEqual(server.requests, ["before 9007199254740991", "before 9007199254740991"]);
+    // The first read finds the seq of x's failure among the newest turn.ended events.
+    assert.deepEqual(server.requests, ["before 4", "before 9007199254740991", "before 9007199254740991"]);
     room.apply(event(4, { type: "turn.ended", body: { session: "s", turn: "t", outcome: "completed", final: "Answer", usage,
       replies: [{ reply: { kind: "final", target: { kind: "owner" }, home: dm } }] } }));
     assert.equal(room.turns.has("s"), false);
@@ -244,6 +245,21 @@ test("session.list gives running turns and failures, and a live DM answer lands 
     assert.deepEqual(feedRows(dmWindow.ordered, dm).map(row => row.kind === "post" && row.text), ["Answer"]);
     assert.equal(feedRows(feedWindow.ordered, feed).some(row => row.kind === "post" && row.text === "Answer"), false);
   } finally { server.restore(); }
+});
+
+test("a failed turn marks its session until the owner reads past it in the feed or the DM, and a later failure marks it again", () => {
+  const failed = (seq: number) => event(seq, { type: "turn.ended", body: { session: "s", turn: String(seq), outcome: "failed", usage } });
+  const read = (conversation: Conversation, seq: number) => event(0, { type: "conversation.read", body: { room: "r", conversation, seq } });
+  const room = new RoomStore("r", () => () => {});
+  room.apply(failed(1));
+  assert.equal(room.unseen("s"), true);
+  room.apply(read(dm, 1));
+  assert.equal(room.unseen("s"), false);
+  room.apply(failed(2));
+  room.apply(read(dm, 1));
+  assert.equal(room.unseen("s"), true);
+  room.apply(read(feed, 2));
+  assert.equal(room.unseen("s"), false);
 });
 
 test("session.list and later events set and clear the running computers", async () => {
