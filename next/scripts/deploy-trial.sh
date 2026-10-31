@@ -50,6 +50,10 @@ rollback() {
   printf 'See next/docs/m1-run.md for schema rollback steps.\n' >&2
 }
 trap rollback ERR
+if ! mkdir "$bin/.deploy-pending" 2>/dev/null; then
+  echo "A previous deploy is unresolved; preserve the rollback pair and remove $bin/.deploy-pending only after recovery." >&2
+  exit 1
+fi
 cp "$bin/dyna" "$bin/dyna-prev"
 cp "$bin/pi.tgz" "$bin/pi-prev.tgz"
 cp "$stage/dyna" "$bin/dyna.new"
@@ -63,5 +67,6 @@ for path in / "/r/$room"; do
   status=$(curl --silent --show-error -o /dev/null -w '%{http_code}' -H "Host: $web_host" "$web_url$path")
   [[ $status == 200 ]] || { echo "Web check failed for $path: HTTP $status" >&2; false; }
 done
+rmdir "$bin/.deploy-pending"
 trap - ERR
 echo "Deployed $sha; service and web checks passed."
