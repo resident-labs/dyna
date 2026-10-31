@@ -284,6 +284,7 @@
     if (seq !== undefined) void tick().then(() => { jumpSeq = seq; });
   }
   // F6 (mod+F6 in a browser) moves focus between areas; Shift goes back.
+  let goKey = 0;
   function cycle(event: KeyboardEvent) {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
       event.preventDefault();
@@ -291,6 +292,21 @@
       return;
     }
     if (palette) return;
+    if ((event.ctrlKey || event.metaKey) && event.key === ",") {
+      event.preventDefault();
+      history.pushState(null, "", "/settings");
+      follow();
+      return;
+    }
+    const editing = event.target instanceof HTMLElement && (event.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName));
+    if (!editing && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (event.key.toLowerCase() === "r" && goKey && event.timeStamp - goKey < 1000 && room) {
+        event.preventDefault();
+        if (inSettings) { history.pushState(null, "", behind); follow(); }
+        section = "requests";
+      }
+      goKey = event.key.toLowerCase() === "g" ? event.timeStamp : 0;
+    }
     if (event.key === "Escape" && drawer) void showDrawer(false);
     else if (event.key === "Escape" && panel && !wide.current) void showPanel(false);
     else if (event.key === "Escape" && section && !inSettings) void closeSection();
