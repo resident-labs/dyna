@@ -1,4 +1,3 @@
-import type { IconName } from "./ui/Icon.svelte";
 import type { PostHit } from "./search.svelte.ts";
 
 // The Ctrl+K palette's rules, apart from the screen: matching, the grouped list, the keys and the time labels.
@@ -56,7 +55,7 @@ export const CAP = 3;
 export type Place = { id: string; name: string; paused: boolean; sessions: number; working: number };
 export type Person = { id: string; room: string; roomName: string; name: string; root: boolean; closed: boolean; working: boolean };
 export type ActionId = "requests" | "pause" | "theme" | "settings";
-export type Action = { id: ActionId; label: string; hint: string; keys: string[]; icon: IconName };
+export type Action = { id: ActionId; label: string; hint: string; keys: string[]; icon: "inbox" | "pause" | "palette" | "gear" };
 
 export type Item =
   | { kind: "room"; room: Place }
