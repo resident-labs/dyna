@@ -6,8 +6,9 @@
 // and @siblings as groups and @root as the room's root, so a session with a group name, or a session
 // named root that is not the room's root, gets no mention.
 const groups = new Set(["parent", "children", "siblings"]);
+export const mentionable = ({ name, parent }: { name: string; parent?: string }) => !groups.has(name) && !(name === "root" && parent);
 export function parseMentions(draft: string, sessions: Iterable<{ name: string; parent?: string }>): { text: string; mentions: string[] } {
-  const names = new Set([...sessions].flatMap(({ name, parent }) => groups.has(name) || (name === "root" && parent) ? [] : [name]));
+  const names = new Set([...sessions].filter(mentionable).map(({ name }) => name));
   const mentions: string[] = [];
   const text = draft.trim();
   let out = "";
@@ -30,4 +31,11 @@ export function parseMentions(draft: string, sessions: Iterable<{ name: string; 
     out += text[i];
   }
   return { text: out, mentions };
+}
+
+// The @word the caret ends, by the same rule: it starts the text or follows a space, a line break or "(".
+// The composer offers the sessions whose names start with its query.
+export function mentionToken(text: string, caret: number): { start: number; query: string } | undefined {
+  const match = /(?:^|[\s(])@([A-Za-z0-9._:-]*)$/.exec(text.slice(0, caret));
+  return match ? { start: caret - match[1].length - 1, query: match[1] } : undefined;
 }
