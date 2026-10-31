@@ -301,16 +301,9 @@ func (m *BoxMessage) UnmarshalJSON(data []byte) error {
 		}
 		m.Body = v
 		return nil
-	case "upgrade":
-		var v Upgrade
-		if err := json.Unmarshal(w.Body, &v); err != nil {
-			return err
-		}
-		m.Body = v
-		return nil
 	default:
 		return fmt.Errorf("unknown box message type %q", w.Type)
 	}
 }
 
-var boxMessageTypes = []BoxMessageType{"archive", "computer.watch.start", "computer.watch.stop", "shell.watch.start", "shell.watch.stop", "turn.start", "turn.steer", "turn.stop", "upgrade"}
+var boxMessageTypes = []BoxMessageType{"archive", "computer.watch.start", "computer.watch.stop", "shell.watch.start", "shell.watch.stop", "turn.start", "turn.steer", "turn.stop"}
