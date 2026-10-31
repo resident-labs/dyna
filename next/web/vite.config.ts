@@ -11,16 +11,27 @@ const jar = process.env.DYNA_TRIAL_COOKIE;
 const cookie = jar && readFileSync(jar, "utf8").split("\n").map(line => line.split("\t")).find(fields => fields[5] === "dyna_device")?.[6];
 const key = process.env.DYNA_TRIAL_KEY;
 const trial = "dyna.localhost:7790";
-// The view serves only the browser that opened its one-time link: that link sets a key cookie, and a request from another
-// origin, such as another local page, is refused even with the cookie.
-const gate: Plugin = { name: "trial-gate", apply: "serve", configureServer: server => {
-  server.middlewares.use((req, res, next) => {
-    if (new URL(req.url ?? "/", "http://view").searchParams.get("key") === key) {
-      res.writeHead(303, { "set-cookie": `trial_key=${key}; HttpOnly; SameSite=Strict; Path=/`, location: "/" }).end();
-    } else if (req.headers.cookie?.split("; ").includes(`trial_key=${key}`) && [undefined, `http://${req.headers.host}`].includes(req.headers.origin)) next();
-    else res.writeHead(403).end("forbidden");
-  });
-} };
+// Only the browser that opened the run's one-time link reads the trial. The page keeps the key in sessionStorage, which no
+// other origin (another localhost port included) can read, and sends it with each /v1 call in a header, or for an
+// EventSource, which cannot send headers, in the query. A call without the key, or from another origin, is refused.
+const sendKey = `const key = new URLSearchParams(location.search).get("key") ?? sessionStorage.getItem("trial-key") ?? "";
+sessionStorage.setItem("trial-key", key);
+const send = window.fetch;
+window.fetch = (input, init = {}) => send(input, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-trial-key": key } });
+window.EventSource = class extends EventSource { constructor(url, init) { const keyed = new URL(url, location.href); keyed.searchParams.set("trial_key", key); super(keyed, init); } };`;
+const gate: Plugin = { name: "trial-gate", apply: "serve", transformIndexHtml: () => [{ tag: "script", attrs: { type: "module" }, children: sendKey, injectTo: "head-prepend" }],
+  configureServer: server => {
+    server.middlewares.use((req, res, next) => {
+      if (!req.url?.startsWith("/v1/")) { next(); return; }
+      const url = new URL(req.url, "http://view");
+      const sent = req.headers["x-trial-key"] ?? url.searchParams.get("trial_key");
+      url.searchParams.delete("trial_key");
+      req.url = url.pathname + url.search;
+      delete req.headers["x-trial-key"];
+      if (sent === key && [undefined, `http://${req.headers.host}`].includes(req.headers.origin)) next();
+      else res.writeHead(403).end("forbidden");
+    });
+  } };
 export default defineConfig({
   plugins: [svelte(), renderBlocking, ...cookie && key ? [gate] : []],
   server: cookie && key ? { cors: false, proxy: { "/v1": { target: "http://127.0.0.1:7790",
