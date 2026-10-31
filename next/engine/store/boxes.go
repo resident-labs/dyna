@@ -79,3 +79,24 @@ func (s *Store) TransitionBox(ctx context.Context, b box.Box, to contract.BoxSta
 	})
 	return next, err
 }
+
+// BoxAncestry returns budget ancestors and the box, parent first.
+func (s *Store) BoxAncestry(ctx context.Context, id contract.BoxID) ([]box.Box, error) {
+	rows, err := s.Read().QueryContext(ctx, `WITH RECURSIVE path(id,session,parent,state,depth) AS (
+  SELECT id,session,parent,state,0 FROM boxes WHERE id=?
+  UNION ALL SELECT b.id,b.session,b.parent,b.state,p.depth+1 FROM boxes b JOIN path p ON b.id=p.parent
+ ) SELECT id,session,state FROM path ORDER BY depth DESC`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []box.Box
+	for rows.Next() {
+		var b box.Box
+		if err := rows.Scan(&b.ID, &b.Session, &b.State); err != nil {
+			return nil, err
+		}
+		result = append(result, b)
+	}
+	return result, rows.Err()
+}

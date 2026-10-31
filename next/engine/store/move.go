@@ -4,19 +4,21 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
 
 // MoveSession checks idleness and commits the new tree and recreate markers together.
-func (s *Store) MoveSession(ctx context.Context, target, parent contract.SessionID, budgetParent contract.BoxID, event contract.Event) (contract.SessionID, error) {
+func (s *Store) MoveSession(ctx context.Context, target, parent contract.SessionID, budgetParent contract.BoxID, event contract.Event, members []box.Box, boxEvents []contract.Event) (contract.SessionID, bool, error) {
 	var busy contract.SessionID
+	var uncreated bool
 	err := s.Write(ctx, func(tx *sql.Tx) error {
 		err := tx.QueryRowContext(ctx, `WITH RECURSIVE sub(id) AS (
 			SELECT ? UNION ALL SELECT s.id FROM sessions s JOIN sub ON s.parent=sub.id WHERE s.closed_at IS NULL
-		) SELECT s.id FROM sessions s JOIN sub ON s.id=sub.id JOIN boxes b ON b.session=s.id WHERE s.state='closing' OR b.state NOT IN ('ready','stopped','pending') OR b.image='' OR b.host IS NULL
+		) SELECT s.id, (b.image='' OR b.host IS NULL) FROM sessions s JOIN sub ON s.id=sub.id JOIN boxes b ON b.session=s.id WHERE s.state='closing' OR b.state NOT IN ('ready','stopped','pending') OR b.image='' OR b.host IS NULL
 		  OR EXISTS (SELECT 1 FROM turns t WHERE t.session=s.id AND t.ended_at IS NULL)
 		  OR COALESCE((SELECT shell_jobs FROM turns t WHERE t.session=s.id ORDER BY t.started_at DESC,t.rowid DESC LIMIT 1),0)!=0
-		  ORDER BY s.id LIMIT 1`, target).Scan(&busy)
+		  ORDER BY s.id LIMIT 1`, target).Scan(&busy, &uncreated)
 		if err != nil && err != sql.ErrNoRows {
 			return err
 		}
@@ -36,10 +38,22 @@ func (s *Store) MoveSession(ctx context.Context, target, parent contract.Session
 		if _, err := tx.ExecContext(ctx, "UPDATE boxes SET parent=? WHERE session=?", nullableBox(budgetParent), target); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `WITH RECURSIVE sub(id) AS (
-			SELECT ? UNION ALL SELECT s.id FROM sessions s JOIN sub ON s.parent=sub.id WHERE s.closed_at IS NULL
-		) UPDATE boxes SET state='stopped',reason='',slice='' WHERE session IN (SELECT id FROM sub)`, target); err != nil {
-			return err
+		for i, b := range members {
+			state := b.State
+			if state == contract.BoxReady {
+				next, body, err := box.Transition(b, contract.BoxStopped, "", event.Time)
+				if err != nil {
+					return err
+				}
+				state = next.State
+				boxEvents[i].Body = body
+				if _, err := s.AppendEvent(tx, boxEvents[i]); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.ExecContext(ctx, "UPDATE boxes SET state=?,reason='',slice='',updated_at=? WHERE id=?", state, event.Time.UnixMilli(), b.ID); err != nil {
+				return err
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `WITH RECURSIVE sub(id) AS (
 			SELECT ? UNION ALL SELECT s.id FROM sessions s JOIN sub ON s.parent=sub.id WHERE s.closed_at IS NULL
@@ -49,7 +63,7 @@ func (s *Store) MoveSession(ctx context.Context, target, parent contract.Session
 		_, err = s.AppendEvent(tx, event)
 		return err
 	})
-	return busy, err
+	return busy, uncreated, err
 }
 
 // SetRecreated records the new slice after the container was created.
