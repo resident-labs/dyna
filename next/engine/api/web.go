@@ -62,7 +62,7 @@ func NewWeb(a *API, address string, app fs.FS, now func() time.Time, devices Dev
 type ConnectSessions interface {
 	ManagedOrigin(context.Context) string
 	ServePublic(http.ResponseWriter, *http.Request, string, []string) bool
-	ServePrivate(http.ResponseWriter, *http.Request, string, store.ConnectSession)
+	ServePrivate(http.ResponseWriter, *http.Request, string, store.ConnectSession, []string)
 	Authenticate(context.Context, *http.Request, string) (store.ConnectSession, []contract.Scope, bool, error)
 	StreamScopes(context.Context, string) ([]contract.Scope, bool, error)
 }
@@ -169,7 +169,7 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 				http.Error(out, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			w.connect.ServePrivate(out, r, origin, x)
+			w.connect.ServePrivate(out, r, origin, x, routes)
 			return
 		}
 	}
