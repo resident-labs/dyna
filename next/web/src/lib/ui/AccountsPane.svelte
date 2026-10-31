@@ -42,20 +42,22 @@
   async function start() {
     if (!selected || busy) return;
     busy = true; state = "idle"; keyFailed = false;
+    const ticket = ++generation;
     if (selected.connectMethod === "key") {
       const key = secret; secret = "";
-      await call("accounts.set_key", { provider: selected.id, label, key }).then(() => { close(); reload(); }, () => { keyFailed = true; });
+      await call("accounts.set_key", { provider: selected.id, label, key }).then(() => { if (ticket === generation) { close(); reload(); } }, () => { if (ticket === generation) keyFailed = true; });
     } else {
       await call("accounts.connect", { provider: selected.id, label }).then(result => {
-        attempt = result; state = "pending"; now = Date.now(); watch(result.attempt, ++generation);
-      }, () => { state = "failed"; });
+        if (ticket !== generation) return;
+        attempt = result; state = "pending"; now = Date.now(); watch(result.attempt, ticket);
+      }, () => { if (ticket === generation) state = "failed"; });
     }
     busy = false;
   }
   async function finish() {
     if (!attempt || busy) return;
-    const url = redirect; redirect = ""; busy = true;
-    await call("accounts.connect_callback", { attempt: attempt.attempt, redirectUrl: url }).catch(() => { state = "failed"; });
+    const url = redirect, ticket = generation; redirect = ""; busy = true;
+    await call("accounts.connect_callback", { attempt: attempt.attempt, redirectUrl: url }).catch(() => { if (ticket === generation) state = "failed"; });
     busy = false;
   }
   const remaining = (at: string, time: number) => {
@@ -93,7 +95,8 @@
     </div>
   {/if}
 {/snippet}
-{@render bar("Accounts", loaded ? accounts.length : undefined, action)}
+{#if phone && adding && !inline}<header class="phone-bar"><button class="btn ghost" type="button" onclick={close} aria-label="Back to Accounts">‹</button><strong>Add an account</strong></header>
+{:else}{@render bar("Accounts", loaded ? accounts.length : undefined, action)}{/if}
 <div class="body">
   {#if loadFailed}<p>Accounts did not load. <button class="btn" type="button" onclick={reload}>Try again</button></p>
   {:else if !loaded}<p class="muted">Loading accounts…</p>
@@ -135,6 +138,7 @@
 </div>
 
 <style>
+  .phone-bar { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--line); }
   .body { flex: 1; min-height: 0; overflow: auto; padding: 20px 24px; display: grid; align-content: start; gap: 18px; }
   p { margin: 0; } .muted { color: var(--muted); font-size: 12.5px; }
   .heading { display: flex; align-items: center; gap: 8px; margin: 0 8px 8px; }
