@@ -85,6 +85,41 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 		return a.service.EventsList(ctx, p, req)
 	})
+	call(mux, contract.MethodShellOutput, c, box, a.service.ShellOutput)
+	mux.HandleFunc("GET /v1/shell/watch", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		if !owner(c) {
+			writeError(w, forbidden())
+			return
+		}
+		id := contract.SessionID(r.URL.Query().Get("session"))
+		if id == "" {
+			writeError(w, invalid())
+			return
+		}
+		ch, problem := a.service.ShellWatch(r.Context(), id)
+		if problem != nil {
+			writeError(w, problem)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		f, ok := w.(http.Flusher)
+		if !ok {
+			return
+		}
+		f.Flush()
+		for job := range ch {
+			data, err := json.Marshal(job)
+			if err != nil {
+				return
+			}
+			if _, err = fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+				return
+			}
+			f.Flush()
+		}
+	})
 	call(mux, contract.MethodComputerChanged, c, box, a.service.ComputerChanged)
 	mux.HandleFunc("POST /v1/computers/frames", func(w http.ResponseWriter, r *http.Request) {
 		if !box(c) {
