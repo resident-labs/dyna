@@ -4,6 +4,7 @@ package connect
 import (
 	"net"
 	"net/http"
+	"time"
 )
 
 // CardListener reserves a separate loopback origin. Visual cards are not
@@ -13,5 +14,5 @@ func CardListener() (net.Listener, *http.Server, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return listener, &http.Server{Handler: http.NotFoundHandler()}, nil
+	return listener, &http.Server{Handler: http.NotFoundHandler(), ReadHeaderTimeout: 10 * time.Second}, nil
 }
