@@ -4,7 +4,7 @@
   import { APIError, call } from "../client.ts";
   import type { Attention } from "../attention.svelte.ts";
   import type { AccountUsage, Card, HostSummary, Principal, SessionListResponse } from "../contract.gen.ts";
-  import { boxReason, fromNow, requestLine, turnReason } from "../feed.ts";
+  import { boxReason, clause, fromNow, requestLine, turnReason } from "../feed.ts";
   import { hostLabel, hostMeters, watchHosts } from "../hosts.ts";
   import { busiestWindow } from "../usage.ts";
   import { distinctInitials, hue, initials as letters } from "../identity.ts";
@@ -174,7 +174,7 @@
         <Avatar kind={value.by.kind} name={who} label={value.by.session ? sessionInitials.get(value.by.session) : undefined} {root} size={28} />
         <!-- The title is the phrase after the asker's name, as on the request card. The body's first line says who gets what for how long, so Approve never hides it; only a line that does not name the host gives way to the host. -->
         <span class="lines"><span class="title"><b class="who {value.by.kind}" class:root style:--hue={hue(who)}>{who}</b> {value.title}</span>
-          <span class="line">{#if line.named}{line.text}<code>{line.named}</code>{line.after}{" · "}{:else if value.target.kind === "host"}on <code>{value.target.name}</code>{" · "}{:else if value.body}{value.body}{" · "}{:else if value.target.kind !== "room"}on {value.target.kind} {value.target.name}{" · "}{/if}{room.name} ·
+          <span class="line">{#if line.named}{line.text}<code>{line.named}</code>{clause(line.after)}{" · "}{:else if value.target.kind === "host"}on <code>{value.target.name}</code>{" · "}{:else if value.body}{clause(value.body)}{" · "}{:else if value.target.kind !== "room"}on {value.target.kind} {value.target.name}{" · "}{/if}{room.name} ·
             {#if soon}<StatusPill tone="warning" label="Expires {fromNow(value.expires, now)}" />{:else}Expires {fromNow(value.expires, now)}{/if}</span>
           {#if failures.has(id)}<span class="line" role="alert">{failures.get(id)}</span>{/if}</span>
         <span class="acts"><button type="button" class="approve" disabled={deciding.has(id)} onclick={event => void decide(id, `${who} ${value.title}`, true, event.currentTarget.closest(".request") ?? event.currentTarget)}>Approve</button>
@@ -185,7 +185,7 @@
     <section class="card"><h2>Activity{#if roomsWorking}<span>{workingCounts.reduce((sum, n) => sum + n)} working</span>{/if}</h2>
       {#snippet row({ room, working, failed, line }: (typeof activity)[number])}<a class="item" href={roomHref(room.id)} onclick={navigate}>
         <Avatar kind="room" name={room.name} label={initials.get(room.name)} size={28} />
-        <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{#if failed}<StatusPill tone="failed" word label={failed} />{line && " · "}{/if}{line}</span></span>
+        <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line" class:failing={failed}>{#if failed}<StatusPill tone="failed" word label={failed} /><span class="join">{line && " · "}</span>{/if}<span class="rest">{line}</span></span></span>
         <!-- Who works, from two sessions on (one is named in the line, unless a failure cuts it): three small avatars at most, then a count. -->
         {#if working.length > 1 || failed && working.length}<span class="stack">{#each working.slice(0, 3) as id (id)}<Avatar kind="session" name={sessions.get(id)?.name ?? ""} label={sessionInitials.get(id)} root={sessions.get(id)?.root ?? false} size={20} />{/each}
           {#if working.length > 3}<span class="more-count">+{working.length - 3}</span>{/if}</span>{/if}</a>{/snippet}
@@ -237,6 +237,12 @@
   .request { flex-wrap: wrap; }
   /* The owner approves from this line, so it wraps rather than cutting off who gets access or for how long. */
   .request .line { white-space: normal; }
+  /* On a phone a failure's reason wraps on its own lines, so the owner reads all of it; the rest of the row stays one line. */
+  @media (max-width: 640px) {
+    .failing :global(.status) { display: block; white-space: normal; }
+    .failing .join { display: none; }
+    .failing .rest { display: block; overflow: hidden; text-overflow: ellipsis; }
+  }
   .who { font-weight: 500; color: oklch(var(--id-name) var(--hue)); }
   .who.owner { color: var(--focus); }
   .who.engine, .who.root { color: var(--text); }
