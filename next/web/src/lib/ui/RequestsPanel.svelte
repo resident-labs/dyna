@@ -1,102 +1,101 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import PageCrumb from "./PageCrumb.svelte";
-  import RequestCard from "./RequestCard.svelte";
+  import { call } from "../client.ts";
+  import { hue } from "../identity.ts";
+  import { closedSession, fromNow } from "../feed.ts";
+  import { requestGroups } from "../request-groups.ts";
   import type { Request, RoomStore } from "../room.svelte.ts";
-  let { store, room, admin, onback, element = $bindable() }: { store: RoomStore; room: string; admin: boolean; onback: (event: MouseEvent) => void; element?: HTMLElement } = $props();
-  // Relative times refresh each half minute while the page is open; this reads nothing from the engine.
-  let now = $state(Date.now());
-  // Waiting requests in the order they expire: first the owner's own, which Home and the room header count, then the ones
-  // a session above the asker may also decide. Then the ones decided today, newest first, folded after 10.
-  const byExpiry = (a: Request, b: Request) => Date.parse(a.expires) - Date.parse(b.expires);
+  import Avatar from "./Avatar.svelte";
+  import RequestCard from "./RequestCard.svelte";
+  import RequestRow from "./RequestRow.svelte";
+  let { store, admin, onclose, element = $bindable() }: { store: RoomStore; admin: boolean; onclose: () => void; element?: HTMLElement } = $props();
+  const groupThreshold = 12, initialGroups = 3;
+  let now = $state(Date.now()), all = $state(false), moreGroups = $state(false), chosen = $state("");
+  let expanded = $state<string[]>([]), denying = $state(""), reason = $state(""), failure = $state("");
+  let touchStart = 0;
+  let rows: Record<string, ReturnType<typeof RequestRow>> = $state({});
   let requests = $derived([...store.requests.values()]);
-  let waiting = $derived(requests.filter(request => request.state === "pending" && request.class === "owner").sort(byExpiry));
-  let shared = $derived(requests.filter(request => request.state === "pending" && request.class !== "owner").sort(byExpiry));
+  let waiting = $derived(requests.filter(item => item.state === "pending" && item.class === "owner")
+    .sort((a, b) => Date.parse(a.expires) - Date.parse(b.expires)));
+  let shared = $derived(requests.filter(item => item.state === "pending" && item.class !== "owner")
+    .sort((a, b) => Date.parse(a.expires) - Date.parse(b.expires)));
   let pending = $derived([...waiting, ...shared]);
-  let today = $derived(new Date(now).toDateString());
-  let decided = $derived(requests.filter(request => request.decision && new Date(request.decision.at).toDateString() === today)
+  let decided = $derived(requests.filter(item => item.decision && new Date(item.decision.at).toDateString() === new Date(now).toDateString())
     .sort((a, b) => (b.decision?.at ?? "").localeCompare(a.decision?.at ?? "")));
-  let all = $state(false);
-  // One waiting request is open, the first until the owner opens another; the keys act on the current one.
-  // Both fall back to the first when theirs is decided.
-  let chosen = $state("");
-  let pointed = $state("");
-  let open = $derived(pending.some(request => request.id === chosen) ? chosen : pending[0]?.id);
-  let current = $derived(pending.some(request => request.id === pointed) ? pointed : open);
-  let cards: Record<string, ReturnType<typeof RequestCard>> = $state({});
-  // J and K move, A approves, D denies and Enter opens, as Linear's inbox; typing in the note field is left alone.
-  // A held key never decides: the current request moves on, so a repeat would decide one the owner has not read.
+  let groups = $derived(requestGroups(waiting));
+  let current = $derived(pending.some(item => item.id === chosen) ? chosen : pending[0]?.id);
   function keys(event: KeyboardEvent) {
     if (event.target instanceof HTMLInputElement || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || !current) return;
-    const at = pending.findIndex(request => request.id === current);
-    const key = event.key.toLowerCase();
-    if (key === "j" || key === "k") pointed = pending[Math.min(pending.length - 1, Math.max(0, at + (key === "j" ? 1 : -1)))].id;
-    else if (key === "a" || key === "d") { if (admin && !event.repeat) void cards[current]?.decide(key === "a"); }
-    else if (key === "enter" && !(event.target instanceof HTMLButtonElement)) chosen = current;
+    const at = pending.findIndex(item => item.id === current), key = event.key.toLowerCase();
+    if (key === "j" || key === "k") {
+      const next = pending[Math.max(0, Math.min(pending.length - 1, at + (key === "j" ? 1 : -1)))];
+      chosen = next.id;
+      const group = next.by.session ?? "";
+      if (!expanded.includes(group)) expanded = [...expanded, group];
+      moreGroups = true;
+    }
+    else if (admin && (key === "a" || key === "d") && !event.repeat) void rows[current]?.decide(key === "a");
     else return;
     event.preventDefault();
   }
-  // A decided row loses its buttons, and focus with them; it returns to the page, so the keys keep working.
-  $effect(() => {
-    void pending.length;
-    if (document.activeElement === document.body) element?.focus();
-  });
-  // The keys can move past the fold, and the current row stays in view.
-  $effect(() => {
-    void current;
-    element?.querySelector(".current")?.scrollIntoView({ block: "nearest" });
-  });
-  onMount(() => {
-    // Focus moves to the page, so the keys work at once.
-    element?.focus();
-    const timer = setInterval(() => { now = Date.now(); }, 30_000);
-    return () => clearInterval(timer);
-  });
+  async function denyGroup(items: Request[]) {
+    failure = "";
+    const results = await Promise.allSettled(items.map(item => call("op.decide", { id: item.id, approve: false, reason: reason.trim() || undefined })));
+    if (results.some(result => result.status === "rejected")) failure = "Some decisions were not saved. Try again.";
+    else { denying = ""; reason = ""; }
+  }
+  onMount(() => { element?.focus(); const timer = setInterval(() => { now = Date.now(); }, 30_000); return () => clearInterval(timer); });
 </script>
-
-{#snippet card(request: Request)}
-  <RequestCard {admin} bind:this={cards[request.id]} {request} {store} {now} folded={request.id !== open} current={request.id === current}
-    onopen={() => { chosen = request.id; pointed = request.id; }} />
+{#snippet row(request: Request, grouped = false)}
+  <RequestRow bind:this={() => rows[request.id], value => { if (value) rows[request.id] = value; else delete rows[request.id]; }} row={{ kind: "approval", request }} {admin} {store} {now} {grouped} current={request.id === current} />
 {/snippet}
-
-<!-- The page takes focus and its keys are shortcuts for the buttons on each row, which stay the accessible way to decide. -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <section class="panel" aria-label="Requests" tabindex="-1" bind:this={element} onkeydown={keys}>
-  <div class="top"><PageCrumb {room} page="Requests" {onback} />{#if pending.length}<span class="count">{pending.length}</span>{/if}
-    {#if pending.length}<span class="hints" aria-hidden="true"><span><kbd>A</kbd> approve</span><span><kbd>D</kbd> deny</span><span><kbd>J</kbd><kbd>K</kbd> move</span></span>{/if}</div>
-  <div class="list"><div class="column">
-    <h2>Waiting for you{#if waiting.length}<span class="count">{waiting.length}</span>{/if}</h2>
-    {#each waiting as request (request.id)}{@render card(request)}
-    {:else}{#if store.ready}<p class="none">Nothing waits for you.</p>{/if}{/each}
-    {#if shared.length}
-      <h2>Waiting for a session<span class="count">{shared.length}</span></h2>
-      {#each shared as request (request.id)}{@render card(request)}{/each}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="handle" ontouchstart={event => { touchStart = event.touches[0].clientY; }} ontouchend={event => { if (event.changedTouches[0].clientY - touchStart > 60) onclose(); }}><span></span></div>
+  <header><div><strong>Requests</strong>{#if waiting.length}<span>{waiting.length} waiting</span>{/if}</div><button type="button" aria-label="Close requests" onclick={onclose}>×</button></header>
+  <div class="list">
+    {#if pending.length && !admin}<p class="none">Needs a device with full access.</p>{/if}
+    {#if waiting.length > groupThreshold}
+      {#each moreGroups ? groups : groups.slice(0, initialGroups) as [id, items] (id)}
+        {@const name = id ? store.names.get(id) ?? closedSession : "Dyna"}
+        <div class="group"><Avatar kind="session" {name} size={24} /><strong style:--hue={hue(name)}>{name}</strong><span>{items.length} waiting · earliest expires {fromNow(items[0].expires, now)}</span>
+          {#if admin}<button type="button" onclick={() => { denying = id || "engine"; reason = ""; }}>Deny all {items.length}…</button>{/if}</div>
+        {#if denying === (id || "engine")}<div class="deny"><input aria-label="Note for all denials" placeholder="Add a note" bind:value={reason} /><button type="button" onclick={() => void denyGroup(items)}>Confirm denial</button><button type="button" onclick={() => { denying = ""; }}>Cancel</button></div>{/if}
+        {#each expanded.includes(id) ? items : items.slice(0, 1) as request (request.id)}{@render row(request, true)}{/each}
+        {#if items.length > 1 && !expanded.includes(id)}<button class="more" type="button" onclick={() => { expanded = [...expanded, id]; }}>Show {items.length - 1} more from this session</button>{/if}
+      {/each}
+      {#if groups.length > initialGroups && !moreGroups}<button class="more" type="button" onclick={() => { moreGroups = true; }}>{groups.length - initialGroups} more sessions · {groups.slice(initialGroups).reduce((n, group) => n + group[1].length, 0)} requests</button>{/if}
+    {:else}
+      {#each waiting as request (request.id)}{@render row(request)}{:else}{#if store.ready}<p class="none">Nothing waits for you.</p>{/if}{/each}
+    {/if}
+    {#if shared.length}<h2>Waiting for a session <span>{shared.length}</span></h2>
+      {#each shared as request (request.id)}{@render row(request)}{/each}
     {/if}
     {#if decided.length}
-      <h2>Decided today<span class="count">{decided.length}</span></h2>
-      {#each all ? decided : decided.slice(0, 10) as request (request.id)}<RequestCard {admin} {request} {store} {now} />{/each}
-      {#if decided.length > 10 && !all}<button type="button" class="more" onclick={() => { all = true; }}>Show {decided.length - 10} more</button>{/if}
+      <h2>Decided today <span>{decided.length}</span></h2>
+      {#each all ? decided : decided.slice(0, 5) as request (request.id)}<RequestCard {admin} {request} {store} {now} />{/each}
+      {#if decided.length > 5 && !all}<button class="more" type="button" onclick={() => { all = true; }}>Show all {decided.length}</button>{/if}
     {/if}
-  </div></div>
+    {#if failure}<p class="none" role="alert">{failure}</p>{/if}
+  </div>
+  {#if pending.length}<footer><kbd>J</kbd><kbd>K</kbd> move {#if admin}<kbd>A</kbd> approve <kbd>D</kbd> deny{/if} <kbd>Esc</kbd> close</footer>{/if}
 </section>
-
 <style>
-  .panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  /* The page holds focus for its keys; the current row's background shows where they act, so the page needs no ring. */
-  .panel:focus-visible { outline: none; }
-  .top { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
-  /* Key hints only where a keyboard is likely: wide screens that can hover. */
-  .hints { margin-left: auto; display: none; align-items: center; gap: 12px; color: var(--muted); font-size: 12.5px; }
-  .hints span { display: flex; align-items: center; gap: 4px; }
-  @media (hover: hover) and (min-width: 641px) { .hints { display: flex; } }
-  kbd { min-width: 18px; padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; font: 11px/16px var(--mono); text-align: center; }
-  .list { flex: 1; min-height: 0; overflow-y: auto; }
-  /* One reading column, as the room's posts; the open card spans it. */
-  .column { max-width: 760px; margin: 0 auto; padding: 8px 8px 32px; }
-  .column > :global(.card) { max-width: none; margin: 4px 0 8px; }
-  h2 { display: flex; align-items: baseline; gap: 8px; margin: 0; padding: 20px 12px 6px; font-size: 18px; font-weight: 600; }
-  .count { color: var(--muted); font-size: 13px; font-weight: 400; font-variant-numeric: tabular-nums; }
-  .none { margin: 0; padding: 8px 12px; color: var(--muted); font-size: 14px; }
-  .more { margin: 4px 12px; padding: 4px 8px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
-  .more:hover { background: var(--hover); color: var(--text); }
+  .panel { position: absolute; z-index: 20; top: 48px; right: 16px; width: min(520px, calc(100% - 32px)); max-height: calc(100% - 64px); display: flex; flex-direction: column; background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 40px var(--shadow-md); }
+  header { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  header strong { font-size: 16px; } header span, h2 span { margin-left: 8px; color: var(--muted); font-size: 13px; font-weight: 400; }
+  button { border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
+  header button { font-size: 24px; line-height: 24px; }
+  button:hover { color: var(--text); } :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .list { min-height: 0; overflow-y: auto; } .none { margin: 0; padding: 20px 16px; color: var(--muted); font-size: 14px; }
+  h2 { margin: 0; padding: 16px 16px 4px; font-size: 16px; }
+  footer { flex: none; padding: 10px 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
+  kbd { margin-left: 8px; font: 11px var(--mono); } kbd:first-child { margin-left: 0; }
+  .group { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 14px 16px 4px; font-size: 13px; }
+  .group strong { color: oklch(var(--id-name) var(--hue)); overflow-wrap: anywhere; } .group span { color: var(--muted); white-space: nowrap; }
+  .group button { margin-left: auto; white-space: nowrap; } .more { padding: 10px 16px; font-size: 13px; }
+  .deny { display: flex; gap: 8px; padding: 8px 16px; } .deny input { min-width: 0; flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--line); padding: 6px; }
+  .handle { display: none; }
+  @media(max-width: 640px) { .handle { display: grid; place-items: center; height: 24px; touch-action: none; } .handle span { width: 36px; height: 4px; border-radius: 4px; background: var(--muted); } .panel { position: fixed; top: auto; right: 0; bottom: 0; width: 100%; max-height: 85dvh; border-radius: 14px 14px 0 0; } footer { display: none; } }
 </style>
