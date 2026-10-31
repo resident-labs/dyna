@@ -366,6 +366,8 @@ type BoxRepo struct {
 }
 
 type BoxHelloResponse struct {
+	GitName       string           `json:"gitName,omitempty"`
+	GitEmail      string           `json:"gitEmail,omitempty"`
 	CompactTokens int              `json:"compactTokens,omitempty"`
 	Instructions  string           `json:"instructions"`
 	Session       SessionID        `json:"session"`

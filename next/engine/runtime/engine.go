@@ -96,6 +96,7 @@ type Config struct {
 	WebListen                                  string
 	WebRoutes                                  []string
 	BackupDest, BackupRecipient                string
+	GitName, GitEmail                          string
 }
 
 func Run(ctx context.Context, cfg Config) error {
@@ -162,6 +163,7 @@ func Run(ctx context.Context, cfg Config) error {
 	go boxes.controlPlane(cfg.Data)
 	service := engine.New(st, boxes, profiles, time.Now)
 	service.Reconciler().SetHostMemory(boxes.hostMemory)
+	service.SetGitIdentity(cfg.GitName, cfg.GitEmail)
 	service.SetHostexecRunner(boxes)
 	boxes.Pressure = service
 	hosts, err := st.Hosts(ctx)
