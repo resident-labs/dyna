@@ -163,15 +163,8 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 	s.activityCount++
 	state := s.sessionLocked(caller.Session)
 	state.activity, state.activityOrder = body, s.activityCount
-	for ch, room := range s.live {
-		if room == session.Room || room == "" {
-			select {
-			case ch <- event:
-			default:
-			}
-		}
-	}
 	s.mu.Unlock()
+	s.live.Publish(session.Room, event, false)
 	return contract.TurnActivityResponse{}, nil
 }
 
@@ -203,15 +196,6 @@ func (s *Service) ConversationRead(ctx context.Context, caller contract.Principa
 	if err != nil {
 		return contract.ConversationReadResponse{}, failure(err)
 	}
-	s.mu.Lock()
-	for ch, room := range s.live {
-		if room == req.Room || room == "" {
-			select {
-			case ch <- event:
-			default:
-			}
-		}
-	}
-	s.mu.Unlock()
+	s.live.Publish(req.Room, event, false)
 	return contract.ConversationReadResponse{}, nil
 }
