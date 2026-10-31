@@ -24,3 +24,21 @@ func TestConcurrentPublishClosesFullOwnerStream(t *testing.T) {
 		t.Fatal("full owner stream did not close")
 	}
 }
+
+// An older activity that arrives late cannot replace the newest label.
+func TestPublishActivityKeepsNewest(t *testing.T) {
+	l := New(func(map[contract.SessionID]bool) {})
+	_, events := l.Subscribe("r", 2)
+	newer := contract.Event{Body: contract.TurnActivity{Session: "s", Label: "new"}}
+	older := contract.Event{Body: contract.TurnActivity{Session: "s", Label: "old"}}
+	l.PublishActivity("r", "s", 2, newer)
+	l.PublishActivity("r", "s", 1, older)
+	if got := (<-events).Body.(contract.TurnActivity).Label; got != "new" {
+		t.Fatalf("label: %s", got)
+	}
+	select {
+	case event := <-events:
+		t.Fatalf("stale activity published: %+v", event)
+	default:
+	}
+}
