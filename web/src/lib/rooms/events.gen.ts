@@ -19,7 +19,7 @@ export type PRType = "opened" | "ready" | "approved" | "changes" | "ci-failed" |
 export type PROutcome = "ok" | "failed" | "info"
 
 // MergeStep is a named string type of an event payload.
-export type MergeStep = "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested"
+export type MergeStep = "queued" | "trial" | "checks" | "landed" | "cancelled" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested"
 
 // IssueChange is a named string type of an event payload.
 export type IssueChange = "filed" | "updated" | "closed" | "noted"
@@ -295,7 +295,7 @@ export interface RuleEvent {
   sessions?: string[]
 }
 
-// MergeEvent is the payload of the merge/queued and merge/trial and merge/checks and merge/landed and merge/failed and merge/returned and merge/conflict and merge/rolled-back and merge/fix-requested events.
+// MergeEvent is the payload of the merge/queued and merge/trial and merge/checks and merge/landed and merge/cancelled and merge/failed and merge/returned and merge/conflict and merge/rolled-back and merge/fix-requested events.
 export interface MergeEvent {
   type: MergeStep
   trialId: string
@@ -669,7 +669,7 @@ export interface TurnEvent {
 export type EventPayload = GitHubWriteRefusedEvent | MCPCallEvent | WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | GitHubQuotaEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineCacheCleanFailedEvent | MachineScratchEvent | MachineLimitsEvent | RoomCapEvent | WorktreePortsEvent | CallEvent | VoiceSessionEvent | ReviewEvent | IssueWatchEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ApprovalRequestedEvent | ApprovalDecidedEvent | ApprovalResultEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | ShellSilenceEvent | ShellInactivityEvent | JobEvent | RunEvent | TurnEvent
 
 export type EventFamily = "github-write" | "mcp" | "worktree" | "hook" | "issue" | "goal" | "checkin" | "github-quota" | "ci-health" | "rule" | "merge" | "machine" | "call" | "voice-session" | "review" | "issue-watch" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "approval" | "terminal" | "shell" | "job" | "run" | "turn"
-export type EventType = "refused" | "result" | "kept" | "started" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "low" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "cache-clean-failed" | "scratch-freed" | "limits-off" | "room-cap" | "worktree-ports" | "joined" | "declined" | "withdrawn" | "ended" | "comment" | "reopened" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "shell" | "waiting" | "helper-outcome" | "root-flush" | "requested" | "decided" | "request" | "request.done" | "output-silence" | "observed-output-inactivity" | "completed" | "stopped"
+export type EventType = "refused" | "result" | "kept" | "started" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "low" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "cancelled" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "cache-clean-failed" | "scratch-freed" | "limits-off" | "room-cap" | "worktree-ports" | "joined" | "declined" | "withdrawn" | "ended" | "comment" | "reopened" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "shell" | "waiting" | "helper-outcome" | "root-flush" | "requested" | "decided" | "request" | "request.done" | "output-silence" | "observed-output-inactivity" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -941,6 +941,17 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     threadEnd: true,
     audience: "room",
     text: "Merge trial {trialId} landed {commit} on {base}.",
+  },
+  {
+    family: "merge",
+    type: "cancelled",
+    renderer: "MergeCard",
+    quiet: true,
+    wake: "never",
+    once: false,
+    threadEnd: true,
+    audience: "room",
+    text: "Merge trial {trialId} ended: {reason}.",
   },
   {
     family: "merge",
@@ -1720,7 +1731,7 @@ const M_C_P_OUTCOME: ReadonlySet<unknown> = new Set(["ok", "server-error", "not-
 const JOB_STATE: ReadonlySet<unknown> = new Set(["queued", "running", "passed", "failed", "cancelled", "lost", "timed_out"])
 const P_R_TYPE: ReadonlySet<unknown> = new Set(["opened", "ready", "approved", "changes", "ci-failed", "ci-paused", "ci-passed", "returned", "merged", "closed", "comment", "held-comment", "review-assigned", "update"])
 const P_R_OUTCOME: ReadonlySet<unknown> = new Set(["ok", "failed", "info"])
-const MERGE_STEP: ReadonlySet<unknown> = new Set(["queued", "trial", "checks", "landed", "failed", "returned", "conflict", "rolled-back", "decision", "fix-requested"])
+const MERGE_STEP: ReadonlySet<unknown> = new Set(["queued", "trial", "checks", "landed", "cancelled", "failed", "returned", "conflict", "rolled-back", "decision", "fix-requested"])
 const ISSUE_CHANGE: ReadonlySet<unknown> = new Set(["filed", "updated", "closed", "noted"])
 const ISSUE_STATE: ReadonlySet<unknown> = new Set(["open", "goal", "exported", "closed"])
 const ISSUE_WATCH_TYPE: ReadonlySet<unknown> = new Set(["comment", "closed", "reopened"])
@@ -2348,6 +2359,7 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "merge" && type === "trial") return isMergeEvent(v)
   if (family === "merge" && type === "checks") return isMergeEvent(v)
   if (family === "merge" && type === "landed") return isMergeEvent(v)
+  if (family === "merge" && type === "cancelled") return isMergeEvent(v)
   if (family === "merge" && type === "failed") return isMergeEvent(v)
   if (family === "merge" && type === "returned") return isMergeEvent(v)
   if (family === "merge" && type === "conflict") return isMergeEvent(v)
