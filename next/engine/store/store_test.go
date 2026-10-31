@@ -72,6 +72,30 @@ func TestFloor(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+func TestStoreBelowFloorIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(dir, "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("UPDATE meta SET value='41' WHERE key='schema_version'"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Open(dir)
+	var e *Error
+	if !errors.As(err, &e) || e.Code != StoreTooOld {
+		t.Fatalf("got %v", err)
+	}
+}
+
 func TestWriteSurvivesClose(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(dir)
