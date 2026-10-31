@@ -1,12 +1,15 @@
 <script lang="ts">
+  import { SvelteMap } from "svelte/reactivity";
   import StatusPill from "./StatusPill.svelte";
   import { count } from "../feed.ts";
+  import { watchShell, type ShellJob } from "../shell.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { BoxState } from "../contract.gen.ts";
   // What a DM's session is, as design A's About tab: its goal, then one label and value per fact the engine reports.
-  // A row without a value does not show. Jobs opens the session's job list.
-  let { store, room, session, line, navigate, onjobs }: {
-    store: RoomStore; room: string; session: string; line: string; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onjobs: () => void;
+  // A row without a value does not show. Jobs opens the dock's list on this session. It counts the jobs the engine lists, as
+  // that list does, because session.list's count can lag; until they load, it reads Jobs.
+  let { store, room, session, navigate, onjobs }: {
+    store: RoomStore; room: string; session: string; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onjobs: (event: MouseEvent) => void;
   } = $props();
   const boxes: Record<BoxState, string> = {
     pending: "Starting", creating: "Starting", starting: "Starting", ready: "Ready", stopped: "Stopped",
@@ -15,17 +18,25 @@
   let open = $derived(store.sessions.get(session));
   let parent = $derived(open?.parent && store.names.get(open.parent));
   let box = $derived(store.boxes.get(session));
-  let jobs = $derived(box === "ready" ? store.shellJobs.get(session) ?? 0 : 0);
+  let hasJobs = $derived(box === "ready" && (store.shellJobs.get(session) ?? 0) > 0);
+  const listed = new SvelteMap<string, ShellJob>();
+  let visible = $state(document.visibilityState === "visible");
+  $effect(() => {
+    if (!hasJobs || !visible) return;
+    const stop = watchShell(session, listed, closed => { if (closed) listed.clear(); });
+    return () => { stop(); listed.clear(); };
+  });
+  let running = $derived([...listed.values()].filter(job => job.running).length);
 </script>
 
+<svelte:document onvisibilitychange={() => { visible = document.visibilityState === "visible"; }} />
 <div class="about">
   {#if open?.goal}<h3>Goal</h3><p class="goal">{open.goal}</p>{/if}
   <dl>
-    <dt>Status</dt><dd>{line}</dd>
     {#if parent && open?.parent}<dt>Parent</dt><dd><a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(open.parent)}`} onclick={navigate}>{parent}</a></dd>{/if}
     {#if open?.profile}<dt>Profile</dt><dd>{open.profile}</dd>{/if}
     {#if box}<dt>Box</dt><dd>{#if box === "failed" || box === "lost"}<StatusPill tone="failed" label={boxes[box]} />{:else}{boxes[box]}{/if}</dd>{/if}
-    {#if jobs}<dt>Jobs</dt><dd><button type="button" onclick={onjobs}>{count(jobs, "job")} running</button></dd>{/if}
+    {#if hasJobs}<dt>Jobs</dt><dd><button type="button" onclick={onjobs}>{running ? `${count(running, "job")} running` : "Jobs"}</button></dd>{/if}
   </dl>
 </div>
 
