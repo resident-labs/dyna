@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -9,6 +10,13 @@ import (
 )
 
 func (s *Service) ConfigureOperations(ctx context.Context, kinds map[contract.OpKind]approve.Entry, expiry time.Duration) error {
+	for kind, entry := range kinds {
+		switch entry.Scope {
+		case contract.ScopeRead, contract.ScopeOperate, contract.ScopeFiles, contract.ScopeTerminal, contract.ScopeComputers, contract.ScopeAdmin:
+		default:
+			return fmt.Errorf("operation %s has invalid scope", kind)
+		}
+	}
 	s.approvals = approve.New(s.store, ctx, kinds, s.now, expiry, func(prefix string) (string, error) { return id(prefix, s.now()) })
 	return s.approvals.Recover(ctx)
 }
@@ -47,4 +55,11 @@ func (s *Service) OpList(ctx context.Context, caller contract.Principal, req con
 		return contract.OpListResponse{}, failure(err)
 	}
 	return contract.OpListResponse{Operations: ops}, nil
+}
+
+func (s *Service) OperationScope(kind contract.OpKind) contract.Scope {
+	if s.approvals == nil {
+		return ""
+	}
+	return s.approvals.Kinds[kind].Scope
 }

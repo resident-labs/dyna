@@ -19,6 +19,7 @@ var ErrInvalid = errors.New("invalid operation")
 var ErrConflict = errors.New("operation is no longer pending")
 
 type Entry struct {
+	Scope   contract.Scope
 	Class   func(contract.OpArgs, contract.Principal) contract.Class
 	Card    func(context.Context, contract.OpArgs, contract.Principal) contract.Card
 	Check   func(context.Context, contract.OpArgs, contract.Principal) error

@@ -81,6 +81,7 @@ type Config struct {
 	Data, Runtime, HostData, Profiles, Version string
 	ApprovalsExpiry                            time.Duration
 	WebListen                                  string
+	WebRoutes                                  []string
 	BackupDest, BackupRecipient                string
 }
 
@@ -197,8 +198,11 @@ func Run(ctx context.Context, cfg Config) error {
 		if err != nil {
 			return err
 		}
-		webServer, err := api.NewWeb(apiServer, cfg.WebListen, app, time.Now)
+		webServer, err := api.NewWeb(apiServer, cfg.WebListen, app, time.Now, st)
 		if err != nil {
+			return err
+		}
+		if err := webServer.SetRoutes(cfg.WebRoutes); err != nil {
 			return err
 		}
 		listener, err := webServer.Listen()
