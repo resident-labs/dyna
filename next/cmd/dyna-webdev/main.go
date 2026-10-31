@@ -73,10 +73,7 @@ func (b *boxes) Create(ctx context.Context, spec engine.BoxSpec) (string, error)
 	if err = b.sockets.AddBox(spec.Box, spec.Session, session.Room); err != nil {
 		return "", err
 	}
-	if err := b.Start(ctx, spec.Box); err != nil {
-		return "", err
-	}
-	return "fake", nil
+	return "fake", b.Start(ctx, spec.Box)
 }
 func (b *boxes) Start(_ context.Context, id contract.BoxID) error {
 	b.mu.Lock()
@@ -102,9 +99,7 @@ func (b *boxes) Recreate(ctx context.Context, spec engine.BoxSpec, _, _ string) 
 	return b.Start(ctx, spec.Box)
 }
 func (b *boxes) Remove(ctx context.Context, id contract.BoxID) error {
-	if err := b.Stop(ctx, id); err != nil {
-		return err
-	}
+	_ = b.Stop(ctx, id) // Stop never fails.
 	return b.sockets.RemoveBox(id)
 }
 func (b *boxes) run(ctx context.Context, id contract.BoxID) {
@@ -200,12 +195,11 @@ func seedRoom(ctx context.Context, s *engine.Service, posts int) {
 		fatal(json.Unmarshal(rec.Body.Bytes(), &attachments[i]))
 	}
 	post(owner, contract.PostRequest{Text: "Review these examples.", Attachments: attachments})
-	authors := []contract.SessionID{lead.Session, child.Session} // session posts wake no turns
 	for i := range posts {
 		text := fmt.Sprintf("Long-list post %d of %d.", i+1, posts)
 		if i%5 == 0 { // every fifth post is taller, so rows have different heights
 			text += "\n\n- The feed measures each row.\n- The window keeps 1,000 events."
 		}
-		post(contract.Principal{Kind: contract.PrincipalSession, Session: authors[i%2]}, contract.PostRequest{Text: text})
+		post(contract.Principal{Kind: contract.PrincipalSession, Session: []contract.SessionID{lead.Session, child.Session}[i%2]}, contract.PostRequest{Text: text}) // session posts wake no turns
 	}
 }
