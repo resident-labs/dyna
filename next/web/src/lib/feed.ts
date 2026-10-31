@@ -97,7 +97,7 @@ export function commandLine(argv: string[]): string {
   return argv.map(arg => /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`).join(" ");
 }
 
-const count = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+export const count = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
 
@@ -128,7 +128,7 @@ export function workSummary(events: Event[], name: Name): string {
   const [ran] = turns;
   const parts = [
     started.length && `${who(started)} started`,
-    turns.size > 1 ? `${turns.size} sessions ran turns` : ran && `${name(ran[0])} ran ${count(ran[1].size, "turn")}`,
+    turns.size > 1 ? `${who([...turns.keys()].map(name))} ran turns` : ran && `${name(ran[0])} ran ${count(ran[1].size, "turn")}`,
     jobs && count(jobs, "job"), requests.size && count(requests.size, "request"), images && `${count(images, "image")} built`,
     failedImages && `${count(failedImages, "image build")} failed`, prs && count(prs, "pull request"),
     memory && count(memory, "memory warning"), grants && `${count(grants, "host-exec grant")} expired`,
