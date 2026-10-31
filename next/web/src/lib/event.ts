@@ -1,4 +1,4 @@
-import type { BoxChanged, Event, ShellJobOutput } from "./contract.gen.ts";
+import type { BoxState, Event, ShellJobOutput } from "./contract.gen.ts";
 
 type Check = (value: unknown) => boolean;
 const string: Check = value => typeof value === "string";
@@ -85,11 +85,11 @@ export function decodeShellOutput(value: unknown): ShellJobOutput | undefined {
   return shellOutput(value) ? value as ShellJobOutput : skip(value);
 }
 
-// Why a pending box waits: the reasons admission names (next/box/admission.go). box.changed's reason is free text for
-// other states and for a create that will retry, so any other text gives no reason.
+// Why a pending box waits: the reasons admission names (next/box/admission.go). A box reason, in box.changed or
+// session.list, is free text for other states and for a create that will retry, so any other text gives no reason.
 const pendingReasons = ["cpu", "memory", "disk", "room-limit", "no-ready-host", "room-host", "invalid-size"] as const;
 export type PendingReason = typeof pendingReasons[number];
-export const pendingReason = ({ to, reason }: BoxChanged): PendingReason | undefined =>
+export const pendingReason = (to: BoxState, reason?: string): PendingReason | undefined =>
   to === "pending" ? pendingReasons.find(item => item === reason) : undefined;
 
 function skip(value: unknown): undefined {
