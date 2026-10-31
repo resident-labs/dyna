@@ -80,20 +80,24 @@ type event struct {
 }
 
 type Harness struct {
-	Activity  func(contract.TurnID, string)
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	session   string
-	writeMu   sync.Mutex
-	mu        sync.Mutex
-	pending   map[string]chan event
-	events    chan event
-	done      chan struct{}
-	stop      chan struct{}
-	readErr   error
-	sequence  atomic.Uint64
-	closeOnce sync.Once
-	closeErr  error
+	Activity       func(contract.TurnID, string)
+	cmd            *exec.Cmd
+	stdin          io.WriteCloser
+	session        string
+	writeMu        sync.Mutex
+	mu             sync.Mutex
+	pending        map[string]chan event
+	events         chan event
+	done           chan struct{}
+	stop           chan struct{}
+	readErr        error
+	sequence       atomic.Uint64
+	closeOnce      sync.Once
+	closeErr       error
+	deliveryMu     sync.Mutex
+	deliveryPath   string
+	deliveryOffset int64
+	delivered      map[string]struct{}
 }
 
 var _ harness.Harness = (*Harness)(nil)
@@ -308,6 +312,9 @@ func completeLines(data []byte, atEOF bool) (int, []byte, error) {
 }
 
 func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, error) {
+	h.deliveryMu.Lock()
+	defer h.deliveryMu.Unlock()
+
 	file, err := os.Open(h.session)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
@@ -316,10 +323,29 @@ func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, e
 		return false, err
 	}
 	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 4096), 16<<20)
-	scanner.Split(completeLines)
-	for scanner.Scan() {
+	info, err := file.Stat()
+	if err != nil {
+		return false, err
+	}
+	if h.deliveryPath != h.session || info.Size() < h.deliveryOffset {
+		h.deliveryPath, h.deliveryOffset = h.session, 0
+		h.delivered = nil
+	}
+	if _, err := file.Seek(h.deliveryOffset, io.SeekStart); err != nil {
+		return false, err
+	}
+	if h.delivered == nil {
+		h.delivered = make(map[string]struct{})
+	}
+	reader := bufio.NewReader(file)
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		if readErr == io.EOF {
+			break // Re-read a partial line on the next call.
+		}
+		if readErr != nil {
+			return false, readErr
+		}
 		var entry struct {
 			Type    string `json:"type"`
 			Message struct {
@@ -327,14 +353,13 @@ func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, e
 				DeliveryID string `json:"deliveryId"`
 			} `json:"message"`
 		}
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			continue // Pi ignores malformed session lines after interrupted writes.
+		if json.Unmarshal(line, &entry) == nil && entry.Type == "message" && entry.Message.Role == "user" {
+			h.delivered[entry.Message.DeliveryID] = struct{}{}
 		}
-		if entry.Type == "message" && entry.Message.Role == "user" && entry.Message.DeliveryID == strconv.FormatInt(int64(id), 10) {
-			return true, nil
-		}
+		h.deliveryOffset += int64(len(line))
 	}
-	return false, scanner.Err()
+	_, found := h.delivered[strconv.FormatInt(int64(id), 10)]
+	return found, nil
 }
 
 func (h *Harness) Close() error {
