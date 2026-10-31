@@ -33,24 +33,25 @@ type Repositories interface {
 }
 
 type Service struct {
-	store           *store.Store
-	boxes           BoxAdapter
-	profiles        Profiles
-	repos           Repositories
-	approvals       *approve.Service
-	hostexec        HostexecRunner
-	hostexecTimeout func(context.Context, time.Duration) (context.Context, context.CancelFunc)
-	now             func() time.Time
-	mu              sync.Mutex
-	channels        map[contract.SessionID]*boxChannel
-	computers       map[contract.SessionID]*computerState
-	admit           sync.Mutex
-	boxLockMu       sync.Mutex
-	boxLocks        map[contract.SessionID]*sync.Mutex
-	boxRuns         map[contract.SessionID]*boxRun
-	moveMu          sync.Mutex
-	moveStops       []contract.BoxID
-	dormancy        dormancy
+	store              *store.Store
+	boxes              BoxAdapter
+	profiles           Profiles
+	repos              Repositories
+	approvals          *approve.Service
+	hostexec           HostexecRunner
+	hostexecTimeout    func(context.Context, time.Duration) (context.Context, context.CancelFunc)
+	now                func() time.Time
+	mu                 sync.Mutex
+	channels           map[contract.SessionID]*boxChannel
+	computers          map[contract.SessionID]*computerState
+	computerGeneration uint64
+	admit              sync.Mutex
+	boxLockMu          sync.Mutex
+	boxLocks           map[contract.SessionID]*sync.Mutex
+	boxRuns            map[contract.SessionID]*boxRun
+	moveMu             sync.Mutex
+	moveStops          []contract.BoxID
+	dormancy           dormancy
 	// transcriptMu serializes appends, so each offset check and write runs alone.
 	transcriptMu  sync.Mutex
 	transcriptDir string
