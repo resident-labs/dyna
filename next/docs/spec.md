@@ -929,7 +929,7 @@ A host-exec grant names the hosts, the reason and the expiry. It permits any com
 
 1. The agent runs `dyna hostexec run --host <h> [--timeout 10m] -- <argv>` in its box. The request comes over the box socket, so the engine knows the principal.
 2. The engine matches the grants and submits `hostexec.run{Host, Argv, Cwd, Timeout, Grant}`. It runs at once.
-3. On a capacity host, the command runs over the master as `systemd-run --user --scope --unit=dyna-hostexec-<op> -p RuntimeMaxSec=<timeout> -p TimeoutStopSec=5 -- <argv>`, with framed replies. On the control plane, the same `systemd-run` runs locally.
+3. A capacity host accepts at most 3 concurrent hostexec runs; a full lane returns `host_busy` immediately and asks the caller to retry later. On a capacity host, the command runs over the master as `systemd-run --user --scope --unit=dyna-hostexec-<op> -p RuntimeMaxSec=<timeout> -p TimeoutStopSec=5 -- <argv>`, with framed replies. On the control plane, the same `systemd-run` runs locally.
 4. The command gets the host user's login environment. The engine adds no secrets. Stdin is empty.
 5. There is no live output stream for now. The CLI waits for the result. Up to 64 KiB is kept inline in the result; the rest is a file named in the result, and output is capped at 8 MiB. The default timeout is 10 minutes, and the maximum is 2 hours.
 6. The caller gets the exit code and the output. A run longer than the shell's foreground window works like a long shell job: the caller wakes on `op.ran`.

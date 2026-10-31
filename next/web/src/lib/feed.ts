@@ -24,6 +24,7 @@ export const causes: Record<FailureCause, string> = {
   archive_failed: "Dyna could not save the session's branch",
   grant_inactive: "The host execution grant expired or was revoked",
   host_lost: "The host stopped answering during the run",
+  host_busy: "host busy, try again later",
   github_failed: "GitHub refused the request or did not answer",
   stale: "Something it depended on changed before it ran",
   interrupted: "Dyna stopped during the run, so the outcome is unknown",
