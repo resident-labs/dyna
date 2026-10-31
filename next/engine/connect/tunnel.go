@@ -9,11 +9,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/child"
 )
 
 type tunnelState interface {
 	ConnectLinked(context.Context) (bool, error)
+	ConnectAttempt(context.Context) (contract.ConnectAttempt, error)
 	SetConnectConnector(context.Context, bool, time.Time) error
 }
 
@@ -82,7 +84,11 @@ func superviseTunnel(ctx context.Context, state tunnelState, enabled bool, wake 
 		if err != nil {
 			return fail(err)
 		}
-		if !linked || !enabled {
+		a, err := state.ConnectAttempt(ctx)
+		if err != nil {
+			return fail(err)
+		}
+		if !linked || !enabled || a.State == contract.ConnectAttemptUnlinking {
 			_ = state.SetConnectConnector(ctx, false, h.now())
 			return nil
 		}
