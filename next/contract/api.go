@@ -20,6 +20,7 @@ const (
 	MethodBoxHello         Method = "box.hello"
 	MethodComputerChanged  Method = "computer.changed"
 	MethodTurnOutput       Method = "turn.output"
+	MethodTurnActivity     Method = "turn.activity"
 	MethodTranscriptAppend Method = "transcript.append"
 	MethodShellJobEnded    Method = "shell.job.ended"
 )
@@ -66,6 +67,7 @@ type SessionSummary struct {
 	Computer    ComputerState `json:"computer"`
 	Goal        string        `json:"goal"`
 	Turn        TurnID        `json:"turn,omitempty"`        // the running turn
+	Activity    string        `json:"activity,omitempty"`    // the running turn's latest TurnActivity label
 	LastOutcome TurnOutcome   `json:"lastOutcome,omitempty"` // of the last ended turn
 }
 type SessionListResponse struct {
@@ -206,6 +208,14 @@ type TurnOutputRequest struct {
 	Usage     Usage       `json:"usage"`
 }
 type TurnOutputResponse struct{}
+
+// TurnActivityRequest reports the running turn's latest tool call. The box agent sends at most
+// one a second. Readers show a label only while its turn runs.
+type TurnActivityRequest struct {
+	Turn  TurnID `json:"turn"`
+	Label string `json:"label"`
+}
+type TurnActivityResponse struct{}
 type TranscriptAppendRequest struct {
 	Path   string `json:"path"`
 	Offset int64  `json:"offset"`

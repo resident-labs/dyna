@@ -133,6 +133,8 @@ export function describe(event: Event, name: Name): string {
     case "box.changed": return `${name(event.body.session)}'s box is ${event.body.to}`;
     case "turn.started": return `${name(event.body.session)} started a turn`;
     case "turn.ended": return event.body.outcome === "stopped" ? `${name(event.body.session)}'s turn stopped` : `${name(event.body.session)} finished a turn`;
+    // Live only: the room store keeps it out of every feed window.
+    case "turn.activity": return event.body.label;
     case "shell.job.ended": return `${name(event.body.session)}'s job ended with exit code ${event.body.exitCode}`;
     case "op.requested": return `${who(event.body.by)} asked to ${event.body.card.title}`;
     case "op.decided": return `A request was ${event.body.state}`;

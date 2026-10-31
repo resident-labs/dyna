@@ -38,6 +38,7 @@ type Service interface {
 	Post(context.Context, contract.Principal, contract.PostRequest) (contract.PostResponse, *contract.Error)
 	EventsList(context.Context, contract.Principal, contract.EventsListRequest) (contract.EventsListResponse, *contract.Error)
 	BoxHello(context.Context, contract.Principal, contract.BoxHelloRequest) (contract.BoxHelloResponse, *contract.Error)
+	TurnActivity(context.Context, contract.Principal, contract.TurnActivityRequest) (contract.TurnActivityResponse, *contract.Error)
 	TurnOutput(context.Context, contract.Principal, contract.TurnOutputRequest) (contract.TurnOutputResponse, *contract.Error)
 	DeliveryDone(context.Context, contract.Principal, contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error)
 	ArchiveDone(context.Context, contract.Principal, contract.ArchiveDoneRequest) (contract.ArchiveDoneResponse, *contract.Error)
