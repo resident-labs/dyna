@@ -16,7 +16,9 @@ func (s *Service) HostexecGrant() approve.Entry {
 	return approve.Entry{
 		Class: func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassOwner },
 
-		Card: func(ctx context.Context, args contract.OpArgs, _ contract.Principal) contract.Card {
+		// The card reads as the web shows it: "<session> asks for host access", then "Run any command on <host> for 24 hours."
+		// A single host is the target, so the web can show its name in mono.
+		Card: func(ctx context.Context, args contract.OpArgs, who contract.Principal) contract.Card {
 			a := args.(contract.HostexecGrantArgs)
 			session, _ := s.store.Session(ctx, a.To.Session)
 			expiry := "for 24 hours"
@@ -33,7 +35,15 @@ func (s *Service) HostexecGrant() approve.Entry {
 					hosts = append(hosts, quoteHostexec(string(host)))
 				}
 			}
-			return contract.Card{Title: "Grant host access", Target: contract.Target{Kind: contract.TargetRoom, Name: string(a.Room)}, Body: fmt.Sprintf("Let %s run any command on %s, %s.\nReason: %s", session.Name, strings.Join(hosts, ", "), expiry, a.Reason)}
+			target := contract.Target{Kind: contract.TargetRoom, Name: string(a.Room)}
+			if len(a.Hosts) == 1 && a.Hosts[0] != contract.AllHosts {
+				target = contract.Target{Kind: contract.TargetHost, Name: hosts[0]}
+			}
+			run := "Run"
+			if who.Session != a.To.Session {
+				run = "Let " + session.Name + " run"
+			}
+			return contract.Card{Title: "host access", Target: target, Body: fmt.Sprintf("%s any command on %s %s.\nReason: %s", run, strings.Join(hosts, ", "), expiry, a.Reason)}
 		},
 		Check: func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
 			a := args.(contract.HostexecGrantArgs)
