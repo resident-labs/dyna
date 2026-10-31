@@ -37,6 +37,21 @@ describe("context updates", () => {
 		expect(createContextUpdate({ file: first ?? "" }, { file: second ?? "" })).toBeUndefined();
 	});
 
+	it("removes retained pre-compaction updates already folded into the head", () => {
+		const session = SessionManager.inMemory();
+		session.appendMessage({ role: "system", content: "", sections: { goal: "old" }, timestamp: 0 });
+		const kept = session.appendMessage({ role: "user", content: "question", timestamp: 1 });
+		const update = createContextUpdate({ goal: "old" }, { goal: "middle" });
+		if (!update) throw new Error("expected update");
+		session.appendCustomMessageEntry(update.customType, update.content, update.display, update.details);
+		session.appendCompaction("summary", kept, 0, undefined, false, undefined, { goal: "latest" });
+		const messages = session.buildSessionContext().messages;
+		expect(messages[0]).toMatchObject({ role: "system", sections: { goal: "latest" } });
+		expect(messages.some((message) => message.role === "custom" && message.customType === "context_update")).toBe(
+			false,
+		);
+	});
+
 	it("derives only the active branch and replaces it at compaction", () => {
 		const session = SessionManager.inMemory();
 		const head = session.appendMessage({ role: "system", content: "", sections: { goal: "first" }, timestamp: 0 });
