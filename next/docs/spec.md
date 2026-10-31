@@ -519,10 +519,10 @@ Column types follow SQLite. Times are INTEGER Unix milliseconds (`_at`). IDs are
 | M2 | `operations` | `id` PK, `kind`, `room`, `by_kind`, `by_id`, `class`, `state`, `card` BLOB, `args` BLOB, `args_sha256`, `created_at`, `expires_at`, `decided_by_kind`, `decided_by_id`, `decided_at`, `reason`, `exit_code`, `output_file` |
 | M2 | `grants` | `id` PK, `kind`, `room`, `to_kind`, `to_id`, `mode`, `hosts` JSON, `commands` JSON, `expires_at`, `by_kind`, `by_id`, `created_at`, `revoked_at`, `expired_at` |
 | M2 | `hostexec_runs` | section 6.3 |
-| M2 | `subscriptions`, `subscription_events`, `subscription_args` | section 8.5; the default notice subscription needs them |
 | M2 | `archives` | section 5.9 |
 | M2 | `room_repos`, `repos` | section 7.6 |
 | M2 | `pr_owners` | (`repo`, `number`) PK, `session`, `goal`, `approved_head`. M2 opens PRs; M3 approves and merges them (decision 13). |
+| M3 | `subscriptions`, `subscription_events`, `subscription_args` | section 8.5; hooks and the default notice subscription need them |
 | M3 | `repo_attribution`, `devices`, `device_scopes` | section 7 |
 | M3 | `imports` | section 8.5 |
 | M3 | the imported records | `rules`, `goals`, `goal_items`, `issues`, `questions`, `library_entries`, `accounts` (labels and limits only), `counters`. The import also fills `pr_owners`. Each area owner writes the columns in its M3 plan. Profiles, harness config and skills stay config files. |
@@ -1272,7 +1272,7 @@ Acceptance:
 
 ### M2: web room view, approvals, host exec
 
-Scope: the ported web room view (feed, DMs, composer, cards and files, session tree, approvals panel, host-exec grants), the tree with child boxes in the parent's budget, dormant boxes that stop and wake, reply channels (7.5), operations and approvals, host exec, the default notice subscription, images from `.dyna/images/`, the `box.pressure` report, the Dyna shell server with secret masking, the transcript stream, computers (5.14), rooms with repositories (7.6), the repository copy, git through the engine and close with archive (5.6 to 5.9), and opening a PR through an operation (decision 13).
+Scope: the ported web room view (feed, DMs, composer, cards and files, session tree, approvals panel, host-exec grants), the tree with child boxes in the parent's budget, dormant boxes that stop and wake, reply channels (7.5), operations and approvals, host exec, images from `.dyna/images/`, the `box.pressure` report, the Dyna shell server with secret masking, the transcript stream, computers (5.14), rooms with repositories (7.6), the repository copy, git through the engine and close with archive (5.6 to 5.9), and opening a PR through an operation (decision 13).
 
 The order inside M2:
 
@@ -1299,7 +1299,7 @@ Acceptance:
 
 ### M3: bundle import and self-hosting
 
-Scope: the approval flag, merges and CI through GitHub (decision 13), `gh` for agents through the engine (decision 13), goals, issues, questions (with terminal requests), rules, hooks as typed subscriptions (`Wake` and `Run`), engine timers (check-ins, usage), accounts through CLIProxyAPI, settings and backups, `dyna update`, remote access, the desktop window, workflows (9.2), the import, and the cutover. Section 9 lists every feature.
+Scope: the approval flag, merges and CI through GitHub (decision 13), `gh` for agents through the engine (decision 13), goals, issues, questions (with terminal requests), rules, hooks as typed subscriptions (`Wake` and `Run`) with the default notice subscription, which wakes root on `notice.posted` (an M3 event), engine timers (check-ins, usage), accounts through CLIProxyAPI, settings and backups, `dyna update`, remote access, the desktop window, workflows (9.2), the import, and the cutover. Section 9 lists every feature.
 
 The order inside M3:
 
