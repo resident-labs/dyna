@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -103,10 +104,7 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 			Status int    `json:"status_code"`
 			Body   string `json:"body"`
 		}
-		var buckets map[string]*struct {
-			Utilization float64   `json:"utilization"`
-			ResetsAt    time.Time `json:"resets_at"`
-		}
+		var buckets map[string]json.RawMessage
 		switch {
 		case errors.Is(err, errSignInExpired):
 			usage.Cause = contract.UsageSignInExpired
@@ -118,17 +116,56 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 			usage.Cause = contract.UsageUnreachable
 		default:
 			weekly := "seven_day_oauth_apps"
-			if buckets[weekly] == nil {
+			if len(buckets[weekly]) == 0 || string(buckets[weekly]) == "null" {
 				weekly = "seven_day"
 			}
 			for _, window := range []struct {
 				key, name string
 				seconds   int64
 			}{{"five_hour", "five_hour", 18000}, {weekly, "seven_day", 604800}} {
-				if b := buckets[window.key]; b != nil {
-					usage.Windows = append(usage.Windows, contract.UsageWindow{Name: window.name, UsedPercent: b.Utilization, Seconds: window.seconds, ResetsAt: b.ResetsAt})
+				var b *struct {
+					Utilization float64   `json:"utilization"`
+					ResetsAt    time.Time `json:"resets_at"`
+				}
+				if raw := buckets[window.key]; len(raw) > 0 {
+					if json.Unmarshal(raw, &b) != nil {
+						usage.Cause = contract.UsageUnreachable
+						usage.Windows = nil
+						break
+					}
+					if b != nil {
+						usage.Windows = append(usage.Windows, contract.UsageWindow{Name: window.name, UsedPercent: b.Utilization, Seconds: window.seconds, ResetsAt: b.ResetsAt})
+					}
 				}
 			}
+		}
+		if usage.Cause != "" {
+			// Log only JSON structure, never upstream values or response headers.
+			var shape map[string]json.RawMessage
+			_ = json.Unmarshal([]byte(reply.Body), &shape)
+			kinds := make(map[string]string, len(shape))
+			for key, raw := range shape {
+				switch key {
+				case "five_hour", "seven_day", "seven_day_oauth_apps", "limits", "error", "type", "message":
+				default:
+					continue
+				}
+				switch raw[0] {
+				case '{':
+					kinds[key] = "object"
+				case '[':
+					kinds[key] = "array"
+				case '"':
+					kinds[key] = "string"
+				case 'n':
+					kinds[key] = "null"
+				case 't', 'f':
+					kinds[key] = "boolean"
+				default:
+					kinds[key] = "number"
+				}
+			}
+			log.Printf("model quota failed: upstream_status=%d keys_and_kinds=%q", reply.Status, kinds)
 		}
 		q.mu.Lock()
 		q.cache[file.Index] = quotaEntry{at: q.now(), usage: usage}
