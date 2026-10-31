@@ -36,12 +36,12 @@
     void call("room.list", {}).then(result => { rooms = result.rooms ?? []; }, () => {});
   }
   onMount(() => { reload(); window.addEventListener("focus", reload); return () => { reset(); window.removeEventListener("focus", reload); }; });
-  $effect(() => { path; return () => reset(); });
+  $effect(() => { path; return () => { if (attempt) reset(); }; });
   function watch(id: string, ticket: number) {
     timer = setTimeout(() => {
       void call("accounts.connect_status", { attempt: id }).then(result => {
         if (ticket !== generation) return;
-        if (result.status === "connected") { reset(); reload(); }
+        if (result.status === "connected") { reset(); reload(); document.getElementById("accounts-back")?.click(); }
         else if (result.status === "pending") watch(id, ticket);
         else { connectState = result.status; error = result.reason === "wrong_account" ? "That sign-in belongs to a different account." : result.reason === "adoption_failed" ? "Dyna cannot reconnect this sign-in. Remove it and add it again." : ""; }
       }, () => { if (ticket === generation) { connectState = "failed"; error = "Could not reach the service. Try again."; } });
@@ -52,7 +52,7 @@
     busy = true; error = ""; const ticket = ++generation;
     if (selected.connectMethod === "key") {
       const key = secret; secret = "";
-      await call("accounts.set_key", { provider: selected.id, label, key }).then(() => { if (ticket === generation) { reset(); reload(); } }, () => { if (ticket === generation) error = "Could not save the key. Try again."; });
+      await call("accounts.set_key", { provider: selected.id, label, key }).then(() => { if (ticket === generation) { reset(); reload(); document.getElementById("accounts-back")?.click(); } }, () => { if (ticket === generation) error = "Could not save the key. Try again."; });
     } else {
       const request = reconnectId ? call("accounts.reconnect", { accountId: reconnectId }) : call("accounts.connect", { provider: selected.id, label });
       await request.then(result => {
@@ -90,7 +90,7 @@
 {#if failed}<p>Accounts did not load. <button class="btn" type="button" onclick={reload}>Try again</button></p>
 {:else if !loaded}<p class="muted">Loading accounts…</p>
 {:else if adding}
-  <div class="add-layout">
+  <a id="picker-back" href={base + "/add"} onclick={navigate} hidden>Back to providers</a><div class="add-layout">
     {#if !phone || !selected}
       <section class="picker">
         <input aria-label="Search providers" placeholder={`Search ${providers.length} providers`} bind:value={query} />
@@ -99,7 +99,7 @@
           {#if matches.length}<h3>{group.title} · {matches.length}</h3>
             {#each group.flow === "key" && !query && !expanded ? matches.slice(0, 10) : matches as provider (provider.id)}
               {@const connected = accounts.filter(a => a.provider === provider.id).length}
-              <a class:chosen={selected?.id === provider.id} href={providerPath(provider.id)} onclick={navigate}><span class="initial">{provider.displayName.slice(0, 1)}</span><strong>{provider.displayName}</strong>{#if connected}<span class="muted">{connected} connected</span>{/if}</a>
+              <a class:chosen={selected?.id === provider.id} href={providerPath(provider.id)} onclick={(e) => { reset(); label = ""; navigate(e); }}><span class="initial">{provider.displayName.slice(0, 1)}</span><strong>{provider.displayName}</strong>{#if connected}<span class="muted">{connected} connected</span>{/if}</a>
             {/each}
             {#if group.flow === "key" && !query && !expanded && matches.length > 10}<button class="btn ghost" type="button" onclick={() => expanded = true}>Show {matches.length - 10} more</button>{/if}
           {/if}
@@ -115,7 +115,7 @@
             <p class="muted">Dyna keeps the sign-in on this computer and sends it only to {selected.displayName}.</p>
             <label>Label <input bind:value={label} placeholder="Work, Personal, …" disabled={busy} /></label>
             {#if selected.connectFlow === "key"}<label>API key <input type="password" bind:value={secret} autocomplete="off" disabled={busy} /></label>{/if}
-            <button class="btn fill" type="button" disabled={busy || !label.trim() || (selected.connectFlow === "key" && !secret)} onclick={() => void start()}>{selected.connectFlow === "callback" ? `Sign in with ${selected.displayName}` : selected.connectFlow === "device" ? "Get a code" : "Save key"}</button>
+            <button class="btn fill" type="button" disabled={busy || !label.trim() || (selected.connectFlow === "key" && !secret)} onclick={() => void start()}>{selected.connectFlow === "callback" ? `Sign in with ${selected.displayName}` : selected.connectFlow === "device" ? "Get a code" : "Save key"}</button>{#if selected.connectFlow === "key"}<a class="btn" href={base + "/add"} onclick={navigate}>Cancel</a>{/if}
           {:else}
             <label>Label <input value={label} disabled /></label>
             {#if attempt.flow === "device"}
@@ -174,7 +174,7 @@
 {/if}
 </div>
 
-<svelte:window onkeydown={(e) => { if (e.key === "Escape" && attempt) { reset(); document.querySelector<HTMLAnchorElement>(".subbar a")?.click(); } }} />
+<svelte:window onkeydown={(e) => { if (e.key === "Escape" && attempt) { reset(); document.getElementById("picker-back")?.click(); } }} />
 <style>
   .subbar { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 24px; border-bottom: 1px solid var(--line); }
   .subbar a, .subbar span { color: var(--muted); }
