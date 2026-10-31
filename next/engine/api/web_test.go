@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -213,7 +214,7 @@ func TestWebDiscoversAndReplacesRoutesOnMiss(t *testing.T) {
 		t.Fatal(err)
 	}
 	route, calls, wakes := "https://first.example", 0, 0
-	w.SetDiscovery(func(context.Context) string { calls++; return route }, func() { wakes++ })
+	w.SetDiscovery(func(context.Context, int) (string, error) { calls++; return route, nil }, func() { wakes++ })
 	request := func(host string) int {
 		rec := httptest.NewRecorder()
 		w.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "https://"+host+"/", nil))
@@ -243,6 +244,49 @@ func TestWebDiscoversAndReplacesRoutesOnMiss(t *testing.T) {
 	}
 }
 
+func TestDiscoveryFailureKeepsRouteUntilSuccessfulRemoval(t *testing.T) {
+	now := time.Unix(1000, 0)
+	w, err := NewWeb(New(&fakeService{}, nil), "127.0.0.1:7790", fstest.MapFS{}, func() time.Time { return now }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, failure := "https://host.example", error(nil)
+	w.SetDiscovery(func(context.Context, int) (string, error) { return route, failure }, nil)
+	w.RefreshRoutes(context.Background())
+	now = now.Add(30 * time.Second)
+	failure = errors.New("unavailable")
+	w.RefreshRoutes(context.Background())
+	if !slices.Equal(w.PublicRoutes(), []string{"https://host.example"}) {
+		t.Fatalf("lost route: %v", w.PublicRoutes())
+	}
+	now = now.Add(30 * time.Second)
+	failure, route = nil, ""
+	w.RefreshRoutes(context.Background())
+	if len(w.PublicRoutes()) != 0 {
+		t.Fatalf("route not removed: %v", w.PublicRoutes())
+	}
+}
+
+func TestTunnelRefreshDoesNotWakeTunnel(t *testing.T) {
+	now := time.Unix(1000, 0)
+	w, err := NewWeb(New(&fakeService{}, nil), "127.0.0.1:7790", fstest.MapFS{}, func() time.Time { return now }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetRoutes([]string{"https://configured.example"}); err != nil {
+		t.Fatal(err)
+	}
+	route, wakes := "https://configured.example", 0
+	w.SetDiscovery(func(context.Context, int) (string, error) { return route, nil }, func() { wakes++ })
+	w.RefreshRoutes(context.Background())
+	route = "https://new.example"
+	now = now.Add(30 * time.Second)
+	w.RefreshRoutes(context.Background())
+	if wakes != 0 || !slices.Equal(w.PublicRoutes(), []string{"https://configured.example", "https://new.example"}) {
+		t.Fatalf("wakes %d, routes %v", wakes, w.PublicRoutes())
+	}
+}
+
 func TestWebDiscoverySharesInFlightResult(t *testing.T) {
 	w, err := NewWeb(New(&fakeService{}, nil), "127.0.0.1:7790", fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, func() time.Time { return time.Unix(1000, 0) }, nil)
 	if err != nil {
@@ -250,7 +294,12 @@ func TestWebDiscoverySharesInFlightResult(t *testing.T) {
 	}
 	started, release := make(chan struct{}), make(chan struct{})
 	var calls atomic.Int32
-	w.SetDiscovery(func(context.Context) string { calls.Add(1); close(started); <-release; return "https://first.example" }, nil)
+	w.SetDiscovery(func(context.Context, int) (string, error) {
+		calls.Add(1)
+		close(started)
+		<-release
+		return "https://first.example", nil
+	}, nil)
 	results := make(chan int, 2)
 	request := func() {
 		rec := httptest.NewRecorder()
