@@ -23,6 +23,7 @@
     trial: 'trial running',
     checks: 'checks running',
     landed: 'landed',
+    cancelled: 'ended',
     failed: 'failed',
     returned: 'returned by root',
     conflict: 'conflict',
@@ -37,6 +38,7 @@
     trial: '',
     checks: '',
     landed: '',
+    cancelled: '',
     failed: 'coral',
     returned: 'coral',
     conflict: 'coral',
@@ -49,6 +51,7 @@
     trial: 'Merging',
     checks: 'Merging',
     landed: 'Merged',
+    cancelled: 'Merge trial ended:',
     failed: 'Merge failed:',
     returned: 'Returned by root:',
     conflict: 'Merge conflict:',
@@ -63,6 +66,7 @@
     trial: ['done', 'live', 'pending', 'pending'],
     checks: ['done', 'done', 'live', 'pending'],
     landed: ['done', 'done', 'done', 'done'],
+    cancelled: [],
     failed: ['done', 'done', 'done', 'bad'],
     returned: ['done', 'bad', 'pending', 'pending'],
     conflict: ['done', 'bad', 'pending', 'pending'],
@@ -159,7 +163,7 @@
         {#if payload.head}<span>head <b class="mono">{shortSha(payload.head)}</b></span>{/if}
         {#if payload.commit}<span>commit <b class="mono">{shortSha(payload.commit)}</b></span>{/if}
       </div>
-      {#if reason && stepTones[type] === 'coral'}<p class="reason">{reason}</p>{:else if reason && type === 'landed'}<p class="note">{reason}</p>{/if}
+      {#if reason && stepTones[type] === 'coral'}<p class="reason">{reason}</p>{:else if reason && (type === 'landed' || type === 'cancelled')}<p class="note">{reason}</p>{/if}
       {#if failedChecks.length}<p class="reason">Failed checks: {failedChecks.join(', ')}</p>{/if}
       <div class="acts">
         {#if subject?.url}<button class="btn" type="button" onclick={() => openLink(subject?.url)}>Open PR</button>{/if}

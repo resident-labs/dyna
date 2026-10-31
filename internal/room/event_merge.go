@@ -11,6 +11,7 @@ const (
 	MergeTrial      MergeStep = "trial"
 	MergeChecks     MergeStep = "checks"
 	MergeLanded     MergeStep = "landed"
+	MergeCancelled  MergeStep = "cancelled"
 	MergeFailed     MergeStep = "failed"
 	MergeReturned   MergeStep = "returned"
 	MergeConflict   MergeStep = "conflict"
@@ -26,7 +27,7 @@ const (
 
 // mergeSteps lists every merge step the web needs as a union type.
 var mergeSteps = []MergeStep{
-	MergeQueued, MergeTrial, MergeChecks, MergeLanded, MergeFailed,
+	MergeQueued, MergeTrial, MergeChecks, MergeLanded, MergeCancelled, MergeFailed,
 	MergeReturned, MergeConflict, MergeRolledBack, MergeDecision, MergeFixRequested,
 }
 
