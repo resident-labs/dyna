@@ -12,16 +12,30 @@ type Plan = store.Plan
 type Window = store.Window
 type Effort = adapters.Effort
 
-// visibleSnapshot returns a copy of out without model-specific windows that
-// show 0% used. Once the model has any use, the window stays visible. The
-// cached snapshot keeps every window, so a hidden window can return after its
-// reset as a probable-reset window.
+// visibleSnapshot returns a copy of out without model-specific windows whose
+// pool shows 0% used everywhere. A pool is one model window of one provider,
+// across its accounts. While any account in the pool has use, every account
+// keeps its window, so the pool mean counts each account. The cached snapshot
+// keeps every window, so a hidden window can return after its reset as a
+// probable-reset window.
 func visibleSnapshot(out Snapshot) Snapshot {
+	type pool struct {
+		provider store.Provider
+		id       string
+	}
+	inUse := map[pool]bool{}
+	for _, a := range out.Accounts {
+		for _, w := range a.Windows {
+			if p, ok := WindowPercent(w); strings.HasPrefix(w.ID, store.ModelWindowPrefix) && (!ok || p != 0) {
+				inUse[pool{a.Provider, w.ID}] = true
+			}
+		}
+	}
 	accounts := make([]Account, len(out.Accounts))
 	for i, a := range out.Accounts {
 		kept := make([]Window, 0, len(a.Windows))
 		for _, w := range a.Windows {
-			if p, ok := WindowPercent(w); ok && p == 0 && strings.HasPrefix(w.ID, store.ModelWindowPrefix) {
+			if p, ok := WindowPercent(w); ok && p == 0 && strings.HasPrefix(w.ID, store.ModelWindowPrefix) && !inUse[pool{a.Provider, w.ID}] {
 				continue
 			}
 			kept = append(kept, w)
