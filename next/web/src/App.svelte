@@ -540,9 +540,9 @@
   .requests.waiting:hover, .requests.waiting[aria-pressed="true"] { background: color-mix(in srgb, var(--attention) 22%, transparent); }
   .requests ~ :global(.panel-toggle) { margin-left: 0; }
   main > header :global(.panel-toggle) { display: flex; align-items: center; gap: 8px; }
-  .faces { display: flex; padding-left: 4px; }
-  /* Overlapped faces, ringed in the page color; initials stay on the type scale. */
-  .faces > :global(.avatar) { margin-left: -4px; box-shadow: 0 0 0 2px var(--bg); font-size: 11px; }
+  .faces { display: flex; padding-left: 2px; }
+  /* Overlapped faces, ringed in the page color; initials stay on the type scale, and the overlap clears them. */
+  .faces > :global(.avatar) { margin-left: -2px; box-shadow: 0 0 0 2px var(--bg); font-size: 11px; letter-spacing: 0; }
   .more { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .shell.open.tucked { grid-template-columns: 64px 1fr; }
   .shell.tucked > aside.members { display: none; }

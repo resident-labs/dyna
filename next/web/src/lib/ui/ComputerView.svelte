@@ -56,7 +56,7 @@
     {#if phase === "failed"}<p class="badge" role="status">The live view stopped. <button type="button" class="retry" onclick={() => { attempt++; element?.focus(); }}>Try again</button></p>{/if}
   </div>
   <!-- The current step, one muted line under the screen: "qa-runner · reading the review state". -->
-  {#if activity}<p class="activity">{name} · {activity}</p>{/if}
+  {#if activity}<p class="activity" class:full>{name} · {activity}</p>{/if}
 </FloatWindow>
 
 <style>
@@ -65,7 +65,8 @@
   .live { padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
   .connecting { color: var(--muted); font-weight: 400; }
   .first { margin-left: auto; }
-  /* Full screen, the band under the home bar stays near-black, as the screen is. */
+  /* Full screen, the activity line and the band under the home bar stay near-black, as the screen is. */
+  .activity.full { background: #0d0d0f; color: #d8d3cc; }
   :global(.computer.full)::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: env(safe-area-inset-bottom); background: #0d0d0f; }
   /* The screen is near-black in both themes, as a display is. Docked, it takes the panel width at the screen's ratio;
      floating, it fills the window body edge to edge and the dark background fills the letterbox. */
