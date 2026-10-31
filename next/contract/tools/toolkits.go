@@ -1,6 +1,7 @@
 package tools
 
 // Toolkit describes the MCP annotations shared by all actions in an area.
+// Registration-only exposure follows T3 Code McpToolAccess.ts at 15fe283 (MIT).
 type Toolkit struct {
 	Name        string
 	Title       string
