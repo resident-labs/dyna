@@ -261,6 +261,9 @@ func Run(ctx context.Context, cfg Config) error {
 			return nil
 		case now := <-ticker.C:
 			if !now.Before(lastDormant.Add(time.Hour)) {
+				if err := service.ExpireArchives(ctx); err != nil {
+					log.Printf("archive expiry sweep: %v", err)
+				}
 				if err := service.CloseDormant(ctx); err != nil {
 					log.Printf("dormant close sweep: %v", err)
 				}

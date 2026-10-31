@@ -17,6 +17,34 @@ type Archive struct {
 	ExpiresAt time.Time
 }
 
+// ExpiredArchives bounds each maintenance pass and preserves the oldest first.
+func (s *Store) ExpiredArchives(ctx context.Context, now time.Time) ([]Archive, error) {
+	rows, err := s.Read().QueryContext(ctx, "SELECT session,repo,ref,commit_sha,expires_at FROM archives WHERE expires_at<=? ORDER BY expires_at,session,repo LIMIT 50", now.UnixMilli())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var archives []Archive
+	for rows.Next() {
+		var a Archive
+		var expires int64
+		if err := rows.Scan(&a.Session, &a.Repo, &a.Ref, &a.Commit, &expires); err != nil {
+			return nil, err
+		}
+		a.ExpiresAt = time.UnixMilli(expires)
+		archives = append(archives, a)
+	}
+	return archives, rows.Err()
+}
+
+// ForgetArchive removes only the exact report that was deleted remotely.
+func (s *Store) ForgetArchive(ctx context.Context, a Archive) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "DELETE FROM archives WHERE session=? AND repo=? AND ref=? AND commit_sha=? AND expires_at=?", a.Session, a.Repo, a.Ref, a.Commit, a.ExpiresAt.UnixMilli())
+		return err
+	})
+}
+
 // SaveArchives stores a complete set of verified reports atomically.
 func (s *Store) SaveArchives(ctx context.Context, archives []Archive) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
