@@ -4,7 +4,7 @@ import { RoomStore } from "./room.svelte.ts";
 import { EventWindow, PAGE, WINDOW, dmOf } from "./window.svelte.ts";
 import { feedRows as dayRows } from "./feed.ts";
 import { decodeEvent } from "./event.ts";
-import type { Conversation, Event, EventBody, EventsListRequest, PostRequest, SessionSummary } from "./contract.gen.ts";
+import type { BoxState, Conversation, Event, EventBody, EventsListRequest, PostRequest, SessionSummary } from "./contract.gen.ts";
 
 // These cases leave out the day rows, which feed.test.ts covers.
 const feedRows = (...args: Parameters<typeof dayRows>) => dayRows(...args).filter(row => row.kind !== "day");
@@ -303,6 +303,26 @@ test("session.list and later events set and clear the running computers", async 
     room.apply(event(6, { type: "box.changed", body: { box: "b", session: "x", from: "ready", to: "lost" } }));
     assert.equal(room.computers.size, 0);
   } finally { server.restore(); }
+});
+
+test("a pending box's reason comes from history, follows a pending to pending change, and free text gives none", async () => {
+  const original = globalThis.fetch;
+  const session = { id: "s", lastRead: 0, name: "Agent", parent: "", profile: "p", box: "b", boxState: "pending", computer: "stopped", goal: "", startedAt: "", hadJobs: false };
+  const changed = (seq: number, from: BoxState, to: BoxState, reason?: string) => event(seq, { type: "box.changed", body: { box: "b", session: "s", from, to, reason } });
+  globalThis.fetch = async input => {
+    if (String(input).endsWith("session.list")) return new Response(JSON.stringify({ sessions: [session], seq: 2 }));
+    if (String(input).endsWith("events.list")) return new Response(JSON.stringify({ events: [changed(1, "pending", "pending", "memory"), changed(2, "pending", "pending", "cpu")] }));
+    return new Response("{}");
+  };
+  try {
+    const room = new RoomStore("r", () => () => {});
+    await room.open();
+    assert.equal(room.pendingReasons.get("s"), "cpu");
+    room.apply(changed(3, "pending", "pending", "room-limit"));
+    assert.equal(room.pendingReasons.get("s"), "room-limit");
+    room.apply(changed(4, "creating", "pending", "dial tcp: connection refused"));
+    assert.equal(room.pendingReasons.has("s"), false);
+  } finally { globalThis.fetch = original; }
 });
 
 test("a failed job counts after a fresh load until the owner reads past its end, and the page does not wait for it", async () => {
