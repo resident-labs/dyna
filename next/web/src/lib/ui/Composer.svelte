@@ -93,7 +93,7 @@
   }
 </script>
 
-<div class="composer">
+<div class="composer" class:has-files={touch.current && files.items.length > 0}>
   {#if matches.length}
     <div class="mentions" id="{id}-list" role="listbox" aria-label="Sessions">
       <p class="head" aria-hidden="true">Sessions</p>
@@ -111,8 +111,8 @@
     <button type="button" aria-label="Remove forwarded post" title="Remove forwarded post" onclick={() => { onunquote(); element?.focus(); }}><Icon name="close" size={14} /></button></p>
     <div class="quoted">{@html render(quote.text)}</div>
     {#if quote.attachments.length}<p class="files">{count(quote.attachments.length, "file")}: {quote.attachments.map(file => file.name).join(", ")}</p>{/if}
-    {#if replacement}<p class="replaced" aria-live="polite"><span>Replaced the post from {replacement.author}.</span><button type="button" onclick={onundo}>Undo</button></p>{/if}</div>{/if}
-  {#if files.items.length}<ul class="tray" aria-label="Files">{#each files.items as item (item.id)}
+    {#if replacement}<p class="replaced" aria-live="polite"><span>Replaced the post from {replacement.author}.</span><button type="button" onclick={onundo}><Icon name="undo" size={14} />Undo</button></p>{/if}</div>{/if}
+  {#snippet fileTray()}<ul class="tray" aria-label="Files">{#each files.items as item (item.id)}
     <li class="chip" class:failed={item.state === "failed"}>
       {#if item.preview}<img src={item.preview} alt="" />
       {:else}<span class="ext" aria-hidden="true">{extension(item.file.name)}</span>{/if}
@@ -120,8 +120,9 @@
         <span class="sub">{item.state === "saving" ? "Saving…" : item.state === "failed" ? "Not saved" : fileSize(item.file.size)}</span></span>
       {#if item.state === "failed"}<button type="button" class="retry" onclick={() => files.save(item.id)}>Retry</button>{/if}
       <button type="button" class="remove" aria-label="Remove {item.file.name}" title="Remove {item.file.name}" onclick={() => files.remove(item.id)}><Icon name="close" size={14} /></button>
-    </li>{/each}</ul>{/if}
-  {#if note || over > 0}<p class="note" role="status">{over > 0 ? `A post can carry ${maxFiles} files; remove ${over} to send.` : note}</p>{/if}
+    </li>{/each}</ul>{/snippet}
+  {#if files.items.length}{#if touch.current}<details class="files-toggle"><summary><Icon name="file" size={14} />{count(files.items.length, "file")}</summary>{@render fileTray()}</details>{:else}{@render fileTray()}{/if}{/if}
+  {#if note || over > 0}<p class="note" class:over={over > 0} role="status">{over > 0 ? `A post can carry ${maxFiles} files; remove ${over} to send.` : note}</p>{/if}
   {#if stop?.failed && empty}<p class="note" role="status">The stop did not reach the engine. Try again.</p>{/if}
   <textarea rows="2" aria-label="Message" bind:this={element} bind:value onkeydown={keydown} onpaste={paste} {placeholder}
     oninput={() => { dismissed = -1; track(); }} onclick={track} onkeyup={track} onblur={() => { dismissed = token?.start ?? -1; }} onfocus={() => { dismissed = -1; }}
@@ -154,14 +155,14 @@
   .quote { margin-bottom: 8px; padding: 6px 10px; border: 1px solid var(--line); border-left: 3px solid var(--focus); border-radius: 6px; background: var(--sidebar); }
   .label { margin: 0; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
   .label span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .label strong { color: var(--text); font-weight: 500; }
+  .label strong { color: var(--text); font-weight: 600; }
   .quote button { all: unset; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 4px; color: var(--muted); cursor: pointer; }
   .quote button:hover { background: var(--hover); color: var(--text); }
   .quote button:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
   @media (pointer: coarse) { .quote .label button { width: 44px; height: 44px; flex: none; } }
   .replaced { display: flex; align-items: center; gap: 8px; margin: 4px 0 0; color: var(--muted); font-size: 12px; }
-  .replaced span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .replaced button { width: auto; height: auto; flex: none; color: var(--focus); }
+  .replaced span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .replaced button { display: inline-flex; align-items: center; gap: 4px; width: auto; height: auto; flex: none; color: var(--focus); }
   .quoted { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
   .quoted :global(:is(p, ul, ol, pre, blockquote)) { margin: 0; }
   .quoted :global(:is(h1, h2, h3, h4, h5, h6)) { margin: 0; font-size: inherit; }
@@ -191,13 +192,18 @@
   .retry { all: unset; cursor: pointer; color: var(--focus); font-size: 12px; border-radius: 3px; }
   .retry:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .note { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
+  .note.over { color: var(--danger); }
   /* The key hint shows only while the empty message box has focus. */
   .keys { font-size: 12px; color: var(--muted); visibility: hidden; }
   .composer:has(textarea:focus:placeholder-shown) .keys { visibility: visible; }
   @media (pointer: coarse) {
     .composer { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; align-items: center; padding: 8px 10px; }
     .quote, .tray, .note, .mentions { grid-column: 1 / -1; }
-    .tray { max-height: 88px; overflow-y: auto; }
+    .note.over { grid-row: 5; margin: 4px 0 0; }
+    .files-toggle { grid-column: 2; grid-row: 4; justify-self: start; z-index: 1; }
+    .files-toggle summary { display: flex; align-items: center; gap: 4px; padding: 6px; border-radius: 6px; background: var(--selected); color: var(--muted); font-size: 12px; cursor: pointer; list-style: none; white-space: nowrap; }
+    .files-toggle .tray { position: absolute; left: 0; right: 0; bottom: 100%; max-height: 180px; overflow-y: auto; padding: 8px; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; }
+    .has-files textarea { padding-left: 76px; }
     textarea { grid-column: 2; grid-row: 4; min-height: 40px; max-height: 30vh; padding: 8px 0; }
     .actions { display: contents; }
     .actions .attach { grid-column: 1; grid-row: 4; }
