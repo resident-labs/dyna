@@ -15,7 +15,7 @@ import (
 	"github.com/coder/websocket"
 )
 
-func TestWatchPreservesUpdatesDuringScreenshot(t *testing.T) {
+func TestWatchSendsScreenshotBeforeScreencast(t *testing.T) {
 	acked := make(chan int, 1)
 	mux := http.NewServeMux()
 	server := httptest.NewServer(mux)
@@ -29,7 +29,7 @@ func TestWatchPreservesUpdatesDuringScreenshot(t *testing.T) {
 			return
 		}
 		defer conn.CloseNow()
-		shots := 0
+		captured := false
 		for {
 			_, data, err := conn.Read(r.Context())
 			if err != nil {
@@ -42,16 +42,16 @@ func TestWatchPreservesUpdatesDuringScreenshot(t *testing.T) {
 			result := json.RawMessage(`{}`)
 			switch m.Method {
 			case "Page.captureScreenshot":
-				shots++
-				if shots == 1 {
-					// This update arrives after the screenshot was captured, but before its reply.
-					frame := []byte(`{"method":"Page.screencastFrame","params":{"data":"c3RhbGU=","sessionId":17}}`)
-					if conn.Write(r.Context(), websocket.MessageText, frame) != nil {
-						return
-					}
-					result = json.RawMessage(`{"data":"b2xk"}`)
-				} else {
-					result = json.RawMessage(`{"data":"bmV3"}`)
+				if captured {
+					t.Error("unexpected second capture")
+					return
+				}
+				captured = true
+				result = json.RawMessage(`{"data":"b2xk"}`)
+			case "Page.startScreencast":
+				if !captured {
+					t.Error("screencast started before screenshot")
+					return
 				}
 			case "Page.screencastFrameAck":
 				var params struct {
@@ -65,12 +65,24 @@ func TestWatchPreservesUpdatesDuringScreenshot(t *testing.T) {
 			if conn.Write(r.Context(), websocket.MessageText, reply) != nil {
 				return
 			}
+			if m.Method == "Page.startScreencast" {
+				frame := []byte(`{"method":"Page.screencastFrame","params":{"data":"bmV3","sessionId":17}}`)
+				if conn.Write(r.Context(), websocket.MessageText, frame) != nil {
+					return
+				}
+			}
 		}
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	reader, writer := io.Pipe()
 	done := make(chan error, 1)
-	go func() { done <- watch(ctx, server.URL, writer, func(context.Context) error { return nil }) }()
+	go func() {
+		err := watch(ctx, server.URL, writer, func(context.Context) error { return nil })
+		writer.CloseWithError(err)
+		done <- err
+	}()
+	defer cancel()
+	defer reader.Close()
 	for _, want := range []string{"old", "new"} {
 		var size uint32
 		if err := binary.Read(reader, binary.BigEndian, &size); err != nil || size != uint32(len(want)) {
