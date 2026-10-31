@@ -295,7 +295,7 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
       case "pr.opened": prs++; break;
       case "box.pressure": memory++; break;
       case "grant.expired": grants++; break;
-    case "rule.added": case "rule.removed": case "rule.edited": rules++; break;
+      case "rule.added": case "rule.removed": case "rule.edited": rules++; break;
     }
   }
   if (until) last = Math.max(last, Date.parse(until));
@@ -340,13 +340,14 @@ export function describe(event: Event, name: Name): string {
     case "grant.expired": return "A host execution grant expired";
     // The owner reads this feed; a room's root may also pause it.
     case "room.paused": case "room.resumed": return `${event.from.session ? name(event.from.session) : "You"} ${event.type === "room.paused" ? "paused" : "resumed"} the room`;
-    // Zero means no limit. GB counts 2^30 bytes, as the Home meters do.
+    // Only the owner sets room limits. Zero means no limit. GB and MB count 2^30 and 2^20 bytes, as the Home meters do;
+    // a limit under 1 GB shows in MB, rounded up to at least 1, so a real limit never reads as zero.
     case "room.limits_changed": {
       const { cpus, memBytes } = event.body, gb = memBytes / 2 ** 30;
-      if (!cpus && !memBytes) return "Room limit removed";
+      if (!cpus && !memBytes) return "You removed the room limit";
       const cpu = cpus ? `${cpus} CPU${cpus === 1 ? "" : "s"}` : "no CPU limit";
-      const mem = memBytes ? `${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB` : "no memory limit";
-      return `Room limit set to ${cpu} and ${mem}`;
+      const mem = !memBytes ? "no memory limit" : gb < 1 ? `${Math.max(1, Math.round(memBytes / 2 ** 20))} MB` : `${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB`;
+      return `You set the room limit to ${cpu} and ${mem}`;
     }
     case "rule.added": return `Rule r${event.body.number} added: ${event.body.text}`;
     case "rule.removed": return `Rule r${event.body.number} removed`;
