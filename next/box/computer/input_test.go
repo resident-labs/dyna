@@ -13,6 +13,20 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+// With no worker draining the queue, as when Chromium hangs, Enqueue returns at once and drops the overflow.
+func TestInputEnqueueNeverBlocks(t *testing.T) {
+	in := NewInput("http://unused")
+	accepted := 0
+	for range 100 {
+		if in.Enqueue(contract.ComputerInputBatch{}) {
+			accepted++
+		}
+	}
+	if accepted != 64 {
+		t.Fatalf("accepted %d batches, want 64", accepted)
+	}
+}
+
 func TestInputMapsFramePixelsToCSSPixels(t *testing.T) {
 	var sent []message
 	mux := http.NewServeMux()
