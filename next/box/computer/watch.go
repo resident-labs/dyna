@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"time"
 
@@ -34,12 +35,16 @@ func watch(ctx context.Context, base string, out io.Writer, pace func(context.Co
 	if _, err = d.Call(ctx, "Page.enable", nil); err != nil {
 		return err
 	}
-	if err = captureFrame(ctx, d, out); err != nil {
-		return err
-	}
 	if _, err = d.Call(ctx, "Page.startScreencast", json.RawMessage(`{"format":"jpeg","quality":70,"maxWidth":1280,"everyNthFrame":1}`)); err != nil {
 		return err
 	}
+	d.id++
+	captureID := d.id
+	request, _ := json.Marshal(message{ID: captureID, Method: "Page.captureScreenshot", Params: json.RawMessage(`{"format":"jpeg","quality":70}`)})
+	if err = d.conn.Write(ctx, websocket.MessageText, request); err != nil {
+		return err
+	}
+	shownFrame := false
 	for {
 		var m message
 		if len(d.pending) > 0 {
@@ -54,6 +59,23 @@ func watch(ctx context.Context, base string, out io.Writer, pace func(context.Co
 				return err
 			}
 		}
+		if m.ID == captureID {
+			if m.Error != nil {
+				return fmt.Errorf("DevTools Page.captureScreenshot: %s", m.Error.Message)
+			}
+			if !shownFrame {
+				var shot struct {
+					Data string `json:"data"`
+				}
+				if err = json.Unmarshal(m.Result, &shot); err != nil {
+					return err
+				}
+				if err = writeFrame(out, shot.Data); err != nil {
+					return err
+				}
+			}
+			continue
+		}
 		if m.Method != "Page.screencastFrame" {
 			continue
 		}
@@ -67,6 +89,7 @@ func watch(ctx context.Context, base string, out io.Writer, pace func(context.Co
 		if err = writeFrame(out, frame.Data); err != nil {
 			return err
 		}
+		shownFrame = true
 		if err = pace(ctx); err != nil {
 			return err
 		}
@@ -74,20 +97,6 @@ func watch(ctx context.Context, base string, out io.Writer, pace func(context.Co
 			return err
 		}
 	}
-}
-
-func captureFrame(ctx context.Context, d *DevTools, out io.Writer) error {
-	result, err := d.Call(ctx, "Page.captureScreenshot", json.RawMessage(`{"format":"jpeg","quality":70}`))
-	if err != nil {
-		return err
-	}
-	var shot struct {
-		Data string `json:"data"`
-	}
-	if err = json.Unmarshal(result, &shot); err != nil {
-		return err
-	}
-	return writeFrame(out, shot.Data)
 }
 
 func writeFrame(out io.Writer, data string) error {
