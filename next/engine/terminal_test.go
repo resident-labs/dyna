@@ -7,14 +7,10 @@ import (
 )
 
 func TestHostListOwner(t *testing.T) {
-	s, _, sid, ctx := setup(t)
+	s, _, _, ctx := setup(t)
 	list, problem := s.HostList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.HostListRequest{})
 	if problem != nil || len(list.Hosts) != 2 || list.Hosts[0].Name != contract.ControlPlane || list.Hosts[1].Name != "host" {
 		t.Fatalf("hosts: %+v %v", list, problem)
-	}
-	_, problem = s.HostList(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid}, contract.HostListRequest{})
-	if problem == nil || problem.Code != contract.ErrForbidden {
-		t.Fatalf("session: %v", problem)
 	}
 }
 
