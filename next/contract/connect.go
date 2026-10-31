@@ -22,6 +22,7 @@ type ConnectStatusResponse struct {
 	ConnectorMissing bool           `json:"connectorMissing"`
 	Routes           []string       `json:"routes"`
 	Tunnel           string         `json:"tunnel,omitempty"`
+	Relay            string         `json:"relay,omitempty"`
 }
 type ConnectCancelRequest struct{}
 type ConnectCancelResponse struct{}
