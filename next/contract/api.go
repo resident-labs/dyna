@@ -314,6 +314,7 @@ type PostRequest struct {
 	Home        Conversation `json:"home,omitempty"`
 	ReplyTo     EventID      `json:"replyTo,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
+	ClientID    string       `json:"clientId,omitempty"` // at most 64 characters; a repeat from the same author in a room returns the first post
 }
 type PostResponse struct {
 	Event EventID `json:"event"`
