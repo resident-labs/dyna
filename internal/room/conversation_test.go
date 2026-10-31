@@ -208,3 +208,33 @@ func TestConversationValidate(t *testing.T) {
 		}
 	}
 }
+
+// The media lookup must start with one session's deliveries, not every post in the room.
+func TestFileDeliveryQueryStartsWithSession(t *testing.T) {
+	s, rec := newEventStore(t)
+	db, err := s.postIndexDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := "EXPLAIN QUERY PLAN SELECT h.post_id,h.ts,h.rowid FROM " + fileDeliverySource + " AND (h.ts<? OR (h.ts=? AND h.rowid<?)) ORDER BY h.ts DESC,h.rowid DESC LIMIT ?"
+	rows, err := db.Query(query, rec.ID, "session", "home", int64(999), int64(999), int64(999), 256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var details []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(details) < 2 || !strings.Contains(details[0], "post_deliveries_session") || !strings.Contains(details[1], "sqlite_autoindex_post_homes_1") {
+		t.Fatalf("media query does not start with the session: %v", details)
+	}
+}
