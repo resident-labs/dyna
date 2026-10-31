@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +34,10 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 	files, err := s.store.TranscriptFiles(ctx, req.Session)
 	if err != nil {
 		return response, failure(err)
+	}
+	reader := pi.TranscriptReader{Dir: filepath.Join(s.transcriptDir, string(req.Session)), Acked: make(map[string]int64, len(files))}
+	for _, f := range files {
+		reader.Acked[f.Path] = f.Acked
 	}
 	deliveries, err := s.store.TranscriptDeliveries(ctx, req.Session)
 	if err != nil {
@@ -135,37 +138,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			skip := req.ItemIndex
 			if !req.Tail {
 				for _, r := range ranges {
-					file, err := os.Open(filepath.Join(s.transcriptDir, string(req.Session), r.Path))
-					if errors.Is(err, os.ErrNotExist) {
-						continue
-					}
-					if err != nil {
-						return response, failure(err)
-					}
-					info, err := file.Stat()
-					if err != nil {
-						file.Close()
-						return response, failure(err)
-					}
-					end := info.Size()
-					if r.End != nil && *r.End < end {
-						end = *r.End
-					}
-					// Never read bytes after the committed acknowledgment.
-					acknowledged := false
-					for _, f := range files {
-						if f.Path == r.Path {
-							end = min(end, f.Acked)
-							acknowledged = true
-							break
-						}
-					}
-					if !acknowledged {
-						file.Close()
-						continue
-					}
-					items, seen, more, err := pi.ReadTranscript(io.NewSectionReader(file, r.Start, max(0, end-r.Start)), deliveries, r.Path, req.Item, skip, max(0, 6-len(t.Items)))
-					file.Close()
+					items, seen, more, err := reader.Read(r.Path, r.Start, r.End, deliveries, req.Item, skip, max(0, 6-len(t.Items)))
 					if err != nil {
 						return response, failure(err)
 					}
@@ -252,25 +225,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 					offset++
 					claimed := false
 					for _, r := range ranges {
-						file, err := os.Open(filepath.Join(s.transcriptDir, string(req.Session), r.Path))
-						if errors.Is(err, os.ErrNotExist) {
-							continue
-						}
-						if err != nil {
-							return response, failure(err)
-						}
-						end := int64(0)
-						for _, f := range files {
-							if f.Path == r.Path {
-								end = f.Acked
-								break
-							}
-						}
-						if r.End != nil && *r.End < end {
-							end = *r.End
-						}
-						found, err := pi.TranscriptHasPost(io.NewSectionReader(file, r.Start, max(0, end-r.Start)), post.ID)
-						file.Close()
+						found, err := reader.HasPost(r.Path, r.Start, r.End, post.ID)
 						if err != nil {
 							return response, failure(err)
 						}
