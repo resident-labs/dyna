@@ -53,7 +53,7 @@ func (s *Store) FinishHostexec(ctx context.Context, id contract.OpID, now time.T
 }
 func (s *Store) HostexecStops(ctx context.Context, now time.Time) ([]HostexecRun, error) {
 	if err := s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.Exec("UPDATE hostexec_runs SET ended_at=? WHERE ended_at IS NULL AND stopped='lost' AND started_at+timeout_ms+10000<=?", now.UnixMilli(), now.UnixMilli())
+		_, err := tx.Exec("UPDATE hostexec_runs SET ended_at=? WHERE ended_at IS NULL AND lost_at IS NOT NULL AND lost_at+30000+timeout_ms+10000<=?", now.UnixMilli(), now.UnixMilli())
 		return err
 	}); err != nil {
 		return nil, err
@@ -86,7 +86,7 @@ func (s *Store) RecoverHostexec(ctx context.Context, now time.Time) error {
 // Revoked runs retain their live runner, which records completion itself.
 func (s *Store) CompleteHostexecStop(ctx context.Context, id contract.OpID, now time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.Exec("UPDATE hostexec_runs SET ended_at=? WHERE op=? AND ended_at IS NULL AND stopped='lost' AND lost_at+30000<=?", now.UnixMilli(), id, now.UnixMilli())
+		_, err := tx.Exec("UPDATE hostexec_runs SET ended_at=? WHERE op=? AND ended_at IS NULL AND lost_at IS NOT NULL AND lost_at+30000<=?", now.UnixMilli(), id, now.UnixMilli())
 		return err
 	})
 }
