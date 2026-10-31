@@ -161,8 +161,8 @@
       </section>
       <aside class:mobile-hidden={mobile !== "changes"} aria-label="Instruction review">
         {#if other}
-          <div class="side-head"><StatusPill tone="warning" label="Changed on another device" /><p>Nothing was saved. Your text is unchanged.</p></div>
           <div class="side-head review-title"><strong>What sessions get</strong> <span>· {changed.length} lines changed</span></div>
+          <div class="side-head"><StatusPill tone="warning" label="Changed on another device" /><p>Nothing was saved. Your text is unchanged.</p></div>
           <div class="review"><strong>Their change</strong>
             {@render diffView(instructionDiff(base, other.text))}
             <strong>Yours</strong>
@@ -187,7 +187,7 @@
         {#if other}<p class="overwrite-note">Save mine over it replaces their change with your file.</p>{/if}
         <div class="actions">
           {#if other}<button class="outlined" type="button" disabled={saving} onclick={useTheirs}>Use theirs</button><button class="primary" type="button" disabled={saving} onclick={() => void save(true)}>Save mine over it</button>
-          {:else}<button type="button" disabled={draft === base} onclick={discard}>Discard</button><button class="primary" type="button" disabled={saving || draft === base} onclick={() => void save()}>Save</button>{#if draft !== base}<kbd>Ctrl S</kbd>{/if}{/if}
+          {:else}<button type="button" disabled={draft === base} onclick={discard}>Discard</button>{#if draft !== base}<kbd>Ctrl S</kbd>{/if}<button class="primary" type="button" disabled={saving || draft === base} onclick={() => void save()}>Save</button>{/if}
         </div>
       </aside>
     </div>
@@ -224,7 +224,7 @@
   .review li small { display: block; color: var(--muted); margin-top: 4px; }
   .line-number { display: block; width: 100%; border-radius: 0; background: var(--hover); color: var(--muted); text-align: left; font-size: 11px; padding: 3px 10px; }
   .diff { display: flex; gap: 8px; padding: 4px 10px; white-space: pre-wrap; overflow-wrap: anywhere; }.diff span { flex: none; width: 8px; }.diff.same { color: var(--muted); }.diff.add { background: color-mix(in srgb, var(--success) 12%, transparent); }.diff.remove { background: color-mix(in srgb, var(--danger) 12%, transparent); }
-  .overwrite-note { margin: 0; padding: 12px 16px 0; color: var(--muted); font-size: 12.5px; }.outlined { border: 1px solid var(--line); }.actions kbd { align-self: center; margin-left: 6px; }.actions { display: flex; justify-content: space-between; padding: 12px 16px; border-top: 1px solid var(--line); }.primary { background: var(--focus); color: var(--bg); }.primary:hover { background: var(--focus); opacity: .85; }
+  .overwrite-note { margin: 0; padding: 12px 16px 0; color: var(--muted); font-size: 12.5px; }.outlined { border: 1px solid var(--muted); }.actions kbd { align-self: center; margin-left: auto; margin-right: 6px; }.actions { display: flex; justify-content: space-between; padding: 12px 16px; border-top: 1px solid var(--line); }.primary { background: var(--focus); color: var(--bg); }.primary:hover { background: var(--focus); opacity: .85; }
   .mobile-tabs, .mobile-save { display: none; }.loading { padding: 24px; display: grid; gap: 12px; }.loading span { display: block; height: 14px; width: 70%; background: var(--hover); border-radius: 6px; }.loading span:nth-child(2) { width: 90%; }.error { color: var(--muted); padding: 16px; }
   @media (max-width: 700px) {
     header { height: auto; min-height: 52px; padding: 0 8px; flex-wrap: wrap; }.crumb, .slash { display: none; }.files { order: 2; flex-basis: 100%; margin-left: 0; border-top: 1px solid var(--line); }.files button { min-height: 40px; }
