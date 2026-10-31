@@ -84,6 +84,13 @@ func (s *AccountActions) runAccountAction(ctx context.Context, caller contract.P
 		return accountActionResult{}, &contract.Error{Code: contract.ErrUnavailable, Message: "account action unavailable"}
 	}
 	if op.State == contract.OpFailed {
+		select {
+		case result := <-resultCh:
+			if errors.Is(result.err, model.ErrReconnectUnavailable) {
+				return accountActionResult{}, &contract.Error{Code: contract.ErrReconnectUnavailable, Message: "reconnect unavailable"}
+			}
+		default:
+		}
 		return accountActionResult{}, &contract.Error{Code: contract.ErrUnavailable, Message: "account action failed"}
 	}
 	select {
