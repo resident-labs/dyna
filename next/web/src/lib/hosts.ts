@@ -1,3 +1,4 @@
+import { call } from "./client.ts";
 import type { HostSummary } from "./contract.gen.ts";
 
 export const hostLabel = (host: string) => host === "control-plane" ? "This computer" : host;
@@ -27,4 +28,29 @@ export function lastSeen(h: HostSummary, now: number): string | undefined {
   if (!h.lastSeen) return undefined;
   const minutes = Math.max(0, Math.round((now - Date.parse(h.lastSeen)) / 60_000));
   return "Last seen " + (minutes < 1 ? "just now" : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`);
+}
+
+// The sessions panel's foot: at most 3 hosts. Unreachable hosts come first, since they need attention; then the
+// reachable ones that report load, busiest first by the higher of CPU and memory.
+export function hostLoads(hosts: HostSummary[]): { name: string; reachable: boolean; meters: Meter[] }[] {
+  const load = (meters: Meter[]) => Math.max(...meters.map(m => m.percent));
+  const loads = hosts.filter(h => h.reachable).map(h => ({ name: h.name, reachable: true, meters: hostMeters(h).slice(0, 2) }))
+    .filter(h => h.meters.length).sort((a, b) => load(b.meters) - load(a.meters));
+  return [...hosts.filter(h => !h.reachable).map(h => ({ name: h.name, reachable: false, meters: [] })), ...loads].slice(0, 3);
+}
+
+// host.list now, then every 10 s to match the engine's beat, only while the page is visible. A tick skips while a
+// call is out, so calls never pile up on a slow engine and answers arrive in order. It returns the stop function.
+export function watchHosts(apply: (hosts: HostSummary[]) => void, fail: () => void): () => void {
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let loading = false;
+  const tick = () => {
+    if (loading) return;
+    loading = true;
+    void call("host.list", {}).then(list => apply(list.hosts ?? []), fail).finally(() => { loading = false; });
+  };
+  const sync = () => { clearInterval(timer); if (document.hidden) return; tick(); timer = setInterval(tick, 10_000); };
+  sync();
+  document.addEventListener("visibilitychange", sync);
+  return () => { clearInterval(timer); document.removeEventListener("visibilitychange", sync); };
 }
