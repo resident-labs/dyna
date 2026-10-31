@@ -52,7 +52,19 @@ func readPRs(db *sql.DB, room string, author func(string) (contract.ImportedAuth
 		if err != nil {
 			return nil, nil, err
 		}
-		result = append(result, contract.TrackedPR{Branch: rec.Branch, Repo: contract.RepoName(strings.TrimSuffix(repo, ".git")), Number: number, Author: by, Goal: contract.GoalID(rec.GoalID)})
+		out := contract.TrackedPR{Branch: rec.Branch, Repo: contract.RepoName(strings.TrimSuffix(repo, ".git")), Number: number, Author: by, Goal: contract.GoalID(rec.GoalID)}
+		if rec.Hold != nil {
+			holder := rec.Hold.By
+			if holder == "" {
+				holder = "owner"
+			}
+			by, err := author(holder)
+			if err != nil {
+				return nil, nil, err
+			}
+			out.Hold = &contract.PRHandoffHold{Reason: rec.Hold.Reason, By: by, At: rec.Hold.At}
+		}
+		result = append(result, out)
 	}
 	return result, skipped, rows.Err()
 }
