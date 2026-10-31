@@ -291,6 +291,18 @@ test("a job that ends counts as ended at once, even while a turn holds the runni
   assert.equal(room.failedJobs.size, 0);
 });
 
+test("a session with finished jobs stays reachable after a fresh load, and one that gains a job joins it", async () => {
+  const listed = { lastRead: 0, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "", startedAt: "" } as const;
+  const server = engine(3, [{ id: "s", ...listed, hadJobs: true }, { id: "x", ...listed, hadJobs: false }]);
+  try {
+    const room = new RoomStore("r", () => () => {});
+    await room.open();
+    assert.deepEqual([...room.hadJobs], ["s"]);
+    room.apply(event(4, { type: "shell.job.ended", body: { session: "x", job: "j", exitCode: 0, tail: "" } }));
+    assert.deepEqual([...room.hadJobs], ["s", "x"]);
+  } finally { server.restore(); }
+});
+
 test("activity labels follow the running turn and never reach a window", async () => {
   const listed = { lastRead: 0, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "", startedAt: "", hadJobs: false } as const;
   const server = engine(1, [{ id: "s", ...listed, turn: "t", activity: "read spec.md" }]);
