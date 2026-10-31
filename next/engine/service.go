@@ -228,6 +228,11 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 	if !mentionName.MatchString(req.Name) {
 		return contract.SessionStartResponse{}, invalid("session name must be 1–64 letters, digits, dots, underscores or hyphens and start with a letter or digit")
 	}
+	switch req.Name {
+	case "root", "parent", "children", "siblings":
+		// room.ParseAddress reads these names as roles, so no one could mention the session by its name.
+		return contract.SessionStartResponse{}, invalid("session name " + req.Name + " is reserved for a mention role")
+	}
 	return s.startSession(ctx, caller, req, "")
 }
 
