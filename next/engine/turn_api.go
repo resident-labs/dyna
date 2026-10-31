@@ -89,7 +89,7 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		"Use dyna rules to read room rules and dyna room log ROOM to read the feed.\n" +
 		"Use dyna op list ROOM, dyna op approve ID, or dyna op deny ID --reason WHY for requests.\n" +
 		"Use dyna pr open --title TITLE --body-file FILE to open a pull request."
-	return contract.BoxHelloResponse{Session: session.ID, Box: session.Box, Model: model, CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Rules: rules.Rules, Transcripts: files, Instructions: instructions}, nil
+	return contract.BoxHelloResponse{GitName: s.gitName, GitEmail: s.gitEmail, Session: session.ID, Box: session.Box, Model: model, CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Rules: rules.Rules, Transcripts: files, Instructions: instructions}, nil
 }
 
 func (s *Service) DeliveryDone(ctx context.Context, caller contract.Principal, req contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error) {
