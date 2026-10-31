@@ -57,7 +57,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 				}
 				commands = append(commands, line)
 			}
-			return contract.Card{Title: "Grant host execution", Target: contract.Target{Kind: contract.TargetRoom, Name: string(a.Room)}, Body: fmt.Sprintf("Let %s run %s on %s %s, %s.", session.Name, strings.Join(commands, "\n"), strings.Join(hosts, ", "), expiry, mode)}
+			return contract.Card{Title: "Grant host execution", Target: contract.Target{Kind: contract.TargetRoom, Name: string(a.Room)}, Body: fmt.Sprintf("Let %s run %s on %s, %s, %s.", session.Name, strings.Join(commands, "\n"), strings.Join(hosts, ", "), expiry, mode)}
 		},
 		Check: func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
 			a := args.(contract.HostexecGrantArgs)
