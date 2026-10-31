@@ -23,9 +23,12 @@
   import RequestsPanel from "./lib/ui/RequestsPanel.svelte";
   import { Attention } from "./lib/attention.svelte.ts";
   import { mentionable, parseMentions } from "./lib/mentions.ts";
+  import { roomInitials } from "./lib/identity.ts";
   import type { Conversation, PostRequest, SessionStarted } from "./lib/contract.gen.ts";
   const attention = new Attention();
   let rooms = $derived([...attention.rooms.values()]);
+  // Distinct initials for every room avatar, so two rooms never look alike on the rail.
+  let initials = $derived(roomInitials(rooms.map(item => item.name)));
   // While the engine is not reachable, open runs again by itself: after a growing wait while the page is visible, and at
   // once when a hidden page becomes visible again. Try again runs it at once.
   // An open runs alone, so Try again or a wake during one adds no second stream; none starts after stop.
@@ -285,7 +288,7 @@
 {#snippet intro()}
   {#if session}<RoomIntro kind="session" name={title} root={!!store?.sessions.get(session) && !store.sessions.get(session)?.parent} line={`This is the start of your direct messages with ${title}.`} />
   {:else}{@const created = attention.rooms.get(room ?? "")?.created}
-    <RoomIntro kind="room" name={roomName} line={`This is the beginning of #${roomName}.${created ? ` It started ${new Date(created).toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" })}.` : ""}`} />{/if}
+    <RoomIntro kind="room" name={roomName} label={initials.get(roomName)} line={`This is the beginning of #${roomName}.${created ? ` It started ${new Date(created).toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" })}.` : ""}`} />{/if}
 {/snippet}
 
 {#snippet computerView(id: string)}
@@ -302,7 +305,7 @@
       {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}
       <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id ? "page" : undefined}
         aria-label={waiting ? `${item.name}, ${count(waiting, "request")} waiting` : item.name} title={item.name}>
-        <Avatar kind="room" name={item.name} size={40} />{#if waiting}<StatusPill tone="warning" label="Waiting" count={waiting} />{/if}</a>
+        <Avatar kind="room" name={item.name} label={initials.get(item.name)} size={40} />{#if waiting}<StatusPill tone="warning" label="Waiting" count={waiting} />{/if}</a>
     {/each}</nav>
     <!-- The owner's face from the feed; v2 has no owner name or account menu yet. -->
     <footer><span role="img" aria-label="You" title="You"><Avatar kind="owner" name="You" size={32} /></span></footer>
@@ -323,7 +326,7 @@
     {:else}<div class="feed">
       {#if blocked}<Blocked kind={blocked} onretry={blocked === "unreachable" ? connect : undefined} />
       {:else if !room && roomsLoaded && !rooms.length}<Blocked kind="no-rooms" />
-      {:else if !room}<Home {attention} loaded={roomsLoaded} {navigate} onrequests={() => { section = "requests"; }} />
+      {:else if !room}<Home {attention} {initials} loaded={roomsLoaded} {navigate} onrequests={() => { section = "requests"; }} />
       {:else if unavailable && unavailable !== "room"}<Blocked kind={unavailable} onretry={unavailable === "unreachable" ? reopen : undefined} />
       {:else if store && !unavailable}
         {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}

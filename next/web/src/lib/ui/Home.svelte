@@ -15,7 +15,10 @@
   import UsageCard from "./UsageCard.svelte";
   type Navigate = (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void;
   // onrequests opens the Requests panel once the link has moved to that room. loaded is false until room.list answers.
-  let { attention, loaded, navigate, onrequests }: { attention: Attention; loaded: boolean; navigate: Navigate; onrequests: () => void } = $props();
+  // initials are the rooms' distinct initials, as the rail shows them.
+  let { attention, initials, loaded, navigate, onrequests }: {
+    attention: Attention; initials: Map<string, string>; loaded: boolean; navigate: Navigate; onrequests: () => void;
+  } = $props();
   // Each room's sessions load once while Home is open, for Activity's counts and names. Requests load per room, and
   // again only when a room gains a request or requester that no answer named yet. A failed load forgets its IDs and
   // offers Try again.
@@ -149,7 +152,7 @@
   <div class="top">
     {#if asks || decided.size}<section class="card requests"><h2 tabindex="-1" bind:this={requestsHeading}>Requests{#if waiting.length}<span>{waiting.length}</span>{/if}</h2>
       <div class="list">{#each groups as { room, count } (room.id)}<a class="item fold" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>
-        <Icon name="chevron" /><Avatar kind="room" name={room.name} size={28} />
+        <Icon name="chevron" /><Avatar kind="room" name={room.name} label={initials.get(room.name)} size={28} />
         <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{count} waiting</span></span></a>
       {:else}{#each waiting as { id, room, value, who, root } (id)}{@const soon = Date.parse(value.expires) - now < 5 * 60_000}<div class="item request">
         <Avatar kind={value.by.kind} name={who} {root} size={28} />
@@ -164,7 +167,7 @@
       </section>{/if}
     <section class="card"><h2>Activity{#if total(attention.working)}<span>{total(attention.working)} working</span>{/if}</h2>
       {#snippet row({ room, working, line }: (typeof activity)[number])}<a class="item" href={roomHref(room.id)} onclick={navigate}>
-        <Avatar kind="room" name={room.name} size={28} />
+        <Avatar kind="room" name={room.name} label={initials.get(room.name)} size={28} />
         <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{line}</span></span>
         <!-- Who works, from two sessions on (one is named in the line): three small avatars at most, then a count. -->
         {#if working.length > 1}<span class="stack">{#each working.slice(0, 3) as id (id)}<Avatar kind="session" name={sessions.get(id)?.name ?? ""} root={sessions.get(id)?.root ?? false} size={20} />{/each}
