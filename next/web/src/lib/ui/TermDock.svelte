@@ -120,9 +120,9 @@
 
 <style>
   :global(.terminals) { flex: none; border-top: 1px solid var(--line); background: var(--bg); }
-  :global(.terminals:not(.floating) > header) { height: 34px; padding-left: 6px; }
+  :global(.terminals:not(.floating) > header) { height: 30px; padding-left: 4px; }
   .tabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
-  .tab { display: flex; align-items: center; flex: none; height: 26px; border-radius: 6px; }
+  .tab { display: flex; align-items: center; flex: none; height: 24px; border-radius: 6px; }
   .tab:hover, .tab.active { background: var(--selected); }
   .tabs [role="tab"] { display: flex; align-items: center; width: auto; padding: 0 2px 0 8px; gap: 6px; color: var(--muted); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
   .tab.active [role="tab"] { color: var(--text); }
