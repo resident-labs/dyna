@@ -79,7 +79,7 @@
     if (stuck) events = events.filter(event => event.kind !== "mouse.move" && event.kind !== "wheel");
     if (input && picture && events.length) queue.push(events, { width: picture.naturalWidth, height: picture.naturalHeight });
   };
-  async function take() { control = true; await tick(); screen?.focus(); }
+  async function take() { queue.begin(); control = true; await tick(); screen?.focus(); }
   const hold = new MouseHold();
   // Control ends or the view closes: held buttons go up, even behind a refused batch.
   const drop = () => queue.finish(hold.release());
