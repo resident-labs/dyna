@@ -107,9 +107,14 @@ type AccountsConnectCallbackResponse struct{}
 type AccountsConnectStatusRequest struct {
 	Attempt string `json:"attempt"`
 }
+type ConnectFailureReason string
+
+const ConnectAdoptionFailed ConnectFailureReason = "adoption_failed"
+
 type AccountsConnectStatusResponse struct {
-	Status    ConnectStatus `json:"status"`
-	AccountID AccountID     `json:"accountId,omitempty"`
+	Status    ConnectStatus        `json:"status"`
+	AccountID AccountID            `json:"accountId,omitempty"`
+	Reason    ConnectFailureReason `json:"reason,omitempty"`
 }
 type AccountsSetKeyRequest struct {
 	Provider AccountProvider `json:"provider"`
