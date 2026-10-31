@@ -6,37 +6,71 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 type Web struct {
 	mu      sync.Mutex
 	host    string
+	routes  map[string]string
 	address string
 	handler http.Handler
 	now     func() time.Time
+	ticks   func() (<-chan time.Time, func())
 	tokens  map[[32]byte]time.Time
-	cookies map[[32]byte]struct{}
+	devices DeviceStore
 	app     fs.FS
 	api     *API
 }
 
-func NewWeb(a *API, address string, app fs.FS, now func() time.Time) (*Web, error) {
+type DeviceStore interface {
+	CreateDevice(context.Context, store.Device) error
+	AuthenticateDevice(context.Context, [32]byte, time.Time) (store.Device, bool, error)
+	RedeemPairCode(context.Context, string, string, []contract.Scope, time.Time) (string, store.Device, error)
+}
+
+func NewWeb(a *API, address string, app fs.FS, now func() time.Time, devices DeviceStore) (*Web, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil || host != "127.0.0.1" || port == "" {
 		return nil, fmt.Errorf("web listener must bind 127.0.0.1 with a port")
 	}
-	w := &Web{address: address, host: "dyna.localhost:" + port, now: now, app: app, api: a, tokens: make(map[[32]byte]time.Time), cookies: make(map[[32]byte]struct{})}
+	w := &Web{address: address, host: "dyna.localhost:" + port, routes: map[string]string{"dyna.localhost:" + port: "http://dyna.localhost:" + port}, now: now, app: app, api: a, tokens: make(map[[32]byte]time.Time), devices: devices}
+	w.ticks = func() (<-chan time.Time, func()) {
+		t := time.NewTicker(15 * time.Second)
+		return t.C, t.Stop
+	}
 	a.web = w
 	return w, nil
+}
+
+// SetRoutes adds the public origins served by the loopback listener.
+func (w *Web) SetRoutes(routes []string) error {
+	for _, route := range routes {
+		u, err := url.Parse(route)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+			return fmt.Errorf("invalid web route %q: expected an http or https origin", route)
+		}
+		host := strings.ToLower(u.Host)
+		origin := u.Scheme + "://" + host
+		if existing, ok := w.routes[host]; ok && existing != origin {
+			return fmt.Errorf("web route %q has a conflicting host", route)
+		}
+		w.routes[host] = origin
+	}
+	return nil
 }
 
 func secret() (string, error) {
@@ -67,8 +101,50 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 	// The terminal renderer is WebAssembly; a composer shows a picked image from a blob: URL before any post refers to it.
 	out.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' blob:; frame-ancestors 'none'")
 	out.Header().Set("X-Content-Type-Options", "nosniff")
-	if r.Host != w.host || (r.Method != http.MethodGet && r.Header.Get("Origin") != "http://"+w.host) {
+	if r.Header.Get("Tailscale-Funnel-Request") != "" {
 		http.Error(out, "forbidden", http.StatusForbidden)
+		return
+	}
+	origin, known := w.routes[strings.ToLower(r.Host)]
+	if !known {
+		http.Error(out, "unknown host", http.StatusMisdirectedRequest)
+		return
+	}
+	if (r.Method != http.MethodGet && r.Method != http.MethodHead || strings.EqualFold(r.Header.Get("Upgrade"), "websocket")) && r.Header.Get("Origin") != origin {
+		http.Error(out, "forbidden", http.StatusForbidden)
+		return
+	}
+	if r.URL.Path == "/v1/pair" && r.Method == http.MethodPost {
+		var req struct {
+			Code string `json:"code"`
+			Name string `json:"name"`
+		}
+		dec := json.NewDecoder(http.MaxBytesReader(out, r.Body, 4096))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil || len(req.Name) > 200 {
+			http.Error(out, "invalid request", http.StatusBadRequest)
+			return
+		}
+		if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+			http.Error(out, "invalid request", http.StatusBadRequest)
+			return
+		}
+		defaults := []contract.Scope{contract.ScopeRead, contract.ScopeOperate}
+		if origin == "http://"+w.host {
+			defaults = store.FullDeviceScopes
+		}
+		value, _, err := w.devices.RedeemPairCode(r.Context(), req.Code, req.Name, defaults, w.now())
+		if errors.Is(err, store.ErrPair) {
+			http.Error(out, "invalid pairing code", http.StatusForbidden)
+			return
+		}
+		if err != nil {
+			http.Error(out, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		http.SetCookie(out, &http.Cookie{Name: "dyna_device", Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: strings.HasPrefix(origin, "https://"), MaxAge: int(store.DeviceLife / time.Second)})
+		out.Header().Set("Content-Type", "application/json")
+		_, _ = out.Write([]byte("{}"))
 		return
 	}
 	if r.URL.Path == "/login" && r.Method == http.MethodGet {
@@ -86,27 +162,69 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 			http.Error(out, "unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		w.mu.Lock()
-		w.cookies[sha256.Sum256([]byte(value))] = struct{}{}
-		w.mu.Unlock()
-		http.SetCookie(out, &http.Cookie{Name: "dyna_web", Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
+		id, err := secret()
+		if err != nil {
+			http.Error(out, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		now := w.now()
+		d := store.Device{ID: id, Name: "Local web", TokenHash: sha256.Sum256([]byte(value)), PairedAt: now, LastSeenAt: now, ExpiresAt: now.Add(store.DeviceLife), Scopes: store.FullDeviceScopes}
+		if err := w.devices.CreateDevice(r.Context(), d); err != nil {
+			http.Error(out, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		http.SetCookie(out, &http.Cookie{Name: "dyna_device", Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: strings.HasPrefix(origin, "https://"), MaxAge: int(store.DeviceLife / time.Second)})
 		http.Redirect(out, r, "/", http.StatusSeeOther)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/v1/") {
-		cookie, err := r.Cookie("dyna_web")
-		valid := false
-		if err == nil {
-			hash := sha256.Sum256([]byte(cookie.Value))
-			w.mu.Lock()
-			_, valid = w.cookies[hash]
-			w.mu.Unlock()
+		cookie, err := r.Cookie("dyna_device")
+		if err != nil {
+			http.Error(out, "forbidden", http.StatusForbidden)
+			return
+		}
+		device, valid, err := w.devices.AuthenticateDevice(r.Context(), sha256.Sum256([]byte(cookie.Value)), w.now())
+		if err != nil {
+			http.Error(out, "unavailable", http.StatusServiceUnavailable)
+			return
 		}
 		if !valid {
 			http.Error(out, "forbidden", http.StatusForbidden)
 			return
 		}
-		w.handler.ServeHTTP(out, r)
+		http.SetCookie(out, &http.Cookie{Name: "dyna_device", Value: cookie.Value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: strings.HasPrefix(origin, "https://"), MaxAge: int(store.DeviceLife / time.Second)})
+		var streamScope contract.Scope
+		switch r.URL.Path {
+		case "/v1/terminal":
+			streamScope = contract.ScopeTerminal
+		case "/v1/computers/watch":
+			streamScope = contract.ScopeComputers
+		case "/v1/events", "/v1/shell/watch":
+			streamScope = contract.ScopeRead
+		}
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		ticks, stop := w.ticks()
+		defer stop()
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticks:
+					current, alive, err := w.devices.AuthenticateDevice(ctx, sha256.Sum256([]byte(cookie.Value)), w.now())
+					if err != nil || !alive || (streamScope != "" && !hasScope(Caller{Web: true, Scopes: current.Scopes}, streamScope)) {
+						cancel()
+						return
+					}
+				}
+			}
+		}()
+		handler := w.handler
+		if handler == nil {
+			handler = w.api.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner, Device: contract.DeviceID(device.ID)}, Device: device.ID, Scopes: device.Scopes, Web: true})
+		}
+		handler.ServeHTTP(out, r.WithContext(ctx))
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -129,7 +247,6 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 }
 
 func (w *Web) Listen() (net.Listener, error) {
-	w.handler = w.api.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true})
 	l, err := net.Listen("tcp", w.address)
 	if err != nil {
 		return nil, err
