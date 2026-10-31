@@ -21,7 +21,7 @@ func prFixture(t *testing.T, handler http.HandlerFunc) (*Service, contract.Sessi
 	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
 		t.Fatal(err)
 	}
-	child, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: root, Name: "pr-worker", Profile: "test"})
+	child, e := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: root, Name: "pr-worker", Profile: "test", Goal: "goal"})
 	if e != nil {
 		t.Fatal(e)
 	}

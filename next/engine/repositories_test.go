@@ -60,7 +60,7 @@ func TestStartPreparesRepositoriesBeforeBox(t *testing.T) {
 	repos := &fakeRepos{}
 	s.SetRepositories(repos)
 	s.boxes = checkingBoxes{repos, t}
-	_, err := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "second", Profile: "test"})
+	_, err := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "second", Profile: "test", Goal: "goal"})
 	if err != nil {
 		t.Fatal(err)
 	}
