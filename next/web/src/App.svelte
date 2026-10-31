@@ -363,7 +363,8 @@
           {#if store?.computers.has(item.session)}<button type="button" class="watch" class:open={watching === item.session} data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
             title={`Watch ${item.name}'s computer`} onclick={() => watch(item.session)}><Icon name="monitor" /></button>{/if}</div>{/if}
       {:else}<p class="hint">No sessions yet.</p>{/each}
-      <HostFoot {navigate} />
+      <!-- The foot polls hosts, so it mounts only while the panel shows; a phone's closed panel polls nothing. -->
+      {#if wide.current || panel}<HostFoot {navigate} />{/if}
       {/if}
     </aside>
     {#if watching && !docked}{@render computerView(watching)}{/if}
