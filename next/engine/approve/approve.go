@@ -82,7 +82,12 @@ func (s *Service) access(ctx context.Context, who contract.Principal, room contr
 	return nil
 }
 func (s *Service) Submit(ctx context.Context, who contract.Principal, input contract.Operation) (contract.Operation, error) {
-	return s.submit(ctx, who, input, nil)
+	return s.submit(ctx, who, input, nil, "")
+}
+
+// SubmitWithClientID binds a retry key to the created or deduplicated operation.
+func (s *Service) SubmitWithClientID(ctx context.Context, who contract.Principal, input contract.Operation, clientID string) (contract.Operation, error) {
+	return s.submit(ctx, who, input, nil, clientID)
 }
 
 // SubmitEphemeral runs an owner action whose secrets must not enter its record.
@@ -90,12 +95,21 @@ func (s *Service) SubmitEphemeral(ctx context.Context, who contract.Principal, i
 	if execute == nil {
 		return contract.Operation{}, ErrInvalid
 	}
-	return s.submit(ctx, who, input, execute)
+	return s.submit(ctx, who, input, execute, "")
 }
 
-func (s *Service) submit(ctx context.Context, who contract.Principal, input contract.Operation, execute func(context.Context) contract.OpResult) (contract.Operation, error) {
+func (s *Service) submit(ctx context.Context, who contract.Principal, input contract.Operation, execute func(context.Context) contract.OpResult, clientID string) (contract.Operation, error) {
 	if err := s.access(ctx, who, input.Room); err != nil {
 		return contract.Operation{}, err
+	}
+	if clientID != "" {
+		previous, err := s.Store.ReadReplayOperation(ctx, who, clientID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return contract.Operation{}, err
+		}
+		if previous.Operation.ID != "" {
+			return s.decodeReplay(previous, input)
+		}
 	}
 	if input.Args == nil {
 		return contract.Operation{}, ErrInvalid
@@ -143,7 +157,19 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 		}
 	}
 	var previous store.StoredOperation
+	var replay bool
 	err = s.Store.Write(ctx, func(tx *sql.Tx) error {
+		if clientID != "" {
+			found, err := s.Store.ReplayOperation(tx, who, clientID)
+			if err == nil {
+				previous = found
+				replay = true
+				return nil
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+		}
 		found, err := s.Store.PendingOperation(tx, op.Room, who, op.Kind, args)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
@@ -154,17 +180,29 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 			}
 		} else if err == nil {
 			previous = found
+			if clientID != "" {
+				return s.Store.InsertOperationReplay(tx, who, clientID, found.Operation.ID, now)
+			}
 			return nil
 		}
 		if checkErr != nil {
 			return checkErr
 		}
-		return s.Store.InsertOperation(tx, store.StoredOperation{Operation: op, Args: args}, request, nil)
+		if err := s.Store.InsertOperation(tx, store.StoredOperation{Operation: op, Args: args}, request, nil); err != nil {
+			return err
+		}
+		if clientID != "" {
+			return s.Store.InsertOperationReplay(tx, who, clientID, op.ID, now)
+		}
+		return nil
 	})
 	if err != nil {
 		return contract.Operation{}, err
 	}
 	if previous.Operation.ID != "" {
+		if replay {
+			return s.decodeReplay(previous, input)
+		}
 		previous.Operation.Args = input.Args
 		return previous.Operation, nil
 	}
@@ -191,6 +229,20 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 		s.mu.Unlock()
 		return op, nil
 	}
+}
+
+func (s *Service) decodeReplay(record store.StoredOperation, input contract.Operation) (contract.Operation, error) {
+	// The API authorized the submitted kind. Never return a different kind or room.
+	if record.Operation.Kind != input.Kind || record.Operation.Room != input.Room {
+		return contract.Operation{}, ErrForbidden
+	}
+	entry, ok := s.Kinds[record.Operation.Kind]
+	if !ok {
+		return contract.Operation{}, ErrInvalid
+	}
+	args, err := entry.Decode(record.Args)
+	record.Operation.Args = args
+	return record.Operation, err
 }
 
 func (s *Service) Decide(ctx context.Context, who contract.Principal, id contract.OpID, state contract.OpState, reason string) error {
