@@ -26,6 +26,20 @@ func (f *fakeClient) SessionStop(context.Context, contract.SessionStopRequest) (
 	return contract.SessionStopResponse{}, nil
 }
 
+func (f *fakeClient) SessionList(context.Context, contract.SessionListRequest) (contract.SessionListResponse, error) {
+	return contract.SessionListResponse{}, nil
+}
+func (f *fakeClient) SessionMove(context.Context, contract.SessionMoveRequest) (contract.SessionMoveResponse, error) {
+	return contract.SessionMoveResponse{}, nil
+}
+func (f *fakeClient) OpWithdraw(context.Context, contract.OpWithdrawRequest) (contract.OpWithdrawResponse, error) {
+	return contract.OpWithdrawResponse{}, nil
+}
+
+func (f *fakeClient) ContextSnapshot(context.Context, contract.ContextSnapshotRequest) (contract.ContextSnapshotResponse, error) {
+	return contract.ContextSnapshotResponse{}, nil
+}
+
 type fakeClient struct {
 	host         contract.HostAddRequest
 	hostNoSwap   bool
