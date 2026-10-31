@@ -36,6 +36,23 @@ func (s *Store) CreateDevice(ctx context.Context, d Device) error {
 	})
 }
 
+func readDeviceScopes(ctx context.Context, tx *sql.Tx, id string) ([]contract.Scope, error) {
+	rows, err := tx.QueryContext(ctx, "SELECT scope FROM device_scopes WHERE device=? ORDER BY scope", id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var scopes []contract.Scope
+	for rows.Next() {
+		var scope contract.Scope
+		if err := rows.Scan(&scope); err != nil {
+			return nil, err
+		}
+		scopes = append(scopes, scope)
+	}
+	return scopes, rows.Err()
+}
+
 // AuthenticateDevice reads the device and its scopes from one SQLite snapshot.
 // A conditional renewal cannot restore a revoked or expired device.
 func (s *Store) AuthenticateDevice(ctx context.Context, hash [32]byte, now time.Time) (Device, bool, error) {
@@ -57,20 +74,7 @@ func (s *Store) AuthenticateDevice(ctx context.Context, hash [32]byte, now time.
 	d.PairedAt = time.UnixMilli(paired)
 	d.LastSeenAt = time.UnixMilli(seen)
 	d.ExpiresAt = time.UnixMilli(expires)
-	rows, err := tx.QueryContext(ctx, "SELECT scope FROM device_scopes WHERE device=? ORDER BY scope", d.ID)
-	if err != nil {
-		return Device{}, false, err
-	}
-	for rows.Next() {
-		var scope contract.Scope
-		if err := rows.Scan(&scope); err != nil {
-			rows.Close()
-			return Device{}, false, err
-		}
-		d.Scopes = append(d.Scopes, scope)
-	}
-	err = rows.Err()
-	rows.Close()
+	d.Scopes, err = readDeviceScopes(ctx, tx, d.ID)
 	if err != nil {
 		return Device{}, false, err
 	}
