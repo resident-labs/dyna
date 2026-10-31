@@ -278,6 +278,16 @@ var eventSpecs = []EventSpec{
 	},
 	{
 		Family:    FamilyMerge,
+		Type:      EventType(MergeCancelled),
+		ThreadEnd: true,
+		Renderer:  "MergeCard",
+		Payload:   reflect.TypeOf(MergeEvent{}),
+		Quiet:     true,
+		Wake:      WakeNever,
+		Text:      "Merge trial {trialId} ended: {reason}.",
+	},
+	{
+		Family:    FamilyMerge,
 		Type:      EventType(MergeFailed),
 		ThreadEnd: true,
 		Renderer:  "MergeCard",

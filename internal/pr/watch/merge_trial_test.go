@@ -406,6 +406,25 @@ func TestSingleReadyPRTakesTrialWhenMainMovesDuringDirectPublication(t *testing.
 	}
 }
 
+func TestMovedMainReplacesTrialWithoutAnotherWake(t *testing.T) {
+	f := mergeTrialEnv(t, 1, 2)
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	f.ci = "completed"
+	f.main = strings.Repeat("f", 40)
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if f.builds != 2 {
+		t.Fatalf("moved main left the queue without a replacement: builds=%d", f.builds)
+	}
+	ended := mergeNotices(f.e.sent, room.MergeCancelled)
+	if len(ended) != 1 || !strings.Contains(ended[0].Merge.Reason, "main moved") {
+		t.Fatalf("missing trial end event: %+v", ended)
+	}
+}
+
 func TestBatchTrialResumesAfterRestart(t *testing.T) {
 	f := mergeTrialEnv(t, 1)
 	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
@@ -481,7 +500,7 @@ func TestBatchTrialRechecksPRBeforePublication(t *testing.T) {
 			if _, err := f.e.s.MergeTick(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			if len(*f.merged) != 0 || len(f.branches) != 0 {
+			if len(*f.merged) != 0 || (which != "main" && len(f.branches) != 0) || f.branches["dyna/merge-trial/1"] != "" {
 				t.Fatalf("published or kept invalid trial: merged=%v branches=%v", *f.merged, f.branches)
 			}
 		})
@@ -681,8 +700,10 @@ func TestStackedTrialsPublishLongestPassingPrefixAndReturnFailure(t *testing.T) 
 	if !reflect.DeepEqual(*f.merged, []int{1, 2}) {
 		t.Fatalf("merged=%v", *f.merged)
 	}
-	if len(f.branches) != 0 {
-		t.Fatalf("leaked branches=%v", f.branches)
+	for _, branch := range []string{"dyna/merge-trial/1", "dyna/merge-trial/2", "dyna/merge-trial/3", "dyna/merge-trial/4"} {
+		if f.branches[branch] != "" {
+			t.Fatalf("leaked branch %s", branch)
+		}
 	}
 	st, err := f.e.s.Store.Read()
 	if err != nil {
@@ -745,8 +766,10 @@ func TestStackedTrialsHoldPendingAndDiscardWhenMainMoves(t *testing.T) {
 	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.branches) != 0 {
-		t.Fatal("kept stale stack branches")
+	for _, branch := range []string{"dyna/merge-trial/1", "dyna/merge-trial/2", "dyna/merge-trial/3"} {
+		if f.branches[branch] != "" {
+			t.Fatalf("kept stale stack branch %s", branch)
+		}
 	}
 	st, err := f.e.s.Store.Read()
 	if err != nil {
