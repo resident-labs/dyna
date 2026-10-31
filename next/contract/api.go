@@ -132,9 +132,10 @@ type RoomSummary struct {
 	Paused   bool        `json:"paused"`
 	Created  time.Time   `json:"created"`
 	LastRead int64       `json:"lastRead"`
-	Waiting  []OpID      `json:"waiting"` // pending owner-class operations, which only the owner decides
-	Working  []SessionID `json:"working"` // open sessions with a running turn
-	Failed   int         `json:"failed"`  // open sessions whose last turn that was not stopped failed, or whose box failed or is lost; each counts once
+	Waiting  []OpID      `json:"waiting"`  // pending owner-class operations, which only the owner decides
+	Working  []SessionID `json:"working"`  // open sessions with a running turn
+	Failed   int         `json:"failed"`   // open sessions whose last turn that was not stopped failed, or whose box failed or is lost; each counts once
+	Hostless int         `json:"hostless"` // open sessions whose box waits for a room host
 	// Latest is the newest current-turn activity among the working sessions; none when no working session reported one.
 	Latest *RoomActivity `json:"latest,omitempty"`
 }
