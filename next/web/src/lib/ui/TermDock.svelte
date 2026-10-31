@@ -9,7 +9,7 @@
   // the app. The dock is app-wide: hosts are not room objects, so tabs stay across rooms and on Home.
   // A tab lives while the page is open (no reattach in M2); × closes its socket, and the engine ends
   // the shell. The new-tab menu lists the room's sessions whose box is ready, then the hosts.
-  let { sessions, element = $bindable() }: { sessions: { id: string; name: string }[]; element?: HTMLElement } = $props();
+  let { sessions, element = $bindable(), onempty }: { sessions: { id: string; name: string }[]; element?: HTMLElement; onempty: () => void } = $props();
   type Tab = { key: number; target: TerminalTarget; label: string; exited?: { code?: number } };
   let tabs: Tab[] = $state([]);
   let active = $state(0);
@@ -29,7 +29,8 @@
     picking = true;
     void call("host.list", {}).then(list => { hosts = list.hosts ?? []; }, () => { hosts = []; });
     await tick();
-    menu?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+    // With no item yet (no ready session, hosts still loading), the menu itself takes the keys.
+    (menu?.querySelector<HTMLElement>("[role=menuitem]") ?? menu)?.focus();
   }
   function open(target: TerminalTarget, label: string) {
     picking = false;
@@ -43,11 +44,14 @@
     tabs[index] = { key: next++, target: tab.target, label: tab.label };
     active = tabs[index].key;
   }
-  function close(key: number) {
+  // Focus moves to the tab that takes the closed one's place, or out of the dock when none is left.
+  async function close(key: number) {
     const index = tabs.findIndex(tab => tab.key === key);
     tabs.splice(index, 1);
     if (active === key) active = tabs[Math.min(index, tabs.length - 1)]?.key ?? 0;
     if (!tabs.length) floating = false;
+    await tick();
+    if (tabs.length) panes[active]?.focus(); else if (picking) plus?.focus(); else onempty();
   }
   // Up and Down move in the menu, Escape closes it and returns to "+".
   function walk(event: KeyboardEvent) {
@@ -77,7 +81,7 @@
       {#each tabs as tab (tab.key)}<span class="tab" class:active={tab.key === active}>
         <button type="button" role="tab" aria-selected={tab.key === active} onclick={() => { active = tab.key; void tick().then(() => panes[tab.key]?.focus()); }}>{tab.label}
           {#if tab.exited}<span class="muted">exited</span>{/if}</button>
-        <button type="button" class="x" aria-label={`Close ${tab.label}`} title="Close" onclick={() => close(tab.key)}><Icon name="close" size={12} /></button></span>{/each}
+        <button type="button" class="x" aria-label={`Close ${tab.label}`} title="Close" onclick={() => void close(tab.key)}><Icon name="close" size={12} /></button></span>{/each}
     </div>
     <span class="menu">
       <button type="button" bind:this={plus} aria-label="New terminal" title="New terminal" aria-haspopup="menu" aria-expanded={picking}
@@ -85,7 +89,7 @@
       {#if picking}<div class="list" role="menu" tabindex="-1" bind:this={menu} onkeydown={walk}>
         {#if sessions.length}<p class="label">Sessions</p>{/if}
         {#each sessions as session (session.id)}<button type="button" role="menuitem" tabindex="-1" onclick={() => open({ box: session.id }, session.name)}>{session.name}</button>{/each}
-        <p class="label">Hosts</p>
+        {#if hosts.length}<p class="label">Hosts</p>{/if}
         {#each hosts as host (host)}<button type="button" role="menuitem" tabindex="-1" onclick={() => open({ host }, hostLabel(host))}>{hostLabel(host)}</button>{/each}
       </div>{/if}
     </span>
