@@ -26,6 +26,7 @@
   import { Attention } from "./lib/attention.svelte.ts";
   import { mentionable, parseMentions } from "./lib/mentions.ts";
   import { distinctInitials } from "./lib/identity.ts";
+  import type { Rect } from "./lib/float.ts";
   import type { Conversation, PostRequest, SessionStarted } from "./lib/contract.gen.ts";
   const attention = new Attention();
   let rooms = $derived([...attention.rooms.values()]);
@@ -250,17 +251,19 @@
   let panel = $state(false);
   // The session whose computer the owner watches, while it runs: in a window over the app, or docked
   // in the sessions panel instead of the list. Docked, the view mounts only where the panel is on
-  // screen: always when wide, below 761 px only while it is open. The window keeps its place and size
+  // screen: always when wide, below 761 px only while it is open. Each session's window keeps its place and size
   // for the page view.
   let watching: string | undefined = $state();
   let docked = $state(false);
   let rect = $state({ x: window.innerWidth - 504, y: window.innerHeight - 420, w: 480, h: 300 });
-  // The first window opens at the bottom right of the feed, above the composer, as in v1; later ones keep the owner's rect.
-  let placed = false;
+  // A session's first window opens at the top right of the feed, clear of the composer below it (round 2, page 6);
+  // it then opens where the owner left it.
+  const places = new Map<string, Rect>();
   function watch(id: string) {
+    if (watching) places.set(watching, rect);
     const box = feed?.getBoundingClientRect();
-    if (box && !placed) rect = { ...rect, x: box.right - rect.w - 16, y: box.bottom - rect.h - 16 };
-    placed = true;
+    const w = box ? Math.min(600, box.width - 32) : rect.w, h = box ? Math.min(400, box.height - 32) : rect.h;
+    rect = places.get(id) ?? (box ? { w, h, x: box.right - w - 16, y: box.top + 16 } : rect);
     watching = id;
   }
   // The view closes when its computer stops or the room changes, before the DOM updates, so it never
@@ -268,6 +271,7 @@
   // below 761 px with the panel closed, it returns to the panel's toggle button.
   async function stopWatching() {
     const id = watching ?? "";
+    if (watching) places.set(watching, rect);
     const held = members?.contains(document.activeElement) || computer?.contains(document.activeElement);
     watching = undefined;
     await tick();
