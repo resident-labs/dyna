@@ -47,6 +47,8 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 	var workErr error
 	switch {
 	case row.Want == store.WantStop:
+		// A terminal admitted after this check ends with the box. WakeTerminal already set
+		// want=run, so the box restarts; serializing admission would bring back the per-session lock.
 		if r.view.OpenTerminal(b.Session) {
 			return r.store.WakeTerminal(ctx, b.ID)
 		}
