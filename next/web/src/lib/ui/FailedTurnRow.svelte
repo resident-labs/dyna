@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { untrack, type Snippet } from "svelte";
   import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
   import { formatTime, type Row } from "../feed.ts";
   import { hue } from "../identity.ts";
-  let { row, author, root, onseen }: { row: Extract<Row, { kind: "failed" }>; author: string; root: boolean; onseen?: () => void } = $props();
+  let { row, author, root, onseen, children }: { row: Extract<Row, { kind: "failed" }>; author: string; root: boolean; onseen?: () => void; children?: Snippet } = $props();
   // The owner has seen a failed turn once its row stays on screen for a second while the page is visible, which
   // clears the session's mark. The wait skips rows that only pass by, such as while the feed jumps to its end on open.
   // Feed passes a new callback with every event, so the attachment reads it once; reading it as a dependency
@@ -32,6 +32,7 @@
   <p class="name"><strong style:--hue={hue(author)}>{author}</strong> {#if row.at}<time datetime={row.at}>{formatTime(row.at)}</time>{/if}
     <StatusPill tone="failed" label={row.label} /></p>
   {#if row.cause}<p class="cause">{row.cause}</p>{/if}
+  {#if children}<div class="more">{@render children()}</div>{/if}
 </article>
 
 <style>
@@ -41,5 +42,7 @@
   .name { display: flex; align-items: baseline; gap: 8px; }
   strong { color: oklch(var(--id-name) var(--hue)); }
   .cause { color: var(--muted); }
+  .more { grid-column: 2; margin-top: 8px; }
+  .more:empty { display: none; }
   time { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 </style>

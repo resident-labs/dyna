@@ -4,6 +4,7 @@
   import { APIError } from "../client.ts";
   import VirtualList from "./VirtualList.svelte";
   import PostRow from "./PostRow.svelte";
+  import BoxRestart from "./BoxRestart.svelte";
   import FailedTurnRow from "./FailedTurnRow.svelte";
   import WorkRow from "./WorkRow.svelte";
   import RequestCard from "./RequestCard.svelte";
@@ -13,9 +14,9 @@
   import type { Conversation, PostRequest, Principal } from "../contract.gen.ts";
 
   // unsent holds the app's failed sends of this conversation; see EventWindow.onunsent.
-  let { store, home, intro, unsent, onunsent, onsettled, onforward, element = $bindable() }: {
+  let { store, home, intro, unsent, onunsent, onsettled, onforward, onrestarted, element = $bindable() }: {
     store: RoomStore; home: Conversation; intro: Snippet<[boolean]>; unsent: PostRequest[];
-    onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onforward: (quote: Quote) => void; element?: HTMLDivElement;
+    onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onforward: (quote: Quote) => void; onrestarted: () => void; element?: HTMLDivElement;
   } = $props();
 
   // The view is keyed by its conversation, so its window lives as long as the view.
@@ -126,7 +127,8 @@
       {#if item.kind === "post"}<PostRow row={item} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
         onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} onforward={() => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments })} />
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} root={root(item.session)}
-        onseen={item.label === "Turn failed" ? () => store.see(home, item.seq) : undefined} />
+        onseen={item.label === "Turn failed" ? () => store.see(home, item.seq) : undefined}>
+        {#if item.key === "box-failed" && failure?.box === "failed"}<BoxRestart session={item.session} {onrestarted} />{/if}</FailedTurnRow>
       <!-- The store knows every request that waited when the room opened and every later one. A request the window
         shows as waiting that the store lacks was decided outside the window, so it gets no buttons. -->
       {:else if item.kind === "request"}{@const live = store.requests.get(item.request.id)}
