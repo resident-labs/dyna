@@ -227,11 +227,13 @@
   a.member[aria-current="page"] { background: var(--selected); }
   .row { position: relative; display: flex; align-items: center; }
   /* The chevron sits in the gutter left of the avatar; a folded row stacks its hidden count under it, as in v1. */
-  .fold { all: unset; position: absolute; z-index: 1; top: 50%; transform: translateY(-50%); width: 16px; display: grid; justify-items: center;
+  .fold { all: unset; position: absolute; z-index: 1; top: 50%; transform: translateY(-50%); width: 16px; min-height: 24px; display: grid; justify-items: center; align-content: center;
     padding: 2px 0; border-radius: 4px; color: var(--muted); font-size: 10px; line-height: 1.1; font-variant-numeric: tabular-nums; cursor: pointer; }
   .fold:hover { background: var(--hover); color: var(--text); }
   .fold:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
   .fold[aria-expanded="false"] :global(svg) { transform: rotate(-90deg); }
+  /* A thumb gets v1's taller target, so a near miss does not open the DM. */
+  @media (hover: none) { .fold { width: 24px; min-height: 44px; } }
   .row a.member { flex: 1; min-width: 0; }
   .watch { all: unset; display: grid; place-items: center; width: 24px; height: 24px; margin-right: 8px; border-radius: 6px; color: var(--muted); cursor: pointer; }
   .watch:hover { background: var(--hover); color: var(--text); }
