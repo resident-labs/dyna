@@ -30,6 +30,7 @@ import (
 	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/api"
 	"github.com/resident-labs/dyna/engine/approve"
+	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/harness/fakeharness"
 	"github.com/resident-labs/dyna/web"
@@ -225,7 +226,7 @@ func (b *boxes) TerminalArgv(context.Context, contract.HostName, contract.BoxID)
 	return []string{"bash", "--norc", "--noprofile"}, nil
 }
 
-func (b *boxes) Create(ctx context.Context, spec engine.BoxSpec) (string, error) {
+func (b *boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, error) {
 	session, err := b.st.Session(ctx, spec.Session)
 	if err != nil {
 		return "", err
@@ -255,7 +256,7 @@ func (b *boxes) Stop(_ context.Context, id contract.BoxID) error {
 	b.mu.Unlock()
 	return nil
 }
-func (b *boxes) Recreate(ctx context.Context, spec engine.BoxSpec, _, _ string) error {
+func (b *boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, _, _ string) error {
 	return b.Start(ctx, spec.Box)
 }
 func (b *boxes) Remove(ctx context.Context, id contract.BoxID) error {
