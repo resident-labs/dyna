@@ -98,7 +98,7 @@ func dynaCredentialState(auth *coreauth.Auth) DynaAuthState {
 	if auth.RequiresSignIn {
 		return DynaAuthExpired
 	}
-	if auth.Status == coreauth.StatusError {
+	if auth.Status == coreauth.StatusError && (auth.RefreshError != nil || auth.Failed > 0) {
 		return DynaAuthFailed
 	}
 	if auth.InferenceVerified || auth.RenewalVerified {
