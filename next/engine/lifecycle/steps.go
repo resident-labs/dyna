@@ -94,6 +94,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 				next.State, next.Reason = contract.BoxFailed, workErr.Error()
 				cause = contract.CauseCreateFailed
 			} else {
+				next.Reason = workErr.Error()
 				due = r.retryAt(failures)
 			}
 		} else {
