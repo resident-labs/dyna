@@ -2,6 +2,7 @@ import type { Attachment, BoxState, Card, Conversation, Event, FailureCause, Pri
 import type { BoxFailure } from "./status.ts";
 import type { PendingReason } from "./event.ts";
 import type { Request } from "./room.svelte.ts";
+import { endCause, failed } from "./jobs.ts";
 
 export type Row =
   | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[]; pending?: Pending }
@@ -352,7 +353,11 @@ export function describe(event: Event, name: Name): string {
     // Live only: the room store keeps it out of every feed window.
     case "host.disk_low": case "conversation.read": return "";
     case "turn.activity": return event.body.label;
-    case "shell.job.ended": return event.body.exitCode === 0 ? `${name(event.body.session)}'s job finished` : `${name(event.body.session)}'s job failed with exit code ${event.body.exitCode}`;
+    case "shell.job.ended": {
+      const who = name(event.body.session), job = event.body.description ? `job "${event.body.description}"` : "job";
+      if (event.body.end?.kind === "stopped") return `${who} stopped its ${job}`;
+      return failed(event.body) ? `${who}'s ${job} failed: ${endCause(event.body, who)}` : `${who}'s ${job} finished`;
+    }
     case "op.requested": case "op.decided": case "op.ran": return ""; // feedRows gives each request its own row.
     case "image.built": return `Image ${event.body.name}:${event.body.tag} built in ${event.body.seconds} s`;
     // The reason is raw build output (r8); the build log holds it.
