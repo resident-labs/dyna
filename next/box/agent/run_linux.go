@@ -47,12 +47,35 @@ func Run(ctx context.Context, version string) error {
 	defer cancel()
 	client := NewClient(engineSocket)
 	errs := make(chan error, 4)
-	closeComputer, err := computer.Serve(ctx, "/run/dyna/agent.sock", errs)
+	states := make(chan bool, 8)
+	var computerRunning atomic.Bool
+	closeComputer, err := computer.Serve(ctx, "/run/dyna/agent.sock", errs, func(running bool) {
+		computerRunning.Store(running)
+		select {
+		case states <- running:
+		case <-ctx.Done():
+		}
+	})
 	if err != nil {
 		return err
 	}
 	defer closeComputer()
 	go client.Run(ctx)
+	go func() {
+		for {
+			select {
+			case running := <-states:
+				state := contract.ComputerStopped
+				if running {
+					state = contract.ComputerRunning
+				}
+				body, _ := json.Marshal(contract.ComputerChangedRequest{To: state})
+				_, _ = client.call(ctx, contract.MethodComputerChanged, body)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 	hello, err := client.Hello(ctx, version)
 	if err != nil {
 		return err
@@ -105,8 +128,25 @@ func Run(ctx context.Context, version string) error {
 	go transcript.Run(ctx, ticks.C, h.SessionFile)
 	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, file: h.SessionFile}, Setup: setup, setupErr: setupErr}
 	var closing atomic.Bool
+	var stopWatch context.CancelFunc
 	go func() {
 		errs <- client.Channel(ctx, func(message contract.BoxMessage) error {
+			switch message.Body.(type) {
+			case contract.ComputerWatchStart:
+				if stopWatch != nil {
+					stopWatch()
+				}
+				var watch context.Context
+				watch, stopWatch = context.WithCancel(ctx)
+				go client.watchComputer(watch)
+				return nil
+			case contract.ComputerWatchStop:
+				if stopWatch != nil {
+					stopWatch()
+					stopWatch = nil
+				}
+				return nil
+			}
 			if _, ok := message.Body.(contract.Archive); ok {
 				closing.Store(true)
 				return closeBox(ctx, h, transcript, h.SessionFile(), time.After, func(ctx context.Context) error {
@@ -122,6 +162,17 @@ func Run(ctx context.Context, version string) error {
 				})
 			}
 			return runner.Handle(ctx, message)
+		}, func(connected bool) {
+			if connected && computerRunning.Load() {
+				select {
+				case states <- true:
+				case <-ctx.Done():
+				}
+			}
+			if !connected && stopWatch != nil {
+				stopWatch()
+				stopWatch = nil
+			}
 		})
 	}()
 	return waitRun(ctx, errs, runner.Errors(), &closing)
