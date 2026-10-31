@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 16
+const schemaVersion = 17
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
@@ -41,6 +41,11 @@ var steps = map[int][]string{
 		`UPDATE events SET home=json_extract(CAST(body AS TEXT),'$.home.session') WHERE type='post.created' AND json_extract(CAST(body AS TEXT),'$.home.kind')='dm'`,
 		`UPDATE events SET home=(SELECT json_extract(value,'$.reply.home.session') FROM json_each(CAST(events.body AS TEXT),'$.replies') WHERE json_extract(value,'$.reply.home.kind')='dm' LIMIT 1) WHERE type='turn.ended'`,
 		"CREATE INDEX events_room_home ON events(room, home, seq) WHERE home IS NOT NULL",
+	},
+	// Only an open turn reads started_seq again, when it ends.
+	16: {
+		"ALTER TABLE turns ADD COLUMN started_seq INTEGER",
+		`UPDATE turns SET started_seq=(SELECT seq FROM events WHERE type='turn.started' AND json_extract(CAST(body AS TEXT),'$.turn')=turns.id) WHERE ended_at IS NULL`,
 	},
 }
 
