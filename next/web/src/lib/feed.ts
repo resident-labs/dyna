@@ -4,7 +4,8 @@ export type Row =
   | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[]; pending?: Pending }
   | { kind: "failed"; key: string; seq: number; session: string; at: string; label: "Turn failed" | "Could not start" | "Could not close" | "Stopped unexpectedly"; cause: string }
   | { kind: "work"; key: string; events: Event[] }
-  | { kind: "day"; key: string; at: string };
+  | { kind: "day"; key: string; at: string }
+  | { kind: "new"; key: string };
 
 // An owner's post the engine has not confirmed yet, with its mentions as sessions.
 export type Pending = { id: number; at: string; text: string; attachments: Attachment[]; to: Principal[]; failed: boolean };
@@ -47,7 +48,8 @@ function subject(event: Event): string | undefined {
 // failed turn is its own row, and all other events between them fold into one work row.
 // Pending owner posts follow as post rows, so they group like the posts that replace them.
 // A day row comes before the first row of each local day, so a new day also starts a new name line.
-export function feedRows(events: Event[], home: Conversation, pending: Pending[] = []): Row[] {
+// With the owner's read position (since), a New row comes before the first later post or failed row by someone else.
+export function feedRows(events: Event[], home: Conversation, pending: Pending[] = [], since = 0): Row[] {
   const rows: Row[] = [];
   let work: Event[] = [];
   let today = "";
@@ -56,14 +58,19 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     if (day !== today) rows.push({ kind: "day", key: `d${day}`, at });
     today = day;
   };
+  let unread = since > 0;
+  const fresh = (seq: number, from: Principal) => {
+    if (unread && seq > since && from.kind !== "owner") { rows.push({ kind: "new", key: "new" }); unread = false; }
+  };
   const flush = () => {
     if (work.length) { dated(work[0].at); rows.push({ kind: "work", key: `w${work[0].seq}`, events: work }); }
     work = [];
   };
   // A post to other people, its mentions or a final reply's target, starts a new run with its own name line.
-  const post = (key: string, from: Principal, at: string, text: string, attachments: Attachment[], to: Principal[] = [], pending?: Pending) => {
+  const post = (key: string, seq: number, from: Principal, at: string, text: string, attachments: Attachment[], to: Principal[] = [], pending?: Pending) => {
     flush();
     dated(at);
+    fresh(seq, from);
     const previous = rows.at(-1);
     const first = previous?.kind !== "post" || !sameAuthor(previous.from, from) ||
       previous.to.length !== to.length || previous.to.some((target, i) => !sameAuthor(target, to[i]));
@@ -71,7 +78,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
   };
   for (const event of events) {
     if (event.type === "post.created") {
-      if (sameHome(event.body.home, home)) post(`p${event.seq}`, event.from, event.at, event.body.text, event.body.attachments ?? [], event.body.mentions ?? []);
+      if (sameHome(event.body.home, home)) post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, event.body.attachments ?? [], event.body.mentions ?? []);
       continue;
     }
     const session = subject(event);
@@ -83,6 +90,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       if (to === "failed" || to === "lost" || cause) {
         flush();
         dated(event.at);
+        fresh(event.seq, { kind: "session", session: event.body.session });
         rows.push({ kind: "failed", key: `f${event.seq}`, seq: event.seq, session: event.body.session, at: event.at, cause: cause ? causes[cause] : "",
           label: cause === "remove_failed" || cause === "archive_failed" ? "Could not close" : to === "lost" ? "Stopped unexpectedly" : "Could not start" });
       }
@@ -93,13 +101,14 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       const answer = event.body.final && (event.body.replies ?? []).find(({ reply, posted }) =>
         reply.kind === "final" && !posted && sameHome(reply.home ?? { kind: "feed" }, home));
       if (event.body.final && answer) {
-        post(`a${event.seq}`, { kind: "session", session: event.body.session }, event.at, event.body.final, [], answer.reply.target ? [answer.reply.target] : []);
+        post(`a${event.seq}`, event.seq, { kind: "session", session: event.body.session }, event.at, event.body.final, [], answer.reply.target ? [answer.reply.target] : []);
       }
       // A failed turn always gets its own row, even after its answer; it never folds into a work row. Its error is the
       // harness's raw text (r8), so the row shows only the owner words for its typed cause.
       if (event.body.outcome === "failed") {
         flush();
         dated(event.at);
+        fresh(event.seq, { kind: "session", session: event.body.session });
         const cause = event.body.cause;
         rows.push({ kind: "failed", key: `f${event.seq}`, seq: event.seq, session: event.body.session, at: event.at, label: "Turn failed", cause: cause ? causes[cause] : "" });
       }
@@ -107,7 +116,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     }
     work.push(event);
   }
-  for (const sent of pending) post(`n${sent.id}`, { kind: "owner" }, sent.at, sent.text, sent.attachments, sent.to, sent);
+  for (const sent of pending) post(`n${sent.id}`, 0, { kind: "owner" }, sent.at, sent.text, sent.attachments, sent.to, sent);
   flush();
   return rows;
 }
