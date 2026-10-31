@@ -22,10 +22,11 @@ type accountActionResult struct {
 type AccountActions struct {
 	service     *Service
 	connections *model.Connections
+	quotas      *model.Quotas
 }
 
-func NewAccountActions(service *Service, connections *model.Connections) *AccountActions {
-	return &AccountActions{service: service, connections: connections}
+func NewAccountActions(service *Service, connections *model.Connections, quotas *model.Quotas) *AccountActions {
+	return &AccountActions{service: service, connections: connections, quotas: quotas}
 }
 
 func (a *AccountActions) Entry() approve.Entry {
@@ -104,7 +105,11 @@ func (s *AccountActions) AccountsList(ctx context.Context, caller contract.Princ
 	credentials, err := s.connections.Credentials(ctx)
 	states := make(map[string]model.CredentialState, len(credentials))
 	for _, credential := range credentials {
-		states[credential.ID] = credential.State
+		state := credential.State
+		if state == model.CredentialUnknown {
+			state = s.quotas.ObservedState(credential.Index)
+		}
+		states[credential.ID] = state
 	}
 	for i, binding := range bindings {
 		accounts[i] = binding.Account
@@ -151,6 +156,7 @@ func (s *AccountActions) AccountsRemove(ctx context.Context, caller contract.Pri
 			err = s.connections.RemoveCredential(ctx, id)
 		}
 		if err == nil {
+			s.quotas.Clear()
 			err = s.service.store.RemoveAccount(ctx, req.AccountID)
 		}
 		return accountActionResult{err: err}
