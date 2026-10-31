@@ -42,11 +42,14 @@ func TestRunPhasesPreserveTotalsAndHideRequestValues(t *testing.T) {
 	q.recordPhase(caller, RunWatchSnapshot, false)
 	q.recordPhase(caller, RunCancellation, false)
 	q.recordPhase(caller, RunOther, true)
+	q.recordPhase(caller, RunMainRecheck, false)
+	q.recordPhase(caller, RunMergeTrial, true)
 	now = now.Add(window)
 	q.recordPhase("graphql", RunOther, false)
-	if len(lines) != 2 || !strings.Contains(lines[0], "runs-head-sha 2") ||
+	if len(lines) != 3 || !strings.Contains(lines[0], "runs-head-sha 3") ||
 		!strings.Contains(lines[1], "snapshot 1 counted 0 free; cancellation 1 counted 0 free") ||
 		!strings.Contains(lines[1], "other 0 counted 1 free") ||
+		!strings.Contains(lines[2], "main-recheck 1 counted 0 free; merge-trial 0 counted 1 free") ||
 		strings.Contains(strings.Join(lines, " "), "secret") || strings.Contains(strings.Join(lines, " "), "private") {
 		t.Fatalf("unexpected quota summaries: %v", lines)
 	}
