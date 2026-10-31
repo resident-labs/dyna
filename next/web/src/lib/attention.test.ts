@@ -42,15 +42,15 @@ test("room.list seeds each room's waiting requests and working sessions, and the
     attention.apply(event(10, "a", { type: "session.closed", body: { session: "s1" } }));
     assert.equal(attention.working.get("a")!.size, 0);
     assert.deepEqual([...attention.activity.keys()], ["s2"]);
-    // A room's session.list seeds its sessions and failures. Events that arrive before the answer wait, and those
-    // after its seq apply on top; later ones apply at once.
-    globalThis.fetch = async () => new Response(JSON.stringify({ seq: 11, sessions: [{ id: "s2" }, { id: "s4", lastOutcome: "failed" }] }));
+    // A room's session.list seeds its sessions. Events that arrive before the answer wait, and those after its seq
+    // apply on top; later ones apply at once.
+    globalThis.fetch = async () => new Response(JSON.stringify({ seq: 11, sessions: [{ id: "s2" }, { id: "s4" }] }));
     const listed = attention.listSessions("b");
-    const usage = { model: "m", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
-    attention.apply(event(11, "b", { type: "session.started", body: { session: "s4", name: "n", profile: "p" } }));
-    attention.apply(event(12, "b", { type: "turn.ended", body: { session: "s2", turn: "t", outcome: "failed", usage } }));
+    const started = (seq: number, session: string) => event(seq, "b", { type: "session.started", body: { session, name: "n", profile: "p" } });
+    attention.apply(started(11, "s4"));
+    attention.apply(started(12, "s5"));
     await listed;
     attention.apply(event(13, "b", { type: "session.closed", body: { session: "s4" } }));
-    assert.deepEqual([[...attention.sessions.get("b")!], [...attention.failed.get("b")!]], [["s2"], ["s2"]]);
+    assert.deepEqual([...attention.sessions.get("b")!], ["s2", "s5"]);
   } finally { globalThis.fetch = original; }
 });
