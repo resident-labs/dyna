@@ -170,6 +170,7 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 4. Show v2's screen beside them in the PR, in dark and light when the view has both. [owner r23] [spec 5.13]
 5. Check the screenshot against this file before you ask for review. List any rule that you broke on purpose, and give the reason.
 6. The reviewer and the lead reject the PR unless v2 is clearly better than v1. [owner r23]
+7. Every UI PR includes a 390 px screenshot, and every screen works at that width. [owner, #1461]
 
 ### Adding or changing a rule
 

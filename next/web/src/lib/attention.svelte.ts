@@ -11,10 +11,8 @@ export class Attention {
   readonly working = new SvelteMap<string, SvelteSet<string>>();
   // A working session's latest activity label, such as "read spec.md", as the engine sends it.
   readonly activity = new SvelteMap<string, string>();
-  // Per room, the open sessions and those whose last turn failed, once a session.list answer seeds the room; the
-  // stream keeps them current. Only a completed turn clears a failure, as in the room's own store.
+  // Per room, the open sessions, once a session.list answer seeds the room; the stream keeps them current.
   readonly sessions = new SvelteMap<string, SvelteSet<string>>();
-  readonly failed = new SvelteMap<string, SvelteSet<string>>();
   // Per room asked but not yet seeded, the session events the stream sent meanwhile; seeding replays the newer ones.
   private readonly pending = new Map<string, Event[]>();
   // Each working session's current turn, as far as known; a label of another turn is stale.
@@ -38,7 +36,7 @@ export class Attention {
 
   close(): void { this.stop(); }
 
-  // A room's sessions for Home, which seed the room's sets once. A failed call keeps no buffer.
+  // A room's sessions for Home, which seed the room's set once. A failed call keeps no buffer.
   listSessions(room: string): Promise<SessionListResponse> {
     if (!this.sessions.has(room)) this.pending.set(room, this.pending.get(room) ?? []);
     return call("session.list", { room }).then(list => { this.seed(list.sessions ?? [], { id: room, seq: list.seq }); return list; },
@@ -47,11 +45,10 @@ export class Attention {
 
   // Labels are live only, so a session.list answer seeds the turn and label of a session already
   // working; a turn or label the stream sent first is newer and stays. With a room, the answer also seeds that
-  // room's sets once, and the buffered events after the answer's seq apply on top.
-  seed(sessions: Pick<SessionSummary, "id" | "turn" | "activity" | "lastOutcome">[], room?: { id: string; seq: number }): void {
+  // room's set once, and the buffered events after the answer's seq apply on top.
+  seed(sessions: Pick<SessionSummary, "id" | "turn" | "activity">[], room?: { id: string; seq: number }): void {
     if (room && !this.sessions.has(room.id)) {
       this.sessions.set(room.id, new SvelteSet(sessions.map(s => s.id)));
-      this.failed.set(room.id, new SvelteSet(sessions.flatMap(s => s.lastOutcome === "failed" ? [s.id] : [])));
       for (const event of this.pending.get(room.id) ?? []) if (event.seq > room.seq) this.track(event);
     }
     if (room) this.pending.delete(room.id);
@@ -88,17 +85,10 @@ export class Attention {
     }
   }
 
-  // A seeded room's open sessions and failures. Only a completed turn clears a failure, as in the room's own store.
+  // A seeded room's open sessions.
   private track(event: Event): void {
-    const sessions = this.sessions.get(event.room ?? ""), failed = this.failed.get(event.room ?? "");
-    if (!sessions || !failed) return;
-    switch (event.type) {
-      case "session.started": sessions.add(event.body.session); break;
-      case "turn.ended":
-        if (event.body.outcome === "failed") failed.add(event.body.session);
-        else if (event.body.outcome === "completed") failed.delete(event.body.session);
-        break;
-      case "session.closed": sessions.delete(event.body.session); failed.delete(event.body.session); break;
-    }
+    const sessions = this.sessions.get(event.room ?? "");
+    if (event.type === "session.started") sessions?.add(event.body.session);
+    if (event.type === "session.closed") sessions?.delete(event.body.session);
   }
 }
