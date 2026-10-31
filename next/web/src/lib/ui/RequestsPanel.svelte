@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { call } from "../client.ts";
+  import { requestDecision } from "../request-decision.ts";
   import { hue } from "../identity.ts";
   import { closedSession, fromNow } from "../feed.ts";
   import { requestGroups } from "../request-groups.ts";
@@ -40,7 +40,7 @@
   }
   async function denyGroup(items: Request[]) {
     failure = "";
-    const results = await Promise.allSettled(items.map(item => call("op.decide", { id: item.id, approve: false, reason: reason.trim() || undefined })));
+    const results = await Promise.allSettled(items.map(item => requestDecision(admin, { id: item.id, approve: false, reason: reason.trim() || undefined })));
     if (results.some(result => result.status === "rejected")) failure = "Some decisions were not saved. Try again.";
     else { denying = ""; reason = ""; }
   }
