@@ -37,6 +37,10 @@ export class RoomStore {
   readonly shellJobs = new SvelteMap<string, number>();
   // Jobs that failed, as "session/job", so the dock can mark one while its Jobs tab is closed.
   readonly failedJobs = new SvelteSet<string>();
+  // "session/job" keys that About subtracts from its running count, because the engine's list can lag.
+  readonly endedJobs = new SvelteSet<string>();
+  // Sessions with a job to reach: their box keeps a finished job's output.
+  readonly hadJobs = new SvelteSet<string>();
   // op.list gives the pending operations; decided ones stay for the time the room is open.
   readonly requests = new SvelteMap<string, Request>();
   // The room's rules by number. rule.list reads after session.list, and rule.added and rule.removed repeat safely.
@@ -129,6 +133,7 @@ export class RoomStore {
       if (session.lastOutcome === "failed") this.failed.set(session.id, list.seq);
       if (session.computer === "running") this.computers.add(session.id);
       this.shellJobs.set(session.id, session.shellJobs ?? 0);
+      if (session.hadJobs) this.hadJobs.add(session.id);
     }
     if (this.boxFailures.size) for (const [id, failure] of await boxFailures(this.room, list.seq + 1)) if (this.boxFailures.has(id)) this.boxFailures.set(id, failure);
     // A failure turnFailures cannot place keeps list.seq and shows.
@@ -226,6 +231,7 @@ export class RoomStore {
           if (event.body.cause) this.causes.set(event.body.session, event.body.cause); else this.causes.delete(event.body.session);
         } else if (event.body.outcome === "completed") { this.failed.delete(event.body.session); this.causes.delete(event.body.session); }
         this.shellJobs.set(event.body.session, event.body.shellJobs ?? 0);
+        if (event.body.shellJobs) this.hadJobs.add(event.body.session);
         break;
       case "rule.added": this.rules.set(event.body.number, { number: event.body.number, text: event.body.text, by: event.from, at: event.at }); break;
       case "rule.removed": this.rules.delete(event.body.number); break;
@@ -237,6 +243,8 @@ export class RoomStore {
       case "shell.job.ended":
         // A running turn's end replaces the count, as in the engine.
         if (!this.turns.has(event.body.session)) this.shellJobs.set(event.body.session, Math.max(0, (this.shellJobs.get(event.body.session) ?? 0) - 1));
+        this.endedJobs.add(`${event.body.session}/${event.body.job}`);
+        this.hadJobs.add(event.body.session);
         if (event.body.exitCode !== 0) this.failedJobs.add(`${event.body.session}/${event.body.job}`);
         break;
       case "op.requested": this.requests.set(event.body.id, { ...event.body, state: "pending" }); break;
