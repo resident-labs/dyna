@@ -59,7 +59,7 @@ func TestHelloInstructionsForWorkerAndRoot(t *testing.T) {
 		parts []string
 	}{
 		{worker, []string{"worker", string(worker), "room", string(room) + " as ROOM", "parent is root", "Each input has one line that starts with [Dyna]", "Profiles: alpha, zeta", "dyna post"}},
-		{root, []string{"root of room room", string(room) + " as ROOM", "owner talks to you", "hold no goals", "Each input has one line that starts with [Dyna]", "dyna session start"}},
+		{root, []string{"root of room room", string(room) + " as ROOM", "owner talks to you", "hold no goals", "--size agent, small, medium or large", "Each input has one line that starts with [Dyna]", "dyna session start"}},
 	} {
 		hello, problem := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: tt.id}, contract.BoxHelloRequest{})
 		if problem != nil {
