@@ -27,15 +27,17 @@
     return () => { closing = true; image.src = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="; };
   }
   const fit = (next: Rect) => clamp(next, window.innerWidth, window.innerHeight);
-  // One pointer gesture on the title bar or a handle; the pointer capture ends it. Moving and
-  // resizing change only the style, so the stream stays open.
-  function grab(event: PointerEvent & { currentTarget: HTMLElement }, edges: Edges) {
+  // One pointer gesture on the title bar or a handle, followed on the window until the pointer
+  // goes up, as in v1. Moving and resizing change only the style, so the stream stays open.
+  function grab(event: PointerEvent, edges: Edges) {
     if (docked || event.button !== 0 || event.target instanceof Element && event.target.closest("button")) return;
-    const start = rect, target = event.currentTarget, x = event.clientX, y = event.clientY;
+    event.preventDefault();
+    const start = rect, x = event.clientX, y = event.clientY;
     const move = (next: PointerEvent) => { rect = fit(dragged(start, edges, next.clientX - x, next.clientY - y)); };
-    target.setPointerCapture(event.pointerId);
-    target.addEventListener("pointermove", move);
-    target.addEventListener("lostpointercapture", () => target.removeEventListener("pointermove", move), { once: true });
+    const end = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); window.removeEventListener("pointercancel", end); };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
   }
   // The view takes focus when it opens; a window that no longer fits the viewport is brought inside.
   onMount(() => { if (!docked) rect = fit(rect); element?.focus(); });
@@ -51,6 +53,7 @@
 
 <svelte:document onvisibilitychange={() => { visible = document.visibilityState === "visible"; if (visible) failed = false; }} />
 <svelte:window onresize={() => { if (!docked) rect = fit(rect); }} />
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions (Escape and Alt with an arrow key act on the whole window) -->
 <section class="computer" class:floating={!docked} aria-label={`${name}'s computer`} tabindex="-1" bind:this={element} onkeydown={key}
   style:left={docked ? null : `${rect.x}px`} style:top={docked ? null : `${rect.y}px`}
   style:width={docked ? null : `${rect.w}px`} style:height={docked ? null : `${rect.h}px`}
