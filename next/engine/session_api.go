@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"slices"
 
 	"github.com/resident-labs/dyna/box"
@@ -42,6 +43,8 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		}
 		return contract.SessionStartResponse{}, failure(err)
 	}
+	s.treeMu.Lock()
+	defer s.treeMu.Unlock()
 	tree, err := s.store.RoomTree(ctx, req.Room)
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
@@ -51,6 +54,11 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		parent, err = tree.ParentFor(caller, req.Parent)
 		if err != nil {
 			return contract.SessionStartResponse{}, invalid(err.Error())
+		}
+	}
+	if parent != "" {
+		if e := s.checkDepth(tree.Depth(parent) + 1); e != nil {
+			return contract.SessionStartResponse{}, e
 		}
 	}
 	var repo contract.RepoName
@@ -230,4 +238,11 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 		return response, failure(err)
 	}
 	return response, nil
+}
+
+func (s *Service) checkDepth(depth int) *contract.Error {
+	if s.maxDepth > 0 && depth > s.maxDepth {
+		return invalid(fmt.Sprintf("session depth %d exceeds limit %d", depth, s.maxDepth))
+	}
+	return nil
 }

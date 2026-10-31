@@ -39,6 +39,15 @@ func NewTree(nodes []Node) Tree {
 // Root returns the room root, or an empty ID for an empty tree.
 func (t Tree) Root() contract.SessionID { return t.root }
 
+// Depth returns the depth of a session, with root at 1.
+func (t Tree) Depth(id contract.SessionID) int {
+	depth := 0
+	for n, ok := t.nodes[id]; ok; n, ok = t.nodes[n.Parent] {
+		depth++
+	}
+	return depth
+}
+
 // ParentFor picks the caller for a session start, or the requested parent
 // for an owner start, defaulting to root.
 func (t Tree) ParentFor(caller contract.Principal, requested contract.SessionID) (contract.SessionID, error) {
