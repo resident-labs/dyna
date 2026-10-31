@@ -1,9 +1,10 @@
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
-import { blockedBy, call, retryDelay } from "./client.ts";
+import { APIError, blockedBy, call, retryDelay } from "./client.ts";
 import { stream } from "./stream.ts";
 import { boxFailures, turnFailures, type BoxFailure } from "./status.ts";
 import { pendingReason } from "./event.ts";
-import type { Event, FailureCause, RoomSummary, SessionListResponse, SessionSummary } from "./contract.gen.ts";
+import { scopes as everyScope } from "./devices.ts";
+import type { Event, FailureCause, RoomSummary, Scope, SessionListResponse, SessionSummary } from "./contract.gen.ts";
 
 // The rooms, and per room the requests waiting for the owner and the sessions with an open turn. room.list
 // gives them once; the owner stream keeps them current across every room, so nothing polls.
@@ -31,6 +32,10 @@ export class Attention {
   private readonly pending = new Map<string, Event[]>();
   // Each working session's current turn, as far as known; a label of another turn is stale.
   private readonly turns = new Map<string, string>();
+  // What this device may do, read once when the page connects. An engine without device.scopes answers not_found; the page
+  // then offers every control, and the engine still refuses what the device cannot do.
+  private readonly scopes = new SvelteSet<Scope>(everyScope.map(item => item.scope));
+  can = (scope: Scope) => this.scopes.has(scope);
   // The newest event applied; room.list gives the first value and the stream resumes after it.
   private head = 0;
   private stop = () => {};
@@ -38,7 +43,8 @@ export class Attention {
   constructor(connect: typeof stream = stream) { this.connect = connect; }
 
   async open(): Promise<void> {
-    const list = await call("room.list", {});
+    const [list, mine] = await Promise.all([call("room.list", {}), call("device.scopes", {}).catch((error: unknown) => { if (error instanceof APIError && error.detail.code === "not_found") return undefined; throw error; })]);
+    if (mine) { this.scopes.clear(); for (const scope of mine.scopes ?? []) this.scopes.add(scope); }
     this.head = list.seq;
     for (const room of list.rooms ?? []) this.add(room);
     this.stop = this.connect(undefined, () => this.head, event => this.apply(event));
