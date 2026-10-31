@@ -181,3 +181,47 @@ func (s *Store) SetBoxLifecycle(ctx context.Context, old, next box.Box, due time
 	})
 	return updated, err
 }
+
+// FinishCreate records the host result without overwriting a concurrent hello.
+func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure string, due time.Time, event contract.Event) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		var state contract.BoxState
+		if err := tx.QueryRowContext(ctx, `SELECT state FROM boxes WHERE id=?`, b.ID).Scan(&state); err != nil {
+			return err
+		}
+		if state != contract.BoxCreating && state != contract.BoxStarting && state != contract.BoxReady {
+			return nil
+		}
+		b.State = state
+		to := state
+		if failure != "" {
+			to = contract.BoxFailed
+		} else if state == contract.BoxCreating {
+			to = contract.BoxStarting
+		}
+		if to != state {
+			_, body, err := box.Transition(b, to, failure, event.Time)
+			if err != nil {
+				return err
+			}
+			body.Cause = event.Body.(contract.BoxChanged).Cause
+			event.Body = body
+		}
+		dueMS := int64(0)
+		if to == contract.BoxStarting && !due.IsZero() {
+			dueMS = due.UnixMilli()
+		}
+		result, err := tx.ExecContext(ctx, `UPDATE boxes SET image=?,state=?,reason=?,due_at=? WHERE id=? AND state=?`, image, to, failure, dueMS, b.ID, state)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil || n == 0 {
+			return err
+		}
+		if to != state {
+			_, err = s.AppendEvent(tx, event)
+		}
+		return err
+	})
+}
