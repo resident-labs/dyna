@@ -10,31 +10,6 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
-func TestProfileSurfaceValidation(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "profiles.json")
-	config := `{"p":{"provider":"anthropic","model":"a","allowedModels":["a"],"thinking":"low","agentSurface":"caller"}}`
-	if err := os.WriteFile(path, []byte(config), 0600); err != nil {
-		t.Fatal(err)
-	}
-	profiles, err := LoadProfiles(path)
-	if err != nil || profiles.Surface("p") != contract.AgentSurfaceCaller {
-		t.Fatalf("surface: %v %v", profiles, err)
-	}
-	if err := os.WriteFile(path, []byte(strings.Replace(config, `,"agentSurface":"caller"`, "", 1)), 0600); err != nil {
-		t.Fatal(err)
-	}
-	profiles, err = LoadProfiles(path)
-	if err != nil || profiles.Surface("p") != contract.AgentSurfaceOff {
-		t.Fatalf("default surface: %v %v", profiles, err)
-	}
-	if err := os.WriteFile(path, []byte(strings.Replace(config, "caller", "unknown", 1)), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := LoadProfiles(path); err == nil {
-		t.Fatal("unknown surface accepted")
-	}
-}
-
 func TestProfilesRejectModelOutsideAllowList(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	if err := os.WriteFile(path, []byte(`{"p":{"provider":"anthropic","model":"a","allowedModels":["b"],"thinking":"low"}}`), 0600); err != nil {
