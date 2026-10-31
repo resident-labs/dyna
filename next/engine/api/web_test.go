@@ -203,35 +203,66 @@ func TestPairAnswersGoneWithNoLiveCode(t *testing.T) {
 	}
 }
 
-func TestListenRegistersDiscoveredRouteBeforeServing(t *testing.T) {
-	w, err := NewWeb(New(&fakeService{}, nil), "127.0.0.1:0", fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, time.Now, nil)
+func TestWebDiscoversAndReplacesRoutesOnMiss(t *testing.T) {
+	now := time.Unix(1000, 0)
+	w, err := NewWeb(New(&fakeService{}, nil), "127.0.0.1:7790", fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, func() time.Time { return now }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	listener, err := w.Listen(func(port int) {
-		if port == 0 {
-			t.Error("missing actual app port")
-		}
-		if err := w.SetRoutes([]string{"https://host.example.ts.net"}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	if err := w.SetRoutes([]string{"https://configured.example"}); err != nil {
+		t.Fatal(err)
+	}
+	route, calls, wakes := "https://first.example", 0, 0
+	w.SetDiscovery(func(context.Context) string { calls++; return route }, func() { wakes++ })
+	request := func(host string) int {
+		rec := httptest.NewRecorder()
+		w.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "https://"+host+"/", nil))
+		return rec.Code
+	}
+	if got := request("first.example"); got != 200 || calls != 1 || wakes != 1 {
+		t.Fatalf("first: %d, calls %d, wakes %d", got, calls, wakes)
+	}
+	route = "https://second.example"
+	if got := request("second.example"); got != 421 || calls != 1 {
+		t.Fatalf("throttle: %d, calls %d", got, calls)
+	}
+	now = now.Add(30 * time.Second)
+	if got := request("second.example"); got != 200 || calls != 2 || wakes != 2 {
+		t.Fatalf("changed: %d, calls %d, wakes %d", got, calls, wakes)
+	}
+	if got := request("first.example"); got != 421 {
+		t.Fatalf("old host: %d", got)
+	}
+	if got := request("configured.example"); got != 200 {
+		t.Fatalf("configured host: %d", got)
+	}
+	route = ""
+	now = now.Add(30 * time.Second)
+	if got := request("missing.example"); got != 421 || request("second.example") != 421 || wakes != 3 {
+		t.Fatalf("removed: %d, wakes %d", got, wakes)
+	}
+}
+
+func TestWebDiscoverySharesInFlightResult(t *testing.T) {
+	w, err := NewWeb(New(&fakeService{}, nil), "127.0.0.1:7790", fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, func() time.Time { return time.Unix(1000, 0) }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
-	rec := httptest.NewRecorder()
-	w.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "https://host.example.ts.net/", nil))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Header().Get("Content-Security-Policy"), "https://host.example.ts.net") {
-		t.Fatalf("route not admitted: %d %s", rec.Code, rec.Header())
+	started, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	w.SetDiscovery(func(context.Context) string { calls.Add(1); close(started); <-release; return "https://first.example" }, nil)
+	results := make(chan int, 2)
+	request := func() {
+		rec := httptest.NewRecorder()
+		w.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "https://first.example/", nil))
+		results <- rec.Code
 	}
-	if err := w.SetRoutes([]string{"https://new.example.ts.net"}); err != nil {
-		t.Fatal(err)
-	}
-	rec = httptest.NewRecorder()
-	w.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "https://new.example.ts.net/", nil))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Header().Get("Content-Security-Policy"), "https://new.example.ts.net") {
-		t.Fatalf("refreshed route not admitted: %d %s", rec.Code, rec.Header())
+	go request()
+	<-started
+	go request()
+	close(release)
+	if a, b := <-results, <-results; a != 200 || b != 200 || calls.Load() != 1 {
+		t.Fatalf("responses %d, %d; discoveries %d", a, b, calls.Load())
 	}
 }
 
