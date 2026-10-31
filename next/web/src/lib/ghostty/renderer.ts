@@ -246,11 +246,13 @@ export function renderGhosttySnapshot(options: {
     }
   }
 
-  if (cursorOn && snapshot.cursorVisible && snapshot.cursorX >= 0 && snapshot.cursorY >= 0) {
+  // Dyna: a blinking block goes hollow in its off phase instead of vanishing, so the prompt never looks dead.
+  const block = snapshot.cursorStyle !== 0 && snapshot.cursorStyle !== 2;
+  if ((cursorOn || block) && snapshot.cursorVisible && snapshot.cursorX >= 0 && snapshot.cursorY >= 0) {
     const left = padding + snapshot.cursorX * metrics.width;
     const top = originY + snapshot.cursorY * metrics.height;
     context.fillStyle = cssColor(snapshot.cursor);
-    if (!focused) {
+    if (!focused || !cursorOn) {
       context.strokeStyle = cssColor(snapshot.cursor);
       context.strokeRect(left + 0.5, top + 0.5, metrics.width - 1, metrics.height - 1);
     } else if (snapshot.cursorStyle === 0) {
