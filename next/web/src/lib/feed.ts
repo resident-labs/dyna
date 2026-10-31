@@ -5,6 +5,8 @@ import type { Request } from "./room.svelte.ts";
 export type Row =
   | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[]; pending?: Pending }
   | { kind: "restarted"; key: string; session: string; at: string }
+  // A plain line for what the owner did to a session or the room; describe gives its words.
+  | { kind: "notice"; key: string; event: Event }
   | { kind: "failed"; key: string; seq: number; session: string; at: string; label: "Turn failed" | "Failed" | "Could not start" | "Could not close" | "Stopped unexpectedly"; cause: string }
   | { kind: "work"; key: string; events: Event[]; until?: string }
   | { kind: "request"; key: string; request: Request }
@@ -117,6 +119,11 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     }
     const session = subject(event);
     if (home.kind === "dm" && session !== home.session) continue;
+    if (event.type === "room.paused" || event.type === "room.resumed") {
+      flush(); dated(event.at);
+      rows.push({ kind: "notice", key: `n${event.seq}`, event });
+      continue;
+    }
     if (event.type === "op.requested") {
       flush();
       dated(event.at);
@@ -148,8 +155,8 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       const answer = event.body.final && (event.body.replies ?? []).find(({ reply, posted }) =>
         reply.kind === "final" && !posted && sameHome(reply.home ?? { kind: "feed" }, home));
       // Only the end of a turn whose start the row holds ends the row's time.
-      const turn = event.body.turn;
-      if ((event.body.final && answer) || event.body.outcome === "failed") {
+      const turn = event.body.turn, stopped = event.body.outcome === "stopped";
+      if ((event.body.final && answer) || event.body.outcome === "failed" || stopped) {
         const until = work.some(e => e.type === "turn.started" && e.body.turn === turn) ? event.at : undefined;
         // A reloaded DM window holds only posts and the turns that answered in it, so this end is the turn's only event.
         // The work row keeps it, so the turn's steps can still open above its answer.
@@ -168,7 +175,13 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
         const cause = event.body.cause;
         rows.push({ kind: "failed", key: `f${event.seq}`, seq: event.seq, session: event.body.session, at: event.at, label: "Turn failed", cause: cause ? causes[cause] : "" });
       }
-      if (answer || event.body.outcome === "failed") continue;
+      // A stopped turn ends with a line of its own, since the owner asked for it and looks for the result.
+      if (stopped) {
+        flush();
+        dated(event.at);
+        rows.push({ kind: "notice", key: `n${event.seq}`, event });
+      }
+      if (answer || event.body.outcome === "failed" || stopped) continue;
     }
     work.push(event);
   }
