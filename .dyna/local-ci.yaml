@@ -3,7 +3,7 @@ version: 1
 # Pull requests select only the trial suites whose file patterns match. Merge
 # trials run every suite in this list. The other suites remain available to
 # `dyna git ci run --suite` for focused manual runs.
-trial: [relay, pi, go, cross, computer-smoke, next, next-web]
+trial: [relay, pi, go, cross, computer-smoke, next, next-web, next-pi]
 
 caches:
   - name: go-build
@@ -197,6 +197,12 @@ checks:
       GOMEMLIMIT: 3GiB
       GOFLAGS: -p=2
     reports: none
+
+  - id: next-pi
+    image: node:22
+    command: bash scripts/ci.sh next-pi
+    caches: [npm]
+    reports: junit
 
   # next/web is the v2 web app. It needs Node 24, which the golang image lacks,
   # so it gets its own check and image.
@@ -415,11 +421,11 @@ checks:
 
 suites:
   - id: relay
-    files: ['^\.github/', '^scripts/ci\.sh$', '^relay/']
+    files: ['^(relay|\.github)/|^scripts/ci\.sh$']
     checks: [relay]
 
   - id: pi
-    files: ['^third_party/pi/', '^scripts/pi-(hydrate|pack)\.sh$', '^scripts/ci\.sh$', '^\.github/']
+    files: ['^third_party/pi/|^scripts/pi-(hydrate|pack)\.sh$|^scripts/ci\.sh$|^\.github/']
     checks: [pi-pack, pi-test-0, pi-test-1, pi-test-2, pi-test-3]
 
   - id: frontend
@@ -432,8 +438,12 @@ suites:
     checks: [go-static]
 
   - id: next
-    files: ['^next/', '^scripts/ci\.sh$']
+    files: ['(\.go$|^internal/|^next/|^go\.(mod|sum)$|^tygo\.yaml$|^tygo/.*\.yaml$|^desktop/|^web/|^install\.sh$|^\.github/|^scripts/ci\.sh$)']
     checks: [next, next-ssh]
+
+  - id: next-pi
+    files: ['^next/third_party/pi/|^scripts/ci-changes\.sh$|^\.github/']
+    checks: [next-pi]
 
   - id: next-web
     files: ['^next/web/', '^scripts/ci\.sh$']
@@ -445,10 +455,10 @@ suites:
     checks: [cross-build-linux-amd64, cross-build-linux-arm64, cross-build-darwin-amd64, cross-build-darwin-arm64]
 
   - id: computer-smoke
-    files: ['^\.github/', '^internal/(computers|computerweb)/']
+    files: ['^internal/(computers|computerweb)/|^\.github/']
     checks: [computer-smoke]
 
   - id: go
     group: go-test
-    files: ['^\.github/', '^scripts/ci\.sh$', '^[^/]*\.go$', '^(cmd|desktop|examples|internal|scripts|web)/.*\.go$', '^internal/', '^go\.(mod|sum)$', '^tygo\.yaml$', '^tygo/.*\.yaml$', '^desktop/', '^web/', '^install\.sh$']
+    files: ['(\.go$|^internal/|^next/|^go\.(mod|sum)$|^tygo\.yaml$|^tygo/.*\.yaml$|^desktop/|^web/|^install\.sh$|^\.github/|^scripts/ci\.sh$)', '^web/|^internal/filesvc/files\.go$|^internal/voice/realtime/testdata/page-protocol\.json$|^\.github/|^scripts/ci\.sh$']
     checks: [frontend-0, frontend-1, frontend-2, frontend-3, frontend-4, frontend-5, frontend-build, frontend-check, go-static, desktop, go-test-shard-0, go-test-shard-1, go-test-shard-2, go-test-shard-3, go-test-shard-4, go-test-shard-5, go-test-shard-6, go-test-shard-7, go-test-shard-8, go-test-shard-9]
