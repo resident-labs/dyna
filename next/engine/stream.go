@@ -52,8 +52,8 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 }
 
 type boxChannel struct {
-	stop    context.CancelFunc
-	control chan contract.BoxMessage
+	stop context.CancelFunc
+	wake chan struct{}
 }
 
 func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-chan contract.BoxMessage, *contract.Error) {
@@ -70,36 +70,11 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 		s.clearComputerLocked(session.ID)
 		previous.stop()
 	}
-	channel := &boxChannel{stop: stop, control: make(chan contract.BoxMessage, 2)}
+	channel := &boxChannel{stop: stop, wake: make(chan struct{}, 1)}
 	s.channels[session.ID] = channel
 	s.mu.Unlock()
 	sub, cancel := s.store.Subscribe()
 	out := make(chan contract.BoxMessage)
-	turns := make(chan contract.BoxMessage)
-	go func() {
-		defer close(out)
-		for {
-			select {
-			case m, ok := <-turns:
-				if !ok {
-					return
-				}
-				select {
-				case out <- m:
-				case <-ctx.Done():
-					return
-				}
-			case m := <-channel.control:
-				select {
-				case out <- m:
-				case <-ctx.Done():
-					return
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
 	go func() {
 		defer func() {
 			stop()
@@ -110,11 +85,28 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			}
 			s.mu.Unlock()
 		}()
-		defer close(turns)
+		defer close(out)
 		defer func() { cancel() }()
 		replay := true
 		archiveSent := false
+		watching := false
 		for {
+			s.mu.Lock()
+			c := s.computers[session.ID]
+			desired := c != nil && len(c.watchers) != 0
+			s.mu.Unlock()
+			if desired != watching {
+				var body contract.BoxMessageBody = contract.ComputerWatchStop{}
+				if desired {
+					body = contract.ComputerWatchStart{}
+				}
+				select {
+				case out <- contract.BoxMessage{Body: body}:
+					watching = desired
+				case <-ctx.Done():
+					return
+				}
+			}
 			current, err := s.store.Box(ctx, session.Box)
 			if err != nil || current.State == contract.BoxDeleted {
 				return
@@ -125,13 +117,15 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				}
 				if !archiveSent && current.Reason == "" {
 					select {
-					case turns <- contract.BoxMessage{Body: contract.Archive{}}:
+					case out <- contract.BoxMessage{Body: contract.Archive{}}:
 						archiveSent = true
 					case <-ctx.Done():
 						return
 					}
 				}
 				select {
+				case <-channel.wake:
+					continue
 				case event, ok := <-sub:
 					if !ok {
 						return
@@ -153,6 +147,8 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			if !allowed {
 				unlock()
 				select {
+				case <-channel.wake:
+					continue
 				case <-sub:
 					continue
 				case <-ctx.Done():
@@ -230,19 +226,21 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			}
 			if len(start) != 0 {
 				select {
-				case turns <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start}}:
+				case out <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start}}:
 				case <-ctx.Done():
 					return
 				}
 			}
 			for _, input := range steer {
 				select {
-				case turns <- contract.BoxMessage{Body: input}:
+				case out <- contract.BoxMessage{Body: input}:
 				case <-ctx.Done():
 					return
 				}
 			}
 			select {
+			case <-channel.wake:
+				continue
 			case _, ok := <-sub:
 				if !ok {
 					if ctx.Err() != nil {
