@@ -7,7 +7,7 @@
   import { fromNow } from "../feed.ts";
   import { hostMeters, watchHosts } from "../hosts.ts";
   import { busiestWindow } from "../usage.ts";
-  import { hue } from "../identity.ts";
+  import { distinctInitials, hue, initials as letters } from "../identity.ts";
   import Avatar from "./Avatar.svelte";
   import HostCard from "./HostCard.svelte";
   import Icon from "./Icon.svelte";
@@ -15,12 +15,15 @@
   import UsageCard from "./UsageCard.svelte";
   type Navigate = (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void;
   // onrequests opens the Requests panel once the link has moved to that room. loaded is false until room.list answers.
-  let { attention, loaded, navigate, onrequests }: { attention: Attention; loaded: boolean; navigate: Navigate; onrequests: () => void } = $props();
+  // initials are the rooms' distinct initials, as the rail shows them.
+  let { attention, initials, loaded, navigate, onrequests }: {
+    attention: Attention; initials: Map<string, string>; loaded: boolean; navigate: Navigate; onrequests: () => void;
+  } = $props();
   // Each room's sessions load once while Home is open, for Activity's counts and names. Requests load per room, and
   // again only when a room gains a request or requester that no answer named yet. A failed load forgets its IDs and
   // offers Try again.
   const requests = new SvelteMap<string, { title: string; by: Principal; target: Card["target"]; expires: string }>();
-  const sessions = new SvelteMap<string, { name: string; root: boolean }>();
+  const sessions = new SvelteMap<string, { name: string; root: boolean; room: string }>();
   // Requester IDs a session.list answered for; one it did not name is a closed session.
   const answered = new SvelteSet<string>();
   // Rooms whose session.list answered.
@@ -35,7 +38,7 @@
     void list().then(answer => keep(answer, fresh), () => { for (const id of fresh) asked.delete(id); failed = true; });
   }
   const keepSessions = (room: string) => (list: SessionListResponse, fresh: string[]) => {
-    for (const item of list.sessions ?? []) sessions.set(item.id, { name: item.name, root: !item.parent });
+    for (const item of list.sessions ?? []) sessions.set(item.id, { name: item.name, root: !item.parent, room });
     for (const id of fresh) answered.add(id);
     listed.add(room);
   };
@@ -61,6 +64,11 @@
     if (!session && !answered.has(by.session)) return [];
     return [{ ...row, who: session?.name ?? "A closed session", root: session?.root ?? false }];
   }));
+  // Each session's initials, distinct within its room as the room's own page shows them.
+  let sessionInitials = $derived(new Map([...Map.groupBy(sessions, ([, item]) => item.room).values()].flatMap(list => {
+    const labels = distinctInitials(list.map(([, item]) => item.name));
+    return list.map(([id, item]) => [id, labels.get(item.name) ?? letters(item.name)]);
+  })));
   // More than 4 requests fold into one row per room, which opens that room's Requests.
   let groups = $derived(waiting.length <= 4 ? [] : [...attention.rooms.values()].flatMap(room => {
     const count = waiting.filter(row => row.room.id === room.id).length;
@@ -149,10 +157,10 @@
   <div class="top">
     {#if asks || decided.size}<section class="card requests"><h2 tabindex="-1" bind:this={requestsHeading}>Requests{#if waiting.length}<span>{waiting.length}</span>{/if}</h2>
       <div class="list">{#each groups as { room, count } (room.id)}<a class="item fold" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>
-        <Icon name="chevron" /><Avatar kind="room" name={room.name} size={28} />
+        <Icon name="chevron" /><Avatar kind="room" name={room.name} label={initials.get(room.name)} size={28} />
         <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{count} waiting</span></span></a>
       {:else}{#each waiting as { id, room, value, who, root } (id)}{@const soon = Date.parse(value.expires) - now < 5 * 60_000}<div class="item request">
-        <Avatar kind={value.by.kind} name={who} {root} size={28} />
+        <Avatar kind={value.by.kind} name={who} label={value.by.session ? sessionInitials.get(value.by.session) : undefined} {root} size={28} />
         <span class="lines"><span class="title">{value.title}</span>
           <span class="line"><b class="who {value.by.kind}" class:root style:--hue={hue(who)}>{who}</b> · {#if value.target.kind === "host"}on <code>{value.target.name}</code> · {:else if value.target.kind !== "room"}on {value.target.kind} {value.target.name} · {/if}{room.name} ·
             {#if soon}<StatusPill tone="warning" label="Expires {fromNow(value.expires, now)}" />{:else}Expires {fromNow(value.expires, now)}{/if}</span>
@@ -164,10 +172,10 @@
       </section>{/if}
     <section class="card"><h2>Activity{#if total(attention.working)}<span>{total(attention.working)} working</span>{/if}</h2>
       {#snippet row({ room, working, line }: (typeof activity)[number])}<a class="item" href={roomHref(room.id)} onclick={navigate}>
-        <Avatar kind="room" name={room.name} size={28} />
+        <Avatar kind="room" name={room.name} label={initials.get(room.name)} size={28} />
         <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{line}</span></span>
         <!-- Who works, from two sessions on (one is named in the line): three small avatars at most, then a count. -->
-        {#if working.length > 1}<span class="stack">{#each working.slice(0, 3) as id (id)}<Avatar kind="session" name={sessions.get(id)?.name ?? ""} root={sessions.get(id)?.root ?? false} size={20} />{/each}
+        {#if working.length > 1}<span class="stack">{#each working.slice(0, 3) as id (id)}<Avatar kind="session" name={sessions.get(id)?.name ?? ""} label={sessionInitials.get(id)} root={sessions.get(id)?.root ?? false} size={20} />{/each}
           {#if working.length > 3}<span class="more-count">+{working.length - 3}</span>{/if}</span>{/if}</a>{/snippet}
       <div class="list">{#each active as item (item.room.id)}{@render row(item)}{/each}
         {#if quiet.length}<button type="button" class="item fold quiet" aria-expanded={showQuiet} onclick={() => { showQuiet = !showQuiet; }}>
