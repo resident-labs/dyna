@@ -18,7 +18,7 @@
 
 <SessionFace {name} {root} {dot} {mark} />
 <span class="who"><span class="name" class:quiet style:--hue={hue(name)}>{name}</span>
-  <span class="line" class:split={state === "failed"}>{#if state === "failed"}<StatusPill tone="failed" word label="Failed" />{#if line}<span class="reason">{` · ${line}`}</span>{/if}{:else}{line}{/if}</span></span>
+  <span class="line" class:split={state === "failed"} class:ask={state === "waiting"}>{#if state === "failed"}<StatusPill tone="failed" word label="Failed" />{#if line}<span class="reason">{` · ${line}`}</span>{/if}{:else}{line}{/if}</span></span>
 
 <style>
   .who { flex: 1; min-width: 0; display: grid; line-height: 1.3; }
@@ -26,6 +26,8 @@
   .name.quiet { color: var(--text); }
   .line { min-width: 0; color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .split { display: flex; }
+  /* This status needs the owner, so it wraps and never cuts. */
+  .ask { white-space: normal; }
   .line > :global(.status) { opacity: 1; font-weight: 400; }
   .reason { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
 </style>
