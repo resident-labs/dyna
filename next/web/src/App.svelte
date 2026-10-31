@@ -321,7 +321,8 @@
           aria-label={hidden ? `Show ${count(hidden, "session")} under ${item.name}` : `Hide the sessions under ${item.name}`}
           title={hidden ? `${count(hidden, "session")} folded` : "Fold"} onclick={() => { if (!folded.delete(item.session)) folded.add(item.session); }}
           onkeydown={event => fold(event, item.session)}><Icon name="chevron" size={12} />{#if hidden}<span>{hidden}</span>{/if}</button>{/if}
-        <a class="member" href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.session)}`} onclick={navigate}
+        <a class="member" href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.session)}`}
+          onclick={event => { navigate(event); if (!wide.current && event.defaultPrevented) void showPanel(false); }}
           onkeydown={event => { walkTree(event); if (parent) fold(event, item.session); }}
           aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{28 + depth * 14}px">
           <SessionRow name={item.name} root={!item.parent} status={status(item.session)} />
@@ -372,6 +373,6 @@
   /* The docked computer and the jobs view need 420 px. They dock beside the feed from 1024 px, where the
      feed keeps 540 px; below that they cover the feed, and Back or Escape closes them. */
   @media (min-width: 1024px) { .shell.open:has(aside.watching) { grid-template-columns: 64px 1fr 420px; } }
-  @media (min-width: 761px) and (max-width: 1023px) { .shell > aside.members.watching { position: fixed; top: var(--panel-top, 52px); right: 0; bottom: 0; width: 420px; z-index: 1; box-shadow: -8px 0 24px rgb(0 0 0 / 25%); } }
+  @media (min-width: 761px) and (max-width: 1023px) { .shell > aside.members.watching { position: fixed; top: calc(var(--panel-top, 52px) + env(safe-area-inset-top)); right: 0; bottom: 0; width: 420px; z-index: 1; box-shadow: -8px 0 24px rgb(0 0 0 / 25%); } }
   @media (max-width: 760px) { .shell > aside.members.shown.watching { width: min(420px, 100vw); } }
 </style>
