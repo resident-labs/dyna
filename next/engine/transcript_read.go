@@ -121,7 +121,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 				t.More = true
 				break
 			}
-			t.Inputs = append(t.Inputs, contract.TranscriptInput{ID: input.ID, Seq: input.Seq, Room: input.Room, Type: input.Body.EventType(), From: input.From, Text: clipTranscript(value, 4096), More: len(value) > 4096})
+			t.Inputs = append(t.Inputs, contract.TranscriptInput{ID: input.ID, Seq: input.Seq, Room: input.Room, Type: input.Body.EventType(), From: input.From, Text: clipTranscript(value, 512), More: len(value) > 512})
 			t.After = "input:" + string(input.ID)
 		}
 		if !t.More {
@@ -341,19 +341,19 @@ func clipTranscript(value string, maxBytes int) string {
 func applyTranscriptPost(item *contract.TranscriptItem, event contract.Event) {
 	post := event.Body.(contract.PostCreated)
 	text := harness.Mask(post.Text)
-	item.Kind, item.Event, item.Room, item.Seq, item.Text = contract.TranscriptPost, event.ID, event.Room, event.Seq, clipTranscript(text, 8192)
-	item.More = item.More || len(text) > 8192
+	item.Kind, item.Event, item.Room, item.Seq, item.Text = contract.TranscriptPost, event.ID, event.Room, event.Seq, clipTranscript(text, 4096)
+	item.More = item.More || len(text) > 4096
 	home := post.Home
 	item.Home = &home
 	item.Attachments = post.Attachments
 	for i := range item.Attachments {
 		a := &item.Attachments[i]
-		a.Name = harness.Mask(a.Name)
-		a.Media = clipTranscript(harness.Mask(a.Media), 1024)
+		a.Name = clipTranscript(harness.Mask(a.Name), 128)
+		a.Media = clipTranscript(harness.Mask(a.Media), 128)
 		if a.Visual != nil {
-			a.Visual.Title = harness.Mask(a.Visual.Title)
+			a.Visual.Title = clipTranscript(harness.Mask(a.Visual.Title), 128)
 			for j := range a.Visual.Checks {
-				a.Visual.Checks[j].Detail = clipTranscript(harness.Mask(a.Visual.Checks[j].Detail), 4096)
+				a.Visual.Checks[j].Detail = clipTranscript(harness.Mask(a.Visual.Checks[j].Detail), 128)
 			}
 		}
 	}
