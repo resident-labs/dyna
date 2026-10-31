@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"strconv"
 	"time"
 
@@ -81,6 +83,58 @@ func (a *API) handler(c Caller) http.Handler {
 			return contract.EventsListResponse{}, forbidden()
 		}
 		return a.service.EventsList(ctx, p, req)
+	})
+	call(mux, contract.MethodComputerChanged, c, box, a.service.ComputerChanged)
+	mux.HandleFunc("POST /v1/computers/frames", func(w http.ResponseWriter, r *http.Request) {
+		if !box(c) {
+			writeError(w, forbidden())
+			return
+		}
+		generation, err := strconv.ParseUint(r.URL.Query().Get("generation"), 10, 64)
+		if err != nil || generation == 0 {
+			writeError(w, invalid())
+			return
+		}
+		if err := a.service.ComputerFrames(r.Context(), c.Principal, generation, r.Body); err != nil {
+			writeError(w, err)
+		}
+	})
+	mux.HandleFunc("GET /v1/computers/watch", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		if !owner(c) || !c.Web {
+			writeError(w, forbidden())
+			return
+		}
+		session := contract.SessionID(r.URL.Query().Get("session"))
+		if session == "" {
+			writeError(w, invalid())
+			return
+		}
+		frames, err := a.service.ComputerWatch(r.Context(), session)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		multi := multipart.NewWriter(w)
+		_ = multi.SetBoundary("frame")
+		w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+		w.WriteHeader(http.StatusOK)
+		f, ok := w.(http.Flusher)
+		if !ok {
+			return
+		}
+		f.Flush()
+		header := textproto.MIMEHeader{"Content-Type": []string{"image/jpeg"}}
+		for frame := range frames {
+			part, err := multi.CreatePart(header)
+			if err != nil {
+				return
+			}
+			if _, err = part.Write(frame); err != nil {
+				return
+			}
+			f.Flush()
+		}
 	})
 	call(mux, contract.MethodBoxHello, c, box, a.service.BoxHello)
 	call(mux, contract.MethodTurnOutput, c, box, a.service.TurnOutput)
