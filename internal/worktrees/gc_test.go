@@ -81,7 +81,7 @@ func ageGCTree(t *testing.T, path string) {
 func TestNewWorktreeRemoveUnchanged(t *testing.T) {
 	repo := gcRepo(t)
 	base := git(t, repo, "rev-parse", "HEAD")
-	rec, err := NewFor(t.Context(), repo, "clean-removal", base, "", "")
+	rec, err := NewFor(t.Context(), repo, "clean-removal", base, "owner", "")
 	if err != nil {
 		t.Fatal(err)
 	}
