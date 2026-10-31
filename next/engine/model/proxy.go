@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 	"golang.org/x/crypto/bcrypt"
@@ -16,11 +17,12 @@ import (
 
 // Proxy owns the proxy listener and its private client key.
 type Proxy struct {
-	Listener  *net.UnixListener
-	Config    string
-	Socket    string
-	clientKey string
-	client    *http.Client
+	Listener   *net.UnixListener
+	Config     string
+	Socket     string
+	clientKey  string
+	client     *http.Client
+	generation atomic.Uint64
 }
 
 // NewProxy creates a private proxy configuration. managementKey is held by the engine.
@@ -44,7 +46,8 @@ func NewProxy(dataDir, managementKey string) (*Proxy, error) {
 	if err := os.Chmod(dir, 0700); err != nil {
 		return nil, err
 	}
-	authDir := filepath.Join(dir, "auth")
+	// M1 file credentials are not imported; the owner reconnects accounts.
+	authDir := filepath.Join(dir, "auth-v2")
 	if err := os.MkdirAll(authDir, 0700); err != nil {
 		return nil, err
 	}
@@ -76,6 +79,13 @@ func NewProxy(dataDir, managementKey string) (*Proxy, error) {
 		return nil, err
 	}
 	cfg.AuthDir = authDir
+	for _, provider := range KeyProviders() {
+		catalog := config.OpenAICompatibility{Name: string(provider.Provider), BaseURL: provider.URL, DynaCatalogOnly: true}
+		for _, name := range provider.Models {
+			catalog.Models = append(catalog.Models, config.OpenAICompatibilityModel{Name: name, Alias: name})
+		}
+		cfg.OpenAICompatibility = append(cfg.OpenAICompatibility, catalog)
+	}
 	cfg.APIKeys = []string{key}
 	// Unix clients have no loopback IP; the private socket limits access.
 	cfg.RemoteManagement.AllowRemote = true
