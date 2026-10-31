@@ -115,7 +115,7 @@
     else if (event.key === "Escape" && section) void closeSection();
     if (event.key !== "F6") return;
     event.preventDefault();
-    // Only areas on screen take part; below 900 px the closed sessions panel has no boxes.
+    // Only areas on screen take part; below 761 px the closed sessions panel has no boxes.
     // A panel from the room menu takes the place of the feed and the composer.
     const areas = [rail, section ? requests : feed, section ? undefined : composer, members, docked ? undefined : computer]
       .filter(area => area != null)
@@ -139,12 +139,12 @@
     if (store?.turns.has(id)) { const label = store.activity.get(id); return label ? `working · ${label}` : "working"; }
     return box === "pending" || box === "creating" || box === "starting" ? "starting" : "";
   };
-  // Below 900 px the sessions panel is hidden; a header button opens it over the feed.
+  // Below 761 px the sessions panel is hidden; a header button opens it over the feed.
   // Opening moves focus into the panel; closing returns it to the button if the panel held it.
   let panel = $state(false);
   // The session whose computer the owner watches, while it runs: in a window over the app, or docked
   // in the sessions panel instead of the list. Docked, the view mounts only where the panel is on
-  // screen: always when wide, below 900 px only while it is open. The window keeps its place and size
+  // screen: always when wide, below 761 px only while it is open. The window keeps its place and size
   // for the page view.
   let watching: string | undefined = $state();
   let docked = $state(false);
@@ -159,7 +159,7 @@
   }
   // The view closes when its computer stops or the room changes, before the DOM updates, so it never
   // streams again unasked. Focus that was in the view returns to the row's button, or to the panel;
-  // below 900 px with the panel closed, it returns to the panel's toggle button.
+  // below 761 px with the panel closed, it returns to the panel's toggle button.
   async function stopWatching() {
     const id = watching ?? "";
     const held = members?.contains(document.activeElement) || computer?.contains(document.activeElement);
@@ -180,7 +180,7 @@
     if (held) (members?.querySelector<HTMLElement>(`[data-jobs="${CSS.escape(id)}"]`) ?? members)?.focus();
   }
   $effect.pre(() => { if (jobsOf && store?.boxes.get(jobsOf) !== "ready") void closeJobs(); });
-  const wide = new MediaQuery("min-width: 901px");
+  const wide = new MediaQuery("min-width: 761px");
   let toggle: HTMLButtonElement | undefined = $state();
   async function showPanel(open: boolean) {
     const held = members?.contains(document.activeElement);
@@ -287,7 +287,9 @@
   .watch { all: unset; display: grid; place-items: center; width: 24px; height: 24px; margin-right: 8px; border-radius: 6px; color: var(--muted); cursor: pointer; }
   .watch:hover { background: var(--hover); color: var(--text); }
   .watch:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
-  /* The docked computer and the jobs view need room: the panel widens while it shows one. */
-  @media (min-width: 901px) { .shell.open:has(aside.watching) { grid-template-columns: 64px 1fr 420px; } }
-  @media (max-width: 900px) { .shell > aside.members.shown.watching { width: min(420px, 100vw); } }
+  /* The docked computer and the jobs view need 420 px. They dock beside the feed from 1024 px, where the
+     feed keeps 540 px; below that they cover the feed, and Back or Escape closes them. */
+  @media (min-width: 1024px) { .shell.open:has(aside.watching) { grid-template-columns: 64px 1fr 420px; } }
+  @media (min-width: 761px) and (max-width: 1023px) { .shell > aside.members.watching { position: fixed; top: var(--panel-top, 52px); right: 0; bottom: 0; width: 420px; z-index: 1; box-shadow: -8px 0 24px rgb(0 0 0 / 25%); } }
+  @media (max-width: 760px) { .shell > aside.members.shown.watching { width: min(420px, 100vw); } }
 </style>
