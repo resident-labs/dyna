@@ -90,6 +90,11 @@ export class EventWindow {
   // Reach a searched post without competing with an automatic page load.
   async seek(seq: number): Promise<void> {
     while (this.busy) await this.busy;
+    while (!this.present && this.newest < seq && !this.failure) {
+      const before = this.newest;
+      await this.loadNewer();
+      if (this.newest <= before) break;
+    }
     while (this.older && this.oldest > seq && !this.failure) {
       const before = this.oldest;
       await this.loadOlder();
