@@ -179,8 +179,9 @@ The exporter report must identify any remaining gap for a lead decision.
 | wonder-full | `meta/muse-wonder-full-1.0` | dropped: Muse is unsupported |
 
 The exporter carries the thinking level, including `xhigh` for
-opus-rewrite. Import checks every mapped ID against the trial proxy's live
-model list, without reading its config. It reports a missing model by name.
+opus-rewrite. The offline dry run lists mapped IDs as checked at import. The future real
+import must check them against the supervised proxy's live model list, without
+reading its config, and refuse each missing model by name.
 The six skipped profiles (deepseek, fable, grok, kimi-max, mimo and sol)
 were disabled in the captured catalog. The unsupported Muse profile is a
 report and handoff line, not a cutover blocker.
