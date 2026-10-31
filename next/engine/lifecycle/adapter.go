@@ -1,12 +1,10 @@
-package engine
+package lifecycle
 
 import (
 	"context"
-
 	"github.com/resident-labs/dyna/contract"
 )
 
-// BoxSpec identifies the admitted allocation the host adapter must create.
 type BoxSpec struct {
 	Box     contract.BoxID
 	Session contract.SessionID
@@ -16,7 +14,6 @@ type BoxSpec struct {
 	Repos   []contract.BoxRepo
 }
 
-// BoxAdapter performs host work after the service records admission.
 type BoxAdapter interface {
 	TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error)
 	Create(context.Context, BoxSpec) (string, error)
@@ -24,4 +21,11 @@ type BoxAdapter interface {
 	Start(context.Context, contract.BoxID) error
 	Stop(context.Context, contract.BoxID) error
 	Recreate(context.Context, BoxSpec, string, string) error
+}
+
+type View interface {
+	OpenTerminal(contract.SessionID) bool
+}
+type Repositories interface {
+	Get(context.Context, contract.SessionID, contract.HostName, bool) ([]contract.BoxRepo, error)
 }

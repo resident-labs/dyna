@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 21
+const schemaVersion = 22
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
@@ -57,6 +57,14 @@ var steps = map[int][]string{
 		`ALTER TABLE grants ADD COLUMN reason TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE grants DROP COLUMN mode`,
 		`ALTER TABLE grants DROP COLUMN commands`,
+	},
+	21: {
+		`ALTER TABLE boxes ADD COLUMN want TEXT NOT NULL DEFAULT 'run'`,
+		`ALTER TABLE boxes ADD COLUMN due_at INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE boxes ADD COLUMN failures INTEGER NOT NULL DEFAULT 0`,
+		`UPDATE boxes SET want='stop' WHERE session IN (SELECT id FROM sessions WHERE state='dormant')`,
+		`UPDATE boxes SET want='close' WHERE session IN (SELECT id FROM sessions WHERE state='closing')`,
+		`UPDATE sessions SET state='open' WHERE state IN ('dormant','pending')`,
 	},
 }
 
