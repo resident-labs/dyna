@@ -32,7 +32,19 @@ type hostRegistrar interface {
 
 type serviceWithHosts struct {
 	*engine.Service
-	boxes hostRegistrar
+	boxes  hostRegistrar
+	quotas *model.Quotas
+}
+
+func (s *serviceWithHosts) AccountsQuota(ctx context.Context, caller contract.Principal, _ contract.AccountsQuotaRequest) (contract.AccountsQuotaResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalOwner {
+		return contract.AccountsQuotaResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "owner only"}
+	}
+	result, err := s.quotas.Read(ctx)
+	if err != nil {
+		return result, &contract.Error{Code: contract.ErrUnavailable, Message: "account usage unavailable"}
+	}
+	return result, nil
 }
 
 func (s *serviceWithHosts) HostList(ctx context.Context, caller contract.Principal, req contract.HostListRequest) (contract.HostListResponse, *contract.Error) {
@@ -125,7 +137,8 @@ func Run(ctx context.Context, cfg Config) error {
 	if _, err := rand.Read(key[:]); err != nil {
 		return err
 	}
-	proxy, err := model.NewProxy(cfg.Data, hex.EncodeToString(key[:]))
+	managementKey := hex.EncodeToString(key[:])
+	proxy, err := model.NewProxy(cfg.Data, managementKey)
 	if err != nil {
 		return err
 	}
@@ -157,7 +170,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	boxes.Mirror = mirror
 	boxes.Images = &images.Builder{Recorder: service, Now: time.Now}
-	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes}, func(c api.Caller) http.Handler {
+	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes, quotas: proxy.Quotas(managementKey, time.Now)}, func(c api.Caller) http.Handler {
 		session, err := st.Session(ctx, c.Principal.Session)
 		if err != nil {
 			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
