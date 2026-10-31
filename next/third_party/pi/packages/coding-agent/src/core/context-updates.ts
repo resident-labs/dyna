@@ -1,15 +1,14 @@
-import { createHash } from "node:crypto";
 import { structuredPatch } from "diff";
 import type { CustomMessage } from "./messages.ts";
-import type { SessionEntry } from "./session-manager.ts";
+import type { SessionManager } from "./session-manager.ts";
 
 /** Ordered sections last delivered in a head or context update. */
 export type ContextSections = Record<string, string>;
 
 /** Derive the last delivered state from the active session branch. */
-export function deliveredSections(branch: SessionEntry[]): ContextSections | undefined {
-	for (let i = branch.length - 1; i >= 0; i--) {
-		const entry = branch[i];
+export function deliveredSections(session: Pick<SessionManager, "getLeafEntry" | "getEntry">): ContextSections | undefined {
+	let entry = session.getLeafEntry();
+	while (entry) {
 		if (entry.type === "custom_message" && entry.customType === "context_update") {
 			if (isContextDetails(entry.details)) return entry.details.sections;
 		}
@@ -24,6 +23,7 @@ export function deliveredSections(branch: SessionEntry[]): ContextSections | und
 				Object.entries(head.sections ?? {}).filter((item): item is [string, string] => item[1] !== null),
 			);
 		}
+		entry = entry.parentId ? session.getEntry(entry.parentId) : undefined;
 	}
 	return undefined;
 }
@@ -47,8 +47,7 @@ function isContextDetails(details: unknown): details is { sections: ContextSecti
 export function createContextUpdate(
 	previous: ContextSections,
 	current: ContextSections,
-	operations: { hash: (text: string) => string; diff: (old: string, text: string) => string } = {
-		hash: (text) => createHash("sha256").update(text).digest("hex"),
+	operations: { diff: (old: string, text: string) => string } = {
 		diff: (old, text) =>
 			structuredPatch("section", "section", old, text, "", "", { context: 3 })
 				.hunks.map(
@@ -62,7 +61,6 @@ export function createContextUpdate(
 	for (const [key, text] of Object.entries(current)) {
 		const old = Object.hasOwn(previous, key) ? previous[key] : undefined;
 		if (old === text) continue;
-		if (old !== undefined && operations.hash(old) === operations.hash(text)) continue;
 		if (old === undefined) {
 			changes.push(`New section ${key}:\n${text}`);
 			continue;
