@@ -169,3 +169,41 @@ func TestCheckpointDoesNotBlockWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestHistoryQueriesUseIndexes(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	tests := []string{
+		"SELECT id FROM turns WHERE session='s' AND ended_at IS NULL",
+		"SELECT 1 FROM turns WHERE session='s' LIMIT 1",
+		"SELECT reply_kind FROM deliveries WHERE to_kind='session' AND to_id='s' AND turn='t' ORDER BY seq",
+		"SELECT id FROM sessions WHERE room='r' AND closed_at IS NULL",
+		"SELECT id FROM sessions WHERE parent='s'",
+		"SELECT id FROM operations WHERE state='pending' AND expires_at<=1",
+	}
+	for _, tt := range tests {
+		t.Run(tt, func(t *testing.T) {
+			rows, err := s.Read().Query("EXPLAIN QUERY PLAN " + tt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var id, parent, unused int
+				var detail string
+				if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(detail, "SCAN ") {
+					t.Fatalf("full scan: %s", detail)
+				}
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

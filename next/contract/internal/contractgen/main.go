@@ -293,6 +293,8 @@ func tsType(e ast.Expr) string {
 			return "string | null"
 		}
 		return "Array<" + tsType(t.Elt) + "> | null"
+	case *ast.MapType:
+		return "Record<" + tsType(t.Key) + ", " + tsType(t.Value) + "> | null"
 	case *ast.StructType:
 		var b strings.Builder
 		b.WriteString("{")

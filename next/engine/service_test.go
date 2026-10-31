@@ -1045,3 +1045,30 @@ func connectAgent(ctx context.Context, t *testing.T, s *Service, session contrac
 		t.Fatal(err)
 	}
 }
+
+func TestClosedSessionNamesRemainInEvents(t *testing.T) {
+	s, room, session, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	if _, e := s.Post(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session}, contract.PostRequest{Room: room, Text: "hello"}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: session, Discard: true}); e != nil {
+		t.Fatal(e)
+	}
+	list, e := s.SessionList(ctx, owner, contract.SessionListRequest{Room: room})
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, item := range list.Sessions {
+		if item.ID == session {
+			t.Fatal("closed session listed")
+		}
+	}
+	events, e := s.EventsList(ctx, owner, contract.EventsListRequest{Room: room, Types: []contract.EventType{"post.created"}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if len(events.Events) != 1 || events.Names[session] != "worker" {
+		t.Fatalf("events: %+v, names: %+v", events.Events, events.Names)
+	}
+}
