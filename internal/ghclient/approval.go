@@ -51,6 +51,11 @@ func classifyForApproval(ctx context.Context, binary, dir string, args []string,
 
 // decideCommand binds repository and account state to the common write policy.
 func decideCommand(ctx context.Context, cmd *exec.Cmd, r repository, login string, owns func(context.Context, ItemRef) bool) (Write, Decision, error) {
+	if r.host == "" || !repoName.MatchString(r.name) {
+		w := ParseWrite(cmd.Args[1:], r.host, r.name, TargetOther)
+		d := Decision{Rule: "repository-unknown", Refusal: ReasonRepositoryUnknown}
+		return w, d, &RefusalError{Write: w, Decision: d}
+	}
 	rec, err := roomFor(ctx, cmd.Dir, r)
 	target := TargetRoom
 	if errors.Is(err, errNotInRoom) {
