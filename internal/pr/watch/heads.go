@@ -212,7 +212,7 @@ func (g GitHub) readHeadChunk(ctx context.Context, records []*Record) (map[strin
 		}
 		query.WriteString("}")
 		g.requests.account = group.login
-		requestCtx, cancel := withHeadChunkTimeout(ctx, 3*time.Second)
+		requestCtx, cancel := withHeadChunkTimeout(ctx, 10*time.Second)
 		body, _, callErr := g.requestMethod(ghclient.WithRoom(requestCtx, grouped[repos[0]][0].RoomID), Ref{Host: host, Repo: repos[0]}, "graphql", "POST", "-f", "query="+query.String())
 		cancel()
 		if errors.Is(callErr, context.DeadlineExceeded) || (callErr != nil && strings.Contains(callErr.Error(), "GitHub HTTP status 504")) {
