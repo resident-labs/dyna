@@ -430,7 +430,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		return err
 	}}
 	closeCmd.Flags().BoolVar(&discard, "discard", false, "Close without archiving")
-	restart := &cobra.Command{Use: "restart SESSION", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	restart := &cobra.Command{Use: "restart SESSION", Short: "Replace a failed session box", Long: "Replace a failed session box. The old volume and unpushed work are lost. If the old host is unavailable, its resources may remain there.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := getClient().SessionRestart(cmd.Context(), contract.SessionRestartRequest{Session: contract.SessionID(args[0])})
 		return err
 	}}
