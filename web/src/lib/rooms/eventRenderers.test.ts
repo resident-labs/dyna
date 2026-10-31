@@ -507,6 +507,7 @@ function fixtureTip(payload: EventPayload): string {
   if ('filer' in payload) return `D-${payload.number}`
   if ('goalId' in payload) return payload.goalId
   if ('crossings' in payload) return payload.run
+  if ('host' in payload && 'resource' in payload) return payload.host
   if ('children' in payload) return payload.children[0]?.name ?? payload.parent
   if ('ruleId' in payload) return payload.sessions?.length ? `reached ${payload.sessions.length} sessions` : payload.ruleId
   if ('block' in payload) return payload.name
