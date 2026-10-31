@@ -39,7 +39,7 @@ func TestMoveIdleSubtree(t *testing.T) {
 	s.boxes = host
 	start := func(name string, parent contract.SessionID) contract.SessionStartResponse {
 		t.Helper()
-		r, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Parent: parent, Name: name, Profile: "test"})
+		r, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Parent: parent, Name: name, Profile: "test", Goal: "goal"})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -137,7 +137,7 @@ func TestMoveUnderCallerAfterStopFailure(t *testing.T) {
 	if _, e := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: parent}, contract.BoxHelloRequest{}); e != nil {
 		t.Fatal(e)
 	}
-	child, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Parent: parent, Name: "child", Profile: "test"})
+	child, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Parent: parent, Name: "child", Profile: "test", Goal: "goal"})
 	if e != nil {
 		t.Fatal(e)
 	}

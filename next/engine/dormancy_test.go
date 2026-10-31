@@ -128,7 +128,7 @@ func TestDormancyTransitionRechecksClosing(t *testing.T) {
 
 func TestDormancyKeepsParentWithLiveChild(t *testing.T) {
 	s, h, room, sid, ctx := quietSession(t, 0)
-	_, problem := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: sid, Name: "child", Profile: "test"})
+	_, problem := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Parent: sid, Name: "child", Profile: "test", Goal: "goal"})
 	if problem != nil {
 		t.Fatal(problem)
 	}
