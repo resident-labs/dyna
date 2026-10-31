@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,10 +26,15 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var refused atomic.Bool
 	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/machine/grant" || r.Header.Get("Authorization") == "" {
 			t.Errorf("unexpected relay request %s", r.URL.Path)
 			http.Error(w, "bad", 400)
+			return
+		}
+		if refused.Load() {
+			http.Error(w, "revoked", http.StatusForbidden)
 			return
 		}
 		_, _ = w.Write([]byte(`{"active":true,"epoch":1}`))
@@ -140,5 +146,23 @@ func TestRelayMintExchangeRenewAndReplay(t *testing.T) {
 	}
 	if out.Result().Cookies()[0].Value == cookies[0].Value {
 		t.Fatal("cookie did not rotate")
+	}
+	rotated := out.Result().Cookies()[0]
+	now = now.Add(2 * time.Minute)
+	refused.Store(true)
+	r = httptest.NewRequest("POST", origin+"/api/connect/renew", bytes.NewBufferString(`{"proof":"`+proof("/api/connect/renew", "abcdefghijklmnops")+`"}`))
+	r.Header.Set("Origin", origin)
+	r.AddCookie(rotated)
+	x, _, ok, err = service.Authenticate(r.Context(), r, origin)
+	if err != nil || !ok {
+		t.Fatalf("rotated auth: %v %v", ok, err)
+	}
+	out = httptest.NewRecorder()
+	service.ServePrivate(out, r, origin, []string{origin}, x)
+	if out.Code != http.StatusUnauthorized {
+		t.Fatalf("relay refusal: %d %s", out.Code, out.Body.String())
+	}
+	if _, _, ok, err = service.Authenticate(r.Context(), r, origin); err != nil || ok {
+		t.Fatalf("revoked: %v %v", ok, err)
 	}
 }

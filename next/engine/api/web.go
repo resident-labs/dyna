@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
-	"github.com/resident-labs/dyna/engine/connect"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -34,7 +33,7 @@ type Web struct {
 	ticks   func() (<-chan time.Time, func())
 	tokens  map[[32]byte]time.Time
 	devices DeviceStore
-	connect *connect.Sessions
+	connect ConnectSessions
 	app     fs.FS
 	api     *API
 }
@@ -59,8 +58,17 @@ func NewWeb(a *API, address string, app fs.FS, now func() time.Time, devices Dev
 	return w, nil
 }
 
+// ConnectSessions is the authentication boundary for relay-backed sessions.
+type ConnectSessions interface {
+	ManagedOrigin(context.Context) string
+	ServePublic(http.ResponseWriter, *http.Request, string, []string) bool
+	ServePrivate(http.ResponseWriter, *http.Request, string, []string, store.ConnectSession)
+	Authenticate(context.Context, *http.Request, string) (store.ConnectSession, []contract.Scope, bool, error)
+	StreamScopes(context.Context, string) ([]contract.Scope, bool, error)
+}
+
 // SetConnect installs Connect session authorization before the listener starts.
-func (w *Web) SetConnect(s *connect.Sessions) { w.connect = s }
+func (w *Web) SetConnect(s ConnectSessions) { w.connect = s }
 
 // SetRoutes adds the public origins served by the loopback listener.
 func (w *Web) SetRoutes(routes []string) error {
