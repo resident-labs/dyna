@@ -427,7 +427,7 @@ func (s *Service) refreshHeads(ctx context.Context, st State, polledAt time.Time
 			if r.Head != pull.Head.SHA || !headVerified(*r) || r.HeadVerifiedAt.IsZero() {
 				r.HeadVerifiedAt = s.now()
 			}
-			if r.Polling.PullVersion != pullVersion(pull, EffectivePolicy(*current, *r)) {
+			if r.Polling.PullVersion != pullVersion(pull, EffectivePolicy(*current, *r)) || pull.DiscussionVersion == "" || r.Polling.DiscussionVersion != pull.DiscussionVersion {
 				for path := range current.Responses[key] {
 					if strings.Contains(path, "/comments?") || strings.Contains(path, "/reviews?") {
 						delete(current.Responses[key], path)
