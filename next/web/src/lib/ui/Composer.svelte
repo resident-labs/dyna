@@ -14,6 +14,7 @@
 <div class="composer">
   <textarea rows="2" aria-label="Message" bind:this={element} bind:value onkeydown={keydown} {placeholder}></textarea>
   <div class="actions">
+    <span class="keys">Enter to send · Shift+Enter for a new line</span>
     <button type="button" aria-label="Send" title="Send" disabled={!value.trim()} onclick={() => { onsend(); element?.focus(); }}><Icon name="send" /></button>
   </div>
 </div>
@@ -25,7 +26,10 @@
   textarea { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; resize: none; field-sizing: content; min-height: 3em; max-height: 40vh; }
   textarea:focus-visible { outline: none; }
   textarea::placeholder { color: var(--muted); }
-  .actions { display: flex; justify-content: flex-end; margin-top: 4px; }
+  .actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 4px; }
+  /* The key hint shows only while the empty message box has focus. */
+  .keys { font-size: 12px; color: var(--muted); visibility: hidden; }
+  .composer:has(textarea:focus:placeholder-shown) .keys { visibility: visible; }
   button { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 8px; background: var(--focus); color: var(--bg); cursor: pointer; }
   button:disabled { background: var(--selected); color: var(--muted); cursor: default; }
   button:focus-visible { outline-offset: 2px; }
