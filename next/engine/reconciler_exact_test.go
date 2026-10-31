@@ -41,6 +41,7 @@ func TestReconcilerRetriesLeadWhenAnotherBoxIsDeleted(t *testing.T) {
 	if _, problem := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: first, Discard: true}); problem != nil {
 		t.Fatal(problem)
 	}
+	passLifecycle(t, s, ctx)
 	if err := s.Reconciler().Pass(ctx); err != nil {
 		t.Fatal(err)
 	}
