@@ -293,6 +293,15 @@ func (s *Service) sendWatch(ctx context.Context, out chan<- contract.BoxMessage,
 
 // queueWakes never waits for the engine mutex or the box loops.
 func (s *Service) queueWakes(ids []contract.SessionID, events []contract.Event) {
+	if len(ids) > 0 {
+		s.reconciler.Kick()
+	}
+	for _, event := range events {
+		switch event.Body.(type) {
+		case contract.BoxChanged, contract.SessionStarted, contract.SessionClosed, contract.TurnEnded:
+			s.reconciler.Kick()
+		}
+	}
 	s.wakeMu.Lock()
 	defer s.wakeMu.Unlock()
 	for _, id := range ids {
