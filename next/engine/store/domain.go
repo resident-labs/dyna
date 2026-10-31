@@ -52,6 +52,18 @@ func (s *Store) CreateRoom(ctx context.Context, id contract.RoomID, name string,
 	})
 }
 
+// SessionReplay returns the response saved for a caller's session start key.
+func (s *Store) SessionReplay(ctx context.Context, caller contract.Principal, clientID string) (contract.SessionStartResponse, error) {
+	var data []byte
+	var response contract.SessionStartResponse
+	err := s.read.QueryRowContext(ctx, "SELECT response FROM client_replays WHERE method=? AND caller_kind=? AND caller_id=? AND client_id=?", contract.MethodSessionStart, caller.Kind, caller.Session, clientID).Scan(&data)
+	if err != nil {
+		return response, err
+	}
+	err = json.Unmarshal(data, &response)
+	return response, err
+}
+
 func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, size contract.BoxSizeName, goal string, event, boxEvent contract.Event, reason string, sameHost bool, clientID string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		if clientID != "" {
