@@ -46,7 +46,7 @@ func TestQuotaNormalizedWindowsAndCache(t *testing.T) {
 		name, windows string
 		weekly        float64
 	}{
-		{"oauth apps preferred", `[{"kind":"weekly_all","utilization":42},{"kind":"weekly_scoped","scope":"Oauth Apps","utilization":21},{"kind":"weekly_scoped","scope":"Opus","utilization":11}]`, 21},
+		{"oauth apps preferred", `[{"kind":"session","utilization":17},{"kind":"weekly_all","utilization":42},{"kind":"weekly_scoped","scope":"Oauth Apps","utilization":21},{"kind":"weekly_scoped","scope":"Opus","utilization":11}]`, 21},
 		{"weekly fallback", `[{"kind":"weekly_all","utilization":42}]`, 42},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -74,11 +74,15 @@ func TestQuotaNormalizedWindowsAndCache(t *testing.T) {
 					t.Fatalf("read failed: %v", err)
 				}
 				account := got.Accounts[0]
-				if account.Cause != contract.UsageOK || account.ObservedAt == nil || !account.ObservedAt.Equal(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)) || len(account.Windows) == 0 || account.Windows[0].Name != "seven_day" || account.Windows[0].UsedPercent != tc.weekly || account.Windows[0].Seconds != 604800 {
+				if account.Cause != contract.UsageOK || account.ObservedAt == nil || !account.ObservedAt.Equal(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)) || len(account.Windows) == 0 || account.Windows[len(account.Windows)-1].Seconds != 604800 {
 					t.Fatal("unexpected normalized result")
 				}
-				if tc.name == "oauth apps preferred" && (len(account.Windows) != 2 || account.Windows[1].Name != "Opus Weekly") {
-					t.Fatal("scoped window missing")
+				if tc.name == "oauth apps preferred" {
+					if len(account.Windows) != 3 || account.Windows[0].Kind != contract.UsageWindowFiveHour || account.Windows[1].Kind != contract.UsageWindowWeekly || account.Windows[1].UsedPercent != tc.weekly || account.Windows[2].Model != "Opus" {
+						t.Fatal("wrong typed window order or scoped model")
+					}
+				} else if account.Windows[0].Kind != contract.UsageWindowWeekly || account.Windows[0].UsedPercent != tc.weekly {
+					t.Fatal("weekly fallback missing")
 				}
 			}
 			if calls != 1 {
@@ -110,7 +114,7 @@ func TestQuotaExpiredSignIn(t *testing.T) {
 
 func TestCodexPassiveQuota(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"credentials":[{"id":"invented","auth_index":"invented","provider":"codex","state":"unknown","quota":{"observed_at":"2026-01-02T00:00:00Z","primary":{"used_percent":42,"window_minutes":300,"reset_after_seconds":3600}}}]}`))
+		_, _ = w.Write([]byte(`{"credentials":[{"id":"invented","auth_index":"invented","provider":"codex","state":"unknown","quota":{"observed_at":"2026-01-02T00:00:00Z","primary":{"used_percent":20,"window_minutes":10080},"secondary":{"used_percent":42,"window_minutes":300,"reset_after_seconds":3600}}}]}`))
 	}))
 	defer server.Close()
 	q := (&Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}).Quotas("key", quotaStore(t), time.Now)
@@ -119,7 +123,7 @@ func TestCodexPassiveQuota(t *testing.T) {
 		t.Fatalf("read failed: %v", err)
 	}
 	a := got.Accounts[0]
-	if a.ObservedAt == nil || a.ObservedAt.Format(time.RFC3339) != "2026-01-02T00:00:00Z" || len(a.Windows) != 1 || a.Windows[0].UsedPercent != 42 || a.Windows[0].Seconds != 18000 || !a.Windows[0].ResetsAt.Equal(a.ObservedAt.Add(time.Hour)) {
+	if a.ObservedAt == nil || a.ObservedAt.Format(time.RFC3339) != "2026-01-02T00:00:00Z" || len(a.Windows) != 2 || a.Windows[0].UsedPercent != 42 || a.Windows[0].Kind != contract.UsageWindowFiveHour || a.Windows[0].Seconds != 18000 || !a.Windows[0].ResetsAt.Equal(a.ObservedAt.Add(time.Hour)) {
 		t.Fatal("Codex snapshot did not preserve its observation")
 	}
 
