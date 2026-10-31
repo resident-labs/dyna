@@ -74,16 +74,8 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodHostexecRevoke, c, contract.ScopeAdmin, owner, a.service.HostexecRevoke)
 	call(mux, contract.MethodOpSubmit, c, contract.ScopeOperate, user, func(ctx context.Context, p contract.Principal, req contract.OpSubmitRequest) (contract.OpSubmitResponse, *contract.Error) {
 		if c.Web {
-			switch req.Operation.Kind {
-			case "pr.open":
-				if !hasScope(c, contract.ScopeOperate) {
-					return contract.OpSubmitResponse{}, forbidden()
-				}
-			case "hostexec.grant":
-				if !hasScope(c, contract.ScopeAdmin) {
-					return contract.OpSubmitResponse{}, forbidden()
-				}
-			default:
+			scope := a.service.OperationScope(req.Operation.Kind)
+			if scope == "" || !hasScope(c, scope) {
 				return contract.OpSubmitResponse{}, forbidden()
 			}
 		}
