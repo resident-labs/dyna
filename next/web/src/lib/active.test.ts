@@ -5,7 +5,7 @@ import { Attention } from "./attention.svelte.ts";
 import type { Event, EventBody, RoomSummary } from "./contract.gen.ts";
 
 const event = (seq: number, room: string, body: EventBody): Event => ({ seq, id: String(seq), at: "", room, from: { kind: "owner" }, ...body });
-const room = (id: string, working: string[]): RoomSummary => ({ id, name: id, paused: false, created: "", lastRead: 0, waiting: [], working, failed: 0 });
+const room = (id: string, working: string[]): RoomSummary => ({ id, name: id, paused: false, created: "", lastRead: 0, waiting: [], working, failed: 0, hostless: 0 });
 async function opened(rooms: RoomSummary[]) {
   const original = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({ seq: 1, rooms }));

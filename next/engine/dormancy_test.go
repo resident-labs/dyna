@@ -395,6 +395,20 @@ func TestSessionListHadJobsStaysAfterTheJobEnds(t *testing.T) {
 	}
 }
 
+func TestRoomListCountsRoomHostWaits(t *testing.T) {
+	s, _, worker, ctx := setup(t)
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE boxes SET state='pending', reason=CASE WHEN session=? THEN 'room-host' ELSE 'room-limit' END", worker)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rooms, problem := s.RoomList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.RoomListRequest{})
+	if problem != nil || len(rooms.Rooms) != 1 || rooms.Rooms[0].Hostless != 1 {
+		t.Fatalf("rooms %+v: %v", rooms, problem)
+	}
+}
+
 func TestRoomListCountsAFailedBoxOnceWithoutAFailedTurn(t *testing.T) {
 	s, _, worker, ctx := setup(t)
 	err := s.store.Write(ctx, func(tx *sql.Tx) error {
