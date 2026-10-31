@@ -19,6 +19,10 @@ type Caller struct {
 // Service implements the engine operations. It must authorize resource targets
 // against the caller as well as applying the API's listener-level policy.
 type Service interface {
+	DevicePair(context.Context, contract.Principal, contract.DevicePairRequest) (contract.DevicePairResponse, *contract.Error)
+	DeviceList(context.Context, contract.Principal, contract.DeviceListRequest) (contract.DeviceListResponse, *contract.Error)
+	DeviceRevoke(context.Context, contract.Principal, contract.DeviceRevokeRequest) (contract.DeviceRevokeResponse, *contract.Error)
+	DeviceSetScopes(context.Context, contract.Principal, contract.DeviceSetScopesRequest) (contract.DeviceSetScopesResponse, *contract.Error)
 	OperationScope(contract.OpKind) contract.Scope
 	Terminal(context.Context, contract.SessionID, contract.HostName) ([]string, func(), *contract.Error)
 	ShellWatch(context.Context, contract.SessionID) (<-chan contract.ShellJobOutput, *contract.Error)
