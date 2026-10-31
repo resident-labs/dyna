@@ -29,10 +29,9 @@ var sqlCallNames = map[string]bool{
 // entry counts calls, not lines, so edits nearby do not break it. A count
 // lowers as M3 moves calls into the store; a count never rises.
 var sqlAllowlist = map[string]int{
-	"engine/post_api.go":    4,
-	"engine/service.go":     1,
-	"engine/session_api.go": 1,
-	"engine/turn_api.go":    4,
+	"engine/post_api.go": 4,
+	"engine/service.go":  1,
+	"engine/turn_api.go": 4,
 }
 
 // sqlCall is one SQL call found in a file.
