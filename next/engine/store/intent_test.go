@@ -64,7 +64,8 @@ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at
 		t.Fatal(err)
 	}
 	due := time.UnixMilli(100)
-	if err := s.SetArchiveRetry(ctx, "b", due); err != nil {
+	event := contract.Event{ID: "retry", Room: "r", Time: due, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{Box: "b", Session: "s", From: contract.BoxClosing, To: contract.BoxClosing, Reason: "failure"}}
+	if err := s.SetArchiveRetry(ctx, "b", WantClose, due, "failure", event); err != nil {
 		t.Fatal(err)
 	}
 	var got int64
@@ -74,11 +75,46 @@ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at
 	if err := s.CompleteArchives(ctx, "s", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetArchiveRetry(ctx, "b", due); err != nil {
+	if err := s.SetArchiveRetry(ctx, "b", WantClose, due, "failure", event); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Read().QueryRowContext(ctx, "SELECT due_at FROM boxes WHERE id='b'").Scan(&got); err != nil || got != 0 {
 		t.Fatalf("discard delayed = %d: %v", got, err)
+	}
+	event.ID = "remove"
+	event.Body = contract.BoxChanged{Box: "b", Session: "s", From: contract.BoxClosing, To: contract.BoxClosing, Reason: "remove failed"}
+	if err := s.SetArchiveRetry(ctx, "b", WantDiscard, due, "remove failed", event); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetArchiveRetry(ctx, "b", WantDiscard, due.Add(time.Millisecond), "remove failed", event); err != nil {
+		t.Fatal(err)
+	}
+	var reason string
+	if err := s.Read().QueryRowContext(ctx, "SELECT due_at,reason FROM boxes WHERE id='b'").Scan(&got, &reason); err != nil || got != 101 || reason != "remove failed" {
+		t.Fatalf("retry %d %q: %v", got, reason, err)
+	}
+	var count int
+	if err := s.Read().QueryRowContext(ctx, "SELECT count(*) FROM events WHERE type='box.changed'").Scan(&count); err != nil || count != 2 {
+		t.Fatalf("events %d: %v", count, err)
+	}
+}
+
+func TestLifecycleBoxesSkipsCompletedClosures(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	_, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+INSERT INTO sessions(id,room,name,profile,state,goal,created_at,closed_at) VALUES('closed','r','closed','p','closed','',0,1),('closing','r','closing','p','closing','',0,NULL);
+INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at,want) VALUES('old','closed','','agent','deleted','','',0,0,'discard'),('pending','closing','','agent','deleted','','',0,0,'discard')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.LifecycleBoxes(ctx)
+	if err != nil || len(rows) != 1 || rows[0].ID != "pending" {
+		t.Fatalf("lifecycle boxes %+v: %v", rows, err)
 	}
 }
 
