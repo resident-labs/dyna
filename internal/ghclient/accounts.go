@@ -324,6 +324,10 @@ func selectAccountAfterPolicy(ctx context.Context, cmd *exec.Cmd, r repository) 
 	if err != nil {
 		return "", "", err
 	}
+	if _, comment := ownCommentCall(cmd.Args[1:]); comment {
+		// GitHub permits authors to edit comments without repository push access.
+		write = false
+	}
 	return selectAccountForRoom(ctx, cmd, r, rec, write)
 }
 
