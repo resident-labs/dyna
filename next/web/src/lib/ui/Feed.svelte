@@ -11,14 +11,30 @@
   import type { RoomStore } from "../room.svelte.ts";
   import type { Conversation, PostRequest, Principal } from "../contract.gen.ts";
 
-  let { store, home, intro, element = $bindable() }: {
-    store: RoomStore; home: Conversation; intro: Snippet; element?: HTMLDivElement;
+  // A failed send outlives the view: onunsent hands it to the app, which passes it back in unsent when the
+  // conversation opens again. onsettled tells the app that Retry or Discard took it back.
+  let { store, home, intro, unsent, onunsent, onsettled, element = $bindable() }: {
+    store: RoomStore; home: Conversation; intro: Snippet; unsent: PostRequest[];
+    onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; element?: HTMLDivElement;
   } = $props();
 
   // The view is keyed by its conversation, so its window lives as long as the view.
   // svelte-ignore state_referenced_locally
   const view = store.window(home);
+  // svelte-ignore state_referenced_locally
+  for (const request of unsent) view.unsent(request);
   onDestroy(() => store.leave(view));
+  function retry(id: number) {
+    const request = view.pendingPosts.get(id)?.request;
+    if (!request) return;
+    onsettled(request);
+    void view.retry(id).then(sent => { if (!sent) onunsent(request); });
+  }
+  function discard(id: number) {
+    const request = view.pendingPosts.get(id)?.request;
+    view.discard(id);
+    if (request) onsettled(request);
+  }
   type Item = Row | { kind: "working"; key: string; session: string } | { kind: "intro"; key: string };
   // A pending post's mentions are names; its row shows them as the sessions the engine will resolve.
   const mentioned = (names: string[]) => names.flatMap(name => {
@@ -48,7 +64,7 @@
   export async function send(request: PostRequest): Promise<void> {
     const sending = view.post(request);
     void list?.toEnd();
-    await sending;
+    if (!(await sending)) onunsent(request);
     await list?.toEnd();
   }
   // Rows that do not fill the view cannot be scrolled up, so older pages load until they do.
@@ -80,7 +96,7 @@
     onstart={() => void view.loadOlder()} onend={() => void view.loadNewer()}>
     {#snippet row(item: Item)}
       {#if item.kind === "post"}<PostRow row={item} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
-        onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} />
+        onretry={retry} ondiscard={discard} />
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} root={root(item.session)} />
       {:else if item.kind === "work"}<WorkRow row={item} {name} open={opened.has(item.key)} ontoggle={() => toggle(item.key)} />
       {:else if item.kind === "working"}<p class="working"><WorkingDot />{name(item.session)} is working</p>

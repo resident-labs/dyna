@@ -41,10 +41,11 @@ test("a pending post gives way to its event in either order, and a failed one st
     // A failed call keeps the row; a retry sends the same body once.
     const bodies: unknown[] = [];
     globalThis.fetch = (_, init) => { bodies.push(init?.body); return Promise.reject(new Error("offline")); };
-    await window.post({ room: "r", text: "later" });
+    assert.equal(await window.post({ room: "r", text: "later" }), false);
     assert.deepEqual([...window.pendingPosts.values()].map(({ failed, seq }) => [failed, seq]), [[true, undefined]]);
     globalThis.fetch = (_, init) => { bodies.push(init?.body); return Promise.resolve(new Response(JSON.stringify({ seq: 5, event: "5" }))); };
-    await window.retry(3);
+    // A second Retry while the first sends, as from a double click, sends nothing more.
+    assert.deepEqual(await Promise.all([window.retry(3), window.retry(3)]), [true, true]);
     assert.deepEqual([...window.pendingPosts.values()].map(({ failed, seq }) => [failed, seq]), [[false, 5]]);
     assert.deepEqual([bodies.length, bodies[0] === bodies[1]], [2, true]);
     window.apply(event(5, { type: "post.created", body: { text: "later", home: feed } }));
