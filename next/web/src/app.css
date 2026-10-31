@@ -1,25 +1,14 @@
 :root {
-  color-scheme: light dark;
-  /* Warm off-white. --focus is the one accent, for focus rings, selection and links. */
-  --bg: #fbf9f6; --sidebar: #f3efe9; --raised: #ffffff; --line: rgb(60 40 20 / 11%); --selected: rgb(60 40 20 / 8%);
-  --hover: rgb(60 40 20 / 4%); --focus: #3d5bd0; --text: #2a2723; --muted: #63605a; --attention: #a45500; --danger: #b3332e; --success: #2f7d4a;
-  /* Identity colors: the hue comes from the name, these set lightness and chroma per theme. */
-  --id-name: 47% 0.13; --id-face: 89% 0.05; --id-initials: 38% 0.1;
   /* The left edge of post text: the 16 px row padding, the 32 px avatar and a 12 px gap. */
   --gutter: 60px;
+  /* Avatar initials under 24 px: no step of the type scale fits two letters there. */
+  --type-face: 9px;
   /* v1's stacks. main.ts bundles the first face of each; the rest cover scripts beyond Latin. */
   --sans: 'IBM Plex Sans', 'Adwaita Sans', system-ui, sans-serif; --mono: 'JetBrains Mono', 'Adwaita Mono', ui-monospace, monospace;
   /* v1's scale: 15 px running text at 1.45; weights are 400, 500 and 600. */
   font: 15px/1.45 var(--sans); -webkit-font-smoothing: antialiased;
 }
 strong, b, h1, h2, h3, h4 { font-weight: 600; }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #23201d; --sidebar: #1a1816; --raised: #2d2926; --line: rgb(255 235 210 / 8%); --selected: rgb(255 235 210 / 9%);
-    --hover: rgb(255 235 210 / 4%); --focus: #93a6f5; --text: #ece6de; --muted: #a39b91; --attention: #efb66d; --danger: #e67a76; --success: #86c79b;
-    --id-name: 78% 0.11; --id-face: 40% 0.08; --id-initials: 92% 0.04;
-  }
-}
 /* Thin scrollbars that stay hidden until the pointer is over their area: a muted thumb on no track. */
 * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: transparent transparent; }
 :hover { scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent; }
@@ -77,7 +66,7 @@ main > header strong { font-size: 16px; }
 @media (max-width: 760px) {
   .shell.open { grid-template-columns: 64px minmax(0, 1fr); }
   .shell > aside.members { display: none; }
-  .shell > aside.members.shown { display: flex; position: fixed; top: calc(var(--panel-top, 52px) + env(safe-area-inset-top)); right: 0; bottom: 0; padding-bottom: max(0px, env(safe-area-inset-bottom) - var(--keyboard, 0px)); width: min(300px, 100vw); z-index: 1; box-shadow: -8px 0 24px rgb(0 0 0 / 25%); }
+  .shell > aside.members.shown { display: flex; position: fixed; top: calc(var(--panel-top, 52px) + env(safe-area-inset-top)); right: 0; bottom: 0; padding-bottom: max(0px, env(safe-area-inset-bottom) - var(--keyboard, 0px)); width: min(300px, 100vw); z-index: 1; box-shadow: -8px 0 24px var(--shadow-lg); }
 }
 /* A phone: the rail is a drawer from the left, as in Discord's phone app, with the open room's pages beside the rooms. */
 @media (max-width: 640px) {
@@ -86,14 +75,14 @@ main > header strong { font-size: 16px; }
     grid-template-rows: minmax(0, 1fr) auto; align-items: stretch; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left); overflow: hidden;
     transform: translateX(-100%); visibility: hidden; transition: transform 160ms ease-out, visibility 0s 160ms; }
   /* Visible at once on open, so focus can move in; hidden only after the slide out. */
-  .shell.drawer .rail { transform: none; visibility: visible; transition: transform 160ms ease-out; box-shadow: 8px 0 24px rgb(0 0 0 / 30%); }
+  .shell.drawer .rail { transform: none; visibility: visible; transition: transform 160ms ease-out; box-shadow: 8px 0 24px var(--shadow-lg); }
   /* A tap focuses the dialog itself; its rows keep their own rings. */
   .shell.drawer .rail:focus { outline: none; }
   .rail > nav:first-child { grid-column: 1; align-items: center; overflow-y: auto; }
   .rail footer { grid-column: 1; display: flex; justify-content: center; }
   /* The sessions panel is a bottom sheet over a scrim (iOS sheets) that fits its content; its handle grows it to full height. */
   .shell > aside.members.shown, .shell > aside.members.shown.watching { top: auto; left: 0; right: 0; bottom: 0; z-index: 3; width: auto; max-height: calc(var(--app-height, 100dvh) * 0.65);
-    border: 0; border-radius: 16px 16px 0 0; box-shadow: 0 -8px 24px rgb(0 0 0 / 30%); transition: max-height 160ms ease-out; }
+    border: 0; border-radius: 16px 16px 0 0; box-shadow: 0 -8px 24px var(--shadow-lg); transition: max-height 160ms ease-out; }
   /* Full height stops under the room header, so the room's name and its Requests chip stay in view. */
   .shell > aside.members.shown.full { height: calc(var(--app-height, 100dvh) - env(safe-area-inset-top) - 52px); max-height: calc(var(--app-height, 100dvh) - env(safe-area-inset-top) - 52px); }
 }
