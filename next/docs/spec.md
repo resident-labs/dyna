@@ -237,6 +237,7 @@ type TurnEnded struct {
 	Replies []FinalReply   `json:"replies,omitempty"` // where Final was delivered
 	Usage   Usage          `json:"usage"`
 	Error   string         `json:"error,omitempty"`   // failed only
+	Cause   FailureCause   `json:"cause,omitempty"`   // failed only
 	// ShellJobs counts the background shell jobs still running when the turn ended. Each job's
 	// end wakes the session, so the next turn.ended carries the new count (5.15).
 	ShellJobs int `json:"shellJobs,omitempty"`
@@ -261,7 +262,7 @@ type BoxChanged struct {
 }
 ```
 
-A failed box and a failed operation carry a typed `FailureCause`, such as `create_failed`, `no_hello`, `host_lost`, `github_failed`, `stale` or `interrupted`. The `Reason` or `Error` text beside it is detail for agents and the log. Owner views show only the cause, in owner words (r8).
+A failed box, a failed operation and a failed turn carry a typed `FailureCause`, such as `create_failed`, `no_hello`, `host_lost`, `github_failed`, `stale` or `interrupted`. A failed turn uses `setup_failed`, `model_failed`, `output_limit` or `harness_failed`. The `Reason` or `Error` text beside it is detail for agents and the log. Owner views show only the cause, in owner words (r8).
 
 ### 3.4 Delivery and reply channels
 

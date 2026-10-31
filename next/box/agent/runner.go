@@ -45,7 +45,7 @@ func (r *Runner) Handle(ctx context.Context, message contract.BoxMessage) error 
 		if r.Setup != nil {
 			r.setupErr = r.Setup(ctx)
 			if r.setupErr != nil {
-				return r.Sink.TurnOutput(ctx, contract.TurnEnded{Turn: m.Turn, Outcome: contract.TurnOutcome("failed"), Error: "repository setup: " + r.setupErr.Error()})
+				return r.Sink.TurnOutput(ctx, contract.TurnEnded{Turn: m.Turn, Outcome: contract.TurnOutcome("failed"), Error: "repository setup: " + r.setupErr.Error(), Cause: contract.CauseSetupFailed})
 			}
 		}
 		return r.start(ctx, m)
@@ -121,7 +121,7 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 			}
 		}
 		if err != nil {
-			result = contract.TurnEnded{Turn: start.Turn, Outcome: contract.TurnOutcome("failed"), Error: err.Error()}
+			result = contract.TurnEnded{Turn: start.Turn, Outcome: contract.TurnOutcome("failed"), Error: err.Error(), Cause: contract.CauseHarnessFailed}
 		}
 		r.mu.Lock()
 		r.settling = true

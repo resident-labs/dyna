@@ -26,7 +26,7 @@ const card = object({
   command: optional(nullable(array(string))),
 });
 const state = oneOf("pending", "approved", "denied", "expired", "withdrawn", "done", "failed");
-const cause = optional(oneOf("create_failed", "no_hello", "engine_restarted", "remove_failed", "archive_failed", "grant_inactive", "host_lost", "github_failed", "stale", "interrupted", "internal"));
+const cause = optional(oneOf("create_failed", "no_hello", "engine_restarted", "remove_failed", "archive_failed", "grant_inactive", "host_lost", "github_failed", "stale", "interrupted", "internal", "setup_failed", "model_failed", "output_limit", "harness_failed"));
 const boxState = oneOf("pending", "creating", "starting", "ready", "stopped", "closing", "deleted", "failed", "lost");
 const bodies: Record<string, Check> = {
   "post.created": object({ text: string, home: conversation, mentions: optional(nullable(array(principal))), replyTo: optional(string),
@@ -38,7 +38,7 @@ const bodies: Record<string, Check> = {
   "box.changed": object({ box: string, session: string, host: optional(string), from: optional(boxState), to: boxState, cause, reason: optional(string) }),
   "turn.started": object({ session: string, turn: string, inputs: nullable(array(string)) }),
   "turn.ended": object({ session: string, turn: string, outcome: oneOf("completed", "failed", "stopped"), final: optional(string),
-    replies: optional(nullable(array(object({ reply, posted: optional(string) })))), usage, error: optional(string), shellJobs: optional(number) }),
+    replies: optional(nullable(array(object({ reply, posted: optional(string) })))), usage, error: optional(string), cause, shellJobs: optional(number) }),
   "turn.activity": object({ session: string, turn: string, label: string }),
   "op.requested": object({ id: string, kind: string, by: principal, class: oneOf("auto", "agent", "owner"), card, expires: string }),
   "op.decided": object({ id: string, state, decision: object({ by: principal, approved: boolean, reason: optional(string), at: string }) }),
