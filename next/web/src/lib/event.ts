@@ -68,7 +68,8 @@ export function decodeEvent(value: unknown): Event | undefined {
   return value as Event;
 }
 
-const shellOutput = object({ job: string, command: string, running: boolean, exitCode: number, text: string, reset: optional(boolean) });
+const shellOutput = object({ job: string, command: string, running: boolean, exitCode: number, text: string, reset: optional(boolean),
+  started: string, ended: optional(string) });
 // Each message of /v1/shell/watch passes here once; one that does not match is skipped like an event.
 export function decodeShellOutput(value: unknown): ShellJobOutput | undefined {
   // The check covers every field of the generated type.

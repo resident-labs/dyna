@@ -4,7 +4,7 @@ import { KEEP, KEEP_FINISHED, applyOutput, watchShell, type ShellConnection, typ
 
 test("resets replace, other messages append, and kept text stays under the cap at a line start", () => {
   const jobs = new Map<string, ShellJob>();
-  const job = { job: "j", command: "npm run dev", running: true, exitCode: 0 };
+  const job = { job: "j", command: "npm run dev", running: true, exitCode: 0, started: "2026-10-31T00:00:00Z" };
   applyOutput(jobs, { ...job, text: "ready\n", reset: true });
   applyOutput(jobs, { ...job, text: "built\n" });
   assert.equal(jobs.get("j")?.text, "ready\nbuilt\n");
@@ -19,7 +19,7 @@ test("a reconnect starts empty, so a running job that finished and was pruned me
   const jobs = new Map<string, ShellJob>();
   const source: ShellConnection = { onopen: null, onmessage: null, onerror: null, readyState: 1, close: () => {} };
   watchShell("s", jobs, () => {}, () => source);
-  const send = (job: string) => source.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ job, command: "sleep 60", running: true, exitCode: 0, text: "", reset: true }) }));
+  const send = (job: string) => source.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ job, command: "sleep 60", running: true, exitCode: 0, text: "", reset: true, started: "2026-10-31T00:00:00Z" }) }));
   source.onopen?.(new Event("open"));
   send("old");
   source.onopen?.(new Event("open"));
@@ -29,14 +29,14 @@ test("a reconnect starts empty, so a running job that finished and was pruned me
 
 test("keeps running jobs and only the newest finished jobs, as the box does", () => {
   const jobs = new Map<string, ShellJob>();
-  applyOutput(jobs, { job: "server", command: "npm run dev", running: true, exitCode: 0, text: "" });
-  for (let i = 0; i < KEEP_FINISHED + 2; i++) applyOutput(jobs, { job: `t${i}`, command: "go test", running: false, exitCode: 0, text: "ok\n" });
+  applyOutput(jobs, { job: "server", command: "npm run dev", running: true, exitCode: 0, text: "", started: "" });
+  for (let i = 0; i < KEEP_FINISHED + 2; i++) applyOutput(jobs, { job: `t${i}`, command: "go test", running: false, exitCode: 0, text: "ok\n", started: "" });
   assert.deepEqual([...jobs.keys()], ["server", ...Array.from({ length: KEEP_FINISHED }, (_, i) => `t${i + 2}`)]);
 });
 
 test("a job that ends moves behind the jobs that ended before it", () => {
   const jobs = new Map<string, ShellJob>();
-  const send = (job: string, running: boolean) => applyOutput(jobs, { job, command: job, running, exitCode: 0, text: "" });
+  const send = (job: string, running: boolean) => applyOutput(jobs, { job, command: job, running, exitCode: 0, text: "", started: "" });
   send("server", true);
   send("tests", false);
   send("server", false);
