@@ -23,6 +23,8 @@ type Service interface {
 	DeviceList(context.Context, contract.Principal, contract.DeviceListRequest) (contract.DeviceListResponse, *contract.Error)
 	DeviceRevoke(context.Context, contract.Principal, contract.DeviceRevokeRequest) (contract.DeviceRevokeResponse, *contract.Error)
 	DeviceSetScopes(context.Context, contract.Principal, contract.DeviceSetScopesRequest) (contract.DeviceSetScopesResponse, *contract.Error)
+	InstructionsGet(context.Context, contract.Principal, contract.InstructionsGetRequest) (contract.InstructionsGetResponse, *contract.Error)
+	InstructionsSet(context.Context, contract.Principal, contract.InstructionsSetRequest) (contract.InstructionsSetResponse, *contract.Error)
 	OperationScope(contract.OpKind) contract.Scope
 	Terminal(context.Context, contract.SessionID, contract.HostName) ([]string, func(), *contract.Error)
 	ShellWatch(context.Context, contract.SessionID) (<-chan contract.ShellJobOutput, *contract.Error)
