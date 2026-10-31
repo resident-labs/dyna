@@ -886,8 +886,16 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 	if req.Outcome != contract.TurnCompleted && req.Outcome != contract.TurnFailed && req.Outcome != contract.TurnStopped {
 		return contract.TurnOutputResponse{}, invalid("invalid turn outcome")
 	}
+	if req.Cause != "" && req.Outcome != contract.TurnFailed {
+		return contract.TurnOutputResponse{}, invalid("turn cause needs a failed outcome")
+	}
+	switch req.Cause {
+	case "", contract.CauseSetupFailed, contract.CauseModelFailed, contract.CauseOutputLimit, contract.CauseHarnessFailed:
+	default:
+		return contract.TurnOutputResponse{}, invalid("invalid turn cause")
+	}
 	req.Usage.Model = req.Model
-	event, err := s.event(session.Room, caller, contract.TurnEnded{Session: session.ID, Turn: req.Turn, Outcome: req.Outcome, Final: req.Final, Usage: req.Usage, Error: req.Error, ShellJobs: req.ShellJobs})
+	event, err := s.event(session.Room, caller, contract.TurnEnded{Session: session.ID, Turn: req.Turn, Outcome: req.Outcome, Final: req.Final, Usage: req.Usage, Error: req.Error, Cause: req.Cause, ShellJobs: req.ShellJobs})
 	if err != nil {
 		return contract.TurnOutputResponse{}, failure(err)
 	}

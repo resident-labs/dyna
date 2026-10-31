@@ -200,7 +200,7 @@ func (c *Client) TranscriptAppend(ctx context.Context, req contract.TranscriptAp
 }
 
 func (c *Client) TurnOutput(ctx context.Context, result contract.TurnEnded) error {
-	body, err := json.Marshal(contract.TurnOutputRequest{ShellJobs: c.shellJobs(), Turn: result.Turn, Outcome: result.Outcome, Error: result.Error, Final: result.Final, Model: result.Usage.Model, Usage: result.Usage})
+	body, err := json.Marshal(contract.TurnOutputRequest{ShellJobs: c.shellJobs(), Turn: result.Turn, Outcome: result.Outcome, Error: result.Error, Cause: result.Cause, Final: result.Final, Model: result.Usage.Model, Usage: result.Usage})
 	if err != nil {
 		return err
 	}
