@@ -560,24 +560,6 @@ func (s *Service) closeSession(ctx context.Context, caller contract.Principal, s
 		s.admit.Unlock()
 		return e
 	}
-	current, err := s.store.Box(ctx, session.Box)
-	if err != nil {
-		s.admit.Unlock()
-		return failure(err)
-	}
-	// A session without turns has no work in its box, so no archive ack is due. The check reads durable turns, so a restart makes the same choice.
-	hasTurns, err := s.store.SessionHasTurns(ctx, session.ID)
-	if err != nil {
-		s.admit.Unlock()
-		return failure(err)
-	}
-	if current.State != contract.BoxClosing && current.State != contract.BoxDeleted {
-		current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, "")
-		if err != nil {
-			s.admit.Unlock()
-			return failure(err)
-		}
-	}
 	s.boxLockMu.Lock()
 	if run := s.boxRuns[session.ID]; run != nil {
 		run.closing = true
@@ -587,6 +569,20 @@ func (s *Service) closeSession(ctx context.Context, caller contract.Principal, s
 	s.admit.Unlock()
 	unlock := s.lockBox(session.ID)
 	defer unlock()
+	s.admit.Lock()
+	current, err := s.store.Box(ctx, session.Box)
+	if err != nil {
+		s.admit.Unlock()
+		return failure(err)
+	}
+	hasTurns, err := s.store.SessionHasTurns(ctx, session.ID)
+	if err == nil && current.State != contract.BoxClosing && current.State != contract.BoxDeleted {
+		current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, "")
+	}
+	s.admit.Unlock()
+	if err != nil {
+		return failure(err)
+	}
 	if _, err := s.store.Session(ctx, session.ID); errors.Is(err, sql.ErrNoRows) {
 		return nil
 	} else if err != nil {
@@ -597,7 +593,9 @@ func (s *Service) closeSession(ctx context.Context, caller contract.Principal, s
 		return failure(err)
 	}
 	if !discard && hasTurns && current.State != contract.BoxDeleted {
-		if err := s.boxes.Start(ctx, current.ID); err != nil { return failure(err) }
+		if err := s.boxes.Start(ctx, current.ID); err != nil {
+			return failure(err)
+		}
 		if current.Reason != "" {
 			if err := s.archiveReason(ctx, session.Room, current, ""); err != nil {
 				return failure(err)
@@ -833,7 +831,7 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		if _, err = s.transition(ctx, session.Room, current, contract.BoxReady, ""); err != nil {
 			return contract.BoxHelloResponse{}, failure(err)
 		}
-	} else if current.State != contract.BoxReady && (current.State != contract.BoxClosing || session.Repo == "") {
+	} else if current.State != contract.BoxReady && current.State != contract.BoxClosing {
 		return contract.BoxHelloResponse{}, invalid("box is not starting, ready, or archiving")
 	}
 	model, _, err := s.profiles.Model(session.Profile)
