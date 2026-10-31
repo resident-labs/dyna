@@ -29,7 +29,7 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, data strin
 			return
 		case now := <-ticks:
 			probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			out, err := h.run(probeCtx, "bash", "-c", heartbeatScript, "dyna", data)
+			out, err := h.runUnbounded(probeCtx, nil, "bash", "-c", heartbeatScript, "dyna", data)
 			cancel()
 			if err != nil {
 				misses++
