@@ -85,7 +85,7 @@ func TestMoveIdleSubtree(t *testing.T) {
 		t.Fatal(err)
 	}
 	event, _ := s.event(room, owner, contract.TurnStarted{})
-	turn, _, err := s.store.Dispatch(ctx, leaf.Session, "turn_busy", event, false)
+	turn, _, _, err := s.store.Dispatch(ctx, leaf.Session, "turn_busy", event, false)
 	if err != nil {
 		t.Fatal(err)
 	}
