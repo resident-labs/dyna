@@ -8,6 +8,9 @@
   import SessionRow from "./lib/ui/SessionRow.svelte";
   import WorkingDot from "./lib/ui/WorkingDot.svelte";
   import Icon from "./lib/ui/Icon.svelte";
+  import Avatar from "./lib/ui/Avatar.svelte";
+  import RoomIntro from "./lib/ui/RoomIntro.svelte";
+  import DirectMessages from "./lib/ui/DirectMessages.svelte";
   import type { Conversation, RoomSummary, SessionStarted } from "./lib/contract.gen.ts";
   const signedOut = (error: unknown) => error instanceof APIError && error.detail.code === "forbidden";
   let rooms: RoomSummary[] = $state([]);
@@ -98,6 +101,7 @@
     const box = store?.boxes.get(id);
     return `${store?.turns.has(id) ? "working" : box && box !== "ready" ? `box ${box}` : "idle"} · ${profile}`;
   };
+  const sessionHref = (id: string) => `/r/${encodeURIComponent(room ?? "")}/s/${encodeURIComponent(id)}`;
   // Below 900 px the sessions panel is hidden; a header button opens it over the feed.
   // Opening moves focus into the panel; closing returns it to the button if the panel held it.
   let panel = $state(false);
@@ -124,16 +128,26 @@
   };
 </script>
 
+{#snippet intro()}
+  {#if session}<RoomIntro kind="session" name={title} root={!!store?.sessions.get(session) && !store.sessions.get(session)?.parent} line={`Your direct messages with ${title}`} />
+  {:else}<RoomIntro kind="room" name={roomName} line={`The start of ${roomName}${store ? ` · ${plural(store.sessions.size, "session")}` : ""}`} />{/if}
+{/snippet}
+
 <svelte:window onkeydown={cycle} />
 <div class="shell" class:open={room}>
-  <aside aria-label="Rooms" tabindex="-1" bind:this={rail}>
-    <header><Icon name="root" /><strong>Dyna</strong></header>
-    <div class="section-title">Rooms</div>
-    {#if rooms.length}
-      <nav>{#each rooms as item (item.id)}
-        <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id ? "page" : undefined}><Icon name="room" />{item.name}</a>
-      {/each}</nav>
-    {:else}<p class="hint">{roomsError || "Your rooms will appear here."}</p>{/if}
+  <aside class="rooms" aria-label="Rooms" tabindex="-1" bind:this={rail}>
+    <nav class="rail" aria-label="Rooms">{#each rooms as item (item.id)}
+      <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id ? "page" : undefined}
+        aria-label={item.name} title={item.name}><Avatar kind="room" name={item.name} size={36} /></a>
+    {/each}</nav>
+    <div class="column">
+      <header><strong>{room ? roomName : "Dyna"}</strong></header>
+      {#if room}
+        <nav aria-label="Room"><a href={"/r/" + encodeURIComponent(room)} onclick={navigate} aria-current={session ? undefined : "page"}><Icon name="room" />feed</a></nav>
+        {#if store && !unavailable}<DirectMessages {store} href={sessionHref} current={session} {navigate} />{/if}
+      {:else}<p class="hint">{roomsError || (rooms.length ? "Select a room." : "Your rooms will appear here.")}</p>{/if}
+      <footer><Avatar kind="owner" name="You" size={28} /><strong>You</strong></footer>
+    </div>
   </aside>
   <main>
     <header>{#if room && !session}<Icon name="room" />{/if}<strong>{title}</strong>
@@ -145,7 +159,7 @@
         {#if store?.failed.size && !panel}<span class="attention"></span>{/if}</button>{/if}</header>
     <div class="feed">
       {#if store && !unavailable}
-        {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} empty={session ? "No messages yet." : "No posts yet."} />{/key}
+        {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} {intro} />{/key}
       {:else}<p class="empty">{unavailable || "Select a room."}
         {#if store && unavailable && !signedOut(store.error)}<button type="button" class="retry" onclick={() => void store?.open()}>Try again</button>{/if}</p>{/if}
     </div>
@@ -160,7 +174,7 @@
       {#each tree as { session: item, depth } (item.session)}
         <a class="member" href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.session)}`} onclick={navigate} onkeydown={walkTree}
           aria-current={session === item.session ? "page" : undefined} style:padding-left="{16 + depth * 14}px">
-          <SessionRow name={item.name} status={status(item.session, item.profile)} />
+          <SessionRow name={item.name} root={!item.parent} status={status(item.session, item.profile)} />
           {#if store?.turns.has(item.session)}<WorkingDot label="Working" />
           {:else if trouble(item.session)}<StatusPill tone="failed">{store?.failed.has(item.session) ? "Failed" : trouble(item.session)}</StatusPill>{/if}</a>
       {:else}<p class="hint">No sessions yet.</p>{/each}
