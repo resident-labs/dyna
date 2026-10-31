@@ -178,3 +178,15 @@ func TestPrOpenTransfersAfterSessionClose(t *testing.T) {
 		t.Fatalf("notifications %d error %v", notifications, err)
 	}
 }
+
+func TestPrOpenRejectsUnownedHead(t *testing.T) {
+	s, session, ctx := prFixture(t, func(http.ResponseWriter, *http.Request) { t.Error("unowned head reached GitHub") })
+	record, err := s.store.Session(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, failure := s.OpSubmit(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session}, contract.OpSubmitRequest{Operation: contract.Operation{Room: record.Room, Kind: "pr.open", Args: contract.PrOpenArgs{Title: "Trial", Base: "main", Head: "v2/another"}}})
+	if failure == nil {
+		t.Fatal("unowned head was accepted")
+	}
+}
