@@ -729,7 +729,7 @@ func TestResumeClosesPendingBoxWithoutArchiveAck(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A restart after the close marked the pending box and before it finished leaves this state behind.
-	if _, err := s.transition(ctx, record.Room, current, contract.BoxClosing, ""); err != nil {
+	if _, err := s.transition(ctx, record.Room, current, contract.BoxClosing, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if e := s.ResumeClosures(ctx); e != nil {
@@ -1082,7 +1082,7 @@ func connectAgent(ctx context.Context, t *testing.T, s *Service, session contrac
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.transition(ctx, record.Room, current, contract.BoxReady, ""); err != nil {
+	if _, err := s.transition(ctx, record.Room, current, contract.BoxReady, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
