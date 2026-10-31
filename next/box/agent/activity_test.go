@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -17,9 +18,14 @@ func TestActivityCoalesces(t *testing.T) {
 	a.set("turn_1", "first")
 	a.set("turn_1", "second")
 	a.set("turn_1", "last")
-	go a.run(ctx, ticks, func(_ context.Context, req contract.TurnActivityRequest) { got <- req })
-	ticks <- time.Time{}
-	if req := <-got; req.Turn != "turn_1" || req.Label != "last" {
-		t.Fatalf("got %+v", req)
+	go a.run(ctx, ticks, func(_ context.Context, req contract.TurnActivityRequest) error {
+		got <- req
+		return errors.New("disconnected")
+	})
+	for range 2 {
+		ticks <- time.Time{}
+		if req := <-got; req.Turn != "turn_1" || req.Label != "last" {
+			t.Fatalf("got %+v", req)
+		}
 	}
 }

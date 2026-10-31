@@ -88,7 +88,6 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			s.mu.Lock()
 			if s.channels[session.ID] == channel {
 				delete(s.channels, session.ID)
-				delete(s.activity, session.ID)
 			}
 			s.mu.Unlock()
 		}()
