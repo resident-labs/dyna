@@ -372,21 +372,9 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	if err = b.installBinary(ctx, h); err != nil {
 		return "", err
 	}
-	image, err := h.BuildBase(ctx, images.BaseContainerfile, b.PiTarball)
+	image, err := b.CurrentImage(ctx, spec.Session, spec.Host)
 	if err != nil {
 		return "", err
-	}
-	if session.Repo != "" {
-		name, tree, data, err := b.Mirror.ImageContext(ctx, session.Repo)
-		if err != nil {
-			return "", err
-		}
-		if name != "" {
-			image, err = b.Images.Build(ctx, h, session.Room, spec.Host, session.Repo, name, image, tree, data)
-			if err != nil {
-				return "", err
-			}
-		}
 	}
 	slice, c := b.container(spec, image)
 	if err = h.EnsureSlice(ctx, slice); err != nil {
@@ -597,6 +585,34 @@ func (b *Boxes) RunHostexec(ctx context.Context, a contract.HostexecRunArgs, op 
 	}
 	return r.RunHostexec(ctx, a, op)
 }
+func (b *Boxes) CurrentImage(ctx context.Context, sessionID contract.SessionID, host contract.HostName) (string, error) {
+	h, err := b.host(ctx, host)
+	if err != nil {
+		return "", err
+	}
+	session, err := b.Store.Session(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+	image, err := h.BuildBase(ctx, images.BaseContainerfile, b.PiTarball)
+	if err != nil {
+		return "", err
+	}
+	if session.Repo != "" {
+		name, tree, data, err := b.Mirror.ImageContext(ctx, session.Repo)
+		if err != nil {
+			return "", err
+		}
+		if name != "" {
+			image, err = b.Images.Build(ctx, h, session.Room, host, session.Repo, name, image, tree, data)
+			if err != nil {
+				return "", err
+			}
+		}
+	}
+	return image, nil
+}
+
 func (b *Boxes) StopHostexec(ctx context.Context, host contract.HostName, scope string) error {
 	r, err := b.scopeRunner(ctx, host)
 	if err != nil {
@@ -620,7 +636,7 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, old
 	if err := h.RemoveContainer(ctx, spec.Box); err != nil {
 		return err
 	}
-	if oldSlice != "" {
+	if oldSlice != "" && oldSlice != spec.Slice {
 		if err := h.RemoveSlice(ctx, oldSlice); err != nil {
 			return err
 		}
