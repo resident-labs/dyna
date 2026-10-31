@@ -272,6 +272,7 @@ func (s *Service) run(op contract.Operation, entry Entry) {
 	result := contract.OpResult{}
 	if err := entry.Check(s.Context, op.Args, op.By); err != nil {
 		result.Error = "stale: " + err.Error()
+		result.Cause = contract.CauseStale
 	} else {
 		result = entry.Execute(s.Context, op.ID, op.Args, op.By)
 	}

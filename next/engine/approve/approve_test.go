@@ -148,6 +148,9 @@ func TestStaleCheckPreventsExecution(t *testing.T) {
 			t.Fatal(err)
 		}
 		if rec.Operation.State == contract.OpFailed {
+			if rec.Operation.Result == nil || rec.Operation.Result.Cause != contract.CauseStale {
+				t.Fatalf("result %+v", rec.Operation.Result)
+			}
 			break
 		}
 		<-sub
