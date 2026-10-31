@@ -38,7 +38,7 @@ func TestPhaseOneActionCoverage(t *testing.T) {
 		"post": "send update_visual", "session": "start list stop close restart set_profile move profiles", "room": "log repos pause", "rules": "list add edit remove", "op": "list withdraw", "hostexec": "run request_grant", "pr": "open", "visual": "check", "computer": "open click type text screenshot", "context": "show usage",
 	}
 	found := map[string]bool{}
-	for _, entry := range Entries() {
+	for _, entry := range AgentEntries() {
 		found[entry.Tool+"/"+entry.Action] = true
 	}
 	for tool, actions := range required {
