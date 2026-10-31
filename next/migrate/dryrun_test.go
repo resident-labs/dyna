@@ -16,7 +16,7 @@ func fixture(t *testing.T) string {
 	if err := os.Mkdir(filepath.Join(dir, "rooms"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	global := contract.GlobalBundle{Version: contract.BundleV1, Rooms: []contract.RoomName{"alpha"}, Profiles: []contract.ProfileBundle{{Model: "model-a", Models: []string{"model-a", "model-b"}}}, Repos: []contract.RepoBundle{{}}, Skills: []contract.SkillBundle{{}}}
+	global := contract.GlobalBundle{Version: contract.BundleV1, Instructions: "é", Counts: contract.BundleCounts{InstructionChars: 1}, Rooms: []contract.RoomName{"alpha"}, Profiles: []contract.ProfileBundle{{Model: "model-a", Models: []string{"model-a", "model-b"}}}, Repos: []contract.RepoBundle{{}}, Skills: []contract.SkillBundle{{}}}
 	room := contract.RoomBundle{Version: contract.BundleV1, Name: "alpha", Goals: []contract.GoalBundle{{Items: []contract.GoalItemBundle{{}}}}, Counts: contract.BundleCounts{Goals: 1, GoalItems: 1}}
 	globalData, err := json.Marshal(global)
 	if err != nil {
@@ -43,7 +43,7 @@ func TestDryRun(t *testing.T) {
 	if len(report.ModelsCheckedAtImport) != 2 || report.ModelsCheckedAtImport[0] != "model-a" || report.ModelsCheckedAtImport[1] != "model-b" {
 		t.Fatal("models are not listed for the import check")
 	}
-	if report.Profiles != 1 || report.Repositories != 1 || report.Skills != 1 {
+	if report.Global.InstructionChars != 1 || report.Profiles != 1 || report.Repositories != 1 || report.Skills != 1 {
 		t.Fatalf("global record counts: %+v", report)
 	}
 	if got := report.Rooms["alpha"]; got.Goals != 1 || got.GoalItems != 1 {
@@ -53,6 +53,7 @@ func TestDryRun(t *testing.T) {
 
 func TestDryRunRefusesInvalidBundle(t *testing.T) {
 	for _, tc := range []struct{ name, file, old, replacement string }{
+		{"missing instructions", "global.json", `"instructions":"é",`, ``},
 		{"version", "global.json", `"version":1`, `"version":2`},
 		{"unknown field", "rooms/alpha.json", `"version":1`, `"version":1,"extra":true`},
 		{"count", "rooms/alpha.json", `"goalItems":1`, `"goalItems":2`},
