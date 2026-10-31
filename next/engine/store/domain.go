@@ -204,7 +204,7 @@ var ErrTurnConflict = errors.New("turn output differs from the committed result"
 
 func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output contract.TurnOutputRequest, event contract.Event) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, "UPDATE turns SET ended_at=?,outcome=?,model=?,input_tokens=?,output_tokens=?,cache_read_tokens=?,cache_write_tokens=?,shell_jobs=? WHERE id=? AND session=? AND ended_at IS NULL", event.Time.UnixMilli(), output.Outcome, output.Model, output.Usage.InputTokens, output.Usage.OutputTokens, output.Usage.CacheReadTokens, output.Usage.CacheWriteTokens, output.ShellJobs, output.Turn, session)
+		result, err := tx.ExecContext(ctx, "UPDATE turns SET ended_at=?,outcome=?,model=?,input_tokens=?,output_tokens=?,cache_read_tokens=?,cache_write_tokens=?,shell_jobs=?,sections=NULL WHERE id=? AND session=? AND ended_at IS NULL", event.Time.UnixMilli(), output.Outcome, output.Model, output.Usage.InputTokens, output.Usage.OutputTokens, output.Usage.CacheReadTokens, output.Usage.CacheWriteTokens, output.ShellJobs, output.Turn, session)
 		if err != nil {
 			return err
 		}

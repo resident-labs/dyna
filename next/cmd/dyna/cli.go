@@ -610,7 +610,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	root.AddCommand(post, visualCommand())
 	contextCmd := &cobra.Command{Use: "context"}
 	contextCmd.AddCommand(&cobra.Command{Use: "show SECTION", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		result, err := getClient().ContextSnapshot(cmd.Context(), contract.ContextSnapshotRequest{Section: args[0]})
+		result, err := getClient().ContextSnapshot(cmd.Context(), contract.ContextSnapshotRequest{Section: contract.ContextSectionKey(args[0])})
 		if err != nil {
 			return err
 		}
