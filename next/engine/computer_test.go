@@ -355,3 +355,23 @@ func TestShellWatchGenerationAndStop(t *testing.T) {
 	}
 	t.Fatal("box channel closed before stop")
 }
+
+// A replaced box rejects input even when its queue has room.
+func TestComputerInputReplacement(t *testing.T) {
+	done := make(chan struct{})
+	handle := computerInputHandle{queue: make(chan contract.ComputerInputBatch, 1), done: done}
+	close(done)
+	problem := handle.send(context.Background(), contract.ComputerInputBatch{})
+	if problem == nil || problem.Code != contract.ErrConflict || problem.Message != "box replaced" {
+		t.Fatalf("replacement: %v", problem)
+	}
+}
+
+func TestComputerInputFullQueue(t *testing.T) {
+	handle := computerInputHandle{queue: make(chan contract.ComputerInputBatch, 1), done: make(chan struct{})}
+	handle.queue <- contract.ComputerInputBatch{}
+	problem := handle.send(context.Background(), contract.ComputerInputBatch{})
+	if problem == nil || problem.Code != contract.ErrConflict || problem.Message != "input queue is full" {
+		t.Fatalf("full queue: %v", problem)
+	}
+}
