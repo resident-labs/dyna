@@ -51,14 +51,14 @@ func Admit(hosts []Host, boxes []Box, request Box, diskFloor int64) Placement {
 		if h.State != HostReady || (existing != nil && h.Name != existing.Host) {
 			continue
 		}
-		if h.MemUsed >= h.MemBytes-h.MemBytes/5 {
-			reason = PendingMemory
-			continue
-		}
 		if len(h.Rooms) > 0 && !slices.Contains(h.Rooms, request.Room) {
 			if reason == PendingNoReadyHost {
 				reason = PendingRoomHost
 			}
+			continue
+		}
+		if h.MemUsed >= h.MemBytes-h.MemBytes/5 {
+			reason = PendingMemory
 			continue
 		}
 		cpu, mem, disk := 0, int64(0), h.DiskBytes
