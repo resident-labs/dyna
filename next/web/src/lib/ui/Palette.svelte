@@ -25,7 +25,7 @@
   let current = $derived(rooms.find(found => found.id === room));
   let actions: Action[] = $derived([
     ...current ? [
-      { id: "requests", label: "Requests", hint: current.waiting?.length ? `${current.waiting.length} wait for you` : "", keys: ["G", "R"], icon: "inbox" },
+      { id: "requests", label: "Requests", hint: current.waiting?.length ? `${current.waiting.length} wait${phone.current ? "" : " for you"}` : "", keys: ["G", "R"], icon: "inbox" },
       { id: "pause", label: current.paused ? "Resume the room" : "Pause the room", hint: `${current.name} · ${current.paused ? "Sessions can start turns again" : "No session starts a new turn"}`, keys: [], icon: "pause" },
     ] satisfies Action[] : [],
     { id: "theme", label: "Theme", hint: "Carbon, Ink, Nord, Paper, Light or OLED black", keys: [], icon: "palette" },
@@ -114,7 +114,7 @@
         {#each section.items as item}
           {@const index = items.indexOf(item)}
           <button type="button" id="palette-{index}" role="option" aria-selected={pick === index} tabindex="-1" class="row" class:chosen={pick === index}
-            class:message={item.kind === "message"} class:action={item.kind === "action"} class:more={item.kind === "more"} onmousemove={() => pick = index} onclick={() => choose(item)}>
+            class:message={item.kind === "message"} class:action={item.kind === "action"} class:request={item.kind === "action" && item.action.id === "requests"} class:more={item.kind === "more"} onmousemove={() => pick = index} onclick={() => choose(item)}>
             {#if item.kind === "room"}
               <Avatar kind="room" name={item.room.name} size={22} />
               <span class="name">{#each marks(item.room.name, mode.query, Infinity) as part}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</span>
@@ -185,7 +185,7 @@
     .palette { width: 100%; height: 100dvh; max-height: none; border: 0; border-radius: 0; }
     .list { flex: 1; }
     .row { min-height: 44px; }
-    .action .sub { display: none; }
+    .action:not(.request) .sub { display: none; }
     .cancel { display: block; }
     .esc, footer, .keys { display: none; }
   }
