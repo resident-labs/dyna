@@ -498,6 +498,9 @@ func call[Req, Resp any](mux *http.ServeMux, method contract.Method, c Caller, s
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if method == contract.MethodConnectStatus {
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		_ = json.NewEncoder(w).Encode(result)
 	})
 }
