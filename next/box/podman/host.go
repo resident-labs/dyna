@@ -442,7 +442,7 @@ func (h *Host) ListContainers(ctx context.Context) ([]box.ContainerStatus, error
 	}
 	out := make([]box.ContainerStatus, 0, len(records))
 	for _, r := range records {
-		out = append(out, box.ContainerStatus{Box: contract.BoxID(r.Labels["dyna.box"]), Running: r.State == "running", LegacySharedMount: r.Labels["dyna.shared"] != "2"})
+		out = append(out, box.ContainerStatus{Box: contract.BoxID(r.Labels["dyna.box"]), Running: r.State == "running", StaleLayout: r.Labels["dyna.layout"] != box.ContainerLayout})
 	}
 	return out, nil
 }
