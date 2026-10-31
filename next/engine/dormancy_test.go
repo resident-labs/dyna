@@ -136,6 +136,10 @@ func TestDormancyRetriesFailedStart(t *testing.T) {
 		t.Fatal("failed start did not return to stopped")
 	}
 	h.startErr = nil
+	s.ReconcileDormancy(ctx, false, false)
+	if h.starts != 1 {
+		t.Fatal("event retried the failed start")
+	}
 	s.ReconcileDormancy(ctx, false, true)
 	if h.starts != 2 || stateOf(t, s, ctx, sid) != contract.BoxStarting {
 		t.Fatal("failed start was not retried")
