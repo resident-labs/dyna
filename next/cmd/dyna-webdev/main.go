@@ -110,8 +110,12 @@ func (d devService) TurnOutput(ctx context.Context, p contract.Principal, req co
 	return d.Service.TurnOutput(ctx, p, req)
 }
 func (devService) ShellWatch(ctx context.Context, _ contract.SessionID) (<-chan contract.ShellJobOutput, *contract.Error) {
-	out, run := make(chan contract.ShellJobOutput, 2), "npm run dev -- --host 127.0.0.1 --port 5173" // a reset, then a line every 250 ms
+	out, run := make(chan contract.ShellJobOutput, 4), "npm run dev -- --host 127.0.0.1 --port 5173" // a reset, then a line every 250 ms
 	now := time.Now()
+	out <- contract.ShellJobOutput{Job: "j0", Command: "npm run build", Text: "built in 1.35s\n", Reset: true,
+		Started: now.Add(-2 * time.Hour), Ended: now.Add(-2*time.Hour + 12*time.Second)}
+	out <- contract.ShellJobOutput{Job: "j3", Command: "go vet ./...", Text: "", Reset: true,
+		Started: now.Add(-5 * time.Minute), Ended: now.Add(-5*time.Minute + 38*time.Second)}
 	out <- contract.ShellJobOutput{Job: "j1", Command: "go test ./engine/...", ExitCode: 1, Text: "--- FAIL: TestShellWatch (0.01s)\nFAIL\n", Reset: true,
 		Started: now.Add(-3 * time.Minute), Ended: now.Add(-3*time.Minute + 38*time.Second)}
 	out <- contract.ShellJobOutput{Job: "j2", Command: run, Running: true, Text: "VITE v7.1.3  ready in 312 ms\n", Reset: true, Started: now.Add(-2 * time.Minute)}
