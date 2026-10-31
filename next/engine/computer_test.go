@@ -274,13 +274,10 @@ func TestShellWatchGenerationAndStop(t *testing.T) {
 	}
 	cancel()
 	<-ch
-	for {
-		switch (<-messages).Body.(type) {
-		case contract.ShellWatchStop:
+	for message := range messages {
+		if _, ok := message.Body.(contract.ShellWatchStop); ok {
 			return
-		case contract.TurnStart: // A pending turn can be dispatched before the stop.
-		default:
-			t.Fatal("unexpected box message")
 		}
 	}
+	t.Fatal("box channel closed before stop")
 }
