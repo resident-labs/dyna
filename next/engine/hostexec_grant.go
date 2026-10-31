@@ -29,28 +29,29 @@ func (s *Service) HostexecGrant() approve.Entry {
 			if a.Mode == contract.GrantModePreapproved {
 				mode = "without asking each time"
 			}
+			quote := func(value string) string {
+				if value == "" {
+					return strconv.Quote(value)
+				}
+				for _, c := range value {
+					if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("_./:=@%+-", c)) {
+						return strconv.Quote(value)
+					}
+				}
+				return value
+			}
 			var hosts, commands []string
 			for _, host := range a.Hosts {
 				if host == contract.AllHosts {
 					hosts = append(hosts, "every host, including the control plane")
 				} else {
-					hosts = append(hosts, string(host))
+					hosts = append(hosts, quote(string(host)))
 				}
 			}
 			for _, command := range a.Commands {
 				var argv []string
 				for _, arg := range append([]string{command.Program}, command.Args...) {
-					safe := arg != ""
-					for _, c := range arg {
-						if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("_./:=@%+-", c)) {
-							safe = false
-							break
-						}
-					}
-					if !safe {
-						arg = strconv.Quote(arg)
-					}
-					argv = append(argv, arg)
+					argv = append(argv, quote(arg))
 				}
 				if command.Program == "*" {
 					argv[0] = "any program"
