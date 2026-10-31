@@ -32,6 +32,7 @@ export class EventWindow {
   private sent = 0;
   private present = true;
   private older = false;
+  private loadingOlder = false;
   private loaded = false;
   // The page request in flight; a jump to the present waits for it instead of being dropped.
   private busy: Promise<void> | undefined;
@@ -71,20 +72,24 @@ export class EventWindow {
     if (this.home.kind === "dm" && dmOf(event) !== this.home.session) return;
     if (this.present) {
       if (!this.insert(event)) return;
-      this.release("oldest");
+      // Keep the fetched page boundary while an older page is in flight. The newer end can be refetched.
+      this.release(this.loadingOlder ? "newest" : "oldest");
     } else if (event.seq <= this.latest) return;
     this.latest = Math.max(this.latest, event.seq);
   }
 
   // Loads the page before the window and releases the newest end beyond WINDOW.
-  async loadOlder(): Promise<void> {
+  async loadOlder(beforeApply?: () => Promise<void>): Promise<void> {
     if (this.busy || !this.older) return;
+    this.loadingOlder = true;
     await this.run(async () => {
       const page = await this.page({ beforeSeq: this.oldest });
+      await beforeApply?.();
       for (const event of page.events) this.insert(event);
       this.older = page.full;
       this.release("newest");
     });
+    this.loadingOlder = false;
   }
 
   // Reach a searched post without competing with an automatic page load.
