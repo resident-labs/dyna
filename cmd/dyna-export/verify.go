@@ -1,8 +1,11 @@
 package main
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +16,7 @@ import (
 
 // verifyBundle decodes the output again and compares it with separate source
 // queries. It does not call exporter selection functions.
-func verifyBundle(db *sql.DB, bundle string) error {
+func verifyBundle(db *sql.DB, bundle, backup string, cap capture) error {
 	f, err := os.Open(filepath.Join(bundle, "global.json"))
 	if err != nil {
 		return err
@@ -22,6 +25,26 @@ func verifyBundle(db *sql.DB, bundle string) error {
 	f.Close()
 	if err != nil {
 		return err
+	}
+	backupFile, err := os.Open(backup)
+	if err != nil {
+		return err
+	}
+	hash := sha256.New()
+	_, err = io.Copy(hash, backupFile)
+	backupFile.Close()
+	if err != nil {
+		return err
+	}
+	if global.Source.BackupSHA256 != hex.EncodeToString(hash.Sum(nil)) {
+		return fmt.Errorf("bundle source backup hash differs")
+	}
+	repos, err := countRepositories(db, cap)
+	if err != nil {
+		return err
+	}
+	if repos != len(global.Repos) {
+		return fmt.Errorf("source repository count differs")
 	}
 	got := globalBundleCounts(global)
 	if got != global.Counts {
