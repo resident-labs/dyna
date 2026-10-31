@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { roomRoute, settingsRoute } from "./lib/routes.ts";
   import { watchHello, watchStreamState } from "./lib/stream.ts";
   import { watchConnect } from "./lib/connect-watch.ts";
   import { reconnectNotice } from "./lib/reconnect.ts";
@@ -120,7 +121,7 @@
   connect();
   let path = $state(window.location.pathname);
   // Settings opens over the app, so the page behind it keeps its stream, its draft and its feed position.
-  const isSettings = (where: string) => /^\/settings(\/|$)/.test(where);
+  const isSettings = (where: string) => settingsRoute.test(where);
   let behind = $state(isSettings(window.location.pathname) ? "/" : window.location.pathname);
   let inSettings = $derived(isSettings(path));
   function follow() {
@@ -163,7 +164,7 @@
   // A link to a room the engine does not list, or to a path the app has no page for, shows a load error in Home's
   // place. Until the room list loads, a room link is trusted, so a known room opens without a flash.
   // Room, session and instructions paths are routes; other paths show no page.
-  const route = $derived(/^\/r\/([^/]+)(?:\/s\/([^/]+)|\/instructions|\/new)?\/?$/.exec(behind));
+  const route = $derived(roomRoute.exec(behind));
   const asked = $derived(route?.[1] && decodeURIComponent(route[1]));
   let room = $derived(asked && (!roomsLoaded || attention.rooms.has(asked)) ? asked : undefined);
   let lost: "room" | "page" | undefined = $derived(room || behind === "/" || section === "new-room" ? undefined : asked ? "room" : "page");
