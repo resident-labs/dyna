@@ -392,7 +392,7 @@
 {#snippet computerView(id: string)}
   <!-- Another session's view is a new view, so the old image runs its cleanup and drops its stream. -->
   {#key id}<ComputerView session={id} name={store?.names.get(id) ?? "Session"} root={!store?.sessions.get(id)?.parent} activity={store?.activity.get(id)} {docked} full={phone.current && !docked} bind:rect bind:element={computer}
-    onfit={(ratio, chrome) => { if (!places.has(id)) rect = fitted(rect, ratio, chrome, (feed?.getBoundingClientRect().bottom ?? window.innerHeight) - 16); }}
+    onfit={(ratio, chrome) => { if (!places.has(id)) places.set(id, rect = fitted(rect, ratio, chrome, (feed?.getBoundingClientRect().bottom ?? window.innerHeight) - 16)); }}
     onclose={tapped => void stopWatching(tapped)} ondock={event => { docked = !docked; if (docked && !panelShown) void showPanel(true, event.detail > 0); }} />{/key}
 {/snippet}
 
@@ -445,7 +445,7 @@
         aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section === "requests" ? undefined : "requests"; }}>
         <Icon name="inbox" />{#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
         <!-- One click to the session's shell and computer; neither shows when the session has none. -->
-        {#if session && !closed && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title="Open a terminal in this session's box" onclick={() => terminals?.shell(session, title)}><Icon name="terminal" /><span>Terminal</span></button>{/if}
+        {#if session && !closed && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title="Open a terminal in this session's box" onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /><span>Terminal</span></button>{/if}
         {#if session && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /><span>Computer</span></button>{/if}
         <span class="room-menu"><RoomMenu bind:this={roomMenu} onterminal={() => void terminals?.pick()} onrules={() => { section = "rules"; }} /></span>{/if}
       <!-- While the panel is closed, who works shows on its button, as at most 3 faces, "+n" and the count from status.ts. -->
@@ -473,7 +473,7 @@
         quote={quotes[key]} onunquote={() => { quotes[key] = undefined; }} sessions={mentions} files={files(key)} />
     {/if}{/if}
     <TermDock bind:this={terminals} bind:element={dock} onempty={() => composer?.focus()} jobs={jobSessions} failures={jobFailures}
-      sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name }))} />
+      sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
   </main>
   {#if room}
     <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} class:watching={watching && docked} aria-label="Sessions" tabindex="-1" role={panel && phone.current && !covered ? "dialog" : undefined} aria-modal={(panel && phone.current && !covered) || undefined} bind:this={members} inert={drawer || covered}>
