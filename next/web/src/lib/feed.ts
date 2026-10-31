@@ -35,7 +35,7 @@ const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.sessio
 // The session an event is about; events without one belong to the room feed only.
 function subject(event: Event): string | undefined {
   switch (event.type) {
-    case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": return undefined;
+    case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "rule.added": case "rule.removed": return undefined;
     case "op.requested": return event.body.by.session;
     case "op.decided": case "op.ran": return event.from.session;
     default: return event.body.session;
@@ -153,7 +153,7 @@ export function workSummary(events: Event[], name: Name): string {
   const started: string[] = [], moved: string[] = [], closed: string[] = [], opened: string[] = [], shut: string[] = [];
   const turns = new Map<string, Set<string>>();
   const requests = new Set<string>();
-  let jobs = 0, images = 0, failedImages = 0, prs = 0, memory = 0, grants = 0;
+  let jobs = 0, images = 0, failedImages = 0, prs = 0, memory = 0, grants = 0, rules = 0;
   for (const event of events) {
     switch (event.type) {
       case "session.started": started.push(name(event.body.session)); break;
@@ -168,6 +168,7 @@ export function workSummary(events: Event[], name: Name): string {
       case "pr.opened": prs++; break;
       case "box.pressure": memory++; break;
       case "grant.expired": grants++; break;
+      case "rule.added": case "rule.removed": rules++; break;
     }
   }
   const who = (sessions: string[]) => sessions.length > 2 ? `${sessions.length} sessions` : list(sessions);
@@ -178,6 +179,7 @@ export function workSummary(events: Event[], name: Name): string {
     jobs && count(jobs, "job"), requests.size && count(requests.size, "request"), images && `${count(images, "image")} built`,
     failedImages && `${count(failedImages, "image build")} failed`, prs && count(prs, "pull request"),
     memory && count(memory, "memory warning"), grants && `${count(grants, "host execution grant")} expired`,
+    rules && count(rules, "rule change"),
     opened.length && `${who(opened)} opened a computer`, shut.length && `${who(shut)} closed a computer`, moved.length && `${who(moved)} moved`, closed.length && `${who(closed)} closed`,
   ].filter(part => typeof part === "string");
   return parts.length ? parts.join(", ") : count(events.length, "update");
@@ -209,6 +211,8 @@ export function describe(event: Event, name: Name): string {
     case "image.failed": return `Image ${event.body.name}:${event.body.tag} failed`;
     case "pr.opened": return `${name(event.body.session)} opened pull request ${event.body.repo}#${event.body.number}`;
     case "grant.expired": return "A host execution grant expired";
+    case "rule.added": return `Rule r${event.body.number} added: ${event.body.text}`;
+    case "rule.removed": return `Rule r${event.body.number} removed`;
     case "box.pressure": return event.body.kind === "max" ? "A session reached its memory limit" : "A session is short of memory";
     case "post.created": return event.body.text;
   }
