@@ -33,7 +33,7 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 	if e := s.roomAccess(ctx, caller, req.Room); e != nil {
 		return contract.SessionListResponse{}, e
 	}
-	rows, err := s.store.Read().QueryContext(ctx, "SELECT s.id,s.name,COALESCE(s.parent,''),s.profile,COALESCE(b.id,''),COALESCE(b.state,''),s.goal FROM sessions s LEFT JOIN boxes b ON b.session=s.id WHERE s.room=? ORDER BY s.created_at,s.id", req.Room)
+	rows, err := s.store.Read().QueryContext(ctx, "SELECT s.id,s.name,COALESCE(s.parent,''),s.profile,COALESCE(b.id,''),COALESCE(b.state,''),s.goal FROM sessions s LEFT JOIN boxes b ON b.session=s.id WHERE s.room=? AND s.closed_at IS NULL ORDER BY s.created_at,s.id", req.Room)
 	if err != nil {
 		return contract.SessionListResponse{}, failure(err)
 	}
