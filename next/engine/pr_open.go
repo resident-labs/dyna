@@ -56,10 +56,10 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 			defer unlock()
 			session, head, err := lookup(ctx, who)
 			if err != nil {
-				return contract.OpResult{Error: "session repository unavailable"}
+				return contract.OpResult{Cause: contract.CauseInternal, Error: "session repository unavailable"}
 			}
 			if token == "" {
-				return contract.OpResult{Error: "GitHub token is not set"}
+				return contract.OpResult{Cause: contract.CauseInternal, Error: "GitHub token is not set"}
 			}
 			// The request has only strings and a boolean, which JSON always encodes.
 			body, _ := json.Marshal(struct {
@@ -70,14 +70,14 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 			target.Path = strings.TrimRight(target.Path, "/") + "/repos/" + string(session.Repo) + "/pulls"
 			request, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(body))
 			if err != nil {
-				return contract.OpResult{Error: "cannot create PR request"}
+				return contract.OpResult{Cause: contract.CauseInternal, Error: "cannot create PR request"}
 			}
 			request.Header.Set("Authorization", "Bearer "+token)
 			request.Header.Set("Content-Type", "application/json")
 			client := http.Client{Transport: transport, Timeout: time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 			response, err := client.Do(request)
 			if err != nil {
-				return contract.OpResult{Error: "GitHub request failed; outcome unknown, reconcile before retrying"}
+				return contract.OpResult{Cause: contract.CauseGithubFailed, Error: "GitHub request failed; outcome unknown, reconcile before retrying"}
 			}
 			defer response.Body.Close()
 			var payload struct {
@@ -93,10 +93,10 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 				for _, item := range payload.Errors {
 					parts = append(parts, item.Message)
 				}
-				return contract.OpResult{Error: strings.ReplaceAll(strings.Join(parts, ": "), token, "***")}
+				return contract.OpResult{Cause: contract.CauseGithubFailed, Error: strings.ReplaceAll(strings.Join(parts, ": "), token, "***")}
 			}
 			if err != nil || payload.Number <= 0 {
-				return contract.OpResult{Error: "GitHub may have opened the PR but returned an invalid response; reconcile before retrying"}
+				return contract.OpResult{Cause: contract.CauseGithubFailed, Error: "GitHub may have opened the PR but returned an invalid response; reconcile before retrying"}
 			}
 			link := fmt.Sprintf("https://github.com/%s/pull/%d", session.Repo, payload.Number)
 			result := contract.OpResult{Output: link, PR: &contract.PrOpenResult{Number: payload.Number, URL: link}}
@@ -120,6 +120,7 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 				return s.store.RecordPROpen(ctx, session.Repo, payload.Number, who.Session, event, deliveries)
 			}()
 			if err != nil {
+				result.Cause = contract.CauseInternal
 				result.Error = "PR opened but ownership could not be recorded; reconcile before retrying: " + link
 			}
 			return result

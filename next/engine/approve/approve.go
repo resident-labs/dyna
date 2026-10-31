@@ -272,6 +272,7 @@ func (s *Service) run(op contract.Operation, entry Entry) {
 	result := contract.OpResult{}
 	if err := entry.Check(s.Context, op.Args, op.By); err != nil {
 		result.Error = "stale: " + err.Error()
+		result.Cause = contract.CauseStale
 	} else {
 		result = entry.Execute(s.Context, op.ID, op.Args, op.By)
 	}
@@ -324,7 +325,7 @@ func (s *Service) Recover(ctx context.Context) error {
 		return err
 	}
 	for _, record := range ops {
-		if err := s.finish(record.Operation, contract.OpResult{Error: "interrupted: outcome unknown"}); err != nil {
+		if err := s.finish(record.Operation, contract.OpResult{Error: "interrupted: outcome unknown", Cause: contract.CauseInterrupted}); err != nil {
 			return err
 		}
 	}
