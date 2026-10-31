@@ -215,6 +215,8 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				switch body := event.Body.(type) {
 				case contract.RuleAdded:
 					text = fmt.Sprintf("Rule r%d added: %s", body.Number, body.Text)
+				case contract.RuleEdited:
+					text = fmt.Sprintf("Rule r%d changed: %s", body.Number, body.Text)
 				case contract.RuleRemoved:
 					var oldText string
 					if err := s.store.Read().QueryRowContext(ctx, "SELECT text FROM rules WHERE room=? AND number=?", event.Room, body.Number).Scan(&oldText); err != nil {

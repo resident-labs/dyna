@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -81,6 +82,40 @@ func (s *Service) RuleRemove(ctx context.Context, caller contract.Principal, req
 	})
 	if err == sql.ErrNoRows {
 		return response, invalid("no such rule")
+	}
+	if err != nil {
+		return response, failure(err)
+	}
+	return response, nil
+}
+
+func (s *Service) RuleEdit(ctx context.Context, caller contract.Principal, req contract.RuleEditRequest) (contract.RuleEditResponse, *contract.Error) {
+	var response contract.RuleEditResponse
+	if problem := s.ruleWriter(ctx, caller, req.Room); problem != nil {
+		return response, problem
+	}
+	if strings.TrimSpace(req.Text) == "" || utf8.RuneCountInString(req.Text) > 2000 {
+		return response, invalid("rule text must contain 1 to 2000 characters")
+	}
+	event, err := s.event(req.Room, caller, contract.RuleEdited{Number: req.Number, Text: req.Text})
+	if err != nil {
+		return response, failure(err)
+	}
+	err = s.store.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "UPDATE rules SET text=? WHERE room=? AND number=? AND removed_at IS NULL", req.Text, req.Room, req.Number)
+		if err != nil {
+			return err
+		}
+		if n, err := result.RowsAffected(); err != nil || n == 0 {
+			if err == nil {
+				err = sql.ErrNoRows
+			}
+			return err
+		}
+		return s.ruleEvent(ctx, tx, event)
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return response, &contract.Error{Code: contract.ErrNotFound, Message: "no such rule"}
 	}
 	if err != nil {
 		return response, failure(err)
