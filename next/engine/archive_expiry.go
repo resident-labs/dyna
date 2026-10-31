@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // ExpireArchives deletes expired remote archive refs before forgetting their records.
@@ -15,12 +16,19 @@ func (s *Service) ExpireArchives(ctx context.Context) error {
 	var failures []error
 	for _, a := range archives {
 		if a.Ref != "" {
+			if err := s.store.RetryArchive(ctx, a, s.now().Add(time.Hour)); err != nil {
+				failures = append(failures, err)
+				continue
+			}
 			if a.Ref != "refs/dyna/archive/"+string(a.Session) {
 				failures = append(failures, fmt.Errorf("invalid archive ref for %s", a.Session))
 				continue
 			}
 			if err := s.repos.DeleteArchiveRef(ctx, a.Repo, a.Ref, a.Commit); err != nil {
 				failures = append(failures, err)
+				if ctx.Err() != nil {
+					return errors.Join(failures...)
+				}
 				continue
 			}
 		}

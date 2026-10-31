@@ -29,6 +29,7 @@ func TestExpireArchives(t *testing.T) {
 		t.Fatalf("failed delete lost archive: %d %v", count, err)
 	}
 	repos.err = nil
+	now = now.Add(time.Hour)
 	if err := s.ExpireArchives(ctx); err != nil {
 		t.Fatal(err)
 	}

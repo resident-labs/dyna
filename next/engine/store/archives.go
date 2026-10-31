@@ -19,7 +19,7 @@ type Archive struct {
 
 // ExpiredArchives bounds each maintenance pass and preserves the oldest first.
 func (s *Store) ExpiredArchives(ctx context.Context, now time.Time) ([]Archive, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT session,repo,ref,commit_sha,expires_at FROM archives WHERE expires_at<=? ORDER BY expires_at,session,repo LIMIT 50", now.UnixMilli())
+	rows, err := s.Read().QueryContext(ctx, "SELECT session,repo,ref,commit_sha,expires_at FROM archives WHERE expires_at<=? AND retry_at<=? ORDER BY retry_at,expires_at,session,repo LIMIT 50", now.UnixMilli(), now.UnixMilli())
 	if err != nil {
 		return nil, err
 	}
@@ -37,6 +37,14 @@ func (s *Store) ExpiredArchives(ctx context.Context, now time.Time) ([]Archive, 
 	return archives, rows.Err()
 }
 
+// RetryArchive moves a failed report behind reports not tried yet.
+func (s *Store) RetryArchive(ctx context.Context, a Archive, at time.Time) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE archives SET retry_at=? WHERE session=? AND repo=? AND ref=? AND commit_sha=? AND expires_at=?", at.UnixMilli(), a.Session, a.Repo, a.Ref, a.Commit, a.ExpiresAt.UnixMilli())
+		return err
+	})
+}
+
 // ForgetArchive removes only the exact report that was deleted remotely.
 func (s *Store) ForgetArchive(ctx context.Context, a Archive) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
@@ -49,7 +57,7 @@ func (s *Store) ForgetArchive(ctx context.Context, a Archive) error {
 func (s *Store) SaveArchives(ctx context.Context, archives []Archive) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		for _, a := range archives {
-			_, err := tx.ExecContext(ctx, "INSERT INTO archives(session,repo,ref,commit_sha,created_at,expires_at) VALUES(?,?,?,?,?,?) ON CONFLICT(session,repo) DO UPDATE SET ref=excluded.ref,commit_sha=excluded.commit_sha,created_at=excluded.created_at,expires_at=excluded.expires_at", a.Session, a.Repo, a.Ref, a.Commit, a.CreatedAt.UnixMilli(), a.ExpiresAt.UnixMilli())
+			_, err := tx.ExecContext(ctx, "INSERT INTO archives(session,repo,ref,commit_sha,created_at,expires_at) VALUES(?,?,?,?,?,?) ON CONFLICT(session,repo) DO UPDATE SET ref=excluded.ref,commit_sha=excluded.commit_sha,created_at=excluded.created_at,expires_at=excluded.expires_at,retry_at=0", a.Session, a.Repo, a.Ref, a.Commit, a.CreatedAt.UnixMilli(), a.ExpiresAt.UnixMilli())
 			if err != nil {
 				return err
 			}
@@ -77,7 +85,7 @@ func (s *Store) CompleteArchives(ctx context.Context, session contract.SessionID
 			if a.Session != session {
 				return sql.ErrNoRows
 			}
-			_, err := tx.ExecContext(ctx, "INSERT INTO archives(session,repo,ref,commit_sha,created_at,expires_at) VALUES(?,?,?,?,?,?) ON CONFLICT(session,repo) DO UPDATE SET ref=excluded.ref,commit_sha=excluded.commit_sha,created_at=excluded.created_at,expires_at=excluded.expires_at", a.Session, a.Repo, a.Ref, a.Commit, a.CreatedAt.UnixMilli(), a.ExpiresAt.UnixMilli())
+			_, err := tx.ExecContext(ctx, "INSERT INTO archives(session,repo,ref,commit_sha,created_at,expires_at) VALUES(?,?,?,?,?,?) ON CONFLICT(session,repo) DO UPDATE SET ref=excluded.ref,commit_sha=excluded.commit_sha,created_at=excluded.created_at,expires_at=excluded.expires_at,retry_at=0", a.Session, a.Repo, a.Ref, a.Commit, a.CreatedAt.UnixMilli(), a.ExpiresAt.UnixMilli())
 			if err != nil {
 				return err
 			}
