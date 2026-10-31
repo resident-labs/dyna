@@ -42,8 +42,17 @@ func WriteReport(w io.Writer, results []CellResult, skipRepository, skipChildren
 						}
 					}
 					if result.Measured && len(result.Attempts) > 0 {
-						usage := result.Attempts[len(result.Attempts)-1].Usage
-						if usage.Input >= 0 && usage.CacheRead >= 0 && usage.CacheWrite >= 0 && usage.Output >= 0 {
+						var usage Usage
+						valid := true
+						for _, attempt := range result.Attempts {
+							u := attempt.Usage
+							valid = valid && u.Input >= 0 && u.CacheRead >= 0 && u.CacheWrite >= 0 && u.Output >= 0
+							usage.Input += u.Input
+							usage.CacheRead += u.CacheRead
+							usage.CacheWrite += u.CacheWrite
+							usage.Output += u.Output
+						}
+						if valid {
 							total = fmt.Sprint(usage.Total())
 							input := usage.Input + usage.CacheRead + usage.CacheWrite
 							if input > 0 {
