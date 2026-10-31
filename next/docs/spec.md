@@ -19,7 +19,7 @@ The owner settled the design on the card. Writing the spec needed the decisions 
 6. **Only the owner grants host exec.** Root's default grant covers every host, including the control-plane host, with no approval step, as the owner decided. The engine refuses owner-only calls from host-exec processes (section 6).
 7. **Root is a position in the tree.** Any session above another may approve its agent-class operations and start, move or close it. Root is above every session, so it can do all of that with no root check. Its only extra powers are two grants (ask the owner, host exec) and one subscription (engine notices).
 8. **Self-hosting comes before the cutover.** v2 first runs its own development in a trial room beside v1. Until the cutover, v2 uses its own data, runtime and SSH control folders (`dyna-next`), so its store, owner socket, box sockets and SSH masters never meet v1's. The trial starts in M2, as soon as one box can build and test dyna (root, 2026-10-30). From then on, v2 sessions do part of the M2 and M3 work, and v1 stays the fallback until the cutover. The cutover follows only after the trial works and a dry-run import passes (section 11).
-9. **Some v1 features wait until after the cutover.** Voice and web search through Dyna come back after the cutover. The library (the feature map, the librarian and its page) is cut from v2 for now (owner, 2026-10-30); the frozen v1 backup keeps the map. Computers come back early, in M2, in a minimal form (5.14), so that agents can check web views from inside v2 (owner, 2026-10-30). Workflows are ported in M3, before the cutover, because fl-rea depends on them (owner, 2026-10-30; 9.2). The desktop window is ported in M3, so the owner keeps it. Section 9 lists every feature. There is no data rollback, so the owner should check that list.
+9. **Some v1 features wait until after the cutover.** Voice and web search through Dyna come back after the cutover. The library (the feature map, the librarian and its page) is cut from v2 for now (owner, 2026-10-30); the frozen v1 backup keeps the map. Computers come back early, in M2, in a minimal form (5.14), so that agents can check web views from inside v2 (owner, 2026-10-30). Workflows are ported in M3, before the cutover, because fl-rea depends on them (owner, 2026-10-30; 9.2). The desktop window is ported in M3, so the owner keeps it. Section 9 lists every feature. There is no rollback, so the owner should check that list.
 10. **Node jobs are not ported.** CI runs on GitHub Actions, with self-hosted runners in boxes (decision 13). Host-specific work, such as a GPU task, uses host exec or a box on a host with that label.
 11. **CLIProxyAPI is vendored and runs in a child process.** We keep a fork in `next/third_party/cliproxyapi`, as v1 keeps Pi, so that we can extend it. `dyna engine` supervises a child of the same binary over a Unix socket, so a proxy panic cannot stop the engine (5.7). It lands in M1, because the model route needs it.
 12. **Size budget and scope cuts (r22).** Each milestone report counts product lines per package against the plan's budget. On 2026-10-30 the owner kept subtree moves, `Run` subscriptions and terminal questions, and cut these until a need shows: box growth (`box.grow`; only the `box.pressure` report ships, 5.4, owner q40), a box starting again on another host after a host failure (a lost box waits for its host, 5.10), box checkpoints, the relocation commands (a manual procedure instead, 5.10), the bundle data of issue watches and room MCP servers, one cgroup per shell job (process groups instead, 5.8), `node_modules` reflink seeding, and external members (7.3). M1 also moves the Dyna shell server and the transcript stream to M2 (5.8).
@@ -48,6 +48,7 @@ The owner settled these. A review does not raise them as findings, and only the 
 2. **No Claude Code fallback adapter** (decision 4; owner, q51). Pi is the only harness, and the accepted risk in decision 4 stays.
 3. **The library is cut** from v2 for now (decision 9; owner, 2026-10-30).
 4. **Integration tests only for important owner-facing features**: one or two each, and no end-to-end tests in the repository (10.1; owner, 2026-10-30).
+5. **No cutover rollback step** (goal 6; owner, 2026-10-31). The cutover has no step that restores v1 service. The frozen backup and the dry-run gate bound the data risk.
 
 ## 1. Goals and non-goals
 
@@ -58,12 +59,12 @@ The owner settled these. A review does not raise them as findings, and only the 
 3. **No secret in a box, with one exception by owner decision.** Model calls, git, GitHub writes and host commands go through the engine. The engine knows the caller by its socket. The exception is root: its default host exec includes the control plane, which holds the model sign-ins and the GitHub token (settled decision 1).
 4. **Small and legible.** v1 has about 260,000 lines of Go (without tests) in 138 packages. v2 targets under 60,000 lines at the cutover, in nine top-level packages, with no compatibility code.
 5. **Fast, honest tests.** The repository holds fast unit tests, plus one or two fast integration tests for each important owner-facing feature. A person or agent checks each milestone end to end by hand in a sandbox (section 10).
-6. **A clean cutover.** One bundle, one commit, and no data rollback: v2 writes nothing back to v1. For 7 days, v1 can start again from its final state (8.3, step 12). The store guard protects every other install.
+6. **A clean cutover.** One bundle, one commit, no rollback. The store guard protects every other install.
 7. **Useful to any owner (r9).** Any repository and toolchain (images from `.dyna/images/`), any Linux host with rootless Podman and SSH, and every model account that CLIProxyAPI supports.
 
 ### Non-goals
 
-- No v1 compatibility in `next/`: no v1 store reader, no v1 wire fields, no legacy shims and no rollback code (v1 starts again from its own binary, 8.3 step 12).
+- No v1 compatibility in `next/`: no v1 store reader, no v1 wire fields, no legacy shims, no rollback path.
 - No harness other than Pi. Claude Code is not ported (section 0, decision 4).
 - No agent work on the control plane: no host worktrees, host shells, host browsers, room slices or test-slot wrapper.
 - No root seat and no attach or detach of outside CLIs.
@@ -1114,7 +1115,6 @@ The external Opus agent runs steps 3 to 10 from a prompt we write. The owner doe
 9. **Import.** `dyna import <bundle>` writes the store in one transaction and records the bundle hash. It copies the Connect secrets file to file with mode 0600, so they never enter the bundle, and deletes the copies it read. On the desktop, the v1 data folder moves to `~/.local/share/dyna-v1/`. The owner deletes that folder after the first good week.
 10. **Start.** `dyna engine` starts each room's root in a box. Each root gets one `migrate.handoff` event with its open goals, PRs, questions, issue count and handoff cards.
 11. **Owner checks.** The owner checks that the CLIProxyAPI sign-ins from the trial work (the auth folder moves with the engine), opens a room from a paired device, and turns auto-update back on.
-12. **Keep v1 for 7 days.** Keep the `v1-final` binary and `~/.local/share/dyna-v1/` on the desktop for 7 days. Step 6 writes the exact commands that start v1 again from them into the cutover prompt's report. If day 1 fails, the owner stops v2 and runs those commands. v1 then starts from its final backup, and work done in v2 meanwhile stays in v2 and on GitHub. After 7 good days, the owner deletes them.
 
 ### 8.4 Upgrade guard and other installs
 
@@ -1173,7 +1173,7 @@ Tables: `subscriptions` (`id` PK, `scope`, `room`, `session`, `every_ms`, `wake_
 
 ## 9. Feature map
 
-Drafted by dyna:code-architectural. Every feature in the v1 library map, with its v2 milestone. The cutover gate needs every M1, M2 and M3 row, because there is no data rollback. "Data at M3" means the import keeps the records, but the feature comes after the cutover.
+Drafted by dyna:code-architectural. Every feature in the v1 library map, with its v2 milestone. The cutover gate needs every M1, M2 and M3 row, because there is no rollback. "Data at M3" means the import keeps the records, but the feature comes after the cutover.
 
 | Feature | Milestone | Reason |
 |---|---|---|
