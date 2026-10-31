@@ -3,12 +3,14 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
+	"github.com/resident-labs/dyna/engine/model"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -19,20 +21,38 @@ func TestAccountActionKeepsSecretOutOfAudit(t *testing.T) {
 	}
 	defer st.Close()
 	ctx := context.Background()
+	proxy, err := model.NewProxy(t.TempDir(), "invented-management-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := "invented-private-api-key"
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			ID       string `json:"id"`
+			Provider string `json:"provider"`
+			Key      string `json:"key"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.Key != secret {
+			t.Error("fake proxy did not receive the key")
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if err := st.SaveProxyAuth(ctx, store.ProxyAuth{ID: input.ID, Provider: input.Provider, Record: []byte("{}")}, true); err != nil {
+			t.Error("fake credential save failed")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte("{}"))
+	})}
+	go func() { _ = server.Serve(proxy.Listener) }()
+	defer server.Close()
 	core := New(st, nil, nil, time.Now)
-	actions := NewAccountActions(core, nil)
+	actions := NewAccountActions(core, proxy.Connections("invented-management-key", st, time.Now))
 	if err := core.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": actions.Entry()}, time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	s := actions
-	secret := "invented-private-api-key"
-	result, problem := s.runAccountAction(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.AccountActionSetKey, func(context.Context) accountActionResult {
-		if secret == "" {
-			t.Fatal("missing invented secret")
-		}
-		return accountActionResult{}
-	})
-	if problem != nil || result.err != nil {
+	_, problem := actions.AccountsSetKey(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.AccountsSetKeyRequest{Provider: contract.ProviderZAI, Label: "Invented", Key: secret})
+	if problem != nil {
 		t.Fatal("account action failed")
 	}
 	events, err := st.OwnerEvents(ctx, 0, 10)

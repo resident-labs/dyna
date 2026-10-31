@@ -45,6 +45,8 @@ func (a *AccountActions) Entry() approve.Entry {
 				name = "Check account connection"
 			case contract.AccountActionSetKey:
 				name = "Save account key"
+			case contract.AccountActionRemove:
+				name = "Remove account"
 			}
 			return contract.Card{Title: name, Target: contract.Target{Kind: contract.TargetAccount}}
 		},
@@ -60,12 +62,12 @@ func (a *AccountActions) Entry() approve.Entry {
 	}
 }
 
-func (s *AccountActions) runAccountAction(ctx context.Context, caller contract.Principal, kind contract.AccountAction, run func(context.Context) accountActionResult) (accountActionResult, *contract.Error) {
+func (s *AccountActions) runAccountAction(ctx context.Context, caller contract.Principal, kind contract.AccountAction, account contract.AccountID, run func(context.Context) accountActionResult) (accountActionResult, *contract.Error) {
 	if caller.Kind != contract.PrincipalOwner {
 		return accountActionResult{}, &contract.Error{Code: contract.ErrForbidden, Message: "forbidden"}
 	}
 	resultCh := make(chan accountActionResult, 1)
-	op, err := s.service.approvals.SubmitEphemeral(ctx, caller, contract.Operation{Args: contract.AccountsActionArgs{Action: kind}}, func(ctx context.Context) contract.OpResult {
+	op, err := s.service.approvals.SubmitEphemeral(ctx, caller, contract.Operation{Args: contract.AccountsActionArgs{Action: kind, Account: account}}, func(ctx context.Context) contract.OpResult {
 		result := run(ctx)
 		resultCh <- result
 		if result.err != nil {
@@ -94,9 +96,30 @@ func (s *AccountActions) AccountsList(ctx context.Context, caller contract.Princ
 	if caller.Kind != contract.PrincipalOwner {
 		return contract.AccountsListResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "forbidden"}
 	}
-	accounts, err := s.service.store.Accounts(ctx)
+	bindings, err := s.service.store.Accounts(ctx)
 	if err != nil {
 		return contract.AccountsListResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable"}
+	}
+	accounts := make([]contract.Account, len(bindings))
+	credentials, err := s.connections.Credentials(ctx)
+	states := make(map[string]model.CredentialState, len(credentials))
+	for _, credential := range credentials {
+		states[credential.ID] = credential.State
+	}
+	for i, binding := range bindings {
+		accounts[i] = binding.Account
+		if err == nil {
+			switch states[binding.ProxyID] {
+			case model.CredentialConnected:
+				accounts[i].State = contract.AccountConnected
+			case model.CredentialExpired:
+				accounts[i].State, accounts[i].Reason = contract.AccountSignInExpired, contract.AccountSignInRejected
+			case model.CredentialFailed:
+				accounts[i].State, accounts[i].Reason = contract.AccountFailedState, contract.AccountProxyFailed
+			case "":
+				accounts[i].State, accounts[i].Reason = contract.AccountFailedState, contract.AccountCredentialMissing
+			}
+		}
 	}
 	return contract.AccountsListResponse{Accounts: accounts, Providers: []contract.AccountProviderInfo{
 		{ID: contract.ProviderAnthropic, DisplayName: "Claude", ConnectMethod: contract.ConnectOAuth},
@@ -114,11 +137,25 @@ func (s *AccountActions) AccountsConnect(ctx context.Context, caller contract.Pr
 	if req.Label == "" || len(req.Label) > 128 || strings.ContainsAny(req.Label, "\r\n") {
 		return contract.AccountsConnectResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "invalid account label"}
 	}
-	result, problem := s.runAccountAction(ctx, caller, contract.AccountActionConnect, func(ctx context.Context) accountActionResult {
+	result, problem := s.runAccountAction(ctx, caller, contract.AccountActionConnect, "", func(ctx context.Context) accountActionResult {
 		out, err := s.connections.Start(ctx, req)
 		return accountActionResult{connect: out, err: err}
 	})
 	return result.connect, problem
+}
+
+func (s *AccountActions) AccountsRemove(ctx context.Context, caller contract.Principal, req contract.AccountsRemoveRequest) (contract.AccountsRemoveResponse, *contract.Error) {
+	_, problem := s.runAccountAction(ctx, caller, contract.AccountActionRemove, req.AccountID, func(ctx context.Context) accountActionResult {
+		id, err := s.service.store.AccountProxyID(ctx, req.AccountID)
+		if err == nil {
+			err = s.connections.RemoveCredential(ctx, id)
+		}
+		if err == nil {
+			err = s.service.store.RemoveAccount(ctx, req.AccountID)
+		}
+		return accountActionResult{err: err}
+	})
+	return contract.AccountsRemoveResponse{}, problem
 }
 
 func (s *AccountActions) AccountsSetKey(ctx context.Context, caller contract.Principal, req contract.AccountsSetKeyRequest) (contract.AccountsSetKeyResponse, *contract.Error) {
@@ -126,7 +163,7 @@ func (s *AccountActions) AccountsSetKey(ctx context.Context, caller contract.Pri
 	if req.Label == "" || len(req.Label) > 128 || strings.ContainsAny(req.Label, "\r\n") || strings.TrimSpace(req.Key) == "" || len(req.Key) > 4096 {
 		return contract.AccountsSetKeyResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "invalid account input"}
 	}
-	result, problem := s.runAccountAction(ctx, caller, contract.AccountActionSetKey, func(ctx context.Context) accountActionResult {
+	result, problem := s.runAccountAction(ctx, caller, contract.AccountActionSetKey, "", func(ctx context.Context) accountActionResult {
 		out, err := s.connections.SetKey(ctx, req)
 		return accountActionResult{key: out, err: err}
 	})
@@ -134,7 +171,7 @@ func (s *AccountActions) AccountsSetKey(ctx context.Context, caller contract.Pri
 }
 
 func (s *AccountActions) AccountsConnectCallback(ctx context.Context, caller contract.Principal, req contract.AccountsConnectCallbackRequest) (contract.AccountsConnectCallbackResponse, *contract.Error) {
-	_, problem := s.runAccountAction(ctx, caller, contract.AccountActionCallback, func(ctx context.Context) accountActionResult {
+	_, problem := s.runAccountAction(ctx, caller, contract.AccountActionCallback, "", func(ctx context.Context) accountActionResult {
 		return accountActionResult{err: s.connections.Callback(ctx, req)}
 	})
 	return contract.AccountsConnectCallbackResponse{}, problem
@@ -145,7 +182,7 @@ func (s *AccountActions) AccountsConnectStatus(ctx context.Context, caller contr
 		return contract.AccountsConnectStatusResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "forbidden"}
 	}
 	out, err := s.connections.Status(ctx, req, func(commit func() error) error {
-		_, problem := s.runAccountAction(ctx, caller, contract.AccountActionComplete, func(context.Context) accountActionResult {
+		_, problem := s.runAccountAction(ctx, caller, contract.AccountActionComplete, "", func(context.Context) accountActionResult {
 			return accountActionResult{err: commit()}
 		})
 		if problem != nil {

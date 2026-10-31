@@ -195,7 +195,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	boxes.Mirror = mirror
 	boxes.Images = &images.Builder{Recorder: service, Now: time.Now}
-	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes, quotas: proxy.Quotas(managementKey, time.Now), AccountActions: accounts, backupEnabled: recipient != nil}, func(c api.Caller) http.Handler {
+	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes, quotas: proxy.Quotas(managementKey, st, time.Now), AccountActions: accounts, backupEnabled: recipient != nil}, func(c api.Caller) http.Handler {
 		return drain.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			session, err := st.Session(r.Context(), c.Principal.Session)
 			if err != nil {
