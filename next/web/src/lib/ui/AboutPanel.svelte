@@ -1,7 +1,7 @@
 <script lang="ts">
   import { SvelteMap } from "svelte/reactivity";
   import StatusPill from "./StatusPill.svelte";
-  import { count } from "../feed.ts";
+  import { boxReason, count } from "../feed.ts";
   import { failed } from "../jobs.ts";
   import { watchShell, type ShellJob } from "../shell.ts";
   import type { RoomStore } from "../room.svelte.ts";
@@ -19,6 +19,7 @@
   let open = $derived(store.sessions.get(session));
   let parent = $derived(open?.parent && store.names.get(open.parent));
   let box = $derived(store.boxes.get(session));
+  let failure = $derived(store.boxFailures.get(session));
   let hasJobs = $derived(box === "ready" && (store.shellJobs.get(session) ?? 0) > 0);
   const listed = new SvelteMap<string, ShellJob>();
   let visible = $state(document.visibilityState === "visible");
@@ -37,7 +38,7 @@
   <dl>
     {#if parent && open?.parent}<dt>Parent</dt><dd><a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(open.parent)}`} onclick={navigate}>{parent}</a></dd>{/if}
     {#if open?.profile}<dt>Profile</dt><dd>{open.profile}</dd>{/if}
-    {#if box}<dt>Box</dt><dd>{#if box === "failed" || box === "lost"}<StatusPill tone="failed" label={boxes[box]} />{:else}{boxes[box]}{/if}</dd>{/if}
+    {#if box}<dt>Box</dt><dd>{#if failure}<StatusPill tone="failed" word label="Failed" /> · {boxReason(failure)}{:else}{boxes[box]}{/if}</dd>{/if}
     {#if hasJobs}<dt>Jobs</dt><dd><button type="button" onclick={onjobs}>{running ? `${count(running, "job")} running` : "Jobs"}</button>{#if failures}{" · "}<StatusPill tone="failed" label="{failures} failed" word />{/if}</dd>{/if}
   </dl>
 </div>
