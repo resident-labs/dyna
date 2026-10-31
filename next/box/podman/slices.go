@@ -12,7 +12,7 @@ import (
 const pressureWindow = 60 * time.Second
 
 // heartbeatScript prints memory.events.local under dyna.slice. grep exits 1 when nothing matches, which is not a failure.
-const heartbeatScript = `set -o pipefail; df -B1 --output=size,used "$1" | awk 'NR == 2 {print "dyna-disk", $1, $2}' || exit 1; cg=$(systemctl --user show dyna.slice -p ControlGroup --value) || exit 1; [ -n "$cg" ] || { echo dyna-load 0 0; exit 0; }; dir="/sys/fs/cgroup$cg"; mem=$(cat "$dir/memory.current") || exit 1; cpu=$(awk '$1 == "usage_usec" {print $2}' "$dir/cpu.stat") || exit 1; [ -n "$cpu" ] || exit 1; echo "dyna-load $mem $cpu"; grep -r --include=memory.events.local . "$dir" || [ $? = 1 ]`
+const heartbeatScript = `disk=$(df -B1 --output=size,used "$1" 2>/dev/null) && echo "$disk" | awk 'NR == 2 {print "dyna-disk", $1, $2}'; cg=$(systemctl --user show dyna.slice -p ControlGroup --value) || exit 1; [ -n "$cg" ] || { echo dyna-load 0 0; exit 0; }; dir="/sys/fs/cgroup$cg"; mem=$(cat "$dir/memory.current") || exit 1; cpu=$(awk '$1 == "usage_usec" {print $2}' "$dir/cpu.stat") || exit 1; [ -n "$cpu" ] || exit 1; echo "dyna-load $mem $cpu"; grep -r --include=memory.events.local . "$dir" || [ $? = 1 ]`
 
 type slicePressure struct {
 	prev      map[string]int64
