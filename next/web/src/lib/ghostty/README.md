@@ -39,6 +39,7 @@ The behavior changes carry a `Dyna:` comment.
   `getSelectionEndClientRect`, and `isAtBottom`. The unused
   `GhosttySelectionPosition` type is also removed.
 - A late font load repaints the frame.
+- A blinking block cursor goes hollow in its off phase instead of vanishing.
 - Dyna v2 bundles no font: `fonts/` and the symbols-only Nerd Font are
   dropped, `ensureTerminalSymbolsFont` and its call in `create` are removed,
   and `TERMINAL_GLYPH_FALLBACKS` is only `monospace`. The family is the app's
