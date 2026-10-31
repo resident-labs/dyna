@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clamp, dragged, fitted, type Rect } from "./float.ts";
+import { clamp, computerPlace, dragged, fitted, type Rect } from "./float.ts";
 
 test("a floating window moves, resizes from any edge down to its minimum, and stays in the viewport", () => {
   const start: Rect = { x: 100, y: 100, w: 480, h: 300 };
@@ -18,4 +18,10 @@ test("fits a window to its frame, keeping the top right corner", () => {
   assert.deepEqual(fitted(rect, 1.6, 70, 800), { x: 500, y: 68, w: 600, h: 445 });
   // Too tall for the space above the composer, it narrows instead.
   assert.deepEqual(fitted(rect, 1.6, 70, 400), { x: 681, y: 68, w: 419, h: 332 });
+});
+
+test("a computer opens against the right edge, and says when it cannot clear the cards", () => {
+  assert.deepEqual(computerPlace(1440, 68, 744), { rect: { x: 1008, y: 68, w: 416, h: 300 }, clear: true });
+  assert.equal(computerPlace(1184, 68, 744).clear, true);
+  assert.equal(computerPlace(1183, 68, 744).clear, false);
 });
