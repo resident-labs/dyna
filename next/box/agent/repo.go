@@ -28,7 +28,14 @@ func runGit(ctx context.Context, dir, index string, args ...string) (string, err
 	return strings.TrimSpace(string(out)), nil
 }
 
-func setupRepos(ctx context.Context, root string, repos []contract.BoxRepo, git gitRunner) error {
+func setupRepos(ctx context.Context, root string, repos []contract.BoxRepo, name, email string, git gitRunner) error {
+	for _, entry := range []struct{ key, value string }{{"user.name", name}, {"user.email", email}} {
+		if entry.value != "" {
+			if _, err := git(ctx, "", "", "config", "--global", entry.key, entry.value); err != nil {
+				return err
+			}
+		}
+	}
 	for _, repo := range repos {
 		dir := filepath.Join(root, string(repo.Name))
 		if _, err := os.Stat(dir); err == nil {

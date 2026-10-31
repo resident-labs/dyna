@@ -88,7 +88,9 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	setup := func(ctx context.Context) error { return setupRepos(ctx, "/box/work", hello.Repos, runGit) }
+	setup := func(ctx context.Context) error {
+		return setupRepos(ctx, "/box/work", hello.Repos, hello.GitName, hello.GitEmail, runGit)
+	}
 	setupErr := setup(ctx)
 	args, err := modelArgs(hello.Model, hello.CompactTokens)
 	if err != nil {
