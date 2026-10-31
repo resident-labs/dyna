@@ -20,6 +20,7 @@ import (
 
 	"dyna-agent/internal/boundedio"
 	"dyna-agent/internal/ghclient"
+	"dyna-agent/internal/ghquota"
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
@@ -392,6 +393,7 @@ type GitHub struct {
 	Timeout        time.Duration
 	recoverPolling func(RateLimit, RateLimitScope) error
 	artifactErrors bool
+	runPhase       ghquota.RunPhase
 	now            func() time.Time
 	requests       *requestCache
 	// run replaces process execution in tests; production uses the shared account-aware path.
