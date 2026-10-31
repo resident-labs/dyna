@@ -66,6 +66,12 @@ export class Attention {
       if (this.working.get(event.room ?? "")?.has(session) && (this.turns.get(session) ?? turn) === turn) this.activity.set(session, label);
       return;
     }
+    // A read position also has seq 0. The feed's moves only forward, so a room store opened later starts from it.
+    if (event.type === "conversation.read") {
+      const room = this.rooms.get(event.body.room);
+      if (room && event.body.conversation.kind === "feed" && event.body.seq > room.lastRead) this.rooms.set(room.id, { ...room, lastRead: event.body.seq });
+      return;
+    }
     if (event.seq <= this.head) return;
     this.head = event.seq;
     const waiting = this.waiting.get(event.room ?? ""), working = this.working.get(event.room ?? "");

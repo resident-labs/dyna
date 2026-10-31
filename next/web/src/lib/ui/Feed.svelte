@@ -37,11 +37,29 @@
   let pending = $derived([...view.pendingPosts.values()].map(({ id, request, at, failed }) => ({
     id, at, failed, text: request.text, attachments: request.attachments ?? [], to: mentioned(request.mentions ?? []),
   })));
+  // The owner's read position when the conversation opened, as in Discord: the New line stays where it was while the
+  // owner reads on, and moves only when the conversation opens again. It is taken once the room and the window load.
+  let since: number | undefined = $state();
+  $effect(() => { if (since === undefined && store.ready && view.ready) since = untrack(() => store.readAt(home)); });
+  // The owner has read the conversation up to its newest event once the bottom of the window is on screen while the
+  // page is visible. see() sends only a newer position, so scrolling and new events make one call per change.
+  function markRead() {
+    if (since === undefined || !view.atPresent || !element || document.visibilityState !== "visible") return;
+    const newest = view.newest;
+    if (element.scrollTop + element.clientHeight >= element.scrollHeight - 24) untrack(() => store.see(home, newest));
+  }
+  $effect(markRead);
+  $effect(() => {
+    const list = element;
+    list?.addEventListener("scroll", markRead, { passive: true });
+    document.addEventListener("visibilitychange", markRead);
+    return () => { list?.removeEventListener("scroll", markRead); document.removeEventListener("visibilitychange", markRead); };
+  });
   // The intro opens the conversation once the window reaches its first event; it also stands in for an empty feed.
   // A DM ends with one muted line while its session runs a turn, only when the window shows the present.
   let items: Item[] = $derived([
     ...view.ready && !view.hasOlder ? [{ kind: "intro" as const, key: "intro" }] : [],
-    ...feedRows(view.ordered, home, pending),
+    ...feedRows(view.ordered, home, pending, since),
     ...(home.session && view.atPresent && store.turns.has(home.session) ? [{ kind: "working" as const, key: "working", session: home.session }] : []),
   ]);
   // Opened work rows stay open while the list recycles their elements.
@@ -93,6 +111,7 @@
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} root={root(item.session)}
         onseen={item.label === "Turn failed" ? () => store.see(home, item.seq) : undefined} />
       {:else if item.kind === "work"}<WorkRow row={item} {name} open={opened.has(item.key)} ontoggle={() => toggle(item.key)} />
+      {:else if item.kind === "new"}<p class="new"><span>New</span></p>
       {:else if item.kind === "day"}<p class="day"><span>{dayLabel(item.at, Date.now())}</span></p>
       {:else if item.kind === "working"}<p class="working"><WorkingDot />{name(item.session)} is working</p>
       {:else}{@render intro()}{/if}
@@ -113,6 +132,10 @@
   /* A centred muted date on a hairline, as in Discord. */
   .day { margin: 16px 16px 4px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; }
   .day::before, .day::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+  /* The first unread row, as in Discord and v1: a danger hairline with a small label at its right end. */
+  .new { margin: 8px 16px 4px; display: flex; align-items: center; gap: 8px; color: var(--danger); font-size: 11px; font-weight: 600; line-height: 1.25; }
+  .new::before { content: ""; flex: 1; border-top: 1px solid var(--danger); }
+  .new span { padding: 1px 6px; border-radius: 6px; background: var(--danger); color: var(--bg); }
   .hint { margin: 0; padding: 6px 16px; color: var(--muted); font-size: 12px; }
   .jump { all: unset; cursor: pointer; padding: 6px 16px; color: var(--muted); font-size: 12px; }
   .jump:hover { color: var(--text); }
