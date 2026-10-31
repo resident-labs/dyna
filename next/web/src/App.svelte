@@ -480,9 +480,10 @@
       {:else}<p class="empty">This room is not available. <button type="button" class="retry" onclick={reopen}>Try again</button></p>{/if}
     </div>
     {#if room && !unavailable}
-      {#if store}<WorkingLine {store} {home} />{/if}
-      {#if paused || pauseFailed}<p class="paused" role="status">{#if pauseFailed}The room did not change. Try again.{:else}Room paused. No session starts a new turn.{/if}
-        {#if paused}<button type="button" class="retry" onclick={pause}>Resume</button>{/if}</p>{/if}
+      <!-- A paused room's line takes the working line's place, so the composer never moves; the header still says who works. -->
+      {#if paused || pauseFailed}<p class="paused" role="status"><span>{pauseFailed ? "The room did not change. Try again." : "Room paused. No session starts a new turn."}</span>
+        {#if paused}<button type="button" class="retry" onclick={pause}>Resume</button>{/if}</p>
+      {:else if store}<WorkingLine {store} {home} />{/if}
       <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title}
         quote={quotes[key]} onunquote={() => { quotes[key] = undefined; }} sessions={mentions} files={files(key)} {stop} />
     {/if}{/if}
@@ -554,8 +555,10 @@
   .requests.waiting:hover, .requests.waiting[aria-pressed="true"] { background: color-mix(in srgb, var(--attention) 22%, transparent); }
   .requests ~ :global(.panel-toggle) { margin-left: 0; }
   main > header :global(.panel-toggle) { display: flex; align-items: center; gap: 8px; }
-  /* One quiet line on the working line's edge; only its Resume acts. */
-  .paused { flex: none; margin: 0 0 4px; padding: 0 16px 0 30px; color: var(--muted); font-size: 12.5px; line-height: 20px; }
+  /* One quiet line of the working line's size and edge; only its Resume acts. */
+  .paused { flex: none; display: flex; gap: 6px; height: 20px; margin: 0 0 4px; padding: 0 16px 0 30px; color: var(--muted); font-size: 12.5px; line-height: 20px; white-space: nowrap; }
+  .paused span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .paused button { flex: none; }
   .faces { display: flex; }
   /* Faces side by side, ringed in the page color, so no face covers another's initials, which stay on the type scale. */
   .faces > :global(.avatar) { box-shadow: 0 0 0 2px var(--bg); font-size: 11px; letter-spacing: 0; }
