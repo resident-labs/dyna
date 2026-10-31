@@ -10,6 +10,9 @@
     chevron: "M6 9l6 6 6-6",
     back: "M19 12H5M11 18l-6-6 6-6",
     more: "M5 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2ZM12 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2ZM19 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z",
+    close: "M6 6l12 12M18 6 6 18",
+    dock: "M4 5h16v14H4ZM15 5v14",
+    undock: "M4 5h16v14H4ZM11 11h6v5h-6Z",
     root: "M12 3l7.8 4.5v9L12 21l-7.8-4.5v-9ZM12 12l7.8-4.5M12 12v9M12 12 4.2 7.5",
   };
   export type IconName = keyof typeof paths;
