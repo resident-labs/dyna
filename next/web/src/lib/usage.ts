@@ -15,14 +15,16 @@ const unitOf = (seconds: number): [number, string] =>
 // A window's span from its length: "5 hours", "7 days", "1 day", "30 minutes".
 const span = (seconds: number) => count(...unitOf(seconds));
 
+// An account's name on screen: its provider, such as "Claude". The label is never shown, because it can be a sign-in address.
+export const providerName = (provider: string) => `${provider.charAt(0).toUpperCase()}${provider.slice(1)}`;
+
 // The busiest window of any account that reports one, as "Claude at 62% of the 5-hour window"; none without one.
-// The provider names the account, because a label can be a sign-in address.
 export function busiestWindow(accounts: AccountUsage[]): string | undefined {
   const windows = accounts.flatMap(a => a.cause ? [] : (a.windows ?? []).map(w => ({ provider: a.provider, w })));
   const top = windows.reduce<(typeof windows)[number] | undefined>((max, next) => !max || next.w.usedPercent > max.w.usedPercent ? next : max, undefined);
   if (!top) return undefined;
   const [n, unit] = unitOf(top.w.seconds);
-  return `${top.provider.charAt(0).toUpperCase()}${top.provider.slice(1)} at ${Math.round(top.w.usedPercent)}% of the ${n}-${unit} window`;
+  return `${providerName(top.provider)} at ${Math.round(top.w.usedPercent)}% of the ${n}-${unit} window`;
 }
 
 // "2 h 10 min", "3 d 4 h" or "10 min" until a time, with no-break spaces so it wraps as one; none when it is not
