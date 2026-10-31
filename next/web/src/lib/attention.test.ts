@@ -37,3 +37,37 @@ test("room.list seeds each room's waiting requests and working sessions, and the
     assert.deepEqual([...attention.activity.keys()], ["s2"]);
   } finally { globalThis.fetch = original; }
 });
+
+test("each stream connect reloads the labels it missed, and a newer live label wins", async () => {
+  const original = globalThis.fetch;
+  let label = "read spec.md";
+  const answers: ((response: Response) => void)[] = [];
+  globalThis.fetch = async input => String(input).endsWith("room.list")
+    ? new Response(JSON.stringify({ seq: 1, rooms: [{ id: "a", name: "A", waiting: null, working: ["s1"] }] }))
+    : new Promise<Response>(resolve => answers.push(resolve));
+  const list = () => new Response(JSON.stringify({ seq: 1, sessions: [{ id: "s1", name: "lead", turn: "t", activity: label }] }));
+  const settle = () => new Promise(resolve => setTimeout(resolve));
+  try {
+    let opened = () => {};
+    const attention = new Attention((room, after, apply, open) => { opened = open ?? opened; return () => {}; });
+    await attention.open();
+    // A session already working when Home opens shows its current label.
+    opened();
+    answers.shift()!(list());
+    await settle();
+    assert.equal(attention.activity.get("s1"), "read spec.md");
+    // A label sent while the stream was down arrives with the next connect.
+    label = "edited App.svelte";
+    opened();
+    answers.shift()!(list());
+    await settle();
+    assert.equal(attention.activity.get("s1"), "edited App.svelte");
+    // A live label that lands while a reload is in flight is newer than its answer.
+    label = "stale";
+    opened();
+    attention.apply(event(0, "a", { type: "turn.activity", body: { session: "s1", turn: "t", label: "ran node --test" } }));
+    answers.shift()!(list());
+    await settle();
+    assert.equal(attention.activity.get("s1"), "ran node --test");
+  } finally { globalThis.fetch = original; }
+});
