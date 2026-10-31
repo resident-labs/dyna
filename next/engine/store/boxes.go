@@ -232,7 +232,8 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 		if (to == contract.BoxStarting || to == contract.BoxPending) && !due.IsZero() {
 			dueMS = due.UnixMilli()
 		}
-		result, err := tx.ExecContext(ctx, `UPDATE boxes SET image=?,state=?,reason=?,due_at=?,failures=? WHERE id=? AND state=?`, image, to, reason, dueMS, failures, b.ID, state)
+		// A completed turn after an early hello may have reset the current failure count.
+		result, err := tx.ExecContext(ctx, `UPDATE boxes SET image=?,state=?,reason=?,due_at=?,failures=CASE WHEN ?='ready' THEN failures ELSE ? END WHERE id=? AND state=?`, image, to, reason, dueMS, state, failures, b.ID, state)
 		if err != nil {
 			return err
 		}
