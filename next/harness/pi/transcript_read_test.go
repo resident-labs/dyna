@@ -17,6 +17,17 @@ func TestTranscriptMasksBeforeLabelLimit(t *testing.T) {
 	}
 }
 
+func TestTranscriptMasksPreviewBeforeLimit(t *testing.T) {
+	secret := "ghp_" + strings.Repeat("a", 100)
+	data := `{"type":"message","message":{"role":"user","deliveryId":"1"}}` + "\n" +
+		`{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"c","name":"bash","arguments":{}}]}}` + "\n" +
+		`{"type":"message","message":{"role":"toolResult","toolCallId":"c","content":[{"type":"text","text":"` + strings.Repeat("x", 1000) + " " + secret + `"}]}}` + "\n"
+	steps, _, err := ReadSteps(strings.NewReader(data), map[contract.DeliverySeq]contract.TurnID{1: "turn_a"}, "", 200)
+	if err != nil || len(steps) != 1 || strings.Contains(steps[0].Preview, "ghp_") || !strings.Contains(steps[0].Preview, "[masked]") {
+		t.Fatalf("preview not masked: %+v, %v", steps, err)
+	}
+}
+
 func TestTranscriptNewestAndIncomplete(t *testing.T) {
 	data := `{"type":"message","message":{"role":"user","deliveryId":"1"}}
 {"type":"message","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"a","name":"old"},{"type":"toolCall","id":"b","name":"new"}]}}
