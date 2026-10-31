@@ -32,3 +32,18 @@ func TestProfilesReturnModelChoice(t *testing.T) {
 		t.Fatalf("%+v %v %v", choice, allowed, err)
 	}
 }
+
+func TestProfilesRejectNegativeLimits(t *testing.T) {
+	for _, field := range []string{"maxConcurrent", "maxCallsPerRun"} {
+		t.Run(field, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "profiles.json")
+			data := `{"p":{"provider":"anthropic","model":"a","allowedModels":["a"],"thinking":"low","` + field + `":-1}}`
+			if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadProfiles(path); err == nil {
+				t.Fatal("negative limit accepted")
+			}
+		})
+	}
+}
