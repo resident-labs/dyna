@@ -6,11 +6,12 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 35
+const schemaVersion = 36
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
 	34: {`CREATE TABLE room_shared (room TEXT NOT NULL, host TEXT NOT NULL REFERENCES hosts(name), bytes INTEGER NOT NULL, measured_at INTEGER NOT NULL, PRIMARY KEY(room, host))`},
+	35: {`ALTER TABLE archives ADD COLUMN retry_at INTEGER NOT NULL DEFAULT 0`},
 	32: {`ALTER TABLE events ADD COLUMN client_id TEXT`, `CREATE UNIQUE INDEX events_client_id ON events(room, from_kind, from_id, client_id) WHERE client_id IS NOT NULL`},
 	33: {`ALTER TABLE sessions ADD COLUMN close_reason TEXT NOT NULL DEFAULT ''`},
 	30: {`CREATE TABLE host_rooms (host TEXT NOT NULL REFERENCES hosts(name), room TEXT NOT NULL REFERENCES rooms(id), PRIMARY KEY(host, room))`},

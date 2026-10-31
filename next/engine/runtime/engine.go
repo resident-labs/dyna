@@ -252,6 +252,26 @@ func Run(ctx context.Context, cfg Config) error {
 		<-reconcilerDone
 		service.Reconciler().Wait()
 	}()
+	archiveDone := make(chan struct{})
+	go func() {
+		defer close(archiveDone)
+		ticks := time.NewTicker(time.Hour)
+		defer ticks.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticks.C:
+				passCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+				err := service.ExpireArchives(passCtx)
+				cancel()
+				if err != nil && ctx.Err() == nil {
+					log.Printf("archive expiry sweep: %v", err)
+				}
+			}
+		}
+	}()
+	defer func() { <-archiveDone }()
 	lastDormant := time.Now()
 	for {
 		select {
