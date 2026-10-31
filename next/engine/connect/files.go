@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 type Link struct {
@@ -89,11 +90,15 @@ func (f *Files) Link() (Link, error) {
 	return link, err
 }
 
-func (f *Files) Keys() (KeySet, error) {
+func (f *Files) Keys(now time.Time) (KeySet, error) {
 	var keys KeySet
 	b, err := os.ReadFile(filepath.Join(f.dir, "jwks.json"))
 	if err != nil {
 		return keys, err
+	}
+	info, err := os.Stat(filepath.Join(f.dir, "jwks.json"))
+	if err != nil || now.Sub(info.ModTime()) >= 7*24*time.Hour {
+		return keys, errors.New("relay keys expired")
 	}
 	err = json.Unmarshal(b, &keys)
 	return keys, err

@@ -33,6 +33,7 @@ type Web struct {
 	ticks   func() (<-chan time.Time, func())
 	tokens  map[[32]byte]time.Time
 	devices DeviceStore
+	connect ConnectSessions
 	app     fs.FS
 	api     *API
 }
@@ -56,6 +57,18 @@ func NewWeb(a *API, address string, app fs.FS, now func() time.Time, devices Dev
 	a.web = w
 	return w, nil
 }
+
+// ConnectSessions is the authentication boundary for relay-backed sessions.
+type ConnectSessions interface {
+	ManagedOrigin(context.Context) string
+	ServePublic(http.ResponseWriter, *http.Request, string, []string) bool
+	ServePrivate(http.ResponseWriter, *http.Request, string, store.ConnectSession)
+	Authenticate(context.Context, *http.Request, string) (store.ConnectSession, []contract.Scope, bool, error)
+	StreamScopes(context.Context, string) ([]contract.Scope, bool, error)
+}
+
+// SetConnect installs Connect session authorization before the listener starts.
+func (w *Web) SetConnect(s ConnectSessions) { w.connect = s }
 
 // SetRoutes adds the public origins served by the loopback listener.
 func (w *Web) SetRoutes(routes []string) error {
@@ -119,13 +132,46 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 		return
 	}
 	origin, known := w.routes[strings.ToLower(r.Host)]
+	if !known && w.connect != nil {
+		managed := w.connect.ManagedOrigin(r.Context())
+		if u, err := url.Parse(managed); err == nil && strings.EqualFold(u.Host, r.Host) && (u.Scheme == "https" || u.Scheme == "http") {
+			origin, known = managed, true
+		}
+	}
 	if !known {
 		http.Error(out, "unknown host", http.StatusMisdirectedRequest)
 		return
 	}
-	if (r.Method != http.MethodGet && r.Method != http.MethodHead || strings.EqualFold(r.Header.Get("Upgrade"), "websocket")) && r.Header.Get("Origin") != origin {
+	relayRequest := r.URL.Path == "/connect/v1/mint" || r.URL.Path == "/connect/v1/revoke"
+	if !relayRequest && (r.Method != http.MethodGet && r.Method != http.MethodHead || strings.EqualFold(r.Header.Get("Upgrade"), "websocket")) && r.Header.Get("Origin") != origin {
 		http.Error(out, "forbidden", http.StatusForbidden)
 		return
+	}
+	var routes []string
+	for _, route := range w.routes {
+		routes = append(routes, route)
+	}
+	if w.connect != nil {
+		managed := w.connect.ManagedOrigin(r.Context())
+		if managed != "" && !slices.Contains(routes, managed) {
+			routes = append(routes, managed)
+		}
+		if w.connect.ServePublic(out, r, origin, routes) {
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/connect/") || r.URL.Path == "/api/logout" {
+			x, _, ok, err := w.connect.Authenticate(r.Context(), r, origin)
+			if err != nil {
+				http.Error(out, "unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if !ok {
+				http.Error(out, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			w.connect.ServePrivate(out, r, origin, x)
+			return
+		}
 	}
 	if r.URL.Path == "/v1/pair" && r.Method == http.MethodPost {
 		var req struct {
@@ -195,21 +241,40 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/v1/") {
-		cookie, err := r.Cookie("dyna_device")
-		if err != nil {
-			http.Error(out, "forbidden", http.StatusForbidden)
-			return
+		cookie, _ := r.Cookie("dyna_device")
+		var device store.Device
+		var valid bool
+		var err error
+		if cookie != nil {
+			device, valid, err = w.devices.AuthenticateDevice(r.Context(), sha256.Sum256([]byte(cookie.Value)), w.now())
 		}
-		device, valid, err := w.devices.AuthenticateDevice(r.Context(), sha256.Sum256([]byte(cookie.Value)), w.now())
 		if err != nil {
 			http.Error(out, "unavailable", http.StatusServiceUnavailable)
 			return
+		}
+		var session store.ConnectSession
+		if !valid && w.connect != nil {
+			var scopes []contract.Scope
+			session, scopes, valid, err = w.connect.Authenticate(r.Context(), r, origin)
+			if err != nil {
+				http.Error(out, "unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if valid && session.Stale {
+				out.Header().Set("Content-Type", "application/json")
+				out.WriteHeader(http.StatusUnauthorized)
+				_, _ = out.Write([]byte(`{"error":"this session needs to renew","code":"renew"}`))
+				return
+			}
+			device.ID, device.Scopes = session.Device, scopes
 		}
 		if !valid {
 			http.Error(out, "forbidden", http.StatusForbidden)
 			return
 		}
-		http.SetCookie(out, &http.Cookie{Name: "dyna_device", Value: cookie.Value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: strings.HasPrefix(origin, "https://"), MaxAge: int(store.DeviceLife / time.Second)})
+		if session.ID == "" {
+			http.SetCookie(out, &http.Cookie{Name: "dyna_device", Value: cookie.Value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: strings.HasPrefix(origin, "https://"), MaxAge: int(store.DeviceLife / time.Second)})
+		}
 		var streamScope contract.Scope
 		switch r.URL.Path {
 		case "/v1/terminal":
@@ -231,8 +296,17 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 				case <-ctx.Done():
 					return
 				case <-ticks:
-					current, alive, err := w.devices.AuthenticateDevice(ctx, sha256.Sum256([]byte(cookie.Value)), w.now())
-					if err != nil || !alive || (streamScope != "" && !hasScope(Caller{Web: true, Scopes: current.Scopes}, streamScope)) {
+					var scopes []contract.Scope
+					var alive bool
+					var err error
+					if session.ID != "" {
+						scopes, alive, err = w.connect.StreamScopes(ctx, session.ID)
+					} else {
+						var current store.Device
+						current, alive, err = w.devices.AuthenticateDevice(ctx, sha256.Sum256([]byte(cookie.Value)), w.now())
+						scopes = current.Scopes
+					}
+					if err != nil || !alive || (streamScope != "" && !hasScope(Caller{Web: true, Scopes: scopes}, streamScope)) {
 						cancel()
 						return
 					}
