@@ -34,6 +34,11 @@
     onChange: instance => { visible = instance.getVirtualItems(); total = instance.getTotalSize(); },
   });
   const virtualizer = new Virtualizer(options());
+  // Rows sit in normal flow between two spacers, so the browser's scroll anchoring keeps the rows in view still when a
+  // row above them gets its real height. The virtualizer would set scrollTop for that instead, and each such write
+  // stops the browser's smooth wheel scroll: a trace counted 256 writes in 300 wheel steps. Safari has no scroll
+  // anchoring and keeps the virtualizer's writes.
+  if (CSS.supports("overflow-anchor", "auto")) virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => false;
 
   $effect.pre(() => {
     rows = items;
@@ -115,18 +120,21 @@
 </script>
 
 <div class="virtual" {role} aria-label={label} tabindex="-1" bind:this={element} onscroll={scrolled}>
-  <div class="space" class:top={align === "top"} style:height="{total}px">
+  <div class="space" class:top={align === "top"}>
+    <div style:height="{visible[0]?.start ?? 0}px"></div>
     {#each visible as item (item.key)}
-      <div class="item" data-index={item.index} style:transform="translateY({item.start}px)" {@attach measure}>
+      <div class="item" data-index={item.index} {@attach measure}>
         {@render row(rows[item.index])}
       </div>
     {/each}
+    <div style:height="{total - (visible.at(-1)?.end ?? 0)}px"></div>
   </div>
 </div>
 
 <style>
   .virtual { height: 100%; overflow-y: auto; display: flex; flex-direction: column; }
-  .space { position: relative; flex: none; margin-top: auto; }
+  .space { flex: none; margin-top: auto; }
   .space.top { margin-top: 0; }
-  .item { position: absolute; top: 0; left: 0; width: 100%; }
+  /* flow-root keeps a row's margins inside it, so its measured height is the space it takes. */
+  .item { display: flow-root; }
 </style>
