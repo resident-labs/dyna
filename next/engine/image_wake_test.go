@@ -17,6 +17,11 @@ type imageWakeHost struct {
 	recreated       contract.BoxID
 	tag             string
 	slice, oldSlice string
+	legacy          bool
+}
+
+func (h *imageWakeHost) Inspect(_ context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
+	return box.ContainerStatus{Box: id, LegacySharedMount: h.legacy}, true, nil
 }
 
 func (h *imageWakeHost) CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error) {
@@ -26,6 +31,7 @@ func (h *imageWakeHost) Recreate(_ context.Context, spec BoxSpec, image, oldSlic
 	h.recreated = spec.Box
 	h.tag = image
 	h.slice, h.oldSlice = spec.Slice, oldSlice
+	h.legacy = false
 	return nil
 }
 
@@ -63,12 +69,13 @@ func TestWakeUsesCurrentImage(t *testing.T) {
 		name, image string
 		err         error
 		recreate    bool
+		legacy      bool
 	}{
-		{name: "new", image: "new", recreate: true}, {name: "current", image: "image"}, {name: "build fails", err: errors.New("build failed")},
+		{name: "new", image: "new", recreate: true}, {name: "current", image: "image"}, {name: "shared mount upgrade", image: "image", legacy: true, recreate: true}, {name: "build fails", err: errors.New("build failed")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _, room, sid, ctx := quietSession(t, 0)
-			h := &imageWakeHost{image: tc.image, err: tc.err}
+			h := &imageWakeHost{image: tc.image, err: tc.err, legacy: tc.legacy}
 			s.boxes = h
 			resetLifecycle(s)
 			passLifecycle(t, s, ctx)
