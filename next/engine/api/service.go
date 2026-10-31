@@ -29,6 +29,7 @@ type Service interface {
 	ShellOutput(context.Context, contract.Principal, contract.ShellOutputRequest) (contract.ShellOutputResponse, *contract.Error)
 	ComputerChanged(context.Context, contract.Principal, contract.ComputerChangedRequest) (contract.ComputerChangedResponse, *contract.Error)
 	ComputerWatch(context.Context, contract.SessionID) (<-chan []byte, *contract.Error)
+	ComputerInput(context.Context, contract.Principal, contract.ComputerInputRequest) (contract.ComputerInputResponse, *contract.Error)
 	ComputerFrames(context.Context, contract.Principal, uint64, io.Reader) *contract.Error
 	RuleAdd(context.Context, contract.Principal, contract.RuleAddRequest) (contract.RuleAddResponse, *contract.Error)
 	RuleRemove(context.Context, contract.Principal, contract.RuleRemoveRequest) (contract.RuleRemoveResponse, *contract.Error)

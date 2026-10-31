@@ -1,0 +1,143 @@
+package computer
+
+import (
+	"context"
+	"encoding/json"
+	"sync"
+	"unicode/utf8"
+
+	"github.com/resident-labs/dyna/contract"
+)
+
+// Input sends the owner's events to the page. It keeps one DevTools connection between batches and
+// the mouse buttons held down, so a drag moves with its button.
+type Input struct {
+	Base    string
+	mu      sync.Mutex
+	d       *DevTools
+	buttons int
+}
+
+type keyParams struct {
+	Type       string `json:"type"`
+	Modifiers  int    `json:"modifiers,omitempty"`
+	Key        string `json:"key"`
+	Code       string `json:"code,omitempty"`
+	Text       string `json:"text,omitempty"`
+	VirtualKey int    `json:"windowsVirtualKeyCode,omitempty"`
+}
+
+type mouseParams struct {
+	Type       string  `json:"type"`
+	X          float64 `json:"x"`
+	Y          float64 `json:"y"`
+	Button     string  `json:"button"`
+	Buttons    int     `json:"buttons"`
+	ClickCount int     `json:"clickCount,omitempty"`
+	DeltaX     float64 `json:"deltaX"`
+	DeltaY     float64 `json:"deltaY"`
+	Modifiers  int     `json:"modifiers,omitempty"`
+}
+
+var virtualKeys = map[string]int{
+	"Backspace": 8, "Tab": 9, "Enter": 13, "Shift": 16, "Control": 17, "Alt": 18, "Escape": 27,
+	"PageUp": 33, "PageDown": 34, "End": 35, "Home": 36, "ArrowLeft": 37, "ArrowUp": 38, "ArrowRight": 39,
+	"ArrowDown": 40, "Delete": 46,
+}
+
+// Send dispatches a batch in order. It drops the connection on an error so the next batch reconnects.
+func (in *Input) Send(ctx context.Context, batch contract.ComputerInputBatch) error {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	if in.d == nil {
+		d, err := Connect(ctx, in.Base)
+		if err != nil {
+			return err
+		}
+		in.d = d
+	}
+	if err := in.send(ctx, in.d, batch); err != nil {
+		in.d.Close()
+		in.d = nil
+		return err
+	}
+	return nil
+}
+
+func (in *Input) send(ctx context.Context, d *DevTools, batch contract.ComputerInputBatch) error {
+	var viewW, viewH float64
+	for _, e := range batch.Events {
+		var method string
+		var params any
+		switch e.Kind {
+		case contract.InputKeyDown, contract.InputKeyUp:
+			p := keyParams{Type: "keyUp", Modifiers: int(e.Modifiers), Key: e.Key, Code: e.Code, VirtualKey: virtualKeys[e.Key]}
+			if r, size := utf8.DecodeRuneInString(e.Key); size == len(e.Key) && r < 128 {
+				if p.VirtualKey = int(r); r >= 'a' && r <= 'z' {
+					p.VirtualKey = int(r - 'a' + 'A')
+				}
+			}
+			if e.Kind == contract.InputKeyDown {
+				p.Type = "rawKeyDown"
+				if e.Key == "Enter" {
+					p.Type, p.Text = "keyDown", "\r"
+				} else if utf8.RuneCountInString(e.Key) == 1 && e.Modifiers&(contract.ModCtrl|contract.ModAlt|contract.ModMeta) == 0 {
+					p.Type, p.Text = "keyDown", e.Key
+				}
+			}
+			method, params = "Input.dispatchKeyEvent", p
+		case contract.InputChar:
+			method, params = "Input.insertText", struct {
+				Text string `json:"text"`
+			}{e.Text}
+		default:
+			if viewW == 0 {
+				var m struct {
+					Viewport struct {
+						Width  float64 `json:"clientWidth"`
+						Height float64 `json:"clientHeight"`
+					} `json:"cssVisualViewport"`
+				}
+				result, err := d.Call(ctx, "Page.getLayoutMetrics", nil)
+				if err == nil {
+					err = json.Unmarshal(result, &m)
+				}
+				if err != nil {
+					return err
+				}
+				viewW, viewH = m.Viewport.Width, m.Viewport.Height
+			}
+			x, y := cssPoint(batch.Frame, viewW, viewH, e.X, e.Y)
+			p := mouseParams{Type: "mouseMoved", X: x, Y: y, Button: "none", Buttons: in.buttons, Modifiers: int(e.Modifiers)}
+			switch e.Kind {
+			case contract.InputMouseDown, contract.InputMouseUp:
+				bit := map[contract.MouseButton]int{contract.ButtonLeft: 1, contract.ButtonRight: 2, contract.ButtonMiddle: 4}[e.Button]
+				p.Button, p.ClickCount = string(e.Button), 1
+				if e.Kind == contract.InputMouseDown {
+					p.Type, in.buttons = "mousePressed", in.buttons|bit
+				} else {
+					p.Type, in.buttons = "mouseReleased", in.buttons&^bit
+				}
+				p.Buttons = in.buttons
+			case contract.InputWheel:
+				p.Type = "mouseWheel"
+				p.DeltaX, p.DeltaY = cssPoint(batch.Frame, viewW, viewH, e.DeltaX, e.DeltaY)
+			}
+			method, params = "Input.dispatchMouseEvent", p
+		}
+		raw, err := json.Marshal(params)
+		if err != nil {
+			return err
+		}
+		if _, err = d.Call(ctx, method, raw); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// cssPoint scales a position in frame pixels to the page's CSS pixels. The screencast JPEG shows the
+// whole CSS viewport, so each axis scales by viewport size over frame size.
+func cssPoint(frame contract.FrameSize, viewW, viewH, x, y float64) (float64, float64) {
+	return x * viewW / float64(frame.Width), y * viewH / float64(frame.Height)
+}

@@ -39,6 +39,7 @@ const (
 	MethodEventsList        Method = "events.list"
 	MethodBoxHello          Method = "box.hello"
 	MethodComputerChanged   Method = "computer.changed"
+	MethodComputerInput     Method = "computer.input"
 	MethodTurnOutput        Method = "turn.output"
 	MethodTurnActivity      Method = "turn.activity"
 	MethodTranscriptFetch   Method = "transcript.fetch"
@@ -534,6 +535,73 @@ type ComputerWatchStart struct {
 }
 type ComputerWatchStop struct{}
 
+type ComputerInputKind string
+
+const (
+	InputKeyDown   ComputerInputKind = "key.down"
+	InputKeyUp     ComputerInputKind = "key.up"
+	InputChar      ComputerInputKind = "char" // Text is typed as is, for phone keyboards and input methods
+	InputMouseMove ComputerInputKind = "mouse.move"
+	InputMouseDown ComputerInputKind = "mouse.down"
+	InputMouseUp   ComputerInputKind = "mouse.up"
+	InputWheel     ComputerInputKind = "wheel"
+)
+
+type MouseButton string
+
+const (
+	ButtonLeft   MouseButton = "left"
+	ButtonMiddle MouseButton = "middle"
+	ButtonRight  MouseButton = "right"
+)
+
+// InputModifiers is the DevTools modifier mask of the keys held during an event.
+type InputModifiers int
+
+const (
+	ModAlt   InputModifiers = 1
+	ModCtrl  InputModifiers = 2
+	ModMeta  InputModifiers = 4
+	ModShift InputModifiers = 8
+)
+
+// FrameSize is the size in pixels of the screencast JPEG the owner saw when the event was made.
+type FrameSize struct {
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
+
+// ComputerInput is one owner event. Key events use Key (a DOM KeyboardEvent.key value such as "a" or
+// "Enter"), Code and Modifiers. Mouse and wheel events use X and Y in frame pixels; mouse down and up
+// also use Button, and a wheel event uses DeltaX and DeltaY in frame pixels.
+type ComputerInput struct {
+	Kind      ComputerInputKind `json:"kind"`
+	Key       string            `json:"key,omitempty"`
+	Code      string            `json:"code,omitempty"`
+	Text      string            `json:"text,omitempty"`
+	Modifiers InputModifiers    `json:"modifiers,omitempty"`
+	Button    MouseButton       `json:"button,omitempty"`
+	X         float64           `json:"x"`
+	Y         float64           `json:"y"`
+	DeltaX    float64           `json:"deltaX,omitempty"`
+	DeltaY    float64           `json:"deltaY,omitempty"`
+}
+
+// ComputerInputRequest sends a batch of owner events, in order, to the session's computer. Frame is
+// required, and every position in the batch is in its pixels.
+type ComputerInputRequest struct {
+	Session SessionID       `json:"session"`
+	Frame   FrameSize       `json:"frame"`
+	Events  []ComputerInput `json:"events"`
+}
+type ComputerInputResponse struct{}
+
+// ComputerInputBatch is what the engine sends the box agent for a ComputerInputRequest.
+type ComputerInputBatch struct {
+	Frame  FrameSize       `json:"frame"`
+	Events []ComputerInput `json:"events"`
+}
+
 // ShellWatchStart asks the box agent to post each shell job's output with shell.output while the
 // owner watches. Each start begins a new generation, and its first post resets every job's view.
 type ShellWatchStart struct {
@@ -615,6 +683,8 @@ func (ComputerWatchStart) BoxMessageType() BoxMessageType { return "computer.wat
 func (ComputerWatchStart) isBoxMessageBody()              {}
 func (ComputerWatchStop) BoxMessageType() BoxMessageType  { return "computer.watch.stop" }
 func (ComputerWatchStop) isBoxMessageBody()               {}
+func (ComputerInputBatch) BoxMessageType() BoxMessageType { return "computer.input" }
+func (ComputerInputBatch) isBoxMessageBody()              {}
 func (ShellWatchStart) BoxMessageType() BoxMessageType    { return "shell.watch.start" }
 func (ShellWatchStart) isBoxMessageBody()                 {}
 func (ShellWatchStop) BoxMessageType() BoxMessageType     { return "shell.watch.stop" }

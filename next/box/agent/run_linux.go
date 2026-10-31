@@ -158,6 +158,7 @@ func Run(ctx context.Context) error {
 	go transcript.Run(ctx, ticks.C, h.SessionFile)
 	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, file: h.SessionFile}, Setup: setup, setupErr: setupErr, Model: hello.Model}
 	var closing atomic.Bool
+	ownerInput := &computer.Input{Base: computer.URL}
 	var stopWatch context.CancelFunc
 	var stopShellWatch context.CancelFunc
 	var shellDone chan struct{}
@@ -191,6 +192,14 @@ func Run(ctx context.Context) error {
 				var watch context.Context
 				watch, stopWatch = context.WithCancel(ctx)
 				go client.watchComputer(watch, body.Generation)
+				return nil
+			case contract.ComputerInputBatch:
+				// A failed event must not end the channel, so the error is only logged.
+				sendCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				defer cancel()
+				if err := ownerInput.Send(sendCtx, body); err != nil {
+					log.Printf("computer input: %v", err)
+				}
 				return nil
 			case contract.ComputerWatchStop:
 				if stopWatch != nil {
