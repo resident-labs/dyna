@@ -38,3 +38,5 @@ CREATE INDEX hostexec_runs_pending ON hostexec_runs(ended_at) WHERE ended_at IS 
 
 CREATE TABLE rules (room TEXT NOT NULL REFERENCES rooms(id), number INTEGER NOT NULL, text TEXT NOT NULL, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at INTEGER NOT NULL, removed_at INTEGER, PRIMARY KEY(room, number));
 CREATE TABLE conversation_reads (room TEXT NOT NULL, conversation TEXT NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY(room, conversation));
+
+CREATE TABLE backup_copy_status (id INTEGER PRIMARY KEY CHECK(id=1), last_success INTEGER, failure TEXT NOT NULL);

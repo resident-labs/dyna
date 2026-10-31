@@ -45,6 +45,7 @@ type request struct {
 	done chan error
 }
 type Store struct {
+	backupMu      sync.Mutex
 	lock          *os.File
 	writer        *sql.DB
 	read          *sql.DB
