@@ -21,11 +21,13 @@ const (
 	GitHubWriteBranchDelete      GitHubWriteReason = "upstream-branch-delete"
 	GitHubWriteForeignItem       GitHubWriteReason = "not-room-account-item"
 	GitHubWriteForeignComment    GitHubWriteReason = "foreign-comment"
+	GitHubWriteCommentAccount    GitHubWriteReason = "comment-account-unavailable"
+	GitHubWriteCommentAuthor     GitHubWriteReason = "comment-author-unavailable"
 	GitHubWriteForeignHead       GitHubWriteReason = "upstream-edit-foreign-head"
 	GitHubWriteUpstreamVerb      GitHubWriteReason = "upstream-verb-not-allowed"
 )
 
-var gitHubWriteReasons = []GitHubWriteReason{GitHubWriteRepositoryUnknown, GitHubWriteReadOnly, GitHubWriteOther, GitHubWriteBranchDelete, GitHubWriteForeignItem, GitHubWriteForeignComment, GitHubWriteForeignHead, GitHubWriteUpstreamVerb}
+var gitHubWriteReasons = []GitHubWriteReason{GitHubWriteRepositoryUnknown, GitHubWriteReadOnly, GitHubWriteOther, GitHubWriteBranchDelete, GitHubWriteForeignItem, GitHubWriteForeignComment, GitHubWriteCommentAccount, GitHubWriteCommentAuthor, GitHubWriteForeignHead, GitHubWriteUpstreamVerb}
 
 type GitHubWriteRefusedEvent struct {
 	Requester  string            `json:"requester"`

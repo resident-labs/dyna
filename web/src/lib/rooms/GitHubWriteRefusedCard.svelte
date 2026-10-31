@@ -13,6 +13,8 @@
     'upstream-branch-delete': 'An upstream close cannot delete a branch. Remove the branch deletion option.',
     'not-room-account-item': 'The room account did not author this item. Choose an item it authored.',
     'foreign-comment': 'The room account did not author this comment. The owner can change it on GitHub.',
+    'comment-account-unavailable': 'Dyna could not select the room GitHub account. Check the account and retry.',
+    'comment-author-unavailable': 'Dyna could not read the comment author. Check access to the comment and retry.',
     'upstream-edit-foreign-head': 'The pull request head is not in the room fork. Choose a pull request from the fork.',
     'upstream-verb-not-allowed': 'This operation is not allowed on the upstream. Use a supported operation or the room repository.',
   }
