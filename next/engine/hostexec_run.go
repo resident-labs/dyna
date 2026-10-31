@@ -70,7 +70,7 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 			if a.Cwd != "" {
 				body = fmt.Sprintf("Working directory: %s; ", quoteHostexec(a.Cwd)) + body
 			}
-			return contract.Card{Title: "Run host command", Target: contract.Target{Kind: contract.TargetHost, Name: quoteHostexec(string(a.Host))}, Command: a.Argv, Body: body}
+			return contract.Card{Title: "asks to run a command", Target: contract.Target{Kind: contract.TargetHost, Name: quoteHostexec(string(a.Host))}, Command: a.Argv, Body: body}
 		},
 		Check: func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
 			a := args.(contract.HostexecRunArgs)
