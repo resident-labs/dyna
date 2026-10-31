@@ -12,7 +12,7 @@
 </div>
 
 <style>
-  .work { padding: 4px 16px; color: var(--muted); font-size: 12px; }
+  .work { padding: 4px 16px 4px var(--gutter); color: var(--muted); font-size: 12px; }
   button { all: unset; cursor: pointer; border-radius: 4px; }
   button:hover { color: var(--text); }
   button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
