@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -42,6 +43,63 @@ func TestVisualReplyRequiresCurrentVersion(t *testing.T) {
 	}
 	if _, problem = s.Post(ctx, owner, contract.PostRequest{Room: room, Text: "reply", VisualReply: "missing"}); problem == nil || problem.Code != contract.ErrInvalid {
 		t.Fatalf("missing visual: %+v", problem)
+	}
+}
+
+func visualReplyFixture(t *testing.T) (*Service, contract.RoomID, contract.SessionID, contract.PostResponse, context.Context) {
+	t.Helper()
+	s, roomID, root, ctx := setup(t)
+	s.SetFilesDir(filepath.Join(t.TempDir(), "files"))
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	child, problem := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: roomID, Parent: root, Name: "author", Profile: "test", Goal: "test"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	author := contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}
+	req := httptest.NewRequest("POST", "/v1/files?name=card.html", bytes.NewBufferString("<title>Card</title>"))
+	req.Header.Set("Content-Type", "text/html")
+	rec := httptest.NewRecorder()
+	s.Files(author, roomID).ServeHTTP(rec, req)
+	var file contract.Attachment
+	if rec.Code != 200 || json.NewDecoder(rec.Body).Decode(&file) != nil {
+		t.Fatal(rec.Code)
+	}
+	file.Visual = &contract.VisualCard{Height: 120}
+	first, problem := s.Post(ctx, author, contract.PostRequest{Room: roomID, Text: "card", Attachments: []contract.Attachment{file}})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	second, problem := s.Post(ctx, owner, contract.PostRequest{Room: roomID, Text: "update", VisualUpdate: first.Event, Attachments: []contract.Attachment{file}})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	return s, roomID, child.Session, second, ctx
+}
+
+func TestVisualReplyUsesCardSurface(t *testing.T) {
+	s, roomID, _, card, ctx := visualReplyFixture(t)
+	reply, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: roomID, Text: "answer", VisualReply: card.Event})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	var surface contract.Surface
+	var replyTo contract.EventID
+	err := s.store.Read().QueryRowContext(ctx, "SELECT surface,reply_to FROM deliveries WHERE seq=?", reply.Seq).Scan(&surface, &replyTo)
+	if err != nil || surface != contract.SurfaceCard || replyTo != card.Event {
+		t.Fatalf("card delivery: %s %s %v", surface, replyTo, err)
+	}
+}
+
+func TestVisualReplyTargetsOriginalAuthor(t *testing.T) {
+	s, roomID, author, card, ctx := visualReplyFixture(t)
+	reply, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: roomID, Text: "answer", VisualReply: card.Event})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	var recipient contract.SessionID
+	err := s.store.Read().QueryRowContext(ctx, "SELECT to_id FROM deliveries WHERE seq=?", reply.Seq).Scan(&recipient)
+	if err != nil || recipient != author {
+		t.Fatalf("recipient: %s, want %s: %v", recipient, author, err)
 	}
 }
 
