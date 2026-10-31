@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { allowedOrigin, hello, getPin, fingerprint, type Hello, type Pin } from "../connect.ts";
   import { beginConnect, checkPin, finishConnect, type Landing, type ConnectProblem } from "../connect-flow.ts";
   import PairScreen from "./PairScreen.svelte";
 
   let { code = "", landing = false }: { code?: string; landing?: boolean } = $props();
-  let pairing = $state(code !== ""), greeting: Hello | undefined = $state(), pin: Pin | undefined = $state();
+  let pairing = $state(untrack(() => code !== "")), greeting: Hello | undefined = $state(), pin: Pin | undefined = $state();
   let result: Landing | undefined = $state(), loading = $state(true), busy = $state(false);
   let trusted = $state(""), offered = $state("");
   let button: HTMLButtonElement | undefined = $state();
