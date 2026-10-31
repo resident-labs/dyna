@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,6 +24,7 @@ import (
 	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/api"
 	"github.com/resident-labs/dyna/engine/approve"
+	"github.com/resident-labs/dyna/engine/connect"
 	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/images"
 	"github.com/resident-labs/dyna/engine/model"
@@ -231,6 +233,7 @@ func Run(ctx context.Context, cfg Config) error {
 	apiServer.SetGitRoute(func(c api.Caller) http.Handler {
 		return enginegit.Handler(&url.URL{Scheme: "https", Host: "github.com"}, http.DefaultTransport, token, c.Principal.Session, c.Room, st)
 	})
+	appPort := 0
 	if cfg.WebListen != "" {
 		app, err := fs.Sub(web.Dist, "dist")
 		if err != nil {
@@ -248,7 +251,31 @@ func Run(ctx context.Context, cfg Config) error {
 			return err
 		}
 		defer listener.Close()
+		appPort = listener.Addr().(*net.TCPAddr).Port
 	}
+	card, cardServer, err := connect.CardListener()
+	if err != nil {
+		return err
+	}
+	go cardServer.Serve(card)
+	defer card.Close()
+	files, err := connect.OpenFiles(cfg.Data)
+	if err != nil {
+		return err
+	}
+	connectOps := connect.NewOperations(ctx, files, st, appPort, card.Addr().(*net.TCPAddr).Port)
+	defer connectOps.Close()
+	if err := connectOps.Resume(ctx); err != nil {
+		return err
+	}
+	apiServer.SetConnectOperations(connectOps)
+	tunnelCtx, stopTunnel := context.WithCancel(ctx)
+	tunnelDone := make(chan struct{})
+	go func() {
+		defer close(tunnelDone)
+		connect.SuperviseTunnel(tunnelCtx, files, st, appPort, card.Addr().(*net.TCPAddr).Port, connectOps.Wake())
+	}()
+	defer func() { stopTunnel(); <-tunnelDone }()
 	sockets := api.NewSockets(apiServer, cfg.Runtime, uint32(os.Getuid()), nil)
 	boxes.Sockets = sockets
 	if err := sockets.OpenOwner(); err != nil {

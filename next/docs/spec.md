@@ -168,6 +168,8 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `hostexec_runs` |
 | `conversation_reads` |
 | `backup_copy_status` |
+| `connect_attempt` |
+| `connect_connector` |
 | `connect_link_state` |
 | `connect_nonces` |
 | `devices` |

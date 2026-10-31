@@ -90,7 +90,7 @@ func TestDeviceManagementRequiresAdminOwner(t *testing.T) {
 		{Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true, Scopes: []contract.Scope{contract.ScopeOperate}},
 		boxCaller(),
 	} {
-		for _, method := range []contract.Method{contract.MethodDevicePair, contract.MethodDeviceList, contract.MethodDeviceRevoke, contract.MethodDeviceSetScopes} {
+		for _, method := range []contract.Method{contract.MethodDevicePair, contract.MethodDeviceList, contract.MethodDeviceRevoke, contract.MethodDeviceSetScopes, contract.MethodConnectStart, contract.MethodConnectStatus, contract.MethodConnectCancel, contract.MethodConnectUnlink} {
 			w := request(a.handler(c), "/v1/"+string(method), `{}`)
 			if w.Code != http.StatusForbidden {
 				t.Fatalf("%s: got %d", method, w.Code)

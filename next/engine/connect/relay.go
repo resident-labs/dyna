@@ -25,6 +25,10 @@ type machineClaims struct {
 	Bh  string `json:"bh"`
 }
 
+type RelayError struct{ Status int }
+
+func (e *RelayError) Error() string { return fmt.Sprintf("relay returned HTTP %d", e.Status) }
+
 type Relay struct {
 	Base   string
 	Key    ed25519.PrivateKey
@@ -109,7 +113,7 @@ func call[I, O any](ctx context.Context, r *Relay, issuer, path string, body I, 
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("relay returned HTTP %d", res.StatusCode)
+		return &RelayError{Status: res.StatusCode}
 	}
 	return json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(out)
 }
