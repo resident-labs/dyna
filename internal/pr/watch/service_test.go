@@ -250,8 +250,21 @@ func fakeHeadBatch(f fixture, args []string) any {
 					contexts = append(contexts, map[string]string{"createdAt": status.Updated})
 				}
 			}
+			issueCount, reviewCount, inlineCount := 0, 0, 0
+			for _, c := range f.Comments {
+				switch c.Kind {
+				case "issue-comments":
+					issueCount++
+				case "reviews":
+					reviewCount++
+				case "comments":
+					inlineCount++
+				}
+			}
 			nodes["p"+m[1]] = map[string]any{
-				"number": n, "title": f.Pull.Title, "state": state, "merged": f.Pull.Merged, "isDraft": f.Draft, "mergeable": mergeability,
+				"comments": map[string]int{"totalCount": issueCount}, "reviews": map[string]int{"totalCount": reviewCount},
+				"reviewThreads": map[string]any{"totalCount": 1, "nodes": []any{map[string]any{"comments": map[string]int{"totalCount": inlineCount}}}},
+				"number":        n, "title": f.Pull.Title, "state": state, "merged": f.Pull.Merged, "isDraft": f.Draft, "mergeable": mergeability,
 				"updatedAt": f.Pull.Updated, "headRefOid": f.Pull.Head.SHA, "headRefName": f.Pull.Head.Ref,
 				"headRepository": map[string]string{"nameWithOwner": f.Pull.Head.Repo.FullName},
 				"baseRefOid":     f.Pull.Base.SHA, "baseRefName": f.Pull.Base.Ref,

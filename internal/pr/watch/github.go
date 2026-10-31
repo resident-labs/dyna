@@ -83,13 +83,14 @@ type Label struct {
 	Name string `json:"name"`
 }
 type Pull struct {
-	Draft   bool   `json:"draft"`
-	Updated string `json:"updated_at"`
-	Number  int    `json:"number"`
-	Title   string `json:"title"`
-	Body    string `json:"body"`
-	State   string `json:"state"`
-	Merged  bool   `json:"merged"`
+	DiscussionVersion string `json:"-"`
+	Draft             bool   `json:"draft"`
+	Updated           string `json:"updated_at"`
+	Number            int    `json:"number"`
+	Title             string `json:"title"`
+	Body              string `json:"body"`
+	State             string `json:"state"`
+	Merged            bool   `json:"merged"`
 	// MergeCommit is the merge commit of a merged PR; it names the fix in issue closes.
 	MergeCommit string  `json:"merge_commit_sha"`
 	User        User    `json:"user"`
@@ -181,6 +182,7 @@ type Snapshot struct {
 	localCIConfig     state.LocalCIConfigState
 	localCIDef        *localci.Definition
 	ciReused          bool // A discussion refresh does not advance the full CI safety clock.
+	discussionReused  bool
 	headConfirmed     bool
 	ciProbe           string
 	// NoPRWorkflows is true only after a successful workflow inspection.
@@ -580,7 +582,12 @@ func (g GitHub) snapshotFromPull(ctx context.Context, r Ref, pull Pull, savedCI 
 		s.ciReused = true
 	}
 	var err error
-	s.Comments, err = g.Comments(ctx, r)
+	if g.requests.savedComments != nil {
+		s.Comments = *g.requests.savedComments
+		s.discussionReused = true
+	} else {
+		s.Comments, err = g.Comments(ctx, r)
+	}
 	if err == nil && !s.hasRealCI() {
 		active, workflowErr := g.hasPRWorkflows(ctx, r)
 		s.NoPRWorkflows = workflowErr == nil && !active

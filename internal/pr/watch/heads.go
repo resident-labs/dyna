@@ -154,7 +154,7 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 					fmt.Fprintf(&query, "b%d:pullRequests(first:1,headRefName:%s,states:OPEN){nodes{number headRefName isCrossRepository headRefOid}}", j, strconv.Quote(r.Branch))
 					continue
 				}
-				fmt.Fprintf(&query, "p%d:pullRequest(number:%d){number title state merged isDraft mergeable updatedAt headRefOid headRefName headRepository{nameWithOwner} baseRefOid baseRefName author{login __typename} labels(first:100){nodes{name}} commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{... on CheckRun{completedAt} ... on StatusContext{createdAt}}}}}}}}", r.Number, r.Number)
+				fmt.Fprintf(&query, "p%d:pullRequest(number:%d){number title state merged isDraft mergeable updatedAt comments{totalCount} reviews{totalCount} reviewThreads(first:100){totalCount nodes{comments{totalCount}}} headRefOid headRefName headRepository{nameWithOwner} baseRefOid baseRefName author{login __typename} labels(first:100){nodes{name}} commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{... on CheckRun{completedAt} ... on StatusContext{createdAt}}}}}}}}", r.Number, r.Number)
 			}
 			query.WriteString("}")
 		}
@@ -225,13 +225,27 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 					continue
 				}
 				var node struct {
-					IsDraft        bool   `json:"isDraft"`
-					Mergeable      string `json:"mergeable"`
-					Number         int    `json:"number"`
-					Title          string `json:"title"`
-					State          string `json:"state"`
-					Merged         bool   `json:"merged"`
-					Updated        string `json:"updatedAt"`
+					IsDraft   bool   `json:"isDraft"`
+					Mergeable string `json:"mergeable"`
+					Number    int    `json:"number"`
+					Title     string `json:"title"`
+					State     string `json:"state"`
+					Merged    bool   `json:"merged"`
+					Updated   string `json:"updatedAt"`
+					Comments  *struct {
+						TotalCount int `json:"totalCount"`
+					} `json:"comments"`
+					Reviews *struct {
+						TotalCount int `json:"totalCount"`
+					} `json:"reviews"`
+					Threads *struct {
+						TotalCount int `json:"totalCount"`
+						Nodes      []struct {
+							Comments *struct {
+								TotalCount int `json:"totalCount"`
+							} `json:"comments"`
+						} `json:"nodes"`
+					} `json:"reviewThreads"`
 					Head           string `json:"headRefOid"`
 					HeadRepository struct {
 						Name string `json:"nameWithOwner"`
@@ -272,6 +286,19 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 					continue
 				}
 				p := Pull{Number: node.Number, Title: node.Title, Draft: node.IsDraft, Updated: node.Updated, State: strings.ToLower(node.State), Merged: node.Merged, User: User{Login: node.Author.Login, Type: node.Author.Type}, Labels: node.Labels.Nodes}
+				if node.Comments != nil && node.Reviews != nil && node.Threads != nil && node.Threads.TotalCount == len(node.Threads.Nodes) {
+					inline, complete := 0, true
+					for _, thread := range node.Threads.Nodes {
+						if thread.Comments == nil {
+							complete = false
+							break
+						}
+						inline += thread.Comments.TotalCount
+					}
+					if complete {
+						p.DiscussionVersion = fmt.Sprintf("%d/%d/%d", node.Comments.TotalCount, node.Reviews.TotalCount, inline)
+					}
+				}
 				if node.State == "MERGED" {
 					p.State = "closed"
 					p.Merged = true
@@ -399,13 +426,6 @@ func (s *Service) refreshHeads(ctx context.Context, st State, polledAt time.Time
 			// every minute would rewrite every watched record on every tick.
 			if r.Head != pull.Head.SHA || !headVerified(*r) || r.HeadVerifiedAt.IsZero() {
 				r.HeadVerifiedAt = s.now()
-			}
-			if r.Polling.PullVersion != pullVersion(pull, EffectivePolicy(*current, *r)) {
-				for path := range current.Responses[key] {
-					if strings.Contains(path, "/comments?") || strings.Contains(path, "/reviews?") {
-						delete(current.Responses[key], path)
-					}
-				}
 			}
 			if r.Head != pull.Head.SHA {
 				if r.Polling.PullHead == "" {
