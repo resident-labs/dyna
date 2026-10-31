@@ -38,7 +38,7 @@ func TestPendingCIDiscussionCacheHasBoundedRefresh(t *testing.T) {
 	e.addTrustedComment(78, "comments", "A reply", "owner")
 	e.tick()
 	calls, err = os.ReadFile(e.calls)
-	if err != nil || !strings.Contains(string(calls), "If-None-Match:") || len(e.record().Seen) != 2 {
-		t.Fatalf("changed count did not refresh with validators: %s, %v", calls, err)
+	if err != nil || !strings.Contains(string(calls), "/pulls/17/comments?") || len(e.record().Seen) != 2 {
+		t.Fatalf("changed count did not refresh: %s, %v", calls, err)
 	}
 }

@@ -105,7 +105,9 @@ func requireClearedBudgetRecovery(t *testing.T, start, outcome string) {
 		t.Fatal(err)
 	}
 	before := e.record()
-	if !quietPull(before, EffectivePolicy(st, before), e.f.Pull, before.Polling.CIVersion, false, e.clock.Add(time.Minute)) {
+	pull := e.f.Pull
+	pull.DiscussionVersion = "0/0/0"
+	if !quietPull(before, EffectivePolicy(st, before), pull, before.Polling.CIVersion, false, e.clock.Add(time.Minute)) {
 		t.Fatal("replacement recovery is not a due quiet poll")
 	}
 	if err := os.WriteFile(e.calls, nil, 0600); err != nil {
