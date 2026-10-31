@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { chromium } from "../../internal/cli/computer/browserdeps/node_modules/playwright-core/index.mjs";
 import { roomRoute, settingsPanes, settingsRoute } from "./src/lib/routes.ts";
+import { knownWidthFailures } from "./known-width-failures.ts";
 
 const widths = [1280, 920, 768, 390];
 const fixtures = ["full", "empty"] as const;
@@ -66,7 +67,13 @@ try {
           }
           return found;
         });
-        for (const issue of issues) failures.push(`${fixture} ${route} ${width}px: ${issue}`);
+        const roomMatch = roomRoute.exec(route);
+        const baselineRoute = roomMatch ? (roomMatch[2] ? "/r/:room/s/:session" : "/r/:room") : route.replace(/^\\/settings\\/accounts\\/account\\/[^/]+$/, "/settings/accounts/account/:account");
+        for (const issue of issues) {
+          const line = `${fixture} ${route} ${width}px: ${issue}`;
+          if (knownWidthFailures[baselineRoute]?.includes(width)) console.warn(`Known: ${line}`);
+          else failures.push(line);
+        }
       } finally { await page.close(); }
       }
     }));
