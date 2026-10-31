@@ -46,6 +46,9 @@ func checkoutRepo(t *testing.T, remote string) string {
 		}
 		tpl.dir = dir
 		checkoutGit(t, dir, "init", "-b", "main")
+		// The template is copied while tests run; Git must not mutate it in the background.
+		checkoutGit(t, dir, "config", "--local", "gc.auto", "0")
+		checkoutGit(t, dir, "config", "--local", "maintenance.auto", "false")
 		checkoutGit(t, dir, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "initial")
 		checkoutGit(t, dir, "remote", "add", "origin", remote)
 	})
@@ -57,6 +60,15 @@ func checkoutRepo(t *testing.T, remote string) string {
 		t.Fatalf("copy checkout template: %v: %s", err, out)
 	}
 	return dir
+}
+
+func TestCheckoutTemplateDisablesAutoMaintenance(t *testing.T) {
+	repo := checkoutRepo(t, "https://github.com/maintenance/fixture.git")
+	for key, want := range map[string]string{"gc.auto": "0", "maintenance.auto": "false"} {
+		if got := strings.TrimSpace(checkoutGit(t, repo, "config", "--local", "--get", key)); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
 }
 
 func TestResolveCheckoutSources(t *testing.T) {
