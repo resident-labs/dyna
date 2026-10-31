@@ -14,7 +14,7 @@
   import type { Rect } from "../float.ts";
   import PhoneKeys from "./PhoneKeys.svelte";
   import { LiveStream, type Phase } from "../live.ts";
-  import { Finger, InputQueue, PhoneKeys as PhoneState, buttonOf, escTwice, keyboardInput, pictureScale, screenPoint, type ComputerInput, type Modifiers, type Size } from "../computerInput.ts";
+  import { Finger, InputQueue, MouseHold, PhoneKeys as PhoneState, buttonOf, escTwice, keyboardInput, pictureScale, screenPoint, type ComputerInput, type Modifiers, type Size } from "../computerInput.ts";
   import { softKeyboard } from "../softKeyboard.ts";
   // Floating, the view is a window over the app; docked, it sits above the session list in the sessions panel. The
   // rect belongs to the app, so the window keeps its place and size for the page view.
@@ -78,7 +78,9 @@
     if (input && picture && events.length) queue.push(events, { width: picture.naturalWidth, height: picture.naturalHeight });
   };
   async function take() { control = true; await tick(); screen?.focus(); }
-  function release() { control = false; stuck = false; keyboardOpen = false; field?.blur(); }
+  const hold = new MouseHold();
+  const letGo = () => send(hold.release());
+  function release() { letGo(); if (stuck) queue.clear(); control = false; stuck = false; keyboardOpen = false; field?.blur(); }
   $effect(() => { if (phase !== "live") release(); });
   function toggleKeyboard() {
     keyboardOpen = !keyboardOpen;
@@ -110,7 +112,11 @@
       const point = at(event);
       if (!point) return;
       if (touching(event)) finger.down({ x: event.clientX, y: event.clientY }, point);
-      else void send([{ kind: "mouse.move", ...point }, { kind: "mouse.down", ...point, button: buttonOf(event.button) }]);
+      else {
+        const button = buttonOf(event.button);
+        hold.down(button, point);
+        send([{ kind: "mouse.move", ...point }, { kind: "mouse.down", ...point, button }]);
+      }
     };
     // A mouse moves at most once per frame: one batch of the latest position.
     const move = (event: PointerEvent) => {
@@ -118,14 +124,15 @@
       const point = at(event);
       if (!point) return;
       if (touching(event)) { void send(finger.move({ x: event.clientX, y: event.clientY }, point, scale())); return; }
+      hold.move(point);
       pending = { kind: "mouse.move", ...point };
       frame ||= requestAnimationFrame(() => { frame = 0; if (pending) void send([pending]); pending = undefined; });
     };
     const up = (event: PointerEvent) => {
       if (!control) return;
       if (touching(event)) { void send(finger.up()); return; }
-      const point = at(event);
-      if (point) void send([{ kind: "mouse.up", ...point, button: buttonOf(event.button) }]);
+      // A release outside the picture still lets go, where the pointer last was inside it.
+      letGo();
     };
     const wheel = (event: WheelEvent) => {
       if (!control) return;
@@ -137,6 +144,7 @@
     node.addEventListener("pointerdown", down);
     node.addEventListener("pointermove", move);
     node.addEventListener("pointerup", up);
+    node.addEventListener("pointercancel", up);
     node.addEventListener("contextmenu", menu);
     // Not passive: the wheel must not also scroll the page.
     node.addEventListener("wheel", wheel, { passive: false });
@@ -145,6 +153,7 @@
       node.removeEventListener("pointerdown", down);
       node.removeEventListener("pointermove", move);
       node.removeEventListener("pointerup", up);
+      node.removeEventListener("pointercancel", up);
       node.removeEventListener("contextmenu", menu);
       node.removeEventListener("wheel", wheel);
     };

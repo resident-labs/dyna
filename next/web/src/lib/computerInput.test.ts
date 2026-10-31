@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Alt, Ctrl, Finger, PhoneKeys, Shift, InputQueue, escTwice, keyboardInput, pictureScale, screenPoint, textInputs, type ComputerInput, type Modifiers } from "./computerInput.ts";
+import { Alt, Ctrl, Finger, PhoneKeys, Shift, InputQueue, MouseHold, escTwice, keyboardInput, pictureScale, screenPoint, textInputs, type ComputerInput, type Modifiers } from "./computerInput.ts";
 
 const none: Modifiers = { ctrl: false, alt: false };
 const tap = (key: string, code: string, modifiers = 0): ComputerInput[] => [
@@ -80,21 +80,32 @@ test("one request is in flight, and the events that wait go together after it", 
   assert.deepEqual(results, [true]);
 });
 
-test("a refused batch goes again, first, when the owner retries", async () => {
+test("a refused batch pauses the queue, and retry sends it first with what came after, in order", async () => {
   const sent: string[][] = [];
   const results: boolean[] = [];
   let settle = () => {};
   let fail = true;
-  const queue = new InputQueue(async events => { sent.push(events.map(event => event.key ?? "")); if (fail) throw new Error("refused"); }, ok => { results.push(ok); settle(); });
+  const queue = new InputQueue(async events => { sent.push(events.map(event => event.kind)); if (fail) throw new Error("refused"); }, ok => { results.push(ok); settle(); });
   const frame = { width: 10, height: 10 };
   const next = () => new Promise<void>(resolve => { settle = resolve; });
   let done = next();
-  queue.push(tap("a", "a"), frame);
+  queue.push([{ kind: "mouse.down", x: 1, y: 1, button: "left" }], frame);
   await done;
+  queue.push([{ kind: "mouse.up", x: 1, y: 1, button: "left" }], frame);
+  assert.deepEqual(sent, [["mouse.down"]]);
   fail = false;
   done = next();
   queue.retry();
   await done;
-  assert.deepEqual(sent, [["a", "a"], ["a", "a"]]);
+  assert.deepEqual(sent, [["mouse.down"], ["mouse.down", "mouse.up"]]);
   assert.deepEqual(results, [false, true]);
+});
+
+test("a held button is let go where the pointer last was inside the picture, once", () => {
+  const hold = new MouseHold();
+  assert.deepEqual(hold.release(), []);
+  hold.down("right", { x: 5, y: 5 });
+  hold.move({ x: 9, y: 7 });
+  assert.deepEqual(hold.release(), [{ kind: "mouse.up", x: 9, y: 7, button: "right" }]);
+  assert.deepEqual(hold.release(), []);
 });
