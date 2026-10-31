@@ -6,6 +6,7 @@ require (
 	filippo.io/age v1.2.1
 	github.com/coder/websocket v1.8.14
 	github.com/creack/pty v1.1.24
+	github.com/dustin/go-humanize v1.0.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.57.0
 )
@@ -81,7 +82,6 @@ require (
 )
 
 require (
-	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
