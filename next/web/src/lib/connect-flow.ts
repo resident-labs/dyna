@@ -24,7 +24,7 @@ export async function beginConnect(greeting: Hello): Promise<Landing | undefined
   const params = new URLSearchParams({ machine: greeting.machine, origin: location.origin, jkt: await thumbprint(await deviceKey()), state });
   location.assign(greeting.relay + "/open?" + params);
 }
-export async function finishConnect(fragment: string): Promise<Landing> {
+export async function finishConnect(fragment: string, onPin: (pin: Pin | undefined) => void = () => {}): Promise<Landing> {
   const params = new URLSearchParams(fragment.replace(/^#/, ""));
   // The one-use secret must leave browser history before any asynchronous work.
   history.replaceState(null, "", "/connect");
@@ -38,12 +38,13 @@ export async function finishConnect(fragment: string): Promise<Landing> {
   }
   sessionStorage.removeItem(stateKey);
   const pin = await getPin(machine);
+  onPin(pin);
   if (pin && pin.key !== key) return { kind: "stop", pin, offered: key, field: "key", returning: true };
   let greeting: Hello | null;
   try { greeting = await hello(location.origin); } catch { return { kind: "failed", problem: "unreachable" }; }
   if (!greeting || greeting.machine !== machine) return { kind: "failed", problem: "state" };
   const stopped = await checkPin(greeting, pin);
-  if (stopped) return stopped;
+  if (stopped) return stopped.kind === "stop" ? { ...stopped, returning: true } : stopped;
   if (greeting.relay !== relay) return { kind: "stop", pin: pin ?? { machine, key, relay, at: Date.now() }, offered: greeting.relay, field: "relay", returning: true };
   if (!allowedOrigin(greeting.relay)) return { kind: "failed", problem: "relay" };
   if (greeting.key !== key) {
@@ -57,7 +58,7 @@ export async function finishConnect(fragment: string): Promise<Landing> {
   if (!response) return { kind: "failed", problem: "unreachable" };
   if (!response.ok) return { kind: "failed", problem: response.status === 429 ? "limit" : response.status === 403 ? "code" : "relay" };
   const route = params.get("route");
-  if (handoff && route) sessionStorage.setItem("dyna-connect-move", new URLSearchParams({ route }).toString());
+  if (handoff && route) sessionStorage.setItem("dyna-connect-move", new URLSearchParams({ route, name: params.get("name") ?? "this machine" }).toString());
   const destination = (handoff ? params.get("return") : sessionStorage.getItem(returnKey)) ?? "/";
   sessionStorage.removeItem(returnKey);
   location.replace(destination.startsWith("/") && !destination.startsWith("//") ? destination : "/");

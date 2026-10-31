@@ -10,11 +10,11 @@
   let trusted = $state(""), offered = $state("");
   let button: HTMLButtonElement | undefined = $state();
   const errors: Record<ConnectProblem, string> = {
-    state: "The sign-in state did not match. Sign in again.",
-    code: "The code expired or was already used.",
-    limit: "Too many sign-ins. Try again later.",
-    unreachable: "The machine did not answer. Try again.",
-    relay: "The relay could not finish sign-in. Try again.",
+    state: "This sign-in started in another tab or browser. Start again here.",
+    code: "This sign-in link no longer works. A link works once, within 5 minutes.",
+    limit: "Too many sign-ins in the last minute. Wait a minute, then try again.",
+    unreachable: "This machine did not answer. Check this device’s connection, then try again.",
+    relay: "Resident Labs did not finish the sign-in. Try again.",
   };
   async function show(value: Landing) {
     result = value;
@@ -26,7 +26,7 @@
   onMount(() => {
     void (async () => {
       if (landing) {
-        try { await show(await finishConnect(location.hash)); }
+        try { await show(await finishConnect(location.hash, value => { pin = value; })); }
         catch { result = { kind: "failed", problem: "unreachable" }; }
         loading = false; return;
       }
@@ -59,16 +59,16 @@
   <main class="screen"><div class="column">
     <svg class:danger={result?.kind === "stop"} class="logo" viewBox="0 0 24 24" width="40" height="40" aria-hidden="true"><path d="M5 4h6.2c4.6 0 7.8 3.2 7.8 8s-3.2 8-7.8 8H5z" /></svg>
     {#if loading}
-      <h1>Signing in…</h1><p>Checking this machine: its key must match the one this browser trusts.</p>
+      <h1>Signing in…</h1><p>Checking that this is {pin?.name ?? "this machine"}: its key must match the one this browser trusts.</p>
     {:else if result?.kind === "stop"}
       <h1>Do not continue</h1>
-      <p>{result.field === "proof" ? `This page could not prove that it is ${result.pin.name ?? "this machine"}.` : `The ${result.field === "key" ? "machine key" : "sign-in address"} changed. This could mean someone is trying to take over this connection.`}</p>
+      <p>{result.field === "proof" ? `This page could not prove that it is ${result.pin.name ?? "this machine"}.` : `This page offers a different ${result.field === "key" ? "key" : "sign-in service"} for ${result.pin.name ?? "this machine"} than the one this browser trusts. Either ${result.pin.name ?? "this machine"} was set up again, or someone is posing as it.`}</p>
       <div class="values"><p>Trusted since {new Date(result.pin.at).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</p><code>{result.field === "relay" ? result.pin.relay : trusted}</code>
         {#if result.field !== "proof"}<p>Offered now</p><code class="danger">{result.field === "key" ? offered : result.offered}</code>{/if}</div>
-      {#if result.field !== "proof"}<p>If you set this machine up again, open Settings › Sharing &amp; access on the machine and compare its key. If it matches the offered key, remove this site’s data in your browser, then sign in again.</p>{/if}
+      {#if result.field !== "proof"}<p><strong>If you set {result.pin.name ?? "this machine"} up again:</strong> open Settings › Sharing &amp; access on {result.pin.name ?? "the machine"} itself and compare its key. If it matches the offered key, remove this site’s data in your browser, then sign in again.</p>{/if}
       <p>{result.field === "proof" ? "Close this tab. You have not signed in." : result.returning ? "Otherwise, close this tab. Your sign-in code was not used." : "Otherwise, close this tab. You have not signed in."}</p>
     {:else if result?.kind === "failed"}
-      <h1>Did not finish</h1><p class="danger" role="alert">{errors[result.problem]}</p>
+      <h1>Sign-in did not finish</h1><p class="danger" role="alert">{result.problem === "unreachable" && pin?.name ? `${pin.name} did not answer. Check this device’s connection, then try again.` : errors[result.problem]}</p>
       <button class="primary" onclick={() => { location.replace("/"); }}>Sign in again</button>
       <button class="link" onclick={() => { pairing = true; }}>Pair with a code instead</button>
     {:else if greeting}
@@ -91,6 +91,7 @@
   .logo.danger { stroke: var(--danger); }
   h1 { margin: 0; font-size: 24px; line-height: 1.2; overflow-wrap: anywhere; }
   p { margin: 0; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+  p strong { color: var(--text); }
   code { color: var(--text); font: 13px var(--mono); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
   .danger { color: var(--danger); }
   .values { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
