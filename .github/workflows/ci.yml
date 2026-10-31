@@ -398,11 +398,53 @@ jobs:
         working-directory: next
         run: DYNA_REQUIRE_SSHD=1 go test -count=1 -tags integration ./box/podman -run '^TestRealSSHForwardReconnect$' -v
 
+  next-web-width-build:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: next/go.mod
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Build webdev fixture server
+        env:
+          DYNA_WEBDEV_BIN: ${{ runner.temp }}/dyna-webdev
+        run: bash scripts/ci.sh next-web-width-build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: next-webdev-width
+          path: ${{ runner.temp }}/dyna-webdev
+          retention-days: 1
+
+  next-web-width:
+    needs: [changes, next-web-width-build]
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: next-webdev-width
+          path: ${{ runner.temp }}
+      - name: Install system Chromium
+        run: sudo apt-get update -qq && sudo apt-get install -y chromium-browser
+      - name: Check responsive widths
+        env:
+          DYNA_WEBDEV_BIN: ${{ runner.temp }}/dyna-webdev
+        run: chmod +x "$DYNA_WEBDEV_BIN" && bash scripts/ci.sh next-web-width
+
   # The single check name that Dyna and branch protection wait on. It passes
   # only when every shard and static job passed.
   test:
     name: go-test
-    needs: [changes, go-shard, go-static, desktop, frontend, frontend-check, next]
+    needs: [changes, go-shard, go-static, desktop, frontend, frontend-check, next, next-web-width]
     if: ${{ always() && needs.changes.outputs.go == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -410,7 +452,7 @@ jobs:
       - name: Require every Go job
         env:
           WEB: ${{ needs.changes.outputs.web }}
-          RESULTS: ${{ needs.go-shard.result }} ${{ needs.go-static.result }} ${{ needs.desktop.result }} ${{ needs.next.result }} ${{ needs.frontend.result }} ${{ needs.frontend-check.result }}
+          RESULTS: ${{ needs.go-shard.result }} ${{ needs.go-static.result }} ${{ needs.desktop.result }} ${{ needs.next.result }} ${{ needs.next-web-width.result }} ${{ needs.frontend.result }} ${{ needs.frontend-check.result }}
           FRONTEND_CHECK: ${{ needs.frontend-check.result }}
         run: |
           echo "Results: $RESULTS"

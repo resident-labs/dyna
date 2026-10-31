@@ -216,6 +216,16 @@ checks:
     caches: [npm]
     reports: none
 
+  # Reuse the same host browser tools as computer-smoke and the QA script.
+  - id: next-web-width
+    host: true
+    command: >-
+      dir=$(mktemp -d); trap 'rm -rf "$dir"' EXIT;
+      export DYNA_WEBDEV_BIN="$dir/dyna-webdev";
+      bash scripts/ci.sh next-web-width-build && bash scripts/ci.sh next-web-width
+    caches: [go-build, go-mod, npm]
+    reports: none
+
   # The desktop module is a nested module, so the root Go commands never reach
   # it. The hosted workflow reports it as its own desktop job, and the base
   # graph requires that name, so it stays a check of its own.
@@ -450,7 +460,7 @@ suites:
 
   - id: next-web
     files: ['^next/web/', '^scripts/ci\.sh$']
-    checks: [next-web]
+    checks: [next-web, next-web-width]
 
   - id: cross
     group: cross-build
