@@ -56,7 +56,7 @@ The owner settled the design on the card. Writing the spec needed the decisions 
 - No JSON state files. JSON stays for settings and config.
 - No new web framework. The Svelte app is ported, and each view takes the quiet, dense look of 5.13 as it is ported.
 - No shared or untrusted hosts. Boxes run only where only we have admin.
-- No end-to-end tests in the repository, and only one or two fast integration tests per feature (10.1).
+- No end-to-end tests in the repository, and only one or two fast integration tests per important owner-facing feature (10.1).
 - No box-lite step. M1 goes straight to the full box.
 
 ## 2. Layout
@@ -1244,7 +1244,7 @@ The owner chose this design on 2026-10-30. Workflows are ported before the cutov
 ### 10.1 Owner policy
 
 1. The repository holds only solid, worthwhile unit tests. Each is fast (under 1 s), tests one behavior, and uses fakes at the package boundary. No snapshot tests and no implementation-detail tests.
-2. The repository holds one or two integration tests per feature, for a boundary where a fake would hide the risk (owner, 2026-10-30). Each runs in under 1 s against real local parts, and CI provides those parts. SSH, socket forwards, reconnects and Podman come first. The repository holds no end-to-end tests.
+2. The repository holds one or two integration tests per important feature that an owner relies on, such as a box that starts, a reconnect after an SSH drop, or a terminal that opens (owner, 2026-10-30). Each test checks behavior the owner would notice, never an implementation detail, and reviewers reject an integration test that checks internals. Each runs in under 1 s against real local parts, and CI provides those parts. SSH, socket forwards, reconnects and Podman come first. The repository holds no end-to-end tests.
 3. When a milestone needs an end-to-end check, a terra agent runs it once by hand in a sandbox (a box on hermeslab or Boat). It reports the result in the PR or the milestone report. Nothing is committed.
 
 ### 10.2 Boundaries and their fakes
