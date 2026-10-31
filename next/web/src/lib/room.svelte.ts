@@ -133,7 +133,7 @@ export class RoomStore {
       if (session.lastOutcome === "failed") this.failed.set(session.id, list.seq);
       if (session.computer === "running") this.computers.add(session.id);
       this.shellJobs.set(session.id, session.shellJobs ?? 0);
-      if (session.hadJobs) this.hadJobs.add(session.id);
+      if (session.hadJobs || session.shellJobs) this.hadJobs.add(session.id);
     }
     if (this.boxFailures.size) for (const [id, failure] of await boxFailures(this.room, list.seq + 1)) if (this.boxFailures.has(id)) this.boxFailures.set(id, failure);
     // A failure turnFailures cannot place keeps list.seq and shows.
