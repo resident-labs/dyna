@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -135,6 +136,15 @@ func Run(ctx context.Context, cfg Config) error {
 	service := engine.New(st, boxes, profiles, time.Now)
 	service.SetHostexecRunner(boxes)
 	boxes.Pressure = service
+	hosts, err := st.Hosts(ctx)
+	if err != nil {
+		return fmt.Errorf("list hosts: %w", err)
+	}
+	for _, host := range hosts {
+		if _, err := boxes.host(ctx, host.Name); err != nil {
+			log.Printf("host %s: start heartbeat: %v", host.Name, err)
+		}
+	}
 	service.SetTranscriptDir(filepath.Join(cfg.Data, "transcripts"))
 	service.SetFilesDir(filepath.Join(cfg.Data, "files"))
 	mirror := &enginegit.Mirror{Data: cfg.Data, Token: token, Runner: enginegit.GitRunner{}}
