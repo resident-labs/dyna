@@ -4,7 +4,6 @@
   import RequestCard from "./RequestCard.svelte";
   import type { RoomStore } from "../room.svelte.ts";
   let { store, room, onback, element = $bindable() }: { store: RoomStore; room: string; onback: () => void; element?: HTMLElement } = $props();
-  let back: HTMLButtonElement;
   // Waiting requests first, in the order they came; then the ones decided since the room opened, newest first.
   let requests = $derived([...store.requests.values()]);
   let waiting = $derived(requests.filter(request => request.state === "pending"));
@@ -13,14 +12,15 @@
   // Relative times refresh each half minute while the panel is open; this reads nothing from the engine.
   let now = $state(Date.now());
   onMount(() => {
-    back.focus();
+    // Focus moves to the panel; its ring shows only after keyboard use (:focus-visible).
+    element?.focus();
     const timer = setInterval(() => { now = Date.now(); }, 30_000);
     return () => clearInterval(timer);
   });
 </script>
 
 <section class="panel" aria-label="Requests" tabindex="-1" bind:this={element}>
-  <div class="top"><button type="button" class="back" bind:this={back} onclick={onback}><Icon name="back" />Back</button>
+  <div class="top"><button type="button" class="back" onclick={onback}><Icon name="back" />Back</button>
     <span class="room">{room}</span><strong>Requests</strong></div>
   <div class="list">
     <h2 class="label">Waiting for you</h2>
