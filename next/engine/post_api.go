@@ -109,6 +109,9 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		file.Bytes = info.Size()
 		file.Media = media
 	}
+	if req.VisualReply != "" && req.VisualUpdate != "" {
+		return contract.PostResponse{}, invalid("a visual update cannot be a visual reply")
+	}
 	if req.VisualUpdate != "" && visuals != 1 {
 		return contract.PostResponse{}, invalid("visual update requires one visual")
 	}
@@ -184,7 +187,11 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		return contract.PostResponse{}, failure(err)
 	}
 	deliveries := tree.Deliveries(room.DeliveryInput{Event: event, Surface: surface, Recipients: recipients, HasMentions: len(req.Mentions) > 0, Home: req.Home, ReplyTo: req.ReplyTo})
-	id, seq, err := s.store.PostOnce(ctx, event, deliveries, req.VisualUpdate)
+	id, seq, err := s.store.PostOnce(ctx, event, deliveries, req.VisualUpdate, req.VisualReply)
+	var superseded *store.VisualSupersededError
+	if errors.As(err, &superseded) {
+		return contract.PostResponse{}, &contract.Error{Code: contract.ErrVisualSuperseded, Message: "visual has a newer version", Visual: &contract.VisualSuperseded{Event: superseded.Event, Version: superseded.Version}}
+	}
 	if errors.Is(err, store.ErrVisualForbidden) {
 		return contract.PostResponse{}, forbidden()
 	}
