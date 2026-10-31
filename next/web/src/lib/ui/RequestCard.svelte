@@ -55,7 +55,7 @@
 
 {#snippet who()}<Avatar kind={request.by.kind} name={name(request.by)} {root} size={request.state === "pending" && !gone ? 24 : 20} />
   <strong class={request.by.kind} class:root style:--hue={hue(name(request.by))}>{name(request.by)}</strong>
-  <span class="title">asks for {request.card.title}{#if named && !after.length} on <code>{named}</code>{/if}</span>{/snippet}
+  <span class="title">{request.card.title}{#if named && !after.length} on <code>{named}</code>{/if}</span>{/snippet}
 
 <!-- While it waits, a request reads as a sentence on a card, with the exact command that runs; an owner-class card has the attention edge. -->
 {#if request.state === "pending" && !gone}

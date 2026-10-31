@@ -83,7 +83,7 @@ test("folds sessions, box, turns and pending operations", () => {
 });
 
 test("the waiting count holds pending owner-class operations from op.list and op events after the baseline", async () => {
-  const card = { title: "Open a pull request", target: { kind: "repo", name: "web" } } as const;
+  const card = { title: "asks to open a pull request", target: { kind: "repo", name: "web" } } as const;
   const listed = { id: "a", kind: "pr.open", room: "r", by: { kind: "session", session: "s" }, class: "owner", card, args: { title: "", body: "", base: "main", draft: false },
     state: "pending", created: "", expires: "" } as const;
   const requested = (seq: number, id: string, level: "agent" | "owner") => event(seq, { type: "op.requested", body: { id, kind: "pr.open", by: listed.by, class: level, card, expires: "" } });

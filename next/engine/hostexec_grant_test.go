@@ -40,7 +40,7 @@ func TestGrantCard(t *testing.T) {
 	s, room, worker, ctx := setup(t)
 	to := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
 	card := s.HostexecGrant().Card(ctx, contract.HostexecGrantArgs{Room: room, To: to, Hosts: []contract.HostName{"host"}, Reason: "Inspect logs"}, to)
-	if card.Title != "host access" || card.Target != (contract.Target{Kind: contract.TargetHost, Name: "host"}) || card.Body != "Run any command on host for 24 hours.\nReason: Inspect logs" {
+	if card.Title != "asks for host access" || card.Target != (contract.Target{Kind: contract.TargetHost, Name: "host"}) || card.Body != "Run any command on host for 24 hours.\nReason: Inspect logs" {
 		t.Fatalf("card: %+v", card)
 	}
 	// The owner granting another session names it, and two hosts keep the room as the target.
