@@ -75,6 +75,11 @@
 
   // Reads the element itself: the scroll handler runs before the virtualizer sees the new offset.
   let last = 0, atEnd = true;
+  // Rows taller than their estimate grow the list after scrollToEnd has landed, so a reader at the newest row stays there.
+  $effect(() => {
+    void total;
+    if (element && atEnd && untrack(() => follow)) element.scrollTop = element.scrollHeight;
+  });
   // A view that shrinks, as when a phone's keyboard opens, keeps its scrollTop; a reader at the newest row stays there.
   $effect(() => {
     if (!element || !follow) return;
