@@ -74,9 +74,11 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		if parent != "" {
 			reply = contract.ReplyChannel{Kind: contract.ReplyFinal, Target: contract.Principal{Kind: contract.PrincipalSession, Session: parent}, Home: contract.Conversation{Kind: contract.ConversationFeed}}
 		}
-		err = insertDelivery(ctx, tx, seq, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: session.ID}, Surface: contract.SurfaceSession, Reply: reply, Wake: true})
-		if err != nil {
-			return err
+		if started, _ := event.Body.(contract.SessionStarted); goal != "" || started.Brief != "" {
+			err = insertDelivery(ctx, tx, seq, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: session.ID}, Surface: contract.SurfaceSession, Reply: reply, Wake: true})
+			if err != nil {
+				return err
+			}
 		}
 		_, err = s.AppendEvent(tx, boxEvent)
 		return err
