@@ -47,11 +47,19 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 	if err != nil {
 		t.Fatal(err)
 	}
-	boxes[0].State, boxes[0].Image = contract.BoxStarting, "image"
+	host.CheckedAt = time.Unix(102, 0) // The host sampled while creation was still running.
+	event.ID, event.Time = "done", time.Unix(103, 0)
+	if err := s.FinishCreate(ctx, boxes[0], "image", "", time.Time{}, 0, event); err != nil {
+		t.Fatal(err)
+	}
+	boxes, err = s.Boxes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if p := box.Admit([]box.Host{host}, boxes, boxes[1], 20*box.GiB); p.Reason != box.PendingDisk {
 		t.Fatalf("after create: %+v", p)
 	}
-	host.CheckedAt = time.Unix(102, 0)
+	host.CheckedAt = time.Unix(104, 0)
 	if p := box.Admit([]box.Host{host}, boxes, boxes[1], 20*box.GiB); p.Host != "h" {
 		t.Fatalf("after sample: %+v", p)
 	}
