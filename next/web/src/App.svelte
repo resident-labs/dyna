@@ -26,7 +26,7 @@
   import TermDock from "./lib/ui/TermDock.svelte";
   import Home from "./lib/ui/Home.svelte";
   import Palette from "./lib/ui/Palette.svelte";
-  import type { Item } from "./lib/palette.ts";
+  import { remember, visits, type Item } from "./lib/palette.ts";
   import type { SearchCall } from "./lib/search.svelte.ts";
   import { MediaQuery, SvelteMap, SvelteSet } from "svelte/reactivity";
   import RoomMenu from "./lib/ui/RoomMenu.svelte";
@@ -112,6 +112,11 @@
   let room = $derived(asked && (!roomsLoaded || attention.rooms.has(asked)) ? asked : undefined);
   let lost: "room" | "page" | undefined = $derived(room || behind === "/" ? undefined : asked ? "room" : "page");
   let session = $derived(room && route?.[2] ? decodeURIComponent(route[2]) : undefined);
+  $effect(() => {
+    if (!room) return;
+    const key = "dyna.recent-places";
+    localStorage.setItem(key, JSON.stringify(remember(visits(localStorage.getItem(key)), { room, session })));
+  });
   // Derived, not set in the effect below: the room's views render with the store of the room they show.
   let store = $derived(room ? new RoomStore(room) : undefined);
   // The same rule per room for its open sessions.

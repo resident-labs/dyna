@@ -91,7 +91,7 @@ export function build(text: string, scope: Scope | undefined, sources: Sources):
     const cap = alone || (group === "actions" && !query) ? Infinity : CAP;
     const items = found.slice(0, cap);
     return { group, title: titles[group], shown: items.length, total, state,
-      items: total > items.length && state !== "searching" ? [...items, { kind: "more", scope: group, total }] : items };
+      items: !alone && total > items.length && state !== "searching" ? [...items, { kind: "more", scope: group, total }] : items };
   };
   const rooms = section("rooms", ranked(sources.rooms, query, () => false).map((room): Item => ({ kind: "room", room })));
   const sessions = section("sessions", ranked(sources.sessions, query, item => item.closed).map((session): Item => ({ kind: "session", session })));
@@ -150,7 +150,8 @@ export function remember(list: Visit[], visit: Visit): Visit[] {
   return [visit, ...list.filter(old => old.room !== visit.room || old.session !== visit.session)].slice(0, LIMIT);
 }
 export function visits(stored: string | null): Visit[] {
-  const parsed: unknown = stored ? JSON.parse(stored) : [];
+  let parsed: unknown;
+  try { parsed = stored ? JSON.parse(stored) : []; } catch { return []; }
   if (!Array.isArray(parsed)) return [];
   return parsed.flatMap((entry: unknown): Visit[] => {
     if (typeof entry !== "object" || entry === null || !("room" in entry) || typeof entry.room !== "string") return [];
