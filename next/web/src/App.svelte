@@ -125,6 +125,7 @@
   const treeKey = (entry: TreeRow) => entry.kind === "idle" ? `idle ${entry.key}` : entry.session.session;
   let sessionList: VirtualList<TreeRow> | undefined = $state();
   const folds: Record<Status, string> = { waiting: "A folded session waits for you", failed: "A folded session failed", working: "A folded session is working", idle: "" };
+  const starting = (id: string) => { const box = store?.boxes.get(id); return box === "pending" || box === "creating" || box === "starting"; };
   let tree = $derived.by(() => {
     const sessions = [...(store?.sessions.values() ?? [])];
     const ids = new Set(sessions.map(item => item.session));
@@ -133,8 +134,8 @@
     const own = new Map(sessions.map(item => [item.session, store?.status(item.session) ?? "idle"]));
     const most = (list: string[]) => list.reduce<Status>((best, id) => urgency(own.get(id) ?? "idle") < urgency(best) ? own.get(id) ?? "idle" : best, "idle");
     const top = new Map(sessions.map(item => [item.session, most([item.session, ...under(item.session)])]));
-    // Only rows that read Idle fold, by the words the row itself shows, so a starting session stays out.
-    const quiet = new Map(sessions.map(item => [item.session, [item.session, ...under(item.session)].every(id => status(id) === "Idle")]));
+    // Only rows that read Idle fold, by the state that writes the row's words, so a starting session stays out.
+    const quiet = new Map(sessions.map(item => [item.session, [item.session, ...under(item.session)].every(id => own.get(id) === "idle" && !starting(id))]));
     // The open DM's row and its ancestors never fold away as idle.
     const keep = new Set<string>();
     for (let id = session; id && ids.has(id); id = store?.sessions.get(id)?.parent) keep.add(id);
@@ -259,7 +260,7 @@
         const reason = box === "failed" ? "could not start" : box === "lost" ? "stopped unexpectedly" : cause ? causes[cause] : "the last turn failed";
         return reason[0].toLowerCase() + reason.slice(1);
       }
-      default: return box === "pending" || box === "creating" || box === "starting" ? "Starting" : "Idle";
+      default: return starting(id) ? "Starting" : "Idle";
     }
   };
   // A DM's header says only the status word; the live line and About say what the session does.
@@ -563,6 +564,8 @@
     .requests:not([aria-pressed="true"], .waiting) { display: none; }
     main > header :global(.panel-toggle) { gap: 4px; min-width: 40px; height: 40px; padding: 0 8px; }
     .phone { display: inline; }
+    /* The header keeps its width for the room's name: the faces and the count already say who works. */
+    .more { display: none; }
     .scrim { position: fixed; inset: 0; z-index: 2; padding: 0; border: 0; background: rgb(0 0 0 / 50%); }
   }
   .handle { display: none; }
