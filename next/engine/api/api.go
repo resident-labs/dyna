@@ -185,6 +185,30 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 	})
 	call(mux, contract.MethodComputerChanged, c, contract.ScopeRead, box, a.service.ComputerChanged)
+	// Input is a batched POST, not a WebSocket: the watch stream is one-way HTTP, a batch keeps a
+	// mouse-move flood to one request per frame, and POST needs no new socket handling in the web listener.
+	call(mux, contract.MethodComputerInput, c, contract.ScopeComputers, owner, func(ctx context.Context, p contract.Principal, req contract.ComputerInputRequest) (contract.ComputerInputResponse, *contract.Error) {
+		if req.Session == "" || req.Frame.Width < 1 || req.Frame.Width > 16384 || req.Frame.Height < 1 || req.Frame.Height > 16384 || len(req.Events) == 0 || len(req.Events) > 256 {
+			return contract.ComputerInputResponse{}, invalid()
+		}
+		for _, e := range req.Events {
+			ok := false
+			switch e.Kind {
+			case contract.InputKeyDown, contract.InputKeyUp:
+				ok = e.Key != "" && len(e.Key) <= 32
+			case contract.InputChar:
+				ok = e.Text != "" && len(e.Text) <= 1024
+			case contract.InputMouseMove, contract.InputWheel:
+				ok = true
+			case contract.InputMouseDown, contract.InputMouseUp:
+				ok = e.Button == contract.ButtonLeft || e.Button == contract.ButtonMiddle || e.Button == contract.ButtonRight
+			}
+			if !ok || e.X < 0 || e.X > float64(req.Frame.Width) || e.Y < 0 || e.Y > float64(req.Frame.Height) || e.Modifiers < 0 || e.Modifiers > 15 {
+				return contract.ComputerInputResponse{}, invalid()
+			}
+		}
+		return a.service.ComputerInput(ctx, p, req)
+	})
 	mux.HandleFunc("POST /v1/computers/frames", func(w http.ResponseWriter, r *http.Request) {
 		if !box(c) {
 			writeError(w, forbidden())
