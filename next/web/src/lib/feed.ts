@@ -1,14 +1,14 @@
 import type { Attachment, Conversation, Event, Principal } from "./contract.gen.ts";
 
 export type Row =
-  | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean }
+  | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to?: Principal }
   | { kind: "failed"; key: string; session: string; at: string; error: string }
   | { kind: "work"; key: string; events: Event[] };
 
 type Name = (session: string) => string;
 
 const sameHome = (a: Conversation, b: Conversation) => a.kind === b.kind && (a.session ?? "") === (b.session ?? "");
-const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.session === b.session;
+const sameAuthor = (a?: Principal, b?: Principal) => a?.kind === b?.kind && a?.session === b?.session;
 
 // The session an event is about; events without one belong to the room feed only.
 function subject(event: Event): string | undefined {
@@ -29,23 +29,26 @@ export function feedRows(events: Event[], home: Conversation): Row[] {
     if (work.length) rows.push({ kind: "work", key: `w${work[0].seq}`, events: work });
     work = [];
   };
-  const post = (key: string, from: Principal, at: string, text: string, attachments: Attachment[]) => {
+  // A post to someone else, its first mention or a final reply's target, starts a new run with its own name line.
+  const post = (key: string, from: Principal, at: string, text: string, attachments: Attachment[], to?: Principal) => {
     flush();
     const previous = rows.at(-1);
-    rows.push({ kind: "post", key, from, at, text, attachments, first: previous?.kind !== "post" || !sameAuthor(previous.from, from) });
+    const first = previous?.kind !== "post" || !sameAuthor(previous.from, from) || !sameAuthor(previous.to, to);
+    rows.push({ kind: "post", key, from, at, text, attachments, first, to });
   };
   for (const event of events) {
     if (event.type === "post.created") {
-      if (sameHome(event.body.home, home)) post(`p${event.seq}`, event.from, event.at, event.body.text, event.body.attachments ?? []);
+      if (sameHome(event.body.home, home)) post(`p${event.seq}`, event.from, event.at, event.body.text, event.body.attachments ?? [], event.body.mentions?.[0]);
       continue;
     }
     const session = subject(event);
     if (home.kind === "dm" && session !== home.session) continue;
     if (event.type === "turn.ended") {
       // A final reply that no post of the session already carried is the session's answer here.
-      if (event.body.final && (event.body.replies ?? []).some(({ reply, posted }) =>
-        reply.kind === "final" && !posted && sameHome(reply.home ?? { kind: "feed" }, home))) {
-        post(`a${event.seq}`, { kind: "session", session: event.body.session }, event.at, event.body.final, []);
+      const answer = event.body.final && (event.body.replies ?? []).find(({ reply, posted }) =>
+        reply.kind === "final" && !posted && sameHome(reply.home ?? { kind: "feed" }, home));
+      if (event.body.final && answer) {
+        post(`a${event.seq}`, { kind: "session", session: event.body.session }, event.at, event.body.final, [], answer.reply.target);
         continue;
       }
       if (event.body.outcome === "failed") {
