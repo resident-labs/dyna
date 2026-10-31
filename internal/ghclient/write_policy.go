@@ -29,13 +29,14 @@ const (
 )
 
 const (
-	ReasonReadOnly       Reason = "read-only-room"
-	ReasonOther          Reason = "not-room-repository"
-	ReasonBranchDelete   Reason = "upstream-branch-delete"
-	ReasonForeignItem    Reason = "not-room-account-item"
-	ReasonForeignComment Reason = "foreign-comment"
-	ReasonForeignHead    Reason = "upstream-edit-foreign-head"
-	ReasonUpstreamVerb   Reason = "upstream-verb-not-allowed"
+	ReasonReadOnly          Reason = "read-only-room"
+	ReasonRepositoryUnknown Reason = "repository-unknown"
+	ReasonOther             Reason = "not-room-repository"
+	ReasonBranchDelete      Reason = "upstream-branch-delete"
+	ReasonForeignItem       Reason = "not-room-account-item"
+	ReasonForeignComment    Reason = "foreign-comment"
+	ReasonForeignHead       Reason = "upstream-edit-foreign-head"
+	ReasonUpstreamVerb      Reason = "upstream-verb-not-allowed"
 )
 
 // Write is the parsed command and its repository scope.
@@ -264,6 +265,8 @@ func (e *RefusalError) Error() string {
 	switch e.Decision.Refusal {
 	case ReasonReadOnly:
 		action = "ask the room owner to enable GitHub writes"
+	case ReasonRepositoryUnknown:
+		return "GitHub write refused: repository unknown; use --repo, a pull request URL, or a checkout with an origin remote"
 	case ReasonOther:
 		action = "choose a repository registered to the room"
 	case ReasonBranchDelete:
