@@ -117,6 +117,8 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     rows.push({ kind: "post", key, from, at, text, attachments, first, to, ...pending && { pending } });
   };
   for (const event of events) {
+    // Account alerts are owner-only and never belong to a room feed.
+    if (event.type === "account.failed" || event.type === "account.quota_low") continue;
     if (event.type === "post.created") {
       if (sameHome(event.body.home, home)) post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, event.body.attachments ?? [], event.body.mentions ?? []);
       continue;
