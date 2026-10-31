@@ -79,7 +79,7 @@
   }
   let roomName = $derived(rooms.find(item => item.id === room)?.name ?? "Room");
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-  let counts = $derived(store?.ready ? `${plural(store.sessions.size, "session")} · ${store.turns.size} working` : "");
+  let counts = $derived(store?.ready ? plural(store.sessions.size, "session") + (store.turns.size ? ` · ${store.turns.size} working` : "") : "");
   // A session's muted status line: what it does now, then its profile.
   const status = (id: string, profile: string) => {
     const box = store?.boxes.get(id);
