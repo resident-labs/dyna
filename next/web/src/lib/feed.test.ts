@@ -88,11 +88,11 @@ test("a failed turn with a final reply keeps its failed row", () => {
   assert.deepEqual(rows[1], { kind: "failed", key: "f1", seq: 1, session: "l", at: ended.at, label: "Turn failed", cause: "The model provider refused or failed the request" });
 });
 
-test("puts a turn's final reply in its home only", () => {
+test("puts a turn's final reply in its home only, and a DM keeps a work row above it so the turn can open", () => {
   const ended = event(3, { type: "turn.ended", body: { session: "l", turn: "t", outcome: "completed", final: "Answer", usage,
     replies: [{ reply: { kind: "final", target: { kind: "owner" }, home: { kind: "dm", session: "l" } } }] } });
   const dm = feedRows([ended], { kind: "dm", session: "l" });
-  assert.deepEqual(dm.map(row => row.kind === "post" && row.text), ["Answer"]);
+  assert.deepEqual(dm.map(row => row.kind === "post" ? row.text : row.kind), ["work", "Answer"]);
   assert.deepEqual(feedRows([ended], { kind: "feed" }).map(row => row.kind), ["work"]);
 });
 
