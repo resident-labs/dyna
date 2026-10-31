@@ -3,6 +3,8 @@ package podman
 import (
 	"context"
 	"fmt"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -195,7 +197,7 @@ func TestHeartbeatEpisodes(t *testing.T) {
 }
 
 func TestHeartbeatReportsLoad(t *testing.T) {
-	runner := &seqRunner{bodies: []string{"dyna-disk 1000 400\ndyna-load 100 1000000\n", "dyna-disk 1000 450\ndyna-load 250 16000000\n"}, drained: make(chan struct{})}
+	runner := &seqRunner{bodies: []string{"dyna-disk 1000 400\ndyna-load 100 1000000\n", "dyna-load 250 16000000\n"}, drained: make(chan struct{})}
 	h, err := New("user@host", t.TempDir(), "host", runner)
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +219,7 @@ func TestHeartbeatReportsLoad(t *testing.T) {
 			reports <- sample{ok, load.CPUUsed, load.MemUsed, load.DiskBytes, load.DiskUsed}
 		}, func(string, contract.PressureKind) {})
 	}()
-	for i, want := range []sample{{true, 0, 100, 1000, 400}, {true, 1.5, 250, 1000, 450}} {
+	for i, want := range []sample{{true, 0, 100, 1000, 400}, {true, 1.5, 250, 1000, 400}} {
 		ticks <- time.Unix(1000+int64(10*i), 0)
 		if got := <-reports; got != want {
 			t.Errorf("sample %d: got %+v, want %+v", i, got, want)
@@ -225,4 +227,12 @@ func TestHeartbeatReportsLoad(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+func TestHeartbeatDiskFailureKeepsProbeAlive(t *testing.T) {
+	script := `df() { return 1; }; systemctl() { :; }; ` + heartbeatScript
+	out, err := exec.Command("bash", "-c", script, "dyna", "/missing").CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "dyna-load 0 0") {
+		t.Fatalf("probe output %q, error %v", out, err)
+	}
 }
