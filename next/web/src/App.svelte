@@ -59,7 +59,7 @@
   }
   let firstBuild: string | undefined;
   let reloadPending = $state(false);
-  let mainWidth = $state(0);
+  let mainWidth = $state(4096);
   watchHello(({ build }) => {
     if (firstBuild === undefined) { firstBuild = build; return; }
     if (build === firstBuild || reloadPending) return;
@@ -776,6 +776,7 @@
   .requests { margin-left: auto; display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 28px; height: 28px; padding: 0;
     border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
   .requests:hover, .requests[aria-pressed="true"] { background: var(--hover); color: var(--text); }
+  @media (min-width: 761px) { .requests.waiting { margin-right: 4px; } }
   main { position: relative; }
   :where(main.header-tight) .tool { justify-content: center; width: 28px; padding: 0; }
   :where(main.header-tight) .tool span { display: none; }
