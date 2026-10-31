@@ -85,7 +85,7 @@
     const timer = setInterval(() => { now = Date.now(); }, 30_000);
     return () => clearInterval(timer);
   });
-  const toggle = (key: string) => { if (!opened.delete(key)) opened.add(key); };
+  const toggle = (key: string) => { list?.hold(); if (!opened.delete(key)) opened.add(key); };
   let list: VirtualList<Item> | undefined = $state();
   // The owner's own post and a jump always land on the newest row, even from inside the present window.
   // It never rejects: a failed send stays in the feed as a row with Retry.
