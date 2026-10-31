@@ -46,6 +46,11 @@ func TestTerminalRoute(t *testing.T) {
 	server := httptest.NewServer(a.handler(owner))
 	defer server.Close()
 	ctx := context.Background()
+	url := "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/terminal?host=test&cols=80&rows=24"
+	_, response, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: http.Header{"Origin": []string{"https://example.com"}}})
+	if err == nil || response == nil || response.StatusCode != http.StatusForbidden {
+		t.Fatalf("foreign origin: response %v, error %v", response, err)
+	}
 	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/terminal?host=test&cols=80&rows=24", nil)
 	if err != nil {
 		t.Fatal(err)
