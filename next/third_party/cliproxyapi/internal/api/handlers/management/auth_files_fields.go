@@ -993,6 +993,16 @@ func (h *Handler) saveTokenRecord(ctx context.Context, record *coreauth.Auth) (s
 	if record == nil {
 		return "", fmt.Errorf("token record is nil")
 	}
+	if info := coreauth.GetRequestInfo(ctx); info != nil {
+		identity := &coreauth.OAuthIdentity{}
+		identity.AccountID, _ = record.Metadata["account_id"].(string)
+		identity.AccountUUID, _ = record.Metadata["account_uuid"].(string)
+		identity.Subject, _ = record.Metadata["sub"].(string)
+		identity.Email, _ = record.Metadata["email"].(string)
+		copy := *info
+		copy.OAuthIdentity = identity
+		ctx = coreauth.WithRequestInfo(ctx, &copy)
+	}
 	h.mergeExistingAuthFileMetadata(record)
 	store := h.tokenStoreWithBaseDir()
 	if store == nil {
