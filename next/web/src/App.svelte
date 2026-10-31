@@ -197,6 +197,15 @@
   // The tree is virtual, so the next row may not be rendered yet: the list scrolls to it first. A held key's presses
   // that come meanwhile move on from that row, and only the newest one focuses.
   let walkingTo: number | undefined;
+  // Focus goes back to a row's icon when a view over the list closes. The list mounts again at its top, so the row is
+  // scrolled back in first; and a row shows its icons only on hover or focus, so its link takes focus before the icon.
+  async function focusRowIcon(id: string, icon: string) {
+    const index = tree.findIndex(entry => entry.kind === "session" && entry.session.session === id);
+    if (index >= 0) await sessionList?.reveal(index);
+    const button = members?.querySelector<HTMLElement>(`[${icon}="${CSS.escape(id)}"]`);
+    button?.closest(".row")?.querySelector<HTMLElement>("a.member")?.focus();
+    (button ?? members)?.focus();
+  }
   async function walkTree(event: KeyboardEvent & { currentTarget: HTMLElement }) {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp" || !members) return;
     event.preventDefault();
@@ -253,7 +262,7 @@
     await tick();
     if (!held) return;
     if (!members?.getClientRects().length) toggle?.focus();
-    else (members.querySelector<HTMLElement>(`[data-watch="${CSS.escape(id)}"]`) ?? members).focus();
+    else await focusRowIcon(id, "data-watch");
   }
   $effect.pre(() => { if (watching && !store?.computers.has(watching)) void stopWatching(); });
   // The session whose jobs the panel shows instead of the list, while its box is ready; it closes as the computer does.
@@ -263,7 +272,7 @@
     const id = jobsOf ?? "", held = members?.contains(document.activeElement);
     jobsOf = undefined;
     await tick();
-    if (held) (members?.querySelector<HTMLElement>(`[data-jobs="${CSS.escape(id)}"]`) ?? members)?.focus();
+    if (held) await focusRowIcon(id, "data-jobs");
   }
   $effect.pre(() => { if (jobsOf && store?.boxes.get(jobsOf) !== "ready") void closeJobs(); });
   const wide = new MediaQuery("min-width: 761px");
