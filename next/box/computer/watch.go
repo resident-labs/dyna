@@ -24,7 +24,7 @@ func watch(ctx context.Context, base string, out io.Writer) error {
 	if _, err = d.Call(ctx, "Page.enable", nil); err != nil {
 		return err
 	}
-	if _, err = d.Call(ctx, "Page.startScreencast", json.RawMessage(`{"format":"jpeg","quality":70,"maxWidth":1280,"everyNthFrame":6}`)); err != nil {
+	if _, err = d.Call(ctx, "Page.startScreencast", json.RawMessage(`{"format":"jpeg","quality":70,"maxWidth":1280,"everyNthFrame":1}`)); err != nil {
 		return err
 	}
 	for {
