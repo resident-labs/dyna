@@ -30,8 +30,8 @@ func TestSnapshotReplayAndCap(t *testing.T) {
 	if problem != nil {
 		t.Fatal(problem)
 	}
-	if hello.AgentSurface != contract.AgentSurfaceCaller || !strings.Contains(hello.Instructions, "Use dyna post") {
-		t.Fatalf("enabled profile lost existing guidance: %+v", hello)
+	if hello.AgentSurface != contract.AgentSurfaceCaller || strings.Contains(hello.Instructions, "Use dyna post") || !strings.Contains(hello.Instructions, "context_update") {
+		t.Fatalf("enabled profile hello has the wrong guidance: %+v", hello)
 	}
 	for _, key := range []contract.ContextSectionKey{"dyna_goal", "dyna_usage", "invalid"} {
 		if _, problem := s.ContextSnapshot(ctx, caller, contract.ContextSnapshotRequest{Section: key}); problem == nil || problem.Code != contract.ErrInvalid {

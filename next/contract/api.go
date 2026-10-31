@@ -80,6 +80,7 @@ type ErrorCode string
 const (
 	ErrPodmanRequired       ErrorCode = "podman_required"
 	ErrInvalid              ErrorCode = "invalid"
+	ErrUnknownAction        ErrorCode = "unknown_action"
 	ErrNotFound             ErrorCode = "not_found"
 	ErrForbidden            ErrorCode = "forbidden"
 	ErrConflict             ErrorCode = "conflict"
