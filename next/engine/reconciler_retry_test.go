@@ -65,6 +65,7 @@ func TestReconcilerCreateRetriesBeforeFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Unix(1000, 0)
+	s.now = func() time.Time { return now }
 	host := &failingCreateHost{id: session.Box}
 	r := lifecycle.New(s.store, host, retryView{}, nil, s.event, func() time.Time { return now })
 	for i, delay := range []time.Duration{30 * time.Second, time.Minute, 0} {
