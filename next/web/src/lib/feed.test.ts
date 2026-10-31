@@ -85,6 +85,16 @@ test("a stopped turn and a room's pause show as their own lines", () => {
   assert.deepEqual(feedRows([event(2, { type: "room.paused", body: {} })], { kind: "dm", session: "s" }), []);
 });
 
+test("a room limit change is one plain line, and zero means no limit", () => {
+  const limits = (seq: number, cpus: number, memBytes: number) => event(seq, { type: "room.limits_changed", body: { cpus, memBytes } }, { kind: "owner" });
+  const rows = feedRows([limits(1, 8, 16 * 2 ** 30), limits(2, 1, 0), limits(3, 0, 2 ** 29), limits(4, 0, 0)], { kind: "feed" });
+  assert.deepEqual(rows.flatMap(row => row.kind === "notice" ? [describe(row.event, id => id)] : []),
+    ["Room limit set to 8 CPUs and 16 GB", "Room limit set to 1 CPU and no memory limit", "Room limit set to no CPU limit and 0.5 GB", "Room limit removed"]);
+  const raw = { seq: 5, id: "5", at: "", room: "r", from: { kind: "owner" }, type: "room.limits_changed" };
+  assert.equal(decodeEvent({ ...raw, body: { cpus: 8, memBytes: 0 } })?.type, "room.limits_changed");
+  assert.equal(decodeEvent({ ...raw, body: { cpus: -1, memBytes: 0 } }), undefined);
+});
+
 test("names failed image builds and computers in the work line", () => {
   const image = { host: "h", repo: "r", name: "base", tag: "1" };
   const failed = event(1, { type: "image.failed", body: { ...image, reason: "no space", logTail: "" } });

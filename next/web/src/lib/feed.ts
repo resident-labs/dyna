@@ -66,7 +66,7 @@ const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.sessio
 // The session an event is about; events without one belong to the room feed only.
 function subject(event: Event): string | undefined {
   switch (event.type) {
-    case "room.paused": case "room.resumed": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "rule.added": case "rule.removed": case "rule.edited": case "session.profile_changed": return undefined;
+    case "room.paused": case "room.resumed": case "room.limits_changed": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "rule.added": case "rule.removed": case "rule.edited": case "session.profile_changed": return undefined;
     case "op.requested": return event.body.by.session;
     case "op.decided": case "op.ran": return event.from.session;
     default: return event.body.session;
@@ -121,7 +121,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     }
     const session = subject(event);
     if (home.kind === "dm" && session !== home.session) continue;
-    if (event.type === "room.paused" || event.type === "room.resumed") {
+    if (event.type === "room.paused" || event.type === "room.resumed" || event.type === "room.limits_changed") {
       flush(); dated(event.at);
       rows.push({ kind: "notice", key: `n${event.seq}`, event });
       continue;
@@ -295,7 +295,7 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
       case "pr.opened": prs++; break;
       case "box.pressure": memory++; break;
       case "grant.expired": grants++; break;
-      case "rule.added": case "rule.removed": case "rule.edited": rules++; break;
+    case "rule.added": case "rule.removed": case "rule.edited": rules++; break;
     }
   }
   if (until) last = Math.max(last, Date.parse(until));
@@ -340,6 +340,14 @@ export function describe(event: Event, name: Name): string {
     case "grant.expired": return "A host execution grant expired";
     // The owner reads this feed; a room's root may also pause it.
     case "room.paused": case "room.resumed": return `${event.from.session ? name(event.from.session) : "You"} ${event.type === "room.paused" ? "paused" : "resumed"} the room`;
+    // Zero means no limit. GB counts 2^30 bytes, as the Home meters do.
+    case "room.limits_changed": {
+      const { cpus, memBytes } = event.body, gb = memBytes / 2 ** 30;
+      if (!cpus && !memBytes) return "Room limit removed";
+      const cpu = cpus ? `${cpus} CPU${cpus === 1 ? "" : "s"}` : "no CPU limit";
+      const mem = memBytes ? `${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB` : "no memory limit";
+      return `Room limit set to ${cpu} and ${mem}`;
+    }
     case "rule.added": return `Rule r${event.body.number} added: ${event.body.text}`;
     case "rule.removed": return `Rule r${event.body.number} removed`;
     case "rule.edited": return `Rule r${event.body.number} changed: ${event.body.text}`;
