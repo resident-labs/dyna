@@ -21,7 +21,8 @@
   .working { color: var(--success); }
   .count { flex: none; color: var(--attention); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .count.error { color: var(--danger); }
-  i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  i { width: 6px; height: 6px; border-radius: 50%; background: var(--attention-fill); }
+  .error i, .working i { background: currentColor; }
   .dot { width: 14px; height: 14px; justify-content: center; }
   .dot i { width: 9px; height: 9px; }
   .working i { box-shadow: 0 0 0 3px color-mix(in oklab, currentColor 22%, transparent); }

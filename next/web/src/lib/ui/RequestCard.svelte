@@ -116,7 +116,7 @@
   .card { display: grid; gap: 6px; max-width: 620px; margin: 8px 16px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); font-size: 14px; }
   /* In the feed the card starts at the post text's left edge, as the request is part of the conversation. */
   .card.feed { margin-left: var(--gutter); }
-  .yours { border-left: 2px solid var(--attention); padding-left: 15px; }
+  .yours { border-left: 2px solid var(--attention-fill); padding-left: 15px; }
   p { margin: 0; }
   .top, .line { display: flex; align-items: center; gap: 8px; min-width: 0; }
   strong { flex: none; font-weight: 600; color: oklch(var(--id-name) var(--hue)); }
