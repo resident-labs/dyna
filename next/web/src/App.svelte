@@ -222,7 +222,9 @@
     event.preventDefault();
     const index = walkingTo ?? tree.findIndex(entry => treeKey(entry) === event.currentTarget.dataset.key);
     const next = Math.max(0, Math.min(tree.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
-    const target = () => members?.querySelector<HTMLElement>(`[data-key="${CSS.escape(treeKey(tree[next]))}"]`);
+    // The tree can change while the list scrolls, so the row is found again by its key, never by its old index.
+    const key = treeKey(tree[next]);
+    const target = () => members?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`);
     walkingTo = next;
     if (!target()) await sessionList?.reveal(next);
     if (walkingTo !== next) return;
