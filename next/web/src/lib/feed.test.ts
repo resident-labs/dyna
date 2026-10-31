@@ -68,6 +68,15 @@ test("names two sessions that ran turns and counts more", () => {
   assert.equal(workSummary([begun(1, "a"), started(2, "a"), started(3, "b"), started(4, "c")], name), "a started · 3 sessions worked · 3 turns");
 });
 
+test("a dormant close says why in the work line and its opened row, and a normal close does not", () => {
+  const closed = (seq: number, session: string, reason?: "dormant") => decodeEvent(event(seq, { type: "session.closed", body: { session, reason } }));
+  const name = (session: string) => session;
+  const quiet = closed(1, "scout", "dormant"), plain = closed(2, "builder");
+  assert.ok(quiet && plain);
+  assert.equal(workSummary([quiet, plain], name), "builder closed · scout closed after 7 quiet days");
+  assert.deepEqual([describe(quiet, name), describe(plain, name)], ["scout closed after 7 quiet days", "builder closed"]);
+});
+
 test("collapses repeated names in the work line", () => {
   const started = (seq: number, session: string) => event(seq, { type: "turn.started", body: { session, turn: `t${seq}`, inputs: [] } });
   const unknown = () => "A closed session";
