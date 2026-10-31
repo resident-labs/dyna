@@ -126,7 +126,7 @@ func Run(ctx context.Context, cfg Config) error {
 	service.SetFilesDir(filepath.Join(cfg.Data, "files"))
 	mirror := &enginegit.Mirror{Data: cfg.Data, Token: token, Runner: enginegit.GitRunner{}}
 	service.SetRepositories(&enginegit.Repositories{Rooms: st, Hosts: boxes, Mirror: mirror})
-	if err := service.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"pr.open": service.PrOpen(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport)}, cfg.ApprovalsExpiry); err != nil {
+	if err := service.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"pr.open": service.PrOpen(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport), "hostexec.grant": service.HostexecGrant()}, cfg.ApprovalsExpiry); err != nil {
 		return err
 	}
 	boxes.Mirror = mirror
@@ -198,6 +198,9 @@ func Run(ctx context.Context, cfg Config) error {
 			service.ReconcileDormancy(ctx, false, true)
 			if err := service.ExpireOperations(ctx); err != nil {
 				return fmt.Errorf("operation expiry sweep: %w", err)
+			}
+			if err := service.ExpireHostexecGrants(ctx); err != nil {
+				return fmt.Errorf("grant expiry sweep: %w", err)
 			}
 			if err := service.FailStaleStarts(ctx); err != nil {
 				return fmt.Errorf("hello timeout sweep: %w", err)

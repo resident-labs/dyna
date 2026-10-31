@@ -26,3 +26,7 @@ CREATE INDEX turns_session_ended ON turns(session, ended_at);
 CREATE INDEX sessions_room_closed ON sessions(room, closed_at);
 CREATE INDEX sessions_parent ON sessions(parent);
 CREATE INDEX operations_state_expires ON operations(state, expires_at);
+
+CREATE TABLE grants (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id), to_kind TEXT NOT NULL, to_id TEXT NOT NULL, mode TEXT NOT NULL, hosts BLOB NOT NULL, commands BLOB NOT NULL, expires_at INTEGER, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at INTEGER NOT NULL, revoked_at INTEGER, expired_at INTEGER);
+CREATE INDEX grants_expiry ON grants(expires_at) WHERE expired_at IS NULL AND revoked_at IS NULL;
+CREATE INDEX grants_room_principal ON grants(room, to_id);

@@ -61,7 +61,9 @@ func setup(t *testing.T) *fixture {
 	f.s = New(st, ctx, nil, func() time.Time { return f.now }, 24*time.Hour, func(prefix string) (string, error) { return fmt.Sprintf("%s%d", prefix, ids.Add(1)), nil })
 	f.s.Kinds = map[contract.OpKind]Entry{"test.run": {
 		Class: func(contract.OpArgs, contract.Principal) contract.Class { return f.class },
-		Card:  func(contract.OpArgs, contract.Principal) contract.Card { return contract.Card{Title: "Run"} },
+		Card: func(context.Context, contract.OpArgs, contract.Principal) contract.Card {
+			return contract.Card{Title: "Run"}
+		},
 		Check: func(context.Context, contract.OpArgs, contract.Principal) error {
 			if f.stale {
 				return errors.New("changed")
@@ -322,5 +324,17 @@ func TestInterruptedExecutionIsNotRetried(t *testing.T) {
 	record, err = f.s.Store.Operation(context.Background(), op.ID)
 	if err != nil || record.Operation.State != contract.OpFailed || f.runs.Load() != 0 {
 		t.Fatalf("record %+v err %v", record, err)
+	}
+}
+
+type scopedArgs struct{ fakeArgs }
+
+func (scopedArgs) OperationRoom() contract.RoomID { return "other" }
+
+func TestSubmitRejectsMismatchedArgumentRoom(t *testing.T) {
+	f := setup(t)
+	_, err := f.s.Submit(context.Background(), principal("worker"), contract.Operation{Room: "room", Args: scopedArgs{}})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("mismatched room: %v", err)
 	}
 }
