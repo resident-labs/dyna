@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/box"
+	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/store"
 
@@ -71,5 +72,18 @@ func TestHostListIncludesLoadAndRunningBoxes(t *testing.T) {
 	want := contract.HostSummary{Name: "host", Reachable: true, Boxes: 1, CPUs: 8, MemBytes: 4096, CPUUsed: 1.5, MemUsed: 512, History: []contract.HostLoadPoint{}}
 	if problem != nil || len(got.Hosts) != 2 || !reflect.DeepEqual(got.Hosts[1], want) {
 		t.Fatalf("hosts: %+v, error: %v", got, problem)
+	}
+}
+
+type missingPodmanRegistrar struct{ fakeRegistrar }
+
+func (*missingPodmanRegistrar) AddHost(context.Context, contract.HostAddRequest) error {
+	return podman.RequiredError{}
+}
+func TestHostAddRefusesMissingPodman(t *testing.T) {
+	s := serviceWithHosts{boxes: &missingPodmanRegistrar{}}
+	_, problem := s.HostAdd(context.Background(), contract.Principal{Kind: contract.PrincipalOwner}, contract.HostAddRequest{Name: "host", SSH: "user@host", OwnerOnlyAdmin: true})
+	if problem == nil || problem.Code != contract.ErrPodmanRequired || !strings.Contains(problem.Message, "Podman 5") {
+		t.Fatalf("problem: %+v", problem)
 	}
 }

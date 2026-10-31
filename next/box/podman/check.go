@@ -30,6 +30,13 @@ const (
 	CheckForward   CheckName = "stream-local forwarding"
 )
 
+// RequiredError reports a missing or unsupported rootless Podman installation.
+type RequiredError struct{}
+
+func (RequiredError) Error() string {
+	return "Install rootless Podman 5 or later with systemd cgroups on the host"
+}
+
 type CheckItem struct {
 	Name   CheckName
 	OK     bool
