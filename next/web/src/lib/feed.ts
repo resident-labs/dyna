@@ -8,10 +8,11 @@ export type Row =
   | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[]; pending?: Pending }
   | { kind: "restarted"; key: string; session: string; at: string }
   // A plain line for what the owner did to a session or the room; describe gives its words.
-  | { kind: "notice"; key: string; event: Event }
+  | { kind: "notice"; key: string; event: Event; resumedAt?: string }
   | { kind: "failed"; key: string; seq: number; session: string; at: string; label: "Turn failed" | "Failed" | "Could not start" | "Could not close" | "Stopped unexpectedly"; cause: string }
-  | { kind: "work"; key: string; events: Event[]; until?: string }
-  | { kind: "request"; key: string; request: Request }
+  | { kind: "more-failures"; key: string; failures: Extract<Row, { kind: "failed" }>[] }
+  | { kind: "work"; key: string; events: Event[]; failedSessions: string[]; until?: string }
+  | { kind: "request"; key: string; at: string; request: Request }
   | { kind: "day"; key: string; at: string }
   | { kind: "new"; key: string };
 
@@ -72,7 +73,7 @@ const sameHome = (a: Conversation, b: Conversation) => a.kind === b.kind && (a.s
 const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.session === b.session;
 
 // The session an event is about; events without one belong to the room feed only.
-function subject(event: Event): string | undefined {
+export function subject(event: Event): string | undefined {
   switch (event.type) {
     case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "rule.added": case "rule.removed": case "rule.edited": case "session.profile_changed": return undefined;
     case "op.requested": return event.body.by.session;
@@ -87,11 +88,13 @@ function subject(event: Event): string | undefined {
 // Pending owner posts follow as post rows, so they group like the posts that replace them.
 // A day row comes before the first row of each local day, so a new day also starts a new name line.
 // With the owner's read position (since), a New row comes before the first later post or failed row by someone else.
-export function feedRows(events: Event[], home: Conversation, pending: Pending[] = [], since = 0): Row[] {
+export function feedRows(events: Event[], home: Conversation, pending: Pending[] = [], since = 0, retainedRequests: ReadonlySet<string> = new Set()): Row[] {
   const rows: Row[] = [];
   let work: Event[] = [];
+  let deferred: Row[] = [];
   let today = "";
   const requests = new Map<string, Extract<Row, { kind: "request" }>>();
+  const decided = new Set(events.flatMap(event => event.type === "op.decided" ? [event.body.id] : []));
   const dated = (at: string) => {
     const day = new Date(at).toDateString();
     if (day !== today) rows.push({ kind: "day", key: `d${day}`, at });
@@ -103,8 +106,24 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
   };
   // until is the end of a turn that answers or fails in its own row, so the work row above it still knows when the work ended.
   const flush = (until?: string) => {
-    if (work.length) { dated(work[0].at); rows.push({ kind: "work", key: `w${work[0].seq}`, events: work, ...until && { until } }); }
+    if (work.length) { dated(work[0].at); rows.push({ kind: "work", key: `w${work[0].seq}`, events: work, failedSessions: deferred.flatMap(row => row.kind === "failed" ? [row.session] : []), ...until && { until } }); }
     work = [];
+    let failures = 0;
+    let more: Extract<Row, { kind: "more-failures" }> | undefined;
+    for (const row of deferred) {
+      if (row.kind === "notice") dated(row.event.at);
+      else if (row.kind === "request" || row.kind === "restarted") dated(row.at);
+      else if (row.kind === "failed") {
+        dated(row.at); fresh(row.seq, { kind: "session", session: row.session });
+        if (++failures > 5) {
+          if (!more) { more = { kind: "more-failures", key: `more-${row.key}`, failures: [] }; rows.push(more); }
+          more.failures.push(row);
+          continue;
+        }
+      }
+      rows.push(row);
+    }
+    deferred = [];
   };
   // A post to other people, its mentions or a final reply's target, starts a new run with its own name line.
   const post = (key: string, seq: number, from: Principal, at: string, text: string, attachments: Attachment[], to: Principal[] = [], pending?: Pending) => {
@@ -119,6 +138,8 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
   for (const event of events) {
     // Account alerts are owner-only and never belong to a room feed.
     if (event.type === "account.failed" || event.type === "account.quota_low") continue;
+    const firstAt = work[0]?.at ?? (deferred[0]?.kind === "notice" ? deferred[0].event.at : deferred[0]?.kind === "failed" || deferred[0]?.kind === "request" || deferred[0]?.kind === "restarted" ? deferred[0].at : undefined);
+    if (firstAt && new Date(firstAt).toDateString() !== new Date(event.at).toDateString()) flush();
     if (event.type === "post.created") {
       if (sameHome(event.body.home, home)) post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, event.body.attachments ?? [], event.body.mentions ?? []);
       continue;
@@ -127,38 +148,35 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     if (event.type === "op.decided" || event.type === "op.ran") {
       const row = requests.get(event.body.id);
       if (row) row.request = { ...row.request, ...event.body };
+      else if (event.type === "op.decided" && home.kind === "feed") work.push(event);
       continue;
     }
     const session = subject(event);
     if (home.kind === "dm" && session !== home.session) continue;
-    if (event.type === "room.paused" || event.type === "room.resumed" || event.type === "room.limits_changed") {
-      flush(); dated(event.at);
-      rows.push({ kind: "notice", key: `n${event.seq}`, event });
+    if (event.type === "room.paused" || event.type === "room.resumed" || event.type === "room.limits_changed" || event.type === "rule.added" || event.type === "rule.removed" || event.type === "rule.edited") {
+      const previous = deferred.at(-1);
+      if (event.type === "room.resumed" && previous?.kind === "notice" && previous.event.type === "room.paused" && sameAuthor(previous.event.from, event.from) && Date.parse(event.at) - Date.parse(previous.event.at) <= 300_000) previous.resumedAt = event.at;
+      else deferred.push({ kind: "notice", key: `n${event.seq}`, event });
       continue;
     }
     if (event.type === "op.requested") {
-      flush();
-      dated(event.at);
-      const row = { kind: "request" as const, key: `r${event.seq}`, request: { ...event.body, state: "pending" as const } };
+      if (decided.has(event.body.id) && !retainedRequests.has(event.body.id)) { work.push(event); continue; }
+      const row = { kind: "request" as const, key: `r${event.seq}`, at: event.at, request: { ...event.body, state: "pending" as const } };
       requests.set(event.body.id, row);
-      rows.push(row);
+      deferred.push(row);
+      continue;
+    }
+    if (event.type === "session.restarted") {
+      deferred.push({ kind: "restarted", key: `restart${event.seq}`, session: event.body.session, at: event.at });
       continue;
     }
     // Box lifecycle stays out of the feed; only a failed or lost box, or a close that failed to archive,
     // shows as a failed row with its cause in the owner's words.
-    if (event.type === "session.restarted") {
-      flush(); dated(event.at);
-      rows.push({ kind: "restarted", key: `restart${event.seq}`, session: event.body.session, at: event.at });
-      continue;
-    }
     if (event.type === "box.changed") {
       const { to, cause } = event.body;
       // A lost box that then fails has said why already.
       if ((to === "failed" || to === "lost" || cause) && !(to === "failed" && event.body.from === "lost")) {
-        flush();
-        dated(event.at);
-        fresh(event.seq, { kind: "session", session: event.body.session });
-        rows.push({ kind: "failed", key: `f${event.seq}`, seq: event.seq, session: event.body.session, at: event.at, ...boxRow(to, cause) });
+        deferred.push({ kind: "failed", key: `f${event.seq}`, seq: event.seq, session: event.body.session, at: event.at, ...boxRow(to, cause) });
       }
       continue;
     }
@@ -167,8 +185,8 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       const answer = event.body.final && (event.body.replies ?? []).find(({ reply, posted }) =>
         reply.kind === "final" && !posted && sameHome(reply.home ?? { kind: "feed" }, home));
       // Only the end of a turn whose start the row holds ends the row's time.
-      const turn = event.body.turn, stopped = event.body.outcome === "stopped";
-      if ((event.body.final && answer) || event.body.outcome === "failed" || stopped) {
+      const turn = event.body.turn;
+      if (event.body.final && answer) {
         const until = work.some(e => e.type === "turn.started" && e.body.turn === turn) ? event.at : undefined;
         // A reloaded DM window holds only posts and the turns that answered in it, so this end is the turn's only event.
         // The work row keeps it, so the turn's steps can still open above its answer.
@@ -181,19 +199,11 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       // A failed turn always gets its own row, even after its answer; it never folds into a work row. Its error is the
       // harness's raw text (r8), so the row shows only the owner words for its typed cause.
       if (event.body.outcome === "failed") {
-        flush();
-        dated(event.at);
-        fresh(event.seq, { kind: "session", session: event.body.session });
+        if (work.some(e => e.type === "turn.started" && e.body.turn === turn)) work.push(event);
         const cause = event.body.cause;
-        rows.push({ kind: "failed", key: `f${event.seq}`, seq: event.seq, session: event.body.session, at: event.at, label: "Turn failed", cause: cause ? causes[cause] : "" });
+        deferred.push({ kind: "failed", key: `f${event.seq}`, seq: event.seq, session: event.body.session, at: event.at, label: "Turn failed", cause: cause ? causes[cause] : "" });
       }
-      // A stopped turn ends with a line of its own, since the owner asked for it and looks for the result.
-      if (stopped) {
-        flush();
-        dated(event.at);
-        rows.push({ kind: "notice", key: `n${event.seq}`, event });
-      }
-      if (answer || event.body.outcome === "failed" || stopped) continue;
+      if (answer || event.body.outcome === "failed") continue;
     }
     work.push(event);
   }
@@ -201,6 +211,30 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
   flush();
   return rows;
 }
+
+// The local clock range elides a repeated day period, but keeps it when the range crosses noon.
+export function timeSpan(start: string, end: string): string {
+  const formatter = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" });
+  const a = formatter.formatToParts(new Date(start)), b = formatter.formatToParts(new Date(end));
+  const period = (parts: Intl.DateTimeFormatPart[]) => parts.find(part => part.type === "dayPeriod")?.value;
+  const first = a.filter(part => period(a) && period(a) === period(b) ? part.type !== "dayPeriod" : true).map(part => part.value).join("").trim();
+  return `${first} – ${b.map(part => part.value).join("").trim()}`;
+}
+
+// Every event type has a plural group label, including types that do not currently appear in a work block.
+export const eventGroups: Record<Event["type"], string> = {
+  "account.failed": "account failures", "account.quota_low": "account quota alerts",
+  "post.created": "posts", "session.started": "sessions started", "session.closed": "sessions closed",
+  "session.restarted": "boxes replaced", "session.moved": "sessions moved", "session.profile_changed": "profiles changed",
+  "turn.started": "turns started", "turn.ended": "turns ended", "turn.activity": "turn updates",
+  "computer.changed": "computer changes", "box.changed": "box changes", "box.pressure": "memory warnings",
+  "room.paused": "pauses", "room.resumed": "resumes", "room.limits_changed": "room limits changed",
+  "rule.added": "rules added", "rule.edited": "rules changed", "rule.removed": "rules removed",
+  "op.requested": "requests", "op.decided": "requests decided", "op.ran": "requests run",
+  "image.built": "images built", "image.failed": "image builds failed", "pr.opened": "pull requests opened",
+  "shell.job.ended": "jobs finished", "grant.expired": "host grants expired",
+  "host.disk_low": "disk warnings", "conversation.read": "read positions",
+};
 
 // A full moment for a title, such as "Oct 31, 2026, 4:48 AM".
 export const fullTime = (value: string): string => new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
@@ -293,52 +327,43 @@ const closeReasons: Record<SessionCloseReason, string> = { dormant: "after 7 qui
 // "Worked for 20s"; without both ends the line says "lead-web worked · 2 turns". A DM's saved steps give the start
 // that a reloaded window lacks.
 export function workSummary(events: Event[], name: Name, until?: string, from?: string): string {
-  const started: string[] = [], moved: string[] = [], closed: string[] = [], opened: string[] = [], shut: string[] = [];
-  // Sessions the engine closed, by why.
-  const closedFor = new Map<SessionCloseReason, string[]>();
-  const turns = new Map<string, Set<string>>();
-  let jobs = 0, images = 0, failedImages = 0, prs = 0, memory = 0, grants = 0, rules = 0, first = Infinity, last = -Infinity;
+  if (events.length === 1 && !until && events[0].type !== "computer.changed" && !(events[0].type === "session.closed" && events[0].body.reason)) return describe(events[0], name) || "Activity";
+  const turns = new Set<string>();
+  let stopped = 0, images = 0, prs = 0, started = 0, closed = 0, memory = 0;
+  const approvals = new Map<string, number>();
+  let first = Infinity, last = -Infinity;
   for (const event of events) {
     switch (event.type) {
-      case "session.started": started.push(name(event.body.session)); break;
-      case "session.moved": moved.push(name(event.body.session)); break;
-      case "session.closed": {
-        const reason = event.body.reason;
-        if (reason) closedFor.set(reason, [...closedFor.get(reason) ?? [], name(event.body.session)]); else closed.push(name(event.body.session));
+      case "turn.started": turns.add(event.body.session); first = Math.min(first, Date.parse(event.at)); break;
+      case "turn.ended":
+        turns.add(event.body.session);
+        last = Math.max(last, Date.parse(event.at));
+        if (event.body.outcome === "stopped") stopped++;
         break;
-      }
-      case "computer.changed": (event.body.to === "running" ? opened : shut).push(name(event.body.session)); break;
-      case "turn.started": case "turn.ended":
-        turns.set(event.body.session, (turns.get(event.body.session) ?? new Set()).add(event.body.turn));
-        if (event.type === "turn.started") first = Math.min(first, Date.parse(event.at)); else last = Math.max(last, Date.parse(event.at));
-        break;
-      case "shell.job.ended": jobs++; break;
+      case "session.started": started++; break;
+      case "session.closed": if (!event.body.reason) closed++; break;
       case "image.built": images++; break;
-      case "image.failed": failedImages++; break;
       case "pr.opened": prs++; break;
       case "box.pressure": memory++; break;
-      case "grant.expired": grants++; break;
-      case "rule.added": case "rule.removed": case "rule.edited": rules++; break;
+      case "op.decided": if (event.body.decision.approved) { const by = event.body.decision.by.session ? name(event.body.decision.by.session) : "you"; approvals.set(by, (approvals.get(by) ?? 0) + 1); } break;
     }
   }
   if (until) last = Math.max(last, Date.parse(until));
   if (from) first = Math.min(first, Date.parse(from));
-  const who = (sessions: string[]) => sessions.length > 2 ? `${sessions.length} sessions`
-    : sessions.length === 2 && sessions.every(session => session === closedSession) ? "Closed sessions" : list([...new Set(sessions)]);
   const minutes = Math.round((last - first) / 60_000);
   const took = minutes < 1 ? "under a minute" : minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${minutes % 60} min` : ""}`;
-  const ran = [...turns.values()].reduce((sum, set) => sum + set.size, 0);
+  const sessions = [...turns];
   const parts = [
-    started.length && `${who(started)} started`,
-    turns.size && `${who([...turns.keys()].map(name))} worked${last >= first ? ` for ${took}` : ""}`,
-    ran && count(ran, "turn"), jobs && count(jobs, "job"), images && `${count(images, "image")} built`,
-    failedImages && `${count(failedImages, "image build")} failed`, prs && count(prs, "pull request"),
-    memory && count(memory, "memory warning"), grants && `${count(grants, "host execution grant")} expired`,
-    rules && count(rules, "rule change"),
-    opened.length && `${who(opened)} opened a computer`, shut.length && `${who(shut)} closed a computer`, moved.length && `${who(moved)} moved`, closed.length && `${who(closed)} closed`,
-    ...[...closedFor].map(([reason, sessions]) => `${who(sessions)} closed ${closeReasons[reason]}`),
-  ].filter(part => typeof part === "string");
-  return parts.length ? parts.join(" · ") : count(events.length, "update");
+    sessions.length && `${sessions.length === 1 ? name(sessions[0]) : count(sessions.length, "session")} worked${sessions.length === 1 && last >= first ? ` for ${took}` : ""}`,
+    stopped && `${count(stopped, "turn")} stopped`,
+    images && `${count(images, "image")} built`,
+    prs && `${count(prs, "pull request")} opened`,
+    ...[...approvals].map(([by, amount]) => `${count(amount, "approval")} by ${by}`),
+    started && `${count(started, "session")} started`,
+    closed && `${closed} closed`,
+    memory && count(memory, "memory warning"),
+  ].filter((part): part is string => typeof part === "string").slice(0, 4);
+  return parts.join(" · ") || (events.length === 1 && events[0].type !== "computer.changed" && !(events[0].type === "session.closed" && events[0].body.reason) ? describe(events[0], name) : "") || "Activity";
 }
 
 // One plain line for an event inside an opened work row.
@@ -351,7 +376,7 @@ export function describe(event: Event, name: Name): string {
     case "computer.changed": return `${name(event.body.session)} ${event.body.to === "running" ? "opened" : "closed"} its computer`;
     case "box.changed": return ""; // feedRows keeps box changes out of work rows.
     case "turn.started": return `${name(event.body.session)} started a turn`;
-    case "turn.ended": return event.body.outcome === "stopped" ? `${name(event.body.session)}'s turn stopped` : `${name(event.body.session)} finished a turn`;
+    case "turn.ended": return event.body.outcome === "failed" ? "" : event.body.outcome === "stopped" ? `${name(event.body.session)}'s turn stopped` : `${name(event.body.session)} finished a turn`;
     // Live only: the room store keeps it out of every feed window.
     case "account.failed": case "account.quota_low": case "host.disk_low": case "conversation.read": return "";
     case "turn.activity": return event.body.label;
@@ -360,7 +385,9 @@ export function describe(event: Event, name: Name): string {
       if (event.body.end?.kind === "stopped") return `${who} stopped its ${job}`;
       return failed(event.body) ? `${who}'s ${job} failed: ${endCause(event.body, who)}` : `${who}'s ${job} finished`;
     }
-    case "op.requested": case "op.decided": case "op.ran": return ""; // feedRows gives each request its own row.
+    case "op.decided": return `${event.body.decision.by.session ? name(event.body.decision.by.session) : "You"} ${event.body.decision.approved ? "approved" : "denied"} a request`;
+    case "op.requested": return `${event.body.by.kind === "owner" ? "You" : event.body.by.session ? name(event.body.by.session) : "Dyna"} ${event.body.by.kind === "owner" ? event.body.card.title.replace(/^asks\b/, "ask") : event.body.card.title}${event.body.card.target.name ? ` · ${event.body.card.target.name}` : ""}`;
+    case "op.ran": return "";
     case "image.built": return `Image ${event.body.name}:${event.body.tag} built in ${event.body.seconds} s`;
     // The reason is raw build output (r8); the build log holds it.
     case "image.failed": return `Image ${event.body.name}:${event.body.tag} failed`;
