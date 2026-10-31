@@ -10,6 +10,8 @@ Dyna modified this vendored source. The upstream repository is `https://github.c
 
 ## Dyna changes
 
+Tool search ranking ports upstream fixes [#11625](https://github.com/earendil-works/pi/pull/11625) (`cc44fa216959c0ace2ff131eac918b911d8c9cde`) and [#11632](https://github.com/earendil-works/pi/pull/11632) (`e033f255f0f560cf5e825f312c75c45baadc3cb4`), adapted to the v1.4.0 subtree. Names weigh above descriptions, and a result matching more query terms ranks first. This removes no Dyna code.
+
 P0 adds this documentation and changes no upstream Pi file. It changes no Pi behavior and removes no Dyna code. `scripts/pi-pack.sh` stages the built packages outside this tree, sets every internal fork package to `1.4.0-dyna.1`, and adds `dynaFork: 1` and bundled dependencies to the staged metadata. The upstream files stay unchanged.
 
 Each later Pi behavior change must add an entry here and name the Dyna code it removes.
