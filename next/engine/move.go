@@ -10,38 +10,22 @@ import (
 
 // SessionMove moves a session without changing its box.
 func (s *Service) SessionMove(ctx context.Context, caller contract.Principal, req contract.SessionMoveRequest) (contract.SessionMoveResponse, *contract.Error) {
-	s.treeMu.Lock()
-	defer s.treeMu.Unlock()
 	var response contract.SessionMoveResponse
 	session, err := s.store.Session(ctx, req.Session)
 	if err != nil {
 		return response, failure(err)
 	}
-	tree, err := s.store.RoomTree(ctx, session.Room)
-	if err != nil {
-		return response, failure(err)
-	}
-	if !tree.CanManage(caller, req.Session) || !(tree.CanManage(caller, req.NewParent) || caller.Kind == contract.PrincipalSession && caller.Session == req.NewParent) {
-		return response, forbidden()
-	}
-	if err := tree.CheckMove(req.Session, req.NewParent); err != nil {
-		return response, invalid(err.Error())
-	}
-	order, err := tree.CloseOrder(req.Session)
-	if err != nil {
-		return response, invalid(err.Error())
-	}
-	depth := tree.Depth(req.NewParent) + 1 + tree.Depth(order[0]) - tree.Depth(req.Session)
-	if e := s.checkDepth(depth); e != nil {
-		return response, e
-	}
 	event, err := s.event(session.Room, caller, contract.SessionMoved{Session: req.Session, NewParent: req.NewParent})
 	if err != nil {
 		return response, failure(err)
 	}
-	err = s.store.MoveSession(ctx, req.Session, req.NewParent, event)
-	if errors.Is(err, store.ErrMoveCycle) {
-		return response, invalid(err.Error())
+	err = s.store.MoveSession(ctx, req.Session, req.NewParent, event, s.maxDepth)
+	var treeErr *store.TreeError
+	if errors.As(err, &treeErr) {
+		return response, invalid(treeErr.Error())
+	}
+	if errors.Is(err, store.ErrTreeForbidden) {
+		return response, forbidden()
 	}
 	if err != nil {
 		return response, failure(err)

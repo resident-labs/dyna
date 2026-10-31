@@ -29,6 +29,9 @@ type profile struct {
 	MaxCallsPerRun int                    `json:"maxCallsPerRun,omitempty"`
 }
 
+// Profile operations take the profile lock, then the store transaction. The post-commit
+// wake hook calls non-blocking Kick, then takes wakeMu. wakeMu is a leaf lock.
+// No box IO runs while the profile lock is held.
 type ProfileConfig struct {
 	mu      sync.RWMutex
 	path    string
@@ -147,6 +150,10 @@ func (p *ProfileConfig) Model(name contract.ProfileName) (contract.ModelChoice, 
 func (p *ProfileConfig) update(name contract.ProfileName, value *profile, create bool) *contract.Error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	return p.updateLocked(name, value, create)
+}
+
+func (p *ProfileConfig) updateLocked(name contract.ProfileName, value *profile, create bool) *contract.Error {
 	if _, exists := p.entries[name]; create && exists {
 		return &contract.Error{Code: contract.ErrProfileExists, Message: "profile already exists"}
 	}
@@ -210,6 +217,40 @@ func (s *Service) ProfileSet(_ context.Context, who contract.Principal, req cont
 	return contract.ProfileSetResponse{}, err
 }
 
+// WithProfile protects a profile from removal while fn commits a session write.
+func (p *ProfileConfig) WithProfile(name contract.ProfileName, fn func() *contract.Error) *contract.Error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if _, ok := p.entries[name]; !ok {
+		return invalid("unknown profile")
+	}
+	return fn()
+}
+
+// Remove serializes the in-use check and removal against profile assignments.
+func (p *ProfileConfig) Remove(name contract.ProfileName, inUse func() (bool, error)) *contract.Error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	used, err := inUse()
+	if err != nil {
+		return failure(err)
+	}
+	if used {
+		return &contract.Error{Code: contract.ErrConflict, Message: "profile is used by an open session"}
+	}
+	return p.updateLocked(name, nil, false)
+}
+
+func (s *Service) withProfile(name contract.ProfileName, fn func() *contract.Error) *contract.Error {
+	if p, ok := s.profiles.(*ProfileConfig); ok {
+		return p.WithProfile(name, fn)
+	}
+	if _, _, err := s.profiles.Model(name); err != nil {
+		return invalid("unknown profile")
+	}
+	return fn()
+}
+
 func (s *Service) ProfileRemove(ctx context.Context, who contract.Principal, req contract.ProfileRemoveRequest) (contract.ProfileRemoveResponse, *contract.Error) {
 	if who.Kind != contract.PrincipalOwner {
 		return contract.ProfileRemoveResponse{}, forbidden()
@@ -218,14 +259,7 @@ func (s *Service) ProfileRemove(ctx context.Context, who contract.Principal, req
 	if !ok {
 		return contract.ProfileRemoveResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "profile configuration is read-only"}
 	}
-	s.treeMu.Lock()
-	defer s.treeMu.Unlock()
-	inUse, err := s.store.ProfileInUse(ctx, req.Name)
-	if err != nil {
-		return contract.ProfileRemoveResponse{}, failure(err)
-	}
-	if inUse {
-		return contract.ProfileRemoveResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "profile is used by an open session"}
-	}
-	return contract.ProfileRemoveResponse{}, p.update(req.Name, nil, false)
+	return contract.ProfileRemoveResponse{}, p.Remove(req.Name, func() (bool, error) {
+		return s.store.ProfileInUse(ctx, req.Name)
+	})
 }
