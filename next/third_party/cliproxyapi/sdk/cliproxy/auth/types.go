@@ -67,6 +67,8 @@ type Auth struct {
 	Prefix string `json:"prefix,omitempty"`
 	// FileName stores the relative or absolute path of the backing auth file.
 	FileName string `json:"-"`
+	// OAuthGrantReplaced records an atomic runtime replacement for this login only.
+	OAuthGrantReplaced bool `json:"-"`
 	// Storage holds the token persistence implementation used during login flows.
 	Storage baseauth.TokenStorage `json:"-"`
 	// CodexRefreshPatch carries an immutable pending credential update, never configuration.
