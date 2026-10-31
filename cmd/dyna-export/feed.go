@@ -65,7 +65,20 @@ func readFeed(feeds, roomID string) (roomFeed, error) {
 		event, ok := msg.Issue()
 		if !ok {
 			if msg.Kind == string(room.FamilyIssue) {
-				return roomFeed{}, fmt.Errorf("captured issue event is not decodable")
+				if msg.Payload.IsZero() {
+					return roomFeed{}, fmt.Errorf("issue feed payload is missing")
+				}
+				raw, err := msg.Payload.MarshalJSON()
+				if err != nil {
+					return roomFeed{}, fmt.Errorf("issue feed payload: %w", err)
+				}
+				var event room.IssueEvent
+				decoder := json.NewDecoder(bytes.NewReader(raw))
+				decoder.DisallowUnknownFields()
+				if err := decoder.Decode(&event); err != nil {
+					return roomFeed{}, fmt.Errorf("decode issue feed payload: %w", err)
+				}
+				return roomFeed{}, fmt.Errorf("issue feed payload type is missing")
 			}
 			continue
 		}

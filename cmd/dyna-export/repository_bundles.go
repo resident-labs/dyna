@@ -36,9 +36,12 @@ func buildRepositories(db *sql.DB, records []room.Record, cap capture) (repoOutp
 		paths = append(paths, rec.ExtraRepos...)
 		seen := make(map[contract.RepoName]bool)
 		for _, p := range paths {
-			id, ok := cap.Repos[p]
-			if !ok {
-				return out, fmt.Errorf("repository path missing from capture manifest")
+			id := cap.Repos[p]
+			if id == "" {
+				name := contract.RoomName(rec.Name)
+				out.RoomHandoffs[name] = append(out.RoomHandoffs[name], contract.RepoHandoff{Identity: p, Reason: contract.RepoUnverifiedIdentity})
+				out.Gaps = append(out.Gaps, repoGap{Identity: p, Rooms: []contract.RoomName{name}, Reason: "unverifiedIdentity"})
+				continue
 			}
 			if seen[id] {
 				return out, fmt.Errorf("duplicate room repository")
