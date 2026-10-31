@@ -12,6 +12,14 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+// RecordEvent appends one event in its own transaction.
+func (s *Store) RecordEvent(ctx context.Context, event contract.Event) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := s.AppendEvent(tx, event)
+		return err
+	})
+}
+
 // AppendEvent inserts an event in a transaction submitted through Write.
 func (s *Store) AppendEvent(tx *sql.Tx, event contract.Event) (int64, error) {
 	if tx != s.currentTx {
