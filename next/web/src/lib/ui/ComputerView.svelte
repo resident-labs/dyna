@@ -14,11 +14,13 @@
   // Floating, the view is a window over the app; docked, it sits above the session list in the sessions panel. The
   // rect belongs to the app, so the window keeps its place and size for the page view.
   // onfit gives each frame's ratio and the height around the screen, so a floating window can show no black bars.
-  let { session, name, root, activity, docked, full = false, rect = $bindable(), element = $bindable(), onclose, ondock, onfit }: {
-    session: string; name: string; root: boolean; activity?: string; docked: boolean; full?: boolean; rect: Rect; element?: HTMLElement; onclose: (tapped: boolean) => void; ondock: (event: MouseEvent) => void;
+  // At full screen, the steps before the current one read below the screen, newest first.
+  let { session, name, root, activity, steps, docked, full = false, rect = $bindable(), element = $bindable(), onclose, ondock, onfit }: {
+    session: string; name: string; root: boolean; activity?: string; steps: string[]; docked: boolean; full?: boolean; rect: Rect; element?: HTMLElement; onclose: (tapped: boolean) => void; ondock: (event: MouseEvent) => void;
     onfit: (ratio: number, chrome: number) => void;
   } = $props();
   let screen: HTMLElement | undefined = $state();
+  let earlier = $derived(full ? steps.slice(-6, -1).reverse() : []);
   let visible = $state(document.visibilityState === "visible");
   // A stopped computer closes this view, so a failure here is a broken or silent stream. The owner's retry or the
   // page becoming visible again tries once more; nothing retries on a timer.
@@ -64,6 +66,7 @@
   <!-- The current step, one muted line under the screen: "qa-runner · reading the review state". Floating, the line
        stays between steps, so the screen keeps the shape the window was fitted to. -->
   {#if activity || (!docked && !full)}<p class="activity">{activity ? `${name} · ${activity}` : name}</p>{/if}
+  {#if earlier.length}<ol class="earlier" aria-label="Earlier steps">{#each earlier as step, i (i)}<li>{step}</li>{/each}</ol>{/if}
 </FloatWindow>
 
 <style>
@@ -79,11 +82,14 @@
      floating, it fills the window body edge to edge and the dark background fills the letterbox. */
   .screen { position: relative; display: grid; place-items: center; flex: 1; margin: 0; border-radius: 0 0 7px 7px; overflow: hidden; background: #0d0d0f; }
   .screen.foot { border-radius: 0; }
-  .screen.full { border-radius: 0; }
+  /* Full screen, the picture sits under the title bar at its own shape; a short screen shrinks it to keep the steps. */
+  .screen.full { flex: 0 1 auto; width: 100%; aspect-ratio: var(--ratio); border-radius: 0; }
   .screen.docked { flex: none; aspect-ratio: var(--ratio); margin: 12px 12px 0; border: 1px solid var(--line); border-radius: 8px; }
   img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
   /* v1's badge: a dark chip over the last picture, readable on any frame. */
   .badge { position: absolute; left: 12px; top: 12px; margin: 0; padding: 3px 11px; border-radius: 12px; background: rgb(20 19 22 / 82%); color: #d8d3cc; font-size: 12px; }
   .badge .retry { margin-left: 4px; color: #f4f0ea; }
   .activity { flex: none; margin: 0; padding: 6px 12px; overflow: hidden; color: var(--muted); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+  .earlier { flex: none; margin: 0; padding: 0 12px 6px; color: var(--muted); font-size: 12.5px; line-height: 20px; list-style: none; }
+  .earlier li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
