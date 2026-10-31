@@ -19,6 +19,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/resident-labs/dyna/box/post"
+	"github.com/resident-labs/dyna/box/visual"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/contract/tools"
 	"github.com/spf13/cobra"
@@ -516,9 +517,9 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	var postRoom, htmlPath, update string
 	var allowNet bool
 	var mentions, paths []string
-	post := &cobra.Command{Use: "post TEXT", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	postCmd := &cobra.Command{Use: "post TEXT", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		c := getClient()
-		request, checks, err := post.Prepare(cmd.Context(), c.Upload, tools.PostInput{Room: contract.RoomID(postRoom), Text: args[0], Mentions: mentions, Paths: paths, HTML: htmlPath, AllowNet: allowNet, VisualUpdate: contract.EventID(update)})
+		request, checks, err := (post.Preparer{Upload: c.Upload, Render: visual.Preview}).Prepare(cmd.Context(), tools.PostInput{Room: contract.RoomID(postRoom), Text: args[0], Mentions: mentions, Paths: paths, HTML: htmlPath, AllowNet: allowNet, VisualUpdate: contract.EventID(update)})
 		if err != nil {
 			return err
 		}
@@ -529,13 +530,13 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		}
 		return err
 	}}
-	post.Flags().StringVar(&htmlPath, "html", "", "Attach an HTML visual card")
-	post.Flags().StringVar(&update, "update", "", "Add a version to a visual post")
-	post.Flags().BoolVar(&allowNet, "allow-net", false, "Allow HTTPS resources in the visual")
-	post.Flags().StringArrayVar(&paths, "attach", nil, "Attach a file (repeatable)")
-	post.Flags().StringVar(&postRoom, "room", "", "Room ID")
-	post.Flags().StringSliceVar(&mentions, "mention", nil, "Session mentions")
-	root.AddCommand(post, visualCommand())
+	postCmd.Flags().StringVar(&htmlPath, "html", "", "Attach an HTML visual card")
+	postCmd.Flags().StringVar(&update, "update", "", "Add a version to a visual post")
+	postCmd.Flags().BoolVar(&allowNet, "allow-net", false, "Allow HTTPS resources in the visual")
+	postCmd.Flags().StringArrayVar(&paths, "attach", nil, "Attach a file (repeatable)")
+	postCmd.Flags().StringVar(&postRoom, "room", "", "Room ID")
+	postCmd.Flags().StringSliceVar(&mentions, "mention", nil, "Session mentions")
+	root.AddCommand(postCmd, visualCommand())
 	contextCmd := &cobra.Command{Use: "context"}
 	contextCmd.AddCommand(&cobra.Command{Use: "show SECTION", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		result, err := getClient().ContextSnapshot(cmd.Context(), contract.ContextSnapshotRequest{Section: args[0]})
