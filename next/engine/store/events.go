@@ -159,6 +159,15 @@ func (s *Store) eventsPage(ctx context.Context, room contract.RoomID, afterSeq, 
 }
 
 // Event returns one event by sequence, including events from another room.
+// EventInRoom finds a room event by ID without exposing events from other rooms.
+func (s *Store) EventInRoom(ctx context.Context, room contract.RoomID, id contract.EventID) (contract.Event, error) {
+	var seq int64
+	if err := s.Read().QueryRowContext(ctx, "SELECT seq FROM events WHERE id=? AND room=?", id, room).Scan(&seq); err != nil {
+		return contract.Event{}, err
+	}
+	return s.Event(ctx, seq)
+}
+
 func (s *Store) Event(ctx context.Context, seq int64) (contract.Event, error) {
 	var room sql.NullString
 	if err := s.Read().QueryRowContext(ctx, "SELECT room FROM events WHERE seq=?", seq).Scan(&room); err != nil {
