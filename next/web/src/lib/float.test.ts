@@ -20,8 +20,8 @@ test("fits a window to its frame, keeping the top right corner", () => {
   assert.deepEqual(fitted(rect, 1.6, 70, 400), { x: 681, y: 68, w: 419, h: 332 });
 });
 
-test("a computer opens against the right edge, and says when it cannot clear the cards", () => {
-  assert.deepEqual(computerPlace(1440, 68, 744), { rect: { x: 1008, y: 68, w: 416, h: 300 }, clear: true });
-  assert.equal(computerPlace(1184, 68, 744).clear, true);
-  assert.equal(computerPlace(1183, 68, 744).clear, false);
+test("a computer opens 16 px inside the feed's right edge, and says when it cannot clear the cards", () => {
+  assert.deepEqual(computerPlace(1177, 68, 744), { rect: { x: 761, y: 68, w: 400, h: 300 }, clear: true });
+  assert.equal(computerPlace(1168, 68, 744).clear, true);
+  assert.equal(computerPlace(1167, 68, 744).clear, false);
 });
