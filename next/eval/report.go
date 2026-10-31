@@ -7,9 +7,9 @@ import (
 )
 
 // WriteReport lists every task, including skipped and unmeasured tasks.
-func WriteReport(w io.Writer, results []CellResult, skipRepository, skipChildren bool) error {
+func WriteReport(w io.Writer, results []CellResult, skipRepository bool) error {
 	expected := make(map[Cell]bool)
-	for _, cell := range Schedule(skipRepository, skipChildren) {
+	for _, cell := range Schedule(skipRepository) {
 		expected[cell] = true
 	}
 	recorded := make(map[Cell]CellResult)

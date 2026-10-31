@@ -43,12 +43,12 @@ type CellResult struct {
 // RunSuite executes the live-trial sanity schedule once. Setup, observation and cleanup errors
 // stop the run; a repeated early provider failure is retained as unmeasured.
 // The backend must journal attempts durably before execution and refuse replays.
-// Both optional skip decisions are fixed before the run and apply to both arms.
-func RunSuite(ctx context.Context, backend Backend, skipRepository, skipChildren bool, emit func(CellResult) error) error {
+// The repository skip decision is fixed before the run and applies to both arms.
+func RunSuite(ctx context.Context, backend Backend, skipRepository bool, emit func(CellResult) error) error {
 	if err := backend.Preflight(ctx); err != nil {
 		return fmt.Errorf("evaluation preflight: %w", err)
 	}
-	for _, cell := range Schedule(skipRepository, skipChildren) {
+	for _, cell := range Schedule(skipRepository) {
 		fixture, err := backend.Prepare(ctx, cell)
 		if err != nil {
 			return fmt.Errorf("prepare task %d: %w", cell.Task, err)

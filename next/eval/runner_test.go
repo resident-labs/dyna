@@ -33,7 +33,7 @@ func (b *incompleteFixtureBackend) Execute(context.Context, Cell, Fixture) (Atte
 
 func TestIncompleteFixtureStartsNoModel(t *testing.T) {
 	backend := &incompleteFixtureBackend{}
-	err := RunSuite(context.Background(), backend, false, false, func(CellResult) error { t.Fatal("unexpected result"); return nil })
+	err := RunSuite(context.Background(), backend, false, func(CellResult) error { t.Fatal("unexpected result"); return nil })
 	if err == nil || backend.calls != 1 || backend.executed {
 		t.Fatalf("err=%v prepares=%d", err, backend.calls)
 	}
@@ -41,7 +41,7 @@ func TestIncompleteFixtureStartsNoModel(t *testing.T) {
 
 func TestMissingPrerequisiteStartsNoTasks(t *testing.T) {
 	backend := &blockedBackend{}
-	err := RunSuite(context.Background(), backend, false, false, func(CellResult) error { t.Fatal("unexpected result"); return nil })
+	err := RunSuite(context.Background(), backend, false, func(CellResult) error { t.Fatal("unexpected result"); return nil })
 	if err == nil || backend.calls != 0 {
 		t.Fatalf("err=%v prepares=%d", err, backend.calls)
 	}
