@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
-  import { accountRows, accountState, refused, reconnectUnavailable } from "../accounts.ts";
+  import { accountRows, accountState, providerGroup, refused, reconnectUnavailable } from "../accounts.ts";
   import { visibleWindows, windowMeter } from "../usage.ts";
   import type { Account, AccountProviderInfo, AccountUsage, AccountsConnectResponse, RoomSummary } from "../contract.gen.ts";
   import StatusPill from "./StatusPill.svelte";
@@ -23,7 +23,6 @@
   let account = $derived(accounts.find(a => a.id === accountId));
   let accountProvider = $derived(providers.find(p => p.id === account?.provider));
   let accountUsage = $derived(usage.find(u => u.accountId === accountId));
-  let filtered = $derived(providers.filter(p => p.displayName.toLowerCase().includes(query.trim().toLowerCase())));
   const groups = [{ flow: "callback", title: "Sign in with your plan" }, { flow: "device", title: "Sign in with a code" }, { flow: "key", title: "API key" }] as const;
   const providerPath = (id: string) => base + "/add/" + encodeURIComponent(id);
   const accountPath = (id: string) => base + "/account/" + encodeURIComponent(id);
@@ -95,13 +94,13 @@
       <section class="picker">
         <input aria-label="Search providers" placeholder={`Search ${providers.length} providers`} bind:value={query} />
         {#each groups as group}
-          {@const matches = filtered.filter(p => p.connectFlow === group.flow)}
-          {#if matches.length}<h3>{group.title} · {matches.length}</h3>
-            {#each group.flow === "key" && !query && !expanded ? matches.slice(0, 10) : matches as provider (provider.id)}
+          {@const matches = providerGroup(providers, group.flow, query, expanded)}
+          {#if matches.count}<h3>{group.title} · {matches.count}</h3>
+            {#each matches.items as provider (provider.id)}
               {@const connected = accounts.filter(a => a.provider === provider.id).length}
               <a class:chosen={selected?.id === provider.id} href={providerPath(provider.id)} onclick={(e) => { reset(); label = ""; navigate(e); }}><span class="initial">{provider.displayName.slice(0, 1)}</span><strong>{provider.displayName}</strong>{#if connected}<span class="muted">{connected} connected</span>{/if}</a>
             {/each}
-            {#if group.flow === "key" && !query && !expanded && matches.length > 10}<button class="btn ghost" type="button" onclick={() => expanded = true}>Show {matches.length - 10} more</button>{/if}
+            {#if matches.remaining}<button class="btn ghost" type="button" onclick={() => expanded = true}>Show {matches.remaining} more</button>{/if}
           {/if}
         {/each}
       </section>
