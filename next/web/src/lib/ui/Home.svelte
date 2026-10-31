@@ -2,9 +2,12 @@
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { call } from "../client.ts";
   import type { Attention } from "../attention.svelte.ts";
-  import type { Principal, SessionListResponse } from "../contract.gen.ts";
+  import type { AccountUsage, HostSummary, Principal, SessionListResponse } from "../contract.gen.ts";
+  import { hostMeters } from "../hosts.ts";
   import Avatar from "./Avatar.svelte";
+  import HostCard from "./HostCard.svelte";
   import SessionRow from "./SessionRow.svelte";
+  import UsageCard from "./UsageCard.svelte";
   type Navigate = (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void;
   // onrequests opens the Requests panel once the link has moved to that room.
   let { attention, navigate, onrequests }: { attention: Attention; navigate: Navigate; onrequests: () => void } = $props();
@@ -59,27 +62,69 @@
   const total = (sets: Map<string, Set<string>>) => [...sets.values()].reduce((sum, set) => sum + set.size, 0);
   let missing = $derived(waiting.length < total(attention.waiting) || working.length < total(attention.working));
   const roomHref = (room: string) => "/r/" + encodeURIComponent(room);
+  // Hosts load when Home opens, then every 10 s to match the engine's beat, only while the page is visible.
+  // A failed call keeps the last answer, and the next tick tries again. A tick skips while a call is out, so
+  // calls never pile up on a slow engine and answers arrive in order.
+  let hosts: HostSummary[] | undefined = $state();
+  let hostsFailed = $state(false);
+  $effect(() => {
+    let timer: ReturnType<typeof setInterval> | undefined;
+    let loading = false;
+    const tick = () => {
+      if (loading) return;
+      loading = true;
+      // A control plane that reports no load shows no card, never an empty one.
+      void call("host.list", {}).then(list => { hosts = (list.hosts ?? []).filter(h => h.name !== "control-plane" || hostMeters(h).length); hostsFailed = false; }, () => { hostsFailed = true; })
+        .finally(() => { loading = false; });
+    };
+    const sync = () => { clearInterval(timer); if (document.hidden) return; tick(); timer = setInterval(tick, 10_000); };
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => { clearInterval(timer); document.removeEventListener("visibilitychange", sync); };
+  });
+  // Model usage loads once when Home opens: the engine caches it for 5 min. Reset times count from that answer.
+  let accounts: AccountUsage[] | undefined = $state();
+  let accountsFailed = $state(false);
+  let loadedAt = $state(0);
+  $effect(() => {
+    void call("accounts.quota", {}).then(list => { accounts = list.accounts ?? []; loadedAt = Date.now(); }, () => { accountsFailed = true; });
+  });
 </script>
 
 <div class="home">
-  {#if anyWaiting}<h2 class="label">Waiting for you{#if waiting.length}<span>{waiting.length}</span>{/if}</h2>
-    {#each waiting as { id, room, value, who, root } (id)}<a class="item" href={roomHref(room.id)}
-      onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>
-      <Avatar kind={value.by.kind} name={who} {root} size={28} />
-      <span class="lines"><span class="title">{value.title}</span><span class="line">{who} · {room.name}</span></span></a>{/each}{/if}
-  {#if anyWorking}<h2 class="label">Working{#if working.length}<span>{working.length}</span>{/if}</h2>
-    {#each working as { id, room, value } (id)}<a class="item" href={`${roomHref(room.id)}/s/${encodeURIComponent(id)}`} onclick={navigate}>
-      <SessionRow name={value.name} root={value.root} status={["working", attention.activity.get(id), room.name].filter(Boolean).join(" · ")} /></a>{/each}{/if}
+  <!-- Waiting and Working are one list card each, side by side, with their empty state inside. -->
+  <div class="cards top">
+    <section class="card"><h2>Waiting for you{#if waiting.length}<span>{waiting.length}</span>{/if}</h2>
+      {#each waiting as { id, room, value, who, root } (id)}<a class="item" href={roomHref(room.id)}
+        onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>
+        <Avatar kind={value.by.kind} name={who} {root} size={28} />
+        <span class="lines"><span class="title">{value.title}</span><span class="line">{who} · {room.name}</span></span></a>{/each}
+      {#if !anyWaiting}<p class="none">Nothing is waiting for you.</p>{/if}</section>
+    <section class="card"><h2>Working{#if working.length}<span>{working.length}</span>{/if}</h2>
+      {#each working as { id, room, value } (id)}<a class="item" href={`${roomHref(room.id)}/s/${encodeURIComponent(id)}`} onclick={navigate}>
+        <SessionRow name={value.name} root={value.root} status={["working", attention.activity.get(id), room.name].filter(Boolean).join(" · ")} /></a>{/each}
+      {#if !anyWorking}<p class="none">No session is working.</p>{/if}</section>
+  </div>
   {#if failed && missing}<p class="failed">Some items could not load. <button type="button" class="retry" onclick={() => { failed = false; attempt++; }}>Try again</button></p>{/if}
-  {#if !anyWaiting && !anyWorking}<p class="empty">Nothing waits for you, and no session is working.</p>{/if}
+  {#if hosts?.length || hostsFailed}<h2>Machines{#if hosts?.length}<span>{hosts.length}</span>{/if}</h2>{/if}
+  {#if !hosts && hostsFailed}<p class="failed">Machines could not load.</p>{/if}
+  {#if hosts?.length}<div class="cards">{#each hosts as host (host.name)}<HostCard {host} />{/each}</div>{/if}
+  {#if accounts?.length || accountsFailed}<h2>Usage{#if accounts?.length}<span>{accounts.length}</span>{/if}</h2>{/if}
+  {#if accountsFailed}<p class="failed">Model usage could not load.</p>{/if}
+  {#if accounts?.length}<div class="cards">{#each accounts as account, i (i)}<UsageCard {account} now={loadedAt} />{/each}</div>{/if}
 </div>
 
 <style>
-  .home { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; width: min(640px, 100%); margin: 0 auto; padding: 16px 8px; }
-  h2 { display: flex; justify-content: space-between; margin: 16px 8px 4px; }
-  h2 span { font-weight: 400; font-variant-numeric: tabular-nums; }
-  .item { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 8px; border-radius: 8px; color: var(--text); text-decoration: none; }
+  /* Home is a dashboard, so its card grids use the page width up to 1200 px. */
+  .home { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; width: min(1200px, 100%); margin: 0 auto; padding: 16px 16px 32px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin: 0 8px; }
+  .top { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); margin-top: 8px; }
+  h2 { display: flex; align-items: baseline; gap: 8px; margin: 24px 8px 12px; font-size: 18px; font-weight: 600; line-height: 1.25; }
+  .card h2 { margin: 0 0 8px; font-size: 16px; }
+  h2 span { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+  .item { display: flex; align-items: center; gap: 10px; min-height: 44px; margin: 0 -8px; padding: 6px 8px; border-radius: 8px; color: var(--text); text-decoration: none; }
   .item:hover { background: var(--hover); }
+  .none { margin: 12px 0 4px; color: var(--muted); font-size: 13px; }
   .failed { margin: 12px 8px; color: var(--muted); font-size: 13px; }
   /* A request row has SessionRow's shape: a main line, then one muted line that ends with the room. */
   .lines { flex: 1; min-width: 0; display: grid; line-height: 1.3; }
