@@ -177,7 +177,7 @@ export interface PrepareRequestContext {
 }
 
 /** Replacement runtime state for the provider request being prepared. */
-export type AgentRequestUpdate = Omit<AgentLoopTurnUpdate, "messages">;
+export type AgentRequestUpdate = AgentLoopTurnUpdate;
 
 /**
  * Called immediately before every conversational provider request, including the first.

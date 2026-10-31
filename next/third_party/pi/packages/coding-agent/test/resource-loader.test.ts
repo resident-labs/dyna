@@ -432,6 +432,40 @@ Content`,
 			expect(themes.some((t) => t.sourcePath?.endsWith("skip.json"))).toBe(false);
 		});
 
+		it("refreshes changed context and discovers skills without a full reload", async () => {
+			const skillRoot = join(agentDir, "skills", "nested");
+			mkdirSync(skillRoot, { recursive: true });
+			const instructions = join(cwd, "AGENTS.md");
+			writeFileSync(instructions, "old");
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+
+			writeFileSync(instructions, "new instructions");
+			const skill = join(skillRoot, "new-skill");
+			mkdirSync(skill);
+			writeFileSync(join(skill, "SKILL.md"), "---\nname: new-skill\ndescription: New skill\n---\nUse it.");
+			await loader.refreshPromptResources();
+
+			expect(loader.getAgentsFiles().agentsFiles).toContainEqual({
+				path: instructions,
+				content: "new instructions",
+			});
+			expect(loader.getSkills().skills.map((entry) => entry.name)).toContain("new-skill");
+		});
+
+		it("discovers a skill repaired in place on the next refresh", async () => {
+			const dir = join(agentDir, "skills", "repaired");
+			mkdirSync(dir, { recursive: true });
+			const path = join(dir, "SKILL.md");
+			writeFileSync(path, "---\nname: [invalid\n---\n");
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+			expect(loader.getSkills().skills.some((skill) => skill.filePath === path)).toBe(false);
+			writeFileSync(path, "---\nname: repaired\ndescription: A repaired skill\n---\n");
+			await loader.refreshPromptResources();
+			expect(loader.getSkills().skills.some((skill) => skill.filePath === path)).toBe(true);
+		});
+
 		it("should discover AGENTS.md context files", async () => {
 			writeFileSync(join(cwd, "AGENTS.md"), "# Project Guidelines\n\nBe helpful.");
 

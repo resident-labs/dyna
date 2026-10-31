@@ -44,7 +44,7 @@ import { parseStreamingJson, parseToolCallArguments } from "../utils/json-parse.
 import { getProviderEnvValue } from "../utils/provider-env.ts";
 import { retryProviderRequest } from "../utils/provider-retry.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
-import { getSystemMessageText, renderSystemMessageUpdate } from "../utils/text.ts";
+import { getSystemMessageText } from "../utils/text.ts";
 import {
 	getDeclaredTools,
 	resolveTranscript,
@@ -1264,7 +1264,7 @@ export function convertMessages(
 				};
 				params.push(kimiToolMessage as unknown as ChatCompletionMessageParam);
 			}
-			const text = i === 0 ? getSystemMessageText(msg) : renderSystemMessageUpdate(msg);
+			const text = i === 0 ? getSystemMessageText(msg) : "";
 			if (text.length > 0) {
 				params.push({ role: instructionRole, content: sanitizeSurrogates(text) });
 			}
