@@ -47,7 +47,7 @@ func DryRun(dir string) (Report, error) {
 	}
 	slices.Sort(report.ModelsCheckedAtImport)
 	report.Global = contract.BundleCounts{
-		Rules: len(global.Rules), Hosts: len(global.Hosts), Accounts: len(global.Accounts),
+		Hosts: len(global.Hosts), Accounts: len(global.Accounts),
 		Devices: len(global.Devices), Subscriptions: len(global.Subscriptions),
 	}
 	if err := compareCounts(report.Global, global.Counts); err != nil {
@@ -92,7 +92,7 @@ func DryRun(dir string) (Report, error) {
 			return report, fmt.Errorf("room %s: name mismatch", name)
 		}
 		counts := contract.BundleCounts{
-			Rules: len(room.Rules), Goals: len(room.Goals), Issues: len(room.Issues),
+			Goals: len(room.Goals), Issues: len(room.Issues),
 			PRs: len(room.PRs), Questions: len(room.Questions),
 			Subscriptions: len(room.Subscriptions), Sessions: len(room.Handoff),
 		}
@@ -112,7 +112,7 @@ func compareCounts(actual, declared contract.BundleCounts) error {
 		name             string
 		actual, declared int
 	}{
-		{"rules", actual.Rules, declared.Rules}, {"goals", actual.Goals, declared.Goals},
+		{"goals", actual.Goals, declared.Goals},
 		{"goalItems", actual.GoalItems, declared.GoalItems}, {"issues", actual.Issues, declared.Issues},
 		{"prs", actual.PRs, declared.PRs}, {"questions", actual.Questions, declared.Questions},
 		{"subscriptions", actual.Subscriptions, declared.Subscriptions}, {"hosts", actual.Hosts, declared.Hosts},
