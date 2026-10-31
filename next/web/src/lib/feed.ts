@@ -17,6 +17,7 @@ type Name = (session: string) => string;
 // Why a box or a request failed, in the owner's words. The engine's reason and error texts are raw (r8), so they never show.
 export const causes: Record<FailureCause, string> = {
   create_failed: "Its workspace could not be created on the host",
+  start_failed: "Its workspace could not start on the host",
   no_hello: "Its workspace did not connect in time",
   engine_restarted: "Dyna restarted while it set up the workspace",
   remove_failed: "Dyna could not remove its workspace",

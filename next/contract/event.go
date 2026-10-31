@@ -155,6 +155,7 @@ type FailureCause string
 
 const (
 	CauseCreateFailed    FailureCause = "create_failed"    // the box could not be created on its host
+	CauseStartFailed     FailureCause = "start_failed"     // the box container could not start on its host
 	CauseNoHello         FailureCause = "no_hello"         // the box agent did not connect in time
 	CauseEngineRestarted FailureCause = "engine_restarted" // the engine restarted while it created the box
 	CauseRemoveFailed    FailureCause = "remove_failed"    // close could not remove the box

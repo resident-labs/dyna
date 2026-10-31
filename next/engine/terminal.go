@@ -43,6 +43,13 @@ func (s *Service) Terminal(ctx context.Context, session contract.SessionID, host
 		s.mu.Lock()
 		s.sessionLocked(session).terminals++
 		s.mu.Unlock()
+		if err := s.store.WakeTerminal(ctx, id); err != nil {
+			s.mu.Lock()
+			s.sessions[session].terminals--
+			s.mu.Unlock()
+			return nil, release, failure(err)
+		}
+		s.reconciler.Kick()
 		release = func() {
 			s.mu.Lock()
 			s.sessions[session].terminals--

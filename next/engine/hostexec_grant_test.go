@@ -53,6 +53,9 @@ func TestUpgradeRemovesLegacyGrantRequestFromList(t *testing.T) {
 	}
 	err = st.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('room','room',1,1,1);
+ ALTER TABLE boxes DROP COLUMN want;
+ ALTER TABLE boxes DROP COLUMN due_at;
+ ALTER TABLE boxes DROP COLUMN failures;
  ALTER TABLE grants ADD COLUMN mode TEXT NOT NULL DEFAULT '';
  ALTER TABLE grants ADD COLUMN commands BLOB NOT NULL DEFAULT '[]';
  ALTER TABLE grants DROP COLUMN reason;
