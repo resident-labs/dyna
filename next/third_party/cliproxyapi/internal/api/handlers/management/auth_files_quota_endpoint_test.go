@@ -211,6 +211,33 @@ func TestParseClaudeOAuthUsageFallsBackToLegacyWindows(t *testing.T) {
 	}
 }
 
+func TestClaudeQuotaMixedLimitsPreservesSession(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		want float64
+	}{
+		{`{"five_hour":{"utilization":81,"resets_at":"2030-01-01T00:00:00Z"},"limits":[{"kind":"weekly_all","percent":20}]}`, 81},
+		{`{"five_hour":{"utilization":81},"limits":[{"kind":"session","percent":50}]}`, 50},
+	} {
+		windows, err := parseClaudeOAuthUsage([]byte(tc.body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var sessions []authFileQuotaWindow
+		for _, window := range windows {
+			if window.Kind == "session" {
+				sessions = append(sessions, window)
+			}
+		}
+		if len(sessions) != 1 || sessions[0].Utilization != tc.want {
+			t.Fatalf("session windows = %#v, want one at %v", sessions, tc.want)
+		}
+		if tc.want == 81 && sessions[0].ResetsAt != "2030-01-01T00:00:00Z" {
+			t.Fatalf("session reset = %q", sessions[0].ResetsAt)
+		}
+	}
+}
+
 func TestClaudeQuotaMixedLimitsPreservesOAuthApps(t *testing.T) {
 	windows, err := parseClaudeOAuthUsage([]byte(`{"seven_day_oauth_apps":{"utilization":81},"limits":[{"kind":"weekly_all","percent":20},{"kind":"weekly_scoped","percent":10,"scope":{"model":{"display_name":"Opus"}}}]}`))
 	if err != nil {
