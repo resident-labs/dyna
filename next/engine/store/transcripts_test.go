@@ -116,6 +116,13 @@ func TestTranscriptTurnIndex(t *testing.T) {
 	if err != nil || offset != 30 {
 		t.Fatalf("offset = %d, err = %v", offset, err)
 	}
+	if err := s.CommitTranscriptOffset(ctx, "s", "file", 10, nil); err != nil {
+		t.Fatal(err)
+	}
+	offset, err = s.TranscriptOffset(ctx, "s", "file")
+	if err != nil || offset != 30 {
+		t.Fatalf("stale backfill lowered offset to %d: %v", offset, err)
+	}
 	ranges, err = s.TranscriptTurnRanges(ctx, "s", "d")
 	if err != nil || len(ranges) != 0 {
 		t.Fatalf("rolled-back ranges = %v, err = %v", ranges, err)
