@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"database/sql"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -13,8 +12,5 @@ func (s *Service) Record(ctx context.Context, room contract.RoomID, body contrac
 	if err != nil {
 		return err
 	}
-	return s.store.Write(ctx, func(tx *sql.Tx) error {
-		_, err := s.store.AppendEvent(tx, event)
-		return err
-	})
+	return s.store.RecordEvent(ctx, event)
 }
