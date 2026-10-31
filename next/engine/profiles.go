@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -27,16 +29,20 @@ type profile struct {
 	MaxCallsPerRun int                    `json:"maxCallsPerRun,omitempty"`
 }
 
-type ProfileConfig map[contract.ProfileName]profile
+type ProfileConfig struct {
+	mu      sync.RWMutex
+	path    string
+	entries map[contract.ProfileName]profile
+}
 
 // LoadProfiles validates configuration at the file boundary.
-func LoadProfiles(path string) (ProfileConfig, error) {
+func LoadProfiles(path string) (*ProfileConfig, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-	var profiles ProfileConfig
+	var profiles map[contract.ProfileName]profile
 	decoder := json.NewDecoder(file)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&profiles); err != nil {
@@ -45,44 +51,53 @@ func LoadProfiles(path string) (ProfileConfig, error) {
 	if len(profiles) == 0 {
 		return nil, fmt.Errorf("profiles: no profiles")
 	}
+	if err := validateProfiles(profiles); err != nil {
+		return nil, err
+	}
+	return &ProfileConfig{path: path, entries: profiles}, nil
+}
+
+func validateProfiles(profiles map[contract.ProfileName]profile) error {
 	for name, p := range profiles {
 		switch p.AgentSurface {
 		case "", contract.AgentSurfaceOff, contract.AgentSurfaceCaller, contract.AgentSurfaceDeclared:
 		default:
-			return nil, fmt.Errorf("profile %q: invalid agentSurface", name)
+			return fmt.Errorf("profile %q: invalid agentSurface", name)
 		}
 		for _, rating := range []int{p.Taste, p.Diagnostics, p.Intelligence, p.Cost} {
 			if rating < 0 || rating > 10 {
-				return nil, fmt.Errorf("profile %q: ratings must be 0..10", name)
+				return fmt.Errorf("profile %q: ratings must be 0..10", name)
 			}
 		}
 		if p.MaxConcurrent < 0 || p.MaxCallsPerRun < 0 {
-			return nil, fmt.Errorf("profile %q: limits must be non-negative", name)
+			return fmt.Errorf("profile %q: limits must be non-negative", name)
 		}
 		if p.CompactTokens < 0 {
-			return nil, fmt.Errorf("profile %q: compactTokens must be non-negative", name)
+			return fmt.Errorf("profile %q: compactTokens must be non-negative", name)
 		}
 		if name == "" || p.Model == "" || !slices.Contains(p.AllowedModels, p.Model) {
-			return nil, fmt.Errorf("profile %q: model must be allowed", name)
+			return fmt.Errorf("profile %q: model must be allowed", name)
 		}
 		switch p.Provider {
 		case contract.ModelProviderAnthropic, contract.ModelProviderOpenAI:
 		default:
-			return nil, fmt.Errorf("profile %q: invalid provider", name)
+			return fmt.Errorf("profile %q: invalid provider", name)
 		}
 		switch p.Thinking {
 		case contract.ThinkingOff, contract.ThinkingMinimal, contract.ThinkingLow, contract.ThinkingMedium, contract.ThinkingHigh, contract.ThinkingXHigh:
 		default:
-			return nil, fmt.Errorf("profile %q: invalid thinking level", name)
+			return fmt.Errorf("profile %q: invalid thinking level", name)
 		}
 	}
-	return profiles, nil
+	return nil
 }
 
-func (p ProfileConfig) List() []contract.ProfileSummary {
-	result := make([]contract.ProfileSummary, 0, len(p))
-	for name, profile := range p {
-		result = append(result, contract.ProfileSummary{Name: name, Provider: profile.Provider, Model: profile.Model, Thinking: profile.Thinking, Description: profile.Description, Taste: profile.Taste, Diagnostics: profile.Diagnostics, Intelligence: profile.Intelligence, Cost: profile.Cost, AllowedModels: profile.AllowedModels, CompactTokens: profile.CompactTokens, MaxConcurrent: profile.MaxConcurrent, MaxCallsPerRun: profile.MaxCallsPerRun})
+func (p *ProfileConfig) List() []contract.ProfileSummary {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	result := make([]contract.ProfileSummary, 0, len(p.entries))
+	for name, profile := range p.entries {
+		result = append(result, contract.ProfileSummary{Name: name, Provider: profile.Provider, Model: profile.Model, Thinking: profile.Thinking, Description: profile.Description, Taste: profile.Taste, Diagnostics: profile.Diagnostics, Intelligence: profile.Intelligence, Cost: profile.Cost, AllowedModels: slices.Clone(profile.AllowedModels), CompactTokens: profile.CompactTokens, MaxConcurrent: profile.MaxConcurrent, MaxCallsPerRun: profile.MaxCallsPerRun})
 	}
 	slices.SortFunc(result, func(a, b contract.ProfileSummary) int { return strings.Compare(string(a.Name), string(b.Name)) })
 	return result
@@ -95,22 +110,102 @@ func (s *Service) ProfileList(_ context.Context, who contract.Principal, _ contr
 	return contract.ProfileListResponse{Profiles: s.profiles.List()}, nil
 }
 
-func (p ProfileConfig) Surface(name contract.ProfileName) contract.AgentSurface {
-	surface := p[name].AgentSurface
+func (p *ProfileConfig) Surface(name contract.ProfileName) contract.AgentSurface {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	surface := p.entries[name].AgentSurface
 	if surface == "" {
 		return contract.AgentSurfaceOff
 	}
 	return surface
 }
 
-func (p ProfileConfig) CompactionTokens(name contract.ProfileName) int {
-	return p[name].CompactTokens
+func (p *ProfileConfig) CompactionTokens(name contract.ProfileName) int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.entries[name].CompactTokens
 }
 
-func (p ProfileConfig) Model(name contract.ProfileName) (contract.ModelChoice, []string, error) {
-	profile, ok := p[name]
+func (p *ProfileConfig) Model(name contract.ProfileName) (contract.ModelChoice, []string, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	profile, ok := p.entries[name]
 	if !ok {
 		return contract.ModelChoice{}, nil, fmt.Errorf("unknown profile %q", name)
 	}
-	return contract.ModelChoice{Provider: profile.Provider, ID: profile.Model, Thinking: profile.Thinking}, profile.AllowedModels, nil
+	return contract.ModelChoice{Provider: profile.Provider, ID: profile.Model, Thinking: profile.Thinking}, slices.Clone(profile.AllowedModels), nil
+}
+
+func (p *ProfileConfig) update(name contract.ProfileName, value *profile) *contract.Error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	next := make(map[contract.ProfileName]profile, len(p.entries)+1)
+	for k, v := range p.entries {
+		next[k] = v
+	}
+	if value == nil {
+		if _, ok := next[name]; !ok {
+			return &contract.Error{Code: contract.ErrNotFound, Message: "profile not found"}
+		}
+		delete(next, name)
+	} else {
+		value.AgentSurface = next[name].AgentSurface
+		next[name] = *value
+	}
+	if len(next) == 0 {
+		return invalid("at least one profile is required")
+	}
+	if err := validateProfiles(next); err != nil {
+		return invalid(err.Error())
+	}
+	data, err := json.MarshalIndent(next, "", "  ")
+	if err != nil {
+		return failure(err)
+	}
+	file, err := os.CreateTemp(filepath.Dir(p.path), ".profiles-*")
+	if err != nil {
+		return failure(err)
+	}
+	defer os.Remove(file.Name())
+	if err = file.Chmod(0600); err == nil {
+		_, err = file.Write(append(data, '\n'))
+	}
+	if err == nil {
+		err = file.Sync()
+	}
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(file.Name(), p.path)
+	}
+	if err != nil {
+		return failure(err)
+	}
+	p.entries = next
+	return nil
+}
+
+func (s *Service) ProfileSet(_ context.Context, who contract.Principal, req contract.ProfileSetRequest) (contract.ProfileSetResponse, *contract.Error) {
+	if who.Kind != contract.PrincipalOwner {
+		return contract.ProfileSetResponse{}, forbidden()
+	}
+	p, ok := s.profiles.(*ProfileConfig)
+	if !ok {
+		return contract.ProfileSetResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "profile configuration is read-only"}
+	}
+	v := req.Profile
+	err := p.update(v.Name, &profile{Description: v.Description, Taste: v.Taste, Diagnostics: v.Diagnostics, Intelligence: v.Intelligence, Cost: v.Cost, Provider: v.Provider, Model: v.Model, AllowedModels: slices.Clone(v.AllowedModels), Thinking: v.Thinking, CompactTokens: v.CompactTokens, MaxConcurrent: v.MaxConcurrent, MaxCallsPerRun: v.MaxCallsPerRun})
+	return contract.ProfileSetResponse{}, err
+}
+
+func (s *Service) ProfileRemove(_ context.Context, who contract.Principal, req contract.ProfileRemoveRequest) (contract.ProfileRemoveResponse, *contract.Error) {
+	if who.Kind != contract.PrincipalOwner {
+		return contract.ProfileRemoveResponse{}, forbidden()
+	}
+	p, ok := s.profiles.(*ProfileConfig)
+	if !ok {
+		return contract.ProfileRemoveResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "profile configuration is read-only"}
+	}
+	return contract.ProfileRemoveResponse{}, p.update(req.Name, nil)
 }
