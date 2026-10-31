@@ -52,7 +52,7 @@ func TestBackupStartAge(t *testing.T) {
 		b := backupLoop{store: st, dir: dir, now: func() time.Time { return now }}
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		b.start(ctx, nil)
+		b.start(ctx)
 		if (st.calls == 1) != (age > 24*time.Hour) {
 			t.Fatalf("age %v: calls %d", age, st.calls)
 		}
@@ -71,7 +71,7 @@ func TestBackupCopyFailure(t *testing.T) {
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	st := &fakeBackupStore{dir: dir}
 	dataDir := filepath.Dir(dir)
-	for _, name := range []string{"files/a", "transcripts/b", "cliproxy/auth/c"} {
+	for _, name := range []string{"files/a", "transcripts/b", "archive/d", "connect/e", "cliproxy/auth/c"} {
 		path := filepath.Join(dataDir, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 			t.Fatal(err)
@@ -112,7 +112,7 @@ func TestBackupCopyFailure(t *testing.T) {
 			}
 			members[h.Name] = string(body)
 		}
-		for _, name := range []string{"files/a", "transcripts/b", "cliproxy/auth/c"} {
+		for _, name := range []string{"files/a", "transcripts/b", "archive/d", "connect/e", "cliproxy/auth/c"} {
 			if members[name] != name {
 				t.Fatalf("missing %s: %v", name, members)
 			}
