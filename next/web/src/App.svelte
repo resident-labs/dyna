@@ -435,7 +435,8 @@
   @media (max-width: 640px) {
     .menu-toggle { display: grid; place-items: center; flex: none; width: 40px; height: 40px; margin-left: -10px; padding: 0; border: 0; border-radius: 8px;
       background: none; color: var(--muted); cursor: pointer; }
-    .menu-toggle:hover { background: var(--hover); color: var(--text); }
+    /* Touch screens keep :hover after a tap, so the wash waits for a real pointer. */
+    @media (hover: hover) { .menu-toggle:hover { background: var(--hover); color: var(--text); } }
     .hash, .room-menu { display: none; }
     .heading { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.25; }
     .heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -450,7 +451,7 @@
   .pages strong { padding: 6px 10px 10px; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pages a, .pages button { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border-radius: 8px;
     color: var(--muted); font-size: 15px; cursor: pointer; }
-  .pages a:hover, .pages button:hover { background: var(--hover); box-shadow: none; color: var(--text); }
+  @media (hover: hover) { .pages a:hover, .pages button:hover { background: var(--hover); box-shadow: none; color: var(--text); } }
   .pages a[aria-current="page"], .pages button[aria-pressed="true"] { background: var(--selected); color: var(--text); font-weight: 500; }
   .pages a::before { content: none; }
   .pages a:focus-visible, .pages button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
