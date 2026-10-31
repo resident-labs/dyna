@@ -34,10 +34,13 @@ import (
 	"github.com/resident-labs/dyna/web"
 )
 
+// host is the dev engine's one host, named as an owner's build machine might be, since the page shows it.
+const host = "build-server"
+
 type devService struct{ *engine.Service } // api.Service needs HostAdd; engine/runtime adds the real one.
 
 func (devService) HostAdd(context.Context, contract.Principal, contract.HostAddRequest) (contract.HostAddResponse, *contract.Error) {
-	return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "webdev uses only the fake host"}
+	return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "webdev uses only " + host}
 }
 
 // The fake box's jobs: the agent counts real jobs only, so after a turn whose final quotes [jobs], each turn of
@@ -130,7 +133,7 @@ func (b *boxes) Create(ctx context.Context, spec engine.BoxSpec) (string, error)
 	if err = b.sockets.AddBox(spec.Box, spec.Session, session.Room); err != nil {
 		return "", err
 	}
-	return "fake", b.Start(ctx, spec.Box)
+	return host, b.Start(ctx, spec.Box)
 }
 func (b *boxes) Start(_ context.Context, id contract.BoxID) error {
 	b.mu.Lock()
@@ -213,7 +216,7 @@ func main() {
 	b.sockets = api.NewSockets(a, runtime, uint32(os.Getuid()), nil)
 	fatal(b.sockets.OpenOwner())
 	defer b.sockets.Close()
-	fatal(st.AddHost(ctx, box.Host{Name: "fake", State: box.HostReady, CPUs: 128, MemBytes: 256 * box.GiB, DiskBytes: 1024 * box.GiB}))
+	fatal(st.AddHost(ctx, box.Host{Name: host, State: box.HostReady, CPUs: 128, MemBytes: 256 * box.GiB, DiskBytes: 1024 * box.GiB}))
 	if *seed {
 		seedRoom(ctx, svc, *posts)
 	}
@@ -275,7 +278,7 @@ func seedRoom(ctx context.Context, s *engine.Service, posts int) {
 		Attachments: []contract.Attachment{upload("notes.txt", "text/plain", "The feed rows render.\nThe previews load.\n")}})
 	by := contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}
 	for _, program := range []string{"go", "npm"} {
-		args := contract.HostexecGrantArgs{Room: room.Room, To: by, Hosts: []contract.HostName{"fake"}, Commands: []contract.CommandRule{{Program: program, Args: []string{"test"}, Prefix: true}}, Mode: contract.GrantModeApprove}
+		args := contract.HostexecGrantArgs{Room: room.Room, To: by, Hosts: []contract.HostName{host}, Commands: []contract.CommandRule{{Program: program, Args: []string{"test"}, Prefix: true}}, Mode: contract.GrantModeApprove}
 		if _, e := s.OpSubmit(ctx, by, contract.OpSubmitRequest{Operation: contract.Operation{Room: room.Room, Args: args}}); e != nil {
 			log.Fatal(e.Message)
 		}

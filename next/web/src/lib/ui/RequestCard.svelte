@@ -44,7 +44,9 @@
   <p class="meta"><Avatar kind={request.by.kind} name={name(request.by)} {root} size={20} /><span class="who">{name(request.by)}</span>
     {#if request.card.target.kind !== "room"}<span>· {request.card.target.kind} {request.card.target.name}</span>{/if}{#if request.state === "pending"}<span>· expires {fromNow(request.expires, now)}</span>
       {#if request.class === "agent" && parent}<span>· {parent} can also decide</span>{/if}{/if}</p>
-  {#if request.card.body}<p class="body">{request.card.body}</p>{/if}
+  <!-- A grant's body names the grant on its first line, then lists one command per line, shown in mono. -->
+  {#if request.card.body}{@const [lead, ...lines] = request.kind === "hostexec.grant" ? request.card.body.split("\n") : [request.card.body]}
+    <p class="body">{lead}</p>{#if lines.length}<pre>{lines.join("\n")}</pre>{/if}{/if}
   {#if request.card.command?.length}<pre>{commandLine(request.card.command)}</pre>{/if}
   {#if request.card.changes?.length}<ul class="changes">{#each request.card.changes as change (change.field)}
     <li><span class="field">{change.field}:</span> {change.old || "none"} → {change.new || "none"}</li>{/each}</ul>{/if}
