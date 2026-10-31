@@ -1,4 +1,4 @@
-import type { KeyInput, PhoneKeys } from "./computerInput.ts";
+import type { ComputerInput, PhoneKeys } from "./computerInput.ts";
 
 // A real, visually hidden textarea opens the phone keyboard, as in v1. It keeps one sentinel character so that mobile
 // keyboards can report Backspace even after the text is cleared. Typed, composed and pasted text goes to the keys.
@@ -8,7 +8,7 @@ const sentinel = "​";
 const inputType = (event: Event) => "inputType" in event && typeof event.inputType === "string" ? event.inputType : "";
 const composingNow = (event: Event) => "isComposing" in event && event.isComposing === true;
 
-export function softKeyboard(node: HTMLTextAreaElement, keys: PhoneKeys, send: (inputs: KeyInput[]) => void): () => void {
+export function softKeyboard(node: HTMLTextAreaElement, keys: PhoneKeys, send: (inputs: ComputerInput[]) => void): () => void {
   let composing = false;
   const reset = () => { node.value = sentinel; node.setSelectionRange(1, 1); };
   const typed = (value: string) => send(keys.text(value));
