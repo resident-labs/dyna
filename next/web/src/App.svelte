@@ -7,6 +7,8 @@
   import Settings from "./lib/ui/Settings.svelte";
   import { linkCode } from "./lib/devices.ts";
   import Feed from "./lib/ui/Feed.svelte";
+  import VisualView from "./lib/ui/VisualView.svelte";
+  import type { VisualVersion } from "./lib/visual.ts";
   import StatusPill from "./lib/ui/StatusPill.svelte";
   import Composer from "./lib/ui/Composer.svelte";
   import WorkingLine from "./lib/ui/WorkingLine.svelte";
@@ -87,6 +89,7 @@
     if (inSettings) return;
     behind = path;
     section = undefined;
+    visual = undefined;
   }
   window.addEventListener("popstate", follow);
   function dismissRequests(event: MouseEvent) {
@@ -94,6 +97,8 @@
   }
   // The requests and rules views show in place of the conversation until Back, Escape or the control that opened them.
   let section: "requests" | "rules" | undefined = $state();
+  let visual: { versions: VisualVersion[]; selected: number } | undefined = $state();
+  let visualTrigger: HTMLElement | undefined;
   let requestsButton: HTMLButtonElement | undefined = $state();
   let roomMenu: RoomMenu | undefined = $state();
   async function closeSection(tapped = false) {
@@ -612,7 +617,8 @@
       {:else if unavailable === "unreachable"}<Blocked kind="unreachable" onretry={reopen} />
       {:else if store && !unavailable}
         {#key key}<Feed bind:this={view} {store} {home} admin={attention.can("admin")} operate={attention.can("operate")} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
-          onforward={quote => { quotes[key] = quote; composer?.focus(); }} onclosed={() => composer?.focus()} onjobs={item => void jobsTool?.show(item)} />{/key}
+          onforward={quote => { quotes[key] = quote; composer?.focus(); }} onclosed={() => composer?.focus()} onjobs={item => void jobsTool?.show(item)}
+          onvisual={(versions, selected) => { visualTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : undefined; visual = { versions, selected }; }} />{/key}
         <!-- The empty feed stays mounted behind the error, as it is how the page learns the session has no history. -->
         {#if missing && room}<Blocked kind="no-session" back={{ href: "/r/" + encodeURIComponent(room), label: `Back to ${roomName}` }} {navigate} />{/if}
       {:else}<p class="empty">This room is not available. <button type="button" class="retry" onclick={reopen}>Try again</button></p>{/if}
@@ -629,7 +635,8 @@
     <TermDock bind:this={terminals} terminal={attention.can("terminal")} bind:element={dock} onempty={() => composer?.focus()} phone={phone.current} strip={!!room && !unavailable}
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
   </main>
-  {#if room}
+  {#if visual && store && !inSettings}<aside class="visual-pane"><VisualView {...visual} onclose={() => { visual = undefined; void tick().then(() => visualTrigger?.focus()); }} /></aside>
+  {:else if room}
     <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} class:watching={watching && docked} aria-label="Sessions" tabindex="-1" role={panel && phone.current && !covered ? "dialog" : undefined} aria-modal={(panel && phone.current && !covered) || undefined} bind:this={members} inert={drawer || covered || inSettings}>
       <!-- Docked, the computer sits above the session list. -->
       {#if watching && docked && panelShown}{@render computerView(watching)}{/if}
@@ -677,6 +684,10 @@
 </div>{/if}
 
 <style>
+  :global(.shell.open:has(.visual-pane)) { grid-template-columns: 64px minmax(0, 1fr) min(660px, calc(100vw - 64px)); }
+  .visual-pane { min-width: 0; overflow: hidden; border-left: 1px solid var(--line); }
+  @media (max-width: 760px) { :global(.shell.open:has(.visual-pane)) { grid-template-columns: 64px minmax(0, 1fr); } .visual-pane { position: fixed; z-index: 4; inset: 0 0 0 auto; width: min(660px, 100vw); } }
+  @media (max-width: 640px) { :global(.shell.open:has(.visual-pane)) { grid-template-columns: minmax(0, 1fr); } .visual-pane { width: 100%; height: var(--app-height, 100dvh); } }
   /* Two-line rows around the 28 px avatar, as in the chosen mockup: the name, then what the session does. */
   a.member { min-height: 48px; color: var(--text); text-decoration: none; }
   /* The panel's header matches the room header: a 16 px title with its muted counts beside it. */

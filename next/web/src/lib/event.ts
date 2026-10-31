@@ -30,11 +30,15 @@ const cause = optional(oneOf("create_failed", "start_failed", "no_hello", "engin
 // How a shell job ended (the end field is new, so it may be missing).
 const jobEnd = optional(nullable(object({ kind: oneOf("exit", "signal", "stopped"), code: optional(number), signal: optional(string) })));
 const boxState = oneOf("pending", "creating", "starting", "ready", "stopped", "closing", "deleted", "failed", "lost");
+const visual = object({ id: string, version: number, title: string, height: number, allowNet: boolean, banner: string, thumbnail: string,
+  shots: nullable(array(object({ width: number, file: string }))), checks: nullable(array(object({
+    name: oneOf("renders", "console", "widths", "contrast", "network"), status: oneOf("pass", "warn", "fail", "skip"), detail: optional(string),
+  }))) });
 const bodies: Record<string, Check> = {
   "account.failed": object({ accountId: string, reason: oneOf("sign_in_rejected", "refresh_failed") }),
   "account.quota_low": object({ accountId: string, window: string, remainingPercent: number, floor: number }),
   "post.created": object({ text: string, home: conversation, mentions: optional(nullable(array(principal))), replyTo: optional(string), clientId: optional(string),
-    attachments: optional(nullable(array(object({ name: string, media: string, bytes: number, sha256: string })))) }),
+    attachments: optional(nullable(array(object({ name: string, media: string, bytes: number, sha256: string, visual: optional(nullable(visual)) })))) }),
   "session.restarted": object({ session: string }),
   "session.started": object({ session: string, name: string, parent: optional(string), profile: string, goal: optional(string), brief: optional(string) }),
   "session.moved": object({ session: string, newParent: string }),
