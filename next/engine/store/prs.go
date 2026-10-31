@@ -25,7 +25,7 @@ func (s *Store) RecordPROpen(ctx context.Context, repo contract.RepoName, number
 			return err
 		}
 		for _, delivery := range deliveries {
-			if err := s.insertDelivery(ctx, tx, seq, delivery); err != nil {
+			if err := s.InsertDelivery(ctx, tx, seq, delivery); err != nil {
 				return err
 			}
 		}

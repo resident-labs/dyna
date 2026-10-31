@@ -21,6 +21,19 @@ type EventBody interface {
 	isEventBody()
 }
 
+type RuleAdded struct {
+	Number int    `json:"number"`
+	Text   string `json:"text"`
+}
+type RuleRemoved struct {
+	Number int `json:"number"`
+}
+
+func (RuleAdded) EventType() EventType   { return "rule.added" }
+func (RuleAdded) isEventBody()           {}
+func (RuleRemoved) EventType() EventType { return "rule.removed" }
+func (RuleRemoved) isEventBody()         {}
+
 type PostCreated struct {
 	Text        string       `json:"text"`
 	Mentions    []Principal  `json:"mentions,omitempty"`

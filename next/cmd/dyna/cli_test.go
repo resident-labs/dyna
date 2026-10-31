@@ -33,6 +33,15 @@ type fakeClient struct {
 	hostexecResp contract.HostexecRunResponse
 }
 
+func (f *fakeClient) RuleAdd(context.Context, contract.RuleAddRequest) (contract.RuleAddResponse, error) {
+	return contract.RuleAddResponse{}, nil
+}
+func (f *fakeClient) RuleRemove(context.Context, contract.RuleRemoveRequest) (contract.RuleRemoveResponse, error) {
+	return contract.RuleRemoveResponse{}, nil
+}
+func (f *fakeClient) RuleList(context.Context, contract.RuleListRequest) (contract.RuleListResponse, error) {
+	return contract.RuleListResponse{}, nil
+}
 func (f *fakeClient) HostexecRun(context.Context, contract.HostexecRunRequest) (contract.HostexecRunResponse, error) {
 	return f.hostexecResp, nil
 }
