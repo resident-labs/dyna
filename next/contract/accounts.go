@@ -13,6 +13,7 @@ const (
 	AccountActionSetKey    AccountAction = "set_key"
 	AccountActionComplete  AccountAction = "complete"
 	AccountActionRemove    AccountAction = "remove"
+	AccountActionSetLimits AccountAction = "set_limits"
 )
 
 // AccountsActionArgs contains only the action kind, never account secrets.

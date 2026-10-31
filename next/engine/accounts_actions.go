@@ -52,6 +52,8 @@ func (a *AccountActions) Entry() approve.Entry {
 				name = "Save account key"
 			case contract.AccountActionRemove:
 				name = "Remove account"
+			case contract.AccountActionSetLimits:
+				name = "Set account room limits"
 			}
 			return contract.Card{Title: name, Target: contract.Target{Kind: contract.TargetAccount}}
 		},
@@ -240,4 +242,11 @@ func (s *AccountActions) AccountsConnectStatus(ctx context.Context, caller contr
 		return contract.AccountsConnectStatusResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "account connection unavailable"}
 	}
 	return out, nil
+}
+
+func (s *AccountActions) AccountsSetLimits(ctx context.Context, caller contract.Principal, req contract.AccountsSetLimitsRequest) (contract.AccountsSetLimitsResponse, *contract.Error) {
+	_, problem := s.runAccountAction(ctx, caller, contract.AccountActionSetLimits, req.AccountID, func(ctx context.Context) accountActionResult {
+		return accountActionResult{err: s.service.store.SetAccountRooms(ctx, req.AccountID, req.Rooms)}
+	})
+	return contract.AccountsSetLimitsResponse{}, problem
 }

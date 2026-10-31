@@ -608,6 +608,12 @@ func (h *BaseAPIHandler) GetContextWithCancel(handler interfaces.APIHandler, c *
 		}
 	}
 	newCtx, cancel := context.WithCancel(parentCtx)
+	if c != nil && c.Request != nil {
+		if values, present := c.Request.Header[http.CanonicalHeaderKey("X-Dyna-Eligible-Auth")]; present {
+			newCtx = coreauth.WithDynaEligibleAuth(newCtx, values)
+			c.Request.Header.Del("X-Dyna-Eligible-Auth")
+		}
+	}
 
 	endpoint := ""
 	if c != nil && c.Request != nil {
