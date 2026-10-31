@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { busiestWindow, providerName, windowMeter } from "./usage.ts";
+import { busiestWindow, causeText, providerName, windowMeter } from "./usage.ts";
 
 test("names a usage account by its provider, never by its label", () => {
   assert.equal(providerName("claude"), "Claude");
@@ -24,4 +24,9 @@ test("names the busiest usage window of any account by its provider, skipping ac
     { provider: "codex", label: "team", cause: "sign_in_expired", windows: [w(99, 604800)] },
     { provider: "kimi", label: "spare", cause: "", windows: null }]), "Claude at 62% of the 5-hour window");
   assert.equal(busiestWindow([]), undefined);
+});
+
+test("shows an unreachable account in the error tone and an expired sign-in as a warning", () => {
+  assert.equal(causeText.unreachable.tone, "error");
+  assert.equal(causeText.sign_in_expired.tone, "warning");
 });
