@@ -24,23 +24,23 @@ type Host struct {
 	State               HostState
 	CPUs                int
 	MemBytes, DiskBytes int64
+	MemUsed             int64 // latest heartbeat; not stored
 	MaintainedAt        time.Time
 	Labels              []string
 	Rooms               []contract.RoomID
 	CheckedAt           time.Time
 }
 type Box struct {
-	ID           contract.BoxID
-	Session      contract.SessionID
-	Room         contract.RoomID
-	BudgetParent contract.BoxID
-	Host         contract.HostName
-	Image        string
-	Size         contract.BoxSize
-	State        contract.BoxState
-	Reason       string
-	Slice        string
-	Updated      time.Time
+	ID      contract.BoxID
+	Session contract.SessionID
+	Room    contract.RoomID
+	Host    contract.HostName
+	Image   string
+	Size    contract.BoxSize
+	State   contract.BoxState
+	Reason  string
+	Slice   string
+	Updated time.Time
 	// PlacedAt records when this allocation began, for disk accounting.
 	PlacedAt time.Time
 }

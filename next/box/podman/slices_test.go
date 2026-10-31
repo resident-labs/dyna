@@ -3,13 +3,29 @@ package podman
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
+
+func TestHeartbeatCountsAnonShmemAndSwap(t *testing.T) {
+	dir := t.TempDir()
+	for name, data := range map[string]string{"memory.stat": "anon 100\nshmem 30\nfile 900\n", "memory.swap.current": "20\n", "cpu.stat": "usage_usec 42\n"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script := `df() { return 1; }; systemctl() { echo /; }; ` + strings.Replace(heartbeatScript, `/sys/fs/cgroup$cg`, dir, 1)
+	out, err := exec.Command("bash", "-c", script).CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "dyna-load 150 42") {
+		t.Fatalf("heartbeat: %s: %v", out, err)
+	}
+}
 
 // seqRunner answers each probe with the next body. Every tick in a test consumes one body.
 // It closes drained when it returns the last body, so the driver cancels only after the final probe.
