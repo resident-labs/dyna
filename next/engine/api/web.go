@@ -74,7 +74,7 @@ func (w *Web) SetConnect(s ConnectSessions) { w.connect = s }
 func (w *Web) SetRoutes(routes []string) error {
 	for _, route := range routes {
 		u, err := url.Parse(route)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || (route != u.Scheme+"://"+u.Host && route != u.Scheme+"://"+u.Host+"/") || strings.ContainsAny(route, "*; \t\r\n") {
 			return fmt.Errorf("invalid web route %q: expected an http or https origin", route)
 		}
 		host := strings.ToLower(u.Host)
@@ -97,6 +97,21 @@ func (w *Web) publicRoutes() []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+func (w *Web) routeOrigins(ctx context.Context) ([]string, string) {
+	var routes []string
+	for _, route := range w.routes {
+		routes = append(routes, route)
+	}
+	var managed string
+	if w.connect != nil {
+		managed = w.connect.ManagedOrigin(ctx)
+		if managed != "" && !slices.Contains(routes, managed) {
+			routes = append(routes, managed)
+		}
+	}
+	return routes, managed
 }
 
 func secret() (string, error) {
@@ -124,8 +139,8 @@ func (w *Web) login(_ context.Context, _ contract.Principal, _ contract.WebLogin
 }
 
 func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
-	// The terminal renderer is WebAssembly; a composer shows a picked image from a blob: URL before any post refers to it.
-	out.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' blob:; frame-ancestors 'none'")
+	routes, managed := w.routeOrigins(r.Context())
+	out.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' blob:; connect-src 'self' "+strings.Join(routes, " ")+"; frame-ancestors 'none'")
 	out.Header().Set("X-Content-Type-Options", "nosniff")
 	if r.Header.Get("Tailscale-Funnel-Request") != "" {
 		http.Error(out, "forbidden", http.StatusForbidden)
@@ -133,7 +148,6 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 	}
 	origin, known := w.routes[strings.ToLower(r.Host)]
 	if !known && w.connect != nil {
-		managed := w.connect.ManagedOrigin(r.Context())
 		if u, err := url.Parse(managed); err == nil && strings.EqualFold(u.Host, r.Host) && (u.Scheme == "https" || u.Scheme == "http") {
 			origin, known = managed, true
 		}
@@ -147,15 +161,7 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 		http.Error(out, "forbidden", http.StatusForbidden)
 		return
 	}
-	var routes []string
-	for _, route := range w.routes {
-		routes = append(routes, route)
-	}
 	if w.connect != nil {
-		managed := w.connect.ManagedOrigin(r.Context())
-		if managed != "" && !slices.Contains(routes, managed) {
-			routes = append(routes, managed)
-		}
 		if w.connect.ServePublic(out, r, origin, routes) {
 			return
 		}

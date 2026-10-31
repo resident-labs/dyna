@@ -19,6 +19,7 @@ func TestLinkThroughFakeRelay(t *testing.T) {
 	now := time.Unix(1700000000, 0)
 	var pub ed25519.PublicKey
 	var tokenCalls int
+	app := "https://machine.example;script-src"
 	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/.well-known/jwks.json" {
 			w.Write([]byte(`{"keys":[{"kty":"OKP","crv":"Ed25519","kid":"test","x":"invented"}]}`))
@@ -64,7 +65,7 @@ func TestLinkThroughFakeRelay(t *testing.T) {
 		case "/v1/link/start":
 			json.NewEncoder(w).Encode(LinkStart{ID: "link_test", Expires: now.Add(time.Minute).UnixMilli()})
 		case "/v1/link/poll":
-			json.NewEncoder(w).Encode(LinkPoll{Status: "linked", Machine: MachineInfo{ID: "m_test", Owner: Owner{ID: "usr_test"}, Epoch: 3}})
+			json.NewEncoder(w).Encode(LinkPoll{Status: "linked", Machine: MachineInfo{ID: "m_test", Owner: Owner{ID: "usr_test"}, Epoch: 3, App: app}})
 		case "/v1/machine/tunnel-token":
 			tokenCalls++
 			if tokenCalls == 1 {
@@ -90,6 +91,12 @@ func TestLinkThroughFakeRelay(t *testing.T) {
 	}
 	opts := LinkOptions{Name: "test", AppPort: 1001, CardPort: 1002, Ticks: ticks, Now: func() time.Time { return now }}
 	link, err := LinkMachine(context.Background(), &Relay{Base: relay.URL, Now: func() time.Time { return now }}, files, state, opts)
+	if err == nil {
+		t.Fatal("accepted invalid managed origin")
+	}
+	app = "https://machine.example"
+	ticks <- now
+	link, err = LinkMachine(context.Background(), &Relay{Now: func() time.Time { return now }}, files, state, opts)
 	if err == nil || link.Machine != "m_test" {
 		t.Fatalf("link = %+v, error = %v", link, err)
 	}

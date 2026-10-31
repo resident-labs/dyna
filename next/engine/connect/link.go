@@ -217,7 +217,7 @@ func LinkMachine(ctx context.Context, relay *Relay, files *Files, state LinkStat
 			return Link{}, errors.New("link was denied or expired")
 		case "linked":
 			m := p.Machine
-			if m.ID == "" || m.Owner.ID == "" || m.Epoch < 1 {
+			if m.ID == "" || m.Owner.ID == "" || m.Epoch < 1 || routeRank(m.App, m.App) < 0 {
 				return Link{}, errors.New("invalid linked machine")
 			}
 			l := Link{Relay: pending.Relay, Machine: m.ID, Name: m.Name, Owner: m.Owner, App: m.App, Cards: m.Cards}

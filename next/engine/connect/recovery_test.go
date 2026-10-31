@@ -229,6 +229,13 @@ func TestRestartCompletesInterruptedUnlink(t *testing.T) {
 
 func TestCancelRemovesPendingApproval(t *testing.T) {
 	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body startBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if name, err := os.Hostname(); err != nil || body.Name != name {
+			t.Errorf("default machine name: %q %v", body.Name, err)
+		}
 		json.NewEncoder(w).Encode(LinkStart{ID: "invented-id", URL: "https://example.invalid", UserCode: "invented-code", Expires: time.Now().Add(time.Minute).UnixMilli()})
 	}))
 	defer relay.Close()
@@ -244,8 +251,13 @@ func TestCancelRemovesPendingApproval(t *testing.T) {
 	}
 	ops := NewOperations(context.Background(), files, st, 1001, 1002)
 	defer ops.Close()
-	if err := ops.Start(context.Background(), contract.ConnectStartRequest{Relay: relay.URL, Name: "test"}); err != nil {
+	var requestedRelay string
+	ops.relay = func(base string) *Relay { requestedRelay = base; return &Relay{Base: relay.URL} }
+	if err := ops.Start(context.Background(), contract.ConnectStartRequest{}); err != nil {
 		t.Fatal(err)
+	}
+	if requestedRelay != DefaultRelay {
+		t.Fatalf("default relay: %q", requestedRelay)
 	}
 	status, err := ops.Status(context.Background())
 	if err != nil || status.Code != "invented-code" {
@@ -279,7 +291,7 @@ func TestPendingLinkResumesAfterRestart(t *testing.T) {
 			if poll.ID != "invented-attempt" || hashToken(poll.Secret) != first.PollHash {
 				t.Error("pending attempt changed")
 			}
-			json.NewEncoder(w).Encode(LinkPoll{Status: "linked", Machine: MachineInfo{ID: "invented-machine", Owner: Owner{ID: "invented-owner"}, Epoch: 1}})
+			json.NewEncoder(w).Encode(LinkPoll{Status: "linked", Machine: MachineInfo{ID: "invented-machine", Owner: Owner{ID: "invented-owner"}, Epoch: 1, App: "https://machine.example"}})
 		case "/v1/machine/tunnel-token":
 			w.Write([]byte(`{"token":"invented-token"}`))
 		case "/.well-known/jwks.json":

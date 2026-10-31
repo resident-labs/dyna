@@ -15,6 +15,7 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/contract/tools"
+	"github.com/resident-labs/dyna/engine/connect"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -64,6 +65,11 @@ func (a *API) handler(c Caller) http.Handler {
 		out, err := a.connect.Status(ctx)
 		if err != nil {
 			return contract.ConnectStatusResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Connect status unavailable"}
+		}
+		if a.web != nil {
+			routes, tunnel := a.web.routeOrigins(ctx)
+			out.Routes = connect.RankedRoutes(routes, tunnel)
+			out.Tunnel = tunnel
 		}
 		return out, nil
 	})
