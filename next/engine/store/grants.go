@@ -13,21 +13,17 @@ func (s *Store) InsertGrant(tx *sql.Tx, g contract.Grant) error {
 	if err != nil {
 		return err
 	}
-	commands, err := json.Marshal(g.Commands)
-	if err != nil {
-		return err
-	}
 	var expires *int64
 	if !g.Expires.IsZero() {
 		v := g.Expires.UnixMilli()
 		expires = &v
 	}
-	_, err = tx.Exec("INSERT INTO grants(id,kind,room,to_kind,to_id,mode,hosts,commands,expires_at,by_kind,by_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", g.ID, g.Kind, g.Room, g.To.Kind, g.To.Session, g.Mode, hosts, commands, expires, g.By.Kind, g.By.Session, g.Created.UnixMilli())
+	_, err = tx.Exec("INSERT INTO grants(id,kind,room,to_kind,to_id,hosts,expires_at,by_kind,by_id,created_at,reason) VALUES(?,?,?,?,?,?,?,?,?,?,?)", g.ID, g.Kind, g.Room, g.To.Kind, g.To.Session, hosts, expires, g.By.Kind, g.By.Session, g.Created.UnixMilli(), g.Reason)
 	return err
 }
 
 func (s *Store) ListActiveGrants(ctx context.Context, room contract.RoomID, who contract.Principal, now time.Time) ([]contract.Grant, error) {
-	rows, err := s.read.QueryContext(ctx, `SELECT id,mode,hosts,commands,expires_at,by_kind,by_id,created_at FROM grants WHERE room=? AND to_kind=? AND to_id=? AND kind='hostexec' AND revoked_at IS NULL AND expired_at IS NULL AND (expires_at IS NULL OR expires_at>?) ORDER BY id`, room, who.Kind, who.Session, now.UnixMilli())
+	rows, err := s.read.QueryContext(ctx, `SELECT id,hosts,expires_at,by_kind,by_id,created_at,reason FROM grants WHERE room=? AND to_kind=? AND to_id=? AND kind='hostexec' AND revoked_at IS NULL AND expired_at IS NULL AND (expires_at IS NULL OR expires_at>?) ORDER BY id`, room, who.Kind, who.Session, now.UnixMilli())
 	if err != nil {
 		return nil, err
 	}
@@ -35,16 +31,13 @@ func (s *Store) ListActiveGrants(ctx context.Context, room contract.RoomID, who 
 	var grants []contract.Grant
 	for rows.Next() {
 		g := contract.Grant{Kind: contract.GrantHostExec, Room: room, To: who}
-		var hosts, commands []byte
+		var hosts []byte
 		var expires sql.NullInt64
 		var created int64
-		if err = rows.Scan(&g.ID, &g.Mode, &hosts, &commands, &expires, &g.By.Kind, &g.By.Session, &created); err != nil {
+		if err = rows.Scan(&g.ID, &hosts, &expires, &g.By.Kind, &g.By.Session, &created, &g.Reason); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(hosts, &g.Hosts); err != nil {
-			return nil, err
-		}
-		if err = json.Unmarshal(commands, &g.Commands); err != nil {
 			return nil, err
 		}
 		g.Created = time.UnixMilli(created).UTC()

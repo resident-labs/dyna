@@ -25,12 +25,12 @@ type HostexecRunner interface {
 
 func (s *Service) SetHostexecRunner(r HostexecRunner) { s.hostexec = r }
 
-func (s *Service) matchHostexec(ctx context.Context, room contract.RoomID, who contract.Principal, host contract.HostName, argv []string) (contract.Grant, error) {
+func (s *Service) matchHostexec(ctx context.Context, room contract.RoomID, who contract.Principal, host contract.HostName) (contract.Grant, error) {
 	grants, err := s.store.ListActiveGrants(ctx, room, who, s.now())
 	if err != nil {
 		return contract.Grant{}, err
 	}
-	return hostexec.Match(grants, host, argv, s.now())
+	return hostexec.Match(grants, host, s.now())
 }
 
 func (s *Service) HostexecRun(ctx context.Context, who contract.Principal, req contract.HostexecRunRequest) (contract.HostexecRunResponse, *contract.Error) {
@@ -47,14 +47,14 @@ func (s *Service) HostexecRun(ctx context.Context, who contract.Principal, req c
 	if req.Host == "" || len(req.Argv) == 0 || req.Argv[0] == "" || req.Timeout < 0 || req.Timeout > contract.DurationMS((2*time.Hour).Milliseconds()) {
 		return contract.HostexecRunResponse{}, invalid("invalid host, command or timeout")
 	}
-	grant, err := s.matchHostexec(ctx, session.Room, who, req.Host, req.Argv)
+	grant, err := s.matchHostexec(ctx, session.Room, who, req.Host)
 	if errors.Is(err, hostexec.ErrNoGrant) {
 		return contract.HostexecRunResponse{}, &contract.Error{Code: contract.ErrNoGrant, Message: "no matching host-exec grant"}
 	}
 	if err != nil {
 		return contract.HostexecRunResponse{}, failure(err)
 	}
-	a := contract.HostexecRunArgs{Room: session.Room, Host: req.Host, Argv: req.Argv, Cwd: req.Cwd, Timeout: req.Timeout, Grant: grant.ID, Mode: grant.Mode}
+	a := contract.HostexecRunArgs{Room: session.Room, Host: req.Host, Argv: req.Argv, Cwd: req.Cwd, Timeout: req.Timeout, Grant: grant.ID}
 	op, err := s.approvals.Submit(ctx, who, contract.Operation{Room: session.Room, Args: a})
 	if err != nil {
 		return contract.HostexecRunResponse{}, failure(err)
@@ -63,9 +63,7 @@ func (s *Service) HostexecRun(ctx context.Context, who contract.Principal, req c
 }
 func (s *Service) HostexecRunEntry() approve.Entry {
 	return approve.Entry{
-		Class: func(args contract.OpArgs, _ contract.Principal) contract.Class {
-			return hostexec.Class(contract.Grant{Mode: args.(contract.HostexecRunArgs).Mode})
-		},
+		Class: func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassAuto },
 		Card: func(_ context.Context, args contract.OpArgs, _ contract.Principal) contract.Card {
 			a := args.(contract.HostexecRunArgs)
 			body := fmt.Sprintf("timeout: %s", time.Duration(a.Timeout)*time.Millisecond)
@@ -76,14 +74,17 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 		},
 		Check: func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
 			a := args.(contract.HostexecRunArgs)
-			grant, err := s.matchHostexec(ctx, a.Room, who, a.Host, a.Argv)
+			grants, err := s.store.ListActiveGrants(ctx, a.Room, who, s.now())
 			if err != nil {
 				return err
 			}
-			if grant.ID != a.Grant || grant.Mode != a.Mode {
-				return hostexec.ErrNoGrant
+			for _, grant := range grants {
+				if grant.ID == a.Grant {
+					_, err = hostexec.Match([]contract.Grant{grant}, a.Host, s.now())
+					return err
+				}
 			}
-			return nil
+			return hostexec.ErrNoGrant
 		},
 		Decode: func(data json.RawMessage) (contract.OpArgs, error) {
 			var a contract.HostexecRunArgs
