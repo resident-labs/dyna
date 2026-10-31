@@ -375,7 +375,8 @@
   $effect(() => { if (!phone.current) drawer = false; });
   // A room's open sheet closes on the way Home, and Home's own closes when its last active room leaves.
   $effect(() => { if (!room) panel = false; });
-  $effect(() => { if (!room && !activity.active.length) panel = false; });
+  // Before the DOM update, so showPanel still sees focus in the sheet that is about to leave.
+  $effect.pre(() => { if (!room && !activity.active.length && panel) { if (wide.current) panel = false; else void showPanel(false); } });
   // On a phone the sessions panel is a bottom sheet that fits its content, up to about two thirds of the height (fix 1). Its handle drags it to
   // full height, or down to its first height and then closed; a tap toggles the height. The tree already puts what
   // needs the owner first and folds idle sessions.
@@ -400,7 +401,8 @@
     if (wide.current) tucked = !open; else panel = open;
     if (!open) sheetFull = false;
     await tick();
-    if (open) members?.focus({ focusVisible: !tapped }); else if (held) toggle?.focus({ focusVisible: !tapped });
+    // Home's strip leaves with its last active room, and then the menu button takes focus.
+    if (open) members?.focus({ focusVisible: !tapped }); else if (held) (toggle?.isConnected ? toggle : menuButton)?.focus({ focusVisible: !tapped });
   }
   // The sessions the feed composer offers after @: the root first, then by name. A DM offers none.
   let mentions = $derived(session ? [] : [...store?.sessions.values() ?? []].filter(mentionable)
