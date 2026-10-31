@@ -81,8 +81,8 @@
   };
   async function take() { control = true; await tick(); screen?.focus(); }
   const hold = new MouseHold();
-    // Control ends or the view closes: the release goes even behind a refused batch, so the queue drops what waits first.
-  const drop = () => { const up = hold.release(); if (stuck) queue.clear(); send(up); };
+    // Control ends or the view closes: held buttons go up, even behind a refused batch.
+  const drop = () => queue.finish(hold.release());
   function release() { drop(); control = false; stuck = false; keyboardOpen = false; field?.blur(); }
   $effect(() => { if (phase !== "live") release(); });
   function toggleKeyboard() {
