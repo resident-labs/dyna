@@ -20,6 +20,7 @@ type Proxy struct {
 	Config    string
 	Socket    string
 	clientKey string
+	client    *http.Client
 }
 
 // NewProxy creates a private proxy configuration. managementKey is held by the engine.
@@ -101,10 +102,10 @@ func NewProxy(dataDir, managementKey string) (*Proxy, error) {
 		return nil, closeErr
 	}
 	owned = false
-	return &Proxy{Listener: listener, Config: path, Socket: socket, clientKey: key}, nil
+	return &Proxy{Listener: listener, Config: path, Socket: socket, clientKey: key, client: unixClient(socket)}, nil
 }
 
 // Handler binds a route to a session and its permitted models.
 func (p *Proxy) Handler(sessionID string, allowedModels []string) http.Handler {
-	return Handler(p.Socket, p.clientKey, sessionID, allowedModels)
+	return handler(p.client, p.clientKey, sessionID, allowedModels)
 }
