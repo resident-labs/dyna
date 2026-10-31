@@ -5,23 +5,30 @@
 </script>
 
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import Icon from "./Icon.svelte";
   import Avatar from "./Avatar.svelte";
   import FloatWindow from "./FloatWindow.svelte";
   import { shortPaths } from "../feed.ts";
   import type { Rect } from "../float.ts";
+  import PhoneKeys from "./PhoneKeys.svelte";
   import { LiveStream, type Phase } from "../live.ts";
+  import { Finger, PhoneKeys as PhoneState, buttonOf, escTwice, keyboardInput, screenPoint, type KeyInput, type Modifiers, type PointerInput } from "../computerInput.ts";
+  import { softKeyboard } from "../softKeyboard.ts";
   // Floating, the view is a window over the app; docked, it sits above the session list in the sessions panel. The
   // rect belongs to the app, so the window keeps its place and size for the page view.
   // onfit gives each frame's ratio and the height around the screen, so a floating window can show no black bars.
   // At full screen, the steps before the current one read below the screen, newest first.
-  let { session, name, root, activity, steps, docked, full = false, rect = $bindable(), element = $bindable(), onclose, ondock, onfit }: {
-    session: string; name: string; root: boolean; activity?: string; steps: string[]; docked: boolean; full?: boolean; rect: Rect; element?: HTMLElement; onclose: (tapped: boolean) => void; ondock: (event: MouseEvent) => void;
+  // input sends the owner's keys and pointer to the computer. A device that may not control computers passes none,
+  // and the view then has no Take control step.
+  let { session, name, root, activity, steps, docked, full = false, rect = $bindable(), element = $bindable(), input, onclose, ondock, onfit }: {
+    session: string; name: string; root: boolean; activity?: string; steps: string[]; docked: boolean; full?: boolean; rect: Rect; element?: HTMLElement; input?: (event: KeyInput | PointerInput) => void; onclose: (tapped: boolean) => void; ondock: (event: MouseEvent) => void;
     onfit: (ratio: number, chrome: number) => void;
   } = $props();
   let screen: HTMLElement | undefined = $state();
   let earlier = $derived(full ? steps.slice(-6, -1).reverse() : []);
+  // The line under the screen: the current step and, where the owner may control the computer, its control step.
+  let foot = $derived(!!input || !!activity || (!docked && !full));
   let visible = $state(document.visibilityState === "visible");
   // A stopped computer closes this view, so a failure here is a broken or silent stream. The owner's retry or the
   // page becoming visible again tries once more; nothing retries on a timer.
@@ -32,7 +39,9 @@
   // Chromium may keep a multipart request open until a removed <img> is garbage-collected, so the
   // image drops its stream before it leaves. The load or error that the clearing fires belongs to a stopped stream,
   // so the view ignores it. A failed image stays, so the browser keeps showing the last frame under the notice, as in v1.
+  let picture: HTMLImageElement | undefined;
   function watch(image: HTMLImageElement) {
+    picture = image;
     const { frame, fail } = stream.start();
     image.src = `/v1/computers/watch?session=${encodeURIComponent(session)}&n=${++opened}`;
     image.addEventListener("load", () => { frame(); if (image.naturalHeight > 1) {
@@ -50,6 +59,86 @@
   }
   // Try again loads a new stream: the key remounts the image.
   let attempt = $state(0);
+
+  // Control is the owner's, on purpose: nothing leaves the page until Take control, and it ends with Return control,
+  // Esc twice (the first Esc still reaches the computer, as in v1), or a stream that is no longer live.
+  let control = $state(false);
+  let keyboardOpen = $state(false);
+  let held: Modifiers = $state({ ctrl: false, alt: false });
+  let field: HTMLTextAreaElement | undefined = $state();
+  const phoneKeys = new PhoneState(state => { held = state; });
+  const twice = escTwice();
+  const send = (inputs: KeyInput[]) => { for (const event of inputs) input?.(event); };
+  async function take() { control = true; await tick(); screen?.focus(); }
+  function release() { control = false; keyboardOpen = false; field?.blur(); }
+  $effect(() => { if (phase !== "live") release(); });
+  function toggleKeyboard() {
+    keyboardOpen = !keyboardOpen;
+    if (keyboardOpen) field?.focus({ preventScroll: true });
+    else field?.blur();
+  }
+  // A hardware key goes to the computer while the owner controls it, Esc and Alt with an arrow key included.
+  function press(event: KeyboardEvent) {
+    if (!control) return;
+    event.stopPropagation();
+    event.preventDefault();
+    if (event.key === "Escape" && twice(performance.now())) { release(); return; }
+    const stroke = keyboardInput(event);
+    if (stroke) input?.(stroke);
+  }
+  // The pointer: a mouse is sent as it moves, once per frame; a finger taps or scrolls. The picture sits inside the
+  // screen at its own shape, so a pointer on a bar lands nowhere.
+  function pointing(node: HTMLElement) {
+    const finger = new Finger();
+    let pending: PointerInput | undefined;
+    let frame = 0;
+    const at = (event: MouseEvent) => picture && screenPoint(picture.getBoundingClientRect(), { width: picture.naturalWidth, height: picture.naturalHeight }, event.clientX, event.clientY);
+    const touching = (event: PointerEvent) => event.pointerType === "touch";
+    const down = (event: PointerEvent) => {
+      if (!control) return;
+      node.focus();
+      node.setPointerCapture(event.pointerId);
+      const point = at(event);
+      if (!point) return;
+      if (touching(event)) finger.down({ x: event.clientX, y: event.clientY }, point);
+      else { input?.({ type: "move", ...point }); input?.({ type: "down", ...point, button: buttonOf(event.button) }); }
+    };
+    const move = (event: PointerEvent) => {
+      if (!control) return;
+      const point = at(event);
+      if (!point) return;
+      if (touching(event)) { for (const scroll of finger.move({ x: event.clientX, y: event.clientY }, point)) input?.(scroll); return; }
+      pending = { type: "move", ...point };
+      frame ||= requestAnimationFrame(() => { frame = 0; if (pending) input?.(pending); pending = undefined; });
+    };
+    const up = (event: PointerEvent) => {
+      if (!control) return;
+      if (touching(event)) { for (const tap of finger.up()) input?.(tap); return; }
+      const point = at(event);
+      if (point) input?.({ type: "up", ...point, button: buttonOf(event.button) });
+    };
+    const wheel = (event: WheelEvent) => {
+      if (!control) return;
+      event.preventDefault();
+      const point = at(event);
+      if (point) input?.({ type: "wheel", ...point, dx: event.deltaX, dy: event.deltaY });
+    };
+    const menu = (event: Event) => { if (control) event.preventDefault(); };
+    node.addEventListener("pointerdown", down);
+    node.addEventListener("pointermove", move);
+    node.addEventListener("pointerup", up);
+    node.addEventListener("contextmenu", menu);
+    // Not passive: the wheel must not also scroll the page.
+    node.addEventListener("wheel", wheel, { passive: false });
+    return () => {
+      cancelAnimationFrame(frame);
+      node.removeEventListener("pointerdown", down);
+      node.removeEventListener("pointermove", move);
+      node.removeEventListener("pointerup", up);
+      node.removeEventListener("contextmenu", menu);
+      node.removeEventListener("wheel", wheel);
+    };
+  }
 </script>
 
 <svelte:document onvisibilitychange={() => { visible = document.visibilityState === "visible"; if (visible && phase === "failed") attempt++; }} />
@@ -60,13 +149,27 @@
       <Icon name={docked ? "undock" : "dock"} /></button>{/if}
     <button type="button" class:first={full} aria-label="Close" title="Close" onclick={event => onclose(event.detail > 0)}><Icon name="close" /></button>{/snippet}
   <!-- The image streams only while the owner can see it: this view open, the page visible. -->
-  <div class="screen" class:docked class:full class:foot={activity || (!docked && !full)} style:--ratio={ratio} bind:this={screen}>
+  <!-- While the owner controls it, the screen takes the keyboard and the pointer; its outline says so. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions (the screen is a keyboard and pointer target only while the owner controls it) -->
+  <div class="screen" class:docked class:full class:control class:foot={foot} style:--ratio={ratio} bind:this={screen} tabindex={control ? 0 : undefined}
+    role={control ? "application" : undefined} aria-label={control ? `Controlling ${name}'s computer` : undefined} onkeydown={press} {@attach pointing}>
     {#if visible}{#key attempt}<img alt={`${name}'s screen, live`} {@attach watch} />{/key}{/if}
     {#if phase === "failed"}<p class="badge" role="status">The live view stopped. <button type="button" class="retry" onclick={() => { attempt++; element?.focus(); }}>Try again</button></p>{/if}
   </div>
   <!-- The current step, one muted line under the screen: "qa-runner · reading the review state". Floating, the line
-       stays between steps, so the screen keeps the shape the window was fitted to. -->
-  {#if activity || (!docked && !full)}<p class="activity">{activity ? `${name} · ${activity}` : name}</p>{/if}
+       stays between steps, so the screen keeps the shape the window was fitted to. Where the owner may control the
+       computer, the line carries the Take control step; in control it says how to return. -->
+  {#if foot}<div class="activity">
+    <span class="line">{control ? "You are in control. Esc twice returns it." : activity ? `${name} · ${activity}` : name}</span>
+    {#if input && control}
+      <button type="button" class="tool" class:on={keyboardOpen} aria-label="Phone keyboard" aria-pressed={keyboardOpen} title="Phone keyboard" onpointerdown={event => event.preventDefault()} onclick={toggleKeyboard}><Icon name="keyboard" size={18} /></button>
+      <button type="button" class="take" onclick={release}>Return control</button>
+    {:else if input}<button type="button" class="take" disabled={phase !== "live"} onclick={take}>Take control</button>{/if}
+  </div>{/if}
+  {#if input && control}
+    <textarea class="field" aria-label="Type on the computer" bind:this={field} {@attach node => softKeyboard(node, phoneKeys, send)} onblur={() => { keyboardOpen = false; }} autocapitalize="off" autocomplete="off" spellcheck="false" rows="1"></textarea>
+    {#if keyboardOpen}<PhoneKeys {held} onkey={key => { send(phoneKeys.press(key)); field?.focus({ preventScroll: true }); }} />{/if}
+  {/if}
   {#if earlier.length}<ol class="earlier" aria-label="Earlier steps">{#each earlier as step, i (i)}<li>{shortPaths(step)}</li>{/each}</ol>{/if}
 </FloatWindow>
 
@@ -91,7 +194,20 @@
   /* v1's badge: a dark chip over the last picture, readable on any frame. */
   .badge { position: absolute; left: 12px; top: 12px; margin: 0; padding: 3px 11px; border-radius: 12px; background: var(--screen-chip); color: var(--screen-text); font-size: 12px; }
   .badge .retry { margin-left: 4px; color: var(--screen-text); }
-  .activity { flex: none; margin: 0; padding: 6px 12px; overflow: hidden; color: var(--muted); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+  .screen.control { outline: 2px solid var(--focus); outline-offset: -2px; touch-action: none; }
+  .screen:focus { outline-offset: -2px; }
+  .activity { display: flex; flex: none; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; color: var(--muted); font-size: 12.5px; }
+  .line { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Take control and Return control are controls, not statuses: an outline button, with the accent only on focus. */
+  .take { flex: none; height: 28px; padding: 0 12px; border: 1px solid var(--firm); border-radius: 6px; background: none; color: var(--text); font: 500 13px var(--sans); cursor: pointer; }
+  .take:hover:not(:disabled) { background: var(--hover); }
+  .take:disabled { opacity: 0.45; cursor: default; }
+  .take:focus-visible, .tool:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  .tool { display: grid; flex: none; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+  .tool:hover, .tool.on { background: var(--hover); color: var(--text); }
+  @media (hover: none) { .activity { min-height: 48px; } .take { height: 40px; padding: 0 16px; } .tool { width: 40px; height: 40px; } }
+  /* The field that takes the phone keyboard's text: on the page and focusable, but invisible. */
+  .field { position: fixed; left: 0; bottom: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; font-size: 16px; pointer-events: none; }
   .earlier { flex: none; margin: 0; padding: 0 12px 6px; color: var(--muted); font-size: 12.5px; line-height: 20px; list-style: none; }
   .earlier li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
