@@ -22,12 +22,16 @@ type proxyKeyRequest struct {
 func keyAuth(provider config.OpenAICompatibility, id, key string) *coreauth.Auth {
 	name := provider.Name
 	// The proxy SDK defines credential metadata as map[string]any.
-	return &coreauth.Auth{
+	auth := &coreauth.Auth{
 		ID: id, Provider: "openai-compatible-" + name, Label: name,
 		Prefix: name, Status: coreauth.StatusActive,
 		Attributes: map[string]string{"api_key": key, "auth_kind": "apikey", "base_url": provider.BaseURL, "compat_name": name, "provider_key": "openai-compatible-" + name, "dyna_provider": name},
 		Metadata:   map[string]any{"type": "openai-compatibility"},
 	}
+	for name, value := range provider.Headers {
+		auth.Attributes["header:"+name] = value
+	}
+	return auth
 }
 
 func validProxyKeyID(id string) bool {

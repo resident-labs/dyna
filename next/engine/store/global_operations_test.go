@@ -15,6 +15,7 @@ func TestGlobalOperationUpgradePreservesReferences(t *testing.T) {
 	_, err = db.Exec(`
 		CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 		CREATE TABLE rules (room TEXT, number INTEGER);
+		CREATE TABLE accounts (id TEXT PRIMARY KEY, provider TEXT);
 		CREATE TABLE deliveries (seq INTEGER);
 		CREATE TABLE event_files (seq INTEGER);
 		INSERT INTO meta VALUES ('schema_version','42');

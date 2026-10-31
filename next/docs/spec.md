@@ -242,6 +242,8 @@ Each box receives only its own forwarded Unix socket. The engine derives session
 
 Pi sends model calls to its loopback box agent with a placeholder key. The engine checks the profile, substitutes the CLIProxyAPI client key and streams through the proxy's Unix socket. Pi alone retries model calls. Failed turns retry pending inputs with bounded backoff; paused rooms wait for resume. Before M3 enables a second sign-in, account affinity must survive proxy restarts.
 
+The catalog rejects a provider when a static header value starts with `$`; the proxy would otherwise treat it as a client header reference. The vendored proxy keeps its upstream catalog and xAI version updaters; Dyna's catalog uses only pinned Pi data.
+
 CLIProxyAPI is a pinned vendored fork supervised as a separate child. Its patch ledger is `next/third_party/cliproxyapi/DYNA.md`. Strict cloak mode stays off. Claude sign-ins use cloaking, with the accepted account risk in decision 4. M1 stores proxy sign-ins in its protected file store; M3 moves them into its SQLite token store. Only the engine holds its management key. Shutdown drains admitted model calls before stopping the proxy.
 
 From M2, git smart HTTP goes through the engine. Fetches cover room repositories; pushes cover only the session repository and its owned branches or archive ref. The engine rejects unauthorized refs before forwarding. Boxes have outbound internet but no device keys; engine network listeners accept paired devices only.

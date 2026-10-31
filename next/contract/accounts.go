@@ -25,6 +25,13 @@ type AccountsActionArgs struct {
 func (AccountsActionArgs) OpKind() OpKind { return "accounts.action" }
 func (AccountsActionArgs) isOpArgs()      {}
 
+type ConnectMethod string
+
+const (
+	ConnectOAuth ConnectMethod = "oauth"
+	ConnectKey   ConnectMethod = "key"
+)
+
 type AccountState string
 
 const (
@@ -41,11 +48,14 @@ type CatalogModel struct {
 }
 
 type AccountProviderInfo struct {
-	ID          AccountProvider `json:"id"`
-	DisplayName string          `json:"displayName"`
-	Flows       []ConnectFlow   `json:"flows"`
-	KeyName     string          `json:"keyName,omitempty"`
-	Models      []CatalogModel  `json:"models"`
+	// Legacy shim: remove in catalog PR 4.
+	ConnectMethod ConnectMethod   `json:"connectMethod"`
+	ConnectFlow   ConnectFlow     `json:"connectFlow"`
+	ID            AccountProvider `json:"id"`
+	DisplayName   string          `json:"displayName"`
+	Flows         []ConnectFlow   `json:"flows"`
+	KeyName       string          `json:"keyName,omitempty"`
+	Models        []CatalogModel  `json:"models"`
 }
 type Account struct {
 	Flow     ConnectFlow          `json:"flow"`

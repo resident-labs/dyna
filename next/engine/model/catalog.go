@@ -6,7 +6,6 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/url"
 	"regexp"
@@ -41,11 +40,19 @@ type CatalogModel struct {
 
 var catalogProviderID = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{0,63}$`)
 
+// CatalogError reports a missing or invalid packed Pi catalog.
+type CatalogError struct{ Cause error }
+
+func (e *CatalogError) Error() string {
+	return "invalid Pi catalog; rebuild pi.tgz with pi-pack.sh: " + e.Cause.Error()
+}
+func (e *CatalogError) Unwrap() error { return e.Cause }
+
 // LoadCatalog reads the catalog from the packed Pi artifact. Invalid providers
 // are returned separately so the caller can log their IDs.
 func LoadCatalog(pi []byte) (Catalog, []string, error) {
 	fail := func(err error) (Catalog, []string, error) {
-		return Catalog{}, nil, fmt.Errorf("invalid Pi catalog; rebuild pi.tgz with pi-pack.sh: %w", err)
+		return Catalog{}, nil, &CatalogError{Cause: err}
 	}
 	gz, err := gzip.NewReader(bytes.NewReader(pi))
 	if err != nil {
@@ -81,8 +88,8 @@ func LoadCatalog(pi []byte) (Catalog, []string, error) {
 		valid := make([]CatalogProvider, 0, len(catalog.Providers))
 		var skipped []string
 		for _, provider := range catalog.Providers {
-			if !validCatalogProvider(provider) {
-				skipped = append(skipped, provider.ID)
+			if reason := invalidCatalogProvider(provider); reason != "" {
+				skipped = append(skipped, provider.ID+": "+reason)
 				continue
 			}
 			valid = append(valid, provider)
@@ -92,21 +99,26 @@ func LoadCatalog(pi []byte) (Catalog, []string, error) {
 	}
 }
 
-func validCatalogProvider(p CatalogProvider) bool {
+func invalidCatalogProvider(p CatalogProvider) string {
 	if !catalogProviderID.MatchString(p.ID) || len(p.Models) > 500 {
-		return false
+		return "invalid provider ID or model count"
+	}
+	for _, value := range p.Headers {
+		if strings.HasPrefix(value, "$") {
+			return "a header value cannot start with $"
+		}
 	}
 	for _, m := range p.Models {
 		if len(m.ID) == 0 || len(m.ID) > 200 {
-			return false
+			return "invalid model ID"
 		}
 		for _, c := range m.ID {
 			if c < 33 || c > 126 {
-				return false
+				return "invalid model ID"
 			}
 		}
 	}
-	return true
+	return ""
 }
 
 // fixedCatalogURL excludes dynamic destinations and non-default HTTPS ports.
