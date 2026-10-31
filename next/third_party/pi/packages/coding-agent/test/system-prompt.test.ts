@@ -68,7 +68,7 @@ describe("buildSystemPrompt", () => {
 
 			expect(prompt).toContain("<addendum>\nAdditional instructions.\n</addendum>");
 			expect(prompt).toContain(
-				'<project_context>\nProject-specific instructions and guidelines:\n\n<project_instructions path="/tmp/AGENTS.md">',
+				'<context_section>\nProject-specific instructions and guidelines:\n\n<project_instructions path="/tmp/AGENTS.md">',
 			);
 			expect(prompt).toContain("<cwd>\n/tmp\n</cwd>");
 		});
