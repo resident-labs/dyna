@@ -3,6 +3,7 @@ module github.com/resident-labs/dyna
 go 1.26.10
 
 require (
+	filippo.io/age v1.2.1
 	github.com/coder/websocket v1.8.14
 	github.com/creack/pty v1.1.24
 	github.com/spf13/cobra v1.10.2
@@ -11,7 +12,6 @@ require (
 
 require (
 	cloud.google.com/go/compute/metadata v0.3.0 // indirect
-	filippo.io/age v1.2.1 // indirect
 	github.com/andybalholm/brotli v1.0.6 // indirect
 	github.com/bytedance/sonic v1.11.6 // indirect
 	github.com/bytedance/sonic/loader v0.1.1 // indirect
