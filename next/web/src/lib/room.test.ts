@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { RoomStore } from "./room.svelte.ts";
 import { EventWindow, PAGE, WINDOW, dmOf } from "./window.svelte.ts";
 import { feedRows as dayRows } from "./feed.ts";
-import { failedJobs } from "./status.ts";
 import { decodeEvent } from "./event.ts";
 import type { Conversation, Event, EventBody, EventsListRequest, PostRequest, SessionSummary } from "./contract.gen.ts";
 
@@ -284,13 +283,28 @@ test("session.list and later events set and clear the running computers", async 
   } finally { server.restore(); }
 });
 
-test("failed jobs read from history keep their session, and a job that passed stays out", async () => {
+test("a failed job counts after a fresh load until the owner reads past its end, and the page does not wait for it", async () => {
   const original = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify({ events: [
-    event(1, { type: "shell.job.ended", body: { session: "s", job: "j1", exitCode: 1, tail: "" } }),
-    event(2, { type: "shell.job.ended", body: { session: "s", job: "j2", exitCode: 0, tail: "" } }),
-  ] }));
-  try { assert.deepEqual(await failedJobs("r", 3), ["s/j1"]); } finally { globalThis.fetch = original; }
+  let answer = (_: Response) => {};
+  const ends = [
+    event(1, { type: "shell.job.ended", body: { session: "s", job: "read", exitCode: 1, tail: "" } }),
+    event(3, { type: "shell.job.ended", body: { session: "s", job: "passed", exitCode: 0, tail: "" } }),
+    event(4, { type: "shell.job.ended", body: { session: "s", job: "unread", exitCode: 1, tail: "" } }),
+  ];
+  const session = { id: "s", lastRead: 2, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "", startedAt: "", hadJobs: true };
+  globalThis.fetch = async input => {
+    if (String(input).endsWith("session.list")) return new Response(JSON.stringify({ sessions: [session], seq: 4 }));
+    if (String(input).endsWith("events.list")) return new Promise<Response>(done => { answer = done; });
+    return new Response("{}");
+  };
+  try {
+    const room = new RoomStore("r", () => () => {});
+    await room.open();
+    assert.equal(room.ready, true);
+    answer(new Response(JSON.stringify({ events: ends })));
+    await new Promise(setImmediate);
+    assert.deepEqual([...room.failedJobs], ["s/unread"]);
+  } finally { globalThis.fetch = original; }
 });
 
 test("a job that ends counts as ended at once, even while a turn holds the running count", () => {
