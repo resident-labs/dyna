@@ -99,8 +99,19 @@ func (in *Input) collect(first contract.ComputerInputBatch) ([]contract.Computer
 }
 
 // Send dispatches batches in order, then lifts every held key and button if release is set. It drops the
-// connection on an error so the next batch reconnects.
+// connection on an error so the next batch reconnects. If a release was due and the send failed, it
+// retries the release at once on a fresh connection, and asks the next batch to retry if that fails too.
 func (in *Input) Send(ctx context.Context, release bool, batches ...contract.ComputerInputBatch) error {
+	err := in.dispatch(ctx, release, batches)
+	if err != nil && release {
+		if in.dispatch(ctx, true, nil) != nil {
+			in.overflow.Store(true)
+		}
+	}
+	return err
+}
+
+func (in *Input) dispatch(ctx context.Context, release bool, batches []contract.ComputerInputBatch) error {
 	if in.d == nil {
 		d, err := Connect(ctx, in.Base)
 		if err != nil {
