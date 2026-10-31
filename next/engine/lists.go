@@ -77,7 +77,8 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 	}
 	rows, err := s.store.Read().QueryContext(ctx, `SELECT s.id,s.name,COALESCE(s.parent,''),s.profile,COALESCE(b.id,''),COALESCE(b.state,''),s.goal,
 		COALESCE((SELECT id FROM turns WHERE session=s.id AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1),''),
-		COALESCE((SELECT outcome FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND outcome!='stopped' ORDER BY ended_at DESC LIMIT 1),'')
+		COALESCE((SELECT outcome FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND outcome!='stopped' ORDER BY ended_at DESC LIMIT 1),''),
+		MAX(0,COALESCE((SELECT shell_jobs FROM turns WHERE session=s.id AND ended_at IS NOT NULL ORDER BY ended_at DESC LIMIT 1),0))
 		FROM sessions s LEFT JOIN boxes b ON b.session=s.id WHERE s.room=? AND s.closed_at IS NULL ORDER BY s.created_at,s.id`, req.Room)
 	if err != nil {
 		return contract.SessionListResponse{}, failure(err)
@@ -86,7 +87,7 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 	sessions := []contract.SessionSummary{}
 	for rows.Next() {
 		var session contract.SessionSummary
-		if err := rows.Scan(&session.ID, &session.Name, &session.Parent, &session.Profile, &session.Box, &session.BoxState, &session.Goal, &session.Turn, &session.LastOutcome); err != nil {
+		if err := rows.Scan(&session.ID, &session.Name, &session.Parent, &session.Profile, &session.Box, &session.BoxState, &session.Goal, &session.Turn, &session.LastOutcome, &session.ShellJobs); err != nil {
 			return contract.SessionListResponse{}, failure(err)
 		}
 		s.mu.Lock()
