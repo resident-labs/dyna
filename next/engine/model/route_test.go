@@ -24,6 +24,7 @@ func TestRouteSwapsKeyAndSetsAffinity(t *testing.T) {
 	defer up.Close()
 	target := up.Listener.Addr().String()
 	req := httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed"}`))
+	req.Header.Set("Connection", "X-Dyna-Eligible-Auth")
 	req.Header.Set("X-Dyna-Eligible-Auth", "spoof")
 	req.Header.Set("X-Api-Key", "box")
 	req.Header.Set("Authorization", "Bearer box")
