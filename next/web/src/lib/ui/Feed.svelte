@@ -53,7 +53,7 @@
   function markRead() {
     if (since === undefined || !view.atPresent || document.visibilityState !== "visible") return;
     const newest = view.newest;
-    void list?.atBottom().then(shown => { if (shown && !gone && document.visibilityState === "visible") store.see(home, newest); });
+    void list?.atBottom().then(shown => { if (shown && !gone && view.atPresent && document.visibilityState === "visible") store.see(home, newest); });
   }
   $effect(markRead);
   $effect(() => {
