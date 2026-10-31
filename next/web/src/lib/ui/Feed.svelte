@@ -9,14 +9,14 @@
   import WorkRow from "./WorkRow.svelte";
   import RequestCard from "./RequestCard.svelte";
   import { TurnTranscripts } from "../transcripts.svelte.ts";
-  import { causes, closedSession, shortPaths, dayLabel, feedRows, type Quote, type Row } from "../feed.ts";
+  import { boxRow, closedSession, shortPaths, dayLabel, feedRows, type Quote, type Row } from "../feed.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { Conversation, PostRequest, Principal } from "../contract.gen.ts";
 
   // unsent holds the app's failed sends of this conversation; see EventWindow.onunsent.
-  let { store, home, intro, unsent, onunsent, onsettled, onforward, onrestarted, element = $bindable() }: {
+  let { store, home, intro, unsent, onunsent, onsettled, onforward, onclosed, element = $bindable() }: {
     store: RoomStore; home: Conversation; intro: Snippet<[boolean]>; unsent: PostRequest[];
-    onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onforward: (quote: Quote) => void; onrestarted: () => void; element?: HTMLDivElement;
+    onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onforward: (quote: Quote) => void; onclosed: () => void; element?: HTMLDivElement;
   } = $props();
 
   // The view is keyed by its conversation, so its window lives as long as the view.
@@ -69,8 +69,7 @@
     ...view.ready && !view.hasOlder ? [{ kind: "intro" as const, key: "intro" }] : [],
     ...rows,
     ...steps.length ? [{ kind: "steps" as const, key: "steps", labels: steps }] : [],
-    ...failure && home.kind === "dm" && home.session ? [{ kind: "failed" as const, key: "box-failed", seq: 0, session: home.session, at: failure.at ?? "",
-      label: failure.box === "lost" || failure.cause === "host_lost" ? "Stopped unexpectedly" as const : "Could not start" as const, cause: failure.cause ? causes[failure.cause] : "" }] : [],
+    ...failure && home.kind === "dm" && home.session ? [{ kind: "failed" as const, key: "box-failed", seq: 0, session: home.session, at: failure.at ?? "", ...boxRow(failure.box, failure.cause) }] : [],
   ]);
   // Opened work rows, steps and transcripts stay while the list recycles their elements.
   const opened = new SvelteSet<string>();
@@ -128,7 +127,7 @@
         onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} onforward={() => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments })} />
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} root={root(item.session)}
         onseen={item.label === "Turn failed" ? () => store.see(home, item.seq) : undefined}>
-        {#if item.key === "box-failed" && failure?.box === "failed"}<BoxRestart session={item.session} {onrestarted} />{/if}</FailedTurnRow>
+        {#if item.key === "box-failed" && failure?.box === "failed"}<BoxRestart session={item.session} {onclosed} />{/if}</FailedTurnRow>
       <!-- The store knows every request that waited when the room opened and every later one. A request the window
         shows as waiting that the store lacks was decided outside the window, so it gets no buttons. -->
       {:else if item.kind === "request"}{@const live = store.requests.get(item.request.id)}

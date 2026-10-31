@@ -14,7 +14,7 @@
   } = $props();
   const boxes: Record<BoxState, string> = {
     pending: "Starting", creating: "Starting", starting: "Starting", ready: "Ready", stopped: "Stopped",
-    closing: "Closing", deleted: "Deleted", failed: "Could not start", lost: "Stopped unexpectedly",
+    closing: "Closing", deleted: "Deleted", failed: "Failed", lost: "Stopped unexpectedly",
   };
   let open = $derived(store.sessions.get(session));
   let parent = $derived(open?.parent && store.names.get(open.parent));
