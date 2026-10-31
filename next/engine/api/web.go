@@ -64,7 +64,8 @@ func (w *Web) login(_ context.Context, _ contract.Principal, _ contract.WebLogin
 }
 
 func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
-	out.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; frame-ancestors 'none'") // the terminal renderer is WebAssembly
+	// The terminal renderer is WebAssembly; a composer shows a picked image from a blob: URL before any post refers to it.
+	out.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' blob:; frame-ancestors 'none'")
 	out.Header().Set("X-Content-Type-Options", "nosniff")
 	if r.Host != w.host || (r.Method != http.MethodGet && r.Header.Get("Origin") != "http://"+w.host) {
 		http.Error(out, "forbidden", http.StatusForbidden)
