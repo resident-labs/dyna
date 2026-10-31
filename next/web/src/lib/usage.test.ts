@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { busiestWindow, windowMeter } from "./usage.ts";
+import { busiestWindow, providerName, windowMeter } from "./usage.ts";
+
+test("names a usage account by its provider, never by its label", () => {
+  assert.equal(providerName("claude"), "Claude");
+});
 
 test("words a usage window by its span, percent used, percent left and time to reset; busy at 90% used", () => {
   const now = Date.parse("2026-10-31T00:00:00Z");
