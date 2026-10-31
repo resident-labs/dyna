@@ -8,6 +8,14 @@ const thinking: Record<ThinkingLevel, string> = {
   off: "no thinking", minimal: "minimal thinking", low: "low thinking", medium: "medium thinking", high: "high thinking", xhigh: "very high thinking",
 };
 
+// Preserve the profile’s other allowed models and hidden limits when the owner edits its model.
+export function profileForSave(draft: ProfileSummary) {
+  const { inUse: _inUse, ...profile } = draft;
+  const model = profile.model.trim();
+  return { ...profile, name: draft.name.trim(), model, allowedModels: Array.from(new Set([...(draft.allowedModels ?? []), model])),
+    compactTokens: draft.compactTokens ?? 0, maxConcurrent: draft.maxConcurrent ?? 0, maxCallsPerRun: draft.maxCallsPerRun ?? 0 };
+}
+
 // "gpt-6.1-sol" is "GPT 6.1 Sol". Neighboring numbers are one version: "claude-opus-5-5" is "Claude Opus 5.5".
 export function slugName(slug: string): string {
   const word = (part: string) => SHOWN_AS[part.toLowerCase()] ?? (/^v?\d/.test(part) ? part : part[0].toUpperCase() + part.slice(1).toLowerCase());
