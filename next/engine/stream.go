@@ -20,7 +20,7 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 		}
 	}
 	sub, cancel := s.store.Subscribe()
-	subscription, live := s.live.Subscribe(room, 16)
+	subscription, liveEvents := s.live.Subscribe(room, 16)
 	out := make(chan contract.Event)
 	go func() {
 		defer close(out)
@@ -49,7 +49,7 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 				continue
 			}
 			select {
-			case event, ok := <-live:
+			case event, ok := <-liveEvents:
 				if !ok {
 					return
 				}
