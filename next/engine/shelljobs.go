@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -28,23 +27,4 @@ func (s *Service) ShellJobEnded(ctx context.Context, caller contract.Principal, 
 		return contract.ShellJobEndedResponse{}, failure(err)
 	}
 	return contract.ShellJobEndedResponse{}, nil
-}
-
-func shellJobText(job contract.ShellJobEnded) string {
-	name := string(job.Job)
-	if job.Description != "" {
-		name = "'" + job.Description + "'"
-	}
-	result := fmt.Sprintf("exited with code %d", job.ExitCode)
-	if job.End != nil {
-		switch job.End.Kind {
-		case contract.ShellJobExited:
-			result = fmt.Sprintf("exited with code %d", job.End.Code)
-		case contract.ShellJobSignaled:
-			result = fmt.Sprintf("ended by a signal (%s)", job.End.Signal)
-		case contract.ShellJobStopped:
-			result = "was stopped"
-		}
-	}
-	return fmt.Sprintf("Background job %s %s. Last output:\n%s", name, result, job.Tail)
 }
