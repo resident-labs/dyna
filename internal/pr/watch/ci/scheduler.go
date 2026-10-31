@@ -89,7 +89,7 @@ func (runs *Runs) CloseAdmission() []StopTarget {
 	var targets []StopTarget
 	runs.Lock()
 	for _, run := range runs.Runs {
-		targets = append(targets, StopTarget{Label: run.label(), Cancel: run.Cancel, Stopped: run.Stopped})
+		targets = append(targets, StopTarget{Label: run.label(), Cancel: run.Cancel, Ended: run.Ended})
 	}
 	runs.Unlock()
 	return targets
@@ -148,11 +148,11 @@ func shortHead(head string) string {
 }
 
 // StopTarget is one local CI run the engine has to end: its cancel handle, the
-// channel that closes when its work on the machine ends, and a name for a log line.
+// channel that closes after its result is saved, and a name for a log line.
 type StopTarget struct {
-	Label   string
-	Cancel  context.CancelFunc
-	Stopped <-chan struct{}
+	Label  string
+	Cancel context.CancelFunc
+	Ended  <-chan struct{}
 }
 
 // SavedResultAction says what admission does with a saved result that already
