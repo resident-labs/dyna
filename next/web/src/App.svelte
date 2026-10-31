@@ -98,9 +98,14 @@
     if (was === "rules") (phone.current ? menuButton ?? toggle : roomMenu)?.focus({ focusVisible: !tapped });
     else (phone.current && !store?.waiting ? menuButton ?? toggle : requestsButton)?.focus({ focusVisible: !tapped });
   }
-  const segment = (pattern: RegExp) => { const match = pattern.exec(behind)?.[1]; return match && decodeURIComponent(match); };
-  let room = $derived(segment(/^\/r\/([^/]+)/));
-  let session = $derived(segment(/^\/r\/[^/]+\/s\/([^/]+)/));
+  // A link to a room the engine does not list, or to a path the app has no page for, shows a load error in Home's
+  // place. Until the room list loads, a room link is trusted, so a known room opens without a flash.
+  // Only /r/<room> and /r/<room>/s/<session> are routes; any other path, a typo after a room included, is no page.
+  const route = $derived(/^\/r\/([^/]+)(?:\/s\/([^/]+))?\/?$/.exec(behind));
+  const asked = $derived(route?.[1] && decodeURIComponent(route[1]));
+  let room = $derived(asked && (!roomsLoaded || attention.rooms.has(asked)) ? asked : undefined);
+  let lost: "room" | "page" | undefined = $derived(room || behind === "/" ? undefined : asked ? "room" : "page");
+  let session = $derived(room && route?.[2] ? decodeURIComponent(route[2]) : undefined);
   // Derived, not set in the effect below: the room's views render with the store of the room they show.
   let store = $derived(room ? new RoomStore(room) : undefined);
   // The same rule per room for its open sessions.
@@ -432,9 +437,11 @@
   let working = $derived(store?.counts.working ?? 0);
   let busy = $derived([...store?.sessions.values() ?? []].filter(item => store?.status(item.session) === "working"));
   let faces = $derived(!session && !panelShown && working > 0);
-  let title = $derived(!room ? "Home" : session ? store?.names.get(session) ?? "Session" : roomName);
+  let title = $derived(lost ? "Not found" : !room ? "Home" : session ? store?.names.get(session) ?? "Session" : roomName);
   // Each fact shows once: profile, state and trouble live on the session's row. A closed session has no row.
   let closed = $derived(!!session && !!store?.ready && !store.sessions.has(session));
+  // A closed session keeps its history to read, with no composer. One with no history at all never existed.
+  let missing = $derived(closed && !!view?.empty());
   let about = $derived(!!session && !closed && (tabs.get(key) ?? "about") === "about");
   // room.list gives the feed's read position. Opening a session's DM shows the owner its failure, which clears the mark.
   // This device was revoked while its page stayed open.
@@ -515,7 +522,7 @@
       {:else if room}<span class="hash"><Icon name="room" /></span>{/if}
       {#if session && !closed}<SessionFace name={title} root={!store?.sessions.get(session)?.parent} dot={shown} size={24} />{/if}
       <span class="heading"><strong>{title}</strong>
-        {#if closed}<span class="count">· closed</span>{:else if word}<span class="count word">{word}</span>{/if}
+        {#if closed && !missing}<span class="count">closed</span>{:else if word && !missing}<span class="count word">{word}</span>{/if}
         {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session")}</span>{/if}</span>
       {#if store && !unavailable}<button type="button" class="requests" class:waiting={store.waiting > 0} bind:this={requestsButton} aria-pressed={section === "requests"}
         aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section === "requests" ? undefined : "requests"; }}>
@@ -536,15 +543,19 @@
     {:else}<div class="feed">
       {#if blocked}<Blocked kind="unreachable" onretry={connect} />
       {:else if !room && roomsLoaded && !rooms.length}<Blocked kind="no-rooms" />
+      {:else if lost === "room"}<Blocked kind="no-room" back={{ href: "/", label: "Go to Home" }} {navigate} />
+      {:else if lost === "page"}<Blocked kind="no-page" back={{ href: "/", label: "Go to Home" }} {navigate} />
       {:else if !room}<Home {attention} {initials} loaded={roomsLoaded} {navigate} onrequests={() => { section = "requests"; }} active={activity.active}
         onactive={event => { toggle = event.currentTarget; void showPanel(true, event.detail > 0); }} />
       {:else if unavailable === "unreachable"}<Blocked kind="unreachable" onretry={reopen} />
       {:else if store && !unavailable}
         {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
           onforward={quote => { quotes[key] = quote; composer?.focus(); }} onclosed={() => composer?.focus()} />{/key}
+        <!-- The empty feed stays mounted behind the error, as it is how the page learns the session has no history. -->
+        {#if missing && room}<Blocked kind="no-session" back={{ href: "/r/" + encodeURIComponent(room), label: `Back to ${roomName}` }} {navigate} />{/if}
       {:else}<p class="empty">This room is not available. <button type="button" class="retry" onclick={reopen}>Try again</button></p>{/if}
     </div>
-    {#if room && !unavailable}
+    {#if room && !unavailable && !closed}
       <!-- A paused room's line takes the working line's place, so the composer never moves; the header still says who works. -->
       {#if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
         <button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button></p>
@@ -608,6 +619,7 @@
   aside.members > header strong, .count.active { font-size: 16px; }
   /* The header's face rings its dot in the header's color. */
   main > header { --ring: var(--bg); }
+  .feed:has(> :global(.blocked)) > :global(:not(.blocked)) { display: none; }
   .tabs { gap: 4px; }
   .tabs button { padding: 4px 10px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
   .tabs button:hover { background: var(--hover); color: var(--text); }
