@@ -359,3 +359,17 @@ func TestBoxCanStartChild(t *testing.T) {
 		t.Fatalf("status=%d caller=%+v", w.Code, f.caller)
 	}
 }
+
+func TestOpSubmitRejectsUnknownOperationFields(t *testing.T) {
+	a := New(&fakeService{}, nil)
+	for _, body := range []string{
+		`{"operation":{"kind":"pr.open","args":{"title":"x","unknown":true}}}`,
+		`{"operation":{"kind":"hostexec.grant","args":{"hosts":["h"],"reason":"x","unknown":true}}}`,
+		`{"operation":{"kind":"pr.open","unknown":true,"args":{"title":"x"}}}`,
+	} {
+		got := request(a.handler(boxCaller()), "/v1/op.submit", body)
+		if got.Code != http.StatusBadRequest {
+			t.Fatalf("unknown field accepted: %s: %d %s", body, got.Code, got.Body)
+		}
+	}
+}
