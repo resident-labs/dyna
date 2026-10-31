@@ -67,7 +67,6 @@ func TestAdoptionRecovery(t *testing.T) {
 	if err := rpc.Save(model.AuthSave{Record: record, Create: true, Attempt: reconnect.Attempt, Identity: model.OAuthIdentity{Email: "invented@example.test"}}, &struct{}{}); err != nil {
 		t.Fatal(err)
 	}
-	_, _ = actions.AccountsConnectStatus(ctx, owner, contract.AccountsConnectStatusRequest{Attempt: reconnect.Attempt})
 	status, problem := actions.AccountsConnectStatus(ctx, owner, contract.AccountsConnectStatusRequest{Attempt: reconnect.Attempt})
 	if problem != nil || status.Status != contract.ConnectFailed || status.Reason != contract.ConnectAdoptionFailed {
 		t.Fatal("failed adoption was not reported")
