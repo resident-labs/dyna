@@ -92,24 +92,32 @@ type RuleListResponse struct {
 type ErrorCode string
 
 const (
-	ErrPodmanRequired ErrorCode = "podman_required"
-	ErrInvalid        ErrorCode = "invalid"
-	ErrNotFound       ErrorCode = "not_found"
-	ErrForbidden      ErrorCode = "forbidden"
-	ErrConflict       ErrorCode = "conflict"
-	ErrMoveBusy       ErrorCode = "move_busy"
-	ErrHasChildren    ErrorCode = "has_children"
-	ErrParentClosing  ErrorCode = "parent_closing"
-	ErrSessionClosing ErrorCode = "session_closing"
-	ErrStale          ErrorCode = "stale"
-	ErrUnavailable    ErrorCode = "unavailable"
-	ErrStoreFromV1    ErrorCode = "store_from_v1"
-	ErrStoreTooOld    ErrorCode = "store_too_old"
+	ErrPodmanRequired   ErrorCode = "podman_required"
+	ErrInvalid          ErrorCode = "invalid"
+	ErrNotFound         ErrorCode = "not_found"
+	ErrForbidden        ErrorCode = "forbidden"
+	ErrConflict         ErrorCode = "conflict"
+	ErrMoveBusy         ErrorCode = "move_busy"
+	ErrHasChildren      ErrorCode = "has_children"
+	ErrParentClosing    ErrorCode = "parent_closing"
+	ErrSessionClosing   ErrorCode = "session_closing"
+	ErrStale            ErrorCode = "stale"
+	ErrVisualSuperseded ErrorCode = "visual_superseded"
+	ErrUnavailable      ErrorCode = "unavailable"
+	ErrStoreFromV1      ErrorCode = "store_from_v1"
+	ErrStoreTooOld      ErrorCode = "store_too_old"
 )
 
 type Error struct {
-	Code    ErrorCode `json:"code"`
-	Message string    `json:"message"`
+	Code    ErrorCode         `json:"code"`
+	Message string            `json:"message"`
+	Visual  *VisualSuperseded `json:"visual,omitempty"`
+}
+
+type VisualSuperseded struct {
+	Event   EventID `json:"event"`
+	Version int     `json:"version"`
+	Seq     int64   `json:"seq"`
 }
 
 type ConversationReadRequest struct {
@@ -358,6 +366,7 @@ type PostRequest struct {
 	Attachments  []Attachment `json:"attachments,omitempty"`
 	ClientID     string       `json:"clientId,omitempty"`     // at most 64 characters; a repeat from the same author in a room returns the first post
 	VisualUpdate EventID      `json:"visualUpdate,omitempty"` // original visual ID, for a new version
+	VisualReply  EventID      `json:"visualReply,omitempty"`  // visual version this post answers
 }
 type PostResponse struct {
 	Event EventID `json:"event"`
@@ -397,6 +406,7 @@ type PostSearchResponse struct {
 	Total int                  `json:"total"`
 }
 type EventsListRequest struct {
+	Event     EventID     `json:"event,omitempty"` // return this room event by ID
 	Room      RoomID      `json:"room"`
 	AfterSeq  int64       `json:"afterSeq"`
 	BeforeSeq int64       `json:"beforeSeq,omitempty"`
