@@ -47,15 +47,15 @@ test("folds the work between two posts into one row", () => {
   ], { kind: "feed" });
   assert.deepEqual(rows.map(row => row.kind), ["post", "work", "failed", "post"]);
   const work = rows[1];
-  assert.equal(work.kind === "work" && workSummary(work.events, session => names[session]), "lead-web ran 2 turns");
+  assert.equal(work.kind === "work" && workSummary(work.events, session => names[session]), "lead-web worked · 2 turns");
 });
 
 test("names two sessions that ran turns and counts more", () => {
   const started = (seq: number, session: string) => event(seq, { type: "turn.started", body: { session, turn: `t${seq}`, inputs: [] } });
   const begun = (seq: number, session: string) => event(seq, { type: "session.started", body: { session, name: session, profile: "p", goal: "" } });
   const name = (session: string) => session;
-  assert.equal(workSummary([started(1, "designer"), started(2, "lead-web")], name), "designer and lead-web ran turns");
-  assert.equal(workSummary([begun(1, "a"), started(2, "a"), started(3, "b"), started(4, "c")], name), "a started, 3 sessions ran turns");
+  assert.equal(workSummary([started(1, "designer"), started(2, "lead-web")], name), "designer and lead-web worked · 2 turns");
+  assert.equal(workSummary([begun(1, "a"), started(2, "a"), started(3, "b"), started(4, "c")], name), "a started · 3 sessions worked · 3 turns");
 });
 
 test("names failed image builds and computers in the work line", () => {
@@ -126,4 +126,20 @@ test("a request is its own row where it happened, and its decision updates that 
   ], { kind: "feed" });
   assert.deepEqual(rows.map(row => row.kind), ["work", "request", "work"]);
   assert.deepEqual(rows[1].kind === "request" && rows[1].request, { id: "op1", kind: "hostexec.grant", by: lead, class: "owner", card, expires: "", state: "approved", decision });
+});
+
+test("says how long the work in a row took, from the first turn's start to the last turn's end", () => {
+  const at = (seq: number, minutes: number, body: EventBody) => ({ ...event(seq, body), at: new Date(minutes * 60_000).toISOString() });
+  const ended = (seq: number, minutes: number, turn: string) => at(seq, minutes, { type: "turn.ended", body: { session: "l", turn, outcome: "completed", usage } });
+  const events = [
+    at(1, 0, { type: "turn.started", body: { session: "l", turn: "t1", inputs: [] } }), ended(2, 2, "t1"),
+    at(3, 3, { type: "shell.job.ended", body: { session: "l", job: "j", exitCode: 0, tail: "" } }), ended(4, 6, "t2"),
+  ];
+  assert.equal(workSummary(events, session => names[session]), "lead-web worked for 6 min · 2 turns · 1 job");
+  assert.equal(workSummary([events[0], ended(2, 80, "t1")], session => names[session]), "lead-web worked for 1 h 20 min · 1 turn");
+  // A turn that answers here ends in the answer's row, which still gives the work row above it its end.
+  const answered = at(2, 4, { type: "turn.ended", body: { session: "l", turn: "t1", outcome: "completed", usage, final: "Done", replies: [{ reply: { kind: "final" } }] } });
+  const rows = dayRows([events[0], answered], { kind: "feed" });
+  const work = rows.find(row => row.kind === "work");
+  assert.equal(work?.kind === "work" && workSummary(work.events, session => names[session], work.until), "lead-web worked for 4 min · 1 turn");
 });
