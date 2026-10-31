@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -67,7 +68,11 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 		},
 		Card: func(_ context.Context, args contract.OpArgs, _ contract.Principal) contract.Card {
 			a := args.(contract.HostexecRunArgs)
-			return contract.Card{Title: "Run host command", Target: contract.Target{Kind: contract.TargetHost, Name: quoteHostexec(string(a.Host))}, Command: a.Argv, Body: fmt.Sprintf("Working directory: %s; timeout: %s", quoteHostexec(a.Cwd), time.Duration(a.Timeout)*time.Millisecond)}
+			body := fmt.Sprintf("timeout: %s", time.Duration(a.Timeout)*time.Millisecond)
+			if a.Cwd != "" {
+				body = fmt.Sprintf("Working directory: %s; ", quoteHostexec(a.Cwd)) + body
+			}
+			return contract.Card{Title: "Run host command", Target: contract.Target{Kind: contract.TargetHost, Name: quoteHostexec(string(a.Host))}, Command: a.Argv, Body: body}
 		},
 		Check: func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
 			a := args.(contract.HostexecRunArgs)
@@ -89,7 +94,10 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 			a := args.(contract.HostexecRunArgs)
 			run := store.HostexecRun{Op: op, Grant: a.Grant, Host: a.Host, Scope: "dyna-hostexec-" + string(op) + ".scope", Timeout: a.Timeout}
 			if err := s.store.StartHostexec(ctx, run, who, a.Room, s.now()); err != nil {
-				return contract.OpResult{Error: "grant no longer active"}
+				if errors.Is(err, sql.ErrNoRows) {
+					return contract.OpResult{Error: "grant no longer active"}
+				}
+				return contract.OpResult{Error: err.Error()}
 			}
 			started := s.now()
 			runCtx, cancel := s.hostexecTimeout(ctx, time.Duration(a.Timeout)*time.Millisecond+15*time.Second)
@@ -149,7 +157,9 @@ func (s *Service) StopHostexecs(ctx context.Context) error {
 		go func() {
 			stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
-			_ = s.hostexec.StopHostexec(stopCtx, r.Host, r.Scope)
+			if s.hostexec.StopHostexec(stopCtx, r.Host, r.Scope) == nil {
+				_ = s.store.CompleteHostexecStop(stopCtx, r.Op, s.now())
+			}
 		}()
 	}
 	return nil
