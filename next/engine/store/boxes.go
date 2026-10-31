@@ -25,6 +25,7 @@ type LifecycleBox struct {
 	Want     BoxWant
 	DueAt    time.Time
 	Failures int
+	Paused   bool
 }
 
 func (s *Store) Boxes(ctx context.Context) ([]box.Box, error) {
@@ -44,7 +45,7 @@ func (s *Store) LifecycleBoxes(ctx context.Context) ([]LifecycleBox, error) {
 }
 
 func (s *Store) lifecycleBoxes(ctx context.Context, activeOnly bool) ([]LifecycleBox, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT id,session,parent,host,image,size,state,reason,slice,created_at,updated_at,want,due_at,failures FROM boxes WHERE NOT ? OR NOT (state='deleted' AND EXISTS (SELECT 1 FROM sessions WHERE sessions.id=boxes.session AND sessions.closed_at IS NOT NULL)) ORDER BY created_at,id", activeOnly)
+	rows, err := s.Read().QueryContext(ctx, "SELECT id,session,parent,host,image,size,state,reason,slice,created_at,updated_at,want,due_at,failures,EXISTS(SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND r.paused_at IS NOT NULL) FROM boxes WHERE NOT ? OR NOT (state='deleted' AND EXISTS (SELECT 1 FROM sessions WHERE sessions.id=boxes.session AND sessions.closed_at IS NOT NULL)) ORDER BY created_at,id", activeOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +56,7 @@ func (s *Store) lifecycleBoxes(ctx context.Context, activeOnly bool) ([]Lifecycl
 		var parent, host sql.NullString
 		var size contract.BoxSizeName
 		var created, updated, due int64
-		if err := rows.Scan(&b.ID, &b.Session, &parent, &host, &b.Image, &size, &b.State, &b.Reason, &b.Slice, &created, &updated, &b.Want, &due, &b.Failures); err != nil {
+		if err := rows.Scan(&b.ID, &b.Session, &parent, &host, &b.Image, &size, &b.State, &b.Reason, &b.Slice, &created, &updated, &b.Want, &due, &b.Failures, &b.Paused); err != nil {
 			return nil, err
 		}
 		b.BudgetParent = contract.BoxID(parent.String)
