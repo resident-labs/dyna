@@ -36,12 +36,17 @@ func (s *Store) CreateDevice(ctx context.Context, d Device) error {
 	})
 }
 
-// AuthenticateDevice checks revocation and expiry on every request. Renewals
-// use a conditional write so concurrent requests cannot renew more than daily.
+// AuthenticateDevice reads the device and its scopes from one SQLite snapshot.
+// A conditional renewal cannot restore a revoked or expired device.
 func (s *Store) AuthenticateDevice(ctx context.Context, hash [32]byte, now time.Time) (Device, bool, error) {
+	tx, err := s.read.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return Device{}, false, err
+	}
+	defer tx.Rollback()
 	var d Device
 	var paired, seen, expires int64
-	err := s.read.QueryRowContext(ctx, "SELECT id,name,paired_at,last_seen_at,expires_at FROM devices WHERE token_sha256=? AND revoked_at IS NULL AND expires_at>?", hash[:], now.UnixMilli()).Scan(&d.ID, &d.Name, &paired, &seen, &expires)
+	err = tx.QueryRowContext(ctx, "SELECT id,name,paired_at,last_seen_at,expires_at FROM devices WHERE token_sha256=? AND revoked_at IS NULL AND expires_at>?", hash[:], now.UnixMilli()).Scan(&d.ID, &d.Name, &paired, &seen, &expires)
 	if err == sql.ErrNoRows {
 		return Device{}, false, nil
 	}
@@ -52,26 +57,34 @@ func (s *Store) AuthenticateDevice(ctx context.Context, hash [32]byte, now time.
 	d.PairedAt = time.UnixMilli(paired)
 	d.LastSeenAt = time.UnixMilli(seen)
 	d.ExpiresAt = time.UnixMilli(expires)
+	rows, err := tx.QueryContext(ctx, "SELECT scope FROM device_scopes WHERE device=? ORDER BY scope", d.ID)
+	if err != nil {
+		return Device{}, false, err
+	}
+	for rows.Next() {
+		var scope contract.Scope
+		if err := rows.Scan(&scope); err != nil {
+			rows.Close()
+			return Device{}, false, err
+		}
+		d.Scopes = append(d.Scopes, scope)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return Device{}, false, err
+	}
+	if err = tx.Commit(); err != nil {
+		return Device{}, false, err
+	}
 	if now.UnixMilli()-seen >= (24 * time.Hour).Milliseconds() {
 		err = s.Write(ctx, func(tx *sql.Tx) error {
-			_, err := tx.ExecContext(ctx, "UPDATE devices SET last_seen_at=?,expires_at=? WHERE id=? AND revoked_at IS NULL AND expires_at>? AND last_seen_at<=?", now.UnixMilli(), now.Add(DeviceLife).UnixMilli(), d.ID, now.UnixMilli(), now.Add(-24*time.Hour).UnixMilli())
+			_, err := tx.ExecContext(ctx, "UPDATE devices SET last_seen_at=?,expires_at=? WHERE id=? AND token_sha256=? AND revoked_at IS NULL AND expires_at>? AND last_seen_at<=?", now.UnixMilli(), now.Add(DeviceLife).UnixMilli(), d.ID, hash[:], now.UnixMilli(), now.Add(-24*time.Hour).UnixMilli())
 			return err
 		})
 		if err != nil {
 			return Device{}, false, err
 		}
 	}
-	rows, err := s.read.QueryContext(ctx, "SELECT scope FROM device_scopes WHERE device=? ORDER BY scope", d.ID)
-	if err != nil {
-		return Device{}, false, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var scope contract.Scope
-		if err := rows.Scan(&scope); err != nil {
-			return Device{}, false, err
-		}
-		d.Scopes = append(d.Scopes, scope)
-	}
-	return d, true, rows.Err()
+	return d, true, nil
 }

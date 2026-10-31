@@ -86,6 +86,10 @@ func TestUpgradeRemovesLegacyGrantRequestFromList(t *testing.T) {
  DROP TABLE rules;
  DROP TABLE uploads;
  DROP TABLE backup_copy_status;
+ ALTER TABLE pr_owners DROP COLUMN branch;
+ DROP TABLE device_scopes;
+ DROP TABLE devices;
+ DROP TABLE pairing_codes;
  UPDATE meta SET value='17' WHERE key='schema_version';
  INSERT INTO operations(id,kind,room,by_kind,by_id,class,state,card,args,args_sha256,created_at,expires_at) VALUES
  ('old','hostexec.grant','room','session','worker','owner','pending','{}',CAST('{"room":"room","to":{"kind":"session","session":"worker"},"hosts":["host"],"commands":[{"program":"git"}],"mode":"approve"}' AS BLOB),x'01',1,9999999999999),
