@@ -1,12 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { commandLine, feedRows, workSummary } from "./feed.ts";
-import type { Event, EventBody, Principal } from "./contract.gen.ts";
+import { commandLine, feedRows, fromNow, workSummary } from "./feed.ts";
+import type { BoxState, Event, EventBody, FailureCause, Principal } from "./contract.gen.ts";
 
 test("a command line shows each argument exactly: spaces, quotes and empty arguments are quoted", () => {
   assert.equal(commandLine(["tool", "a b"]), "tool 'a b'");
   assert.equal(commandLine(["tool", "a", "b"]), "tool a b");
   assert.equal(commandLine(["echo", "it's", "", "--x=1"]), `echo 'it'\\''s' '' --x=1`);
+});
+
+test("a time less than a minute ahead is 'in under a minute', not 'just now'", () => {
+  assert.equal(fromNow(new Date(20_000).toISOString(), 0), "in under a minute");
+  assert.equal(fromNow(new Date(0).toISOString(), 20_000), "just now");
 });
 
 const lead: Principal = { kind: "session", session: "l" };
@@ -47,10 +52,11 @@ test("names failed image builds and computers in the work line", () => {
   assert.equal(workSummary([computer], session => names[session]), "lead-web opened a computer");
 });
 
-test("keeps box changes out of the feed except a failed or lost box", () => {
-  const box = (seq: number, to: "ready" | "lost") => event(seq, { type: "box.changed", body: { box: "b", session: "l", to, reason: "podman: exit 125" } });
-  const rows = feedRows([box(1, "ready"), box(2, "lost")], { kind: "feed" });
-  assert.deepEqual(rows.map(row => row.kind === "failed" && [row.label, row.error]), [["Stopped unexpectedly", ""]]);
+test("keeps box changes out of the feed except a failed or lost box or a failed close, in the owner's words", () => {
+  const box = (seq: number, to: BoxState, cause?: FailureCause) => event(seq, { type: "box.changed", body: { box: "b", session: "l", to, cause, reason: "podman: exit 125" } });
+  const rows = feedRows([box(1, "ready"), box(2, "lost"), box(3, "failed", "no_hello"), box(4, "closing"), box(5, "closing", "archive_failed")], { kind: "feed" });
+  assert.deepEqual(rows.map(row => row.kind === "failed" && [row.label, row.cause]), [["Stopped unexpectedly", ""],
+    ["Could not start", "Its workspace did not connect in time"], ["Could not close", "Dyna could not save the session's branch"]]);
 });
 
 test("a failed turn with a final reply keeps its failed row", () => {
