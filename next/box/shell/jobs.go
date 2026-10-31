@@ -59,6 +59,7 @@ func (p *execProcess) Signal(sig syscall.Signal) { _ = syscall.Kill(-p.cmd.Proce
 type job struct {
 	id      contract.ShellJobID
 	command string
+	started time.Time
 	proc    process
 	done    chan struct{}
 
@@ -70,6 +71,7 @@ type job struct {
 	ownerFinished bool
 	exit          int
 	finished      bool
+	ended         time.Time
 	background    bool
 	stopped       bool
 	skipping      bool // inside a line that was cut; drop it to its newline
@@ -139,6 +141,7 @@ type Config struct {
 
 	newID func() contract.ShellJobID
 	start func(command, cwd string, out io.Writer) (process, error)
+	now   func() time.Time // the clock for a job's start and end
 }
 
 // Server owns the box's jobs. They outlive any Pi process.
@@ -161,6 +164,9 @@ func New(cfg Config) *Server {
 	if cfg.start == nil {
 		cfg.start = startBash
 	}
+	if cfg.now == nil {
+		cfg.now = time.Now
+	}
 	return &Server{cfg: cfg, closed: make(chan struct{})}
 }
 
@@ -180,7 +186,7 @@ func (s *Server) run(cancel <-chan struct{}, command, cwd string) (*job, error) 
 	if cwd == "" {
 		cwd = s.cfg.Dir
 	}
-	j := &job{id: s.cfg.newID(), command: command, owner: -1, done: make(chan struct{})}
+	j := &job{id: s.cfg.newID(), command: command, started: s.cfg.now(), owner: -1, done: make(chan struct{})}
 	proc, err := s.cfg.start(command, cwd, j)
 	if err != nil {
 		return nil, err
@@ -192,7 +198,7 @@ func (s *Server) run(cancel <-chan struct{}, command, cwd string) (*job, error) 
 	go func() {
 		code := proc.Wait()
 		j.mu.Lock()
-		j.exit, j.finished = code, true
+		j.exit, j.finished, j.ended = code, true, s.cfg.now()
 		report := j.background && !j.stopped
 		j.mu.Unlock()
 		close(j.done)
@@ -330,7 +336,8 @@ func (s *Server) View(reset bool) []contract.ShellJobOutput {
 		if fresh || end > start || j.ownerFinished != j.finished {
 			command := Mask(j.command)
 			command = strings.ToValidUTF8(command[:min(len(command), 4<<10)], "")
-			result = append(result, contract.ShellJobOutput{Job: j.id, Command: command, Running: !j.finished, ExitCode: j.exit, Text: Mask(string(j.output[start:end])), Reset: fresh})
+			result = append(result, contract.ShellJobOutput{Job: j.id, Command: command, Running: !j.finished, ExitCode: j.exit, Text: Mask(string(j.output[start:end])), Reset: fresh,
+				Started: j.started, Ended: j.ended})
 			budget -= end - start + len(command) + 256 // JSON fields and job ID
 			s.viewNext = (index + 1) % len(s.jobs)
 		}
