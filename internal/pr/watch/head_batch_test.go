@@ -288,7 +288,6 @@ func TestHeadBatchKeepsConfirmedHeadUnchanged(t *testing.T) {
 	e.write()
 	e.track()
 	e.tick()
-	e.holdSafetyPoll()
 	before := e.record()
 	e.tick()
 	if after := e.record(); !after.HeadVerifiedAt.Equal(before.HeadVerifiedAt) {
