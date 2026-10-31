@@ -95,6 +95,9 @@ func TestReconcilerCreateRetriesBeforeFailure(t *testing.T) {
 			if i == 2 {
 				want = contract.BoxFailed
 			}
+			if i == 2 && row.Reason != string(contract.CauseCreateFailed) {
+				t.Fatalf("terminal reason=%q", row.Reason)
+			}
 			if i < 2 && row.Reason != string(box.PendingCreateRetry) {
 				t.Fatalf("attempt %d: persisted reason=%q, want %q", i+1, row.Reason, box.PendingCreateRetry)
 			}
@@ -117,7 +120,7 @@ func TestReconcilerCreateRetriesBeforeFailure(t *testing.T) {
 		}
 	}
 	log.SetOutput(previousLog)
-	if !strings.Contains(logs.String(), "create unavailable") {
+	if !strings.Contains(logs.String(), "create unavailable") || !strings.Contains(logs.String(), string(session.Box)) {
 		t.Fatalf("create error missing from log: %q", logs.String())
 	}
 	page, problem := s.EventsList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.EventsListRequest{Room: room, Limit: 1000, Types: []contract.EventType{"box.changed"}})
@@ -138,6 +141,9 @@ func TestReconcilerCreateRetriesBeforeFailure(t *testing.T) {
 			retries++
 		}
 		if change.To == contract.BoxFailed && change.Cause == contract.CauseCreateFailed {
+			if change.Reason != string(contract.CauseCreateFailed) {
+				t.Fatalf("terminal event reason=%q", change.Reason)
+			}
 			failed = true
 		}
 	}
