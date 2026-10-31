@@ -17,6 +17,7 @@ func TestQuotasThroughManagement(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := 0
+	refreshFails := false
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer management-key" {
 			t.Error("missing management authorization")
@@ -26,6 +27,10 @@ func TestQuotasThroughManagement(t *testing.T) {
 			_, _ = w.Write([]byte(`{"files":[{"auth_index":"index","provider":"claude","label":"Personal"}]}`))
 		case "/v0/management/api-call":
 			calls++
+			if refreshFails {
+				http.Error(w, `{"error":"auth token refresh failed"}`, http.StatusBadRequest)
+				return
+			}
 			var req struct {
 				Index  string            `json:"auth_index"`
 				Method string            `json:"method"`
@@ -66,5 +71,11 @@ func TestQuotasThroughManagement(t *testing.T) {
 	second, err := q.Read(context.Background())
 	if err != nil || len(second.Accounts) != 1 || calls != 1 {
 		t.Fatalf("cache: %+v, calls %d, error %v", second, calls, err)
+	}
+	now = now.Add(2 * time.Minute)
+	refreshFails = true
+	third, err := q.Read(context.Background())
+	if err != nil || len(third.Accounts) != 1 || third.Accounts[0].Cause != "sign_in_expired" || calls != 2 {
+		t.Fatalf("refresh failure: %+v, calls %d, error %v", third, calls, err)
 	}
 }
