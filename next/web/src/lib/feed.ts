@@ -9,12 +9,12 @@ type Name = (session: string) => string;
 
 // Why a box or a request failed, in the owner's words. The engine's reason and error texts are raw (r8), so they never show.
 export const causes: Record<FailureCause, string> = {
-  create_failed: "Its box could not be created on the host",
-  no_hello: "Its box did not connect in time",
-  engine_restarted: "Dyna restarted while it created the box",
-  remove_failed: "Dyna could not remove its box",
+  create_failed: "Its workspace could not be created on the host",
+  no_hello: "Its workspace did not connect in time",
+  engine_restarted: "Dyna restarted while it set up the workspace",
+  remove_failed: "Dyna could not remove its workspace",
   archive_failed: "Dyna could not save the session's branch",
-  grant_inactive: "The host-exec grant expired or was revoked",
+  grant_inactive: "The host execution grant expired or was revoked",
   host_lost: "The host stopped answering during the run",
   github_failed: "GitHub refused the request or did not answer",
   stale: "What the request needed changed before it ran",
