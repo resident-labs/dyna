@@ -332,6 +332,9 @@
     const targetRoom = item.kind === "room" ? item.room.id : item.kind === "session" ? item.session.room : item.post.room;
     const targetSession = item.kind === "session" ? item.session.id : item.kind === "message" && item.post.home.kind === "dm" ? item.post.home.session : undefined;
     const seq = item.kind === "message" ? item.post.seq : undefined;
+    openLocation(targetRoom, targetSession, seq);
+  }
+  function openLocation(targetRoom: string, targetSession?: string, seq?: number) {
     jumpSeq = undefined;
     history.pushState(null, "", `/r/${encodeURIComponent(targetRoom)}${targetSession ? `/s/${encodeURIComponent(targetSession)}` : ""}`);
     follow();
@@ -675,7 +678,7 @@
         onactive={event => { toggle = event.currentTarget; void showPanel(true, event.detail > 0); }} />
       {:else if unavailable === "unreachable"}<Blocked kind="unreachable" onretry={reopen} />
       {:else if store && !unavailable}
-        {#if session}{#key session}<SessionThread bind:this={thread} {store} {session} {roomName} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle} />{/key}{:else}{#key key}<Feed bind:this={view} {store} {home} admin={attention.can("admin")} operate={attention.can("operate") && !closed} waiting={quotes[key]} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
+        {#if session}{#key session}<SessionThread bind:this={thread} {store} {session} {roomName} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{/key}{:else}{#key key}<Feed bind:this={view} {store} {home} admin={attention.can("admin")} operate={attention.can("operate") && !closed} waiting={quotes[key]} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
           onforward={forward} onclosed={() => composer?.focus()} onjobs={item => void jobsTool?.show(item)}
           onvisual={(versions, selected, send) => { visualTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : undefined; visual = { versions, selected, send }; }} />{/key}{/if}
         <!-- The empty feed stays mounted behind the error, as it is how the page learns the session has no history. -->
