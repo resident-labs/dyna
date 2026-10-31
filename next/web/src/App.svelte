@@ -504,7 +504,7 @@
             {#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
           <button type="button" onclick={event => void showPanel(true, event.detail > 0)}><Icon name="people" />Sessions<span class="count">{store.sessions.size}</span></button>
           <button type="button" aria-pressed={section === "rules"} onclick={() => { section = "rules"; }}><Icon name="rules" />Rules<span class="count">{store.rules.size}</span></button>
-          <button type="button" onclick={pause}><Icon name="pause" />{paused ? "Resume room" : "Pause room"}</button>
+          {#if attention.can("operate")}<button type="button" onclick={pause}><Icon name="pause" />{paused ? "Resume room" : "Pause room"}</button>{/if}
         {/if}
       {:else}
         {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}
@@ -532,9 +532,9 @@
         aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section === "requests" ? undefined : "requests"; }}>
         <Icon name="inbox" />{#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
         <!-- One click to the session's shell and computer; neither shows when the session has none. -->
-        {#if session && !closed && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title={terminals?.hasShell(session) ? "Show this session's terminal" : "Open a terminal in this session's box"} aria-pressed={terminals?.hasShell(session) ?? false} onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /><span>Terminal</span></button>{/if}
-        {#if session && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /><span>Computer</span></button>{/if}
-        <span class="room-menu"><RoomMenu bind:this={roomMenu} {paused} onrules={() => { section = "rules"; }} onpause={pause} /></span>{/if}
+        {#if session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title={terminals?.hasShell(session) ? "Show this session's terminal" : "Open a terminal in this session's box"} aria-pressed={terminals?.hasShell(session) ?? false} onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /><span>Terminal</span></button>{/if}
+        {#if session && attention.can("computers") && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /><span>Computer</span></button>{/if}
+        <span class="room-menu"><RoomMenu bind:this={roomMenu} {paused} operate={attention.can("operate")} onrules={() => { section = "rules"; }} onpause={pause} /></span>{/if}
       <!-- While the panel is closed, who works shows on its button, as at most 3 faces, "+n" and the count from status.ts. -->
       {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={"Sessions" + (faces ? `, ${working} working` : "") + (store?.counts.failed ? ", a session failed" : "")}
         title={faces ? busy.map(item => item.name).join(", ") : "Sessions"} aria-controls="sessions" aria-expanded={panelShown} onclick={event => void showPanel(!panelShown, event.detail > 0)}>
@@ -542,8 +542,8 @@
           {#if busy.length > 3}<span class="more">+{busy.length - 3}</span>{/if}<span class="count">{working} working</span>
         {:else}<Icon name="people" />{#if store?.ready}<span class="count phone">{store.sessions.size}</span>{/if}{/if}
         {#if store?.counts.failed && !panelShown}<span class="attention"></span>{/if}</button>{/if}</header>
-    {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} room={roomName} onback={event => void closeSection(event.detail > 0)} />
-    {:else if section === "rules" && store && !unavailable}<RulesPanel bind:element={page} {store} room={roomName} onback={event => void closeSection(event.detail > 0)} />
+    {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} admin={attention.can("admin")} {store} room={roomName} onback={event => void closeSection(event.detail > 0)} />
+    {:else if section === "rules" && store && !unavailable}<RulesPanel bind:element={page} {store} room={roomName} edit={attention.can("admin")} onback={event => void closeSection(event.detail > 0)} />
     {:else}<div class="feed">
       {#if blocked}<Blocked kind="unreachable" onretry={connect} />
       {:else if !room && roomsLoaded && !rooms.length}<Blocked kind="no-rooms" />
@@ -553,7 +553,7 @@
         onactive={event => { toggle = event.currentTarget; void showPanel(true, event.detail > 0); }} />
       {:else if unavailable === "unreachable"}<Blocked kind="unreachable" onretry={reopen} />
       {:else if store && !unavailable}
-        {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
+        {#key key}<Feed bind:this={view} {store} {home} admin={attention.can("admin")} operate={attention.can("operate")} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
           onforward={quote => { quotes[key] = quote; composer?.focus(); }} onclosed={() => composer?.focus()} onjobs={item => void jobsTool?.show(item)} />{/key}
         <!-- The empty feed stays mounted behind the error, as it is how the page learns the session has no history. -->
         {#if missing && room}<Blocked kind="no-session" back={{ href: "/r/" + encodeURIComponent(room), label: `Back to ${roomName}` }} {navigate} />{/if}
@@ -562,12 +562,13 @@
     {#if room && !unavailable && !closed}
       <!-- A paused room's line takes the working line's place, so the composer never moves; the header still says who works. -->
       {#if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
-        <button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button></p>
+        {#if attention.can("operate")}<button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button>{/if}</p>
       {:else if store}<WorkingLine {store} {home} />{/if}
-      <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title}
+      {#if attention.can("operate")}<Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title}
         quote={quotes[key]} onunquote={() => { quotes[key] = undefined; }} sessions={mentions} files={files(key)} {stop} />
+      {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
     {/if}{/if}
-    <TermDock bind:this={terminals} bind:element={dock} onempty={() => composer?.focus()} phone={phone.current} strip={!!room && !unavailable}
+    <TermDock bind:this={terminals} terminal={attention.can("terminal")} bind:element={dock} onempty={() => composer?.focus()} phone={phone.current} strip={!!room && !unavailable}
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
   </main>
   {#if room}
@@ -580,7 +581,7 @@
         <button type="button" aria-pressed={about} onclick={() => tabs.set(key, "about")}>About</button></header>
       {:else}<header class="bar"><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}</header>{/if}
       <!-- A long tree renders only its visible rows, through the feed's shared list (spec: long lists are virtual). -->
-      {#if about && session && store}<AboutPanel {store} room={room} {session} navigate={openSession} onjobs={async event => { if (!wide.current) await showPanel(false, event.detail > 0); void jobsTool?.show(session); }} />
+      {#if about && session && store}<AboutPanel {store} room={room} {session} switchable={attention.can("operate")} navigate={openSession} onjobs={async event => { if (!wide.current) await showPanel(false, event.detail > 0); void jobsTool?.show(session); }} />
       {:else if tree.length}<div class="tree"><VirtualList bind:this={sessionList} items={tree} key={treeKey}
         label="Session list" role="group" align="top" estimate={48}>
         {#snippet row(entry: TreeRow)}
@@ -598,7 +599,7 @@
           <SessionRow name={item.name} root={!item.parent} {state} {dot} line={status(item.session)} {mark} /></a>
           {#if jobs(item.session)}<button type="button" class="watch" aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
             title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={async event => { if (!wide.current) await showPanel(false, event.detail > 0); void jobsTool?.show(item.session); }}><Icon name="terminal" /></button>{/if}
-          {#if store?.computers.has(item.session)}<button type="button" class="watch" class:open={watching === item.session} data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
+          {#if attention.can("computers") && store?.computers.has(item.session)}<button type="button" class="watch" class:open={watching === item.session} data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
             title={`Watch ${item.name}'s computer`} onclick={() => watch(item.session)}><Icon name="monitor" /></button>{/if}</div>{/if}
         {/snippet}</VirtualList></div>
       {:else}<p class="hint">No sessions yet.</p>{/if}
@@ -648,6 +649,7 @@
   .paused { flex: none; display: flex; gap: 6px; height: 20px; margin: 0 0 4px; padding: 0 16px 0 30px; color: var(--muted); font-size: 12.5px; line-height: 20px; white-space: nowrap; }
   .paused span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .paused button { flex: none; }
+  .readonly { flex: none; margin: 0; padding: 12px 16px 14px 30px; color: var(--muted); font-size: 12.5px; }
   .faces { display: flex; }
   /* Faces side by side, on an opaque layer of the page color and ringed in it, so glass faces never mix. */
   .faces > :global(.avatar) { --under: var(--bg); box-shadow: 0 0 0 2px var(--bg); letter-spacing: 0; }
