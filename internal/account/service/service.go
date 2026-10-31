@@ -156,7 +156,7 @@ func (s *Service) Snapshot(ctx context.Context, refresh bool) Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if ctx.Err() != nil {
-		return s.last
+		return visibleSnapshot(s.last)
 	}
 	accounts, problems, err := s.nativeHomeAccounts(ctx, false)
 	return s.publish(accounts, problems, err)
@@ -166,7 +166,7 @@ func (s *Service) Snapshot(ctx context.Context, refresh bool) Snapshot {
 func (s *Service) cached() Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.last
+	return visibleSnapshot(s.last)
 }
 
 // publish builds the view from one pass over the accounts and keeps it as the
@@ -188,10 +188,9 @@ func (s *Service) publish(accounts []Account, problems []runtime.AccountProblem,
 	})
 	now := s.o.Now()
 	applyStatedFailoverLimits(out.Accounts, s.o.Store, now)
-	hideUnusedModelWindows(out.Accounts)
 	ApplyBlockingQuota(out.Accounts, now)
 	s.last = out
-	return out
+	return visibleSnapshot(out)
 }
 
 // AccountUsage refreshes usage within the account API request deadline.
