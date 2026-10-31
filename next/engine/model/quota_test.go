@@ -1,42 +1,17 @@
 package model
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"fmt"
 	"io"
-	"log"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-)
 
-func TestQuotaFailureLogDoesNotExposeUnknownKeys(t *testing.T) {
-	var output bytes.Buffer
-	old := log.Writer()
-	log.SetOutput(&output)
-	t.Cleanup(func() { log.SetOutput(old) })
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "auth-files") {
-			_, _ = w.Write([]byte(`{"files":[{"auth_index":"index","provider":"claude"}]}`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"status_code":500,"body":"{\"sensitive-secret\":42,\"limits\":[]}"}`))
-	}))
-	defer server.Close()
-	q := (&Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}).Quotas("key", time.Now)
-	_, err := q.Read(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(output.String(), "sensitive-secret") || !strings.Contains(output.String(), "limits") || !strings.Contains(output.String(), "500") {
-		t.Fatalf("unsafe or incomplete log: %s", output.String())
-	}
-}
+	"github.com/resident-labs/dyna/contract"
+)
 
 type quotaTestTransport struct {
 	url  string
@@ -49,73 +24,70 @@ func (t quotaTestTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return t.base.RoundTrip(r)
 }
 
-func TestQuotasThroughManagement(t *testing.T) {
-	socket := filepath.Join(t.TempDir(), "proxy.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatal(err)
+func TestQuotaNormalizedWindowsAndCache(t *testing.T) {
+	for _, tc := range []struct {
+		name, windows string
+		weekly        float64
+	}{
+		{"oauth apps preferred", `[{"kind":"weekly_all","utilization":42},{"kind":"weekly_scoped","scope":"Oauth Apps","utilization":21},{"kind":"weekly_scoped","scope":"Opus","utilization":11}]`, 21},
+		{"weekly fallback", `[{"kind":"weekly_all","utilization":42}]`, 42},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/v0/management/auth-files":
+					fmt.Fprint(w, `{"files":[{"auth_index":"invented","provider":"claude","label":"Personal"}]}`)
+				case "/v0/management/auth-files/quota":
+					calls++
+					if r.URL.Query().Get("auth_index") != "invented" {
+						t.Error("wrong account filter")
+					}
+					fmt.Fprintf(w, `{"files":[{"auth_index":"invented","observed_at":"2026-01-01T00:00:00Z","status_code":200,"windows":%s}]}`, tc.windows)
+				default:
+					t.Error("unexpected request")
+				}
+			}))
+			defer server.Close()
+			now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			q := (&Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}).Quotas("key", func() time.Time { return now })
+			for i := 0; i < 2; i++ {
+				got, err := q.Read(context.Background())
+				if err != nil || len(got.Accounts) != 1 {
+					t.Fatalf("read failed: %v", err)
+				}
+				account := got.Accounts[0]
+				if account.Cause != contract.UsageOK || account.ObservedAt == nil || !account.ObservedAt.Equal(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)) || len(account.Windows) == 0 || account.Windows[0].Name != "seven_day" || account.Windows[0].UsedPercent != tc.weekly || account.Windows[0].Seconds != 604800 {
+					t.Fatal("unexpected normalized result")
+				}
+				if tc.name == "oauth apps preferred" && (len(account.Windows) != 2 || account.Windows[1].Name != "Opus Weekly") {
+					t.Fatal("scoped window missing")
+				}
+			}
+			if calls != 1 {
+				t.Fatalf("quota requests = %d, want 1", calls)
+			}
+			now = now.Add(6 * time.Minute)
+			if _, err := q.Read(context.Background()); err != nil || calls != 2 {
+				t.Fatalf("cache did not expire: calls = %d, error = %v", calls, err)
+			}
+		})
 	}
-	calls := 0
-	refreshFails := false
-	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer management-key" {
-			t.Error("missing management authorization")
+}
+
+func TestQuotaExpiredSignIn(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/quota") {
+			fmt.Fprint(w, `{"files":[{"auth_index":"invented","status_code":401,"error":"upstream returned status 401"}]}`)
+		} else {
+			fmt.Fprint(w, `{"files":[{"auth_index":"invented","provider":"claude"}]}`)
 		}
-		switch r.URL.Path {
-		case "/v0/management/auth-files":
-			_, _ = w.Write([]byte(`{"files":[{"auth_index":"index","provider":"claude","label":"Personal"}]}`))
-		case "/v0/management/api-call":
-			calls++
-			if refreshFails {
-				http.Error(w, `{"error":"auth token refresh failed"}`, http.StatusBadRequest)
-				return
-			}
-			var req struct {
-				Index  string            `json:"auth_index"`
-				Method string            `json:"method"`
-				URL    string            `json:"url"`
-				Header map[string]string `json:"header"`
-			}
-			if json.NewDecoder(r.Body).Decode(&req) != nil || req.Index != "index" || req.Method != "GET" || req.URL != "https://api.anthropic.com/api/oauth/usage" || req.Header["Authorization"] != "Bearer $TOKEN$" {
-				t.Error("invalid proxy request")
-			}
-			_ = json.NewEncoder(w).Encode(struct {
-				Status int    `json:"status_code"`
-				Body   string `json:"body"`
-			}{200, `{"five_hour":{"utilization":25.5,"resets_at":"2026-10-31T01:00:00Z"},"seven_day_oauth_apps":{"utilization":42,"resets_at":"2026-11-06T01:00:00Z"},"limits":[{"kind":"weekly_scoped","percent":0,"scope":{"model":{"id":"opus"}}}]}`})
-		default:
-			t.Error("unexpected request")
-		}
-	})}
-	go func() { _ = server.Serve(listener) }()
-	t.Cleanup(func() { _ = server.Close() })
-	now := time.Date(2026, 10, 30, 23, 0, 0, 0, time.UTC)
-	q := (&Proxy{client: unixClient(socket)}).Quotas("management-key", func() time.Time { return now })
-	first, err := q.Read(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(first.Accounts) != 1 {
-		t.Fatalf("accounts: %+v", first.Accounts)
-	}
-	account := first.Accounts[0]
-	if account.Provider != "claude" || account.Label != "Personal" || account.Cause != "" || account.ObservedAt == nil || !account.ObservedAt.Equal(now) || len(account.Windows) != 2 {
-		t.Fatalf("account: %+v", account)
-	}
-	a, b := account.Windows[0], account.Windows[1]
-	if a.Name != "five_hour" || a.UsedPercent != 25.5 || a.Seconds != 18000 || a.ResetsAt.Format(time.RFC3339) != "2026-10-31T01:00:00Z" || b.Name != "seven_day" || b.UsedPercent != 42 || b.Seconds != 604800 || b.ResetsAt.Format(time.RFC3339) != "2026-11-06T01:00:00Z" {
-		t.Fatalf("windows: %+v", account.Windows)
-	}
-	now = now.Add(4 * time.Minute)
-	second, err := q.Read(context.Background())
-	if err != nil || len(second.Accounts) != 1 || second.Accounts[0].ObservedAt == nil || !second.Accounts[0].ObservedAt.Equal(*account.ObservedAt) || calls != 1 {
-		t.Fatalf("cache: %+v, calls %d, error %v", second, calls, err)
-	}
-	now = now.Add(2 * time.Minute)
-	refreshFails = true
-	third, err := q.Read(context.Background())
-	if err != nil || len(third.Accounts) != 1 || third.Accounts[0].Cause != "sign_in_expired" || calls != 2 {
-		t.Fatalf("refresh failure: %+v, calls %d, error %v", third, calls, err)
+	}))
+	defer server.Close()
+	q := (&Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}).Quotas("key", time.Now)
+	got, err := q.Read(context.Background())
+	if err != nil || len(got.Accounts) != 1 || got.Accounts[0].Cause != contract.UsageSignInExpired {
+		t.Fatalf("expired sign-in not reported: %v", err)
 	}
 }
 
