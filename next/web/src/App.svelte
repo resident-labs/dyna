@@ -40,6 +40,7 @@
   import { MediaQuery, SvelteMap, SvelteSet } from "svelte/reactivity";
   import RoomMenu from "./lib/ui/RoomMenu.svelte";
   import RequestsPanel from "./lib/ui/RequestsPanel.svelte";
+  import Instructions from "./lib/ui/Instructions.svelte";
   import ActiveNow from "./lib/ui/ActiveNow.svelte";
   import { activeRooms } from "./lib/active.ts";
   import { Attention } from "./lib/attention.svelte.ts";
@@ -120,7 +121,7 @@
     if (section === "requests" && event.target instanceof Node && !page?.contains(event.target) && !requestsButton?.contains(event.target)) section = undefined;
   }
   // The requests view shows in place of the conversation until Back, Escape or the control that opened it.
-  let section: "requests" | undefined = $state();
+  let section: "requests" | "instructions" | undefined = $state();
   let visual: { versions: VisualVersion[]; selected: number; send: (text: string, event: string) => Promise<void> } | undefined = $state();
   let visualTrigger: HTMLElement | undefined;
   let requestsButton: HTMLButtonElement | undefined = $state();
@@ -650,7 +651,7 @@
         <!-- One click to the session's shell and computer; neither shows when the session has none. -->
         {#if session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title={terminals?.hasShell(session) ? "Show this session's terminal" : "Open a terminal in this session's box"} aria-pressed={terminals?.hasShell(session) ?? false} onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /><span>Terminal</span></button>{/if}
         {#if session && attention.can("computers") && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /><span>Computer</span></button>{/if}
-        <span class="room-menu"><RoomMenu {paused} operate={attention.can("operate")} onpause={pause} /></span>{/if}
+        <span class="room-menu"><RoomMenu {paused} operate={attention.can("operate")} admin={attention.can("admin")} onpause={pause} oninstructions={() => { section = "instructions"; }} /></span>{/if}
       <!-- While the panel is closed, who works shows on its button, as at most 3 faces, "+n" and the count from status.ts. -->
       {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={"Sessions" + (faces ? `, ${working} working` : "") + (store?.counts.failed ? ", a session failed" : "")}
         title={faces ? busy.map(item => item.name).join(", ") : "Sessions"} aria-controls="sessions" aria-expanded={panelShown} onclick={event => void showPanel(!panelShown, event.detail > 0)}>
@@ -660,6 +661,7 @@
         {#if store?.counts.failed && !panelShown}<span class="attention"></span>{/if}</button>{/if}</header>
     {@render workTabs("phone-tabs")}
     {#if reloadPending}<p class="reload-notice" role="status">Dyna updated. Reload to use the new version. <button type="button" onclick={() => location.reload()}>Reload</button></p>{/if}
+    {#if section === "instructions" && room && store && !unavailable}<Instructions {room} {roomName} sessions={store.sessions.size} onclose={() => void closeSection()} />{/if}
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} admin={attention.can("admin")} onclose={() => void closeSection()} />{/if}
     <div class="feed">
       {#if blocked}<Blocked kind="unreachable" onretry={connect} />
@@ -788,7 +790,8 @@
   /* Faces side by side, on an opaque layer of the page color and ringed in it, so glass faces never mix. */
   .faces > :global(.avatar) { --under: var(--bg); box-shadow: 0 0 0 2px var(--bg); letter-spacing: 0; }
   .more { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
-  .shell.open.tucked { grid-template-columns: 64px 1fr; }
+  .shell.open.tucked, .shell.open:has(.instructions) { grid-template-columns: 64px 1fr; }
+  .shell.open:has(.instructions) aside.members { display: none; }
   .shell.tucked > aside.members { display: none; }
   .narrow, .phone, .menu-toggle { display: none; }
   @media (max-width: 760px) { .narrow { display: inline; } }
