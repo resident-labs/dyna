@@ -438,6 +438,7 @@ func TestTickFailedCIWaitsForBatchChange(t *testing.T) {
 	if r := e.record(); r.CI != "failed" {
 		t.Fatalf("CI = %q, want failed", r.CI)
 	}
+	e.holdSafetyPoll()
 	calls := func() []string {
 		t.Helper()
 		b, err := os.ReadFile(e.calls)
