@@ -1,58 +1,117 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { SvelteMap } from "svelte/reactivity";
   import Icon from "./Icon.svelte";
-  import StatusPill from "./StatusPill.svelte";
+  import Avatar from "./Avatar.svelte";
   import StepList from "./StepList.svelte";
-  import { count, describe, workSummary } from "../feed.ts";
-  import type { Row } from "../feed.ts";
-  import type { TurnTranscripts } from "../transcripts.svelte.ts";
-  // Folded work reads as one quiet line that starts with a chevron, as T3 Code's "Worked for 20s"; it opens in place.
-  // In a DM it opens to the turn's saved steps, which replace the lines that only say a turn started and ended.
-  // Other events, and a turn with no saved steps, read as one line per event.
+  import { describe, eventGroups, formatTime, subject, timeSpan, workSummary, type Row } from "../feed.ts";
+  import type { Event } from "../contract.gen.ts";
+  import { TurnTranscripts } from "../transcripts.svelte.ts";
+
   let { row, name, opened, ontoggle, transcripts, onjobs }: {
     row: Extract<Row, { kind: "work" }>; name: (session: string) => string; opened: ReadonlySet<string>; ontoggle: (key: string) => void;
     transcripts?: TurnTranscripts; onjobs: (session: string) => void;
   } = $props();
+  const clock = (at: string) => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   let open = $derived(opened.has(row.key));
+  let sessions = $derived([...new Set(row.events.map(subject).filter((session): session is string => !!session))]);
   let read = $derived(transcripts?.of(row.events));
   let saved = $derived(typeof read === "object" ? read : undefined);
   let steps = $derived(saved?.steps ?? []);
-  let failures = $derived(steps.filter(step => step.failed).length);
   let events = $derived(steps.length || read === "loading" ? row.events.filter(event => !["turn.started", "turn.ended", "turn.activity"].includes(event.type)) : row.events);
-  // The "3 jobs" part of the line opens the Jobs list on the session that ran them, so it is a button of its own.
-  let ended = $derived(row.events.find(event => event.type === "shell.job.ended"));
-  let line = $derived(workSummary(row.events, name, row.until, steps[0]?.started));
-  let jobs = $derived(ended ? count(row.events.filter(event => event.type === "shell.job.ended").length, "job") : "");
-  let parts = $derived(jobs && line.includes(jobs) ? line.split(jobs) : [line]);
-  $effect(() => { if (open) { const events = row.events; untrack(() => transcripts?.read(events)); } });
+  let workers = $derived([...new Set(events.flatMap(event => event.type === "turn.started" || event.type === "turn.ended" ? [event.body.session] : []))].sort((a, b) => Number(row.failedSessions.includes(b)) - Number(row.failedSessions.includes(a))));
+  let other = $derived(events.filter(event => event.type !== "turn.started" && event.type !== "turn.ended" && event.type !== "turn.activity" && event.type !== "computer.changed"));
+  let groups = $derived([...other.reduce((groups, event) => groups.set(event.type, [...groups.get(event.type) ?? [], event]), new Map<Event["type"], Event[]>()).values()]);
+  let computerSessions = $derived([...new Set(events.flatMap(event => event.type === "computer.changed" ? [event.body.session] : []))]);
+  function computerUsage(session: string): string {
+    let start: number | undefined, total = 0, uses = 0;
+    for (const event of events) {
+      if (event.type !== "computer.changed" || event.body.session !== session) continue;
+      if (event.body.to === "running") { start = Date.parse(event.at); uses++; }
+      else if (start !== undefined) { total += Math.max(0, Date.parse(event.at) - start); start = undefined; }
+    }
+    const minutes = Math.round(total / 60_000);
+    return `${name(session)} used its computer${uses ? ` ${uses} ${uses === 1 ? "time" : "times"}` : ""}${minutes ? `, ${minutes} min in all` : ""}`;
+  }
+  let allWorkers = $derived(opened.has(`${row.key}-all`));
+  const sessionTranscripts = new SvelteMap<string, TurnTranscripts>();
+  function transcriptOf(session: string): TurnTranscripts {
+    let transcript = sessionTranscripts.get(session);
+    if (!transcript) { transcript = new TurnTranscripts(session); sessionTranscripts.set(session, transcript); }
+    return transcript;
+  }
+  function toggleSession(session: string, own: Event[]) {
+    const key = `${row.key}-${session}`;
+    if (!opened.has(key)) transcriptOf(session).read(own);
+    ontoggle(key);
+  }
+  $effect(() => {
+    if (open) {
+      const current = row.events;
+      untrack(() => transcripts?.read(current));
+      for (const session of workers) if (opened.has(`${row.key}-${session}`)) {
+        transcriptOf(session).read(current.filter(event => subject(event) === session));
+      }
+    }
+  });
 </script>
 
-{#snippet tail()}{#if steps.length}{" · "}{count(steps.length, "step")}{/if}{#if failures}{" · "}<StatusPill tone="failed" label="{failures} failed" word />{/if}{/snippet}
 <div class="work">
-  <button type="button" class="fold" aria-expanded={open} onclick={() => ontoggle(row.key)}><span class="chevron" class:open><Icon name="chevron" size={14} /></span><span>{parts[0]}{#if parts.length === 1}{@render tail()}{/if}</span></button>{#if parts.length > 1 && ended?.type === "shell.job.ended"}<button type="button" class="jobs" onclick={() => onjobs(ended.body.session)}>{jobs}</button><button type="button" class="fold" tabindex="-1" aria-hidden="true" onclick={() => ontoggle(row.key)}><span>{parts[1]}{@render tail()}</span></button>{/if}
-  {#if open}<div class="opened">
-    {#if read === "loading"}<ul class="waiting" aria-label="Loading steps"><li></li><li></li><li></li></ul>
-    {:else if read === "failed"}<p>The steps did not load. <button type="button" class="retry" onclick={() => transcripts?.read(row.events, true)}>Retry</button></p>
-    {:else if saved && steps.length}<StepList {steps} truncated={saved.truncated} id={row.key} {opened} {ontoggle} />{/if}
-    {#if events.length}<ul>{#each events as event (event.seq)}{@const line = describe(event, name)}{#if line}<li>{line}</li>{/if}{/each}</ul>{/if}
-  </div>{/if}
+  <span class="glyph" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 3 8l9 5 9-5zM3 13l9 5 9-5" /></svg></span>
+  <div class="body">
+    <button type="button" class="fold" aria-expanded={open} onclick={() => ontoggle(row.key)}>
+      {#if sessions.length}<span class="faces">{#each sessions.slice(0, 4) as session (session)}<Avatar kind="session" name={name(session)} size={22} />{/each}{#if sessions.length > 4}<span class="extra">+{sessions.length - 4}</span>{/if}</span>{/if}
+      <span class="summary">{workSummary(row.events, name, row.until, steps[0]?.started)} <time datetime={row.events[0].at}>{row.events.length > 1 || row.until ? timeSpan(row.events[0].at, row.until ?? row.events.at(-1)?.at ?? row.events[0].at) : clock(row.events[0].at)}</time></span>
+      <span class="chevron" class:open><Icon name="chevron" size={14} /></span>
+    </button>
+    {#if open}<div class="opened">
+      {#if read === "loading"}<p>Loading steps…</p>
+      {:else if read === "failed"}<p>The steps did not load. <button type="button" class="retry" onclick={() => transcripts?.read(row.events, true)}>Retry</button></p>
+      {:else if saved && steps.length}<StepList {steps} truncated={saved.truncated} id={row.key} {opened} {ontoggle} />{/if}
+      {#if workers.length}{#if workers.length > 1}<button class="detail" type="button" aria-expanded={!opened.has(`${row.key}-workers`)} onclick={() => ontoggle(`${row.key}-workers`)}><Icon name="terminal" size={14} /> {workers.length === 1 ? `${name(workers[0])} worked` : `${workers.length} sessions worked`} <Icon name="chevron" size={14} /><time datetime={row.events[0].at}>{timeSpan(row.events[0].at, row.until ?? row.events.at(-1)?.at ?? row.events[0].at)}</time></button>{/if}
+        {#if workers.length === 1 || !opened.has(`${row.key}-workers`)}<ul class="workers">{#each workers.slice(0, allWorkers ? undefined : 6) as session (session)}
+          {@const own = events.filter(event => subject(event) === session && (event.type === "turn.started" || event.type === "turn.ended"))}
+          <li><button class="detail" type="button" aria-expanded={opened.has(`${row.key}-${session}`)} onclick={() => toggleSession(session, own)}>{#if workers.length === 1}<Icon name="terminal" size={14} />{/if}{name(session)} worked <Icon name="chevron" size={14} /></button><time datetime={own[0].at}>{own.length > 1 ? timeSpan(own[0].at, own.at(-1)?.at ?? own[0].at) : clock(own[0].at)}</time></li>
+          {#if opened.has(`${row.key}-${session}`)}
+            {@const transcript = sessionTranscripts.get(session)?.of(own)}
+            {#if transcript === "loading"}<li class="step">Loading steps…</li>
+            {:else if transcript === "failed"}<li class="step">The steps did not load. <button class="retry" type="button" onclick={() => sessionTranscripts.get(session)?.read(own, true)}>Retry</button></li>
+            {:else if transcript && transcript.steps.length}<li class="step"><StepList steps={transcript.steps} truncated={transcript.truncated} id={`${row.key}-${session}`} {opened} {ontoggle} /></li>
+            {:else}{#each own as event (event.seq)}{#if describe(event, name)}<li class="step"><time datetime={event.at}>{formatTime(event.at)}</time><span>{describe(event, name)}</span></li>{/if}{/each}{/if}
+          {/if}
+        {/each}{#if !allWorkers && workers.length > 6}<li><button class="detail" type="button" onclick={() => ontoggle(`${row.key}-all`)}>Show {workers.length - 6} more sessions</button></li>{/if}</ul>{/if}
+      {/if}
+      <ul>{#each computerSessions as session (session)}<li><Icon name="monitor" size={14} /><span>{computerUsage(session)}</span></li>{/each}{#each groups as group (group[0].type)}{@const line = describe(group[0], name)}{#if line}<li><Icon name={group[0].type === "session.closed" ? "close" : group[0].type === "session.started" ? "person" : group[0].type === "op.decided" ? "check" : "list"} size={14} />{#if group.length === 1}<span>{line}{#if group[0].type === "shell.job.ended"} <button type="button" class="retry" onclick={() => onjobs(group[0].body.session)}>View jobs</button>{/if}</span>{:else}<button class="detail" type="button" aria-expanded={opened.has(`${row.key}-${group[0].type}`)} onclick={() => ontoggle(`${row.key}-${group[0].type}`)}>{group.length} {eventGroups[group[0].type]} <Icon name="chevron" size={14} /></button>{/if}<time datetime={group[0].at}>{formatTime(group[0].at)}</time></li>{#if group.length > 1 && opened.has(`${row.key}-${group[0].type}`)}{#each group as event (event.seq)}<li class="step"><span>{describe(event, name)}{#if event.type === "shell.job.ended"} <button type="button" class="retry" onclick={() => onjobs(event.body.session)}>View jobs</button>{/if}</span><time datetime={event.at}>{formatTime(event.at)}</time></li>{/each}{/if}{/if}{/each}</ul>
+    </div>{/if}
+  </div>
 </div>
 
 <style>
-  /* The chevron sits left of the post text's edge, so the words line up with the posts above and below. */
-  .work { padding: 2px 16px 2px calc(var(--gutter) - 18px); color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
-  .fold { all: unset; display: inline-flex; align-items: center; gap: 4px; min-height: 24px; cursor: pointer; border-radius: 6px; }
-  .fold:hover, .retry:hover, .jobs:hover { color: var(--text); }
-  .jobs { all: unset; display: inline-flex; align-items: center; min-height: 24px; cursor: pointer; border-radius: 6px; text-decoration: underline; text-decoration-color: var(--firm); text-underline-offset: 3px; }
-  .fold:focus-visible, .retry:focus-visible, .jobs:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-  @media (hover: none) { .fold, .retry, .jobs { min-height: 40px; } }
-  .chevron { display: inline-flex; transform: rotate(-90deg); transition: transform 150ms ease-out; }
-  .open { transform: none; }
-  .opened { margin: 2px 0 4px 18px; padding: 0 0 0 12px; border-left: 1px solid var(--line); }
+  .work { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 7px 16px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .glyph { display: flex; justify-content: center; padding-top: 5px; }
+  .body { min-width: 0; }
+  .fold { all: unset; display: flex; align-items: flex-start; gap: 8px; width: 100%; min-height: 24px; cursor: pointer; border-radius: 6px; }
+  .fold:hover, .retry:hover { color: var(--text); }
+  .fold:focus-visible, .retry:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .faces { display: inline-flex; flex: none; padding-right: 4px; }
+  .faces :global(.avatar + .avatar) { margin-left: -5px; }
+  .extra { margin-left: 4px; }
+  .summary { flex: 1; min-width: 0; padding-top: 3px; overflow-wrap: anywhere; }
+  time { color: var(--muted); opacity: .8; white-space: nowrap; }
+  .summary time { margin-left: 8px; }
+  .chevron { display: inline-flex; flex: none; padding-top: 4px; transform: rotate(-90deg); }
+  .chevron.open { transform: none; }
+  .opened { margin: 4px 0 4px 10px; padding-left: 16px; border-left: 1px solid var(--line); }
   ul { margin: 0; padding: 0; list-style: none; }
-  li { padding: 1px 0; }
+  li { display: flex; gap: 12px; padding: 4px 0; }
+  li span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   p { margin: 0; padding: 2px 0; }
-  .retry { all: unset; display: inline-flex; align-items: center; cursor: pointer; border-radius: 6px; color: var(--focus); }
-  /* Skeleton rows in the shape of a step; they sit still, since only Working animates. */
-  .waiting li { height: 12px; margin: 8px 0; max-width: 320px; border-radius: 6px; background: var(--hover); }
+  .retry, .detail { all: unset; cursor: pointer; color: var(--focus); }
+  .detail { display: inline-flex; align-items: center; gap: 6px; color: inherit; overflow-wrap: anywhere; }
+  li > .detail { flex: 1; min-width: 0; }
+  .detail:focus-visible { outline: 2px solid var(--focus); }
+  .opened > .detail { display: flex; width: 100%; }
+  .opened > .detail time { margin-left: auto; }
+  .workers { margin-left: 6px; padding-left: 10px; border-left: 1px solid var(--line); }
+  .step { margin-left: 16px; }
 </style>
