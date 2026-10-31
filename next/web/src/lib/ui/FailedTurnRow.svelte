@@ -1,9 +1,7 @@
 <script lang="ts">
   import { untrack, type Snippet } from "svelte";
-  import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
   import { formatTime, type Row } from "../feed.ts";
-  import { hue } from "../identity.ts";
   let { row, author, root, onseen, children }: { row: Extract<Row, { kind: "failed" }>; author: string; root: boolean; onseen?: () => void; children?: Snippet } = $props();
   // The owner has seen a failed turn once its row stays on screen for a second while the page is visible, which
   // clears the session's mark. The wait skips rows that only pass by, such as while the feed jumps to its end on open.
@@ -28,22 +26,20 @@
 
 <!-- As v1's turn result, a failed turn uses the post layout: the session's avatar, then its name line and the cause. -->
 <article class="failed" {@attach seen}>
-  <Avatar kind="session" name={author} {root} />
-  <p class="name"><strong style:--hue={hue(author)}>{author}</strong> {#if row.at}<time datetime={row.at}>{formatTime(row.at)}</time>{/if}
-    <StatusPill tone="failed" label={row.label} /></p>
-  {#if row.cause}<p class="cause">{row.cause}</p>{/if}
+  <span class="mark"><StatusPill tone="failed" label={row.label} dot triangle /></span>
+  <p class="name"><strong>{author}</strong><span class="tail">{row.label === "Turn failed" ? "’s turn failed" : ` ${row.label.toLowerCase()}`}{#if row.at}{" "}<time datetime={row.at}>{formatTime(row.at)}</time>{/if}</span></p>
+  {#if row.cause}<p class="cause">{row.cause}{row.cause.endsWith(".") ? "" : "."}</p>{/if}
   {#if children}<div class="more">{@render children()}</div>{/if}
 </article>
 
 <style>
-  .failed { display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: 12px; padding: 14px 16px 1px; }
-  .failed > :global(.avatar) { grid-row: 1 / span 2; margin-top: 2px; }
+  .failed { display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: 12px; padding: 6px 16px; }
+  .mark { grid-row: 1 / span 2; display: flex; justify-content: center; padding-top: 2px; }
   p { grid-column: 2; margin: 0; }
-  /* One line at any width: the name truncates; the time and the pill stay whole. */
-  .name { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
-  strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: oklch(var(--id-name) var(--hue)); }
-  .name > :global(:not(strong)) { flex: none; }
-  .cause { color: var(--muted); }
+  .name { overflow-wrap: anywhere; }
+  .tail { white-space: nowrap; }
+  .name time { margin-left: 4px; }
+  .cause { color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .more { grid-column: 2; margin-top: 8px; }
   .more:empty { display: none; }
   time { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
