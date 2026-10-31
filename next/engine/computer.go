@@ -146,8 +146,13 @@ type computerInputHandle struct {
 	done  <-chan struct{}
 }
 
-// Input that races a replacement may be dropped because the computer is replaced with it.
+// Only input that races cancellation may be dropped; later input reports replacement.
 func (h computerInputHandle) send(ctx context.Context, batch contract.ComputerInputBatch) *contract.Error {
+	select {
+	case <-h.done:
+		return &contract.Error{Code: contract.ErrConflict, Message: "box replaced"}
+	default:
+	}
 	select {
 	case <-h.done:
 		return &contract.Error{Code: contract.ErrConflict, Message: "box replaced"}
