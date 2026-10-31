@@ -178,10 +178,9 @@ The exporter report must identify any remaining gap for a lead decision.
 | terra | `openai-codex/gpt-6.1-terra` | `gpt-6.1-terra` |
 | wonder-full | `meta/muse-wonder-full-1.0` | dropped: Muse is unsupported |
 
-The exporter carries the thinking level, including `xhigh` for
-opus-rewrite. The offline dry run lists mapped IDs as checked at import. The future real
-import must check them against the supervised proxy's live model list, without
-reading its config, and refuse each missing model by name.
+The exporter carries the thinking level, including `xhigh` for opus-rewrite.
+The real import maps `ProfileBundle` fields `description`, `taste`, `diagnostics`, `intelligence` and `cost` to the matching atomic profile config fields.
+The real import must check each profile model ID against the supervised proxy's live model list, without reading its config, and refuse each missing model by name. The offline dry run lists mapped IDs as checked at import.
 The six skipped profiles (deepseek, fable, grok, kimi-max, mimo and sol)
 were disabled in the captured catalog. The unsupported Muse profile is a
 report and handoff line, not a cutover blocker.
