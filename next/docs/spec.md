@@ -998,7 +998,7 @@ The engine keeps each file alone in its own folder in its data folder, which the
 
 The web app's rules page becomes a plain markdown editor for the global file and the current room's file. It saves with `instructions.set` and the content hash it read, so a stale save returns a typed conflict instead of overwriting. Only the owner edits them. An agent that wants a change asks the owner in a post.
 
-A change reaches every running session at its next run as a diff in Pi's context update (7.9), and it folds into the system prompt at the next compaction. The owner sees that diff in the session's context update; the engine emits no event and creates no delivery for it. The v1 import writes v1's global and room rules into the two files, one list item per rule with its v1 number as a heading, so references such as "r22" keep their meaning.
+A change reaches every running session at its next run as a diff in Pi's context update (7.9), and it folds into the system prompt at the next compaction. The owner sees that diff in the session's context update; the engine emits no event and creates no delivery for it. The v1 import writes v1's global and room rules into the two files as one list item per rule in ID order, such as `- (r22) first line`, with later lines indented two spaces, so references such as "r22" keep their meaning.
 
 ### 7.1 Principals
 
@@ -1301,18 +1301,18 @@ dyna:lead-rewrite schedules the build after the M2 trial parts (section 11).
 2. **Evaluation**, run once in a sandbox by a terra agent (10.1), with the setting on. It settles the tool shape. When the gate passes, the default becomes on. The setting and the old `box.hello` text go in the next release, so 7.5 then describes the only behavior.
 3. **Phase 2, in M3.** Each M3 feature ships its toolkit with its methods: `goal`, `issue`, `question`, `workflow`, `subscription`, and `pr` approve and status. The `dyna_goal` section and the skills port land with their features.
 
-**Size (r22).** About +1,150 product lines in phase 1: `contract` +300 (registry and snapshot types), `box` +400 (MCP adapter that reuses the shell server's framing, skills writer, snapshot hand-off), `engine` +310 (snapshot renderer, `TurnStart` field, `client_id` replay, minus rule deliveries and the command list in `box.hello`), `harness` +10 and `cmd` ±20, with no Pi extension. Pi's change is in `third_party`, outside the budget, at about −70 net lines (above). Each phase-2 action costs about 10 registry lines instead of a CLI-only command and instruction text. The rules removal, a separate PR after this spec, deletes `engine/rules.go` (173 lines) and its test (71), `web/src/lib/rules.ts` (63) and its test, and `RuleBox.svelte` (43). It replaces `RulesPanel.svelte` (343) with the markdown editor, and drops the rule references in `contract`, `engine`, `box/agent/run_linux.go`, `cmd` and the web app.
+**Size (r22).** About +1,150 product lines in phase 1: `contract` +300 (registry and snapshot types), `box` +400 (MCP adapter that reuses the shell server's framing, skills writer, snapshot hand-off), `engine` +310 (snapshot renderer, `TurnStart` field, `client_id` replay, minus rule deliveries and the command list in `box.hello`), `harness` +10 and `cmd` ±20, with no Pi extension. Pi's change is in `third_party`, outside the budget, at about 0 net lines (above). Each phase-2 action costs about 10 registry lines instead of a CLI-only command and instruction text. The rules removal, a separate PR after this spec, deletes `engine/rules.go` (173 lines) and its test (71), `web/src/lib/rules.ts` (63) and its test, and `RuleBox.svelte` (43). It replaces `RulesPanel.svelte` (343) with the markdown editor, and drops the rule references in `contract`, `engine`, `box/agent/run_linux.go`, `cmd` and the web app.
 
 #### Evaluation
 
 One run, before `agentSurface` becomes the default.
 
-- **Tasks.** 20 fixed tasks, such as: start a child on a cheaper profile, post with a mention, approve an operation, read a rule, find a stuck child, open a PR, and run a long host command.
+- **Tasks.** 20 fixed tasks, such as: start a child on a cheaper profile, post with a mention, withdraw an operation, follow a standing instruction, find a stuck child, open a PR, and run a long host command.
 - **Providers**, all through CLIProxyAPI: Claude Opus and Sonnet, ChatGPT, zai and Kimi.
 - **Arms.** The CLI through the shell; `caller` (deferred tools through `tool_search`, the update and `call_tool`); `declared` (every Dyna tool declared from the first request). All three keep the tool list fixed between compactions. `declared` measures the schema tokens against the accuracy cost of the indirection. Both MCP shapes come from the same registry.
 - **Measures.** A correct engine call with correct arguments, wrong calls, extra calls (including searches), uncached input and output tokens, cache-read share, and time.
 - **Checks.** Cloaked tool names map back, and the model finds and calls the aliased `tool_search` and `call_tool`. A call over 60 seconds completes.
-- **Cache check.** Six tasks change state mid-session: a rule added, a rule removed, a child finished, usage pace changed, a `tool_search` hit, and a skill added. One more task compacts. Per provider, the run reports cache-read share on the request after each update and on the second request after compaction, and whether the model obeys the changed rule, drops the removed one, calls the found tool and reads the new skill. It measures the one path; it decides no fallback.
+- **Cache check.** Six tasks change state mid-session: a standing instruction added, a standing instruction removed, a child finished, usage pace changed, a `tool_search` hit, and a skill added. One more task compacts. Per provider, the run reports cache-read share on the request after each update and on the second request after compaction, and whether the model follows the changed standing instruction, drops the removed one, calls the found tool and reads the new skill. It measures the one path; it decides no fallback.
 - **Pi time.** Pi's work per run on the no-change path, against the 5 ms budget.
 - **Fixed tool list.** For each provider, one session checks that the tools array is byte-identical on every request between compactions, after the proxy, including the proxy's aliases for Pi's own tools.
 - **Gate.** On every provider, MCP accuracy is at least the CLI arm's, and tokens per task fall by at least 20%. Profiles on a provider that fails keep the setting off until a fix lands, and the setting stays until then. The better MCP shape wins.
@@ -1342,7 +1342,7 @@ type GlobalBundle struct {
 	Version       BundleVersion  `json:"version"`
 	Exported      time.Time      `json:"exported"`
 	Source        BundleSource   `json:"source"`
-	Instructions  Instructions   `json:"instructions"`  // v1 rules rendered by the exporter; the import writes the files unchanged
+	Instructions  string         `json:"instructions"`  // the global AGENTS.md, rendered from v1's global rules by the exporter
 	Settings      SettingsBundle `json:"settings"`      // cleaned settings.json; subagentMaxDepth becomes --session.max-depth at cutover
 	Profiles      []ProfileBundle `json:"profiles"`
 	Hosts         []HostBundle   `json:"hosts"`         // from machines
@@ -1360,6 +1360,7 @@ type RoomBundle struct {
 	Repos         []RoomRepo       `json:"repos"`
 	Limits        RoomLimits       `json:"limits"`
 	Color         string           `json:"color"`
+	Instructions  string           `json:"instructions"` // this room's AGENTS.md, rendered from v1's room rules by the exporter
 	Goals         []GoalBundle     `json:"goals"`     // active, with items; no holder
 	Issues        []IssueBundle    `json:"issues"`    // open and goal-linked; D-numbers kept
 	NextIssue     int              `json:"nextIssue"`
@@ -1370,18 +1371,11 @@ type RoomBundle struct {
 	Counts        BundleCounts     `json:"counts"`
 }
 
-// Instructions holds the standing-instruction files as rendered markdown.
-// v2 keeps no rule type: the v1 exporter renders each rule as one list item
-// under its v1 number, and its verifier checks IDs and text against v1's SQL.
-type Instructions struct {
-	Global string             `json:"global"`
-	Rooms  []RoomInstructions `json:"rooms"`
-}
-
-type RoomInstructions struct {
-	Room RoomID `json:"room"`
-	Text string `json:"text"`
-}
+// The exporter renders v1 rules as markdown: one list item per rule in ID
+// order, such as "- (r22) first line", with later lines indented two spaces.
+// Its verifier checks IDs and text against v1's SQL. v2 keeps no rule type.
+// The import writes the global file, and each room's file under the new room
+// ID after it creates the room, each by rename after the store commit.
 
 type BundleCounts struct {
 	Goals, GoalItems, Issues, PRs, Questions        int
@@ -1536,7 +1530,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | settings-harnesses | dropped | harness versions live in the image; sign-in moves to accounts |
 | claude-code | dropped | Pi is the only harness (section 0, decision 4) |
 
-**What the owner gives up from the cutover until each port:** placement by device needs, voice calls, web search through Dyna, issue watches, room MCP servers, and several settings panes. External members (7.3), the reviewer service (decision 13) and, for now, the library are dropped. Paired devices, the desktop window, issues, goals, PRs and rules keep working.
+**What the owner gives up from the cutover until each port:** placement by device needs, voice calls, web search through Dyna, issue watches, room MCP servers, and several settings panes. External members (7.3), the reviewer service (decision 13) and, for now, the library are dropped. Paired devices, the desktop window, issues, goals, PRs and standing instructions keep working.
 
 **What the owner accepted giving up at the cutover (q57, 2026-10-31): readable room history.** `dyna room log` starts empty. Room feeds, files, finished goals and closed issues stay in `archive/` in the data folder (8.1), and they are never imported, but nothing reads them. The `dyna` room alone holds 65,088 posts and 1,965 attachments, and with the library cut, the feed is the main record of decisions. No `dyna room log --archive` is planned. `archive/` stays in the data folder and in the backups.
 
@@ -1669,7 +1663,7 @@ Acceptance:
 
 ### M3: bundle import and self-hosting
 
-Scope: durable session-to-account affinity before a second sign-in (5.7), the approval flag, merges and CI through GitHub (decision 13), `gh` for agents through the engine (decision 13), goals, issues, questions (with terminal requests), rules, hooks as typed subscriptions (`Wake` and `Run`) with the default notice subscription, which wakes root on `notice.posted` (an M3 event), engine timers (check-ins, usage), accounts through CLIProxyAPI, settings and backups, `dyna update`, remote access, the desktop window, workflows (9.2), the import, and the cutover. Section 9 lists every feature.
+Scope: durable session-to-account affinity before a second sign-in (5.7), the approval flag, merges and CI through GitHub (decision 13), `gh` for agents through the engine (decision 13), goals, issues, questions (with terminal requests), hooks as typed subscriptions (`Wake` and `Run`) with the default notice subscription, which wakes root on `notice.posted` (an M3 event), engine timers (check-ins, usage), accounts through CLIProxyAPI, settings and backups, `dyna update`, remote access, the desktop window, workflows (9.2), the import, and the cutover. Section 9 lists every feature.
 
 The order inside M3:
 
