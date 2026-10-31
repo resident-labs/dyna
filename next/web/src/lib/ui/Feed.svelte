@@ -42,7 +42,7 @@
   <VirtualList bind:this={list} {items} key={item => item.key} label="Feed" follow={store.atPresent} bind:element
     onstart={() => void store.loadOlder()} onend={() => void store.loadNewer()}>
     {#snippet row(item: Item)}
-      {#if item.kind === "post"}<PostRow row={item} author={author(item.from)} />
+      {#if item.kind === "post"}<PostRow row={item} author={author(item.from)} to={item.to.map(author).join(", ")} />
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} />
       {:else if item.kind === "work"}<WorkRow row={item} {name} open={opened.has(item.key)} ontoggle={() => toggle(item.key)} />
       {:else}<p class="pending">{item.text}</p>{/if}
