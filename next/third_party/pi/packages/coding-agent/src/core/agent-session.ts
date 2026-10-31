@@ -144,6 +144,7 @@ import {
 	buildSystemPromptSections,
 	type NormalizedBuildSystemPromptOptions,
 	normalizeBuildSystemPromptOptions,
+	RESERVED_SYSTEM_PROMPT_SECTIONS,
 } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
@@ -1751,9 +1752,8 @@ export class AgentSession {
 
 	/** Replace host-supplied sections for the next request. */
 	setPromptSections(sections: Array<{ key: string; text: string }>): void {
-		const reserved = new Set(["preamble", "tools", "rules", "docs", "addendum", "skills", "cwd"]);
 		for (const { key } of sections) {
-			if (reserved.has(key) || key.startsWith("file:")) throw new Error(`Reserved prompt section: ${key}`);
+			if (RESERVED_SYSTEM_PROMPT_SECTIONS.has(key) || key.startsWith("file:")) throw new Error(`Reserved prompt section: ${key}`);
 		}
 		if (this._runSystemPromptOptions) {
 			for (const key of Object.keys(this._hostSections)) delete this._runSystemPromptOptions.sections[key];
@@ -1815,7 +1815,7 @@ export class AgentSession {
 		options.selectedTools = this._applyToolLoadout(options.selectedTools).map((tool) => tool.name);
 		options.hiddenTools = [...this._hiddenDeclarations];
 		const sections = buildSystemPromptSections(options);
-		const previous = deliveredSections(this.sessionManager.getBranch());
+		const previous = deliveredSections(this.sessionManager);
 		if (previous === undefined && !getCurrentSystemMessage(messages)) {
 			return { role: "system", content: "", sections, timestamp: Date.now() };
 		}
