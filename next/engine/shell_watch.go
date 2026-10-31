@@ -11,12 +11,13 @@ type shellWatch struct {
 }
 
 func (s *Service) clearShellLocked(id contract.SessionID) {
-	if w := s.shellWatches[id]; w != nil {
+	if state := s.sessionLocked(id); state.watch != nil {
+		w := state.watch
 		for ch := range w.watchers {
 			close(ch)
 			delete(w.watchers, ch)
 		}
-		delete(s.shellWatches, id)
+		state.watch = nil
 	}
 }
 
@@ -31,14 +32,15 @@ func (s *Service) ShellWatch(ctx context.Context, id contract.SessionID) (<-chan
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	channel := s.channels[id]
-	if b.State != contract.BoxReady || channel == nil {
+	state := s.sessionLocked(id)
+	if b.State != contract.BoxReady || state.channel == nil {
 		return nil, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
 	}
-	w := s.shellWatches[id]
+	channel := state.channel
+	w := state.watch
 	if w == nil {
 		w = &shellWatch{watchers: make(map[chan contract.ShellJobOutput]struct{})}
-		s.shellWatches[id] = w
+		state.watch = w
 	}
 	s.shellGeneration++
 	w.generation = s.shellGeneration
@@ -54,7 +56,7 @@ func (s *Service) ShellWatch(ctx context.Context, id contract.SessionID) (<-chan
 		}
 		delete(w.watchers, ch)
 		close(ch)
-		if len(w.watchers) == 0 && s.channels[id] == channel {
+		if len(w.watchers) == 0 && state.channel == channel {
 			wakeChannel(channel)
 		}
 	}()
@@ -67,7 +69,8 @@ func (s *Service) ShellOutput(_ context.Context, caller contract.Principal, req 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if w := s.shellWatches[caller.Session]; w != nil && w.generation == req.Generation {
+	if state := s.sessionLocked(caller.Session); state.watch != nil && state.watch.generation == req.Generation {
+		w := state.watch
 		for _, job := range req.Jobs {
 			for ch := range w.watchers {
 				select {
@@ -78,8 +81,8 @@ func (s *Service) ShellOutput(_ context.Context, caller contract.Principal, req 
 				}
 			}
 		}
-		if len(w.watchers) == 0 && s.channels[caller.Session] != nil {
-			wakeChannel(s.channels[caller.Session])
+		if len(w.watchers) == 0 && state.channel != nil {
+			wakeChannel(state.channel)
 		}
 	}
 	return contract.ShellOutputResponse{}, nil

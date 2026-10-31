@@ -15,7 +15,7 @@ func TestComputerWatchFanoutAndState(t *testing.T) {
 	connectAgent(ctx, t, s, id)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
 	channel := &boxChannel{wake: make(chan struct{}, 1)}
-	s.channels[id] = channel
+	s.sessionLocked(id).channel = channel
 	if _, err := s.ComputerWatch(ctx, id); err == nil || err.Code != contract.ErrNotFound {
 		t.Fatalf("without computer: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestComputerWatchFanoutAndState(t *testing.T) {
 	defer reader.Close()
 	defer writer.Close()
 	done := make(chan *contract.Error, 1)
-	generation := s.computers[id].generation
+	generation := s.sessions[id].computer.generation
 	go func() { done <- s.ComputerFrames(ctx, caller, generation, reader) }()
 	send := func(frame string) {
 		if err := binary.Write(writer, binary.BigEndian, uint32(len(frame))); err != nil {
@@ -136,7 +136,7 @@ func TestComputerWatchControlsBoxChannel(t *testing.T) {
 		t.Fatalf("box channel closed before %s", want)
 	}
 	wait("computer.watch.start")
-	if err := s.ComputerFrames(ctx, caller, s.computers[id].generation, bytes.NewReader(nil)); err != nil {
+	if err := s.ComputerFrames(ctx, caller, s.sessions[id].computer.generation, bytes.NewReader(nil)); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -170,7 +170,7 @@ func TestComputerChannelCloseEndsWatch(t *testing.T) {
 	s, room, id, ctx := setup(t)
 	connectAgent(ctx, t, s, id)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
-	s.channels[id] = &boxChannel{wake: make(chan struct{}, 1)}
+	s.sessionLocked(id).channel = &boxChannel{wake: make(chan struct{}, 1)}
 	if _, err := s.ComputerChanged(ctx, caller, contract.ComputerChangedRequest{To: contract.ComputerRunning}); err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestOldComputerStreamDoesNotEndNewWatch(t *testing.T) {
 	s, _, id, ctx := setup(t)
 	connectAgent(ctx, t, s, id)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
-	s.channels[id] = &boxChannel{wake: make(chan struct{}, 1)}
+	s.sessionLocked(id).channel = &boxChannel{wake: make(chan struct{}, 1)}
 	if _, err := s.ComputerChanged(ctx, caller, contract.ComputerChangedRequest{To: contract.ComputerRunning}); err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestOldComputerStreamDoesNotEndNewWatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	generation := s.computers[id].generation
+	generation := s.sessions[id].computer.generation
 	reader, writer := io.Pipe()
 	defer reader.Close()
 	defer writer.Close()
@@ -228,7 +228,7 @@ func TestOldComputerStreamDoesNotEndNewWatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.computers[id].generation == generation {
+	if s.sessions[id].computer.generation == generation {
 		t.Fatal("generation did not change")
 	}
 	if err := binary.Write(writer, binary.BigEndian, uint32(1)); err != nil {
