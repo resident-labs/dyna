@@ -57,7 +57,7 @@
   .about { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; font-size: 14px; }
   h3 { margin: 0 0 4px; color: var(--muted); font-size: 12.5px; font-weight: 400; }
   .goal { margin: 0 0 16px; line-height: 1.45; overflow-wrap: anywhere; }
-  dl { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px 12px; margin: 0; }
+  dl { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 8px 12px; margin: 0; }
   dt { color: var(--muted); font-size: 12.5px; line-height: 20px; }
   dd { margin: 0; line-height: 20px; overflow-wrap: anywhere; }
   .muted { color: var(--muted); }
