@@ -27,4 +27,4 @@ echo "computers=$(has '^internal/(computers|computerweb)/|^\.github/')"
 # Two web tests read these backend files, so a change to either runs the web suites.
 echo "web=$(has '^web/|^internal/filesvc/files\.go$|^internal/voice/realtime/testdata/page-protocol\.json$|^\.github/|^scripts/ci\.sh$')"
 echo "pi=$(has '^third_party/pi/|^scripts/pi-(hydrate|pack)\.sh$|^scripts/ci\.sh$|^\.github/')"
-echo "next_pi=$(has '^next/third_party/pi/|^scripts/ci-changes\.sh$|^\.github/')"
+echo "next_pi=$(has '^next/third_party/pi/|^scripts/ci-changes\.sh$|^scripts/ci\.sh$|^\.github/')"

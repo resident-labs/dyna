@@ -127,6 +127,23 @@ case "$suite" in
     )
     (cd cmd/dyna-export && go vet ./... && go test -count=1 ./...)
     ;;
+  next-pi)
+    cd next/third_party/pi
+    export NODE_OPTIONS=--experimental-strip-types
+    npm ci --ignore-scripts
+    bash scripts/pi-hydrate.sh
+    npm run build:offline
+    PI_OFFLINE= node --import ./packages/coding-agent/src/experimental/source-resolver.ts --input-type=module -e '
+      import { ensureTool } from "./packages/coding-agent/src/utils/tools-manager.ts";
+      for (const tool of ["fd", "rg"]) {
+        const path = await ensureTool(tool, ({ message }) => console.log(message));
+        if (!path) throw new Error(`Unable to provision ${tool}`);
+      }
+    '
+    npm test --workspace=@earendil-works/pi-coding-agent -- --maxWorkers=2 --reporter=default --reporter=junit --outputFile="${JUNIT_REPORT_PATH:-$RUNNER_TEMP/next-pi-test.xml}"
+    npm --prefix packages/ai test -- anthropic-mid-conversation-effort.test.ts
+    PI_PACK_SKIP_BUILD=1 bash scripts/pi-pack.sh "$RUNNER_TEMP/next-pi-fork.tgz"
+    ;;
   next-web)
     # next/web is the v2 web app, a Svelte project with its own package.json.
     # Its check runs on Node 24, the image set for next-web in local CI.
