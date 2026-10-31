@@ -121,7 +121,11 @@
   <form class="add" onsubmit={event => { event.preventDefault(); void submit(); }}>
     {#if failure}<p class="failure" role="alert">{failure}</p>{/if}
     <div class="box"><textarea rows="1" maxlength="2000" bind:value={draft} placeholder={`Add a rule for every session in ${room}`} aria-label="New rule" readonly={busy}
-      onkeydown={event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); void submit(); } }}></textarea>
+      onkeydown={event => {
+        if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); void submit(); }
+        // Escape keeps a typed rule: the page closes only on Escape in an empty box.
+        if (event.key === "Escape" && draft) event.stopPropagation();
+      }}></textarea>
       <span class="hint" aria-hidden="true"><kbd>Enter</kbd> adds</span></div>
   </form>
 </section>
@@ -181,7 +185,7 @@
   @media (pointer: coarse) { textarea { font-size: 16px; } }
   textarea:focus-visible { outline: none; }
   textarea::placeholder { color: var(--muted); }
-  .hint { flex: none; color: var(--muted); font-size: 12px; }
+  .hint { flex: none; color: var(--muted); font-size: 12.5px; }
   kbd { padding: 1px 5px; border: 1px solid var(--line); border-radius: 4px; font: 11px var(--mono); }
   @media (hover: none) { .hint { display: none; } }
   @container (max-width: 560px) { .hint { display: none; } }
