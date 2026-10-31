@@ -151,7 +151,7 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 		if w.connect.ServePublic(out, r, origin, routes) {
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/connect/") {
+		if strings.HasPrefix(r.URL.Path, "/api/connect/") || r.URL.Path == "/api/logout" {
 			x, _, ok, err := w.connect.Authenticate(r.Context(), r, origin)
 			if err != nil {
 				http.Error(out, "unavailable", http.StatusServiceUnavailable)

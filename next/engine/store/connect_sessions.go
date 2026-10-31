@@ -16,7 +16,7 @@ type ConnectSession struct {
 	Epoch, Generation                          int64
 	Hash                                       [32]byte
 	Created, Access, End, Grant, Minted        time.Time
-	Stale                                      bool
+	Stale, CookieStale                         bool
 }
 
 // StartConnectSession atomically maps a relay device and replaces its session.
@@ -103,7 +103,8 @@ func (s *Store) AuthenticateConnect(ctx context.Context, hash [32]byte, origin s
 	x.Access = time.UnixMilli(access)
 	x.End = time.UnixMilli(end)
 	x.Grant = time.UnixMilli(grant)
-	x.Stale = which > 1 || (which == 1 && now.UnixMilli() > prev) || !now.Before(x.Access)
+	x.CookieStale = which > 1 || (which == 1 && now.UnixMilli() > prev)
+	x.Stale = x.CookieStale || !now.Before(x.Access)
 	rows, err := tx.QueryContext(ctx, "SELECT scope FROM device_scopes WHERE device=? ORDER BY scope", x.Device)
 	if err != nil {
 		return x, nil, false, err
@@ -193,8 +194,19 @@ func (s *Store) EndConnectSession(ctx context.Context, id string) error {
 	})
 }
 
-func (s *Store) RevokeConnectDevice(ctx context.Context, relayDevice string, now time.Time) error {
+func (s *Store) RevokeConnectDevice(ctx context.Context, relayDevice string, generation int64, now time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		var current int64
+		var linked bool
+		if err := tx.QueryRowContext(ctx, "SELECT generation,linked FROM connect_link_state WHERE id=1").Scan(&current, &linked); err != nil {
+			return err
+		}
+		if generation != current {
+			return ErrConnectEpoch
+		}
+		if !linked {
+			return nil
+		}
 		if _, err := tx.ExecContext(ctx, "UPDATE devices SET revoked_at=? WHERE id=(SELECT device FROM connect_devices WHERE relay_device=?) AND revoked_at IS NULL", now.UnixMilli(), relayDevice); err != nil {
 			return err
 		}

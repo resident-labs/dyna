@@ -21,7 +21,7 @@ func (s *Sessions) checkGrant(ctx context.Context, x store.ConnectSession) (bool
 	s.mu.Lock()
 	cached, ok := s.grants[x.RelayDevice]
 	s.mu.Unlock()
-	if !ok || s.now().Sub(cached.At) > time.Minute {
+	if !ok || cached.Generation != x.Generation || s.now().Sub(cached.At) > time.Minute {
 		relay, err := s.relay(ctx, l)
 		if err != nil {
 			return false, false, err
@@ -31,7 +31,7 @@ func (s *Sessions) checkGrant(ctx context.Context, x store.ConnectSession) (bool
 			var re *RelayError
 			if errors.As(err, &re) && (re.Status == http.StatusForbidden || re.Status == http.StatusUnauthorized || re.Status == http.StatusGone) {
 				if re.Status == http.StatusGone {
-					if e := s.store.UnlinkConnect(ctx); e != nil {
+					if e := s.store.UnlinkConnectGeneration(ctx, x.Generation); e != nil {
 						return false, false, e
 					}
 				}
@@ -39,7 +39,7 @@ func (s *Sessions) checkGrant(ctx context.Context, x store.ConnectSession) (bool
 			}
 			return false, false, err
 		}
-		cached = grantCacheEntry{Grant: grant, At: s.now()}
+		cached = grantCacheEntry{Grant: grant, At: s.now(), Generation: x.Generation}
 		if grant.Epoch > x.Epoch {
 			if err := s.store.AdvanceConnectEpoch(ctx, grant.Epoch, x.Generation); err != nil {
 				return false, false, err
@@ -63,7 +63,7 @@ func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin s
 		Proof  string `json:"proof"`
 		Target string `json:"target"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384)).Decode(&req); err != nil && r.URL.Path != "/api/connect/whoami" && r.URL.Path != "/api/connect/routes" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384)).Decode(&req); err != nil && r.URL.Path != "/api/connect/whoami" && r.URL.Path != "/api/connect/routes" && r.URL.Path != "/api/connect/logout" && r.URL.Path != "/api/logout" {
 		fail(w, 400, "bad request")
 		return
 	}
@@ -80,7 +80,7 @@ func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin s
 		ok, refused, err := s.checkGrant(r.Context(), x)
 		grace := false
 		if refused {
-			if err := s.store.RevokeConnectDevice(r.Context(), x.RelayDevice, s.now()); err != nil {
+			if err := s.store.RevokeConnectDevice(r.Context(), x.RelayDevice, x.Generation, s.now()); err != nil {
 				fail(w, 503, "unavailable")
 				return
 			}
@@ -191,8 +191,8 @@ func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin s
 			Current string  `json:"current"`
 			Routes  []Route `json:"routes"`
 		}{l.Machine, b64.EncodeToString(relay.Key.Public().(ed25519.PublicKey)), origin, entries})
-	case "/api/connect/logout":
-		if !x.Stale {
+	case "/api/connect/logout", "/api/logout":
+		if !x.CookieStale {
 			if err := s.store.EndConnectSession(r.Context(), x.ID); err != nil {
 				fail(w, 503, "unavailable")
 				return
