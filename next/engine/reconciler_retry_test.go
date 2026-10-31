@@ -468,6 +468,7 @@ func TestCloseDuringRetryCleanupRemovesContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Unix(1000, 0)
+	s.now = func() time.Time { return now }
 	host := &closeRetryCleanupHost{service: s, session: sid}
 	r := lifecycle.New(s.store, host, retryView{}, nil, s.event, func() time.Time { return now })
 	host.reconciler = r
