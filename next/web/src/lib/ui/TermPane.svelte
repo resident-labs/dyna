@@ -15,26 +15,35 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { GhosttyTerminalSurface } from "../ghostty/surface.ts";
-  import { openTerminal, type TerminalTarget } from "../terminal.ts";
+  import { keyBytes, withCtrl } from "../strip.ts";
+  import { openTerminal, type TerminalSocket, type TerminalTarget } from "../terminal.ts";
   import { theme } from "../theme.svelte.ts";
   // One live terminal, drawn by libghostty-vt on a canvas (see ../ghostty, vendored from v1). The socket
   // opens at the size the first fit measures; leaving closes it, and the engine hangs up the shell.
-  let { target, label, onexit }: { target: TerminalTarget; label: string; onexit: (code?: number) => void } = $props();
+  let { target, label, onexit, ctrl = $bindable(false) }: { target: TerminalTarget; label: string; onexit: (code?: number) => void; ctrl?: boolean } = $props();
   let host: HTMLElement;
   let surface: GhosttyTerminalSurface | undefined;
   let failed = $state(false);
+  let socket: TerminalSocket | undefined;
   export function focus() { surface?.focus(); }
+  // The phone key row (v1's send and key): a held Ctrl turns the next letter into its control character, and arrows
+  // follow the shell's cursor mode.
+  function send(text: string) {
+    socket?.send(ctrl ? withCtrl(text) : text);
+    ctrl = false;
+  }
+  export function key(name: Parameters<typeof keyBytes>[0]) { send(keyBytes(name, surface?.isApplicationCursorKeys() ?? false)); surface?.focus(); }
   $effect(() => { const next = ghosttyTheme(theme()); surface?.setTheme(next); });
   onMount(() => {
     let gone = false;
-    const socket = openTerminal($state.snapshot(target), { output: bytes => surface?.write(bytes), exit: code => { if (!gone) onexit(code); } });
+    socket = openTerminal($state.snapshot(target), { output: bytes => surface?.write(bytes), exit: code => { if (!gone) onexit(code); } });
     // The WebAssembly runtime loads only when the first terminal opens.
     import("../ghostty/surface.ts").then(async ({ GhosttyTerminalSurface: Surface }) => {
       const made = await Surface.create(host, {
         theme: ghosttyTheme(theme()), font: font(),
-        onData: data => socket.send(data),
+        onData: data => send(data),
         // dispose() flushes a pending resize, so a pane that has gone opens no shell.
-        onResize: (cols, rows) => { if (!gone) socket.resize(cols, rows); },
+        onResize: (cols, rows) => { if (!gone) socket?.resize(cols, rows); },
         // F6 moves between the app's areas, so the shell never gets it.
         onSelectionChange: () => {}, beforeKey: event => event.key !== "F6",
         onLinkActivate: text => { window.open(text, "_blank", "noopener"); },
@@ -44,7 +53,7 @@
       surface = made;
       made.focus();
     }).catch(() => { failed = true; });
-    return () => { gone = true; surface?.dispose(); surface = undefined; socket.close(); };
+    return () => { gone = true; surface?.dispose(); surface = undefined; socket?.close(); socket = undefined; };
   });
 </script>
 

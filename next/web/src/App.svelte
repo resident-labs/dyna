@@ -503,7 +503,6 @@
           <button type="button" aria-pressed={section === "requests"} onclick={() => { section = "requests"; }}><Icon name="inbox" />Requests
             {#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
           <button type="button" onclick={event => void showPanel(true, event.detail > 0)}><Icon name="people" />Sessions<span class="count">{store.sessions.size}</span></button>
-          <button type="button" onclick={() => void terminals?.pick()}><Icon name="terminal" />Terminal</button>
           <button type="button" aria-pressed={section === "rules"} onclick={() => { section = "rules"; }}><Icon name="rules" />Rules<span class="count">{store.rules.size}</span></button>
           <button type="button" onclick={pause}><Icon name="pause" />{paused ? "Resume room" : "Pause room"}</button>
         {/if}
@@ -528,14 +527,14 @@
         {#if closed && !missing}<span class="count">closed</span>{:else if word && !missing}<span class="count word">{word}</span>{/if}
         {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session")}</span>{/if}</span>
       {#if store && !unavailable}{#if room}<JobsTool bind:this={jobsTool} sessions={toolSessions} failures={toolFailures} phone={phone.current}
-        onopen={(item, job) => terminals?.openJob(item, job)} onterminal={() => void terminals?.pick()} onseen={key => store?.failedJobs.delete(key)} />{/if}
+        onopen={(item, job) => terminals?.openJob(item, job)} onseen={key => store?.failedJobs.delete(key)} />{/if}
         <button type="button" class="requests" class:waiting={store.waiting > 0} bind:this={requestsButton} aria-pressed={section === "requests"}
         aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section === "requests" ? undefined : "requests"; }}>
         <Icon name="inbox" />{#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
         <!-- One click to the session's shell and computer; neither shows when the session has none. -->
         {#if session && !closed && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title={terminals?.hasShell(session) ? "Show this session's terminal" : "Open a terminal in this session's box"} aria-pressed={terminals?.hasShell(session) ?? false} onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /><span>Terminal</span></button>{/if}
         {#if session && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /><span>Computer</span></button>{/if}
-        <span class="room-menu"><RoomMenu bind:this={roomMenu} {paused} onterminal={() => void terminals?.pick()} onrules={() => { section = "rules"; }} onpause={pause} /></span>{/if}
+        <span class="room-menu"><RoomMenu bind:this={roomMenu} {paused} onrules={() => { section = "rules"; }} onpause={pause} /></span>{/if}
       <!-- While the panel is closed, who works shows on its button, as at most 3 faces, "+n" and the count from status.ts. -->
       {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={"Sessions" + (faces ? `, ${working} working` : "") + (store?.counts.failed ? ", a session failed" : "")}
         title={faces ? busy.map(item => item.name).join(", ") : "Sessions"} aria-controls="sessions" aria-expanded={panelShown} onclick={event => void showPanel(!panelShown, event.detail > 0)}>
@@ -568,7 +567,7 @@
       <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title}
         quote={quotes[key]} onunquote={() => { quotes[key] = undefined; }} sessions={mentions} files={files(key)} {stop} />
     {/if}{/if}
-    <TermDock bind:this={terminals} bind:element={dock} onempty={() => composer?.focus()}
+    <TermDock bind:this={terminals} bind:element={dock} onempty={() => composer?.focus()} phone={phone.current} strip={!!room && !unavailable}
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
   </main>
   {#if room}
@@ -642,7 +641,8 @@
   .requests:hover, .requests[aria-pressed="true"] { background: var(--hover); color: var(--text); }
   .requests.waiting { height: 40px; padding: 0 12px; border-radius: 8px; background: color-mix(in srgb, var(--attention) 14%, transparent); color: var(--attention); }
   .requests.waiting:hover, .requests.waiting[aria-pressed="true"] { background: color-mix(in srgb, var(--attention) 22%, transparent); }
-  .requests ~ :global(.panel-toggle), :global(.jobs) ~ .requests { margin-left: 0; }
+  .requests ~ :global(.panel-toggle) { margin-left: 0; }
+  :global(.jobs ~ .requests) { margin-left: 0; }
   main > header :global(.panel-toggle) { display: flex; align-items: center; gap: 8px; }
   /* One quiet line of the working line's size and edge; only its Resume acts. */
   .paused { flex: none; display: flex; gap: 6px; height: 20px; margin: 0 0 4px; padding: 0 16px 0 30px; color: var(--muted); font-size: 12.5px; line-height: 20px; white-space: nowrap; }
