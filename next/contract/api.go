@@ -117,7 +117,7 @@ type Error struct {
 type VisualSuperseded struct {
 	Event   EventID `json:"event"`
 	Version int     `json:"version"`
-	Seq int64 `json:"seq"`
+	Seq     int64   `json:"seq"`
 }
 
 type ConversationReadRequest struct {
