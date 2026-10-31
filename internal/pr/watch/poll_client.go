@@ -63,9 +63,10 @@ func (s *Service) savePollResponses(key string, gh GitHub) error {
 			entries = map[string]cachedResponse{}
 		}
 		for path, response := range used {
-			// Merge reads do not own the complete discussion snapshot.
+			// Merge reads do not own a complete discussion snapshot. Keep
+			// their validators, but never publish their pages as trusted.
 			if discussionResponse(path) {
-				continue
+				response.Stale = true
 			}
 			entries[path] = response
 		}
