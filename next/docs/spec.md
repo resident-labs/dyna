@@ -168,6 +168,8 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `hostexec_runs` |
 | `conversation_reads` |
 | `backup_copy_status` |
+| `connect_link_state` |
+| `connect_nonces` |
 | `devices` |
 | `device_scopes` |
 | `pairing_codes` |
@@ -368,7 +370,7 @@ The web listener binds loopback behind an owner proxy. Each `--web.route <origin
 
 The `dyna_device` cookie is a random 256-bit token, HttpOnly, SameSite=Strict and Secure on HTTPS. SQLite stores only its SHA-256; its 30-day sliding expiry writes at most daily. `dyna web` also creates a device. Scopes are `read`, `operate`, `files`, `terminal`, `computers`, `admin`; every API method and operation kind registers a required typed scope. Attachment reads need `read`, uploads `operate`. Only admin manages devices; `device.scopes` needs no scope and returns the caller's scopes. The owner socket has all; sessions cannot call device methods. The web app reads scopes on connect and hides unavailable controls. Revocation applies on the next request; streams and terminals recheck every 15 seconds.
 
-Connect keeps its wire protocol and relay paths. `engine/connect` ports link, mint, session exchange, renew, revoke and hello; relay passkeys authenticate linking. Supervised `cloudflared` is an engine child. Session token hashes live in SQLite; machine key, link, relay keys and tunnel token live in mode 0700 `<data>/connect`. Route handoff, ranking and long-poll fallback wait for need. Web Push follows the Devices page, runs from the machine without relay or Connect link, and contains no post text.
+Connect keeps its wire protocol and relay paths. `engine/connect` ports link, mint, session exchange, renew, revoke and hello; relay passkeys authenticate linking. Supervised `cloudflared` is an engine child. Session token hashes live in SQLite; machine key, link, relay keys and tunnel token live in mode 0700 `<data>/connect`. Route ranking, signed hello, session handoff and event-stream route fallback follow v1 and ship in g1512. A route has one app origin. The machine sends Web Push itself with its own VAPID key; the relay never sees subscriptions. Web Push needs a separate r23 design and lead approval before implementation.
 
 ### 7.9 Agent surface: MCP tools and the context snapshot
 
