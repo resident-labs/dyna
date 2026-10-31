@@ -32,3 +32,31 @@ func TestRoomsReusesUnreadScanUntilLogOrReadsChange(t *testing.T) {
 	check(1, 3)
 	check(1, 3)
 }
+
+// Read posts must not cause repeated home-index lookups on every room list.
+func TestRoomUnreadChecksHomesOnlyForUnreadPosts(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	first := e.say(rec, "lead", "first")
+	e.say(rec, "lead", "second")
+	if err := e.svc.MarkRead(rec.ID, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	checked := -1
+	e.svc.onOwnerHomes = func(n int) { checked = n }
+	if got := roomUnreadCount(t, e.svc, rec.ID); got != 1 {
+		t.Fatalf("unread = %d; want 1", got)
+	}
+	if checked != 1 {
+		t.Fatalf("checked %d post homes; want only the unread post", checked)
+	}
+	if err := e.svc.MarkRoomRead(rec.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := roomUnreadCount(t, e.svc, rec.ID); got != 0 {
+		t.Fatalf("unread after marking room read = %d", got)
+	}
+	if checked != 0 {
+		t.Fatalf("checked %d post homes after marking read; want 0", checked)
+	}
+}
