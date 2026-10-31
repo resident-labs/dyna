@@ -4,18 +4,22 @@
   import { formatTime, type Row } from "../feed.ts";
   import { hue } from "../identity.ts";
   let { row, author, root, onseen }: { row: Extract<Row, { kind: "failed" }>; author: string; root: boolean; onseen?: () => void } = $props();
-  // The owner has seen a failed turn once its row stays on screen for a second, which clears the session's mark.
-  // The wait skips rows that only pass by, such as while the feed jumps to its end on open.
+  // The owner has seen a failed turn once its row stays on screen for a second while the page is visible, which
+  // clears the session's mark. The wait skips rows that only pass by, such as while the feed jumps to its end on open.
   function seen(node: HTMLElement) {
     if (!onseen) return;
     const done = onseen;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const observer = new IntersectionObserver(([entry]) => {
+    let shown = false;
+    const start = () => {
       clearTimeout(timer);
-      if (entry.isIntersecting) timer = setTimeout(() => { done(); observer.disconnect(); }, 1000);
-    });
+      if (shown && document.visibilityState === "visible") timer = setTimeout(() => { done(); stop(); }, 1000);
+    };
+    const observer = new IntersectionObserver(([entry]) => { shown = entry.isIntersecting; start(); });
+    const stop = () => { clearTimeout(timer); observer.disconnect(); document.removeEventListener("visibilitychange", start); };
     observer.observe(node);
-    return () => { clearTimeout(timer); observer.disconnect(); };
+    document.addEventListener("visibilitychange", start);
+    return stop;
   }
 </script>
 
