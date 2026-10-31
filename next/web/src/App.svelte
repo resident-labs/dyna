@@ -12,6 +12,7 @@
   import { count } from "./lib/feed.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
   import ShellView from "./lib/ui/ShellView.svelte";
+  import TermDock from "./lib/ui/TermDock.svelte";
   import Home from "./lib/ui/Home.svelte";
   import { MediaQuery, SvelteSet } from "svelte/reactivity";
   import RoomMenu, { type Section } from "./lib/ui/RoomMenu.svelte";
@@ -107,6 +108,8 @@
   let composer: HTMLTextAreaElement | undefined = $state();
   let members: HTMLElement | undefined = $state();
   let computer: HTMLElement | undefined = $state();
+  let terminals: TermDock | undefined = $state();
+  let dock: HTMLElement | undefined = $state();
   // F6 (mod+F6 in a browser) moves focus between areas; Shift goes back.
   function cycle(event: KeyboardEvent) {
     // Escape closes the jobs view only from inside the panel, so Escape in the composer or a section keeps it.
@@ -117,7 +120,7 @@
     event.preventDefault();
     // Only areas on screen take part; below 900 px the closed sessions panel has no boxes.
     // A panel from the room menu takes the place of the feed and the composer.
-    const areas = [rail, section ? requests : feed, section ? undefined : composer, members, docked ? undefined : computer]
+    const areas = [rail, section ? requests : feed, section ? undefined : composer, dock, members, docked ? undefined : computer]
       .filter(area => area != null)
       .filter(area => area.getClientRects().length > 0);
     const index = areas.findIndex(area => area.contains(document.activeElement));
@@ -224,7 +227,7 @@
     <header>{#if room && session}<a class="crumb" href={"/r/" + encodeURIComponent(room)} onclick={navigate}>{roomName}</a><span class="count">/</span>
       {:else if room}<Icon name="room" />{/if}<strong>{title}</strong>
       {#if closed}<span class="count">· closed</span>{/if}
-      {#if store && !unavailable}<RoomMenu bind:this={menu} waiting={store.waiting} onchoose={next => { section = next; }} />{/if}
+      {#if store && !unavailable}<RoomMenu bind:this={menu} waiting={store.waiting} onchoose={next => { if (next === "terminal") void terminals?.pick(); else section = next; }} />{/if}
       {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={store?.failed.size ? "Sessions, a turn failed" : "Sessions"}
         title="Sessions" aria-controls="sessions" aria-expanded={panel} onclick={() => void showPanel(!panel)}><Icon name="people" />
         {#if store?.failed.size && !panel}<span class="attention"></span>{/if}</button>{/if}</header>
@@ -240,6 +243,8 @@
       <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title} />
       {#if failed === key}<p class="hint" role="alert">Your message was not sent. Press Enter to try again.</p>{/if}
     {/if}{/if}
+    <TermDock bind:this={terminals} bind:element={dock}
+      sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name }))} />
   </main>
   {#if room}
     <aside class="members" id="sessions" class:shown={panel} class:watching={jobsOf || (watching && docked)} aria-label="Sessions" tabindex="-1" bind:this={members}>
