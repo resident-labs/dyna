@@ -2,7 +2,7 @@ import { test } from "node:test";
 import { decodeEvent } from "./event.ts";
 import { dmOf } from "./window.svelte.ts";
 import assert from "node:assert/strict";
-import { commandLine, dayLabel, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, quoted, requestLine, shortPaths, workSummary } from "./feed.ts";
+import { commandLine, dayLabel, describe, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, quoted, requestLine, shortPaths, workSummary } from "./feed.ts";
 import type { BoxState, Event, EventBody, FailureCause, Principal } from "./contract.gen.ts";
 
 test("a forward quotes every line of the post under its label, then the owner's words", () => {
@@ -72,6 +72,16 @@ test("collapses repeated names in the work line", () => {
   const unknown = () => "A closed session";
   assert.equal(workSummary([started(1, "gone-1"), started(2, "gone-2")], unknown), "Closed sessions worked · 2 turns");
   assert.equal(workSummary([started(1, "gone"), started(2, "lead-web")], session => session === "gone" ? "A closed session" : session), "A closed session and lead-web worked · 2 turns");
+});
+
+test("a stopped turn and a room's pause show as their own lines", () => {
+  const stopped = event(1, { type: "turn.ended", body: { session: "s", turn: "t", outcome: "stopped", usage } });
+  const rows = feedRows([stopped, event(2, { type: "room.paused", body: {} }, { kind: "owner" }), event(3, { type: "room.resumed", body: {} }, { kind: "session", session: "root" })], { kind: "feed" });
+  assert.deepEqual(rows.flatMap(row => row.kind === "notice" ? [describe(row.event, id => id)] : []), ["s's turn stopped", "You paused the room", "root resumed the room"]);
+  assert.equal(dmOf(stopped), "s");
+  assert.equal(decodeEvent({ seq: 2, id: "2", at: "", room: "r", from: { kind: "owner" }, type: "room.paused", body: {} })?.type, "room.paused");
+  assert.deepEqual(feedRows([stopped], { kind: "dm", session: "s" }).map(row => row.kind), ["work", "notice"]);
+  assert.deepEqual(feedRows([event(2, { type: "room.paused", body: {} })], { kind: "dm", session: "s" }), []);
 });
 
 test("names failed image builds and computers in the work line", () => {
