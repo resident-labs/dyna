@@ -15,11 +15,12 @@ import (
 )
 
 type fakeProc struct {
-	exit    chan int
-	signals chan syscall.Signal
-	signal  string
-	killOn  syscall.Signal // the signal that ends the process
-	orphan  bool           // SIGTERM ends the leader, but a child survives until SIGKILL
+	exit     chan int
+	signals  chan syscall.Signal
+	signal   string
+	stopCode int
+	killOn   syscall.Signal // the signal that ends the process
+	orphan   bool           // SIGTERM ends the leader, but a child survives until SIGKILL
 }
 
 func (p *fakeProc) Wait() (int, string) { return <-p.exit, p.signal }
@@ -33,7 +34,7 @@ func (p *fakeProc) Signal(sig syscall.Signal) {
 		p.orphan = false
 	}
 	if sig == p.killOn {
-		p.exit <- 137
+		p.exit <- p.stopCode
 	}
 }
 
@@ -49,7 +50,7 @@ type rig struct {
 
 func newRig(output string, killOn syscall.Signal) *rig {
 	r := &rig{
-		proc:    &fakeProc{exit: make(chan int, 1), signals: make(chan syscall.Signal, 4), killOn: killOn},
+		proc:    &fakeProc{exit: make(chan int, 1), signals: make(chan syscall.Signal, 4), killOn: killOn, stopCode: 137},
 		timers:  make(chan timer, 4),
 		reports: make(chan contract.ShellJobEndedRequest, 4),
 	}
@@ -139,8 +140,10 @@ func TestStopKillsTheGroupAfterTheGracePeriod(t *testing.T) {
 		t.Fatalf("second signal = %v, want SIGKILL", sig)
 	}
 	<-stopped
-	if report := <-r.reports; report.End.Kind != contract.ShellJobStopped {
-		t.Fatalf("unexpected end: %+v", report.End)
+	select {
+	case report := <-r.reports:
+		t.Fatalf("stopped job reported: %+v", report)
+	default:
 	}
 }
 
@@ -424,11 +427,13 @@ func TestJobEndAndDescription(t *testing.T) {
 	}{
 		{name: "exit", code: 2, want: contract.ShellJobEnd{Kind: contract.ShellJobExited, Code: 2}},
 		{name: "signal", code: -1, signal: "SIGTERM", want: contract.ShellJobEnd{Kind: contract.ShellJobSignaled, Signal: "SIGTERM"}},
-		{name: "stopped", stopped: true, want: contract.ShellJobEnd{Kind: contract.ShellJobStopped}},
+		{name: "stopped with signal", code: -1, stopped: true, want: contract.ShellJobEnd{Kind: contract.ShellJobStopped}},
+		{name: "stopped with exit 0", code: 0, stopped: true, want: contract.ShellJobEnd{Kind: contract.ShellJobStopped}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newRig("", syscall.SIGTERM)
 			r.proc.signal = tc.signal
+			r.proc.stopCode = tc.code
 			done := make(chan *job, 1)
 			go func() { j, _ := r.server.run(nil, "build", "", "Build the bundle"); done <- j }()
 			(<-r.timers).fire <- time.Time{}
@@ -438,10 +443,16 @@ func TestJobEndAndDescription(t *testing.T) {
 			} else {
 				r.proc.exit <- tc.code
 			}
-			report := <-r.reports
+			<-j.done
 			view := r.server.View(true)
-			if report.Description != "Build the bundle" || *report.End != tc.want || len(view) != 1 || view[0].Description != report.Description || *view[0].End != tc.want {
-				t.Fatalf("report=%+v view=%+v", report, view)
+			if len(view) != 1 || view[0].Description != "Build the bundle" || *view[0].End != tc.want {
+				t.Fatalf("view=%+v", view)
+			}
+			if !tc.stopped {
+				report := <-r.reports
+				if report.Description != view[0].Description || *report.End != tc.want {
+					t.Fatalf("report=%+v", report)
+				}
 			}
 		})
 	}
