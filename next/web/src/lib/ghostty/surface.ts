@@ -1835,7 +1835,7 @@ export class GhosttyTerminalSurface {
     });
     this.positionInput();
     this.renderedCursorY =
-      this.cursorOn && this.snapshot.cursorVisible && this.snapshot.cursorY >= 0
+      this.snapshot.cursorVisible && this.snapshot.cursorY >= 0
         ? this.snapshot.cursorY
         : null;
     if (this.scrollbarDirty) {

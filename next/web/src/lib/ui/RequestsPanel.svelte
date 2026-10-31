@@ -62,7 +62,7 @@
 <!-- The page takes focus and its keys are shortcuts for the buttons on each row, which stay the accessible way to decide. -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <section class="panel" aria-label="Requests" tabindex="-1" bind:this={element} onkeydown={keys}>
-  <div class="top"><PageCrumb {room} page="Requests" {onback} />
+  <div class="top"><PageCrumb {room} page="Requests" {onback} />{#if pending.length}<span class="count">{pending.length}</span>{/if}
     {#if pending.length}<span class="hints" aria-hidden="true"><span><kbd>A</kbd> approve</span><span><kbd>D</kbd> deny</span><span><kbd>J</kbd><kbd>K</kbd> move</span></span>{/if}</div>
   <div class="list"><div class="column">
     <h2>Waiting for you{#if waiting.length}<span class="count">{waiting.length}</span>{/if}</h2>
