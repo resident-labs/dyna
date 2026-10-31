@@ -211,6 +211,16 @@ func (m *Manager) Replace(ctx context.Context, auth *Auth) (*Auth, error) {
 	auth.Disabled, auth.Status = existing.Disabled, existing.Status
 	auth.RegistrationEpoch = existing.RegistrationEpoch
 	committed, changed, cooldown, err := m.updateInternalLocked(WithAuthCreationIntent(ctx), nil, auth, updateModeReplace)
+	if err == nil && changed {
+		// An OAuth replacement starts a new runtime registration lifetime.
+		// In-flight refreshes cannot cross it, while independent partition
+		// updates retain upstream merge behavior.
+		m.mu.Lock()
+		m.authEpochs[auth.ID]++
+		m.auths[auth.ID].RegistrationEpoch = m.authEpochs[auth.ID]
+		committed.RegistrationEpoch = m.authEpochs[auth.ID]
+		m.mu.Unlock()
+	}
 	release()
 	if err == nil && changed {
 		m.finishAuthUpdate(ctx, committed, cooldown)
@@ -353,12 +363,17 @@ func (m *Manager) updateInternalLocked(ctx context.Context, base, auth *Auth, mo
 		m.authEpochs[auth.ID] = existing.RegistrationEpoch
 	}
 	if (mode == updateModeRefresh || mode == updateModePrepare) && base != nil && existing.RegistrationEpoch != base.RegistrationEpoch {
+		if mode == updateModeRefresh {
+			current := existing.Clone()
+			m.mu.Unlock()
+			return current, false, false, nil
+		}
 		m.mu.Unlock()
 		return nil, false, false, fmt.Errorf("update auth %s: stale registration epoch %d != %d", auth.ID, base.RegistrationEpoch, existing.RegistrationEpoch)
 	}
 	// Do not let an in-flight refresh overwrite credentials committed after its snapshot.
 	if mode == updateModeRefresh && base != nil && (existing.CredentialVersion != base.CredentialVersion || CredentialsChanged(base, existing)) {
-		if existing.CredentialVersion != base.CredentialVersion || auth.CodexRefreshPatch == nil || !auth.CodexRefreshPatch.CanApplyTo(existing.Metadata) {
+		if auth.CodexRefreshPatch == nil || !auth.CodexRefreshPatch.CanApplyTo(existing.Metadata) {
 			current := existing.Clone()
 			m.mu.Unlock()
 			// Discarded stale refresh: committed=false so callers do not
