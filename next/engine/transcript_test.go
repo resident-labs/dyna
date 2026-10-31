@@ -85,3 +85,45 @@ func TestTranscriptAppendStartsNewFileAtZero(t *testing.T) {
 		t.Fatalf("new file = %+v, %v; want ack 3", resp, e)
 	}
 }
+
+func TestTranscriptFetchAcknowledged(t *testing.T) {
+	s, ctx, caller := transcriptCaller(t)
+	if _, e := appendTranscript(s, ctx, caller, "a.jsonl", 0, "abc"); e != nil {
+		t.Fatal(e)
+	}
+	name := filepath.Join(s.transcriptDir, string(caller.Session), "a.jsonl")
+	if err := os.WriteFile(name, []byte("abcdef"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, e := s.TranscriptFetch(ctx, caller, contract.TranscriptFetchRequest{Path: "a.jsonl", Offset: 1})
+	if e != nil || string(got.Bytes) != "bc" {
+		t.Fatalf("fetch = %q, %v", got.Bytes, e)
+	}
+	if err := os.Truncate(name, 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, e := s.TranscriptFetch(ctx, caller, contract.TranscriptFetchRequest{Path: "a.jsonl"}); e == nil || e.Code != contract.ErrConflict {
+		t.Fatal("short backing file did not return conflict")
+	}
+}
+
+func TestTranscriptFetchBoundaries(t *testing.T) {
+	s, ctx, caller := transcriptCaller(t)
+	data := make([]byte, (1<<20)+1)
+	if _, e := s.TranscriptAppend(ctx, caller, contract.TranscriptAppendRequest{Path: "a", Bytes: data}); e != nil {
+		t.Fatal(e)
+	}
+	got, e := s.TranscriptFetch(ctx, caller, contract.TranscriptFetchRequest{Path: "a"})
+	if e != nil || len(got.Bytes) != (1<<20) {
+		t.Fatalf("chunk %d: %v", len(got.Bytes), e)
+	}
+	for _, req := range []contract.TranscriptFetchRequest{{Path: "../a"}, {Path: "a", Offset: -1}, {Path: "a", Offset: int64(len(data) + 1)}} {
+		if _, e := s.TranscriptFetch(ctx, caller, req); e == nil {
+			t.Fatalf("accepted %+v", req)
+		}
+	}
+	other := contract.Principal{Kind: contract.PrincipalSession, Session: "another"}
+	if got, e := s.TranscriptFetch(ctx, other, contract.TranscriptFetchRequest{Path: "a"}); e == nil && len(got.Bytes) > 0 {
+		t.Fatal("another session read bytes")
+	}
+}
