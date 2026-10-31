@@ -148,6 +148,10 @@ func TestMissingDeviceIsTyped(t *testing.T) {
 	if !errors.As(err, &missing) || missing.Need != box.NeedKVM {
 		t.Fatalf("error %v", err)
 	}
+	cmd := r.calls[len(r.calls)-1][len(r.calls[len(r.calls)-1])-1]
+	if !strings.Contains(cmd, "'--device' '/dev/kvm' '--group-add' 'keep-groups' 'image'") {
+		t.Fatalf("KVM command %s", cmd)
+	}
 }
 
 func TestStopContainerIgnoresMissing(t *testing.T) {

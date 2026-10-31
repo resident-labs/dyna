@@ -2,7 +2,10 @@
 
 A repository can put `nested-containers` in `.dyna/images/<name>/box-needs`.
 Dyna supplies the TUN device and unmasks `/proc/sys` only for that image.
-A `kvm` need supplies `/dev/kvm` instead. List one need per line.
+A `kvm` need supplies `/dev/kvm` and keeps the host user’s supplementary groups.
+This allows access when the host grants it through a group. It also gives the
+box those groups for other mounted files. It requires Podman with crun.
+List one need per line.
 Dyna refuses any unknown need.
 
 This example uses the Debian packages in the current `dyna-base`. Put it in
