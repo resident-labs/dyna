@@ -4,7 +4,7 @@
   import Icon from "./Icon.svelte";
   import Avatar from "./Avatar.svelte";
   import StepList from "./StepList.svelte";
-  import { describe, eventGroups, formatTime, subject, timeSpan, workSummary, type Row } from "../feed.ts";
+  import { commandLine, describe, eventGroups, formatTime, subject, timeSpan, workSummary, type Row } from "../feed.ts";
   import type { Event } from "../contract.gen.ts";
   import { TurnTranscripts } from "../transcripts.svelte.ts";
 
@@ -56,6 +56,12 @@
   });
 </script>
 
+{#snippet requestDetails(event: Extract<Event, { type: "op.requested" }>)}<li class="step"><details><summary>Request details</summary>
+  {#if event.body.card.body}<p>{event.body.card.body}</p>{/if}
+  {#if event.body.card.command?.length}<pre>{commandLine(event.body.card.command)}</pre>{/if}
+  {#each event.body.card.changes ?? [] as change (change.field)}<p>{change.field}: {change.old || "none"} → {change.new || "none"}</p>{/each}
+</details></li>{/snippet}
+
 <div class="work">
   <span class="glyph" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 3 8l9 5 9-5zM3 13l9 5 9-5" /></svg></span>
   <div class="body">
@@ -81,7 +87,7 @@
           {/if}
         {/each}{#if !allWorkers && workers.length > 6}<li><button class="detail" type="button" onclick={() => ontoggle(`${row.key}-all`)}>Show {workers.length - 6} more sessions</button></li>{/if}</ul>{/if}
       {/if}
-      <ul>{#each computerSessions as session (session)}<li><Icon name="monitor" size={14} /><span>{computerUsage(session)}</span></li>{/each}{#each groups as group (group[0].type)}{@const line = describe(group[0], name)}{#if line}<li><Icon name={group[0].type === "session.closed" ? "close" : group[0].type === "session.started" ? "person" : group[0].type === "op.decided" ? "check" : "list"} size={14} />{#if group.length === 1}<span>{line}{#if group[0].type === "shell.job.ended"}{@const session = group[0].body.session} <button type="button" class="retry" onclick={() => onjobs(session)}>View jobs</button>{/if}</span>{:else}<button class="detail" type="button" aria-expanded={opened.has(`${row.key}-${group[0].type}`)} onclick={() => ontoggle(`${row.key}-${group[0].type}`)}>{group.length} {eventGroups[group[0].type]} <Icon name="chevron" size={14} /></button>{/if}<time datetime={group[0].at}>{formatTime(group[0].at)}</time></li>{#if group.length > 1 && opened.has(`${row.key}-${group[0].type}`)}{#each group as event (event.seq)}<li class="step"><span>{describe(event, name)}{#if event.type === "shell.job.ended"} <button type="button" class="retry" onclick={() => onjobs(event.body.session)}>View jobs</button>{/if}</span><time datetime={event.at}>{formatTime(event.at)}</time></li>{/each}{/if}{/if}{/each}</ul>
+      <ul>{#each computerSessions as session (session)}<li><Icon name="monitor" size={14} /><span>{computerUsage(session)}</span></li>{/each}{#each groups as group (group[0].type)}{@const line = describe(group[0], name)}{#if line}<li><Icon name={group[0].type === "session.closed" ? "close" : group[0].type === "session.started" ? "person" : group[0].type === "op.decided" ? "check" : "list"} size={14} />{#if group.length === 1}<span>{line}{#if group[0].type === "shell.job.ended"}{@const session = group[0].body.session} <button type="button" class="retry" onclick={() => onjobs(session)}>View jobs</button>{/if}</span>{:else}<button class="detail" type="button" aria-expanded={opened.has(`${row.key}-${group[0].type}`)} onclick={() => ontoggle(`${row.key}-${group[0].type}`)}>{group.length} {eventGroups[group[0].type]} <Icon name="chevron" size={14} /></button>{/if}<time datetime={group[0].at}>{formatTime(group[0].at)}</time></li>{#if group.length === 1 && group[0].type === "op.requested"}{@render requestDetails(group[0])}{/if}{#if group.length > 1 && opened.has(`${row.key}-${group[0].type}`)}{#each group as event (event.seq)}<li class="step"><span>{describe(event, name)}{#if event.type === "shell.job.ended"} <button type="button" class="retry" onclick={() => onjobs(event.body.session)}>View jobs</button>{/if}</span><time datetime={event.at}>{formatTime(event.at)}</time></li>{#if event.type === "op.requested"}{@render requestDetails(event)}{/if}{/each}{/if}{/if}{/each}</ul>
     </div>{/if}
   </div>
 </div>
@@ -115,4 +121,7 @@
   .opened > .detail time { margin-left: auto; }
   .workers { margin-left: 6px; padding-left: 10px; border-left: 1px solid var(--line); }
   .step { margin-left: 16px; }
+  details { min-width: 0; overflow-wrap: anywhere; }
+  summary { cursor: pointer; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 </style>
