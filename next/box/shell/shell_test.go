@@ -387,4 +387,15 @@ func TestOwnerViewBudgetsAndResets(t *testing.T) {
 	if len(third) != 1 || !third[0].Reset || len(third[0].Text) > 64<<10 {
 		t.Fatalf("large output: %+v", third)
 	}
+	s.jobs = nil
+	for i := 0; i < 70; i++ {
+		s.jobs = append(s.jobs, &job{id: contract.ShellJobID(fmt.Sprint(i)), command: strings.Repeat("é", 3000), done: make(chan struct{})})
+	}
+	commands := s.View(true)
+	if len(commands) != 61 || len(commands[0].Command) != 4096 {
+		t.Fatalf("command batch: %d", len(commands))
+	}
+	if rest := s.View(false); len(rest) != 9 || !rest[0].Reset {
+		t.Fatalf("remaining commands: %d", len(rest))
+	}
 }
