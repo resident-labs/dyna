@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stream, watchHello, type EventConnection } from "./stream.ts";
+import { stream, watchHello, watchTranscripts, type EventConnection } from "./stream.ts";
 import { decodeEvent } from "./event.ts";
 
 test("skips malformed event bodies at the stream boundary", () => {
@@ -19,6 +19,30 @@ test("delivers the build hello", () => {
   }));
   listener(new MessageEvent("hello", { data: '{"build":"b"}' }));
   assert.equal(build, "b");
+  stop();
+});
+
+test("notifies transcript watchers on owner reconnect and changes", () => {
+  const calls: (string | undefined)[] = [];
+  const unwatch = watchTranscripts(session => calls.push(session));
+  let hello: (event: MessageEvent<string>) => void = () => {};
+  let reconnect = () => {};
+  const sources: EventConnection[] = [];
+  const stop = stream(undefined, () => 0, () => {}, () => {
+    const source: EventConnection = { onmessage: null, onerror: null, addEventListener(_type, cb) { hello = cb; }, close() {} };
+    sources.push(source);
+    return source;
+  }, cb => { reconnect = cb; return () => {}; });
+  hello(new MessageEvent("hello", { data: '{"build":"b"}' }));
+  sources[0].onmessage?.(new MessageEvent("message", { data: JSON.stringify({
+    seq: 0, id: "", at: "", from: { kind: "engine" },
+    type: "transcript.changed", body: { session: "s", turn: "t" },
+  }) }));
+  sources[0].onerror?.(new Event("error"));
+  reconnect();
+  hello(new MessageEvent("hello", { data: '{"build":"b"}' }));
+  assert.deepEqual(calls, [undefined, "s", undefined]);
+  unwatch();
   stop();
 });
 
