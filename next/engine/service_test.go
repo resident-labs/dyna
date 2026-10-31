@@ -1093,6 +1093,25 @@ func connectAgent(ctx context.Context, t *testing.T, s *Service, session contrac
 	}
 }
 
+func TestSessionListLastOutcomeSkipsStoppedTurns(t *testing.T) {
+	s, room, session, ctx := setup(t)
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,ended_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES ('a',?,0,1,'failed','',0,0,0,0),('b',?,2,3,'stopped','',0,0,0,0)", session, session)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	list, e := s.SessionList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionListRequest{Room: room})
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, item := range list.Sessions {
+		if item.ID == session && item.LastOutcome != contract.TurnFailed {
+			t.Fatalf("a stopped turn hid the failure: %+v", item)
+		}
+	}
+}
+
 func TestClosedSessionNamesRemainInEvents(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}

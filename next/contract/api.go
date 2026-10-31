@@ -68,7 +68,7 @@ type SessionSummary struct {
 	Goal        string        `json:"goal"`
 	Turn        TurnID        `json:"turn,omitempty"`        // the running turn
 	Activity    string        `json:"activity,omitempty"`    // the running turn's latest TurnActivity label
-	LastOutcome TurnOutcome   `json:"lastOutcome,omitempty"` // of the last ended turn
+	LastOutcome TurnOutcome   `json:"lastOutcome,omitempty"` // of the last ended turn that was not stopped; a stopped turn neither fails nor succeeds
 }
 type SessionListResponse struct {
 	Sessions []SessionSummary `json:"sessions"`
