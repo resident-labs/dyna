@@ -2,7 +2,7 @@ import { SvelteMap, SvelteSet, createSubscriber } from "svelte/reactivity";
 import { call } from "./client.ts";
 import { stream } from "./stream.ts";
 import { EventWindow } from "./window.svelte.ts";
-import { countOf, statusOf, type Counts, type Status } from "./status.ts";
+import { boxFailures, countOf, statusOf, type BoxFailure, type Counts, type Status } from "./status.ts";
 import type { BoxState, Conversation, FailureCause, Decision, Event, OpRequested, OpResult, OpState, RoomRule, SessionStarted } from "./contract.gen.ts";
 
 type TurnEndedEvent = Extract<Event, { type: "turn.ended" }>;
@@ -28,6 +28,8 @@ export class RoomStore {
   readonly failed = new SvelteMap<string, number>();
   // Why each failed turn failed, when the engine said; a session row shows it after "Failed".
   readonly causes = new SvelteMap<string, FailureCause>();
+  // Sessions whose box failed or was lost, with why.
+  readonly boxFailures = new SvelteMap<string, BoxFailure>();
   // The owner's read position per conversation, by readKey; the newest seq wins.
   private readonly read = new SvelteMap<string, number>();
   // Sessions whose box runs a computer the owner can watch.
@@ -122,12 +124,14 @@ export class RoomStore {
       this.names.set(session.id, session.name);
       this.noteRead({ kind: "dm", session: session.id }, session.lastRead);
       this.boxes.set(session.id, session.boxState);
+      if (session.boxState === "failed" || session.boxState === "lost") this.boxFailures.set(session.id, { box: session.boxState });
       if (session.turn) this.turns.set(session.id, session.turn);
       if (session.turn && session.activity) { this.activity.set(session.id, session.activity); this.steps.set(session.id, [session.activity]); }
       if (session.lastOutcome === "failed") this.failed.set(session.id, list.seq);
       if (session.computer === "running") this.computers.add(session.id);
       this.shellJobs.set(session.id, session.shellJobs ?? 0);
     }
+    if (this.boxFailures.size) for (const [id, failure] of await boxFailures(this.room, list.seq + 1)) if (this.boxFailures.has(id)) this.boxFailures.set(id, failure);
     // session.list says which last turns failed but not when, so the room reads turn.ended pages back from the newest
     // until it has placed each failure. One it cannot place, as when a read fails, keeps list.seq and shows.
     const unplaced = new Set(this.failed.keys());
@@ -204,6 +208,10 @@ export class RoomStore {
       }
       case "box.changed":
         this.boxes.set(event.body.session, event.body.to);
+        if (event.body.to === "failed" || event.body.to === "lost") {
+          const { session, to, cause } = event.body;
+          this.boxFailures.set(session, { box: to, cause: cause ?? this.boxFailures.get(session)?.cause, at: event.at });
+        } else this.boxFailures.delete(event.body.session);
         // A computer runs only inside a ready box.
         if (event.body.to !== "ready") this.computers.delete(event.body.session);
         break;

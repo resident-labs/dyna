@@ -1,9 +1,10 @@
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { call, retryDelay } from "./client.ts";
 import { stream } from "./stream.ts";
+import { boxFailures, type BoxFailure } from "./status.ts";
 import type { Event, RoomSummary, SessionListResponse, SessionSummary } from "./contract.gen.ts";
 
-// The rooms, and per room the requests waiting for the owner and the sessions working. room.list
+// The rooms, and per room the requests waiting for the owner and the sessions with an open turn. room.list
 // gives them once; the owner stream keeps them current across every room, so nothing polls.
 export class Attention {
   readonly rooms = new SvelteMap<string, RoomSummary>();
@@ -14,6 +15,9 @@ export class Attention {
   readonly activity = new SvelteMap<string, string>();
   // Per room, the open sessions, once a session.list answer seeds the room; the stream keeps them current.
   readonly sessions = new SvelteMap<string, SvelteSet<string>>();
+  // Per room, the sessions whose box failed or was lost. A session.list answer seeds them, since room.list has no box
+  // states. Such a session is not working, even with its turn open (status.ts).
+  readonly broken = new SvelteMap<string, SvelteMap<string, BoxFailure>>();
   // Per room asked but not yet seeded, the session events the stream sent meanwhile; seeding replays the newer ones.
   private readonly pending = new Map<string, Event[]>();
   // Each working session's current turn, as far as known; a label of another turn is stale.
@@ -35,6 +39,7 @@ export class Attention {
     this.rooms.set(room.id, room);
     this.waiting.set(room.id, new SvelteSet(room.waiting));
     this.working.set(room.id, new SvelteSet(room.working));
+    this.broken.set(room.id, new SvelteMap());
     if (room.latest && !this.activity.has(room.latest.session)) this.activity.set(room.latest.session, room.latest.label);
   }
 
@@ -69,19 +74,29 @@ export class Attention {
 
   close(): void { this.stop(); clearTimeout(this.timer); }
 
+  // The sessions that really work in a room.
+  busy(room: string): string[] { return [...this.working.get(room) ?? []].filter(id => !this.broken.get(room)?.has(id)); }
+
   // A room's sessions for Home, which seed the room's set once. A failed call keeps no buffer.
   listSessions(room: string): Promise<SessionListResponse> {
     if (!this.sessions.has(room)) this.pending.set(room, this.pending.get(room) ?? []);
-    return call("session.list", { room }).then(list => { this.seed(list.sessions ?? [], { id: room, seq: list.seq }); return list; },
-      (error: unknown) => { this.pending.delete(room); throw error; });
+    return call("session.list", { room }).then(list => {
+      this.seed(list.sessions ?? [], { id: room, seq: list.seq });
+      const broken = this.broken.get(room);
+      if (broken?.size) void boxFailures(room, list.seq + 1).then(found => {
+        for (const [id, failure] of found) if (broken.has(id)) broken.set(id, failure);
+      });
+      return list;
+    }, (error: unknown) => { this.pending.delete(room); throw error; });
   }
 
   // Labels are live only, so a session.list answer seeds the turn and label of a session already
   // working; a turn or label the stream sent first is newer and stays. With a room, the answer also seeds that
   // room's set once, and the buffered events after the answer's seq apply on top.
-  seed(sessions: Pick<SessionSummary, "id" | "turn" | "activity">[], room?: { id: string; seq: number }): void {
+  seed(sessions: Pick<SessionSummary, "id" | "turn" | "activity" | "boxState">[], room?: { id: string; seq: number }): void {
     if (room && !this.sessions.has(room.id)) {
       this.sessions.set(room.id, new SvelteSet(sessions.map(s => s.id)));
+      this.broken.set(room.id, new SvelteMap(sessions.flatMap(({ id, boxState }) => boxState === "failed" || boxState === "lost" ? [[id, { box: boxState }]] : [])));
       for (const event of this.pending.get(room.id) ?? []) if (event.seq > room.seq) this.track(event);
     }
     if (room) this.pending.delete(room.id);
@@ -137,5 +152,11 @@ export class Attention {
     const sessions = this.sessions.get(event.room ?? "");
     if (event.type === "session.started") sessions?.add(event.body.session);
     if (event.type === "session.closed") sessions?.delete(event.body.session);
+    const broken = this.broken.get(event.room ?? "");
+    if (event.type === "session.closed") broken?.delete(event.body.session);
+    if (event.type === "box.changed") {
+      const { session, to, cause } = event.body;
+      if (to === "failed" || to === "lost") broken?.set(session, { box: to, cause: cause ?? broken.get(session)?.cause, at: event.at }); else broken?.delete(session);
+    }
   }
 }

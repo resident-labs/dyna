@@ -78,7 +78,7 @@ func (d devService) HostList(ctx context.Context, p contract.Principal, req cont
 	return list, problem
 }
 
-// A builder types [wait], [jobs] or [fail] in a post to script the fake turn. Seed posts read like owner messages,
+// A builder types [wait], [jobs], [fail] or [lost] in a post to script the fake turn. Seed posts read like owner messages,
 // so each seed text acts as its marker instead.
 var seeded = map[string]string{
 	"Build the feed rows.":                          "[fail]",
@@ -235,7 +235,8 @@ var devLabels = []string{"edited App.svelte", "reading docs/spec.md", "running g
 
 type scripted struct {
 	fakeharness.Harness
-	box *agent.Client
+	box  *agent.Client
+	lose func() // ends the box as a host loss would, with no container left
 }
 
 func (h *scripted) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, started func()) (contract.TurnEnded, error) {
@@ -247,7 +248,7 @@ func (h *scripted) Start(ctx context.Context, id contract.TurnID, inputs []contr
 		}
 	}
 	for _, in := range inputs { // a turn can batch inputs; one with a marker wins, so the marker works in any order
-		if marked(in.Text, "[fail]") || marked(in.Text, "[jobs]") || marked(in.Text, "[wait]") {
+		if marked(in.Text, "[fail]") || marked(in.Text, "[jobs]") || marked(in.Text, "[wait]") || marked(in.Text, "[lost]") {
 			text = in.Text
 		}
 	}
@@ -256,8 +257,9 @@ func (h *scripted) Start(ctx context.Context, id contract.TurnID, inputs []contr
 		result = contract.TurnEnded{Outcome: contract.TurnFailed, Error: "Scripted development failure", Cause: contract.CauseModelFailed}
 	}
 	h.Turns = []fakeharness.Turn{{Result: result}}
-	// A [wait] turn runs until it is stopped, so the working state and its activity labels can be seen.
-	if marked(text, "[wait]") {
+	// A [wait] turn runs until it is stopped, so the working state and its activity labels can be seen. A [lost] turn
+	// loses its box after those labels: the turn stays open, and the reconciler marks the box lost, then failed.
+	if lost := marked(text, "[lost]"); lost || marked(text, "[wait]") {
 		h.Turns[0].Release = make(chan struct{})
 		begin := started
 		started = func() {
@@ -268,6 +270,9 @@ func (h *scripted) Start(ctx context.Context, id contract.TurnID, inputs []contr
 				for _, label := range []string{"read feed.ts", "ran node --test", last} {
 					_ = h.box.TurnActivity(ctx, contract.TurnActivityRequest{Turn: id, Label: label}) // A lost label only leaves the last one showing.
 					time.Sleep(2 * time.Second)
+				}
+				if lost {
+					h.lose()
 				}
 			}()
 		}
@@ -341,7 +346,14 @@ func (b *boxes) run(ctx context.Context, id contract.BoxID) {
 	for _, err := c.Hello(ctx); err != nil && ctx.Err() == nil; _, err = c.Hello(ctx) { // Create returns before the box is starting.
 		time.Sleep(50 * time.Millisecond)
 	}
-	runner := &agent.Runner{Harness: &scripted{box: c}, Sink: c}
+	lose := func() {
+		b.mu.Lock()
+		cancel := b.cancel[id]
+		delete(b.cancel, id)
+		b.mu.Unlock()
+		cancel()
+	}
+	runner := &agent.Runner{Harness: &scripted{box: c, lose: lose}, Sink: c}
 	if err := c.Channel(ctx, func(m contract.BoxMessage) error { return runner.Handle(ctx, m) }, func(bool) {}); err != nil && ctx.Err() == nil {
 		log.Printf("box channel: %v", err)
 	}
@@ -440,6 +452,8 @@ func seedAgents(ctx context.Context, s *engine.Service, n int) {
 		switch {
 		case i%17 == 5:
 			brief = "[fail]"
+		case i%17 == 11:
+			brief = "[lost]"
 		case i%3 == 0:
 			brief = "[wait]"
 		}
