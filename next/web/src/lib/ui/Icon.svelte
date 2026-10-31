@@ -19,6 +19,8 @@
     check: "M5 12.5l4.5 4.5L19 7",
     plus: "M12 5v14M5 12h14",
     undock: "M4 5h16v14H4ZM11 11h6v5h-6Z",
+    maximize: "M14 4h6v6M10 20H4v-6M20 4l-6 6M4 20l6-6",
+    restore: "M20 4l-6 6M14 5v5h5M4 20l6-6M10 19v-5H5",
     root: "M12 3l7.8 4.5v9L12 21l-7.8-4.5v-9ZM12 12l7.8-4.5M12 12v9M12 12 4.2 7.5",
   };
   export type IconName = keyof typeof paths;

@@ -18,8 +18,10 @@
   let hosts: string[] = $state([]);
   let floating = $state(false);
   let rect = $state({ x: window.innerWidth - 744, y: window.innerHeight - 464, w: 720, h: 440 });
-  // The docked height, kept for the page view.
+  // The docked height, kept for the page view. Maximized, the dock takes the most height fit allows; collapsed, only its tab bar shows.
   let height = $state(280);
+  let maximized = $state(false);
+  let collapsed = $state(false);
   let menu: HTMLElement | undefined = $state();
   let plus: HTMLButtonElement | undefined = $state();
   const panes: Record<number, TermPane | undefined> = $state({});
@@ -66,6 +68,7 @@
   function drag(event: PointerEvent) {
     const start = height, y = event.clientY;
     event.preventDefault();
+    maximized = false;
     const move = (next: PointerEvent) => { height = fit(start + y - next.clientY); };
     const end = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); };
     window.addEventListener("pointermove", move);
@@ -88,20 +91,24 @@
         onclick={() => { if (picking) picking = false; else void pick(); }}><Icon name="plus" /></button>
       {#if picking}<div class="list" role="menu" tabindex="-1" bind:this={menu} onkeydown={walk}>
         {#if sessions.length}<p class="label">Sessions</p>{/if}
-        {#each sessions as session (session.id)}<button type="button" role="menuitem" tabindex="-1" onclick={() => open({ box: session.id }, session.name)}>{session.name}</button>{/each}
+        {#each sessions as session (session.id)}<button type="button" role="menuitem" tabindex="-1" onclick={() => open({ box: session.id }, `${session.name} · bash`)}>{session.name}</button>{/each}
         {#if hosts.length}<p class="label">Hosts</p>{/if}
         {#each hosts as host (host)}<button type="button" role="menuitem" tabindex="-1" onclick={() => open({ host }, hostLabel(host))}>{hostLabel(host)}</button>{/each}
       </div>{/if}
     </span>
-    {#if tabs.length}<button type="button" aria-label={floating ? "Dock the terminals" : "Float the terminals"} title={floating ? "Dock" : "Float"}
-      onclick={() => { floating = !floating; }}><Icon name={floating ? "dockBottom" : "undock"} /></button>{/if}
+    {#if tabs.length}<button type="button" class="tool" aria-label={floating ? "Dock the terminals" : "Float the terminals"} title={floating ? "Dock" : "Float"}
+      onclick={() => { floating = !floating; }}><Icon name={floating ? "dockBottom" : "undock"} /></button>
+      {#if !floating}<button type="button" class="tool" aria-label={maximized ? "Restore the terminals" : "Maximize the terminals"} title={maximized ? "Restore" : "Maximize"}
+        onclick={() => { maximized = !maximized; collapsed = false; }}><Icon name={maximized ? "restore" : "maximize"} /></button>
+      <button type="button" class="tool fold" class:collapsed aria-label={collapsed ? "Expand the terminals" : "Collapse the terminals"} title={collapsed ? "Expand" : "Collapse"}
+        aria-expanded={!collapsed} onclick={() => { collapsed = !collapsed; if (!collapsed) void tick().then(() => panes[active]?.focus()); }}><Icon name="chevron" /></button>{/if}{/if}
   {/snippet}
-  {#if !floating && tabs.length}<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions (a separator that the arrow keys move is focusable) -->
+  {#if !floating && tabs.length && !collapsed && !maximized}<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions (a separator that the arrow keys move is focusable) -->
     <div class="grip" role="separator" aria-orientation="horizontal" aria-label="Terminal height" aria-valuenow={height} tabindex="0" onpointerdown={drag}
       onkeydown={event => { const step = { ArrowUp: 24, ArrowDown: -24 }[event.key]; if (step) { event.preventDefault(); height = fit(height + step); } }}></div>{/if}
   <!-- Keys typed into a shell stay there, so Escape closes no panel and Alt with an arrow key moves no window; F6 still moves between areas. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="body" style:height={floating ? null : `${height}px`} onkeydown={event => { if (event.key !== "F6") event.stopPropagation(); }}>
+  <div class="body" hidden={!floating && collapsed} style:height={floating ? null : `${maximized ? fit(Infinity) : height}px`} onkeydown={event => { if (event.key !== "F6") event.stopPropagation(); }}>
     {#each tabs as tab (tab.key)}<div class="tabpanel" hidden={tab.key !== active}>
       {#if tab.exited}<p class="exited">{tab.exited.code ? `Exited with code ${tab.exited.code}` : "The shell exited."}
         <button type="button" class="retry" onclick={() => renew(tab)}>New shell</button></p>{/if}
@@ -113,15 +120,19 @@
 
 <style>
   :global(.terminals) { flex: none; border-top: 1px solid var(--line); background: var(--bg); }
-  :global(.terminals:not(.floating) > header) { height: 36px; padding-left: 8px; }
-  .tabs { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
-  .tab { display: flex; align-items: center; flex: none; border-radius: 6px; }
+  :global(.terminals:not(.floating) > header) { height: 34px; padding-left: 6px; }
+  .tabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .tab { display: flex; align-items: center; flex: none; height: 26px; border-radius: 6px; }
   .tab:hover, .tab.active { background: var(--selected); }
-  .tabs [role="tab"] { display: flex; align-items: center; width: auto; padding: 0 4px 0 8px; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 500; }
+  .tabs [role="tab"] { display: flex; align-items: center; width: auto; padding: 0 2px 0 8px; gap: 6px; color: var(--muted); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
   .tab.active [role="tab"] { color: var(--text); }
   .tabs [role="tab"]:hover { background: none; }
   .muted { color: var(--muted); font-weight: 400; }
-  .x { width: 20px; height: 20px; margin-right: 2px; }
+  .x { width: 20px; height: 20px; margin-right: 3px; }
+  /* The dock's own controls sit at the right, 28 px like a floating window's. */
+  .tool { width: 28px; height: 28px; }
+  .fold :global(svg) { transition: transform 120ms; }
+  .fold.collapsed :global(svg) { transform: rotate(180deg); }
   .menu { position: relative; margin-right: auto; }
   .list { position: absolute; left: 0; bottom: calc(100% + 4px); z-index: 4; min-width: 200px; padding: 4px; display: grid;
     background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 18%); }
@@ -132,6 +143,7 @@
   .grip { position: absolute; top: -3px; left: 0; right: 0; height: 6px; z-index: 1; cursor: ns-resize; touch-action: none; }
   .grip:hover, .grip:focus-visible { background: var(--focus); opacity: 0.6; outline: none; }
   /* Docked, the body keeps the dragged height; floating, it fills the window. */
+  .body[hidden] { display: none; }
   .body { display: flex; flex-direction: column; min-height: 0; flex: none; }
   :global(.floating) .body { flex: 1; }
   .tabpanel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
