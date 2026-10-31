@@ -790,8 +790,8 @@
   /* Faces side by side, on an opaque layer of the page color and ringed in it, so glass faces never mix. */
   .faces > :global(.avatar) { --under: var(--bg); box-shadow: 0 0 0 2px var(--bg); letter-spacing: 0; }
   .more { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
-  .shell.open.tucked, .shell.open:has(.instructions) { grid-template-columns: 64px 1fr; }
-  .shell.open:has(.instructions) aside.members { display: none; }
+  .shell.open.tucked, .shell.open:has(:global(.instructions)) { grid-template-columns: 64px 1fr; }
+  .shell.open:has(:global(.instructions)) aside.members { display: none; }
   .shell.tucked > aside.members { display: none; }
   .narrow, .phone, .menu-toggle { display: none; }
   @media (max-width: 760px) { .narrow { display: inline; } }
