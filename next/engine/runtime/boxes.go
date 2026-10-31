@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -36,25 +37,30 @@ type boxStore interface {
 	Boxes(context.Context) ([]box.Box, error)
 }
 
+type heartbeatStore interface {
+	RecordHostHeartbeat(context.Context, contract.HostName, bool, *int64, time.Time) error
+}
+
 type Boxes struct {
-	Store     boxStore
-	Sockets   *api.Sockets
-	Runtime   string
-	HostData  string
-	Version   string
-	PiTarball []byte
-	Mirror    *enginegit.Mirror
-	Images    *engineimages.Builder
-	Context   context.Context
-	Pressure  *engine.Service
-	Proc      string // Proc is the folder with stat and meminfo; empty means /proc.
-	mu        sync.Mutex
-	hosts     map[contract.HostName]*podman.Host
-	loads     map[contract.HostName]hostLoad
-	cpuPrev   *cpuTimes // cpuPrev is the last /proc/stat sample of this machine, nil before the first.
-	binOnce   sync.Once
-	binSum    string
-	binErr    error
+	HeartbeatStore heartbeatStore
+	Store          boxStore
+	Sockets        *api.Sockets
+	Runtime        string
+	HostData       string
+	Version        string
+	PiTarball      []byte
+	Mirror         *enginegit.Mirror
+	Images         *engineimages.Builder
+	Context        context.Context
+	Pressure       *engine.Service
+	Proc           string // Proc is the folder with stat and meminfo; empty means /proc.
+	mu             sync.Mutex
+	hosts          map[contract.HostName]*podman.Host
+	loads          map[contract.HostName]hostLoad
+	cpuPrev        *cpuTimes // cpuPrev is the last /proc/stat sample of this machine, nil before the first.
+	binOnce        sync.Once
+	binSum         string
+	binErr         error
 }
 
 type hostLoad struct {
@@ -108,9 +114,27 @@ func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
 	go func() {
 		defer ticker.Stop()
 		h.Heartbeat(b.Context, ticker.C, b.HostData, func(ok bool, load podman.Load) {
-			b.record(name, ok, load, time.Now())
+			now := time.Now()
+			b.record(name, ok, load, now)
+			b.reportHeartbeat(b.Context, name, ok, load, now)
 		}, b.pressure(name))
 	}()
+}
+
+func (b *Boxes) reportHeartbeat(ctx context.Context, name contract.HostName, ok bool, load podman.Load, now time.Time) {
+	if b.HeartbeatStore == nil {
+		return
+	}
+	var free *int64
+	if ok && load.DiskBytes > 0 {
+		value := load.DiskBytes - load.DiskUsed
+		free = &value
+	}
+	if err := b.HeartbeatStore.RecordHostHeartbeat(ctx, name, ok, free, now); err != nil {
+		log.Printf("host %s: record heartbeat: %v", name, err)
+		return
+	}
+	b.Pressure.Reconciler().Kick()
 }
 
 func (b *Boxes) HostLoad(ctx context.Context, hosts []contract.HostSummary) error {
@@ -387,13 +411,14 @@ func (b *Boxes) Restore(ctx context.Context) error {
 		}
 		if !installed[record.Host] {
 			if err := b.installBinary(ctx, host); err != nil {
-				return err
+				log.Printf("host %s: restore binary: %v", record.Host, err)
+				continue
 			}
 			installed[record.Host] = true
 		}
 		forward := box.Forward{Box: record.ID, HostPath: filepath.Join(b.HostData, "sock", string(record.ID), "engine.sock"), EnginePath: filepath.Join(b.Runtime, "boxes", string(record.ID)+".sock")}
 		if err := host.AddForward(ctx, forward); err != nil {
-			return err
+			log.Printf("host %s: restore forward: %v", record.Host, err)
 		}
 	}
 	return nil
@@ -405,6 +430,33 @@ func (b *Boxes) containerHost(ctx context.Context, id contract.BoxID) (*podman.H
 		return nil, err
 	}
 	return b.host(ctx, record.Host)
+}
+
+func (b *Boxes) Inspect(ctx context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
+	host, err := b.containerHost(ctx, id)
+	if err != nil {
+		return box.ContainerStatus{}, false, err
+	}
+	forward := box.Forward{Box: id, HostPath: filepath.Join(b.HostData, "sock", string(id), "engine.sock"), EnginePath: filepath.Join(b.Runtime, "boxes", string(id)+".sock")}
+	return inspectContainer(ctx, host, forward)
+}
+
+func inspectContainer(ctx context.Context, host box.HostDriver, forward box.Forward) (box.ContainerStatus, bool, error) {
+	statuses, err := host.ListContainers(ctx)
+	if err != nil {
+		return box.ContainerStatus{}, false, err
+	}
+	for _, status := range statuses {
+		if status.Box == forward.Box {
+			if status.Running {
+				if err := host.AddForward(ctx, forward); err != nil {
+					return box.ContainerStatus{}, false, err
+				}
+			}
+			return status, true, nil
+		}
+	}
+	return box.ContainerStatus{}, false, nil
 }
 
 func (b *Boxes) Start(ctx context.Context, id contract.BoxID) error {
