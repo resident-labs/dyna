@@ -33,6 +33,87 @@ func (h *retryHost) Recreate(context.Context, lifecycle.BoxSpec, string, string)
 	return h.startErr
 }
 
+type failingCreateHost struct {
+	fakeBoxes
+	creates int
+	removes int
+}
+
+func (h *failingCreateHost) Create(context.Context, lifecycle.BoxSpec) (string, error) {
+	h.creates++
+	return "", errors.New("create unavailable")
+}
+
+func (h *failingCreateHost) Remove(context.Context, contract.BoxID) error {
+	h.removes++
+	return nil
+}
+
+func TestReconcilerCreateRetriesBeforeFailure(t *testing.T) {
+	s, room, sid, ctx := setup(t)
+	session, err := s.store.Session(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE boxes SET state='creating', image='', want='run', due_at=0, failures=0 WHERE id=?", session.Box)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1000, 0)
+	host := &failingCreateHost{}
+	r := lifecycle.New(s.store, host, retryView{}, nil, s.event, func() time.Time { return now })
+	for i, delay := range []time.Duration{30 * time.Second, time.Minute, 0} {
+		if err := r.Pass(ctx); err != nil {
+			t.Fatal(err)
+		}
+		r.Wait()
+		rows, err := s.store.LifecycleBoxes(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found bool
+		for _, row := range rows {
+			if row.ID != session.Box {
+				continue
+			}
+			found = true
+			want := contract.BoxCreating
+			if i == 2 {
+				want = contract.BoxFailed
+			}
+			if row.State != want || row.Failures != i+1 || (delay != 0 && !row.DueAt.Equal(now.Add(delay))) {
+				t.Fatalf("attempt %d: state=%s failures=%d due=%s", i+1, row.State, row.Failures, row.DueAt)
+			}
+		}
+		if !found || host.creates != i+1 || host.removes != i+1 {
+			t.Fatalf("attempt %d: found=%v creates=%d removes=%d", i+1, found, host.creates, host.removes)
+		}
+		if delay != 0 {
+			if err := r.Pass(ctx); err != nil {
+				t.Fatal(err)
+			}
+			r.Wait()
+			if host.creates != i+1 {
+				t.Fatal("create retried before deadline")
+			}
+			now = now.Add(delay)
+		}
+	}
+	events, err := s.store.Events(ctx, room, 0, 1000, []contract.EventType{"box.changed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		change := event.Body.(contract.BoxChanged)
+		if change.Box == session.Box && change.To == contract.BoxFailed && change.Cause == contract.CauseCreateFailed {
+			return
+		}
+	}
+	t.Fatal("third failure did not publish create_failed")
+}
+
 type retryView struct{}
 
 func (retryView) OpenTerminal(contract.SessionID) bool { return false }
