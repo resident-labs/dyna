@@ -67,3 +67,17 @@ func TestFrozenReplacementOutcomes(t *testing.T) {
 		t.Fatal("fallback not applied")
 	}
 }
+
+func TestFixtureValidationRequiresOnlyTaskInputs(t *testing.T) {
+	f := Fixture{Room: "room", ReadValue: "unique"}
+	if err := f.Validate(1); err != nil {
+		t.Fatal(err)
+	}
+	f.ReadValue = ""
+	if err := f.Validate(1); err == nil {
+		t.Fatal("missing read value accepted")
+	}
+	if err := (Fixture{A: "child"}).Validate(17); err != nil {
+		t.Fatal(err)
+	}
+}

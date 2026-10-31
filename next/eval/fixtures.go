@@ -12,13 +12,47 @@ type Fixture struct {
 }
 
 // Validate rejects incomplete fixtures before a model can act.
-func (f Fixture) Validate() error {
-	for name, value := range map[string]string{
-		"room": f.Room, "lead": f.Lead, "A": f.A, "B": f.B, "C": f.C,
-		"AName": f.AName, "BName": f.BName, "profile": f.Profile,
-		"operation": f.Operation, "host": f.Host, "file": f.File, "visual": f.Visual,
-		"page": f.Page, "readValue": f.ReadValue, "fileSHA256": f.FileSHA256,
-	} {
+func (f Fixture) Validate(task int) error {
+	required := map[string]string{}
+	switch task {
+	case 1, 2:
+		required["room"], required["readValue"] = f.Room, f.ReadValue
+	case 3:
+		required["room"], required["AName"], required["readValue"] = f.Room, f.AName, f.ReadValue
+	case 4:
+		required["A"], required["AName"] = f.A, f.AName
+	case 5:
+		required["A"], required["AName"], required["B"], required["BName"] = f.A, f.AName, f.B, f.BName
+	case 6:
+		required["lead"], required["profile"] = f.Lead, f.Profile
+	case 7:
+		required["A"], required["profile"] = f.A, f.Profile
+	case 8:
+		required["C"], required["lead"] = f.C, f.Lead
+	case 9:
+		required["B"] = f.B
+	case 10, 17:
+		required["A"] = f.A
+	case 11, 20:
+		required["readValue"] = f.ReadValue
+	case 12:
+		required["room"] = f.Room
+	case 13:
+		required["visual"], required["file"] = f.Visual, f.File
+	case 14:
+		required["operation"] = f.Operation
+	case 15:
+		required["host"], required["file"], required["readValue"] = f.Host, f.File, f.ReadValue
+	case 16:
+		required["host"] = f.Host
+	case 18:
+		required["A"], required["AName"], required["file"], required["fileSHA256"] = f.A, f.AName, f.File, f.FileSHA256
+	case 19:
+		required["page"], required["readValue"] = f.Page, f.ReadValue
+	default:
+		return fmt.Errorf("unknown evaluation task %d", task)
+	}
+	for name, value := range required {
 		if value == "" {
 			return fmt.Errorf("fixture %s is empty", name)
 		}

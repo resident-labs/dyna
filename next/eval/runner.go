@@ -54,11 +54,11 @@ func RunSuite(ctx context.Context, backend Backend, skipRepository, task11Fallba
 			return fmt.Errorf("prepare task %d: %w", cell.Task, err)
 		}
 		fixture.Task11Fallback = task11Fallback
-		if err := fixture.Validate(); err != nil {
+		if err := fixture.Validate(cell.Task); err != nil {
 			_ = backend.Cleanup(ctx, cell, fixture)
 			return fmt.Errorf("fixture task %d: %w", cell.Task, err)
 		}
-		if strings.Contains(tasks[cell.Task-1].PromptFor(fixture), fixture.ReadValue) {
+		if fixture.ReadValue != "" && strings.Contains(tasks[cell.Task-1].PromptFor(fixture), fixture.ReadValue) {
 			_ = backend.Cleanup(ctx, cell, fixture)
 			return fmt.Errorf("fixture task %d: read value appears in prompt", cell.Task)
 		}
