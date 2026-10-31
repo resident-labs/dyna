@@ -120,7 +120,7 @@ func TestPrOpenGitHubErrorIsRedacted(t *testing.T) {
 		t.Fatalf("response %+v error %+v", result, failure)
 	}
 	message := result.Operation.Result.Error
-	if result.Operation.State != contract.OpFailed || strings.Contains(message, "secret-token") || !strings.Contains(message, "***") || !strings.Contains(message, "No commits between") {
+	if result.Operation.State != contract.OpFailed || result.Operation.Result.Cause != contract.CauseGithubFailed || strings.Contains(message, "secret-token") || !strings.Contains(message, "***") || !strings.Contains(message, "No commits between") {
 		t.Fatalf("state %s error %q", result.Operation.State, message)
 	}
 }
