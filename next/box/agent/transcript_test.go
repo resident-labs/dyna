@@ -198,6 +198,22 @@ func TestCloseRetriesFailedArchiveDone(t *testing.T) {
 	}
 }
 
+func TestPiExitStopsRunUnlessClosing(t *testing.T) {
+	piDone := make(chan struct{})
+	close(piDone)
+	var closing atomic.Bool
+	err := waitRun(context.Background(), nil, nil, piDone, &closing)
+	if err == nil || err.Error() != "pi RPC stream closed" {
+		t.Fatalf("Pi exit: %v", err)
+	}
+	closing.Store(true)
+	errs := make(chan error, 1)
+	errs <- nil
+	if err := waitRun(context.Background(), errs, nil, piDone, &closing); err != nil {
+		t.Fatalf("Pi exit during close interrupted archive: %v", err)
+	}
+}
+
 func TestCloseKeepsRunAfterRunnerErrorAndRetriesSync(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "a.jsonl")
@@ -207,7 +223,7 @@ func TestCloseKeepsRunAfterRunnerErrorAndRetriesSync(t *testing.T) {
 	runnerErrs := make(chan error)
 	var closing atomic.Bool
 	done := make(chan error, 1)
-	go func() { done <- waitRun(context.Background(), errs, runnerErrs, &closing) }()
+	go func() { done <- waitRun(context.Background(), errs, runnerErrs, nil, &closing) }()
 	closing.Store(true)
 	runnerErrs <- errors.New("turn output: engine unavailable")
 	fired := func(time.Duration) <-chan time.Time {
