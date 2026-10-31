@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { hostMeters, lastSeen } from "./hosts.ts";
+import { hostLoads, hostMeters, lastSeen } from "./hosts.ts";
 
 test("words a host's load, marks meters at 90% of their limit as busy, and has none without capacity", () => {
   const gib = 2 ** 30;
@@ -11,4 +11,14 @@ test("words a host's load, marks meters at 90% of their limit as busy, and has n
     { text: `${(1348).toLocaleString()} GB free`, percent: 34, busy: false }]);
   assert.deepEqual(hostMeters({ ...h, name: "control-plane", cpus: 0, memBytes: 0 }), []);
   assert.equal(lastSeen(h, Date.parse("2026-10-31T00:04:10Z")), "Last seen 4 min ago");
+});
+
+test("the panel foot shows unreachable hosts first, then reachable ones busiest first by CPU or memory, at most 3", () => {
+  const host = (name: string, cpuUsed: number, memUsed: number, reachable = true) =>
+    ({ name, reachable, boxes: 0, cpus: 10, memBytes: 100, cpuUsed, memUsed, diskBytes: 0, diskUsed: 0, history: null });
+  const hosts = [host("calm", 1, 10), host("cpu", 9.5, 10), host("down", 10, 100, false), { ...host("control-plane", 0, 0), cpus: 0 },
+    host("mem", 2, 60), host("quiet", 0.5, 5)];
+  const lines = (list: typeof hosts) => hostLoads(list).map(h => [h.name, ...h.reachable ? h.meters.map(m => `${m.label} ${m.percent}%${m.busy ? " busy" : ""}`) : ["Unreachable"]]);
+  assert.deepEqual(lines(hosts), [["down", "Unreachable"], ["cpu", "CPU 95% busy", "Memory 10%"], ["mem", "CPU 20%", "Memory 60%"]]);
+  assert.deepEqual(lines(hosts.filter(h => h.reachable)), [["cpu", "CPU 95% busy", "Memory 10%"], ["mem", "CPU 20%", "Memory 60%"], ["calm", "CPU 10%", "Memory 10%"]]);
 });
