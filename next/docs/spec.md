@@ -42,7 +42,7 @@ The owner settled the design on the card. Writing the spec needed the decisions 
 2. **One contract.** Events, operations, grants, the API and the migration bundle are defined once in `contract/`. The engine, the CLI, the box agent and the web app use the same types. TypeScript is generated.
 3. **No secret in a box.** Model calls, git, GitHub writes and host commands go through the engine. The engine knows the caller by its socket.
 4. **Small and legible.** v1 has about 260,000 lines of Go (without tests) in 138 packages. v2 targets under 60,000 lines at the cutover, in nine top-level packages, with no compatibility code.
-5. **Fast, honest tests.** The repository holds only fast unit tests. A person or agent checks integration by hand in a sandbox (section 10).
+5. **Fast, honest tests.** The repository holds fast unit tests, plus one or two fast integration tests for each important owner-facing feature. A person or agent checks each milestone end to end by hand in a sandbox (section 10).
 6. **A clean cutover.** One bundle, one commit, no rollback. The store guard protects every other install.
 7. **Useful to any owner (r9).** Any repository and toolchain (images from `.dyna/images/`), any Linux host with rootless Podman and SSH, and every model account that CLIProxyAPI supports.
 
