@@ -32,23 +32,25 @@ var proxyModels = map[string]string{
 type profileGap struct {
 	Profile string
 	Model   string
+	Reason  contract.ProfileHandoffReason `json:"reason,omitempty"`
 }
 
-func readProfiles(config string) ([]contract.ProfileBundle, []string, []profileGap, error) {
+func readProfiles(config string) ([]contract.ProfileBundle, []string, []profileGap, []profileGap, error) {
 	body, err := os.ReadFile(filepath.Join(config, "profiles.json"))
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("captured profiles: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("captured profiles: %w", err)
 	}
 	var store profile.Store
 	if err := json.Unmarshal(body, &store); err != nil {
-		return nil, nil, nil, fmt.Errorf("decode profiles: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("decode profiles: %w", err)
 	}
 	if store.Version != 3 {
-		return nil, nil, nil, fmt.Errorf("unsupported profiles version %d", store.Version)
+		return nil, nil, nil, nil, fmt.Errorf("unsupported profiles version %d", store.Version)
 	}
 	var result []contract.ProfileBundle
 	var disabled []string
 	var gaps []profileGap
+	var dropped []profileGap
 	for _, p := range store.Profiles {
 		if p.Disabled {
 			disabled = append(disabled, p.Name)
@@ -61,6 +63,11 @@ func readProfiles(config string) ([]contract.ProfileBundle, []string, []profileG
 		var mapped []string
 		unknown := false
 		for _, m := range models {
+			if m == "meta/muse-wonder-full-1.0" {
+				dropped = append(dropped, profileGap{Profile: p.Name, Model: m, Reason: contract.ProfileUnsupportedMuse})
+				unknown = true
+				continue
+			}
 			model, ok := proxyModels[m]
 			if !ok {
 				gaps = append(gaps, profileGap{Profile: p.Name, Model: m})
@@ -82,7 +89,7 @@ func readProfiles(config string) ([]contract.ProfileBundle, []string, []profileG
 			if !eq {
 				i++
 				if i >= len(p.ExtraArgs) {
-					return nil, nil, nil, fmt.Errorf("profile thinking level is missing")
+					return nil, nil, nil, nil, fmt.Errorf("profile thinking level is missing")
 				}
 				val = p.ExtraArgs[i]
 			}
@@ -90,10 +97,10 @@ func readProfiles(config string) ([]contract.ProfileBundle, []string, []profileG
 			switch level {
 			case contract.ThinkingOff, contract.ThinkingMinimal, contract.ThinkingLow, contract.ThinkingMedium, contract.ThinkingHigh, contract.ThinkingXHigh:
 			default:
-				return nil, nil, nil, fmt.Errorf("profile thinking level is unsupported")
+				return nil, nil, nil, nil, fmt.Errorf("profile thinking level is unsupported")
 			}
 			if thinking != "" && thinking != level {
-				return nil, nil, nil, fmt.Errorf("conflicting profile thinking levels")
+				return nil, nil, nil, nil, fmt.Errorf("conflicting profile thinking levels")
 			}
 			thinking = level
 		}
@@ -109,5 +116,5 @@ func readProfiles(config string) ([]contract.ProfileBundle, []string, []profileG
 		}
 		result = append(result, out)
 	}
-	return result, disabled, gaps, nil
+	return result, disabled, gaps, dropped, nil
 }

@@ -8,7 +8,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-func readHandoff(db *sql.DB, roomID, roomName string, feed roomFeed, refs map[string]string, author func(string) (contract.ImportedAuthor, error)) ([]contract.SessionHandoff, error) {
+func readHandoff(db *sql.DB, roomID, roomName string, feed roomFeed, refs map[string]string, dropped []profileGap, author func(string) (contract.ImportedAuthor, error)) ([]contract.SessionHandoff, error) {
 	rows, err := db.Query(`SELECT id,name,parent,meta FROM session_records
 WHERE room_id=? AND closed=0 AND history_only=0 AND service=0 AND json_extract(meta,'$.run') IS NULL ORDER BY id`, roomID)
 	if err != nil {
@@ -44,6 +44,12 @@ WHERE room_id=? AND closed=0 AND history_only=0 AND service=0 AND json_extract(m
 	for _, e := range source {
 		name := roomName + ":" + e.name
 		handoff := contract.SessionHandoff{Name: contract.V1Address(name), Profile: e.profile, ArchiveRef: refs[e.id], LastPost: feed.lastPosts[name]}
+		for _, gap := range dropped {
+			if gap.Profile == e.profile {
+				handoff.ProfileWarning = gap.Reason
+				break
+			}
+		}
 		if e.parent != "" {
 			parent, err := author(e.parent)
 			if err != nil {
