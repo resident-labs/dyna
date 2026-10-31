@@ -68,6 +68,34 @@ func (s Store) ClaimInterval(ctx context.Context, now time.Time) (Config, bool, 
 	return c, claimed, err
 }
 
+// ScheduleRetry brings the next update forward after an installer deferral.
+// Replaying a receipt cannot postpone an earlier scheduled attempt.
+func (s Store) ScheduleRetry(ctx context.Context, finished time.Time) error {
+	db, err := database.Open(s.DataDir)
+	if err != nil {
+		return err
+	}
+	due := finished.Add(5 * time.Minute).UTC().Format(time.RFC3339Nano)
+	return statewrite.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		var current string
+		if err := conn.QueryRowContext(ctx, "SELECT next_due FROM updater_service WHERE id=1").Scan(&current); err != nil {
+			return err
+		}
+		if current == "" {
+			return nil // An immediate interval is already due.
+		}
+		t, err := time.Parse(time.RFC3339Nano, current)
+		if err != nil {
+			return err
+		}
+		if !finished.Add(5 * time.Minute).Before(t) {
+			return nil
+		}
+		_, err = conn.ExecContext(ctx, "UPDATE updater_service SET next_due=? WHERE id=1", due)
+		return err
+	})
+}
+
 // Update changes the updater configuration in one committed write.
 func (s Store) Update(ctx context.Context, change func(*Config) error) error {
 	db, err := database.Open(s.DataDir)
