@@ -55,6 +55,26 @@ func setQueued(t *testing.T, s Service, events ...Event) {
 	}
 }
 
+func TestMergeHookRetryAfterQueueDrain(t *testing.T) {
+	s, repo := setup(t)
+	add(t, s, repo, hook("queued", PRMerged))
+	e := Event{Repo: repo, Event: PRMerged, DedupKey: "pr-merged:example#1"}
+	if err := s.Emit(context.Background(), e); err != nil {
+		t.Fatal(err)
+	}
+	if len(queuedEvents(t, s)) != 1 {
+		t.Fatal("merge hook was not queued")
+	}
+	// Simulate a drain before the PR watcher saves its completion marker.
+	setQueued(t, s)
+	if err := s.Emit(context.Background(), e); err != nil {
+		t.Fatal(err)
+	}
+	if len(queuedEvents(t, s)) != 0 {
+		t.Fatal("retry queued a duplicate merge hook")
+	}
+}
+
 func TestEmitSpoolsWithoutStartingAProcess(t *testing.T) {
 	s, repo := setup(t)
 	add(t, s, repo, hook("queued", AfterLand))
