@@ -42,3 +42,14 @@ func TestGrantCardShowsMode(t *testing.T) {
 		t.Fatalf("cards: %q / %q", approve.Body, auto.Body)
 	}
 }
+
+func TestGrantCardDistinguishesArguments(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	a := contract.HostexecGrantArgs{Room: room, To: contract.Principal{Kind: contract.PrincipalSession, Session: worker}, Commands: []contract.CommandRule{{Program: "sh", Args: []string{"-c", "a; b"}}}}
+	one := s.HostexecGrant().Card(ctx, a, contract.Principal{}).Body
+	a.Commands[0].Args = []string{"-c", "a", "b"}
+	two := s.HostexecGrant().Card(ctx, a, contract.Principal{}).Body
+	if one == two || !strings.Contains(one, "'a; b'") {
+		t.Fatalf("ambiguous cards: %q / %q", one, two)
+	}
+}
