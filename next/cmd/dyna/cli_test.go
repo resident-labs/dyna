@@ -22,6 +22,7 @@ type fakeClient struct {
 	repoList     contract.RoomReposRequest
 	start        contract.SessionStartRequest
 	close        contract.SessionCloseRequest
+	restart      contract.SessionRestartRequest
 	post         contract.PostRequest
 	events       []contract.Event
 	after        int64
@@ -77,6 +78,10 @@ func (f *fakeClient) SessionStart(_ context.Context, q contract.SessionStartRequ
 func (f *fakeClient) SessionClose(_ context.Context, q contract.SessionCloseRequest) (contract.SessionCloseResponse, error) {
 	f.close = q
 	return contract.SessionCloseResponse{}, nil
+}
+func (f *fakeClient) SessionRestart(_ context.Context, q contract.SessionRestartRequest) (contract.SessionRestartResponse, error) {
+	f.restart = q
+	return contract.SessionRestartResponse{}, nil
 }
 func (f *fakeClient) Post(_ context.Context, q contract.PostRequest) (contract.PostResponse, error) {
 	f.post = q
@@ -150,6 +155,20 @@ func TestSessionStartMapsFlags(t *testing.T) {
 	runCLI(t, f, "session", "start", "--room", "r", "--name", "n", "--profile", "p", "--goal", "g", "--brief", "b", "--repo", "owner/name", "--parent", "s")
 	if f.start.Room != "r" || f.start.Name != "n" || f.start.Profile != "p" || f.start.Goal != "g" || f.start.Brief != "b" || f.start.Repo != "owner/name" || f.start.Parent != "s" {
 		t.Fatalf("%+v", f.start)
+	}
+}
+func TestSessionRestartMapsID(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "session", "restart", "s")
+	if f.restart.Session != "s" {
+		t.Fatalf("%+v", f.restart)
+	}
+	if _, err := execCLI(f, "session", "restart"); err == nil {
+		t.Fatal("restart accepted a missing session")
+	}
+	help := runCLI(t, f, "session", "restart", "--help")
+	if !strings.Contains(help, "old volume and unpushed work are lost") || !strings.Contains(help, "old host is unavailable") {
+		t.Fatalf("restart help does not explain data loss and orphaned resources: %q", help)
 	}
 }
 func TestSessionCloseDiscard(t *testing.T) {

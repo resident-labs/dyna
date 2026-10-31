@@ -104,8 +104,8 @@ func (r *Reconciler) change(ctx context.Context, old, next box.Box, due time.Tim
 	if err != nil {
 		return false, err
 	}
-	if old.State == contract.BoxCreating && (next.State == contract.BoxStarting || next.State == contract.BoxFailed) {
-		return true, r.store.FinishCreate(ctx, old, next.Image, next.Reason, due, event)
+	if old.State == contract.BoxCreating && (next.State == contract.BoxStarting || next.State == contract.BoxFailed || next.State == contract.BoxPending) {
+		return true, r.store.FinishCreate(ctx, old, next.Image, next.Reason, due, failures, event)
 	}
 	return r.store.SetBoxLifecycle(ctx, old, next, due, failures, event)
 }
@@ -214,7 +214,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			rows[i].Box = next
 			rows[i].DueAt = time.Time{}
 			all[i] = next
-			if next.State == contract.BoxCreating {
+			if next.State == contract.BoxCreating && b.Host == "" {
 				r.mu.Lock()
 				r.fresh[b.ID] = true
 				r.mu.Unlock()
