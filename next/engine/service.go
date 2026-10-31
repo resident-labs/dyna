@@ -47,6 +47,8 @@ type Service struct {
 	boxLockMu       sync.Mutex
 	boxLocks        map[contract.SessionID]*sync.Mutex
 	boxRuns         map[contract.SessionID]*boxRun
+	moveMu          sync.Mutex
+	moveStops       []contract.BoxID
 	dormancy        dormancy
 	// transcriptMu serializes appends, so each offset check and write runs alone.
 	transcriptMu  sync.Mutex

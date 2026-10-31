@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"log"
 	"slices"
 	"sort"
 
@@ -100,18 +99,12 @@ func (s *Service) SessionMove(ctx context.Context, caller contract.Principal, re
 		}
 		return response, &contract.Error{Code: contract.ErrMoveBusy, Message: "session " + string(busy) + reason}
 	}
-	for _, id := range order {
-		member, err := s.store.Session(ctx, id)
-		if err != nil {
-			return response, failure(err)
-		}
-		if err := s.boxes.Stop(context.WithoutCancel(ctx), member.Box); err != nil {
-			log.Printf("move stop %s: %v", member.Box, err)
-			continue
-		}
-		if err := s.boxes.RemoveContainer(context.WithoutCancel(ctx), member.Box); err != nil {
-			log.Printf("move remove %s: %v", member.Box, err)
+	s.moveMu.Lock()
+	for _, b := range members {
+		if b.State == contract.BoxReady {
+			s.moveStops = append(s.moveStops, b.ID)
 		}
 	}
+	s.moveMu.Unlock()
 	return response, nil
 }
