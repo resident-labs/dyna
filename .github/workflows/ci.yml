@@ -32,6 +32,7 @@ jobs:
       web: ${{ steps.filter.outputs.web }}
       pi: ${{ steps.filter.outputs.pi }}
       next_pi: ${{ steps.filter.outputs.next_pi }}
+      next_web: ${{ steps.filter.outputs.next_web }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -400,7 +401,7 @@ jobs:
 
   next-web-width-build:
     needs: changes
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.next_web == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -422,7 +423,7 @@ jobs:
 
   next-web-width:
     needs: [changes, next-web-width-build]
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.next_web == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -450,10 +451,13 @@ jobs:
       - name: Require every Go job
         env:
           WEB: ${{ needs.changes.outputs.web }}
-          RESULTS: ${{ needs.go-shard.result }} ${{ needs.go-static.result }} ${{ needs.desktop.result }} ${{ needs.next.result }} ${{ needs.next-web-width.result }} ${{ needs.frontend.result }} ${{ needs.frontend-check.result }}
+          RESULTS: ${{ needs.go-shard.result }} ${{ needs.go-static.result }} ${{ needs.desktop.result }} ${{ needs.next.result }} ${{ needs.frontend.result }} ${{ needs.frontend-check.result }}
+          NEXT_WEB: ${{ needs.changes.outputs.next_web }}
+          WIDTH: ${{ needs.next-web-width.result }}
           FRONTEND_CHECK: ${{ needs.frontend-check.result }}
         run: |
-          echo "Results: $RESULTS"
+          echo "Results: $RESULTS; width: $WIDTH"
+          if [ "$NEXT_WEB" = true ] && [ "$WIDTH" != success ]; then echo "The width check ended with $WIDTH" >&2; exit 1; fi
           # frontend-check is skipped when no web file changed.
           if [ "$WEB" != true ] && [ "$FRONTEND_CHECK" = skipped ]; then
             RESULTS="${RESULTS% *} success"
