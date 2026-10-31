@@ -45,6 +45,13 @@ aside.members { border-right: 0; border-left: 1px solid var(--line); }
 .rail footer { margin-top: auto; padding: 12px 0; }
 .rail footer span { display: flex; }
 .label { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+/* A card on Home's grid: a machine now, model usage later. */
+.card { container-type: inline-size; min-width: 0; padding: 12px 14px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
+.card h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 16px; line-height: 1.25; font-weight: 600; }
+.card .aside { margin-left: auto; color: var(--muted); font-size: 12.5px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.card p { margin: 0 0 6px; }
+.card .tiles { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 12px; }
+@container (max-width: 320px) { .card .tiles { gap: 8px; } }
 .member { padding: 5px 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .member:hover { background: var(--hover); }
 header { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--line); }
