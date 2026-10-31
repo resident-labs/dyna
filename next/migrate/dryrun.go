@@ -31,8 +31,8 @@ func DryRun(dir string) (Report, error) {
 		Rules: len(global.Rules), Hosts: len(global.Hosts), Accounts: len(global.Accounts),
 		Devices: len(global.Devices), Subscriptions: len(global.Subscriptions),
 	}
-	if report.Global != global.Counts {
-		return report, fmt.Errorf("global: count mismatch")
+	if err := compareCounts(report.Global, global.Counts); err != nil {
+		return report, fmt.Errorf("global: %w", err)
 	}
 	if global.Rooms == nil {
 		return report, fmt.Errorf("global: missing room manifest")
@@ -80,10 +80,29 @@ func DryRun(dir string) (Report, error) {
 		for _, goal := range room.Goals {
 			counts.GoalItems += len(goal.Items)
 		}
-		if counts != room.Counts {
-			return report, fmt.Errorf("room %s: count mismatch", name)
+		if err := compareCounts(counts, room.Counts); err != nil {
+			return report, fmt.Errorf("room %s: %w", name, err)
 		}
 		report.Rooms[name] = counts
 	}
 	return report, nil
+}
+
+func compareCounts(actual, declared contract.BundleCounts) error {
+	for _, c := range []struct {
+		name             string
+		actual, declared int
+	}{
+		{"rules", actual.Rules, declared.Rules}, {"goals", actual.Goals, declared.Goals},
+		{"goalItems", actual.GoalItems, declared.GoalItems}, {"issues", actual.Issues, declared.Issues},
+		{"prs", actual.PRs, declared.PRs}, {"questions", actual.Questions, declared.Questions},
+		{"subscriptions", actual.Subscriptions, declared.Subscriptions}, {"hosts", actual.Hosts, declared.Hosts},
+		{"accounts", actual.Accounts, declared.Accounts}, {"devices", actual.Devices, declared.Devices},
+		{"sessions", actual.Sessions, declared.Sessions},
+	} {
+		if c.actual != c.declared {
+			return fmt.Errorf("%s count: records %d, declared %d", c.name, c.actual, c.declared)
+		}
+	}
+	return nil
 }
