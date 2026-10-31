@@ -257,8 +257,8 @@ func Run(ctx context.Context, cfg Config) error {
 			st.DrainDispatch()
 			waitForDrain(drain.Begin(), time.After(60*time.Second))
 			return nil
-		case <-ticker.C:
-			if now := time.Now(); !now.Before(lastDormant.Add(time.Hour)) {
+		case now := <-ticker.C:
+			if !now.Before(lastDormant.Add(time.Hour)) {
 				if err := service.CloseDormant(ctx); err != nil {
 					log.Printf("dormant close sweep: %v", err)
 				}
