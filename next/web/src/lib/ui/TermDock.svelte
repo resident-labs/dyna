@@ -145,7 +145,7 @@
 
 {#snippet tabList(list: Tab[])}{#each list as tab (tab.key)}{@const job = jobOf(tab)}{@const off = !shownTabs.includes(tabs.indexOf(tab))}<span class="tab" class:active={tab.key === active} class:off>
   <button type="button" role="tab" aria-selected={tab.key === active} onclick={() => void show(tab.key)}>{#if "target" in tab && "box" in tab.target}<Avatar kind="session" name={tab.label} root={tab.root} size={16} />
-    {:else if job && failed(job)}<StatusPill tone="failed" dot label="Failed" />{/if}<span class="label">{tab.label}</span>
+    {:else if job && failed(job)}<StatusPill tone="failed" dot label="Failed" />{/if}<span class="label">{tab.label}{"target" in tab ? " shell" : ""}</span>
     {#if tab.exited}<span class="muted">exited{tab.exited.code === undefined ? "" : ` ${tab.exited.code}`}</span>{/if}</button>
   <button type="button" class="x" aria-label={`Close ${tab.label}`} title="Close" onclick={() => void close(tab.key)}><Icon name="close" size={12} /></button></span>{/each}{/snippet}
 
@@ -174,7 +174,7 @@
     {#if hidden.length}<span class="menu">
       <button type="button" class="add" aria-haspopup="menu" aria-expanded={rest} onclick={async () => { rest = !rest; picking = false; await tick(); menu?.querySelector<HTMLElement>("[role=menuitem]")?.focus(); }}>{hidden.length} more<Icon name="chevron" size={12} /></button>
       {#if rest}<div class="list" role="menu" tabindex="-1" bind:this={menu} onkeydown={walk}>
-        {#each hidden as tab (tab.key)}<button type="button" role="menuitem" tabindex="-1" onclick={() => void show(tab.key)}>{tab.label}</button>{/each}
+        {#each hidden as tab (tab.key)}<button type="button" role="menuitem" tabindex="-1" onclick={() => void show(tab.key)}>{tab.label}{"target" in tab ? " shell" : ""}</button>{/each}
       </div>{/if}
     </span>{/if}
     <span class="space"></span>
