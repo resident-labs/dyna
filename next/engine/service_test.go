@@ -1105,10 +1105,17 @@ func TestSessionListLastOutcomeSkipsStoppedTurns(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	found := false
 	for _, item := range list.Sessions {
-		if item.ID == session && item.LastOutcome != contract.TurnFailed {
-			t.Fatalf("a stopped turn hid the failure: %+v", item)
+		if item.ID == session {
+			found = true
+			if item.LastOutcome != contract.TurnFailed {
+				t.Fatalf("a stopped turn hid the failure: %+v", item)
+			}
 		}
+	}
+	if !found {
+		t.Fatalf("session %s is not in the list: %+v", session, list.Sessions)
 	}
 }
 
