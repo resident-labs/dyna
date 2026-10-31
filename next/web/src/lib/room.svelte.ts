@@ -44,8 +44,8 @@ export class RoomStore {
   // True once session.list and op.list have loaded.
   get ready(): boolean { this.subscribe(); return this.loaded; }
   get error(): unknown { this.subscribe(); return this.failure; }
-  // Every pending operation waits for the owner: agent-class ones also for an agent ancestor.
-  get waiting(): number { return [...this.requests.values()].filter(request => request.state === "pending").length; }
+  // Pending owner-class operations wait for the owner; agent-class ones wait for an ancestor session first.
+  get waiting(): number { return [...this.requests.values()].filter(request => request.state === "pending" && request.class === "owner").length; }
 
   async open(): Promise<void> {
     this.opening = this.load();
