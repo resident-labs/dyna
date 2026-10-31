@@ -60,7 +60,7 @@ func NewWeb(a *API, address string, app fs.FS, now func() time.Time, devices Dev
 func (w *Web) SetRoutes(routes []string) error {
 	for _, route := range routes {
 		u, err := url.Parse(route)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
 			return fmt.Errorf("invalid web route %q: expected an http or https origin", route)
 		}
 		host := strings.ToLower(u.Host)
