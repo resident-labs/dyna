@@ -63,7 +63,7 @@ func TestGrantCardEscapesControlCharactersAndNamesWildcard(t *testing.T) {
 	}
 	a.Commands = []contract.CommandRule{{Program: "*", Prefix: true}}
 	body = s.HostexecGrant().Card(ctx, a, contract.Principal{}).Body
-	if !strings.Contains(body, "any program …") {
+	if !strings.Contains(body, "any command") {
 		t.Fatalf("wildcard: %q", body)
 	}
 }
