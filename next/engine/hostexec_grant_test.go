@@ -49,7 +49,21 @@ func TestGrantCardDistinguishesArguments(t *testing.T) {
 	one := s.HostexecGrant().Card(ctx, a, contract.Principal{}).Body
 	a.Commands[0].Args = []string{"-c", "a", "b"}
 	two := s.HostexecGrant().Card(ctx, a, contract.Principal{}).Body
-	if one == two || !strings.Contains(one, "'a; b'") {
+	if one == two || !strings.Contains(one, `"a; b"`) {
 		t.Fatalf("ambiguous cards: %q / %q", one, two)
+	}
+}
+
+func TestGrantCardEscapesControlCharactersAndNamesWildcard(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	a := contract.HostexecGrantArgs{Room: room, To: contract.Principal{Kind: contract.PrincipalSession, Session: worker}, Commands: []contract.CommandRule{{Program: "sh", Args: []string{"a\nb"}}}}
+	body := s.HostexecGrant().Card(ctx, a, contract.Principal{}).Body
+	if !strings.Contains(body, `"a\nb"`) || strings.Contains(body, "a\nb") {
+		t.Fatalf("control character: %q", body)
+	}
+	a.Commands = []contract.CommandRule{{Program: "*", Prefix: true}}
+	body = s.HostexecGrant().Card(ctx, a, contract.Principal{}).Body
+	if !strings.Contains(body, "any program …") {
+		t.Fatalf("wildcard: %q", body)
 	}
 }
