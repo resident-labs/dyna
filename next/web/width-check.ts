@@ -1,7 +1,7 @@
 // The browser and its Playwright client are the same system tools used by scripts/qa-branch.sh.
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { chromium } from "../../internal/cli/computer/browserdeps/node_modules/playwright-core/index.mjs";
+import { chromium } from "../../internal/cli/computer/browserdeps/node_modules/playwright-core/index.js";
 import { roomRoute, settingsPanes, settingsRoute } from "./src/lib/routes.ts";
 import { knownWidthFailures } from "./known-width-failures.ts";
 
