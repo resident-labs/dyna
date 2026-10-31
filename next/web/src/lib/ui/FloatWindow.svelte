@@ -62,7 +62,7 @@
      the line color. Only its body clips, so the resize handles past the edge and the header's menus stay whole. */
   .floating { position: fixed; z-index: 3; background: var(--raised); border: 1px solid var(--firm, var(--line)); border-radius: 16px; box-shadow: 0 12px 32px var(--shadow-lg); }
   .body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  .floating .body { overflow: hidden; border-radius: 0 0 15px 15px; }
+  .floating:not(.full) .body { overflow: hidden; border-radius: 0 0 15px 15px; }
   header { gap: 6px; padding: 0 6px 0 12px; }
   .floating header { height: 40px; cursor: grab; user-select: none; touch-action: none; }
   /* Full screen: no frame, clear of the notch and the home bar; its one focus is the window itself, so no ring. */
