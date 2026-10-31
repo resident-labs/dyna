@@ -44,26 +44,28 @@ type heartbeatStore interface {
 }
 
 type Boxes struct {
-	HeartbeatStore heartbeatStore
-	Store          boxStore
-	Sockets        *api.Sockets
-	Runtime        string
-	HostData       string
-	Version        string
-	PiTarball      []byte
-	Mirror         *enginegit.Mirror
-	Images         *engineimages.Builder
-	Context        context.Context
-	Pressure       *engine.Service
-	Proc           string // Proc is the folder with stat and meminfo; empty means /proc.
-	mu             sync.Mutex
-	hosts          map[contract.HostName]*podman.Host
-	restored       map[contract.HostName]bool
-	loads          map[contract.HostName]hostLoad
-	cpuPrev        *cpuTimes // cpuPrev is the last /proc/stat sample of this machine, nil before the first.
-	binOnce        sync.Once
-	binSum         string
-	binErr         error
+	HeartbeatStore  heartbeatStore
+	Store           boxStore
+	Sockets         *api.Sockets
+	Runtime         string
+	HostData        string
+	InstructionsDir string
+	instructionsMu  sync.Mutex
+	Version         string
+	PiTarball       []byte
+	Mirror          *enginegit.Mirror
+	Images          *engineimages.Builder
+	Context         context.Context
+	Pressure        *engine.Service
+	Proc            string // Proc is the folder with stat and meminfo; empty means /proc.
+	mu              sync.Mutex
+	hosts           map[contract.HostName]*podman.Host
+	restored        map[contract.HostName]bool
+	loads           map[contract.HostName]hostLoad
+	cpuPrev         *cpuTimes // cpuPrev is the last /proc/stat sample of this machine, nil before the first.
+	binOnce         sync.Once
+	binSum          string
+	binErr          error
 }
 
 type hostLoad struct {
@@ -118,6 +120,11 @@ func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
 		defer ticker.Stop()
 		h.Heartbeat(b.Context, ticker.C, b.HostData, func(ok bool, load podman.Load) {
 			now := time.Now()
+			if ok {
+				if err := b.syncInstructions(b.Context, h); err != nil {
+					log.Printf("host %s: instructions: %v", name, err)
+				}
+			}
 			b.record(name, ok, load, now)
 			b.reportHeartbeat(b.Context, name, ok, load, now)
 		}, b.pressure(name))
@@ -330,6 +337,9 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool,
 	if err := b.installBinary(ctx, h); err != nil {
 		return false, err
 	}
+	if err := b.syncInstructions(ctx, h); err != nil {
+		return false, err
+	}
 	same, err := engineHost(ctx, h)
 	if err != nil {
 		return false, err
@@ -351,6 +361,9 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool,
 func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, error) {
 	h, err := b.host(ctx, spec.Host)
 	if err != nil {
+		return "", err
+	}
+	if err := b.syncInstructions(ctx, h, spec.Room); err != nil {
 		return "", err
 	}
 	session, err := b.Store.Session(ctx, spec.Session)
@@ -521,6 +534,9 @@ func (b *Boxes) Start(ctx context.Context, id contract.BoxID) error {
 	if err != nil {
 		return err
 	}
+	if err := b.syncInstructions(ctx, host); err != nil {
+		return err
+	}
 	return host.StartContainer(ctx, id)
 }
 
@@ -648,6 +664,9 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, _ s
 	if err != nil {
 		return err
 	}
+	if err := b.syncInstructions(ctx, h, spec.Room); err != nil {
+		return err
+	}
 	if err := h.StopContainer(ctx, spec.Box); err != nil {
 		return err
 	}
@@ -672,11 +691,13 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, _ s
 func (b *Boxes) container(spec lifecycle.BoxSpec, image string) (box.Slice, box.ContainerSpec) {
 	size := spec.Size
 	slice := box.Slice{Name: spec.Slice, CPUs: size.CPUs, MemHigh: size.MemBytes, MemMax: size.MemBytes * 3 / 2, Pids: size.Pids}
-	c := box.ContainerSpec{Box: spec.Box, Image: image, Slice: spec.Slice, Needs: spec.Needs, Labels: []box.Label{{Key: "dyna.shared", Value: "1"}}, Mounts: []box.Mount{
+	c := box.ContainerSpec{Box: spec.Box, Image: image, Slice: spec.Slice, Needs: spec.Needs, Labels: []box.Label{{Key: "dyna.shared", Value: "2"}}, Mounts: []box.Mount{
 		{HostPath: filepath.Join(b.HostData, "sock", string(spec.Box)), BoxPath: "/run/dyna/engine", ReadOnly: true},
 		{HostPath: filepath.Join(b.HostData, "bin"), BoxPath: "/opt/dyna/bin", ReadOnly: true},
 		{HostPath: filepath.Join(b.HostData, "cache"), BoxPath: "/box/cache"},
 		{HostPath: filepath.Join(b.HostData, "rooms", string(spec.Room)), BoxPath: "/box/shared"},
+		{HostPath: filepath.Join(b.HostData, "instructions", "global"), BoxPath: "/run/dyna/instructions/global", ReadOnly: true},
+		{HostPath: filepath.Join(b.HostData, "instructions", "rooms", string(spec.Room)), BoxPath: "/run/dyna/instructions/room", ReadOnly: true},
 	}, Env: []box.EnvVar{{Name: "GOMODCACHE", Value: "/box/cache/gomod"}, {Name: "GOCACHE", Value: "/box/cache/gocache"}, {Name: "CARGO_HOME", Value: "/box/cache/cargo"}, {Name: "npm_config_store_dir", Value: "/box/cache/pnpm"}}}
 	for _, repo := range spec.Repos {
 		c.Mounts = append(c.Mounts, box.Mount{HostPath: repo.Cache, BoxPath: repo.Cache, ReadOnly: true})
