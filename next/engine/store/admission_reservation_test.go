@@ -48,6 +48,16 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 		t.Fatal(err)
 	}
 	host.CheckedAt = time.Unix(102, 0) // The host sampled while creation was still running.
+	if _, err := s.writer.ExecContext(ctx, "UPDATE boxes SET state='ready' WHERE id='b1'"); err != nil {
+		t.Fatal(err)
+	}
+	boxes, err = s.Boxes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := box.Admit([]box.Host{host}, boxes, boxes[1], 20*box.GiB); p.Reason != box.PendingDisk {
+		t.Fatalf("early hello: %+v", p)
+	}
 	event.ID, event.Time = "done", time.Unix(103, 0)
 	if err := s.FinishCreate(ctx, boxes[0], "image", "", time.Time{}, 0, event); err != nil {
 		t.Fatal(err)
