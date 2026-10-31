@@ -56,3 +56,19 @@ a room flag; its socket identifies its room. Close the session with
 M1 does not upgrade a running box across engine versions. Close all boxes
 before an engine upgrade. The proxy must already have a valid sign-in in its
 auth directory.
+
+## Trial deployment and fix forward
+
+Run `next/scripts/deploy-trial.sh --dry-run` on the trial host to build and
+check the pair without installing it. The script accepts `--prefix`, `--node-bin`,
+`--socket`, `--unit`, `--web-url` and `--web-host` for other installations.
+A schedule hook can run:
+
+```sh
+dyna job run --node hermeslab --commit <origin/main sha> --io heavy -- next/scripts/deploy-trial.sh
+```
+
+The trial never rolls back. Fix failures forward on main. An older binary
+cannot open a store after a schema step. The engine keeps
+`backups/pre-upgrade-v*.db` for an emergency restore; only the owner decides
+whether to restore one.
