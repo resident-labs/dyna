@@ -199,6 +199,14 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			if err != nil {
 				return
 			}
+			latest, err := s.store.Session(ctx, session.ID)
+			if err != nil {
+				return
+			}
+			model, _, err := s.profiles.Model(latest.Profile)
+			if err != nil {
+				return
+			}
 			turn, deliveries, err := s.store.Dispatch(ctx, session.ID, contract.TurnID(turnID), started, replay)
 			if err != nil {
 				return
@@ -221,6 +229,8 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 						return
 					}
 					text = fmt.Sprintf("Rule r%d is removed and no longer applies: %s.", body.Number, oldText)
+				case contract.SessionProfileChanged:
+					text = fmt.Sprintf("Your model is now %s.", body.Profile)
 				case contract.PostCreated:
 					text = body.Text
 				case contract.SessionStarted:
@@ -264,7 +274,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			}
 			if len(start) != 0 {
 				select {
-				case out <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start}}:
+				case out <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start, Model: model}}:
 				case <-ctx.Done():
 					return
 				}
