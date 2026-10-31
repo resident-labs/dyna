@@ -176,6 +176,7 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 4. The judges review the built page. Repeat steps 1 to 3 until the judges agree that the page is solid. [owner r23]
 5. The PR attaches the mockups, the votes and the reviews. [root]
 6. Judges read `next/docs/spec.md` first and never reopen its settled owner decisions. [owner r25]
+7. Before a winner merges, its PR attaches side-by-side images of the build on the trial with real data next to each mockup, at the same sizes. The PR lists every deliberate difference from the mockups, each with its reason. One of the design judges then confirms that the build matches. [owner, 2026-10-31]
 
 ### Each UI PR
 
