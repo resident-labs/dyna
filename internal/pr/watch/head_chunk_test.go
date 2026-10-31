@@ -117,10 +117,11 @@ func TestHeadChunkFastChunksSucceedAcrossManyChunks(t *testing.T) {
 	defer cancel()
 	re := regexp.MustCompile(`p([0-9]+):pullRequest`)
 	g := GitHub{now: func() time.Time { return start.Add(elapsed) }, run: func(ctx context.Context, cmd *exec.Cmd) error {
-		// Simulated GitHub: every request answers in one second unless its deadline comes first.
-		const latency = time.Second
+		// Simulated GitHub: every request answers in 1.5 seconds unless its deadline comes first.
+		const latency = 1500 * time.Millisecond
 		if deadline, ok := ctx.Deadline(); ok && deadline.Before(start.Add(elapsed+latency)) {
-			elapsed = deadline.Sub(start)
+			// A request that times out keeps its clock; an expired deadline spends no time.
+			elapsed = max(elapsed, deadline.Sub(start))
 			return context.DeadlineExceeded
 		}
 		elapsed += latency
