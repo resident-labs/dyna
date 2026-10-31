@@ -47,10 +47,13 @@
   // page is visible. see() sends only a newer position, so scrolling and new events make one call per change. A new
   // event may push the bottom out of view before the browser reports it, so the position is taken from a fresh
   // observation of the layout that holds that event, not from the last report.
+  // The observation resolves a frame later; by then the owner may have switched tab or conversation.
+  let gone = false;
+  onDestroy(() => { gone = true; });
   function markRead() {
     if (since === undefined || !view.atPresent || document.visibilityState !== "visible") return;
     const newest = view.newest;
-    void list?.atBottom().then(shown => { if (shown) store.see(home, newest); });
+    void list?.atBottom().then(shown => { if (shown && !gone && document.visibilityState === "visible") store.see(home, newest); });
   }
   $effect(markRead);
   $effect(() => {
