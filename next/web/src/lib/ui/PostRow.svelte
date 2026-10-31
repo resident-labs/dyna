@@ -48,7 +48,7 @@
   .text :global(:is(p, ul, ol, pre, blockquote)) { margin: 0 0 4px; }
   .text :global(:is(p, ul, ol, pre, blockquote):last-child) { margin-bottom: 0; }
   .text :global(pre) { padding: 8px 10px; border-radius: 8px; background: var(--sidebar); overflow-x: auto; }
-  .text :global(code) { font: 13px ui-monospace, monospace; }
+  .text :global(code) { font: 13px var(--mono); }
   .text :global(blockquote) { padding-left: 10px; border-left: 2px solid var(--line); color: var(--muted); }
   .text :global(a) { color: var(--focus); }
 </style>
