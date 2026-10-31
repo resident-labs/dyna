@@ -61,7 +61,7 @@ var expectedChecks = map[localci.Suite][]localci.CheckName{
 
 // expectedTrials is the suite set a merge trial must run.
 var expectedTrials = []localci.Suite{
-	localci.SuiteRelay, localci.Suite("pi"), localci.SuiteGo, localci.SuiteCross, localci.SuiteComputerSmoke, localci.Suite("next"),
+	localci.SuiteRelay, localci.Suite("pi"), localci.SuiteGo, localci.SuiteCross, localci.SuiteComputerSmoke, localci.Suite("next"), localci.Suite("next-web"),
 }
 
 // reportedChecks is what a run of one suite leaves in a saved result: the name of
