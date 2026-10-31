@@ -86,6 +86,7 @@
   let requests: HTMLElement | undefined = $state();
   let composer: HTMLTextAreaElement | undefined = $state();
   let members: HTMLElement | undefined = $state();
+  let computer: HTMLElement | undefined = $state();
   // F6 (mod+F6 in a browser) moves focus between areas; Shift goes back.
   function cycle(event: KeyboardEvent) {
     if (event.key === "Escape" && panel) void showPanel(false);
@@ -94,7 +95,8 @@
     event.preventDefault();
     // Only areas on screen take part; below 900 px the closed sessions panel has no boxes.
     // A panel from the room menu takes the place of the feed and the composer.
-    const areas = [rail, section ? requests : feed, section ? undefined : composer, members].filter(area => area != null)
+    const areas = [rail, section ? requests : feed, section ? undefined : composer, members, docked ? undefined : computer]
+      .filter(area => area != null)
       .filter(area => area.getClientRects().length > 0);
     const index = areas.findIndex(area => area.contains(document.activeElement));
     areas[(index + (event.shiftKey ? areas.length - 1 : 1)) % areas.length].focus();
@@ -118,14 +120,18 @@
   // Below 900 px the sessions panel is hidden; a header button opens it over the feed.
   // Opening moves focus into the panel; closing returns it to the button if the panel held it.
   let panel = $state(false);
-  // The session whose computer the sessions panel shows instead of the list, while it runs. The view
-  // mounts only where the panel is on screen: always when wide, below 900 px only while it is open.
+  // The session whose computer the owner watches, while it runs: in a window over the app, or docked
+  // in the sessions panel instead of the list. Docked, the view mounts only where the panel is on
+  // screen: always when wide, below 900 px only while it is open. The window keeps its place and size
+  // for the page view.
   let watching: string | undefined = $state();
+  let docked = $state(false);
+  let rect = $state({ x: window.innerWidth - 504, y: window.innerHeight - 420, w: 480, h: 300 });
   // The view closes when its computer stops or the room changes, before the DOM updates, so it never
   // streams again unasked. Focus that was in the view returns to the row's button, or to the panel.
   async function stopWatching() {
     const id = watching ?? "";
-    const held = members?.contains(document.activeElement);
+    const held = members?.contains(document.activeElement) || computer?.contains(document.activeElement);
     watching = undefined;
     await tick();
     if (held) (members?.querySelector<HTMLElement>(`[data-watch="${CSS.escape(id)}"]`) ?? members)?.focus();
@@ -153,6 +159,11 @@
 {#snippet intro()}
   {#if session}<RoomIntro kind="session" name={title} root={!!store?.sessions.get(session) && !store.sessions.get(session)?.parent} line="This is the start of your direct messages." />
   {:else}<RoomIntro kind="room" name={roomName} line="This is the start of the room." />{/if}
+{/snippet}
+
+{#snippet computerView(id: string)}
+  <ComputerView session={id} name={store?.names.get(id) ?? "Session"} {docked} bind:rect bind:element={computer}
+    onclose={() => void stopWatching()} ondock={() => { docked = !docked; if (docked && !wide.current) void showPanel(true); }} />
 {/snippet}
 
 <svelte:window onkeydown={cycle} />
@@ -186,9 +197,9 @@
     {/if}{/if}
   </main>
   {#if room}
-    <aside class="members" id="sessions" class:shown={panel} class:watching={watching !== undefined} aria-label="Sessions" tabindex="-1" bind:this={members}>
-      {#if watching}
-        {#if wide.current || panel}<ComputerView session={watching} name={store?.names.get(watching) ?? "Session"} onback={() => void stopWatching()} />{/if}
+    <aside class="members" id="sessions" class:shown={panel} class:watching={watching && docked} aria-label="Sessions" tabindex="-1" bind:this={members}>
+      {#if watching && docked}
+        {#if wide.current || panel}{@render computerView(watching)}{/if}
       {:else}
       <header class="label">Sessions</header>
       {#each tree as { session: item, depth } (item.session)}
@@ -201,6 +212,7 @@
       {:else}<p class="hint">No sessions yet.</p>{/each}
       {/if}
     </aside>
+    {#if watching && !docked}{@render computerView(watching)}{/if}
   {/if}
 </div>
 
