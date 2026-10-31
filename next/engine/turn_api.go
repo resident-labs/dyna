@@ -57,7 +57,11 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	if problem != nil {
 		return contract.BoxHelloResponse{}, problem
 	}
-	return contract.BoxHelloResponse{Session: session.ID, Box: session.Box, Model: model, Repos: repos, Rules: rules.Rules}, nil
+	files, err := s.store.Transcripts(ctx, session.ID)
+	if err != nil {
+		return contract.BoxHelloResponse{}, failure(err)
+	}
+	return contract.BoxHelloResponse{Session: session.ID, Box: session.Box, Model: model, Repos: repos, Rules: rules.Rules, Transcripts: files}, nil
 }
 
 func (s *Service) DeliveryDone(ctx context.Context, caller contract.Principal, req contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error) {

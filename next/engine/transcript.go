@@ -51,3 +51,41 @@ func (s *Service) TranscriptAppend(ctx context.Context, caller contract.Principa
 	}
 	return contract.TranscriptAppendResponse{AckedOffset: end}, nil
 }
+
+// TranscriptFetch reads only bytes committed for the calling session.
+func (s *Service) TranscriptFetch(ctx context.Context, caller contract.Principal, req contract.TranscriptFetchRequest) (contract.TranscriptFetchResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalSession {
+		return contract.TranscriptFetchResponse{}, forbidden()
+	}
+	if !filepath.IsLocal(req.Path) || req.Offset < 0 {
+		return contract.TranscriptFetchResponse{}, invalid("invalid transcript path or offset")
+	}
+	s.transcriptMu.Lock()
+	defer s.transcriptMu.Unlock()
+	ack, err := s.store.TranscriptOffset(ctx, caller.Session, req.Path)
+	if err != nil {
+		return contract.TranscriptFetchResponse{}, failure(err)
+	}
+	if req.Offset > ack {
+		return contract.TranscriptFetchResponse{}, invalid("offset past acknowledged transcript")
+	}
+	f, err := os.Open(filepath.Join(s.transcriptDir, string(caller.Session), req.Path))
+	if err != nil {
+		return contract.TranscriptFetchResponse{}, failure(err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return contract.TranscriptFetchResponse{}, failure(err)
+	}
+	if info.Size() < ack {
+		return contract.TranscriptFetchResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "transcript file is shorter than its acknowledged offset"}
+	}
+	buf := make([]byte, min(ack-req.Offset, 1<<20))
+	if len(buf) > 0 {
+		if _, err := f.ReadAt(buf, req.Offset); err != nil {
+			return contract.TranscriptFetchResponse{}, failure(err)
+		}
+	}
+	return contract.TranscriptFetchResponse{Bytes: buf}, nil
+}

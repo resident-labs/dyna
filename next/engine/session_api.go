@@ -191,7 +191,11 @@ func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal,
 	if err != nil {
 		return contract.SessionRestartResponse{}, failure(err)
 	}
-	restarted, err := s.store.RestartSession(ctx, req.Session, event)
+	notice, err := s.event(session.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionRestarted{Session: session.ID})
+	if err != nil {
+		return contract.SessionRestartResponse{}, failure(err)
+	}
+	restarted, err := s.store.RestartSession(ctx, req.Session, event, notice)
 	if err != nil {
 		return contract.SessionRestartResponse{}, failure(err)
 	}

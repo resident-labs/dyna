@@ -10,7 +10,7 @@ import (
 )
 
 // RestartSession resets a failed box for admission and publishes its transition.
-func (s *Store) RestartSession(ctx context.Context, id contract.SessionID, event contract.Event) (bool, error) {
+func (s *Store) RestartSession(ctx context.Context, id contract.SessionID, event, notice contract.Event) (bool, error) {
 	var restarted bool
 	err := s.Write(ctx, func(tx *sql.Tx) error {
 		b := box.Box{Session: id, State: contract.BoxFailed}
@@ -32,6 +32,13 @@ func (s *Store) RestartSession(ctx context.Context, id contract.SessionID, event
 			return err
 		}
 		if _, err := s.AppendEvent(tx, event); err != nil {
+			return err
+		}
+		seq, err := s.AppendEvent(tx, notice)
+		if err != nil {
+			return err
+		}
+		if err := s.InsertDelivery(ctx, tx, seq, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: id}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: false}); err != nil {
 			return err
 		}
 		restarted = true
