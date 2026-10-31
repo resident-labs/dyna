@@ -48,7 +48,7 @@
         if (ticket !== generation) return;
         if (result.status === "connected") { close(); reload(); }
         else if (result.status === "pending") watch(id, ticket);
-        else { connectState = result.status; wrongAccount = result.reason === "wrong_account"; }
+        else { connectState = result.status; wrongAccount = result.reason === "wrong_account"; cannotReconnect = !!reconnectId && result.reason === "adoption_failed"; }
       }, (error: unknown) => { if (ticket === generation) { connectState = "failed"; unreachable = !refused(error); } });
     }, 2000);
   }
