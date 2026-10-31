@@ -2,6 +2,7 @@ package pi
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -94,14 +95,14 @@ func readTranscript(r io.Reader, deliveries map[contract.DeliverySeq]contract.Tu
 				continue
 			}
 			for n, b := range blocks {
-				item := contract.TranscriptItem{ID: entry.ID + ":" + strconv.Itoa(n), Turn: turn, At: entry.Timestamp}
+				item := contract.TranscriptItem{ID: transcriptItemID(entry.ID + ":" + strconv.Itoa(n)), Turn: turn, At: entry.Timestamp}
 				switch b.Type {
 				case "text":
 					item.Kind, item.Text = contract.TranscriptText, harness.Mask(b.Text)
 				case "thinking":
 					item.Kind, item.Text = contract.TranscriptThinking, harness.Mask(b.Thinking)
 				case "toolCall":
-					item.Kind, item.ID, item.Tool, item.Arguments = contract.TranscriptTool, b.ID, harness.Mask(b.Name), harness.Mask(string(b.Arguments))
+					item.Kind, item.ID, item.Tool, item.Arguments = contract.TranscriptTool, transcriptItemID(b.ID), clipToolName(harness.Mask(b.Name)), harness.Mask(string(b.Arguments))
 				default:
 					continue
 				}
@@ -250,4 +251,19 @@ func TranscriptStep(item contract.TranscriptItem) contract.TranscriptStep {
 		label = string(runes[:79]) + "…"
 	}
 	return contract.TranscriptStep{Turn: item.Turn, Tool: item.Tool, Label: label, Started: item.At, Ended: item.Ended, Failed: item.Failed, Preview: item.Output}
+}
+
+func transcriptItemID(id string) string {
+	if len(id) <= 256 {
+		return id
+	}
+	sum := sha256.Sum256([]byte(id))
+	return fmt.Sprintf("sha256:%x", sum)
+}
+
+func clipToolName(name string) string {
+	if len(name) <= 256 {
+		return name
+	}
+	return strings.ToValidUTF8(name[:256], "")
 }
