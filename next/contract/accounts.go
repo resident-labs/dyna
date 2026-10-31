@@ -137,6 +137,11 @@ type AccountsSetLimitsRequest struct {
 }
 type AccountsSetLimitsResponse struct{}
 type Profile struct {
+	Description    string        `json:"description"`
+	Taste          int           `json:"taste"`
+	Diagnostics    int           `json:"diagnostics"`
+	Intelligence   int           `json:"intelligence"`
+	Cost           int           `json:"cost"`
 	Name           ProfileName   `json:"name"`
 	Provider       ModelProvider `json:"provider"`
 	Model          string        `json:"model"`
