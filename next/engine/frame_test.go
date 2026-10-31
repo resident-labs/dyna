@@ -73,4 +73,17 @@ func TestHelloInstructionsForWorkerAndRoot(t *testing.T) {
 	}
 }
 
+func TestHelloOmitsOwnerOnlyCommands(t *testing.T) {
+	s, _, worker, ctx := setup(t)
+	hello, problem := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.BoxHelloRequest{})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	for _, part := range []string{"op approve", "op deny"} {
+		if strings.Contains(hello.Instructions, part) {
+			t.Errorf("hello offers owner-only command %q: %q", part, hello.Instructions)
+		}
+	}
+}
+
 func inputBody(text string) string { _, body, _ := strings.Cut(text, "\n"); return body }
