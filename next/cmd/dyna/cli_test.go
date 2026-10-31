@@ -15,6 +15,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func (f *fakeClient) RoomSetLimits(context.Context, contract.RoomSetLimitsRequest) (contract.RoomSetLimitsResponse, error) {
+	return contract.RoomSetLimitsResponse{}, nil
+}
 func (f *fakeClient) RoomPause(context.Context, contract.RoomPauseRequest) (contract.RoomPauseResponse, error) {
 	return contract.RoomPauseResponse{}, nil
 }
@@ -390,5 +393,20 @@ func TestHostexecGrantSubmitsOperation(t *testing.T) {
 	args = f.submit.Operation.Args.(contract.HostexecGrantArgs)
 	if args.To.Session != "ses_1" || args.Room != "room_1" || f.submit.Operation.Room != "room_1" {
 		t.Fatalf("%+v", f.submit)
+	}
+}
+
+func TestParseLimitBytes(t *testing.T) {
+	for _, tc := range []struct {
+		input string
+		want  int64
+		valid bool
+	}{
+		{"0", 0, true}, {"1.5 GiB", 1610612736, true}, {"2MB", 2 << 20, true}, {"1,024", 1024, true}, {"0.1", 0, false}, {"-1", 0, false}, {"9EiB", 0, false},
+	} {
+		got, err := parseLimitBytes(tc.input)
+		if (err == nil) != tc.valid || err == nil && got != tc.want {
+			t.Errorf("%q: %d, %v", tc.input, got, err)
+		}
 	}
 }
