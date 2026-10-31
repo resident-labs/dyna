@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
@@ -1101,6 +1103,24 @@ func TestPostRejectsMissingAttachment(t *testing.T) {
 	})
 	if e == nil || e.Code != contract.ErrInvalid {
 		t.Fatalf("got %v", e)
+	}
+}
+
+func TestPostNeedsTextOrFile(t *testing.T) {
+	s, room, _, ctx := setup(t)
+	dir := t.TempDir()
+	s.SetFilesDir(dir)
+	hash := "0000000000000000000000000000000000000000000000000000000000000000"
+	if err := os.WriteFile(filepath.Join(dir, hash), []byte("notes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	if _, e := s.Post(ctx, owner, contract.PostRequest{Room: room, Text: " "}); e == nil || e.Code != contract.ErrInvalid {
+		t.Fatalf("empty post: got %v", e)
+	}
+	file := contract.Attachment{Name: "notes.txt", Media: "text/plain", SHA256: hash}
+	if _, e := s.Post(ctx, owner, contract.PostRequest{Room: room, Attachments: []contract.Attachment{file}}); e != nil {
+		t.Fatalf("file-only post: %v", e)
 	}
 }
 

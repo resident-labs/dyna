@@ -1,4 +1,4 @@
-import type { Error as ContractError, MethodMap } from "./contract.gen.ts";
+import type { Attachment, Error as ContractError, MethodMap } from "./contract.gen.ts";
 
 export class APIError extends Error {
   readonly detail: ContractError;
@@ -24,4 +24,15 @@ export async function call<M extends keyof MethodMap>(
   // else the method's response. Callers that read events check them with decodeEvent.
   if (!response.ok) throw new APIError(body as ContractError);
   return body as MethodMap[M]["response"];
+}
+
+// Stores one file in the engine; the answer is the Attachment a post carries. The engine answers a
+// failed upload with plain text, so any failure is the one typed error.
+export async function upload(file: File): Promise<Attachment> {
+  const response = await fetch(`/v1/files?name=${encodeURIComponent(file.name)}`, {
+    method: "POST", credentials: "same-origin", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file,
+  }).catch(() => { throw unavailable(); });
+  if (!response.ok) throw unavailable();
+  // The engine's own JSON, as in call.
+  return await response.json().catch(() => { throw unavailable(); }) as Attachment;
 }
