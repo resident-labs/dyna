@@ -210,3 +210,23 @@ func TestParseClaudeOAuthUsageFallsBackToLegacyWindows(t *testing.T) {
 		t.Fatal("expected a parse error for a non-JSON body")
 	}
 }
+
+func TestClaudeQuotaMixedLimitsPreservesOAuthApps(t *testing.T) {
+	windows, err := parseClaudeOAuthUsage([]byte(`{"seven_day_oauth_apps":{"utilization":81},"limits":[{"kind":"weekly_all","percent":20},{"kind":"weekly_scoped","percent":10,"scope":{"model":{"display_name":"Opus"}}}]}`))
+	if err != nil {
+		t.Fatal("quota response rejected")
+	}
+	found := false
+	for _, window := range windows {
+		if window.Kind == "weekly_scoped" && window.Scope == "Oauth Apps" && window.Utilization == 81 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("OAuth Apps window missing from mixed response")
+	}
+	windows, err = parseClaudeOAuthUsage([]byte(`{"seven_day_oauth_apps":{"utilization":81},"limits":[{"kind":"weekly_scoped","percent":50,"scope":{"model":{"display_name":"Oauth Apps"}}}]}`))
+	if err != nil || len(windows) != 1 || windows[0].Utilization != 50 {
+		t.Fatal("normalized OAuth Apps window was duplicated or replaced")
+	}
+}

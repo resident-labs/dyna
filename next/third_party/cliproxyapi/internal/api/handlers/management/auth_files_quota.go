@@ -63,9 +63,10 @@ type authFileQuotaEntry struct {
 // plus the per-model `seven_day_<model>` buckets are the older one and are
 // only used when `limits` is absent.
 type claudeOAuthUsageResponse struct {
-	FiveHour *claudeOAuthUsageWindow `json:"five_hour"`
-	SevenDay *claudeOAuthUsageWindow `json:"seven_day"`
-	Limits   []claudeOAuthUsageLimit `json:"limits"`
+	FiveHour          *claudeOAuthUsageWindow `json:"five_hour"`
+	SevenDay          *claudeOAuthUsageWindow `json:"seven_day"`
+	SevenDayOAuthApps *claudeOAuthUsageWindow `json:"seven_day_oauth_apps"`
+	Limits            []claudeOAuthUsageLimit `json:"limits"`
 }
 
 type claudeOAuthUsageWindow struct {
@@ -207,6 +208,20 @@ func parseClaudeOAuthUsage(body []byte) ([]authFileQuotaWindow, error) {
 			}
 			if limit.Scope != nil && limit.Scope.Model != nil && limit.Scope.Model.DisplayName != nil {
 				window.Scope = *limit.Scope.Model.DisplayName
+			}
+			windows = append(windows, window)
+		}
+		hasOAuthApps := false
+		for _, window := range windows {
+			if window.Kind == "weekly_scoped" && strings.EqualFold(window.Scope, "Oauth Apps") {
+				hasOAuthApps = true
+				break
+			}
+		}
+		if !hasOAuthApps && payload.SevenDayOAuthApps != nil && payload.SevenDayOAuthApps.Utilization != nil {
+			window := authFileQuotaWindow{Kind: "weekly_scoped", Scope: "Oauth Apps", Utilization: *payload.SevenDayOAuthApps.Utilization}
+			if payload.SevenDayOAuthApps.ResetsAt != nil {
+				window.ResetsAt = *payload.SevenDayOAuthApps.ResetsAt
 			}
 			windows = append(windows, window)
 		}
