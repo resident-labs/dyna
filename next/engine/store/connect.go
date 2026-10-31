@@ -39,6 +39,7 @@ func (s *Store) ConnectAttempt(ctx context.Context) (contract.ConnectAttempt, er
 	var a contract.ConnectAttempt
 	err := s.read.QueryRowContext(ctx, "SELECT state,expires FROM connect_attempt WHERE id=1").Scan(&a.State, &a.Expires)
 	if errors.Is(err, sql.ErrNoRows) {
+		a.State = contract.ConnectAttemptIdle
 		return a, nil
 	}
 	return a, err
