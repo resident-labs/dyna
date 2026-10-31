@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"filippo.io/age"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/api"
@@ -78,9 +79,21 @@ type Config struct {
 	Data, Runtime, HostData, Profiles, Version string
 	ApprovalsExpiry                            time.Duration
 	WebListen                                  string
+	BackupDest, BackupRecipient                string
 }
 
 func Run(ctx context.Context, cfg Config) error {
+	if (cfg.BackupDest == "") != (cfg.BackupRecipient == "") {
+		return fmt.Errorf("backup.dest and backup.recipient must be set together")
+	}
+	var recipient age.Recipient
+	if cfg.BackupRecipient != "" {
+		parsed, err := age.ParseX25519Recipient(cfg.BackupRecipient)
+		if err != nil {
+			return fmt.Errorf("backup.recipient: %w", err)
+		}
+		recipient = parsed
+	}
 	token := os.Getenv("GH_TOKEN")
 	if err := os.Unsetenv("GH_TOKEN"); err != nil {
 		return err
@@ -98,6 +111,14 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	defer st.Close()
+	backupCtx, stopBackup := context.WithCancel(ctx)
+	backupDone := make(chan struct{})
+	backupTicks := time.NewTicker(24 * time.Hour)
+	go func() {
+		defer close(backupDone)
+		(&backupLoop{store: st, dir: filepath.Join(cfg.Data, "backups"), dest: cfg.BackupDest, recipient: recipient, now: time.Now, run: sshBackup}).start(backupCtx, backupTicks.C)
+	}()
+	defer func() { stopBackup(); backupTicks.Stop(); <-backupDone }()
 	if err := st.ResetEngineHosts(ctx); err != nil {
 		return fmt.Errorf("reset host identity: %w", err)
 	}
