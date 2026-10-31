@@ -122,6 +122,18 @@ func decodeEventBody(t EventType, data json.RawMessage) (EventBody, error) {
 			return nil, err
 		}
 		return v, nil
+	case "room.paused":
+		var v RoomPaused
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case "room.resumed":
+		var v RoomResumed
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case "rule.added":
 		var v RuleAdded
 		if err := json.Unmarshal(data, &v); err != nil {
@@ -249,7 +261,7 @@ func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs, error) {
 	}
 }
 
-var eventBodyTypes = []EventType{"box.changed", "box.pressure", "computer.changed", "conversation.read", "grant.expired", "host.disk_low", "image.built", "image.failed", "op.decided", "op.ran", "op.requested", "post.created", "pr.opened", "rule.added", "rule.edited", "rule.removed", "session.closed", "session.moved", "session.profile_changed", "session.restarted", "session.started", "shell.job.ended", "turn.activity", "turn.ended", "turn.started"}
+var eventBodyTypes = []EventType{"box.changed", "box.pressure", "computer.changed", "conversation.read", "grant.expired", "host.disk_low", "image.built", "image.failed", "op.decided", "op.ran", "op.requested", "post.created", "pr.opened", "room.paused", "room.resumed", "rule.added", "rule.edited", "rule.removed", "session.closed", "session.moved", "session.profile_changed", "session.restarted", "session.started", "shell.job.ended", "turn.activity", "turn.ended", "turn.started"}
 
 func (m BoxMessage) MarshalJSON() ([]byte, error) {
 	if m.Body == nil {

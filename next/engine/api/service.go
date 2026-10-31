@@ -27,6 +27,8 @@ type Service interface {
 	RuleRemove(context.Context, contract.Principal, contract.RuleRemoveRequest) (contract.RuleRemoveResponse, *contract.Error)
 	RuleEdit(context.Context, contract.Principal, contract.RuleEditRequest) (contract.RuleEditResponse, *contract.Error)
 	RuleList(context.Context, contract.Principal, contract.RuleListRequest) (contract.RuleListResponse, *contract.Error)
+	RoomPause(context.Context, contract.Principal, contract.RoomPauseRequest) (contract.RoomPauseResponse, *contract.Error)
+	SessionStop(context.Context, contract.Principal, contract.SessionStopRequest) (contract.SessionStopResponse, *contract.Error)
 	RoomList(context.Context, contract.Principal, contract.RoomListRequest) (contract.RoomListResponse, *contract.Error)
 	SessionList(context.Context, contract.Principal, contract.SessionListRequest) (contract.SessionListResponse, *contract.Error)
 	HostexecRun(context.Context, contract.Principal, contract.HostexecRunRequest) (contract.HostexecRunResponse, *contract.Error)

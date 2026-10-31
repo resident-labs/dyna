@@ -30,6 +30,8 @@ type client interface {
 	File(context.Context, string, io.Writer) error
 	Upload(context.Context, string) (contract.Attachment, error)
 	HostAdd(context.Context, contract.HostAddRequest) (contract.HostAddResponse, error)
+	RoomPause(context.Context, contract.RoomPauseRequest) (contract.RoomPauseResponse, error)
+	SessionStop(context.Context, contract.SessionStopRequest) (contract.SessionStopResponse, error)
 	RoomCreate(context.Context, contract.RoomCreateRequest) (contract.RoomCreateResponse, error)
 	RoomRepoAdd(context.Context, contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, error)
 	RoomRepos(context.Context, contract.RoomReposRequest) (contract.RoomReposResponse, error)
@@ -54,10 +56,10 @@ func newClient(socket string) *socketClient {
 }
 
 type requestType interface {
-	contract.RuleAddRequest | contract.RuleRemoveRequest | contract.RuleListRequest | contract.HostexecRunRequest | contract.HostexecRevokeRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest
+	contract.RoomPauseRequest | contract.SessionStopRequest | contract.RuleAddRequest | contract.RuleRemoveRequest | contract.RuleListRequest | contract.HostexecRunRequest | contract.HostexecRevokeRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest
 }
 type responseType interface {
-	contract.RuleAddResponse | contract.RuleRemoveResponse | contract.RuleListResponse | contract.HostexecRunResponse | contract.HostexecRevokeResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse
+	contract.RoomPauseResponse | contract.SessionStopResponse | contract.RuleAddResponse | contract.RuleRemoveResponse | contract.RuleListResponse | contract.HostexecRunResponse | contract.HostexecRevokeResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse
 }
 
 func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
@@ -154,6 +156,13 @@ func (e commandExit) Error() string { return fmt.Sprintf("command exited with st
 func (c *socketClient) HostAdd(ctx context.Context, q contract.HostAddRequest) (contract.HostAddResponse, error) {
 	return call[contract.HostAddRequest, contract.HostAddResponse](ctx, c, contract.MethodHostAdd, q)
 }
+func (c *socketClient) RoomPause(ctx context.Context, q contract.RoomPauseRequest) (contract.RoomPauseResponse, error) {
+	return call[contract.RoomPauseRequest, contract.RoomPauseResponse](ctx, c, contract.MethodRoomPause, q)
+}
+func (c *socketClient) SessionStop(ctx context.Context, q contract.SessionStopRequest) (contract.SessionStopResponse, error) {
+	return call[contract.SessionStopRequest, contract.SessionStopResponse](ctx, c, contract.MethodSessionStop, q)
+}
+
 func (c *socketClient) RoomCreate(ctx context.Context, q contract.RoomCreateRequest) (contract.RoomCreateResponse, error) {
 	return call[contract.RoomCreateRequest, contract.RoomCreateResponse](ctx, c, contract.MethodRoomCreate, q)
 }
@@ -339,6 +348,16 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	root.AddCommand(host)
 
 	room := &cobra.Command{Use: "room"}
+	for _, paused := range []bool{true, false} {
+		name := "resume"
+		if paused {
+			name = "pause"
+		}
+		room.AddCommand(&cobra.Command{Use: name + " ROOM", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := getClient().RoomPause(cmd.Context(), contract.RoomPauseRequest{Room: contract.RoomID(args[0]), Paused: paused})
+			return err
+		}})
+	}
 	var rootProfile string
 	create := &cobra.Command{Use: "create NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		r, err := getClient().RoomCreate(cmd.Context(), contract.RoomCreateRequest{Name: args[0], RootProfile: contract.ProfileName(rootProfile)})
@@ -413,6 +432,16 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	root.AddCommand(room)
 
 	session := &cobra.Command{Use: "session"}
+	session.AddCommand(&cobra.Command{Use: "stop SESSION", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := getClient().SessionStop(cmd.Context(), contract.SessionStopRequest{Session: contract.SessionID(args[0])})
+		if err != nil {
+			return err
+		}
+		if !result.Stopping {
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), "No turn is running.")
+		}
+		return err
+	}})
 	var roomID, name, profile, goal, brief, sessionRepo, parent, size string
 	start := &cobra.Command{Use: "start", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		r, err := getClient().SessionStart(cmd.Context(), contract.SessionStartRequest{Room: contract.RoomID(roomID), Name: name, Parent: contract.SessionID(parent), Repo: contract.RepoName(sessionRepo), Profile: contract.ProfileName(profile), Goal: goal, Brief: brief, Size: contract.BoxSizeName(size)})
