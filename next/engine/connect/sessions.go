@@ -32,8 +32,9 @@ type handoffCode struct {
 	End     time.Time
 }
 type grantCacheEntry struct {
-	Grant Grant
-	At    time.Time
+	Grant      Grant
+	At         time.Time
+	Generation int64
 }
 type rateEntry struct {
 	Start time.Time
@@ -83,6 +84,11 @@ func (s *Sessions) allow(key string, count int) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
+	for k, v := range s.rates {
+		if now.Sub(v.Start) >= time.Minute {
+			delete(s.rates, k)
+		}
+	}
 	x := s.rates[key]
 	if now.Sub(x.Start) >= time.Minute || now.Before(x.Start) {
 		x = rateEntry{Start: now}
@@ -287,7 +293,7 @@ func (s *Sessions) ServePublic(w http.ResponseWriter, r *http.Request, origin st
 		}
 		delete(s.grants, c.Dev)
 		if c.Dev != "" {
-			err = s.store.RevokeConnectDevice(r.Context(), c.Dev, s.now())
+			err = s.store.RevokeConnectDevice(r.Context(), c.Dev, c.Generation, s.now())
 		}
 		s.mu.Unlock()
 		if err != nil {
