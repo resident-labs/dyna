@@ -53,7 +53,7 @@ func TestPauseHoldsDeliveryUntilResume(t *testing.T) {
 	if _, problem := s.RoomPause(ctx, owner, contract.RoomPauseRequest{Room: room, Paused: true}); problem != nil {
 		t.Fatal(problem)
 	}
-	if _, problem := s.Post(ctx, owner, contract.PostRequest{Room: room, Text: "@worker hello"}); problem != nil {
+	if _, problem := s.Post(ctx, owner, contract.PostRequest{Room: room, Text: "@worker hello", Mentions: []string{"worker"}}); problem != nil {
 		t.Fatal(problem)
 	}
 	if _, problem := s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnCompleted}); problem != nil {
