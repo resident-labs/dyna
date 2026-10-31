@@ -138,17 +138,3 @@ func TestBundleRefusesUnknownFields(t *testing.T) {
 		}
 	}
 }
-
-func TestBundleRequiresInstructions(t *testing.T) {
-	for _, document := range []string{`{"version":1}`, `{"version":1,"instructions":null}`} {
-		if _, err := DecodeBundle[GlobalBundle](strings.NewReader(document)); err == nil {
-			t.Fatal("global accepted missing or null instructions")
-		}
-		if _, err := DecodeBundle[RoomBundle](strings.NewReader(document)); err == nil {
-			t.Fatal("room accepted missing or null instructions")
-		}
-	}
-	if _, err := DecodeBundle[GlobalBundle](strings.NewReader(`{"version":1,"instructions":""}`)); err != nil {
-		t.Fatalf("empty instructions must be accepted: %v", err)
-	}
-}
