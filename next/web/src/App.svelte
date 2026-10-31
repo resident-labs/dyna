@@ -260,8 +260,8 @@
   let palette = $state(false);
   let paletteOpener: HTMLElement | undefined;
   let jumpSeq: number | undefined = $state();
-  // This injected boundary is replaced by the generated post.search method when its contract lands.
-  const searchPosts: SearchCall = async () => { throw new Error("Search is not available"); };
+  // Author names for closed sessions will come from the search response when that contract lands.
+  const searchPosts: SearchCall = async request => ({ ...await call("post.search", request), names: null });
   function closePalette() {
     palette = false;
     void tick().then(() => (paletteOpener?.isConnected ? paletteOpener : composer)?.focus());

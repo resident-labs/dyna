@@ -1,10 +1,10 @@
 import { createSubscriber } from "svelte/reactivity";
-import type { Conversation, Principal } from "./contract.gen.ts";
+import type { PostSearchRequest, PostSearchResponse, SearchPost } from "./contract.gen.ts";
 
-// Temporary boundary until post.search joins the generated contract.
-export type PostHit = { seq: number; room: string; home: Conversation; author: Principal; time: string; text: string };
-export type SearchRequest = { query: string; room?: string; before?: number; limit?: number };
-export type SearchResponse = { posts: PostHit[] | null; total: number; names: Record<string, string> | null };
+// The names field anticipates the search contract for closed-session authors.
+export type PostHit = SearchPost;
+export type SearchRequest = PostSearchRequest;
+export type SearchResponse = PostSearchResponse & { names: Record<string, string> | null };
 export type SearchCall = (request: SearchRequest) => Promise<SearchResponse>;
 
 export class MessageSearch {
