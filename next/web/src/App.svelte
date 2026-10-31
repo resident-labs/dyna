@@ -146,7 +146,8 @@
     <div class="feed">
       {#if store && !unavailable}
         {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} empty={session ? "No messages yet." : "No posts yet."} />{/key}
-      {:else}<p class="empty">{unavailable || "Select a room."}</p>{/if}
+      {:else}<p class="empty">{unavailable || "Select a room."}
+        {#if store && unavailable && !signedOut(store.error)}<button type="button" class="retry" onclick={() => void store?.open()}>Try again</button>{/if}</p>{/if}
     </div>
     {#if room && !unavailable}
       <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title} />
