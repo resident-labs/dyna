@@ -66,6 +66,9 @@ func (p headProbe) ciVersion() string {
 
 var withHeadChunkTimeout = context.WithTimeout
 
+// headChunkNow reads the clock that parent deadlines use; tests replace it with a fake clock.
+var headChunkNow = time.Now
+
 // readHeads bounds each query and retries failed records in two halves once.
 func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]headProbe, map[string]RateLimit, error) {
 	const headBatchSize = 20
@@ -74,9 +77,18 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 	}
 	out := map[string]headProbe{}
 	var failures []error
+	var retries [][]*Record
 	for start := 0; start < len(records); start += headBatchSize {
 		chunk := records[start:min(start+headBatchSize, len(records))]
-		heads, _, err := g.readHeadChunk(ctx, chunk)
+		chunkCtx, stop := ctx, context.CancelFunc(func() {})
+		if deadline, ok := ctx.Deadline(); ok {
+			// Each remaining chunk gets an equal share of the time left, so a stall cannot take it all.
+			at := headChunkNow()
+			chunksLeft := (len(records) - start + headBatchSize - 1) / headBatchSize
+			chunkCtx, stop = context.WithDeadline(ctx, at.Add(deadline.Sub(at)/time.Duration(chunksLeft)))
+		}
+		heads, _, err := g.readHeadChunk(chunkCtx, chunk)
+		stop()
 		var rateErr *rateLimitError
 		if err != nil && !errors.As(err, &rateErr) && len(chunk) > 1 && ctx.Err() == nil {
 			// Preserve successful observations; only retry records that failed.
@@ -89,19 +101,7 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 				}
 			}
 			if len(failed) > 0 {
-				mid := (len(failed) + 1) / 2
-				for _, half := range [][]*Record{failed[:mid], failed[mid:]} {
-					if len(half) == 0 {
-						continue
-					}
-					retried, _, retryErr := g.readHeadChunk(ctx, half)
-					for k, p := range retried {
-						out[k] = p
-					}
-					if retryErr != nil {
-						failures = append(failures, retryErr)
-					}
-				}
+				retries = append(retries, failed)
 			}
 			continue
 		}
@@ -110,6 +110,22 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 		}
 		if err != nil {
 			failures = append(failures, err)
+		}
+	}
+	// Retry after every chunk ran once, so stalled retries cannot starve later chunks.
+	for _, failed := range retries {
+		mid := (len(failed) + 1) / 2
+		for _, half := range [][]*Record{failed[:mid], failed[mid:]} {
+			if len(half) == 0 {
+				continue
+			}
+			retried, _, retryErr := g.readHeadChunk(ctx, half)
+			for k, p := range retried {
+				out[k] = p
+			}
+			if retryErr != nil {
+				failures = append(failures, retryErr)
+			}
 		}
 	}
 	return out, g.requests.rates, errors.Join(failures...)
@@ -212,7 +228,7 @@ func (g GitHub) readHeadChunk(ctx context.Context, records []*Record) (map[strin
 		}
 		query.WriteString("}")
 		g.requests.account = group.login
-		requestCtx, cancel := withHeadChunkTimeout(ctx, 3*time.Second)
+		requestCtx, cancel := withHeadChunkTimeout(ctx, 10*time.Second)
 		body, _, callErr := g.requestMethod(ghclient.WithRoom(requestCtx, grouped[repos[0]][0].RoomID), Ref{Host: host, Repo: repos[0]}, "graphql", "POST", "-f", "query="+query.String())
 		cancel()
 		if errors.Is(callErr, context.DeadlineExceeded) || (callErr != nil && strings.Contains(callErr.Error(), "GitHub HTTP status 504")) {
