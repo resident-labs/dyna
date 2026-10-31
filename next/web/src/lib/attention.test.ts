@@ -10,12 +10,13 @@ const decision = { by: { kind: "owner" }, approved: true, at: "" } as const;
 test("room.list seeds each room's waiting requests and working sessions, and the owner stream updates them", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({ seq: 5, rooms: [
-    { id: "a", name: "A", created: "", waiting: ["o1"], working: ["s1"] }, { id: "b", name: "B", created: "", waiting: null, working: null }] }));
+    { id: "a", name: "A", created: "", waiting: ["o1"], working: ["s1"], latest: { session: "s1", name: "lead", label: "booting" } }, { id: "b", name: "B", created: "", waiting: null, working: null }] }));
   const urls: string[] = [];
   try {
     const attention = new Attention((room, after, apply) => { urls.push(`${room}/${after()}`); return () => {}; });
     await attention.open();
     assert.deepEqual(urls, ["undefined/5"]);
+    assert.equal(attention.activity.get("s1"), "booting");
     // Events at or before the list's seq are already in it.
     attention.apply(event(5, "a", { type: "turn.ended", body: { session: "s1", turn: "t", outcome: "completed", usage: { model: "m", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } } }));
     attention.apply(event(6, "b", { type: "op.requested", body: { id: "o2", kind: "k", by: { kind: "owner" }, class: "owner", card, expires: "" } }));
@@ -37,7 +38,8 @@ test("room.list seeds each room's waiting requests and working sessions, and the
     assert.deepEqual([...attention.activity], [["s1", "read spec.md"], ["s2", "edited App.svelte"]]);
     label("s1", "t0", "stale turn");
     label("s1", "t1", "ran node --test");
-    assert.equal(attention.activity.get("s1"), "ran node --test");
+    // The newest label is last, so it names the room's busiest agent.
+    assert.deepEqual([...attention.activity], [["s2", "edited App.svelte"], ["s1", "ran node --test"]]);
     // A session closed during its turn sends no turn.ended.
     attention.apply(event(10, "a", { type: "session.closed", body: { session: "s1" } }));
     assert.equal(attention.working.get("a")!.size, 0);
