@@ -503,7 +503,7 @@ M1 methods: `host.add`, `room.create`, `session.start`, `session.close`, `post`,
 
 ### 4.1 Rules
 
-- One SQLite file, `store.db`, in the data folder. The name differs from v1's `dyna.db`, so v2 never opens a v1 file by mistake. WAL mode, `synchronous=NORMAL`, `foreign_keys=ON`, `auto_vacuum=INCREMENTAL` from creation (D-582).
+- One SQLite file, `store.db`, in the data folder. An exclusive `store.lock` prevents two engines from using that folder. The name differs from v1's `dyna.db`, so v2 never opens a v1 file by mistake. WAL mode, `synchronous=NORMAL`, `foreign_keys=ON`, `auto_vacuum=INCREMENTAL` from creation (D-582).
 - **Declarative schema.** `engine/store/schema.sql` is the full, current schema. A fresh store runs it. An existing store runs the numbered steps in `engine/store/steps.go` from its `schema_version` up. After the steps, the engine compares the live schema with `schema.sql` and refuses to start if they differ. A unit test proves that the steps from the floor version give exactly `schema.sql`.
 - **The floor.** `steps.go` starts at a floor version. Steps below it are deleted once every known store has passed them (rules r17 and r18). A store below the floor gets `store_too_old` with the commit to update through.
 - **The upgrade guard.** Before it opens anything, the engine checks the data folder. If `dyna.db` exists and `store.db` does not, it stops with `store_from_v1` and the text in section 8.4, which names the export step. The engine never opens or changes a v1 file. A `store.db` without `meta.format = 'dyna-v2'` is refused too.
