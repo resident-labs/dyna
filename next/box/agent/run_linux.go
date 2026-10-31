@@ -92,6 +92,9 @@ func Run(ctx context.Context) error {
 		return setupRepos(ctx, "/box/work", hello.Repos, hello.GitName, hello.GitEmail, runGit)
 	}
 	setupErr := setup(ctx)
+	if setupErr != nil {
+		return setupErr
+	}
 	for _, link := range []struct{ path, target string }{
 		{"/box/pi/AGENTS.md", "/run/dyna/instructions/global/AGENTS.md"},
 		{"/box/work/AGENTS.md", "/run/dyna/instructions/room/AGENTS.md"},
@@ -148,7 +151,11 @@ func Run(ctx context.Context) error {
 	go func() { errs <- server.Serve(listener) }()
 	args = append(args, "--append-system-prompt", hello.Instructions)
 	args = append(args, "--mode", "rpc", "--models-file", modelsPath, "--session-dir", sessions, "--mcp-config", mcpPath, "--exclude-tools", "bash", "--continue")
-	h, err := pi.Open(ctx, "pi", args, "", "/box/work")
+	workdir := "/box/work"
+	if len(hello.Repos) > 0 {
+		workdir = filepath.Join(workdir, string(hello.Repos[0].Name))
+	}
+	h, err := pi.Open(ctx, "pi", args, "", workdir)
 	if err != nil {
 		return err
 	}
