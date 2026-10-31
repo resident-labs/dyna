@@ -230,14 +230,10 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 		if req.AfterSeq != 0 || req.BeforeSeq != 0 || req.Home != nil || len(req.Types) != 0 {
 			return contract.EventsListResponse{}, invalid("event lookup cannot have filters")
 		}
-		var seq int64
-		err = s.store.Read().QueryRowContext(ctx, "SELECT seq FROM events WHERE id=? AND room=?", req.Event, req.Room).Scan(&seq)
+		var event contract.Event
+		event, err = s.store.EventInRoom(ctx, req.Room, req.Event)
 		if err == nil {
-			var event contract.Event
-			event, err = s.store.Event(ctx, seq)
-			if err == nil {
-				events = append(events, event)
-			}
+			events = append(events, event)
 		} else if errors.Is(err, sql.ErrNoRows) {
 			err = nil
 		}
