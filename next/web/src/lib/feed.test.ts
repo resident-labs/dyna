@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { commandLine, feedRows, fileSize, formatTime, fromNow, isImage, quoted, workSummary } from "./feed.ts";
+import { commandLine, dayLabel, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, quoted, workSummary } from "./feed.ts";
 import type { BoxState, Event, EventBody, FailureCause, Principal } from "./contract.gen.ts";
 
 test("a forward quotes every line of the post under its label, then the owner's words", () => {
@@ -30,6 +30,8 @@ const lead: Principal = { kind: "session", session: "l" };
 function event(seq: number, body: EventBody, from: Principal = { kind: "engine" }): Event {
   return { seq, id: String(seq), at: "", from, ...body };
 }
+// These cases leave out the day rows; one case below covers them.
+const feedRows = (...args: Parameters<typeof dayRows>) => dayRows(...args).filter(row => row.kind !== "day");
 const usage = { model: "m", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 const names: Record<string, string> = { l: "lead-web" };
 
@@ -93,4 +95,14 @@ test("names every mention and starts a new run when the mentions change", () => 
   const to = (seq: number, mentions: Principal[]) => event(seq, { type: "post.created", body: { text: "x", home: { kind: "feed" }, mentions } }, owner);
   const rows = feedRows([to(1, [lead, root]), to(2, [lead, root]), to(3, [lead])], { kind: "feed" });
   assert.deepEqual(rows.map(row => row.kind === "post" && [row.first, row.to.length]), [[true, 2], [false, 2], [true, 1]]);
+});
+
+test("starts each local day with a day row, which also starts a new name line", () => {
+  const owner: Principal = { kind: "owner" };
+  const at = (seq: number, day: number) => ({ ...event(seq, { type: "post.created", body: { text: "x", home: { kind: "feed" } } }, owner), at: new Date(2026, 9, day, 12).toISOString() });
+  const rows = dayRows([at(1, 30), at(2, 30), at(3, 31)], { kind: "feed" });
+  assert.deepEqual(rows.map(row => row.kind === "post" ? row.first : row.kind), ["day", true, false, "day", true]);
+  const now = new Date(2026, 9, 31, 18).getTime();
+  assert.deepEqual(rows.flatMap(row => row.kind === "day" ? [dayLabel(row.at, now)] : []), ["Yesterday", "Today"]);
+  assert.equal(dayLabel(new Date(2026, 9, 24, 12).toISOString(), now), "Saturday, October 24");
 });
