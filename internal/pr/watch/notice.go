@@ -118,7 +118,11 @@ func systemReviewNotice(r *Record, target, text, token string) {
 // Cleanup remains a separate informational notice. All merge observation
 // paths call endRecord, including publication by the merge engine.
 func outcomeNotice(r *Record) {
-	id := "msg_" + digest(r.Key + "/outcome/" + string(r.State))[:16]
+	token := r.Key + "/outcome/" + string(r.State)
+	if r.State == state.PRClosed && r.CloseEpisode > 0 {
+		token += fmt.Sprintf("/%d", r.CloseEpisode)
+	}
+	id := "msg_" + digest(token)[:16]
 	for _, n := range r.Notices {
 		if n.ID == id {
 			return
