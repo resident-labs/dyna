@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"dyna-agent/internal/pr/issuewatch"
 	"dyna-agent/internal/repoid"
@@ -240,17 +241,34 @@ func (s *Service) pollIssueWatches(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if len(watches) == 0 {
+		return false, nil
+	}
+	if s.Store == nil {
+		return true, fmt.Errorf("issue watcher needs a polling store")
+	}
+	st, err := s.Store.Read()
+	if err != nil {
+		return true, err
+	}
+	rates := cloneRates(st.RateLimits)
 	var first error
 	for _, w := range watches {
 		if err := ctx.Err(); err != nil {
-			return true, errors.Join(first, err)
+			first = errors.Join(first, err)
+			break
 		}
-		first = errors.Join(first, s.pollIssueWatch(ctx, w))
+		first = errors.Join(first, s.pollIssueWatch(ctx, w, rates, st.LegacyPause))
 	}
-	return len(watches) > 0, first
+	// Persist observations even when a request fails or the context expires.
+	first = errors.Join(first, s.Store.update(func(current *State) error {
+		applyRateLimits(current, rates, s.now())
+		return nil
+	}))
+	return true, first
 }
 
-func (s *Service) pollIssueWatch(ctx context.Context, w issuewatch.Watch) error {
+func (s *Service) pollIssueWatch(ctx context.Context, w issuewatch.Watch, rates map[string]RateLimit, legacyPause time.Time) error {
 	rec, err := s.roomsStore().Resolve(w.Room)
 	if err != nil {
 		return err
@@ -262,7 +280,7 @@ func (s *Service) pollIssueWatch(ctx context.Context, w issuewatch.Watch) error 
 		return err
 	}
 	entries[key] = cachedResponse{ETag: w.ETag, Body: json.RawMessage(w.Body)}
-	cache := &requestCache{entries: entries, used: map[string]cachedResponse{}, now: s.now}
+	cache := &requestCache{entries: entries, used: map[string]cachedResponse{}, rates: rates, legacyPause: legacyPause, now: s.now}
 	gh := s.github(rec.ID)
 	gh.requests = cache
 	var issue issueObject
