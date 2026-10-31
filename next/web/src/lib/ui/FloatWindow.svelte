@@ -11,16 +11,16 @@
   import { clamp, dragged, type Edges, type Rect } from "../float.ts";
   // A view that floats as a window over the app or docks in its place in the layout. Docking changes
   // only the style, so the content never remounts. The rect belongs to the caller, so the window keeps
-  // its place and size for the page view.
-  let { label, docked, rect = $bindable(), element = $bindable(), kind, header, children, onkeydown }: {
-    label: string; docked: boolean; rect: Rect; element?: HTMLElement; kind: string;
+  // its place and size for the page view. Full, it fills the screen, as on a phone, and does not move.
+  let { label, docked, full = false, rect = $bindable(), element = $bindable(), kind, header, children, onkeydown }: {
+    label: string; docked: boolean; full?: boolean; rect: Rect; element?: HTMLElement; kind: string;
     header: Snippet; children: Snippet; onkeydown?: (event: KeyboardEvent) => void;
   } = $props();
   const fit = (next: Rect) => clamp(next, window.innerWidth, window.innerHeight);
   // One pointer gesture on the title bar or a handle, followed on the window until the pointer
   // goes up, as in v1.
   function grab(event: PointerEvent, edges: Edges) {
-    if (docked || event.button !== 0 || event.target instanceof Element && event.target.closest("button")) return;
+    if (docked || full || event.button !== 0 || event.target instanceof Element && event.target.closest("button")) return;
     event.preventDefault();
     const start = rect, x = event.clientX, y = event.clientY;
     const move = (next: PointerEvent) => { rect = fit(dragged(start, edges, next.clientX - x, next.clientY - y)); };
@@ -34,7 +34,7 @@
   // Alt with an arrow key moves the floating window by 24 px; other keys go to the caller.
   function key(event: KeyboardEvent) {
     const step = { ArrowLeft: [-24, 0], ArrowRight: [24, 0], ArrowUp: [0, -24], ArrowDown: [0, 24] }[event.key];
-    if (docked || !event.altKey || !step) { onkeydown?.(event); return; }
+    if (docked || full || !event.altKey || !step) { onkeydown?.(event); return; }
     event.preventDefault();
     rect = fit({ ...rect, x: rect.x + step[0], y: rect.y + step[1] });
   }
@@ -42,14 +42,14 @@
 
 <svelte:window onresize={() => { if (!docked) rect = fit(rect); }} />
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions (Alt with an arrow key acts on the whole window) -->
-<section class="window {kind}" class:floating={!docked} aria-label={label} tabindex="-1" bind:this={element} onkeydown={key}
-  style:left={docked ? null : `${rect.x}px`} style:top={docked ? null : `${rect.y}px`}
-  style:width={docked ? null : `${rect.w}px`} style:height={docked ? null : `${rect.h}px`}
+<section class="window {kind}" class:floating={!docked} class:full aria-label={label} tabindex="-1" bind:this={element} onkeydown={key}
+  style:left={docked || full ? null : `${rect.x}px`} style:top={docked || full ? null : `${rect.y}px`}
+  style:width={docked || full ? null : `${rect.w}px`} style:height={docked || full ? null : `${rect.h}px`}
 >
   <!-- svelte-ignore a11y_no_static_element_interactions (dragging is for the pointer; Alt with an arrow key moves the window) -->
   <header class="label" onpointerdown={event => grab(event, [1, 1, 1, 1])}>{@render header()}</header>
   {@render children()}
-  {#if !docked}{#each handles as [side, edges] (side)}
+  {#if !docked && !full}{#each handles as [side, edges] (side)}
     <!-- svelte-ignore a11y_no_static_element_interactions (resizing is for the pointer) -->
     <div class="handle {side}" onpointerdown={event => grab(event, edges)}></div>{/each}{/if}
 </section>
@@ -61,6 +61,11 @@
   .floating { position: fixed; z-index: 3; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 12px 32px rgb(0 0 0 / 28%); }
   header { gap: 6px; padding: 0 6px 0 12px; }
   .floating header { height: 40px; cursor: grab; user-select: none; touch-action: none; }
+  /* Full screen: no frame, clear of the notch and the home bar; its one focus is the window itself, so no ring. */
+  .full { inset: 0; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); border: 0; border-radius: 0; box-shadow: none; }
+  .full:focus-visible { outline: none; }
+  .full header { box-sizing: content-box; padding-top: env(safe-area-inset-top); cursor: default; }
+  .full header :global(button) { width: 40px; height: 40px; }
   header :global(button) { all: unset; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--muted); cursor: pointer; }
   header :global(button:hover) { background: var(--hover); color: var(--text); }
   header :global(button:focus-visible) { outline: 2px solid var(--focus); outline-offset: 0; }
