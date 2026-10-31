@@ -19,7 +19,7 @@ INSERT INTO pr_rows VALUES ('r','owner/repo',7,0,'{"record":{"host":"github.com"
 		t.Fatal(err)
 	}
 	author := func(s string) (contract.ImportedAuthor, error) {
-		return contract.ImportedAuthor{Kind: contract.PrincipalSession, Label: s}, nil
+		return contract.ImportedAuthor{Kind: contract.PrincipalSession, Label: contract.V1Address(s)}, nil
 	}
 	got, _, err := readPRs(db, "r", author)
 	if err != nil {
