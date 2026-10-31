@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
   import { RoomStore } from "./lib/room.svelte.ts";
-  import { APIError, call } from "./lib/client.ts";
+  import { APIError } from "./lib/client.ts";
   import Feed from "./lib/ui/Feed.svelte";
   import StatusPill from "./lib/ui/StatusPill.svelte";
   import Composer from "./lib/ui/Composer.svelte";
@@ -11,14 +11,17 @@
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
   import { count } from "./lib/feed.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
+  import Home from "./lib/ui/Home.svelte";
   import { MediaQuery, SvelteSet } from "svelte/reactivity";
   import RoomMenu, { type Section } from "./lib/ui/RoomMenu.svelte";
   import RequestsPanel from "./lib/ui/RequestsPanel.svelte";
-  import type { Conversation, RoomSummary, SessionStarted } from "./lib/contract.gen.ts";
+  import { Attention } from "./lib/attention.svelte.ts";
+  import type { Conversation, SessionStarted } from "./lib/contract.gen.ts";
   const signedOut = (error: unknown) => error instanceof APIError && error.detail.code === "forbidden";
-  let rooms: RoomSummary[] = $state([]);
+  const attention = new Attention();
+  let rooms = $derived([...attention.rooms.values()]);
   let roomsError = $state("");
-  void call("room.list", {}).then(result => { rooms = result.rooms ?? []; }).catch((error: unknown) => {
+  void attention.open().catch((error: unknown) => {
     roomsError = signedOut(error) ? "Your sign-in ended. Run dyna web to sign in again." : "Rooms are not available.";
   });
   let path = $state(window.location.pathname);
@@ -119,7 +122,7 @@
     const index = links.indexOf(event.currentTarget);
     links[Math.max(0, Math.min(links.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)))]?.focus();
   }
-  let roomName = $derived(rooms.find(item => item.id === room)?.name ?? "Room");
+  let roomName = $derived(attention.rooms.get(room ?? "")?.name ?? "Room");
   // A session's muted status line shows only state that matters: a running turn with its latest activity, or a
   // starting box. An idle session has none; its profile is the row's hover title.
   const status = (id: string) => {
@@ -150,9 +153,7 @@
     panel = open;
     if (open) { await tick(); members?.focus(); } else if (held) toggle?.focus();
   }
-  let title = $derived(!room ? "Welcome" : session ? store?.names.get(session) ?? "Session" : roomName);
-  // The open room's icon gets a dot while a request waits for the owner; other rooms need cross-room counts first.
-  let waiting = $derived((store?.waiting ?? 0) > 0);
+  let title = $derived(!room ? "Home" : session ? store?.names.get(session) ?? "Session" : roomName);
   // Each fact shows once: profile, state and trouble live on the session's row. A closed session has no row.
   let closed = $derived(!!session && !!store?.ready && !store.sessions.has(session));
   const trouble = (id: string) => {
@@ -170,10 +171,12 @@
 <svelte:window onkeydown={cycle} />
 <div class="shell" class:open={room}>
   <aside class="rail" aria-label="Rooms" tabindex="-1" bind:this={rail}>
-    <nav aria-label="Rooms">{#each rooms as item (item.id)}
+    <nav aria-label="Rooms"><a class="home" href="/" onclick={navigate} aria-current={room ? undefined : "page"} aria-label="Home" title="Home"><Icon name="home" /></a>
+      <!-- A room's dot shows while a request waits for the owner. -->
+      {#each rooms as item (item.id)}{@const waiting = !!attention.waiting.get(item.id)?.size}
       <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id ? "page" : undefined}
-        aria-label={room === item.id && waiting ? `${item.name}, requests waiting` : item.name} title={item.name}>
-        <Avatar kind="room" name={item.name} size={40} />{#if room === item.id && waiting}<span class="waiting"></span>{/if}</a>
+        aria-label={waiting ? `${item.name}, requests waiting` : item.name} title={item.name}>
+        <Avatar kind="room" name={item.name} size={40} />{#if waiting}<span class="waiting"></span>{/if}</a>
     {/each}</nav>
     <footer><Avatar kind="owner" name="You" size={32} /></footer>
   </aside>
@@ -187,7 +190,8 @@
         {#if store?.failed.size && !panel}<span class="attention"></span>{/if}</button>{/if}</header>
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={requests} {store} room={roomName} onback={() => void closeSection()} />
     {:else}<div class="feed">
-      {#if store && !unavailable}
+      {#if !room && !roomsError}<Home {attention} {navigate} onrequests={() => { section = "requests"; }} />
+      {:else if store && !unavailable}
         {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} {intro} />{/key}
       {:else}<p class="empty">{unavailable || roomsError || (rooms.length ? "Select a room." : "Your rooms will appear here.")}
         {#if store && unavailable && !signedOut(store.error)}<button type="button" class="retry" onclick={() => void store?.open()}>Try again</button>{/if}</p>{/if}
