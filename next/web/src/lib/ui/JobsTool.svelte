@@ -13,9 +13,9 @@
   // it, or a sheet on a phone, with the jobs grouped by session; a job opens as a dock tab (onopen), or on a phone as
   // a full-height sheet. The lists watch each session's jobs only while they are open and the page is visible.
   type JobSession = { id: string; name: string; root: boolean; running: number };
-  let { sessions, failures, phone, onopen, onterminal, onseen }: {
+  let { sessions, failures, phone, onopen, onseen }: {
     sessions: JobSession[]; failures: string[]; phone: boolean;
-    onopen: (session: JobSession, job: ShellJob) => void; onterminal: () => void; onseen: (key: string) => void;
+    onopen: (session: JobSession, job: ShellJob) => void; onseen: (key: string) => void;
   } = $props();
 
   let open = $state(false);
@@ -68,7 +68,7 @@
     const index = rows.findIndex(row => row === document.activeElement);
     rows[Math.max(0, Math.min(rows.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)))]?.focus();
   }
-  const state = (job: ShellJob, session: JobSession) => job.running ? "Running" : failed(job) ? endCause(job, session.name)
+  const stateText = (job: ShellJob, session: JobSession) => job.running ? "Running" : failed(job) ? endCause(job, session.name)
     : `${endCause(job, session.name)}${jobTime(job) ? ` · ${jobTime(job)}` : ""}`;
 </script>
 
@@ -76,7 +76,7 @@
   <button type="button" class="job" onclick={() => pick(session, job)}>
     <span class="dot">{#if job.running}<StatusPill tone="working" dot label="Running" />{:else if failed(job)}<StatusPill tone="failed" dot label="Failed" />{/if}</span>
     <span class="lines"><span class="title">{jobTitle(job)}</span><code>{job.command}</code></span>
-    <span class="state" class:bad={failed(job)}>{state(job, session)}</span>
+    <span class="state" class:bad={failed(job)}>{stateText(job, session)}</span>
   </button>
 {/snippet}
 
@@ -102,8 +102,7 @@
         <div class="head"><strong>Jobs</strong>{#if counts}<span class="counts">{counts}</span>{/if}<span class="space"></span>
           {#if sessions.length > 1}<label class="filter"><span class="hidden">Show the jobs of</span><select bind:value={only}>
             <option value={undefined}>All sessions</option>{#each sessions as session (session.id)}<option value={session.id}>{session.name}</option>{/each}</select>
-            <Icon name="chevron" size={12} /></label>{/if}
-          {#if !phone}<button type="button" class="mini" onclick={() => { open = false; onterminal(); }}><Icon name="plus" size={14} />New terminal</button>{/if}</div>
+            <Icon name="chevron" size={12} /></label>{/if}</div>
         <!-- svelte-ignore a11y_no_noninteractive_tabindex (the list takes the arrow keys) -->
         <div class="list" role="group" aria-label="Background jobs" tabindex="-1" bind:this={list}>
           {#each groups as group (group.session)}{@const session = names.get(group.session)}{#if session}
@@ -149,10 +148,6 @@
   .filter select:focus-visible { outline: 2px solid var(--focus); }
   .filter :global(svg) { position: absolute; right: 6px; pointer-events: none; }
   .hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  .mini { all: unset; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--firm);
-    color: var(--muted); font-size: 12.5px; font-weight: 500; cursor: pointer; }
-  .mini:hover { background: var(--hover); color: var(--text); }
-  .mini:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .list { min-height: 0; overflow-y: auto; padding: 0 6px 6px; }
   .list:focus { outline: none; }
   .session { display: flex; align-items: center; gap: 6px; margin: 10px 10px 2px; color: var(--muted); font-size: 12.5px; font-weight: 600; }
