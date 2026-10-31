@@ -13,6 +13,7 @@
     "@tanstack/virtual-core": "^3.19.9",
     "dompurify": "^3.4.17",
     "marked": "^18.1.2",
+    "qrcode-generator": "^2.0.4",
     "svelte": "^5.0.0"
   },
   "devDependencies": {

@@ -16,6 +16,7 @@ type Device struct {
 	LastSeenAt time.Time `json:"lastSeenAt"`
 	ExpiresAt  time.Time `json:"expiresAt"`
 	Scopes     []Scope   `json:"scopes"`
+	Current    bool      `json:"current"` // the device that made this call
 }
 type DevicePairRequest struct {
 	Scopes []Scope `json:"scopes"`
@@ -23,6 +24,7 @@ type DevicePairRequest struct {
 type DevicePairResponse struct {
 	Code      string    `json:"code"`
 	ExpiresAt time.Time `json:"expiresAt"`
+	Routes    []string  `json:"routes"` // configured public origins; a loopback page cannot name one itself
 }
 type DeviceListRequest struct{}
 type DeviceListResponse struct {

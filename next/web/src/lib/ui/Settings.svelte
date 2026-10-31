@@ -1,0 +1,71 @@
+<script lang="ts">
+  import { untrack, type Snippet } from "svelte";
+  import { APIError, call, SignedOut } from "../client.ts";
+  import DevicesPane from "./DevicesPane.svelte";
+  import Icon, { type IconName } from "./Icon.svelte";
+  import type { Device } from "../contract.gen.ts";
+  // The Settings page, in the feed's and the sidebar's place. It opens over the app, so the room behind keeps its feed,
+  // its position and its draft. A wide page opens the first pane. A phone opens the pane list, and a pane's arrow returns to it.
+  let { path, phone, navigate, onmenu, signedout, element = $bindable(), menu = $bindable() }: { path: string; phone: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void;
+    onmenu: (event: MouseEvent) => void; signedout: () => void; element?: HTMLElement; menu?: HTMLButtonElement } = $props();
+
+  // device.list needs admin, so its refusal tells that this device has no Devices pane (spec 7.8).
+  let devices: Device[] | undefined = $state.raw();
+  let admin = $state(true), failed = $state(false);
+  function reload() {
+    call("device.list", {}).then(list => { devices = list.devices ?? []; admin = true; failed = false; }, (error: unknown) => {
+      if (error instanceof SignedOut) signedout();
+      else if (error instanceof APIError && error.detail.code === "forbidden") admin = false;
+      // A failed poll keeps the list and the pair card on screen.
+      else if (!devices) failed = true;
+    });
+  }
+  untrack(reload);
+
+  let panes: { id: string; label: string; icon: IconName }[] = $derived(admin ? [{ id: "devices", label: "Devices", icon: "devices" }] : []);
+  let shown = $derived(panes.find(pane => path === `/settings/${pane.id}`) ?? (phone ? undefined : panes[0]));
+</script>
+
+{#snippet bar(title: string, count?: number, action?: Snippet)}
+  <header>{#if phone}<a class="round" href="/settings" onclick={navigate} aria-label="Back to Settings" title="Back to Settings"><Icon name="backChevron" /></a>{/if}
+    <strong>{title}</strong>{#if count !== undefined}<span class="count">{count}</span>{/if}{@render action?.()}</header>
+{/snippet}
+
+<section class="settings" aria-label="Settings" tabindex="-1" bind:this={element}>
+  {#if !phone}<aside class="nav"><header><strong>Settings</strong></header>
+    <nav aria-label="Settings panes">{#each panes as pane (pane.id)}
+      <a href={`/settings/${pane.id}`} onclick={navigate} aria-current={shown === pane ? "page" : undefined}><Icon name={pane.icon} />{pane.label}</a>{/each}</nav></aside>{/if}
+  <div class="pane">
+    {#if shown?.id === "devices"}<DevicesPane {devices} {failed} {reload} {signedout} {bar} />
+    {:else}
+      <header><button type="button" class="round menu" bind:this={menu} aria-label="Rooms and pages" title="Rooms and pages" onclick={onmenu}><Icon name="menu" /></button><strong>Settings</strong></header>
+      {#if panes.length}<nav class="list" aria-label="Settings panes">{#each panes as pane (pane.id)}
+        <a href={`/settings/${pane.id}`} onclick={navigate}><Icon name={pane.icon} />{pane.label}<Icon name="forwardChevron" /></a>{/each}</nav>
+      {:else}<p class="empty">This device has no settings it can change.</p>{/if}
+    {/if}
+  </div>
+</section>
+
+<style>
+  /* Over the room column and the sessions panel, under the phone's drawer; the rail stays. */
+  .settings { position: fixed; z-index: 1; top: env(safe-area-inset-top); right: 0; left: calc(64px + env(safe-area-inset-left)); height: calc(var(--app-height, 100dvh) - env(safe-area-inset-top));
+    display: grid; grid-template-columns: 220px minmax(0, 1fr); background: var(--bg); }
+  .settings:focus-visible { outline: none; }
+  header strong, header .count { font-size: 16px; }
+  .nav { min-height: 0; }
+  .nav nav { display: grid; gap: 2px; padding: 8px; }
+  .nav a { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border-radius: 6px; color: var(--muted); font-size: 14px; font-weight: 500; text-decoration: none; }
+  .nav a:hover { background: var(--hover); color: var(--text); }
+  .nav a[aria-current="page"] { background: var(--selected); color: var(--text); }
+  .pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .round { display: grid; place-items: center; flex: none; width: 40px; height: 40px; margin: 0 -8px 0 -10px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; }
+  .menu { display: none; }
+  .list { padding: 8px; }
+  .list a { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 8px; border-radius: 6px; color: var(--text); font-size: 15px; font-weight: 500; text-decoration: none; }
+  .list a :global(svg:last-child) { margin-left: auto; color: var(--muted); }
+  .empty { margin: 24px; color: var(--muted); font-size: 14px; }
+  @media (max-width: 640px) {
+    .settings { left: env(safe-area-inset-left); grid-template-columns: minmax(0, 1fr); }
+    .menu { display: grid; }
+  }
+</style>
