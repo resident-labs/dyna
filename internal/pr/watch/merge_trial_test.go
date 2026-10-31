@@ -593,6 +593,29 @@ func TestBatchTrialFailureLeavesMainUntouched(t *testing.T) {
 	}
 }
 
+func TestPublishedTrialFinishesWhenCheckoutWasRemoved(t *testing.T) {
+	f := mergeTrialEnv(t, 1)
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	f.e.s.CleanupMerged = nil
+	if err := f.e.s.Store.update(func(st *State) error {
+		r := st.Records["github.com/owner/repo#1"]
+		r.LookupDir, r.Dir, r.RepoPath = t.TempDir()+"/removed", "", ""
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.ci = "completed"
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	st, err := f.e.s.Store.Read()
+	if err != nil || len(st.MergeTrials) != 0 || st.Records["github.com/owner/repo#1"].Watching {
+		t.Fatalf("published trial did not finish: trials=%+v error=%v", st.MergeTrials, err)
+	}
+}
+
 func TestBatchTrialKeepsStateUntilMergeIsRecorded(t *testing.T) {
 	f := mergeTrialEnv(t, 1)
 	if _, err := f.e.s.MergeTick(t.Context()); err != nil {

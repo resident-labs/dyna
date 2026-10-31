@@ -1109,8 +1109,18 @@ func (s *Service) finishProcess(ctx context.Context, key string, snap Snapshot, 
 		if s.CleanupMerged != nil {
 			issueErr = errors.Join(issueErr, s.CleanupMerged(ctx, *out.merged, snap.Pull.Head.Ref))
 		} else {
-			_, err := maintenance.CleanBranch(ctx, []string{repo}, snap.Pull.Head.Ref)
-			issueErr = errors.Join(issueErr, err)
+			// The author checkout can disappear before this retry. There is
+			// nothing left to clean there; use another saved checkout if present.
+			cleanupRepo := repo
+			if _, err := os.Stat(cleanupRepo); errors.Is(err, os.ErrNotExist) {
+				cleanupRepo = out.merged.RepoPath
+			}
+			if cleanupRepo != "" {
+				if _, err := os.Stat(cleanupRepo); !errors.Is(err, os.ErrNotExist) {
+					_, err = maintenance.CleanBranch(ctx, []string{cleanupRepo}, snap.Pull.Head.Ref)
+					issueErr = errors.Join(issueErr, err)
+				}
+			}
 		}
 	}
 	if err := errors.Join(issueErr, cleanupErr); err != nil {
