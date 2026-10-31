@@ -7,7 +7,9 @@ import (
 	"errors"
 	"io"
 	"log"
+	"math"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -69,6 +71,10 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 			Index    string `json:"auth_index"`
 			Provider string `json:"provider"`
 			Label    string `json:"label"`
+			Quota    struct {
+				ObservedAt *time.Time        `json:"observed_at"`
+				Signals    map[string]string `json:"signals"`
+			} `json:"quota"`
 		} `json:"files"`
 	}
 	if json.Unmarshal(data, &list) != nil {
@@ -77,6 +83,31 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 	result := contract.AccountsQuotaResponse{Accounts: []contract.AccountUsage{}}
 	for _, file := range list.Files {
 		usage := contract.AccountUsage{Provider: file.Provider, Label: file.Label, Windows: []contract.UsageWindow{}}
+		if file.Provider == "codex" && file.Quota.ObservedAt != nil && !file.Quota.ObservedAt.IsZero() {
+			usage.ObservedAt = file.Quota.ObservedAt
+			headers := http.Header{}
+			for key, value := range file.Quota.Signals {
+				headers.Set(key, value)
+			}
+			for _, name := range []string{"primary", "secondary"} {
+				prefix := "X-Codex-" + name + "-"
+				used, err := strconv.ParseFloat(headers.Get(prefix+"Used-Percent"), 64)
+				if err != nil || math.IsNaN(used) || math.IsInf(used, 0) || used < 0 || used > 100 {
+					continue
+				}
+				var seconds int64
+				if minutes, err := strconv.ParseInt(headers.Get(prefix+"Window-Minutes"), 10, 32); err == nil && minutes > 0 {
+					seconds = minutes * 60
+				}
+				var reset time.Time
+				if n, err := strconv.ParseInt(headers.Get(prefix+"Reset-At"), 10, 64); err == nil && n > 0 {
+					reset = time.Unix(n, 0).UTC()
+				} else if n, err := strconv.ParseInt(headers.Get(prefix+"Reset-After-Seconds"), 10, 32); err == nil && n >= 0 {
+					reset = file.Quota.ObservedAt.Add(time.Duration(n) * time.Second)
+				}
+				usage.Windows = append(usage.Windows, contract.UsageWindow{Name: name, UsedPercent: used, Seconds: seconds, ResetsAt: reset})
+			}
+		}
 		if file.Provider != "claude" {
 			result.Accounts = append(result.Accounts, usage)
 			continue
@@ -99,7 +130,9 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 			"Authorization": "Bearer $TOKEN$", "anthropic-beta": "oauth-2025-04-20",
 			"Accept": "application/json", "User-Agent": "dyna-account-manager/1.0",
 		}})
-		data, err := q.request(ctx, "POST", "api-call", payload)
+		requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		data, err := q.request(requestCtx, "POST", "api-call", payload)
+		cancel()
 		var reply struct {
 			Status int    `json:"status_code"`
 			Body   string `json:"body"`
@@ -115,6 +148,8 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 		case reply.Status != 200 || json.Unmarshal([]byte(reply.Body), &buckets) != nil || buckets == nil:
 			usage.Cause = contract.UsageUnreachable
 		default:
+			observedAt := q.now().UTC()
+			usage.ObservedAt = &observedAt
 			weekly := "seven_day_oauth_apps"
 			if len(buckets[weekly]) == 0 || string(buckets[weekly]) == "null" {
 				weekly = "seven_day"
@@ -140,6 +175,7 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 			}
 		}
 		if usage.Cause != "" {
+			usage.ObservedAt = nil
 			// Log only JSON structure, never upstream values or response headers.
 			var shape map[string]json.RawMessage
 			_ = json.Unmarshal([]byte(reply.Body), &shape)
