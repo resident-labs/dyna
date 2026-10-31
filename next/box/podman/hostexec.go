@@ -3,30 +3,22 @@ package podman
 import (
 	"context"
 	"errors"
-	"fmt"
+	"github.com/resident-labs/dyna/box/hostexec"
 	"github.com/resident-labs/dyna/contract"
 	"strings"
 )
 
-const HostexecCapture = `cd -- "$1" || exit 254; shift; "$@" 2>&1 | { head -c 8388609; cat >/dev/null; }; exit "${PIPESTATUS[0]}"`
-
 func (h *Host) RunHostexec(ctx context.Context, a contract.HostexecRunArgs, op contract.OpID) ([]byte, int, bool, error) {
-	cwd := a.Cwd
-	if cwd == "" {
-		cwd = "."
-	}
-	args := []string{"bash", "-c", HostexecCapture, "dyna-hostexec", cwd, "systemd-run", "--quiet", "--user", "--scope", "--unit=dyna-hostexec-" + string(op), "-p", fmt.Sprintf("RuntimeMaxSec=%g", float64(a.Timeout)/1000), "-p", "TimeoutStopSec=5", "--"}
-	args = append(args, a.Argv...)
-	out, err := h.run(ctx, args...)
+	out, err := h.run(ctx, hostexec.RunArgs(a, op)...)
 	code := 0
 	var exit remoteExit
 	if errors.As(err, &exit) {
 		code = int(exit)
 		err = nil
 	}
-	truncated := len(out) > 8<<20
+	truncated := len(out) > hostexec.OutputLimit
 	if truncated {
-		out = out[:8<<20]
+		out = out[:hostexec.OutputLimit]
 	}
 	return out, code, truncated, err
 }
