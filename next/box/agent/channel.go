@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"time"
@@ -32,7 +33,10 @@ func (c *Client) Channel(ctx context.Context, handle func(contract.BoxMessage) e
 			decoder := json.NewDecoder(resp.Body)
 			for {
 				var msg contract.BoxMessage
-				if err = decoder.Decode(&msg); err != nil {
+				if err = decoder.Decode(&msg); errors.Is(err, contract.ErrUnknownBoxMessage) {
+					log.Printf("box channel: %v; skipped", err)
+					continue
+				} else if err != nil {
 					var netErr net.Error
 					if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.As(err, &netErr) {
 						resp.Body.Close()
