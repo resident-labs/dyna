@@ -6,10 +6,11 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 45
+const schemaVersion = 46
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	45: {`DROP TABLE rules`},
 	44: {`CREATE INDEX turns_backfill_start ON events(json_extract(CAST(body AS TEXT),'$.turn')) WHERE type='turn.started'`, `UPDATE turns SET started_seq=(SELECT seq FROM events WHERE type='turn.started' AND json_extract(CAST(body AS TEXT),'$.turn')=turns.id) WHERE started_seq IS NULL`, `DROP INDEX turns_backfill_start`, `CREATE INDEX turns_session_started ON turns(session, started_seq)`, `CREATE INDEX events_sender_type ON events(room, from_kind, from_id, type, seq)`},
 	43: {
 		`CREATE TEMP TABLE hostexec_runs_backup AS SELECT * FROM hostexec_runs`,
