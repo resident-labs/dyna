@@ -374,3 +374,28 @@ func TestSessionListHadJobsStaysAfterTheJobEnds(t *testing.T) {
 		t.Fatal("hadJobs is false after a job ended")
 	}
 }
+
+func TestRoomListCountsAFailedBoxOnceWithoutAFailedTurn(t *testing.T) {
+	s, _, worker, ctx := setup(t)
+	err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE boxes SET state='failed' WHERE session=?", worker)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooms, problem := s.RoomList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.RoomListRequest{})
+	if problem != nil || len(rooms.Rooms) != 1 || rooms.Rooms[0].Failed != 1 {
+		t.Fatalf("rooms %+v: %v", rooms, problem)
+	}
+	err = s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("INSERT INTO turns(id,session,started_at,ended_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES('t1',?,1,5000,'failed','',0,0,0,0)", worker)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rooms, problem = s.RoomList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.RoomListRequest{}); problem != nil || rooms.Rooms[0].Failed != 1 {
+		t.Fatalf("a failed box and a failed turn count twice: %+v: %v", rooms, problem)
+	}
+}
