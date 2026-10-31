@@ -14,7 +14,7 @@
 <div class="composer">
   <textarea rows="2" aria-label="Message" bind:this={element} bind:value onkeydown={keydown} {placeholder}></textarea>
   <div class="actions">
-    <button type="button" aria-label="Send" title="Send" disabled={!value.trim()} onclick={onsend}><Icon name="send" /></button>
+    <button type="button" aria-label="Send" title="Send" disabled={!value.trim()} onclick={() => { onsend(); element?.focus(); }}><Icon name="send" /></button>
   </div>
 </div>
 

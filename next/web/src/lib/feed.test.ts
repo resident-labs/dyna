@@ -32,3 +32,11 @@ test("puts a turn's final reply in its home only", () => {
   assert.deepEqual(dm.map(row => row.kind === "post" && row.text), ["Answer"]);
   assert.deepEqual(feedRows([ended], { kind: "feed" }).map(row => row.kind), ["work"]);
 });
+
+test("names every mention and starts a new run when the mentions change", () => {
+  const root: Principal = { kind: "session", session: "r" };
+  const owner: Principal = { kind: "owner" };
+  const to = (seq: number, mentions: Principal[]) => event(seq, { type: "post.created", body: { text: "x", home: { kind: "feed" }, mentions } }, owner);
+  const rows = feedRows([to(1, [lead, root]), to(2, [lead, root]), to(3, [lead])], { kind: "feed" });
+  assert.deepEqual(rows.map(row => row.kind === "post" && [row.first, row.to.length]), [[true, 2], [false, 2], [true, 1]]);
+});
