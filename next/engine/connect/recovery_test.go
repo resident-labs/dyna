@@ -50,6 +50,45 @@ func TestUnlinkFinishesAfterRelayAlreadyRevoked(t *testing.T) {
 	}
 }
 
+func TestRestartCompletesInterruptedUnlink(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetConnectAttempt(context.Background(), contract.ConnectAttempt{State: contract.ConnectAttemptUnlinking}); err != nil {
+		t.Fatal(err)
+	}
+	files, err := OpenFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := files.Key(); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ops := NewOperations(context.Background(), files, st, 1001, 1002)
+	defer ops.Close()
+	if err := ops.Resume(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	<-ops.done
+	a, err := st.ConnectAttempt(context.Background())
+	if err != nil || a.State != contract.ConnectAttemptCanceled {
+		t.Fatalf("attempt: %+v, %v", a, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "connect", "machine.key")); !os.IsNotExist(err) {
+		t.Fatal("machine key remains")
+	}
+}
+
 func TestCancelRemovesPendingApproval(t *testing.T) {
 	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(LinkStart{ID: "invented-id", URL: "https://example.invalid", UserCode: "invented-code", Expires: time.Now().Add(time.Minute).UnixMilli()})
