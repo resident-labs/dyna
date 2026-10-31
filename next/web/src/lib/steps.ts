@@ -1,5 +1,5 @@
 import { shortPaths } from "./feed.ts";
-import type { Event, TranscriptStep } from "./contract.gen.ts";
+import type { Event, TranscriptItem, TranscriptStep } from "./contract.gen.ts";
 
 export type StepKind = "read" | "edit" | "write" | "search" | "list" | "run" | "fetch" | "tool";
 
@@ -20,6 +20,40 @@ export function stepTitle({ tool, label }: Pick<TranscriptStep, "tool" | "label"
   const verb = kind === "tool" ? words.charAt(0).toUpperCase() + words.slice(1) : verbs[kind];
   const full = label.startsWith(tool) ? label.slice(tool.length).trim() : label;
   return { kind, verb, target: shortPaths(full), full };
+}
+
+export function titleOf(item: TranscriptItem) {
+  let target = "";
+  // Tool arguments are an untrusted JSON string from the harness.
+  try {
+    const value: unknown = JSON.parse(item.arguments ?? "{}");
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const entries: [string, unknown][] = Object.entries(value);
+      for (const key of ["command", "path", "query", "pattern", "url"]) {
+        const field = entries.find(([name]) => name === key)?.[1];
+        if (typeof field === "string") { target = field; break; }
+      }
+    }
+  } catch { /* An incomplete preview has no row target; its fold keeps the full arguments. */ }
+  const tool = item.tool ?? "tool";
+  return stepTitle({ tool, label: target ? `${tool} ${target}` : "" });
+}
+export function activeVerb(kind: StepKind, fallback: string): string {
+  const active: Record<StepKind, string> = { run: "Running", read: "Reading", edit: "Editing", write: "Writing", search: "Searching", list: "Listing", fetch: "Fetching", tool: fallback };
+  return active[kind];
+}
+export const workingGroup = (items: TranscriptItem[], turnEnded: boolean) => !turnEnded && items.some(item => !item.ended);
+export function workSummary(items: TranscriptItem[]) {
+  const counts = new Map<StepKind, number>();
+  for (const item of items) { const kind = titleOf(item).kind; counts.set(kind, (counts.get(kind) ?? 0) + 1); }
+  const words: Record<StepKind, [string, string]> = { run: ["Ran", "command"], read: ["Read", "file"], edit: ["Edited", "file"], write: ["Wrote", "file"], search: ["Searched", "time"], list: ["Listed", "time"], fetch: ["Fetched", "page"], tool: ["Used", "tool"] };
+  return [...counts].map(([kind, n], i) => { const [verb, noun] = words[kind]; return `${i ? verb.toLowerCase() : verb} ${n} ${noun}${n === 1 ? "" : "s"}`; }).join(", ");
+}
+
+// An injected clock keeps a live turn current without depending on wall time in tests.
+export function elapsed(started: string, now: number): string {
+  const seconds = Math.max(0, Math.floor((now - Date.parse(started)) / 1000));
+  return seconds < 60 ? `${seconds} s` : `${Math.floor(seconds / 60)} m ${seconds % 60} s`;
 }
 
 // A step's own time, as in v1: a quick step reads in milliseconds, so it does not look like a clock that failed to move.

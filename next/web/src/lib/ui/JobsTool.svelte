@@ -12,7 +12,8 @@
   // it, or a sheet on a phone, with the jobs grouped by session; a job opens as a dock tab (onopen), or on a phone as
   // a full-height sheet. The lists watch each session's jobs only while they are open and the page is visible.
   type JobSession = { id: string; name: string; root: boolean; running: number };
-  let { sessions, allSessions, failures, allFailures, phone, onopen, onseen }: {
+  let { sessions, allSessions, failures, allFailures, phone, compact = false, onopen, onseen }: {
+    compact?: boolean;
     sessions: JobSession[]; allSessions: JobSession[]; failures: string[]; allFailures: string[]; phone: boolean;
     onopen: (session: JobSession, job: ShellJob) => void; onseen: (key: string) => void;
   } = $props();
@@ -21,6 +22,7 @@
   let only: string | undefined = $state();
   let shown: { session: JobSession; job: string } | undefined = $state();
   let button: HTMLButtonElement | undefined = $state();
+  let opener: HTMLElement | undefined;
   let list: HTMLElement | undefined = $state();
   let root: HTMLElement | undefined = $state();
   let visible = $state(document.visibilityState === "visible");
@@ -41,6 +43,7 @@
 
   // A session row, About's Jobs row or a work row's jobs open the list on that session's jobs.
   export async function show(session?: string) {
+    opener = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
     only = session;
     shown = undefined;
     open = true;
@@ -51,7 +54,7 @@
     open = false;
     shown = undefined;
     await tick();
-    button?.focus();
+    (opener?.isConnected ? opener : button)?.focus();
   }
   function pick(session: JobSession, job: ShellJob) {
     const key = `${session.id}/${job.job}`;
@@ -87,6 +90,7 @@
   <button type="button" class="open" class:live={running || failures.length} class:phone bind:this={button} aria-haspopup="dialog" aria-expanded={open}
     aria-label={`Jobs, ${summary}`} title={summary} onclick={() => { if (open) void close(); else void show(); }}>
     <Icon name="prompt" />{#if phone}{#if failures.length}<span class="corner"><StatusPill tone="failed" dot label="Failed" /></span>{/if}
+    {:else if compact}{#if failures.length}<StatusPill tone="failed" dot label="Failed" />{/if}
     {:else}<span>Jobs</span>
       {#if running}<span class="n">{running}</span>{/if}
       {#if failures.length}<StatusPill tone="failed" label={`${failures.length} failed`} />{/if}
