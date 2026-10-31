@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"filippo.io/age"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/api"
@@ -32,8 +33,9 @@ type hostRegistrar interface {
 
 type serviceWithHosts struct {
 	*engine.Service
-	boxes  hostRegistrar
-	quotas *model.Quotas
+	boxes         hostRegistrar
+	quotas        *model.Quotas
+	backupEnabled bool
 }
 
 func (s *serviceWithHosts) AccountsQuota(ctx context.Context, caller contract.Principal, _ contract.AccountsQuotaRequest) (contract.AccountsQuotaResponse, *contract.Error) {
@@ -52,6 +54,7 @@ func (s *serviceWithHosts) HostList(ctx context.Context, caller contract.Princip
 	if err := s.boxes.HostLoad(ctx, result.Hosts); err != nil {
 		return contract.HostListResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: err.Error()}
 	}
+	result.Hosts[0].BackupCopyEnabled = s.backupEnabled
 	return result, nil
 }
 
@@ -78,9 +81,21 @@ type Config struct {
 	Data, Runtime, HostData, Profiles, Version string
 	ApprovalsExpiry                            time.Duration
 	WebListen                                  string
+	BackupDest, BackupRecipient                string
 }
 
 func Run(ctx context.Context, cfg Config) error {
+	if (cfg.BackupDest == "") != (cfg.BackupRecipient == "") {
+		return fmt.Errorf("backup.dest and backup.recipient must be set together")
+	}
+	var recipient age.Recipient
+	if cfg.BackupRecipient != "" {
+		parsed, err := age.ParseX25519Recipient(cfg.BackupRecipient)
+		if err != nil {
+			return fmt.Errorf("backup.recipient: %w", err)
+		}
+		recipient = parsed
+	}
 	token := os.Getenv("GH_TOKEN")
 	if err := os.Unsetenv("GH_TOKEN"); err != nil {
 		return err
@@ -98,6 +113,13 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	defer st.Close()
+	backupCtx, stopBackup := context.WithCancel(ctx)
+	backupDone := make(chan struct{})
+	go func() {
+		defer close(backupDone)
+		(&backupLoop{store: st, dir: filepath.Join(cfg.Data, "backups"), dest: cfg.BackupDest, recipient: recipient, now: time.Now, run: sshBackup}).start(backupCtx)
+	}()
+	defer func() { stopBackup(); <-backupDone }()
 	if err := st.ResetEngineHosts(ctx); err != nil {
 		return fmt.Errorf("reset host identity: %w", err)
 	}
@@ -151,7 +173,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	boxes.Mirror = mirror
 	boxes.Images = &images.Builder{Recorder: service, Now: time.Now}
-	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes, quotas: proxy.Quotas(managementKey, time.Now)}, func(c api.Caller) http.Handler {
+	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes, quotas: proxy.Quotas(managementKey, time.Now), backupEnabled: recipient != nil}, func(c api.Caller) http.Handler {
 		return drain.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			session, err := st.Session(r.Context(), c.Principal.Session)
 			if err != nil {

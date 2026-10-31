@@ -2,8 +2,10 @@ package engine
 
 import (
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 func TestHostListOwner(t *testing.T) {
@@ -11,6 +13,25 @@ func TestHostListOwner(t *testing.T) {
 	list, problem := s.HostList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.HostListRequest{})
 	if problem != nil || len(list.Hosts) != 2 || list.Hosts[0].Name != contract.ControlPlane || list.Hosts[1].Name != "host" {
 		t.Fatalf("hosts: %+v %v", list, problem)
+	}
+}
+
+func TestHostListBackupFailureCodes(t *testing.T) {
+	s, _, _, ctx := setup(t)
+	for _, test := range []struct {
+		failure string
+		want    contract.BackupCopyFailure
+	}{
+		{"private diagnostic", contract.BackupCopyFailed},
+		{store.BackupCopyNoSpace, contract.BackupCopyNoSpace},
+	} {
+		if err := s.store.RecordBackupCopy(ctx, time.Now(), test.failure); err != nil {
+			t.Fatal(err)
+		}
+		list, problem := s.HostList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.HostListRequest{})
+		if problem != nil || list.Hosts[0].BackupCopyFailure != test.want {
+			t.Fatalf("failure: %+v %v", list, problem)
+		}
 	}
 }
 

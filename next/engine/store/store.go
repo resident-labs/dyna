@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 
@@ -45,6 +46,7 @@ type request struct {
 	done chan error
 }
 type Store struct {
+	backupMu      sync.Mutex
 	lock          *os.File
 	writer        *sql.DB
 	read          *sql.DB
@@ -123,7 +125,10 @@ func open(dir string, floor int, commit string, checkpointRun func() error) (*St
 	if format != "dyna-v2" {
 		return fail(fmt.Errorf("invalid store format %q", format))
 	}
-	if err := upgrade(writer, floor, commit, steps); err != nil {
+	if err := upgrade(writer, floor, commit, steps, func(version int) error {
+		_, err := backup(context.Background(), writer, dir, fmt.Sprintf("pre-upgrade-v%d-", version), "pre-upgrade-v*-*.db", time.Now())
+		return err
+	}); err != nil {
 		return fail(err)
 	}
 	if err := compareSchema(writer); err != nil {
