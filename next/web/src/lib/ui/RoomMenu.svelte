@@ -2,7 +2,7 @@
   import { tick } from "svelte";
   import Icon from "./Icon.svelte";
   // The room's less frequent actions. Requests has its own header button.
-  let { paused, onterminal, onrules, onpause }: { paused: boolean; onterminal: () => void; onrules: () => void; onpause: () => void } = $props();
+  let { paused, onrules, onpause }: { paused: boolean; onrules: () => void; onpause: () => void } = $props();
   let open = $state(false);
   let root: HTMLDivElement;
   let button: HTMLButtonElement;
@@ -33,7 +33,6 @@
     <Icon name="more" /></button>
   {#if open}
     <div class="list" role="menu" id="room-menu" tabindex="-1" bind:this={list} onkeydown={move}>
-      <button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false); onterminal(); }}>New terminal</button>
       <button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false); onrules(); }}>Rules</button>
       <button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onpause(); }}>{paused ? "Resume room" : "Pause room"}</button>
     </div>

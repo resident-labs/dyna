@@ -9,9 +9,9 @@
   // Folded work reads as one quiet line that starts with a chevron, as T3 Code's "Worked for 20s"; it opens in place.
   // In a DM it opens to the turn's saved steps, which replace the lines that only say a turn started and ended.
   // Other events, and a turn with no saved steps, read as one line per event.
-  let { row, name, opened, ontoggle, transcripts }: {
+  let { row, name, opened, ontoggle, transcripts, onjobs }: {
     row: Extract<Row, { kind: "work" }>; name: (session: string) => string; opened: ReadonlySet<string>; ontoggle: (key: string) => void;
-    transcripts?: TurnTranscripts;
+    transcripts?: TurnTranscripts; onjobs: (session: string) => void;
   } = $props();
   let open = $derived(opened.has(row.key));
   let read = $derived(transcripts?.of(row.events));
@@ -19,11 +19,17 @@
   let steps = $derived(saved?.steps ?? []);
   let failures = $derived(steps.filter(step => step.failed).length);
   let events = $derived(steps.length || read === "loading" ? row.events.filter(event => !["turn.started", "turn.ended", "turn.activity"].includes(event.type)) : row.events);
+  // The "3 jobs" part of the line opens the Jobs list on the session that ran them, so it is a button of its own.
+  let ended = $derived(row.events.find(event => event.type === "shell.job.ended"));
+  let line = $derived(workSummary(row.events, name, row.until, steps[0]?.started));
+  let jobs = $derived(ended ? count(row.events.filter(event => event.type === "shell.job.ended").length, "job") : "");
+  let parts = $derived(jobs && line.includes(jobs) ? line.split(jobs) : [line]);
   $effect(() => { if (open) { const events = row.events; untrack(() => transcripts?.read(events)); } });
 </script>
 
+{#snippet tail()}{#if steps.length}{" · "}{count(steps.length, "step")}{/if}{#if failures}{" · "}<StatusPill tone="failed" label="{failures} failed" word />{/if}{/snippet}
 <div class="work">
-  <button type="button" class="fold" aria-expanded={open} onclick={() => ontoggle(row.key)}><span class="chevron" class:open><Icon name="chevron" size={14} /></span><span>{workSummary(row.events, name, row.until, steps[0]?.started)}{#if steps.length}{" · "}{count(steps.length, "step")}{/if}{#if failures}{" · "}<StatusPill tone="failed" label="{failures} failed" word />{/if}</span></button>
+  <button type="button" class="fold" aria-expanded={open} onclick={() => ontoggle(row.key)}><span class="chevron" class:open><Icon name="chevron" size={14} /></span><span>{parts[0]}{#if parts.length === 1}{@render tail()}{/if}</span></button>{#if parts.length > 1 && ended?.type === "shell.job.ended"}<button type="button" class="jobs" onclick={() => onjobs(ended.body.session)}>{jobs}</button><button type="button" class="fold" tabindex="-1" aria-hidden="true" onclick={() => ontoggle(row.key)}><span>{parts[1]}{@render tail()}</span></button>{/if}
   {#if open}<div class="opened">
     {#if read === "loading"}<ul class="waiting" aria-label="Loading steps"><li></li><li></li><li></li></ul>
     {:else if read === "failed"}<p>The steps did not load. <button type="button" class="retry" onclick={() => transcripts?.read(row.events, true)}>Retry</button></p>
@@ -36,9 +42,10 @@
   /* The chevron sits left of the post text's edge, so the words line up with the posts above and below. */
   .work { padding: 2px 16px 2px calc(var(--gutter) - 18px); color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .fold { all: unset; display: inline-flex; align-items: center; gap: 4px; min-height: 24px; cursor: pointer; border-radius: 6px; }
-  .fold:hover, .retry:hover { color: var(--text); }
-  .fold:focus-visible, .retry:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-  @media (hover: none) { .fold, .retry { min-height: 40px; } }
+  .fold:hover, .retry:hover, .jobs:hover { color: var(--text); }
+  .jobs { all: unset; display: inline-flex; align-items: center; min-height: 24px; cursor: pointer; border-radius: 6px; text-decoration: underline; text-decoration-color: var(--firm); text-underline-offset: 3px; }
+  .fold:focus-visible, .retry:focus-visible, .jobs:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  @media (hover: none) { .fold, .retry, .jobs { min-height: 40px; } }
   .chevron { display: inline-flex; transform: rotate(-90deg); transition: transform 150ms ease-out; }
   .open { transform: none; }
   .opened { margin: 2px 0 4px 18px; padding: 0 0 0 12px; border-left: 1px solid var(--line); }
