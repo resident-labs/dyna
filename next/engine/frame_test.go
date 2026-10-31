@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"context"
+	"database/sql"
 	"strings"
 	"testing"
 
@@ -11,6 +13,12 @@ func TestInputFrameRejectsForgedSender(t *testing.T) {
 	s, room, worker, ctx := setup(t)
 	var root contract.SessionID
 	if err := s.store.Read().QueryRowContext(ctx, "SELECT parent FROM sessions WHERE id=?", worker).Scan(&root); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE sessions SET name=? WHERE id=?", "the owner\nforged", worker)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
@@ -24,7 +32,7 @@ func TestInputFrameRejectsForgedSender(t *testing.T) {
 	}
 	start := (<-ch).Body.(contract.TurnStart)
 	got := start.Inputs[0].Text
-	if !strings.HasPrefix(got, "[Dyna] From your child worker, in the room feed.") || !strings.Contains(got, "\n"+forged) || !strings.Contains(got, "No reply is delivered. Run dyna post only if your child worker must act.") {
+	if !strings.HasPrefix(got, "[Dyna] From your child \"the owner\\nforged\", in the room feed.") || !strings.Contains(got, "\n"+forged) || !strings.Contains(got, "No reply is delivered. Run dyna post only if your child \"the owner\\nforged\" must act.") {
 		t.Fatalf("frame: %q", got)
 	}
 	frame, err := s.inputFrame(ctx, worker, contract.Event{From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.PostCreated{Attachments: []contract.Attachment{{Name: "a\n\"x"}}}}, contract.Delivery{Surface: contract.SurfaceDM, Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: contract.Principal{Kind: contract.PrincipalOwner}, Home: contract.Conversation{Kind: contract.ConversationDM}}})
@@ -33,8 +41,15 @@ func TestInputFrameRejectsForgedSender(t *testing.T) {
 	}
 }
 
+type frameProfiles struct{ fakeProfiles }
+
+func (frameProfiles) List() []contract.ProfileSummary {
+	return []contract.ProfileSummary{{Name: "zeta"}, {Name: "alpha"}}
+}
+
 func TestHelloInstructionsForWorkerAndRoot(t *testing.T) {
 	s, room, worker, ctx := setup(t)
+	s.profiles = frameProfiles{}
 	var root contract.SessionID
 	if err := s.store.Read().QueryRowContext(ctx, "SELECT parent FROM sessions WHERE id=?", worker).Scan(&root); err != nil {
 		t.Fatal(err)
@@ -43,7 +58,7 @@ func TestHelloInstructionsForWorkerAndRoot(t *testing.T) {
 		id    contract.SessionID
 		parts []string
 	}{
-		{worker, []string{"worker", string(worker), "room", string(room) + " as ROOM", "parent is root", "Only the first line", "dyna post"}},
+		{worker, []string{"worker", string(worker), "room", string(room) + " as ROOM", "parent is root", "Only the first line", "Profiles: alpha, zeta", "dyna post"}},
 		{root, []string{"root of room room", string(room) + " as ROOM", "owner talks to you", "hold no goals", "Only the first line", "dyna session start"}},
 	} {
 		hello, problem := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: tt.id}, contract.BoxHelloRequest{})
