@@ -1,6 +1,6 @@
 <script lang="ts">
   import { APIError, call } from "../client.ts";
-  import { commandLine, fromNow } from "../feed.ts";
+  import { causes, commandLine, fromNow } from "../feed.ts";
   import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
   import type { Request, RoomStore } from "../room.svelte.ts";
@@ -56,7 +56,8 @@
     </div>
     {#if failure}<p class="meta" role="alert">{failure}</p>{/if}
   {:else}
-    <p class="meta">{#if request.state === "failed"}<StatusPill tone="failed">Run failed</StatusPill>{/if}<span>{decided}</span></p>
+    <p class="meta">{#if request.state === "failed"}<StatusPill tone="failed">Run failed</StatusPill>
+      {#if request.result?.cause}<span class="cause">{causes[request.result.cause]}</span>{/if}{/if}<span>{decided}</span></p>
   {/if}
 </article>
 
@@ -64,7 +65,7 @@
   .request { display: grid; gap: 4px; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 14px; }
   .decided { color: var(--muted); }
   .meta { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-  .who { color: var(--text); }
+  .who, .cause { color: var(--text); }
   .decided .who { color: inherit; }
   .body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   pre { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--sidebar); font: 13px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
