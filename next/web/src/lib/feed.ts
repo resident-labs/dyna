@@ -123,7 +123,13 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
         reply.kind === "final" && !posted && sameHome(reply.home ?? { kind: "feed" }, home));
       // Only the end of a turn whose start the row holds ends the row's time.
       const turn = event.body.turn;
-      if ((event.body.final && answer) || event.body.outcome === "failed") flush(work.some(e => e.type === "turn.started" && e.body.turn === turn) ? event.at : undefined);
+      if ((event.body.final && answer) || event.body.outcome === "failed") {
+        const until = work.some(e => e.type === "turn.started" && e.body.turn === turn) ? event.at : undefined;
+        // A reloaded DM window holds only posts and the turns that answered in it, so this end is the turn's only event.
+        // The work row keeps it, so the turn's steps can still open above its answer.
+        if (home.kind === "dm") work.push(event);
+        flush(until);
+      }
       if (event.body.final && answer) {
         post(`a${event.seq}`, event.seq, { kind: "session", session: event.body.session }, event.at, event.body.final, [], answer.reply.target ? [answer.reply.target] : []);
       }
@@ -218,8 +224,9 @@ const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.s
 // One short line per work row in the owner's terms, such as "lead-web worked for 6 min · 2 turns · 1 job" or
 // "builder-feed started · 3 sessions worked for 12 min · 4 turns"; the opened row lists each event.
 // The time runs from the first turn's start to the last turn's end in the row, in whole minutes as T3 Code's
-// "Worked for 20s"; without both ends the line says "lead-web worked · 2 turns".
-export function workSummary(events: Event[], name: Name, until?: string): string {
+// "Worked for 20s"; without both ends the line says "lead-web worked · 2 turns". A DM's saved steps give the start
+// that a reloaded window lacks.
+export function workSummary(events: Event[], name: Name, until?: string, from?: string): string {
   const started: string[] = [], moved: string[] = [], closed: string[] = [], opened: string[] = [], shut: string[] = [];
   const turns = new Map<string, Set<string>>();
   let jobs = 0, images = 0, failedImages = 0, prs = 0, memory = 0, grants = 0, rules = 0, first = Infinity, last = -Infinity;
@@ -243,6 +250,7 @@ export function workSummary(events: Event[], name: Name, until?: string): string
     }
   }
   if (until) last = Math.max(last, Date.parse(until));
+  if (from) first = Math.min(first, Date.parse(from));
   const who = (sessions: string[]) => sessions.length > 2 ? `${sessions.length} sessions` : list(sessions);
   const minutes = Math.round((last - first) / 60_000);
   const took = minutes < 1 ? "under a minute" : minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${minutes % 60} min` : ""}`;

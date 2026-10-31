@@ -132,6 +132,48 @@ func (devService) ShellWatch(ctx context.Context, _ contract.SessionID) (<-chan 
 	return out, nil
 }
 
+// devSteps are invented, since the fake harness writes no transcript: failures, long output, and tools of every kind.
+var devSteps = []struct {
+	tool, target string
+	ms           time.Duration
+	failed       bool
+	preview      string
+}{
+	{"read", "feed.ts", 42, false, "export function feedRows(events: Event[], home: Conversation) {\n  const rows: Row[] = [];\n  ..."},
+	{"grep", "workSummary", 118, false, "src/lib/feed.ts:221\nsrc/lib/feed.test.ts:40\nsrc/lib/ui/WorkRow.svelte:13"},
+	{"ls", "src/lib/ui", 21, false, ""},
+	{"read", "docs/spec.md", 64, false, "## 5.13 Web design\nFold agent work into one muted line that expands in place."},
+	{"web_fetch", "https://example.com/docs/virtual-list", 1840, false, "Virtual lists measure each row after it renders."},
+	{"edit", "WorkRow.svelte", 310, false, "Replaced 4 lines with 9 lines."},
+	{"bash", "node --test src/lib/feed.test.ts", 2360, true, "# Subtest: a work row names its turns\nnot ok 1 - a work row names its turns\n  expected: '2 turns'\n  actual:   '1 turn'\n# tests 41\n# pass 40\n# fail 1"},
+	{"edit", "feed.ts", 280, false, "Replaced 2 lines with 3 lines."},
+	{"bash", "node --test src/lib/feed.test.ts", 2110, false, "# tests 41\n# pass 41\n# fail 0"},
+	{"grep", "shortPaths\\(", 96, false, "src/lib/feed.ts:208"},
+	{"write", "src/lib/steps.ts", 190, false, "Wrote 38 lines."},
+	{"read", "app.css", 38, false, ""},
+	{"browser_snapshot", "http://127.0.0.1:5173/dm", 1250, false, "Saved a snapshot of the page."},
+	{"bash", "npx svelte-check --threshold error --fail-on-warnings --tsconfig ./tsconfig.json", 96400, false, "svelte-check found 0 errors and 0 warnings"},
+}
+
+// TranscriptRead keeps the real checks, then answers with devSteps. Each turn picks a run of them from its ID, so turns
+// differ in length, and the longest say that their record is cut.
+func (d devService) TranscriptRead(ctx context.Context, p contract.Principal, req contract.TranscriptReadRequest) (contract.TranscriptReadResponse, *contract.Error) {
+	response, problem := d.Service.TranscriptRead(ctx, p, req)
+	if problem != nil {
+		return response, problem
+	}
+	sum := crc32.ChecksumIEEE([]byte(req.Turn))
+	at := time.Now().Add(-3 * time.Minute)
+	for _, step := range devSteps[sum%4*3:] {
+		end := at.Add(step.ms * time.Millisecond)
+		response.Steps = append(response.Steps, contract.TranscriptStep{Turn: req.Turn, Tool: step.tool, Label: step.tool + " " + step.target,
+			Started: at, Ended: &end, Failed: step.failed, Preview: step.preview})
+		at = end.Add(4 * time.Second)
+	}
+	response.Truncated = sum%4 == 0
+	return response, nil
+}
+
 // SessionList shows builder-feed's computer as running, so the computer view can be opened.
 func (d devService) SessionList(ctx context.Context, p contract.Principal, req contract.SessionListRequest) (contract.SessionListResponse, *contract.Error) {
 	list, problem := d.Service.SessionList(ctx, p, req)
