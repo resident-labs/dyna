@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -13,23 +14,29 @@ import (
 // Input sends the owner's events to the page. It keeps one DevTools connection between batches and
 // the mouse buttons held down, so a drag moves with its button.
 type Input struct {
-	Base    string
-	queue   chan contract.ComputerInputBatch
-	d       *DevTools
-	buttons int
+	Base     string
+	queue    chan contract.ComputerInputBatch
+	overflow atomic.Bool // a batch was dropped, so a release may be missing
+	d        *DevTools
+	buttons  int
+	lastX    float64 // CSS pixels of the last mouse event
+	lastY    float64
+	keys     map[string]keyParams // keys held down, as the key-up that releases each
 }
 
 func NewInput(base string) *Input {
-	return &Input{Base: base, queue: make(chan contract.ComputerInputBatch, 64)}
+	return &Input{Base: base, queue: make(chan contract.ComputerInputBatch, 64), keys: map[string]keyParams{}}
 }
 
 // Enqueue never blocks, so a stuck browser cannot hold the box channel. It reports false when the
-// queue is full and the batch is dropped.
+// queue is full and the batch is dropped. A drop may lose a key or button release, so the worker
+// releases everything held before its next batch.
 func (in *Input) Enqueue(batch contract.ComputerInputBatch) bool {
 	select {
 	case in.queue <- batch:
 		return true
 	default:
+		in.overflow.Store(true)
 		return false
 	}
 }
@@ -86,10 +93,39 @@ func (in *Input) Send(ctx context.Context, batch contract.ComputerInputBatch) er
 		}
 		in.d = d
 	}
+	if in.overflow.Swap(false) {
+		if err := in.releaseAll(ctx, in.d); err != nil {
+			in.d.Close()
+			in.d = nil
+			return err
+		}
+	}
 	if err := in.send(ctx, in.d, batch); err != nil {
 		in.d.Close()
 		in.d = nil
 		return err
+	}
+	return nil
+}
+
+// releaseAll lifts every key and mouse button the owner holds, at the last mouse position.
+func (in *Input) releaseAll(ctx context.Context, d *DevTools) error {
+	for key, p := range in.keys {
+		raw, _ := json.Marshal(p)
+		if _, err := d.Call(ctx, "Input.dispatchKeyEvent", raw); err != nil {
+			return err
+		}
+		delete(in.keys, key)
+	}
+	for button, bit := range map[contract.MouseButton]int{contract.ButtonLeft: 1, contract.ButtonRight: 2, contract.ButtonMiddle: 4} {
+		if in.buttons&bit == 0 {
+			continue
+		}
+		in.buttons &^= bit
+		raw, _ := json.Marshal(mouseParams{Type: "mouseReleased", X: in.lastX, Y: in.lastY, Button: string(button), Buttons: in.buttons, ClickCount: 1})
+		if _, err := d.Call(ctx, "Input.dispatchMouseEvent", raw); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -116,6 +152,12 @@ func (in *Input) send(ctx context.Context, d *DevTools, batch contract.ComputerI
 				}
 			}
 			method, params = "Input.dispatchKeyEvent", p
+			if e.Kind == contract.InputKeyDown {
+				p.Type, p.Text = "keyUp", ""
+				in.keys[e.Key] = p
+			} else {
+				delete(in.keys, e.Key)
+			}
 		case contract.InputChar:
 			method, params = "Input.insertText", struct {
 				Text string `json:"text"`
@@ -138,6 +180,7 @@ func (in *Input) send(ctx context.Context, d *DevTools, batch contract.ComputerI
 				viewW, viewH = m.Viewport.Width, m.Viewport.Height
 			}
 			x, y := cssPoint(batch.Frame, viewW, viewH, e.X, e.Y)
+			in.lastX, in.lastY = x, y
 			p := mouseParams{Type: "mouseMoved", X: x, Y: y, Button: "none", Buttons: in.buttons, Modifiers: int(e.Modifiers)}
 			switch e.Kind {
 			case contract.InputMouseDown, contract.InputMouseUp:
