@@ -481,7 +481,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 	}
 
 	private scanSkillDirectories(): void {
-		const roots = [join(this.agentDir, "skills"), join(process.env.HOME ?? homedir(), ".agents", "skills")];
+		const roots = [join(this.agentDir, "skills"), join(process.env.HOME || homedir(), ".agents", "skills")];
 		if (this.settingsManager.isProjectTrusted()) {
 			roots.push(join(this.cwd, CONFIG_DIR_NAME, "skills"));
 			for (let dir = this.cwd; ; dir = dirname(dir)) {

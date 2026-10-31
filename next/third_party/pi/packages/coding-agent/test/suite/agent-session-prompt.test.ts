@@ -140,7 +140,7 @@ describe("AgentSession prompt characterization", () => {
 
 	it("folds the latest sections into an automatic compaction head", async () => {
 		const harness = await createHarness({
-			settings: { compaction: { enabled: true, reserveTokens: 1, keepRecentTokens: 1, triggerTokens: 100 } },
+			settings: { compaction: { enabled: false, reserveTokens: 1, keepRecentTokens: 1, triggerTokens: 100 } },
 			extensionFactories: [
 				(pi) => {
 					pi.on("session_before_compact", (event) => ({
@@ -160,6 +160,9 @@ describe("AgentSession prompt characterization", () => {
 		harness.session.setPromptSections([{ key: "goal", text: "before" }]);
 		await harness.session.prompt("first request with enough content");
 		harness.session.setPromptSections([{ key: "goal", text: "after" }]);
+		harness.settingsManager.applyOverrides({
+			compaction: { enabled: true, reserveTokens: 1, keepRecentTokens: 1, triggerTokens: 100 },
+		});
 		await harness.session.prompt("second request with enough content");
 
 		const compacted = harness.sessionManager.getBranch().findLast((entry) => entry.type === "compaction");
