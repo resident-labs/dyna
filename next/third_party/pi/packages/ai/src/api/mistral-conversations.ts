@@ -20,7 +20,7 @@ import { headersToRecord } from "../utils/headers.ts";
 import { getIdentityHeaders } from "../utils/identity.ts";
 import { parseStreamingJson, parseToolCallArguments } from "../utils/json-parse.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
-import { getSystemMessageText, renderSystemMessageUpdate } from "../utils/text.ts";
+import { getSystemMessageText } from "../utils/text.ts";
 import { getCurrentTools, resolveTranscript } from "../utils/transcript.ts";
 import { getJsonSchemaToolParameters, resolveJsonSchemaStrictSampling } from "./constrained-sampling.ts";
 import { buildBaseOptions } from "./simple-options.ts";
@@ -810,7 +810,7 @@ function toChatMessages(messages: Message[], supportsImages: boolean): MistralCh
 
 	for (const [index, msg] of messages.entries()) {
 		if (msg.role === "system") {
-			const text = index === 0 ? getSystemMessageText(msg) : renderSystemMessageUpdate(msg);
+			const text = index === 0 ? getSystemMessageText(msg) : "";
 			if (text.length > 0) result.push({ role: "system", content: sanitizeSurrogates(text) });
 			continue;
 		}
