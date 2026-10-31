@@ -46,7 +46,7 @@
       if (!active) return;
       const event = page.events?.[0] && decodeEvent(page.events[0]);
       if (event?.id === id && event.type === "post.created" && event.from.session) {
-        recipient = page.names[event.from.session] ?? "the card's author";
+        recipient = page.names?.[event.from.session] ?? "the card's author";
       }
     }, () => {});
     return () => { active = false; };
