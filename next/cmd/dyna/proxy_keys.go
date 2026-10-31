@@ -19,19 +19,24 @@ type proxyKeyRequest struct {
 	Key      string                   `json:"key"`
 }
 
+func validProxyKeyID(id string) bool {
+	if !strings.HasPrefix(id, "dyna-key-") || len(id) != len("dyna-key-")+32 {
+		return false
+	}
+	_, err := hex.DecodeString(strings.TrimPrefix(id, "dyna-key-"))
+	return err == nil
+}
+
 func proxyKeyRoutes(router *gin.Engine, service **cliproxy.Service, managementHash string) {
-	router.POST("/dyna/keys", func(c *gin.Context) {
+	keys := router.Group("/dyna/keys", func(c *gin.Context) {
 		password := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
 		if bcrypt.CompareHashAndPassword([]byte(managementHash), []byte(password)) != nil {
-			c.Status(http.StatusUnauthorized)
-			return
+			c.AbortWithStatus(http.StatusUnauthorized)
 		}
+	})
+	keys.POST("", func(c *gin.Context) {
 		var req proxyKeyRequest
-		if err := c.ShouldBindJSON(&req); err != nil || !strings.HasPrefix(req.ID, "dyna-key-") || len(req.ID) != len("dyna-key-")+32 || strings.TrimSpace(req.Key) == "" || len(req.Key) > 4096 {
-			c.Status(http.StatusBadRequest)
-			return
-		}
-		if _, err := hex.DecodeString(strings.TrimPrefix(req.ID, "dyna-key-")); err != nil {
+		if err := c.ShouldBindJSON(&req); err != nil || !validProxyKeyID(req.ID) || strings.TrimSpace(req.Key) == "" || len(req.Key) > 4096 {
 			c.Status(http.StatusBadRequest)
 			return
 		}
@@ -58,18 +63,9 @@ func proxyKeyRoutes(router *gin.Engine, service **cliproxy.Service, managementHa
 		}
 		c.Status(http.StatusBadRequest)
 	})
-	router.DELETE("/dyna/keys/:id", func(c *gin.Context) {
-		password := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
-		if bcrypt.CompareHashAndPassword([]byte(managementHash), []byte(password)) != nil {
-			c.Status(http.StatusUnauthorized)
-			return
-		}
+	keys.DELETE("/:id", func(c *gin.Context) {
 		id := c.Param("id")
-		if !strings.HasPrefix(id, "dyna-key-") || len(id) != len("dyna-key-")+32 {
-			c.Status(http.StatusBadRequest)
-			return
-		}
-		if _, err := hex.DecodeString(strings.TrimPrefix(id, "dyna-key-")); err != nil {
+		if !validProxyKeyID(id) {
 			c.Status(http.StatusBadRequest)
 			return
 		}
