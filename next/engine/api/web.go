@@ -28,7 +28,8 @@ type Web struct {
 	host        string
 	routes      map[string]string
 	discovered  string
-	discovery   func(context.Context) string
+	discovery   func(context.Context, int) (string, error)
+	port        int
 	routeWake   func()
 	discoveryAt time.Time
 	discoverMu  sync.Mutex
@@ -80,10 +81,12 @@ func (w *Web) SetRoutes(routes []string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, route := range routes {
-		host, origin, err := webRoute(route)
-		if err != nil {
-			return err
+		u, err := url.Parse(route)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || (route != u.Scheme+"://"+u.Host && route != u.Scheme+"://"+u.Host+"/") || strings.ContainsAny(route, "*; \t\r\n") {
+			return fmt.Errorf("invalid web route %q: expected an http or https origin", route)
 		}
+		host := strings.ToLower(u.Host)
+		origin := u.Scheme + "://" + host
 		if existing, ok := w.routes[host]; ok && existing != origin {
 			return fmt.Errorf("web route %q has a conflicting host", route)
 		}
@@ -92,49 +95,42 @@ func (w *Web) SetRoutes(routes []string) error {
 	return nil
 }
 
-func webRoute(route string) (string, string, error) {
-	u, err := url.Parse(route)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || (route != u.Scheme+"://"+u.Host && route != u.Scheme+"://"+u.Host+"/") || strings.ContainsAny(route, "*; \t\r\n") {
-		return "", "", fmt.Errorf("invalid web route %q: expected an http or https origin", route)
-	}
-	host := strings.ToLower(u.Host)
-	return host, u.Scheme + "://" + host, nil
-}
-
-// SetDiscovery installs route discovery before the tunnel supervisor starts.
-func (w *Web) SetDiscovery(discover func(context.Context) string, wake func()) {
-	w.mu.Lock()
-	w.discovery, w.routeWake = discover, wake
-	w.mu.Unlock()
-}
-
-// RefreshRoutes runs bounded discovery and returns the current public routes.
-func (w *Web) RefreshRoutes(ctx context.Context) []string {
+// SetDiscovery installs bounded route discovery.
+func (w *Web) SetDiscovery(discover func(context.Context, int) (string, error), wake func()) {
 	w.discoverMu.Lock()
 	defer w.discoverMu.Unlock()
-	w.mu.Lock()
-	discover := w.discovery
-	w.mu.Unlock()
-	if discover != nil && (w.discoveryAt.IsZero() || !w.now().Before(w.discoveryAt.Add(30*time.Second))) {
-		w.discoveryAt = w.now()
-		route := discover(context.WithoutCancel(ctx))
-		if route != "" {
-			_, origin, err := webRoute(route)
-			if err != nil || !strings.HasPrefix(origin, "https://") {
-				route = ""
-			} else {
-				route = origin
-			}
-		}
-		w.mu.Lock()
-		changed := w.discovered != route
-		w.discovered = route
-		wake := w.routeWake
-		w.mu.Unlock()
-		if changed && wake != nil {
-			wake()
-		}
+	w.discovery, w.routeWake = discover, wake
+}
+
+func (w *Web) discover(ctx context.Context, wake bool) {
+	w.discoverMu.Lock()
+	defer w.discoverMu.Unlock()
+	if w.discovery == nil || (!w.discoveryAt.IsZero() && w.now().Before(w.discoveryAt.Add(30*time.Second))) {
+		return
 	}
+	w.discoveryAt = w.now()
+	route, err := w.discovery(context.WithoutCancel(ctx), w.port)
+	if err != nil {
+		return
+	}
+	old := w.discovered
+	host := strings.ToLower(strings.TrimPrefix(route, "https://"))
+	w.mu.Lock()
+	delete(w.routes, old)
+	_, configured := w.routes[host]
+	w.mu.Unlock()
+	w.discovered = ""
+	if route != "" && w.SetRoutes([]string{route}) == nil && !configured {
+		w.discovered = host
+	}
+	if wake && old != w.discovered && w.routeWake != nil {
+		w.routeWake()
+	}
+}
+
+// RefreshRoutes refreshes discovered routes for a tunnel report.
+func (w *Web) RefreshRoutes(ctx context.Context) []string {
+	w.discover(ctx, false)
 	return w.PublicRoutes()
 }
 
@@ -148,9 +144,6 @@ func (w *Web) PublicRoutes() []string {
 			out = append(out, origin)
 		}
 	}
-	if w.discovered != "" && !slices.Contains(out, w.discovered) {
-		out = append(out, w.discovered)
-	}
 	slices.Sort(out)
 	return out
 }
@@ -160,9 +153,6 @@ func (w *Web) routeOrigins(ctx context.Context) ([]string, string) {
 	var routes []string
 	for _, route := range w.routes {
 		routes = append(routes, route)
-	}
-	if w.discovered != "" && !slices.Contains(routes, w.discovered) {
-		routes = append(routes, w.discovered)
 	}
 	w.mu.Unlock()
 	var managed string
@@ -200,17 +190,16 @@ func (w *Web) login(_ context.Context, _ contract.Principal, _ contract.WebLogin
 }
 
 func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
+	routes, managed := w.routeOrigins(r.Context())
+	out.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' blob:; connect-src 'self' "+strings.Join(routes, " ")+"; frame-ancestors 'none'")
+	out.Header().Set("X-Content-Type-Options", "nosniff")
 	if r.Header.Get("Tailscale-Funnel-Request") != "" {
 		http.Error(out, "forbidden", http.StatusForbidden)
 		return
 	}
-	routes, managed := w.routeOrigins(r.Context())
 	host := strings.ToLower(r.Host)
 	w.mu.Lock()
 	origin, known := w.routes[host]
-	if !known && w.discovered == "https://"+host {
-		origin, known = w.discovered, true
-	}
 	w.mu.Unlock()
 	if !known && w.connect != nil {
 		if u, err := url.Parse(managed); err == nil && strings.EqualFold(u.Host, r.Host) && (u.Scheme == "https" || u.Scheme == "http") {
@@ -218,16 +207,11 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !known {
-		w.RefreshRoutes(r.Context())
-		routes, managed = w.routeOrigins(r.Context())
+		w.discover(r.Context(), true)
 		w.mu.Lock()
-		if w.discovered == "https://"+host {
-			origin, known = w.discovered, true
-		}
+		origin, known = w.routes[host]
 		w.mu.Unlock()
 	}
-	out.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' blob:; connect-src 'self' "+strings.Join(routes, " ")+"; frame-ancestors 'none'")
-	out.Header().Set("X-Content-Type-Options", "nosniff")
 	if !known {
 		http.Error(out, "unknown host", http.StatusMisdirectedRequest)
 		return
@@ -426,6 +410,7 @@ func (w *Web) Listen() (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
+	w.port = l.Addr().(*net.TCPAddr).Port
 	server := &http.Server{Handler: w, ReadHeaderTimeout: 10 * time.Second}
 	go server.Serve(l)
 	return l, nil

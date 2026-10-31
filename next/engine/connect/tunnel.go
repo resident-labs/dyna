@@ -2,10 +2,13 @@ package connect
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -107,4 +110,36 @@ func superviseTunnel(ctx context.Context, state tunnelState, enabled bool, wake 
 		}
 		return h.start(ctx, path, token)
 	}, func(error) {})
+}
+
+// TailscaleRoute discovers existing Serve mappings; it never changes them.
+func TailscaleRoute(ctx context.Context, appPort int) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "tailscale", "serve", "status", "--json")
+	cmd.Env = []string{"HOME=" + os.Getenv("HOME"), "PATH=" + os.Getenv("PATH")}
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return parseTailscaleServe(out, appPort)
+}
+
+func parseTailscaleServe(out []byte, appPort int) (string, error) {
+	var status struct {
+		Web map[string]struct {
+			Handlers map[string]struct{ Proxy string }
+		}
+	}
+	if err := json.Unmarshal(out, &status); err != nil {
+		return "", err
+	}
+	port := strconv.Itoa(appPort)
+	for hostPort, web := range status.Web {
+		switch strings.TrimSuffix(web.Handlers["/"].Proxy, "/") {
+		case "http://127.0.0.1:" + port, "http://localhost:" + port, "127.0.0.1:" + port:
+			return "https://" + strings.TrimSuffix(hostPort, ":443"), nil
+		}
+	}
+	return "", nil
 }
