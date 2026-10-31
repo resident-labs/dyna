@@ -336,8 +336,8 @@ func newEnv(t *testing.T) *testEnv {
 		t.Fatal(err)
 	}
 	roomfixture.Repository(t, room.DefaultStore(), scoped.ID, "github.com", "owner/repo", "read-write")
-	// The real clock: state.Write drops closed records older than 14 days, so a fixed date would expire.
-	e := &testEnv{t: t, file: filepath.Join(dir, "fixture.json"), calls: filepath.Join(dir, "calls"), clock: time.Now().UTC().Truncate(time.Second)}
+	// The real clock, on a minute boundary as nextPollTime expects: state.Write drops closed records older than 14 days, so a fixed date would expire.
+	e := &testEnv{t: t, file: filepath.Join(dir, "fixture.json"), calls: filepath.Join(dir, "calls"), clock: time.Now().UTC().Truncate(time.Minute)}
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
