@@ -30,7 +30,6 @@ var sqlCallNames = map[string]bool{
 // lowers as M3 moves calls into the store; a count never rises.
 var sqlAllowlist = map[string]int{
 	"engine/post_api.go": 4,
-	"engine/service.go":  1,
 	"engine/turn_api.go": 4,
 }
 
