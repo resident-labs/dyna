@@ -47,7 +47,7 @@ func TestSessionWorkPagesTurns(t *testing.T) {
 			if _, err = appendEvent(fmt.Sprintf("post%d", i), session, contract.PostCreated{Text: "post"}); err != nil {
 				return err
 			}
-			if i < 3 {
+			if i == 2 {
 				if _, err = appendEvent(fmt.Sprintf("end%d", i), session, contract.TurnEnded{Session: "s", Turn: turn, Outcome: contract.TurnCompleted}); err != nil {
 					return err
 				}
@@ -58,12 +58,15 @@ func TestSessionWorkPagesTurns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, more, err := s.SessionWork(ctx, "s", "", 2)
-	if err != nil || !more || len(page) != 2 || page[0].Started.ID != "start3" || page[0].Ended != nil || len(page[0].Posts) != 1 || len(page[0].Inputs) != 1 || page[1].Ended == nil {
+	page, more, total, err := s.SessionWork(ctx, "s", "", 2)
+	if err != nil || total != 3 || !more || len(page) != 2 || page[0].Started.ID != "start3" || page[0].Ended != nil || len(page[0].Posts) != 1 || len(page[0].Inputs) != 1 || page[1].Ended == nil {
 		t.Fatalf("page=%+v more=%v err=%v", page, more, err)
 	}
-	page, more, err = s.SessionWork(ctx, "s", "turn2", 2)
-	if err != nil || more || len(page) != 1 || page[0].Started.ID != "start1" || len(page[0].Posts) != 1 {
+	page, more, total, err = s.SessionWork(ctx, "s", "turn2", 2)
+	if err != nil || total != 3 || more || len(page) != 1 || page[0].Started.ID != "start1" || page[0].Ended != nil || len(page[0].Posts) != 1 {
 		t.Fatalf("older=%+v more=%v err=%v", page, more, err)
+	}
+	if _, _, _, err := s.SessionWork(ctx, "s", "missing", 2); err != sql.ErrNoRows {
+		t.Fatalf("missing cursor error = %v", err)
 	}
 }
