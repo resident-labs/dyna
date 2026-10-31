@@ -51,6 +51,22 @@
     return rows.find(row => keyOf(row.session, row.job) === chosen) ?? rows[0];
   });
   let fail = $derived(shown && failed(shown.job) ? failingLine(shown.job.text) : undefined);
+  // The header shows at most 3 lines of the command, so a long heredoc cannot fill the pane; Show all opens the rest
+  // for that job only. clipped says whether the 3 lines hide any of it, measured again when the pane resizes.
+  let whole: string | undefined = $state();
+  let opens = $derived(shown !== undefined && whole === keyOf(shown.session, shown.job));
+  let command: HTMLElement | undefined = $state();
+  let clipped = $state(false);
+  $effect(() => {
+    const element = command;
+    void shown?.job.command;
+    if (!element) return;
+    const measure = () => { clipped = element.scrollHeight > element.clientHeight + 1; };
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    measure();
+    return () => observer.disconnect();
+  });
   const outcome = (job: ShellJob) => job.running ? "running" : failed(job) ? `failed · exit ${job.exitCode}` : `passed · ${jobTime(job)}`;
 
   // A running job's output follows its end unless the owner scrolls up. A failed job opens at its first failing line
@@ -112,7 +128,9 @@
   </div>
   <section class="output" aria-label="Job output">
     {#if shown}
-      <header><code class="command">{shown.job.command}</code>
+      <header class:opens><code class="command" bind:this={command}>{shown.job.command}</code>
+        {#if clipped || opens}<button type="button" class="retry whole" aria-expanded={opens}
+          onclick={() => { whole = opens ? undefined : keyOf(shown.session, shown.job); }}>{opens ? "Show less" : "Show all"}</button>{/if}
         <span class="meta">{names.get(shown.session)?.name} · {#if failed(shown.job)}<StatusPill tone="failed" word label={outcome(shown.job)} /> · {jobTime(shown.job)}{:else}{outcome(shown.job)}{/if}</span></header>
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (the keyboard scrolls the output) -->
       <pre bind:this={output} tabindex="0" aria-label={`Output of ${shown.job.command}`}
@@ -126,7 +144,8 @@
 <style>
   /* The list on the left and the output on the right; in a narrow dock, such as on a phone, the list sits above. */
   .pane { flex: 1; min-height: 0; display: flex; container-type: inline-size; }
-  .jobs { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(240px, 2fr) 3fr; }
+  /* One row the pane's height: an auto row would grow with the output and run past the window. */
+  .jobs { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(240px, 2fr) 3fr; grid-template-rows: minmax(0, 1fr); }
   .list { min-height: 0; overflow-y: auto; padding: 6px; border-right: 1px solid var(--line); }
   .list:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .only { display: flex; align-items: baseline; gap: 8px; margin: 2px 6px 6px; color: var(--muted); font-size: 12.5px; }
@@ -147,8 +166,12 @@
   .job code { flex: 1; min-width: 0; overflow: hidden; color: var(--text); font: 12.5px/1.4 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
   .state { flex: none; font-variant-numeric: tabular-nums; }
   .output { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-  .output header { display: grid; gap: 2px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
-  .command { font: 12.5px/1.4 var(--mono); overflow-wrap: anywhere; }
+  .output header { flex: none; display: grid; gap: 2px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  /* A whole command takes at most half the pane and scrolls, so the output keeps the rest. */
+  .output header.opens { max-height: 50%; overflow-y: auto; }
+  .command { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; font: 12.5px/1.4 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .opens .command { display: block; }
+  .whole { justify-self: start; font-size: 12.5px; }
   .meta { color: var(--muted); font-size: 12.5px; }
   pre { flex: 1; min-height: 0; margin: 0; padding: 8px 12px; overflow-y: auto; font: 12.5px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
   pre:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
