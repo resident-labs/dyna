@@ -138,9 +138,6 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 	}
 }
 func (s *Service) HostexecRevoke(ctx context.Context, who contract.Principal, req contract.HostexecRevokeRequest) (contract.HostexecRevokeResponse, *contract.Error) {
-	if who.Kind != contract.PrincipalOwner {
-		return contract.HostexecRevokeResponse{}, forbidden()
-	}
 	if err := s.store.RevokeGrant(ctx, req.Grant, s.now()); err != nil {
 		return contract.HostexecRevokeResponse{}, failure(err)
 	}
