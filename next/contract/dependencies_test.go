@@ -21,10 +21,16 @@ func TestDependencyDirection(t *testing.T) {
 		standard[fields[0]] = fields[1] == "true"
 	}
 	// The runtime embeds the web assets; web has no Go dependencies on the engine.
+	// A sub-package with its own entry imports only what that entry lists. Other
+	// engine sub-packages fall back to the engine entry.
 	allowed := map[string][]string{
 		"contract": {}, "room": {"contract"}, "harness": {"contract"},
 		"box": {"contract", "harness"}, "engine": {"contract", "room", "box", "harness"},
-		"migrate": {"contract", "engine/store"},
+		"migrate":          {"contract", "engine/store"},
+		"engine/lifecycle": {"contract", "box", "engine/store"},
+		"engine/store":     {"contract", "room", "box"},
+		"engine/approve":   {"contract", "engine/store"},
+		"engine/model":     {"contract"},
 	}
 	for _, line := range lines {
 		fields := strings.Fields(line)
@@ -32,8 +38,12 @@ func TestDependencyDirection(t *testing.T) {
 		if !strings.HasPrefix(path, module) {
 			continue
 		}
-		area := strings.Split(strings.TrimPrefix(path, module), "/")[0]
+		area := strings.TrimPrefix(path, module)
 		deps, checked := allowed[area]
+		if !checked {
+			area = strings.Split(area, "/")[0]
+			deps, checked = allowed[area]
+		}
 		if !checked {
 			continue
 		}
