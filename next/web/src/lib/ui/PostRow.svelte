@@ -27,11 +27,12 @@
 <script lang="ts">
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
+  import VisualBanner from "./VisualBanner.svelte";
   import { fileSize, formatTime, isImage, isThumb, type Row } from "../feed.ts";
-  import type { Attachment } from "../contract.gen.ts";
+  import type { Attachment, VisualCard } from "../contract.gen.ts";
   import { hue } from "../identity.ts";
-  let { row, author, to, root, onretry, ondiscard, onforward }: {
-    row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void;
+  let { row, author, to, root, onretry, ondiscard, onforward, newest, onvisual }: {
+    row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; newest: Map<string, VisualCard>; onvisual: (visual: VisualCard) => void;
   } = $props();
   let html = $derived(render(row.text));
   // Copy text answers in the bar for 2 seconds, as in v1.
@@ -75,8 +76,8 @@
   // Images already retried once; a second failure leaves the card without Retry.
   let retried: string[] = $state([]);
   const retry = (file: Attachment) => { retried = [...retried, file.sha256]; failed = failed.filter(sha => sha !== file.sha256); };
-  let images = $derived(row.attachments.filter(file => isThumb(file, failed)));
-  let others = $derived(row.attachments.filter(file => !isThumb(file, failed)));
+  let images = $derived(row.attachments.filter(file => !file.visual && isThumb(file, failed)));
+  let others = $derived(row.attachments.filter(file => !file.visual && !isThumb(file, failed)));
 </script>
 
 <!-- A pointer or the keyboard shows the bar; a long press on a touch screen opens a bottom sheet with the same two actions. -->
@@ -96,6 +97,7 @@
       <time datetime={row.at}>{formatTime(row.at)}</time>{#if to}<span class="to">→ {to}</span>{/if}</p>
   {/if}
   <div class="text">{@html html}</div>
+  {#each row.attachments as file}{@const visual = file.visual}{#if visual}<div><VisualBanner {visual} newest={newest.get(visual.id) ?? visual} onopen={() => onvisual(visual)} /></div>{/if}{/each}
   <!-- As in v1, images come first as thumbnails, then a card per other file. Each opens the file in a new tab. -->
   {#if images.length}<div class="images" class:many={images.length > 1}>{#each images as file, i (i)}
     <a class="thumb" href={url(file)} target="_blank" rel="noopener" title={`${file.name} · ${fileSize(file.bytes)}`}>
