@@ -2,7 +2,7 @@
   color-scheme: light dark;
   /* Warm off-white. --focus is the one accent, for focus rings, selection and links. */
   --bg: #fbf9f6; --sidebar: #f3efe9; --raised: #ffffff; --line: rgb(60 40 20 / 11%); --selected: rgb(60 40 20 / 8%);
-  --hover: rgb(60 40 20 / 4%); --focus: #3d5bd0; --text: #2a2723; --muted: #63605a; --attention: #a45500; --danger: #b3332e; --ok: #3f8a57;
+  --hover: rgb(60 40 20 / 4%); --focus: #3d5bd0; --text: #2a2723; --muted: #63605a; --attention: #a45500; --danger: #b3332e;
   /* Identity colors: the hue comes from the name, these set lightness and chroma per theme. */
   --id-name: 47% 0.13; --id-face: 89% 0.05; --id-initials: 38% 0.1;
   /* The left edge of post text: the 16 px row padding, the 32 px avatar and a 12 px gap. */
@@ -16,7 +16,7 @@ strong, b, h1, h2, h3, h4 { font-weight: 600; }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #23201d; --sidebar: #1a1816; --raised: #2d2926; --line: rgb(255 235 210 / 8%); --selected: rgb(255 235 210 / 9%);
-    --hover: rgb(255 235 210 / 4%); --focus: #93a6f5; --text: #ece6de; --muted: #a39b91; --attention: #efb66d; --danger: #e67a76; --ok: #7cc493;
+    --hover: rgb(255 235 210 / 4%); --focus: #93a6f5; --text: #ece6de; --muted: #a39b91; --attention: #efb66d; --danger: #e67a76;
     --id-name: 78% 0.11; --id-face: 40% 0.08; --id-initials: 92% 0.04;
   }
 }
@@ -51,7 +51,7 @@ aside.members { border-right: 0; border-left: 1px solid var(--line); }
 .card h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 16px; line-height: 1.25; font-weight: 600; }
 .card .aside { margin-left: auto; color: var(--muted); font-size: 12.5px; font-weight: 400; font-variant-numeric: tabular-nums; }
 .card p { margin: 0 0 6px; }
-.card .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.card .tiles { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 16px; }
 .member { padding: 5px 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .member:hover { background: var(--hover); }
 header { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--line); }
