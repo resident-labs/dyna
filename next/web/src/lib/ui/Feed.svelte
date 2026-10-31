@@ -1,12 +1,13 @@
 <script lang="ts">
   import { SvelteSet } from "svelte/reactivity";
+  import { APIError } from "../client.ts";
   import VirtualList from "./VirtualList.svelte";
   import PostRow from "./PostRow.svelte";
   import FailedTurnRow from "./FailedTurnRow.svelte";
   import WorkRow from "./WorkRow.svelte";
   import { feedRows, type Row } from "../feed.ts";
   import type { RoomStore } from "../room.svelte.ts";
-  import type { Conversation, Principal } from "../contract.gen.ts";
+  import type { Conversation, PostRequest, Principal } from "../contract.gen.ts";
 
   let { store, home, empty, element = $bindable() }: {
     store: RoomStore; home: Conversation; empty: string; element?: HTMLDivElement;
@@ -23,10 +24,22 @@
   const name = (session: string) => store.names.get(session) ?? "A closed session";
   const author = (from: Principal) => from.kind === "owner" ? "You" : from.session ? name(from.session) : "Dyna";
   const toggle = (key: string) => { if (!opened.delete(key)) opened.add(key); };
+  let list: VirtualList<Item> | undefined = $state();
+  // The owner's own post and a jump always land on the newest row, even from inside the present window.
+  export async function send(request: PostRequest): Promise<void> {
+    const sending = store.post(request);
+    void list?.toEnd();
+    await sending;
+    await list?.toEnd();
+  }
+  async function jump() {
+    await store.jumpToPresent();
+    await list?.toEnd();
+  }
 </script>
 
 {#if items.length}
-  <VirtualList {items} key={item => item.key} label="Feed" follow={store.atPresent} bind:element
+  <VirtualList bind:this={list} {items} key={item => item.key} label="Feed" follow={store.atPresent} bind:element
     onstart={() => void store.loadOlder()} onend={() => void store.loadNewer()}>
     {#snippet row(item: Item)}
       {#if item.kind === "post"}<PostRow row={item} author={author(item.from)} />
@@ -38,12 +51,17 @@
 {:else if store.ready}
   <p class="empty">{empty}</p>
 {/if}
+{#if store.ready && store.error !== undefined}
+  <p class="hint" role="alert">{store.error instanceof APIError && store.error.detail.code === "forbidden"
+    ? "Your sign-in ended. Run dyna web to sign in again." : "Some posts did not load. Scroll or jump to try again."}</p>
+{/if}
 {#if !store.atPresent}
-  <button type="button" class="jump" onclick={() => void store.jumpToPresent()}>New posts below. Jump to present</button>
+  <button type="button" class="jump" onclick={jump}>New posts below. Jump to present</button>
 {/if}
 
 <style>
   .pending { margin: 0; padding: 1px 16px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .hint { margin: 0; padding: 6px 16px; color: var(--muted); font-size: 12px; }
   .jump { all: unset; cursor: pointer; padding: 6px 16px; color: var(--muted); font-size: 12px; }
   .jump:hover { color: var(--text); }
   .jump:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
