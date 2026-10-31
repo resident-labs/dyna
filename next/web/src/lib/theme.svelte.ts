@@ -21,3 +21,9 @@ window.addEventListener("storage", event => {
 });
 
 export const theme = () => current;
+// The owner's pick applies at once and stays on this browser. A browser that blocks site storage keeps it for this tab only.
+export function choose(next: Theme) {
+  current = next;
+  apply(next);
+  try { localStorage.setItem(key, next.id); } catch { /* Storage is blocked: the pick lasts until the tab closes. */ }
+}
