@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -24,6 +25,7 @@ type client interface {
 	HostexecRun(context.Context, contract.HostexecRunRequest) (contract.HostexecRunResponse, error)
 	HostexecRevoke(context.Context, contract.HostexecRevokeRequest) (contract.HostexecRevokeResponse, error)
 	File(context.Context, string, io.Writer) error
+	Upload(context.Context, string) (contract.Attachment, error)
 	HostAdd(context.Context, contract.HostAddRequest) (contract.HostAddResponse, error)
 	RoomCreate(context.Context, contract.RoomCreateRequest) (contract.RoomCreateResponse, error)
 	RoomRepoAdd(context.Context, contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, error)
@@ -101,6 +103,35 @@ func (c *socketClient) File(ctx context.Context, hash string, out io.Writer) err
 	}
 	_, err = io.Copy(out, resp.Body)
 	return err
+}
+
+func (c *socketClient) Upload(ctx context.Context, path string) (contract.Attachment, error) {
+	var attachment contract.Attachment
+	file, err := os.Open(path)
+	if err != nil {
+		return attachment, err
+	}
+	defer file.Close()
+	name := filepath.Base(path)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://dyna/v1/files?name="+url.QueryEscape(name), file)
+	if err != nil {
+		return attachment, err
+	}
+	media := mime.TypeByExtension(filepath.Ext(name))
+	if media == "" {
+		media = "application/octet-stream"
+	}
+	req.Header.Set("Content-Type", media)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return attachment, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return attachment, fmt.Errorf("upload %s: %s", name, resp.Status)
+	}
+	err = json.NewDecoder(resp.Body).Decode(&attachment)
+	return attachment, err
 }
 
 type commandExit int
@@ -191,7 +222,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		}
 		op := res.Operation
 		if op.Result == nil {
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), op.ID)
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Command %s waits for approval; op.ran wakes the session with the result.\n", op.ID)
 			return err
 		}
 		if _, err = io.WriteString(cmd.OutOrStdout(), op.Result.Output); err != nil {
@@ -336,14 +367,27 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	session.AddCommand(start, closeCmd)
 	root.AddCommand(session)
 	var postRoom string
-	var mentions []string
+	var mentions, paths []string
 	post := &cobra.Command{Use: "post TEXT", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		r, err := getClient().Post(cmd.Context(), contract.PostRequest{Room: contract.RoomID(postRoom), Text: args[0], Mentions: mentions})
+		if len(paths) > 16 {
+			return fmt.Errorf("a post can carry at most 16 attachments")
+		}
+		c := getClient()
+		var attachments []contract.Attachment
+		for _, path := range paths {
+			attachment, err := c.Upload(cmd.Context(), path)
+			if err != nil {
+				return err
+			}
+			attachments = append(attachments, attachment)
+		}
+		r, err := c.Post(cmd.Context(), contract.PostRequest{Room: contract.RoomID(postRoom), Text: args[0], Mentions: mentions, Attachments: attachments})
 		if err == nil {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), r.Event)
 		}
 		return err
 	}}
+	post.Flags().StringArrayVar(&paths, "attach", nil, "Attach a file (repeatable)")
 	post.Flags().StringVar(&postRoom, "room", "", "Room ID")
 	post.Flags().StringSliceVar(&mentions, "mention", nil, "Session mentions")
 	root.AddCommand(post)
