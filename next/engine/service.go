@@ -740,13 +740,14 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 	if req.Limit < 0 || req.AfterSeq < 0 || req.BeforeSeq < 0 || (req.BeforeSeq > 0 && req.AfterSeq > 0) {
 		return contract.EventsListResponse{}, invalid("invalid event range")
 	}
-	var events []contract.Event
-	var err error
-	if req.BeforeSeq > 0 {
-		events, err = s.store.EventsBefore(ctx, req.Room, req.BeforeSeq, req.Limit, req.Types)
-	} else {
-		events, err = s.store.Events(ctx, req.Room, req.AfterSeq, req.Limit, req.Types)
+	var dm contract.SessionID
+	if req.Home != nil {
+		if req.Home.Kind != contract.ConversationDM || req.Home.Session == "" {
+			return contract.EventsListResponse{}, invalid("home must be a DM")
+		}
+		dm = req.Home.Session
 	}
+	events, err := s.store.EventsPage(ctx, req.Room, req.AfterSeq, req.BeforeSeq, req.Limit, req.Types, dm)
 	if err != nil {
 		return contract.EventsListResponse{}, failure(err)
 	}
