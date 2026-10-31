@@ -496,7 +496,7 @@ type Error struct {
 }
 ```
 
-M1 methods: `host.add`, `room.create`, `session.start`, `session.close`, `post`, `events.list`, `box.hello`, `turn.output`. M2 adds `transcript.append`, `turn.activity` and `shell.output`. Each later milestone adds its methods in the same way.
+M1 methods: `host.add`, `room.create`, `session.start`, `session.close`, `post`, `events.list`, `box.hello`, `turn.output`. M2 adds `transcript.append`, `turn.activity`, `shell.output` and `host.list`. Each later milestone adds its methods in the same way.
 
 ## 4. Store
 
@@ -836,7 +836,8 @@ Owner, 2026-10-30: v2 ports v1's workspace tools. The engine side has two parts,
 
 **Owner terminal.** A tabbed terminal in the web app opens a shell in a box, on a capacity host, or on the control-plane host.
 
-- `GET /v1/terminal?box=<session>` or `?host=<name>`, with `cols` and `rows`, upgrades to a WebSocket. Binary frames carry the terminal's bytes both ways. The client's JSON text frame, `TerminalResize`, sets the size. The engine's last text frame, `TerminalExit`, gives the shell's exit code.
+- `host.list` returns the hosts a terminal can open: `control-plane` first, then each added host. Only the owner calls it.
+- `GET /v1/terminal?box=<session>` or `?host=<name>`, with `cols` and `rows`, upgrades to a WebSocket. The engine keeps the WebSocket library's same-origin check, so another site cannot open a terminal with the owner's cookie. Binary frames carry the terminal's bytes both ways. The client's JSON text frame, `TerminalResize`, sets the size. The engine's last text frame, `TerminalExit`, gives the shell's exit code.
 - The engine starts one command under a local PTY for every target:
   - a box: `ssh -tt` through its host's master, running `podman exec -it <box> bash -l` as the box user;
   - a capacity host: `ssh -tt` through the master, running the host user's login shell;

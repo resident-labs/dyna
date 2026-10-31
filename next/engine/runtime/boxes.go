@@ -3,6 +3,7 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -81,7 +82,7 @@ func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host,
 			return h, nil
 		}
 	}
-	return nil, fmt.Errorf("host %q not found", name)
+	return nil, fmt.Errorf("host %q: %w", name, sql.ErrNoRows)
 }
 
 func (b *Boxes) CacheHost(ctx context.Context, name contract.HostName) (enginegit.CacheHost, string, error) {
@@ -309,6 +310,21 @@ func removeHostBox(ctx context.Context, h box.HostDriver, record box.Box, forwar
 type scopeRunner interface {
 	RunHostexec(context.Context, contract.HostexecRunArgs, contract.OpID) ([]byte, int, bool, error)
 	StopHostexec(context.Context, string) error
+}
+
+func (b *Boxes) TerminalArgv(ctx context.Context, host contract.HostName, id contract.BoxID) ([]string, error) {
+	if host == contract.ControlPlane && id == "" {
+		shell := os.Getenv("SHELL")
+		if shell == "" {
+			shell = "/bin/sh"
+		}
+		return []string{"systemd-run", "--user", "--scope", "--quiet", "--", shell, "-l"}, nil
+	}
+	h, err := b.host(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	return h.TerminalArgv(id), nil
 }
 
 func (b *Boxes) scopeRunner(ctx context.Context, host contract.HostName) (scopeRunner, error) {

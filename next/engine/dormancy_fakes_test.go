@@ -49,3 +49,43 @@ func (*heldParentBox) Recreate(context.Context, BoxSpec, string, string) error {
 func (closingInterleaveBox) Recreate(context.Context, BoxSpec, string, string) error { return nil }
 
 func (heldRemoveBox) Recreate(context.Context, BoxSpec, string, string) error { return nil }
+
+func (checkingBoxes) TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error) {
+	return nil, nil
+}
+
+func (*recoveryBoxes) TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error) {
+	return nil, nil
+}
+
+func (*blockingTimeoutBoxes) TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error) {
+	return nil, nil
+}
+
+func (unavailableBoxes) TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error) {
+	return nil, nil
+}
+
+func (blockingBoxes) TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error) {
+	return nil, nil
+}
+
+func (cancelOnRemove) TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error) {
+	return nil, nil
+}
+
+func (*recordingBoxes) TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error) {
+	return nil, nil
+}
+
+func (*heldParentBox) TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error) {
+	return nil, nil
+}
+
+func (closingInterleaveBox) TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error) {
+	return nil, nil
+}
+
+func (heldRemoveBox) TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error) {
+	return nil, nil
+}
