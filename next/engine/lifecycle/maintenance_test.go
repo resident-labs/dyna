@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
@@ -11,15 +12,18 @@ import (
 
 type maintenanceAdapter struct {
 	BoxAdapter
-	calls chan contract.HostName
+	calls int
 }
 
-func (a maintenanceAdapter) MaintainHost(_ context.Context, host contract.HostName) error {
-	a.calls <- host
+func (a *maintenanceAdapter) MaintainHost(_ context.Context, _ contract.HostName) error {
+	a.calls++
+	if a.calls == 1 {
+		return errors.New("offline")
+	}
 	return nil
 }
 
-func TestDailyHostMaintenance(t *testing.T) {
+func TestDailyHostMaintenanceRetriesFailure(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -30,20 +34,34 @@ func TestDailyHostMaintenance(t *testing.T) {
 	if err := st.AddHost(ctx, box.Host{Name: "h", State: box.HostReady, DiskBytes: 40 * box.GiB, CheckedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if ok, err := st.ClaimHostMaintenance(ctx, "h", now.Add(-24*time.Hour)); !ok || err != nil {
-		t.Fatalf("initial claim: %v %v", ok, err)
-	}
-	a := maintenanceAdapter{calls: make(chan contract.HostName, 2)}
+	a := &maintenanceAdapter{}
 	r := New(st, a, nil, nil, nil, func() time.Time { return now })
-	if err := r.Pass(ctx); err != nil {
-		t.Fatal(err)
+	pass := func() {
+		t.Helper()
+		if err := r.Pass(ctx); err != nil {
+			t.Fatal(err)
+		}
+		r.Wait()
 	}
-	r.Wait()
-	if err := r.Pass(ctx); err != nil {
-		t.Fatal(err)
+	pass()
+	now = now.Add(time.Hour - time.Millisecond)
+	pass()
+	if a.calls != 1 {
+		t.Fatalf("early retry: %d", a.calls)
 	}
-	r.Wait()
-	if len(a.calls) != 1 || <-a.calls != "h" {
-		t.Fatal("maintenance did not run exactly once")
+	now = now.Add(time.Millisecond)
+	pass()
+	if a.calls != 2 {
+		t.Fatalf("retry: %d", a.calls)
+	}
+	now = now.Add(24*time.Hour - time.Millisecond)
+	pass()
+	if a.calls != 2 {
+		t.Fatalf("early daily run: %d", a.calls)
+	}
+	now = now.Add(time.Millisecond)
+	pass()
+	if a.calls != 3 {
+		t.Fatalf("daily run: %d", a.calls)
 	}
 }
