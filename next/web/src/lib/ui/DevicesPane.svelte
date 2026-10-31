@@ -51,6 +51,7 @@
   {:else}
     {#if pairing}<PairCard {devices} {reload} onclose={paired => void closePair(paired)} />{/if}
     <div class="list">
+      {#if devices.length === 0}<p class="load">No devices yet.</p>{/if}
       {#each listed(devices) as device (device.id)}{@const warning = expiring(device.expiresAt, Date.now())}
         <div class="row">
           <Icon name={isPhone(device.name) ? "phone" : "laptop"} size={20} />
