@@ -158,6 +158,9 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			}
 			return nil
 		}
+		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET shell_jobs=MAX(0,?) WHERE id=?", output.ShellJobs, session); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='read' WHERE to_kind=? AND to_id=? AND turn=? AND state='taken'", contract.PrincipalSession, session, output.Turn); err != nil {
 			return err
 		}
