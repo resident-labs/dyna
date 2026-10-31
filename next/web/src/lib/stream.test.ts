@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stream, type EventConnection } from "./stream.ts";
+import { stream, watchHello, type EventConnection } from "./stream.ts";
 import { decodeEvent } from "./event.ts";
 
 test("skips malformed event bodies at the stream boundary", () => {
@@ -8,6 +8,18 @@ test("skips malformed event bodies at the stream boundary", () => {
     seq: 1, id: "e", at: "", from: { kind: "owner" },
     type: "session.started", body: { session: "s" },
   }), undefined);
+});
+
+test("delivers the build hello", () => {
+  let listener: (event: MessageEvent<string>) => void = () => {};
+  let build = "";
+  watchHello(hello => { build = hello.build; });
+  const stop = stream(undefined, () => 0, () => {}, () => ({
+    onmessage: null, onerror: null, addEventListener(_type, callback) { listener = callback; }, close() {},
+  }));
+  listener(new MessageEvent("hello", { data: '{"build":"b"}' }));
+  assert.equal(build, "b");
+  stop();
 });
 
 test("reconnects after the last applied event", () => {

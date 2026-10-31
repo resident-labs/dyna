@@ -62,6 +62,24 @@ func boxCaller() Caller {
 	return Caller{Principal: contract.Principal{Kind: contract.PrincipalSession, Session: "session-a"}, Box: "box-a", Room: "room-a"}
 }
 
+type helloService struct{ *fakeService }
+
+func (helloService) Events(context.Context, contract.Principal, contract.RoomID, int64) (<-chan contract.Event, *contract.Error) {
+	ch := make(chan contract.Event)
+	close(ch)
+	return ch, nil
+}
+
+func TestEventsStartWithBuildHello(t *testing.T) {
+	a := New(helloService{&fakeService{}}, nil)
+	a.Build = "b"
+	w := httptest.NewRecorder()
+	a.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}}).ServeHTTP(w, httptest.NewRequest("GET", "/v1/events", nil))
+	if got, want := w.Body.String(), "event: hello\ndata: {\"build\":\"b\"}\n\n"; got != want {
+		t.Fatalf("stream starts with %q, want %q", got, want)
+	}
+}
+
 func TestBoxCallerIsListenerIdentity(t *testing.T) {
 	f := &fakeService{}
 	dir := t.TempDir()
