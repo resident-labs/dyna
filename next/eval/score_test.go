@@ -76,3 +76,12 @@ func TestFixtureValidationRequiresOnlyTaskInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPostRequiresExpectedText(t *testing.T) {
+	f := Fixture{A: "child"}
+	want, _ := Expected(4, f)
+	state := []Field{field("posts", "1"), field("recipient", "child"), field("text", "wrong")}
+	if ScoreTask(want, Observation{Complete: true, State: state}).Correct {
+		t.Fatal("wrong message passed")
+	}
+}

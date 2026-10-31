@@ -37,7 +37,7 @@ func (f Fixture) Validate(task int) error {
 	case 12:
 		required["room"] = f.Room
 	case 13:
-		required["visual"], required["file"] = f.Visual, f.File
+		required["visual"], required["file"], required["fileSHA256"] = f.Visual, f.File, f.FileSHA256
 	case 14:
 		required["operation"] = f.Operation
 	case 15:
@@ -74,9 +74,9 @@ func Expected(id int, f Fixture) (Expectation, error) {
 	case 3:
 		return Expectation{ReadValue: f.ReadValue, Calls: []Call{call("events.list", field("room", f.Room))}}, nil
 	case 4:
-		return Expectation{Calls: []Call{call("post", field("recipient", f.A), field("text", "Check complete."))}, State: []Field{field("posts", "1"), field("recipient", f.A)}}, nil
+		return Expectation{Calls: []Call{call("post", field("recipient", f.A), field("text", "Check complete."))}, State: []Field{field("posts", "1"), field("recipient", f.A), field("text", "Check complete.")}}, nil
 	case 5:
-		return Expectation{Calls: []Call{call("post", field("recipient.A", f.A), field("recipient.B", f.B), field("text", "Please review."))}, State: []Field{field("posts", "1"), field("recipient.A", f.A), field("recipient.B", f.B)}}, nil
+		return Expectation{Calls: []Call{call("post", field("recipient.A", f.A), field("recipient.B", f.B), field("text", "Please review."))}, State: []Field{field("posts", "1"), field("recipient.A", f.A), field("recipient.B", f.B), field("text", "Please review.")}}, nil
 	case 6:
 		return Expectation{Calls: []Call{call("session.start", field("parent", f.Lead), field("name", "eval-worker"), field("profile", f.Profile), field("brief", "Report ready."))}, State: []Field{field("children.created", "1"), field("child.parent", f.Lead), field("child.name", "eval-worker"), field("child.profile", f.Profile), field("child.brief", "Report ready.")}}, nil
 	case 7:
@@ -92,7 +92,7 @@ func Expected(id int, f Fixture) (Expectation, error) {
 	case 12:
 		return Expectation{Calls: []Call{call("room.pause", field("room", f.Room), field("paused", "true"))}, State: []Field{field("room.paused", "true")}}, nil
 	case 13:
-		return Expectation{Calls: []Call{call("post", field("visualUpdate", f.Visual), field("html", f.File))}, State: []Field{field("visual.updated", f.Visual), field("visual.source", f.File)}}, nil
+		return Expectation{Calls: []Call{call("post", field("visualUpdate", f.Visual), field("html", f.File))}, State: []Field{field("visual.updated", f.Visual), field("visual.sha256", f.FileSHA256)}}, nil
 	case 14:
 		return Expectation{Calls: []Call{call("op.withdraw", field("operation", f.Operation))}, State: []Field{field("operation.withdrawn", "true")}}, nil
 	case 15:
