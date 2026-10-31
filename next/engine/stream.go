@@ -51,7 +51,11 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 	return out, nil
 }
 
-type boxChannel struct{ stop context.CancelFunc }
+type boxChannel struct {
+	stop     context.CancelFunc
+	wake     chan struct{}
+	watching uint64
+}
 
 func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-chan contract.BoxMessage, *contract.Error) {
 	if caller.Kind != contract.PrincipalSession {
@@ -64,9 +68,10 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 	ctx, stop := context.WithCancel(ctx)
 	s.mu.Lock()
 	if previous := s.channels[session.ID]; previous != nil {
+		s.clearComputerLocked(session.ID)
 		previous.stop()
 	}
-	channel := &boxChannel{stop: stop}
+	channel := &boxChannel{stop: stop, wake: make(chan struct{}, 1)}
 	s.channels[session.ID] = channel
 	s.mu.Unlock()
 	sub, cancel := s.store.Subscribe()
@@ -77,6 +82,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			s.mu.Lock()
 			if s.channels[session.ID] == channel {
 				delete(s.channels, session.ID)
+				s.clearComputerLocked(session.ID)
 			}
 			s.mu.Unlock()
 		}()
@@ -85,6 +91,26 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 		replay := true
 		archiveSent := false
 		for {
+			s.mu.Lock()
+			c := s.computers[session.ID]
+			var desired uint64
+			if c != nil && len(c.watchers) != 0 {
+				desired = c.generation
+			}
+			changed := desired != channel.watching
+			channel.watching = desired
+			s.mu.Unlock()
+			if changed {
+				var body contract.BoxMessageBody = contract.ComputerWatchStop{}
+				if desired != 0 {
+					body = contract.ComputerWatchStart{Generation: desired}
+				}
+				select {
+				case out <- contract.BoxMessage{Body: body}:
+				case <-ctx.Done():
+					return
+				}
+			}
 			current, err := s.store.Box(ctx, session.Box)
 			if err != nil || current.State == contract.BoxDeleted {
 				return
@@ -102,6 +128,8 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 					}
 				}
 				select {
+				case <-channel.wake:
+					continue
 				case event, ok := <-sub:
 					if !ok {
 						return
@@ -123,6 +151,8 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			if !allowed {
 				unlock()
 				select {
+				case <-channel.wake:
+					continue
 				case <-sub:
 					continue
 				case <-ctx.Done():
@@ -213,6 +243,8 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				}
 			}
 			select {
+			case <-channel.wake:
+				continue
 			case _, ok := <-sub:
 				if !ok {
 					if ctx.Err() != nil {

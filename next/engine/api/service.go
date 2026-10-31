@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"github.com/resident-labs/dyna/contract"
+	"io"
 )
 
 // Caller is fixed by the listener, not by a request body.
@@ -16,6 +17,9 @@ type Caller struct {
 // Service implements the engine operations. It must authorize resource targets
 // against the caller as well as applying the API's listener-level policy.
 type Service interface {
+	ComputerChanged(context.Context, contract.Principal, contract.ComputerChangedRequest) (contract.ComputerChangedResponse, *contract.Error)
+	ComputerWatch(context.Context, contract.SessionID) (<-chan []byte, *contract.Error)
+	ComputerFrames(context.Context, contract.Principal, uint64, io.Reader) *contract.Error
 	RoomList(context.Context, contract.Principal, contract.RoomListRequest) (contract.RoomListResponse, *contract.Error)
 	SessionList(context.Context, contract.Principal, contract.SessionListRequest) (contract.SessionListResponse, *contract.Error)
 	HostexecRun(context.Context, contract.Principal, contract.HostexecRunRequest) (contract.HostexecRunResponse, *contract.Error)

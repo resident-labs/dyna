@@ -15,6 +15,7 @@ const object = (fields: Record<string, Check>): Check => value => {
   return Object.entries(fields).every(([key, check]) => check(record[key]));
 };
 
+const computerState = oneOf("running", "stopped");
 const principal = object({ kind: oneOf("owner", "session", "engine"), session: optional(string) });
 const conversation = object({ kind: oneOf("feed", "dm"), session: optional(string) });
 const reply = object({ kind: oneOf("final", "post", "none"), target: optional(principal), home: optional(conversation), replyTo: optional(string) });
@@ -32,6 +33,7 @@ const bodies: Record<string, Check> = {
   "session.started": object({ session: string, name: string, parent: optional(string), profile: string, goal: optional(string), brief: optional(string) }),
   "session.moved": object({ session: string, newParent: string }),
   "session.closed": object({ session: string, archive: optional(string), unheld: optional(nullable(array(string))) }),
+  "computer.changed": object({ session: string, to: computerState }),
   "box.changed": object({ box: string, session: string, host: optional(string), from: optional(boxState), to: boxState, reason: optional(string) }),
   "turn.started": object({ session: string, turn: string, inputs: nullable(array(string)) }),
   "turn.ended": object({ session: string, turn: string, outcome: oneOf("completed", "failed", "stopped"), final: optional(string),
