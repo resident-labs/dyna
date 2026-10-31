@@ -22,6 +22,6 @@ test("fits a window to its frame, keeping the top right corner", () => {
 
 test("a computer opens against the right edge, and says when it cannot clear the cards", () => {
   assert.deepEqual(computerPlace(1440, 68, 744), { rect: { x: 1008, y: 68, w: 416, h: 300 }, clear: true });
-  assert.equal(computerPlace(1192, 68, 744).clear, true);
-  assert.equal(computerPlace(1191, 68, 744).clear, false);
+  assert.equal(computerPlace(1184, 68, 744).clear, true);
+  assert.equal(computerPlace(1183, 68, 744).clear, false);
 });

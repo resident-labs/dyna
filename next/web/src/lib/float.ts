@@ -23,7 +23,7 @@ export function fitted(rect: Rect, ratio: number, chrome: number, bottom: number
 // leaves the cards alone, whose right edge is cards.
 export function computerPlace(width: number, top: number, cards: number): { rect: Rect; clear: boolean } {
   const rect = { x: width - 432, y: top, w: 416, h: 300 };
-  return { rect, clear: rect.x >= cards + 16 };
+  return { rect, clear: rect.x >= cards + 8 };
 }
 
 // The rect after a drag of (dx, dy) on the given edges, from the rect when the drag began.
