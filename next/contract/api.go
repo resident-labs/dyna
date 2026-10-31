@@ -88,6 +88,7 @@ const (
 	ErrMoveBusy       ErrorCode = "move_busy"
 	ErrHasChildren    ErrorCode = "has_children"
 	ErrParentClosing  ErrorCode = "parent_closing"
+	ErrSessionClosing ErrorCode = "session_closing"
 	ErrStale          ErrorCode = "stale"
 	ErrUnavailable    ErrorCode = "unavailable"
 	ErrStoreFromV1    ErrorCode = "store_from_v1"

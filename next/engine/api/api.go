@@ -440,7 +440,7 @@ func writeError(w http.ResponseWriter, err *contract.Error) {
 		status = http.StatusForbidden
 	case contract.ErrNotFound:
 		status = http.StatusNotFound
-	case contract.ErrConflict, contract.ErrStale, contract.ErrMoveBusy, contract.ErrHasChildren, contract.ErrParentClosing:
+	case contract.ErrConflict, contract.ErrStale, contract.ErrMoveBusy, contract.ErrHasChildren, contract.ErrParentClosing, contract.ErrSessionClosing:
 		status = http.StatusConflict
 	case contract.ErrUnavailable:
 		status = http.StatusServiceUnavailable
