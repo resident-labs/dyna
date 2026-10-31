@@ -549,7 +549,7 @@ Column types follow SQLite. Times are INTEGER Unix milliseconds (`_at`). IDs are
 | M2 | `hostexec_runs` | section 6.3 |
 | M2 | `archives` | section 5.9 |
 | M2 | `room_repos`, `repos` | section 7.6 |
-| M2 | `pr_owners` | (`repo`, `number`) PK, `session`, `goal`, `approved_head`. M2 opens PRs; M3 approves and merges them (decision 13). |
+| M2 | `pr_owners` | (`repo`, `number`) PK, `session`, `goal`, `approved_head`, `branch`. M2 opens PRs; M3 approves and merges them (decision 13). |
 | M3 | `subscriptions`, `subscription_events`, `subscription_args` | section 8.5; hooks and the default notice subscription need them |
 | M3 | `repo_attribution`, `devices`, `device_scopes` | section 7 |
 | M3 | `imports` | section 8.5 |
@@ -769,7 +769,7 @@ On SIGTERM, the engine blocks new turn dispatches and model calls, and waits up 
 - In M1 the proxy keeps its sign-ins in its own file store, `<data>/cliproxy/auth` (mode 0700). In M3 the engine registers a token store on `store.db` through the SDK's `Store` interface (`List`, `Save`, `Delete`), so no JSON state is left. `store.db` and its backups then hold tokens and stay 0600.
 - Accepted costs: the binary grows by the proxy's dependencies (gin, a Redis client, zeroconf and others), which later patches may trim. A proxy panic stops only the child; the engine restarts it (5.7).
 
-**Git (M2).** The box agent forwards `/git/` from its loopback listener over the box socket, as it does for `/model/`. `origin` is `http://127.0.0.1:7781/git/<owner>/<repo>.git`, so git's own smart-HTTP client works with no remote helper. The engine checks the room's repositories and proxies to GitHub with its own token. Pushes are limited to the session's repository. For a push, it reads the ref commands first and answers a ref the session does not own with a receive-pack `ng` report, without forwarding anything to GitHub. Pushes are allowed only to branches the session owns (`dyna/<session>`, or a branch registered to it) and to `refs/dyna/archive/<session>`. Fetches are allowed for the room's repositories.
+**Git (M2).** The box agent forwards `/git/` from its loopback listener over the box socket, as it does for `/model/`. `origin` is `http://127.0.0.1:7781/git/<owner>/<repo>.git`, so git's own smart-HTTP client works with no remote helper. The engine checks the room's repositories and proxies to GitHub with its own token. Pushes are limited to the session's repository. For a push, it reads the ref commands first and answers a ref the session does not own with a receive-pack `ng` report, without forwarding anything to GitHub. Pushes are allowed only to branches the session owns (`v2/<session>`, `v2/<session>-<topic>` with no slash in the topic, or a PR branch registered to it) and to `refs/dyna/archive/<session>`. Fetches are allowed for the room's repositories.
 
 **Network.** Boxes have outbound internet for package installs, so they may reach the desktop on the LAN or through the tunnel. The engine's network listeners therefore accept only paired devices, and boxes hold no device keys. The box socket is a box's only way into the engine.
 
