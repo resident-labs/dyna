@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/images"
 )
@@ -110,12 +111,12 @@ func (m *Mirror) authEnv() []string {
 }
 
 // ImageContext reads the default-branch toolchain context from the mirror.
-func (m *Mirror) ImageContext(ctx context.Context, repo contract.RepoName) (string, images.TreeID, []byte, error) {
+func (m *Mirror) ImageContext(ctx context.Context, repo contract.RepoName) (string, images.TreeID, []byte, []box.Need, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	path, err := m.path(repo)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, nil, err
 	}
 	return images.Context(ctx, m.Runner, path)
 }

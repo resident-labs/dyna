@@ -97,7 +97,15 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		if workErr == nil {
 			next.Image, workErr = r.boxes.Create(ctx, BoxSpec{Box: b.ID, Session: b.Session, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources})
 		}
-		if workErr != nil {
+		var missing box.MissingDevice
+		if errors.As(workErr, &missing) {
+			next.State, next.Reason = contract.BoxFailed, missing.Error()
+			if missing.Need == box.NeedKVM {
+				cause = contract.CauseKVMDeviceMissing
+			} else {
+				cause = contract.CauseNestedDeviceMissing
+			}
+		} else if workErr != nil {
 			failures++
 			if failures >= 3 {
 				next.State, next.Reason = contract.BoxFailed, workErr.Error()
@@ -139,16 +147,18 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			due = r.retryAt(failures)
 		}
 	default:
-		image, imageErr := r.boxes.CurrentImage(ctx, b.Session, b.Host)
-		if imageErr != nil {
-			image = b.Image
-			next.Reason = imageErr.Error()
-		}
 		slice, err := box.SliceName(b.ID)
 		if err != nil {
 			return err
 		}
-		if image != b.Image || slice != b.Slice {
+		image, imageErr := r.boxes.CurrentImage(ctx, b.Session, b.Host)
+		if imageErr != nil {
+			image.Tag = b.Image
+			next.Reason = imageErr.Error()
+		}
+		if imageErr != nil && slice != b.Slice {
+			workErr = imageErr
+		} else if slice != b.Slice || image.Tag != b.Image {
 			r.mu.Lock()
 			repos := r.repos
 			r.mu.Unlock()
@@ -157,16 +167,24 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 				sources, workErr = repos.Get(ctx, b.Session, b.Host, false)
 			}
 			if workErr == nil {
-				workErr = r.boxes.Recreate(ctx, BoxSpec{Box: b.ID, Session: b.Session, Host: b.Host, Slice: slice, Size: b.Size, Repos: sources}, image, b.Slice)
+				workErr = r.boxes.Recreate(ctx, BoxSpec{Box: b.ID, Session: b.Session, Host: b.Host, Slice: slice, Size: b.Size, Repos: sources, Needs: image.Needs}, image.Tag, b.Slice)
 			}
 			if workErr == nil {
-				workErr = r.store.SetRecreated(ctx, b.ID, slice, image)
-				next.Image, next.Slice = image, slice
+				workErr = r.store.SetRecreated(ctx, b.ID, slice, image.Tag)
+				next.Image, next.Slice = image.Tag, slice
 			}
 		} else {
 			workErr = r.boxes.Start(ctx, b.ID)
 		}
-		if workErr != nil {
+		var missing box.MissingDevice
+		if errors.As(workErr, &missing) {
+			next.State, next.Reason = contract.BoxFailed, missing.Error()
+			if missing.Need == box.NeedKVM {
+				cause = contract.CauseKVMDeviceMissing
+			} else {
+				cause = contract.CauseNestedDeviceMissing
+			}
+		} else if workErr != nil {
 			next.State = contract.BoxStopped
 			failures++
 			due = r.retryAt(failures)
