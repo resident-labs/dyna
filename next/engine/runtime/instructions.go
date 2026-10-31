@@ -6,11 +6,17 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/resident-labs/dyna/box/podman"
 )
 
 type instructionVersion struct{ generation, saves uint64 }
+
+type instructionHost struct {
+	mu      sync.Mutex
+	version instructionVersion
+}
 
 // PublishInstructions marks the local commit before starting remote work.
 func (b *Boxes) PublishInstructions(ctx context.Context) {
@@ -38,9 +44,19 @@ func (b *Boxes) syncInstructions(ctx context.Context, h *podman.Host) error {
 		return nil
 	}
 	b.instructionsMu.Lock()
-	defer b.instructionsMu.Unlock()
+	if b.instructionSynced == nil {
+		b.instructionSynced = make(map[*podman.Host]*instructionHost)
+	}
+	state := b.instructionSynced[h]
+	if state == nil {
+		state = &instructionHost{}
+		b.instructionSynced[h] = state
+	}
+	b.instructionsMu.Unlock()
+	state.mu.Lock()
+	defer state.mu.Unlock()
 	version := instructionVersion{h.Generation(), b.instructionSaves.Load()}
-	if version.generation != 0 && b.instructionSynced[h] == version {
+	if version.generation != 0 && state.version == version {
 		return nil
 	}
 	paths := []string{filepath.Join("global", "AGENTS.md")}
@@ -67,10 +83,7 @@ func (b *Boxes) syncInstructions(ctx context.Context, h *podman.Host) error {
 	if err := h.SyncInstructions(ctx, files); err != nil {
 		return err
 	}
-	if b.instructionSynced == nil {
-		b.instructionSynced = make(map[*podman.Host]instructionVersion)
-	}
 	version.generation = h.Generation()
-	b.instructionSynced[h] = version
+	state.version = version
 	return nil
 }

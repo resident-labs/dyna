@@ -14,6 +14,7 @@ type Slice struct {
 type Mount struct {
 	HostPath, BoxPath string
 	ReadOnly          bool
+	MakeDir           bool
 }
 type EnvVar struct{ Name, Value string }
 type Label struct{ Key, Value string }
