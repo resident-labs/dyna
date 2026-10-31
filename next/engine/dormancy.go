@@ -87,7 +87,7 @@ func (s *Service) reconcileBox(ctx context.Context, id contract.SessionID, force
 		return nil
 	}
 	s.mu.Lock()
-	open := s.terminals[id] > 0
+	open := s.sessionLocked(id).terminals > 0
 	s.mu.Unlock()
 	if current.State == contract.BoxReady && (force || open) {
 		return nil
