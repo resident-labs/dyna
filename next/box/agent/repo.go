@@ -38,38 +38,50 @@ func setupRepos(ctx context.Context, root string, repos []contract.BoxRepo, name
 	}
 	for _, repo := range repos {
 		dir := filepath.Join(root, string(repo.Name))
-		if _, err := os.Stat(dir); err == nil {
-			continue
-		} else if !os.IsNotExist(err) {
+		if err := os.MkdirAll(dir, 0755); err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(dir), 0755); err != nil {
-			return err
-		}
-		tmp := filepath.Join(filepath.Dir(dir), "."+filepath.Base(dir)+".setup")
-		if err := os.RemoveAll(tmp); err != nil {
-			return err
-		}
-		if _, err := git(ctx, "", "", "clone", "--no-checkout", "--reference", repo.Cache, repo.Cache, tmp); err != nil {
-			return err
-		}
-		if _, err := git(ctx, tmp, "", "remote", "set-url", "origin", "http://127.0.0.1:7781/git/"+string(repo.Name)+".git"); err != nil {
-			return err
-		}
-		_, err := git(ctx, tmp, "", "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+repo.Branch)
-		if err == nil {
-			_, err = git(ctx, tmp, "", "checkout", "-b", repo.Branch, "refs/remotes/origin/"+repo.Branch)
-		} else {
-			_, err = git(ctx, tmp, "", "checkout", "-b", repo.Branch, "refs/remotes/origin/"+repo.Base)
-		}
+		entries, err := os.ReadDir(dir)
 		if err != nil {
 			return err
 		}
-		if err := os.Rename(tmp, dir); err != nil {
+		if len(entries) > 0 {
+			continue
+		}
+		if err := setupRepo(ctx, dir, repo, git); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// setupRepo keeps the checkout directory itself in place for a running Pi process.
+func setupRepo(ctx context.Context, dir string, repo contract.BoxRepo, git gitRunner) (err error) {
+	defer func() {
+		if err == nil {
+			return
+		}
+		entries, readErr := os.ReadDir(dir)
+		if readErr != nil {
+			return
+		}
+		for _, entry := range entries {
+			_ = os.RemoveAll(filepath.Join(dir, entry.Name()))
+		}
+	}()
+	if _, err = git(ctx, "", "", "clone", "--no-checkout", "--reference", repo.Cache, repo.Cache, dir); err != nil {
+		return err
+	}
+	if _, err = git(ctx, dir, "", "remote", "set-url", "origin", "http://127.0.0.1:7781/git/"+string(repo.Name)+".git"); err != nil {
+		return err
+	}
+	_, err = git(ctx, dir, "", "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+repo.Branch)
+	base := "refs/remotes/origin/" + repo.Branch
+	if err != nil {
+		base = "refs/remotes/origin/" + repo.Base
+	}
+	_, err = git(ctx, dir, "", "checkout", "-b", repo.Branch, base)
+	return err
 }
 
 func archiveRepo(ctx context.Context, root string, session contract.SessionID, repo contract.BoxRepo, git gitRunner) (result contract.ArchiveDoneRequest) {
