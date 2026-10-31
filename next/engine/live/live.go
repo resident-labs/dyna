@@ -7,9 +7,9 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-// Live holds live state. Service.mu, computerLock, readMu and transcriptMu may
-// precede mu; mu is innermost. Code under mu takes no other lock and sends no
-// channel messages. wakeMu is never held with mu.
+// Live holds live state. Service.mu, computerLock, readMu, transcriptMu and
+// activityMu may precede mu; mu is innermost. Code under mu takes no other lock
+// and sends no channel messages. wakeMu is never held with mu.
 type Live struct {
 	mu           sync.Mutex
 	activityMu   sync.Mutex
