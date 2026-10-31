@@ -2,10 +2,11 @@
   import { onMount, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
   import { accountRows, accountState, providerGroup, refused, reconnectUnavailable } from "../accounts.ts";
-  import { visibleWindows, windowMeter } from "../usage.ts";
+  import { visibleWindows } from "../usage.ts";
   import type { Account, AccountProviderInfo, AccountUsage, AccountsConnectResponse, RoomSummary } from "../contract.gen.ts";
   import StatusPill from "./StatusPill.svelte";
-  import MeterTile from "./MeterTile.svelte";
+  import Icon from "./Icon.svelte";
+  import AccountMeter from "./AccountMeter.svelte";
 
   let { bar, phone, signedout, path, navigate }: { bar: Snippet<[string, number | undefined, Snippet | undefined]>; phone: boolean; signedout: () => void; path: string; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void } = $props();
   let providers: AccountProviderInfo[] = $state([]), accounts: Account[] = $state([]), rooms: RoomSummary[] = $state([]), usage: AccountUsage[] = $state([]);
@@ -35,7 +36,7 @@
     void call("room.list", {}).then(result => { rooms = result.rooms ?? []; }, () => {});
   }
   onMount(() => { reload(); window.addEventListener("focus", reload); return () => { reset(); window.removeEventListener("focus", reload); }; });
-  $effect(() => { path; return () => { if (attempt) reset(); }; });
+  $effect(() => { path; return () => { generation++; clearTimeout(timer); attempt = undefined; connectState = "idle"; redirect = ""; secret = ""; error = ""; }; });
   function watch(id: string, ticket: number) {
     timer = setTimeout(() => {
       now = Date.now();
@@ -54,16 +55,18 @@
   async function start() {
     if (!selected || busy) return;
     busy = true; error = ""; const ticket = ++generation;
+    const popup = selected.connectMethod === "oauth" ? window.open("", "_blank") : null;
+    if (popup) popup.opener = null;
     if (selected.connectMethod === "key") {
       const key = secret; secret = "";
       await call("accounts.set_key", { provider: selected.id, label, key }).then(() => { if (ticket === generation) { reset(); reload(); document.getElementById("accounts-back")?.click(); } }, () => { if (ticket === generation) error = "Could not save the key. Try again."; });
     } else {
       const request = reconnectId ? call("accounts.reconnect", { accountId: reconnectId }) : call("accounts.connect", { provider: selected.id, label });
       await request.then(result => {
-        if (ticket !== generation) return;
+        if (ticket !== generation) { popup?.close(); return; }
         attempt = result; connectState = "pending"; watch(result.attempt, ticket);
-        window.open(result.link, "_blank", "noopener,noreferrer");
-      }, (e: unknown) => { if (ticket === generation) { connectState = "failed"; error = reconnectUnavailable(e) ? "Dyna cannot reconnect this sign-in. Remove it and add it again." : refused(e) ? "The provider did not accept the sign-in." : "Could not reach the service. Try again."; } });
+        if (popup) popup.location.href = result.link;
+      }, (e: unknown) => { popup?.close(); if (ticket === generation) { connectState = "failed"; error = reconnectUnavailable(e) ? "Dyna cannot reconnect this sign-in. Remove it and add it again." : refused(e) ? "The provider did not accept the sign-in." : "Could not reach the service. Try again."; } });
     }
     busy = false;
   }
@@ -89,7 +92,7 @@
 {#snippet back()}<a href={base} onclick={navigate}>Accounts</a>{/snippet}
 <a id="accounts-back" href={base} onclick={navigate} hidden>Back to Accounts</a>
 {#if adding || accountId}
-  <header class="subbar">{#if phone && adding && selected}<a href={base + "/add"} onclick={navigate}>Back</a>{:else}{@render back()}{/if} <span>/</span> <strong>{adding ? (phone && selected ? selected.displayName : "Add an account") : account?.label || "Account"}</strong></header>
+  <header class="subbar">{#if phone && adding && selected}<a href={base + "/add"} onclick={navigate} aria-label="Back to providers"><Icon name="backChevron" size={20} /></a>{:else}{@render back()}{/if} <span>/</span> <strong>{adding ? (phone && selected ? selected.displayName : "Add an account") : account?.label || "Account"}</strong></header>
 {:else}{@render bar("Accounts", loaded ? accounts.length : undefined, action)}{/if}
 <div class="body">
 {#if failed}<p>Accounts did not load. <button class="btn" type="button" onclick={reload}>Try again</button></p>
@@ -120,7 +123,7 @@
             <p class="muted">Dyna keeps the sign-in on this computer and sends it only to {selected.displayName}.</p>
             <label>Label <input bind:value={label} placeholder="Work, Personal, …" disabled={busy} /></label>
             {#if selected.connectFlow === "key"}<label>API key <input type="password" bind:value={secret} autocomplete="off" disabled={busy} /></label>{/if}
-            <button class="btn fill" type="button" disabled={busy || !label.trim() || (selected.connectFlow === "key" && !secret)} onclick={() => void start()}>{selected.connectFlow === "callback" ? `Sign in with ${selected.displayName}` : selected.connectFlow === "device" ? "Get a code" : "Save key"}</button>{#if selected.connectFlow === "key"}<a class="btn" href={base + "/add"} onclick={navigate}>Cancel</a>{/if}
+            <div class="start-actions"><button class="btn fill" type="button" disabled={busy || !label.trim() || (selected.connectFlow === "key" && !secret)} onclick={() => void start()}>{selected.connectFlow === "callback" ? `Sign in with ${selected.displayName}` : selected.connectFlow === "device" ? "Get a code" : "Save key"}</button>{#if selected.connectFlow === "key"}<a class="btn" href={base + "/add"} onclick={navigate}>Cancel</a>{/if}</div>
           {:else}
             <label>Label <input value={label} disabled /></label>
             {#if attempt.flow === "device"}
@@ -155,12 +158,12 @@
       <h1><span class="initial">{accountProvider.displayName.slice(0, 1)}</span>{account.label}</h1>
       <p class="muted">{accountProvider.displayName}{#if accountUsage?.observedAt} · usage at {new Date(accountUsage.observedAt).toLocaleString()}{/if}</p>
       <h2>Usage</h2>
-      {#if accountUsage && visibleWindows(accountUsage.windows ?? []).length}<div class="meters">{#each visibleWindows(accountUsage.windows ?? []) as window (window.name)}<MeterTile meter={windowMeter(window, Date.now())} />{/each}</div>{:else}<p class="muted">No usage limits reported.</p>{/if}
+      {#if accountUsage && visibleWindows(accountUsage.windows ?? []).length}<div class="meters">{#each visibleWindows(accountUsage.windows ?? []) as window (window.name)}<AccountMeter {window} now={Date.now()} />{/each}</div>{:else}<p class="muted">No usage limits reported.</p>{/if}
       <h2>Rooms</h2>
       <p><label><input type="radio" name="room-scope" checked={!account.rooms?.length} disabled={busy} onchange={() => void setRooms(account, [])} /> Every room</label> <label><input type="radio" name="room-scope" checked={!!account.rooms?.length} disabled={busy || !rooms.length} onchange={() => void setRooms(account, [rooms[0].id])} /> Only these rooms</label></p>
       {#if account.rooms?.length}{#each rooms as room (room.id)}<label><input type="checkbox" checked={account.rooms.includes(room.id)} disabled={busy || (account.rooms.length === 1 && account.rooms.includes(room.id))} onchange={(e) => void setRooms(account, e.currentTarget.checked ? [...(account.rooms ?? []), room.id] : (account.rooms ?? []).filter(id => id !== room.id))} /> {room.name}</label>{/each}{/if}
       <h2>Sign-in</h2>
-      {#if accountProvider.connectMethod === "oauth"}<a class="btn" href={providerPath(accountProvider.id)} onclick={(e) => { navigate(e); label = account.label; reconnectId = account.id; }}>Sign in again</a> <span class="muted">Use it if the account changed plans or Dyna asks.</span>{:else}<p class="muted">This account uses an API key.</p>{/if}
+      {#if accountProvider.connectMethod === "oauth"}<div class="start-actions"><a class="btn" href={providerPath(accountProvider.id)} onclick={(e) => { navigate(e); label = account.label; reconnectId = account.id; }}>Sign in again</a> <span class="muted">Use it if the account changed plans or Dyna asks.</span></div>{:else}<p class="muted">This account uses an API key.</p>{/if}
       <div class="remove"><div><strong>Remove {account.label}</strong><p class="muted">Dyna deletes this sign-in from this computer. You can connect it again later.</p></div><button class="btn danger" type="button" disabled={busy} onclick={() => void remove(account)}>Remove</button></div>
       {#if error}<p role="alert">{error}</p>{/if}
     </section>
@@ -172,7 +175,8 @@
     <section><div class="heading"><h2><span class="initial">{provider.displayName.slice(0, 1)}</span>{provider.displayName}</h2><span class="muted">{group.length} · {provider.connectMethod === "key" ? "API key" : "Sign-in"}</span><a class="btn ghost" href={providerPath(provider.id)} onclick={(e) => { reset(); label = ""; navigate(e); }}>{provider.connectMethod === "key" ? "+ Add a key" : "+ Connect another"}</a></div>
       <div class="list">{#each group as item, index (item.id)}
         {@const status = accountState(item)}
-        <a class="row" href={accountPath(item.id)} onclick={navigate}><div><strong>{item.label || `${provider.displayName} account ${index + 1}`}</strong>{#if status.pill} <StatusPill tone={status.pill.tone} label={status.pill.label} />{/if}<div class="muted">{item.rooms?.length ? `${item.rooms.length} rooms` : "Every room"}{#if status.line} · {status.line}{/if}</div></div><span>›</span></a>{#if item.state === "sign_in_expired" && provider.connectMethod === "oauth"}<div class="retry"><a class="btn fill" href={providerPath(provider.id)} onclick={(e) => { navigate(e); label = item.label; reconnectId = item.id; }}>Sign in again</a></div>{/if}
+        {@const rowUsage = usage.find(u => u.accountId === item.id)}
+        <div class="account-row"><a class="row" href={accountPath(item.id)} onclick={navigate}><div><strong>{item.label || `${provider.displayName} account ${index + 1}`}</strong>{#if status.pill} <StatusPill tone={status.pill.tone} label={status.pill.label} />{/if}<div class="muted">{item.rooms?.length ? `${item.rooms.length} rooms` : "Every room"}{#if status.line} · {status.line}{/if}{#if rowUsage?.observedAt} · usage at {new Date(rowUsage.observedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}{/if}</div></div>{#if rowUsage && !rowUsage.cause}<div class="row-meters">{#each visibleWindows(rowUsage.windows ?? []) as window (window.name)}<AccountMeter {window} now={Date.now()} />{/each}</div>{/if}<span>›</span></a>{#if item.state === "sign_in_expired" && provider.connectMethod === "oauth"}<div class="retry"><a class="btn fill" href={providerPath(provider.id)} onclick={(e) => { navigate(e); label = item.label; reconnectId = item.id; }}>Sign in again</a></div>{/if}</div>
       {/each}</div>
     </section>
   {/each}
@@ -190,9 +194,9 @@
   .initial { display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 6px; background: var(--selected); color: var(--muted); font-size: 12px; }
   .heading { display: flex; align-items: center; gap: 8px; margin: 0 8px 8px; } .heading h2, .connect h2 { display: flex; align-items: center; gap: 8px; } .heading .btn { margin-left: auto; }
   .list, .card, .picker { border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
-  .row { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; color: var(--text); text-decoration: none; } .row + .row { border-top: 1px solid var(--line); } .row:hover, .picker a:hover { background: var(--hover); } .row .muted { margin-top: 4px; }
+  .account-row { display: flex; align-items: center; } .account-row + .account-row { border-top: 1px solid var(--line); } .row { flex: 1; min-width: 0; min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; color: var(--text); text-decoration: none; } .row:hover, .picker a:hover { background: var(--hover); } .row .muted { margin-top: 4px; } .row-meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 20px; width: min(65%, 700px); margin-left: auto; }
   .add-layout { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: 20px; align-items: start; } .picker { padding: 8px; } .picker a { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; padding: 8px; border-radius: 6px; } .picker a .muted { margin-left: auto; } .picker a.chosen { background: var(--selected); }
-  .details { display: grid; gap: 16px; } .card { padding: 20px; } .connect { display: grid; justify-items: start; gap: 16px; } .connect h2 .muted { font-weight: 400; } .connect label, form { display: grid; gap: 8px; width: 100%; } .connect input, .picker input { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; } .actions { display: flex; gap: 8px; align-items: center; } .retry { padding: 0 14px 12px; } .code { display: flex; gap: 12px; align-items: center; font-family: var(--mono); font-size: 20px; }
+  .details { display: grid; gap: 16px; } .card { padding: 20px; } .connect { display: grid; justify-items: start; gap: 16px; } .connect h2 .muted { font-weight: 400; } .connect label, form { display: grid; gap: 8px; width: 100%; } .connect input, .picker input { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; } .actions, .start-actions { display: flex; gap: 8px; align-items: center; } .retry { padding: 8px 14px; } .btn:not(.fill):not(.danger) { color: var(--text); } .code { display: flex; gap: 12px; align-items: center; font-family: var(--mono); font-size: 20px; }
   .legend { display: grid; gap: 16px; } .legend p { display: grid; grid-template-columns: 180px 1fr; gap: 16px; } .account-view { display: grid; justify-items: start; gap: 12px; max-width: 900px; } .account-view h2 { margin-top: 28px; } .meters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; width: 100%; } .remove { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 20px; width: 100%; display: flex; justify-content: space-between; gap: 16px; }
-  @media (max-width: 640px) { .body { padding: 12px 16px; } .subbar { padding: 0 16px; } .add-layout { display: block; } .picker { border: 0; padding: 0; } .picker input { position: sticky; top: 0; } .legend { display: none; } .meters { grid-template-columns: 1fr; } .actions { position: fixed; z-index: 2; bottom: 0; left: 0; right: 0; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--bg); flex-wrap: wrap; } .actions .btn { flex: 1; min-height: 44px; } .actions .muted { width: 100%; text-align: center; } }
+  @media (max-width: 640px) { .body { padding: 12px 16px; } .subbar { padding: 0 16px; } .add-layout { display: block; } .picker { border: 0; padding: 0; } .picker input { position: sticky; top: 0; } .legend { display: none; } .meters { grid-template-columns: 1fr; } .account-row, .row { flex-wrap: wrap; } .row-meters { order: 3; width: 100%; grid-template-columns: 1fr; } .actions { position: fixed; z-index: 2; bottom: 0; left: 0; right: 0; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--bg); flex-wrap: wrap; } .actions .btn { flex: 1; min-height: 44px; } .actions .muted { width: 100%; text-align: center; } }
 </style>
