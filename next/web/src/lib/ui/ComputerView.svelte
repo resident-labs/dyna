@@ -173,7 +173,7 @@
        stays between steps, so the screen keeps the shape the window was fitted to. Where the owner may control the
        computer, the line carries the Take control step; in control it says how to return. -->
   {#if foot}<div class="activity">
-    <span class="line">{control ? stuck ? "Your input did not reach the computer." : "You are in control. Esc twice returns it." :activity ? `${name} · ${activity}` : name}</span>
+    <span class="line" class:wrap={control}>{control ? stuck ? "Your input did not reach the computer." : "You are in control. Esc twice returns it." :activity ? `${name} · ${activity}` : name}</span>
     {#if input && control}
       <button type="button" class="tool" class:on={keyboardOpen} aria-label="Phone keyboard" aria-pressed={keyboardOpen} title="Phone keyboard" onpointerdown={event => event.preventDefault()} onclick={toggleKeyboard}><Icon name="keyboard" size={18} /></button>
       <button type="button" class="take" onclick={release}>Return control</button>
@@ -207,10 +207,13 @@
   /* v1's badge: a dark chip over the last picture, readable on any frame. */
   .badge { position: absolute; left: 12px; top: 12px; margin: 0; padding: 3px 11px; border-radius: 12px; background: var(--screen-chip); color: var(--screen-text); font-size: 12px; }
   .badge .retry { margin-left: 4px; color: var(--screen-text); }
-  .screen.control { outline: 2px solid var(--focus); outline-offset: -2px; touch-action: none; }
+  /* The frame is drawn over the picture, which would cover an outline. */
+  .screen.control { outline: none; touch-action: none; }
+  .screen.control::after { content: ""; position: absolute; inset: 0; border: 2px solid var(--focus); pointer-events: none; }
   .screen:focus { outline-offset: -2px; }
   .activity { display: flex; flex: none; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; color: var(--muted); font-size: 12.5px; }
   .line { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .line.wrap { white-space: normal; }
   /* Take control and Return control are controls, not statuses: an outline button, with the accent only on focus. */
   .take { flex: none; height: 28px; padding: 0 12px; border: 1px solid var(--firm); border-radius: 6px; background: none; color: var(--text); font: 500 13px var(--sans); cursor: pointer; }
   .take:hover:not(:disabled) { background: var(--hover); }
