@@ -65,6 +65,13 @@ test("names two sessions that ran turns and counts more", () => {
   assert.equal(workSummary([begun(1, "a"), started(2, "a"), started(3, "b"), started(4, "c")], name), "a started · 3 sessions worked · 3 turns");
 });
 
+test("collapses repeated names in the work line", () => {
+  const started = (seq: number, session: string) => event(seq, { type: "turn.started", body: { session, turn: `t${seq}`, inputs: [] } });
+  const unknown = () => "A closed session";
+  assert.equal(workSummary([started(1, "gone-1"), started(2, "gone-2")], unknown), "Closed sessions worked · 2 turns");
+  assert.equal(workSummary([started(1, "gone"), started(2, "lead-web")], session => session === "gone" ? "A closed session" : session), "A closed session and lead-web worked · 2 turns");
+});
+
 test("names failed image builds and computers in the work line", () => {
   const image = { host: "h", repo: "r", name: "base", tag: "1" };
   const failed = event(1, { type: "image.failed", body: { ...image, reason: "no space", logTail: "" } });
