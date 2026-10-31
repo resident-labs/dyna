@@ -73,7 +73,7 @@
   // shows as a notice under the screen with Retry. It stays until Retry or Return control, because the refused batch may
   // hold a key up or a mouse up, and a later batch that lands does not send it.
   let stuck = $state(false);
-  const queue = new InputQueue(async (events, frame) => { await input?.(events, frame); }, ok => { if (!ok) stuck = true; });
+  const queue = new InputQueue(async (events, frame) => { await input?.(events, frame); }, ok => { if (!ok && control) stuck = true; });
   // While a refused batch waits, moves and scrolls are dropped, so Retry does not replay a stream of them.
   const send = (events: ComputerInput[]) => {
     if (stuck) events = events.filter(event => event.kind !== "mouse.move" && event.kind !== "wheel");
@@ -81,7 +81,7 @@
   };
   async function take() { control = true; await tick(); screen?.focus(); }
   const hold = new MouseHold();
-    // Control ends or the view closes: held buttons go up, even behind a refused batch.
+  // Control ends or the view closes: held buttons go up, even behind a refused batch.
   const drop = () => queue.finish(hold.release());
   function release() { drop(); control = false; stuck = false; keyboardOpen = false; field?.blur(); }
   $effect(() => { if (phase !== "live") release(); });
