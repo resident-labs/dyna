@@ -11,6 +11,32 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+func TestLostHelloIgnoresInventoryDeadline(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	_, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+INSERT INTO hosts(name,ssh,state,cpus,mem_bytes,disk_bytes,checked_at) VALUES('h','','ready',1,1,5,10);
+INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('s','r','s','p','open','',0);
+INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updated_at,due_at) VALUES('b','s','h','i','agent','lost','','',0,0,50)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	size, _ := box.Size(contract.BoxSizeAgent)
+	old := box.Box{ID: "b", Session: "s", Host: "h", Size: size, State: contract.BoxLost}
+	event := contract.Event{ID: "hello", Room: "r", Time: time.UnixMilli(100), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{}}
+	if _, err := s.TransitionBox(ctx, old, contract.BoxReady, "", event); err != nil {
+		t.Fatalf("lost hello: %v", err)
+	}
+	var due int64
+	if err := s.Read().QueryRow("SELECT due_at FROM boxes WHERE id='b'").Scan(&due); err != nil || due != 0 {
+		t.Fatalf("due %d: %v", due, err)
+	}
+}
+
 func TestHostLossGuardsStaleResults(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(t.TempDir())
