@@ -91,7 +91,6 @@
   .row > :global(svg) { color: var(--muted); }
   .lines { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
   .title { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 14px; font-weight: 600; }
-  .badge { flex: none; display: inline-grid; place-items: center; height: 20px; padding: 0 6px; border: 1px solid var(--firm); border-radius: 6px; color: var(--muted); font-size: 12px; font-weight: 500; }
   .line { min-width: 0; overflow: hidden; color: var(--muted); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
   .acts, .choices { flex: none; display: inline-flex; align-items: center; gap: 4px; }
   .ask { flex: none; display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; font-weight: 500; }
