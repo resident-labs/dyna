@@ -50,7 +50,8 @@
           if (socket) socket.resize(cols, rows);
           else socket = openTerminal($state.snapshot(target), { cols, rows }, { output: bytes => surface?.write(bytes), exit: code => { if (!gone) onexit(code); } });
         },
-        onSelectionChange: () => {}, beforeKey: () => true,
+        // F6 moves between the app's areas, so the shell never gets it.
+        onSelectionChange: () => {}, beforeKey: event => event.key !== "F6",
         onLinkActivate: text => { window.open(text, "_blank", "noopener"); },
         canActivateLink: text => /^https?:\/\//i.test(text),
       });
