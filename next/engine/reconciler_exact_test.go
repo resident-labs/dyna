@@ -158,3 +158,33 @@ func TestReconcilerSurvivesCancelledStartCaller(t *testing.T) {
 		t.Fatalf("cancelled caller: box state=%s", b.State)
 	}
 }
+
+type earlyHelloHost struct {
+	fakeBoxes
+	service *Service
+	problem *contract.Error
+}
+
+func (h *earlyHelloHost) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, error) {
+	_, h.problem = h.service.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: spec.Session}, contract.BoxHelloRequest{})
+	return "image", nil
+}
+
+func TestHelloBeforeCreateReturns(t *testing.T) {
+	s, room, _, ctx := setup(t)
+	host := &earlyHelloHost{service: s}
+	s.boxes = host
+	resetLifecycle(s)
+	started, problem := s.SessionStart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStartRequest{Room: room, Name: "early", Profile: "test"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	passLifecycle(t, s, ctx)
+	if host.problem != nil {
+		t.Fatal(host.problem)
+	}
+	b, err := s.store.Box(ctx, started.Box)
+	if err != nil || b.State != contract.BoxReady {
+		t.Fatalf("box state=%s error=%v, want ready", b.State, err)
+	}
+}
