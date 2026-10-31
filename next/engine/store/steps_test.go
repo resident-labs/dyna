@@ -51,6 +51,7 @@ func TestUpgradeGrantsExistingRoot(t *testing.T) {
  CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT NOT NULL, parent TEXT, created_at INTEGER NOT NULL, closed_at INTEGER);
  CREATE TABLE events (seq INTEGER PRIMARY KEY, room TEXT, type TEXT NOT NULL, body BLOB NOT NULL);
  CREATE TABLE turns (id TEXT PRIMARY KEY, ended_at INTEGER);
+ CREATE TABLE operations (kind TEXT, state TEXT, args BLOB, decision BLOB);
  INSERT INTO rooms VALUES ('room');
  INSERT INTO sessions VALUES ('root','room',NULL,1000,NULL),('child','room','root',1000,NULL);`)
 	if err != nil {
@@ -108,6 +109,7 @@ func TestUpgradeRevokesOldGrants(t *testing.T) {
  ('grant_child','hostexec','room','session','child','preapproved','[]','[]','engine','',NULL,NULL),
  ('expired','hostexec','room','session','child','approve','[]','[]','owner','',NULL,5),
  ('old','hostexec','room','session','child','approve','[]','[]','owner','',7,NULL);
+ CREATE TABLE operations (kind TEXT, state TEXT, args BLOB, decision BLOB);
  CREATE TABLE hostexec_runs (grant_id TEXT, ended_at INTEGER, stopped TEXT);
  INSERT INTO hostexec_runs VALUES ('custom',NULL,''),('grant_root',NULL,'');`)
 	if err != nil {
