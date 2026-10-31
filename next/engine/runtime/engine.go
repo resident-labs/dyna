@@ -26,11 +26,23 @@ import (
 
 type hostRegistrar interface {
 	AddHost(context.Context, contract.HostAddRequest) error
+	HostLoad(context.Context, []contract.HostSummary) error
 }
 
 type serviceWithHosts struct {
 	*engine.Service
 	boxes hostRegistrar
+}
+
+func (s *serviceWithHosts) HostList(ctx context.Context, caller contract.Principal, req contract.HostListRequest) (contract.HostListResponse, *contract.Error) {
+	result, problem := s.Service.HostList(ctx, caller, req)
+	if problem != nil {
+		return result, problem
+	}
+	if err := s.boxes.HostLoad(ctx, result.Hosts); err != nil {
+		return contract.HostListResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: err.Error()}
+	}
+	return result, nil
 }
 
 func (s *serviceWithHosts) HostAdd(ctx context.Context, caller contract.Principal, req contract.HostAddRequest) (contract.HostAddResponse, *contract.Error) {

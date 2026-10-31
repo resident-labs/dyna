@@ -837,7 +837,7 @@ Owner, 2026-10-30: v2 ports v1's workspace tools. The engine side has two parts,
 
 **Owner terminal.** A tabbed terminal in the web app opens a shell in a box, on a capacity host, or on the control-plane host.
 
-- `host.list` returns the hosts a terminal can open: `control-plane` first, then each added host. Only the owner calls it.
+- `host.list` returns `control-plane` first, with only its name, then each added host with reachability, the count of starting or ready boxes, CPU and memory capacity, and CPU cores and memory in use. Load and reachability come from the 10 s heartbeat and reset after an engine restart. Only the owner calls it.
 - `GET /v1/terminal?box=<session>` or `?host=<name>`, with `cols` and `rows`, upgrades to a WebSocket. The engine keeps the WebSocket library's same-origin check, so another site cannot open a terminal with the owner's cookie. Binary frames carry the terminal's bytes both ways. The client's JSON text frame, `TerminalResize`, sets the size. The engine's last text frame, `TerminalExit`, gives the shell's exit code.
 - The engine starts one command under a local PTY for every target:
   - a box: `ssh -tt` through its host's master, running `podman exec -it <box> bash -l` as the box user;
