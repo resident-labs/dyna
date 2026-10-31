@@ -31,38 +31,41 @@
   let held = false;
   const options = (): VirtualizerOptions<HTMLDivElement, HTMLDivElement> => ({
     count: rows.length, getScrollElement: () => element ?? null, estimateSize: index => typeof estimate === "number" ? estimate : estimate(rows[index]),
-    getItemKey: index => key(rows[index]), overscan: 8, anchorTo: "end", followOnAppend: follow, scrollEndThreshold: held || touch || scrollHold.active(performance.now()) ? -1 : 1,
+    getItemKey: index => key(rows[index]), overscan: 8, anchorTo: "end", followOnAppend: follow, scrollEndThreshold: held || holding() ? -1 : 1,
     scrollToFn: elementScroll, observeElementRect, observeElementOffset, measureElement,
     onChange: instance => { visible = instance.getVirtualItems(); total = instance.getTotalSize(); },
   });
   const scrollHold = new ScrollHold();
+  const holding = () => scrollHold.active(performance.now());
   let scrollTimer: ReturnType<typeof setTimeout> | undefined;
-  let touch = false;
   let waiters: (() => void)[] = [];
   const virtualizer = new Virtualizer(options());
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, delta, instance) => {
     const offset = instance.scrollOffset ?? 0;
+    // This mirrors virtual-core 3.19.9's default correction predicate; recheck it on upgrade.
     const adjust = !instance.itemSizeCache.has(item.key) ? item.start < offset
       : item.end <= offset && instance.scrollDirection !== "backward";
-    if (adjust && (touch || scrollHold.active(performance.now()))) { scrollHold.add(delta); return false; }
+    if (adjust && holding()) { scrollHold.add(delta); return false; }
     return adjust;
   };
-  function activity() {
+  function activity(touching?: boolean) {
+    const wasHolding = holding();
+    if (touching !== undefined) scrollHold.touch(touching);
     scrollHold.activity(performance.now());
-    virtualizer.setOptions(options());
+    if (!wasHolding) virtualizer.setOptions(options());
     clearTimeout(scrollTimer);
     scrollTimer = setTimeout(finishScroll, SCROLL_QUIET_MS);
   }
   function finishScroll() {
-    if (touch || scrollHold.active(performance.now())) { scrollTimer = setTimeout(finishScroll, SCROLL_QUIET_MS); return; }
-    const delta = scrollHold.take(performance.now());
+    if (holding()) { scrollTimer = setTimeout(finishScroll, SCROLL_QUIET_MS); return; }
+    const delta = scrollHold.take();
     if (element && delta) element.scrollTop += delta;
     virtualizer.setOptions(options());
     for (const done of waiters.splice(0)) done();
   }
   // A fetched older page waits for the reader's current scroll before it changes the list.
   export function scrollSettled(): Promise<void> {
-    if (!touch && !scrollHold.active(performance.now())) return Promise.resolve();
+    if (!holding()) return Promise.resolve();
     return new Promise(resolve => waiters.push(resolve));
   }
   $effect(() => () => { clearTimeout(scrollTimer); for (const done of waiters.splice(0)) done(); });
@@ -136,7 +139,7 @@
   });
   function scrolled(event?: Event) {
     if (!element) return;
-    if (event && scrollHold.active(performance.now())) activity();
+    if (event && holding()) activity();
     const top = element.scrollTop;
     atEnd = top + element.clientHeight >= element.scrollHeight - 2;
     const page = shouldPage(top, element.scrollHeight, element.clientHeight, edge(), event ? top - last : undefined);
@@ -170,8 +173,8 @@
 </script>
 
 <div class="virtual" {role} aria-label={label} tabindex="-1" bind:this={element} onscroll={scrolled}
-  onwheel={activity} ontouchstart={() => { touch = true; activity(); }} ontouchmove={activity}
-  ontouchend={() => { touch = false; activity(); }} ontouchcancel={() => { touch = false; activity(); }}
+  onwheel={() => activity()} ontouchstart={() => activity(true)} ontouchmove={() => activity()}
+  ontouchend={() => activity(false)} ontouchcancel={() => activity(false)}
   onkeydown={event => { if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) activity(); }}>
   <div class="space" class:top={align === "top"} style:height="{total}px">
     {#each visible as item (item.key)}

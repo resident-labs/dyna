@@ -4,11 +4,12 @@ export const SCROLL_QUIET_MS = 150;
 export class ScrollHold {
   private until = 0;
   private delta = 0;
+  private touching = false;
   activity(now: number): void { this.until = now + SCROLL_QUIET_MS; }
-  active(now: number): boolean { return now < this.until; }
+  touch(down: boolean): void { this.touching = down; }
+  active(now: number): boolean { return this.touching || now < this.until; }
   add(delta: number): void { this.delta += delta; }
-  take(now: number): number {
-    if (this.active(now)) return 0;
+  take(): number {
     const delta = this.delta;
     this.delta = 0;
     return delta;
