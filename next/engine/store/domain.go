@@ -272,7 +272,19 @@ type FeedInput struct {
 // Dispatch atomically assigns pending inputs to the active turn, or starts one.
 // replay includes previously taken inputs for a new channel connection.
 // Dispatch also returns the session's profile, read in the same transaction as its inputs.
+// DrainDispatch prevents further turn dispatches and waits for any active dispatch.
+func (s *Store) DrainDispatch() {
+	s.dispatchMu.Lock()
+	defer s.dispatchMu.Unlock()
+	s.draining = true
+}
+
 func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn contract.TurnID, started contract.Event, replay bool) (contract.TurnID, []FeedInput, contract.ProfileName, error) {
+	s.dispatchMu.RLock()
+	defer s.dispatchMu.RUnlock()
+	if s.draining {
+		return "", nil, "", nil
+	}
 	var active contract.TurnID
 	var inputs []FeedInput
 	var profile contract.ProfileName
