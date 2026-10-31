@@ -86,6 +86,9 @@
     section = undefined;
   }
   window.addEventListener("popstate", follow);
+  function dismissRequests(event: MouseEvent) {
+    if (section === "requests" && event.target instanceof Node && !page?.contains(event.target) && !requestsButton?.contains(event.target)) section = undefined;
+  }
   // The requests and rules views show in place of the conversation until Back, Escape or the control that opened them.
   let section: "requests" | "rules" | undefined = $state();
   let requestsButton: HTMLButtonElement | undefined = $state();
@@ -95,9 +98,8 @@
     section = undefined;
     await tick();
     // On a phone the room menu is hidden in favour of the drawer, so Rules returns focus to ☰.
-    // So does Requests when nothing waits, as its header button then hides.
     if (was === "rules") (phone.current ? menuButton ?? toggle : roomMenu)?.focus({ focusVisible: !tapped });
-    else (phone.current && !store?.waiting ? menuButton ?? toggle : requestsButton)?.focus({ focusVisible: !tapped });
+    else requestsButton?.focus({ focusVisible: !tapped });
   }
   // A link to a room the engine does not list, or to a path the app has no page for, shows a load error in Home's
   // place. Until the room list loads, a room link is trusted, so a known room opens without a flash.
@@ -474,7 +476,7 @@
     onclose={tapped => void stopWatching(tapped)} ondock={event => { docked = !docked; dockChosen = true; if (docked && !panelShown) void showPanel(true, event.detail > 0); }} />{/key}
 {/snippet}
 
-<svelte:window onkeydown={cycle} />
+<svelte:window onkeydown={cycle} onclickcapture={dismissRequests} />
 {#snippet sheetHandle(of: string)}
   <button type="button" class="handle" aria-label={sheetFull ? `Shrink the ${of} sheet` : `Expand the ${of} sheet`}
     onpointerdown={drag} onclick={() => { if (!dragged) sheetFull = !sheetFull; dragged = false; }}></button>
@@ -529,7 +531,7 @@
       {#if store && !unavailable}{#if room}<JobsTool bind:this={jobsTool} sessions={toolSessions} allSessions={jobSessions} failures={toolFailures} allFailures={[...store.failedJobs]} phone={phone.current}
         onopen={(item, job) => terminals?.openJob(item, job)} onseen={key => store?.failedJobs.delete(key)} />{/if}
         <button type="button" class="requests" class:waiting={store.waiting > 0} bind:this={requestsButton} aria-pressed={section === "requests"}
-        aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section === "requests" ? undefined : "requests"; }}>
+        aria-label={store.waiting ? `${store.waiting} requests wait for you` : "Requests"} title="Requests" onclick={() => { section = section === "requests" ? undefined : "requests"; }}>
         <Icon name="inbox" />{#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
         <!-- One click to the session's shell and computer; neither shows when the session has none. -->
         {#if session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title={terminals?.hasShell(session) ? "Show this session's terminal" : "Open a terminal in this session's box"} aria-pressed={terminals?.hasShell(session) ?? false} onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /><span>Terminal</span></button>{/if}
@@ -542,8 +544,8 @@
           {#if busy.length > 3}<span class="more">+{busy.length - 3}</span>{/if}<span class="count">{working} working</span>
         {:else}<Icon name="people" />{#if store?.ready}<span class="count phone">{store.sessions.size}</span>{/if}{/if}
         {#if store?.counts.failed && !panelShown}<span class="attention"></span>{/if}</button>{/if}</header>
-    {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} admin={attention.can("admin")} {store} room={roomName} onback={event => void closeSection(event.detail > 0)} />
-    {:else if section === "rules" && store && !unavailable}<RulesPanel bind:element={page} {store} room={roomName} edit={attention.can("admin")} onback={event => void closeSection(event.detail > 0)} />
+    {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} admin={attention.can("admin")} onclose={() => void closeSection()} />{/if}
+    {#if section === "rules" && store && !unavailable}<RulesPanel bind:element={page} {store} room={roomName} edit={attention.can("admin")} onback={event => void closeSection(event.detail > 0)} />
     {:else}<div class="feed">
       {#if blocked}<Blocked kind="unreachable" onretry={connect} />
       {:else if !room && roomsLoaded && !rooms.length}<Blocked kind="no-rooms" />
@@ -641,8 +643,7 @@
   .requests { margin-left: auto; display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 28px; height: 28px; padding: 0;
     border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
   .requests:hover, .requests[aria-pressed="true"] { background: var(--hover); color: var(--text); }
-  .requests.waiting { height: 40px; padding: 0 12px; border-radius: 8px; background: color-mix(in srgb, var(--attention) 14%, transparent); color: var(--attention); }
-  .requests.waiting:hover, .requests.waiting[aria-pressed="true"] { background: color-mix(in srgb, var(--attention) 22%, transparent); }
+  main { position: relative; }
   .requests ~ :global(.panel-toggle) { margin-left: 0; }
   :global(.jobs ~ .requests) { margin-left: 0; }
   main > header :global(.panel-toggle) { display: flex; align-items: center; gap: 8px; }
@@ -677,7 +678,7 @@
     .heading { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.25; }
     .heading .count { font-size: 12.5px; }
     .requests { min-width: 40px; height: 40px; }
-    .requests:not([aria-pressed="true"], .waiting) { display: none; }
+
     main > header :global(.panel-toggle) { gap: 4px; min-width: 40px; height: 40px; padding: 0 8px; }
     .phone { display: inline; }
     /* The header keeps its width for the room's name: the faces and the count already say who works. */

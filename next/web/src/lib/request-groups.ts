@@ -1,0 +1,11 @@
+import type { Request } from "./room.svelte.ts";
+
+// Keep the most urgent request first within each session, and the largest sessions first.
+export function requestGroups(waiting: Request[]): [string, Request[]][] {
+  const groups = new Map<string, Request[]>();
+  for (const item of waiting) {
+    const id = item.by.session ?? "";
+    groups.set(id, [...groups.get(id) ?? [], item]);
+  }
+  return [...groups].sort((a, b) => b[1].length - a[1].length);
+}
