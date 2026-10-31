@@ -38,7 +38,7 @@ func (s *Store) RestartSession(ctx context.Context, id contract.SessionID, event
 		if err != nil {
 			return err
 		}
-		if err := s.InsertDelivery(ctx, tx, seq, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: id}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: false}); err != nil {
+		if err := s.InsertDelivery(ctx, tx, seq, notice.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: id}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: false}); err != nil {
 			return err
 		}
 		restarted = true

@@ -2,13 +2,10 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"log"
 	"regexp"
-	"strings"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/room"
 )
 
 func (s *Service) Events(ctx context.Context, caller contract.Principal, room contract.RoomID, after int64) (<-chan contract.Event, *contract.Error) {
@@ -103,10 +100,10 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 	s.mu.Unlock()
 	state.computerLock.Lock()
 	s.mu.Lock()
-	var room contract.RoomID
+	var roomID contract.RoomID
 	var stopped bool
 	if previous := state.channel; previous != nil {
-		room, stopped = s.clearComputerLocked(session.ID)
+		roomID, stopped = s.clearComputerLocked(session.ID)
 		s.clearShellLocked(session.ID)
 		previous.stop()
 	}
@@ -114,7 +111,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 	state.channel = channel
 	s.mu.Unlock()
 	if stopped {
-		_ = s.computerEvent(context.Background(), session.ID, room, contract.ComputerStopped)
+		_ = s.computerEvent(context.Background(), session.ID, roomID, contract.ComputerStopped)
 	}
 	state.computerLock.Unlock()
 	s.reconciler.Connected(session.Box)
@@ -124,16 +121,16 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			stop()
 			state.computerLock.Lock()
 			s.mu.Lock()
-			var room contract.RoomID
+			var roomID contract.RoomID
 			var stopped bool
 			if state.channel == channel {
 				state.channel = nil
-				room, stopped = s.clearComputerLocked(session.ID)
+				roomID, stopped = s.clearComputerLocked(session.ID)
 				s.clearShellLocked(session.ID)
 			}
 			s.mu.Unlock()
 			if stopped {
-				_ = s.computerEvent(context.Background(), session.ID, room, contract.ComputerStopped)
+				_ = s.computerEvent(context.Background(), session.ID, roomID, contract.ComputerStopped)
 			}
 			state.computerLock.Unlock()
 		}()
@@ -236,45 +233,9 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				if err != nil {
 					return
 				}
-				var text string
-				switch body := event.Body.(type) {
-				case contract.SessionProfileChanged:
-					text = fmt.Sprintf("Your model is now %s.", body.Profile)
-				case contract.PostCreated:
-					text = body.Text
-				case contract.SessionRestarted:
-					text = "Your box was replaced. Your conversation is restored. Unpushed work in the old volume is gone."
-				case contract.SessionStarted:
-					var parts []string
-					if body.Goal != "" {
-						parts = append(parts, "Goal: "+body.Goal)
-					}
-					if body.Brief != "" {
-						parts = append(parts, body.Brief)
-					}
-					text = strings.Join(parts, "\n\n")
-				case contract.OpRequested:
-					card, err := json.Marshal(body.Card)
-					if err != nil {
-						return
-					}
-					text = fmt.Sprintf("Approval requested: %s\n%s\nDecide with dyna op approve %s or dyna op deny %s --reason \"...\"", body.ID, card, body.ID, body.ID)
-				case contract.PrOpened:
-					text = fmt.Sprintf("PR opened: %s", body.URL)
-				case contract.OpDecided:
-					text = fmt.Sprintf("Operation %s: %s. %s", body.ID, body.State, body.Decision.Reason)
-				case contract.OpRan:
-					text = fmt.Sprintf("Operation %s: %s. %s\n%s", body.ID, body.State, body.Result.Error, body.Result.Output)
-				case contract.TurnEnded:
-					text = body.Final
-					if body.Outcome == contract.TurnFailed {
-						text = "turn failed: " + body.Error
-					}
-				case contract.ShellJobEnded:
-					text = shellJobText(body)
-				default:
-					log.Printf("box channel: unsupported delivery type %s", event.Body.EventType())
-					text = fmt.Sprintf("Unsupported event: %s", event.Body.EventType())
+				text, err := room.RenderDelivery(event.Body)
+				if err != nil {
+					return
 				}
 				frame, err := s.inputFrame(ctx, session.ID, event, contract.Delivery{Surface: delivery.Surface, Reply: delivery.Reply, HandoffFrom: delivery.HandoffFrom})
 				if err != nil {
