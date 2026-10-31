@@ -59,7 +59,7 @@ INSERT INTO goal_items VALUES (?,'g1','i1','Item','open','');`, roomID, `{"id":"
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"--data", data, "--config", config, "--backup", backup, "--manifest", filepath.Join(dir, "manifest.json"), "--out", filepath.Join(dir, "out")}
+	args := []string{"--data", data, "--feeds", data, "--config", config, "--backup", backup, "--manifest", filepath.Join(dir, "manifest.json"), "--out", filepath.Join(dir, "out")}
 	if err := run(append(append([]string{}, args...), "--commit", strings.Repeat("a", 40))); err != nil {
 		t.Fatal(err)
 	}
