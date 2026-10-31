@@ -282,6 +282,14 @@ func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host,
 	return nil, fmt.Errorf("host %q: %w", name, sql.ErrNoRows)
 }
 
+func (b *Boxes) MaintainHost(ctx context.Context, name contract.HostName) error {
+	h, err := b.host(ctx, name)
+	if err != nil {
+		return err
+	}
+	return h.Maintain(ctx, b.HostData)
+}
+
 func (b *Boxes) CacheHost(ctx context.Context, name contract.HostName) (enginegit.CacheHost, string, error) {
 	h, err := b.host(ctx, name)
 	return h, b.HostData, err
@@ -621,7 +629,8 @@ func (b *Boxes) container(spec lifecycle.BoxSpec, image string) (box.Slice, box.
 	c := box.ContainerSpec{Box: spec.Box, Image: image, Slice: spec.Slice, Mounts: []box.Mount{
 		{HostPath: filepath.Join(b.HostData, "sock", string(spec.Box)), BoxPath: "/run/dyna/engine", ReadOnly: true},
 		{HostPath: filepath.Join(b.HostData, "bin"), BoxPath: "/opt/dyna/bin", ReadOnly: true},
-	}}
+		{HostPath: filepath.Join(b.HostData, "cache"), BoxPath: "/box/cache"},
+	}, Env: []box.EnvVar{{Name: "GOMODCACHE", Value: "/box/cache/gomod"}, {Name: "GOCACHE", Value: "/box/cache/gocache"}, {Name: "CARGO_HOME", Value: "/box/cache/cargo"}, {Name: "npm_config_store_dir", Value: "/box/cache/pnpm"}}}
 	for _, repo := range spec.Repos {
 		c.Mounts = append(c.Mounts, box.Mount{HostPath: repo.Cache, BoxPath: repo.Cache, ReadOnly: true})
 	}
