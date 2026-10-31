@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
@@ -11,11 +12,12 @@ import (
 
 // Report contains counts derived from decoded records, not declared counts.
 type Report struct {
-	Global       contract.BundleCounts                       `json:"global"`
-	Profiles     int                                         `json:"profiles"`
-	Repositories int                                         `json:"repositories"`
-	Skills       int                                         `json:"skills"`
-	Rooms        map[contract.RoomName]contract.BundleCounts `json:"rooms"`
+	Global                contract.BundleCounts                       `json:"global"`
+	Profiles              int                                         `json:"profiles"`
+	ModelsCheckedAtImport []string                                    `json:"modelsCheckedAtImport"`
+	Repositories          int                                         `json:"repositories"`
+	Skills                int                                         `json:"skills"`
+	Rooms                 map[contract.RoomName]contract.BundleCounts `json:"rooms"`
 }
 
 // DryRun validates every part without opening or writing a store.
@@ -31,6 +33,19 @@ func DryRun(dir string) (Report, error) {
 		return report, fmt.Errorf("global: %w", err)
 	}
 	report.Profiles, report.Repositories, report.Skills = len(global.Profiles), len(global.Repos), len(global.Skills)
+	models := make(map[string]bool)
+	for _, profile := range global.Profiles {
+		if profile.Model != "" {
+			models[profile.Model] = true
+		}
+		for _, model := range profile.Models {
+			models[model] = true
+		}
+	}
+	for model := range models {
+		report.ModelsCheckedAtImport = append(report.ModelsCheckedAtImport, model)
+	}
+	slices.Sort(report.ModelsCheckedAtImport)
 	report.Global = contract.BundleCounts{
 		Rules: len(global.Rules), Hosts: len(global.Hosts), Accounts: len(global.Accounts),
 		Devices: len(global.Devices), Subscriptions: len(global.Subscriptions),
