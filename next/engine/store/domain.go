@@ -13,6 +13,7 @@ import (
 )
 
 var ErrParentClosing = errors.New("parent session is closing")
+var ErrParentHostAbsent = errors.New("sameHost requires a parent with an assigned host")
 
 // Session describes the stored session and its box.
 type Session struct {
@@ -33,8 +34,23 @@ func (s *Store) CreateRoom(ctx context.Context, id contract.RoomID, name string,
 	})
 }
 
-func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, size contract.BoxSizeName, goal string, event, boxEvent contract.Event, reason string) error {
+func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, size contract.BoxSizeName, goal string, event, boxEvent contract.Event, reason string, sameHost bool) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		var host *contract.HostName
+		if sameHost {
+			if parent == "" {
+				return ErrParentHostAbsent
+			}
+			var assigned sql.NullString
+			if err := tx.QueryRowContext(ctx, "SELECT host FROM boxes WHERE session=?", parent).Scan(&assigned); err != nil {
+				return err
+			}
+			if !assigned.Valid || assigned.String == "" {
+				return ErrParentHostAbsent
+			}
+			name := contract.HostName(assigned.String)
+			host = &name
+		}
 		if parent != "" {
 			var state string
 			if err := tx.QueryRowContext(ctx, "SELECT state FROM sessions WHERE id=? AND room=?", parent, session.Room).Scan(&state); err != nil {
@@ -63,7 +79,7 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 				return err
 			}
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", session.Box, session.ID, "", size, contract.BoxPending, reason, "", event.Time.UnixMilli(), event.Time.UnixMilli())
+		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)", session.Box, session.ID, host, "", size, contract.BoxPending, reason, "", event.Time.UnixMilli(), event.Time.UnixMilli())
 		if err != nil {
 			return err
 		}
@@ -80,6 +96,11 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 			if err != nil {
 				return err
 			}
+		}
+		if host != nil {
+			body := boxEvent.Body.(contract.BoxChanged)
+			body.Host = *host
+			boxEvent.Body = body
 		}
 		_, err = s.AppendEvent(tx, boxEvent)
 		return err

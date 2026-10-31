@@ -137,7 +137,7 @@ func TestStartSessionIsOpen(t *testing.T) {
 	}
 	event := contract.Event{ID: "start", Room: "r", Time: now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionStarted{}}
 	boxEvent := contract.Event{ID: "box", Room: "r", Time: now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{}}
-	if err := s.StartSession(ctx, Session{ID: "s", Room: "r", Name: "s", Profile: "p", Box: "b"}, "", contract.BoxSizeAgent, "", event, boxEvent, ""); err != nil {
+	if err := s.StartSession(ctx, Session{ID: "s", Room: "r", Name: "s", Profile: "p", Box: "b"}, "", contract.BoxSizeAgent, "", event, boxEvent, "", false); err != nil {
 		t.Fatal(err)
 	}
 	var state string
