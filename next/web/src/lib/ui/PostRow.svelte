@@ -233,7 +233,7 @@
   .to { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   strong.owner { color: var(--focus); }
   strong.engine { color: var(--text); }
-  time, .to { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  time, .to { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
   /* v1's sizes: one image up to 420x300, several as 200x150 crops; a 420 px file card with a 40 px type badge. */
   .images { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
   .thumb { display: block; max-width: min(420px, 100%); border-radius: 8px; overflow: hidden; background: var(--sidebar); line-height: 0; }
