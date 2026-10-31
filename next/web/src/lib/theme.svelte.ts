@@ -10,13 +10,13 @@ function apply(next: Theme) {
 }
 
 // The first read runs before the first paint: index.html's main script holds rendering until this module has run.
-const first = themeFor(localStorage.getItem(key));
+const first = themeFor(() => localStorage.getItem(key));
 apply(first);
 let current = $state.raw(first);
 // A theme stored by another tab applies here too.
 window.addEventListener("storage", event => {
   if (event.key !== key) return;
-  current = themeFor(event.newValue);
+  current = themeFor(() => event.newValue);
   apply(current);
 });
 

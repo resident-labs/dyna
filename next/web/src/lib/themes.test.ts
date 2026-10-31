@@ -43,9 +43,13 @@ test("every theme keeps the contrast floors over each surface", () => {
 });
 
 test("an unknown stored id falls back to Carbon, and a known id wins", () => {
-  assert.equal(themeFor(null), carbon);
-  assert.equal(themeFor("sepia"), carbon);
-  assert.equal(themeFor("light").id, "light");
+  assert.equal(themeFor(() => null), carbon);
+  assert.equal(themeFor(() => "sepia"), carbon);
+  assert.equal(themeFor(() => "light").id, "light");
+});
+
+test("a browser that blocks site storage gets Carbon instead of a blank page", () => {
+  assert.equal(themeFor(() => { throw new DOMException("The operation is insecure.", "SecurityError"); }), carbon);
 });
 
 test("no style in the app holds a raw color", () => {
