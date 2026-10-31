@@ -72,8 +72,8 @@ func (r *Reconciler) closeStep(ctx context.Context, row store.LifecycleBox) erro
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	reason := row.Reason
-	if row.Want == store.WantDiscard || !hadTurns {
+	reason := ""
+	if err != nil {
 		reason = err.Error()
 	}
 	session, eventErr := r.store.Session(ctx, row.Session)
