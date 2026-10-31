@@ -239,7 +239,7 @@ From M2, git smart HTTP goes through the engine. Fetches cover room repositories
 
 The box agent runs Pi over RPC and the Dyna MCP server (7.9). M2 adds a secret-masking shell server and transcript stream. Shell jobs run locally in process groups; stopping a job kills its group. There is no `node=` option. M1 uses Pi's bash tool.
 
-Pi owns steer and follow-up queues. Delivery IDs make replay safe after reconnect: the runner skips inputs already in Pi's session file. Identical turn-result retries do not duplicate events; conflicting results fail. Failed turns except `output_limit` return inputs to pending without waking, preserving reply channels. Pi controls compaction.
+Pi owns steer and follow-up queues. A delivery is done only when Pi's session file records its ID. Until `turn.output` commits, each reconnect resends `TurnStart` with all original inputs, including done deliveries, then unread later inputs as `TurnSteer` in sequence order. The runner skips IDs already in the session file. Identical turn-result retries do not duplicate events; conflicting results fail. Failed turns except `output_limit` return inputs to pending without waking, preserving reply channels. Pi controls compaction.
 
 The transcript stream sends offset-addressed chunks and resumes from the last acknowledgment. Replacement boxes retrieve acknowledged files when needed. `transcript.read` is owner-only and returns bounded tool steps. A quiet box stops after 10 minutes and uses the current host binary on wake.
 
