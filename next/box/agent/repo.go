@@ -28,7 +28,12 @@ func runGit(ctx context.Context, dir, index string, args ...string) (string, err
 	return strings.TrimSpace(string(out)), nil
 }
 
-func setupRepos(ctx context.Context, root string, repos []contract.BoxRepo, name, email string, git gitRunner) error {
+const (
+	setupStarted = "started"
+	setupDone    = "done"
+)
+
+func setupRepos(ctx context.Context, root, stateRoot string, repos []contract.BoxRepo, name, email string, git gitRunner) error {
 	for _, entry := range []struct{ key, value string }{{"user.name", name}, {"user.email", email}} {
 		if entry.value != "" {
 			if _, err := git(ctx, "", "", "config", "--global", entry.key, entry.value); err != nil {
@@ -37,34 +42,52 @@ func setupRepos(ctx context.Context, root string, repos []contract.BoxRepo, name
 		}
 	}
 	for _, repo := range repos {
-		dir := filepath.Join(root, string(repo.Name))
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return err
-		}
-		if err := setupRepo(ctx, dir, repo, git); err != nil {
+		if err := setupRepo(ctx, root, stateRoot, repo, git); err != nil {
 			return fmt.Errorf("set up %s: %w", repo.Name, err)
 		}
 	}
 	return nil
 }
 
-// setupRepo builds the checkout in dir. Pi gets no turn until setup succeeds, so a directory
-// without .git/index holds only setup's own files, and setup clears it first. Setup writes the
-// index last, so an existing index marks a finished checkout, including a legacy one, which stays as it is.
-func setupRepo(ctx context.Context, dir string, repo contract.BoxRepo, git gitRunner) error {
-	if _, err := os.Stat(filepath.Join(dir, ".git", "index")); err == nil {
+// setupRepo builds the checkout in root/<repo>. Its state file lives outside the checkout, so Pi and
+// git never change it. A checkout marked done is never inspected. A checkout marked started holds only
+// setup's own files, because Pi gets no turn before done, so setup empties it first. A checkout with
+// no state that already has files is legacy or unknown, so setup marks it done and leaves it as it is.
+func setupRepo(ctx context.Context, root, stateRoot string, repo contract.BoxRepo, git gitRunner) error {
+	dir := filepath.Join(root, string(repo.Name))
+	state := filepath.Join(stateRoot, string(repo.Name))
+	value, err := os.ReadFile(state)
+	switch {
+	case err == nil && string(value) == setupDone:
 		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+	case err == nil && string(value) == setupStarted:
+		entries, err := os.ReadDir(dir)
+		if err != nil && !os.IsNotExist(err) {
 			return err
 		}
+		for _, entry := range entries {
+			if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+				return err
+			}
+		}
+	case err == nil:
+		return fmt.Errorf("unknown setup state %q", value)
+	case !os.IsNotExist(err):
+		return err
+	default:
+		entries, err := os.ReadDir(dir)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if len(entries) > 0 {
+			return writeSetupState(state, setupDone)
+		}
+	}
+	if err := writeSetupState(state, setupStarted); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dir), 0755); err != nil {
+		return err
 	}
 	if _, err := git(ctx, "", "", "clone", "--no-checkout", "--reference", repo.Cache, repo.Cache, dir); err != nil {
 		return err
@@ -76,17 +99,22 @@ func setupRepo(ctx context.Context, dir string, repo contract.BoxRepo, git gitRu
 	if _, err := git(ctx, dir, "", "show-ref", "--verify", "--quiet", base); err != nil {
 		base = "refs/remotes/origin/" + repo.Base
 	}
-	if _, err := git(ctx, dir, "", "update-ref", "refs/heads/"+repo.Branch, base); err != nil {
+	if _, err := git(ctx, dir, "", "checkout", "-b", repo.Branch, base); err != nil {
 		return err
 	}
-	if _, err := git(ctx, dir, "", "symbolic-ref", "HEAD", "refs/heads/"+repo.Branch); err != nil {
+	return writeSetupState(state, setupDone)
+}
+
+// writeSetupState replaces the state file with an atomic rename, so a crash leaves the old or the new state.
+func writeSetupState(path, value string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	if _, err := git(ctx, dir, "", "branch", "--set-upstream-to="+base, repo.Branch); err != nil {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(value), 0644); err != nil {
 		return err
 	}
-	_, err = git(ctx, dir, "", "reset", "--quiet", "--hard")
-	return err
+	return os.Rename(tmp, path)
 }
 
 func archiveRepo(ctx context.Context, root string, session contract.SessionID, repo contract.BoxRepo, git gitRunner) (result contract.ArchiveDoneRequest) {
