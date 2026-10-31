@@ -1,14 +1,52 @@
 package model
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestQuotaFailureLogDoesNotExposeUnknownKeys(t *testing.T) {
+	var output bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&output)
+	t.Cleanup(func() { log.SetOutput(old) })
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "auth-files") {
+			_, _ = w.Write([]byte(`{"files":[{"auth_index":"index","provider":"claude"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status_code":500,"body":"{\"sensitive-secret\":42,\"limits\":[]}"}`))
+	}))
+	defer server.Close()
+	q := (&Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}).Quotas("key", time.Now)
+	_, err := q.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "sensitive-secret") || !strings.Contains(output.String(), "limits") || !strings.Contains(output.String(), "500") {
+		t.Fatalf("unsafe or incomplete log: %s", output.String())
+	}
+}
+
+type quotaTestTransport struct {
+	url  string
+	base http.RoundTripper
+}
+
+func (t quotaTestTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r.URL.Scheme = "http"
+	r.URL.Host = strings.TrimPrefix(t.url, "http://")
+	return t.base.RoundTrip(r)
+}
 
 func TestQuotasThroughManagement(t *testing.T) {
 	socket := filepath.Join(t.TempDir(), "proxy.sock")
