@@ -17,7 +17,7 @@ func filledGlobalBundle() GlobalBundle {
 		Rooms:        []RoomName{"dyna"},
 		Exported:     bundleTime,
 		Source:       BundleSource{Commit: "abc123", Backup: "dyna-final.db", BackupSHA256: "f00d"},
-		Instructions: "- (u1) report bugs to root\n",
+		Instructions: "# Instructions\n\n- report bugs to root\n",
 		Settings: SettingsBundle{
 			OwnerName: "Ari", RootProfile: "opus", SubagentMaxDepth: 3,
 			CheckInInterval: 900000, ShellSilence: 600000,
@@ -48,7 +48,7 @@ func filledRoomBundle() RoomBundle {
 	root := ImportedAuthor{Kind: PrincipalSession, Label: "dyna:root"}
 	return RoomBundle{
 		Version:      BundleV1,
-		Instructions: "- (r17) upgrade floor\n",
+		Instructions: "# Instructions\n\n- upgrade floor\n",
 		Name:         "dyna",
 		Repos:        []RoomRepo{{Repo: "resident-labs/dyna", Default: true}},
 		Limits:       RoomLimits{CPUs: 8, MemBytes: 16 << 30},
