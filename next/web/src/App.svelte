@@ -264,8 +264,8 @@
   $effect.pre(() => { if (jobsOf && store?.boxes.get(jobsOf) !== "ready") void closeJobs(); });
   const wide = new MediaQuery("min-width: 761px");
   // Below 641 px the rail is a drawer, as in Discord's phone app: the rooms on the left and the open room's pages beside
-  // them. A pick closes it; the scrim and Escape close it and return focus to the menu button. A keyboard open focuses
-  // the current page with its ring; a tap focuses the dialog itself, and no ring follows a tap either way.
+  // them. A pick closes it; the scrim and Escape close it and return focus to the menu button. A keyboard open or
+  // close (Escape) shows the ring; a tap open focuses the dialog itself, and no ring follows a tap either way.
   const phone = new MediaQuery("max-width: 640px");
   let drawer = $state(false);
   let menuButton: HTMLButtonElement | undefined = $state();
@@ -274,7 +274,7 @@
     await tick();
     if (open && tapped) rail.focus({ focusVisible: false });
     else if (open) (rail.querySelector<HTMLElement>(".pages [aria-current=page]") ?? rail.querySelector<HTMLElement>(".pages a"))?.focus();
-    else if (refocus) menuButton?.focus({ focusVisible: false });
+    else if (refocus) menuButton?.focus({ focusVisible: !tapped });
   }
   $effect(() => { if (!phone.current) drawer = false; });
   let toggle: HTMLButtonElement | undefined = $state();
@@ -341,12 +341,12 @@
         {/if}
       {:else}
         {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}
-          <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate}><Avatar kind="room" name={item.name} size={28} />{item.name}
+          <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate}><Avatar kind="room" name={item.name} label={initials.get(item.name)} size={28} />{item.name}
             {#if waiting}<StatusPill tone="warning" label="Waiting" count={waiting} />{/if}</a>
         {/each}
       {/if}</nav>{/if}
   </aside>
-  {#if drawer}<button type="button" class="scrim" tabindex="-1" aria-label="Close the menu" onclick={() => void showDrawer(false)}></button>{/if}
+  {#if drawer}<button type="button" class="scrim" tabindex="-1" aria-label="Close the menu" onclick={() => void showDrawer(false, true, true)}></button>{/if}
   <main inert={drawer}>
     <header><button type="button" class="menu-toggle" bind:this={menuButton} aria-label="Rooms and pages" title="Rooms and pages" aria-expanded={drawer}
         onclick={event => void showDrawer(true, true, event.detail > 0)}><Icon name="menu" /></button>
