@@ -34,4 +34,21 @@ func TestFailStaleStarts(t *testing.T) {
 			t.Fatalf("box = %+v, error = %v; want %s %q", b, err, tc.state, tc.reason)
 		}
 	}
+	events, err := s.store.Events(ctx, room, 0, 100, []contract.EventType{"box.changed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, event := range events {
+		change := event.Body.(contract.BoxChanged)
+		if change.Box == old.Box && change.To == contract.BoxFailed {
+			found = true
+			if change.Cause != contract.CauseNoHello {
+				t.Fatalf("cause = %q", change.Cause)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing failed box event")
+	}
 }

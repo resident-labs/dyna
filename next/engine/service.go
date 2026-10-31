@@ -88,8 +88,8 @@ func (s *Service) lockBox(id contract.SessionID) func() {
 	return lock.Unlock
 }
 
-func (s *Service) transition(ctx context.Context, room contract.RoomID, b box.Box, state contract.BoxState, reason string) (box.Box, error) {
-	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{})
+func (s *Service) transition(ctx context.Context, room contract.RoomID, b box.Box, state contract.BoxState, reason string, cause contract.FailureCause) (box.Box, error) {
+	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Cause: cause})
 	if err != nil {
 		return box.Box{}, err
 	}
@@ -353,7 +353,7 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		return response, failure(err)
 	}
 	current.Host, current.Slice = placement.Host, slice
-	current, err = s.transition(writeCtx, session.Room, current, contract.BoxCreating, "")
+	current, err = s.transition(writeCtx, session.Room, current, contract.BoxCreating, "", "")
 	s.admit.Unlock()
 	if err != nil {
 		return response, failure(err)
@@ -382,7 +382,7 @@ func (s *Service) createPlaced(ctx, writeCtx context.Context, room contract.Room
 		if closing {
 			return nil
 		}
-		_, err := s.transition(writeCtx, room, current, contract.BoxFailed, createErr.Error())
+		_, err := s.transition(writeCtx, room, current, contract.BoxFailed, createErr.Error(), contract.CauseCreateFailed)
 		return err
 	}
 	current.Image = image
@@ -394,7 +394,7 @@ func (s *Service) createPlaced(ctx, writeCtx context.Context, room contract.Room
 		s.admit.Unlock()
 		return nil
 	}
-	_, err := s.transition(writeCtx, room, current, contract.BoxStarting, "")
+	_, err := s.transition(writeCtx, room, current, contract.BoxStarting, "", "")
 	s.admit.Unlock()
 	if err != nil {
 		return err
@@ -479,7 +479,7 @@ func (s *Service) retryChild(ctx context.Context, id contract.SessionID) error {
 	s.boxRuns[id] = run
 	s.boxLockMu.Unlock()
 	defer func() { cancel(); s.boxLockMu.Lock(); delete(s.boxRuns, id); s.boxLockMu.Unlock() }()
-	current, err = s.transition(ctx, session.Room, current, contract.BoxCreating, "")
+	current, err = s.transition(ctx, session.Room, current, contract.BoxCreating, "", "")
 	s.admit.Unlock()
 	if err != nil {
 		return err
@@ -581,7 +581,7 @@ func (s *Service) closeSession(ctx context.Context, caller contract.Principal, s
 	}
 	hasTurns, err := s.store.SessionHasTurns(ctx, session.ID)
 	if err == nil && current.State != contract.BoxClosing && current.State != contract.BoxDeleted {
-		current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, "")
+		current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, "", "")
 	}
 	s.admit.Unlock()
 	if err != nil {
@@ -613,13 +613,13 @@ func (s *Service) closeSession(ctx context.Context, caller contract.Principal, s
 func (s *Service) finishClose(ctx context.Context, session store.Session, current box.Box, caller contract.Principal, discard bool) *contract.Error {
 	if current.State != contract.BoxDeleted {
 		if err := s.boxes.Remove(ctx, session.Box); err != nil {
-			_, transitionErr := s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxFailed, err.Error())
+			_, transitionErr := s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxFailed, err.Error(), contract.CauseRemoveFailed)
 			if transitionErr != nil {
 				return failure(transitionErr)
 			}
 			return failure(err)
 		}
-		if _, err := s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxDeleted, ""); err != nil {
+		if _, err := s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxDeleted, "", ""); err != nil {
 			return failure(err)
 		}
 	}
@@ -833,7 +833,7 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		return contract.BoxHelloResponse{}, failure(err)
 	}
 	if current.State == contract.BoxStarting {
-		if _, err = s.transition(ctx, session.Room, current, contract.BoxReady, ""); err != nil {
+		if _, err = s.transition(ctx, session.Room, current, contract.BoxReady, "", ""); err != nil {
 			return contract.BoxHelloResponse{}, failure(err)
 		}
 	} else if current.State != contract.BoxReady && current.State != contract.BoxClosing {

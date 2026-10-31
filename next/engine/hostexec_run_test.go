@@ -299,7 +299,7 @@ func TestHostexecDeadlineRecordsLost(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, e := s.HostexecRun(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.HostexecRunRequest{Host: "host", Argv: []string{"true"}, Timeout: contract.DurationMS(time.Minute.Milliseconds())})
-	if e != nil || res.Operation.Result == nil || !strings.Contains(res.Operation.Result.Error, context.DeadlineExceeded.Error()) || duration != 75*time.Second {
+	if e != nil || res.Operation.Result == nil || !strings.Contains(res.Operation.Result.Error, context.DeadlineExceeded.Error()) || res.Operation.Result.Cause != contract.CauseHostLost || duration != 75*time.Second {
 		t.Fatalf("result %+v error %+v deadline %s", res, e, duration)
 	}
 	var stopped string
@@ -320,7 +320,13 @@ func TestHostexecCardEmptyCwdAndStoreError(t *testing.T) {
 	if body := entry.Card(ctx, args, who).Body; strings.Contains(body, "Working directory") {
 		t.Fatalf("body %q", body)
 	}
-	result := entry.Execute(ctx, "missing-operation", args, who)
+	inactive := args
+	inactive.Grant = "missing-grant"
+	result := entry.Execute(ctx, "missing-operation", inactive, who)
+	if result.Cause != contract.CauseGrantInactive {
+		t.Fatalf("inactive result %+v", result)
+	}
+	result = entry.Execute(ctx, "missing-operation", args, who)
 	if result.Error == "" || result.Error == "grant no longer active" {
 		t.Fatalf("result %+v", result)
 	}

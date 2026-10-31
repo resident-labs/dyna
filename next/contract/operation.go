@@ -92,6 +92,7 @@ type PrOpenResult struct {
 type OpResult struct {
 	PR         *PrOpenResult `json:"pr,omitempty"`
 	ExitCode   int           `json:"exitCode"`
+	Cause      FailureCause  `json:"cause,omitempty"` // set with Error
 	Error      string        `json:"error,omitempty"`
 	Output     string        `json:"output,omitempty"` // up to 64 KiB inline
 	Truncated  bool          `json:"truncated,omitempty"`

@@ -26,6 +26,7 @@ const card = object({
   command: optional(nullable(array(string))),
 });
 const state = oneOf("pending", "approved", "denied", "expired", "withdrawn", "done", "failed");
+const cause = optional(oneOf("create_failed", "no_hello", "engine_restarted", "remove_failed", "archive_failed", "grant_inactive", "host_lost", "github_failed", "stale", "interrupted", "internal"));
 const boxState = oneOf("pending", "creating", "starting", "ready", "stopped", "closing", "deleted", "failed", "lost");
 const bodies: Record<string, Check> = {
   "post.created": object({ text: string, home: conversation, mentions: optional(nullable(array(principal))), replyTo: optional(string),
@@ -34,14 +35,14 @@ const bodies: Record<string, Check> = {
   "session.moved": object({ session: string, newParent: string }),
   "session.closed": object({ session: string, archive: optional(string), unheld: optional(nullable(array(string))) }),
   "computer.changed": object({ session: string, to: computerState }),
-  "box.changed": object({ box: string, session: string, host: optional(string), from: optional(boxState), to: boxState, reason: optional(string) }),
+  "box.changed": object({ box: string, session: string, host: optional(string), from: optional(boxState), to: boxState, cause, reason: optional(string) }),
   "turn.started": object({ session: string, turn: string, inputs: nullable(array(string)) }),
   "turn.ended": object({ session: string, turn: string, outcome: oneOf("completed", "failed", "stopped"), final: optional(string),
     replies: optional(nullable(array(object({ reply, posted: optional(string) })))), usage, error: optional(string) }),
   "turn.activity": object({ session: string, turn: string, label: string }),
   "op.requested": object({ id: string, kind: string, by: principal, class: oneOf("auto", "agent", "owner"), card, expires: string }),
   "op.decided": object({ id: string, state, decision: object({ by: principal, approved: boolean, reason: optional(string), at: string }) }),
-  "op.ran": object({ id: string, state, result: object({ exitCode: number, error: optional(string), output: optional(string), outputFile: optional(string) }) }),
+  "op.ran": object({ id: string, state, result: object({ exitCode: number, cause, error: optional(string), output: optional(string), outputFile: optional(string) }) }),
   "shell.job.ended": object({ session: string, job: string, exitCode: number, tail: string }),
   "box.pressure": object({ box: string, kind: oneOf("high", "max") }),
   "grant.expired": object({ grant: string }),
