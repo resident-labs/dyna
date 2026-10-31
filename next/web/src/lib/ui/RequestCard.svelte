@@ -46,11 +46,14 @@
   <p class="title"><Avatar kind={request.by.kind} name={name(request.by)} {root} size={24} />
     <span class="who {request.by.kind}" class:root style:--hue={hue(name(request.by))}>{name(request.by)}</span><span class="asks">requests</span>{request.card.title}
     {#if request.card.target.kind !== "room"}<span class="asks">on {request.card.target.kind} {request.card.target.name}</span>{/if}</p>
-  {#if request.card.body || request.card.command?.length || request.card.changes?.length}<div class="exact">
+  {#snippet exact()}<div class="exact">
     {#if request.card.command?.length}<p>{commandLine(request.card.command)}</p>{/if}
     {#if request.card.body}<p>{request.card.body}</p>{/if}
     {#each request.card.changes ?? [] as change (change.field)}<p><span class="field">{change.field}:</span> {change.old || "none"} → {change.new || "none"}</p>{/each}
-  </div>{/if}
+  </div>{/snippet}
+  <!-- A decided row keeps the exact text behind a fold, so the owner can still check what ran or was refused. -->
+  {#if request.card.body || request.card.command?.length || request.card.changes?.length}
+    {#if request.state === "pending"}{@render exact()}{:else}<details><summary>Details</summary>{@render exact()}</details>{/if}{/if}
   {#if request.state === "pending"}
     <p class="meta">{request.class === "owner" ? "Nothing runs until you approve." : parent ? `${parent} or you can decide.` : ""} Expires {fromNow(request.expires, now)}.</p>
     <input type="text" bind:value={reason} placeholder="Note (optional)" aria-label="Note to the session (optional)" disabled={busy} />
@@ -79,7 +82,10 @@
   .decided .who { color: inherit; }
   .exact { padding: 8px 12px; border-radius: 6px; background: var(--bg); font: 13px/1.5 var(--mono); font-variant-ligatures: none; max-height: 320px; overflow: auto; }
   .exact p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .decided .exact { display: none; }
+  details { font-size: 12.5px; }
+  summary { width: fit-content; padding: 2px 4px; margin-left: -4px; border-radius: 6px; cursor: pointer; }
+  summary:hover { background: var(--hover); color: var(--text); }
+  details .exact { margin-top: 4px; color: var(--text); }
   .meta { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .cause { color: var(--text); }
   .field { color: var(--muted); }
