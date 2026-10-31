@@ -463,7 +463,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 			...this.skills.map((skill) => skill.filePath),
 			...this.skillDirectories,
 			...this.skillDiscoveryDirectories,
-			...[...this.skillDirectories].flatMap((dir) =>
+			...[...this.skillDirectories, ...this.skillDiscoveryDirectories].flatMap((dir) =>
 				[".gitignore", ".ignore", ".fdignore"].map((name) => join(dir, name)),
 			),
 		];
@@ -481,24 +481,32 @@ export class DefaultResourceLoader implements ResourceLoader {
 	}
 
 	private scanSkillDirectories(): void {
-		const roots = [
-			join(this.agentDir, "skills"),
-			join(this.cwd, CONFIG_DIR_NAME, "skills"),
-			join(process.env.HOME ?? homedir(), ".agents", "skills"),
-		];
-		for (let dir = this.cwd; ; dir = dirname(dir)) {
-			roots.push(join(dir, ".agents", "skills"));
-			if (dirname(dir) === dir) break;
+		const roots = [join(this.agentDir, "skills"), join(process.env.HOME ?? homedir(), ".agents", "skills")];
+		if (this.settingsManager.isProjectTrusted()) {
+			roots.push(join(this.cwd, CONFIG_DIR_NAME, "skills"));
+			for (let dir = this.cwd; ; dir = dirname(dir)) {
+				roots.push(join(dir, ".agents", "skills"));
+				if (dirname(dir) === dir) break;
+			}
 		}
 		const dirs = new Set<string>();
+		const realDirs = new Set<string>();
 		const visit = (dir: string): void => {
 			if (dirs.has(dir)) return;
 			dirs.add(dir);
 			const stat = statSync(dir, { throwIfNoEntry: false });
 			if (!stat?.isDirectory()) return;
+			const real = canonicalizePath(dir);
+			if (realDirs.has(real)) return;
+			realDirs.add(real);
 			for (const entry of readdirSync(dir, { withFileTypes: true })) {
-				if (entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules")
+				if (
+					!entry.name.startsWith(".") &&
+					entry.name !== "node_modules" &&
+					(entry.isDirectory() || entry.isSymbolicLink())
+				) {
 					visit(join(dir, entry.name));
+				}
 			}
 		};
 		for (const root of roots) visit(root);
