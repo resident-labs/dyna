@@ -325,10 +325,18 @@ func selectAccountAfterPolicy(ctx context.Context, cmd *exec.Cmd, r repository) 
 		return "", "", err
 	}
 	if _, comment := ownCommentCall(cmd.Args[1:]); comment {
-		// GitHub permits authors to edit comments without repository push access.
-		write = false
+		return selectCommentAccount(ctx, cmd, r, rec)
 	}
 	return selectAccountForRoom(ctx, cmd, r, rec, write)
+}
+
+// Prefer the normal write account, but comment authors do not need push access.
+func selectCommentAccount(ctx context.Context, cmd *exec.Cmd, r repository, rec room.Record) (string, string, error) {
+	login, token, err := selectAccountForRoom(ctx, cmd, r, rec, true)
+	if errors.Is(err, ErrNoSignedInAccount) || err == nil && login == "" {
+		return selectAccountForRoom(ctx, cmd, r, rec, false)
+	}
+	return login, token, err
 }
 
 func selectAccountForRoom(ctx context.Context, cmd *exec.Cmd, r repository, rec room.Record, write bool) (string, string, error) {
