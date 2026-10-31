@@ -149,7 +149,7 @@ func (m *BoxMessage) UnmarshalJSON(data []byte) error {
 	for _, b := range messages {
 		fmt.Fprintf(&g, "case %q: var v %s; if err := json.Unmarshal(w.Body,&v); err != nil { return err }; m.Body = v; return nil\n", b.kind, b.name)
 	}
-	g.WriteString(`default: return fmt.Errorf("unknown box message type %q",w.Type)
+	g.WriteString(`default: return fmt.Errorf("%w %q",ErrUnknownBoxMessage,w.Type)
  }
 }
 `)

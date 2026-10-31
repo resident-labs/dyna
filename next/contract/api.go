@@ -1,6 +1,9 @@
 package contract
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 type Method string
 
@@ -525,6 +528,11 @@ type BoxMessageBody interface {
 	BoxMessageType() BoxMessageType
 	isBoxMessageBody()
 }
+
+// ErrUnknownBoxMessage wraps the decode error for a message type this build does not know, so an older box
+// can skip a message from a newer engine.
+var ErrUnknownBoxMessage = errors.New("unknown box message type")
+
 type BoxMessage struct {
 	Body BoxMessageBody `json:"body"`
 }
