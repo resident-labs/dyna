@@ -79,6 +79,9 @@ type RoomBundle struct {
 	Repos         []RoomRepo       `json:"repos"`
 	Limits        RoomLimits       `json:"limits"`
 	Color         string           `json:"color"`
+	Paused        bool             `json:"paused"`
+	RootProfile   ProfileName      `json:"rootProfile,omitempty"`
+	Upstreams     []RoomUpstream   `json:"upstreams,omitempty"`
 	Rules         []Rule           `json:"rules"`
 	Goals         []GoalBundle     `json:"goals"`
 	Issues        []IssueBundle    `json:"issues"`
@@ -217,6 +220,12 @@ type RoomRepo struct {
 }
 
 // RoomLimits is the room budget; zero is unset.
+// RoomUpstream records a v1 issue-watch upstream for manual recreation.
+type RoomUpstream struct {
+	Repo     RepoName `json:"repo"`
+	Upstream string   `json:"upstream"`
+}
+
 type RoomLimits struct {
 	CPUs     int   `json:"cpus"`
 	MemBytes int64 `json:"memBytes"`
@@ -286,6 +295,14 @@ type TrackedPR struct {
 	Number int            `json:"number"`
 	Author ImportedAuthor `json:"author"`
 	Goal   GoalID         `json:"goal,omitempty"`
+	Hold   *PRHandoffHold `json:"hold,omitempty"`
+}
+
+// PRHandoffHold preserves a v1 merge hold for the room handoff.
+type PRHandoffHold struct {
+	Reason string         `json:"reason"`
+	By     ImportedAuthor `json:"by"`
+	At     time.Time      `json:"at"`
 }
 
 type QuestionKind string
