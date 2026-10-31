@@ -20,13 +20,13 @@ const span = (seconds: number) => count(...unitOf(seconds));
 // An account's name on screen: its provider, such as "Claude". The label is never shown, because it can be a sign-in address.
 export const providerName = (provider: string) => `${provider.charAt(0).toUpperCase()}${provider.slice(1)}`;
 
-// The busiest window of any account that reports one, as "Claude at 62% of the 5-hour window"; none without one.
+// The busiest visible window by provider, such as "Claude · 5-hour 62% used"; none without one.
 export function busiestWindow(accounts: AccountUsage[]): string | undefined {
-  const windows = accounts.flatMap(a => a.cause ? [] : (a.windows ?? []).map(w => ({ provider: a.provider, w })));
+  const windows = accounts.flatMap(a => a.cause ? [] : visibleWindows(a.windows ?? []).map(w => ({ provider: a.provider, w })));
   const top = windows.reduce<(typeof windows)[number] | undefined>((max, next) => !max || next.w.usedPercent > max.w.usedPercent ? next : max, undefined);
   if (!top) return undefined;
-  const [n, unit] = unitOf(top.w.seconds);
-  return `${providerName(top.provider)} at ${Math.round(top.w.usedPercent)}% of the ${n}-${unit} window`;
+  const label = windowLabel({ ...top.w, model: undefined });
+  return `${providerName(top.provider)} · ${label}${top.w.model ? ` (${top.w.model})` : ""} ${Math.round(top.w.usedPercent)}% used`;
 }
 
 // "2 h 10 min", "3 d 4 h" or "10 min" until a time, with no-break spaces so it wraps as one; none when it is not
@@ -38,10 +38,20 @@ function until(at: string, now: number): string | undefined {
   return (d ? `${d} d ${h} h` : h ? `${h} h ${m} min` : `${m} min`).replaceAll(" ", "\u00a0");
 }
 
-// A usage window as a meter: "5 hours", "62%" large with "used" after it, and "38% left · 2 h 10 min" until the reset, short enough for one line.
+// A typed kind names the period; a model-specific limit names its model too.
+export function windowLabel(w: UsageWindow): string {
+  const period = w.kind === "five_hour" ? "5-hour" : w.kind === "weekly" ? "Weekly" : w.seconds > 0 ? span(w.seconds) : "Usage";
+  return w.model ? `${period} · ${w.model}` : period;
+}
+
+export function visibleWindows(windows: UsageWindow[]): UsageWindow[] {
+  return windows.filter(w => !w.model || Math.round(w.usedPercent) > 0);
+}
+
+// A usage window as a meter: a label, percent used, and time to reset.
 // It is busy at 90% used or more.
 export function windowMeter(w: UsageWindow, now: number): Meter {
   const used = Math.min(100, Math.max(0, Math.round(w.usedPercent)));
   const resets = until(w.resetsAt, now);
-  return { label: span(w.seconds), percent: used, unit: "used", busy: used >= 90, text: `${100 - used}% left` + (resets ? ` · ${resets}` : "") };
+  return { label: windowLabel(w), percent: used, unit: "used", busy: used >= 90, text: `${100 - used}% left` + (resets ? ` · ${resets}` : "") };
 }

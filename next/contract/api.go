@@ -235,11 +235,21 @@ type AccountUsage struct {
 	Windows    []UsageWindow `json:"windows"`
 	Cause      UsageCause    `json:"cause"`
 }
+type UsageWindowKind string
+
+const (
+	UsageWindowFiveHour UsageWindowKind = "five_hour"
+	UsageWindowWeekly   UsageWindowKind = "weekly"
+	UsageWindowOther    UsageWindowKind = "other"
+)
+
 type UsageWindow struct {
-	Name        string    `json:"name"`
-	UsedPercent float64   `json:"usedPercent"`
-	Seconds     int64     `json:"seconds"`
-	ResetsAt    time.Time `json:"resetsAt"`
+	Name        string          `json:"name"`
+	Kind        UsageWindowKind `json:"kind"`
+	Model       string          `json:"model,omitempty"`
+	UsedPercent float64         `json:"usedPercent"`
+	Seconds     int64           `json:"seconds"`
+	ResetsAt    time.Time       `json:"resetsAt"`
 }
 
 type HostAddRequest struct {
