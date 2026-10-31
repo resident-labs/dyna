@@ -39,8 +39,10 @@
   .failed { display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: 12px; padding: 14px 16px 1px; }
   .failed > :global(.avatar) { grid-row: 1 / span 2; margin-top: 2px; }
   p { grid-column: 2; margin: 0; }
-  .name { display: flex; align-items: baseline; gap: 8px; }
-  strong { color: oklch(var(--id-name) var(--hue)); }
+  /* One line at any width: the name truncates; the time and the pill stay whole. */
+  .name { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+  strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: oklch(var(--id-name) var(--hue)); }
+  .name > :global(:not(strong)) { flex: none; }
   .cause { color: var(--muted); }
   .more { grid-column: 2; margin-top: 8px; }
   .more:empty { display: none; }
