@@ -37,6 +37,7 @@ func (ConnectConnector) isEventBody()         {}
 type ConnectAttemptState string
 
 const (
+	ConnectAttemptIdle     ConnectAttemptState = "idle"
 	ConnectAttemptStarting ConnectAttemptState = "starting"
 	ConnectAttemptPending  ConnectAttemptState = "pending"
 	ConnectAttemptLinked   ConnectAttemptState = "linked"

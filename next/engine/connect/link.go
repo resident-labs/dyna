@@ -113,7 +113,7 @@ func LinkMachine(ctx context.Context, relay *Relay, files *Files, state LinkStat
 		if _, err := CheckRelayURL(pending.Relay); err != nil {
 			return Link{}, err
 		}
-	case "", contract.ConnectAttemptCanceled, contract.ConnectAttemptFailed, contract.ConnectAttemptLinked:
+	case contract.ConnectAttemptIdle, contract.ConnectAttemptCanceled, contract.ConnectAttemptFailed, contract.ConnectAttemptLinked:
 		if _, err := os.Stat(path); err == nil {
 			return Link{}, errors.New("unexpected pending link")
 		} else if !errors.Is(err, os.ErrNotExist) {
