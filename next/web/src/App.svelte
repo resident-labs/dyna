@@ -71,7 +71,9 @@
     section = undefined;
     await tick();
     // On a phone the room menu is hidden in favour of the drawer, so Rules returns focus to ☰.
-    if (was === "rules") (phone.current ? menuButton : roomMenu)?.focus(); else requestsButton?.focus();
+    // So does Requests when nothing waits, as its header button then hides.
+    if (was === "rules") (phone.current ? menuButton : roomMenu)?.focus();
+    else (phone.current && !store?.waiting ? menuButton : requestsButton)?.focus();
   }
   const segment = (pattern: RegExp) => { const match = pattern.exec(path)?.[1]; return match && decodeURIComponent(match); };
   let room = $derived(segment(/^\/r\/([^/]+)/));
