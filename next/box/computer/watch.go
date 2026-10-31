@@ -6,16 +6,26 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"io"
+	"time"
 
 	"github.com/coder/websocket"
 )
 
 // Watch sends JPEG frames and acknowledges each only after it reaches the stream.
 func Watch(ctx context.Context, out io.Writer) error {
-	return watch(ctx, URL, out)
+	return watch(ctx, URL, out, func(ctx context.Context) error {
+		timer := time.NewTimer(100 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
 }
 
-func watch(ctx context.Context, base string, out io.Writer) error {
+func watch(ctx context.Context, base string, out io.Writer, pace func(context.Context) error) error {
 	d, err := Connect(ctx, base)
 	if err != nil {
 		return err
@@ -24,7 +34,7 @@ func watch(ctx context.Context, base string, out io.Writer) error {
 	if _, err = d.Call(ctx, "Page.enable", nil); err != nil {
 		return err
 	}
-	if _, err = d.Call(ctx, "Page.startScreencast", json.RawMessage(`{"format":"jpeg","quality":70,"maxWidth":1280,"everyNthFrame":6}`)); err != nil {
+	if _, err = d.Call(ctx, "Page.startScreencast", json.RawMessage(`{"format":"jpeg","quality":70,"maxWidth":1280,"everyNthFrame":1}`)); err != nil {
 		return err
 	}
 	for {
@@ -54,6 +64,10 @@ func watch(ctx context.Context, base string, out io.Writer) error {
 			return err
 		}
 		if _, err = out.Write(jpeg); err != nil {
+			return err
+		}
+		// Pace acknowledgements so busy pages do not stream at display refresh rate.
+		if err = pace(ctx); err != nil {
 			return err
 		}
 		d.id++
