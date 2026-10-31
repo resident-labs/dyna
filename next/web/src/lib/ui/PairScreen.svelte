@@ -78,6 +78,7 @@
   .big { height: 48px; border: 0; border-radius: 8px; background: var(--focus); color: var(--bg); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
   .big:disabled { opacity: 0.45; cursor: default; }
   .small { font-size: 12.5px; }
-  @media (hover: none) { .link { min-height: 40px; } }
+  /* 16 px text keeps iOS from zooming the page on focus. */
+  @media (hover: none) { .link { min-height: 40px; } .name { height: 40px; font-size: 16px; } }
   @media (max-width: 640px) { .screen { padding-top: 72px; } }
 </style>
