@@ -498,7 +498,7 @@ func (s *Service) mergeReady(ctx context.Context, expected Record) (Record, bool
 		saved, err := s.Store.Get(current.Key)
 		return saved, err == nil && saved.Head == expected.Head && localMergeReady(saved, st.Records), err
 	}
-	err = s.ConfirmHeads(ctx, current.Key)
+	heads, err := s.confirmedHeads(ctx, current.Key)
 	if err != nil {
 		return Record{}, false, err
 	}
@@ -518,6 +518,11 @@ func (s *Service) mergeReady(ctx context.Context, expected Record) (Record, bool
 		return Record{}, false, clientErr
 	}
 	snap, err := gh.Snapshot(ctx, refRecord(*current))
+	// The batch precedes this full read, so its count baseline cannot hide a
+	// later discussion change. Keep it for the next confirmation.
+	if probe, ok := heads[current.Key]; ok && probe.Pull.Head.SHA == snap.Pull.Head.SHA {
+		snap.Pull.DiscussionVersion = probe.Pull.DiscussionVersion
+	}
 	if saveErr := s.savePollResponses(current.Key, gh); saveErr != nil {
 		return Record{}, false, errors.Join(err, saveErr)
 	}
