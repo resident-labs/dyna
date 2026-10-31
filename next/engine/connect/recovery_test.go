@@ -79,6 +79,9 @@ func TestRestartCompletesInterruptedUnlink(t *testing.T) {
 	if err := ops.Resume(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	if ops.done == nil {
+		t.Fatal("unlink recovery did not start")
+	}
 	<-ops.done
 	a, err := st.ConnectAttempt(context.Background())
 	if err != nil || a.State != contract.ConnectAttemptCanceled {

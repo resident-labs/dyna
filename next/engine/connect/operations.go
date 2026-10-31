@@ -225,13 +225,7 @@ func (o *Operations) Cancel(ctx context.Context) error {
 	if linked {
 		return errors.New("link is already active")
 	}
-	if err := o.state.SetConnectAttempt(ctx, contract.ConnectAttempt{State: contract.ConnectAttemptCanceled}); err != nil {
-		return err
-	}
-	if err := os.Remove(filepath.Join(o.files.dir, "pending.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return nil
+	return o.unlink(ctx)
 }
 
 func (o *Operations) Unlink(ctx context.Context) error {
