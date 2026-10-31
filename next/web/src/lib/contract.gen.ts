@@ -212,6 +212,7 @@ export type DeviceRevokeRequest = { id: string; };
 export type DeviceRevokeResponse = { };
 export type DeviceSetScopesRequest = { id: string; scopes: Array<Scope> | null; };
 export type DeviceSetScopesResponse = { };
+export type StreamHello = { build: string; };
 export type EventType = string;
 export type Event = { seq: number; id: EventID; at: string; room?: RoomID; from: Principal } & EventBody;
 export type RoomLimitsChanged = { cpus: number; memBytes: number; };
