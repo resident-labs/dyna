@@ -77,12 +77,21 @@ func dynaWaitCallbackJSON(state string) ([]byte, error) {
 	return json.Marshal(result)
 }
 
-func dynaCompleteOAuth(state string, record *coreauth.Auth) {
+func (h *Handler) dynaCompleteOAuth(state string, record *coreauth.Auth) {
 	if !DynaMemoryOAuthCallbacks {
 		CompleteOAuthSession(state)
 		return
 	}
-	CompleteOAuthSessionWithOutcome(state, record.ID, authGrantFingerprint(record), true, false, false, 0, 0, 0, 0, "", "")
+	grant := authGrantFingerprint(record)
+	var adopted bool
+	var version, epoch uint64
+	if h.authManager != nil && grant != "" {
+		if current, ok := h.authManager.GetByID(record.ID); ok && current != nil && current.Disabled && authGrantFingerprint(current) == grant {
+			adopted = true
+			version, epoch = current.CredentialVersion, current.RegistrationEpoch
+		}
+	}
+	CompleteOAuthSessionWithOutcome(state, record.ID, grant, true, adopted, false, 0, 0, version, epoch, "", "")
 }
 
 func dynaClearCallback(state string) {
