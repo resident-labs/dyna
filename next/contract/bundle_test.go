@@ -17,7 +17,7 @@ func filledGlobalBundle() GlobalBundle {
 		Rooms:        []RoomName{"dyna"},
 		Exported:     bundleTime,
 		Source:       BundleSource{Commit: "abc123", Backup: "dyna-final.db", BackupSHA256: "f00d"},
-		Instructions: Instructions{Global: "- (u1) report bugs to root\n", Rooms: []RoomInstructions{{Room: "room_1", Text: "- (r17) upgrade floor\n"}}},
+		Instructions: "- (u1) report bugs to root\n",
 		Settings: SettingsBundle{
 			OwnerName: "Ari", RootProfile: "opus", RulesMaxChars: 4000, SubagentMaxDepth: 3,
 			CheckInInterval: 900000, ShellSilence: 600000,
@@ -47,14 +47,15 @@ func filledGlobalBundle() GlobalBundle {
 func filledRoomBundle() RoomBundle {
 	root := ImportedAuthor{Kind: PrincipalSession, Label: "dyna:root"}
 	return RoomBundle{
-		Version:     BundleV1,
-		Name:        "dyna",
-		Repos:       []RoomRepo{{Repo: "resident-labs/dyna", Default: true}},
-		Limits:      RoomLimits{CPUs: 8, MemBytes: 16 << 30},
-		Color:       "teal",
-		Paused:      true,
-		RootProfile: "terra",
-		Upstreams:   []RoomUpstream{{Repo: "resident-labs/dyna", Upstream: "github.com/resident-labs/dyna"}},
+		Version:      BundleV1,
+		Instructions: "- (r17) upgrade floor\n",
+		Name:         "dyna",
+		Repos:        []RoomRepo{{Repo: "resident-labs/dyna", Default: true}},
+		Limits:       RoomLimits{CPUs: 8, MemBytes: 16 << 30},
+		Color:        "teal",
+		Paused:       true,
+		RootProfile:  "terra",
+		Upstreams:    []RoomUpstream{{Repo: "resident-labs/dyna", Upstream: "github.com/resident-labs/dyna"}},
 		Goals: []GoalBundle{{
 			Label: "g1084", Text: "review", Detail: "brief", Setter: root, Created: bundleTime,
 			Amendments: []GoalNote{{At: bundleTime, By: root, Text: "also X"}},
