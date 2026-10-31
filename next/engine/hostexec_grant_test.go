@@ -67,3 +67,13 @@ func TestGrantCardEscapesControlCharactersAndNamesWildcard(t *testing.T) {
 		t.Fatalf("wildcard: %q", body)
 	}
 }
+
+func TestGrantCardEscapesHost(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	a := contract.HostexecGrantArgs{Room: room, To: contract.Principal{Kind: contract.PrincipalSession, Session: worker}, Hosts: []contract.HostName{"hermeslab\nany command"}, Commands: []contract.CommandRule{{Program: "git"}}}
+	body := s.HostexecGrant().Card(ctx, a, contract.Principal{}).Body
+	before, _, found := strings.Cut(body, ":\n")
+	if !found || !strings.Contains(before, `"hermeslab\nany command"`) || strings.Contains(before, "\n") {
+		t.Fatalf("host: %q", body)
+	}
+}
