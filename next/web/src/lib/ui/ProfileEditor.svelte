@@ -60,6 +60,9 @@
   .actions button.remove, .in-use { margin-left: auto; }
   .in-use { align-self: center; color: var(--muted); font-size: 12.5px; }
   .actions button:disabled { opacity: .45; }
+  @media (max-width: 479px) {
+    .numeric + .help { display: block; margin-top: 6px; }
+  }
   @media (max-width: 640px) {
     .editor { padding: 16px 12px; }
     .actions { flex-wrap: wrap; }
