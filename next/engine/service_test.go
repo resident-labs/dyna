@@ -84,6 +84,8 @@ func testChannel(t *testing.T, s *Service, ctx context.Context, caller contract.
 
 type fakeProfiles struct{}
 
+func (fakeProfiles) List() []contract.ProfileSummary { return nil }
+
 func (fakeProfiles) Model(contract.ProfileName) (contract.ModelChoice, []string, error) {
 	return contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "model", Thinking: contract.ThinkingLow}, []string{"model"}, nil
 }
