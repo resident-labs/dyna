@@ -57,9 +57,11 @@
   let opens = $derived(shown !== undefined && whole === keyOf(shown.session, shown.job));
   let command: HTMLElement | undefined = $state();
   let clipped = $state(false);
+  // The command alone, so streamed output does not measure the header again.
+  let commandText = $derived(shown?.job.command);
   $effect(() => {
     const element = command;
-    void shown?.job.command;
+    void commandText;
     if (!element) return;
     const measure = () => { clipped = element.scrollHeight > element.clientHeight + 1; };
     const observer = new ResizeObserver(measure);
