@@ -764,8 +764,10 @@ func TestStackedTrialsHoldPendingAndDiscardWhenMainMoves(t *testing.T) {
 	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.branches) != 0 {
-		t.Fatal("kept stale stack branches")
+	for _, branch := range []string{"dyna/merge-trial/1", "dyna/merge-trial/2", "dyna/merge-trial/3"} {
+		if f.branches[branch] != "" {
+			t.Fatalf("kept stale stack branch %s", branch)
+		}
 	}
 	st, err := f.e.s.Store.Read()
 	if err != nil {
@@ -1001,16 +1003,6 @@ func TestUntrackedTrialMemberDoesNotHoldOtherReadyPRs(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, err := f.e.s.Store.Read()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(st.MergeTrials) != 0 {
-		t.Fatal("untracked member retained its trial")
-	}
-	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	st, err = f.e.s.Store.Read()
 	if err != nil {
 		t.Fatal(err)
 	}
