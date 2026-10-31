@@ -60,6 +60,7 @@
   }
   let firstBuild: string | undefined;
   let reloadPending = $state(false);
+  let mainWidth = $state(4096);
   watchHello(({ build }) => {
     if (firstBuild === undefined) { firstBuild = build; return; }
     if (build === firstBuild || reloadPending) return;
@@ -631,7 +632,7 @@
   </aside>
   {#if drawer || (panel && phone.current)}<button type="button" class="scrim" tabindex="-1" aria-label={drawer ? "Close the menu" : room ? "Close the sessions" : "Close the active rooms"}
     onclick={() => void (drawer ? showDrawer(false, true, true) : showPanel(false, true))}></button>{/if}
-  <main inert={drawer || (panel && phone.current) || covered || inSettings}>
+  <main bind:clientWidth={mainWidth} class:header-tight={mainWidth <= 1000} class:header-narrow={mainWidth <= 600} inert={drawer || (panel && phone.current) || covered || inSettings}>
     <header class="bar" class:work-phone={!!session && workTab && phone.current}>{#if room && session && phone.current}<a class="menu-toggle" href={"/r/" + encodeURIComponent(room)} aria-label={`Back to ${roomName}`} title={`Back to ${roomName}`}
         onclick={event => { const tapped = event.detail > 0; navigate(event); void tick().then(() => menuButton?.focus({ focusVisible: !tapped })); }}><Icon name="back" /></a>
       {:else}<button type="button" class="menu-toggle" bind:this={menuButton} aria-label="Rooms and pages" title="Rooms and pages" aria-expanded={drawer}
@@ -771,13 +772,18 @@
   .tool[aria-pressed="true"] { background: var(--selected); }
   /* The session's name gets the crumb's width: the rail or a phone's back arrow leads to the room. */
   @media (max-width: 760px) { .crumb, .crumb + .count { display: none; } }
-  @media (max-width: 760px) { .tool { justify-content: center; width: 40px; height: 40px; padding: 0; border: 0; } .tool span { display: none; } }
+  @media (max-width: 760px) { main .tool { justify-content: center; width: 40px; height: 40px; padding: 0; border: 0; } .tool span { display: none; } }
   /* Requests is a header icon, as the menu and the panel toggle are: 16 px in a 28 px hit area. While requests wait for
      the owner it is one 40 px chip: the icon and StatusPill's count on the warning wash. */
   .requests { margin-left: auto; display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 28px; height: 28px; padding: 0;
     border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
   .requests:hover, .requests[aria-pressed="true"] { background: var(--hover); color: var(--text); }
+  @media (min-width: 761px) { .requests.waiting { margin-right: 4px; } }
   main { position: relative; }
+  :where(main.header-tight) .tool { justify-content: center; width: 28px; padding: 0; }
+  :where(main.header-tight) .tool span { display: none; }
+  main.header-narrow .desktop-tabs { display: none; }
+  main.header-narrow .phone-tabs { display: flex; padding: 4px 12px; border-bottom: 1px solid var(--line); }
   .requests ~ :global(.panel-toggle) { margin-left: 0; }
   :global(.jobs ~ .requests) { margin-left: 0; }
   main > header :global(.panel-toggle) { display: flex; align-items: center; gap: 8px; }
@@ -800,8 +806,8 @@
   /* The header has one line, and a failed session's word is a sentence, so the word gives way and the title stays whole. */
   .word { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .heading strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .heading:has(.word) strong { flex: none; }
-  .crumb { flex: none; white-space: nowrap; }
+  @media (min-width: 641px) { .word { flex: 1 1 0; } }
+  .crumb { flex: none; max-width: 25%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hash { display: inline-flex; align-items: center; }
   /* A phone's header: the menu button, the title over its muted counts, Requests only while something waits (40 px
      targets), and the Sessions button with its count. The room menu's one action, Terminal, moves into the drawer. */
