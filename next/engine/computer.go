@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"database/sql"
 	"encoding/binary"
 	"io"
 
@@ -22,7 +21,7 @@ func (s *Service) computerEvent(ctx context.Context, session contract.SessionID,
 	if err != nil {
 		return err
 	}
-	return s.store.Write(ctx, func(tx *sql.Tx) error { _, err := s.store.AppendEvent(tx, e); return err })
+	return s.store.RecordEvent(ctx, e)
 }
 
 // clearComputerLocked removes the current computer. The caller holds s.mu and
