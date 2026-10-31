@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"github.com/resident-labs/dyna/box/visual"
 
 	"github.com/resident-labs/dyna/contract"
 	"strings"
@@ -31,13 +32,13 @@ func TestVisualFlagsAndMetadata(t *testing.T) {
 		{"refresh", `<meta http-equiv="refresh" content="0">`, 0, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, height, err := visualMeta("test.html", []byte(tc.doc))
+			_, height, err := visual.Meta("test.html", []byte(tc.doc))
 			if (err != nil) != tc.wantErr || height != tc.height {
 				t.Fatalf("height=%d err=%v", height, err)
 			}
 		})
 	}
-	title, _, err := visualMeta("test.html", []byte("<title>"+strings.Repeat("漢", 86)+"</title>"))
+	title, _, err := visual.Meta("test.html", []byte("<title>"+strings.Repeat("漢", 86)+"</title>"))
 	if err != nil || title != strings.Repeat("漢", 85) {
 		t.Fatalf("multibyte title: %q, err=%v", title, err)
 	}

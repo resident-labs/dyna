@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -19,8 +18,10 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
+	"github.com/resident-labs/dyna/box/post"
 	"github.com/resident-labs/dyna/box/visual"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/contract/tools"
 	"github.com/spf13/cobra"
 )
 
@@ -156,32 +157,7 @@ func (c *socketClient) File(ctx context.Context, hash string, out io.Writer) err
 }
 
 func (c *socketClient) Upload(ctx context.Context, path string) (contract.Attachment, error) {
-	var attachment contract.Attachment
-	file, err := os.Open(path)
-	if err != nil {
-		return attachment, err
-	}
-	defer file.Close()
-	name := filepath.Base(path)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://dyna/v1/files?name="+url.QueryEscape(name), file)
-	if err != nil {
-		return attachment, err
-	}
-	media := mime.TypeByExtension(filepath.Ext(name))
-	if media == "" {
-		media = "application/octet-stream"
-	}
-	req.Header.Set("Content-Type", media)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return attachment, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return attachment, fmt.Errorf("upload %s: %s", name, resp.Status)
-	}
-	err = json.NewDecoder(resp.Body).Decode(&attachment)
-	return attachment, err
+	return post.UploadHTTP(ctx, c.http, path)
 }
 
 type commandExit int
@@ -541,73 +517,26 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	var postRoom, htmlPath, update string
 	var allowNet bool
 	var mentions, paths []string
-	post := &cobra.Command{Use: "post TEXT", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		if (update != "" || allowNet) && htmlPath == "" {
-			return fmt.Errorf("--update and --allow-net need --html")
-		}
-		if htmlPath != "" && strings.TrimSpace(args[0]) == "" {
-			return fmt.Errorf("--html needs post text")
-		}
-		count := len(paths)
-		if htmlPath != "" {
-			count++
-		}
-		if count > 16 {
-			return fmt.Errorf("a post can carry at most 16 attachments")
-		}
+	postCmd := &cobra.Command{Use: "post TEXT", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		c := getClient()
-		var attachments []contract.Attachment
-		for _, path := range paths {
-			attachment, err := c.Upload(cmd.Context(), path)
-			if err != nil {
-				return err
-			}
-			attachments = append(attachments, attachment)
+		request, checks, err := (post.Preparer{Upload: c.Upload, Render: visual.Preview}).Prepare(cmd.Context(), tools.PostInput{Room: contract.RoomID(postRoom), Text: args[0], Mentions: mentions, Paths: paths, HTML: htmlPath, AllowNet: allowNet, VisualUpdate: contract.EventID(update)})
+		if err != nil {
+			return err
 		}
-		if htmlPath != "" {
-			data, err := readVisual(htmlPath)
-			if err != nil {
-				return err
-			}
-			title, height, err := visualMeta(htmlPath, data)
-			if err != nil {
-				return err
-			}
-			card := &contract.VisualCard{Title: title, Height: height, AllowNet: allowNet}
-			result := visual.Preview(cmd.Context(), data, visualCSP(allowNet), allowNet)
-			printVisualChecks(cmd.ErrOrStderr(), result.Checks)
-			if err := visualImages(cmd.Context(), c, result, card); err != nil {
-				return err
-			}
-			dir, err := os.MkdirTemp("", "dyna-card-")
-			if err != nil {
-				return err
-			}
-			defer os.RemoveAll(dir)
-			copyPath := filepath.Join(dir, filepath.Base(htmlPath))
-			if err = os.WriteFile(copyPath, data, 0600); err != nil {
-				return err
-			}
-			file, err := c.Upload(cmd.Context(), copyPath)
-			if err != nil {
-				return err
-			}
-			file.Visual = card
-			attachments = append(attachments, file)
-		}
-		r, err := c.Post(cmd.Context(), contract.PostRequest{Room: contract.RoomID(postRoom), Text: args[0], Mentions: mentions, Attachments: attachments, VisualUpdate: contract.EventID(update)})
+		printVisualChecks(cmd.ErrOrStderr(), checks)
+		r, err := c.Post(cmd.Context(), request)
 		if err == nil {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), r.Event)
 		}
 		return err
 	}}
-	post.Flags().StringVar(&htmlPath, "html", "", "Attach an HTML visual card")
-	post.Flags().StringVar(&update, "update", "", "Add a version to a visual post")
-	post.Flags().BoolVar(&allowNet, "allow-net", false, "Allow HTTPS resources in the visual")
-	post.Flags().StringArrayVar(&paths, "attach", nil, "Attach a file (repeatable)")
-	post.Flags().StringVar(&postRoom, "room", "", "Room ID")
-	post.Flags().StringSliceVar(&mentions, "mention", nil, "Session mentions")
-	root.AddCommand(post, visualCommand())
+	postCmd.Flags().StringVar(&htmlPath, "html", "", "Attach an HTML visual card")
+	postCmd.Flags().StringVar(&update, "update", "", "Add a version to a visual post")
+	postCmd.Flags().BoolVar(&allowNet, "allow-net", false, "Allow HTTPS resources in the visual")
+	postCmd.Flags().StringArrayVar(&paths, "attach", nil, "Attach a file (repeatable)")
+	postCmd.Flags().StringVar(&postRoom, "room", "", "Room ID")
+	postCmd.Flags().StringSliceVar(&mentions, "mention", nil, "Session mentions")
+	root.AddCommand(postCmd, visualCommand())
 	contextCmd := &cobra.Command{Use: "context"}
 	contextCmd.AddCommand(&cobra.Command{Use: "show SECTION", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		result, err := getClient().ContextSnapshot(cmd.Context(), contract.ContextSnapshotRequest{Section: contract.ContextSectionKey(args[0])})
