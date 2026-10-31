@@ -22,7 +22,7 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	if err != nil {
 		return contract.BoxHelloResponse{}, failure(err)
 	}
-	if current.State == contract.BoxCreating || current.State == contract.BoxStarting {
+	if current.State == contract.BoxCreating || current.State == contract.BoxStarting || current.State == contract.BoxLost {
 		_, err = s.transition(ctx, session.Room, current, contract.BoxReady, "", "")
 		if errors.Is(err, sql.ErrNoRows) && current.State == contract.BoxCreating {
 			current, err = s.store.Box(ctx, session.Box)
