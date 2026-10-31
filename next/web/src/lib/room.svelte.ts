@@ -109,6 +109,10 @@ export class RoomStore {
     await this.opening.then(() => { this.loaded = true; }, (error: unknown) => { this.failure = error; });
     this.changed();
     if (this.closed || !this.loaded) return;
+    // A failed job counts until the owner reads past its end, as a failed turn does. The first page does not wait for this read.
+    if (this.hadJobs.size) void failedJobs(this.room, this.head + 1).then(ends => {
+      for (const { session, job, seq } of ends) if (seq > Math.max(this.readAt({ kind: "feed" }), this.readAt({ kind: "dm", session }))) this.failedJobs.add(`${session}/${job}`);
+    });
     this.stopStream = this.connect(this.room, () => this.head, event => this.apply(event));
   }
 
@@ -136,7 +140,6 @@ export class RoomStore {
       if (session.hadJobs) this.hadJobs.add(session.id);
     }
     if (this.boxFailures.size) for (const [id, failure] of await boxFailures(this.room, list.seq + 1)) if (this.boxFailures.has(id)) this.boxFailures.set(id, failure);
-    if (this.hadJobs.size) for (const key of await failedJobs(this.room, list.seq + 1)) this.failedJobs.add(key);
     // A failure turnFailures cannot place keeps list.seq and shows.
     for (const [session, { seq, body }] of await turnFailures(this.room, list.seq + 1, this.failed.keys())) {
       this.failed.set(session, seq);
