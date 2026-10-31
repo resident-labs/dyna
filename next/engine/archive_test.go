@@ -73,6 +73,7 @@ func TestClosePendingBoxWithoutTurnsDoesNotStart(t *testing.T) {
 	s, _, sid, ctx := setupArchive(t)
 	h := &dormantHost{}
 	s.boxes = h
+	resetLifecycle(s)
 	session, err := s.store.Session(ctx, sid)
 	if err != nil {
 		t.Fatal(err)
@@ -109,6 +110,7 @@ func TestCloseBlocksDispatchBeforeArchive(t *testing.T) {
 	wakeSession(t, s, ctx, room, sid)
 	h := heldArchiveStart{started: make(chan struct{}), release: make(chan struct{})}
 	s.boxes = h
+	resetLifecycle(s)
 	session, err := s.store.Session(ctx, sid)
 	if err != nil {
 		t.Fatal(err)
@@ -139,6 +141,7 @@ func TestCloseStartsStoppedBoxForArchive(t *testing.T) {
 	s, _, sid, ctx := setupArchive(t)
 	h := &dormantHost{}
 	s.boxes = h
+	resetLifecycle(s)
 	s.SetRepositories(&fakeRepos{})
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: sid}
 	channelCtx, cancel := context.WithCancel(ctx)
@@ -154,7 +157,7 @@ func TestCloseStartsStoppedBoxForArchive(t *testing.T) {
 		t.Fatal(problem)
 	}
 	s.now = func() time.Time { return time.Unix(1000, 0).Add(11 * time.Minute) }
-	s.ReconcileDormancy(ctx, false, true)
+	passLifecycle(t, s, ctx)
 	if stateOf(t, s, ctx, sid) != contract.BoxStopped {
 		t.Fatal("box did not stop")
 	}

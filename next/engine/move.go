@@ -41,8 +41,6 @@ func (s *Service) SessionMove(ctx context.Context, caller contract.Principal, re
 			unlocks[i]()
 		}
 	}()
-	s.admit.Lock()
-	defer s.admit.Unlock()
 	tree, err = s.store.RoomTree(ctx, session.Room)
 	if err != nil {
 		return response, failure(err)
@@ -99,12 +97,5 @@ func (s *Service) SessionMove(ctx context.Context, caller contract.Principal, re
 		}
 		return response, &contract.Error{Code: contract.ErrMoveBusy, Message: "session " + string(busy) + reason}
 	}
-	s.moveMu.Lock()
-	for _, b := range members {
-		if b.State == contract.BoxReady {
-			s.moveStops = append(s.moveStops, b.ID)
-		}
-	}
-	s.moveMu.Unlock()
 	return response, nil
 }

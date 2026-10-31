@@ -1,0 +1,223 @@
+package lifecycle
+
+import (
+	"context"
+	"log"
+	"sync"
+	"time"
+
+	"github.com/resident-labs/dyna/box"
+	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
+)
+
+type eventFunc func(contract.RoomID, contract.Principal, contract.EventBody) (contract.Event, error)
+
+type activeStep struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+type Reconciler struct {
+	store  *store.Store
+	boxes  BoxAdapter
+	view   View
+	event  eventFunc
+	now    func() time.Time
+	kick   chan struct{}
+	mu     sync.Mutex
+	repos  Repositories
+	active map[contract.BoxID]*activeStep
+	hosts  map[contract.HostName]int
+	fresh  map[contract.BoxID]bool
+	wg     sync.WaitGroup
+	pass   sync.Mutex
+}
+
+func New(st *store.Store, boxes BoxAdapter, view View, repos Repositories, event func(contract.RoomID, contract.Principal, contract.EventBody) (contract.Event, error), now func() time.Time) *Reconciler {
+	return &Reconciler{store: st, boxes: boxes, view: view, repos: repos, event: event, now: now, kick: make(chan struct{}, 1), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool)}
+}
+func (r *Reconciler) SetRepositories(repos Repositories) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.repos = repos
+}
+func (r *Reconciler) Kick() {
+	select {
+	case r.kick <- struct{}{}:
+	default:
+	}
+}
+func (r *Reconciler) Run(ctx context.Context, ticks <-chan time.Time) {
+	r.Kick()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-r.kick:
+		case _, ok := <-ticks:
+			if !ok {
+				ticks = nil
+				continue
+			}
+		}
+		if err := r.Pass(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("lifecycle: %v", err)
+		}
+	}
+}
+func (r *Reconciler) Wait() { r.wg.Wait() }
+func (r *Reconciler) Cancel(id contract.BoxID) {
+	r.pass.Lock()
+	done := r.cancel(id)
+	r.pass.Unlock()
+	if done != nil {
+		<-done
+	}
+}
+func (r *Reconciler) cancel(id contract.BoxID) <-chan struct{} {
+	r.mu.Lock()
+	step := r.active[id]
+	if step == nil {
+		r.mu.Unlock()
+		return nil
+	}
+	step.cancel()
+	r.mu.Unlock()
+	return step.done
+}
+func (r *Reconciler) change(ctx context.Context, old, next box.Box, due time.Time, failures int, cause contract.FailureCause) (bool, error) {
+	session, err := r.store.Session(ctx, old.Session)
+	if err != nil {
+		return false, err
+	}
+	event, err := r.event(session.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Cause: cause})
+	if err != nil {
+		return false, err
+	}
+	if old.State == contract.BoxCreating {
+		return true, r.store.FinishCreate(ctx, old, next.Image, next.Reason, due, event)
+	}
+	return r.store.SetBoxLifecycle(ctx, old, next, due, failures, event)
+}
+func (r *Reconciler) Pass(ctx context.Context) error {
+	r.pass.Lock()
+	defer r.pass.Unlock()
+	rows, err := r.store.LifecycleBoxes(ctx)
+	if err != nil {
+		return err
+	}
+	hosts, err := r.store.Hosts(ctx)
+	if err != nil {
+		return err
+	}
+	all := make([]box.Box, len(rows))
+	for i := range rows {
+		all[i] = rows[i].Box
+	}
+	for i, row := range rows {
+		b := row.Box
+		if row.Want == store.WantClose || row.Want == store.WantDiscard {
+			r.cancel(b.ID)
+			continue
+		}
+		if row.Want == store.WantRun && b.State == contract.BoxReady && !r.view.OpenTerminal(b.Session) {
+			stopped, err := r.store.StopQuiet(ctx, b.Session, r.now().Add(-10*time.Minute))
+			if err != nil {
+				return err
+			}
+			if stopped {
+				rows[i].Want = store.WantStop
+			}
+		}
+		if row.Want != store.WantRun || (b.State != contract.BoxPending && b.State != contract.BoxStopped) || (!row.DueAt.IsZero() && row.DueAt.After(r.now())) {
+			continue
+		}
+		placement := box.Admit(hosts, all, b, 20*box.GiB)
+		next := b
+		if placement.Reason != "" {
+			next.State, next.Reason = contract.BoxPending, string(placement.Reason)
+		} else if b.Image == "" {
+			next.State, next.Reason, next.Host = contract.BoxCreating, "", placement.Host
+			path, err := r.store.BoxAncestry(ctx, b.ID)
+			if err != nil {
+				return err
+			}
+			ids := make([]contract.BoxID, len(path))
+			for j := range path {
+				ids[j] = path[j].ID
+			}
+			next.Slice, err = box.SliceName(ids)
+			if err != nil {
+				return err
+			}
+		} else {
+			next.State, next.Reason = contract.BoxStarting, ""
+		}
+		if next.State == b.State && next.Reason == b.Reason {
+			continue
+		}
+		changed, err := r.change(ctx, b, next, time.Time{}, row.Failures, "")
+		if err != nil {
+			return err
+		}
+		if changed {
+			rows[i].Box = next
+			rows[i].DueAt = time.Time{}
+			all[i] = next
+			if next.State == contract.BoxCreating {
+				r.mu.Lock()
+				r.fresh[b.ID] = true
+				r.mu.Unlock()
+			}
+		}
+	}
+	parents := make(map[contract.BoxID]store.LifecycleBox, len(rows))
+	for _, row := range rows {
+		parents[row.ID] = row
+	}
+	for _, row := range rows {
+		if row.Want == store.WantRun && row.BudgetParent != "" && (row.State == contract.BoxCreating || row.State == contract.BoxStarting && row.DueAt.IsZero()) {
+			parent, exists := parents[row.BudgetParent]
+			r.mu.Lock()
+			busy := r.active[row.BudgetParent] != nil
+			r.mu.Unlock()
+			if !exists || busy || parent.Want != store.WantRun || !(parent.State == contract.BoxReady || parent.State == contract.BoxStarting && parent.DueAt.After(r.now())) {
+				continue
+			}
+		}
+		if row.Want == store.WantRun && (row.Box.State == contract.BoxCreating || row.Box.State == contract.BoxStarting) || row.Want == store.WantStop && row.Box.State == contract.BoxReady {
+			if !row.DueAt.IsZero() && row.DueAt.After(r.now()) {
+				continue
+			}
+			r.launch(ctx, row)
+		}
+	}
+	return nil
+}
+func (r *Reconciler) launch(ctx context.Context, row store.LifecycleBox) {
+	r.mu.Lock()
+	if r.active[row.ID] != nil || r.hosts[row.Host] >= 4 {
+		r.mu.Unlock()
+		return
+	}
+	stepCtx, cancel := context.WithCancel(ctx)
+	step := &activeStep{cancel: cancel, done: make(chan struct{})}
+	r.active[row.ID] = step
+	r.hosts[row.Host]++
+	r.wg.Add(1)
+	r.mu.Unlock()
+	go func() {
+		defer r.wg.Done()
+		if err := r.step(stepCtx, row); err != nil && stepCtx.Err() == nil {
+			log.Printf("lifecycle step: %v", err)
+		}
+		cancel()
+		r.mu.Lock()
+		delete(r.active, row.ID)
+		r.hosts[row.Host]--
+		close(step.done)
+		r.mu.Unlock()
+		r.Kick()
+	}()
+}
