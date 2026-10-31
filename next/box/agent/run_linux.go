@@ -42,7 +42,7 @@ func modelArgs(model contract.ModelChoice) ([]string, error) {
 }
 
 // Run connects the box, serves its model route, and runs the Pi session.
-func Run(ctx context.Context, version string) error {
+func Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	client := NewClient(engineSocket)
@@ -77,7 +77,7 @@ func Run(ctx context.Context, version string) error {
 			}
 		}
 	}()
-	hello, err := client.Hello(ctx, version)
+	hello, err := client.Hello(ctx)
 	if err != nil {
 		return err
 	}
