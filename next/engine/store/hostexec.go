@@ -63,3 +63,11 @@ func (s *Store) HostexecStops(ctx context.Context, now time.Time) ([]HostexecRun
 	}
 	return out, rows.Err()
 }
+
+// RecoverHostexec marks interrupted runs for the lost-unit stop sweep.
+func (s *Store) RecoverHostexec(ctx context.Context, now time.Time) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE hostexec_runs SET stopped='lost',ended_at=? WHERE ended_at IS NULL AND stopped=''", now.UnixMilli())
+		return err
+	})
+}

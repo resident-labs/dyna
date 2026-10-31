@@ -302,3 +302,11 @@ func TestOwnerSocketRejectsHostexecScope(t *testing.T) {
 		t.Fatalf("status %d, error %+v", resp.StatusCode, e)
 	}
 }
+
+func TestOpSubmitRejectsHostexecRun(t *testing.T) {
+	body := `{"operation":{"kind":"hostexec.run","room":"room-a","args":{"room":"room-a","host":"host","argv":["true"],"timeout":1000,"grant":"grant","mode":"preapproved"}}}`
+	response := request(New(&fakeService{}, nil).handler(boxCaller()), "/v1/op.submit", body)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status %d: %s", response.Code, response.Body.String())
+	}
+}
