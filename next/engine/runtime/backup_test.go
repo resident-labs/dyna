@@ -1,6 +1,9 @@
 package runtime
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"io"
@@ -57,20 +60,65 @@ func TestBackupStartAge(t *testing.T) {
 }
 
 func TestBackupCopyFailure(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "backups")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	identity, err := age.GenerateX25519Identity()
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	st := &fakeBackupStore{dir: dir}
+	dataDir := filepath.Dir(dir)
+	for _, name := range []string{"files/a", "transcripts/b", "cliproxy/auth/c"} {
+		path := filepath.Join(dataDir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(name), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	b := backupLoop{store: st, dir: dir, dest: "backup-host", recipient: identity.Recipient(), now: func() time.Time { return now }, run: func(_ context.Context, dest, name string, size int64, input *os.File) error {
 		data, err := io.ReadAll(input)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if dest != "backup-host" || name != "dyna-20260102T030405000000000Z.db.age" || size != int64(len(data)) || strings.Contains(string(data), "private database") {
+		if dest != "backup-host" || name != "dyna-20260102T030405000000000Z.tar.gz.age" || size != int64(len(data)) || strings.Contains(string(data), "private database") {
 			t.Fatalf("bad copy command: %s %s %d", dest, name, size)
+		}
+		plain, err := age.Decrypt(bytes.NewReader(data), identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gz, err := gzip.NewReader(plain)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tr := tar.NewReader(gz)
+		members := map[string]string{}
+		for {
+			h, err := tr.Next()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := io.ReadAll(tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			members[h.Name] = string(body)
+		}
+		for _, name := range []string{"files/a", "transcripts/b", "cliproxy/auth/c"} {
+			if members[name] != name {
+				t.Fatalf("missing %s: %v", name, members)
+			}
+		}
+		if members["store.db"] != "private database" {
+			t.Fatalf("bad store: %v", members)
 		}
 		return errors.New("connection lost")
 	}}
