@@ -35,6 +35,9 @@ func TestEndTurnFinalReply(t *testing.T) {
 	if _, _, _, err := s.Dispatch(ctx, "child", "turn", start, false); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.TurnSections(ctx, "turn", []contract.ContextSection{{Key: contract.ContextProfiles, Text: "snapshot"}}); err != nil {
+		t.Fatal(err)
+	}
 	post := contract.Event{ID: "reply", Time: now, Room: "room", From: child, Body: contract.PostCreated{Text: "done", Home: feed, Mentions: []contract.Principal{parent}}}
 	if _, err := s.Post(ctx, post, nil); err != nil {
 		t.Fatal(err)
@@ -43,6 +46,9 @@ func TestEndTurnFinalReply(t *testing.T) {
 	end := contract.Event{ID: "end", Time: now, Room: "room", From: child, Body: contract.TurnEnded{Session: "child", Turn: "turn", Outcome: contract.TurnCompleted, Final: "result"}}
 	if err := s.EndTurn(ctx, "child", output, end); err != nil {
 		t.Fatal(err)
+	}
+	if _, saved, err := s.SavedTurnSections(ctx, "turn"); err != nil || saved {
+		t.Fatalf("ended turn retains snapshot: saved=%v err=%v", saved, err)
 	}
 	events, err := s.Events(ctx, "room", 0, 100, []contract.EventType{"turn.ended"})
 	if err != nil || len(events) != 1 {

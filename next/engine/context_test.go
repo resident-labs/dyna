@@ -33,6 +33,11 @@ func TestSnapshotReplayAndCap(t *testing.T) {
 	if hello.AgentSurface != contract.AgentSurfaceCaller || !strings.Contains(hello.Instructions, "Use dyna post") {
 		t.Fatalf("enabled profile lost existing guidance: %+v", hello)
 	}
+	for _, key := range []contract.ContextSectionKey{"dyna_goal", "dyna_usage", "invalid"} {
+		if _, problem := s.ContextSnapshot(ctx, caller, contract.ContextSnapshotRequest{Section: key}); problem == nil || problem.Code != contract.ErrInvalid {
+			t.Fatalf("unavailable section %q: %v", key, problem)
+		}
+	}
 	firstCtx, cancel := context.WithCancel(ctx)
 	ch, problem := testChannel(t, s, firstCtx, caller)
 	if problem != nil {
