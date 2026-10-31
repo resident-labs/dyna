@@ -148,7 +148,7 @@ func Run(ctx context.Context) error {
 	go func() { errs <- server.Serve(listener) }()
 	args = append(args, "--append-system-prompt", hello.Instructions)
 	args = append(args, "--mode", "rpc", "--models-file", modelsPath, "--session-dir", sessions, "--mcp-config", mcpPath, "--exclude-tools", "bash", "--continue")
-	h, err := pi.Open(ctx, "pi", args, "")
+	h, err := pi.Open(ctx, "pi", args, "", "/box/work")
 	if err != nil {
 		return err
 	}
