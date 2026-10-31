@@ -92,7 +92,11 @@ func failure(code contract.ErrorCode, message string) result {
 func (s *Server) call(ctx context.Context, p callParams) result {
 	verbs, ok := s.actions[p.Name]
 	if !ok {
-		return failure("unknown_action", "Unknown tool; use tools/list.")
+		var names []string
+		for _, tool := range s.list {
+			names = append(names, tool.Name)
+		}
+		return failure(contract.ErrUnknownAction, "Unknown tool. Valid tools: "+strings.Join(names, ", "))
 	}
 	var verb string
 	if err := json.Unmarshal(p.Arguments["action"], &verb); err != nil {
@@ -105,7 +109,7 @@ func (s *Server) call(ctx context.Context, p callParams) result {
 			names = append(names, name)
 		}
 		sort.Strings(names)
-		return failure("unknown_action", "Unknown action. Valid actions: "+strings.Join(names, ", "))
+		return failure(contract.ErrUnknownAction, "Unknown action. Valid actions: "+strings.Join(names, ", "))
 	}
 	delete(p.Arguments, "action")
 	var clientID json.RawMessage
@@ -240,7 +244,40 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				f.Flush()
 			}
 		}
+		if stream {
+			done := make(chan result, 1)
+			go func() { done <- s.call(ctx, p) }()
+			tick := time.NewTicker(30 * time.Second)
+			defer tick.Stop()
+			progress := 0
+			for {
+				select {
+				case out := <-done:
+					resp.Result = marshal(out)
+					goto complete
+				case <-ctx.Done():
+					resp.Result = marshal(failure(contract.ErrUnavailable, ctx.Err().Error()))
+					goto complete
+				case <-tick.C:
+					progress++
+					notice := struct {
+						JSONRPC string `json:"jsonrpc"`
+						Method  string `json:"method"`
+						Params  struct {
+							ProgressToken json.RawMessage `json:"progressToken"`
+							Progress      int             `json:"progress"`
+						} `json:"params"`
+					}{JSONRPC: "2.0", Method: "notifications/progress"}
+					notice.Params.ProgressToken, notice.Params.Progress = p.Meta.ProgressToken, progress
+					_, _ = fmt.Fprintf(w, "event: message\\ndata: %s\\n\\n", marshal(notice))
+					if f, ok := w.(http.Flusher); ok {
+						f.Flush()
+					}
+				}
+			}
+		}
 		resp.Result = marshal(s.call(ctx, p))
+	complete:
 		if stream {
 			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", marshal(resp))
 			if f, ok := w.(http.Flusher); ok {
