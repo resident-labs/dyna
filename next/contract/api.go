@@ -95,6 +95,13 @@ type RoomSummary struct {
 	LastRead int64       `json:"lastRead"`
 	Waiting  []OpID      `json:"waiting"` // pending owner-class operations, which only the owner decides
 	Working  []SessionID `json:"working"` // open sessions with a running turn
+	// Latest is the newest current-turn activity among the working sessions; none when no working session reported one.
+	Latest *RoomActivity `json:"latest,omitempty"`
+}
+type RoomActivity struct {
+	Session SessionID `json:"session"`
+	Name    string    `json:"name"`
+	Label   string    `json:"label"`
 }
 type RoomListResponse struct {
 	Rooms []RoomSummary `json:"rooms"`
