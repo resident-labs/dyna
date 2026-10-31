@@ -7,7 +7,9 @@
   --id-name: 47% 0.13; --id-face: 89% 0.05; --id-initials: 38% 0.1;
   /* The left edge of post text: the 16 px row padding, the 32 px avatar and a 12 px gap. */
   --gutter: 60px;
-  font: 15px/1.5 system-ui, sans-serif;
+  /* v1's stacks: installed faces first, no bundled font. */
+  --sans: 'IBM Plex Sans', 'Adwaita Sans', system-ui, sans-serif; --mono: 'JetBrains Mono', 'Adwaita Mono', ui-monospace, monospace;
+  font: 15px/1.5 var(--sans);
 }
 @media (prefers-color-scheme: dark) {
   :root {
