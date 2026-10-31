@@ -130,7 +130,7 @@
   /* The touch sheet: full width at the bottom, 44 px rows, closed by a tap outside or Esc. */
   .sheet { position: fixed; inset: auto 0 0; margin: 0; width: 100%; max-width: none; padding: 8px 8px max(8px, env(safe-area-inset-bottom)); border: 0;
     border-top: 1px solid var(--line); border-radius: 12px 12px 0 0; background: var(--raised); color: var(--text); }
-  .sheet::backdrop { background: var(--shadow-md); }
+  .sheet::backdrop { background: var(--scrim); }
   .sheet button { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 12px; width: 100%; height: 44px; padding: 0 12px; border-radius: 8px; cursor: pointer; }
   .sheet button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .status { color: var(--muted); font-size: 12px; }
