@@ -35,6 +35,8 @@ const (
 	ReasonBranchDelete      Reason = "upstream-branch-delete"
 	ReasonForeignItem       Reason = "not-room-account-item"
 	ReasonForeignComment    Reason = "foreign-comment"
+	ReasonCommentAccount    Reason = "comment-account-unavailable"
+	ReasonCommentAuthor     Reason = "comment-author-unavailable"
 	ReasonForeignHead       Reason = "upstream-edit-foreign-head"
 	ReasonUpstreamVerb      Reason = "upstream-verb-not-allowed"
 )
@@ -271,6 +273,10 @@ func (e *RefusalError) Error() string {
 		action = "choose a repository registered to the room"
 	case ReasonBranchDelete:
 		action = "remove --delete-branch or -d"
+	case ReasonCommentAccount:
+		action = "check the room GitHub account and retry"
+	case ReasonCommentAuthor:
+		action = "check access to the comment and retry"
 	case ReasonForeignComment:
 		action = "edit or delete only comments authored by the room account; the owner may edit other comments directly on GitHub"
 	case ReasonForeignItem:
@@ -319,6 +325,10 @@ func Decide(ctx context.Context, rec room.Record, w Write, lookups WriteLookups)
 				item = ItemForeign
 				if w.ValidItem && lookups.Login != "" && lookups.AuthorOf != nil {
 					author, err := lookups.AuthorOf(ctx, w.Ref)
+					if err != nil && (w.Verb == "comment.edit" || w.Verb == "comment.delete") {
+						d := Decision{Rule: "comment-author", Refusal: ReasonCommentAuthor}
+						return d, &RefusalError{Write: w, Decision: d}
+					}
 					if err == nil && strings.EqualFold(author, lookups.Login) {
 						item = ItemRoomAccount
 					}
