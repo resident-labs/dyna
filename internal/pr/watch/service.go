@@ -1103,6 +1103,19 @@ func (s *Service) finishProcess(ctx context.Context, key string, snap Snapshot, 
 	if repo == "" {
 		repo = out.merged.Dir
 	}
+	if _, err := os.Stat(repo); errors.Is(err, os.ErrNotExist) && s.CleanupMerged == nil {
+		st, err := s.Store.Read()
+		if err != nil {
+			return err
+		}
+		candidate := *out.merged
+		candidate.RepoPath = ""
+		s.resolveCheckout(ctx, st, &candidate)
+		if candidate.RepoPath == "" {
+			return checkoutError(candidate)
+		}
+		repo = candidate.RepoPath
+	}
 	// The merged PR closes the issues it names, whichever trigger saw the merge.
 	issueErr := s.closeFixedIssues(ctx, *out.merged, out.merged.MergeCommit)
 	if snap.Pull.Head.Ref != "" {
