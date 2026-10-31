@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/spf13/cobra"
@@ -265,5 +266,23 @@ func TestPrOpenReportsMissingResult(t *testing.T) {
 	_, err := execCLI(f, "pr", "open", "--title", "t")
 	if err == nil || !strings.Contains(err.Error(), "pending") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestHostexecGrantSubmitsOperation(t *testing.T) {
+	f := &fakeClient{submitResp: contract.OpSubmitResponse{Operation: contract.Operation{ID: "op_1"}}}
+	before := time.Now()
+	out := runCLI(t, f, "hostexec", "grant", "--host", "hermeslab", "--hours", "2", "--reason", "Inspect logs")
+	args, ok := f.submit.Operation.Args.(contract.HostexecGrantArgs)
+	if !ok || out != "op_1\n" || len(args.Hosts) != 1 || args.Hosts[0] != "hermeslab" || args.Reason != "Inspect logs" || args.To.Kind != "" {
+		t.Fatalf("%+v: %q", f.submit, out)
+	}
+	if d := args.Expires.Sub(before); d < 2*time.Hour || d > 2*time.Hour+time.Minute {
+		t.Fatalf("expires in %v", d)
+	}
+	runCLI(t, f, "hostexec", "grant", "--host", "h", "--reason", "x", "--room", "room_1", "--to", "ses_1")
+	args = f.submit.Operation.Args.(contract.HostexecGrantArgs)
+	if args.To.Session != "ses_1" || args.Room != "room_1" || f.submit.Operation.Room != "room_1" {
+		t.Fatalf("%+v", f.submit)
 	}
 }
