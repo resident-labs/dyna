@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"path/filepath"
 	"strconv"
@@ -16,6 +17,8 @@ func TestUpgradeSessionWorkFrom42(t *testing.T) {
 	for _, statement := range []string{
 		"CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
 		"CREATE TABLE rules (room TEXT, number INTEGER)",
+		"CREATE TABLE deliveries (seq INTEGER)",
+		"CREATE TABLE event_files (seq INTEGER)",
 		"INSERT INTO meta VALUES ('schema_version','42')",
 		"CREATE TABLE events (seq INTEGER PRIMARY KEY, room TEXT, from_kind TEXT, from_id TEXT, type TEXT, body BLOB)",
 		"CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT, started_seq INTEGER)",
@@ -76,7 +79,14 @@ func TestUpgradeDropsRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err := db.Exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO meta VALUES ('schema_version','45'); CREATE TABLE rules (room TEXT, number INTEGER, PRIMARY KEY(room,number)); INSERT INTO rules VALUES ('room',1)`); err != nil {
+	if _, err := db.Exec(`PRAGMA foreign_keys=ON;
+		CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO meta VALUES ('schema_version','45');
+		CREATE TABLE rules (room TEXT, number INTEGER, PRIMARY KEY(room,number)); INSERT INTO rules VALUES ('room',1);
+		CREATE TABLE events (seq INTEGER PRIMARY KEY, id TEXT, at INTEGER, room TEXT, type TEXT, from_kind TEXT, from_id TEXT, body BLOB);
+		CREATE TABLE deliveries (seq INTEGER REFERENCES events(seq));
+		CREATE TABLE event_files (seq INTEGER REFERENCES events(seq));
+		INSERT INTO events VALUES (1,'a',0,'room','rule.added','owner','', '{}'), (2,'b',0,'room','rule.edited','owner','', '{}'), (3,'c',0,'room','rule.removed','owner','', '{}'), (4,'d',0,'room','room.paused','owner','', '{}');
+		INSERT INTO deliveries VALUES (1),(2),(3),(4); INSERT INTO event_files VALUES (1),(4)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := upgrade(db, 45, "", steps, nil); err != nil {
@@ -85,5 +95,17 @@ func TestUpgradeDropsRules(t *testing.T) {
 	var count int
 	if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name='rules'").Scan(&count); err != nil || count != 0 {
 		t.Fatalf("rules table count = %d: %v", count, err)
+	}
+	events, err := (&Store{read: db}).Events(context.Background(), "room", 0, 10, nil)
+	if err != nil || len(events) != 1 || events[0].ID != "d" {
+		t.Fatalf("remaining events = %v: %v", events, err)
+	}
+	for _, table := range []string{"deliveries", "event_files"} {
+		if err := db.QueryRow("SELECT count(*) FROM " + table + " WHERE seq=4").Scan(&count); err != nil || count != 1 {
+			t.Fatalf("remaining %s = %d: %v", table, count, err)
+		}
+		if err := db.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("total %s = %d: %v", table, count, err)
+		}
 	}
 }
