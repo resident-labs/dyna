@@ -13,7 +13,7 @@ func TestComputerWatchFanoutAndState(t *testing.T) {
 	s, room, id, ctx := setup(t)
 	connectAgent(ctx, t, s, id)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
-	channel := &boxChannel{control: make(chan contract.BoxMessage, 2)}
+	channel := &boxChannel{wake: make(chan struct{}, 1)}
 	s.channels[id] = channel
 	if _, err := s.ComputerWatch(ctx, id); err == nil || err.Code != contract.ErrNotFound {
 		t.Fatalf("without computer: %v", err)
@@ -29,15 +29,13 @@ func TestComputerWatchFanoutAndState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := (<-channel.control).Body.(contract.ComputerWatchStart); !ok {
-		t.Fatal("first watcher did not start")
-	}
+	<-channel.wake
 	second, err := s.ComputerWatch(secondCtx, id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	select {
-	case <-channel.control:
+	case <-channel.wake:
 		t.Fatal("second watcher started again")
 	default:
 	}
@@ -63,7 +61,7 @@ func TestComputerWatchFanoutAndState(t *testing.T) {
 		t.Fatal("watcher stayed open")
 	}
 	select {
-	case <-channel.control:
+	case <-channel.wake:
 		t.Fatal("stopped before the last watcher")
 	default:
 	}
@@ -71,9 +69,7 @@ func TestComputerWatchFanoutAndState(t *testing.T) {
 	if _, ok := <-second; ok {
 		t.Fatal("watcher stayed open")
 	}
-	if _, ok := (<-channel.control).Body.(contract.ComputerWatchStop); !ok {
-		t.Fatal("last watcher did not stop")
-	}
+	<-channel.wake
 	list, problem := s.SessionList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionListRequest{Room: room})
 	if problem != nil {
 		t.Fatal(problem)
@@ -100,6 +96,42 @@ func TestComputerWatchFanoutAndState(t *testing.T) {
 	}
 }
 
+func TestComputerWatchControlsBoxChannel(t *testing.T) {
+	s, _, id, ctx := setup(t)
+	connectAgent(ctx, t, s, id)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
+	boxCtx, stopBox := context.WithCancel(ctx)
+	defer stopBox()
+	messages, err := s.BoxChannel(boxCtx, caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ComputerChanged(ctx, caller, contract.ComputerChangedRequest{To: contract.ComputerRunning}); err != nil {
+		t.Fatal(err)
+	}
+	watchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	frames, err := s.ComputerWatch(watchCtx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait := func(want contract.BoxMessageType) {
+		t.Helper()
+		for m := range messages {
+			if m.Body.BoxMessageType() == want {
+				return
+			}
+		}
+		t.Fatalf("box channel closed before %s", want)
+	}
+	wait("computer.watch.start")
+	cancel()
+	if _, ok := <-frames; ok {
+		t.Fatal("watcher stayed open")
+	}
+	wait("computer.watch.stop")
+}
+
 func TestComputerWatchRequiresReadyBox(t *testing.T) {
 	s, _, id, ctx := setup(t)
 	if _, err := s.ComputerWatch(ctx, id); err == nil || err.Code != contract.ErrConflict {
@@ -111,7 +143,7 @@ func TestComputerChannelCloseEndsWatch(t *testing.T) {
 	s, room, id, ctx := setup(t)
 	connectAgent(ctx, t, s, id)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
-	s.channels[id] = &boxChannel{control: make(chan contract.BoxMessage, 2)}
+	s.channels[id] = &boxChannel{wake: make(chan struct{}, 1)}
 	if _, err := s.ComputerChanged(ctx, caller, contract.ComputerChangedRequest{To: contract.ComputerRunning}); err != nil {
 		t.Fatal(err)
 	}

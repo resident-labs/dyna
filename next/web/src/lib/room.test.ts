@@ -171,7 +171,7 @@ test("a DM window reads and keeps only the events whose home is that DM", async 
 });
 
 test("session.list gives running turns and failures, and a live DM answer lands in the DM, not the feed", async () => {
-  const listed = { name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", goal: "" } as const;
+  const listed = { name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "" } as const;
   const server = engine(3, [{ id: "s", ...listed, turn: "t" }, { id: "x", ...listed, name: "Other", lastOutcome: "failed" }]);
   try {
     const room = new RoomStore("r", () => () => {});
