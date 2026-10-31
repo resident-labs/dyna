@@ -41,6 +41,26 @@ type fakeClient struct {
 	submitResp   contract.OpSubmitResponse
 	uploads      []string
 	hostexecResp contract.HostexecRunResponse
+	devicePair   contract.DevicePairRequest
+	devices      []contract.Device
+	deviceRevoke contract.DeviceRevokeRequest
+	deviceScopes contract.DeviceSetScopesRequest
+}
+
+func (f *fakeClient) DevicePair(_ context.Context, q contract.DevicePairRequest) (contract.DevicePairResponse, error) {
+	f.devicePair = q
+	return contract.DevicePairResponse{Code: "ABCDEFGHJK", ExpiresAt: time.Date(2026, 10, 31, 8, 0, 0, 0, time.UTC)}, nil
+}
+func (f *fakeClient) DeviceList(context.Context, contract.DeviceListRequest) (contract.DeviceListResponse, error) {
+	return contract.DeviceListResponse{Devices: f.devices}, nil
+}
+func (f *fakeClient) DeviceRevoke(_ context.Context, q contract.DeviceRevokeRequest) (contract.DeviceRevokeResponse, error) {
+	f.deviceRevoke = q
+	return contract.DeviceRevokeResponse{}, nil
+}
+func (f *fakeClient) DeviceSetScopes(_ context.Context, q contract.DeviceSetScopesRequest) (contract.DeviceSetScopesResponse, error) {
+	f.deviceScopes = q
+	return contract.DeviceSetScopesResponse{}, nil
 }
 
 func (f *fakeClient) RuleAdd(context.Context, contract.RuleAddRequest) (contract.RuleAddResponse, error) {
@@ -304,6 +324,44 @@ func TestPrOpenReportsMissingResult(t *testing.T) {
 	_, err := execCLI(f, "pr", "open", "--title", "t")
 	if err == nil || !strings.Contains(err.Error(), "pending") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestDevicePairMapsRepeatableScopes(t *testing.T) {
+	f := &fakeClient{}
+	out := runCLI(t, f, "device", "pair", "--scope", "read", "--scope", "files")
+	if len(f.devicePair.Scopes) != 2 || f.devicePair.Scopes[0] != contract.ScopeRead || f.devicePair.Scopes[1] != contract.ScopeFiles {
+		t.Fatalf("%+v", f.devicePair)
+	}
+	if out != "ABCDEFGHJK expires 2026-10-31T08:00:00Z\n" {
+		t.Fatalf("output=%q", out)
+	}
+}
+func TestDeviceListPrintsDevices(t *testing.T) {
+	f := &fakeClient{devices: []contract.Device{{
+		ID: "dev_1", Name: "phone", Scopes: []contract.Scope{contract.ScopeRead, contract.ScopeOperate},
+		LastSeenAt: time.Date(2026, 10, 31, 7, 0, 0, 0, time.UTC), ExpiresAt: time.Date(2026, 11, 30, 7, 0, 0, 0, time.UTC),
+	}}}
+	out := runCLI(t, f, "device", "list")
+	if out != "dev_1\tphone\tread,operate\t2026-10-31T07:00:00Z\t2026-11-30T07:00:00Z\n" {
+		t.Fatalf("output=%q", out)
+	}
+}
+func TestDeviceRevokeMapsID(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "device", "revoke", "dev_1")
+	if f.deviceRevoke.ID != "dev_1" {
+		t.Fatalf("%+v", f.deviceRevoke)
+	}
+}
+func TestDeviceSetScopesRequiresScope(t *testing.T) {
+	f := &fakeClient{}
+	if _, err := execCLI(f, "device", "set-scopes", "dev_1"); err == nil {
+		t.Fatal("set-scopes accepted a missing --scope")
+	}
+	runCLI(t, f, "device", "set-scopes", "dev_1", "--scope", "read", "--scope", "computers")
+	if f.deviceScopes.ID != "dev_1" || len(f.deviceScopes.Scopes) != 2 || f.deviceScopes.Scopes[1] != contract.ScopeComputers {
+		t.Fatalf("%+v", f.deviceScopes)
 	}
 }
 
