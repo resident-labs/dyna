@@ -162,3 +162,29 @@ A PR Hold and room RootProfile, SessionPause and RepoUpstreams are handoff
 data. A room pause is carried as the room pause. Hooks that do not map
 cleanly are named with their blocking fields in the handoff or private report.
 The exporter report must identify any remaining gap for a lead decision.
+
+
+### Approved profile mapping
+
+| v1 profile | v1 model | Proxy model |
+|---|---|---|
+| glm | `zai/glm-5.3` | `glm-5.3` |
+| glm-flash | `zai/glm-5.3-flash` | `glm-5.3-flash` |
+| haiku | `haiku` | `claude-haiku-5-5` |
+| luna | `openai-codex/gpt-6-luna` | `gpt-6-luna` |
+| opus | `opus` | `claude-opus-5-5` |
+| opus-rewrite | `opus` | `claude-opus-5-5` |
+| sonnet | `sonnet` | `claude-sonnet-5-5` |
+| terra | `openai-codex/gpt-6.1-terra` | `gpt-6.1-terra` |
+| wonder-full | `meta/muse-wonder-full-1.0` | dropped: Muse is unsupported |
+
+The exporter carries the thinking level, including `xhigh` for
+opus-rewrite. Import checks every mapped ID against the trial proxy's live
+model list, without reading its config. It reports a missing model by name.
+The six skipped profiles (deepseek, fable, grok, kimi-max, mimo and sol)
+were disabled in the captured catalog. The unsupported Muse profile is a
+report and handoff line, not a cutover blocker.
+
+Subscription source count is zero by policy: no v1 shell hook maps to a typed
+subscription. The five unsupported hooks remain handoff records. The verifier
+uses an empty SQL eligibility set; it does not independently classify hooks.
