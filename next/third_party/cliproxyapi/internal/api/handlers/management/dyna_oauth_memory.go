@@ -91,6 +91,10 @@ func (h *Handler) dynaCompleteOAuth(state string, record *coreauth.Auth) {
 			version, epoch = current.CredentialVersion, current.RegistrationEpoch
 		}
 	}
+	if !adopted {
+		// Do not let a status poll promote a mismatched or enabled runtime entry.
+		grant = ""
+	}
 	CompleteOAuthSessionWithOutcome(state, record.ID, grant, true, adopted, false, 0, 0, version, epoch, "", "")
 }
 
