@@ -85,9 +85,11 @@ func TestVisualReplyUsesCardSurface(t *testing.T) {
 	}
 	var surface contract.Surface
 	var replyTo contract.EventID
-	err := s.store.Read().QueryRowContext(ctx, "SELECT surface,reply_to FROM deliveries WHERE seq=?", reply.Seq).Scan(&surface, &replyTo)
-	if err != nil || surface != contract.SurfaceCard || replyTo != card.Event {
-		t.Fatalf("card delivery: %s %s %v", surface, replyTo, err)
+	var kind contract.ReplyKind
+	var target contract.PrincipalKind
+	err := s.store.Read().QueryRowContext(ctx, "SELECT surface,reply_to,reply_kind,reply_target_kind FROM deliveries WHERE seq=?", reply.Seq).Scan(&surface, &replyTo, &kind, &target)
+	if err != nil || surface != contract.SurfaceCard || replyTo != card.Event || kind != contract.ReplyFinal || target != contract.PrincipalOwner {
+		t.Fatalf("card delivery: %s %s %s %s %v", surface, replyTo, kind, target, err)
 	}
 }
 
