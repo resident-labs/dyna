@@ -106,3 +106,11 @@ test("starts each local day with a day row, which also starts a new name line", 
   assert.deepEqual(rows.flatMap(row => row.kind === "day" ? [dayLabel(row.at, now)] : []), ["Yesterday", "Today"]);
   assert.equal(dayLabel(new Date(2026, 9, 24, 12).toISOString(), now), "Saturday, October 24");
 });
+
+test("puts one New row before the first later post by someone else, and none without a read position", () => {
+  const post = (seq: number, from: Principal) => event(seq, { type: "post.created", body: { text: String(seq), home: { kind: "feed" } } }, from);
+  const events = [post(1, lead), post(2, { kind: "owner" }), post(3, { kind: "owner" }), post(4, lead), post(5, lead)];
+  const kinds = (since: number) => feedRows(events, { kind: "feed" }, [], since).map(row => row.kind === "post" ? row.text : row.kind);
+  assert.deepEqual(kinds(1), ["1", "2", "3", "new", "4", "5"]);
+  assert.deepEqual(kinds(0), ["1", "2", "3", "4", "5"]);
+});
