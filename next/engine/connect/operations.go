@@ -16,6 +16,7 @@ import (
 type operationState interface {
 	LinkState
 	UnlinkConnect(context.Context) error
+	ConnectConnectorMissing(context.Context) (bool, error)
 }
 
 // Operations owns the link worker. Its context outlives API requests.
@@ -137,7 +138,11 @@ func (o *Operations) Status(ctx context.Context) (contract.ConnectStatusResponse
 	if err != nil {
 		return contract.ConnectStatusResponse{}, err
 	}
-	out := contract.ConnectStatusResponse{Attempt: a, Linked: linked}
+	missing, err := o.state.ConnectConnectorMissing(ctx)
+	if err != nil {
+		return contract.ConnectStatusResponse{}, err
+	}
+	out := contract.ConnectStatusResponse{Attempt: a, Linked: linked, ConnectorMissing: missing}
 	if a.State != contract.ConnectAttemptPending || linked {
 		return out, nil
 	}
