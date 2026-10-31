@@ -22,11 +22,12 @@ type repoOutput struct {
 	RoomRepos    map[contract.RoomName][]contract.RoomRepo
 	RoomHandoffs map[contract.RoomName][]contract.RepoHandoff
 	RepoRooms    map[contract.RepoName][]contract.RoomName
+	PathRooms    map[string][]contract.RoomName
 	Gaps         []repoGap
 }
 
 func buildRepositories(db *sql.DB, records []room.Record, cap capture) (repoOutput, error) {
-	out := repoOutput{RoomRepos: make(map[contract.RoomName][]contract.RoomRepo), RoomHandoffs: make(map[contract.RoomName][]contract.RepoHandoff), RepoRooms: make(map[contract.RepoName][]contract.RoomName)}
+	out := repoOutput{RoomRepos: make(map[contract.RoomName][]contract.RoomRepo), RoomHandoffs: make(map[contract.RoomName][]contract.RepoHandoff), RepoRooms: make(map[contract.RepoName][]contract.RoomName), PathRooms: make(map[string][]contract.RoomName)}
 	members := make(map[contract.RepoName][]room.Record)
 	for _, rec := range records {
 		var paths []string
@@ -36,6 +37,7 @@ func buildRepositories(db *sql.DB, records []room.Record, cap capture) (repoOutp
 		paths = append(paths, rec.ExtraRepos...)
 		seen := make(map[contract.RepoName]bool)
 		for _, p := range paths {
+			out.PathRooms[p] = append(out.PathRooms[p], contract.RoomName(rec.Name))
 			id := cap.Repos[p]
 			if id == "" {
 				name := contract.RoomName(rec.Name)
