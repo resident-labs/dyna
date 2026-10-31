@@ -93,3 +93,36 @@ func TestPauseHoldsDeliveryUntilResume(t *testing.T) {
 		t.Fatalf("resumed: %+v", next)
 	}
 }
+
+func TestRoomSetLimits(t *testing.T) {
+	s, room, session, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	req := contract.RoomSetLimitsRequest{Room: room, CPUs: 2, MemBytes: 8 << 30}
+	if _, problem := s.RoomSetLimits(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session}, req); problem == nil || problem.Code != contract.ErrForbidden {
+		t.Fatalf("session: %v", problem)
+	}
+	if _, problem := s.RoomSetLimits(ctx, owner, contract.RoomSetLimitsRequest{Room: room, CPUs: -1}); problem == nil || problem.Code != contract.ErrInvalid {
+		t.Fatalf("negative: %v", problem)
+	}
+	if _, problem := s.RoomSetLimits(ctx, owner, contract.RoomSetLimitsRequest{Room: room, MemBytes: 1 << 62}); problem == nil || problem.Code != contract.ErrInvalid {
+		t.Fatalf("overflow: %v", problem)
+	}
+	if _, problem := s.RoomSetLimits(ctx, owner, req); problem != nil {
+		t.Fatal(problem)
+	}
+	var cpus int
+	var mem int64
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT cpus,mem_bytes FROM rooms WHERE id=?", room).Scan(&cpus, &mem); err != nil || cpus != req.CPUs || mem != req.MemBytes {
+		t.Fatalf("limits %d %d: %v", cpus, mem, err)
+	}
+	events, err := s.store.Events(ctx, room, 0, 100, []contract.EventType{"room.limits_changed"})
+	if err != nil || len(events) != 1 || events[0].Body != (contract.RoomLimitsChanged{CPUs: req.CPUs, MemBytes: req.MemBytes}) {
+		t.Fatalf("events %+v: %v", events, err)
+	}
+	if _, problem := s.RoomSetLimits(ctx, owner, contract.RoomSetLimitsRequest{Room: room}); problem != nil {
+		t.Fatal(problem)
+	}
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT cpus,mem_bytes FROM rooms WHERE id=?", room).Scan(&cpus, &mem); err != nil || cpus != 0 || mem != 0 {
+		t.Fatalf("unlimited %d %d: %v", cpus, mem, err)
+	}
+}
