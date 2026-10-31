@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cardMessage, checkLabel, worstCheck } from "./visual.ts";
+import { cardMessage, checkLabel, visualReplyFailure, worstCheck } from "./visual.ts";
 import { decodeEvent } from "./event.ts";
+import { APIError } from "./client.ts";
 
 test("the banner shows the failed check before a warning and hides passing checks", () => {
   assert.equal(worstCheck([{ name: "contrast", status: "warn" }, { name: "widths", status: "fail", detail: "Overflow at widths: 360" }]), "Overflows at 360 px");
@@ -14,10 +15,17 @@ test("console checks name the result without a contradiction", () => {
   assert.equal(checkLabel({ name: "console", status: "fail" }), "Console errors");
 });
 
-test("read-only card messages allow web links but never a submit", () => {
-  assert.equal(cardMessage({ type: "dyna:submit", text: "exact" }), undefined);
+test("card messages accept bounded text and web links only", () => {
+  assert.deepEqual(cardMessage({ type: "dyna:submit", text: "exact" }), { type: "submit", text: "exact" });
+  assert.equal(cardMessage({ type: "dyna:submit", text: "x".repeat(16385) }), undefined);
   assert.equal(cardMessage({ type: "dyna:open", url: "javascript:alert(1)" }), undefined);
   assert.deepEqual(cardMessage({ type: "dyna:open", url: "https://example.org/" }), { type: "open", url: "https://example.org/" });
+});
+
+test("a superseded reply offers the newer version", () => {
+  const visual = { event: "new-event", version: 12, seq: 42 };
+  assert.deepEqual(visualReplyFailure(new APIError({ code: "visual_superseded", message: "stale", visual })), { kind: "superseded", visual });
+  assert.deepEqual(visualReplyFailure(new Error("offline")), { kind: "failed" });
 });
 
 test("the event boundary rejects a malformed visual record", () => {
