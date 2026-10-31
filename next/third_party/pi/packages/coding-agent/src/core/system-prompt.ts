@@ -148,7 +148,7 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
 	}
 
 	const declaredTools = selectedTools.filter((name) => !hiddenTools.includes(name));
-	const promptSections: Record<string, string> = {};
+	const promptSections: Record<string, string> = Object.create(null);
 	if (customPrompt) {
 		promptSections.preamble = customPrompt;
 	} else {
@@ -184,10 +184,11 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
 	}
 	promptSections.cwd = cwd.replace(/\\/g, "/");
 	for (const [name, content] of Object.entries(customSections)) {
-		if (content) promptSections[name] = content;
+		promptSections[name] = content;
 	}
 
-	const sections: SystemPromptSections = { preamble: promptSections.preamble };
+	const sections: SystemPromptSections = Object.create(null);
+	sections.preamble = promptSections.preamble;
 	for (const [name, content] of Object.entries(promptSections)) {
 		if (name !== "preamble") {
 			const tag = SYSTEM_PROMPT_SECTION_NAME.test(name) ? name : "context_section";
