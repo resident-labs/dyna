@@ -311,6 +311,15 @@ func TestOpSubmitRejectsHostexecRun(t *testing.T) {
 	}
 }
 
+func TestShellWatchRejectsBox(t *testing.T) {
+	a := New(&fakeService{}, nil)
+	w := httptest.NewRecorder()
+	a.handler(boxCaller()).ServeHTTP(w, httptest.NewRequest("GET", "/v1/shell/watch?session=session-a", nil))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status %d", w.Code)
+	}
+}
+
 func TestOwnerStreamRejectsSession(t *testing.T) {
 	h := New(&fakeService{}, nil).handler(boxCaller())
 	w := httptest.NewRecorder()

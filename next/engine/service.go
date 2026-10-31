@@ -49,6 +49,8 @@ type Service struct {
 	computers          map[contract.SessionID]*computerState
 	terminals          map[contract.SessionID]int
 	computerGeneration uint64
+	shellGeneration    uint64
+	shellWatches       map[contract.SessionID]*shellWatch
 	admit              sync.Mutex
 	boxLockMu          sync.Mutex
 	boxLocks           map[contract.SessionID]*sync.Mutex
@@ -68,7 +70,7 @@ type boxRun struct {
 }
 
 func New(st *store.Store, boxes BoxAdapter, profiles Profiles, now func() time.Time) *Service {
-	return &Service{terminals: make(map[contract.SessionID]int), activity: make(map[contract.SessionID]contract.TurnActivity), live: make(map[chan contract.Event]contract.RoomID), hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), computers: make(map[contract.SessionID]*computerState), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun), dormancy: dormancy{unconfirmed: make(map[contract.BoxID]bool), failedStarts: make(map[contract.BoxID]bool)}}
+	return &Service{terminals: make(map[contract.SessionID]int), activity: make(map[contract.SessionID]contract.TurnActivity), live: make(map[chan contract.Event]contract.RoomID), hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), computers: make(map[contract.SessionID]*computerState), shellWatches: make(map[contract.SessionID]*shellWatch), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun), dormancy: dormancy{unconfirmed: make(map[contract.BoxID]bool), failedStarts: make(map[contract.BoxID]bool)}}
 }
 
 // SetRepositories configures repository lookup before the service starts.
@@ -880,7 +882,7 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 		return contract.TurnOutputResponse{}, invalid("invalid turn outcome")
 	}
 	req.Usage.Model = req.Model
-	event, err := s.event(session.Room, caller, contract.TurnEnded{Session: session.ID, Turn: req.Turn, Outcome: req.Outcome, Final: req.Final, Usage: req.Usage, Error: req.Error})
+	event, err := s.event(session.Room, caller, contract.TurnEnded{Session: session.ID, Turn: req.Turn, Outcome: req.Outcome, Final: req.Final, Usage: req.Usage, Error: req.Error, ShellJobs: req.ShellJobs})
 	if err != nil {
 		return contract.TurnOutputResponse{}, failure(err)
 	}
