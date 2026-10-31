@@ -28,18 +28,23 @@
     if (running) return;
     running = true;
     failed = false;
+    let tries = 0;
     while (again) {
       again = false;
       const discard = closing;
       const scopes: Scope[] = discard ? ["read"] : chosen;
-      await call("device.pair", { scopes }).then(made => {
-        if (discard) { if (!gone) onclose(false); }
-        else { live = { code: made, scopes }; now = Date.now(); changing = false; }
-      }, () => {
-        // A failed change keeps the old code, so the boxes show its scopes again.
-        failed = true; closing = false; changing = false;
-        if (live) chosen = live.scopes;
-      });
+      const made = await call("device.pair", { scopes }).catch(() => undefined);
+      if (discard) {
+        if (made) { if (!gone) onclose(false); }
+        // After an exit nobody can press Try again, so a failed discard tries twice more.
+        else if (gone) again = ++tries < 3;
+        else { failed = true; closing = false; }
+      }
+      // A newer request follows, so this code is never shown: its scopes are not the boxes'.
+      else if (again) continue;
+      else if (made) { live = { code: made, scopes }; now = Date.now(); changing = false; }
+      // The old code stays hidden, and the boxes keep the owner's latest choice for Try again.
+      else failed = true;
     }
     running = false;
   }
