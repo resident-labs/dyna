@@ -83,6 +83,7 @@ const (
 	ErrNotFound             ErrorCode = "not_found"
 	ErrForbidden            ErrorCode = "forbidden"
 	ErrConflict             ErrorCode = "conflict"
+	ErrProfileExists        ErrorCode = "profile_exists"
 	ErrMoveBusy             ErrorCode = "move_busy"
 	ErrHasChildren          ErrorCode = "has_children"
 	ErrParentClosing        ErrorCode = "parent_closing"
@@ -116,6 +117,7 @@ type ConversationReadResponse struct{}
 
 type ProfileListRequest struct{}
 type ProfileSummary struct {
+	InUse          int           `json:"inUse"`
 	Description    string        `json:"description"`
 	Taste          int           `json:"taste"`
 	Diagnostics    int           `json:"diagnostics"`

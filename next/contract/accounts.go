@@ -137,6 +137,11 @@ type AccountsSetLimitsRequest struct {
 }
 type AccountsSetLimitsResponse struct{}
 type Profile struct {
+	Description    string        `json:"description"`
+	Taste          int           `json:"taste"`
+	Diagnostics    int           `json:"diagnostics"`
+	Intelligence   int           `json:"intelligence"`
+	Cost           int           `json:"cost"`
 	Name           ProfileName   `json:"name"`
 	Provider       ModelProvider `json:"provider"`
 	Model          string        `json:"model"`
@@ -147,6 +152,7 @@ type Profile struct {
 	MaxCallsPerRun int           `json:"maxCallsPerRun"`
 }
 type ProfileSetRequest struct {
+	Create  bool    `json:"create"`
 	Profile Profile `json:"profile"`
 }
 type ProfileSetResponse struct{}
