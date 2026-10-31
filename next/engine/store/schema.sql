@@ -23,7 +23,7 @@ CREATE UNIQUE INDEX events_client_id ON events(room, from_kind, from_id, client_
 CREATE INDEX events_room_home ON events(room, home, seq) WHERE home IS NOT NULL;
 CREATE INDEX events_type_seq ON events(type, seq);
 CREATE TABLE deliveries (to_kind TEXT NOT NULL, to_id TEXT NOT NULL, seq INTEGER NOT NULL REFERENCES events(seq), surface TEXT NOT NULL, reply_kind TEXT NOT NULL, reply_target_kind TEXT NOT NULL, reply_target_id TEXT NOT NULL, reply_home TEXT NOT NULL, reply_to TEXT NOT NULL, wake INTEGER NOT NULL, state TEXT NOT NULL, turn TEXT, queue TEXT, handoff_from TEXT, PRIMARY KEY(to_kind, to_id, seq));
-CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT NOT NULL REFERENCES sessions(id), started_at INTEGER NOT NULL, ended_at INTEGER, outcome TEXT NOT NULL, model TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL, cache_write_tokens INTEGER NOT NULL, shell_jobs INTEGER NOT NULL DEFAULT -1, started_seq INTEGER, stop_requested_at INTEGER);
+CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT NOT NULL REFERENCES sessions(id), started_at INTEGER NOT NULL, ended_at INTEGER, outcome TEXT NOT NULL, model TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL, cache_write_tokens INTEGER NOT NULL, shell_jobs INTEGER NOT NULL DEFAULT -1, started_seq INTEGER, stop_requested_at INTEGER, sections BLOB);
 CREATE TABLE hosts (name TEXT PRIMARY KEY, ssh TEXT NOT NULL, state TEXT NOT NULL, cpus INTEGER NOT NULL, mem_bytes INTEGER NOT NULL, disk_bytes INTEGER NOT NULL, checked_at INTEGER NOT NULL, maintained_at INTEGER NOT NULL DEFAULT 0, engine_host INTEGER);
 CREATE TABLE room_shared (room TEXT NOT NULL, host TEXT NOT NULL REFERENCES hosts(name), bytes INTEGER NOT NULL, measured_at INTEGER NOT NULL, PRIMARY KEY(room, host));
 CREATE TABLE host_rooms (host TEXT NOT NULL REFERENCES hosts(name), room TEXT NOT NULL REFERENCES rooms(id), PRIMARY KEY(host, room));
@@ -46,7 +46,9 @@ CREATE INDEX turns_session_ended ON turns(session, ended_at);
 CREATE INDEX turns_session_started ON turns(session, started_seq);
 CREATE INDEX sessions_room_closed ON sessions(room, closed_at);
 CREATE INDEX sessions_parent ON sessions(parent);
+CREATE INDEX pr_owners_session ON pr_owners(session);
 CREATE INDEX operations_state_expires ON operations(state, expires_at);
+CREATE INDEX operations_pending_caller ON operations(by_kind, by_id, created_at, id) WHERE state='pending';
 
 CREATE TABLE grants (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id), to_kind TEXT NOT NULL, to_id TEXT NOT NULL, hosts BLOB NOT NULL, expires_at INTEGER, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at INTEGER NOT NULL, revoked_at INTEGER, expired_at INTEGER, reason TEXT NOT NULL DEFAULT '');
 CREATE INDEX grants_expiry ON grants(expires_at) WHERE expired_at IS NULL AND revoked_at IS NULL;

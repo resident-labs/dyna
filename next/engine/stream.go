@@ -253,8 +253,26 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				if err != nil {
 					return
 				}
+				sections, saved, err := s.store.SavedTurnSections(ctx, turn)
+				if err != nil {
+					return
+				}
+				if !saved {
+					sections = []contract.ContextSection{}
+					if s.profiles.Surface(profile) != contract.AgentSurfaceOff {
+						snapshot, problem := s.ContextSnapshot(ctx, caller, contract.ContextSnapshotRequest{})
+						if problem != nil {
+							return
+						}
+						sections = snapshot.Sections
+					}
+					sections, err = s.store.TurnSections(ctx, turn, sections)
+					if err != nil {
+						return
+					}
+				}
 				select {
-				case out <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start, Model: model}}:
+				case out <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start, Model: model, Sections: sections}}:
 				case <-ctx.Done():
 					return
 				}
