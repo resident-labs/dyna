@@ -5,9 +5,9 @@
   import { decodeEvent } from "../event.ts";
   import type { VisualSuperseded } from "../contract.gen.ts";
 
-  let { versions, selected, room, names, send, onclose }: {
-    versions: VisualVersion[]; selected: number; room: string; names: Map<string, string>;
-    send: (text: string, session: string, event: string) => Promise<void>; onclose: () => void;
+  let { versions, selected, room, send, onclose }: {
+    versions: VisualVersion[]; selected: number; room: string;
+    send: (text: string, event: string) => Promise<void>; onclose: () => void;
   } = $props();
   let version = $state(untrack(() => selected));
   let extra = $state<VisualVersion[]>([]);
@@ -37,7 +37,20 @@
   let lastSubmit = 0, lastOpen = 0;
   let url = $derived(`/v1/files/visual/${encodeURIComponent(current.event.id)}`);
   let scale = $derived(width === "fit" ? 1 : Math.min(1, stageWidth / width));
-  let recipient = $derived(current.event.from.session ? names.get(current.event.from.session) : undefined);
+  let recipient = $state<string>();
+  $effect(() => {
+    const id = current.visual.id;
+    let active = true;
+    recipient = undefined;
+    void call("events.list", { room, event: id, afterSeq: 0, limit: 1 }).then(page => {
+      if (!active) return;
+      const event = page.events?.[0] && decodeEvent(page.events[0]);
+      if (event?.id === id && event.type === "post.created" && event.from.session) {
+        recipient = page.names[event.from.session] ?? "the card's author";
+      }
+    }, () => {});
+    return () => { active = false; };
+  });
 
   $effect(() => {
     const source = url;
@@ -75,7 +88,7 @@
     if (pending === null || !recipient || older || superseded || sending) return;
     sending = true; sendFailed = false;
     const text = pending;
-    await send(text, recipient, current.event.id).then(() => { pending = null; reply(true); }, error => {
+    await send(text, current.event.id).then(() => { pending = null; reply(true); }, error => {
       const result = visualReplyFailure(error);
       if (result.kind === "superseded") { superseded = result.visual; pending = null; reply(false, "superseded"); }
       else sendFailed = true;
