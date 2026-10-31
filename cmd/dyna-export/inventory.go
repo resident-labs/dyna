@@ -21,6 +21,7 @@ type fieldInventory struct {
 	Type    string   `json:"type"`
 	Carried []string `json:"carried"`
 	Dropped []string `json:"dropped"`
+	Handoff []string `json:"handoff"`
 	Gap     []string `json:"gap"`
 }
 
@@ -48,6 +49,11 @@ func inventory() []fieldInventory {
 		{"Room", reflect.TypeOf(room.Record{}), []string{"ID", "Name", "Repo", "ExtraRepos", "Color", "Limits", "RootProfile", "SessionPause", "Upstream", "RepoUpstreams"}, []string{"MergeMaxParallel", "GitHubAccess", "ApprovalWait", "ApprovalExpiry", "LibraryPinSet", "LibraryPin", "CheckIn", "DisplayName", "ManualArchive", "Pinned", "PinOrder", "CreatedBy", "CreatedAt", "LastActivity"}},
 		{"Session", reflect.TypeOf(subagent.Meta{}), []string{"ID", "Name", "RoomID", "Room", "Profile", "ParentSession"}, []string{"Status", "Closed", "Turns", "HistoryOnly", "Service", "Leaf", "Run", "Role", "InheritedReceipts", "UncertainInputIDs", "ConsolidationHistory", "ClosedPosts", "RoomCursor", "OwnerDMCursor", "Model", "Transfer", "Consolidation", "Consolidating", "ConsumedBy", "ConsolidationCharter", "InheritedInboxes", "FallbackPath", "Dir", "Depth", "Goal", "Item", "SpawnBrief", "Owner", "Created", "LastActivity", "Finished", "WrapUpAfter", "Closing", "HarnessSession", "RuntimePin", "Instructions", "InstructionsStale", "InstructionsKnown", "InstructionsNotes", "InstructionsSeq", "InstructionsChangedAt", "OwnerDisplay", "Resumable", "Usage", "UsageBaseline", "UsageBaselineTurn", "ContextTokens", "Pid"}},
 	}
+	// A handoff names fields that need review, not their potentially sensitive values.
+	handoffs := map[string][]string{
+		"Hook": {"Name", "Label", "Event", "Command", "Cwd", "Timeout", "OnFail", "Scope", "AddedBy", "AddedAt", "EditedBy", "EditedAt", "EveryMinutes"},
+		"Room": {"Attribution", "AttributionPlacement", "AttributionKinds"},
+	}
 	out := make([]fieldInventory, 0, len(specs))
 	for _, spec := range specs {
 		item := fieldInventory{Type: spec.name}
@@ -61,6 +67,8 @@ func inventory() []fieldInventory {
 				item.Carried = append(item.Carried, field.Name)
 			case slices.Contains(spec.dropped, field.Name):
 				item.Dropped = append(item.Dropped, field.Name)
+			case slices.Contains(handoffs[spec.name], field.Name):
+				item.Handoff = append(item.Handoff, field.Name)
 			default:
 				item.Gap = append(item.Gap, field.Name)
 			}
