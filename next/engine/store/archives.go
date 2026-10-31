@@ -30,6 +30,56 @@ func (s *Store) SaveArchives(ctx context.Context, archives []Archive) error {
 	})
 }
 
+// CompleteArchives stores verified reports and requests box removal atomically.
+// An empty report set completes a close for a session without a repository.
+func (s *Store) CompleteArchives(ctx context.Context, session contract.SessionID, archives []Archive) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `UPDATE boxes SET want='discard',due_at=0 WHERE session=? AND state='closing' AND want='close'`, session)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return sql.ErrNoRows
+		}
+		for _, a := range archives {
+			if a.Session != session {
+				return sql.ErrNoRows
+			}
+			_, err := tx.ExecContext(ctx, "INSERT INTO archives(session,repo,ref,commit_sha,created_at,expires_at) VALUES(?,?,?,?,?,?) ON CONFLICT(session,repo) DO UPDATE SET ref=excluded.ref,commit_sha=excluded.commit_sha,created_at=excluded.created_at,expires_at=excluded.expires_at", a.Session, a.Repo, a.Ref, a.Commit, a.CreatedAt.UnixMilli(), a.ExpiresAt.UnixMilli())
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// SetArchiveRetry records a retry only if the observed close intent still matches.
+func (s *Store) SetArchiveRetry(ctx context.Context, id contract.BoxID, want BoxWant, due time.Time, reason string, event contract.Event) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		var previous string
+		err := tx.QueryRowContext(ctx, "SELECT reason FROM boxes WHERE id=? AND state='closing' AND want=?", id, want).Scan(&previous)
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE boxes SET due_at=?,reason=?,updated_at=? WHERE id=? AND state='closing' AND want=?", due.UnixMilli(), reason, event.Time.UnixMilli(), id, want)
+		if err != nil {
+			return err
+		}
+		if previous != reason {
+			_, err = s.AppendEvent(tx, event)
+		}
+		return err
+	})
+}
+
 // SetClosingReason records an archive failure without deleting the box.
 func (s *Store) SetClosingReason(ctx context.Context, id contract.BoxID, reason string, event contract.Event) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {

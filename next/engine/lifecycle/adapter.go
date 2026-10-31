@@ -25,6 +25,7 @@ type BoxAdapter interface {
 
 type View interface {
 	OpenTerminal(contract.SessionID) bool
+	Connected(contract.SessionID) bool
 }
 type Repositories interface {
 	Get(context.Context, contract.SessionID, contract.HostName, bool) ([]contract.BoxRepo, error)
