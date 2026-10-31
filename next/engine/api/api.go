@@ -44,6 +44,9 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodHostexecRun, c, box, a.service.HostexecRun)
 	call(mux, contract.MethodHostexecRevoke, c, owner, a.service.HostexecRevoke)
 	call(mux, contract.MethodOpSubmit, c, user, func(ctx context.Context, p contract.Principal, req contract.OpSubmitRequest) (contract.OpSubmitResponse, *contract.Error) {
+		if req.Operation.Kind == "hostexec.run" {
+			return contract.OpSubmitResponse{}, forbidden()
+		}
 		if box(c) {
 			if req.Operation.Room == "" {
 				req.Operation.Room = c.Room
