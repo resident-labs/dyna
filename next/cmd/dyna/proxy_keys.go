@@ -28,13 +28,13 @@ func validProxyKeyID(id string) bool {
 }
 
 func proxyKeyRoutes(router *gin.Engine, service **cliproxy.Service, managementHash string) {
-	keys := router.Group("/dyna/keys", func(c *gin.Context) {
+	dyna := router.Group("/dyna", func(c *gin.Context) {
 		password := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
 		if bcrypt.CompareHashAndPassword([]byte(managementHash), []byte(password)) != nil {
 			c.AbortWithStatus(http.StatusUnauthorized)
 		}
 	})
-	keys.POST("", func(c *gin.Context) {
+	dyna.POST("/keys", func(c *gin.Context) {
 		var req proxyKeyRequest
 		if err := c.ShouldBindJSON(&req); err != nil || !validProxyKeyID(req.ID) || strings.TrimSpace(req.Key) == "" || len(req.Key) > 4096 {
 			c.Status(http.StatusBadRequest)
@@ -63,13 +63,32 @@ func proxyKeyRoutes(router *gin.Engine, service **cliproxy.Service, managementHa
 		}
 		c.Status(http.StatusBadRequest)
 	})
-	keys.DELETE("/:id", func(c *gin.Context) {
+	dyna.DELETE("/keys/:id", func(c *gin.Context) {
 		id := c.Param("id")
 		if !validProxyKeyID(id) {
 			c.Status(http.StatusBadRequest)
 			return
 		}
 		if err := (*service).DeleteDynaCredential(c.Request.Context(), id); err != nil {
+			c.Status(http.StatusServiceUnavailable)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+	dyna.GET("/credentials", func(c *gin.Context) {
+		c.JSON(http.StatusOK, struct {
+			Credentials []cliproxy.DynaCredential `json:"credentials"`
+		}{(*service).DynaCredentials()})
+	})
+	dyna.POST("/credentials/remove", func(c *gin.Context) {
+		var req struct {
+			ID string `json:"id"`
+		}
+		if c.ShouldBindJSON(&req) != nil || req.ID == "" {
+			c.Status(http.StatusBadRequest)
+			return
+		}
+		if (*service).DeleteDynaCredential(c.Request.Context(), req.ID) != nil {
 			c.Status(http.StatusServiceUnavailable)
 			return
 		}
