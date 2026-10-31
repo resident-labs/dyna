@@ -209,7 +209,7 @@
     .files-toggle { flex: none; z-index: 1; }
     .files-toggle summary { display: flex; align-items: center; gap: 4px; padding: 6px; border-radius: 6px; background: var(--selected); color: var(--muted); font-size: 12px; cursor: pointer; list-style: none; white-space: nowrap; }
     .files-toggle summary.unsaved { color: var(--danger); }
-    textarea::placeholder { white-space: nowrap; }
+    textarea::placeholder { white-space: nowrap; text-overflow: ellipsis; }
     .files-toggle .tray { position: absolute; left: 0; right: 0; bottom: 100%; max-height: 180px; overflow-y: auto; padding: 8px; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; }
     textarea { min-width: 0; flex: 1; min-height: 40px; max-height: 30vh; padding: 8px 0; }
     .actions { display: contents; }
