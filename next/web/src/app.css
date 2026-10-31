@@ -62,7 +62,7 @@ main > header strong { font-size: 16px; }
 /* In a direct message the header leads with its room, a link back to the room's feed. */
 .crumb { color: var(--muted); text-decoration: none; font-size: 16px; }
 .crumb:hover { color: var(--text); }
-.panel-toggle { display: none; position: relative; margin-left: auto; padding: 6px; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+.panel-toggle { position: relative; margin-left: auto; padding: 6px; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
 .panel-toggle:hover, .panel-toggle[aria-expanded="true"] { background: var(--hover); color: var(--text); }
 /* A failed turn, in StatusPill's failed tone, while the sessions panel is closed. */
 .attention { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }
@@ -76,7 +76,6 @@ main > header strong { font-size: 16px; }
 /* Narrow windows hide the sessions column, as v1 does at 760 px; the header button opens it over the feed. */
 @media (max-width: 760px) {
   .shell.open { grid-template-columns: 64px minmax(0, 1fr); }
-  main > header .panel-toggle { display: grid; }
   .shell > aside.members { display: none; }
   .shell > aside.members.shown { display: flex; position: fixed; top: calc(var(--panel-top, 52px) + env(safe-area-inset-top)); right: 0; bottom: 0; padding-bottom: max(0px, env(safe-area-inset-bottom) - var(--keyboard, 0px)); width: min(300px, 100vw); z-index: 1; box-shadow: -8px 0 24px rgb(0 0 0 / 25%); }
 }

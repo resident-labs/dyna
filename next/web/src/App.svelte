@@ -202,7 +202,7 @@
   // F6 (mod+F6 in a browser) moves focus between areas; Shift goes back.
   function cycle(event: KeyboardEvent) {
     if (event.key === "Escape" && drawer) void showDrawer(false);
-    else if (event.key === "Escape" && panel) void showPanel(false);
+    else if (event.key === "Escape" && panel && !wide.current) void showPanel(false);
     else if (event.key === "Escape" && section) void closeSection();
     if (event.key !== "F6") return;
     event.preventDefault();
@@ -267,10 +267,11 @@
   // Below 761 px the sessions panel is hidden; a header button opens it over the feed.
   // Opening moves focus into the panel; closing returns it to the button if the panel held it.
   let panel = $state(false);
+  // From 761 px the panel shows until the owner closes it.
+  let tucked = $state(false);
   // The session whose computer the owner watches, while it runs: in a window over the app, or docked
-  // in the sessions panel instead of the list. Docked, the view mounts only where the panel is on
-  // screen: always when wide, below 761 px only while it is open. Each session's window keeps its place and size
-  // for the page view.
+  // in the sessions panel instead of the list. Docked, the view mounts only while the panel shows.
+  // Each session's window keeps its place and size for the page view.
   let watching: string | undefined = $state();
   let docked = $state(false);
   let rect = $state({ x: window.innerWidth - 504, y: window.innerHeight - 420, w: 480, h: 300 });
@@ -311,6 +312,7 @@
     .map(item => ({ id: item.session, name: item.name, root: !item.parent, running: jobs(item.session) })));
   let jobFailures = $derived([...store?.failedJobs ?? []].filter(key => jobSessions.some(item => key.startsWith(`${item.id}/`))));
   const wide = new MediaQuery("min-width: 761px");
+  let panelShown = $derived(wide.current ? !tucked : panel);
   // Below 641 px the rail is a drawer, as in Discord's phone app: the rooms on the left and the open room's pages beside
   // them. A pick closes it; the scrim and Escape close it and return focus to the menu button. A keyboard open or
   // close (Escape) shows the ring; a tap open focuses the dialog itself, and no ring follows a tap either way.
@@ -346,7 +348,7 @@
   // when a phone's sheet closes.
   async function showPanel(open: boolean, tapped = false) {
     const held = members?.contains(document.activeElement);
-    panel = open;
+    if (wide.current) tucked = !open; else panel = open;
     if (!open) sheetFull = false;
     await tick();
     if (open) members?.focus({ focusVisible: !tapped }); else if (held) toggle?.focus({ focusVisible: !tapped });
@@ -359,6 +361,8 @@
   // The panel's header counts, and the room header's below 761 px where the panel is hidden.
   // One count source (status.ts): a session that waits for the owner is waiting, not working.
   let working = $derived(store?.counts.working ?? 0);
+  let busy = $derived([...store?.sessions.values() ?? []].filter(item => store?.status(item.session) === "working"));
+  let faces = $derived(!session && !panelShown && working > 0);
   let title = $derived(!room ? "Home" : session ? store?.names.get(session) ?? "Session" : roomName);
   // Each fact shows once: profile, state and trouble live on the session's row. A closed session has no row.
   let closed = $derived(!!session && !!store?.ready && !store.sessions.has(session));
@@ -382,11 +386,11 @@
 {#snippet computerView(id: string)}
   <!-- Another session's view is a new view, so the old image runs its cleanup and drops its stream. -->
   {#key id}<ComputerView session={id} name={store?.names.get(id) ?? "Session"} root={!store?.sessions.get(id)?.parent} activity={store?.activity.get(id)} {docked} bind:rect bind:element={computer}
-    onclose={() => void stopWatching()} ondock={event => { docked = !docked; if (docked && !wide.current) void showPanel(true, event.detail > 0); }} />{/key}
+    onclose={() => void stopWatching()} ondock={event => { docked = !docked; if (docked && !panelShown) void showPanel(true, event.detail > 0); }} />{/key}
 {/snippet}
 
 <svelte:window onkeydown={cycle} />
-<div class="shell" class:open={room} class:drawer>
+<div class="shell" class:open={room} class:drawer class:tucked={wide.current && tucked}>
   <aside class="rail" aria-label="Rooms" tabindex="-1" bind:this={rail} inert={phone.current && !drawer} role={drawer ? "dialog" : undefined} aria-modal={drawer || undefined}
     onclick={event => { if (drawer && event.target instanceof Element && event.target.closest("a, button")) void showDrawer(false, false); }}>
     <nav aria-label="Rooms"><a class="home" href="/" onclick={navigate} aria-current={room ? undefined : "page"} aria-label="Home" title="Home"><Icon name="home" /></a>
@@ -429,7 +433,7 @@
       {#if session && !closed}<SessionFace name={title} root={!store?.sessions.get(session)?.parent} dot={shown} size={24} />{/if}
       <span class="heading"><strong>{title}</strong>
         {#if closed}<span class="count">· closed</span>{:else if word}<span class="count">{word}</span>{/if}
-        {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session") + (working ? ` · ${working} working` : "")}</span>{/if}</span>
+        {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session")}</span>{/if}</span>
       {#if store && !unavailable}<button type="button" class="requests" class:waiting={store.waiting > 0} bind:this={requestsButton} aria-pressed={section === "requests"}
         aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section === "requests" ? undefined : "requests"; }}>
         <Icon name="inbox" />{#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
@@ -437,9 +441,13 @@
         {#if session && !closed && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title="Open a terminal in this session's box" onclick={() => terminals?.shell(session, title)}><Icon name="terminal" /><span>Terminal</span></button>{/if}
         {#if session && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /><span>Computer</span></button>{/if}
         <span class="room-menu"><RoomMenu bind:this={roomMenu} onterminal={() => void terminals?.pick()} onrules={() => { section = "rules"; }} /></span>{/if}
-      {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={store?.counts.failed ? "Sessions, a session failed" : "Sessions"}
-        title="Sessions" aria-controls="sessions" aria-expanded={panel} onclick={event => void showPanel(!panel, event.detail > 0)}><Icon name="people" />{#if store?.ready}<span class="count phone">{store.sessions.size}</span>{/if}
-        {#if store?.counts.failed && !panel}<span class="attention"></span>{/if}</button>{/if}</header>
+      <!-- While the panel is closed, who works shows on its button, as at most 3 faces, "+n" and the count from status.ts. -->
+      {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={"Sessions" + (faces ? `, ${working} working` : "") + (store?.counts.failed ? ", a session failed" : "")}
+        title={faces ? busy.map(item => item.name).join(", ") : "Sessions"} aria-controls="sessions" aria-expanded={panelShown} onclick={event => void showPanel(!panelShown, event.detail > 0)}>
+        {#if faces}<span class="faces">{#each busy.slice(0, 3) as item (item.session)}<Avatar kind="session" name={item.name} root={!item.parent} size={24} />{/each}</span>
+          {#if busy.length > 3}<span class="more">+{busy.length - 3}</span>{/if}<span class="count">{working} working</span>
+        {:else}<Icon name="people" />{#if store?.ready}<span class="count phone">{store.sessions.size}</span>{/if}{/if}
+        {#if store?.counts.failed && !panelShown}<span class="attention"></span>{/if}</button>{/if}</header>
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} room={roomName} onback={() => void closeSection()} />
     {:else if section === "rules" && store && !unavailable}<RulesPanel bind:element={page} {store} room={roomName} onback={() => void closeSection()} />
     {:else}<div class="feed">
@@ -463,7 +471,7 @@
   {#if room}
     <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} class:watching={watching && docked} aria-label="Sessions" tabindex="-1" role={panel && phone.current ? "dialog" : undefined} aria-modal={(panel && phone.current) || undefined} bind:this={members} inert={drawer}>
       <!-- Docked, the computer sits above the session list. -->
-      {#if watching && docked && (wide.current || panel)}{@render computerView(watching)}{/if}
+      {#if watching && docked && panelShown}{@render computerView(watching)}{/if}
       {#if phone.current}<button type="button" class="handle" aria-label={sheetFull ? "Shrink the sessions sheet" : "Expand the sessions sheet"}
         onpointerdown={drag} onclick={() => { if (!dragged) sheetFull = !sheetFull; dragged = false; }}></button>{/if}
       {#if session && !closed}<header class="tabs">
@@ -494,7 +502,7 @@
         {/snippet}</VirtualList></div>
       {:else}<p class="hint">No sessions yet.</p>{/if}
       <!-- The foot polls hosts, so it mounts only while the panel shows; a phone's closed panel polls nothing. -->
-      {#if wide.current || panel}<HostFoot {navigate} />{/if}
+      {#if panelShown}<HostFoot {navigate} />{/if}
     </aside>
     {#if watching && !docked}{@render computerView(watching)}{/if}
   {/if}
@@ -524,6 +532,13 @@
   .requests.waiting { height: 40px; padding: 0 12px; border-radius: 8px; background: color-mix(in srgb, var(--attention) 14%, transparent); color: var(--attention); }
   .requests.waiting:hover, .requests.waiting[aria-pressed="true"] { background: color-mix(in srgb, var(--attention) 22%, transparent); }
   .requests ~ :global(.panel-toggle) { margin-left: 0; }
+  main > header :global(.panel-toggle) { display: flex; align-items: center; gap: 8px; }
+  .faces { display: flex; padding-left: 4px; }
+  /* Overlapped faces, ringed in the page color; initials stay on the type scale. */
+  .faces > :global(.avatar) { margin-left: -4px; box-shadow: 0 0 0 2px var(--bg); font-size: 11px; }
+  .more { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .shell.open.tucked { grid-template-columns: 64px 1fr; }
+  .shell.tucked > aside.members { display: none; }
   .narrow, .phone, .menu-toggle { display: none; }
   @media (max-width: 760px) { .narrow { display: inline; } }
   .heading, .room-menu { display: contents; }
@@ -540,7 +555,7 @@
     .heading .count { font-size: 12.5px; }
     .requests { min-width: 40px; height: 40px; }
     .requests:not([aria-pressed="true"], .waiting) { display: none; }
-    main > header :global(.panel-toggle) { display: flex; align-items: center; gap: 4px; min-width: 40px; height: 40px; padding: 0 8px; }
+    main > header :global(.panel-toggle) { gap: 4px; min-width: 40px; height: 40px; padding: 0 8px; }
     .phone { display: inline; }
     .scrim { position: fixed; inset: 0; z-index: 2; padding: 0; border: 0; background: rgb(0 0 0 / 50%); }
   }
@@ -588,7 +603,7 @@
   @media (hover: hover) { .row:not(:hover, :focus-within) .watch:not(.open) { display: none; } }
   /* The docked computer needs 420 px. It docks beside the feed from 1024 px, where the feed keeps 540 px; below
      that it covers the feed, and Back or Escape closes it. */
-  @media (min-width: 1024px) { .shell.open:has(aside.watching) { grid-template-columns: 64px 1fr 420px; } }
+  @media (min-width: 1024px) { .shell.open:not(.tucked):has(aside.watching) { grid-template-columns: 64px 1fr 420px; } }
   @media (min-width: 761px) and (max-width: 1023px) { .shell > aside.members.watching { position: fixed; top: calc(var(--panel-top, 52px) + env(safe-area-inset-top)); right: 0; bottom: 0; width: 420px; z-index: 1; box-shadow: -8px 0 24px rgb(0 0 0 / 25%); } }
   @media (max-width: 760px) { .shell > aside.members.shown.watching { width: min(420px, 100vw); } }
 </style>
