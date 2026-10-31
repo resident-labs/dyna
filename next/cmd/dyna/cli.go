@@ -7,18 +7,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/big"
+	"math"
 	"mime"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/dustin/go-humanize"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/spf13/cobra"
 )
@@ -401,11 +401,11 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	var limitCPUs int
 	var limitMem string
 	limit := &cobra.Command{Use: "limit ROOM --cpus N --mem SIZE", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		mem, err := parseLimitBytes(limitMem)
-		if err != nil {
-			return err
+		mem, err := humanize.ParseBytes(limitMem)
+		if err != nil || mem > math.MaxInt64 {
+			return fmt.Errorf("invalid memory size %q", limitMem)
 		}
-		_, err = getClient().RoomSetLimits(cmd.Context(), contract.RoomSetLimitsRequest{Room: contract.RoomID(args[0]), CPUs: limitCPUs, MemBytes: mem})
+		_, err = getClient().RoomSetLimits(cmd.Context(), contract.RoomSetLimitsRequest{Room: contract.RoomID(args[0]), CPUs: limitCPUs, MemBytes: int64(mem)})
 		return err
 	}}
 	limit.Flags().IntVar(&limitCPUs, "cpus", 0, "CPU limit; 0 means unlimited")
@@ -656,24 +656,4 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	_ = prOpen.MarkFlagRequired("title") // fails only for an undefined flag, and "title" is defined above
 	pr.AddCommand(prOpen)
 	root.AddCommand(pr)
-}
-
-// parseLimitBytes uses binary units, as the v1 room settings do.
-func parseLimitBytes(value string) (int64, error) {
-	parts := regexp.MustCompile(`(?i)^((?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)(?:\.[0-9]+)?)\s*(b|bytes?|[kmgtpe](?:i?b)?)?$`).FindStringSubmatch(strings.TrimSpace(value))
-	if parts != nil {
-		n, ok := new(big.Rat).SetString(strings.ReplaceAll(parts[1], ",", ""))
-		if ok {
-			unit := strings.ToLower(parts[2])
-			power := 0
-			if unit != "" && unit != "b" && unit != "byte" && unit != "bytes" {
-				power = strings.IndexByte("kmgtpe", unit[0]) + 1
-			}
-			n.Mul(n, new(big.Rat).SetInt(new(big.Int).Lsh(big.NewInt(1), uint(10*power))))
-			if n.IsInt() && n.Num().IsInt64() && n.Sign() >= 0 {
-				return n.Num().Int64(), nil
-			}
-		}
-	}
-	return 0, fmt.Errorf("size must be non-negative whole bytes, such as 2 GiB, 2G or 0")
 }

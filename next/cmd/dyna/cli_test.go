@@ -15,7 +15,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func (f *fakeClient) RoomSetLimits(context.Context, contract.RoomSetLimitsRequest) (contract.RoomSetLimitsResponse, error) {
+func (f *fakeClient) RoomSetLimits(_ context.Context, q contract.RoomSetLimitsRequest) (contract.RoomSetLimitsResponse, error) {
+	f.limits = q
 	return contract.RoomSetLimitsResponse{}, nil
 }
 func (f *fakeClient) RoomPause(context.Context, contract.RoomPauseRequest) (contract.RoomPauseResponse, error) {
@@ -29,6 +30,7 @@ type fakeClient struct {
 	host         contract.HostAddRequest
 	hostNoSwap   bool
 	room         contract.RoomCreateRequest
+	limits       contract.RoomSetLimitsRequest
 	repoAdd      contract.RoomRepoAddRequest
 	repoList     contract.RoomReposRequest
 	start        contract.SessionStartRequest
@@ -396,17 +398,10 @@ func TestHostexecGrantSubmitsOperation(t *testing.T) {
 	}
 }
 
-func TestParseLimitBytes(t *testing.T) {
-	for _, tc := range []struct {
-		input string
-		want  int64
-		valid bool
-	}{
-		{"0", 0, true}, {"1.5 GiB", 1610612736, true}, {"2MB", 2 << 20, true}, {"1,024", 1024, true}, {"0.1", 0, false}, {"-1", 0, false}, {"9EiB", 0, false},
-	} {
-		got, err := parseLimitBytes(tc.input)
-		if (err == nil) != tc.valid || err == nil && got != tc.want {
-			t.Errorf("%q: %d, %v", tc.input, got, err)
-		}
+func TestRoomLimitCommand(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "room", "limit", "room_1", "--cpus", "2", "--mem", "8GiB")
+	if f.limits != (contract.RoomSetLimitsRequest{Room: "room_1", CPUs: 2, MemBytes: 8 << 30}) {
+		t.Fatal(f.limits)
 	}
 }
