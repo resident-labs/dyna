@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "rooms": ["sample"],
+  "exported": "2026-01-02T03:04:05Z",
+  "source": {
+    "commit": "0123456789abcdef0123456789abcdef01234567",
+    "backup": "dyna-final.db",
+    "backupSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "instructions": "Sample instruction text.",
+  "settings": {
+    "ownerName": "Sample Owner",
+    "rootProfile": "sample-root",
+    "subagentMaxDepth": 3,
+    "checkInInterval": 900000,
+    "shellSilence": 600000
+  },
+  "profiles": [
+    {
+      "name": "sample-builder",
+      "description": "Sample builder profile.",
+      "model": "sample-model-1",
+      "models": ["sample-model-1"],
+      "fallback": "sample-root",
+      "taste": 7,
+      "intelligence": 9,
+      "cost": 9,
+      "diagnostics": 10,
+      "compactTokens": 200000,
+      "maxConcurrent": 4,
+      "maxCallsPerRun": 8,
+      "default": true
+    }
+  ],
+  "hosts": [
+    {
+      "name": "sample-host",
+      "ssh": "sampleuser@host.example.invalid",
+      "labels": ["sample-label"],
+      "rooms": ["sample"]
+    }
+  ],
+  "accounts": [
+    {
+      "provider": "anthropic",
+      "label": "sample-account",
+      "repos": ["example-org/sample-repo"]
+    }
+  ],
+  "devices": [
+    {
+      "name": "sample-device",
+      "tokenSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "created": "2026-01-02T03:04:05Z",
+      "expires": "2026-02-02T03:04:05Z",
+      "scopes": ["rooms.read"]
+    }
+  ],
+  "repos": [
+    {
+      "repo": "example-org/sample-repo",
+      "defaultRoom": "sample",
+      "mergePolicy": "queue",
+      "ciMode": "box",
+      "attribution": [{ "kind": "pr", "line": "Sample attribution line" }]
+    }
+  ],
+  "skills": [
+    {
+      "name": "sample-skill",
+      "description": "Sample skill.",
+      "package": "sample-package@1.0.0"
+    }
+  ],
+  "subscriptions": [
+    {
+      "id": "sub_sample_1",
+      "scope": "machine",
+      "every": 1800000,
+      "run": {
+        "command": ["sh", "sample.sh"],
+        "image": "sample-image",
+        "size": "small",
+        "files": [{ "path": "sample.sh", "body": "echo sample" }]
+      }
+    }
+  ],
+  "counts": {
+    "instructionChars": 24,
+    "goals": 1,
+    "goalItems": 1,
+    "issues": 1,
+    "prs": 1,
+    "questions": 0,
+    "subscriptions": 1,
+    "hosts": 1,
+    "accounts": 1,
+    "devices": 1,
+    "sessions": 1
+  }
+}
