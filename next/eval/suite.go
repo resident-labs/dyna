@@ -12,11 +12,11 @@ type Task struct {
 }
 
 var tasks = [...]Task{
-	{1, "List the sessions in this room and tell me whether {{A}} and {{B}} are present.", "session.list"},
+	{1, "List the sessions in this room and tell me whether {{AName}} and {{BName}} are present.", "session.list"},
 	{2, "List the repositories in this room and tell me whether repo is present.", "room.repos"},
 	{3, "Read the latest room posts and report the author of the post containing fixture-alpha.", "events.list"},
-	{4, "Send {{A}} the message: Check complete.", "post"},
-	{5, "Send {{A}} and {{B}} the message: Please review.", "post"},
+	{4, "Send {{AName}} the message: Check complete.", "post"},
+	{5, "Send {{AName}} and {{BName}} the message: Please review.", "post"},
 	{6, "Start a child named eval-worker using profile {{Profile}}. Give it the brief: Report ready.", "session.start"},
 	{7, "Change child {{A}} to profile {{Profile}}.", "session.set_profile"},
 	{8, "Move {{C}} directly under {{Lead}}.", "session.move"},
@@ -40,7 +40,7 @@ func Tasks() []Task { return append([]Task(nil), tasks[:]...) }
 // Prompt resolves fixture identities without replacing ordinary words in the task.
 func (t Task) PromptFor(f Fixture) string {
 	return strings.NewReplacer(
-		"{{A}}", f.A, "{{B}}", f.B, "{{C}}", f.C, "{{Lead}}", f.Lead,
+		"{{A}}", f.A, "{{B}}", f.B, "{{AName}}", f.AName, "{{BName}}", f.BName, "{{C}}", f.C, "{{Lead}}", f.Lead,
 		"{{Profile}}", f.Profile, "{{Operation}}", f.Operation, "{{Host}}", f.Host,
 		"{{File}}", f.File, "{{Visual}}", f.Visual, "{{Page}}", f.Page,
 		"{{BranchHead}}", f.BranchHead, "{{BranchBase}}", f.BranchBase,
