@@ -14,11 +14,11 @@ var bundleTime = time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
 func filledGlobalBundle() GlobalBundle {
 	owner := ImportedAuthor{Kind: PrincipalOwner, Label: "owner"}
 	return GlobalBundle{
-		Version:  BundleV1,
-		Rooms:    []RoomName{"dyna"},
-		Exported: bundleTime,
-		Source:   BundleSource{Commit: "abc123", Backup: "dyna-final.db", BackupSHA256: "f00d"},
-		Rules:    []Rule{{Label: "u1", Text: "report bugs to root", By: owner, Created: bundleTime, Updated: bundleTime}},
+		Version:      BundleV1,
+		Rooms:        []RoomName{"dyna"},
+		Exported:     bundleTime,
+		Source:       BundleSource{Commit: "abc123", Backup: "dyna-final.db", BackupSHA256: "f00d"},
+		Instructions: Instructions{Global: "- (u1) report bugs to root\n", Rooms: []RoomInstructions{{Room: "room_1", Text: "- (r17) upgrade floor\n"}}},
 		Settings: SettingsBundle{
 			OwnerName: "Ari", RootProfile: "opus", RulesMaxChars: 4000, SubagentMaxDepth: 3,
 			CheckInInterval: 900000, ShellSilence: 600000,
@@ -41,7 +41,7 @@ func filledGlobalBundle() GlobalBundle {
 			ID: "sub_1", Scope: ScopeMachine, Every: 1800000,
 			Run: &RunSpec{Command: []string{"sh", "watch.sh"}, Image: "dyna-base", Size: "small", Files: []RunFile{{Path: "watch.sh", Body: "echo ok"}}},
 		}},
-		Counts: BundleCounts{Rules: 1, Hosts: 1, Accounts: 1, Devices: 1, Subscriptions: 1},
+		Counts: BundleCounts{Hosts: 1, Accounts: 1, Devices: 1, Subscriptions: 1},
 	}
 }
 
@@ -56,7 +56,6 @@ func filledRoomBundle() RoomBundle {
 		Paused:      true,
 		RootProfile: "terra",
 		Upstreams:   []RoomUpstream{{Repo: "resident-labs/dyna", Upstream: "github.com/resident-labs/dyna"}},
-		Rules:       []Rule{{Label: "r17", Text: "upgrade floor", By: root, Created: bundleTime, Updated: bundleTime}},
 		Goals: []GoalBundle{{
 			Label: "g1084", Text: "review", Detail: "brief", Setter: root, Created: bundleTime,
 			Amendments: []GoalNote{{At: bundleTime, By: root, Text: "also X"}},
@@ -83,7 +82,7 @@ func filledRoomBundle() RoomBundle {
 			Name: "dyna:builder", Profile: "terra", ProfileWarning: ProfileUnsupportedMuse, Parent: "dyna:lead", Goals: []GoalID{"g1084"},
 			ArchiveRef: "refs/dyna/archive/builder", LastPost: "done",
 		}},
-		Counts: BundleCounts{Rules: 1, Goals: 1, GoalItems: 1, Issues: 1, PRs: 1, Questions: 1, Sessions: 1},
+		Counts: BundleCounts{Goals: 1, GoalItems: 1, Issues: 1, PRs: 1, Questions: 1, Sessions: 1},
 	}
 }
 
