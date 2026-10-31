@@ -162,7 +162,7 @@
     {#if !view.ready}<button type="button" class="jump" onclick={() => void view.open()}>Try again</button>{/if}</p>
 {/if}
 {#if !view.atPresent}
-  <button type="button" class="jump" onclick={jump}>New posts below. Jump to present</button>
+  <button type="button" class="btn present" onclick={jump}>New posts below. Jump to present</button>
 {/if}
 
 <style>
@@ -179,5 +179,8 @@
   .hint { margin: 0; padding: 6px 16px; color: var(--muted); font-size: 12px; }
   .jump { all: unset; cursor: pointer; padding: 6px 16px; color: var(--muted); font-size: 12px; }
   .jump:hover { color: var(--text); }
+  /* Jump to present is a control: the shared button on the raised surface, centred under the feed. */
+  .present { align-self: center; margin: 4px 16px 8px; border-radius: 99px; background: var(--raised); }
+  .present:hover { background: var(--hover); }
   .jump:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 </style>
