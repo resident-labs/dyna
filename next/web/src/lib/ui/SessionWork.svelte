@@ -3,9 +3,14 @@
   import { readWork, type WorkTurn } from "../session-work.ts";
   import { causes, dayLabel, describe, formatTime } from "../feed.ts";
   import { hue } from "../identity.ts";
+  import { isLiveTurn } from "../work-steps.ts";
+  import { SvelteSet } from "svelte/reactivity";
+  import { TurnTranscripts } from "../transcripts.svelte.ts";
+  import SessionTurnSteps from "./SessionTurnSteps.svelte";
   import type { Principal } from "../contract.gen.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import Avatar from "./Avatar.svelte";
+  import Icon from "./Icon.svelte";
   import VirtualList from "./VirtualList.svelte";
   import FailedTurnRow from "./FailedTurnRow.svelte";
   import StatusPill from "./StatusPill.svelte";
@@ -18,6 +23,10 @@
   let list: VirtualList<WorkTurn> | undefined = $state();
   let failures = $derived(turns.filter(turn => turn.ended?.body.outcome === "failed"));
   let failureIndex = 0;
+  const opened = new SvelteSet<string>();
+  // The keyed view belongs to one session; transcript state survives virtual row recycling.
+  const transcripts = untrack(() => new TurnTranscripts(session));
+  function toggle(key: string) { list?.hold(); if (!opened.delete(key)) opened.add(key); }
   const name = (id: string) => store.names.get(id) ?? "Closed session";
   const author = (person: Principal) => person.kind === "owner" ? "You" : person.session ? name(person.session) : "Dyna";
   const day = (value: string) => new Date(value).toDateString();
@@ -111,20 +120,19 @@
             <p>{post.body.text}</p>
           </div>
         {/each}
-        {#if turn.posts.some(post => post.body.home.kind === "dm") || turn.ended?.body.replies?.some(reply => reply.reply.home?.kind === "dm")}<p class="answer">Answered you in Messages</p>{/if}
-        {#if !turn.ended && store.activity.get(session)}<p class="answer">{store.activity.get(session)}</p>{/if}
+        <SessionTurnSteps {turn} {transcripts} {opened} ontoggle={toggle} live={isLiveTurn(turn.started.body.turn, turns[0].started.body.turn, store.turns.get(session))} activity={store.activity.get(session)} answered={turn.posts.some(post => post.body.home.kind === "dm") || !!turn.ended?.body.replies?.some(reply => reply.reply.home?.kind === "dm")} />
         {#if turn.ended?.body.outcome === "failed"}
           {@const end = turn.ended}
           <div class="failure"><FailedTurnRow compact row={{ kind: "failed", key: end.id, seq: end.seq, session, at: end.at, label: "Turn failed", cause: end.body.cause ? causes[end.body.cause] : "The turn failed" }} author={name(session)} root={!store.sessions.get(session)?.parent} onseen={() => store.see({ kind: "dm", session }, end.seq)}>
-            <details><summary>Details</summary><p>The session stopped before it finished this turn.</p></details>
+            <details><summary><span class="details-chevron"><Icon name="chevron" size={14} /></span>Details</summary><p>The session stopped before it finished this turn.</p></details>
           </FailedTurnRow></div>
         {/if}
       </article>
+      {#if more && turn === turns[turns.length - 1]}<button type="button" class="older" disabled={loading} onclick={() => void load(true)}>Show older</button>{/if}
     {/snippet}
   </VirtualList>
 {:else if !loading && !failed}<p class="hint">This session has not worked yet.</p>{/if}
 {#if failed}<p class="hint" role="alert">Work did not load. <button type="button" onclick={() => void load()}>Try again</button></p>{/if}
-{#if more}<button type="button" class="older" disabled={loading} onclick={() => void load(true)}>Show older</button>{/if}
 
 <style>
   .work-head { display: flex; align-items: center; gap: 12px; padding: 4px 16px; }
@@ -147,12 +155,16 @@
   .recipient time { margin-left: auto; }
   .post p { margin: 5px 0 0; font-size: 15px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
   .post button { padding: 0; font-size: 12px; }
-  .failure, .answer { margin: 12px 0 0 64px; }
-  .answer { color: var(--muted); }
+  .failure { margin: 12px 0 0 64px; }
+  .failure summary { display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; }
+  .failure summary::-webkit-details-marker { display: none; }
+  .failure summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .details-chevron { display: inline-flex; transform: rotate(-90deg); }
+  details[open] .details-chevron { transform: none; }
   .hint { padding: 8px 16px; color: var(--muted); }
-  .older { padding: 8px 16px; align-self: center; }
+  .older { display: block; margin: 0 auto; padding: 8px 16px; }
   @media (max-width: 600px) {
-    .post, .failure, .answer { margin-left: 0; }
+    .post, .failure { margin-left: 0; }
   }
   @media (pointer: coarse) { button, summary { min-height: 40px; } }
 </style>
