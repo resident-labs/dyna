@@ -400,6 +400,15 @@ jobs:
           cache-dependency-path: next/go.sum
       - name: Format, vet and test
         run: bash scripts/ci.sh next
+      - name: Provision OpenSSH for integration
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq openssh-server
+          sudo mkdir -p /run/sshd
+          sudo usermod -p 'key-only-no-password' "$(id -un)"
+      - name: Test SSH reconnect
+        working-directory: next
+        run: DYNA_REQUIRE_SSHD=1 go test -count=1 -tags integration ./box/podman -run '^TestRealSSHForwardReconnect$' -v
 
   # The single check name that Dyna and branch protection wait on. It passes
   # only when every shard and static job passed.
