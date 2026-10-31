@@ -274,7 +274,13 @@ func TestShellWatchGenerationAndStop(t *testing.T) {
 	}
 	cancel()
 	<-ch
-	if _, ok := (<-messages).Body.(contract.ShellWatchStop); !ok {
-		t.Fatal("missing stop")
+	for {
+		switch (<-messages).Body.(type) {
+		case contract.ShellWatchStop:
+			return
+		case contract.TurnStart: // A pending turn can be dispatched before the stop.
+		default:
+			t.Fatal("unexpected box message")
+		}
 	}
 }

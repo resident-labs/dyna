@@ -346,6 +346,12 @@ func TestOwnerViewKeepsAgentPosition(t *testing.T) {
 	if len(next) != 1 || next[0].Reset || next[0].Text != "partial line\n" {
 		t.Fatalf("delta: %+v", next)
 	}
+	token := "ghp_" + strings.Repeat("a1", 15)
+	j.Write([]byte(token + "\n"))
+	masked := s.View(false)
+	if len(masked) != 1 || strings.Contains(masked[0].Text, token) {
+		t.Fatalf("unmasked: %+v", masked)
+	}
 	j.mu.Lock()
 	j.finished = true
 	j.exit = 7
