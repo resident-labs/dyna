@@ -910,7 +910,7 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 	s.mu.Lock()
 	s.activity[caller.Session] = body
 	for ch, room := range s.live {
-		if room == session.Room {
+		if room == session.Room || room == "" {
 			select {
 			case ch <- event:
 			default:
