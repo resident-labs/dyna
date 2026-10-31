@@ -6,16 +6,14 @@ import (
 	"errors"
 	"time"
 
-	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
-func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox, boxes []box.Box) error {
-	for _, child := range boxes {
-		if child.BudgetParent == row.ID && child.State != contract.BoxDeleted {
-			return nil
-		}
+func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox) error {
+	leaf, err := r.store.ClosingLeaf(ctx, row.Session)
+	if err != nil || !leaf {
+		return err
 	}
 	if row.State == contract.BoxDeleted {
 		session, err := r.store.Session(ctx, row.Session)

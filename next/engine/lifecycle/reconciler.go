@@ -22,6 +22,7 @@ type activeStep struct {
 }
 
 type Reconciler struct {
+	hostMemory   func(contract.HostName) int64
 	store        *store.Store
 	boxes        BoxAdapter
 	view         View
@@ -41,6 +42,8 @@ type Reconciler struct {
 func New(st *store.Store, boxes BoxAdapter, view View, repos Repositories, event func(contract.RoomID, contract.Principal, contract.EventBody) (contract.Event, error), now func() time.Time) *Reconciler {
 	return &Reconciler{store: st, boxes: boxes, view: view, repos: repos, event: event, now: now, kick: make(chan struct{}, 1), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool), disconnected: make(map[contract.BoxID]time.Time)}
 }
+func (r *Reconciler) SetHostMemory(read func(contract.HostName) int64) { r.hostMemory = read }
+
 func (r *Reconciler) SetRepositories(repos Repositories) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -125,6 +128,11 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if r.hostMemory != nil {
+		for i := range hosts {
+			hosts[i].MemUsed = r.hostMemory(hosts[i].Name)
+		}
+	}
 	hostState := make(map[contract.HostName]box.HostState, len(hosts))
 	for _, host := range hosts {
 		hostState[host.Name] = host.State
@@ -195,7 +203,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			}
 			r.mu.Unlock()
 			if step == nil {
-				if err := r.closePass(ctx, row, all); err != nil {
+				if err := r.closePass(ctx, row); err != nil {
 					return err
 				}
 			}
@@ -219,15 +227,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			next.State, next.Reason = contract.BoxPending, string(placement.Reason)
 		} else if b.Image == "" {
 			next.State, next.Reason, next.Host = contract.BoxCreating, "", placement.Host
-			path, err := r.store.BoxAncestry(ctx, b.ID)
-			if err != nil {
-				return err
-			}
-			ids := make([]contract.BoxID, len(path))
-			for j := range path {
-				ids[j] = path[j].ID
-			}
-			next.Slice, err = box.SliceName(ids)
+			next.Slice, err = box.SliceName(b.ID)
 			if err != nil {
 				return err
 			}
@@ -252,20 +252,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			}
 		}
 	}
-	parents := make(map[contract.BoxID]store.LifecycleBox, len(rows))
 	for _, row := range rows {
-		parents[row.ID] = row
-	}
-	for _, row := range rows {
-		if row.Want == store.WantRun && row.BudgetParent != "" && (row.State == contract.BoxCreating || row.State == contract.BoxStarting && row.DueAt.IsZero()) {
-			parent, exists := parents[row.BudgetParent]
-			r.mu.Lock()
-			busy := r.active[row.BudgetParent] != nil
-			r.mu.Unlock()
-			if !exists || busy || parent.Want != store.WantRun || !(parent.State == contract.BoxReady || parent.State == contract.BoxStarting && parent.DueAt.After(r.now())) {
-				continue
-			}
-		}
 		if row.State == contract.BoxLost && hostState[row.Host] == box.HostReady && row.Want != store.WantClose && row.Want != store.WantDiscard {
 			if row.DueAt.IsZero() || !row.DueAt.After(r.now()) {
 				r.launch(ctx, row)
