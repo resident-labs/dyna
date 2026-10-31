@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "name": "sample",
+  "repos": [{ "repo": "example-org/sample-repo", "default": true }],
+  "limits": { "cpus": 4, "memBytes": 8589934592 },
+  "color": "teal",
+  "paused": false,
+  "instructions": "Sample room instruction.",
+  "goals": [
+    {
+      "label": "g100",
+      "text": "Sample goal",
+      "detail": "Sample detail.",
+      "setter": { "kind": "owner", "label": "owner" },
+      "created": "2026-01-02T03:04:05Z",
+      "items": [{ "label": "i1", "text": "Sample item", "state": "open", "assignee": "sample:builder" }]
+    }
+  ],
+  "issues": [
+    {
+      "number": 7,
+      "title": "Sample issue",
+      "body": "Sample body.",
+      "files": [{ "path": "sample.go", "line": 3 }],
+      "filer": { "kind": "owner", "label": "owner" },
+      "filed": "2026-01-02T03:04:05Z",
+      "goal": "g100",
+      "githubUrl": "https://github.com/example-org/sample-repo/issues/1"
+    }
+  ],
+  "nextIssue": 8,
+  "prs": [
+    {
+      "branch": "sample-branch",
+      "repo": "example-org/sample-repo",
+      "number": 1,
+      "author": { "kind": "session", "label": "sample:builder" },
+      "goal": "g100"
+    }
+  ],
+  "questions": [],
+  "subscriptions": [],
+  "handoff": [
+    {
+      "name": "sample:builder",
+      "profile": "sample-builder",
+      "parent": "sample:lead",
+      "goals": ["g100"],
+      "archiveRef": "refs/dyna/archive/sample-builder",
+      "lastPost": "Sample last post."
+    }
+  ],
+  "counts": { "goals": 1, "goalItems": 1, "issues": 1, "prs": 1, "questions": 0, "sessions": 1 }
+}
