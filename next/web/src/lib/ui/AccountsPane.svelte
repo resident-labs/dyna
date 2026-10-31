@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
-  import { accountRows, accountState, refused } from "../accounts.ts";
+  import { accountRows, accountState, refused, removalPrompt } from "../accounts.ts";
   import type { Account, AccountProviderInfo, AccountsConnectResponse } from "../contract.gen.ts";
   import StatusPill from "./StatusPill.svelte";
   import Icon from "./Icon.svelte";
@@ -150,7 +150,7 @@
                 {#if account.state === "sign_in_expired"}
                   <div class="expired"><span>Its limits show once it is signed in.</span><span>Remove it, then use Connect another to sign in again.</span></div>
                 {/if}
-                  {#if removing === account.id}<div class="remove-confirm"><span>Remove this account? Dyna deletes its sign-in. You can connect it again later.</span><button class="btn danger" type="button" disabled={busy} onclick={() => void remove(account)}>Remove</button><button class="btn ghost" type="button" disabled={busy} onclick={() => { removing = undefined; removeFailed = false; }}>Keep</button>{#if removeFailed}<span class="error" role="alert">The account was not removed. Try again.</span>{/if}</div>
+                  {#if removing === account.id}<div class="remove-confirm"><span>{removalPrompt(provider.connectMethod)}</span><button class="btn danger" type="button" disabled={busy} onclick={() => void remove(account)}>Remove</button><button class="btn ghost" type="button" disabled={busy} onclick={() => { removing = undefined; removeFailed = false; }}>Keep</button>{#if removeFailed}<span class="error" role="alert">The account was not removed. Try again.</span>{/if}</div>
                   {:else}<button class="btn ghost" type="button" onclick={() => { removing = account.id; removeFailed = false; }}>Remove</button>{/if}
               </div>
             {/each}
