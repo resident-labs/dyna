@@ -68,6 +68,73 @@ func TestSubtreeArchivesChildBeforeParent(t *testing.T) {
 		t.Fatalf("close order: %+v, %v", events, err)
 	}
 }
+
+func TestClosePendingBoxWithoutTurnsDoesNotStart(t *testing.T) {
+	s, _, sid, ctx := setupArchive(t)
+	h := &dormantHost{}
+	s.boxes = h
+	session, err := s.store.Session(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE boxes SET state='pending',image='image' WHERE id=?", session.Box)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, problem := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: sid}); problem != nil {
+		t.Fatal(problem)
+	}
+	b, err := s.store.Box(ctx, session.Box)
+	if err != nil || b.State != contract.BoxDeleted || h.starts != 0 {
+		t.Fatalf("box=%+v starts=%d err=%v", b, h.starts, err)
+	}
+}
+
+type heldArchiveStart struct {
+	fakeBoxes
+	started, release chan struct{}
+}
+
+func (h heldArchiveStart) Start(context.Context, contract.BoxID) error {
+	close(h.started)
+	<-h.release
+	return nil
+}
+
+func TestCloseBlocksDispatchBeforeArchive(t *testing.T) {
+	s, _, room, sid, ctx := quietSession(t, 0)
+	wakeSession(t, s, ctx, room, sid)
+	h := heldArchiveStart{started: make(chan struct{}), release: make(chan struct{})}
+	s.boxes = h
+	session, err := s.store.Session(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := make(chan *contract.Error, 1)
+	go func() {
+		closed <- s.closeSession(ctx, contract.Principal{Kind: contract.PrincipalOwner}, session, false)
+	}()
+	<-h.started
+	channel, problem := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if _, ok := (<-channel).Body.(contract.Archive); !ok {
+		t.Fatal("closing box dispatched a turn")
+	}
+	close(h.release)
+	if problem := <-closed; problem != nil {
+		t.Fatal(problem)
+	}
+	var count int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM turns WHERE session=?", sid).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("turns=%d err=%v", count, err)
+	}
+}
+
 func TestCloseStartsStoppedBoxForArchive(t *testing.T) {
 	s, _, sid, ctx := setupArchive(t)
 	h := &dormantHost{}
