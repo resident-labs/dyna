@@ -53,6 +53,7 @@ type Service struct {
 	shellGeneration    uint64
 	admit              sync.Mutex
 	moveMu             sync.Mutex
+	readMu             sync.Mutex // preserves commit and live broadcast order
 	moveStops          []contract.BoxID
 	dormancy           dormancy
 	// transcriptMu serializes appends, so each offset check and write runs alone.
@@ -981,14 +982,16 @@ func (s *Service) ConversationRead(ctx context.Context, caller contract.Principa
 		}
 		home += ":" + string(req.Conversation.Session)
 	}
+	s.readMu.Lock()
+	defer s.readMu.Unlock()
+	var seq int64
 	err := s.store.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "INSERT INTO conversation_reads(room,conversation,seq) VALUES(?,?,?) ON CONFLICT(room,conversation) DO UPDATE SET seq=MAX(seq,excluded.seq)", req.Room, home, req.Seq)
-		return err
+		return tx.QueryRowContext(ctx, "INSERT INTO conversation_reads(room,conversation,seq) VALUES(?,?,?) ON CONFLICT(room,conversation) DO UPDATE SET seq=MAX(seq,excluded.seq) RETURNING seq", req.Room, home, req.Seq).Scan(&seq)
 	})
 	if err != nil {
 		return contract.ConversationReadResponse{}, failure(err)
 	}
-	event, err := s.event(req.Room, caller, contract.ConversationRead{Room: req.Room, Conversation: req.Conversation, Seq: req.Seq})
+	event, err := s.event(req.Room, caller, contract.ConversationRead{Room: req.Room, Conversation: req.Conversation, Seq: seq})
 	if err != nil {
 		return contract.ConversationReadResponse{}, failure(err)
 	}
