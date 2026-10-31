@@ -137,7 +137,7 @@
 </div>
 
 <style>
-  .composer { position: relative; flex: none; margin: 0 16px 16px; padding: 12px 14px 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
+  .composer { position: relative; flex: none; width: min(100% - 32px, var(--feed-reading-width) - 32px); margin: 0 auto 16px; padding: 12px 14px 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
   /* The box border is the textarea's focus ring. */
   .composer:has(textarea:focus-visible) { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
   /* A raised card over the feed at the box's top left, as Discord's mention list; v1's list spans the whole box. */
@@ -160,10 +160,16 @@
   @media (hover: none) { .quote button { width: 40px; height: 40px; } }
   .quoted { max-height: 4.5em; overflow: hidden; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
   .quoted :global(:is(p, ul, ol, pre, blockquote)) { margin: 0; }
+  .quoted :global(:is(h1, h2, h3, h4, h5, h6)) { margin: 0; font-size: inherit; }
   .files { margin: 4px 0 0; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   textarea { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; resize: none; field-sizing: content; min-height: 3em; max-height: 40vh; }
   /* iOS zooms into a field under 16 px when it takes focus. */
   @media (pointer: coarse) { textarea { font-size: 16px; } }
+  /* A phone keeps most of its screen for the feed: the box grows to a quarter of the visible height, then scrolls; the file tray scrolls too. */
+  @media (max-width: 640px) {
+    textarea { max-height: calc(var(--app-height, 100dvh) * 0.25); }
+    .tray { max-height: 84px; overflow-y: auto; }
+  }
   textarea:focus-visible { outline: none; }
   textarea::placeholder { color: var(--muted); }
   .actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
