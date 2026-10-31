@@ -39,14 +39,6 @@ func (s *Store) CommitTranscriptOffset(ctx context.Context, session contract.Ses
 	})
 }
 
-// SetTranscriptOffset records the acknowledged offset of a transcript file.
-func (s *Store) SetTranscriptOffset(ctx context.Context, session contract.SessionID, path string, offset int64) error {
-	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "INSERT INTO transcript_offsets(session,path,acked) VALUES(?,?,?) ON CONFLICT(session,path) DO UPDATE SET acked=max(transcript_offsets.acked,excluded.acked)", session, path, offset)
-		return err
-	})
-}
-
 // Transcripts lists files in their insertion order, oldest first.
 func (s *Store) Transcripts(ctx context.Context, session contract.SessionID) ([]contract.TranscriptFile, error) {
 	rows, err := s.Read().QueryContext(ctx, "SELECT path,acked FROM transcript_offsets WHERE session=? ORDER BY rowid", session)
