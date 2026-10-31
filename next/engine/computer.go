@@ -25,19 +25,19 @@ func (s *Service) computerEvent(ctx context.Context, session contract.SessionID,
 	return s.store.Write(ctx, func(tx *sql.Tx) error { _, err := s.store.AppendEvent(tx, e); return err })
 }
 
-func (s *Service) clearComputerLocked(id contract.SessionID) {
+// clearComputerLocked removes the current computer. The caller holds s.mu and
+// the session's computerLock, and writes the returned stop event after unlocking s.mu.
+func (s *Service) clearComputerLocked(id contract.SessionID) (contract.RoomID, bool) {
 	c := s.sessionLocked(id).computer
 	if c == nil {
-		return
+		return "", false
 	}
 	s.sessionLocked(id).computer = nil
 	for ch := range c.watchers {
 		close(ch)
 		delete(c.watchers, ch)
 	}
-	if c.state == contract.ComputerRunning {
-		_ = s.computerEvent(context.Background(), id, c.room, contract.ComputerStopped)
-	}
+	return c.room, c.state == contract.ComputerRunning
 }
 
 func (s *Service) ComputerChanged(ctx context.Context, caller contract.Principal, req contract.ComputerChangedRequest) (contract.ComputerChangedResponse, *contract.Error) {
@@ -52,9 +52,13 @@ func (s *Service) ComputerChanged(ctx context.Context, caller contract.Principal
 		return contract.ComputerChangedResponse{}, failure(err)
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	state := s.sessionLocked(session.ID)
+	s.mu.Unlock()
+	state.computerLock.Lock()
+	defer state.computerLock.Unlock()
+	s.mu.Lock()
 	if state.channel == nil {
+		s.mu.Unlock()
 		return contract.ComputerChangedResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "box channel is not ready"}
 	}
 	c := state.computer
@@ -63,11 +67,15 @@ func (s *Service) ComputerChanged(ctx context.Context, caller contract.Principal
 		state.computer = c
 	}
 	if c.state == req.To {
+		s.mu.Unlock()
 		return contract.ComputerChangedResponse{}, nil
 	}
+	s.mu.Unlock()
 	if err := s.computerEvent(ctx, session.ID, session.Room, req.To); err != nil {
 		return contract.ComputerChangedResponse{}, failure(err)
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	c.state = req.To
 	if req.To == contract.ComputerStopped {
 		c.lastFrame = nil

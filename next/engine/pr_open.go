@@ -51,9 +51,6 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 			return input, err
 		},
 		Execute: func(ctx context.Context, _ contract.OpID, args contract.OpArgs, who contract.Principal) contract.OpResult {
-			// The lock may be held for the GitHub client timeout of one minute.
-			unlock := s.lockBox(who.Session)
-			defer unlock()
 			session, head, err := lookup(ctx, who)
 			if err != nil {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: "session repository unavailable"}
@@ -101,23 +98,11 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 			link := fmt.Sprintf("https://github.com/%s/pull/%d", session.Repo, payload.Number)
 			result := contract.OpResult{Output: link, PR: &contract.PrOpenResult{Number: payload.Number, URL: link}}
 			err = func() error {
-				tree, err := s.store.RoomTree(ctx, session.Room)
-				if err != nil {
-					return err
-				}
 				event, err := s.event(session.Room, who, contract.PrOpened{Repo: session.Repo, Number: payload.Number, Session: who.Session, URL: link})
 				if err != nil {
 					return err
 				}
-				var deliveries []contract.Delivery
-				if who.Session != tree.Root() {
-					parent, err := tree.Handoff(who.Session)
-					if err != nil {
-						return err
-					}
-					deliveries = []contract.Delivery{{To: contract.Principal{Kind: contract.PrincipalSession, Session: parent.PRHolder}, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}}
-				}
-				return s.store.RecordPROpen(ctx, session.Repo, payload.Number, who.Session, event, deliveries)
+				return s.store.RecordPROpen(ctx, session.Repo, payload.Number, who.Session, event, nil)
 			}()
 			if err != nil {
 				result.Cause = contract.CauseInternal

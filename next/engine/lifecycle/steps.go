@@ -36,6 +36,9 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 	if !current {
 		return nil
 	}
+	if row.Want == store.WantClose || row.Want == store.WantDiscard {
+		return r.closeStep(ctx, row)
+	}
 	b := row.Box
 	next := b
 	var due time.Time
@@ -44,6 +47,11 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 	var workErr error
 	switch {
 	case row.Want == store.WantStop:
+		// A terminal admitted after this check ends with the box. WakeTerminal already set
+		// want=run, so the box restarts; serializing admission would bring back the per-session lock.
+		if r.view.OpenTerminal(b.Session) {
+			return r.store.WakeTerminal(ctx, b.ID)
+		}
 		workErr = r.boxes.Stop(ctx, b.ID)
 		if workErr == nil {
 			next.State = contract.BoxStopped
