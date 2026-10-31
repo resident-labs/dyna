@@ -48,12 +48,12 @@ func (devService) HostAdd(context.Context, contract.Principal, contract.HostAddR
 func (devService) AccountsQuota(context.Context, contract.Principal, contract.AccountsQuotaRequest) (contract.AccountsQuotaResponse, *contract.Error) {
 	at := func(d time.Duration) time.Time { return time.Now().Add(d) }
 	return contract.AccountsQuotaResponse{Accounts: []contract.AccountUsage{
-		{Provider: "anthropic", Label: "Claude · studio", Windows: []contract.UsageWindow{
+		{Provider: "claude", Label: "Claude · studio", Windows: []contract.UsageWindow{
 			{Name: "five_hour", UsedPercent: 62, Seconds: 18000, ResetsAt: at(2*time.Hour + 10*time.Minute)},
 			{Name: "seven_day", UsedPercent: 91, Seconds: 604800, ResetsAt: at(76 * time.Hour)}}},
-		{Provider: "openai", Label: "ChatGPT · team", Windows: []contract.UsageWindow{
+		{Provider: "codex", Label: "ChatGPT · team", Windows: []contract.UsageWindow{
 			{Name: "seven_day", UsedPercent: 35, Seconds: 604800, ResetsAt: at(100 * time.Hour)}}},
-		{Provider: "moonshot", Label: "Kimi · spare", Cause: contract.UsageSignInExpired},
+		{Provider: "kimi", Label: "Kimi · spare", Cause: contract.UsageSignInExpired},
 	}}, nil
 }
 
