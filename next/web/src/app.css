@@ -5,6 +5,8 @@
   --hover: rgb(60 40 20 / 4%); --focus: #3d5bd0; --text: #2a2723; --muted: #6b6b66; --attention: #a45500; --danger: #b3332e;
   /* Identity colors: the hue comes from the name, these set lightness and chroma per theme. */
   --id-name: 47% 0.13; --id-face: 89% 0.05; --id-initials: 38% 0.1;
+  /* The left edge of post text: the 16 px row padding, the 32 px avatar and a 12 px gap. */
+  --gutter: 60px;
   font: 15px/1.5 system-ui, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
@@ -16,9 +18,10 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); }
-.shell { display: grid; grid-template-columns: 240px 1fr; height: 100vh; }
+/* The app fills the viewport exactly; only the feed and the side panels scroll. */
+.shell { display: grid; grid-template-columns: 240px 1fr; grid-template-rows: minmax(0, 1fr); height: 100dvh; overflow: hidden; }
 .shell.open { grid-template-columns: 240px 1fr 260px; }
-main { display: flex; flex-direction: column; min-width: 0; }
+main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 aside { background: var(--sidebar); border-right: 1px solid var(--line); overflow-y: auto; }
 aside.members { border-right: 0; border-left: 1px solid var(--line); }
 .label { font-size: 12px; font-weight: 600; color: var(--muted); }
