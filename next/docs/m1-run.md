@@ -63,7 +63,9 @@ Run `next/scripts/deploy-trial.sh --dry-run` on the trial host to build and
 check the pair without installing it. Run it without `--dry-run` to install
 and check it. The script accepts `--prefix`, `--node-bin`, `--socket`, `--unit`,
 `--web-url`, `--web-host` and `--data` for other installations. It never
-restarts a second time after a failure.
+restarts a second time after a failure. After recovery, remove
+`<prefix>/bin/.deploy-pending` before another deploy. The marker preserves
+the rollback pair until an owner resolves the failure.
 
 An older binary cannot open a store after a schema step. To roll back that
 step, stop the unit first. Restore `bin/dyna-prev` and `bin/pi-prev.tgz` to

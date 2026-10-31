@@ -45,3 +45,8 @@ FAKE_STATUS=404 "$script" "${args[@]}" >"$tmp/out" 2>&1 && { echo 'Bad HTTP stat
 grep -q 'schema changed' "$tmp/out"
 test "$(grep -c restart "$TEST_LOG")" = 1
 test "$(<"$tmp/install/bin/dyna-prev")" = old
+# A retry must not replace the last known-good pair or restart again.
+"$script" "${args[@]}" >"$tmp/out" 2>&1 && { echo 'Unresolved deploy was accepted' >&2; exit 1; }
+grep -q 'previous deploy is unresolved' "$tmp/out"
+test "$(<"$tmp/install/bin/dyna-prev")" = old
+test "$(grep -c restart "$TEST_LOG")" = 1
