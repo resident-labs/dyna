@@ -13,5 +13,5 @@
   .who { flex: 1; min-width: 0; display: grid; line-height: 1.3; }
   .name, .status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .name { font-weight: 600; font-size: 14px; color: oklch(var(--id-name) var(--hue)); }
-  .status { color: var(--muted); font-size: 12px; }
+  .status { color: var(--muted); font-size: 12.5px; }
 </style>
