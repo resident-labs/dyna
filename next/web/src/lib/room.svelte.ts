@@ -154,8 +154,9 @@ export class RoomStore {
       this.shellJobs.set(session.id, session.shellJobs ?? 0);
       if (session.hadJobs || session.shellJobs) this.hadJobs.add(session.id);
     }
-    if ([...this.boxes.values()].some(box => box === "pending" || box === "failed" || box === "lost")) {
-      for (const [id, { at, body }] of await lastBoxChanges(this.room, list.seq + 1)) {
+    const unsure = [...this.boxes].flatMap(([id, box]) => box === "pending" || box === "failed" || box === "lost" ? [id] : []);
+    if (unsure.length) {
+      for (const [id, { at, body }] of await lastBoxChanges(this.room, list.seq + 1, unsure)) {
         if (body.to !== this.boxes.get(id)) continue;
         if (body.to === "failed" || body.to === "lost") this.boxFailures.set(id, { box: body.to, cause: body.cause, at });
         const reason = pendingReason(body);

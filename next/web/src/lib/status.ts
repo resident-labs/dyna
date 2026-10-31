@@ -17,19 +17,27 @@ export const statusOf = ({ broken, waiting, working, failed }: { broken: boolean
 export type BoxFailure = { box: "failed" | "lost"; cause?: FailureCause; at?: string };
 
 // session.list gives box states but not why a box failed or waits, so that comes from each session's newest box.changed.
-// One page is enough, as boxes change seldom. A failed read leaves the reasons unknown.
-export async function lastBoxChanges(room: string, beforeSeq: number): Promise<Map<string, Extract<Event, { type: "box.changed" }>>> {
-  const page = await call("events.list", { room, afterSeq: 0, beforeSeq, limit: 200, types: ["box.changed"] }).catch(() => undefined);
+// It reads pages back from the newest until it has placed each session, at most 5 pages, as turnFailures does. A
+// session it cannot place, as when a read fails, keeps its reason unknown.
+export async function lastBoxChanges(room: string, beforeSeq: number, sessions: Iterable<string>): Promise<Map<string, Extract<Event, { type: "box.changed" }>>> {
+  const unplaced = new Set(sessions);
   const found = new Map<string, Extract<Event, { type: "box.changed" }>>();
-  for (const event of page?.events ?? []) {
-    if (event.type === "box.changed" && event.seq > (found.get(event.body.session)?.seq ?? 0)) found.set(event.body.session, event);
+  for (let before = beforeSeq, pages = 0; unplaced.size && pages < 5; pages++) {
+    const page = await call("events.list", { room, afterSeq: 0, beforeSeq: before, limit: 200, types: ["box.changed"] }).catch(() => undefined);
+    const events = page?.events ?? [];
+    for (const event of events) {
+      if (event.type === "box.changed" && unplaced.has(event.body.session) && event.seq > (found.get(event.body.session)?.seq ?? 0)) found.set(event.body.session, event);
+    }
+    for (const session of found.keys()) unplaced.delete(session);
+    if (events.length < 200) break;
+    before = Math.min(...events.map(event => event.seq));
   }
   return found;
 }
 
-export async function boxFailures(room: string, beforeSeq: number): Promise<Map<string, BoxFailure & { seq: number }>> {
+export async function boxFailures(room: string, beforeSeq: number, sessions: Iterable<string>): Promise<Map<string, BoxFailure & { seq: number }>> {
   const found = new Map<string, BoxFailure & { seq: number }>();
-  for (const [session, { seq, at, body: { to, cause } }] of await lastBoxChanges(room, beforeSeq)) {
+  for (const [session, { seq, at, body: { to, cause } }] of await lastBoxChanges(room, beforeSeq, sessions)) {
     if (to === "failed" || to === "lost") found.set(session, { box: to, cause, at, seq });
   }
   return found;
