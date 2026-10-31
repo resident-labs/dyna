@@ -304,19 +304,13 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 				return contract.SessionStartResponse{}, invalid("parent box is closing")
 			}
 		}
-		for id := p.Box; id != ""; {
-			ancestry = append([]contract.BoxID{id}, ancestry...)
-			var found bool
-			for _, b := range boxes {
-				if b.ID == id {
-					id = b.BudgetParent
-					found = true
-					break
-				}
-			}
-			if !found {
-				break
-			}
+		path, err := s.store.BoxAncestry(ctx, p.Box)
+		if err != nil {
+			s.admit.Unlock()
+			return contract.SessionStartResponse{}, failure(err)
+		}
+		for _, b := range path {
+			ancestry = append(ancestry, b.ID)
 		}
 	}
 	placement, err := s.place(ctx, current, boxes)
@@ -444,21 +438,14 @@ func (s *Service) retryChild(ctx context.Context, id contract.SessionID) error {
 		s.admit.Unlock()
 		return nil
 	}
+	path, err := s.store.BoxAncestry(ctx, current.ID)
+	if err != nil {
+		s.admit.Unlock()
+		return err
+	}
 	var ancestry []contract.BoxID
-	for id := current.ID; id != ""; {
-		ancestry = append([]contract.BoxID{id}, ancestry...)
-		if id == current.ID {
-			id = current.BudgetParent
-			continue
-		}
-		next := contract.BoxID("")
-		for _, b := range boxes {
-			if b.ID == id {
-				next = b.BudgetParent
-				break
-			}
-		}
-		id = next
+	for _, b := range path {
+		ancestry = append(ancestry, b.ID)
 	}
 	current.Slice, err = box.SliceName(ancestry)
 	if err != nil {

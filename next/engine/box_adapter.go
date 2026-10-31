@@ -22,4 +22,6 @@ type BoxAdapter interface {
 	Remove(context.Context, contract.BoxID) error
 	Start(context.Context, contract.BoxID) error
 	Stop(context.Context, contract.BoxID) error
+	RemoveContainer(context.Context, contract.BoxID) error
+	Recreate(context.Context, BoxSpec, string) error
 }

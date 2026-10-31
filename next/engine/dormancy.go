@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"time"
 
@@ -146,21 +145,13 @@ func (s *Service) stopBox(ctx context.Context, id contract.BoxID) error {
 func (s *Service) startBox(ctx context.Context, current box.Box) error {
 	var startErr error
 	if current.Slice == "" {
-		boxes, err := s.store.Boxes(ctx)
+		path, err := s.store.BoxAncestry(ctx, current.ID)
 		if err != nil {
 			return err
 		}
 		var ancestry []contract.BoxID
-		for id := current.ID; id != ""; {
-			ancestry = append([]contract.BoxID{id}, ancestry...)
-			next := contract.BoxID("")
-			for _, b := range boxes {
-				if b.ID == id {
-					next = b.BudgetParent
-					break
-				}
-			}
-			id = next
+		for _, b := range path {
+			ancestry = append(ancestry, b.ID)
 		}
 		slice, err := box.SliceName(ancestry)
 		if err != nil {
@@ -173,11 +164,7 @@ func (s *Service) startBox(ctx context.Context, current box.Box) error {
 				return err
 			}
 		}
-		host, ok := s.boxes.(moveBoxes)
-		if !ok {
-			return fmt.Errorf("box host cannot recreate containers")
-		}
-		startErr = host.Recreate(ctx, BoxSpec{Box: current.ID, Session: current.Session, Host: current.Host, Slice: slice, Size: current.Size, Repos: repos}, current.Image)
+		startErr = s.boxes.Recreate(ctx, BoxSpec{Box: current.ID, Session: current.Session, Host: current.Host, Slice: slice, Size: current.Size, Repos: repos}, current.Image)
 		if startErr == nil {
 			startErr = s.store.SetRecreated(ctx, current.ID, slice)
 		}
@@ -211,34 +198,20 @@ func (s *Service) dormancyTransition(ctx context.Context, room contract.RoomID, 
 
 // wakeAncestors starts stopped budget parents before a child is admitted.
 func (s *Service) wakeAncestors(ctx context.Context, id contract.SessionID) error {
-	boxes, err := s.store.Boxes(ctx)
+	session, err := s.store.Session(ctx, id)
 	if err != nil {
 		return err
 	}
-	var parent contract.BoxID
-	for _, b := range boxes {
-		if b.Session == id && (b.State == contract.BoxStopped || b.State == contract.BoxPending) {
-			parent = b.BudgetParent
-			break
-		}
+	path, err := s.store.BoxAncestry(ctx, session.Box)
+	if err != nil || len(path) == 0 {
+		return err
 	}
-	var ancestors []contract.SessionID
-	for parent != "" {
-		found := false
-		for _, b := range boxes {
-			if b.ID == parent {
-				ancestors = append(ancestors, b.Session)
-				parent = b.BudgetParent
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("budget parent not found")
-		}
+	current := path[len(path)-1]
+	if current.State != contract.BoxStopped && current.State != contract.BoxPending {
+		return nil
 	}
-	for i := len(ancestors) - 1; i >= 0; i-- {
-		if err := s.reconcileBox(ctx, ancestors[i], true); err != nil {
+	for _, parent := range path[:len(path)-1] {
+		if err := s.reconcileBox(ctx, parent.Session, true); err != nil {
 			return err
 		}
 	}
