@@ -13,7 +13,7 @@
     if (next) { await tick(); items()[0]?.focus(); } else if (refocus) button.focus();
   }
   // A page the menu opened returns focus here when it closes.
-  export function focus() { button.focus(); }
+  export function focus(options?: FocusOptions) { button.focus(options); }
   // Up and Down move between entries, Home and End jump, Escape closes and Tab leaves.
   function move(event: KeyboardEvent) {
     const all = items();
