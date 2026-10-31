@@ -216,6 +216,8 @@
   .request .line { white-space: normal; }
   /* The owner acts on a failure's reason, so it wraps as well. */
   .failure .line, .hostless .line { white-space: normal; }
+  /* The sentence names the room, so it wraps on a phone instead of cutting the room's name. */
+  .hostless .title { white-space: normal; }
   .failure .line :global(.status), .hostless .line :global(.status) { display: inline; white-space: normal; }
   .failure .line :global(.status i), .hostless .line :global(.status i) { display: inline-block; margin: 0 5px 1px 0; }
   .failure .acts, .hostless .acts { width: auto; margin-left: auto; }
