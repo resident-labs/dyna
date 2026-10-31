@@ -132,7 +132,7 @@
         {@render form()}
       </section>
     {/if}
-    {#if !phone || !adding}
+    {#if !phone || !adding || inline}
       <p class="muted">{accounts.length} {accounts.length === 1 ? "account" : "accounts"} with {new Set(accounts.map(a => a.provider)).size} providers{#if accounts.some(a => a.state === "sign_in_expired")}{" · "}<StatusPill tone="error" label={`${accounts.filter(a => a.state === "sign_in_expired").length} sign-in expired`} />{/if}</p>
       {#each providers.filter(p => accounts.some(a => a.provider === p.id)) as provider (provider.id)}
         {@const group = accountRows(accounts.filter(a => a.provider === provider.id))}
@@ -149,9 +149,9 @@
                 <div class="muted">{account.rooms?.length ? `${account.rooms.length} rooms` : "Every room"}{#if status.line}{" · "}{status.line}{/if}</div></div>
                 {#if account.state === "sign_in_expired"}
                   <div class="expired"><span>Its limits show once it is signed in.</span><span>Remove it, then use Connect another to sign in again.</span></div>
+                {/if}
                   {#if removing === account.id}<div class="remove-confirm"><span>Remove this account? Dyna deletes its sign-in. You can connect it again later.</span><button class="btn danger" type="button" disabled={busy} onclick={() => void remove(account)}>Remove</button><button class="btn ghost" type="button" disabled={busy} onclick={() => { removing = undefined; removeFailed = false; }}>Keep</button>{#if removeFailed}<span class="error" role="alert">The account was not removed. Try again.</span>{/if}</div>
                   {:else}<button class="btn ghost" type="button" onclick={() => { removing = account.id; removeFailed = false; }}>Remove</button>{/if}
-                {/if}
               </div>
             {/each}
             {#if inline && selected?.id === provider.id}{@render form()}{/if}
