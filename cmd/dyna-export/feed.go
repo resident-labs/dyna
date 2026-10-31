@@ -52,6 +52,9 @@ func readFeed(data, roomID string) (roomFeed, error) {
 		}
 		event, ok := msg.Issue()
 		if !ok {
+			if msg.Kind == string(room.FamilyIssue) {
+				return roomFeed{}, fmt.Errorf("captured issue event is not decodable")
+			}
 			continue
 		}
 		id := event.IssueID

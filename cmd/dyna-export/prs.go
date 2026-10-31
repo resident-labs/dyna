@@ -10,14 +10,19 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-func readPRs(db *sql.DB, room string, author func(string) (contract.ImportedAuthor, error)) ([]contract.TrackedPR, []int, error) {
+type skippedPR struct {
+	Repo   string `json:"repo"`
+	Number int    `json:"number"`
+}
+
+func readPRs(db *sql.DB, room string, author func(string) (contract.ImportedAuthor, error)) ([]contract.TrackedPR, []skippedPR, error) {
 	rows, err := db.Query("SELECT repo,number,body FROM pr_records WHERE room=? AND closed=0 ORDER BY repo,number", room)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer rows.Close()
 	var result []contract.TrackedPR
-	var skipped []int
+	var skipped []skippedPR
 	for rows.Next() {
 		var repo string
 		var number int
@@ -36,7 +41,7 @@ func readPRs(db *sql.DB, room string, author func(string) (contract.ImportedAuth
 		}
 		rec := doc.Record
 		if !strings.EqualFold(rec.Host, "github.com") {
-			skipped = append(skipped, number)
+			skipped = append(skipped, skippedPR{Repo: rec.Host + "/" + repo, Number: number})
 			continue
 		}
 		owner := rec.Author
