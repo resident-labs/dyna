@@ -139,7 +139,7 @@ func (s *Store) BoxAncestry(ctx context.Context, id contract.BoxID) ([]box.Box, 
 	return result, rows.Err()
 }
 
-// WakeLostInventory makes a new box channel eligible for one immediate inventory.
+// WakeLostInventory schedules inventory; an in-flight check may defer it by up to 60 seconds.
 func (s *Store) WakeLostInventory(ctx context.Context, id contract.BoxID) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `UPDATE boxes SET due_at=0 WHERE id=? AND state='lost' AND due_at!=0`, id)
