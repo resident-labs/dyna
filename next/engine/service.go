@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
@@ -43,6 +44,8 @@ type Service struct {
 	now             func() time.Time
 	mu              sync.Mutex
 	channels        map[contract.SessionID]*boxChannel
+	activity        map[contract.SessionID]contract.TurnActivity
+	live            map[chan contract.Event]contract.RoomID
 	admit           sync.Mutex
 	boxLockMu       sync.Mutex
 	boxLocks        map[contract.SessionID]*sync.Mutex
@@ -62,7 +65,7 @@ type boxRun struct {
 }
 
 func New(st *store.Store, boxes BoxAdapter, profiles Profiles, now func() time.Time) *Service {
-	return &Service{hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun), dormancy: dormancy{unconfirmed: make(map[contract.BoxID]bool), failedStarts: make(map[contract.BoxID]bool)}}
+	return &Service{activity: make(map[contract.SessionID]contract.TurnActivity), live: make(map[chan contract.Event]contract.RoomID), hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun), dormancy: dormancy{unconfirmed: make(map[contract.BoxID]bool), failedStarts: make(map[contract.BoxID]bool)}}
 }
 
 // SetRepositories configures repository lookup before the service starts.
@@ -882,4 +885,31 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 		return contract.TurnOutputResponse{}, failure(err)
 	}
 	return contract.TurnOutputResponse{}, nil
+}
+
+func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, req contract.TurnActivityRequest) (contract.TurnActivityResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalSession {
+		return contract.TurnActivityResponse{}, forbidden()
+	}
+	if !utf8.ValidString(req.Label) || strings.ContainsAny(req.Label, "\r\n") || utf8.RuneCountInString(req.Label) > 80 {
+		return contract.TurnActivityResponse{}, invalid("activity label must be one line of at most 80 characters")
+	}
+	session, err := s.store.Session(ctx, caller.Session)
+	if err != nil {
+		return contract.TurnActivityResponse{}, failure(err)
+	}
+	body := contract.TurnActivity{Session: caller.Session, Turn: req.Turn, Label: req.Label}
+	event := contract.Event{Time: s.now(), Room: session.Room, From: caller, Body: body}
+	s.mu.Lock()
+	s.activity[caller.Session] = body
+	for ch, room := range s.live {
+		if room == session.Room {
+			select {
+			case ch <- event:
+			default:
+			}
+		}
+	}
+	s.mu.Unlock()
+	return contract.TurnActivityResponse{}, nil
 }

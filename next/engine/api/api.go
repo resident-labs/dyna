@@ -84,6 +84,7 @@ func (a *API) handler(c Caller) http.Handler {
 	})
 	call(mux, contract.MethodBoxHello, c, box, a.service.BoxHello)
 	call(mux, contract.MethodTurnOutput, c, box, a.service.TurnOutput)
+	call(mux, contract.MethodTurnActivity, c, box, a.service.TurnActivity)
 	call(mux, contract.MethodDeliveryDone, c, box, a.service.DeliveryDone)
 	call(mux, contract.MethodArchiveDone, c, box, a.service.ArchiveDone)
 	call(mux, contract.MethodTranscriptAppend, c, box, a.service.TranscriptAppend)
@@ -146,7 +147,12 @@ func (a *API) handler(c Caller) http.Handler {
 				if err != nil {
 					return
 				}
-				if _, err = fmt.Fprintf(w, "id: %d\ndata: %s\n\n", event.Seq, data); err != nil {
+				if event.Seq != 0 {
+					if _, err = fmt.Fprintf(w, "id: %d\n", event.Seq); err != nil {
+						return
+					}
+				}
+				if _, err = fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
 					return
 				}
 				f.Flush()

@@ -14,9 +14,14 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 		return nil, e
 	}
 	sub, cancel := s.store.Subscribe()
+	live := make(chan contract.Event, 16)
+	s.mu.Lock()
+	s.live[live] = room
+	s.mu.Unlock()
 	out := make(chan contract.Event)
 	go func() {
 		defer close(out)
+		defer func() { s.mu.Lock(); delete(s.live, live); s.mu.Unlock() }()
 		defer func() { cancel() }()
 		for {
 			events, err := s.store.Events(ctx, room, after, 256, nil)
@@ -35,6 +40,12 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 				continue
 			}
 			select {
+			case event := <-live:
+				select {
+				case out <- event:
+				case <-ctx.Done():
+					return
+				}
 			case _, ok := <-sub:
 				if !ok {
 					if ctx.Err() != nil {
@@ -77,6 +88,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			s.mu.Lock()
 			if s.channels[session.ID] == channel {
 				delete(s.channels, session.ID)
+				delete(s.activity, session.ID)
 			}
 			s.mu.Unlock()
 		}()
