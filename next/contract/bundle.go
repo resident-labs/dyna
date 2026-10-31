@@ -1,7 +1,6 @@
 package contract
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -408,26 +407,12 @@ func DecodeBundle[T interface {
 }](r io.Reader) (T, error) {
 	var b T
 	dec := json.NewDecoder(r)
-	var raw json.RawMessage
-	if err := dec.Decode(&raw); err != nil {
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&b); err != nil {
 		return b, fmt.Errorf("decode bundle: %w", err)
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return b, errors.New("decode bundle: trailing data")
-	}
-	var required struct {
-		Instructions *string `json:"instructions"`
-	}
-	if err := json.Unmarshal(raw, &required); err != nil {
-		return b, fmt.Errorf("decode bundle: %w", err)
-	}
-	if required.Instructions == nil {
-		return b, errors.New("decode bundle: missing or null instructions")
-	}
-	strict := json.NewDecoder(bytes.NewReader(raw))
-	strict.DisallowUnknownFields()
-	if err := strict.Decode(&b); err != nil {
-		return b, fmt.Errorf("decode bundle: %w", err)
 	}
 	if v := b.version(); v != BundleV1 {
 		return b, fmt.Errorf("decode bundle: version %d, want %d", v, BundleV1)
