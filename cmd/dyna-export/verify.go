@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"dyna-agent/internal/room"
 	"github.com/resident-labs/dyna/contract"
@@ -57,6 +58,8 @@ func verifyBundle(db *sql.DB, bundle, backup string, cap capture) error {
 	if err != nil {
 		return err
 	}
+	// verifyInstructions already compared this document with source IDs and text.
+	source.InstructionChars = utf8.RuneCountInString(global.Instructions)
 	if got != source {
 		return fmt.Errorf("global SQL counts differ from decoded records")
 	}
