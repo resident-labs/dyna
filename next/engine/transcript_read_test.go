@@ -2,6 +2,7 @@ package engine
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -151,5 +152,25 @@ func TestTranscriptTurnPageAndFullOutput(t *testing.T) {
 	full, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: caller.Session, Turn: "turn_a", Item: "call1"})
 	if problem != nil || strings.Contains(full.Chunk, "secretvalue") || !strings.Contains(full.Chunk, "[masked]") {
 		t.Fatalf("full=%+v error=%v", full, problem)
+	}
+}
+
+func TestTranscriptPostPreviewBoundsJSONEscapes(t *testing.T) {
+	checks := make([]contract.VisualCheck, 16)
+	for i := range checks {
+		checks[i].Detail = strings.Repeat("\x01", 4096)
+	}
+	attachments := make([]contract.Attachment, 16)
+	for i := range attachments {
+		attachments[i].Name = strings.Repeat("\x01", 255)
+		attachments[i].Media = strings.Repeat("\x01", 4096)
+	}
+	attachments[0].Visual = &contract.VisualCard{Checks: checks}
+	event := contract.Event{Body: contract.PostCreated{Text: strings.Repeat("\x01", 8192), Attachments: attachments}}
+	item := contract.TranscriptItem{Arguments: strings.Repeat("\x01", 8192)}
+	applyTranscriptPost(&item, event)
+	data, err := json.Marshal(item)
+	if err != nil || len(data) > 140<<10 {
+		t.Fatalf("preview bytes=%d, err=%v", len(data), err)
 	}
 }
