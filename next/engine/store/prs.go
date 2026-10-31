@@ -11,7 +11,7 @@ import (
 // The goal and approved head start empty.
 func (s *Store) RecordPROpen(ctx context.Context, repo contract.RepoName, number int, session contract.SessionID, event contract.Event, deliveries []contract.Delivery) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, "INSERT INTO pr_owners(repo,number,session,goal,approved_head) SELECT ?,?,id,'','' FROM sessions WHERE id=? AND closed_at IS NULL", repo, number, session)
+		result, err := tx.ExecContext(ctx, "WITH RECURSIVE ancestors(id,parent,closed_at,depth) AS (SELECT id,parent,closed_at,0 FROM sessions WHERE id=? UNION ALL SELECT s.id,s.parent,s.closed_at,a.depth+1 FROM sessions s JOIN ancestors a ON s.id=a.parent) INSERT INTO pr_owners(repo,number,session,goal,approved_head) SELECT ?,?,id,'','' FROM ancestors WHERE closed_at IS NULL ORDER BY depth LIMIT 1", session, repo, number)
 		if err != nil {
 			return err
 		}
