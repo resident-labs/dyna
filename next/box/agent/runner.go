@@ -59,8 +59,6 @@ func (r *Runner) Handle(ctx context.Context, message contract.BoxMessage) error 
 			return r.Harness.Abort(ctx)
 		}
 		return nil
-	case contract.Upgrade:
-		return nil // Release skew is deferred to M2 (spec 5.10).
 	default:
 		return fmt.Errorf("unsupported box message")
 	}
