@@ -147,9 +147,9 @@ func TestPrOpenCompletesBeforeSessionClose(t *testing.T) {
 		done <- result
 	}()
 	<-started
-	s.boxLockMu.Lock()
-	lock := s.boxLocks[session]
-	s.boxLockMu.Unlock()
+	s.mu.Lock()
+	lock := &s.sessions[session].lock
+	s.mu.Unlock()
 	if lock.TryLock() {
 		lock.Unlock()
 		close(release)

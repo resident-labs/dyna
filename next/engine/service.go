@@ -43,18 +43,11 @@ type Service struct {
 	hostexecTimeout    func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 	now                func() time.Time
 	mu                 sync.Mutex
-	channels           map[contract.SessionID]*boxChannel
-	activity           map[contract.SessionID]contract.TurnActivity
+	sessions           map[contract.SessionID]*sessionState
 	live               map[chan contract.Event]contract.RoomID
-	computers          map[contract.SessionID]*computerState
-	terminals          map[contract.SessionID]int
 	computerGeneration uint64
 	shellGeneration    uint64
-	shellWatches       map[contract.SessionID]*shellWatch
 	admit              sync.Mutex
-	boxLockMu          sync.Mutex
-	boxLocks           map[contract.SessionID]*sync.Mutex
-	boxRuns            map[contract.SessionID]*boxRun
 	moveMu             sync.Mutex
 	moveStops          []contract.BoxID
 	dormancy           dormancy
@@ -69,8 +62,30 @@ type boxRun struct {
 	closing bool
 }
 
+// sessionState is the engine's in-memory state for one session. s.mu guards every field except
+// lock, which serializes box changes for the session and is held across them.
+type sessionState struct {
+	lock      sync.Mutex
+	channel   *boxChannel
+	activity  contract.TurnActivity
+	computer  *computerState
+	terminals int
+	watch     *shellWatch
+	run       *boxRun
+}
+
+// sessionLocked creates the entry if needed. Callers hold s.mu and pass the id of a session that exists or is being started.
+func (s *Service) sessionLocked(id contract.SessionID) *sessionState {
+	state := s.sessions[id]
+	if state == nil {
+		state = &sessionState{}
+		s.sessions[id] = state
+	}
+	return state
+}
+
 func New(st *store.Store, boxes BoxAdapter, profiles Profiles, now func() time.Time) *Service {
-	return &Service{terminals: make(map[contract.SessionID]int), activity: make(map[contract.SessionID]contract.TurnActivity), live: make(map[chan contract.Event]contract.RoomID), hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), computers: make(map[contract.SessionID]*computerState), shellWatches: make(map[contract.SessionID]*shellWatch), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun), dormancy: dormancy{unconfirmed: make(map[contract.BoxID]bool), failedStarts: make(map[contract.BoxID]bool)}}
+	return &Service{sessions: make(map[contract.SessionID]*sessionState), live: make(map[chan contract.Event]contract.RoomID), hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now, dormancy: dormancy{unconfirmed: make(map[contract.BoxID]bool), failedStarts: make(map[contract.BoxID]bool)}}
 }
 
 // SetRepositories configures repository lookup before the service starts.
@@ -80,15 +95,11 @@ func (s *Service) SetRepositories(repos Repositories) { s.repos = repos }
 func (s *Service) SetTranscriptDir(dir string) { s.transcriptDir = dir }
 
 func (s *Service) lockBox(id contract.SessionID) func() {
-	s.boxLockMu.Lock()
-	lock := s.boxLocks[id]
-	if lock == nil {
-		lock = &sync.Mutex{}
-		s.boxLocks[id] = lock
-	}
-	s.boxLockMu.Unlock()
-	lock.Lock()
-	return lock.Unlock
+	s.mu.Lock()
+	state := s.sessionLocked(id)
+	s.mu.Unlock()
+	state.lock.Lock()
+	return state.lock.Unlock
 }
 
 func (s *Service) transition(ctx context.Context, room contract.RoomID, b box.Box, state contract.BoxState, reason string, cause contract.FailureCause) (box.Box, error) {
@@ -295,14 +306,14 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	defer unlock()
 	createCtx, cancel := context.WithCancel(ctx)
 	run := &boxRun{cancel: cancel}
-	s.boxLockMu.Lock()
-	s.boxRuns[session.ID] = run
-	s.boxLockMu.Unlock()
+	s.mu.Lock()
+	s.sessionLocked(session.ID).run = run
+	s.mu.Unlock()
 	defer func() {
 		cancel()
-		s.boxLockMu.Lock()
-		delete(s.boxRuns, session.ID)
-		s.boxLockMu.Unlock()
+		s.mu.Lock()
+		s.sessionLocked(session.ID).run = nil
+		s.mu.Unlock()
 	}()
 	response := contract.SessionStartResponse{Session: session.ID, Box: session.Box}
 	s.admit.Lock()
@@ -384,9 +395,9 @@ func (s *Service) createPlaced(ctx, writeCtx context.Context, room contract.Room
 		image, createErr = s.boxes.Create(ctx, BoxSpec{Box: current.ID, Session: current.Session, Host: current.Host, Slice: current.Slice, Size: current.Size, Repos: repos})
 	}
 	if createErr != nil {
-		s.boxLockMu.Lock()
+		s.mu.Lock()
 		closing := run.closing
-		s.boxLockMu.Unlock()
+		s.mu.Unlock()
 		if closing {
 			return nil
 		}
@@ -395,9 +406,9 @@ func (s *Service) createPlaced(ctx, writeCtx context.Context, room contract.Room
 	}
 	current.Image = image
 	s.admit.Lock()
-	s.boxLockMu.Lock()
+	s.mu.Lock()
 	closing := run.closing
-	s.boxLockMu.Unlock()
+	s.mu.Unlock()
 	if closing {
 		s.admit.Unlock()
 		return nil
@@ -483,10 +494,10 @@ func (s *Service) retryChild(ctx context.Context, id contract.SessionID) error {
 	}
 	createCtx, cancel := context.WithCancel(ctx)
 	run := &boxRun{cancel: cancel}
-	s.boxLockMu.Lock()
-	s.boxRuns[id] = run
-	s.boxLockMu.Unlock()
-	defer func() { cancel(); s.boxLockMu.Lock(); delete(s.boxRuns, id); s.boxLockMu.Unlock() }()
+	s.mu.Lock()
+	s.sessionLocked(id).run = run
+	s.mu.Unlock()
+	defer func() { cancel(); s.mu.Lock(); s.sessionLocked(id).run = nil; s.mu.Unlock() }()
 	current, err = s.transition(ctx, session.Room, current, contract.BoxCreating, "", "")
 	s.admit.Unlock()
 	if err != nil {
@@ -536,14 +547,14 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 		if err != nil {
 			return &contract.Error{Code: contract.ErrForbidden, Message: err.Error()}
 		}
-		s.boxLockMu.Lock()
+		s.mu.Lock()
 		for _, id := range order {
-			if id != session.ID && s.boxRuns[id] != nil {
-				s.boxLockMu.Unlock()
+			if id != session.ID && s.sessionLocked(id).run != nil {
+				s.mu.Unlock()
 				return &contract.Error{Code: contract.ErrConflict, Message: "child is starting"}
 			}
 		}
-		s.boxLockMu.Unlock()
+		s.mu.Unlock()
 		if err := s.store.MarkClosing(ctx, session.ID); err != nil {
 			return failure(err)
 		}
@@ -572,12 +583,12 @@ func (s *Service) closeSession(ctx context.Context, caller contract.Principal, s
 		s.admit.Unlock()
 		return e
 	}
-	s.boxLockMu.Lock()
-	if run := s.boxRuns[session.ID]; run != nil {
+	s.mu.Lock()
+	if run := s.sessionLocked(session.ID).run; run != nil {
 		run.closing = true
 		run.cancel()
 	}
-	s.boxLockMu.Unlock()
+	s.mu.Unlock()
 	s.admit.Unlock()
 	unlock := s.lockBox(session.ID)
 	defer unlock()
@@ -922,7 +933,7 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 		return contract.TurnActivityResponse{}, failure(err)
 	}
 	s.mu.Lock()
-	s.activity[caller.Session] = body
+	s.sessionLocked(caller.Session).activity = body
 	for ch, room := range s.live {
 		if room == session.Room || room == "" {
 			select {
