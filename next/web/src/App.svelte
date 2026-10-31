@@ -352,7 +352,7 @@
 {#snippet computerView(id: string)}
   <!-- Another session's view is a new view, so the old image runs its cleanup and drops its stream. -->
   {#key id}<ComputerView session={id} name={store?.names.get(id) ?? "Session"} activity={store?.activity.get(id)} {docked} bind:rect bind:element={computer}
-    onclose={() => void stopWatching()} ondock={() => { docked = !docked; if (docked && !wide.current) void showPanel(true); }} />{/key}
+    onclose={() => void stopWatching()} ondock={event => { docked = !docked; if (docked && !wide.current) void showPanel(true, event.detail > 0); }} />{/key}
 {/snippet}
 
 <svelte:window onkeydown={cycle} />
@@ -422,7 +422,7 @@
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name }))} />
   </main>
   {#if room}
-    <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} class:watching={jobsOf || (watching && docked)} aria-label="Sessions" tabindex="-1" bind:this={members} inert={drawer}>
+    <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} class:watching={jobsOf || (watching && docked)} aria-label="Sessions" tabindex="-1" role={panel && phone.current ? "dialog" : undefined} aria-modal={(panel && phone.current) || undefined} bind:this={members} inert={drawer}>
       {#if jobsOf}
         {#if wide.current || panel}<ShellView session={jobsOf} name={store?.names.get(jobsOf) ?? "Session"} onback={() => void closeJobs()} />{/if}
       {:else}
@@ -443,7 +443,7 @@
           title={hidden ? `${count(hidden, "session")} folded` : "Fold"} onclick={() => { if (!folded.delete(item.session)) folded.add(item.session); }}
           onkeydown={event => fold(event, item.session)}><Icon name="chevron" size={12} />{#if hidden}<span>{hidden}</span>{/if}</button>{/if}
         <a class="member" data-key={item.session} href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.session)}`}
-          onclick={event => { navigate(event); if (!wide.current && event.defaultPrevented) void showPanel(false); }}
+          onclick={event => { navigate(event); if (!wide.current && event.defaultPrevented) void showPanel(false, event.detail > 0); }}
           onkeydown={event => { void walkTree(event); if (parent) fold(event, item.session); }}
           aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{28 + depth * 14}px">
           <SessionRow name={item.name} root={!item.parent} {state} {dot} line={status(item.session)} {mark} /></a>
