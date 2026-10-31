@@ -52,6 +52,7 @@ export class EventWindow {
   // True once the first page has loaded, so an empty conversation is really empty.
   get ready(): boolean { this.subscribe(); return this.loaded; }
   get error(): unknown { this.subscribe(); return this.failure; }
+  get hasOlder(): boolean { this.subscribe(); return this.older; }
 
   // Loads the newest page once after has settled; the room passes its list load.
   open(after: Promise<void> = Promise.resolve()): Promise<void> {
@@ -87,6 +88,15 @@ export class EventWindow {
       this.release("oldest");
       if (!page.full && this.newest >= this.latest) this.present = true;
     });
+  }
+
+  // Loads older pages until the view has enough rows, the history ends, or another page
+  // would release the newest end: paging the reader did not ask for never leaves the present.
+  async fill(enough: () => Promise<boolean>): Promise<void> {
+    while (this.older && this.failure === undefined && this.seqs.length + PAGE <= WINDOW && !(await enough())) {
+      if (this.busy) await this.busy;
+      else await this.loadOlder();
+    }
   }
 
   async jumpToPresent(): Promise<void> {
