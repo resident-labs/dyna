@@ -38,6 +38,7 @@
       if (discard) {
         if (made) { if (!gone) onclose(false); }
         // After an exit nobody can press Try again, so a failed discard tries twice more.
+      // If all three fail, the engine still ends the code after 5 minutes: an accepted limit, listed in the PR body under Accepted limits.
         else if (gone) again = ++tries < 3;
         // The close stays asked for, so Try again tries to end the code again.
         else failed = true;
