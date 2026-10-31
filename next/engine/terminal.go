@@ -21,13 +21,11 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 	return result, nil
 }
 
-// Terminal prepares a target while holding its box lock against dormancy.
+// Terminal prepares a target and wakes its box.
 func (s *Service) Terminal(ctx context.Context, session contract.SessionID, host contract.HostName) ([]string, func(), *contract.Error) {
 	var id contract.BoxID
 	release := func() {}
 	if session != "" {
-		unlock := s.lockBox(session)
-		defer unlock()
 		record, err := s.store.Session(ctx, session)
 		if err != nil {
 			return nil, release, failure(err)
