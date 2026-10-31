@@ -9,3 +9,8 @@ export function requestGroups(waiting: Request[]): [string, Request[]][] {
   }
   return [...groups].sort((a, b) => b[1].length - a[1].length);
 }
+
+// Keyboard navigation follows the grouped screen order, then the shared requests.
+export function requestOrder(waiting: Request[], shared: Request[], groups: [string, Request[]][], grouped: boolean): Request[] {
+  return [...(grouped ? groups.flatMap(([, items]) => items) : waiting), ...shared];
+}
