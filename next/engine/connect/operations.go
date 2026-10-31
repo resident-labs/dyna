@@ -226,15 +226,16 @@ func (o *Operations) Cancel(ctx context.Context) error {
 		return errors.New("link is already active")
 	}
 	o.stop()
-	linked, err = o.state.ConnectLinked(ctx)
+	linked, err = o.state.ConnectLinked(context.WithoutCancel(ctx))
 	if err != nil {
+		o.launch(contract.ConnectStartRequest{})
 		return err
 	}
 	if linked {
 		o.launch(contract.ConnectStartRequest{})
 		return errors.New("link is already active")
 	}
-	return o.unlink(ctx)
+	return o.unlink(context.WithoutCancel(ctx))
 }
 
 func (o *Operations) Unlink(ctx context.Context) error {
