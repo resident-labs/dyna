@@ -116,7 +116,7 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	defer proxy.Listener.Close()
+	defer proxy.Close()
 	boxCtx, stopBoxes := context.WithCancel(ctx)
 	defer stopBoxes()
 	boxes := &Boxes{Store: st, Runtime: cfg.Runtime, HostData: cfg.HostData, Version: cfg.Version, PiTarball: pi, Context: boxCtx}
