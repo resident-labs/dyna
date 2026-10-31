@@ -261,13 +261,13 @@
           onkeydown={event => fold(event, item.session)}><Icon name="chevron" size={12} />{#if hidden}<span>{hidden}</span>{/if}</button>{/if}
         <a class="member" href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.session)}`} onclick={navigate}
           onkeydown={event => { walkTree(event); if (parent) fold(event, item.session); }}
-          aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{16 + depth * 14}px">
+          aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{28 + depth * 14}px">
           <SessionRow name={item.name} root={!item.parent} status={status(item.session)} />
           {#if trouble(item.session)}<StatusPill tone="failed">{store?.failed.has(item.session) ? "Failed" : trouble(item.session)}</StatusPill>
           {:else if hiddenTrouble}<StatusPill tone="failed">Failed</StatusPill>{/if}</a>
-          {#if jobs(item.session)}<button type="button" class="watch" data-jobs={item.session} aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
+          {#if jobs(item.session)}<button type="button" class="watch" class:open={jobsOf === item.session} data-jobs={item.session} aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
             title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={() => { jobsOf = item.session; }}><Icon name="terminal" /></button>{/if}
-          {#if store?.computers.has(item.session)}<button type="button" class="watch" data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
+          {#if store?.computers.has(item.session)}<button type="button" class="watch" class:open={watching === item.session} data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
             title={`Watch ${item.name}'s computer`} onclick={() => watch(item.session)}><Icon name="monitor" /></button>{/if}</div>
       {:else}<p class="hint">No sessions yet.</p>{/each}
       {/if}
@@ -280,9 +280,10 @@
   a.member { color: var(--text); text-decoration: none; }
   a.member[aria-current="page"] { background: var(--selected); }
   .row { position: relative; display: flex; align-items: center; }
-  /* The chevron sits in the gutter left of the avatar; a folded row stacks its hidden count under it, as in v1. */
-  .fold { all: unset; position: absolute; z-index: 1; top: 50%; transform: translateY(-50%); width: 16px; min-height: 24px; display: grid; justify-items: center; align-content: center;
-    padding: 2px 0; border-radius: 4px; color: var(--muted); font-size: 10px; line-height: 1.1; font-variant-numeric: tabular-nums; cursor: pointer; }
+  /* The chevron sits in the gutter left of the avatar. As in v1, a folded row's hidden count is part of the same
+     button, but it sits on the row line beside the chevron. */
+  .fold { all: unset; position: absolute; z-index: 1; top: 50%; transform: translateY(-50%); min-width: 16px; min-height: 24px; display: flex; align-items: center; justify-content: center;
+    padding: 0 1px; border-radius: 4px; color: var(--muted); font-size: 10px; line-height: 1.1; font-variant-numeric: tabular-nums; cursor: pointer; }
   .fold:hover { background: var(--hover); color: var(--text); }
   .fold:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
   .fold[aria-expanded="false"] :global(svg) { transform: rotate(-90deg); }
@@ -292,6 +293,8 @@
   .watch { all: unset; display: grid; place-items: center; width: 24px; height: 24px; margin-right: 8px; border-radius: 6px; color: var(--muted); cursor: pointer; }
   .watch:hover { background: var(--hover); color: var(--text); }
   .watch:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+  /* The name wins: a pointer shows a row's icons on hover, and the keyboard on focus; an open view keeps its icon. */
+  @media (hover: hover) { .row:not(:hover, :focus-within) .watch:not(.open) { display: none; } }
   /* The docked computer and the jobs view need 420 px. They dock beside the feed from 1024 px, where the
      feed keeps 540 px; below that they cover the feed, and Back or Escape closes them. */
   @media (min-width: 1024px) { .shell.open:has(aside.watching) { grid-template-columns: 64px 1fr 420px; } }
