@@ -8,6 +8,8 @@
   import Composer from "./lib/ui/Composer.svelte";
   import WorkingLine from "./lib/ui/WorkingLine.svelte";
   import SessionRow from "./lib/ui/SessionRow.svelte";
+  import SessionFace from "./lib/ui/SessionFace.svelte";
+  import AboutPanel from "./lib/ui/AboutPanel.svelte";
   import HostFoot from "./lib/ui/HostFoot.svelte";
   import VirtualList from "./lib/ui/VirtualList.svelte";
   import Icon from "./lib/ui/Icon.svelte";
@@ -19,7 +21,7 @@
   import ComputerView from "./lib/ui/ComputerView.svelte";
   import TermDock from "./lib/ui/TermDock.svelte";
   import Home from "./lib/ui/Home.svelte";
-  import { MediaQuery, SvelteSet } from "svelte/reactivity";
+  import { MediaQuery, SvelteMap, SvelteSet } from "svelte/reactivity";
   import RoomMenu from "./lib/ui/RoomMenu.svelte";
   import RequestsPanel from "./lib/ui/RequestsPanel.svelte";
   import RulesPanel from "./lib/ui/RulesPanel.svelte";
@@ -249,6 +251,12 @@
       default: return box === "pending" || box === "creating" || box === "starting" ? "Starting" : "Idle";
     }
   };
+  // A DM's header says only the status word; the live line and About say what the session does.
+  const stateWords = { waiting: "Waiting", failed: "Failed", working: "Working" };
+  let shown = $derived(session ? store?.status(session) ?? "idle" : "idle");
+  let word = $derived(session ? (shown === "idle" ? status(session) : stateWords[shown]) : "");
+  // The right panel opens on About in a DM and on Sessions in a room, and remembers the last choice per conversation.
+  const tabs = new SvelteMap<string, "sessions" | "about">();
   // Below 761 px the sessions panel is hidden; a header button opens it over the feed.
   // Opening moves focus into the panel; closing returns it to the button if the panel held it.
   let panel = $state(false);
@@ -343,6 +351,7 @@
   let title = $derived(!room ? "Home" : session ? store?.names.get(session) ?? "Session" : roomName);
   // Each fact shows once: profile, state and trouble live on the session's row. A closed session has no row.
   let closed = $derived(!!session && !!store?.ready && !store.sessions.has(session));
+  let about = $derived(!!session && !closed && (tabs.get(key) ?? "about") === "about");
   // room.list gives the feed's read position. Opening a session's DM shows the owner its failure, which clears the mark.
   $effect(() => { const read = attention.rooms.get(room ?? "")?.lastRead; if (store && read) store.noteRead({ kind: "feed" }, read); });
   // Only opening counts: a failure that arrives while the DM is open clears once its row is on screen.
@@ -403,12 +412,16 @@
         onclick={event => void showDrawer(true, true, event.detail > 0)}><Icon name="menu" /></button>
       {#if room && session}<a class="crumb" href={"/r/" + encodeURIComponent(room)} onclick={navigate}>{roomName}</a><span class="count">/</span>
       {:else if room}<span class="hash"><Icon name="room" /></span>{/if}
+      {#if session && !closed}<SessionFace name={title} root={!store?.sessions.get(session)?.parent} dot={shown} size={24} />{/if}
       <span class="heading"><strong>{title}</strong>
-        {#if closed}<span class="count">· closed</span>{/if}
+        {#if closed}<span class="count">· closed</span>{:else if word}<span class="count">{word}</span>{/if}
         {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session") + (working ? ` · ${working} working` : "")}</span>{/if}</span>
       {#if store && !unavailable}<button type="button" class="requests" class:waiting={store.waiting > 0} bind:this={requestsButton} aria-pressed={section === "requests"}
         aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section === "requests" ? undefined : "requests"; }}>
         <Icon name="inbox" />{#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
+        <!-- One click to the session's shell and computer; neither shows when the session has none. -->
+        {#if session && !closed && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title="Open a terminal in this session's box" onclick={() => terminals?.shell(session, title)}><Icon name="terminal" /><span>Terminal</span></button>{/if}
+        {#if session && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={() => watch(session)}><Icon name="monitor" /><span>Computer</span></button>{/if}
         <span class="room-menu"><RoomMenu bind:this={roomMenu} onterminal={() => void terminals?.pick()} onrules={() => { section = "rules"; }} /></span>{/if}
       {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={store?.counts.failed ? "Sessions, a session failed" : "Sessions"}
         title="Sessions" aria-controls="sessions" aria-expanded={panel} onclick={event => void showPanel(!panel, event.detail > 0)}><Icon name="people" />{#if store?.ready}<span class="count phone">{store.sessions.size}</span>{/if}
@@ -439,9 +452,13 @@
       {#if watching && docked && (wide.current || panel)}{@render computerView(watching)}{/if}
       {#if phone.current}<button type="button" class="handle" aria-label={sheetFull ? "Shrink the sessions sheet" : "Expand the sessions sheet"}
         onpointerdown={drag} onclick={() => { if (!dragged) sheetFull = !sheetFull; dragged = false; }}></button>{/if}
-      <header><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}</header>
+      {#if session && !closed}<header class="tabs">
+        <button type="button" aria-pressed={!about} onclick={() => tabs.set(key, "sessions")}>Sessions</button>
+        <button type="button" aria-pressed={about} onclick={() => tabs.set(key, "about")}>About</button></header>
+      {:else}<header><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}</header>{/if}
       <!-- A long tree renders only its visible rows, through the feed's shared list (spec: long lists are virtual). -->
-      {#if tree.length}<div class="tree"><VirtualList bind:this={sessionList} items={tree} key={treeKey}
+      {#if about && session && store}<AboutPanel {store} room={room} {session} line={shown === "failed" ? `Failed · ${status(session)}` : status(session)} {navigate} onjobs={() => { jobsOf = session; }} />
+      {:else if tree.length}<div class="tree"><VirtualList bind:this={sessionList} items={tree} key={treeKey}
         label="Session list" role="group" align="top" estimate={48}>
         {#snippet row(entry: TreeRow)}
         {#if entry.kind === "idle"}<button type="button" class="idle" data-key={treeKey(entry)} aria-expanded={entry.open} style:padding-left="{entry.depth * 14}px" onkeydown={walkTree}
@@ -474,6 +491,15 @@
   a.member { min-height: 48px; color: var(--text); text-decoration: none; }
   /* The panel's header matches the room header: a 16 px title with its muted counts beside it. */
   aside.members > header strong { font-size: 16px; }
+  .tabs { gap: 4px; }
+  .tabs button { padding: 4px 10px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+  .tabs button:hover { background: var(--hover); color: var(--text); }
+  .tabs button[aria-pressed="true"] { background: var(--selected); color: var(--text); }
+  .tool { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+  .tool:hover { background: var(--hover); }
+  /* On a phone the drawer leads back to the room, so the session's name gets the crumb's width. */
+  @media (max-width: 760px) { .crumb, .crumb + .count { display: none; } }
+  @media (max-width: 760px) { .tool { justify-content: center; width: 40px; height: 40px; padding: 0; border: 0; } .tool span { display: none; } }
   /* Requests is a header icon, as the menu and the panel toggle are: 16 px in a 28 px hit area. While requests wait for
      the owner it is one 40 px chip: the icon and StatusPill's count on the warning wash. */
   .requests { margin-left: auto; display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 28px; height: 28px; padding: 0;
