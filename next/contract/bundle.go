@@ -87,6 +87,7 @@ type RoomBundle struct {
 	Questions     []QuestionBundle `json:"questions"`
 	Subscriptions []Subscription   `json:"subscriptions"` // room and session scope
 	Handoff       []SessionHandoff `json:"handoff"`
+	HookHandoff   []HookHandoff    `json:"hookHandoff,omitempty"`
 	Counts        BundleCounts     `json:"counts"`
 }
 
@@ -305,6 +306,12 @@ type QuestionBundle struct {
 	Cwd       string         `json:"cwd,omitempty"`
 	Reason    string         `json:"reason,omitempty"`
 	Asked     time.Time      `json:"asked"`
+}
+
+// HookHandoff names an active v1 hook that needs manual recreation.
+type HookHandoff struct {
+	Name   string   `json:"name"`
+	Fields []string `json:"fields"`
 }
 
 // SessionHandoff tells root about one session that was open in v1.
