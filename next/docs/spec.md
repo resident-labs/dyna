@@ -793,7 +793,7 @@ Close writes `want=close` for the whole subtree, or `want=discard` when the owne
 
 Closing a dormant session starts its box for the archive without admission. Archiving boxes are idle and short-lived, so many closed at once can briefly overcommit their host.
 
-The engine deletes archive refs after 14 days. `dyna session restore <session>` starts a new box from the archive. If an archive push fails, the box stays in `closing` with a reason. If removal fails, the box stays in `closing` with the error as its reason, and the reconciler retries removal after 30 s. A box is never deleted without its archive, except through `dyna session close --discard` (owner only), for a box that cannot start; it deletes the box with no archive.
+The engine deletes archive refs after 14 days. `dyna session restore <session>` starts a new box from the archive. The box agent retries an archive a few times before it reports a failure. If an archive push still fails, the box stays in `closing` with a reason. If removal fails, the box stays in `closing` with the error as its reason, and the reconciler retries removal after 30 s. A box is never deleted without its archive, except through `dyna session close --discard` (owner only), for a box that cannot start; it deletes the box with no archive.
 
 Table: `archives` (`session`, `repo`, `ref`, `commit_sha`, `created_at`, `expires_at`, PK `(session, repo)`).
 

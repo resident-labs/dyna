@@ -2,11 +2,13 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -72,7 +74,8 @@ func archiveRepo(ctx context.Context, root string, session contract.SessionID, r
 		status, err = git(ctx, dir, "", "status", "--porcelain")
 		if err == nil && status == "" {
 			remote, err = git(ctx, dir, "", "ls-remote", "origin", "refs/heads/"+repo.Branch)
-			if err == nil && strings.Fields(remote) != nil && strings.Fields(remote)[0] == head {
+			fields := strings.Fields(remote)
+			if err == nil && len(fields) > 0 && fields[0] == head {
 				result.Commit, result.Skipped = head, true
 				return
 			}
@@ -111,4 +114,28 @@ func archiveRepo(ctx context.Context, root string, session contract.SessionID, r
 		result.Error = err.Error()
 	}
 	return
+}
+
+func archiveAndReport(ctx context.Context, root string, session contract.SessionID, repos []contract.BoxRepo, git gitRunner, after func(time.Duration) <-chan time.Time, done func(context.Context, contract.ArchiveDoneRequest) error) error {
+	if len(repos) == 0 {
+		return done(ctx, contract.ArchiveDoneRequest{})
+	}
+	for _, repo := range repos {
+		var result contract.ArchiveDoneRequest
+		attempts := 0
+		if err := retryClose(ctx, after, func(ctx context.Context) error {
+			result = archiveRepo(ctx, root, session, repo, git)
+			attempts++
+			if result.Error != "" && attempts < 5 {
+				return errors.New(result.Error)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		if err := done(ctx, result); err != nil {
+			return err
+		}
+	}
+	return nil
 }
