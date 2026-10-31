@@ -9,7 +9,7 @@
   import SessionRow from "./lib/ui/SessionRow.svelte";
   import HostFoot from "./lib/ui/HostFoot.svelte";
   import Icon from "./lib/ui/Icon.svelte";
-  import Avatar from "./lib/ui/Avatar.svelte";
+  import Avatar, { setSessionLabels } from "./lib/ui/Avatar.svelte";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
   import { causes, count, quoted, type Quote } from "./lib/feed.ts";
   import { urgency, type Status } from "./lib/status.ts";
@@ -23,12 +23,12 @@
   import RequestsPanel from "./lib/ui/RequestsPanel.svelte";
   import { Attention } from "./lib/attention.svelte.ts";
   import { mentionable, parseMentions } from "./lib/mentions.ts";
-  import { roomInitials } from "./lib/identity.ts";
+  import { distinctInitials } from "./lib/identity.ts";
   import type { Conversation, PostRequest, SessionStarted } from "./lib/contract.gen.ts";
   const attention = new Attention();
   let rooms = $derived([...attention.rooms.values()]);
   // Distinct initials for every room avatar, so two rooms never look alike on the rail.
-  let initials = $derived(roomInitials(rooms.map(item => item.name)));
+  let initials = $derived(distinctInitials(rooms.map(item => item.name)));
   // While the engine is not reachable, open runs again by itself: after a growing wait while the page is visible, and at
   // once when a hidden page becomes visible again. Try again runs it at once.
   // An open runs alone, so Try again or a wake during one adds no second stream; none starts after stop.
@@ -72,6 +72,9 @@
   let room = $derived(segment(/^\/r\/([^/]+)/));
   let session = $derived(segment(/^\/r\/[^/]+\/s\/([^/]+)/));
   let store: RoomStore | undefined = $state();
+  // The same rule per room for its open sessions.
+  let sessionInitials = $derived(distinctInitials([...store?.sessions.values() ?? []].map(item => item.name)));
+  setSessionLabels(() => sessionInitials);
   $effect(() => {
     // Home has no room, so no room controls or panels may show one.
     if (!room) { store = undefined; return; }
