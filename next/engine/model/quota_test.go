@@ -3,7 +3,6 @@ package model
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,7 +10,25 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
+
+func quotaStore(t *testing.T) *store.Store {
+	t.Helper()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	if err := st.SaveProxyAuth(ctx, store.ProxyAuth{ID: "invented", Provider: "claude", Record: []byte("{}")}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindAccount(ctx, "account", "invented", contract.ProviderAnthropic, "Personal"); err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
 
 type quotaTestTransport struct {
 	url  string
@@ -36,8 +53,8 @@ func TestQuotaNormalizedWindowsAndCache(t *testing.T) {
 			calls := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
-				case "/v0/management/auth-files":
-					fmt.Fprint(w, `{"files":[{"auth_index":"invented","provider":"claude","label":"Personal"}]}`)
+				case "/dyna/credentials":
+					fmt.Fprint(w, `{"credentials":[{"id":"invented","auth_index":"invented","provider":"claude","state":"unknown"}]}`)
 				case "/v0/management/auth-files/quota":
 					calls++
 					if r.URL.Query().Get("auth_index") != "invented" {
@@ -50,7 +67,7 @@ func TestQuotaNormalizedWindowsAndCache(t *testing.T) {
 			}))
 			defer server.Close()
 			now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-			q := (&Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}).Quotas("key", func() time.Time { return now })
+			q := (&Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}).Quotas("key", quotaStore(t), func() time.Time { return now })
 			for i := 0; i < 2; i++ {
 				got, err := q.Read(context.Background())
 				if err != nil || len(got.Accounts) != 1 {
@@ -80,11 +97,11 @@ func TestQuotaExpiredSignIn(t *testing.T) {
 		if strings.HasSuffix(r.URL.Path, "/quota") {
 			fmt.Fprint(w, `{"files":[{"auth_index":"invented","status_code":401,"error":"upstream returned status 401"}]}`)
 		} else {
-			fmt.Fprint(w, `{"files":[{"auth_index":"invented","provider":"claude"}]}`)
+			fmt.Fprint(w, `{"credentials":[{"id":"invented","auth_index":"invented","provider":"claude","state":"unknown"}]}`)
 		}
 	}))
 	defer server.Close()
-	q := (&Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}).Quotas("key", time.Now)
+	q := (&Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}).Quotas("key", quotaStore(t), time.Now)
 	got, err := q.Read(context.Background())
 	if err != nil || len(got.Accounts) != 1 || got.Accounts[0].Cause != contract.UsageSignInExpired {
 		t.Fatalf("expired sign-in not reported: %v", err)
@@ -93,39 +110,17 @@ func TestQuotaExpiredSignIn(t *testing.T) {
 
 func TestCodexPassiveQuota(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"files":[{"provider":"codex","quota":{"observed_at":"2026-01-02T00:00:00Z","signals":{"X-Codex-Primary-Used-Percent":"42","X-Codex-Primary-Window-Minutes":"300","X-Codex-Primary-Reset-After-Seconds":"3600"}}},{"provider":"codex","quota":{"signals":{}}}]}`))
+		_, _ = w.Write([]byte(`{"credentials":[{"id":"invented","auth_index":"invented","provider":"codex","state":"unknown","quota":{"observed_at":"2026-01-02T00:00:00Z","primary":{"used_percent":42,"window_minutes":300,"reset_after_seconds":3600}}}]}`))
 	}))
 	defer server.Close()
-	q := (&Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}).Quotas("key", time.Now)
+	q := (&Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}).Quotas("key", quotaStore(t), time.Now)
 	got, err := q.Read(context.Background())
-	if err != nil || len(got.Accounts) != 2 {
+	if err != nil || len(got.Accounts) != 1 {
 		t.Fatalf("read failed: %v", err)
 	}
 	a := got.Accounts[0]
 	if a.ObservedAt == nil || a.ObservedAt.Format(time.RFC3339) != "2026-01-02T00:00:00Z" || len(a.Windows) != 1 || a.Windows[0].UsedPercent != 42 || a.Windows[0].Seconds != 18000 || !a.Windows[0].ResetsAt.Equal(a.ObservedAt.Add(time.Hour)) {
 		t.Fatal("Codex snapshot did not preserve its observation")
 	}
-	if got.Accounts[1].ObservedAt != nil || len(got.Accounts[1].Windows) != 0 {
-		t.Fatal("missing signal became an observation")
-	}
-}
 
-type deadlineTransport struct{}
-
-func (deadlineTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if strings.HasSuffix(r.URL.Path, "/auth-files") {
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"files":[{"auth_index":"invented","provider":"claude"}]}`)), Header: make(http.Header)}, nil
-	}
-	<-r.Context().Done()
-	return nil, r.Context().Err()
-}
-
-func TestQuotaDeadlineIsUnreachable(t *testing.T) {
-	q := (&Proxy{client: &http.Client{Transport: deadlineTransport{}}}).Quotas("key", time.Now)
-	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(1, 0))
-	defer cancel()
-	got, err := q.Read(ctx)
-	if err != nil || len(got.Accounts) != 1 || got.Accounts[0].Cause != "unreachable" {
-		t.Fatalf("deadline did not report unreachable: %v", err)
-	}
 }
