@@ -195,7 +195,7 @@ func TestHelloBeforeCreateReturns(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if fail && (b.State != contract.BoxFailed || b.Reason != "create failed") {
+			if fail && (b.State != contract.BoxFailed || b.Reason != string(contract.CauseCreateFailed)) {
 				t.Fatalf("failed create: %+v", b)
 			}
 			if !fail && (b.State != contract.BoxReady || b.Image != "image") {
