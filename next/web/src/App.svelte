@@ -11,15 +11,13 @@
   import Settings from "./lib/ui/Settings.svelte";
   import { linkCode } from "./lib/devices.ts";
   import Feed from "./lib/ui/Feed.svelte";
-  import SessionWork from "./lib/ui/SessionWork.svelte";
-  import { readWork } from "./lib/session-work.ts";
+  import SessionThread from "./lib/ui/SessionThread.svelte";
   import VisualView from "./lib/ui/VisualView.svelte";
   import type { VisualVersion } from "./lib/visual.ts";
   import StatusPill from "./lib/ui/StatusPill.svelte";
   import Composer from "./lib/ui/Composer.svelte";
   import WorkingLine from "./lib/ui/WorkingLine.svelte";
   import SessionRow from "./lib/ui/SessionRow.svelte";
-  import SessionFace from "./lib/ui/SessionFace.svelte";
   import AboutPanel from "./lib/ui/AboutPanel.svelte";
   import HostFoot from "./lib/ui/HostFoot.svelte";
   import VirtualList from "./lib/ui/VirtualList.svelte";
@@ -284,10 +282,12 @@
     // Mentions come from the owner's own words only, so an @name inside a forwarded post wakes nobody.
     const post = session ? { text, mentions: [] } : parseMentions(text, store.sessions.values());
     // A forward carries the post's files; the engine keeps each file once, by hash, for every conversation.
-    void view?.send({ room, text: quote ? quoted(quote, post.text) : post.text, mentions: post.mentions.length ? post.mentions : undefined,
-      home: session ? home : undefined, attachments: attachments.length ? attachments : undefined });
+    const request: PostRequest = { room, text: quote ? quoted(quote, post.text) : post.text, mentions: post.mentions.length ? post.mentions : undefined,
+      home: session ? home : undefined, attachments: attachments.length ? attachments : undefined };
+    if (session) void thread?.send(request); else void view?.send(request);
   }
   let view: Feed | undefined = $state();
+  let thread: SessionThread | undefined = $state();
   let rail: HTMLElement | undefined = $state();
   let feed: HTMLDivElement | undefined = $state();
   let page: HTMLElement | undefined = $state();
@@ -296,26 +296,13 @@
   let computer: HTMLElement | undefined = $state();
   let terminals: TermDock | undefined = $state();
   let jobsTool: JobsTool | undefined = $state();
+  let roomMenu: RoomMenu | undefined = $state();
   let settings: HTMLElement | undefined = $state();
   let settingsMenu: HTMLButtonElement | undefined = $state();
   let dock: HTMLElement | undefined = $state();
   let palette = $state(false);
   let paletteOpener: HTMLElement | undefined;
   let jumpSeq: number | undefined = $state();
-  let workTab = $state(false), workTotal: number | undefined = $state();
-  $effect(() => {
-    const current = session;
-    workTab = false; workTotal = undefined;
-    let cancelled = false;
-    if (current) void readWork(current).then(page => { if (!cancelled) workTotal = page.total; }).catch(() => {});
-    return () => { cancelled = true; };
-  });
-  function workFeed(seq: number) {
-    if (!room) return;
-    history.pushState(null, "", `/r/${encodeURIComponent(room)}`);
-    follow();
-    void tick().then(() => { jumpSeq = seq; });
-  }
   const searchPosts: SearchCall = request => call("post.search", request);
   function closePalette() {
     palette = false;
@@ -483,7 +470,7 @@
     await tick();
     if (!held) return;
     if (opener?.isConnected) opener.focus({ focusVisible: !tapped });
-    else if (!members?.getClientRects().length) toggle?.focus({ focusVisible: !tapped });
+    else if (!members?.getClientRects().length) { if (toggle?.isConnected) toggle.focus({ focusVisible: !tapped }); else roomMenu?.focus({ focusVisible: !tapped }); }
     else await focusRowIcon(id, tapped);
   }
   // Every refusal shows in the view as a notice; its next batch goes on.
@@ -543,7 +530,7 @@
     if (!open) sheetFull = false;
     await tick();
     // Home's strip leaves with its last active room, and then the menu button takes focus.
-    if (open) members?.focus({ focusVisible: !tapped }); else if (held) (toggle?.isConnected ? toggle : menuButton)?.focus({ focusVisible: !tapped });
+    if (open) members?.focus({ focusVisible: !tapped }); else if (held) { if (toggle?.isConnected) toggle.focus({ focusVisible: !tapped }); else if (session) roomMenu?.focus({ focusVisible: !tapped }); else menuButton?.focus({ focusVisible: !tapped }); }
   }
   // The sessions the feed composer offers after @: the root first, then by name. A DM offers none.
   let mentions = $derived(session ? [] : [...store?.sessions.values() ?? []].filter(mentionable)
@@ -575,7 +562,6 @@
   });
 </script>
 
-{#snippet workTabs(placement: string)}{#if session && store && !unavailable}<nav class="work-tabs {placement}" aria-label="Session view"><button type="button" aria-current={!workTab ? "page" : undefined} onclick={() => workTab = false}>Messages</button><button type="button" aria-current={workTab ? "page" : undefined} onclick={() => workTab = true}>Work{#if workTotal !== undefined}<span class="count">{workTotal}</span>{/if}{#if store.unseen(session)} <StatusPill tone="failed" label="Unseen failure" dot />{/if}</button></nav>{/if}{/snippet}
 
 {#snippet intro(history: boolean)}
   <!-- A DM with history needs only the one muted line. -->
@@ -633,34 +619,37 @@
   {#if drawer || (panel && phone.current)}<button type="button" class="scrim" tabindex="-1" aria-label={drawer ? "Close the menu" : room ? "Close the sessions" : "Close the active rooms"}
     onclick={() => void (drawer ? showDrawer(false, true, true) : showPanel(false, true))}></button>{/if}
   <main bind:clientWidth={mainWidth} class:header-tight={mainWidth <= 1000} class:header-narrow={mainWidth <= 600} inert={drawer || (panel && phone.current) || covered || inSettings}>
-    <header class="bar" class:work-phone={!!session && workTab && phone.current}>{#if room && session && phone.current}<a class="menu-toggle" href={"/r/" + encodeURIComponent(room)} aria-label={`Back to ${roomName}`} title={`Back to ${roomName}`}
+    <header class="bar" class:session-bar={!!session}>{#if room && session && phone.current}<a class="menu-toggle" href={"/r/" + encodeURIComponent(room)} aria-label={`Back to ${roomName}`} title={`Back to ${roomName}`}
         onclick={event => { const tapped = event.detail > 0; navigate(event); void tick().then(() => menuButton?.focus({ focusVisible: !tapped })); }}><Icon name="back" /></a>
       {:else}<button type="button" class="menu-toggle" bind:this={menuButton} aria-label="Rooms and pages" title="Rooms and pages" aria-expanded={drawer}
         onclick={event => void showDrawer(true, true, event.detail > 0)}><Icon name="menu" /></button>{/if}
       {#if room && session}<a class="crumb" href={"/r/" + encodeURIComponent(room)} onclick={navigate}>{roomName}</a><span class="count">/</span>
       {:else if room}<span class="hash"><Icon name="room" /></span>{/if}
-      {#if session && !closed}<SessionFace name={title} root={!store?.sessions.get(session)?.parent} dot={shown} size={24} />{/if}
+      {#if session && !closed}<Avatar kind="session" name={title} root={!store?.sessions.get(session)?.parent} size={24} />{/if}
       <span class="heading"><strong>{title}</strong>
-        {#if closed && !missing}<span class="count">closed</span>{:else if word && !missing}<span class="count word">{word}</span>{/if}
+        {#if closed && !missing}<span class="count">closed</span>{:else if !session && word && !missing}<span class="count word">{word}</span>{/if}
         {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session")}</span>{/if}</span>
-      {@render workTabs("desktop-tabs")}
-      {#if store && !unavailable}{#if room}<JobsTool bind:this={jobsTool} sessions={toolSessions} allSessions={jobSessions} failures={toolFailures} allFailures={[...store.failedJobs]} phone={phone.current}
+      {#if store && !unavailable}{#if session}<span class="session-spacer"></span>{/if}{#if room && !session}<JobsTool bind:this={jobsTool} sessions={toolSessions} allSessions={jobSessions} failures={toolFailures} allFailures={[...store.failedJobs]} phone={phone.current} compact={!!session}
         onopen={(item, job) => terminals?.openJob(item, job)} onseen={key => store?.failedJobs.delete(key)} />{/if}
-        <button type="button" class="requests" class:waiting={store.waiting > 0} bind:this={requestsButton} aria-pressed={section === "requests"}
+        {#if !session || store.waiting}<button type="button" class="requests" class:waiting={store.waiting > 0} bind:this={requestsButton} aria-pressed={section === "requests"}
         aria-label={store.waiting ? `${store.waiting} requests wait for you` : "Requests"} title="Requests" onclick={() => { section = section === "requests" ? undefined : "requests"; }}>
-        <Icon name="inbox" />{#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
+        <Icon name="inbox" />{#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>{/if}
         <!-- One click to the session's shell and computer; neither shows when the session has none. -->
-        {#if session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title={terminals?.hasShell(session) ? "Show this session's terminal" : "Open a terminal in this session's box"} aria-pressed={terminals?.hasShell(session) ?? false} onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /><span>Terminal</span></button>{/if}
-        {#if session && attention.can("computers") && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /><span>Computer</span></button>{/if}
-        <span class="room-menu"><RoomMenu {paused} operate={attention.can("operate")} admin={attention.can("admin")} onpause={pause} oninstructions={() => { section = "instructions"; }} /></span>{/if}
+        {#if session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title={terminals?.hasShell(session) ? "Show this session's terminal" : "Open a terminal in this session's box"} aria-pressed={terminals?.hasShell(session) ?? false} onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /></button>{/if}
+        {#if session && attention.can("computers") && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /></button>{/if}
+        <span class="room-menu"><RoomMenu bind:this={roomMenu} {paused} onsessions={session ? () => void showPanel(!panelShown, true) : undefined} jobFailed={!!session && toolFailures.length > 0} onjobs={session ? () => void jobsTool?.show() : undefined} waiting={phone.current && session ? store.waiting : 0} operate={attention.can("operate")} admin={attention.can("admin")} onpause={pause} oninstructions={() => { section = "instructions"; }}
+          onrequests={phone.current && session ? () => { section = "requests"; } : undefined}
+          onterminal={phone.current && session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready" ? () => terminals?.shell(session!, title, !store?.sessions.get(session!)?.parent) : undefined}
+          oncomputer={phone.current && session && attention.can("computers") && store.computers.has(session) ? () => watch(session!) : undefined} /></span>
+        {#if session}<JobsTool bind:this={jobsTool} sessions={toolSessions} allSessions={jobSessions} failures={toolFailures} allFailures={[...store.failedJobs]} phone={phone.current} compact
+          onopen={(item, job) => terminals?.openJob(item, job)} onseen={key => store?.failedJobs.delete(key)} />{/if}{/if}
       <!-- While the panel is closed, who works shows on its button, as at most 3 faces, "+n" and the count from status.ts. -->
-      {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={"Sessions" + (faces ? `, ${working} working` : "") + (store?.counts.failed ? ", a session failed" : "")}
+      {#if room && !session}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={"Sessions" + (faces ? `, ${working} working` : "") + (store?.counts.failed ? ", a session failed" : "")}
         title={faces ? busy.map(item => item.name).join(", ") : "Sessions"} aria-controls="sessions" aria-expanded={panelShown} onclick={event => void showPanel(!panelShown, event.detail > 0)}>
         {#if faces}<span class="faces">{#each busy.slice(0, 3) as item (item.session)}<Avatar kind="session" name={item.name} root={!item.parent} size={24} />{/each}</span>
           {#if busy.length > 3}<span class="more">+{busy.length - 3}</span>{/if}<span class="count">{working} working</span>
         {:else}<Icon name="people" />{#if store?.ready}<span class="count phone">{store.sessions.size}</span>{/if}{/if}
         {#if store?.counts.failed && !panelShown}<span class="attention"></span>{/if}</button>{/if}</header>
-    {@render workTabs("phone-tabs")}
     {#if reloadPending}<p class="reload-notice" role="status">Dyna updated. Reload to use the new version. <button type="button" onclick={() => location.reload()}>Reload</button></p>{/if}
     {#if section === "instructions" && room && store && !unavailable}<Instructions {room} {roomName} rooms={rooms.length} sessions={store.sessions.size} onclose={() => void closeSection()} />{/if}
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} admin={attention.can("admin")} onclose={() => void closeSection()} />{/if}
@@ -673,23 +662,23 @@
         onactive={event => { toggle = event.currentTarget; void showPanel(true, event.detail > 0); }} />
       {:else if unavailable === "unreachable"}<Blocked kind="unreachable" onretry={reopen} />
       {:else if store && !unavailable}
-        {#if session && workTab}{#key session}<SessionWork {store} {session} onfeed={workFeed} ontotal={total => workTotal = total} />{/key}{:else}{#key key}<Feed bind:this={view} {store} {home} admin={attention.can("admin")} operate={attention.can("operate") && !closed} waiting={quotes[key]} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
+        {#if session}{#key session}<SessionThread bind:this={thread} {store} {session} {roomName} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle} />{/key}{:else}{#key key}<Feed bind:this={view} {store} {home} admin={attention.can("admin")} operate={attention.can("operate") && !closed} waiting={quotes[key]} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
           onforward={forward} onclosed={() => composer?.focus()} onjobs={item => void jobsTool?.show(item)}
           onvisual={(versions, selected, send) => { visualTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : undefined; visual = { versions, selected, send }; }} />{/key}{/if}
         <!-- The empty feed stays mounted behind the error, as it is how the page learns the session has no history. -->
         {#if missing && room}<Blocked kind="no-session" back={{ href: "/r/" + encodeURIComponent(room), label: `Back to ${roomName}` }} {navigate} />{/if}
       {:else}<p class="empty">This room is not available. <button type="button" class="retry" onclick={reopen}>Try again</button></p>{/if}
     </div>
-    {#if room && !unavailable && !closed && !(session && workTab)}
+    {#if room && !unavailable && !closed}
       <!-- A paused room's line takes the working line's place, so the composer never moves; the header still says who works. -->
       {#if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
         {#if attention.can("operate")}<button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button>{/if}</p>
-      {:else if store}<WorkingLine {store} {home} />{/if}
-      {#if attention.can("operate")}<Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; clearReplacement(); }} onsend={send} placeholder={"Message " + title}
+      {:else if store && !session}<WorkingLine {store} {home} />{/if}
+      {#if attention.can("operate")}<Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; clearReplacement(); }} onsend={send} thread={!!session} placeholder={"Message " + title}
         quote={quotes[key]} replacement={replaced[key]} onundo={() => { quotes[key] = undoForward({ quote: quotes[key], previous: replaced[key] }).quote; clearReplacement(); }} onunquote={() => { quotes[key] = undefined; clearReplacement(); }} sessions={mentions} files={files(key)} {stop} />
       {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
     {/if}
-    <TermDock bind:this={terminals} terminal={attention.can("terminal")} bind:element={dock} onempty={() => composer?.focus()} phone={phone.current} strip={!!room && !unavailable}
+    <TermDock bind:this={terminals} terminal={attention.can("terminal")} bind:element={dock} onempty={() => composer?.focus()} phone={phone.current} strip={!!room && !session && !unavailable}
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
   </main>
   {#if visual && store && !inSettings}<aside class="visual-pane"><VisualView {...visual} room={store.room} onclose={() => { visual = undefined; void tick().then(() => visualTrigger?.focus()); }} /></aside>
@@ -741,15 +730,6 @@
 </div>{/if}
 
 <style>
-  .work-tabs { display: flex; gap: 4px; }
-  .work-tabs button { border: 0; border-radius: 6px; background: transparent; color: var(--muted); padding: 6px 10px; font: inherit; cursor: pointer; }
-  .work-tabs button[aria-current] { background: var(--selected); color: var(--text); }
-  .work-tabs .count { margin-left: 5px; color: var(--muted); }
-  .work-tabs button:focus-visible { outline: 2px solid var(--focus); }
-  .phone-tabs { display: none; }
-  .work-phone :global(.jobs), .work-phone .requests, .work-phone .tool, .work-phone .room-menu, .work-phone .word { display: none; }
-  @media (max-width: 600px) { .desktop-tabs { display: none; } .phone-tabs { display: flex; padding: 4px 12px; border-bottom: 1px solid var(--line); } }
-  @media (hover: none) { .work-tabs button { min-height: 40px; } }
   :global(.shell.open:has(.visual-pane)) { grid-template-columns: 64px minmax(0, 1fr) min(660px, calc(100vw - 64px)); }
   .visual-pane { min-width: 0; overflow: hidden; border-left: 1px solid var(--line); }
   @media (max-width: 760px) { :global(.shell.open:has(.visual-pane)) { grid-template-columns: 64px minmax(0, 1fr); } .visual-pane { position: fixed; z-index: 4; inset: 0 0 0 auto; width: min(660px, 100vw); } }
@@ -767,6 +747,11 @@
   .tabs button { padding: 4px 10px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
   .tabs button:hover { background: var(--hover); color: var(--text); }
   .tabs button[aria-pressed="true"] { background: var(--selected); color: var(--text); }
+  .session-spacer { flex: 1; }
+  .session-bar :global(.jobs) { margin-left: 0; }
+  .session-bar :global(.jobs > .open) { display: none; }
+  .session-bar .requests { margin-left: 0; }
+  .session-bar .tool { border: 0; padding: 0 7px; color: var(--muted); }
   .tool { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
   .tool:hover { background: var(--hover); }
   .tool[aria-pressed="true"] { background: var(--selected); }
@@ -817,6 +802,9 @@
     /* Touch screens keep :hover after a tap, so the wash waits for a real pointer. */
     @media (hover: hover) { .menu-toggle:hover { background: var(--hover); color: var(--text); } }
     .hash, .room-menu { display: none; }
+    .session-bar .room-menu { display: block; }
+    .session-spacer { display: none; }
+    .session-bar .tool, .session-bar .requests { display: none; }
     .heading { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.25; }
     .heading .count { font-size: 12.5px; }
     .requests { min-width: 40px; height: 40px; }
