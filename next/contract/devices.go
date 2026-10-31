@@ -5,6 +5,7 @@ import "time"
 const (
 	MethodDevicePair      Method = "device.pair"
 	MethodDeviceList      Method = "device.list"
+	MethodDeviceScopes    Method = "device.scopes"
 	MethodDeviceRevoke    Method = "device.revoke"
 	MethodDeviceSetScopes Method = "device.set_scopes"
 )
@@ -29,6 +30,12 @@ type DevicePairResponse struct {
 type DeviceListRequest struct{}
 type DeviceListResponse struct {
 	Devices []Device `json:"devices"`
+}
+
+// DeviceScopesRequest asks for the caller's own scopes. Any scope may ask.
+type DeviceScopesRequest struct{}
+type DeviceScopesResponse struct {
+	Scopes []Scope `json:"scopes"`
 }
 type DeviceRevokeRequest struct {
 	ID string `json:"id"`
