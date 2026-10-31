@@ -15,7 +15,9 @@ func TestComputerWatchFanoutAndState(t *testing.T) {
 	connectAgent(ctx, t, s, id)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
 	channel := &boxChannel{wake: make(chan struct{}, 1)}
+	s.mu.Lock()
 	s.sessionLocked(id).channel = channel
+	s.mu.Unlock()
 	if _, err := s.ComputerWatch(ctx, id); err == nil || err.Code != contract.ErrNotFound {
 		t.Fatalf("without computer: %v", err)
 	}
@@ -170,7 +172,9 @@ func TestComputerChannelCloseEndsWatch(t *testing.T) {
 	s, room, id, ctx := setup(t)
 	connectAgent(ctx, t, s, id)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
+	s.mu.Lock()
 	s.sessionLocked(id).channel = &boxChannel{wake: make(chan struct{}, 1)}
+	s.mu.Unlock()
 	if _, err := s.ComputerChanged(ctx, caller, contract.ComputerChangedRequest{To: contract.ComputerRunning}); err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +198,9 @@ func TestOldComputerStreamDoesNotEndNewWatch(t *testing.T) {
 	s, _, id, ctx := setup(t)
 	connectAgent(ctx, t, s, id)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
+	s.mu.Lock()
 	s.sessionLocked(id).channel = &boxChannel{wake: make(chan struct{}, 1)}
+	s.mu.Unlock()
 	if _, err := s.ComputerChanged(ctx, caller, contract.ComputerChangedRequest{To: contract.ComputerRunning}); err != nil {
 		t.Fatal(err)
 	}
