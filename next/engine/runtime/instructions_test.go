@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/box"
@@ -19,6 +20,9 @@ import (
 
 type instructionStore struct{ boxStore }
 
+func (instructionStore) Box(_ context.Context, id contract.BoxID) (box.Box, error) {
+	return box.Box{ID: id, Host: "host", Session: "session"}, nil
+}
 func (instructionStore) Hosts(context.Context) ([]box.Host, error) {
 	return []box.Host{{Name: "host"}}, nil
 }
@@ -39,6 +43,9 @@ func (r *instructionTransport) Run(ctx context.Context, input []byte, args ...st
 	}
 	if r.offline {
 		return nil, errors.New("offline")
+	}
+	if strings.Contains(args[len(args)-1], "'podman'") {
+		return []byte("DYNA-END 00000000000000000000 000\n"), nil
 	}
 	cmd := exec.CommandContext(ctx, "bash", "-c", args[len(args)-1])
 	cmd.Stdin = bytes.NewReader(input)
@@ -90,5 +97,34 @@ func TestInstructionMountsAreRoomScoped(t *testing.T) {
 		if mount.HostPath != source || !mount.ReadOnly {
 			t.Fatalf("mount %s: %+v", path, mount)
 		}
+	}
+}
+
+func TestResumeRepairsInstructionsBeforeStarting(t *testing.T) {
+	ctx := context.Background()
+	data, remote := t.TempDir(), t.TempDir()
+	path := filepath.Join(data, "rooms", "room", "AGENTS.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("saved"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	transport := &instructionTransport{offline: true}
+	host, err := podman.New("user@host", t.TempDir(), "host", transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &Boxes{Store: instructionStore{}, InstructionsDir: data, HostData: remote, hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}}
+	if err := b.Start(ctx, "box"); err == nil {
+		t.Fatal("started with offline host")
+	}
+	transport.offline = false
+	if err := b.Start(ctx, "box"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(remote, "instructions", "rooms", "room", "AGENTS.md"))
+	if err != nil || string(got) != "saved" {
+		t.Fatalf("got %q: %v", got, err)
 	}
 }
