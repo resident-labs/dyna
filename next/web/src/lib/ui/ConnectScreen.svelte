@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { allowedOrigin, hello, getPin, fingerprint, type Hello, type Pin } from "../connect.ts";
   import { beginConnect, checkPin, finishConnect, type Landing, type ConnectProblem } from "../connect-flow.ts";
   import PairScreen from "./PairScreen.svelte";
@@ -39,6 +39,7 @@
         if (checked) await show(checked);
       } catch { result = { kind: "failed", problem: "unreachable" }; }
       finally { loading = false; }
+      await tick();
       button?.focus();
     })();
   });
@@ -72,9 +73,9 @@
       <button class="link" onclick={() => { pairing = true; }}>Pair with a code instead</button>
     {:else if greeting}
       <h1>{pin ? "Signed out" : "Sign in to Dyna"}</h1>
-      <p>{pin?.name ? "Continue to your machine." : `Continue to ${location.host}.`}</p>
+      <p><code>{pin?.name ?? location.host}</code> uses Resident Labs Connect. Sign in with your Resident Labs passkey.</p>
       <button bind:this={button} class="primary" disabled={busy} onclick={() => void begin()}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.6"/><path d="M3 20a6 6 0 0 1 9.5-4.8"/><circle cx="17.5" cy="14" r="2.4"/><path d="M17.5 16.4V22M17.5 19.5h2.2"/></svg> Sign in with Resident Labs</button>
-      <p class="small">You sign in on <code>{allowedOrigin(greeting.relay) ? new URL(greeting.relay).host : "an invalid address"}</code> and come back here.{#if !pin}{" "}This browser remembers the machine key for next time.{/if}</p>
+      <p class="small">You sign in on <code>{allowedOrigin(greeting.relay) ? new URL(greeting.relay).host : "an invalid address"}</code> and come back here.{#if !pin}{" "}From then on, this browser remembers this machine's key and checks it at every sign-in.{/if}</p>
       <div class="or"><span></span>or<span></span></div>
       <button class="outline" onclick={() => { pairing = true; }}>Pair with a code</button>
       <p class="small">A code comes from Settings › Sharing &amp; access on a signed-in device, or from <code>dyna device pair</code> on the machine.</p>
@@ -95,6 +96,7 @@
   .values p:not(:first-child) { margin-top: 8px; }
   button { min-height: 48px; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; }
   .primary { display: flex; align-items: center; justify-content: center; gap: 8px; border: 0; background: var(--focus); color: var(--bg); }
+  .primary:focus { outline: 2px solid var(--focus); outline-offset: 3px; }
   .outline { border: 1px solid var(--firm); background: transparent; color: var(--text); }
   .link { border: 0; background: none; color: var(--focus); }
   .small { font-size: 12.5px; }
