@@ -16,6 +16,10 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+func (f *fakeService) OpSubmit(context.Context, contract.Principal, contract.OpSubmitRequest) (contract.OpSubmitResponse, *contract.Error) {
+	return contract.OpSubmitResponse{}, nil
+}
+
 func (f *fakeService) RoomList(context.Context, contract.Principal, contract.RoomListRequest) (contract.RoomListResponse, *contract.Error) {
 	return contract.RoomListResponse{}, nil
 }
@@ -345,7 +349,7 @@ func TestOwnerSocketRejectsHostexecScope(t *testing.T) {
 }
 
 func TestOpSubmitRejectsHostexecRun(t *testing.T) {
-	body := `{"operation":{"kind":"hostexec.run","room":"room-a","args":{"room":"room-a","host":"host","argv":["true"],"timeout":1000,"grant":"grant","mode":"preapproved"}}}`
+	body := `{"operation":{"kind":"hostexec.run","room":"room-a","args":{"room":"room-a","host":"host","argv":["true"],"timeout":1000,"grant":"grant"}}}`
 	response := request(New(&fakeService{}, nil).handler(boxCaller()), "/v1/op.submit", body)
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("status %d: %s", response.Code, response.Body.String())
@@ -375,5 +379,19 @@ func TestBoxCanStartChild(t *testing.T) {
 	w := request(New(f, nil).handler(boxCaller()), "/v1/session.start", `{"room":"room-a","name":"child","profile":"test"}`)
 	if w.Code != http.StatusOK || f.caller.Session != "session-a" {
 		t.Fatalf("status=%d caller=%+v", w.Code, f.caller)
+	}
+}
+
+func TestOpSubmitRejectsUnknownOperationFields(t *testing.T) {
+	a := New(&fakeService{}, nil)
+	for _, body := range []string{
+		`{"operation":{"kind":"pr.open","args":{"title":"x","unknown":true}}}`,
+		`{"operation":{"kind":"hostexec.grant","args":{"hosts":["h"],"reason":"x","unknown":true}}}`,
+		`{"operation":{"kind":"pr.open","unknown":true,"args":{"title":"x"}}}`,
+	} {
+		got := request(a.handler(boxCaller()), "/v1/op.submit", body)
+		if got.Code != http.StatusBadRequest {
+			t.Fatalf("unknown field accepted: %s: %d %s", body, got.Code, got.Body)
+		}
 	}
 }

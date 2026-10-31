@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/contract/tools"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -47,7 +48,7 @@ func (a *API) SetGitRoute(route func(Caller) http.Handler) { a.git = route }
 
 func (a *API) handler(c Caller) http.Handler {
 	mux := http.NewServeMux()
-	call(mux, contract.MethodConnectStart, c, contract.ScopeAdmin, owner, func(ctx context.Context, _ contract.Principal, req contract.ConnectStartRequest) (contract.ConnectStartResponse, *contract.Error) {
+	call(mux, contract.MethodConnectStart, c, func(ctx context.Context, _ contract.Principal, req contract.ConnectStartRequest) (contract.ConnectStartResponse, *contract.Error) {
 		if a.connect == nil {
 			return contract.ConnectStartResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Connect unavailable"}
 		}
@@ -56,7 +57,7 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 		return contract.ConnectStartResponse{}, nil
 	})
-	call(mux, contract.MethodConnectStatus, c, contract.ScopeAdmin, owner, func(ctx context.Context, _ contract.Principal, _ contract.ConnectStatusRequest) (contract.ConnectStatusResponse, *contract.Error) {
+	call(mux, contract.MethodConnectStatus, c, func(ctx context.Context, _ contract.Principal, _ contract.ConnectStatusRequest) (contract.ConnectStatusResponse, *contract.Error) {
 		if a.connect == nil {
 			return contract.ConnectStatusResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Connect unavailable"}
 		}
@@ -66,51 +67,51 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 		return out, nil
 	})
-	call(mux, contract.MethodConnectCancel, c, contract.ScopeAdmin, owner, func(ctx context.Context, _ contract.Principal, _ contract.ConnectCancelRequest) (contract.ConnectCancelResponse, *contract.Error) {
+	call(mux, contract.MethodConnectCancel, c, func(ctx context.Context, _ contract.Principal, _ contract.ConnectCancelRequest) (contract.ConnectCancelResponse, *contract.Error) {
 		if a.connect == nil || a.connect.Cancel(ctx) != nil {
 			return contract.ConnectCancelResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Connect cancel failed"}
 		}
 		return contract.ConnectCancelResponse{}, nil
 	})
-	call(mux, contract.MethodConnectUnlink, c, contract.ScopeAdmin, owner, func(ctx context.Context, _ contract.Principal, _ contract.ConnectUnlinkRequest) (contract.ConnectUnlinkResponse, *contract.Error) {
+	call(mux, contract.MethodConnectUnlink, c, func(ctx context.Context, _ contract.Principal, _ contract.ConnectUnlinkRequest) (contract.ConnectUnlinkResponse, *contract.Error) {
 		if a.connect == nil || a.connect.Unlink(ctx) != nil {
 			return contract.ConnectUnlinkResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Connect unlink failed"}
 		}
 		return contract.ConnectUnlinkResponse{}, nil
 	})
-	call(mux, contract.MethodWebLogin, c, contract.ScopeAdmin, func(c Caller) bool { return owner(c) && !c.Web }, func(ctx context.Context, p contract.Principal, req contract.WebLoginRequest) (contract.WebLoginResponse, *contract.Error) {
+	call(mux, contract.MethodWebLogin, c, func(ctx context.Context, p contract.Principal, req contract.WebLoginRequest) (contract.WebLoginResponse, *contract.Error) {
 		if a.web == nil {
 			return contract.WebLoginResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "the engine was started without --web.listen"}
 		}
 		return a.web.login(ctx, p, req)
 	})
-	call(mux, contract.MethodInstructionsGet, c, contract.ScopeRead, owner, a.service.InstructionsGet)
-	call(mux, contract.MethodInstructionsSet, c, contract.ScopeAdmin, owner, a.service.InstructionsSet)
-	call(mux, contract.MethodDevicePair, c, contract.ScopeAdmin, owner, func(ctx context.Context, p contract.Principal, req contract.DevicePairRequest) (contract.DevicePairResponse, *contract.Error) {
+	call(mux, contract.MethodInstructionsGet, c, a.service.InstructionsGet)
+	call(mux, contract.MethodInstructionsSet, c, a.service.InstructionsSet)
+	call(mux, contract.MethodDevicePair, c, func(ctx context.Context, p contract.Principal, req contract.DevicePairRequest) (contract.DevicePairResponse, *contract.Error) {
 		out, problem := a.service.DevicePair(ctx, p, req)
 		if a.web != nil {
 			out.Routes = a.web.publicRoutes()
 		}
 		return out, problem
 	})
-	call(mux, contract.MethodDeviceList, c, contract.ScopeAdmin, owner, a.service.DeviceList)
-	call(mux, contract.MethodDeviceScopes, c, contract.ScopeRead, owner, func(context.Context, contract.Principal, contract.DeviceScopesRequest) (contract.DeviceScopesResponse, *contract.Error) {
+	call(mux, contract.MethodDeviceList, c, a.service.DeviceList)
+	call(mux, contract.MethodDeviceScopes, c, func(context.Context, contract.Principal, contract.DeviceScopesRequest) (contract.DeviceScopesResponse, *contract.Error) {
 		if c.Web {
 			return contract.DeviceScopesResponse{Scopes: c.Scopes}, nil
 		}
 		return contract.DeviceScopesResponse{Scopes: store.FullDeviceScopes}, nil
 	})
-	call(mux, contract.MethodDeviceRevoke, c, contract.ScopeAdmin, owner, a.service.DeviceRevoke)
-	call(mux, contract.MethodDeviceSetScopes, c, contract.ScopeAdmin, owner, a.service.DeviceSetScopes)
-	call(mux, contract.MethodConversationRead, c, contract.ScopeOperate, owner, a.service.ConversationRead)
-	call(mux, contract.MethodRoomSetLimits, c, contract.ScopeAdmin, owner, a.service.RoomSetLimits)
-	call(mux, contract.MethodRoomPause, c, contract.ScopeOperate, user, a.service.RoomPause)
-	call(mux, contract.MethodSessionStop, c, contract.ScopeOperate, user, a.service.SessionStop)
-	call(mux, contract.MethodRoomList, c, contract.ScopeRead, owner, a.service.RoomList)
-	call(mux, contract.MethodSessionList, c, contract.ScopeRead, user, a.service.SessionList)
-	call(mux, contract.MethodHostexecRun, c, contract.ScopeRead, box, a.service.HostexecRun)
-	call(mux, contract.MethodHostexecRevoke, c, contract.ScopeAdmin, owner, a.service.HostexecRevoke)
-	call(mux, contract.MethodOpSubmit, c, contract.ScopeOperate, user, func(ctx context.Context, p contract.Principal, req contract.OpSubmitRequest) (contract.OpSubmitResponse, *contract.Error) {
+	call(mux, contract.MethodDeviceRevoke, c, a.service.DeviceRevoke)
+	call(mux, contract.MethodDeviceSetScopes, c, a.service.DeviceSetScopes)
+	call(mux, contract.MethodConversationRead, c, a.service.ConversationRead)
+	call(mux, contract.MethodRoomSetLimits, c, a.service.RoomSetLimits)
+	call(mux, contract.MethodRoomPause, c, a.service.RoomPause)
+	call(mux, contract.MethodSessionStop, c, a.service.SessionStop)
+	call(mux, contract.MethodRoomList, c, a.service.RoomList)
+	call(mux, contract.MethodSessionList, c, a.service.SessionList)
+	call(mux, contract.MethodHostexecRun, c, a.service.HostexecRun)
+	call(mux, contract.MethodHostexecRevoke, c, a.service.HostexecRevoke)
+	call(mux, contract.MethodOpSubmit, c, func(ctx context.Context, p contract.Principal, req contract.OpSubmitRequest) (contract.OpSubmitResponse, *contract.Error) {
 		if c.Web {
 			scope := a.service.OperationScope(req.Operation.Kind)
 			if scope == "" || !hasScope(c, scope) {
@@ -136,31 +137,31 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 		return a.service.OpSubmit(ctx, p, req)
 	})
-	call(mux, contract.MethodOpDecide, c, contract.ScopeAdmin, user, a.service.OpDecide)
-	call(mux, contract.MethodOpWithdraw, c, contract.ScopeOperate, user, a.service.OpWithdraw)
-	call(mux, contract.MethodOpList, c, contract.ScopeRead, user, a.service.OpList)
-	call(mux, contract.MethodHostAdd, c, contract.ScopeAdmin, owner, a.service.HostAdd)
-	call(mux, contract.MethodHostList, c, contract.ScopeRead, owner, a.service.HostList)
-	call(mux, contract.MethodProfileList, c, contract.ScopeRead, owner, a.service.ProfileList)
-	call(mux, contract.MethodAccountsList, c, contract.ScopeRead, owner, a.service.AccountsList)
-	call(mux, contract.MethodAccountsRemove, c, contract.ScopeAdmin, owner, a.service.AccountsRemove)
-	call(mux, contract.MethodAccountsConnect, c, contract.ScopeAdmin, owner, a.service.AccountsConnect)
-	call(mux, contract.MethodAccountsReconnect, c, contract.ScopeAdmin, owner, a.service.AccountsReconnect)
-	call(mux, contract.MethodAccountsConnectCallback, c, contract.ScopeAdmin, owner, a.service.AccountsConnectCallback)
-	call(mux, contract.MethodAccountsConnectStatus, c, contract.ScopeAdmin, owner, a.service.AccountsConnectStatus)
-	call(mux, contract.MethodAccountsSetKey, c, contract.ScopeAdmin, owner, a.service.AccountsSetKey)
-	call(mux, contract.MethodAccountsQuota, c, contract.ScopeRead, owner, a.service.AccountsQuota)
-	call(mux, contract.MethodRoomCreate, c, contract.ScopeAdmin, owner, a.service.RoomCreate)
-	call(mux, contract.MethodRoomRepoAdd, c, contract.ScopeAdmin, owner, a.service.RoomRepoAdd)
-	call(mux, contract.MethodRoomRepos, c, contract.ScopeRead, owner, a.service.RoomRepos)
-	call(mux, contract.MethodSessionStart, c, contract.ScopeOperate, user, a.service.SessionStart)
-	call(mux, contract.MethodSessionMove, c, contract.ScopeOperate, user, a.service.SessionMove)
-	call(mux, contract.MethodSessionClose, c, contract.ScopeOperate, user, a.service.SessionClose)
-	call(mux, contract.MethodSessionSetProfile, c, contract.ScopeOperate, user, a.service.SessionSetProfile)
-	call(mux, contract.MethodSessionRestart, c, contract.ScopeOperate, owner, a.service.SessionRestart)
-	call(mux, contract.MethodSessionSearch, c, contract.ScopeRead, owner, a.service.SessionSearch)
-	call(mux, contract.MethodPostSearch, c, contract.ScopeRead, owner, a.service.PostSearch)
-	call(mux, contract.MethodPost, c, contract.ScopeOperate, user, func(ctx context.Context, p contract.Principal, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
+	call(mux, contract.MethodOpDecide, c, a.service.OpDecide)
+	call(mux, contract.MethodOpWithdraw, c, a.service.OpWithdraw)
+	call(mux, contract.MethodOpList, c, a.service.OpList)
+	call(mux, contract.MethodHostAdd, c, a.service.HostAdd)
+	call(mux, contract.MethodHostList, c, a.service.HostList)
+	call(mux, contract.MethodProfileList, c, a.service.ProfileList)
+	call(mux, contract.MethodAccountsList, c, a.service.AccountsList)
+	call(mux, contract.MethodAccountsRemove, c, a.service.AccountsRemove)
+	call(mux, contract.MethodAccountsConnect, c, a.service.AccountsConnect)
+	call(mux, contract.MethodAccountsReconnect, c, a.service.AccountsReconnect)
+	call(mux, contract.MethodAccountsConnectCallback, c, a.service.AccountsConnectCallback)
+	call(mux, contract.MethodAccountsConnectStatus, c, a.service.AccountsConnectStatus)
+	call(mux, contract.MethodAccountsSetKey, c, a.service.AccountsSetKey)
+	call(mux, contract.MethodAccountsQuota, c, a.service.AccountsQuota)
+	call(mux, contract.MethodRoomCreate, c, a.service.RoomCreate)
+	call(mux, contract.MethodRoomRepoAdd, c, a.service.RoomRepoAdd)
+	call(mux, contract.MethodRoomRepos, c, a.service.RoomRepos)
+	call(mux, contract.MethodSessionStart, c, a.service.SessionStart)
+	call(mux, contract.MethodSessionMove, c, a.service.SessionMove)
+	call(mux, contract.MethodSessionClose, c, a.service.SessionClose)
+	call(mux, contract.MethodSessionSetProfile, c, a.service.SessionSetProfile)
+	call(mux, contract.MethodSessionRestart, c, a.service.SessionRestart)
+	call(mux, contract.MethodSessionSearch, c, a.service.SessionSearch)
+	call(mux, contract.MethodPostSearch, c, a.service.PostSearch)
+	call(mux, contract.MethodPost, c, func(ctx context.Context, p contract.Principal, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
 		if box(c) {
 			if req.Room == "" {
 				req.Room = c.Room
@@ -170,13 +171,13 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 		return a.service.Post(ctx, p, req)
 	})
-	call(mux, contract.MethodEventsList, c, contract.ScopeRead, user, func(ctx context.Context, p contract.Principal, req contract.EventsListRequest) (contract.EventsListResponse, *contract.Error) {
+	call(mux, contract.MethodEventsList, c, func(ctx context.Context, p contract.Principal, req contract.EventsListRequest) (contract.EventsListResponse, *contract.Error) {
 		if box(c) && req.Room != c.Room {
 			return contract.EventsListResponse{}, forbidden()
 		}
 		return a.service.EventsList(ctx, p, req)
 	})
-	call(mux, contract.MethodShellOutput, c, contract.ScopeRead, box, a.service.ShellOutput)
+	call(mux, contract.MethodShellOutput, c, a.service.ShellOutput)
 	mux.HandleFunc("GET /v1/shell/watch", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		if !owner(c) || !hasScope(c, contract.ScopeTerminal) {
@@ -211,10 +212,10 @@ func (a *API) handler(c Caller) http.Handler {
 			f.Flush()
 		}
 	})
-	call(mux, contract.MethodComputerChanged, c, contract.ScopeRead, box, a.service.ComputerChanged)
+	call(mux, contract.MethodComputerChanged, c, a.service.ComputerChanged)
 	// Input is a batched POST, not a WebSocket: the watch stream is one-way HTTP, a batch keeps a
 	// mouse-move flood to one request per frame, and POST needs no new socket handling in the web listener.
-	call(mux, contract.MethodComputerInput, c, contract.ScopeComputers, owner, func(ctx context.Context, p contract.Principal, req contract.ComputerInputRequest) (contract.ComputerInputResponse, *contract.Error) {
+	call(mux, contract.MethodComputerInput, c, func(ctx context.Context, p contract.Principal, req contract.ComputerInputRequest) (contract.ComputerInputResponse, *contract.Error) {
 		if req.Session == "" || req.Frame.Width < 1 || req.Frame.Width > 16384 || req.Frame.Height < 1 || req.Frame.Height > 16384 || len(req.Events) == 0 || len(req.Events) > 256 {
 			return contract.ComputerInputResponse{}, invalid()
 		}
@@ -308,16 +309,16 @@ func (a *API) handler(c Caller) http.Handler {
 			f.Flush()
 		}
 	})
-	call(mux, contract.MethodBoxHello, c, contract.ScopeRead, box, a.service.BoxHello)
-	call(mux, contract.MethodTurnOutput, c, contract.ScopeRead, box, a.service.TurnOutput)
-	call(mux, contract.MethodTurnActivity, c, contract.ScopeRead, box, a.service.TurnActivity)
-	call(mux, contract.MethodDeliveryDone, c, contract.ScopeRead, box, a.service.DeliveryDone)
-	call(mux, contract.MethodArchiveDone, c, contract.ScopeRead, box, a.service.ArchiveDone)
-	call(mux, contract.MethodTranscriptAppend, c, contract.ScopeRead, box, a.service.TranscriptAppend)
-	call(mux, contract.MethodTranscriptFetch, c, contract.ScopeRead, box, a.service.TranscriptFetch)
-	call(mux, contract.MethodTranscriptRead, c, contract.ScopeRead, owner, a.service.TranscriptRead)
-	call(mux, contract.MethodSessionWork, c, contract.ScopeRead, owner, a.service.SessionWork)
-	call(mux, contract.MethodShellJobEnded, c, contract.ScopeRead, box, a.service.ShellJobEnded)
+	call(mux, contract.MethodBoxHello, c, a.service.BoxHello)
+	call(mux, contract.MethodTurnOutput, c, a.service.TurnOutput)
+	call(mux, contract.MethodTurnActivity, c, a.service.TurnActivity)
+	call(mux, contract.MethodDeliveryDone, c, a.service.DeliveryDone)
+	call(mux, contract.MethodArchiveDone, c, a.service.ArchiveDone)
+	call(mux, contract.MethodTranscriptAppend, c, a.service.TranscriptAppend)
+	call(mux, contract.MethodTranscriptFetch, c, a.service.TranscriptFetch)
+	call(mux, contract.MethodTranscriptRead, c, a.service.TranscriptRead)
+	call(mux, contract.MethodSessionWork, c, a.service.SessionWork)
+	call(mux, contract.MethodShellJobEnded, c, a.service.ShellJobEnded)
 	mux.HandleFunc("GET /v1/events", func(w http.ResponseWriter, r *http.Request) {
 		if !user(c) || !hasScope(c, contract.ScopeRead) {
 			writeError(w, forbidden())
@@ -472,11 +473,31 @@ func box(c Caller) bool {
 }
 func user(c Caller) bool { return owner(c) || box(c) }
 
-// op.submit checks its own scope by operation kind. device.scopes answers every owner device, whatever it holds, so a client can learn
-// what it may use.
-func call[Req, Resp any](mux *http.ServeMux, method contract.Method, c Caller, scope contract.Scope, allowed func(Caller) bool, fn func(context.Context, contract.Principal, Req) (Resp, *contract.Error)) {
-	mux.HandleFunc("POST /v1/"+string(method), func(w http.ResponseWriter, r *http.Request) {
-		if !allowed(c) || (method != contract.MethodOpSubmit && method != contract.MethodDeviceScopes && !hasScope(c, scope)) {
+// allows checks a method's access rule from the registry table.
+func allows(access tools.Access, c Caller) bool {
+	switch access {
+	case tools.OwnerAccess:
+		return owner(c)
+	case tools.UserAccess:
+		return user(c)
+	case tools.BoxAccess:
+		return box(c)
+	case tools.OwnerLocalAccess:
+		return owner(c) && !c.Web
+	}
+	return false
+}
+
+// call registers one method route. The registry's method table is the one
+// authorization source; op.submit and device.scopes name no scope because
+// their handlers check it themselves, by operation kind or for any owner device.
+func call[Req, Resp any](mux *http.ServeMux, m contract.Method, c Caller, fn func(context.Context, contract.Principal, Req) (Resp, *contract.Error)) {
+	rule, ok := tools.MethodRule(m)
+	if !ok {
+		panic("no method table entry for " + string(m))
+	}
+	mux.HandleFunc("POST /v1/"+string(m), func(w http.ResponseWriter, r *http.Request) {
+		if !allows(rule.Access, c) || rule.Scope != "" && !hasScope(c, rule.Scope) {
 			writeError(w, forbidden())
 			return
 		}
@@ -498,7 +519,7 @@ func call[Req, Resp any](mux *http.ServeMux, method contract.Method, c Caller, s
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if method == contract.MethodConnectStatus {
+		if m == contract.MethodConnectStatus {
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		_ = json.NewEncoder(w).Encode(result)

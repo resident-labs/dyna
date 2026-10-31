@@ -25,6 +25,9 @@ import (
 )
 
 type client interface {
+	OpWithdraw(context.Context, contract.OpWithdrawRequest) (contract.OpWithdrawResponse, error)
+	SessionMove(context.Context, contract.SessionMoveRequest) (contract.SessionMoveResponse, error)
+	SessionList(context.Context, contract.SessionListRequest) (contract.SessionListResponse, error)
 	HostexecRun(context.Context, contract.HostexecRunRequest) (contract.HostexecRunResponse, error)
 	HostexecRevoke(context.Context, contract.HostexecRevokeRequest) (contract.HostexecRevokeResponse, error)
 	File(context.Context, string, io.Writer) error
@@ -61,10 +64,16 @@ func newClient(socket string) *socketClient {
 }
 
 type requestType interface {
-	contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.HostexecRevokeRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest
+	contract.OpWithdrawRequest |
+		contract.SessionMoveRequest |
+		contract.SessionListRequest |
+		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.HostexecRevokeRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest
 }
 type responseType interface {
-	contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.HostexecRevokeResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse
+	contract.OpWithdrawResponse |
+		contract.SessionMoveResponse |
+		contract.SessionListResponse |
+		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.HostexecRevokeResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse
 }
 
 func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
@@ -107,6 +116,15 @@ func (c *socketClient) ConnectUnlink(ctx context.Context, q contract.ConnectUnli
 	return call[contract.ConnectUnlinkRequest, contract.ConnectUnlinkResponse](ctx, c, contract.MethodConnectUnlink, q)
 }
 
+func (c *socketClient) SessionList(ctx context.Context, q contract.SessionListRequest) (contract.SessionListResponse, error) {
+	return call[contract.SessionListRequest, contract.SessionListResponse](ctx, c, contract.MethodSessionList, q)
+}
+func (c *socketClient) SessionMove(ctx context.Context, q contract.SessionMoveRequest) (contract.SessionMoveResponse, error) {
+	return call[contract.SessionMoveRequest, contract.SessionMoveResponse](ctx, c, contract.MethodSessionMove, q)
+}
+func (c *socketClient) OpWithdraw(ctx context.Context, q contract.OpWithdrawRequest) (contract.OpWithdrawResponse, error) {
+	return call[contract.OpWithdrawRequest, contract.OpWithdrawResponse](ctx, c, contract.MethodOpWithdraw, q)
+}
 func (c *socketClient) HostexecRun(ctx context.Context, q contract.HostexecRunRequest) (contract.HostexecRunResponse, error) {
 	return call[contract.HostexecRunRequest, contract.HostexecRunResponse](ctx, c, contract.MethodHostexecRun, q)
 }
@@ -501,6 +519,16 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		_, err := getClient().SessionSetProfile(cmd.Context(), contract.SessionSetProfileRequest{Session: contract.SessionID(args[0]), Profile: contract.ProfileName(args[1])})
 		return err
 	}}
+	session.AddCommand(&cobra.Command{Use: "list ROOM", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := getClient().SessionList(cmd.Context(), contract.SessionListRequest{Room: contract.RoomID(args[0])})
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(result.Sessions)
+	}}, &cobra.Command{Use: "move SESSION NEW_PARENT", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := getClient().SessionMove(cmd.Context(), contract.SessionMoveRequest{Session: contract.SessionID(args[0]), NewParent: contract.SessionID(args[1])})
+		return err
+	}})
 	session.AddCommand(start, closeCmd, restart, setProfile)
 	root.AddCommand(session)
 	var postRoom, htmlPath, update string
@@ -595,6 +623,10 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	}}
 	opDeny.Flags().StringVar(&denyReason, "reason", "", "Why the operation is denied")
 	_ = opDeny.MarkFlagRequired("reason") // fails only for an undefined flag, and "reason" is defined above
+	op.AddCommand(&cobra.Command{Use: "withdraw ID", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := getClient().OpWithdraw(cmd.Context(), contract.OpWithdrawRequest{ID: contract.OpID(args[0])})
+		return err
+	}})
 	op.AddCommand(opList, opApprove, opDeny)
 	root.AddCommand(op)
 
