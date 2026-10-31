@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -17,6 +18,33 @@ func (e *blockedRefresh) Refresh(_ context.Context, a *Auth) (*Auth, error) {
 	out := a.Clone()
 	out.Metadata["access_token"] = "old-refresh-result"
 	return out, nil
+}
+
+type rejectedGrantStore struct{ *memoryAuthTestStore }
+
+func (s *rejectedGrantStore) Save(ctx context.Context, auth *Auth) (string, error) {
+	if HasAuthCreationIntent(ctx) {
+		return "", errors.New("save failed")
+	}
+	return s.memoryAuthTestStore.Save(ctx, auth)
+}
+
+func TestReplaceDoesNotPublishFailedSave(t *testing.T) {
+	ctx := context.Background()
+	st := &rejectedGrantStore{newMemoryAuthTestStore()}
+	m := NewManager(st, nil, nil)
+	old := &Auth{ID: "credential", Provider: "kimi", Metadata: map[string]any{"access_token": "old"}}
+	if _, err := m.Register(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	_, err := m.Replace(ctx, &Auth{ID: old.ID, Provider: old.Provider, Metadata: map[string]any{"access_token": "new"}})
+	if err == nil {
+		t.Fatal("accepted a failed grant save")
+	}
+	current, ok := m.GetByID(old.ID)
+	if !ok || current.Metadata["access_token"] != "old" {
+		t.Fatal("published an unsaved grant")
+	}
 }
 
 type blockedGrantStore struct {
