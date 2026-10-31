@@ -131,6 +131,11 @@ func (s Service) ReconcileInstall(ctx context.Context) error {
 			if err := hookinstall.Log(*j); err != nil {
 				return err
 			}
+			if j.Hook == updaterservice.RunName && j.Result == hookinstall.ResultDeferred {
+				if err := (updaterservice.Store{DataDir: s.dataDir()}).ScheduleRetry(ctx, j.FinishedAt); err != nil {
+					return err
+				}
+			}
 			ev.Result = RunResult(j.Result)
 			ev.FinishedAt = j.FinishedAt
 			if _, err := s.saveRun(ctx, ev); err != nil {
