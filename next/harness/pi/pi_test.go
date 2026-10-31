@@ -6,11 +6,33 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
 )
+
+// Pi discovers room instructions from its working directory.
+func TestOpenUsesWorkDirectory(t *testing.T) {
+	work := t.TempDir()
+	room := filepath.Join(t.TempDir(), "AGENTS.md")
+	if err := os.WriteFile(room, []byte("room-instructions"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(room, filepath.Join(work, "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+	script := `read -r request; printf '{"id":"1","type":"response","success":true,"data":{"sessionFile":"%s"}}\n' "$(cat AGENTS.md)"; read -r wait`
+	h, err := Open(context.Background(), "sh", []string{"-c", script}, "", work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	if got := h.SessionFile(); got != "room-instructions" {
+		t.Fatalf("work directory exposed %q, want room instructions", got)
+	}
+}
 
 // The fixture contains selected, sanitized events from Pi 1.4.0-dyna.10,
 // session ses_20261030-143118-fad2075a, turn 7.
