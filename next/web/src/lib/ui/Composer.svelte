@@ -8,7 +8,7 @@
   import { MediaQuery } from "svelte/reactivity";
   import Icon from "./Icon.svelte";
   import Avatar from "./Avatar.svelte";
-  import { render } from "./PostRow.svelte";
+  import Markdown from "./Markdown.svelte";
   import { count, fileSize, type Quote } from "../feed.ts";
   import { maxFiles, type FileDraft } from "../attach.svelte.ts";
   import { filesSummary } from "../files-summary.ts";
@@ -110,7 +110,7 @@
   {/if}
   {#if quote}<div class="quote"><p class="label"><Icon name="forward" size={14} /><span>Forwarding a post from <strong>{quote.author}</strong></span>
     <button type="button" aria-label="Remove forwarded post" title="Remove forwarded post" onclick={() => { onunquote(); element?.focus(); }}><Icon name="close" size={14} /></button></p>
-    <div class="quoted">{@html render(quote.text)}</div>
+    <div class="quoted"><Markdown text={quote.text} /></div>
     {#if quote.attachments.length}<p class="files">{count(quote.attachments.length, "file")}: {quote.attachments.map(file => file.name).join(", ")}</p>{/if}
     {#if replacement}<p class="replaced" aria-live="polite"><span>Replaced the post from {replacement.author}.</span><button type="button" onclick={onundo}><Icon name="undo" size={14} />Undo</button></p>{/if}</div>{/if}
   {#snippet fileTray()}<ul class="tray" aria-label="Files">{#each files.items as item (item.id)}
