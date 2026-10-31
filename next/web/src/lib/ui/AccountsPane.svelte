@@ -105,7 +105,7 @@
         <p class="muted">Dyna hands the key to the sign-in service and never shows it again.</p>
         {#if unreachable}<p class="error" role="alert">Could not reach the service. Try again.</p>{/if}
       {:else}
-        <label>Label <input bind:value={label} placeholder="A name for this account" disabled={busy || !!attempt || !!reconnectId} /></label>
+        {#if !cannotReconnect}<label>Label <input bind:value={label} placeholder="A name for this account" disabled={busy || !!attempt || !!reconnectId} /></label>{/if}
         {#if connectState === "expired"}
         <p>The code expired.</p><button class="btn fill" type="button" disabled={busy} onclick={() => { attempt = undefined; void start(); }}>Get a new code</button>
       {:else if connectState === "failed"}
@@ -161,9 +161,9 @@
                 {#if status.pill} <StatusPill tone={status.pill.tone} label={status.pill.label} />{/if}
                 <div class="muted">{account.rooms?.length ? count(account.rooms.length, "room") : "Every room"}{#if status.line}{" · "}{status.line}{/if}</div></div>
                 {#if account.state === "sign_in_expired"}
-                  <div class="expired">{#if canReconnect(account, provider.connectMethod)}<button class="btn fill" type="button" onclick={() => { choose(provider, true); reconnectId = account.id; label = account.label; }}>Sign in again</button>{/if}<span>Its limits show once it is signed in.</span></div>
+                  <div class="expired">{#if canReconnect(account, provider.connectMethod) && !(cannotReconnect && reconnectId === account.id)}<button class="btn fill" type="button" onclick={() => { choose(provider, true); reconnectId = account.id; label = account.label; }}>Sign in again</button>{/if}<span>Its limits show once it is signed in.</span></div>
                 {/if}
-                  {#if removing === account.id}<div class="remove-confirm"><span>{removalPrompt(provider.connectMethod)}{#if account.rooms?.length}{" Its room limits will be removed too."}{/if}</span><button class="btn danger" type="button" disabled={busy} onclick={() => void remove(account)}>Remove</button><button class="btn ghost" type="button" disabled={busy} onclick={() => { removing = undefined; removeFailed = false; replaceAfterRemove = false; }}>Keep</button>{#if removeFailed}<span class="error" role="alert">The account was not removed. Try again.</span>{/if}</div>
+                  {#if removing === account.id}<div class="remove-confirm"><div><span>{removalPrompt(provider.connectMethod)}</span>{#if account.rooms?.length}<div class="muted">This account's room limits will be removed too.</div>{/if}</div><button class="btn danger" type="button" disabled={busy} onclick={() => void remove(account)}>Remove</button><button class="btn ghost" type="button" disabled={busy} onclick={() => { removing = undefined; removeFailed = false; replaceAfterRemove = false; }}>Keep</button>{#if removeFailed}<span class="error" role="alert">The account was not removed. Try again.</span>{/if}</div>
                   {:else}<button class="btn ghost" type="button" onclick={() => { removing = account.id; removeFailed = false; replaceAfterRemove = false; }}>Remove</button>{/if}
               </div>
               {#if reconnectId === account.id}{@render form()}{/if}
@@ -207,7 +207,7 @@
   .step.done { background: transparent; border: 1px solid var(--line); }
   .connect a { text-decoration: none; font-weight: 500; }
   .finish { display: flex; gap: 8px; width: min(720px, 100%); } a { color: var(--focus); } .error { color: var(--danger); } .code { font-family: var(--mono); font-size: 24px; letter-spacing: 0.08em; font-variant-numeric: tabular-nums; }
-  @media (min-width: 641px) { .row:has(.remove-confirm) { flex-wrap: wrap; } .remove-confirm { width: 100%; } .remove-confirm > span:first-child { margin-right: auto; } }
+  @media (min-width: 641px) { .row:has(.remove-confirm) { flex-wrap: wrap; } .remove-confirm { width: 100%; } .remove-confirm > div:first-child { margin-right: auto; } }
   @media (min-width: 641px) and (max-width: 1000px) { .row:has(.expired) { display: grid; grid-template-columns: minmax(0, 1fr) auto; } .row:has(.expired) > .btn { grid-column: 2; grid-row: 1; } .expired { grid-column: 1 / -1; grid-row: 2; margin: 0; } .expired + .remove-confirm { grid-column: 1 / -1; grid-row: 3; } }
   @media (max-width: 640px) { .row { display: grid; grid-template-columns: minmax(0, 1fr) auto; } .row > .btn { grid-column: 2; grid-row: 1; } .expired, .remove-confirm { grid-column: 1 / -1; } .expired { grid-row: 2; display: grid; gap: 4px; margin: 0; } .expired .btn { min-height: 40px; } .expired + .remove-confirm { grid-row: 3; } .row > .btn, .connect-button { min-height: 40px; } .row > .btn { padding: 0 12px; border: 1px solid var(--line); } .body { padding: 12px 16px; } .connect { padding: 16px; } .key-fields { flex-direction: column; align-items: stretch; } .connect label { grid-template-columns: 1fr; gap: 4px; } .heading { flex-wrap: wrap; } .row { min-height: 44px; } }
 </style>
