@@ -108,8 +108,8 @@ func TestTurnOutcomeResetsCrashCount(t *testing.T) {
 		want    int
 	}{
 		{"completed", contract.TurnCompleted, "", 0},
-		{"model failed", contract.TurnFailed, contract.CauseModelFailed, 0},
-		{"stopped", contract.TurnStopped, "", 0},
+		{"model failed", contract.TurnFailed, contract.CauseModelFailed, 2},
+		{"stopped", contract.TurnStopped, "", 2},
 		{"harness failed", contract.TurnFailed, contract.CauseHarnessFailed, 2},
 		{"set model failed", contract.TurnFailed, contract.CauseSetModelFailed, 2},
 		{"setup failed", contract.TurnFailed, contract.CauseSetupFailed, 2},
