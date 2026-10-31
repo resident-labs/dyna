@@ -9,7 +9,7 @@
   import Icon from "./lib/ui/Icon.svelte";
   import Avatar from "./lib/ui/Avatar.svelte";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
-  import { count } from "./lib/feed.ts";
+  import { count, quoted, type Quote } from "./lib/feed.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
   import ShellView from "./lib/ui/ShellView.svelte";
   import TermDock from "./lib/ui/TermDock.svelte";
@@ -93,15 +93,21 @@
   const keyOf = (request: PostRequest) => `${request.room}/${request.home?.session ?? ""}`;
   const keep = (request: PostRequest) => { unsent = { ...unsent, [keyOf(request)]: [...unsent[keyOf(request)] ?? [], request] }; };
   const settle = (request: PostRequest) => { unsent = { ...unsent, [keyOf(request)]: (unsent[keyOf(request)] ?? []).filter(kept => kept !== request) }; };
+  // A forwarded post waits in its conversation's composer like a draft.
+  let quotes: Record<string, Quote | undefined> = $state({});
   let key = $derived(`${room}/${session ?? ""}`);
   function send() {
     if (!store || !room) return;
-    const text = drafts[key] ?? "";
-    if (!text.trim()) return;
+    const text = drafts[key] ?? "", quote = quotes[key];
+    if (!text.trim() && !quote) return;
     drafts[key] = "";
+    quotes[key] = undefined;
     // The engine refuses mentions on a DM post; in the feed, @names of open sessions become mentions.
+    // Mentions come from the owner's own words only, so an @name inside a forwarded post wakes nobody.
     const post = session ? { text, mentions: [] } : parseMentions(text, store.sessions.values());
-    void view?.send({ room, text: post.text, mentions: post.mentions.length ? post.mentions : undefined, home: session ? home : undefined });
+    // A forward carries the post's files; the engine keeps each file once, by hash, for every conversation.
+    void view?.send({ room, text: quote ? quoted(quote, post.text) : post.text, mentions: post.mentions.length ? post.mentions : undefined,
+      home: session ? home : undefined, attachments: quote?.attachments.length ? quote.attachments : undefined });
   }
   let view: Feed | undefined = $state();
   let rail: HTMLElement;
@@ -237,12 +243,14 @@
     {:else}<div class="feed">
       {#if !room && !roomsError}<Home {attention} {navigate} onrequests={() => { section = "requests"; }} />
       {:else if store && !unavailable}
-        {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle} />{/key}
+        {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
+          onforward={quote => { quotes[key] = quote; composer?.focus(); }} />{/key}
       {:else}<p class="empty">{unavailable || roomsError || (rooms.length ? "Select a room." : "Your rooms will appear here.")}
         {#if store && unavailable && !signedOut(store.error)}<button type="button" class="retry" onclick={() => void store?.open()}>Try again</button>{/if}</p>{/if}
     </div>
     {#if room && !unavailable}
-      <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title} />
+      <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title}
+        quote={quotes[key]} onunquote={() => { quotes[key] = undefined; }} />
     {/if}{/if}
     <TermDock bind:this={terminals} bind:element={dock} onempty={() => composer?.focus()}
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name }))} />
