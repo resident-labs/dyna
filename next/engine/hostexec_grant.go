@@ -52,7 +52,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 				}
 				line := strings.Join(argv, " ")
 				if command.Prefix {
-					line += " …"
+					line += ", with any arguments"
 				}
 				commands = append(commands, line)
 			}
