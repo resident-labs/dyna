@@ -283,6 +283,7 @@ type Record struct {
 	HeadVerifiedAt   time.Time                    `json:"headVerifiedAt,omitempty"`
 	State            PRState                      `json:"state"`
 	ClosedAt         time.Time                    `json:"closedAt,omitempty"`
+	CloseEpisode     uint64                       `json:"closeEpisode,omitempty"`
 	CICleanupDone    bool                         `json:"ciCleanupDone,omitempty"`
 	Watching         bool                         `json:"watching"`
 	Created          time.Time                    `json:"created"`
