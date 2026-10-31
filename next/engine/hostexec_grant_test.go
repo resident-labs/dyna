@@ -42,6 +42,12 @@ func TestGrantCard(t *testing.T) {
 	if card.Title != "Grant host access" || !strings.Contains(card.Body, "run any command on host, for 24 hours.\nReason: Inspect logs") {
 		t.Fatalf("card: %+v", card)
 	}
+	for expires, want := range map[time.Duration]string{time.Hour: "for up to 1 hour.", 2*time.Hour + time.Second: "for up to 3 hours."} {
+		card = s.HostexecGrant().Card(ctx, contract.HostexecGrantArgs{Room: room, To: contract.Principal{Kind: contract.PrincipalSession, Session: worker}, Hosts: []contract.HostName{"host"}, Reason: "x", Expires: s.now().Add(expires)}, contract.Principal{})
+		if !strings.Contains(card.Body, want) {
+			t.Fatalf("card: %q, want %q", card.Body, want)
+		}
+	}
 }
 
 func TestUpgradeRemovesLegacyGrantRequestFromList(t *testing.T) {
