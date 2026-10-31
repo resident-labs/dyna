@@ -108,10 +108,10 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		} else if workErr != nil {
 			failures++
 			if failures >= 3 {
-				next.State, next.Reason = contract.BoxFailed, workErr.Error()
+				next.State, next.Reason = contract.BoxFailed, string(contract.CauseCreateFailed)
 				cause = contract.CauseCreateFailed
 			} else {
-				next.State, next.Reason = contract.BoxPending, workErr.Error()
+				next.State, next.Reason = contract.BoxPending, string(box.PendingCreateRetry)
 				due = r.retryAt(failures)
 			}
 		} else {
