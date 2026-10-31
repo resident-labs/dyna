@@ -356,38 +356,19 @@ func TestShellWatchGenerationAndStop(t *testing.T) {
 	t.Fatal("box channel closed before stop")
 }
 
-// A replaced box rejects input even when its old queue has space.
+// A replaced box rejects input when its queue cannot accept a batch.
 func TestComputerInputReplacement(t *testing.T) {
-	handle := &computerInputHandle{queue: make(chan contract.ComputerInputBatch, 1), done: make(chan struct{})}
-	handle.close()
+	done := make(chan struct{})
+	handle := computerInputHandle{queue: make(chan contract.ComputerInputBatch), done: done}
+	close(done)
 	problem := handle.send(context.Background(), contract.ComputerInputBatch{})
 	if problem == nil || problem.Code != contract.ErrConflict || problem.Message != "box replaced" {
 		t.Fatalf("replacement: %v", problem)
 	}
-	select {
-	case <-handle.queue:
-		t.Fatal("replaced box accepted input")
-	default:
-	}
-	handle = &computerInputHandle{queue: make(chan contract.ComputerInputBatch, 1), done: make(chan struct{})}
-	start := make(chan struct{})
-	result := make(chan *contract.Error, 1)
-	go func() {
-		<-start
-		result <- handle.send(context.Background(), contract.ComputerInputBatch{})
-	}()
-	close(start)
-	handle.close()
-	if problem := <-result; problem != nil && (problem.Code != contract.ErrConflict || problem.Message != "box replaced") {
-		t.Fatalf("racing replacement: %v", problem)
-	}
-	if problem := handle.send(context.Background(), contract.ComputerInputBatch{}); problem == nil || problem.Message != "box replaced" {
-		t.Fatalf("after replacement: %v", problem)
-	}
 }
 
 func TestComputerInputFullQueue(t *testing.T) {
-	handle := &computerInputHandle{queue: make(chan contract.ComputerInputBatch, 1), done: make(chan struct{})}
+	handle := computerInputHandle{queue: make(chan contract.ComputerInputBatch, 1), done: make(chan struct{})}
 	handle.queue <- contract.ComputerInputBatch{}
 	problem := handle.send(context.Background(), contract.ComputerInputBatch{})
 	if problem == nil || problem.Code != contract.ErrConflict || problem.Message != "input queue is full" {

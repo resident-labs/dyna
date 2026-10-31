@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
-	"sync"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -141,39 +140,23 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 	return ch, nil
 }
 
-// computerInputHandle serializes enqueueing with box replacement.
+// computerInputHandle holds the queue and lifetime of one box channel.
 type computerInputHandle struct {
-	mu    sync.Mutex
 	queue chan contract.ComputerInputBatch
-	done  chan struct{}
+	done  <-chan struct{}
 }
 
-// send and close serialize so an old queue cannot accept input after replacement.
-func (h *computerInputHandle) send(ctx context.Context, batch contract.ComputerInputBatch) *contract.Error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+// Input that races a replacement may be dropped because the computer is replaced with it.
+func (h computerInputHandle) send(ctx context.Context, batch contract.ComputerInputBatch) *contract.Error {
 	select {
 	case <-h.done:
 		return &contract.Error{Code: contract.ErrConflict, Message: "box replaced"}
-	default:
-	}
-	select {
 	case <-ctx.Done():
 		return failure(ctx.Err())
 	case h.queue <- batch:
 		return nil
 	default:
 		return &contract.Error{Code: contract.ErrConflict, Message: "input queue is full"}
-	}
-}
-
-func (h *computerInputHandle) close() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	select {
-	case <-h.done:
-	default:
-		close(h.done)
 	}
 }
 
