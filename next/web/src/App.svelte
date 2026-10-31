@@ -631,7 +631,7 @@
   </aside>
   {#if drawer || (panel && phone.current)}<button type="button" class="scrim" tabindex="-1" aria-label={drawer ? "Close the menu" : room ? "Close the sessions" : "Close the active rooms"}
     onclick={() => void (drawer ? showDrawer(false, true, true) : showPanel(false, true))}></button>{/if}
-  <main bind:clientWidth={mainWidth} class:tight={mainWidth <= 1000} class:narrow={mainWidth <= 600} inert={drawer || (panel && phone.current) || covered || inSettings}>
+  <main bind:clientWidth={mainWidth} class:header-tight={mainWidth <= 1000} class:header-narrow={mainWidth <= 600} inert={drawer || (panel && phone.current) || covered || inSettings}>
     <header class="bar" class:work-phone={!!session && workTab && phone.current}>{#if room && session && phone.current}<a class="menu-toggle" href={"/r/" + encodeURIComponent(room)} aria-label={`Back to ${roomName}`} title={`Back to ${roomName}`}
         onclick={event => { const tapped = event.detail > 0; navigate(event); void tick().then(() => menuButton?.focus({ focusVisible: !tapped })); }}><Icon name="back" /></a>
       {:else}<button type="button" class="menu-toggle" bind:this={menuButton} aria-label="Rooms and pages" title="Rooms and pages" aria-expanded={drawer}
@@ -777,10 +777,10 @@
     border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
   .requests:hover, .requests[aria-pressed="true"] { background: var(--hover); color: var(--text); }
   main { position: relative; }
-  :where(main.tight) .tool { justify-content: center; width: 28px; padding: 0; }
-  :where(main.tight) .tool span { display: none; }
-  main.narrow .desktop-tabs { display: none; }
-  main.narrow .phone-tabs { display: flex; padding: 4px 12px; border-bottom: 1px solid var(--line); }
+  :where(main.header-tight) .tool { justify-content: center; width: 28px; padding: 0; }
+  :where(main.header-tight) .tool span { display: none; }
+  main.header-narrow .desktop-tabs { display: none; }
+  main.header-narrow .phone-tabs { display: flex; padding: 4px 12px; border-bottom: 1px solid var(--line); }
   .requests ~ :global(.panel-toggle) { margin-left: 0; }
   :global(.jobs ~ .requests) { margin-left: 0; }
   main > header :global(.panel-toggle) { display: flex; align-items: center; gap: 8px; }
