@@ -39,6 +39,16 @@ func verifyBundle(db *sql.DB, bundle, backup string, cap capture) error {
 	if global.Source.BackupSHA256 != hex.EncodeToString(hash.Sum(nil)) {
 		return fmt.Errorf("bundle source backup hash differs")
 	}
+	if err := verifyInstructions(db, "*", global.Instructions.Global); err != nil {
+		return err
+	}
+	instructions := make(map[contract.RoomID]string, len(global.Instructions.Rooms))
+	for _, item := range global.Instructions.Rooms {
+		if _, exists := instructions[item.Room]; exists {
+			return fmt.Errorf("duplicate room instructions")
+		}
+		instructions[item.Room] = item.Text
+	}
 	repos, err := countRepositories(db, cap)
 	if err != nil {
 		return err
@@ -80,6 +90,9 @@ func verifyBundle(db *sql.DB, bundle, backup string, cap capture) error {
 	if len(entries) != len(names) {
 		return fmt.Errorf("missing room part")
 	}
+	if len(instructions) != len(names) {
+		return fmt.Errorf("room instruction count differs")
+	}
 	// Count rooms from SQLite independently of the manifest.
 	var roomCount int
 	if err := db.QueryRow("SELECT COUNT(*) FROM room_records").Scan(&roomCount); err != nil {
@@ -93,6 +106,13 @@ func verifyBundle(db *sql.DB, bundle, backup string, cap capture) error {
 		err := db.QueryRow("SELECT id FROM room_records WHERE json_extract(body,'$.name')=?", name).Scan(&roomID)
 		if err != nil {
 			return fmt.Errorf("room missing from source: %w", err)
+		}
+		text, exists := instructions[contract.RoomID(roomID)]
+		if !exists {
+			return fmt.Errorf("room instructions missing")
+		}
+		if err := verifyInstructions(db, roomID, text); err != nil {
+			return err
 		}
 		part, err := os.Open(filepath.Join(bundle, "rooms", string(name)+".json"))
 		if err != nil {
