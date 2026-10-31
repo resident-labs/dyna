@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"database/sql"
+	"math"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -45,4 +47,37 @@ func (s *Service) RoomPause(ctx context.Context, caller contract.Principal, req 
 	}
 	s.reconciler.Kick()
 	return contract.RoomPauseResponse{}, nil
+}
+
+func (s *Service) RoomSetLimits(ctx context.Context, caller contract.Principal, req contract.RoomSetLimitsRequest) (contract.RoomSetLimitsResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalOwner {
+		return contract.RoomSetLimitsResponse{}, forbidden()
+	}
+	if req.CPUs < 0 || req.CPUs > math.MaxInt/4 || req.MemBytes < 0 || req.MemBytes > math.MaxInt64/4 {
+		return contract.RoomSetLimitsResponse{}, invalid("limits must be non-negative and fit admission accounting")
+	}
+	event, err := s.event(req.Room, caller, contract.RoomLimitsChanged{CPUs: req.CPUs, MemBytes: req.MemBytes})
+	if err != nil {
+		return contract.RoomSetLimitsResponse{}, failure(err)
+	}
+	err = s.store.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "UPDATE rooms SET cpus=?,mem_bytes=? WHERE id=?", req.CPUs, req.MemBytes, req.Room)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return sql.ErrNoRows
+		}
+		_, err = s.store.AppendEvent(tx, event)
+		return err
+	})
+	if err != nil {
+		return contract.RoomSetLimitsResponse{}, failure(err)
+	}
+	s.reconciler.Kick()
+	return contract.RoomSetLimitsResponse{}, nil
 }
