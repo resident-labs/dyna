@@ -48,6 +48,7 @@ const web = await import(pathToFileURL(app).href)
 // One typed fixture per registered event. A new event fails the test until it
 // gets a fixture and a card.
 const fixtures: Record<string, EventPayload> = {
+  'github-quota/low': { host: 'github.com', resource: 'core', remaining: 1000, limit: 5000, reset: '2026-10-31T21:00:00Z' },
   'machine/low-disk': {
     name: 'hermeslab',
     freeBytes: 3 * 1024 ** 3,
