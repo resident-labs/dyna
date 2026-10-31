@@ -58,6 +58,14 @@ func (s *Store) CompleteArchives(ctx context.Context, session contract.SessionID
 	})
 }
 
+// SetArchiveRetry schedules another archive start unless close intent changed.
+func (s *Store) SetArchiveRetry(ctx context.Context, id contract.BoxID, due time.Time) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE boxes SET due_at=? WHERE id=? AND state='closing' AND want='close'", due.UnixMilli(), id)
+		return err
+	})
+}
+
 // SetClosingReason records an archive failure without deleting the box.
 func (s *Store) SetClosingReason(ctx context.Context, id contract.BoxID, reason string, event contract.Event) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {

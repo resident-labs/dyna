@@ -50,6 +50,38 @@ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at
 	}
 }
 
+func TestArchiveRetryDoesNotDelayDiscard(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	_, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('s','r','s','p','closing','',0);
+INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at,want,due_at) VALUES('b','s','','agent','closing','','',0,0,'close',0)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	due := time.UnixMilli(100)
+	if err := s.SetArchiveRetry(ctx, "b", due); err != nil {
+		t.Fatal(err)
+	}
+	var got int64
+	if err := s.Read().QueryRowContext(ctx, "SELECT due_at FROM boxes WHERE id='b'").Scan(&got); err != nil || got != 100 {
+		t.Fatalf("archive retry = %d: %v", got, err)
+	}
+	if err := s.CompleteArchives(ctx, "s", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetArchiveRetry(ctx, "b", due); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Read().QueryRowContext(ctx, "SELECT due_at FROM boxes WHERE id='b'").Scan(&got); err != nil || got != 0 {
+		t.Fatalf("discard delayed = %d: %v", got, err)
+	}
+}
+
 func TestCloseIntentAndArchiveCompletion(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(t.TempDir())
