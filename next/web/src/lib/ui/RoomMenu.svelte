@@ -9,6 +9,8 @@
   import Icon from "./Icon.svelte";
   import StatusPill from "./StatusPill.svelte";
   let { waiting, onchoose }: { waiting: number; onchoose: (section: Section) => void } = $props();
+  // The count each entry shows at its right, only while it is above zero.
+  let counts: Record<Section, number> = $derived({ requests: waiting });
   let open = $state(false);
   let root: HTMLDivElement;
   let button: HTMLButtonElement;
@@ -35,11 +37,12 @@
   <button type="button" class="open" bind:this={button} aria-haspopup="menu" aria-expanded={open} aria-controls="room-menu"
     aria-label={waiting ? `Room menu, ${waiting} ${waiting === 1 ? "request waits" : "requests wait"} for you` : "Room menu"} title="Room menu"
     onclick={() => void show(!open)} onkeydown={event => { if (event.key === "ArrowDown") { event.preventDefault(); void show(true); } }}>
-    {#if waiting}<StatusPill tone="warning">{waiting}</StatusPill>{/if}<Icon name="more" /></button>
+    <Icon name="more" />{#if waiting}<StatusPill tone="warning">{waiting}</StatusPill>{/if}</button>
   {#if open}
     <div class="list" role="menu" id="room-menu" tabindex="-1" bind:this={list} onkeydown={move}>
       {#each entries as entry (entry.id)}
-        <button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false); onchoose(entry.id); }}>{entry.label}</button>
+        <button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false); onchoose(entry.id); }}>{entry.label}
+          {#if counts[entry.id]}<StatusPill tone="warning">{counts[entry.id]}</StatusPill>{/if}</button>
       {/each}
     </div>
   {/if}
@@ -52,7 +55,8 @@
   .open { display: flex; align-items: center; gap: 6px; padding: 6px; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
   .open:hover, .open[aria-expanded="true"] { background: var(--hover); color: var(--text); }
   .list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 2; min-width: 180px; padding: 4px; display: grid;
-    background: var(--raised); border: 1px solid var(--line); border-radius: 8px; }
-  [role="menuitem"] { padding: 6px 8px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
-  [role="menuitem"]:hover, [role="menuitem"]:focus-visible { background: var(--selected); }
+    background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 18%); }
+  [role="menuitem"] { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+  /* Items have no border or ring of their own; a fill marks the hovered or focused one. */
+  [role="menuitem"]:hover, [role="menuitem"]:focus { background: var(--selected); outline: none; }
 </style>

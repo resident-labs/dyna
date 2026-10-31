@@ -85,6 +85,7 @@ export function formatTime(value: string): string {
 const relative = new Intl.RelativeTimeFormat([], { numeric: "auto" });
 export function fromNow(value: string, now: number): string {
   const minutes = Math.round((new Date(value).getTime() - now) / 60_000);
+  if (minutes === 0) return "just now";
   if (Math.abs(minutes) < 60) return relative.format(minutes, "minute");
   const hours = Math.round(minutes / 60);
   return Math.abs(hours) < 24 ? relative.format(hours, "hour") : relative.format(Math.round(hours / 24), "day");
