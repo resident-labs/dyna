@@ -194,9 +194,9 @@ func main() {
 	runtime := filepath.Join(data, "runtime")
 	b := &boxes{ctx: ctx, st: st, dir: runtime, cancel: map[contract.BoxID]context.CancelFunc{}}
 	svc := engine.New(st, b, profiles{}, time.Now)
-	grant := svc.HostexecGrant() // a "go" grant is agent class here, so the Requests panel shows both classes
+	grant := svc.HostexecGrant() // a test grant is agent class here, so the Requests panel shows both classes
 	grant.Class = func(a contract.OpArgs, _ contract.Principal) contract.Class {
-		if a.(contract.HostexecGrantArgs).Commands[0].Program == "go" {
+		if a.(contract.HostexecGrantArgs).Reason == "Run Go tests on the host" {
 			return contract.ClassAgent
 		}
 		return contract.ClassOwner
@@ -277,8 +277,8 @@ func seedRoom(ctx context.Context, s *engine.Service, posts int) {
 	post(contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, contract.PostRequest{Text: "My notes from the review.",
 		Attachments: []contract.Attachment{upload("notes.txt", "text/plain", "The feed rows render.\nThe previews load.\n")}})
 	by := contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}
-	for _, program := range []string{"go", "npm"} {
-		args := contract.HostexecGrantArgs{Room: room.Room, To: by, Hosts: []contract.HostName{host}, Commands: []contract.CommandRule{{Program: program, Args: []string{"test"}, Prefix: true}}, Mode: contract.GrantModeApprove}
+	for _, reason := range []string{"Run Go tests on the host", "Inspect the host service logs"} {
+		args := contract.HostexecGrantArgs{Room: room.Room, To: by, Hosts: []contract.HostName{host}, Reason: reason}
 		if _, e := s.OpSubmit(ctx, by, contract.OpSubmitRequest{Operation: contract.Operation{Room: room.Room, Args: args}}); e != nil {
 			log.Fatal(e.Message)
 		}

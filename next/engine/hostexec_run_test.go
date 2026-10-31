@@ -170,7 +170,7 @@ func TestHostexecSignalAtDeadlineIsTimeout(t *testing.T) {
 func TestHostexecApprovalAndRevokedRecheck(t *testing.T) {
 	s, room, worker, ctx := setup(t)
 	principal := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
-	grant := contract.Grant{ID: "grant_test", Kind: contract.GrantHostExec, Room: room, To: principal, Hosts: []contract.HostName{"host"}, Commands: []contract.CommandRule{{Program: "true"}}, Mode: contract.GrantModeApprove, By: contract.Principal{Kind: contract.PrincipalOwner}, Created: s.now()}
+	grant := contract.Grant{ID: "grant_test", Kind: contract.GrantHostExec, Room: room, To: principal, Hosts: []contract.HostName{"host"}, By: contract.Principal{Kind: contract.PrincipalOwner}, Created: s.now()}
 	if err := s.store.Write(ctx, func(tx *sql.Tx) error { return s.store.InsertGrant(tx, grant) }); err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestHostexecApprovalAndRevokedRecheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, e := s.HostexecRun(ctx, principal, contract.HostexecRunRequest{Host: "host", Argv: []string{"true"}})
-	if e != nil || result.Operation.Class != contract.ClassOwner || result.Operation.State != contract.OpPending {
+	if e != nil || result.Operation.Class != contract.ClassAuto || result.Operation.State != contract.OpDone {
 		t.Fatalf("result %+v error %+v", result, e)
 	}
 	if _, e = s.HostexecRevoke(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.HostexecRevokeRequest{Grant: grant.ID}); e != nil {
