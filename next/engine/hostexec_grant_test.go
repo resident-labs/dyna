@@ -66,6 +66,11 @@ func TestGrantCardEscapesControlCharactersAndNamesWildcard(t *testing.T) {
 	if !strings.Contains(body, "any command") {
 		t.Fatalf("wildcard: %q", body)
 	}
+	a.Commands = []contract.CommandRule{{Program: "npm", Args: []string{"test"}, Prefix: true}}
+	body = s.HostexecGrant().Card(ctx, a, contract.Principal{}).Body
+	if !strings.Contains(body, "npm test, with any arguments") {
+		t.Fatalf("prefix: %q", body)
+	}
 }
 
 func TestGrantCardEscapesHost(t *testing.T) {
