@@ -3,8 +3,7 @@ package hostexec
 import (
 	"context"
 	"errors"
-	"fmt"
-	"github.com/resident-labs/dyna/box/podman"
+	"github.com/resident-labs/dyna/box/hostexec"
 	"github.com/resident-labs/dyna/contract"
 	"os/exec"
 	"strings"
@@ -13,21 +12,17 @@ import (
 type Local struct{}
 
 func (Local) RunHostexec(ctx context.Context, a contract.HostexecRunArgs, op contract.OpID) ([]byte, int, bool, error) {
-	cwd := a.Cwd
-	if cwd == "" {
-		cwd = "."
-	}
-	args := []string{"-c", podman.HostexecCapture, "dyna-hostexec", cwd, "systemd-run", "--quiet", "--user", "--scope", "--unit=dyna-hostexec-" + string(op), "-p", fmt.Sprintf("RuntimeMaxSec=%g", float64(a.Timeout)/1000), "-p", "TimeoutStopSec=5", "--"}
-	out, err := exec.CommandContext(ctx, "bash", append(args, a.Argv...)...).Output()
+	args := hostexec.RunArgs(a, op)
+	out, err := exec.CommandContext(ctx, args[0], args[1:]...).Output()
 	code := 0
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
 		code = exit.ExitCode()
 		err = nil
 	}
-	truncated := len(out) > 8<<20
+	truncated := len(out) > hostexec.OutputLimit
 	if truncated {
-		out = out[:8<<20]
+		out = out[:hostexec.OutputLimit]
 	}
 	return out, code, truncated, err
 }
