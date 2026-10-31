@@ -13,7 +13,7 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
-func TestRemoveAndAddAfterFailedReconnectAdoption(t *testing.T) {
+func TestAdoptionRecovery(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.Open(t.TempDir())
 	if err != nil {
