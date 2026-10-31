@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -47,9 +48,12 @@ func (s *Service) HostexecGrant() approve.Entry {
 						}
 					}
 					if !safe {
-						arg = "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
+						arg = strconv.Quote(arg)
 					}
 					argv = append(argv, arg)
+				}
+				if command.Program == "*" {
+					argv[0] = "any program"
 				}
 				line := strings.Join(argv, " ")
 				if command.Prefix {
