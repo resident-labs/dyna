@@ -109,3 +109,20 @@ test("a held button is let go where the pointer last was inside the picture, onc
   assert.deepEqual(hold.release(), [{ kind: "mouse.up", x: 9, y: 7, button: "right" }]);
   assert.deepEqual(hold.release(), []);
 });
+
+test("after a refusal, clear lets a release go ahead of what waited", async () => {
+  const sent: string[][] = [];
+  let settle = () => {};
+  let fail = true;
+  const queue = new InputQueue(async events => { sent.push(events.map(event => event.kind)); if (fail) throw new Error("refused"); }, () => settle());
+  const frame = { width: 10, height: 10 };
+  let done = new Promise<void>(resolve => { settle = resolve; });
+  queue.push([{ kind: "key.down", key: "a", x: 0, y: 0 }], frame);
+  await done;
+  fail = false;
+  done = new Promise<void>(resolve => { settle = resolve; });
+  queue.clear();
+  queue.push([{ kind: "mouse.up", x: 1, y: 1, button: "left" }], frame);
+  await done;
+  assert.deepEqual(sent, [["key.down"], ["mouse.up"]]);
+});
