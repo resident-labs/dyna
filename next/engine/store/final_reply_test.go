@@ -19,7 +19,7 @@ func TestEndTurnFinalReply(t *testing.T) {
 	if err := s.CreateRoom(ctx, "room", "room", now); err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.writer.ExecContext(ctx, "INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('parent','room','parent','p','ready','',0),('child','room','child','p','ready','',0)")
+	_, err = s.writer.ExecContext(ctx, "INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('parent','room','parent','p','open','',0),('child','room','child','p','open','',0); INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES('b','child','','agent','ready','','',0,0)")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestEndTurnIgnoresPostBeforeTurnStart(t *testing.T) {
 		if err := s.CreateRoom(ctx, "room", "room", now); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = s.writer.ExecContext(ctx, "INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('parent','room','parent','p','ready','',0),('child','room','child','p','ready','',0)"); err != nil {
+		if _, err = s.writer.ExecContext(ctx, "INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('parent','room','parent','p','open','',0),('child','room','child','p','open','',0); INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES('b','child','','agent','ready','','',0,0)"); err != nil {
 			t.Fatal(err)
 		}
 		parent := contract.Principal{Kind: contract.PrincipalSession, Session: "parent"}

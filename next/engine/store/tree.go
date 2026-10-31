@@ -43,7 +43,7 @@ func (s *Store) ClosingLeaf(ctx context.Context, id contract.SessionID) (bool, e
 }
 
 // MarkClosing blocks child starts across the subtree in one write.
-func (s *Store) MarkClosing(ctx context.Context, target contract.SessionID, discard ...bool) error {
+func (s *Store) MarkClosing(ctx context.Context, target contract.SessionID, discard bool) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `WITH RECURSIVE sub(id) AS (
 			SELECT ? UNION SELECT s.id FROM sessions s JOIN sub ON s.parent=sub.id WHERE s.closed_at IS NULL
@@ -52,12 +52,12 @@ func (s *Store) MarkClosing(ctx context.Context, target contract.SessionID, disc
 			return err
 		}
 		want := WantClose
-		if len(discard) > 0 && discard[0] {
+		if discard {
 			want = WantDiscard
 		}
 		_, err = tx.ExecContext(ctx, `WITH RECURSIVE sub(id) AS (
 			SELECT ? UNION SELECT s.id FROM sessions s JOIN sub ON s.parent=sub.id WHERE s.closed_at IS NULL
-		) UPDATE boxes SET want=? WHERE session IN (SELECT id FROM sub)`, target, want)
+		) UPDATE boxes SET want=?,due_at=0 WHERE session IN (SELECT id FROM sub) AND want!='discard'`, target, want)
 		return err
 	})
 }
