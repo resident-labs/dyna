@@ -35,18 +35,17 @@
     for (const item of list.sessions ?? []) sessions.set(item.id, { name: item.name, root: !item.parent });
     for (const id of fresh) answered.add(id);
     listed.add(room);
-    attention.seed(list.sessions ?? [], room);
   };
   $effect(() => {
     void attempt;
     for (const room of attention.rooms.keys()) {
-      load([room], listed, () => call("session.list", { room }), keepSessions(room));
+      load([room], listed, () => attention.listSessions(room), keepSessions(room));
       load(attention.waiting.get(room) ?? [], requests, () => call("op.list", { room }), list => {
         for (const op of list.operations ?? []) requests.set(op.id, { title: op.card.title, by: op.by });
       });
       // A requester that started after the room's list loads it again.
       const by = [...attention.waiting.get(room) ?? []].flatMap(id => requests.get(id)?.by.session ?? []);
-      if (listed.has(room)) load(by, sessions, () => call("session.list", { room }), keepSessions(room));
+      if (listed.has(room)) load(by, sessions, () => attention.listSessions(room), keepSessions(room));
     }
   });
   const rows = <T,>(sets: Map<string, Set<string>>, known: SvelteMap<string, T>) => [...attention.rooms.values()].flatMap(room =>
@@ -109,25 +108,25 @@
 </script>
 
 <div class="home">
-  <!-- Waiting and Working are one list card each, side by side, with their empty state inside. -->
-  <div class="cards top">
+  <!-- Waiting for you, then Activity, each a full-width card whose rows fill a grid of about 280 px columns. -->
+  <div class="top">
     <section class="card"><h2>Waiting for you{#if waiting.length}<span>{waiting.length}</span>{/if}</h2>
-      {#each groups as { room, count } (room.id)}<a class="item" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>
+      <div class="rows">{#each groups as { room, count } (room.id)}<a class="item" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>
         <Avatar kind="room" name={room.name} size={28} />
         <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{count} waiting</span></span></a>
       {:else}{#each waiting as { id, room, value, who, root } (id)}<a class="item" href={roomHref(room.id)}
         onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>
         <Avatar kind={value.by.kind} name={who} {root} size={28} />
-        <span class="lines"><span class="title">{value.title}</span><span class="line">{who} · {room.name}</span></span></a>{/each}{/each}
+        <span class="lines"><span class="title">{value.title}</span><span class="line">{who} · {room.name}</span></span></a>{/each}{/each}</div>
       {#if !total(attention.waiting)}<p class="none">Nothing is waiting for you.</p>{/if}</section>
     <section class="card"><h2>Activity{#if total(attention.working)}<span>{total(attention.working)} working</span>{/if}</h2>
-      {#if broken.length}<h4>Needs a look</h4>{/if}
-      {#each broken as { id, room, value } (id)}<a class="item" href={`${roomHref(room.id)}/s/${encodeURIComponent(id)}`} onclick={navigate}>
-        <SessionRow name={value.name} root={value.root} status={`The last turn failed · ${room.name}`} /><StatusPill tone="failed">Failed</StatusPill></a>{/each}
+      {#if broken.length}<h4>Needs a look</h4>
+        <div class="rows">{#each broken as { id, room, value } (id)}<a class="item" href={`${roomHref(room.id)}/s/${encodeURIComponent(id)}`} onclick={navigate}>
+          <SessionRow name={value.name} root={value.root} status={room.name} /><StatusPill tone="failed">Failed</StatusPill></a>{/each}</div>{/if}
       {#if broken.length && busy.length}<h4>Rooms at work</h4>{/if}
-      {#each allRooms ? busy : busy.slice(0, 6) as { room, line } (room.id)}<a class="item" href={roomHref(room.id)} onclick={navigate}>
+      <div class="rows">{#each allRooms ? busy : busy.slice(0, 6) as { room, line } (room.id)}<a class="item" href={roomHref(room.id)} onclick={navigate}>
         <Avatar kind="room" name={room.name} size={28} />
-        <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{line}</span></span></a>{/each}
+        <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{line}</span></span></a>{/each}</div>
       {#if busy.length > 6 && !allRooms}<button type="button" class="retry more" onclick={() => { allRooms = true; }}>{busy.length - 6} more {busy.length === 7 ? "room" : "rooms"}</button>{/if}
       {#if !busy.length && !broken.length}<p class="none">No session is open.</p>{/if}</section>
   </div>
@@ -143,12 +142,14 @@
 <style>
   /* Home is a dashboard, so its card grids use the page width up to 1200 px. */
   .home { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; width: min(1200px, 100%); margin: 0 auto; padding: 16px 16px 32px; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin: 0 8px; }
-  .top { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); align-items: start; margin-top: 8px; }
+  /* 340 px columns keep three metric tiles' figures on one line. */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; margin: 0 8px; }
+  .top { display: grid; gap: 12px; margin: 8px 8px 0; }
+  .rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); column-gap: 12px; margin: 0 -8px; }
   h2 { display: flex; align-items: baseline; gap: 8px; margin: 24px 8px 12px; font-size: 18px; font-weight: 600; line-height: 1.25; }
   .card h2 { margin: 0 0 8px; font-size: 16px; }
   h2 span { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
-  .item { display: flex; align-items: center; gap: 10px; min-height: 44px; margin: 0 -8px; padding: 6px 8px; border-radius: 8px; color: var(--text); text-decoration: none; }
+  .item { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 44px; padding: 6px 8px; border-radius: 8px; color: var(--text); text-decoration: none; }
   .item:hover { background: var(--hover); }
   .none { margin: 12px 0 4px; color: var(--muted); font-size: 13px; }
   .failed { margin: 12px 8px; color: var(--muted); font-size: 13px; }

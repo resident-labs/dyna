@@ -5,18 +5,19 @@ export const hostLabel = (host: string) => host === "control-plane" ? "This comp
 // One tile on a Home card: the label, the percent large with an optional muted unit after it, a bar, and the text.
 export type Meter = { label: string; text: string; percent: number; busy: boolean; unit?: string };
 
-// A host's CPU, memory and disk meters, "3.1 of 16 cores", "9.8 of 31 GB" and "412 free of 931 GB"; none while it
-// reports no capacity, and no disk tile without a disk figure. A meter at 90% of its limit or more is busy.
-// GB counts 2^30 bytes, as v1's GiB did.
+// A host's CPU, memory and disk meters, "3.1 of 16 cores", "9.8 of 31 GB" and "412 GB free"; none while it reports
+// no capacity, and no disk tile without a disk figure. Figures of 100 or more drop the decimal, so a tile's text
+// stays on one line. A meter at 90% of its limit or more is busy. GB counts 2^30 bytes, as v1's GiB did.
 export function hostMeters(h: HostSummary): Meter[] {
   if (!h.cpus || !h.memBytes) return [];
   const gb = (bytes: number) => bytes / 2 ** 30;
+  const fixed = (n: number) => n.toFixed(n >= 100 ? 0 : 1);
   const meter = (label: string, used: number, limit: number, text: string) =>
     ({ label, text, percent: Math.min(100, Math.round(used / limit * 100)), busy: used >= 0.9 * limit });
   return [
-    meter("CPU", h.cpuUsed, h.cpus, `${h.cpuUsed.toFixed(1)} of ${h.cpus} cores`),
-    meter("Memory", h.memUsed, h.memBytes, `${gb(h.memUsed).toFixed(1)} of ${Math.round(gb(h.memBytes))} GB`),
-    ...h.diskBytes ? [meter("Disk", h.diskUsed, h.diskBytes, `${Math.round(gb(h.diskBytes - h.diskUsed))} free of ${Math.round(gb(h.diskBytes))} GB`)] : [],
+    meter("CPU", h.cpuUsed, h.cpus, `${fixed(h.cpuUsed)} of ${h.cpus} cores`),
+    meter("Memory", h.memUsed, h.memBytes, `${fixed(gb(h.memUsed))} of ${Math.round(gb(h.memBytes))} GB`),
+    ...h.diskBytes ? [meter("Disk", h.diskUsed, h.diskBytes, `${Math.round(gb(h.diskBytes - h.diskUsed))} GB free`)] : [],
   ];
 }
 
