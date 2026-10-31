@@ -86,13 +86,13 @@ func (h *Handler) dynaCompleteOAuth(state string, record *coreauth.Auth) {
 	var adopted bool
 	var version, epoch uint64
 	if h.authManager != nil && grant != "" {
-		if current, ok := h.authManager.GetByID(record.ID); ok && current != nil && current.Disabled && authGrantFingerprint(current) == grant {
+		if current, ok := h.authManager.GetByID(record.ID); ok && current != nil && (current.Disabled || record.OAuthGrantReplaced) && authGrantFingerprint(current) == grant {
 			adopted = true
 			version, epoch = current.CredentialVersion, current.RegistrationEpoch
 		}
 	}
 	if !adopted {
-		// Do not let a status poll promote a mismatched or enabled runtime entry.
+		// Do not let a status poll promote a mismatched or unverified runtime entry.
 		grant = ""
 	}
 	CompleteOAuthSessionWithOutcome(state, record.ID, grant, true, adopted, false, 0, 0, version, epoch, "", "")

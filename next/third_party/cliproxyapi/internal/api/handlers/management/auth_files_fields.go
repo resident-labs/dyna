@@ -1010,12 +1010,14 @@ func (h *Handler) saveTokenRecord(ctx context.Context, record *coreauth.Auth) (s
 			return "", fmt.Errorf("post-auth hook failed: %w", err)
 		}
 	}
-	if h.authManager != nil {
+	if durable, ok := store.(coreauth.DurableAuthStore); ok && durable.RequireDurableAuth() && h.authManager != nil {
 		if _, ok := h.authManager.GetByID(record.ID); ok {
-			_, err := h.authManager.Replace(ctx, record)
+			committed, err := h.authManager.Replace(ctx, record)
 			if err != nil {
 				return "", err
 			}
+			record.Metadata = committed.Metadata
+			record.OAuthGrantReplaced = true
 			return record.ID, nil
 		}
 	}
