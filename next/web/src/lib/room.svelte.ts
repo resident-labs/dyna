@@ -3,7 +3,7 @@ import { call } from "./client.ts";
 import { stream } from "./stream.ts";
 import { EventWindow } from "./window.svelte.ts";
 import { countOf, statusOf, type Counts, type Status } from "./status.ts";
-import type { BoxState, Conversation, FailureCause, Decision, Event, OpRequested, OpResult, OpState, SessionStarted } from "./contract.gen.ts";
+import type { BoxState, Conversation, FailureCause, Decision, Event, OpRequested, OpResult, OpState, RoomRule, SessionStarted } from "./contract.gen.ts";
 
 type TurnEndedEvent = Extract<Event, { type: "turn.ended" }>;
 
@@ -33,6 +33,8 @@ export class RoomStore {
   readonly shellJobs = new SvelteMap<string, number>();
   // op.list gives the pending operations; decided ones stay for the time the room is open.
   readonly requests = new SvelteMap<string, Request>();
+  // The room's rules by number. rule.list reads after session.list, and rule.added and rule.removed repeat safely.
+  readonly rules = new SvelteMap<number, RoomRule>();
   // Names outlive closed sessions, so old posts still show who wrote them.
   readonly names = new SvelteMap<string, string>();
   private readonly windows = new Set<EventWindow>();
@@ -104,7 +106,9 @@ export class RoomStore {
     const list = await call("session.list", { room: this.room });
     // op.list reads after the seq, so an operation it misses arrives as a live event.
     const listed = await call("op.list", { room: this.room });
+    const rules = await call("rule.list", { room: this.room });
     this.head = list.seq;
+    for (const rule of rules.rules ?? []) this.rules.set(rule.number, rule);
     for (const session of list.sessions ?? []) {
       this.sessions.set(session.id, {
         session: session.id, name: session.name, parent: session.parent || undefined,
@@ -213,6 +217,8 @@ export class RoomStore {
         } else if (event.body.outcome === "completed") { this.failed.delete(event.body.session); this.causes.delete(event.body.session); }
         this.shellJobs.set(event.body.session, event.body.shellJobs ?? 0);
         break;
+      case "rule.added": this.rules.set(event.body.number, { number: event.body.number, text: event.body.text, by: event.from, at: event.at }); break;
+      case "rule.removed": this.rules.delete(event.body.number); break;
       case "op.requested": this.requests.set(event.body.id, { ...event.body, state: "pending" }); break;
       case "op.decided": case "op.ran": {
         const known = this.requests.get(event.body.id);

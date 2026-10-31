@@ -22,6 +22,7 @@
   import { MediaQuery, SvelteSet } from "svelte/reactivity";
   import RoomMenu from "./lib/ui/RoomMenu.svelte";
   import RequestsPanel from "./lib/ui/RequestsPanel.svelte";
+  import RulesPanel from "./lib/ui/RulesPanel.svelte";
   import { Attention } from "./lib/attention.svelte.ts";
   import { mentionable, parseMentions } from "./lib/mentions.ts";
   import { distinctInitials } from "./lib/identity.ts";
@@ -61,13 +62,16 @@
   connect();
   let path = $state(window.location.pathname);
   window.addEventListener("popstate", () => { path = window.location.pathname; section = undefined; });
-  // The requests view shows in place of the conversation until Back, Escape or its header button.
-  let section: "requests" | undefined = $state();
+  // The requests and rules views show in place of the conversation until Back, Escape or the control that opened them.
+  let section: "requests" | "rules" | undefined = $state();
   let requestsButton: HTMLButtonElement | undefined = $state();
+  let roomMenu: RoomMenu | undefined = $state();
   async function closeSection() {
+    const was = section;
     section = undefined;
     await tick();
-    requestsButton?.focus();
+    // On a phone the room menu is hidden in favour of the drawer, so Rules returns focus to ☰.
+    if (was === "rules") (phone.current ? menuButton : roomMenu)?.focus(); else requestsButton?.focus();
   }
   const segment = (pattern: RegExp) => { const match = pattern.exec(path)?.[1]; return match && decodeURIComponent(match); };
   let room = $derived(segment(/^\/r\/([^/]+)/));
@@ -177,7 +181,7 @@
   let view: Feed | undefined = $state();
   let rail: HTMLElement;
   let feed: HTMLDivElement | undefined = $state();
-  let requests: HTMLElement | undefined = $state();
+  let page: HTMLElement | undefined = $state();
   let composer: HTMLTextAreaElement | undefined = $state();
   let members: HTMLElement | undefined = $state();
   let computer: HTMLElement | undefined = $state();
@@ -193,8 +197,8 @@
     if (event.key !== "F6") return;
     event.preventDefault();
     // Only areas on screen take part; below 761 px the closed sessions panel has no boxes.
-    // The requests view takes the place of the feed and the composer.
-    const areas = [rail, section ? requests : feed, section ? undefined : composer, dock, members, docked ? undefined : computer]
+    // The requests and rules views take the place of the feed and the composer.
+    const areas = [rail, section ? page : feed, section ? undefined : composer, dock, members, docked ? undefined : computer]
       .filter(area => area != null)
       .filter(area => area.getClientRects().length > 0);
     const index = areas.findIndex(area => area.contains(document.activeElement));
@@ -358,6 +362,7 @@
             {#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
           <button type="button" onclick={() => void showPanel(true)}><Icon name="people" />Sessions<span class="count">{store.sessions.size}</span></button>
           <button type="button" onclick={() => void terminals?.pick()}><Icon name="terminal" />Terminal</button>
+          <button type="button" aria-pressed={section === "rules"} onclick={() => { section = "rules"; }}><Icon name="rules" />Rules<span class="count">{store.rules.size}</span></button>
         {/if}
       {:else}
         {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}
@@ -376,13 +381,14 @@
         {#if closed}<span class="count">· closed</span>{/if}
         {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session") + (working ? ` · ${working} working` : "")}</span>{/if}</span>
       {#if store && !unavailable}<button type="button" class="requests" class:waiting={store.waiting > 0} bind:this={requestsButton} aria-pressed={section === "requests"}
-        aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section ? undefined : "requests"; }}>
+        aria-label={store.waiting ? `Requests, ${store.waiting} waiting` : "Requests"} title="Requests" onclick={() => { section = section === "requests" ? undefined : "requests"; }}>
         <Icon name="inbox" />{#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
-        <span class="room-menu"><RoomMenu onterminal={() => void terminals?.pick()} /></span>{/if}
+        <span class="room-menu"><RoomMenu bind:this={roomMenu} onterminal={() => void terminals?.pick()} onrules={() => { section = "rules"; }} /></span>{/if}
       {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={store?.counts.failed ? "Sessions, a session failed" : "Sessions"}
         title="Sessions" aria-controls="sessions" aria-expanded={panel} onclick={() => void showPanel(!panel)}><Icon name="people" />{#if store?.ready}<span class="count phone">{store.sessions.size}</span>{/if}
         {#if store?.counts.failed && !panel}<span class="attention"></span>{/if}</button>{/if}</header>
-    {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={requests} {store} room={roomName} onback={() => void closeSection()} />
+    {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} room={roomName} onback={() => void closeSection()} />
+    {:else if section === "rules" && store && !unavailable}<RulesPanel bind:element={page} {store} room={roomName} onback={() => void closeSection()} />
     {:else}<div class="feed">
       {#if blocked}<Blocked kind={blocked} onretry={blocked === "unreachable" ? connect : undefined} />
       {:else if !room && roomsLoaded && !rooms.length}<Blocked kind="no-rooms" />
