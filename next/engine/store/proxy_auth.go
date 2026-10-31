@@ -3,16 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
+
+	"github.com/resident-labs/dyna/contract/private"
 )
 
 // ProxyAuth is an opaque credential record owned by the proxy.
-type ProxyAuth struct {
-	ID        string
-	Provider  string
-	Record    []byte
-	UpdatedAt int64
-	Bound     bool
-}
+type ProxyAuth = private.ProxyAuth
 
 func (s *Store) SaveProxyAuth(ctx context.Context, auth ProxyAuth, create bool) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
