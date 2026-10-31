@@ -455,6 +455,7 @@ type BoxRepo struct {
 }
 
 type BoxHelloResponse struct {
+	AgentSurface  AgentSurface     `json:"agentSurface"`
 	GitName       string           `json:"gitName,omitempty"`
 	GitEmail      string           `json:"gitEmail,omitempty"`
 	CompactTokens int              `json:"compactTokens,omitempty"`
@@ -555,9 +556,10 @@ type TurnInput struct {
 	Text     string       `json:"text"`
 }
 type TurnStart struct {
-	Turn   TurnID      `json:"turn"`
-	Inputs []TurnInput `json:"inputs"`
-	Model  ModelChoice `json:"model"` // the session profile's model when the turn was dispatched
+	Sections []ContextSection `json:"sections"`
+	Turn     TurnID           `json:"turn"`
+	Inputs   []TurnInput      `json:"inputs"`
+	Model    ModelChoice      `json:"model"` // the session profile's model when the turn was dispatched
 }
 type TurnQueue string
 
