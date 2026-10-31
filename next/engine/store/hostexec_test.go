@@ -22,7 +22,7 @@ func TestRecoverHostexecMarksInterruptedRunsLost(t *testing.T) {
 		t.Fatal(err)
 	}
 	who := contract.Principal{Kind: contract.PrincipalSession, Session: "session"}
-	grant := contract.Grant{ID: "grant", Kind: contract.GrantHostExec, Room: "room", To: who, By: contract.Principal{Kind: contract.PrincipalOwner}, Created: now, Mode: contract.GrantModePreapproved, Hosts: []contract.HostName{"host"}, Commands: []contract.CommandRule{{Program: "true"}}}
+	grant := contract.Grant{ID: "grant", Kind: contract.GrantHostExec, Room: "room", To: who, By: contract.Principal{Kind: contract.PrincipalOwner}, Created: now, Hosts: []contract.HostName{"host"}}
 	err = s.Write(ctx, func(tx *sql.Tx) error {
 		if err := s.InsertGrant(tx, grant); err != nil {
 			return err
@@ -99,7 +99,7 @@ func TestLostRevokedRunWaitsForLaunchWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	who := contract.Principal{Kind: contract.PrincipalSession, Session: "session"}
-	grant := contract.Grant{ID: "grant", Kind: contract.GrantHostExec, Room: "room", To: who, By: contract.Principal{Kind: contract.PrincipalOwner}, Created: now, Mode: contract.GrantModePreapproved, Hosts: []contract.HostName{"host"}, Commands: []contract.CommandRule{{Program: "true"}}}
+	grant := contract.Grant{ID: "grant", Kind: contract.GrantHostExec, Room: "room", To: who, By: contract.Principal{Kind: contract.PrincipalOwner}, Created: now, Hosts: []contract.HostName{"host"}}
 	err = s.Write(ctx, func(tx *sql.Tx) error {
 		if err := s.InsertGrant(tx, grant); err != nil {
 			return err
