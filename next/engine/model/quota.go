@@ -4,15 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
+	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 )
-
-var errSignInExpired = errors.New("sign-in expired")
 
 type quotaEntry struct {
 	at    time.Time
@@ -57,8 +57,8 @@ func (q *Quotas) ObservedState(index string) CredentialState {
 	return CredentialUnknown
 }
 
-func (q *Quotas) request(ctx context.Context, method, path string, body []byte) (json.RawMessage, error) {
-	return q.management.request(ctx, method, "/v0/management/"+path, body)
+func (q *Quotas) request(ctx context.Context, path string) (json.RawMessage, error) {
+	return q.management.request(ctx, http.MethodGet, "/v0/management/"+path, nil)
 }
 
 func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, error) {
@@ -81,6 +81,27 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 			continue
 		}
 		usage := contract.AccountUsage{AccountID: account.ID, Provider: file.Provider, Label: account.Label, Windows: []contract.UsageWindow{}}
+		if file.Provider == "codex" && file.Quota.ObservedAt != nil && !file.Quota.ObservedAt.IsZero() {
+			usage.ObservedAt = file.Quota.ObservedAt
+			for _, item := range []struct {
+				name string
+				data CredentialQuotaWindow
+			}{{"primary", file.Quota.Primary}, {"secondary", file.Quota.Secondary}} {
+				if item.data.UsedPercent == nil {
+					continue
+				}
+				window := contract.UsageWindow{Name: item.name, UsedPercent: *item.data.UsedPercent}
+				if item.data.WindowMinutes != nil {
+					window.Seconds = int64(*item.data.WindowMinutes) * 60
+				}
+				if item.data.ResetAt != nil {
+					window.ResetsAt = time.Unix(*item.data.ResetAt, 0).UTC()
+				} else if item.data.ResetAfterSeconds != nil {
+					window.ResetsAt = file.Quota.ObservedAt.Add(time.Duration(*item.data.ResetAfterSeconds) * time.Second)
+				}
+				usage.Windows = append(usage.Windows, window)
+			}
+		}
 		if file.Provider != "claude" {
 			result.Accounts = append(result.Accounts, usage)
 			continue
@@ -96,82 +117,60 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 			result.Accounts = append(result.Accounts, usage)
 			continue
 		}
-		payload, _ := json.Marshal(struct {
-			Index  string            `json:"auth_index"`
-			Method string            `json:"method"`
-			URL    string            `json:"url"`
-			Header map[string]string `json:"header"`
-		}{file.Index, "GET", "https://api.anthropic.com/api/oauth/usage", map[string]string{
-			"Authorization": "Bearer $TOKEN$", "anthropic-beta": "oauth-2025-04-20",
-			"Accept": "application/json", "User-Agent": "dyna-account-manager/1.0",
-		}})
-		data, err := q.request(ctx, "POST", "api-call", payload)
+		requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		data, err := q.request(requestCtx, "auth-files/quota?auth_index="+url.QueryEscape(file.Index))
+		cancel()
 		var reply struct {
-			Status int    `json:"status_code"`
-			Body   string `json:"body"`
+			Files []struct {
+				Index      string     `json:"auth_index"`
+				ObservedAt *time.Time `json:"observed_at"`
+				Status     int        `json:"status_code"`
+				Error      string     `json:"error"`
+				Windows    []struct {
+					Kind        string  `json:"kind"`
+					Scope       string  `json:"scope"`
+					Utilization float64 `json:"utilization"`
+					ResetsAt    string  `json:"resets_at"`
+				} `json:"windows"`
+			} `json:"files"`
 		}
-		var buckets map[string]json.RawMessage
 		switch {
-		case errors.Is(err, errSignInExpired):
-			usage.Cause = contract.UsageSignInExpired
-		case err != nil || json.Unmarshal(data, &reply) != nil:
+		case err != nil || json.Unmarshal(data, &reply) != nil || len(reply.Files) != 1 || reply.Files[0].Index != file.Index:
 			usage.Cause = contract.UsageUnreachable
-		case reply.Status == 401 || reply.Status == 403:
+		case reply.Files[0].Status == http.StatusUnauthorized || reply.Files[0].Status == http.StatusForbidden:
 			usage.Cause = contract.UsageSignInExpired
-		case reply.Status != 200 || json.Unmarshal([]byte(reply.Body), &buckets) != nil || buckets == nil:
+		case reply.Files[0].Status != http.StatusOK || reply.Files[0].Error != "":
 			usage.Cause = contract.UsageUnreachable
 		default:
-			weekly := "seven_day_oauth_apps"
-			if len(buckets[weekly]) == 0 || string(buckets[weekly]) == "null" {
-				weekly = "seven_day"
-			}
-			for _, window := range []struct {
-				key, name string
-				seconds   int64
-			}{{"five_hour", "five_hour", 18000}, {weekly, "seven_day", 604800}} {
-				var b *struct {
-					Utilization float64   `json:"utilization"`
-					ResetsAt    time.Time `json:"resets_at"`
-				}
-				if raw := buckets[window.key]; len(raw) > 0 {
-					if json.Unmarshal(raw, &b) != nil {
-						usage.Cause = contract.UsageUnreachable
-						usage.Windows = nil
-						break
+			usage.ObservedAt = reply.Files[0].ObservedAt
+			var weekly *contract.UsageWindow
+			var oauthWeekly *contract.UsageWindow
+			for _, w := range reply.Files[0].Windows {
+				reset, _ := time.Parse(time.RFC3339Nano, w.ResetsAt)
+				window := contract.UsageWindow{UsedPercent: w.Utilization, ResetsAt: reset}
+				switch w.Kind {
+				case "session":
+					window.Name, window.Seconds = "five_hour", 18000
+					usage.Windows = append(usage.Windows, window)
+				case "weekly_all":
+					window.Name, window.Seconds = "seven_day", 604800
+					weekly = &window
+				case "weekly_scoped":
+					if strings.EqualFold(w.Scope, "Oauth Apps") {
+						window.Name, window.Seconds = "seven_day", 604800
+						oauthWeekly = &window
+					} else if w.Scope != "" {
+						window.Name, window.Seconds = w.Scope+" Weekly", 604800
+						usage.Windows = append(usage.Windows, window)
 					}
-					if b != nil {
-						usage.Windows = append(usage.Windows, contract.UsageWindow{Name: window.name, UsedPercent: b.Utilization, Seconds: window.seconds, ResetsAt: b.ResetsAt})
-					}
 				}
 			}
-		}
-		if usage.Cause != "" {
-			// Log only JSON structure, never upstream values or response headers.
-			var shape map[string]json.RawMessage
-			_ = json.Unmarshal([]byte(reply.Body), &shape)
-			kinds := make(map[string]string, len(shape))
-			for key, raw := range shape {
-				switch key {
-				case "five_hour", "seven_day", "seven_day_oauth_apps", "limits", "error", "type", "message":
-				default:
-					continue
-				}
-				switch raw[0] {
-				case '{':
-					kinds[key] = "object"
-				case '[':
-					kinds[key] = "array"
-				case '"':
-					kinds[key] = "string"
-				case 'n':
-					kinds[key] = "null"
-				case 't', 'f':
-					kinds[key] = "boolean"
-				default:
-					kinds[key] = "number"
-				}
+			if oauthWeekly != nil {
+				weekly = oauthWeekly
 			}
-			log.Printf("model quota failed: upstream_status=%d keys_and_kinds=%q", reply.Status, kinds)
+			if weekly != nil {
+				usage.Windows = append([]contract.UsageWindow{*weekly}, usage.Windows...)
+			}
 		}
 		q.mu.Lock()
 		if q.generation == generation {

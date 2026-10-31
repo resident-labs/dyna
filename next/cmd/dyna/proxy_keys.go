@@ -89,7 +89,8 @@ func proxyKeyRoutes(router *gin.Engine, service **cliproxy.Service, credentials 
 			c.Status(http.StatusBadRequest)
 			return
 		}
-		if !credentials.bound(req.ID) || (*service).ActivateDynaCredential(c.Request.Context(), req.ID, req.Model) != nil {
+		bound, err := credentials.bound(req.ID)
+		if err != nil || !bound || (*service).ActivateDynaCredential(c.Request.Context(), req.ID, req.Model) != nil {
 			c.Status(http.StatusServiceUnavailable)
 			return
 		}

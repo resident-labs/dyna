@@ -28,9 +28,6 @@ func (m managementClient) request(ctx context.Context, method, path string, body
 	}
 	defer res.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
-	if res.StatusCode == http.StatusBadRequest && bytes.Contains(data, []byte("auth token refresh failed")) {
-		return nil, errSignInExpired
-	}
 	if res.StatusCode != http.StatusOK {
 		return nil, errors.New("management request failed")
 	}
