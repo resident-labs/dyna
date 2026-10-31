@@ -27,7 +27,7 @@ func (s *Sessions) checkGrant(ctx context.Context, x store.ConnectSession) (bool
 		grant, err := relay.CheckGrant(ctx, l.Machine, x.User, x.RelayDevice)
 		if err != nil {
 			var re *RelayError
-			if errors.As(err, &re) {
+			if errors.As(err, &re) && (re.Status == http.StatusUnauthorized || re.Status == http.StatusForbidden || re.Status == http.StatusGone) {
 				if re.Status == http.StatusGone {
 					if e := s.store.UnlinkConnectGeneration(ctx, x.Generation); e != nil {
 						return false, false, e
@@ -52,7 +52,7 @@ func (s *Sessions) checkGrant(ctx context.Context, x store.ConnectSession) (bool
 }
 
 // ServePrivate handles proof-bound renewal.
-func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin string, routes []string, x store.ConnectSession) {
+func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin string, x store.ConnectSession) {
 	if !browserRequest(r, origin) {
 		fail(w, 403, "forbidden")
 		return
@@ -60,7 +60,7 @@ func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin s
 	var req struct {
 		Proof string `json:"proof"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384)).Decode(&req); err != nil && r.URL.Path != "/api/connect/whoami" && r.URL.Path != "/api/connect/routes" && r.URL.Path != "/api/connect/logout" && r.URL.Path != "/api/logout" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384)).Decode(&req); err != nil && r.URL.Path != "/api/connect/logout" && r.URL.Path != "/api/logout" {
 		fail(w, 400, "bad request")
 		return
 	}
@@ -118,18 +118,6 @@ func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin s
 			GrantEnd time.Time `json:"grantEnd"`
 			Grace    bool      `json:"grace"`
 		}{access, x.End, grace})
-	case "/api/connect/whoami":
-		if x.Stale {
-			fail(w, 401, "renew session")
-			return
-		}
-		reply(w, 200, struct {
-			Kind     string    `json:"kind"`
-			ID       string    `json:"id"`
-			Name     string    `json:"name"`
-			Expires  time.Time `json:"expires"`
-			GrantEnd time.Time `json:"grantEnd"`
-		}{"connect", x.ID, x.User, x.Access, x.End})
 	case "/api/connect/logout", "/api/logout":
 		if !x.CookieStale {
 			if err := s.store.EndConnectSession(r.Context(), x.ID); err != nil {

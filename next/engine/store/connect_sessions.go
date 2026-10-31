@@ -118,21 +118,7 @@ func (s *Store) AuthenticateConnect(ctx context.Context, hash [32]byte, origin s
 	x.Grant = time.UnixMilli(grant)
 	x.CookieStale = which > 1 || (which == 1 && now.UnixMilli() > prev)
 	x.Stale = x.CookieStale || !now.Before(x.Access)
-	rows, err := tx.QueryContext(ctx, "SELECT scope FROM device_scopes WHERE device=? ORDER BY scope", x.Device)
-	if err != nil {
-		return x, nil, false, err
-	}
-	var scopes []contract.Scope
-	for rows.Next() {
-		var scope contract.Scope
-		if err := rows.Scan(&scope); err != nil {
-			rows.Close()
-			return x, nil, false, err
-		}
-		scopes = append(scopes, scope)
-	}
-	err = rows.Err()
-	rows.Close()
+	scopes, err := readDeviceScopes(ctx, tx, x.Device)
 	if err != nil {
 		return x, nil, false, err
 	}
@@ -176,21 +162,7 @@ func (s *Store) ConnectStreamScopes(ctx context.Context, id string, now time.Tim
 	if err != nil {
 		return nil, false, err
 	}
-	rows, err := tx.QueryContext(ctx, "SELECT scope FROM device_scopes WHERE device=? ORDER BY scope", device)
-	if err != nil {
-		return nil, false, err
-	}
-	var scopes []contract.Scope
-	for rows.Next() {
-		var scope contract.Scope
-		if err := rows.Scan(&scope); err != nil {
-			rows.Close()
-			return nil, false, err
-		}
-		scopes = append(scopes, scope)
-	}
-	err = rows.Err()
-	rows.Close()
+	scopes, err := readDeviceScopes(ctx, tx, device)
 	if err != nil {
 		return nil, false, err
 	}
