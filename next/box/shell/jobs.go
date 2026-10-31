@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"slices"
 	"strings"
@@ -37,8 +38,9 @@ type process interface {
 
 type execProcess struct{ cmd *exec.Cmd }
 
-func startBash(command, cwd string, out io.Writer) (process, error) {
+func startBash(command, cwd, callID string, out io.Writer) (process, error) {
 	cmd := exec.Command("bash", "-c", command)
+	cmd.Env = append(os.Environ(), contract.ToolCallIDEnv+"="+callID)
 	cmd.Dir, cmd.Stdout, cmd.Stderr = cwd, out, out
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.WaitDelay = time.Second // a background child that keeps the pipe open must not hold the job
@@ -154,7 +156,7 @@ type Config struct {
 	Report func(contract.ShellJobEndedRequest) error // called when a background job ends; retried until it succeeds
 
 	newID func() contract.ShellJobID
-	start func(command, cwd string, out io.Writer) (process, error)
+	start func(command, cwd, callID string, out io.Writer) (process, error)
 	now   func() time.Time // the clock for a job's start and end
 }
 
@@ -196,13 +198,13 @@ func (s *Server) find(id contract.ShellJobID) (*job, bool) {
 }
 
 // run starts a command and waits up to the foreground limit. A job still running then continues in the background.
-func (s *Server) run(cancel <-chan struct{}, command, cwd, description string) (*job, error) {
+func (s *Server) run(cancel <-chan struct{}, command, cwd, description, callID string) (*job, error) {
 	if cwd == "" {
 		cwd = s.cfg.Dir
 	}
 	j := &job{id: s.cfg.newID(), command: command, started: s.cfg.now(), owner: -1, done: make(chan struct{})}
 	j.description = Mask(description)
-	proc, err := s.cfg.start(command, cwd, j)
+	proc, err := s.cfg.start(command, cwd, callID, j)
 	if err != nil {
 		return nil, err
 	}
