@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -35,7 +36,8 @@ func (h *harnessFake) Start(_ context.Context, id contract.TurnID, inputs []cont
 	<-h.release
 	return contract.TurnEnded{Turn: id, Outcome: contract.TurnOutcome("completed")}, nil
 }
-func (h *harnessFake) SetModel(context.Context, contract.ModelChoice) error { return nil }
+func (h *harnessFake) SetModel(context.Context, contract.ModelChoice) error               { return nil }
+func (h *harnessFake) SetPromptSections(context.Context, []contract.ContextSection) error { return nil }
 func (h *harnessFake) Continue(context.Context, contract.TurnID, func()) (contract.TurnEnded, error) {
 	panic("unexpected continuation")
 }
@@ -89,6 +91,67 @@ func (s *sinkFake) TurnOutput(_ context.Context, result contract.TurnEnded) erro
 	}
 	s.done <- result
 	return nil
+}
+
+type sectionHarness struct {
+	fakeharness.Harness
+	calls     []string
+	sections  []contract.ContextSection
+	delivered bool
+	setErr    error
+}
+
+func (h *sectionHarness) Delivered(context.Context, contract.DeliverySeq) (bool, error) {
+	return h.delivered, nil
+}
+func (h *sectionHarness) Recover(id contract.TurnID, _ []contract.TurnInput) (contract.TurnEnded, bool, error) {
+	return contract.TurnEnded{Turn: id}, false, nil
+}
+func (h *sectionHarness) SetPromptSections(_ context.Context, sections []contract.ContextSection) error {
+	h.calls = append(h.calls, "sections")
+	h.sections = append([]contract.ContextSection(nil), sections...)
+	return h.setErr
+}
+func (h *sectionHarness) Start(_ context.Context, id contract.TurnID, _ []contract.TurnInput, started func()) (contract.TurnEnded, error) {
+	h.calls = append(h.calls, "prompt")
+	started()
+	return contract.TurnEnded{Turn: id, Outcome: "completed"}, nil
+}
+func (h *sectionHarness) Continue(_ context.Context, id contract.TurnID, started func()) (contract.TurnEnded, error) {
+	h.calls = append(h.calls, "continue")
+	started()
+	return contract.TurnEnded{Turn: id, Outcome: "completed"}, nil
+}
+
+func TestRunnerAppliesSectionsBeforePromptOrRecovery(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		delivered bool
+		setErr    error
+		want      []string
+		outcome   contract.TurnOutcome
+	}{
+		{"prompt", false, nil, []string{"sections", "prompt"}, "completed"},
+		{"recovery", true, nil, []string{"sections", "continue"}, "completed"},
+		{"failure", false, errors.New("RPC rejected"), []string{"sections"}, "failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &sectionHarness{delivered: tc.delivered, setErr: tc.setErr}
+			sink := &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 1)}
+			r := &Runner{Harness: h, Sink: sink}
+			sections := []contract.ContextSection{{Key: "rule:a", Text: "first"}, {Key: "goal", Text: "second"}}
+			err := r.Handle(context.Background(), contract.BoxMessage{Body: contract.TurnStart{
+				Turn: "turn", Inputs: []contract.TurnInput{{Delivery: 1}}, Sections: sections,
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := <-sink.done
+			if !reflect.DeepEqual(h.calls, tc.want) || !reflect.DeepEqual(h.sections, sections) || got.Outcome != tc.outcome {
+				t.Fatalf("calls=%v sections=%v outcome=%s", h.calls, h.sections, got.Outcome)
+			}
+		})
+	}
 }
 
 func TestRunnerReportsRepositorySetupFailure(t *testing.T) {
