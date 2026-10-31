@@ -102,3 +102,63 @@ Product lines, excluding tests and third party: `cmd/dyna-export` about
 or contract expansion above. Exporter and verifier share the first package
 but not selection/count code. The exporter PR uses the v1 merge queue; the
 dry-run PR touches only `next/`.
+
+
+## Rehearsal: 2026-10-31
+
+The exporter, verifier and dry-run importer passed on a copy of the latest
+daily backup. The backup preceded the file capture by about 22 hours and
+33 minutes. The live feeds were read later. This non-atomic rehearsal is not
+a cutover gate. The captured backup, bundle and other private files were
+deleted after the run.
+
+| Category | Checked source | Bundle | Dry-run |
+|---|---:|---:|---:|
+| Rules | 52 | 52 | 52 |
+| Goals | 20 | 20 | 20 |
+| Goal items | 326 | 326 | 326 |
+| Issues | 412 | 412 | 412 |
+| PRs | 51 | 51 | 51 |
+| Questions | 0 | 0 | 0 |
+| Subscriptions | not independently checked | 0 | 0 |
+| Hosts | 4 | 4 | 4 |
+| Accounts | 10 | 10 | 10 |
+| Devices | 2 | 2 | 2 |
+| Sessions | 36 | 36 | 36 |
+| Profiles | 0 | 0 | 0 |
+| Repositories | 5 | 5 | 5 |
+| Skills | 1 | 1 | 1 |
+
+Database source counts use independent SQL. Repository counts also use the
+captured identity manifest. Profile and skill counts use captured config and
+the sanitized skill catalog. The verifier at this revision did not
+independently count subscriptions. Equal counts do not prove field equality
+or captured-file completeness.
+
+Six disabled profiles were skipped. Nine enabled profiles had no known model
+mapping, so no profile was exported. This blocks cutover until the model table
+is checked. The report also counted two skipped hosts, one skipped account,
+five unsupported hooks, twelve repository gaps, four skipped PRs, ten skipped
+services, and 27 payload-free legacy issue events. It found no partial feed.
+The final export and dry run had no decode errors. Earlier attempts found a
+missing legacy issue payload and the absent `pr_records` table; the exporter
+now handles legacy events and reads `pr_rows`.
+
+### Field decisions
+
+The lead classified all Session and Settings fields in the inventory as
+dropped by design. TrackedPR fields other than Hold are dropped. Profile
+RuntimeVersion, Output, ExtraArgs, Env, TimeoutSec, Managed and SafeMode,
+and Question Human are dropped. Env is never carried: it may hold secrets.
+
+Room MergeMaxParallel, GitHubAccess, ApprovalWait, ApprovalExpiry,
+LibraryPinSet, LibraryPin, CheckIn, DisplayName, ManualArchive, Pinned,
+PinOrder, CreatedBy, CreatedAt and LastActivity are dropped. Attribution,
+AttributionPlacement and AttributionKinds follow the agreed attribution
+mapping and gap report. Rule SetterName maps to the author when possible;
+otherwise it is dropped.
+
+A PR Hold and room RootProfile, SessionPause and RepoUpstreams are handoff
+data. A room pause is carried as the room pause. Hooks that do not map
+cleanly are named with their blocking fields in the handoff or private report.
+The exporter report must identify any remaining gap for a lead decision.
