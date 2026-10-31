@@ -291,8 +291,8 @@
     const place = places.get(id);
     if (place) rect = place;
     else if (box) {
-      // Feed cards start at the feed's left; the Requests column is centered.
-      const first = computerPlace(window.innerWidth, box.top + 16, section ? (box.left + box.right + 760) / 2 : box.left + 680);
+      // Feed cards start at the feed's left; the Requests page centers its 744 px cards.
+      const first = computerPlace(window.innerWidth, box.top + 16, section ? (box.left + box.right + 744) / 2 : box.left + 680);
       rect = first.rect;
       if (!dockChosen && !phone.current) {
         docked = !first.clear;
