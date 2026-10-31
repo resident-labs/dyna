@@ -12,6 +12,39 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+func TestVisualReplyRequiresCurrentVersion(t *testing.T) {
+	s, room, session, ctx := setup(t)
+	s.SetFilesDir(filepath.Join(t.TempDir(), "files"))
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	req := httptest.NewRequest("POST", "/v1/files?name=card.html", bytes.NewBufferString("<title>Card</title>"))
+	req.Header.Set("Content-Type", "text/html")
+	rec := httptest.NewRecorder()
+	s.Files(owner, room).ServeHTTP(rec, req)
+	var file contract.Attachment
+	if rec.Code != 200 || json.NewDecoder(rec.Body).Decode(&file) != nil {
+		t.Fatal(rec.Code)
+	}
+	file.Visual = &contract.VisualCard{Height: 120}
+	first, problem := s.Post(ctx, owner, contract.PostRequest{Room: room, Text: "card", Attachments: []contract.Attachment{file}})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	second, problem := s.Post(ctx, owner, contract.PostRequest{Room: room, Text: "update", Home: contract.Conversation{Kind: contract.ConversationDM, Session: session}, VisualUpdate: first.Event, Attachments: []contract.Attachment{file}})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	_, problem = s.Post(ctx, owner, contract.PostRequest{Room: room, Text: "reply", VisualReply: first.Event})
+	if problem == nil || problem.Code != contract.ErrVisualSuperseded || problem.Visual == nil || problem.Visual.Event != second.Event || problem.Visual.Version != 2 {
+		t.Fatalf("stale reply: %+v", problem)
+	}
+	if _, problem = s.Post(ctx, owner, contract.PostRequest{Room: room, Text: "reply", VisualReply: second.Event}); problem != nil {
+		t.Fatal(problem)
+	}
+	if _, problem = s.Post(ctx, owner, contract.PostRequest{Room: room, Text: "reply", VisualReply: "missing"}); problem == nil || problem.Code != contract.ErrInvalid {
+		t.Fatalf("missing visual: %+v", problem)
+	}
+}
+
 func TestVisualVersionsAndServing(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	s.SetFilesDir(filepath.Join(t.TempDir(), "files"))
