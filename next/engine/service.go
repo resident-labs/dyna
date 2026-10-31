@@ -25,6 +25,7 @@ type Profiles interface {
 type Repositories interface {
 	Get(context.Context, contract.SessionID, contract.HostName, bool) ([]contract.BoxRepo, error)
 	Ref(context.Context, contract.RepoName, string) (string, error)
+	Size(context.Context, contract.RepoName) (contract.BoxSizeName, error)
 }
 
 type Service struct {
