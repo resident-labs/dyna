@@ -37,7 +37,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 			}
 			target := contract.Target{Kind: contract.TargetRoom, Name: string(a.Room)}
 			if len(a.Hosts) == 1 && a.Hosts[0] != contract.AllHosts {
-				target = contract.Target{Kind: contract.TargetHost, Name: hosts[0]}
+				target = contract.Target{Kind: contract.TargetHost, Name: string(a.Hosts[0])}
 			}
 			run := "Run"
 			if who.Session != a.To.Session {
