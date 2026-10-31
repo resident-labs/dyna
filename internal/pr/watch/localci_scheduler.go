@@ -988,12 +988,13 @@ func (s *Service) scheduledCIConclusive(ctx context.Context, job registeredCIJob
 	if !job.trial {
 		return headVerified(r) && job.head == r.Head && r.Polling.PullHead == r.Head && verdictFromHosted(string(r.CI)).Conclusive(), nil
 	}
-	var snap Snapshot
-	if err := s.github(r.RoomID).readCommitCI(ctx, refRecord(r), job.head, &snap); err != nil {
+	gh := s.github(r.RoomID)
+	runs, err := gh.readCommitRuns(ctx, refRecord(r), job.head)
+	if err != nil {
 		return false, err
 	}
 	var matching []Run
-	for _, run := range snap.Runs {
+	for _, run := range runs {
 		if hostedRunMatches(job, run) {
 			matching = append(matching, run)
 		}
@@ -1001,7 +1002,13 @@ func (s *Service) scheduledCIConclusive(ctx context.Context, job registeredCIJob
 	if len(matching) == 0 {
 		return false, nil
 	}
-	snap.Runs = matching
+	snap := Snapshot{Runs: matching}
+	if err := gh.readCommitChecks(ctx, refRecord(r), job.head, &snap); err != nil {
+		return false, err
+	}
+	if err := gh.readCommitStatuses(ctx, refRecord(r), job.head, &snap); err != nil {
+		return false, err
+	}
 	saved, err := s.ciRegistry().LoadHostedRuns(ctx, repo, job.head)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return false, err
