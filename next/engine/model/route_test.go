@@ -1,11 +1,10 @@
 package model
 
 import (
-	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,14 +15,14 @@ import (
 )
 
 func TestRouteSwapsKeyAndSetsAffinity(t *testing.T) {
-	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	up := unixServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages" || r.Header.Get("Authorization") != "Bearer secret" || r.Header.Get("X-Api-Key") != "secret" || r.Header.Get("X-Claude-Code-Session-Id") != "session" {
 			t.Errorf("wrong request: %s %v", r.URL.Path, r.Header)
 		}
 		w.WriteHeader(204)
 	}))
 	defer up.Close()
-	target, _ := url.Parse(up.URL)
+	target := up.Listener.Addr().String()
 	req := httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed"}`))
 	req.Header.Set("X-Api-Key", "box")
 	req.Header.Set("Authorization", "Bearer box")
@@ -36,9 +35,9 @@ func TestRouteSwapsKeyAndSetsAffinity(t *testing.T) {
 
 func TestRouteRefusesForbiddenModel(t *testing.T) {
 	called := false
-	up := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	up := unixServer(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
 	defer up.Close()
-	target, _ := url.Parse(up.URL)
+	target := up.Listener.Addr().String()
 	w := httptest.NewRecorder()
 	Handler(target, "secret", "session", nil).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"other"}`)))
 	if w.Code != 403 || called {
@@ -48,7 +47,7 @@ func TestRouteRefusesForbiddenModel(t *testing.T) {
 
 func TestRouteStreamsAndDoesNotRetry(t *testing.T) {
 	calls := 0
-	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	up := unixServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(503)
@@ -57,7 +56,7 @@ func TestRouteStreamsAndDoesNotRetry(t *testing.T) {
 		io.WriteString(w, "data: two\n\n")
 	}))
 	defer up.Close()
-	target, _ := url.Parse(up.URL)
+	target := up.Listener.Addr().String()
 	w := httptest.NewRecorder()
 	Handler(target, "secret", "session", []string{"allowed"}).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed"}`)))
 	if calls != 1 || w.Code != 503 || w.Body.String() != "data: one\n\ndata: two\n\n" || !w.Flushed {
@@ -67,9 +66,9 @@ func TestRouteStreamsAndDoesNotRetry(t *testing.T) {
 
 func TestRouteRejectsURLSelectedModel(t *testing.T) {
 	called := false
-	up := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	up := unixServer(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
 	defer up.Close()
-	target, _ := url.Parse(up.URL)
+	target := up.Listener.Addr().String()
 	w := httptest.NewRecorder()
 	Handler(target, "secret", "session", []string{"allowed"}).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1beta/models/forbidden:generateContent", strings.NewReader(`{"model":"allowed"}`)))
 	if w.Code != http.StatusNotFound || called {
@@ -78,7 +77,7 @@ func TestRouteRejectsURLSelectedModel(t *testing.T) {
 }
 
 func TestRouteRejectsAmbiguousModel(t *testing.T) {
-	target, _ := url.Parse("http://127.0.0.1")
+	target := filepath.Join(t.TempDir(), "unused.sock")
 	w := httptest.NewRecorder()
 	Handler(target, "secret", "session", []string{"allowed"}).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed","model":"other"}`)))
 	if w.Code != http.StatusBadRequest {
@@ -92,7 +91,7 @@ func TestProxyConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = proxy.Shutdown(context.Background()) })
+	t.Cleanup(func() { _ = proxy.Listener.Close() })
 	path := filepath.Join(dir, "cliproxy", "config.yaml")
 	info, err := os.Stat(path)
 	if err != nil || info.Mode().Perm() != 0600 {
@@ -103,8 +102,8 @@ func TestProxyConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Check 7: StrictMode lives only in claude-api-key cloak blocks, so no key means strict cloak stays off.
-	if cfg.Host != "127.0.0.1" || cfg.Port == 0 || cfg.RequestRetry != 0 || cfg.RemoteManagement.AllowRemote || cfg.RemoteManagement.SecretKey == "" || len(cfg.APIKeys) != 1 || !cfg.Routing.SessionAffinity || len(cfg.ClaudeKey) != 0 {
-		t.Fatal("proxy config violates the loopback, retry, management, or affinity policy")
+	if cfg.RequestRetry != 0 || !cfg.RemoteManagement.AllowRemote || cfg.RemoteManagement.SecretKey == "" || len(cfg.APIKeys) != 1 || !cfg.Routing.SessionAffinity || len(cfg.ClaudeKey) != 0 {
+		t.Fatal("proxy config violates the retry, management, or affinity policy")
 	}
 	if bcrypt.CompareHashAndPassword([]byte(cfg.RemoteManagement.SecretKey), []byte("management-key")) != nil {
 		t.Fatal("management key does not authenticate")
@@ -112,5 +111,38 @@ func TestProxyConfig(t *testing.T) {
 	info, err = os.Stat(filepath.Join(dir, "cliproxy", "auth"))
 	if err != nil || info.Mode().Perm() != 0700 {
 		t.Fatalf("auth mode: %v, %v", info, err)
+	}
+}
+
+func unixServer(t *testing.T, handler http.Handler) *httptest.Server {
+	t.Helper()
+	up := httptest.NewUnstartedServer(handler)
+	_ = up.Listener.Close()
+	listener, err := net.Listen("unix", filepath.Join(t.TempDir(), "up.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	up.Listener = listener
+	up.Start()
+	return up
+}
+
+func TestProxyPreservesNonSocket(t *testing.T) {
+	dir := t.TempDir()
+	proxyDir := filepath.Join(dir, "cliproxy")
+	if err := os.Mkdir(proxyDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(proxyDir, "proxy.sock")
+	if err := os.WriteFile(path, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if proxy, err := NewProxy(dir, "key"); err == nil {
+		proxy.Listener.Close()
+		t.Fatal("accepted non-socket")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "keep" {
+		t.Fatalf("file changed: %q %v", data, err)
 	}
 }

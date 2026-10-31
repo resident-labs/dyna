@@ -3,8 +3,10 @@ package model
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -20,13 +22,16 @@ type RouteError struct {
 }
 
 // Handler returns a route bound to one session and its allowed models.
-// upstream is the proxy's loopback URL; clientKey never leaves the engine.
-func Handler(upstream *url.URL, clientKey, sessionID string, allowedModels []string) http.Handler {
+// socket is the proxy listener; clientKey never leaves the engine.
+func Handler(socket string, clientKey, sessionID string, allowedModels []string) http.Handler {
 	allowed := make(map[string]struct{}, len(allowedModels))
 	for _, name := range allowedModels {
 		allowed[name] = struct{}{}
 	}
-	proxy := httputil.NewSingleHostReverseProxy(upstream)
+	proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: "cliproxy"})
+	proxy.Transport = &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	}}
 	proxy.FlushInterval = -1
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
