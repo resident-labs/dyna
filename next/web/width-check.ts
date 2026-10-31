@@ -31,8 +31,9 @@ try {
     for (const route of routes) {
       await login.goto(origin + route);
       await login.locator('[data-app-ready="true"]').waitFor();
-      if (route === "/" || route === "/settings/devices" || route.startsWith("/settings/accounts") || route === "/settings/profiles")
-        await login.locator('[data-page-ready="true"]').waitFor();
+      if (route === "/") await login.locator('.home[data-page-ready="true"]').waitFor();
+      else if (route === "/settings/devices" || route.startsWith("/settings/accounts") || route === "/settings/profiles")
+        await login.locator('section.settings [data-page-ready="true"]').waitFor();
       for (const href of await login.locator('a[href^="/"]').evaluateAll(links => links.map(link => link.getAttribute("href")!).filter(Boolean))) {
         if (roomRoute.test(href) || settingsRoute.test(href)) routes.add(href);
       }
@@ -49,8 +50,9 @@ try {
       try {
         await page.goto(origin + route);
         await page.locator('[data-app-ready="true"]').waitFor();
-        if (route === "/" || route === "/settings/devices" || route.startsWith("/settings/accounts") || route === "/settings/profiles")
-          await page.locator('[data-page-ready="true"]').waitFor();
+        if (route === "/") await page.locator('.home[data-page-ready="true"]').waitFor();
+        else if (route === "/settings/devices" || route.startsWith("/settings/accounts") || route === "/settings/profiles")
+          await page.locator('section.settings [data-page-ready="true"]').waitFor();
         await page.evaluate(() => document.fonts.ready);
         if (process.env.DYNA_WIDTH_SHOTS && route === "/settings/profiles" && width === 920)
           await page.screenshot({ path: `${process.env.DYNA_WIDTH_SHOTS}/${fixture}-profiles-920.png` });
