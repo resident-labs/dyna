@@ -43,6 +43,8 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 		return a.web.login(ctx, p, req)
 	})
+	call(mux, contract.MethodInstructionsGet, c, contract.ScopeRead, owner, a.service.InstructionsGet)
+	call(mux, contract.MethodInstructionsSet, c, contract.ScopeAdmin, owner, a.service.InstructionsSet)
 	call(mux, contract.MethodDevicePair, c, contract.ScopeAdmin, owner, func(ctx context.Context, p contract.Principal, req contract.DevicePairRequest) (contract.DevicePairResponse, *contract.Error) {
 		out, problem := a.service.DevicePair(ctx, p, req)
 		if a.web != nil {
