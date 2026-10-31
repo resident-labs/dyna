@@ -48,12 +48,15 @@ func filledGlobalBundle() GlobalBundle {
 func filledRoomBundle() RoomBundle {
 	root := ImportedAuthor{Kind: PrincipalSession, Label: "dyna:root"}
 	return RoomBundle{
-		Version: BundleV1,
-		Name:    "dyna",
-		Repos:   []RoomRepo{{Repo: "resident-labs/dyna", Default: true}},
-		Limits:  RoomLimits{CPUs: 8, MemBytes: 16 << 30},
-		Color:   "teal",
-		Rules:   []Rule{{Label: "r17", Text: "upgrade floor", By: root, Created: bundleTime, Updated: bundleTime}},
+		Version:     BundleV1,
+		Name:        "dyna",
+		Repos:       []RoomRepo{{Repo: "resident-labs/dyna", Default: true}},
+		Limits:      RoomLimits{CPUs: 8, MemBytes: 16 << 30},
+		Color:       "teal",
+		Paused:      true,
+		RootProfile: "terra",
+		Upstreams:   []RoomUpstream{{Repo: "resident-labs/dyna", Upstream: "github.com/resident-labs/dyna"}},
+		Rules:       []Rule{{Label: "r17", Text: "upgrade floor", By: root, Created: bundleTime, Updated: bundleTime}},
 		Goals: []GoalBundle{{
 			Label: "g1084", Text: "review", Detail: "brief", Setter: root, Created: bundleTime,
 			Amendments: []GoalNote{{At: bundleTime, By: root, Text: "also X"}},
@@ -65,7 +68,7 @@ func filledRoomBundle() RoomBundle {
 			Notes: []IssueNote{{At: bundleTime, By: root, Text: "note"}},
 		}},
 		NextIssue: 587,
-		PRs:       []TrackedPR{{Repo: "resident-labs/dyna", Number: 1283, Author: root, Goal: "g1084"}},
+		PRs:       []TrackedPR{{Repo: "resident-labs/dyna", Number: 1283, Author: root, Goal: "g1084", Hold: &PRHandoffHold{Reason: "review", By: root, At: bundleTime}}},
 		Questions: []QuestionBundle{{
 			Label: "q33", Kind: QuestionTerminal, Asker: root, Text: "mount the drive", Options: []string{"yes"},
 			Meanwhile: "waiting", Command: "sudo mount /dev/sdb2", Argv: []string{"sudo", "mount", "/dev/sdb2"}, Cwd: "/tmp", Reason: "mount", Asked: bundleTime,
