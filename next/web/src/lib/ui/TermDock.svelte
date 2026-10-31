@@ -80,14 +80,16 @@
     tabs[index] = { key: next++, target: tab.target, label: tab.label };
     void show(tabs[index].key);
   }
-  // Focus moves to the tab that takes the closed one's place, or out of the dock when none is left.
+  // Focus moves to the tab that takes the closed one's place, or out of the dock when none is left. A collapsed dock
+  // stays collapsed, so its tab takes the focus.
   async function close(key: number) {
     const index = tabs.findIndex(tab => tab.key === key);
     tabs.splice(index, 1);
     if (active === key) active = tabs[Math.min(index, tabs.length - 1)]?.key ?? 0;
     if (!tabs.length) floating = false;
     await tick();
-    if (active === JOBS || tabs.length) await show(active); else if (picking) plus?.focus(); else onempty();
+    if (!floating && collapsed && active) element?.querySelector<HTMLElement>("[role=tab][aria-selected=true]")?.focus();
+    else if (active === JOBS || tabs.length) await show(active); else if (picking) plus?.focus(); else onempty();
   }
   // Up and Down move in the menu, Escape closes it and returns to "+".
   function walk(event: KeyboardEvent) {
