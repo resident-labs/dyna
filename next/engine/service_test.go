@@ -7,9 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1364,16 +1362,15 @@ func TestPostWakesOnlyTargetBox(t *testing.T) {
 	if problem != nil {
 		t.Fatal(problem)
 	}
-	ready := make(chan contract.SessionID, 16)
-	var bCalls atomic.Int32
-	s.dispatch = func(ctx context.Context, id contract.SessionID, turn contract.TurnID, event contract.Event, replay bool) (contract.TurnID, []store.FeedInput, error) {
-		if id == b.Session {
-			bCalls.Add(1)
+	wakes := make(chan []contract.SessionID, 1)
+	s.store.SetWake(func(ids []contract.SessionID, events []contract.Event) {
+		s.queueWakes(ids, events)
+		for _, event := range events {
+			if post, ok := event.Body.(contract.PostCreated); ok && post.Text == "hello" {
+				wakes <- append([]contract.SessionID(nil), ids...)
+			}
 		}
-		result, inputs, err := s.store.Dispatch(ctx, id, turn, event, replay)
-		ready <- id
-		return result, inputs, err
-	}
+	})
 	aMessages, problem := testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: a.Session})
 	if problem != nil {
 		t.Fatal(problem)
@@ -1382,9 +1379,6 @@ func TestPostWakesOnlyTargetBox(t *testing.T) {
 	if problem != nil {
 		t.Fatal(problem)
 	}
-	<-ready
-	<-ready
-	before := bCalls.Load()
 	_, problem = s.Post(ctx, owner, contract.PostRequest{Room: room, Text: "hello", Mentions: []string{"a"}})
 	if problem != nil {
 		t.Fatal(problem)
@@ -1392,8 +1386,7 @@ func TestPostWakesOnlyTargetBox(t *testing.T) {
 	if start, ok := (<-aMessages).Body.(contract.TurnStart); !ok || len(start.Inputs) != 1 || start.Inputs[0].Text != "hello" {
 		t.Fatalf("unexpected start: %+v", start)
 	}
-	runtime.Gosched()
-	if got := bCalls.Load(); got != before {
-		t.Fatalf("untargeted box dispatched %d times", got-before)
+	if ids := <-wakes; len(ids) != 1 || ids[0] != a.Session {
+		t.Fatalf("post woke %v, want only %s", ids, a.Session)
 	}
 }

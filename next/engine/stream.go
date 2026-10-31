@@ -183,7 +183,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				unlock()
 				return
 			}
-			turn, deliveries, err := s.dispatch(ctx, session.ID, contract.TurnID(turnID), started, replay)
+			turn, deliveries, err := s.store.Dispatch(ctx, session.ID, contract.TurnID(turnID), started, replay)
 			unlock()
 			if err != nil {
 				return
