@@ -267,6 +267,13 @@ func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn c
 	var active contract.TurnID
 	var inputs []FeedInput
 	err := s.Write(ctx, func(tx *sql.Tx) error {
+		var eligible bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.state='open' AND s.closed_at IS NULL AND b.want='run' AND b.state='ready')`, session).Scan(&eligible); err != nil {
+			return err
+		}
+		if !eligible {
+			return nil
+		}
 		err := tx.QueryRowContext(ctx, "SELECT id FROM turns WHERE session=? AND ended_at IS NULL", session).Scan(&active)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
