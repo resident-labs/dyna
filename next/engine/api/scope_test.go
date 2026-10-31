@@ -36,6 +36,37 @@ func TestWebScopeRefusals(t *testing.T) {
 	}
 }
 
+func TestFileRouteScopes(t *testing.T) {
+	a := New(&fakeService{}, nil)
+	a.SetFilesRoute(func(Caller) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	})
+	for _, tc := range []struct {
+		name         string
+		scopes       []contract.Scope
+		method, path string
+		want         int
+	}{
+		{"read get", []contract.Scope{contract.ScopeRead}, "GET", "/v1/files/hash", 200},
+		{"read head", []contract.Scope{contract.ScopeRead}, "HEAD", "/v1/files/hash", 200},
+		{"read post", []contract.Scope{contract.ScopeRead}, "POST", "/v1/files", 403},
+		{"read operate get", []contract.Scope{contract.ScopeRead, contract.ScopeOperate}, "GET", "/v1/files/hash", 200},
+		{"read operate post", []contract.Scope{contract.ScopeRead, contract.ScopeOperate}, "POST", "/v1/files", 200},
+		{"no read get", []contract.Scope{contract.ScopeOperate}, "GET", "/v1/files/hash", 403},
+		{"other method no files", []contract.Scope{contract.ScopeRead, contract.ScopeOperate}, "DELETE", "/v1/files/hash", 403},
+		{"other method files", []contract.Scope{contract.ScopeFiles}, "DELETE", "/v1/files/hash", 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true, Scopes: tc.scopes}
+			w := httptest.NewRecorder()
+			a.handler(c).ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, nil))
+			if w.Code != tc.want {
+				t.Fatalf("got %d, want %d", w.Code, tc.want)
+			}
+		})
+	}
+}
+
 func (f *fakeService) OperationScope(kind contract.OpKind) contract.Scope {
 	if kind == "pr.open" {
 		return contract.ScopeOperate
