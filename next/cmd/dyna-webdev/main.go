@@ -44,8 +44,33 @@ func (devService) HostAdd(context.Context, contract.Principal, contract.HostAddR
 	return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "webdev uses only " + host}
 }
 
+// AccountsQuota answers with invented accounts, never a real sign-in: one busy, one calm and one expired.
 func (devService) AccountsQuota(context.Context, contract.Principal, contract.AccountsQuotaRequest) (contract.AccountsQuotaResponse, *contract.Error) {
-	return contract.AccountsQuotaResponse{Accounts: []contract.AccountUsage{}}, nil
+	at := func(d time.Duration) time.Time { return time.Now().Add(d) }
+	return contract.AccountsQuotaResponse{Accounts: []contract.AccountUsage{
+		{Provider: "anthropic", Label: "Claude · studio", Windows: []contract.UsageWindow{
+			{Name: "five_hour", UsedPercent: 62, Seconds: 18000, ResetsAt: at(2*time.Hour + 10*time.Minute)},
+			{Name: "seven_day", UsedPercent: 91, Seconds: 604800, ResetsAt: at(76 * time.Hour)}}},
+		{Provider: "openai", Label: "ChatGPT · team", Windows: []contract.UsageWindow{
+			{Name: "seven_day", UsedPercent: 35, Seconds: 604800, ResetsAt: at(100 * time.Hour)}}},
+		{Provider: "moonshot", Label: "Kimi · spare", Cause: contract.UsageSignInExpired},
+	}}, nil
+}
+
+// HostList gives the dev host a busy beat (CPU near its limit) and adds a host that has not answered, so Home
+// shows both looks; engine/runtime fills the real load.
+func (d devService) HostList(ctx context.Context, p contract.Principal, req contract.HostListRequest) (contract.HostListResponse, *contract.Error) {
+	list, problem := d.Service.HostList(ctx, p, req)
+	for i, h := range list.Hosts {
+		switch h.Name {
+		case contract.ControlPlane: // the load engine/runtime reports for its own machine
+			list.Hosts[i] = contract.HostSummary{Name: h.Name, Reachable: true, CPUs: 16, MemBytes: 31 * box.GiB, CPUUsed: 3.1, MemUsed: 10 * box.GiB}
+		case host:
+			list.Hosts[i].Reachable, list.Hosts[i].Boxes, list.Hosts[i].CPUUsed, list.Hosts[i].MemUsed = true, 2, 118.4, 96*box.GiB
+		}
+	}
+	list.Hosts = append(list.Hosts, contract.HostSummary{Name: "gpu-box", CPUs: 32, MemBytes: 128 * box.GiB})
+	return list, problem
 }
 
 // A builder types [wait], [jobs] or [fail] in a post to script the fake turn. Seed posts read like owner messages,
@@ -54,6 +79,7 @@ var seeded = map[string]string{
 	"Build the feed rows.":                          "[fail]",
 	"Exercise the failed turn view":                 "[fail]",
 	"Start the dev server and run the engine tests": "[jobs]",
+	"Then tidy the room menu":                       "[wait]",
 }
 
 func marked(text, marker string) bool {
@@ -318,6 +344,7 @@ func seedRoom(ctx context.Context, s *engine.Service, posts int) {
 	post(owner, contract.PostRequest{Text: "What is the next step?", Home: contract.Conversation{Kind: contract.ConversationDM, Session: lead.Session}})
 	post(owner, contract.PostRequest{Text: "Exercise the failed turn view", Mentions: []string{"builder-feed"}})
 	post(owner, contract.PostRequest{Text: "Start the dev server and run the engine tests", Mentions: []string{"lead-web"}})
+	post(owner, contract.PostRequest{Text: "Then tidy the room menu", Mentions: []string{"builder-feed"}})
 	upload := func(name, media, body string) (a contract.Attachment) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/files?name="+name, strings.NewReader(body))
 		req.Header.Set("Content-Type", media)
