@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { watchHello } from "./lib/stream.ts";
+  import { watchHello, watchStreamState } from "./lib/stream.ts";
+  import { watchConnect } from "./lib/connect-watch.ts";
   import { FormDrafts } from "./lib/form-drafts.ts";
   import { tick, untrack } from "svelte";
   import { RoomStore } from "./lib/room.svelte.ts";
@@ -7,7 +8,7 @@
   import { replaceForward, sameForward, undoForward } from "./lib/forward-state.ts";
   import { blockedBy, call, retryDelay, type Blocked as BlockedState } from "./lib/client.ts";
   import Blocked from "./lib/ui/Blocked.svelte";
-  import PairScreen from "./lib/ui/PairScreen.svelte";
+  import ConnectScreen from "./lib/ui/ConnectScreen.svelte";
   import Settings from "./lib/ui/Settings.svelte";
   import { linkCode } from "./lib/devices.ts";
   import Feed from "./lib/ui/Feed.svelte";
@@ -47,6 +48,11 @@
   import { computerPlace, fitted, type Rect } from "./lib/float.ts";
   import type { ComputerInput, Conversation, PostRequest, SessionStarted } from "./lib/contract.gen.ts";
   // A pairing link leaves the address bar and history at once, whatever this browser's state. Only a signed-out page uses it.
+  const move = new URLSearchParams(location.hash.slice(1));
+  const moveData = move.has("route") ? move : new URLSearchParams(sessionStorage.getItem("dyna-connect-move") ?? "");
+  let routeNotice = $state(moveData.get("route") ? `Moved to ${moveData.get("route")}${moveData.has("lost") ? " because the connection was lost" : ""}.` : "");
+  if (move.has("route")) sessionStorage.setItem("dyna-connect-move", move.toString());
+  if (move.has("route")) history.replaceState(null, "", location.pathname + location.search);
   const pairCode = linkCode(window.location.hash);
   if (window.location.hash.includes("pair=")) history.replaceState(null, "", window.location.pathname + window.location.search);
   const formDrafts = new FormDrafts();
@@ -68,6 +74,9 @@
       formDrafts.pending || terminals?.hasInput() || ((focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement) && focused.value);
     if (hasWork) reloadPending = true; else location.reload();
   });
+  let streamUp: boolean | undefined;
+  watchStreamState(up => { streamUp = up; });
+  void watchConnect().then(watch => { if (watch) { watchStreamState(watch.stream); if (streamUp !== undefined) watch.stream(streamUp); } }, () => {});
   const attention = new Attention();
   let rooms = $derived([...attention.rooms.values()]);
   // Distinct initials for every room avatar, so two rooms never look alike on the rail.
@@ -109,6 +118,9 @@
   let behind = $state(isSettings(window.location.pathname) ? "/" : window.location.pathname);
   let inSettings = $derived(isSettings(path));
   function follow() {
+    const previousRoom = (isSettings(path) ? behind : path).match(/^\/r\/([^/]+)/)?.[1];
+    const nextRoom = window.location.pathname.match(/^\/r\/([^/]+)/)?.[1];
+    if (nextRoom && nextRoom !== previousRoom) { routeNotice = ""; sessionStorage.removeItem("dyna-connect-move"); }
     path = window.location.pathname;
     if (inSettings) return;
     behind = path;
@@ -584,7 +596,7 @@
     onpointerdown={drag} onclick={() => { if (!dragged) sheetFull = !sheetFull; dragged = false; }}></button>
 {/snippet}
 
-{#if signedOut}<PairScreen code={pairCode} />
+{#if signedOut}<ConnectScreen code={pairCode} />
 {:else}<div class="shell" class:open={room || activity.active.length} class:drawer class:tucked={room && wide.current && tucked} class:settings={inSettings}>
   <aside class="rail" aria-label="Rooms" tabindex="-1" bind:this={rail} inert={phone.current && !drawer} role={drawer ? "dialog" : undefined} aria-modal={drawer || undefined}
     onclick={event => { if (drawer && event.target instanceof Element && event.target.closest("a, button")) void showDrawer(false, false); }}>
@@ -650,6 +662,7 @@
           {#if busy.length > 3}<span class="more">+{busy.length - 3}</span>{/if}<span class="count">{working} working</span>
         {:else}<Icon name="people" />{#if store?.ready}<span class="count phone">{store.sessions.size}</span>{/if}{/if}
         {#if store?.counts.failed && !panelShown}<span class="attention"></span>{/if}</button>{/if}</header>
+    {#if routeNotice}<div class="route-notice">{routeNotice}<button type="button" aria-label="Dismiss route notice" onclick={() => { routeNotice = ""; sessionStorage.removeItem("dyna-connect-move"); }}>✕</button></div>{/if}
     {#if reloadPending}<p class="reload-notice" role="status">Dyna updated. Reload to use the new version. <button type="button" onclick={() => location.reload()}>Reload</button></p>{/if}
     {#if section === "instructions" && room && store && !unavailable}<Instructions {room} {roomName} rooms={rooms.length} sessions={store.sessions.size} onclose={() => void closeSection()} />{/if}
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} admin={attention.can("admin")} onclose={() => void closeSection()} />{/if}
@@ -730,6 +743,8 @@
 </div>{/if}
 
 <style>
+  .route-notice { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; color: var(--muted); font-size: 12.5px; border-bottom: 1px solid var(--line); }
+  .route-notice button { border: 0; background: none; color: inherit; cursor: pointer; }
   :global(.shell.open:has(.visual-pane)) { grid-template-columns: 64px minmax(0, 1fr) min(660px, calc(100vw - 64px)); }
   .visual-pane { min-width: 0; overflow: hidden; border-left: 1px solid var(--line); }
   @media (max-width: 760px) { :global(.shell.open:has(.visual-pane)) { grid-template-columns: 64px minmax(0, 1fr); } .visual-pane { position: fixed; z-index: 4; inset: 0 0 0 auto; width: min(660px, 100vw); } }

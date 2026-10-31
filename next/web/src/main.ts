@@ -7,6 +7,7 @@ import "@fontsource/jetbrains-mono/latin-400.css";
 import "@fontsource/jetbrains-mono/latin-500.css";
 import { mount } from "svelte";
 import App from "./App.svelte";
+import ConnectScreen from "./lib/ui/ConnectScreen.svelte";
 import "./app.css";
 import "./lib/theme.svelte.ts";
 // As v1's viewport.ts: a phone's keyboard and browser bars shrink the visible area, and 100dvh follows neither on
@@ -24,4 +25,6 @@ const fit = () => {
 fit();
 viewport?.addEventListener("resize", fit);
 window.addEventListener("resize", fit);
-mount(App, { target: document.getElementById("app")! });
+const target = document.getElementById("app")!;
+if (location.pathname === "/connect" && location.hash) mount(ConnectScreen, { target, props: { landing: true } });
+else mount(App, { target });

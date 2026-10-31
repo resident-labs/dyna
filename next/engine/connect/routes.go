@@ -14,7 +14,7 @@ import (
 // routeRank accepts only configured origins. Plain HTTP never leaves loopback.
 func routeRank(origin, tunnel string) int {
 	u, err := url.Parse(origin)
-	if err != nil || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+	if err != nil || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || origin != u.Scheme+"://"+u.Host || strings.ContainsAny(origin, "*; \t\r\n") {
 		return -1
 	}
 	host := strings.ToLower(u.Hostname())
@@ -35,29 +35,40 @@ func routeRank(origin, tunnel string) int {
 	}
 }
 
-func (s *Sessions) routeList(w http.ResponseWriter, r *http.Request, origin string, routes []string) {
+// RankedRoutes filters and orders configured routes for browsers.
+func RankedRoutes(routes []string, tunnel string) []string {
+	list := []string{}
+	for _, app := range routes {
+		if routeRank(app, tunnel) >= 0 {
+			list = append(list, app)
+		}
+	}
+	slices.SortFunc(list, func(a, b string) int {
+		if rank := routeRank(a, tunnel) - routeRank(b, tunnel); rank != 0 {
+			return rank
+		}
+		return strings.Compare(a, b)
+	})
+	return list
+}
+
+func (s *Sessions) routeList(w http.ResponseWriter, r *http.Request, origin string, routes []string, x store.ConnectSession) {
 	l, _, err := s.link(r.Context())
 	if err != nil {
 		fail(w, 404, "not linked")
 		return
 	}
-	list := []string{}
-	for _, app := range routes {
-		if routeRank(app, l.App) >= 0 {
-			list = append(list, app)
-		}
+	list := RankedRoutes(routes, l.App)
+	expires := x.Access
+	if x.End.Before(expires) {
+		expires = x.End
 	}
-	slices.SortFunc(list, func(a, b string) int {
-		if rank := routeRank(a, l.App) - routeRank(b, l.App); rank != 0 {
-			return rank
-		}
-		return strings.Compare(a, b)
-	})
 	reply(w, 200, struct {
-		Machine string   `json:"machine"`
-		Current string   `json:"current"`
-		Routes  []string `json:"routes"`
-	}{l.Machine, origin, list})
+		Machine string    `json:"machine"`
+		Current string    `json:"current"`
+		Routes  []string  `json:"routes"`
+		Expires time.Time `json:"expires"`
+	}{l.Machine, origin, list, expires})
 }
 
 func (s *Sessions) issueHandoff(w http.ResponseWriter, r *http.Request, origin, target, proof string, x store.ConnectSession, routes []string) {

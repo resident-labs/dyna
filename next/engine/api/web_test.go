@@ -208,11 +208,20 @@ func TestPublicRoutesLeaveOutLoopback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := w.SetRoutes([]string{"https://bad.example;script-src"}); err == nil {
+		t.Fatal("accepted invalid configured origin")
+	}
 	if err := w.SetRoutes([]string{"https://b.example.com", "https://a.example.com"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := w.publicRoutes(); !slices.Equal(got, []string{"https://a.example.com", "https://b.example.com"}) {
 		t.Fatalf("routes: %v", got)
+	}
+	rec := httptest.NewRecorder()
+	w.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "https://a.example.com/", nil))
+	csp := rec.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "connect-src 'self'") || !strings.Contains(csp, "https://a.example.com") || !strings.Contains(csp, "https://b.example.com") {
+		t.Fatalf("configured routes missing from CSP: %s", csp)
 	}
 }
 

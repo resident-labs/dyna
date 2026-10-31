@@ -42,7 +42,7 @@
       <p>You opened a pairing link for <code>{location.hostname}</code>. This device gets the access chosen in Settings.</p>
     {:else}
       <h1>Pair this device</h1>
-      <p>On a signed-in device, open Settings, then Devices, then Pair a device. Or run <code>dyna device pair</code> on the computer that runs Dyna.</p>
+      <p>On a signed-in device, open Settings, then Sharing & access, then Pair a device. Or run <code>dyna device pair</code> on the computer that runs Dyna.</p>
       <label>Pairing code
         <input class="code" class:bad={error} bind:this={field} value={typed} placeholder="XXXXX-XXXXX" autocomplete="one-time-code" autocapitalize="characters" autocorrect="off" spellcheck="false"
           aria-invalid={!!error} aria-describedby={error ? "pair-error" : undefined} oninput={event => { typed = showCode(event.currentTarget.value); event.currentTarget.value = typed; result = undefined; }} /></label>
@@ -54,7 +54,7 @@
       {:else}<span>{name.trim() || guess.name}</span>{/if}
       <button type="button" class="link" onclick={() => { renaming = !renaming; }}>{renaming ? "Done" : "Rename"}</button></div>
     <button type="submit" class="big" disabled={busy || !isFullCode(typed)}>{busy ? "Pairing…" : "Pair"}</button>
-    <p class="small">The pairing lasts 30 days from the last use. You can remove it in Settings, under Devices.</p>
+    <p class="small">The pairing lasts 30 days from the last use. You can remove it in Settings, under Sharing & access.</p>
   </form>
 </main>
 
@@ -79,6 +79,6 @@
   .big:disabled { opacity: 0.45; cursor: default; }
   .small { font-size: 12.5px; }
   /* 16 px text keeps iOS from zooming the page on focus. */
-  @media (hover: none) { .link { min-height: 40px; } .name { height: 40px; font-size: 16px; } }
+  @media (hover: none) { .link { min-height: 44px; } .name { height: 44px; font-size: 16px; } }
   @media (max-width: 640px) { .screen { padding-top: 72px; } }
 </style>
