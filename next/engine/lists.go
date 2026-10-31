@@ -52,6 +52,12 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 		if err := rows.Scan(&session.ID, &session.Name, &session.Parent, &session.Profile, &session.Box, &session.BoxState, &session.Goal, &session.Turn, &session.LastOutcome); err != nil {
 			return contract.SessionListResponse{}, failure(err)
 		}
+		s.mu.Lock()
+		session.Computer = contract.ComputerStopped
+		if c := s.computers[session.ID]; c != nil {
+			session.Computer = c.state
+		}
+		s.mu.Unlock()
 		sessions = append(sessions, session)
 	}
 	if err := rows.Err(); err != nil {
