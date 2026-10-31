@@ -57,6 +57,13 @@
     virtualizer.scrollToEnd();
   }
 
+  // Scrolls a row into the window and waits for it to render, so a caller can focus it.
+  export async function reveal(index: number): Promise<void> {
+    virtualizer.scrollToIndex(index);
+    await new Promise(requestAnimationFrame);
+    await tick();
+  }
+
   // True once the rows overflow the view far enough to scroll up to older ones.
   export function full(): boolean {
     return element !== undefined && virtualizer.getTotalSize() > element.clientHeight + edge;
