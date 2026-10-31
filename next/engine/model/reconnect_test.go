@@ -13,6 +13,51 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
+func TestReconnectRequiresRawMatchingIdentity(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	old := private.ProxyAuth{ID: "xai-collision.json", Provider: "xai", Record: []byte(`{"metadata":{"email":"a+b@example.test","sub":"one"}}`)}
+	if err := st.SaveProxyAuth(ctx, old, true); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{"url":"https://provider.example/login","state":"state"}`))
+	}))
+	defer server.Close()
+	p := &Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
+	c := p.Connections("key", st, time.Now)
+	a, err := c.Reconnect(ctx, "account", old.ID, contract.ProviderXAI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := old
+	next.Record = []byte(`{"metadata":{"email":"a-b@example.test","sub":"two"}}`)
+	rpc := AuthRPC{Store: st, Connections: c}
+	if err := rpc.Save(AuthSave{Record: next, Create: true, Attempt: a.Attempt}, &struct{}{}); err == nil {
+		t.Fatal("different identity replaced the saved credential")
+	}
+	rows, err := st.ListProxyAuths(ctx)
+	if err != nil || string(rows[0].Record) != string(old.Record) {
+		t.Fatal("saved credential changed")
+	}
+	missing := private.ProxyAuth{ID: "no-identity", Provider: "kimi", Record: []byte(`{"metadata":{"type":"kimi"}}`)}
+	if err := st.SaveProxyAuth(ctx, missing, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Reconnect(ctx, "other", missing.ID, contract.ProviderXAI); err == nil {
+		t.Fatal("started reconnect without saved identity")
+	}
+	if calls != 1 {
+		t.Fatal("started provider login without saved identity")
+	}
+}
+
 func TestStatusDoesNotBlockReconnectSave(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.Open(t.TempDir())
@@ -20,7 +65,7 @@ func TestStatusDoesNotBlockReconnectSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	old := private.ProxyAuth{ID: "bound", Provider: "claude", Record: []byte("old")}
+	old := private.ProxyAuth{ID: "bound", Provider: "claude", Record: []byte(`{"metadata":{"email":"invented@example.test"},"grant":"old"}`)}
 	if err := st.SaveProxyAuth(ctx, old, true); err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +96,7 @@ func TestStatusDoesNotBlockReconnectSave(t *testing.T) {
 	}()
 	<-entered
 	rpc := AuthRPC{Store: st, Connections: c}
-	old.Record = []byte("new")
+	old.Record = []byte(`{"metadata":{"email":"invented@example.test"},"grant":"new"}`)
 	if err := rpc.Save(AuthSave{Record: old, Create: true, Attempt: a.Attempt}, &struct{}{}); err != nil {
 		close(release)
 		t.Fatal(err)
@@ -67,7 +112,7 @@ func TestRemoveCancelsUnsavedReconnect(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	old := private.ProxyAuth{ID: "bound", Provider: "claude", Record: []byte("old")}
+	old := private.ProxyAuth{ID: "bound", Provider: "claude", Record: []byte(`{"metadata":{"email":"invented@example.test"},"grant":"old"}`)}
 	if err := st.SaveProxyAuth(ctx, old, true); err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +164,7 @@ func TestReconnectSaveAttributionAndExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	old := private.ProxyAuth{ID: "bound", Provider: "claude", Record: []byte("old")}
+	old := private.ProxyAuth{ID: "bound", Provider: "claude", Record: []byte(`{"metadata":{"email":"invented@example.test"},"grant":"old"}`)}
 	if err := st.SaveProxyAuth(ctx, old, true); err != nil {
 		t.Fatal(err)
 	}
@@ -152,12 +197,12 @@ func TestReconnectSaveAttributionAndExpiry(t *testing.T) {
 	}
 	rpc := AuthRPC{Store: st, Connections: c}
 	next := old
-	next.Record = []byte("new")
+	next.Record = []byte(`{"metadata":{"email":"invented@example.test"},"grant":"new"}`)
 	if err := rpc.Save(AuthSave{Record: next, Create: true, Attempt: "other"}, &struct{}{}); err == nil {
 		t.Fatal("unrelated attempt replaced bound record")
 	}
 	records, err := st.ListProxyAuths(ctx)
-	if err != nil || string(records[0].Record) != "old" {
+	if err != nil || string(records[0].Record) != string(old.Record) {
 		t.Fatal("bound record changed")
 	}
 	now = a.ExpiresAt
@@ -173,7 +218,7 @@ func TestReconnectSaveAttributionAndExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	records, err = st.ListProxyAuths(ctx)
-	if err != nil || string(records[0].Record) != "new" || !records[0].Bound {
+	if err != nil || string(records[0].Record) != string(next.Record) || !records[0].Bound {
 		t.Fatal("committed grant lost")
 	}
 	accounts, err := st.Accounts(ctx)
