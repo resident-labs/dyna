@@ -19,6 +19,7 @@ var ErrVisualForbidden = errors.New("visual belongs to another room or author")
 type VisualSupersededError struct {
 	Event   contract.EventID
 	Version int
+	Seq int64
 }
 
 func (e *VisualSupersededError) Error() string { return "visual has a newer version" }
@@ -358,13 +359,14 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 			}
 			if version != current {
 				var latest contract.EventID
-				err := tx.QueryRowContext(ctx, `SELECT e.id FROM events e, json_each(e.body,'$.attachments') a
+				var seq int64
+				err := tx.QueryRowContext(ctx, `SELECT e.id, e.seq FROM events e, json_each(e.body,'$.attachments') a
 					WHERE e.room=? AND e.type='post.created' AND json_extract(a.value,'$.visual.id')=? AND json_extract(a.value,'$.visual.version')=?
-					ORDER BY e.seq DESC LIMIT 1`, event.Room, visualID, current).Scan(&latest)
+					ORDER BY e.seq DESC LIMIT 1`, event.Room, visualID, current).Scan(&latest, &seq)
 				if err != nil {
 					return err
 				}
-				return &VisualSupersededError{Event: latest, Version: current}
+				return &VisualSupersededError{Event: latest, Version: current, Seq: seq}
 			}
 		}
 		post, isPost := event.Body.(contract.PostCreated)
