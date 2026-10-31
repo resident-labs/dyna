@@ -16,6 +16,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
 	sdkauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 	"github.com/spf13/cobra"
 )
@@ -45,6 +46,9 @@ func proxyCommand() *cobra.Command {
 			var ignored struct{}
 			if client.Call("Auth.OAuthCompleted", model.OAuthCompletion{State: state, AuthID: id}, &ignored) != nil {
 				// Restart removes unbound credentials before accepting requests.
+				os.Exit(1)
+			}
+			if !credentials.bound(id) || service.ActivateDynaCredential(context.Background(), id, "") != nil {
 				os.Exit(1)
 			}
 		})
@@ -78,8 +82,8 @@ func proxyCommand() *cobra.Command {
 			}
 		}()
 		gated := &readyListener{Listener: listener, ready: ready, done: ctx.Done()}
-		service, err = cliproxy.NewBuilder().WithConfig(cfg).WithConfigPath(path).WithListener(gated).WithServerOptions(sdkapi.WithRouterConfigurator(func(router *gin.Engine, _ *handlers.BaseAPIHandler, _ *config.Config) {
-			proxyKeyRoutes(router, &service, cfg.RemoteManagement.SecretKey)
+		service, err = cliproxy.NewBuilder().WithPostAuthHook(func(_ context.Context, auth *coreauth.Auth) error { auth.Disabled = true; return nil }).WithConfig(cfg).WithConfigPath(path).WithListener(gated).WithServerOptions(sdkapi.WithRouterConfigurator(func(router *gin.Engine, _ *handlers.BaseAPIHandler, _ *config.Config) {
+			proxyKeyRoutes(router, &service, credentials, cfg.RemoteManagement.SecretKey)
 		})).Build()
 		if err != nil {
 			return err

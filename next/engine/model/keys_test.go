@@ -24,6 +24,10 @@ func TestKeyProvidersBindOnlyDurableCredentials(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer invented-management-key" {
 			t.Error("missing proxy authentication")
 		}
+		if r.URL.Path == "/dyna/credentials/activate" {
+			_, _ = w.Write([]byte("{}"))
+			return
+		}
 		var input struct {
 			ID       string                   `json:"id"`
 			Provider contract.AccountProvider `json:"provider"`
