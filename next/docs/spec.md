@@ -391,7 +391,7 @@ The first head and each `appendCompaction` contain current keyed sections and de
 
 Updates announce new or changed tools in full and removed tools by name. Direct servers announce their tools; deferred and codemode servers announce their description in `mcp_servers`, and deferred tools appear on a `tool_search` hit. Standard MCP `notifications/tools/list_changed` carries list changes. Search returns a short count, not schemas.
 
-Pi declares `call_tool {name, arguments}` from the first request. It uses the normal tool pipeline and current validation, and calls only announced, undeclared definitions. A declared tool is called directly; a same-name changed definition uses `call_tool` until compaction, and direct calls return a typed instruction to use it. Calls to declared tools through `call_tool` likewise name the direct tool. A session that never compacts still works.
+Pi declares the Dyna tools directly. It does not declare `call_tool`; it activates `tool_search` only when a deferred server requires it. The Dyna and shell servers are direct.
 
 Each update entry stores its full delivered sections and announced-but-undeclared tool definitions in `details`; compaction stores the folded head and declarations. Pi derives delivered state from the active branch's latest update, compaction or first head. Crash recovery sends only an update not yet recorded. Tests cover restart and same-name schema changes.
 
@@ -420,7 +420,7 @@ Each `contract/tools/` toolkit registers one area tool with a flat `action` enum
 | `workflow` | run, status, list | `workflow.*` | 2 |
 | `subscription` | list, add, remove | `subscription.*` | 2 |
 
-Every session initially declares all Dyna tools and four shell tools. Pi waits for direct servers before the first prompt. Maximum-depth starts fail with a typed refusal. Dyna calls use the MCP route; the box resolves names and actions, returning `unknown_action` with valid names. The handler strictly decodes arguments once and returns its typed error unchanged. Room MCP servers use codemode exposure; owner-only methods stay in CLI and web. `session.restart` requires tree access; `room.repos` allows a session its own room. The Dyna MCP timeout is 600 seconds with progress notifications; longer work returns an operation immediately and wakes the session on `op.ran`.
+Every session initially declares all Dyna tools and four shell tools, without `tool_search` or `call_tool`. Pi waits for direct servers before the first prompt. Maximum-depth starts fail with a typed refusal. Dyna calls use the MCP route; the box resolves names and actions, returning `unknown_action` with valid names. The handler strictly decodes arguments once and returns its typed error unchanged. Room MCP servers use codemode exposure; owner-only methods stay in CLI and web. `session.restart` requires tree access; `room.repos` allows a session its own room. The Dyna MCP timeout is 600 seconds with progress notifications; longer work returns an operation immediately and wakes the session on `op.ran`.
 
 The registry generates the server description's one sentence naming areas, and the tool list is the same for all sessions. The startup prompt does not name tools. Tool schemas and help appear in the declaring update or head; identity and trust come from `box.hello`; instructions from context files; state from snapshot sections; skills from Pi; authority from the engine. A test checks registry and CLI action coverage.
 
@@ -447,7 +447,7 @@ At box start the agent writes the global skill catalog into Pi's skills folder. 
 
 After the M2 trial parts, phase 1 ships the registry, ten phase-1 toolkits, MCP server, available snapshot sections, retry keys, shorter `box.hello`, rules removal, upstream cherry-picks and Pi change. All Dyna tools are declared from the first request; the snapshot is always enabled.
 
-The owner chose to ship without the five-provider evaluation gate (q68). A Claude sanity run passed both shapes. Declared used 165,534 tokens against 179,099 for caller; this was not a controlled comparison. The lead chose declared for its simpler model and lower token count in that run. Caller ended one turn with text about the wrong action. The old surface and switch are removed.
+The owner shipped this without the evaluation gate (q68).
 
 Phase 2 in M3 adds `goal`, `issue`, `question`, `workflow`, `subscription`, PR approval and status, `dyna_goal`, `dyna_usage`, and skills with their features.
 
