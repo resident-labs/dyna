@@ -10,6 +10,7 @@
   import type { Principal } from "../contract.gen.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import Avatar from "./Avatar.svelte";
+  import Icon from "./Icon.svelte";
   import VirtualList from "./VirtualList.svelte";
   import FailedTurnRow from "./FailedTurnRow.svelte";
   import StatusPill from "./StatusPill.svelte";
@@ -123,7 +124,7 @@
         {#if turn.ended?.body.outcome === "failed"}
           {@const end = turn.ended}
           <div class="failure"><FailedTurnRow compact row={{ kind: "failed", key: end.id, seq: end.seq, session, at: end.at, label: "Turn failed", cause: end.body.cause ? causes[end.body.cause] : "The turn failed" }} author={name(session)} root={!store.sessions.get(session)?.parent} onseen={() => store.see({ kind: "dm", session }, end.seq)}>
-            <details><summary>Details</summary><p>The session stopped before it finished this turn.</p></details>
+            <details><summary><span class="details-chevron"><Icon name="chevron" size={14} /></span>Details</summary><p>The session stopped before it finished this turn.</p></details>
           </FailedTurnRow></div>
         {/if}
       </article>
@@ -155,6 +156,11 @@
   .post p { margin: 5px 0 0; font-size: 15px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
   .post button { padding: 0; font-size: 12px; }
   .failure { margin: 12px 0 0 64px; }
+  .failure summary { display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; }
+  .failure summary::-webkit-details-marker { display: none; }
+  .failure summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .details-chevron { display: inline-flex; transform: rotate(-90deg); }
+  details[open] .details-chevron { transform: none; }
   .hint { padding: 8px 16px; color: var(--muted); }
   .older { display: block; margin: 0 auto; padding: 8px 16px; }
   @media (max-width: 600px) {
