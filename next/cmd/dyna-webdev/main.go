@@ -390,11 +390,12 @@ func seedRoom(ctx context.Context, s *engine.Service, posts, agents int) {
 	post(owner, contract.PostRequest{Text: "Exercise the failed turn view", Mentions: []string{"builder-feed"}})
 	post(owner, contract.PostRequest{Text: "Start the dev server and run the engine tests", Mentions: []string{"lead-web"}})
 	post(owner, contract.PostRequest{Text: "Then tidy the room menu", Mentions: []string{"builder-feed"}})
-	upload := func(name, media, body string) (a contract.Attachment) {
+	// A session may attach only files uploaded in its room, so each file is uploaded by the principal that posts it.
+	upload := func(by contract.Principal, name, media, body string) (a contract.Attachment) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/files?name="+name, strings.NewReader(body))
 		req.Header.Set("Content-Type", media)
 		rec := httptest.NewRecorder()
-		s.Files(owner, room.Room).ServeHTTP(rec, req)
+		s.Files(by, room.Room).ServeHTTP(rec, req)
 		fatal(json.Unmarshal(rec.Body.Bytes(), &a))
 		return a
 	}
@@ -408,11 +409,11 @@ func seedRoom(ctx context.Context, s *engine.Service, posts, agents int) {
 	var png bytes.Buffer
 	fatal(pngenc.Encode(&png, shot))
 	post(owner, contract.PostRequest{Text: "Review these examples.", Attachments: []contract.Attachment{
-		upload("preview.png", "image/png", png.String()),
-		upload("card.html", "text/html", "<!doctype html><title>Review</title><h1>Feed review</h1><p>Ready to inspect.</p>"),
+		upload(owner, "preview.png", "image/png", png.String()),
+		upload(owner, "card.html", "text/html", "<!doctype html><title>Review</title><h1>Feed review</h1><p>Ready to inspect.</p>"),
 	}})
 	post(contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, contract.PostRequest{Text: "My notes from the review.",
-		Attachments: []contract.Attachment{upload("notes.txt", "text/plain", "The feed rows render.\nThe previews load.\n")}})
+		Attachments: []contract.Attachment{upload(contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, "notes.txt", "text/plain", "The feed rows render.\nThe previews load.\n")}})
 	by := contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}
 	for _, reason := range []string{"Run Go tests on the host", "Inspect the host service logs"} {
 		args := contract.HostexecGrantArgs{Room: room.Room, To: by, Hosts: []contract.HostName{host}, Reason: reason}
