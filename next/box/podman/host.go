@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/resident-labs/dyna/box"
@@ -47,6 +48,7 @@ type Host struct {
 	forwards            map[box.Forward]struct{}
 	restored            bool
 	masterReset         bool
+	generation          atomic.Uint64
 }
 
 // New returns one driver per host. runtime is Dyna v2's private runtime directory.
@@ -79,6 +81,10 @@ func New(destination, runtime, hostKey string, runner Runner) (*Host, error) {
 	}
 	return &Host{gate: make(chan struct{}, 1), buildGate: make(chan struct{}, 1), shortGate: make(chan struct{}, 5), hostexecGate: make(chan struct{}, 3), stopGate: make(chan struct{}, 1), destination: destination, socket: socket, runner: runner, forwards: make(map[box.Forward]struct{})}, nil
 }
+
+// Generation changes each time the SSH master and its forwards are restored.
+func (h *Host) Generation() uint64 { return h.generation.Load() }
+
 func (h *Host) lock(ctx context.Context) error {
 	select {
 	case h.gate <- struct{}{}:
@@ -153,6 +159,7 @@ func (h *Host) ensure(ctx context.Context) error {
 		}
 	}
 	h.restored = true
+	h.generation.Add(1)
 	return nil
 }
 func validateForward(f box.Forward) error {
