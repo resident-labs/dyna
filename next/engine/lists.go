@@ -34,7 +34,7 @@ func (s *Service) RoomList(ctx context.Context, caller contract.Principal, _ con
 		return contract.RoomListResponse{}, failure(err)
 	}
 	rows.Close()
-	failed, err := s.store.Read().QueryContext(ctx, `SELECT s.room,COUNT(*) FROM sessions s WHERE s.closed_at IS NULL AND (SELECT outcome FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND outcome!='stopped' ORDER BY ended_at DESC LIMIT 1)='failed' GROUP BY s.room`)
+	failed, err := s.store.Read().QueryContext(ctx, `SELECT s.room,COUNT(*) FROM sessions s WHERE s.closed_at IS NULL AND ((SELECT outcome FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND outcome!='stopped' ORDER BY ended_at DESC LIMIT 1)='failed' OR EXISTS (SELECT 1 FROM boxes b WHERE b.session=s.id AND b.state='failed')) GROUP BY s.room`)
 	if err != nil {
 		return contract.RoomListResponse{}, failure(err)
 	}
