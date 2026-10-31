@@ -18,7 +18,7 @@
   import RoomMenu, { type Section } from "./lib/ui/RoomMenu.svelte";
   import RequestsPanel from "./lib/ui/RequestsPanel.svelte";
   import { Attention } from "./lib/attention.svelte.ts";
-  import { parseMentions } from "./lib/mentions.ts";
+  import { mentionable, parseMentions } from "./lib/mentions.ts";
   import type { Conversation, PostRequest, SessionStarted } from "./lib/contract.gen.ts";
   const signedOut = (error: unknown) => error instanceof APIError && error.detail.code === "forbidden";
   const attention = new Attention();
@@ -198,6 +198,10 @@
     panel = open;
     if (open) { await tick(); members?.focus(); } else if (held) toggle?.focus();
   }
+  // The sessions the feed composer offers after @: the root first, then by name. A DM offers none.
+  let mentions = $derived(session ? [] : [...store?.sessions.values() ?? []].filter(mentionable)
+    .map(item => ({ name: item.name, root: !item.parent, status: status(item.session) }))
+    .sort((a, b) => Number(b.root) - Number(a.root) || a.name.localeCompare(b.name)));
   let title = $derived(!room ? "Home" : session ? store?.names.get(session) ?? "Session" : roomName);
   // Each fact shows once: profile, state and trouble live on the session's row. A closed session has no row.
   let closed = $derived(!!session && !!store?.ready && !store.sessions.has(session));
@@ -250,7 +254,7 @@
     </div>
     {#if room && !unavailable}
       <Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title}
-        quote={quotes[key]} onunquote={() => { quotes[key] = undefined; }} />
+        quote={quotes[key]} onunquote={() => { quotes[key] = undefined; }} sessions={mentions} />
     {/if}{/if}
     <TermDock bind:this={terminals} bind:element={dock} onempty={() => composer?.focus()}
       sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name }))} />
