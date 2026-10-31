@@ -1,6 +1,6 @@
 <script lang="ts">
   import { APIError, call } from "../client.ts";
-  import { causes, commandLine, fromNow, requestLine } from "../feed.ts";
+  import { causes, clause, commandLine, fromNow, requestLine } from "../feed.ts";
   import { hue } from "../identity.ts";
   import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
@@ -68,14 +68,17 @@
   <strong class={request.by.kind} class:root style:--hue={hue(name(request.by))}>{name(request.by)}</strong>
   <span class="title">{#if pending}{request.card.title}{#if named && !line.named} on <code>{named}</code>{/if}{:else}{asked}{/if}</span>{/snippet}
 
+{#snippet ask()}{#if line.named}{line.text}<code>{line.named}</code>{clause(line.after)}{:else}{clause(lead)}{/if}{/snippet}
+
 {#snippet expiry()}{#if soon}<StatusPill tone="warning" label="Expires {fromNow(request.expires, now)}" />{:else}Expires {fromNow(request.expires, now)}{/if}{/snippet}
 
 <!-- While it waits, a request reads as a sentence on a card, with the exact command that runs; an owner-class card has the attention edge.
-     Folded on the Requests page, it is one row: the sentence, what runs or who decides, and its own Approve and Deny. -->
+     Folded on the Requests page, it is one row: the sentence, what it allows, who decides if that is not only the owner, and its own Approve and Deny. -->
 {#if pending && folded}
   <article class="row" class:current>
     <button type="button" class="head" aria-expanded="false" onclick={onopen}><span class="top">{@render who()}</span>
-      <span class="sub">{request.class === "owner" ? lead : deciders} · {@render expiry()}</span></button>
+      {#if lead}<span class="sub">{@render ask()}{#if request.class === "owner"} · {@render expiry()}{/if}</span>{/if}
+      {#if request.class !== "owner" || !lead}<span class="sub">{deciders} · {@render expiry()}</span>{/if}</button>
     <div class="actions">
       <button type="button" class:approve={current} onclick={() => void decide(true)} disabled={busy}>Approve</button>
       <button type="button" onclick={() => void decide(false)} disabled={busy}>Deny</button>
@@ -150,6 +153,7 @@
   .row .head { all: unset; flex: 1; min-width: 0; display: grid; gap: 2px; cursor: pointer; border-radius: 6px; }
   .row .head:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .sub { padding-left: 32px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .sub code { font-size: 12px; }
   .row .actions { flex: none; margin: 0; }
   .row .why { flex-basis: 100%; }
   /* A decided request is one muted line, in the panel and in the feed's post column. */
@@ -182,6 +186,7 @@
   /* On a phone a row is its text, then Approve and Deny across the full width at touch size. */
   @media (max-width: 640px) {
     .row { flex-wrap: wrap; }
+    .sub { white-space: normal; }
     .row .actions { flex-basis: 100%; }
   }
   @media (max-width: 640px), (hover: none) {
