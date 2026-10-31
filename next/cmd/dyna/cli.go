@@ -294,7 +294,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		if grantTo != "" {
 			args.To = contract.Principal{Kind: contract.PrincipalSession, Session: contract.SessionID(grantTo)}
 		}
-		r, err := getClient().OpSubmit(cmd.Context(), contract.OpSubmitRequest{Operation: contract.Operation{Room: args.Room, Args: args}})
+		r, err := getClient().OpSubmit(cmd.Context(), contract.OpSubmitRequest{Operation: contract.Operation{Kind: args.OpKind(), Room: args.Room, Args: args}})
 		if err == nil {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), r.Operation.ID)
 		}
