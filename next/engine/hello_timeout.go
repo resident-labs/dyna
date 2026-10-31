@@ -33,7 +33,7 @@ func (s *Service) FailStaleStarts(ctx context.Context) error {
 			session, e := s.store.Session(ctx, b.Session)
 			err = e
 			if err == nil {
-				_, err = s.transition(ctx, session.Room, current, contract.BoxFailed, "no hello within 60 s")
+				_, err = s.transition(ctx, session.Room, current, contract.BoxFailed, "no hello within 60 s", contract.CauseNoHello)
 				if errors.Is(err, sql.ErrNoRows) {
 					err = nil // Close won the state change and will finish removal.
 				}

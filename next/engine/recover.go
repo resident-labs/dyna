@@ -23,7 +23,7 @@ func (s *Service) Recover(ctx context.Context) error {
 		if err := s.boxes.Remove(ctx, b.ID); err != nil {
 			return err
 		}
-		if _, err := s.transition(ctx, session.Room, b, contract.BoxFailed, "engine restarted during create"); err != nil {
+		if _, err := s.transition(ctx, session.Room, b, contract.BoxFailed, "engine restarted during create", contract.CauseEngineRestarted); err != nil {
 			return err
 		}
 	}

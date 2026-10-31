@@ -57,6 +57,7 @@ func (s *Store) TransitionBox(ctx context.Context, b box.Box, to contract.BoxSta
 	if err != nil {
 		return box.Box{}, err
 	}
+	body.Cause = event.Body.(contract.BoxChanged).Cause
 	event.Body = body
 	err = s.Write(ctx, func(tx *sql.Tx) error {
 		var host *contract.HostName
