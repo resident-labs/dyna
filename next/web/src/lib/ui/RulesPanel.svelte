@@ -104,7 +104,7 @@
           {:else}
             <li><span class="number">r{rule.number}</span>
               <div class="body"><p class="text">{rule.text}</p>
-                <p class="meta"><span class="by">{#if rule.by.kind === "owner"}You{:else}<Avatar kind={rule.by.kind} name={name(rule)} size={16} />
+                <p class="meta"><span class="by">{#if rule.by.kind === "owner"}You{:else}<Avatar kind={rule.by.kind} name={name(rule)} root={!!rule.by.session && store.sessions.has(rule.by.session) && !store.sessions.get(rule.by.session)?.parent} size={16} />
                   <span class="who" style:--hue={hue(name(rule))}>{name(rule)}</span>{/if}</span><span aria-hidden="true">·</span><time datetime={rule.at} title={new Date(rule.at).toLocaleString()}>{when(rule.at)}</time></p></div>
               <button type="button" class="remove" onclick={() => void remove(rule)} aria-label={`Remove rule r${rule.number}`}>Remove</button>
               <span class="more"><button type="button" aria-label={`Rule r${rule.number} actions`} aria-haspopup="menu" aria-expanded={menuFor === rule.number}
