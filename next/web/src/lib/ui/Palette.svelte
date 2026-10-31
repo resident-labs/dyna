@@ -25,7 +25,7 @@
       { id: "requests", label: "Requests", hint: current.waiting?.length ? `${current.waiting.length} wait for you` : "", keys: ["G", "R"], icon: "inbox" },
       { id: "pause", label: current.paused ? "Resume the room" : "Pause the room", hint: current.paused ? "Sessions can start turns again" : "No session starts a new turn", keys: [], icon: "pause" },
     ] satisfies Action[] : [],
-    { id: "theme", label: "Theme", hint: "Change the app's appearance", keys: [], icon: "palette" },
+    { id: "theme", label: "Theme", hint: "Carbon, Ink, Nord, Paper, Light or OLED black", keys: [], icon: "palette" },
     { id: "settings", label: "Settings", hint: "", keys: ["Ctrl", ","], icon: "gear" },
   ]);
   let places: Place[] = $derived(rooms.map(found => ({ id: found.id, name: found.name, paused: found.paused,
@@ -105,7 +105,7 @@
     </div>
     <div class="list" id="palette-list" role="listbox" bind:this={list} onscroll={scrolled}>
       {#each sections as section}
-        <div class="group">{section.title} {#if count(section)}<span>{count(section)}</span>{/if}</div>
+        <div class="group">{#if scope === "messages" && section.group === "messages"}{section.total.toLocaleString()} messages<span>· newest first</span>{:else}{section.title} {#if count(section)}<span>{count(section)}</span>{/if}{/if}</div>
         {#each section.items as item}
           {@const index = items.indexOf(item)}
           <button type="button" id="palette-{index}" role="option" aria-selected={pick === index} class="row" class:chosen={pick === index}
@@ -136,7 +136,7 @@
       {/each}
       {#if mode.query && !sections.length}<p class="note">No room, session, message or action matches “{mode.query}”.</p>{/if}
     </div>
-    <footer><span><kbd>↑</kbd> <kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span><span><kbd>&gt;</kbd> actions only</span><span class="fact">Matches every word by its start</span></footer>
+    <footer><span><kbd>↑</kbd> <kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span><span><kbd>&gt;</kbd> actions only</span><span class="fact">{scope ? "Esc goes back to all results" : "Matches every word by its start"}</span></footer>
   </div>
 </div>
 
