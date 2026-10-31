@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -14,7 +15,7 @@ func (s *Service) RoomList(ctx context.Context, caller contract.Principal, _ con
 	if err := s.store.Read().QueryRowContext(ctx, "SELECT COALESCE(MAX(seq),0) FROM events").Scan(&seq); err != nil {
 		return contract.RoomListResponse{}, failure(err)
 	}
-	rows, err := s.store.Read().QueryContext(ctx, "SELECT r.id,r.name,COALESCE(c.seq,0) FROM rooms r LEFT JOIN conversation_reads c ON c.room=r.id AND c.conversation='feed' ORDER BY r.name")
+	rows, err := s.store.Read().QueryContext(ctx, "SELECT r.id,r.name,r.created_at,COALESCE(c.seq,0) FROM rooms r LEFT JOIN conversation_reads c ON c.room=r.id AND c.conversation='feed' ORDER BY r.name")
 	if err != nil {
 		return contract.RoomListResponse{}, failure(err)
 	}
@@ -22,9 +23,11 @@ func (s *Service) RoomList(ctx context.Context, caller contract.Principal, _ con
 	rooms := []contract.RoomSummary{}
 	for rows.Next() {
 		var room contract.RoomSummary
-		if err := rows.Scan(&room.ID, &room.Name, &room.LastRead); err != nil {
+		var created int64
+		if err := rows.Scan(&room.ID, &room.Name, &created, &room.LastRead); err != nil {
 			return contract.RoomListResponse{}, failure(err)
 		}
+		room.Created = time.UnixMilli(created).UTC()
 		room.Waiting = []contract.OpID{}
 		room.Working = []contract.SessionID{}
 		rooms = append(rooms, room)

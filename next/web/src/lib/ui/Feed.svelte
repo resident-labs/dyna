@@ -7,7 +7,7 @@
   import FailedTurnRow from "./FailedTurnRow.svelte";
   import WorkRow from "./WorkRow.svelte";
   import WorkingDot from "./WorkingDot.svelte";
-  import { feedRows, type Quote, type Row } from "../feed.ts";
+  import { dayLabel, feedRows, type Quote, type Row } from "../feed.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { Conversation, PostRequest, Principal } from "../contract.gen.ts";
 
@@ -92,6 +92,7 @@
         onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} onforward={() => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments })} />
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} root={root(item.session)} />
       {:else if item.kind === "work"}<WorkRow row={item} {name} open={opened.has(item.key)} ontoggle={() => toggle(item.key)} />
+      {:else if item.kind === "day"}<p class="day"><span>{dayLabel(item.at, Date.now())}</span></p>
       {:else if item.kind === "working"}<p class="working"><WorkingDot />{name(item.session)} is working</p>
       {:else}{@render intro()}{/if}
     {/snippet}
@@ -108,6 +109,9 @@
 
 <style>
   .working { margin: 0; padding: 6px 16px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+  /* A centred muted date on a hairline, as in Discord. */
+  .day { margin: 16px 16px 4px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; }
+  .day::before, .day::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
   .hint { margin: 0; padding: 6px 16px; color: var(--muted); font-size: 12px; }
   .jump { all: unset; cursor: pointer; padding: 6px 16px; color: var(--muted); font-size: 12px; }
   .jump:hover { color: var(--text); }

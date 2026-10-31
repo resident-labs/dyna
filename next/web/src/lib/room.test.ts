@@ -2,8 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { RoomStore } from "./room.svelte.ts";
 import { EventWindow, PAGE, WINDOW, dmOf } from "./window.svelte.ts";
-import { feedRows } from "./feed.ts";
+import { feedRows as dayRows } from "./feed.ts";
 import type { Conversation, Event, EventBody, EventsListRequest, PostRequest, SessionSummary } from "./contract.gen.ts";
+
+// These cases leave out the day rows, which feed.test.ts covers.
+const feedRows = (...args: Parameters<typeof dayRows>) => dayRows(...args).filter(row => row.kind !== "day");
 
 function event(seq: number, body: EventBody): Event {
   return { seq, id: String(seq), at: "", from: { kind: "owner" }, ...body };
