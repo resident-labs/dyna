@@ -93,6 +93,11 @@ export class RoomStore {
         this.names.set(event.body.session, event.body.name);
         break;
       case "session.closed": this.sessions.delete(event.body.session); break;
+      case "session.moved": {
+        const moved = this.sessions.get(event.body.session);
+        if (moved) this.sessions.set(event.body.session, { ...moved, parent: event.body.newParent });
+        break;
+      }
       case "box.changed": this.boxes.set(event.body.session, event.body.to); break;
       case "turn.started": this.turns.set(event.body.session, event.body.turn); break;
       case "turn.ended":
