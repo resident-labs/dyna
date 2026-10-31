@@ -7,6 +7,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import Icon from "./Icon.svelte";
+  import Avatar from "./Avatar.svelte";
   import FloatWindow from "./FloatWindow.svelte";
   import type { Rect } from "../float.ts";
   import { LiveStream, type Phase } from "../live.ts";
@@ -44,32 +45,34 @@
 
 <svelte:document onvisibilitychange={() => { visible = document.visibilityState === "visible"; if (visible && phase === "failed") attempt++; }} />
 <FloatWindow label={`${name}'s computer`} kind="computer" {docked} bind:rect bind:element onkeydown={key}>
-  {#snippet header()}<span class="title">{name}'s computer</span>{#if phase !== "failed"}<span class="live" class:connecting={phase === "connecting"}>{phase === "live" ? "Live" : "Connecting"}</span>{/if}
-    {#if activity && !docked}<span class="caption">· {activity}</span>{/if}
+  {#snippet header()}<Avatar kind="session" {name} size={20} /><span class="title">{name}'s computer</span>
+    {#if phase === "live"}<span class="live">Live</span>{:else if phase === "connecting"}<span class="connecting">Connecting</span>{/if}
     <button type="button" class="first" aria-label={docked ? "Undock" : "Dock in the sessions panel"} title={docked ? "Undock" : "Dock"} onclick={ondock}>
       <Icon name={docked ? "undock" : "dock"} /></button>
     <button type="button" aria-label="Close" title="Close" onclick={onclose}><Icon name="close" /></button>{/snippet}
   <!-- The image streams only while the owner can see it: this view open, the page visible. -->
-  <div class="screen" class:docked style:--ratio={ratio}>
+  <div class="screen" class:docked class:foot={activity} style:--ratio={ratio}>
     {#if visible}{#key attempt}<img alt={`${name}'s screen, live`} {@attach watch} />{/key}{/if}
     {#if phase === "failed"}<p class="badge" role="status">The live view stopped. <button type="button" class="retry" onclick={() => { attempt++; element?.focus(); }}>Try again</button></p>{/if}
   </div>
-  {#if docked && activity}<p class="activity">{activity}</p>{/if}
+  <!-- The current step, one muted line under the screen: "qa-runner · reading the review state". -->
+  {#if activity}<p class="activity">{name} · {activity}</p>{/if}
 </FloatWindow>
 
 <style>
   .title { flex: none; }
-  .live { font-weight: 400; }
-  .connecting { color: var(--muted); }
-  .caption { min-width: 0; overflow: hidden; color: var(--muted); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+  /* A neutral outline label, the window's only uppercase text; it shows only once frames arrive. */
+  .live { padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+  .connecting { color: var(--muted); font-weight: 400; }
   .first { margin-left: auto; }
   /* The screen is near-black in both themes, as a display is. Docked, it takes the panel width at the screen's ratio;
      floating, it fills the window body edge to edge and the dark background fills the letterbox. */
   .screen { position: relative; display: grid; place-items: center; flex: 1; margin: 0; border-radius: 0 0 7px 7px; overflow: hidden; background: #0d0d0f; }
+  .screen.foot { border-radius: 0; }
   .screen.docked { flex: none; aspect-ratio: var(--ratio); margin: 12px 12px 0; border: 1px solid var(--line); border-radius: 8px; }
   img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
   /* v1's badge: a dark chip over the last picture, readable on any frame. */
   .badge { position: absolute; left: 12px; top: 12px; margin: 0; padding: 3px 11px; border-radius: 12px; background: rgb(20 19 22 / 82%); color: #d8d3cc; font-size: 12px; }
   .badge .retry { margin-left: 4px; color: #f4f0ea; }
-  .activity { margin: 8px 12px 4px; overflow: hidden; color: var(--muted); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+  .activity { flex: none; margin: 0; padding: 6px 12px; overflow: hidden; color: var(--muted); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 </style>
