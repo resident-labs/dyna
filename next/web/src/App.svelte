@@ -6,11 +6,9 @@
   import StatusPill from "./lib/ui/StatusPill.svelte";
   import Composer from "./lib/ui/Composer.svelte";
   import SessionRow from "./lib/ui/SessionRow.svelte";
-  import WorkingDot from "./lib/ui/WorkingDot.svelte";
   import Icon from "./lib/ui/Icon.svelte";
   import Avatar from "./lib/ui/Avatar.svelte";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
-  import DirectMessages from "./lib/ui/DirectMessages.svelte";
   import ComputerView from "./lib/ui/ComputerView.svelte";
   import { MediaQuery } from "svelte/reactivity";
   import type { Conversation, RoomSummary, SessionStarted } from "./lib/contract.gen.ts";
@@ -96,14 +94,13 @@
     links[Math.max(0, Math.min(links.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)))]?.focus();
   }
   let roomName = $derived(rooms.find(item => item.id === room)?.name ?? "Room");
-  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-  let counts = $derived(store?.ready ? plural(store.sessions.size, "session") + (store.turns.size ? ` · ${store.turns.size} working` : "") : "");
-  // A session's muted status line: what it does now, then its profile.
-  const status = (id: string, profile: string) => {
+  // A session's muted status line shows only state that matters: a running turn with its latest activity, or a
+  // starting box. An idle session has none; its profile is the row's hover title.
+  const status = (id: string) => {
     const box = store?.boxes.get(id);
-    return `${store?.turns.has(id) ? "working" : box && box !== "ready" ? `box ${box}` : "idle"} · ${profile}`;
+    if (store?.turns.has(id)) { const label = store.activity.get(id); return label ? `working · ${label}` : "working"; }
+    return box === "pending" || box === "creating" || box === "starting" ? "starting" : "";
   };
-  const sessionHref = (id: string) => `/r/${encodeURIComponent(room ?? "")}/s/${encodeURIComponent(id)}`;
   // Below 900 px the sessions panel is hidden; a header button opens it over the feed.
   // Opening moves focus into the panel; closing returns it to the button if the panel held it.
   let panel = $state(false);
@@ -128,55 +125,43 @@
     if (open) { await tick(); members?.focus(); } else if (held) toggle?.focus();
   }
   let title = $derived(!room ? "Welcome" : session ? store?.names.get(session) ?? "Session" : roomName);
-  // The session page header: muted facts, and one pill only for a failed turn or a failed or lost box.
-  let facts = $derived.by(() => {
-    if (!session || !store) return [];
-    const open = store.sessions.get(session);
-    if (!open) return store.ready ? ["closed"] : [];
-    // A failed or lost box shows as the pill, never twice.
-    const box = store.boxes.get(session);
-    return [open.profile, box && box !== "failed" && box !== "lost" && `box ${box}`].filter(fact => typeof fact === "string");
-  });
+  // The open room's icon gets a dot while a request waits for the owner; other rooms need cross-room counts first.
+  let waiting = $derived([...(store?.operations.values() ?? [])].some(op => op.class === "owner"));
+  // Each fact shows once: profile, state and trouble live on the session's row. A closed session has no row.
+  let closed = $derived(!!session && !!store?.ready && !store.sessions.has(session));
   const trouble = (id: string) => {
     const box = store?.boxes.get(id);
-    // A running turn replaces a failed one, as the working dot does in the tree.
-    return store?.failed.has(id) && !store.turns.has(id) ? "Last turn failed" : box === "failed" ? "Box failed" : box === "lost" ? "Box lost" : "";
+    // A failed turn shows until the session's next turn succeeds.
+    return store?.failed.has(id) ? "Last turn failed" : box === "failed" ? "Could not start" : box === "lost" ? "Stopped unexpectedly" : "";
   };
 </script>
 
 {#snippet intro()}
-  {#if session}<RoomIntro kind="session" name={title} root={!!store?.sessions.get(session) && !store.sessions.get(session)?.parent} line={`Your direct messages with ${title}`} />
-  {:else}<RoomIntro kind="room" name={roomName} line={`The start of ${roomName}${store ? ` · ${plural(store.sessions.size, "session")}` : ""}`} />{/if}
+  {#if session}<RoomIntro kind="session" name={title} root={!!store?.sessions.get(session) && !store.sessions.get(session)?.parent} line="This is the start of your direct messages." />
+  {:else}<RoomIntro kind="room" name={roomName} line="This is the start of the room." />{/if}
 {/snippet}
 
 <svelte:window onkeydown={cycle} />
 <div class="shell" class:open={room}>
-  <aside class="rooms" aria-label="Rooms" tabindex="-1" bind:this={rail}>
-    <nav class="rail" aria-label="Rooms">{#each rooms as item (item.id)}
+  <aside class="rail" aria-label="Rooms" tabindex="-1" bind:this={rail}>
+    <nav aria-label="Rooms">{#each rooms as item (item.id)}
       <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id ? "page" : undefined}
-        aria-label={item.name} title={item.name}><Avatar kind="room" name={item.name} size={36} /></a>
+        aria-label={room === item.id && waiting ? `${item.name}, requests waiting` : item.name} title={item.name}>
+        <Avatar kind="room" name={item.name} size={40} />{#if room === item.id && waiting}<span class="waiting"></span>{/if}</a>
     {/each}</nav>
-    <div class="column">
-      <header><strong>{room ? roomName : "Dyna"}</strong></header>
-      {#if room}
-        <nav aria-label="Room"><a href={"/r/" + encodeURIComponent(room)} onclick={navigate} aria-current={session ? undefined : "page"}><Icon name="room" />feed</a></nav>
-        {#if store && !unavailable}<DirectMessages {store} href={sessionHref} current={session} {navigate} />{/if}
-      {:else}<p class="hint">{roomsError || (rooms.length ? "Select a room." : "Your rooms will appear here.")}</p>{/if}
-      <footer><Avatar kind="owner" name="You" size={28} /><strong>You</strong></footer>
-    </div>
+    <footer><Avatar kind="owner" name="You" size={32} /></footer>
   </aside>
   <main>
-    <header>{#if room && !session}<Icon name="room" />{/if}<strong>{title}</strong>
-      {#if !session && counts}<span class="count">{counts}</span>{/if}
-      {#if facts.length}<span class="count">· {facts.join(" · ")}</span>{/if}
-      {#if session && trouble(session)}<StatusPill tone="failed">{trouble(session)}</StatusPill>{/if}
+    <header>{#if room && session}<a class="crumb" href={"/r/" + encodeURIComponent(room)} onclick={navigate}>{roomName}</a><span class="count">/</span>
+      {:else if room}<Icon name="room" />{/if}<strong>{title}</strong>
+      {#if closed}<span class="count">· closed</span>{/if}
       {#if room}<button type="button" class="panel-toggle" bind:this={toggle} aria-label={store?.failed.size ? "Sessions, a turn failed" : "Sessions"}
         title="Sessions" aria-controls="sessions" aria-expanded={panel} onclick={() => void showPanel(!panel)}><Icon name="people" />
         {#if store?.failed.size && !panel}<span class="attention"></span>{/if}</button>{/if}</header>
     <div class="feed">
       {#if store && !unavailable}
         {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} {intro} />{/key}
-      {:else}<p class="empty">{unavailable || "Select a room."}
+      {:else}<p class="empty">{unavailable || roomsError || (rooms.length ? "Select a room." : "Your rooms will appear here.")}
         {#if store && unavailable && !signedOut(store.error)}<button type="button" class="retry" onclick={() => void store?.open()}>Try again</button>{/if}</p>{/if}
     </div>
     {#if room && !unavailable}
@@ -192,10 +177,9 @@
       <header class="label">Sessions</header>
       {#each tree as { session: item, depth } (item.session)}
         <div class="row"><a class="member" href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.session)}`} onclick={navigate} onkeydown={walkTree}
-          aria-current={session === item.session ? "page" : undefined} style:padding-left="{16 + depth * 14}px">
-          <SessionRow name={item.name} root={!item.parent} status={status(item.session, item.profile)} />
-          {#if store?.turns.has(item.session)}<WorkingDot label="Working" />
-          {:else if trouble(item.session)}<StatusPill tone="failed">{store?.failed.has(item.session) ? "Failed" : trouble(item.session)}</StatusPill>{/if}</a>
+          aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{16 + depth * 14}px">
+          <SessionRow name={item.name} root={!item.parent} status={status(item.session)} />
+          {#if trouble(item.session)}<StatusPill tone="failed">{store?.failed.has(item.session) ? "Failed" : trouble(item.session)}</StatusPill>{/if}</a>
           {#if store?.computers.has(item.session)}<button type="button" class="watch" data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
             title={`Watch ${item.name}'s computer`} onclick={() => { watching = item.session; }}><Icon name="monitor" /></button>{/if}</div>
       {:else}<p class="hint">No sessions yet.</p>{/each}
@@ -213,6 +197,6 @@
   .watch:hover { background: var(--hover); color: var(--text); }
   .watch:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
   /* The computer needs room: the panel widens while it shows one. */
-  @media (min-width: 901px) { .shell.open:has(aside.watching) { grid-template-columns: 280px 1fr 420px; } }
+  @media (min-width: 901px) { .shell.open:has(aside.watching) { grid-template-columns: 64px 1fr 420px; } }
   @media (max-width: 900px) { .shell > aside.members.shown.watching { width: min(420px, 100vw); } }
 </style>
