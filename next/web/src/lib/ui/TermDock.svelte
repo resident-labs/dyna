@@ -156,7 +156,7 @@
     {#if full && shown}
       <button type="button" aria-label="Back" title="Back" onclick={() => { full = false; }}><Icon name="backChevron" /></button>
       {#if "target" in shown && "box" in shown.target}<Avatar kind="session" name={shown.label} root={shown.root} size={16} />{:else if jobOf(shown) && failed(jobOf(shown)!)}<StatusPill tone="failed" dot label="Failed" />{/if}
-      <strong class="full-title">{shown.label}</strong>
+      <strong class="full-title">{shown.label}{"target" in shown ? " shell" : ""}</strong>
       <button type="button" aria-label={`Close ${shown.label}`} title="Close" onclick={() => void close(shown!.key)}><Icon name="close" /></button>
     {:else}
     <span class="menu">
@@ -250,7 +250,7 @@
   .list .label { margin: 6px 8px 2px; }
   .list [role="menuitem"] { width: auto; height: auto; justify-content: space-between; gap: 12px; display: flex; padding: 6px 8px; color: var(--text); font-size: 14px; }
   .list [role="menuitem"]:focus { background: var(--hover); outline: none; }
-  .full-title { flex: 1; min-width: 0; overflow: hidden; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+  .full-title { flex: 1; min-width: 0; overflow: hidden; color: var(--text); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
   .grip { position: absolute; top: -3px; left: 0; right: 0; height: 6px; z-index: 1; cursor: ns-resize; touch-action: none; }
   .grip:hover, .grip:focus-visible { background: var(--focus); opacity: 0.6; outline: none; }
   /* Docked, the body keeps the dragged height; floating, it fills the window. */
@@ -262,8 +262,8 @@
   .exited { margin: 0; padding: 6px 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 13px; }
   .exited .retry { margin-left: 8px; }
   /* v1's key row above the phone keyboard; a held Ctrl shows the focus ring. */
-  .keys { flex: none; display: flex; gap: 8px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); overflow-x: auto; }
-  .keys button { all: unset; box-sizing: border-box; flex: 1; display: grid; place-items: center; min-width: 0; height: 40px; padding: 0 4px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--firm);
+  .keys { flex: none; display: flex; gap: 6px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); overflow-x: auto; }
+  .keys button { all: unset; box-sizing: border-box; flex: none; display: grid; place-items: center; width: 44px; height: 40px; padding: 0 4px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--firm);
     color: var(--text); font-size: 14px; font-weight: 500; cursor: pointer; }
   .keys button:active { background: var(--hover); }
   .keys button[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--focus); }
