@@ -7,6 +7,7 @@ type Method string
 const (
 	MethodRuleAdd           Method = "rule.add"
 	MethodRuleRemove        Method = "rule.remove"
+	MethodRuleEdit          Method = "rule.edit"
 	MethodRuleList          Method = "rule.list"
 	MethodWebLogin          Method = "web.login"
 	MethodConversationRead  Method = "conversation.read"
@@ -57,6 +58,12 @@ type RuleRemoveRequest struct {
 	Number int    `json:"number"`
 }
 type RuleRemoveResponse struct{}
+type RuleEditRequest struct {
+	Room   RoomID `json:"room"`
+	Number int    `json:"number"`
+	Text   string `json:"text"`
+}
+type RuleEditResponse struct{}
 type RuleListRequest struct {
 	Room RoomID `json:"room"`
 }
@@ -111,6 +118,7 @@ type RoomSummary struct {
 	LastRead int64       `json:"lastRead"`
 	Waiting  []OpID      `json:"waiting"` // pending owner-class operations, which only the owner decides
 	Working  []SessionID `json:"working"` // open sessions with a running turn
+	Failed   int         `json:"failed"`  // open sessions whose last turn that was not stopped failed
 	// Latest is the newest current-turn activity among the working sessions; none when no working session reported one.
 	Latest *RoomActivity `json:"latest,omitempty"`
 }
@@ -141,6 +149,8 @@ type SessionSummary struct {
 	Activity    string        `json:"activity,omitempty"`    // the running turn's latest TurnActivity label
 	LastOutcome TurnOutcome   `json:"lastOutcome,omitempty"` // of the last ended turn that was not stopped; a stopped turn neither fails nor succeeds
 	ShellJobs   int           `json:"shellJobs,omitempty"`   // TurnEnded.ShellJobs of the last ended turn
+	StartedAt   time.Time     `json:"startedAt"`             // when the session was created
+	LastTurnAt  time.Time     `json:"lastTurnAt,omitzero"`   // when the latest turn ended; empty when no turn has ended
 }
 type SessionListResponse struct {
 	Sessions []SessionSummary `json:"sessions"`
