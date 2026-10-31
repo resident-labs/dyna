@@ -42,77 +42,51 @@ func setupRepos(ctx context.Context, root string, repos []contract.BoxRepo, name
 			return err
 		}
 		if err := setupRepo(ctx, dir, repo, git); err != nil {
-			return err
+			return fmt.Errorf("set up %s: %w", repo.Name, err)
 		}
 	}
 	return nil
 }
 
-// setupMarker names the file in .git that records a finished setup. Setup writes it last.
-const setupMarker = "dyna-setup-done"
-
-// setupStep names the setup action that failed, so the caller can report it.
-type setupStep string
-
-const (
-	stepInit     setupStep = "init"
-	stepConfig   setupStep = "config"
-	stepFetch    setupStep = "fetch"
-	stepCheckout setupStep = "checkout"
-	stepMarker   setupStep = "marker"
-)
-
-// setupError reports one failed setup step for one repository.
-type setupError struct {
-	Repo string
-	Step setupStep
-	Err  error
-}
-
-func (e *setupError) Error() string {
-	return fmt.Sprintf("set up %s at %s: %v", e.Repo, e.Step, e.Err)
-}
-
-func (e *setupError) Unwrap() error { return e.Err }
-
-// setupRepo runs setup in place and never moves, deletes or forces files, so work Pi wrote survives.
-// Every step repeats safely after a crash until the marker exists. A failed step leaves the directory as it is.
+// setupRepo builds the checkout in dir. Pi gets no turn until setup succeeds, so a directory
+// without .git/index holds only setup's own files, and setup clears it first. Setup writes the
+// index last, so an existing index marks a finished checkout, including a legacy one, which stays as it is.
 func setupRepo(ctx context.Context, dir string, repo contract.BoxRepo, git gitRunner) error {
-	if _, err := os.Stat(filepath.Join(dir, ".git", setupMarker)); err == nil {
+	if _, err := os.Stat(filepath.Join(dir, ".git", "index")); err == nil {
 		return nil
+	} else if !os.IsNotExist(err) {
+		return err
 	}
-	fail := func(step setupStep, err error) error {
-		return &setupError{Repo: string(repo.Name), Step: step, Err: err}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
 	}
-	if _, err := git(ctx, dir, "", "init", "--quiet"); err != nil {
-		return fail(stepInit, err)
+	for _, entry := range entries {
+		if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+			return err
+		}
 	}
-	if _, err := git(ctx, dir, "", "config", "remote.origin.url", "http://127.0.0.1:7781/git/"+string(repo.Name)+".git"); err != nil {
-		return fail(stepConfig, err)
+	if _, err := git(ctx, "", "", "clone", "--no-checkout", "--reference", repo.Cache, repo.Cache, dir); err != nil {
+		return err
 	}
-	if _, err := git(ctx, dir, "", "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
-		return fail(stepConfig, err)
-	}
-	if _, err := git(ctx, dir, "", "fetch", "--quiet", repo.Cache, "+refs/heads/*:refs/remotes/origin/*"); err != nil {
-		return fail(stepFetch, err)
+	if _, err := git(ctx, dir, "", "remote", "set-url", "origin", "http://127.0.0.1:7781/git/"+string(repo.Name)+".git"); err != nil {
+		return err
 	}
 	base := "refs/remotes/origin/" + repo.Branch
 	if _, err := git(ctx, dir, "", "show-ref", "--verify", "--quiet", base); err != nil {
 		base = "refs/remotes/origin/" + repo.Base
 	}
-	var err error
-	if _, localErr := git(ctx, dir, "", "show-ref", "--verify", "--quiet", "refs/heads/"+repo.Branch); localErr == nil {
-		_, err = git(ctx, dir, "", "checkout", repo.Branch)
-	} else {
-		_, err = git(ctx, dir, "", "checkout", "-b", repo.Branch, base)
+	if _, err := git(ctx, dir, "", "update-ref", "refs/heads/"+repo.Branch, base); err != nil {
+		return err
 	}
-	if err != nil {
-		return fail(stepCheckout, err)
+	if _, err := git(ctx, dir, "", "symbolic-ref", "HEAD", "refs/heads/"+repo.Branch); err != nil {
+		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".git", setupMarker), nil, 0644); err != nil {
-		return fail(stepMarker, err)
+	if _, err := git(ctx, dir, "", "branch", "--set-upstream-to="+base, repo.Branch); err != nil {
+		return err
 	}
-	return nil
+	_, err = git(ctx, dir, "", "reset", "--quiet", "--hard")
+	return err
 }
 
 func archiveRepo(ctx context.Context, root string, session contract.SessionID, repo contract.BoxRepo, git gitRunner) (result contract.ArchiveDoneRequest) {
