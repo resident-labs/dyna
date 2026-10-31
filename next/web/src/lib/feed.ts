@@ -202,6 +202,13 @@ export function fileSize(bytes: number): string {
   return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+// A long path in an activity label keeps its first folder and its last two parts, so the file name always shows:
+// "editing next/engine/approve/store/files.go" becomes "editing next/…/store/files.go".
+export const shortPaths = (label: string) => label.replace(/\S+(?:\/\S+){4,}/g, path => {
+  const parts = path.split("/");
+  return [parts[0], "…", ...parts.slice(-2)].join("/");
+});
+
 export const count = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
