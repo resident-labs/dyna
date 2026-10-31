@@ -159,9 +159,13 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 
 ### Design panel, before each page or component
 
-1. One opus designer proposes 2 or 3 designs as rendered mockups. Each design cites its reference: T3 Code, Discord, Linear or v1. [owner r23]
-2. Three opus judges pick one design each, with a short review. A judge may add its own mockup. Judges are fresh: none of them designed this page. [owner r23]
-3. The design with the majority of votes is built, with the judges' reviews applied. [owner r23]
+1. dyna:lead-rewrite (opus, xhigh effort) draws 2 or 3 designs as rendered mockups in v2's own tokens, one batch per page. Each design cites its reference: T3 Code, Discord, Linear or v1. xhigh effort is for this step only. [owner r23]
+   - Start from screenshots of the live screens, in v1 and v2. [lead]
+   - Draw in v2's own tokens and bundled fonts, never in a generic style. [lead]
+   - Render the mockup, look at it, and fix it before you send it. [lead]
+   - Number each change, and give its reason and its reference. [lead]
+2. Three opus judges pick one design each, with a short review. A judge may add its own mockup. Judges never design. [owner r23]
+3. An opus builder builds the design with the majority of votes, with the judges' reviews applied. An owner reaction to a design outranks the vote; the judges then review it for fixes only. [owner r23] [root]
 4. The judges review the built page. Repeat steps 1 to 3 until the judges agree that the page is solid. [owner r23]
 5. The PR attaches the mockups, the votes and the reviews. [root]
 6. Judges read `next/docs/spec.md` first and never reopen its settled owner decisions. [owner r25]
