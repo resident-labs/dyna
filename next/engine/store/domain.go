@@ -19,7 +19,7 @@ var ErrVisualForbidden = errors.New("visual belongs to another room or author")
 type VisualSupersededError struct {
 	Event   contract.EventID
 	Version int
-	Seq int64
+	Seq     int64
 }
 
 func (e *VisualSupersededError) Error() string { return "visual has a newer version" }
