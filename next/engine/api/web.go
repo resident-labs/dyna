@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -21,9 +22,11 @@ import (
 type Web struct {
 	mu      sync.Mutex
 	host    string
+	routes  map[string]string
 	address string
 	handler http.Handler
 	now     func() time.Time
+	ticks   func() (<-chan time.Time, func())
 	tokens  map[[32]byte]time.Time
 	devices DeviceStore
 	app     fs.FS
@@ -40,9 +43,30 @@ func NewWeb(a *API, address string, app fs.FS, now func() time.Time, devices Dev
 	if err != nil || host != "127.0.0.1" || port == "" {
 		return nil, fmt.Errorf("web listener must bind 127.0.0.1 with a port")
 	}
-	w := &Web{address: address, host: "dyna.localhost:" + port, now: now, app: app, api: a, tokens: make(map[[32]byte]time.Time), devices: devices}
+	w := &Web{address: address, host: "dyna.localhost:" + port, routes: map[string]string{"dyna.localhost:" + port: "http://dyna.localhost:" + port}, now: now, app: app, api: a, tokens: make(map[[32]byte]time.Time), devices: devices}
+	w.ticks = func() (<-chan time.Time, func()) {
+		t := time.NewTicker(15 * time.Second)
+		return t.C, t.Stop
+	}
 	a.web = w
 	return w, nil
+}
+
+// SetRoutes adds the public origins served by the loopback listener.
+func (w *Web) SetRoutes(routes []string) error {
+	for _, route := range routes {
+		u, err := url.Parse(route)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+			return fmt.Errorf("invalid web route %q: expected an http or https origin", route)
+		}
+		host := strings.ToLower(u.Host)
+		origin := u.Scheme + "://" + host
+		if existing, ok := w.routes[host]; ok && existing != origin {
+			return fmt.Errorf("web route %q has a conflicting host", route)
+		}
+		w.routes[host] = origin
+	}
+	return nil
 }
 
 func secret() (string, error) {
@@ -73,7 +97,16 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 	// The terminal renderer is WebAssembly; a composer shows a picked image from a blob: URL before any post refers to it.
 	out.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' blob:; frame-ancestors 'none'")
 	out.Header().Set("X-Content-Type-Options", "nosniff")
-	if r.Host != w.host || (r.Method != http.MethodGet && r.Header.Get("Origin") != "http://"+w.host) {
+	if r.Header.Get("Tailscale-Funnel-Request") != "" {
+		http.Error(out, "forbidden", http.StatusForbidden)
+		return
+	}
+	origin, known := w.routes[strings.ToLower(r.Host)]
+	if !known {
+		http.Error(out, "unknown host", http.StatusMisdirectedRequest)
+		return
+	}
+	if (r.Method != http.MethodGet && r.Method != http.MethodHead || strings.EqualFold(r.Header.Get("Upgrade"), "websocket")) && r.Header.Get("Origin") != origin {
 		http.Error(out, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -103,7 +136,7 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 			http.Error(out, "unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		http.SetCookie(out, &http.Cookie{Name: "dyna_device", Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: int(store.DeviceLife / time.Second)})
+		http.SetCookie(out, &http.Cookie{Name: "dyna_device", Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: strings.HasPrefix(origin, "https://"), MaxAge: int(store.DeviceLife / time.Second)})
 		http.Redirect(out, r, "/", http.StatusSeeOther)
 		return
 	}
@@ -122,8 +155,26 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 			http.Error(out, "forbidden", http.StatusForbidden)
 			return
 		}
-		http.SetCookie(out, &http.Cookie{Name: "dyna_device", Value: cookie.Value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: int(store.DeviceLife / time.Second)})
-		w.handler.ServeHTTP(out, r)
+		http.SetCookie(out, &http.Cookie{Name: "dyna_device", Value: cookie.Value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: strings.HasPrefix(origin, "https://"), MaxAge: int(store.DeviceLife / time.Second)})
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		ticks, stop := w.ticks()
+		defer stop()
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticks:
+					_, alive, err := w.devices.AuthenticateDevice(ctx, sha256.Sum256([]byte(cookie.Value)), w.now())
+					if err != nil || !alive {
+						cancel()
+						return
+					}
+				}
+			}
+		}()
+		w.handler.ServeHTTP(out, r.WithContext(ctx))
 		return
 	}
 	if r.Method != http.MethodGet {
