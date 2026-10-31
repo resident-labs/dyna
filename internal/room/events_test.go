@@ -63,6 +63,7 @@ var eventFamilyFacts = []familyFacts{
 	{Family: FamilyGoal, Renderers: []string{"GoalPost"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever, WakeTarget}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyCheckin, Renderers: []string{"CheckinCard"}, Producers: []EventProducer{ProducerParentCheckin}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceSession}},
 	{Family: FamilyCIHealth, Renderers: []string{"SlowTestCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilyGitHubQuota, Renderers: []string{"GitHubQuotaCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyRule, Renderers: []string{"RuleCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyMerge, Renderers: []string{"MergeCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever, WakeTarget, WakeRootIfNeeded}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyMachine, Renderers: []string{"MachineDiskCard", "MachineCacheCard", "MachineCacheCleanCard", "MachineScratchCard", "MachineLimitsCard", "RoomCapCard", "WorktreePortsCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeRootIfNeeded, WakeNever, WakeRoot}, Audiences: []Audience{AudienceRoom}},
