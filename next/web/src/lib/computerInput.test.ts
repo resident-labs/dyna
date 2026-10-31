@@ -110,21 +110,41 @@ test("a held button is let go where the pointer last was inside the picture, onc
   assert.deepEqual(hold.release(), []);
 });
 
-test("after a refusal, clear lets a release go ahead of what waited", async () => {
+test("finish sends the releases that wait behind a refusal, and drops the rest", async () => {
   const sent: string[][] = [];
   let settle = () => {};
+  const next = () => new Promise<void>(resolve => { settle = resolve; });
   let fail = true;
   const queue = new InputQueue(async events => { sent.push(events.map(event => event.kind)); if (fail) throw new Error("refused"); }, () => settle());
   const frame = { width: 10, height: 10 };
-  let done = new Promise<void>(resolve => { settle = resolve; });
+  let done = next();
   queue.push([{ kind: "key.down", key: "a", x: 0, y: 0 }], frame);
   await done;
+  queue.push([{ kind: "key.down", key: "b", x: 0, y: 0 }, { kind: "mouse.up", x: 1, y: 1, button: "left" }], frame);
   fail = false;
-  done = new Promise<void>(resolve => { settle = resolve; });
-  queue.clear();
-  queue.push([{ kind: "mouse.up", x: 1, y: 1, button: "left" }], frame);
+  done = next();
+  queue.finish([]);
   await done;
   assert.deepEqual(sent, [["key.down"], ["mouse.up"]]);
+});
+
+test("a release goes on when the request in flight at finish is refused", async () => {
+  const sent: string[][] = [];
+  const refuse: (() => void)[] = [];
+  let settle = () => {};
+  const next = () => new Promise<void>(resolve => { settle = resolve; });
+  const queue = new InputQueue(events => {
+    sent.push(events.map(event => event.kind));
+    return sent.length === 1 ? new Promise<void>((_, reject) => refuse.push(() => reject(new Error("refused")))) : Promise.resolve();
+  }, () => settle());
+  const frame = { width: 10, height: 10 };
+  queue.push([{ kind: "mouse.down", x: 1, y: 1, button: "left" }], frame);
+  queue.finish([{ kind: "mouse.up", x: 1, y: 1, button: "left" }]);
+  const done = next();
+  refuse[0]();
+  await done;
+  await next();
+  assert.deepEqual(sent, [["mouse.down"], ["mouse.up"]]);
 });
 
 test("two held buttons are let go one at a time, each where it was", () => {
