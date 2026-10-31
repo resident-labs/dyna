@@ -9,24 +9,23 @@
   // onrequests opens the Requests panel once the link has moved to that room.
   let { attention, navigate, onrequests }: { attention: Attention; navigate: Navigate; onrequests: () => void } = $props();
   // Requests and sessions load per room while Home is open, and again only when a room gains an ID
-  // that no answer named yet. A failed load forgets its IDs and offers Try again. The activity
-  // label is the one session.list gave; the owner stream carries no activity.
+  // that no answer named yet. A failed load forgets its IDs and offers Try again.
   const requests = new SvelteMap<string, { title: string; by: Principal }>();
-  const sessions = new SvelteMap<string, { name: string; root: boolean; activity?: string }>();
-  // Rooms whose session.list answered, so a requester it did not name is a closed session.
-  const listed = new SvelteSet<string>();
+  const sessions = new SvelteMap<string, { name: string; root: boolean }>();
+  // Requester IDs a session.list answered for; one it did not name is a closed session.
+  const answered = new SvelteSet<string>();
   const asked = new Set<string>();
   let failed = $state(false);
   let attempt = $state(0);
-  function load<T>(ids: Iterable<string>, known: SvelteMap<string, unknown>, list: () => Promise<T>, keep: (answer: T) => void) {
+  function load<T>(ids: Iterable<string>, known: SvelteMap<string, unknown>, list: () => Promise<T>, keep: (answer: T, fresh: string[]) => void) {
     const fresh = [...ids].filter(id => !known.has(id) && !asked.has(id));
     if (!fresh.length) return;
     for (const id of fresh) asked.add(id);
-    void list().then(keep, () => { for (const id of fresh) asked.delete(id); failed = true; });
+    void list().then(answer => keep(answer, fresh), () => { for (const id of fresh) asked.delete(id); failed = true; });
   }
-  const keepSessions = (room: string) => (list: SessionListResponse) => {
-    for (const item of list.sessions ?? []) sessions.set(item.id, { name: item.name, root: !item.parent, activity: item.activity });
-    listed.add(room);
+  const keepSessions = (list: SessionListResponse, fresh: string[]) => {
+    for (const item of list.sessions ?? []) sessions.set(item.id, { name: item.name, root: !item.parent });
+    for (const id of fresh) answered.add(id);
   };
   $effect(() => {
     void attempt;
@@ -34,9 +33,9 @@
       load(attention.waiting.get(room) ?? [], requests, () => call("op.list", { room }), list => {
         for (const op of list.operations ?? []) requests.set(op.id, { title: op.card.title, by: op.by });
         const by = (list.operations ?? []).flatMap(op => op.by.session ? [op.by.session] : []);
-        load(by, sessions, () => call("session.list", { room }), keepSessions(room));
+        load(by, sessions, () => call("session.list", { room }), keepSessions);
       });
-      load(attention.working.get(room) ?? [], sessions, () => call("session.list", { room }), keepSessions(room));
+      load(attention.working.get(room) ?? [], sessions, () => call("session.list", { room }), keepSessions);
     }
   });
   const rows = <T,>(sets: Map<string, Set<string>>, known: SvelteMap<string, T>) => [...attention.rooms.values()].flatMap(room =>
@@ -46,7 +45,7 @@
     const { by } = row.value;
     if (by.kind !== "session" || !by.session) return [{ ...row, who: by.kind === "owner" ? "You" : "Dyna", root: false }];
     const session = sessions.get(by.session);
-    if (!session && !listed.has(row.room.id)) return [];
+    if (!session && !answered.has(by.session)) return [];
     return [{ ...row, who: session?.name ?? "A closed session", root: session?.root ?? false }];
   }));
   let working = $derived(rows(attention.working, sessions));
@@ -68,7 +67,7 @@
       <span class="lines"><span class="title">{value.title}</span><span class="line">{who} · {room.name}</span></span></a>{/each}{/if}
   {#if anyWorking}<h2 class="label">Working{#if working.length}<span>{working.length}</span>{/if}</h2>
     {#each working as { id, room, value } (id)}<a class="item" href={`${roomHref(room.id)}/s/${encodeURIComponent(id)}`} onclick={navigate}>
-      <SessionRow name={value.name} root={value.root} status={["working", value.activity, room.name].filter(Boolean).join(" · ")} /></a>{/each}{/if}
+      <SessionRow name={value.name} root={value.root} status={`working · ${room.name}`} /></a>{/each}{/if}
   {#if failed && missing}<p class="failed">Some items could not load. <button type="button" class="retry" onclick={() => { failed = false; attempt++; }}>Try again</button></p>{/if}
   {#if !anyWaiting && !anyWorking}<p class="empty">Nothing waits for you, and no session is working.</p>{/if}
 </div>
