@@ -372,8 +372,9 @@
   });
 </script>
 
-{#snippet intro()}
-  {#if session}<RoomIntro kind="session" name={title} root={!!store?.sessions.get(session) && !store.sessions.get(session)?.parent} line={`This is the start of your direct messages with ${title}.`} />
+{#snippet intro(history: boolean)}
+  <!-- A DM with history needs only the one muted line. -->
+  {#if session}<RoomIntro kind="session" compact={history} name={title} root={!!store?.sessions.get(session) && !store.sessions.get(session)?.parent} line={`This is the start of your direct messages with ${title}.`} />
   {:else}{@const created = attention.rooms.get(room ?? "")?.created}
     <RoomIntro kind="room" name={roomName} label={initials.get(roomName)} line={`This is the beginning of #${roomName}.${created ? ` It started ${new Date(created).toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" })}.` : ""}`} />{/if}
 {/snippet}
