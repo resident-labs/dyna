@@ -27,11 +27,6 @@ type mintCode struct {
 	Epoch, Generation         int64
 	End, Minted               time.Time
 }
-type handoffCode struct {
-	Session store.ConnectSession
-	Target  string
-	End     time.Time
-}
 type grantCacheEntry struct {
 	Grant      Grant
 	At         time.Time
@@ -50,14 +45,13 @@ type Sessions struct {
 	client    *http.Client
 	mu        sync.Mutex
 	codes     map[string]mintCode
-	handoffs  map[string]handoffCode
 	grants    map[string]grantCacheEntry
 	rates     map[string]rateEntry
 	keysTried time.Time
 }
 
 func NewSessions(files *Files, state *store.Store, now func() time.Time, client *http.Client) *Sessions {
-	return &Sessions{files: files, store: state, now: now, client: client, codes: make(map[string]mintCode), handoffs: make(map[string]handoffCode), grants: make(map[string]grantCacheEntry), rates: make(map[string]rateEntry)}
+	return &Sessions{files: files, store: state, now: now, client: client, codes: make(map[string]mintCode), grants: make(map[string]grantCacheEntry), rates: make(map[string]rateEntry)}
 }
 
 func randomSecret() (string, error) {
@@ -327,10 +321,9 @@ func (s *Sessions) exchange(w http.ResponseWriter, r *http.Request, origin strin
 		return
 	}
 	var req struct {
-		Code    string `json:"code"`
-		Handoff string `json:"handoff"`
-		Proof   string `json:"proof"`
-		Name    string `json:"name"`
+		Code  string `json:"code"`
+		Proof string `json:"proof"`
+		Name  string `json:"name"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&req) != nil {
 		fail(w, 400, "bad request")
@@ -353,33 +346,9 @@ func (s *Sessions) exchange(w http.ResponseWriter, r *http.Request, origin strin
 			return
 		}
 		x = store.ConnectSession{RelayDevice: c.Device, Origin: origin, JKT: c.JKT, User: c.User, Epoch: c.Epoch, Generation: c.Generation, Created: now, Minted: c.Minted, End: now.Add(30 * 24 * time.Hour), Grant: now}
-	case req.Handoff != "":
-		h, ok := s.handoffs[hashToken(req.Handoff)]
-		delete(s.handoffs, hashToken(req.Handoff))
-		if !ok || !now.Before(h.End) || h.Target != origin {
-			fail(w, 403, "invalid handoff")
-			return
-		}
-		src, _, ok, err := s.store.AuthenticateConnect(r.Context(), h.Session.Hash, h.Session.Origin, now)
-		if err != nil || !ok || src.ID != h.Session.ID || src.Stale {
-			fail(w, 403, "session ended")
-			return
-		}
-		p, err := verifyProof(req.Proof, origin+"/api/connect/session", now)
-		if err != nil {
-			fail(w, 403, "invalid proof")
-			return
-		}
-		if err = s.store.ConsumeConnectNonceForLink(r.Context(), src.Epoch, src.Generation, "proof:"+p.JTI, now, now.Add(2*time.Minute)); err != nil {
-			fail(w, 403, "invalid proof")
-			return
-		}
-		x = src
-		x.Origin = origin
-		x.JKT = p.JKT
-		x.Created = now
+
 	default:
-		fail(w, 400, "send a code or handoff")
+		fail(w, 400, "send a code")
 		return
 	}
 	token, err := randomSecret()

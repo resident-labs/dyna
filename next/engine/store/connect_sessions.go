@@ -86,7 +86,7 @@ func (s *Store) StartConnectSession(ctx context.Context, x ConnectSession) error
 		if _, err := tx.ExecContext(ctx, "DELETE FROM connect_sessions WHERE relay_device=?", x.RelayDevice); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO connect_sessions(id,relay_device,origin,jkt,user_id,epoch,generation,token_hash,prev_until,created_at,access_until,grant_end,grant_at,minted_at) VALUES(?,?,?,?,?,?,?,?,0,?,?,?,?,?)", x.ID, x.RelayDevice, x.Origin, x.JKT, x.User, x.Epoch, x.Generation, x.Hash[:], x.Created.UnixMilli(), x.Access.UnixMilli(), x.End.UnixMilli(), x.Grant.UnixMilli(), x.Minted.UnixMilli())
+		_, err = tx.ExecContext(ctx, "INSERT INTO connect_sessions(id,relay_device,origin,jkt,user_id,epoch,generation,token_hash,prev_until,created_at,access_until,grant_end,grant_at) VALUES(?,?,?,?,?,?,?,?,0,?,?,?,?)", x.ID, x.RelayDevice, x.Origin, x.JKT, x.User, x.Epoch, x.Generation, x.Hash[:], x.Created.UnixMilli(), x.Access.UnixMilli(), x.End.UnixMilli(), x.Grant.UnixMilli())
 		return err
 	})
 }
@@ -100,11 +100,11 @@ func (s *Store) AuthenticateConnect(ctx context.Context, hash [32]byte, origin s
 	}
 	defer tx.Rollback()
 	var x ConnectSession
-	var created, access, end, grant, minted, prev int64
+	var created, access, end, grant, prev int64
 	var which int
-	err = tx.QueryRowContext(ctx, `SELECT c.id,c.relay_device,d.id,c.origin,c.jkt,c.user_id,c.epoch,c.generation,c.created_at,c.access_until,c.grant_end,c.grant_at,c.minted_at,c.prev_until, CASE WHEN c.token_hash=? THEN 0 WHEN c.old1=? THEN 1 ELSE 2 END
+	err = tx.QueryRowContext(ctx, `SELECT c.id,c.relay_device,d.id,c.origin,c.jkt,c.user_id,c.epoch,c.generation,c.created_at,c.access_until,c.grant_end,c.grant_at,c.prev_until, CASE WHEN c.token_hash=? THEN 0 WHEN c.old1=? THEN 1 ELSE 2 END
  FROM connect_sessions c JOIN connect_devices m ON m.relay_device=c.relay_device JOIN devices d ON d.id=m.device JOIN connect_link_state l ON l.id=1
- WHERE (c.token_hash=? OR c.old1=? OR c.old2=? OR c.old3=?) AND c.origin=? AND l.linked=1 AND c.epoch=l.epoch AND c.generation=l.generation AND d.revoked_at IS NULL AND d.expires_at>? AND c.grant_end>?`, hash[:], hash[:], hash[:], hash[:], hash[:], hash[:], origin, now.UnixMilli(), now.UnixMilli()).Scan(&x.ID, &x.RelayDevice, &x.Device, &x.Origin, &x.JKT, &x.User, &x.Epoch, &x.Generation, &created, &access, &end, &grant, &minted, &prev, &which)
+ WHERE (c.token_hash=? OR c.old1=? OR c.old2=? OR c.old3=?) AND c.origin=? AND l.linked=1 AND c.epoch=l.epoch AND c.generation=l.generation AND d.revoked_at IS NULL AND d.expires_at>? AND c.grant_end>?`, hash[:], hash[:], hash[:], hash[:], hash[:], hash[:], origin, now.UnixMilli(), now.UnixMilli()).Scan(&x.ID, &x.RelayDevice, &x.Device, &x.Origin, &x.JKT, &x.User, &x.Epoch, &x.Generation, &created, &access, &end, &grant, &prev, &which)
 	if errors.Is(err, sql.ErrNoRows) {
 		return x, nil, false, nil
 	}
@@ -116,7 +116,6 @@ func (s *Store) AuthenticateConnect(ctx context.Context, hash [32]byte, origin s
 	x.Access = time.UnixMilli(access)
 	x.End = time.UnixMilli(end)
 	x.Grant = time.UnixMilli(grant)
-	x.Minted = time.UnixMilli(minted)
 	x.CookieStale = which > 1 || (which == 1 && now.UnixMilli() > prev)
 	x.Stale = x.CookieStale || !now.Before(x.Access)
 	rows, err := tx.QueryContext(ctx, "SELECT scope FROM device_scopes WHERE device=? ORDER BY scope", x.Device)
