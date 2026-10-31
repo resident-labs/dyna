@@ -241,3 +241,59 @@ The updated run exported eight profiles and recorded no unknown model mappings. 
 The exporter renders each scope's v1 rules in ID order. Each rule is one Markdown list item. Its first line is `- (r22) ` followed by the rule's first line. Each later line, including blank lines and code fences, has two leading spaces. The exporter adds no headings and escapes nothing else. The verifier parses each document and independently compares each ID and exact text against v1 SQL. Rule authors and timestamps are dropped.
 
 The bundle carries the rendered documents, not rule records. After the store commit, the real import writes each file unchanged by rename to `<data>/files/instructions/global/AGENTS.md` and `<data>/files/instructions/rooms/<room-id>/AGENTS.md`. The room ID is the new ID created by the import. The offline dry run writes neither file. The rehearsal tables above describe the earlier rule-record bundle and are historical; they are not evidence for the new document format.
+
+# Instructions-bundle rehearsal
+
+Export, independent verification and offline dry-run passed. Backup modified 2026-10-30 18:38:35 UTC. Config captured 2026-10-31 17:57:33 UTC. Feeds were read in place later. This non-atomic capture is not a cutover gate. Repository default rooms are provisional.
+
+The verifier compared SQL source counts with bundle counts per scope; the dry run decoded each bundle and independently counted its records. Subscription SQL is an empty eligibility set by policy. Cells show source / bundle / dry-run.
+
+| Scope | Category | Source / bundle / dry-run |
+|---|---|---|
+| global | hosts | 4 / 4 / 4 |
+| global | accounts | 10 / 10 / 10 |
+| global | devices | 2 / 2 / 2 |
+| dyna | goals | 5 / 5 / 5 |
+| dyna | goalItems | 2 / 2 / 2 |
+| dyna | issues | 24 / 24 / 24 |
+| dyna | prs | 2 / 2 / 2 |
+| dyna | sessions | 8 / 8 / 8 |
+| fl-rea | goals | 10 / 10 / 10 |
+| fl-rea | goalItems | 283 / 283 / 283 |
+| fl-rea | issues | 373 / 373 / 373 |
+| fl-rea | prs | 25 / 25 / 25 |
+| fl-rea | sessions | 18 / 18 / 18 |
+| horizon | goals | 2 / 2 / 2 |
+| horizon | issues | 14 / 14 / 14 |
+| horizon | prs | 24 / 24 / 24 |
+| horizon | sessions | 2 / 2 / 2 |
+| cozycraft | goals | 3 / 3 / 3 |
+| cozycraft | goalItems | 41 / 41 / 41 |
+| cozycraft | issues | 1 / 1 / 1 |
+| cozycraft | sessions | 8 / 8 / 8 |
+| global | profiles | 8 / 8 / 8 |
+| global | repositories | 5 / 5 / 5 |
+| global | skills | 1 / 1 / 1 |
+
+Zero count rows are omitted. The verifier checked them. Profile and skill counts use captured files; repository verification also uses the captured identity manifest.
+
+## Standing instructions
+
+The verifier parsed the rendered documents and independently compared every rule ID and exact text against SQL. The dry run decoded the document strings but did not count or verify individual rules. The table shows matched SQL / document items; it does not claim a dry-run rule count.
+
+| Scope | SQL / document items |
+|---|---|
+| global | 4 / 4 |
+| dyna | 15 / 15 |
+| fl-rea | 14 / 14 |
+| horizon | 11 / 11 |
+| cozycraft | 8 / 8 |
+
+## Exceptions
+
+- Disabled profiles: 6; unknown model mappings: 0.
+- Skipped hosts: 2; skipped accounts: 1; unsupported hooks: 5; repository gaps: 12; skipped PRs: 4; skipped services: 10.
+- Payload-free legacy issue feed events: 27; partial feeds: 0.
+- No decode errors.
+
+The private backup copy, capture, bundle, logs and binaries were deleted after this report was prepared.
