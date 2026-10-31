@@ -194,6 +194,30 @@ func (m *Manager) UpdateRefreshedAuth(ctx context.Context, base, updated *Auth) 
 	return m.updateInternal(ctx, base, updated, updateModeRefresh)
 }
 
+// Replace commits a new grant through the ordinary mutation gate and store.
+// The existing routing state remains in effect until the new grant is durable.
+func (m *Manager) Replace(ctx context.Context, auth *Auth) (*Auth, error) {
+	release, err := m.lockAuthMutationContext(ctx, auth.ID)
+	if err != nil {
+		return nil, err
+	}
+	m.mu.RLock()
+	existing := m.auths[auth.ID].Clone()
+	m.mu.RUnlock()
+	if existing == nil {
+		release()
+		return nil, fmt.Errorf("auth not found")
+	}
+	auth.Disabled, auth.Status = existing.Disabled, existing.Status
+	auth.RegistrationEpoch = existing.RegistrationEpoch
+	committed, changed, cooldown, err := m.updateInternalLocked(WithAuthCreationIntent(ctx), nil, auth, updateModeReplace)
+	release()
+	if err == nil && changed {
+		m.finishAuthUpdate(ctx, committed, cooldown)
+	}
+	return committed, err
+}
+
 // Update replaces an existing auth entry and notifies hooks.
 func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	return m.updateInternal(ctx, nil, auth, updateModeReplace)
@@ -334,7 +358,7 @@ func (m *Manager) updateInternalLocked(ctx context.Context, base, auth *Auth, mo
 	}
 	// Do not let an in-flight refresh overwrite credentials committed after its snapshot.
 	if mode == updateModeRefresh && base != nil && (existing.CredentialVersion != base.CredentialVersion || CredentialsChanged(base, existing)) {
-		if auth.CodexRefreshPatch == nil || !auth.CodexRefreshPatch.CanApplyTo(existing.Metadata) {
+		if existing.CredentialVersion != base.CredentialVersion || auth.CodexRefreshPatch == nil || !auth.CodexRefreshPatch.CanApplyTo(existing.Metadata) {
 			current := existing.Clone()
 			m.mu.Unlock()
 			// Discarded stale refresh: committed=false so callers do not
@@ -384,7 +408,7 @@ func (m *Manager) updateInternalLocked(ctx context.Context, base, auth *Auth, mo
 		existingVersion = 1
 	}
 	credChanged := CredentialsChanged(existing, auth)
-	if credChanged {
+	if credChanged || HasAuthCreationIntent(ctx) {
 		auth.CredentialVersion = max(auth.CredentialVersion, existingVersion) + 1
 	} else {
 		auth.CredentialVersion = existingVersion
