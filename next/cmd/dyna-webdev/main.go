@@ -41,7 +41,10 @@ func (profiles) Model(contract.ProfileName) (contract.ModelChoice, []string, err
 	return contract.ModelChoice{Provider: contract.ModelProviderOpenAI, ID: "fake", Thinking: contract.ThinkingOff}, []string{"fake"}, nil
 }
 
-type scripted struct{ fakeharness.Harness }
+type scripted struct {
+	fakeharness.Harness
+	box *agent.Client
+}
 
 func (h *scripted) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, started func()) (contract.TurnEnded, error) {
 	result := contract.TurnEnded{Outcome: contract.TurnCompleted, Final: "Thanks. I will work on this:\n\n> " + strings.ReplaceAll(inputs[0].Text, "\n", "\n> ")}
@@ -49,9 +52,19 @@ func (h *scripted) Start(ctx context.Context, id contract.TurnID, inputs []contr
 		result = contract.TurnEnded{Outcome: contract.TurnFailed, Error: "Scripted development failure"}
 	}
 	h.Turns = []fakeharness.Turn{{Result: result}}
-	// A [wait] turn runs until it is stopped, so the working state can be seen.
+	// A [wait] turn runs until it is stopped, so the working state and its activity labels can be seen.
 	if strings.Contains(inputs[0].Text, "[wait]") {
 		h.Turns[0].Release = make(chan struct{})
+		begin := started
+		started = func() {
+			begin()
+			go func() {
+				for _, label := range []string{"read feed.ts", "ran node --test", "edited App.svelte"} {
+					_ = h.box.TurnActivity(ctx, contract.TurnActivityRequest{Turn: id, Label: label}) // A lost label only leaves the last one showing.
+					time.Sleep(2 * time.Second)
+				}
+			}()
+		}
 	}
 	return h.Harness.Start(ctx, id, inputs, started)
 }
@@ -108,7 +121,7 @@ func (b *boxes) run(ctx context.Context, id contract.BoxID) {
 	for _, err := c.Hello(ctx, "dev"); err != nil && ctx.Err() == nil; _, err = c.Hello(ctx, "dev") { // Create returns before the box is starting.
 		time.Sleep(50 * time.Millisecond)
 	}
-	runner := &agent.Runner{Harness: &scripted{}, Sink: c}
+	runner := &agent.Runner{Harness: &scripted{box: c}, Sink: c}
 	if err := c.Channel(ctx, func(m contract.BoxMessage) error { return runner.Handle(ctx, m) }, func(bool) {}); err != nil && ctx.Err() == nil {
 		log.Printf("box channel: %v", err)
 	}
