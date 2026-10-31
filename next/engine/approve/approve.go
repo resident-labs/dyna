@@ -20,6 +20,7 @@ var ErrInvalid = errors.New("invalid operation")
 var ErrConflict = errors.New("operation is no longer pending")
 
 type Entry struct {
+	Global  bool
 	Scope   contract.Scope
 	Class   func(contract.OpArgs, contract.Principal) contract.Class
 	Card    func(context.Context, contract.OpArgs, contract.Principal) contract.Card
@@ -94,12 +95,18 @@ func (s *Service) Submit(ctx context.Context, who contract.Principal, input cont
 	if !ok {
 		return contract.Operation{}, ErrInvalid
 	}
+	if (input.Room == "") != entry.Global || (entry.Global && who.Kind != contract.PrincipalOwner) {
+		return contract.Operation{}, ErrForbidden
+	}
 	checkErr := entry.Check(ctx, input.Args, who)
 	args, err := json.Marshal(input.Args)
 	if err != nil {
 		return contract.Operation{}, err
 	}
 	class := entry.Class(input.Args, who)
+	if entry.Global && class != contract.ClassOwner {
+		return contract.Operation{}, ErrInvalid
+	}
 	immediate := who.Kind == contract.PrincipalOwner || class == contract.ClassAuto
 	now := s.Now()
 	id, err := s.ID("op_")
