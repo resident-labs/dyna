@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { call } from "../client.ts";
+  import { requestDecision } from "../request-decision.ts";
   import { closedSession, commandLine, fromNow } from "../feed.ts";
   import { hue } from "../identity.ts";
   import type { Request, RoomStore } from "../room.svelte.ts";
@@ -19,7 +19,7 @@
     if (busy || !admin) return;
     if (!approve && !note) { note = true; return; }
     busy = true; failure = "";
-    await call("op.decide", { id: request.id, approve, reason: reason.trim() || undefined })
+    await requestDecision(admin, { id: request.id, approve, reason: reason.trim() || undefined })
       .catch(() => { failure = "Your decision was not saved. Try again."; });
     busy = false;
   }
