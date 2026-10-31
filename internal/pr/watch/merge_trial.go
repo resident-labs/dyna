@@ -120,6 +120,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 		}
 	}
 	seen := map[string]bool{}
+	moved := map[string]bool{}
 	var repos []string
 	for repo := range st.MergeTrials {
 		repos = append(repos, repo)
@@ -137,7 +138,9 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 			failures = append(failures, err)
 			continue
 		}
-		if err := s.advanceMergeTrial(ctx, repo, *st.MergeTrials[repo]); err != nil {
+		b := st.MergeTrials[repo]
+		moved[repo] = b.Phase != state.MergeTrialPhasePublishing && b.Phase != state.MergeTrialPhasePublished && st.RepositoryFacts[repo].Head != b.Base
+		if err := s.advanceMergeTrial(ctx, repo, *b); err != nil {
 			failures = append(failures, err)
 		}
 	}
@@ -149,7 +152,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 	// in this pass instead of waiting for another wake.
 	discarded := false
 	for repo := range seen {
-		if st.MergeTrials[repo] == nil {
+		if moved[repo] && st.MergeTrials[repo] == nil {
 			delete(seen, repo)
 			discarded = true
 		}
