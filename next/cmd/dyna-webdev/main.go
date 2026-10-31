@@ -74,10 +74,12 @@ func (devService) AccountsQuota(context.Context, contract.Principal, contract.Ac
 	at := func(d time.Duration) time.Time { return time.Now().Add(d) }
 	return contract.AccountsQuotaResponse{Accounts: []contract.AccountUsage{
 		{Provider: "claude", Label: "Claude · studio", Windows: []contract.UsageWindow{
-			{Name: "five_hour", UsedPercent: 62, Seconds: 18000, ResetsAt: at(2*time.Hour + 10*time.Minute)},
-			{Name: "seven_day", UsedPercent: 91, Seconds: 604800, ResetsAt: at(76 * time.Hour)}}},
+			{Name: "five_hour", Kind: contract.UsageWindowFiveHour, UsedPercent: 62, Seconds: 18000, ResetsAt: at(2*time.Hour + 10*time.Minute)},
+			{Name: "seven_day", Kind: contract.UsageWindowWeekly, UsedPercent: 91, Seconds: 604800, ResetsAt: at(76 * time.Hour)},
+			{Name: "Fable Weekly", Kind: contract.UsageWindowWeekly, Model: "Fable", UsedPercent: 0, Seconds: 604800, ResetsAt: at(76 * time.Hour)},
+			{Name: "Opus Weekly", Kind: contract.UsageWindowWeekly, Model: "Opus", UsedPercent: 35, Seconds: 604800, ResetsAt: at(76 * time.Hour)}}},
 		{Provider: "codex", Label: "ChatGPT · team", Windows: []contract.UsageWindow{
-			{Name: "seven_day", UsedPercent: 35, Seconds: 604800, ResetsAt: at(100 * time.Hour)}}},
+			{Name: "seven_day", Kind: contract.UsageWindowWeekly, UsedPercent: 35, Seconds: 604800, ResetsAt: at(100 * time.Hour)}}},
 		{Provider: "kimi", Label: "Kimi · spare", Cause: contract.UsageSignInExpired},
 	}}, nil
 }
