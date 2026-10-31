@@ -8,8 +8,20 @@
       node.rel = "noopener noreferrer";
     }
   });
-  // Markdown from any author is sanitized before it reaches the page. Images wait for the files view.
-  export const render = (text: string) => DOMPurify.sanitize(marked.parse(text, { async: false, gfm: true, breaks: true }), { FORBID_TAGS: ["img"] });
+  // Markdown from any author is sanitized before it reaches the page. Images wait for the files view. Each text renders
+  // once: a row that scrolls back in, or gets a new row object when a page loads, reuses its HTML. Parsing and
+  // sanitizing cost about a millisecond a post, which was most of a scroll frame. The feed keeps at most 1,000 events,
+  // so a full cache starts over.
+  const rendered = new Map<string, string>();
+  export function render(text: string): string {
+    let html = rendered.get(text);
+    if (html === undefined) {
+      if (rendered.size >= 2000) rendered.clear();
+      html = DOMPurify.sanitize(marked.parse(text, { async: false, gfm: true, breaks: true }), { FORBID_TAGS: ["img"] });
+      rendered.set(text, html);
+    }
+    return html;
+  }
 </script>
 
 <script lang="ts">
