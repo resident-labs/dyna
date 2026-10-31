@@ -95,14 +95,23 @@ func (h *Handler) RequestAnthropicToken(c *gin.Context) {
 		}
 	}
 
+	if DynaMemoryOAuthCallbacks {
+		dynaPrepareCallback(state)
+	}
 	go func() {
 		if isWebUI {
 			defer stopCallbackForwarderInstance(anthropicCallbackPort, forwarder)
 		}
 
+		if DynaMemoryOAuthCallbacks {
+			defer dynaClearCallback(state)
+		}
 		// Helper: wait for callback file
 		waitFile := filepath.Join(cfg.AuthDir, fmt.Sprintf(".oauth-anthropic-%s.oauth", state))
 		waitForFile := func(path string, timeout time.Duration) (map[string]string, error) {
+			if DynaMemoryOAuthCallbacks {
+				return dynaWaitCallback(state)
+			}
 			deadline := time.Now().Add(timeout)
 			for {
 				if !IsOAuthSessionPending(state, "anthropic") {
@@ -199,7 +208,7 @@ func (h *Handler) RequestAnthropicToken(c *gin.Context) {
 			fmt.Println("API key obtained and saved")
 		}
 		fmt.Println("You can now use Claude services through this CLI")
-		CompleteOAuthSession(state)
+		dynaCompleteOAuth(state, record)
 	}()
 
 	c.JSON(200, gin.H{"status": "ok", "url": authURL, "state": state})
@@ -263,11 +272,17 @@ func (h *Handler) RequestCodexToken(c *gin.Context) {
 		}
 	}
 
+	if DynaMemoryOAuthCallbacks {
+		dynaPrepareCallback(state)
+	}
 	go func() {
 		if isWebUI {
 			defer stopCallbackForwarderInstance(codexCallbackPort, forwarder)
 		}
 
+		if DynaMemoryOAuthCallbacks {
+			defer dynaClearCallback(state)
+		}
 		// Wait for callback file
 		waitFile := filepath.Join(cfg.AuthDir, fmt.Sprintf(".oauth-codex-%s.oauth", state))
 		deadline := time.Now().Add(5 * time.Minute)
@@ -282,7 +297,11 @@ func (h *Handler) RequestCodexToken(c *gin.Context) {
 				SetOAuthSessionError(state, "Timeout waiting for OAuth callback")
 				return
 			}
-			if data, errR := os.ReadFile(waitFile); errR == nil {
+			data, errR := os.ReadFile(waitFile)
+			if DynaMemoryOAuthCallbacks {
+				data, errR = dynaWaitCallbackJSON(state)
+			}
+			if errR == nil {
 				var m map[string]string
 				_ = json.Unmarshal(data, &m)
 				_ = os.Remove(waitFile)
@@ -757,7 +776,7 @@ func (h *Handler) RequestXAIToken(c *gin.Context) {
 			return
 		}
 
-		CompleteOAuthSession(state)
+		dynaCompleteOAuth(state, record)
 		fmt.Printf("Authentication successful! Token saved to %s\n", savedPath)
 		fmt.Println("You can now use xAI services through this CLI")
 	}()
@@ -1045,7 +1064,7 @@ func (h *Handler) requestKimiTokenWithDomain(c *gin.Context, domain string) {
 
 		fmt.Printf("Authentication successful! Token saved to %s\n", savedPath)
 		fmt.Printf("You can now use %s services through this CLI\n", displayName)
-		CompleteOAuthSession(state)
+		dynaCompleteOAuth(state, record)
 	}()
 
 	response := gin.H{"status": "ok", "url": authURL, "state": state, "flow": "device"}
