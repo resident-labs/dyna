@@ -1,6 +1,5 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { SvelteSet } from "svelte/reactivity";
   import { call } from "../client.ts";
   import type { HostSummary } from "../contract.gen.ts";
   import { hostLabel } from "../hosts.ts";
@@ -8,21 +7,22 @@
   import FloatWindow from "./FloatWindow.svelte";
   import Icon from "./Icon.svelte";
   import Avatar from "./Avatar.svelte";
-  import JobsPane from "./JobsPane.svelte";
+  import JobOutput from "./JobOutput.svelte";
   import StatusPill from "./StatusPill.svelte";
   import TermPane from "./TermPane.svelte";
+  import { failed, jobTitle } from "../jobs.ts";
+  import { ShellWatches, type ShellJob } from "../shell.ts";
   // The owner's terminals, one tab per shell, docked at the bottom of the main column or floating over
   // the app. The dock is app-wide: hosts are not room objects, so tabs stay across rooms and on Home.
   // A tab lives while the page is open (no reattach in M2); × closes its socket, and the engine ends
   // the shell. The new-tab menu lists the room's sessions whose box is ready, then the hosts.
-  // After the shells, a Jobs tab shows the room's background jobs (JobsPane) while jobs has a session; it counts the
-  // running jobs, then the failed jobs the owner has not opened, in the failed tone (Jobs fix 4). With no shell open,
-  // the dock shows only its tab bar until the owner opens Jobs.
-  type JobSession = { id: string; name: string; root: boolean; running: number };
-  let { sessions, jobs, failures, element = $bindable(), onempty }: {
-    sessions: { id: string; name: string; root: boolean }[]; jobs: JobSession[]; failures: string[]; element?: HTMLElement; onempty: () => void;
+  // A job the header's Jobs tool opens is a tab too, named by its title, with the failed dot when it failed (dock
+  // design C); the dock shows only while a tab is open. Each job tab's session is watched while the page is visible.
+  let { sessions, element = $bindable(), onempty }: {
+    sessions: { id: string; name: string; root: boolean }[]; element?: HTMLElement; onempty: () => void;
   } = $props();
-  type Tab = { key: number; target: TerminalTarget; label: string; root: boolean; exited?: { code?: number } };
+  type Session = { id: string; name: string; root: boolean };
+  type Tab = { key: number; label: string; root: boolean; exited?: { code?: number } } & ({ target: TerminalTarget } | { session: Session; job: string });
   let tabs: Tab[] = $state([]);
   let active = $state(0);
   let next = 1;
@@ -36,21 +36,18 @@
   let collapsed = $state(false);
   let menu: HTMLElement | undefined = $state();
   let plus: HTMLButtonElement | undefined = $state();
-  const panes: Record<number, TermPane | undefined> = $state({});
-  const JOBS = -1;
-  let only: string | undefined = $state();
-  let jobsPane: JobsPane | undefined = $state();
-  const opened = new SvelteSet<string>();
-  let unopened = $derived(failures.filter(key => !opened.has(key)).length);
-  // The open list knows its own rows, so the tab counts those and the two cannot disagree.
-  let listed: number | undefined = $state();
-  let running = $derived(active === JOBS && (floating || !collapsed) && listed !== undefined ? listed : jobs.reduce((sum, session) => sum + session.running, 0));
-  // Jobs that leave, as on Home or when every box stops, take their tab with them.
-  $effect.pre(() => { if (active === JOBS && !jobs.length) active = tabs[0]?.key ?? 0; });
-  // A session row's jobs icon opens the tab on that session's jobs.
-  export function showJobs(session?: string) {
-    only = session;
-    void show(JOBS);
+  const panes: Record<number, TermPane | JobOutput | undefined> = $state({});
+  let visible = $state(document.visibilityState === "visible");
+  const watches = new ShellWatches();
+  $effect(() => { watches.sync(new Set(visible ? tabs.flatMap(tab => "job" in tab ? [tab.session.id] : []) : [])); });
+  $effect(() => () => watches.sync(new Set()));
+  const jobOf = (tab: Tab) => "job" in tab ? watches.jobs.get(tab.session.id)?.get(tab.job) : undefined;
+  // A job opens in its own tab, or shows the tab it already has.
+  export function openJob(session: Session, job: ShellJob) {
+    const tab = tabs.find(item => "job" in item && item.session.id === session.id && item.job === job.job);
+    if (tab) { void show(tab.key); return; }
+    tabs.push({ key: next++, label: jobTitle(job), root: session.root, session, job: job.job });
+    void show(tabs[tabs.length - 1].key);
   }
 
   // Opens the new-tab menu; the room menu's "New terminal" comes here too.
@@ -66,9 +63,9 @@
     active = key;
     collapsed = false;
     await tick();
-    if (key === JOBS) jobsPane?.focus(); else panes[key]?.focus();
+    panes[key]?.focus();
   }
-  const liveShell = (id: string) => tabs.find(tab => "box" in tab.target && tab.target.box === id && !tab.exited);
+  const liveShell = (id: string) => tabs.find(tab => "target" in tab && "box" in tab.target && tab.target.box === id && !tab.exited);
   // Whether the session has a shell open, for the DM header's pressed Terminal button.
   export const hasShell = (id: string) => liveShell(id) !== undefined;
   // The DM header's Terminal button: it shows the session's shell, or opens one. The "+" menu always opens a new one.
@@ -78,12 +75,11 @@
   }
   function open(target: TerminalTarget, label: string, root = false) {
     picking = false;
-    const tab = { key: next++, target, label, root };
-    tabs.push(tab);
-    void show(tab.key);
+    tabs.push({ key: next++, target, label, root });
+    void show(tabs[tabs.length - 1].key);
   }
   // A new shell for an exited tab reopens its target under a new key, so its pane starts over.
-  function renew(tab: Tab) {
+  function renew(tab: Tab & { target: TerminalTarget }) {
     const index = tabs.findIndex(item => item.key === tab.key);
     tabs[index] = { key: next++, target: tab.target, label: tab.label, root: tab.root };
     void show(tabs[index].key);
@@ -97,7 +93,7 @@
     if (!tabs.length) floating = false;
     await tick();
     if (!floating && collapsed && active) element?.querySelector<HTMLElement>("[role=tab][aria-selected=true]")?.focus();
-    else if (active === JOBS || tabs.length) await show(active); else if (picking) plus?.focus(); else onempty();
+    else if (tabs.length) await show(active); else if (picking) plus?.focus(); else onempty();
   }
   // Up and Down move in the menu, Escape closes it and returns to "+".
   function walk(event: KeyboardEvent) {
@@ -123,23 +119,21 @@
   let tallest = $derived(viewport && fit(Infinity));
   // Where the active shell runs. The engine gives no shell folder, so a box shows its session's name.
   let shown = $derived(tabs.find(tab => tab.key === active));
-  let where = $derived(shown && ("box" in shown.target ? `${shown.label} box` : shown.label));
+  let where = $derived(shown && "target" in shown ? "box" in shown.target ? `${shown.label} box` : shown.label : undefined);
 </script>
 
 <svelte:window onresize={() => { viewport = window.innerHeight; }} />
+<svelte:document onvisibilitychange={() => { visible = document.visibilityState === "visible"; }} />
 
-{#if tabs.length || picking || jobs.length}
+{#if tabs.length || picking}
 <FloatWindow label="Terminals" kind="terminals" docked={!floating} bind:rect bind:element>
   {#snippet header()}
     <div class="tabs" role="tablist" aria-label="Terminals">
-      {#each tabs as tab (tab.key)}<span class="tab" class:active={tab.key === active}>
-        <button type="button" role="tab" aria-selected={tab.key === active} onclick={() => void show(tab.key)}>{#if "box" in tab.target}<Avatar kind="session" name={tab.label} root={tab.root} size={16} />{/if}{tab.label}
+      {#each tabs as tab (tab.key)}{@const job = jobOf(tab)}<span class="tab" class:active={tab.key === active}>
+        <button type="button" role="tab" aria-selected={tab.key === active} onclick={() => void show(tab.key)}>{#if "target" in tab && "box" in tab.target}<Avatar kind="session" name={tab.label} root={tab.root} size={16} />
+          {:else if job && failed(job)}<StatusPill tone="failed" dot label="Failed" />{/if}<span class="label">{tab.label}</span>
           {#if tab.exited}<span class="muted">exited{tab.exited.code === undefined ? "" : ` ${tab.exited.code}`}</span>{/if}</button>
         <button type="button" class="x" aria-label={`Close ${tab.label}`} title="Close" onclick={() => void close(tab.key)}><Icon name="close" size={12} /></button></span>{/each}
-      {#if jobs.length}<span class="tab" class:active={active === JOBS}>
-        <button type="button" role="tab" class="jobs" aria-selected={active === JOBS} onclick={() => { only = undefined; void show(JOBS); }}>Jobs
-          {#if running}<span class="muted">{running}</span>{/if}
-          {#if unopened}<span class="muted">·</span><StatusPill tone="failed" word label="{unopened} failed in room" />{/if}</button></span>{/if}
     </div>
     <span class="menu">
       <button type="button" bind:this={plus} aria-label="New terminal" title="New terminal" aria-haspopup="menu" aria-expanded={picking}
@@ -166,13 +160,13 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="body" hidden={!active || !floating && collapsed} style:height={floating ? null : `${maximized ? tallest : height}px`} onkeydown={event => { if (event.key !== "F6") event.stopPropagation(); }}>
     {#each tabs as tab (tab.key)}<div class="tabpanel" hidden={tab.key !== active}>
-      {#if tab.exited}<p class="exited">{tab.exited.code ? `Exited with code ${tab.exited.code}` : "The shell exited."}
-        <button type="button" class="retry" onclick={() => renew(tab)}>New shell</button></p>{/if}
-      <TermPane bind:this={panes[tab.key]} target={tab.target} label={tab.label} onexit={code => { tab.exited = { code }; }} />
+      {#if "job" in tab}<JobOutput bind:this={panes[tab.key]} session={tab.session} job={jobOf(tab)} label={tab.label} />
+      {:else}
+        {#if tab.exited}<p class="exited">{tab.exited.code ? `Exited with code ${tab.exited.code}` : "The shell exited."}
+          <button type="button" class="retry" onclick={() => renew(tab)}>New shell</button></p>{/if}
+        <TermPane bind:this={panes[tab.key]} target={tab.target} label={tab.label} onexit={code => { tab.exited = { code }; }} />
+      {/if}
     </div>{/each}
-    <!-- Mounted only while open, so its watches close with it (Jobs fix 1). -->
-    {#if active === JOBS && (floating || !collapsed)}<div class="tabpanel">
-      <JobsPane bind:this={jobsPane} bind:only sessions={jobs} {opened} onrunning={rows => { listed = rows; }} /></div>{/if}
   </div>
 </FloatWindow>
 {/if}
@@ -187,7 +181,8 @@
   .tab.active [role="tab"] { color: var(--text); }
   .tabs [role="tab"]:hover { background: none; }
   .muted { color: var(--muted); font-weight: 400; }
-  .jobs { padding-right: 8px; }
+  /* A job's title can be long; its tab keeps to 240 px. */
+  .label { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
   .x { width: 20px; height: 20px; margin-right: 3px; }
   .where { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--muted); font-size: 12.5px; font-weight: 400; white-space: nowrap; text-overflow: ellipsis; }
   @media (max-width: 640px) { .where { display: none; } }
