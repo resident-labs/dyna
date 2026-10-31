@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
   import { call } from "../client.ts";
+  import { hostLabel } from "../hosts.ts";
   import type { TerminalTarget } from "../terminal.ts";
   import FloatWindow from "./FloatWindow.svelte";
   import Icon from "./Icon.svelte";
@@ -84,7 +85,6 @@
   // fit reads the column's height, which only a window resize changes, so the maximized height follows the window.
   let viewport = $state(window.innerHeight);
   let tallest = $derived(viewport && fit(Infinity));
-  const hostLabel = (host: string) => host === "control-plane" ? "This computer" : host;
 </script>
 
 <svelte:window onresize={() => { viewport = window.innerHeight; }} />
