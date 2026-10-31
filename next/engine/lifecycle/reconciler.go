@@ -123,15 +123,21 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	}
 	for i, row := range rows {
 		b := row.Box
-		if b.State != contract.BoxReady || r.view.Connected(b.Session) {
+		if b.State != contract.BoxReady {
 			delete(r.disconnected, b.ID)
 		} else {
-			since, ok := r.disconnected[b.ID]
-			if !ok {
-				since = r.now()
-				r.disconnected[b.ID] = since
+			lost := hostState[b.Host] == box.HostUnreachable
+			if r.view.Connected(b.Session) {
+				delete(r.disconnected, b.ID)
+			} else {
+				since, ok := r.disconnected[b.ID]
+				if !ok {
+					since = r.now()
+					r.disconnected[b.ID] = since
+				}
+				lost = lost || !r.now().Before(since.Add(60*time.Second))
 			}
-			if hostState[b.Host] == box.HostUnreachable || !r.now().Before(since.Add(60*time.Second)) {
+			if lost {
 				next := b
 				next.State, next.Reason = contract.BoxLost, "host or box disconnected"
 				changed, err := r.change(ctx, b, next, time.Time{}, row.Failures, contract.CauseHostLost)
