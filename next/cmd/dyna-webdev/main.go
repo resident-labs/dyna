@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -177,6 +178,10 @@ func (profiles) Model(contract.ProfileName) (contract.ModelChoice, []string, err
 	return contract.ModelChoice{Provider: contract.ModelProviderOpenAI, ID: "fake", Thinking: contract.ThinkingOff}, []string{"fake"}, nil
 }
 
+// devLabels are the last activity labels of [wait] turns.
+var devLabels = []string{"edited App.svelte", "reading docs/spec.md", "running go test ./engine/...", "reviewing #1481",
+	"searching for StatusPill", "editing store.go", "running npm run build", "reading the CI log"}
+
 type scripted struct {
 	fakeharness.Harness
 	box *agent.Client
@@ -201,7 +206,9 @@ func (h *scripted) Start(ctx context.Context, id contract.TurnID, inputs []contr
 		started = func() {
 			begin()
 			go func() {
-				for _, label := range []string{"read feed.ts", "ran node --test", "edited App.svelte"} {
+				// Each turn ends on its own label, picked from its ID, so a crowded Home shows varied work.
+				last := devLabels[int(crc32.ChecksumIEEE([]byte(id))%uint32(len(devLabels)))]
+				for _, label := range []string{"read feed.ts", "ran node --test", last} {
 					_ = h.box.TurnActivity(ctx, contract.TurnActivityRequest{Turn: id, Label: label}) // A lost label only leaves the last one showing.
 					time.Sleep(2 * time.Second)
 				}
