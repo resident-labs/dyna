@@ -268,6 +268,15 @@ export interface CheckinEvent {
   detail?: string
 }
 
+// GitHubQuotaEvent is the payload of the github-quota/low events.
+export interface GitHubQuotaEvent {
+  host: string
+  resource: string
+  remaining?: number
+  limit: number
+  reset: string
+}
+
 // SlowTestEvent is the payload of the ci-health/slow-test events.
 export interface SlowTestEvent {
   run: string
@@ -657,10 +666,10 @@ export interface TurnEvent {
 }
 
 // EventPayload is the payload of any registered system event.
-export type EventPayload = GitHubWriteRefusedEvent | MCPCallEvent | WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineCacheCleanFailedEvent | MachineScratchEvent | MachineLimitsEvent | RoomCapEvent | WorktreePortsEvent | CallEvent | VoiceSessionEvent | ReviewEvent | IssueWatchEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ApprovalRequestedEvent | ApprovalDecidedEvent | ApprovalResultEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | ShellSilenceEvent | ShellInactivityEvent | JobEvent | RunEvent | TurnEvent
+export type EventPayload = GitHubWriteRefusedEvent | MCPCallEvent | WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | GitHubQuotaEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineCacheCleanFailedEvent | MachineScratchEvent | MachineLimitsEvent | RoomCapEvent | WorktreePortsEvent | CallEvent | VoiceSessionEvent | ReviewEvent | IssueWatchEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ApprovalRequestedEvent | ApprovalDecidedEvent | ApprovalResultEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | ShellSilenceEvent | ShellInactivityEvent | JobEvent | RunEvent | TurnEvent
 
-export type EventFamily = "github-write" | "mcp" | "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "voice-session" | "review" | "issue-watch" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "approval" | "terminal" | "shell" | "job" | "run" | "turn"
-export type EventType = "refused" | "result" | "kept" | "started" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "cache-clean-failed" | "scratch-freed" | "limits-off" | "room-cap" | "worktree-ports" | "joined" | "declined" | "withdrawn" | "ended" | "comment" | "reopened" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "shell" | "waiting" | "helper-outcome" | "root-flush" | "requested" | "decided" | "request" | "request.done" | "output-silence" | "observed-output-inactivity" | "completed" | "stopped"
+export type EventFamily = "github-write" | "mcp" | "worktree" | "hook" | "issue" | "goal" | "checkin" | "github-quota" | "ci-health" | "rule" | "merge" | "machine" | "call" | "voice-session" | "review" | "issue-watch" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "approval" | "terminal" | "shell" | "job" | "run" | "turn"
+export type EventType = "refused" | "result" | "kept" | "started" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "low" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "cache-clean-failed" | "scratch-freed" | "limits-off" | "room-cap" | "worktree-ports" | "joined" | "declined" | "withdrawn" | "ended" | "comment" | "reopened" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "shell" | "waiting" | "helper-outcome" | "root-flush" | "requested" | "decided" | "request" | "request.done" | "output-silence" | "observed-output-inactivity" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -855,6 +864,17 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     threadEnd: false,
     audience: "session",
     text: "Check on your children. For each one below, confirm it is making progress. If one is stuck, idle with unfinished work, or waiting for something that already happened, nudge it, restart it, or take over its work. Close children whose work is done. If everything is on track, end your turn without posting.",
+  },
+  {
+    family: "github-quota",
+    type: "low",
+    renderer: "GitHubQuotaCard",
+    quiet: true,
+    wake: "never",
+    once: true,
+    threadEnd: false,
+    audience: "room",
+    text: "GitHub quota is low for {host} ({resource}). Caller attribution is unavailable.",
   },
   {
     family: "ci-health",
@@ -1907,6 +1927,15 @@ export function isCheckinEvent(v: unknown): v is CheckinEvent {
     (v.detail === undefined || typeof v.detail === "string")
 }
 
+export function isGitHubQuotaEvent(v: unknown): v is GitHubQuotaEvent {
+  return isRecord(v) &&
+    typeof v.host === "string" &&
+    typeof v.resource === "string" &&
+    (v.remaining === undefined || Number.isInteger(v.remaining)) &&
+    Number.isInteger(v.limit) &&
+    typeof v.reset === "string"
+}
+
 export function isSlowTestEvent(v: unknown): v is SlowTestEvent {
   return isRecord(v) &&
     typeof v.run === "string" &&
@@ -2312,6 +2341,7 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "goal" && type === "finished") return isGoalEvent(v)
   if (family === "goal" && type === "dropped") return isGoalEvent(v)
   if (family === "checkin" && type === "summary") return isCheckinEvent(v)
+  if (family === "github-quota" && type === "low") return isGitHubQuotaEvent(v)
   if (family === "ci-health" && type === "slow-test") return isSlowTestEvent(v)
   if (family === "rule" && type === "changed") return isRuleEvent(v)
   if (family === "merge" && type === "queued") return isMergeEvent(v)
