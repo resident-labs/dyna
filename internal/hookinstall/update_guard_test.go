@@ -2,6 +2,8 @@ package hookinstall
 
 import (
 	"bytes"
+	"context"
+	"dyna-agent/internal/processguard"
 	"path/filepath"
 	"testing"
 	"time"
@@ -135,5 +137,31 @@ func TestQuietCooldownResetsBusyPeriod(t *testing.T) {
 	}
 	if notices != 0 {
 		t.Fatalf("new busy period inherited old deadline: %d notices", notices)
+	}
+}
+
+func TestDeferredUpdateWorkerReceipt(t *testing.T) {
+	s, j := fixture(t)
+	j.Hook = updaterservice.RunName
+	if err := s.Jobs.Update(j.ID, func(job *Job) error { *job = j; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.recordUpdateRestart(t.Context(), s.now()); err != nil {
+		t.Fatal(err)
+	}
+	var calls []string
+	fake := fakeInstaller(t, j, "main", "", &calls)
+	s.Exec = func(ctx context.Context, p processguard.Process) error {
+		if p.Args[0] == "flock" {
+			return s.Locked(ctx, j.ID, "", p.Output)
+		}
+		return fake(ctx, p)
+	}
+	if err := s.Worker(t.Context(), j.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Jobs.Read(j.ID)
+	if err != nil || got.Status != "finished" || got.Result != ResultDeferred {
+		t.Fatalf("receipt = %+v, %v", got, err)
 	}
 }

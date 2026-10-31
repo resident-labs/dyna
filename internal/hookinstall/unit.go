@@ -72,13 +72,15 @@ func (s Service) Worker(ctx context.Context, id string) error {
 	args := []string{"flock", "-w", "1800", j.Config.Lock, j.Config.Executable, "git", "hooks", "_install-locked", id, "--jobs-root", s.Jobs.Root}
 	runErr := s.Exec(ctx, processguard.Process{Dir: j.Config.Main, Args: args, Env: append(processguard.MetadataEnv(), "DYNA_HOOK_EVENT=install-worker", "DYNA_HOOK_LOG="+log.Name()), Timeout: timeout, Output: log})
 	runErr = errors.Join(runErr, log.Close())
-	result := "pass"
+	result := ResultPass
 	if runErr != nil {
-		result = "error"
+		result = ResultError
 	}
 	saveErr := s.Jobs.Update(id, func(j *Job) error {
 		j.Status = "finished"
-		j.Result = result
+		if result != ResultPass || j.Result != ResultDeferred {
+			j.Result = result
+		}
 		j.WorkerLog = log.Name()
 		j.FinishedAt = s.now()
 		if runErr != nil {
@@ -113,12 +115,16 @@ func (s Service) InspectUnit(ctx context.Context, j Job) (Job, error) {
 	if props["ActiveState"] == "activating" || props["SubState"] == "running" || props["SubState"] == "start" {
 		return j, nil
 	}
+	deferred := j.Result == ResultDeferred
 	j.Status = "finished"
 	j.FinishedAt = s.now()
 	j.Result = "error"
 	j.Cause = fmt.Sprintf("unit %s: load=%s active=%s result=%s exit=%s", j.Unit, props["LoadState"], props["ActiveState"], props["Result"], props["ExecMainStatus"])
 	if props["Result"] == "success" && props["ExecMainStatus"] == "0" && props["LoadState"] != "not-found" {
-		j.Result = "pass"
+		j.Result = ResultPass
+		if deferred {
+			j.Result = ResultDeferred
+		}
 		j.Cause = ""
 	}
 	err = s.Jobs.Update(j.ID, func(old *Job) error {
@@ -149,7 +155,7 @@ func (s Service) CleanupUnit(ctx context.Context, j Job) {
 
 // Log appends the worker output once. A marker makes retries safe after a crash.
 func Log(j Job) error {
-	marker := "\n[install " + j.ID + " unit " + j.Unit + " result " + j.Result + "]\n"
+	marker := "\n[install " + j.ID + " unit " + j.Unit + " result " + string(j.Result) + "]\n"
 	if err := os.MkdirAll(filepath.Dir(j.HookLog), 0700); err != nil {
 		return err
 	}

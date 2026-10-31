@@ -36,7 +36,8 @@ const (
 	// ResultPending is a run that has started and not yet ended.
 	ResultPending RunResult = "pending"
 	// ResultPass is a run whose hook exited cleanly.
-	ResultPass RunResult = "pass"
+	ResultPass     RunResult = "pass"
+	ResultDeferred RunResult = "deferred"
 	// ResultError is a run that failed to start, timed out or lost its runner.
 	ResultError RunResult = "error"
 	// ResultFail is a run whose hook exited with a failure status.

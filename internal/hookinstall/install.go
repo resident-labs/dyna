@@ -171,7 +171,7 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 		}
 		if !ready {
 			fmt.Fprintln(out, "Update deferred while CI is active or restart cooldown applies")
-			return nil
+			return s.Jobs.Update(id, func(j *Job) error { j.Result = ResultDeferred; return nil })
 		}
 	}
 	restartComputers, err := d.computersChanged(ctx, state.Installed, head)
@@ -232,7 +232,7 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 		}
 		if !ready {
 			fmt.Fprintln(out, "Update deferred while CI is active or restart cooldown applies")
-			return nil
+			return s.Jobs.Update(id, func(j *Job) error { j.Result = ResultDeferred; return nil })
 		}
 	}
 	if err = os.MkdirAll(c.Bin, 0755); err != nil {
