@@ -620,6 +620,7 @@ type Box struct {
 | pending | creating | admission placed it |
 | creating | starting | volume, repository copy and slice are ready, and `podman run` succeeded |
 | starting | ready | the box agent sent `hello` on the box socket within 60 s |
+| starting | stopped | the host start failed during a wake |
 | ready | stopped | the session went dormant: no running turn, shell job or wake |
 | stopped | starting | a delivery wakes the session, and admission fits it again |
 | stopped | pending | a delivery wakes the session, but the host has no room now |
@@ -729,6 +730,8 @@ Close ends the whole subtree, as the card decided: each child is closed and dele
 2. Archive the session's repository, if it has one. Push HEAD and a snapshot of the dirty tree to `refs/dyna/archive/<session>`. The snapshot is a commit of the working tree, with untracked files that are not ignored, made through a temporary index and `commit-tree` (the v1 #1246 method), so the session branch and the index do not change. The ref points at the snapshot, whose first parent is HEAD. Skip this when the tree is clean and HEAD is already on the remote.
 3. `podman rm`, delete the volume, stop the slice, and remove the forward and the listener.
 4. Emit `box.changed` to `deleted`, then `session.closed`.
+
+Closing a dormant session starts its box for the archive without admission. Archiving boxes are idle and short-lived, so many closed at once can briefly overcommit their host.
 
 The engine deletes archive refs after 14 days. `dyna session restore <session>` starts a new box from the archive. If an archive push fails, the box stays in `closing` with a reason. A box is never deleted without its archive, except through `dyna session close --discard` (owner only), for a box that cannot start; it deletes the box with no archive.
 

@@ -45,6 +45,7 @@ type Service struct {
 	boxLockMu sync.Mutex
 	boxLocks  map[contract.SessionID]*sync.Mutex
 	boxRuns   map[contract.SessionID]*boxRun
+	dormancy  dormancy
 	// transcriptMu serializes appends, so each offset check and write runs alone.
 	transcriptMu  sync.Mutex
 	transcriptDir string
@@ -57,7 +58,7 @@ type boxRun struct {
 }
 
 func New(st *store.Store, boxes BoxAdapter, profiles Profiles, now func() time.Time) *Service {
-	return &Service{store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun)}
+	return &Service{store: st, boxes: boxes, profiles: profiles, now: now, channels: make(map[contract.SessionID]*boxChannel), boxLocks: make(map[contract.SessionID]*sync.Mutex), boxRuns: make(map[contract.SessionID]*boxRun), dormancy: dormancy{unconfirmed: make(map[contract.BoxID]bool), failedStarts: make(map[contract.BoxID]bool)}}
 }
 
 // SetRepositories configures repository lookup before the service starts.
@@ -280,11 +281,6 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	}()
 	response := contract.SessionStartResponse{Session: session.ID, Box: session.Box}
 	s.admit.Lock()
-	hosts, err := s.store.Hosts(ctx)
-	if err != nil {
-		s.admit.Unlock()
-		return contract.SessionStartResponse{}, failure(err)
-	}
 	boxes, err := s.store.Boxes(ctx)
 	if err != nil {
 		s.admit.Unlock()
@@ -321,7 +317,11 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 			}
 		}
 	}
-	placement := box.Admit(hosts, boxes, current, 20*box.GiB)
+	placement, err := s.place(ctx, current, boxes)
+	if err != nil {
+		s.admit.Unlock()
+		return contract.SessionStartResponse{}, failure(err)
+	}
 	initial, err := s.event(req.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Box: session.Box, Session: session.ID, To: contract.BoxPending, Reason: string(placement.Reason)})
 	if err != nil {
 		s.admit.Unlock()
@@ -391,6 +391,14 @@ func (s *Service) createPlaced(ctx, writeCtx context.Context, room contract.Room
 	return s.retryChildren(writeCtx, current.ID)
 }
 
+func (s *Service) place(ctx context.Context, current box.Box, boxes []box.Box) (box.Placement, error) {
+	hosts, err := s.store.Hosts(ctx)
+	if err != nil {
+		return box.Placement{}, err
+	}
+	return box.Admit(hosts, boxes, current, 20*box.GiB), nil
+}
+
 func (s *Service) retryChildren(ctx context.Context, parent contract.BoxID) error {
 	boxes, err := s.store.Boxes(ctx)
 	if err != nil {
@@ -425,12 +433,11 @@ func (s *Service) retryChild(ctx context.Context, id contract.SessionID) error {
 		s.admit.Unlock()
 		return nil
 	}
-	hosts, err := s.store.Hosts(ctx)
+	placement, err := s.place(ctx, current, boxes)
 	if err != nil {
 		s.admit.Unlock()
 		return err
 	}
-	placement := box.Admit(hosts, boxes, current, 20*box.GiB)
 	if placement.Reason != "" {
 		s.admit.Unlock()
 		return nil
@@ -553,24 +560,6 @@ func (s *Service) closeSession(ctx context.Context, caller contract.Principal, s
 		s.admit.Unlock()
 		return e
 	}
-	current, err := s.store.Box(ctx, session.Box)
-	if err != nil {
-		s.admit.Unlock()
-		return failure(err)
-	}
-	// A session without turns has no work in its box, so no archive ack is due. The check reads durable turns, so a restart makes the same choice.
-	hasTurns, err := s.store.SessionHasTurns(ctx, session.ID)
-	if err != nil {
-		s.admit.Unlock()
-		return failure(err)
-	}
-	if current.State != contract.BoxClosing && current.State != contract.BoxDeleted {
-		current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, "")
-		if err != nil {
-			s.admit.Unlock()
-			return failure(err)
-		}
-	}
 	s.boxLockMu.Lock()
 	if run := s.boxRuns[session.ID]; run != nil {
 		run.closing = true
@@ -580,6 +569,20 @@ func (s *Service) closeSession(ctx context.Context, caller contract.Principal, s
 	s.admit.Unlock()
 	unlock := s.lockBox(session.ID)
 	defer unlock()
+	s.admit.Lock()
+	current, err := s.store.Box(ctx, session.Box)
+	if err != nil {
+		s.admit.Unlock()
+		return failure(err)
+	}
+	hasTurns, err := s.store.SessionHasTurns(ctx, session.ID)
+	if err == nil && current.State != contract.BoxClosing && current.State != contract.BoxDeleted {
+		current, err = s.transition(ctx, session.Room, current, contract.BoxClosing, "")
+	}
+	s.admit.Unlock()
+	if err != nil {
+		return failure(err)
+	}
 	if _, err := s.store.Session(ctx, session.ID); errors.Is(err, sql.ErrNoRows) {
 		return nil
 	} else if err != nil {
@@ -590,6 +593,9 @@ func (s *Service) closeSession(ctx context.Context, caller contract.Principal, s
 		return failure(err)
 	}
 	if !discard && hasTurns && current.State != contract.BoxDeleted {
+		if err := s.boxes.Start(ctx, current.ID); err != nil {
+			return failure(err)
+		}
 		if current.Reason != "" {
 			if err := s.archiveReason(ctx, session.Room, current, ""); err != nil {
 				return failure(err)
@@ -825,8 +831,8 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		if _, err = s.transition(ctx, session.Room, current, contract.BoxReady, ""); err != nil {
 			return contract.BoxHelloResponse{}, failure(err)
 		}
-	} else if current.State != contract.BoxReady {
-		return contract.BoxHelloResponse{}, invalid("box is not starting or ready")
+	} else if current.State != contract.BoxReady && current.State != contract.BoxClosing {
+		return contract.BoxHelloResponse{}, invalid("box is not starting, ready, or archiving")
 	}
 	model, _, err := s.profiles.Model(session.Profile)
 	if err != nil {
