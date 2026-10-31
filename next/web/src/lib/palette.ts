@@ -66,7 +66,7 @@ export type Item =
 export type Section = { group: Group; title: string; shown: number; total: number; items: Item[]; state?: "searching" | "failed" };
 
 export type Messages = { state: "idle" | "searching" | "failed" | "done"; posts: PostHit[]; total: number };
-export type Sources = { rooms: Place[]; sessions: Person[]; sessionsTotal?: number; actions: Action[]; recent: Item[]; messages: Messages };
+export type Sources = { rooms: Place[]; sessions: Person[]; sessionsTotal?: number; sessionsState?: "searching" | "failed"; actions: Action[]; recent: Item[]; messages: Messages };
 
 // A leading ">" asks for actions only, as in VS Code; the rest of the text filters them.
 export function parse(text: string, scope?: Scope): { scope?: Scope; query: string } {
@@ -93,8 +93,9 @@ export function build(text: string, scope: Scope | undefined, sources: Sources):
       items: !alone && total > items.length && state !== "searching" ? [...items, { kind: "more", scope: group, total }] : items };
   };
   const rooms = section("rooms", ranked(sources.rooms, query, () => false).map((room): Item => ({ kind: "room", room })));
-  const foundSessions = ranked(sources.sessions, query, item => item.closed).map((session): Item => ({ kind: "session", session }));
-  const sessions = section("sessions", foundSessions.slice(0, 50), sources.sessionsTotal ?? foundSessions.length);
+  const foundSessions = (sources.sessionsTotal === undefined ? ranked(sources.sessions, query, item => item.closed) : sources.sessions)
+    .map((session): Item => ({ kind: "session", session }));
+  const sessions = section("sessions", foundSessions.slice(0, 50), sources.sessionsTotal ?? foundSessions.length, sources.sessionsState);
   const messages = sources.messages;
   const post = section("messages", messages.posts.map((found): Item => ({ kind: "message", post: found })), Math.max(messages.total, messages.posts.length),
     messages.state === "searching" || messages.state === "failed" ? messages.state : undefined);
