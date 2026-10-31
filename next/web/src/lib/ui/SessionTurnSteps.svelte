@@ -33,7 +33,7 @@
       <div class="steps">
         {#if read === "loading" || !read}<p>Loading steps…</p>
         {:else if read === "failed"}<p>The steps did not load. <button type="button" class="retry" onclick={() => transcripts.read(events, true)}>Try again</button></p>
-        {:else if read.steps.length}<StepList steps={read.steps} truncated={read.truncated} {id} {opened} {ontoggle} />
+        {:else if read.steps.length || read.truncated}<StepList steps={read.steps} truncated={read.truncated} {id} {opened} {ontoggle} />
         {:else}<p>No steps were recorded.</p>{/if}
       </div>
     {/if}
