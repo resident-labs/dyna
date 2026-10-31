@@ -6,10 +6,11 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 38
+const schemaVersion = 39
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	38: {`UPDATE operations SET state='running' WHERE state='approved'`},
 	37: {`CREATE VIRTUAL TABLE post_search USING fts5(text, author)`, `CREATE TRIGGER post_search_insert AFTER INSERT ON events WHEN new.type='post.created' BEGIN INSERT INTO post_search(rowid,text,author) VALUES(new.seq,coalesce(json_extract(CAST(new.body AS TEXT),'$.text'),''),CASE new.from_kind WHEN 'session' THEN coalesce((SELECT name FROM sessions WHERE id=new.from_id),'') ELSE new.from_kind END); END;`, `CREATE TRIGGER post_search_delete AFTER DELETE ON events WHEN old.type='post.created' BEGIN DELETE FROM post_search WHERE rowid=old.seq; END;`, `INSERT INTO post_search(rowid,text,author) SELECT seq,coalesce(json_extract(CAST(body AS TEXT),'$.text'),''),CASE from_kind WHEN 'session' THEN coalesce((SELECT name FROM sessions WHERE id=from_id),'') ELSE from_kind END FROM events WHERE type='post.created'`},
 	36: {`ALTER TABLE deliveries ADD COLUMN handoff_from TEXT`},
 	34: {`CREATE TABLE room_shared (room TEXT NOT NULL, host TEXT NOT NULL REFERENCES hosts(name), bytes INTEGER NOT NULL, measured_at INTEGER NOT NULL, PRIMARY KEY(room, host))`},

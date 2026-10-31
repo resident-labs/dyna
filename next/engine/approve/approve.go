@@ -379,9 +379,7 @@ func (s *Service) Recover(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := s.run(record.Operation, entry); err != nil {
-			return err
-		}
+		go s.start(record.Operation, entry)
 	}
 	return nil
 }
