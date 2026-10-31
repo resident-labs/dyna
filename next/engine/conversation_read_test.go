@@ -26,7 +26,7 @@ func TestConversationRead(t *testing.T) {
 			for _, stream := range streams {
 				event := <-stream
 				body, ok := event.Body.(contract.ConversationRead)
-				if !ok || event.Seq != 0 || body.Seq != seq || body.Conversation != conversation {
+				if !ok || event.Seq != 0 || body.Seq != 10 || body.Conversation != conversation {
 					t.Fatalf("event: %+v", event)
 				}
 			}
