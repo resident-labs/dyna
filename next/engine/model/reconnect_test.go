@@ -59,6 +59,57 @@ func TestStatusDoesNotBlockReconnectSave(t *testing.T) {
 	<-done
 }
 
+func TestRemoveCancelsUnsavedReconnect(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	old := private.ProxyAuth{ID: "bound", Provider: "claude", Record: []byte("old")}
+	if err := st.SaveProxyAuth(ctx, old, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindAccount(ctx, "account", old.ID, contract.ProviderAnthropic, "label"); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"url":"https://provider.example/login","state":"state"}`))
+	}))
+	defer server.Close()
+	p := &Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
+	c := p.Connections("key", st, time.Now)
+	a, err := c.Reconnect(ctx, "account", old.ID, contract.ProviderAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.CancelReconnect("account")
+	rpc := AuthRPC{Store: st, Connections: c}
+	if err := rpc.Save(AuthSave{Record: old, Create: true, Attempt: a.Attempt}, &struct{}{}); err == nil {
+		t.Fatal("cancelled attempt overwrote bound credential")
+	}
+	if err := st.DeleteProxyAuth(ctx, old.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RemoveAccount(ctx, "account"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := st.ListProxyAuths(ctx)
+	if err != nil || len(rows) != 0 {
+		t.Fatal("credential remains")
+	}
+	accounts, err := st.Accounts(ctx)
+	if err != nil || len(accounts) != 0 {
+		t.Fatal("account remains")
+	}
+	c.mu.Lock()
+	status := c.attempts[a.Attempt].status
+	c.mu.Unlock()
+	if status != contract.ConnectFailed {
+		t.Fatal("attempt remains open")
+	}
+}
+
 func TestReconnectSaveAttributionAndExpiry(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(1000, 0)
