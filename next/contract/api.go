@@ -280,14 +280,15 @@ type RoomReposResponse struct {
 	Repos []RoomRepo `json:"repos"`
 }
 type SessionStartRequest struct {
-	Room    RoomID      `json:"room"`
-	Name    string      `json:"name"`
-	Parent  SessionID   `json:"parent,omitempty"`
-	Repo    RepoName    `json:"repo,omitempty"`
-	Profile ProfileName `json:"profile"`
-	Goal    string      `json:"goal,omitempty"`
-	Brief   string      `json:"brief,omitempty"`
-	Size    BoxSizeName `json:"size,omitempty"`
+	Room     RoomID      `json:"room"`
+	Name     string      `json:"name"`
+	Parent   SessionID   `json:"parent,omitempty"`
+	Repo     RepoName    `json:"repo,omitempty"`
+	Profile  ProfileName `json:"profile"`
+	Goal     string      `json:"goal,omitempty"`
+	Brief    string      `json:"brief,omitempty"`
+	Size     BoxSizeName `json:"size,omitempty"`
+	SameHost bool        `json:"sameHost,omitempty"`
 }
 type SessionStartResponse struct {
 	Session SessionID `json:"session"`
