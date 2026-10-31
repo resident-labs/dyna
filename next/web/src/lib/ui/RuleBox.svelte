@@ -4,22 +4,27 @@
   import { ruleLimit } from "../rules.ts";
   // Where a rule is written: it grows with its text, Shift+Enter adds a line, and a count shows past 90% of the limit.
   // A rule over the limit cannot be saved.
-  let { value = $bindable(), label, placeholder, busy, onsave }: { value: string; label: string; placeholder: string; busy: boolean; onsave: () => void } = $props();
+  // An edit box starts focused, and it passes Escape to oncancel.
+  let { value = $bindable(), label, placeholder, busy, onsave, oncancel }: {
+    value: string; label: string; placeholder?: string; busy: boolean; onsave: () => void; oncancel?: () => void;
+  } = $props();
   let size = $derived([...value].length);
   let over = $derived(size > ruleLimit);
-  const save = () => { if (!over) onsave(); };
+  const save = () => { if (!over && value.trim()) onsave(); };
+  const focused = (box: HTMLTextAreaElement) => { if (oncancel) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); } };
 </script>
 
-<div class="box"><textarea rows="1" bind:value {placeholder} aria-label={label} aria-invalid={over} readonly={busy}
+<div class="box"><textarea rows="1" {@attach focused} bind:value {placeholder} aria-label={label} aria-invalid={over} readonly={busy}
   onkeydown={event => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); save(); }
     // Escape keeps a typed rule: the page closes only on Escape in an empty box.
-    if (event.key === "Escape" && value) event.stopPropagation();
+    if (event.key === "Escape" && (value || oncancel)) event.stopPropagation();
+    if (event.key === "Escape") oncancel?.();
   }}></textarea>
   {#if size > ruleLimit * 0.9}<span class="size" role="status"><StatusPill tone={over ? "error" : "warning"} word label={`${size.toLocaleString("en-US")} of ${ruleLimit.toLocaleString("en-US")}`}
     title={over ? "This rule is too long to save" : "Rules can have up to 2,000 characters"} /></span>
-  {:else}<span class="hint" aria-hidden="true"><kbd>Enter</kbd> adds</span>{/if}
-  <button type="button" class="send" aria-label="Add rule" disabled={over || busy || !value.trim()} onclick={save}><Icon name="send" /></button></div>
+  {:else if !oncancel}<span class="hint" aria-hidden="true"><kbd>Enter</kbd> adds</span>{/if}
+  {#if !oncancel}<button type="button" class="send" aria-label="Add rule" disabled={over || busy || !value.trim()} onclick={save}><Icon name="send" /></button>{/if}</div>
 
 <style>
   .box { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
