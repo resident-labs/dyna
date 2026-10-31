@@ -19,14 +19,13 @@ import (
 )
 
 const backupStamp = "20060102T150405.000000000Z"
-const copyStamp = "20060102T150405000000000Z"
 
 type backupStore interface {
 	Backup(context.Context, time.Time) (string, error)
 	RecordBackupCopy(context.Context, time.Time, string) error
 }
 
-type backupRunner func(context.Context, string, string, int64, *os.File) error
+type backupRunner func(context.Context, string, int64, *os.File) error
 
 type backupReader struct {
 	ctx context.Context
@@ -40,10 +39,10 @@ func (r backupReader) Read(p []byte) (int, error) {
 	return r.Reader.Read(p)
 }
 
-func sshBackup(ctx context.Context, dest, name string, size int64, input *os.File) error {
+func sshBackup(ctx context.Context, dest string, size int64, input *os.File) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", dest, fmt.Sprintf("%s %d", name, size))
+	cmd := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", dest, fmt.Sprintf("%d", size))
 	cmd.Stdin = input
 	err := cmd.Run()
 	var exit *exec.ExitError
@@ -64,7 +63,7 @@ type backupLoop struct {
 	run       backupRunner
 }
 
-func (b *backupLoop) copy(ctx context.Context, path string, now time.Time) error {
+func (b *backupLoop) copy(ctx context.Context, path string) error {
 	src, err := os.Open(path)
 	if err != nil {
 		return err
@@ -160,7 +159,7 @@ func (b *backupLoop) copy(ctx context.Context, path string, now time.Time) error
 	if _, err = tmp.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	return b.run(ctx, b.dest, "dyna-"+now.UTC().Format(copyStamp)+".tar.gz.age", info.Size(), tmp)
+	return b.run(ctx, b.dest, info.Size(), tmp)
 }
 
 func (b *backupLoop) backup(ctx context.Context) {
@@ -173,7 +172,7 @@ func (b *backupLoop) backup(ctx context.Context) {
 	if b.recipient == nil {
 		return
 	}
-	err = b.copy(ctx, path, now)
+	err = b.copy(ctx, path)
 	cause := ""
 	if err != nil {
 		cause = err.Error()
