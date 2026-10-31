@@ -430,9 +430,13 @@ func TestPendingCreateRetry(t *testing.T) {
 
 type closeRetryCleanupHost struct {
 	fakeBoxes
-	entered   chan struct{}
-	removes   int
-	container bool
+	service      *Service
+	reconciler   *lifecycle.Reconciler
+	session      contract.SessionID
+	removes      int
+	container    bool
+	closeProblem *contract.Error
+	passErr      error
 }
 
 func (h *closeRetryCleanupHost) Create(context.Context, lifecycle.BoxSpec) (string, error) {
@@ -443,8 +447,8 @@ func (h *closeRetryCleanupHost) Create(context.Context, lifecycle.BoxSpec) (stri
 func (h *closeRetryCleanupHost) Remove(ctx context.Context, _ contract.BoxID) error {
 	h.removes++
 	if h.removes == 2 {
-		close(h.entered)
-		<-ctx.Done()
+		_, h.closeProblem = h.service.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: h.session, Discard: true})
+		h.passErr = h.reconciler.Pass(ctx)
 		return ctx.Err()
 	}
 	h.container = false
@@ -464,20 +468,14 @@ func TestCloseDuringRetryCleanupRemovesContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Unix(1000, 0)
-	host := &closeRetryCleanupHost{entered: make(chan struct{})}
+	host := &closeRetryCleanupHost{service: s, session: sid}
 	r := lifecycle.New(s.store, host, retryView{}, nil, s.event, func() time.Time { return now })
+	host.reconciler = r
 	if err := r.Pass(ctx); err != nil {
 		t.Fatal(err)
 	}
 	r.Wait()
 	now = now.Add(30 * time.Second)
-	if err := r.Pass(ctx); err != nil {
-		t.Fatal(err)
-	}
-	<-host.entered
-	if _, problem := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: sid, Discard: true}); problem != nil {
-		t.Fatal(problem)
-	}
 	if err := r.Pass(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -487,7 +485,7 @@ func TestCloseDuringRetryCleanupRemovesContainer(t *testing.T) {
 	}
 	r.Wait()
 	b, err := s.store.Box(ctx, session.Box)
-	if err != nil || b.State != contract.BoxDeleted || host.container {
-		t.Fatalf("close after retry cleanup: box=%+v container=%v err=%v", b, host.container, err)
+	if err != nil || b.State != contract.BoxDeleted || host.container || host.closeProblem != nil || host.passErr != nil {
+		t.Fatalf("close after retry cleanup: box=%+v container=%v close=%v pass=%v err=%v", b, host.container, host.closeProblem, host.passErr, err)
 	}
 }
