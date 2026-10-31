@@ -15,6 +15,8 @@ func (u Usage) Total() int64 { return u.Input + u.CacheRead + u.CacheWrite + u.O
 // before any model output makes the run unmeasured.
 type Run struct {
 	Task     int
+	Provider Provider
+	Arm      Arm
 	Measured bool
 	Correct  bool
 	Usage    Usage
@@ -37,15 +39,20 @@ func Compare(cli, mcp []Run) Gate {
 	if len(cli) != len(tasks) || len(mcp) != len(tasks) {
 		return result
 	}
+	provider, mcpArm := cli[0].Provider, mcp[0].Arm
+	if (provider != Opus && provider != Sonnet && provider != ChatGPT && provider != Zai && provider != Kimi) || cli[0].Arm != Off || (mcpArm != Caller && mcpArm != Declared) {
+		return result
+	}
 	var cliSeen, mcpSeen [20]bool
 	for _, arm := range []struct {
 		runs    []Run
+		arm     Arm
 		seen    *[20]bool
 		correct *int
 		tokens  *int64
-	}{{cli, &cliSeen, &result.CLICorrect, &result.CLITokens}, {mcp, &mcpSeen, &result.MCPCorrect, &result.MCPTokens}} {
+	}{{cli, Off, &cliSeen, &result.CLICorrect, &result.CLITokens}, {mcp, mcpArm, &mcpSeen, &result.MCPCorrect, &result.MCPTokens}} {
 		for _, run := range arm.runs {
-			if !run.Measured || run.Task < 1 || run.Task > len(tasks) || arm.seen[run.Task-1] ||
+			if !run.Measured || run.Provider != provider || run.Arm != arm.arm || run.Task < 1 || run.Task > len(tasks) || arm.seen[run.Task-1] ||
 				run.Usage.Input < 0 || run.Usage.CacheRead < 0 || run.Usage.CacheWrite < 0 || run.Usage.Output < 0 {
 				return Gate{}
 			}
