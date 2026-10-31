@@ -13,6 +13,8 @@ Each later patch to this folder must be its own commit. Each patch must add an e
 - The SDK builder accepts an already-bound listener. `engine/model` uses it to avoid a loopback port reservation race that could expose the client key.
 - Upstream PR [#5434](https://github.com/router-for-me/CLIProxyAPI/pull/5434), head `fa29f0716067730b6aedbf3e3602ad7be489f9b7`, adds normalized Claude OAuth quota reports for `engine/model`. The patch changes upstream v7 import paths to v8; drop it when a subtree update includes the upstream change. Patch size: 812 lines added and 15 removed, including tests. The upstream body-cap test passed in 0.02 seconds on hermeslab.
 
+- Preserve `seven_day_oauth_apps` alongside nonempty `limits` when the normalized limits omit that window. `engine/model` uses it for the correct Claude weekly quota. This separate patch adds 38 lines and removes 3, including its regression test; drop it when upstream fixes mixed responses.
+
 ## Update
 
 Run this command from the Dyna repository root, replacing `<tag>` with the new upstream tag:
