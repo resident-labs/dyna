@@ -7,7 +7,7 @@
 </script>
 
 <script lang="ts">
-  import { onMount, type Snippet } from "svelte";
+  import { untrack, type Snippet } from "svelte";
   import { clamp, dragged, type Edges, type Rect } from "../float.ts";
   // A view that floats as a window over the app or docks in its place in the layout. Docking changes
   // only the style, so the content never remounts. The rect belongs to the caller, so the window keeps
@@ -29,8 +29,8 @@
     window.addEventListener("pointerup", end);
     window.addEventListener("pointercancel", end);
   }
-  // A window that no longer fits the viewport is brought inside.
-  onMount(() => { if (!docked) rect = fit(rect); });
+  // A window that no longer fits the viewport is brought inside when it floats.
+  $effect.pre(() => { if (!docked) rect = fit(untrack(() => rect)); });
   // Alt with an arrow key moves the floating window by 24 px; other keys go to the caller.
   function key(event: KeyboardEvent) {
     const step = { ArrowLeft: [-24, 0], ArrowRight: [24, 0], ArrowUp: [0, -24], ArrowDown: [0, 24] }[event.key];
