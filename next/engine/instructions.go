@@ -21,11 +21,10 @@ func (s *Service) instructionsPath(ctx context.Context, room contract.RoomID) (s
 	if room == "" {
 		return filepath.Join(root, "global", "AGENTS.md"), nil
 	}
-	id, err := s.store.RoomID(ctx, room)
-	if err != nil {
+	if err := s.store.RoomExists(ctx, room); err != nil {
 		return "", failure(err)
 	}
-	return filepath.Join(root, "rooms", string(id), "AGENTS.md"), nil
+	return filepath.Join(root, "rooms", string(room), "AGENTS.md"), nil
 }
 
 func readInstructions(path string) (string, string, error) {
