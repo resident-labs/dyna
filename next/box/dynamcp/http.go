@@ -113,6 +113,13 @@ func (s *Server) call(ctx context.Context, p callParams) result {
 		return failure(contract.ErrUnknownAction, "Unknown action. Valid actions: "+strings.Join(names, ", "))
 	}
 	delete(p.Arguments, "action")
+	var callID string
+	if raw := p.Arguments[contract.ToolCallIDArgument]; len(raw) > 0 {
+		if err := json.Unmarshal(raw, &callID); err != nil || len(callID) > 4096 {
+			return failure(contract.ErrInvalid, "invalid tool call ID")
+		}
+		delete(p.Arguments, contract.ToolCallIDArgument)
+	}
 	var clientID json.RawMessage
 	if a.op != "" {
 		clientID = p.Arguments["clientId"]
@@ -136,6 +143,7 @@ func (s *Server) call(ctx context.Context, p callParams) result {
 		if err != nil {
 			return failure(contract.ErrInvalid, err.Error())
 		}
+		req.ToolCallID = callID
 		out, problem := s.forward(ctx, a.method, marshal(req))
 		if problem != nil {
 			return failed(*problem)
