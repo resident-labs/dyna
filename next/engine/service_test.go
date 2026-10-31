@@ -188,7 +188,7 @@ func TestRootCreationRollsBackAndRootCannotClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = s.store.StartSession(ctx, store.Session{ID: "new-root", Room: "new-room", Name: "root", Profile: "test", Box: current.Box, NewRoomName: "new-room"}, "", contract.BoxSizeAgent, "", event, contract.Event{}, "", false, "")
+	_, err = s.store.StartSession(ctx, store.Session{ID: "new-root", Room: "new-room", Name: "root", Profile: "test", Box: current.Box, NewRoomName: "new-room"}, "", contract.BoxSizeAgent, "", event, contract.Event{}, "", false, "", 0)
 	if err == nil {
 		t.Fatal("expected duplicate box failure")
 	}
@@ -1665,5 +1665,57 @@ func TestSetModelFailureKeepsInputForTheProfileWake(t *testing.T) {
 	turn, inputs, profile, err := s.store.Dispatch(ctx, session, "retry", event, false)
 	if err != nil || turn != "retry" || profile != "other" || len(inputs) != 2 || inputs[0].Seq != start.Inputs[0].Delivery {
 		t.Fatalf("turn=%q profile=%q inputs=%+v err=%v", turn, profile, inputs, err)
+	}
+}
+
+func TestSessionStartClientIDRetry(t *testing.T) {
+	s, room, _, ctx := setup(t)
+	caller := contract.Principal{Kind: contract.PrincipalOwner}
+	req := contract.SessionStartRequest{Room: room, Name: "retry", Profile: "test", ClientID: "retry-key"}
+	type result struct {
+		response contract.SessionStartResponse
+		problem  *contract.Error
+	}
+	start := make(chan struct{})
+	results := make(chan result, 2)
+	for range 2 {
+		go func() {
+			<-start
+			response, problem := s.SessionStart(ctx, caller, req)
+			results <- result{response, problem}
+		}()
+	}
+	close(start)
+	first, second := <-results, <-results
+	if first.problem != nil || second.problem != nil || first.response != second.response {
+		t.Fatalf("retry: %+v %+v", first, second)
+	}
+}
+
+// A concurrent move and start cannot leave the new child beyond the depth limit.
+func TestConcurrentStartAndMoveRespectDepth(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	sibling, problem := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "sibling", Profile: "test"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	s.maxDepth = 3
+	start := make(chan struct{})
+	results := make(chan *contract.Error, 2)
+	go func() {
+		<-start
+		_, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Parent: worker, Name: "child", Profile: "test"})
+		results <- e
+	}()
+	go func() {
+		<-start
+		_, e := s.SessionMove(ctx, owner, contract.SessionMoveRequest{Session: worker, NewParent: sibling.Session})
+		results <- e
+	}()
+	close(start)
+	a, b := <-results, <-results
+	if (a == nil) == (b == nil) {
+		t.Fatalf("want exactly one success, got %v and %v", a, b)
 	}
 }
