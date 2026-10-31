@@ -19,6 +19,7 @@ import (
 
 type Profiles interface {
 	List() []contract.ProfileSummary
+	CompactionTokens(contract.ProfileName) int
 	Model(contract.ProfileName) (contract.ModelChoice, []string, error)
 }
 
