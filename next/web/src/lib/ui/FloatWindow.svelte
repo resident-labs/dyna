@@ -47,7 +47,7 @@
   style:width={docked || full ? null : `${rect.w}px`} style:height={docked || full ? null : `${rect.h}px`}
 >
   <!-- svelte-ignore a11y_no_static_element_interactions (dragging is for the pointer; Alt with an arrow key moves the window) -->
-  <header class="label" onpointerdown={event => grab(event, [1, 1, 1, 1])}>{@render header()}</header>
+  <header class="bar label" onpointerdown={event => grab(event, [1, 1, 1, 1])}>{@render header()}</header>
   {@render children()}
   {#if !docked && !full}{#each handles as [side, edges] (side)}
     <!-- svelte-ignore a11y_no_static_element_interactions (resizing is for the pointer) -->
