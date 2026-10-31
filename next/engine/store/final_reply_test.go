@@ -50,6 +50,9 @@ func TestEndTurnFinalReply(t *testing.T) {
 	if _, saved, err := s.SavedTurnSections(ctx, "turn"); err != nil || saved {
 		t.Fatalf("ended turn retains snapshot: saved=%v err=%v", saved, err)
 	}
+	if _, err := s.TurnSections(ctx, "turn", []contract.ContextSection{{Key: contract.ContextProfiles, Text: "late"}}); err == nil {
+		t.Fatal("saved a snapshot after the turn ended")
+	}
 	events, err := s.Events(ctx, "room", 0, 100, []contract.EventType{"turn.ended"})
 	if err != nil || len(events) != 1 {
 		t.Fatalf("events %+v %v", events, err)
