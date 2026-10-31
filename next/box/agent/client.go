@@ -27,7 +27,10 @@ type response struct {
 	err  error
 }
 
-type apiError struct{ status string }
+type apiError struct {
+	status string
+	code   contract.ErrorCode
+}
 
 func (e apiError) Error() string { return e.status }
 
@@ -101,7 +104,9 @@ func (c *Client) post(ctx context.Context, method contract.Method, body []byte) 
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, apiError{status: fmt.Sprintf("box API %s: %s", method, resp.Status)}
+		var detail contract.Error
+		_ = json.Unmarshal(data, &detail)
+		return nil, apiError{status: fmt.Sprintf("box API %s: %s", method, resp.Status), code: detail.Code}
 	}
 	return data, nil
 }
@@ -206,4 +211,18 @@ func (c *Client) TurnOutput(ctx context.Context, result contract.TurnEnded) erro
 	}
 	_, err = c.call(ctx, contract.MethodTurnOutput, body)
 	return err
+}
+
+func (c *Client) TranscriptFetch(ctx context.Context, req contract.TranscriptFetchRequest) (contract.TranscriptFetchResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return contract.TranscriptFetchResponse{}, err
+	}
+	data, err := c.call(ctx, contract.MethodTranscriptFetch, body)
+	if err != nil {
+		return contract.TranscriptFetchResponse{}, err
+	}
+	var result contract.TranscriptFetchResponse
+	err = json.Unmarshal(data, &result)
+	return result, err
 }

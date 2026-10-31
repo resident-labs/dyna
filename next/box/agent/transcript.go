@@ -153,3 +153,61 @@ func waitRun(ctx context.Context, errs <-chan error, runnerErrs <-chan error, cl
 		}
 	}
 }
+
+// restoreTranscripts restores engine copies only when the volume has no session files.
+func restoreTranscripts(ctx context.Context, dir string, files []contract.TranscriptFile, fetch func(context.Context, contract.TranscriptFetchRequest) (contract.TranscriptFetchResponse, error)) (err error) {
+	existing, err := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	if err != nil || len(existing) > 0 {
+		return err
+	}
+	type stagedFile struct{ temp, name string }
+	var staged []stagedFile
+	defer func() {
+		for _, file := range staged {
+			_ = os.Remove(file.temp)
+		}
+	}()
+	for i, item := range files {
+		name := filepath.Join(dir, item.Path)
+		if err := os.MkdirAll(filepath.Dir(name), 0700); err != nil {
+			return err
+		}
+		f, err := os.CreateTemp(filepath.Dir(name), ".transcript-*")
+		if err != nil {
+			return err
+		}
+		temp := f.Name()
+		staged = append(staged, stagedFile{temp: temp, name: name})
+		for offset := int64(0); offset < item.Bytes; {
+			chunk, e := fetch(ctx, contract.TranscriptFetchRequest{Path: item.Path, Offset: offset})
+			if e != nil {
+				err = e
+				break
+			}
+			if len(chunk.Bytes) == 0 || int64(len(chunk.Bytes)) > item.Bytes-offset {
+				err = io.ErrUnexpectedEOF
+				break
+			}
+			if _, err = f.Write(chunk.Bytes); err != nil {
+				break
+			}
+			offset += int64(len(chunk.Bytes))
+		}
+		if e := f.Close(); err == nil {
+			err = e
+		}
+		if err != nil {
+			return err
+		}
+		at := time.Unix(int64(i+1), 0)
+		if err := os.Chtimes(temp, at, at); err != nil {
+			return err
+		}
+	}
+	for i := len(staged) - 1; i >= 0; i-- {
+		if err := os.Rename(staged[i].temp, staged[i].name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
