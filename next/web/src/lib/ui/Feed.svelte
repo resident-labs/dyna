@@ -9,7 +9,7 @@
   import WorkRow from "./WorkRow.svelte";
   import RequestCard from "./RequestCard.svelte";
   import { TurnTranscripts } from "../transcripts.svelte.ts";
-  import { boxRow, closedSession, shortPaths, dayLabel, feedRows, type Quote, type Row } from "../feed.ts";
+  import { boxRow, closedSession, describe, formatTime, shortPaths, dayLabel, feedRows, type Quote, type Row } from "../feed.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { Conversation, PostRequest, Principal } from "../contract.gen.ts";
 
@@ -104,7 +104,14 @@
     await view.fill(filled);
     short = !(await filled());
   }
-  $effect(() => { if (view.ready) void grow(); });
+  // Pages that fill adds go above the view, and their measured height pushes the newest row down, so the open lands on
+  // it again. Only the open: this effect also reruns after each later load, and a reader paging up stays where they are.
+  let landed = false;
+  $effect(() => {
+    if (view.ready) void grow().then(() => {
+      if (!landed && view.atPresent) { landed = true; void list?.toEnd(); }
+    });
+  });
   async function older() {
     await view.loadOlder();
     await grow();
@@ -125,6 +132,7 @@
     {#snippet row(item: Item)}
       {#if item.kind === "post"}<PostRow row={item} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
         onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} onforward={() => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments })} />
+      {:else if item.kind === "notice"}<p class="hint">{describe(item.event, name)} · <time datetime={item.event.at}>{formatTime(item.event.at)}</time></p>
       {:else if item.kind === "restarted"}<p class="hint">{name(item.session)}'s box was replaced. Unpushed work in the old volume is gone.</p>
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} root={root(item.session)}
         onseen={item.label === "Turn failed" ? () => store.see(home, item.seq) : undefined}>

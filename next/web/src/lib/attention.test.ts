@@ -119,3 +119,16 @@ test("a room counts a session as failed until the owner reads past its failure, 
     assert.equal(attention.failing("a"), 0);
   } finally { globalThis.fetch = fetched; }
 });
+
+test("the owner stream keeps a room's paused state current", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ seq: 1, rooms: [{ id: "a", name: "A", paused: false, created: "", lastRead: 0, waiting: [], working: [] }] }));
+  try {
+    const attention = new Attention(() => () => {});
+    await attention.open();
+    attention.apply(event(2, "a", { type: "room.paused", body: {} }));
+    assert.equal(attention.rooms.get("a")?.paused, true);
+    attention.apply(event(3, "a", { type: "room.resumed", body: {} }));
+    assert.equal(attention.rooms.get("a")?.paused, false);
+  } finally { globalThis.fetch = original; }
+});

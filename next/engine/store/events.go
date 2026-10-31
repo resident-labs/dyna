@@ -27,7 +27,7 @@ func (s *Store) AppendEvent(tx *sql.Tx, event contract.Event) (int64, error) {
 		value := string(event.Room)
 		room = &value
 	}
-	// home is the session whose DM holds the event: a DM post, or a turn that answered in a DM.
+	// home is the session whose DM holds the event: a DM post, a turn that answered in a DM, or a stopped turn.
 	var home *contract.SessionID
 	switch body := event.Body.(type) {
 	case contract.SessionRestarted:
@@ -42,6 +42,9 @@ func (s *Store) AppendEvent(tx *sql.Tx, event contract.Event) (int64, error) {
 				home = &reply.Reply.Home.Session
 				break
 			}
+		}
+		if home == nil && body.Outcome == contract.TurnStopped {
+			home = &body.Session
 		}
 	}
 	result, err := tx.Exec("INSERT INTO events(id,at,room,type,from_kind,from_id,body,home) VALUES(?,?,?,?,?,?,?,?)", event.ID, event.Time.UnixMilli(), room, event.Body.EventType(), event.From.Kind, id, body, home)
@@ -70,7 +73,7 @@ func (s *Store) EventsPage(ctx context.Context, room contract.RoomID, afterSeq, 
 
 // OwnerEvents pages the cross-room attention events.
 func (s *Store) OwnerEvents(ctx context.Context, afterSeq int64, limit int) ([]contract.Event, error) {
-	return s.eventsPage(ctx, "", afterSeq, 0, limit, []contract.EventType{"op.requested", "op.decided", "op.ran", "turn.started", "turn.ended", "session.started", "session.closed", "box.changed"}, "", true)
+	return s.eventsPage(ctx, "", afterSeq, 0, limit, []contract.EventType{"op.requested", "op.decided", "op.ran", "turn.started", "turn.ended", "session.started", "session.closed", "box.changed", "room.paused", "room.resumed"}, "", true)
 }
 
 func (s *Store) eventsPage(ctx context.Context, room contract.RoomID, afterSeq, beforeSeq int64, limit int, types []contract.EventType, dm contract.SessionID, allRooms bool) ([]contract.Event, error) {
