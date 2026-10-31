@@ -88,10 +88,9 @@ func (f *Files) Key() (ed25519.PrivateKey, error) {
 func (f *Files) Link() (Link, error) {
 	var link Link
 	b, err := os.ReadFile(filepath.Join(f.dir, "link.json"))
-	if err != nil {
-		return link, err
+	if err == nil {
+		err = json.Unmarshal(b, &link)
 	}
-	err = json.Unmarshal(b, &link)
 	return link, err
 }
 
