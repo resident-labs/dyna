@@ -358,7 +358,14 @@ func (a *API) handler(c Caller) http.Handler {
 	})
 	if user(c) && a.files != nil {
 		files := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !hasScope(c, contract.ScopeFiles) {
+			scope := contract.ScopeFiles
+			switch r.Method {
+			case http.MethodGet, http.MethodHead:
+				scope = contract.ScopeRead
+			case http.MethodPost:
+				scope = contract.ScopeOperate
+			}
+			if !hasScope(c, scope) {
 				writeError(w, forbidden())
 				return
 			}
