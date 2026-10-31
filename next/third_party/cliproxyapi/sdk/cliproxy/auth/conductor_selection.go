@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"maps"
@@ -82,11 +83,27 @@ func isBuiltInSelector(selector Selector) bool {
 
 type requiredAuthKindContextKey struct{}
 type credentialPolicyContextKey struct{}
+type dynaEligibleContextKey struct{}
+
+// WithDynaEligibleAuth captures the private request policy before upstream execution.
+func WithDynaEligibleAuth(ctx context.Context, values []string) context.Context {
+	ids := make(map[string]struct{})
+	for _, value := range values {
+		for _, id := range strings.Split(value, ",") {
+			decoded, err := base64.RawURLEncoding.DecodeString(id)
+			if err == nil && len(decoded) != 0 {
+				ids[string(decoded)] = struct{}{}
+			}
+		}
+	}
+	return context.WithValue(ctx, dynaEligibleContextKey{}, ids)
+}
 
 type authSelectionEligibility struct {
 	requiredKind     string
 	credentialPolicy string
 	disallowFreeAuth bool
+	allowedIDs       map[string]struct{}
 }
 
 func withRequiredAuthKind(ctx context.Context, requiredKind string) context.Context {
@@ -108,6 +125,7 @@ func credentialPolicyFromContext(ctx context.Context) string {
 func authSelectionEligibilityForRequest(ctx context.Context, opts cliproxyexecutor.Options) authSelectionEligibility {
 	eligibility := authSelectionEligibility{disallowFreeAuth: disallowFreeAuthFromMetadata(opts.Metadata)}
 	if ctx != nil {
+		eligibility.allowedIDs, _ = ctx.Value(dynaEligibleContextKey{}).(map[string]struct{})
 		eligibility.requiredKind, _ = ctx.Value(requiredAuthKindContextKey{}).(string)
 		eligibility.credentialPolicy, _ = ctx.Value(credentialPolicyContextKey{}).(string)
 	}
@@ -117,6 +135,11 @@ func authSelectionEligibilityForRequest(ctx context.Context, opts cliproxyexecut
 func (e authSelectionEligibility) allows(auth *Auth) bool {
 	if auth == nil {
 		return false
+	}
+	if e.allowedIDs != nil {
+		if _, ok := e.allowedIDs[auth.ID]; !ok {
+			return false
+		}
 	}
 	if e.requiredKind != "" && auth.AuthKind() != e.requiredKind {
 		return false
