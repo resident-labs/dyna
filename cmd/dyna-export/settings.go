@@ -21,8 +21,8 @@ func readSettings(configDir string) (contract.SettingsBundle, error) {
 	}
 	return contract.SettingsBundle{
 		OwnerName: v.OwnerName, RootProfile: contract.ProfileName(v.RootProfile),
-		RulesMaxChars: v.RulesMaxChars, SubagentMaxDepth: v.SubagentMaxDepth,
-		CheckInInterval: contract.DurationMS(v.SessionCheckInInterval.Milliseconds()),
-		ShellSilence:    contract.DurationMS((time.Duration(v.ShellSilenceMinutes) * time.Minute).Milliseconds()),
+		SubagentMaxDepth: v.SubagentMaxDepth,
+		CheckInInterval:  contract.DurationMS(v.SessionCheckInInterval.Milliseconds()),
+		ShellSilence:     contract.DurationMS((time.Duration(v.ShellSilenceMinutes) * time.Minute).Milliseconds()),
 	}, nil
 }
