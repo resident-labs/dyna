@@ -120,6 +120,26 @@ func TestWakeDuringQuietPeriodPreventsStop(t *testing.T) {
 	}
 }
 
+func TestPausedWakeAllowsDormancyAndResumes(t *testing.T) {
+	s, h, room, sid, ctx := quietSession(t, 0)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	if _, problem := s.RoomPause(ctx, owner, contract.RoomPauseRequest{Room: room, Paused: true}); problem != nil {
+		t.Fatal(problem)
+	}
+	wakeSession(t, s, ctx, room, sid)
+	passLifecycle(t, s, ctx)
+	if h.stops != 1 || stateOf(t, s, ctx, sid) != contract.BoxStopped {
+		t.Fatal("paused wake kept box running")
+	}
+	if _, problem := s.RoomPause(ctx, owner, contract.RoomPauseRequest{Room: room}); problem != nil {
+		t.Fatal(problem)
+	}
+	passLifecycle(t, s, ctx)
+	if h.starts != 1 || stateOf(t, s, ctx, sid) != contract.BoxStarting {
+		t.Fatal("resume did not wake dormant box")
+	}
+}
+
 func TestWakeWithoutRoomWaitsPending(t *testing.T) {
 	s, h, room, sid, ctx := quietSession(t, 0)
 	passLifecycle(t, s, ctx)
