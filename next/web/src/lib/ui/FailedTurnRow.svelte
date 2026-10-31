@@ -29,7 +29,7 @@
 <!-- As v1's turn result, a failed turn uses the post layout: the session's avatar, then its name line and the cause. -->
 <article class="failed" {@attach seen}>
   <Avatar kind="session" name={author} {root} />
-  <p class="name"><strong style:--hue={hue(author)}>{author}</strong> <time datetime={row.at}>{formatTime(row.at)}</time>
+  <p class="name"><strong style:--hue={hue(author)}>{author}</strong> {#if row.at}<time datetime={row.at}>{formatTime(row.at)}</time>{/if}
     <StatusPill tone="failed" label={row.label} /></p>
   {#if row.cause}<p class="cause">{row.cause}</p>{/if}
 </article>

@@ -4,7 +4,7 @@
   import { APIError, call } from "../client.ts";
   import type { Attention } from "../attention.svelte.ts";
   import type { AccountUsage, Card, HostSummary, Principal, SessionListResponse } from "../contract.gen.ts";
-  import { fromNow, requestLine } from "../feed.ts";
+  import { boxReason, fromNow, requestLine } from "../feed.ts";
   import { hostMeters, watchHosts } from "../hosts.ts";
   import { busiestWindow } from "../usage.ts";
   import { distinctInitials, hue, initials as letters } from "../identity.ts";
@@ -75,15 +75,17 @@
     return count ? [{ room, count }] : [];
   }));
   const count = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
-  // Activity has one row per room, never one per session: rooms with requests first, then working rooms, each by name.
+  // Activity has one row per room, never one per session: rooms with requests or a failed box first, then working
+  // rooms, each by name. A failed box comes first in its row, with its reason, as it needs the owner.
   // A working room names its busiest agent, the one with the newest activity label. Quiet rooms fold into one line.
   let activity = $derived([...attention.rooms.values()].map(room => {
-    const working = [...attention.working.get(room.id) ?? []], asks = attention.waiting.get(room.id)?.size ?? 0;
-    const idle = Math.max(0, (attention.sessions.get(room.id)?.size ?? 0) - working.length);
+    const working = attention.busy(room.id), asks = attention.waiting.get(room.id)?.size ?? 0, broken = [...attention.broken.get(room.id) ?? []];
+    const idle = Math.max(0, (attention.sessions.get(room.id)?.size ?? 0) - working.length - broken.length);
+    const failed = broken.length > 1 ? `${broken.length} sessions failed` : broken.map(([id, failure]) => `${sessions.get(id)?.name ?? "A session"} failed · ${boxReason(failure)}`)[0];
     const [busiest, label] = [...attention.activity].findLast(([id]) => working.includes(id)) ?? [];
     const name = busiest && (sessions.get(busiest)?.name ?? (room.latest?.session === busiest ? room.latest.name : undefined));
-    const line = [asks && count(asks, "request"), working.length ? `${working.length} working` : idle ? `${idle} idle` : "No open session", name, label];
-    return { room, working, rank: asks ? 0 : working.length ? 1 : 2, line: line.filter(Boolean).join(" · ") };
+    const line = [asks && count(asks, "request"), working.length ? `${working.length} working` : idle ? `${idle} idle` : broken.length ? "" : "No open session", name, label];
+    return { room, working, failed, rank: asks || broken.length ? 0 : working.length ? 1 : 2, line: line.filter(Boolean).join(" · ") };
   }).sort((a, b) => a.rank - b.rank || a.room.name.localeCompare(b.room.name)));
   let active = $derived(activity.filter(row => row.rank < 2));
   let quiet = $derived(activity.filter(row => row.rank === 2));
@@ -114,7 +116,7 @@
   }
   // A list shows while the store has items, as in v1's Home a failed load is never "all clear";
   // its count is the rows shown.
-  const total = (sets: Map<string, Set<string>>) => [...sets.values()].reduce((sum, set) => sum + set.size, 0);
+  const total = (sets: Map<string, { size: number }>) => [...sets.values()].reduce((sum, set) => sum + set.size, 0);
   let missing = $derived(waiting.length < total(attention.waiting)
     || [...attention.rooms.keys()].some(room => !listed.has(room)));
   const roomHref = (room: string) => "/r/" + encodeURIComponent(room);
@@ -140,9 +142,12 @@
   // One sentence says what needs the owner, counted from the same store as the header's Requests button. Under it, a
   // muted line sums rooms, machines and the busiest usage window; a part with nothing to say is left out.
   let asks = $derived(total(attention.waiting));
-  let roomsWorking = $derived([...attention.working.values()].filter(set => set.size).length);
+  let workingCounts = $derived([...attention.rooms.keys()].map(room => attention.busy(room).length));
+  let roomsWorking = $derived(workingCounts.filter(Boolean).length);
   let unreachable = $derived(hosts?.filter(h => !h.reachable).length ?? 0);
+  let failing = $derived(total(attention.broken));
   let summary = $derived([
+    asks && failing && `${count(failing, "session")} failed`,
     roomsWorking && `${count(roomsWorking, "room")} working`,
     hosts?.length && count(hosts.length, "machine") + (unreachable ? `, ${unreachable} unreachable` : ""),
     accounts && busiestWindow(accounts),
@@ -152,7 +157,7 @@
 <div class="home">
   <!-- Until room.list answers, the sentence is a skeleton of the same height: Home never claims nothing waits before it knows. -->
   {#if !loaded}<p class="hero skeleton" aria-hidden="true"><i></i><i></i></p>
-  {:else}<p class="hero">{asks ? `${count(asks, "request")} ${asks === 1 ? "waits" : "wait"} for you.` : "Nothing needs you."}{#if summary}<span>{summary}</span>{/if}</p>{/if}
+  {:else}<p class="hero">{asks ? `${count(asks, "request")} ${asks === 1 ? "waits" : "wait"} for you.` : failing ? `${count(failing, "session")} failed.` : "Nothing needs you."}{#if summary}<span>{summary}</span>{/if}</p>{/if}
   <!-- Requests while any wait, then Activity, each a full-width card whose rows fill a grid of about 280 px columns. -->
   <div class="top">
     {#if asks || decided.size}<section class="card requests"><h2 tabindex="-1" bind:this={requestsHeading}>Requests{#if waiting.length}<span>{waiting.length}</span>{/if}</h2>
@@ -171,12 +176,12 @@
           <a class="open" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>Open</a></span></div>{/each}{/each}
         {#each [...decided] as [id, line] (id)}<p class="decided">{line}</p>{/each}</div>
       </section>{/if}
-    <section class="card"><h2>Activity{#if total(attention.working)}<span>{total(attention.working)} working</span>{/if}</h2>
-      {#snippet row({ room, working, line }: (typeof activity)[number])}<a class="item" href={roomHref(room.id)} onclick={navigate}>
+    <section class="card"><h2>Activity{#if roomsWorking}<span>{workingCounts.reduce((sum, n) => sum + n)} working</span>{/if}</h2>
+      {#snippet row({ room, working, failed, line }: (typeof activity)[number])}<a class="item" href={roomHref(room.id)} onclick={navigate}>
         <Avatar kind="room" name={room.name} label={initials.get(room.name)} size={28} />
-        <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{line}</span></span>
-        <!-- Who works, from two sessions on (one is named in the line): three small avatars at most, then a count. -->
-        {#if working.length > 1}<span class="stack">{#each working.slice(0, 3) as id (id)}<Avatar kind="session" name={sessions.get(id)?.name ?? ""} label={sessionInitials.get(id)} root={sessions.get(id)?.root ?? false} size={20} />{/each}
+        <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{#if failed}<StatusPill tone="failed" word label={failed} />{line && " · "}{/if}{line}</span></span>
+        <!-- Who works, from two sessions on (one is named in the line, unless a failure cuts it): three small avatars at most, then a count. -->
+        {#if working.length > 1 || failed && working.length}<span class="stack">{#each working.slice(0, 3) as id (id)}<Avatar kind="session" name={sessions.get(id)?.name ?? ""} label={sessionInitials.get(id)} root={sessions.get(id)?.root ?? false} size={20} />{/each}
           {#if working.length > 3}<span class="more-count">+{working.length - 3}</span>{/if}</span>{/if}</a>{/snippet}
       <div class="list">{#each active as item (item.room.id)}{@render row(item)}{/each}
         {#if quiet.length}<button type="button" class="item fold quiet" aria-expanded={showQuiet} onclick={() => { showQuiet = !showQuiet; }}>
