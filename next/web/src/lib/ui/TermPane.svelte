@@ -26,7 +26,7 @@
   import { onMount } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
   import type { GhosttyTerminalSurface } from "../ghostty/surface.ts";
-  import { openTerminal, type TerminalSocket, type TerminalTarget } from "../terminal.ts";
+  import { openTerminal, type TerminalTarget } from "../terminal.ts";
   // One live terminal, drawn by libghostty-vt on a canvas (see ../ghostty, vendored from v1). The socket
   // opens at the size the first fit measures; leaving closes it, and the engine hangs up the shell.
   let { target, label, onexit }: { target: TerminalTarget; label: string; onexit: (code?: number) => void } = $props();
@@ -38,18 +38,14 @@
   $effect(() => { const isDark = dark.current; surface?.setTheme(theme(isDark)); });
   onMount(() => {
     let gone = false;
-    let socket: TerminalSocket | undefined;
+    const socket = openTerminal($state.snapshot(target), { output: bytes => surface?.write(bytes), exit: code => { if (!gone) onexit(code); } });
     // The WebAssembly runtime loads only when the first terminal opens.
     import("../ghostty/surface.ts").then(async ({ GhosttyTerminalSurface: Surface }) => {
       const made = await Surface.create(host, {
         theme: theme(dark.current), font: font(),
-        onData: data => socket?.send(data),
+        onData: data => socket.send(data),
         // dispose() flushes a pending resize, so a pane that has gone opens no shell.
-        onResize: (cols, rows) => {
-          if (gone) return;
-          if (socket) socket.resize(cols, rows);
-          else socket = openTerminal($state.snapshot(target), { cols, rows }, { output: bytes => surface?.write(bytes), exit: code => { if (!gone) onexit(code); } });
-        },
+        onResize: (cols, rows) => { if (!gone) socket.resize(cols, rows); },
         // F6 moves between the app's areas, so the shell never gets it.
         onSelectionChange: () => {}, beforeKey: event => event.key !== "F6",
         onLinkActivate: text => { window.open(text, "_blank", "noopener"); },
@@ -59,7 +55,7 @@
       surface = made;
       made.focus();
     }).catch(() => { failed = true; });
-    return () => { gone = true; surface?.dispose(); surface = undefined; socket?.close(); };
+    return () => { gone = true; surface?.dispose(); surface = undefined; socket.close(); };
   });
 </script>
 
