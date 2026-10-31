@@ -20,7 +20,7 @@
   } = $props();
   const id = $props.id();
   let caret = $state(0);
-  // Escape closes the list for the @word it was open on.
+  // Escape closes the list until the next typed character, as in v1.
   let dismissed = $state(-1);
   let pick = $state(0);
   let token = $derived(sessions.length ? mentionToken(value, caret) : undefined);
@@ -74,7 +74,7 @@
     <div class="quoted">{@html render(quote.text)}</div>
     {#if quote.attachments.length}<p class="files">{count(quote.attachments.length, "file")}: {quote.attachments.map(file => file.name).join(", ")}</p>{/if}</div>{/if}
   <textarea rows="2" aria-label="Message" bind:this={element} bind:value onkeydown={keydown} {placeholder}
-    oninput={track} onclick={track} onkeyup={track} onblur={() => { dismissed = token?.start ?? -1; }} onfocus={() => { dismissed = -1; }}
+    oninput={() => { dismissed = -1; track(); }} onclick={track} onkeyup={track} onblur={() => { dismissed = token?.start ?? -1; }} onfocus={() => { dismissed = -1; }}
     role="combobox" aria-autocomplete="list" aria-expanded={matches.length > 0} aria-controls={matches.length ? `${id}-list` : undefined}
     aria-activedescendant={matches.length ? `${id}-${pick}` : undefined}></textarea>
   <div class="actions">
