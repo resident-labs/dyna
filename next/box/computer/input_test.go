@@ -27,8 +27,9 @@ func TestInputEnqueueNeverBlocks(t *testing.T) {
 	}
 }
 
-// fakePage serves a DevTools page with a 640x400 CSS viewport and records every call it gets.
-func fakePage(t *testing.T) (string, *[]message) {
+// fakePage serves a DevTools page with a 640x400 CSS viewport and records every call it gets. It answers
+// a call with an error when fail says so.
+func fakePage(t *testing.T, fail func(message) bool) (string, *[]message) {
 	t.Helper()
 	sent := &[]message{}
 	mux := http.NewServeMux()
@@ -53,6 +54,12 @@ func fakePage(t *testing.T) (string, *[]message) {
 				return
 			}
 			*sent = append(*sent, m)
+			if fail != nil && fail(m) {
+				if conn.Write(r.Context(), websocket.MessageText, []byte(fmt.Sprintf(`{"id":%d,"error":{"message":"boom"}}`, m.ID))) != nil {
+					return
+				}
+				continue
+			}
 			result := `{}`
 			if m.Method == "Page.getLayoutMetrics" {
 				result = `{"cssVisualViewport":{"clientWidth":640,"clientHeight":400}}`
@@ -66,7 +73,7 @@ func fakePage(t *testing.T) (string, *[]message) {
 }
 
 func TestInputMapsFramePixelsToCSSPixels(t *testing.T) {
-	url, sent := fakePage(t)
+	url, sent := fakePage(t, nil)
 	in := NewInput(url)
 	// The frame is twice the CSS viewport, so a click at frame (640, 400) lands at CSS (320, 200).
 	batch := contract.ComputerInputBatch{Frame: contract.FrameSize{Width: 1280, Height: 800}, Events: []contract.ComputerInput{
@@ -93,7 +100,7 @@ func TestInputMapsFramePixelsToCSSPixels(t *testing.T) {
 
 // A dropped batch may have held the release of a key or button. The next batch lifts them first.
 func TestInputReleasesHeldInputAfterOverflow(t *testing.T) {
-	url, sent := fakePage(t)
+	url, sent := fakePage(t, nil)
 	in := NewInput(url)
 	press := contract.ComputerInputBatch{Frame: contract.FrameSize{Width: 1280, Height: 800}, Events: []contract.ComputerInput{
 		{Kind: contract.InputMouseDown, Button: contract.ButtonLeft, X: 640, Y: 400},
@@ -126,5 +133,42 @@ func TestInputReleasesHeldInputAfterOverflow(t *testing.T) {
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("got:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// If a batch fails while a release is due, the release is retried at once on a new connection.
+func TestInputRetriesReleaseAfterDispatchFailure(t *testing.T) {
+	url, sent := fakePage(t, func(m message) bool {
+		return m.Method == "Input.dispatchKeyEvent" && strings.Contains(string(m.Params), `"type":"keyDown","key":"b"`)
+	})
+	in := NewInput(url)
+	frame := contract.FrameSize{Width: 1280, Height: 800}
+	press := contract.ComputerInputBatch{Frame: frame, Events: []contract.ComputerInput{
+		{Kind: contract.InputMouseDown, Button: contract.ButtonLeft, X: 640, Y: 400},
+		{Kind: contract.InputKeyDown, Key: "a"},
+	}}
+	if err := in.Send(context.Background(), false, press); err != nil {
+		t.Fatal(err)
+	}
+	*sent = nil
+	bad := contract.ComputerInputBatch{Frame: frame, Events: []contract.ComputerInput{{Kind: contract.InputKeyDown, Key: "b"}}}
+	if err := in.Send(context.Background(), true, bad); err == nil {
+		t.Fatal("want the failed batch reported")
+	}
+	defer in.d.Close()
+	got := map[string]bool{}
+	for _, m := range *sent {
+		got[m.Method+" "+string(m.Params)] = true
+	}
+	for _, want := range []string{
+		`Input.dispatchKeyEvent {"type":"keyUp","key":"a","windowsVirtualKeyCode":65}`,
+		`Input.dispatchMouseEvent {"type":"mouseReleased","x":320,"y":200,"button":"left","buttons":0,"clickCount":1,"deltaX":0,"deltaY":0}`,
+	} {
+		if !got[want] {
+			t.Fatalf("missing %s in %v", want, got)
+		}
+	}
+	if in.overflow.Load() {
+		t.Fatal("release succeeded, so no retry is owed")
 	}
 }
