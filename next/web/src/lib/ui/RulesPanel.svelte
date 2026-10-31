@@ -3,7 +3,7 @@
   import { SvelteMap } from "svelte/reactivity";
   import { call } from "../client.ts";
   import { hue } from "../identity.ts";
-  import { marks, ruleAge, ruleParts, ruleTokens, splitRule } from "../rules.ts";
+  import { marks, ruleAge, ruleLimit, ruleParts, ruleTokens, splitRule } from "../rules.ts";
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
   import PageCrumb from "./PageCrumb.svelte";
@@ -40,6 +40,8 @@
   let menuFor: number | undefined = $state();
   let copied: { number: number; word: string } | undefined = $state();
   let flash: number | undefined = $state();
+  // The rule being edited keeps its number and its place. A rule that goes away closes its edit.
+  let editing: { number: number; text: string } | undefined = $state();
   let list: HTMLElement | undefined = $state();
   let addHeight = $state(0);
   let find: HTMLInputElement | undefined = $state();
@@ -104,6 +106,31 @@
     clearTimeout(flashing);
     flashing = setTimeout(() => { flash = undefined; }, 2000);
   }
+  // A tall box must not leave Save behind the add box.
+  const showEdit = (form: HTMLElement) => form.scrollIntoView({ block: "nearest" });
+  function startEdit(rule: RoomRule) {
+    menuFor = undefined;
+    failure = "";
+    editing = { number: rule.number, text: rule.text };
+  }
+  async function endEdit(number: number) {
+    editing = undefined;
+    failure = "";
+    await tick();
+    (list?.querySelector<HTMLElement>(`[data-edit="${number}"]`) ?? element)?.focus();
+  }
+  async function saveEdit(rule: RoomRule) {
+    const text = editing?.text.trim();
+    if (!text || busy) return;
+    if (text === rule.text) { await endEdit(rule.number); return; }
+    busy = true;
+    failure = "";
+    const done = await call("rule.edit", { room: store.room, number: rule.number, text }).then(() => true, () => false);
+    busy = false;
+    // The new text shows when its rule.edited event arrives.
+    if (done) await endEdit(rule.number);
+    else failure = `Rule r${rule.number} was not changed. Try again.`;
+  }
   function copy(rule: RoomRule) {
     menuFor = undefined;
     navigator.clipboard.writeText(rule.text).then(() => "Copied", () => "Could not copy").then(word => {
@@ -156,6 +183,15 @@
             {#if removed.has(rule.number)}
               <li class="gone"><p>Rule r{rule.number} removed · <button type="button" class="link" data-undo={rule.number}
                 aria-label={`Undo: add rule r${rule.number}'s text again`} onclick={() => void undo(rule)} disabled={busy}>Undo</button></p></li>
+            {:else if editing?.number === rule.number}
+              <li data-rule={rule.number} class="editing"><span class="number">r{rule.number}</span>
+                <!-- svelte-ignore a11y_no_noninteractive_element_interactions (Esc cancels from either button) -->
+                <form class="edit" {@attach showEdit} oninput={event => showEdit(event.currentTarget)} onkeydown={event => { if (event.key === "Escape") { event.stopPropagation(); void endEdit(rule.number); } }} onsubmit={event => { event.preventDefault(); void saveEdit(rule); }}>
+                  <RuleBox bind:value={editing.text} label={`Edit rule r${rule.number}`} {busy} onsave={() => void saveEdit(rule)} oncancel={() => void endEdit(rule.number)} />
+                  <p class="keys"><span>Enter saves · Shift+Enter adds a line · Esc cancels</span>
+                    <button type="button" class="plain" onclick={() => void endEdit(rule.number)}>Cancel</button>
+                    <button type="submit" class="plain save" disabled={busy || !editing.text.trim() || [...editing.text].length > ruleLimit}>Save</button></p>
+                </form></li>
             {:else}
               {@const { lead, rest } = splitRule(rule.text)}
               <li data-rule={rule.number} tabindex="-1" class:flash={flash === rule.number}><span class="number">r{rule.number}</span>
@@ -163,12 +199,14 @@
                   style:--hue={hue(name(rule))}>{name(rule)}</span>, <time datetime={rule.at} title={new Date(rule.at).toLocaleString()}>{ruleAge(rule.at, now)}</time></span></p>
                 <!-- The bar sits on the row's top edge, in the padding and the gap above, so it never covers text. -->
                 <span class="bar">
+                  <button type="button" data-edit={rule.number} onclick={() => startEdit(rule)} aria-label={`Edit rule r${rule.number}`}>Edit</button>
                   <button type="button" onclick={() => copy(rule)} aria-label={`Copy rule r${rule.number}`}>{copied?.number === rule.number ? copied.word : "Copy"}</button>
                   <button type="button" class="remove" onclick={() => void remove(rule)} aria-label={`Remove rule r${rule.number}`}>Remove</button></span>
                 <span class="more"><button type="button" aria-label={`Rule r${rule.number} actions`} aria-haspopup="menu" aria-expanded={menuFor === rule.number}
                   onclick={async () => { menuFor = menuFor === rule.number ? undefined : rule.number; await tick(); list?.querySelector<HTMLElement>(".menu [role=menuitem]")?.focus(); }}><Icon name="more" /></button>
                   {#if menuFor === rule.number}
                   <span class="menu" role="menu" tabindex="-1" onkeydown={event => { if (event.key === "Escape") { event.stopPropagation(); menuFor = undefined; } }}>
+                    <button type="button" role="menuitem" onclick={() => startEdit(rule)}>Edit</button>
                     <button type="button" role="menuitem" onclick={() => copy(rule)}>Copy</button>
                     <button type="button" role="menuitem" onclick={() => void remove(rule)}>Remove</button></span>{/if}</span>
               </li>
@@ -244,10 +282,23 @@
   .bar button:hover { background: var(--hover); color: var(--text); }
   /* Neutral at rest: danger shows only when the owner is about to act (r16). */
   .bar .remove:hover, .bar .remove:focus-visible { color: var(--danger); }
+  .editing:hover, .editing:focus-within { background: none; }
+  .editing { padding-block: 8px; }
+  .editing .number { padding-top: 10px; }
+  .edit { grid-column: 2 / -1; min-width: 0; }
+  .keys { display: flex; align-items: center; gap: 4px; margin: 6px 0 0; color: var(--muted); font-size: 12.5px; }
+  .keys span { margin-right: auto; }
+  .plain { min-height: 28px; padding: 0 10px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+  .plain:hover { background: var(--hover); color: var(--text); }
+  .save { background: var(--selected); color: var(--text); }
+  .save:disabled { opacity: 0.5; cursor: default; }
   .more { display: none; position: relative; }
   @media (hover: none) {
     .bar { display: none; }
     .more { display: block; }
+    .keys span { display: none; }
+    .keys { justify-content: flex-end; }
+    .plain { min-height: 40px; }
     li:hover, li:focus-within { background: none; }
     li.flash { background: var(--selected); }
   }
