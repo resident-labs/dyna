@@ -48,7 +48,10 @@ try {
       const page = await context.newPage();
       await page.setViewportSize({ width, height: 900 });
       try {
-        await page.goto(origin + route);
+        await page.goto(origin + route).catch((error: unknown) => {
+          if (error instanceof Error && error.message.includes("net::ERR_NETWORK_CHANGED")) return page.goto(origin + route);
+          throw error;
+        });
         await page.locator('[data-app-ready="true"]').waitFor();
         if (route === "/") await page.locator('.home[data-page-ready="true"]').waitFor();
         else if (route === "/settings/devices" || route.startsWith("/settings/accounts") || route === "/settings/profiles")

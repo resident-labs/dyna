@@ -54,7 +54,7 @@ class ChangesTest(unittest.TestCase):
 
     def test_docs_only_change_skips_go_when_main_moved(self):
         base = self.pull_request("docs/guide.md", main_file="internal/x/x.go")
-        self.assertEqual(self.run_filter("pull_request", base), {"relay": "false", "go": "false", "computers": "false", "web": "false", "pi": "false"})
+        self.assertEqual(self.run_filter("pull_request", base), {"relay": "false", "go": "false", "computers": "false", "web": "false", "pi": "false", "next_pi": "false", "next_web": "false"})
 
     def test_tygo_config_runs_go(self):
         for path in ("tygo.yaml", "tygo/session.gen.yaml"):
@@ -70,7 +70,7 @@ class ChangesTest(unittest.TestCase):
     def test_empty_base_on_an_ordinary_commit_diffs_from_the_first_parent(self):
         self.pull_request("docs/guide.md")
         self.git("checkout", "-q", "pr")
-        self.assertEqual(self.run_filter("pull_request", ""), {"relay": "false", "go": "false", "computers": "false", "web": "false", "pi": "false"})
+        self.assertEqual(self.run_filter("pull_request", ""), {"relay": "false", "go": "false", "computers": "false", "web": "false", "pi": "false", "next_pi": "false", "next_web": "false"})
 
     def test_go_change_skips_web(self):
         base = self.pull_request("internal/x/y.go")
@@ -80,6 +80,10 @@ class ChangesTest(unittest.TestCase):
         base = self.pull_request("web/src/a.ts")
         out = self.run_filter("pull_request", base)
         self.assertEqual((out["web"], out["go"]), ("true", "true"))
+
+    def test_next_web_change_runs_width_check(self):
+        base = self.pull_request("next/web/src/App.svelte")
+        self.assertEqual(self.run_filter("pull_request", base)["next_web"], "true")
 
     def test_backend_go_file_read_by_a_web_test_runs_web(self):
         base = self.pull_request("internal/filesvc/files.go")
@@ -91,11 +95,11 @@ class ChangesTest(unittest.TestCase):
 
     def test_pi_change_runs_only_pi(self):
         base = self.pull_request("third_party/pi/packages/coding-agent/src/cli.ts", large=True)
-        self.assertEqual(self.run_filter("pull_request", base), {"relay": "false", "go": "false", "computers": "false", "web": "false", "pi": "true"})
+        self.assertEqual(self.run_filter("pull_request", base), {"relay": "false", "go": "false", "computers": "false", "web": "false", "pi": "true", "next_pi": "false", "next_web": "false"})
 
     def test_other_events_run_everything(self):
         base = self.pull_request("docs/guide.md")
-        self.assertEqual(self.run_filter("push", base), {"relay": "true", "go": "true", "computers": "true", "web": "true", "pi": "true"})
+        self.assertEqual(self.run_filter("push", base), {"relay": "true", "go": "true", "computers": "true", "web": "true", "pi": "true", "next_pi": "true", "next_web": "true"})
 
 
 if __name__ == "__main__":
