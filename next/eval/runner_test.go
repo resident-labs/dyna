@@ -20,14 +20,21 @@ func (*blockedBackend) Execute(context.Context, Cell, Fixture) (Attempt, error) 
 }
 func (*blockedBackend) Cleanup(context.Context, Cell, Fixture) error { return nil }
 
-type incompleteFixtureBackend struct{ blockedBackend }
+type incompleteFixtureBackend struct {
+	blockedBackend
+	executed bool
+}
 
 func (*incompleteFixtureBackend) Preflight(context.Context) error { return nil }
+func (b *incompleteFixtureBackend) Execute(context.Context, Cell, Fixture) (Attempt, error) {
+	b.executed = true
+	return Attempt{}, nil
+}
 
 func TestIncompleteFixtureStartsNoModel(t *testing.T) {
 	backend := &incompleteFixtureBackend{}
 	err := RunSuite(context.Background(), backend, func(CellResult) error { t.Fatal("unexpected result"); return nil })
-	if err == nil || backend.calls != 1 {
+	if err == nil || backend.calls != 1 || backend.executed {
 		t.Fatalf("err=%v prepares=%d", err, backend.calls)
 	}
 }
