@@ -13,6 +13,23 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
+func TestProviderFlowsMatchOAuthDispatch(t *testing.T) {
+	received := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received <- r.URL.Query().Get("provider")
+		_, _ = w.Write([]byte(`{"url":"https://provider.example/login","state":"invented"}`))
+	}))
+	defer server.Close()
+	proxy := &Proxy{client: &http.Client{Transport: quotaTestTransport{url: server.URL, base: http.DefaultTransport}}}
+	connections := proxy.Connections("invented", nil, time.Now)
+	for _, option := range oauthProviders {
+		result, err := connections.Start(context.Background(), contract.AccountsConnectRequest{Provider: option.info.ID})
+		if err != nil || result.Flow != option.info.ConnectFlow || <-received != option.proxy {
+			t.Fatalf("flow dispatch disagreed with catalog for %s", option.info.ID)
+		}
+	}
+}
+
 func TestConnectBindsAttemptsAndNeverExposesProxyID(t *testing.T) {
 	starts, callbacks := 0, 0
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
