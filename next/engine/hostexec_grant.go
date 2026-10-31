@@ -32,6 +32,32 @@ func (s *Service) HostexecGrant() approve.Entry {
 				}
 			}
 			var hosts []string
+			warning, unknown := false, false
+			records, err := s.store.Hosts(ctx)
+			if err != nil {
+				unknown = true
+			}
+			for _, name := range a.Hosts {
+				if name == contract.ControlPlane || name == contract.AllHosts {
+					warning = true
+					break
+				}
+				found := false
+				for _, h := range records {
+					if h.Name == name {
+						found = true
+						if h.EngineHost == nil {
+							unknown = true
+						} else if *h.EngineHost {
+							warning = true
+						}
+						break
+					}
+				}
+				if !found {
+					unknown = true
+				}
+			}
 			for _, host := range a.Hosts {
 				if host == contract.AllHosts {
 					hosts = append(hosts, "every host, including the control plane")
@@ -47,7 +73,14 @@ func (s *Service) HostexecGrant() approve.Entry {
 			if who.Session != a.To.Session {
 				run = "Let " + session.Name + " run"
 			}
-			return contract.Card{Title: "asks for host access", Target: target, Body: fmt.Sprintf("%s any command on %s %s.\nReason: %s", run, strings.Join(hosts, ", "), expiry, a.Reason)}
+			body := fmt.Sprintf("%s any command on %s %s.\nReason: %s", run, strings.Join(hosts, ", "), expiry, a.Reason)
+			if warning {
+				body += "\nThis host also runs the engine and holds the model sign-ins."
+			}
+			if unknown {
+				body += "\nThe engine cannot confirm whether a host holds the model sign-ins."
+			}
+			return contract.Card{Title: "asks for host access", Target: target, Body: body}
 		},
 		Check: func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
 			a := args.(contract.HostexecGrantArgs)
