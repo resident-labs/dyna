@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -62,40 +61,6 @@ func printVisualChecks(w io.Writer, checks []contract.VisualCheck) {
 	for _, check := range checks {
 		fmt.Fprintf(w, "%s: %s %s\n", check.Name, check.Status, check.Detail)
 	}
-}
-
-func visualImages(ctx context.Context, c client, result visual.Result, card *contract.VisualCard) error {
-	dir, err := os.MkdirTemp("", "dyna-visual-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(dir)
-	upload := func(name string, data []byte) (string, error) {
-		if len(data) == 0 {
-			return "", nil
-		}
-		path := filepath.Join(dir, name)
-		if err := os.WriteFile(path, data, 0600); err != nil {
-			return "", err
-		}
-		file, err := c.Upload(ctx, path)
-		return file.SHA256, err
-	}
-	if card.Banner, err = upload("banner.webp", result.Banner); err != nil {
-		return err
-	}
-	if card.Thumbnail, err = upload("thumbnail.webp", result.Thumb); err != nil {
-		return err
-	}
-	for _, shot := range result.Widths {
-		file, err := upload(fmt.Sprintf("%d.webp", shot.Width), shot.Image)
-		if err != nil {
-			return err
-		}
-		card.Shots = append(card.Shots, contract.VisualShot{Width: shot.Width, File: file})
-	}
-	card.Checks = result.Checks
-	return nil
 }
 
 func readVisual(path string) ([]byte, error) {

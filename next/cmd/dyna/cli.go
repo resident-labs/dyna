@@ -8,10 +8,8 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"mime"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,8 +17,9 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
-	"github.com/resident-labs/dyna/box/visual"
+	"github.com/resident-labs/dyna/box/post"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/contract/tools"
 	"github.com/spf13/cobra"
 )
 
@@ -156,32 +155,7 @@ func (c *socketClient) File(ctx context.Context, hash string, out io.Writer) err
 }
 
 func (c *socketClient) Upload(ctx context.Context, path string) (contract.Attachment, error) {
-	var attachment contract.Attachment
-	file, err := os.Open(path)
-	if err != nil {
-		return attachment, err
-	}
-	defer file.Close()
-	name := filepath.Base(path)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://dyna/v1/files?name="+url.QueryEscape(name), file)
-	if err != nil {
-		return attachment, err
-	}
-	media := mime.TypeByExtension(filepath.Ext(name))
-	if media == "" {
-		media = "application/octet-stream"
-	}
-	req.Header.Set("Content-Type", media)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return attachment, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return attachment, fmt.Errorf("upload %s: %s", name, resp.Status)
-	}
-	err = json.NewDecoder(resp.Body).Decode(&attachment)
-	return attachment, err
+	return post.UploadHTTP(ctx, c.http, path)
 }
 
 type commandExit int
@@ -542,60 +516,13 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	var allowNet bool
 	var mentions, paths []string
 	post := &cobra.Command{Use: "post TEXT", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		if (update != "" || allowNet) && htmlPath == "" {
-			return fmt.Errorf("--update and --allow-net need --html")
-		}
-		if htmlPath != "" && strings.TrimSpace(args[0]) == "" {
-			return fmt.Errorf("--html needs post text")
-		}
-		count := len(paths)
-		if htmlPath != "" {
-			count++
-		}
-		if count > 16 {
-			return fmt.Errorf("a post can carry at most 16 attachments")
-		}
 		c := getClient()
-		var attachments []contract.Attachment
-		for _, path := range paths {
-			attachment, err := c.Upload(cmd.Context(), path)
-			if err != nil {
-				return err
-			}
-			attachments = append(attachments, attachment)
+		request, checks, err := post.Prepare(cmd.Context(), c.Upload, tools.PostInput{Room: contract.RoomID(postRoom), Text: args[0], Mentions: mentions, Paths: paths, HTML: htmlPath, AllowNet: allowNet, VisualUpdate: contract.EventID(update)})
+		if err != nil {
+			return err
 		}
-		if htmlPath != "" {
-			data, err := readVisual(htmlPath)
-			if err != nil {
-				return err
-			}
-			title, height, err := visual.Meta(htmlPath, data)
-			if err != nil {
-				return err
-			}
-			card := &contract.VisualCard{Title: title, Height: height, AllowNet: allowNet}
-			result := visual.Preview(cmd.Context(), data, visual.CSP(allowNet), allowNet)
-			printVisualChecks(cmd.ErrOrStderr(), result.Checks)
-			if err := visualImages(cmd.Context(), c, result, card); err != nil {
-				return err
-			}
-			dir, err := os.MkdirTemp("", "dyna-card-")
-			if err != nil {
-				return err
-			}
-			defer os.RemoveAll(dir)
-			copyPath := filepath.Join(dir, filepath.Base(htmlPath))
-			if err = os.WriteFile(copyPath, data, 0600); err != nil {
-				return err
-			}
-			file, err := c.Upload(cmd.Context(), copyPath)
-			if err != nil {
-				return err
-			}
-			file.Visual = card
-			attachments = append(attachments, file)
-		}
-		r, err := c.Post(cmd.Context(), contract.PostRequest{Room: contract.RoomID(postRoom), Text: args[0], Mentions: mentions, Attachments: attachments, VisualUpdate: contract.EventID(update)})
+		printVisualChecks(cmd.ErrOrStderr(), checks)
+		r, err := c.Post(cmd.Context(), request)
 		if err == nil {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), r.Event)
 		}
