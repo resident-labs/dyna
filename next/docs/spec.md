@@ -40,13 +40,23 @@ The owner settled the design on the card. Writing the spec needed the decisions 
    - **Backups.** The daily `store.db` backup is also copied over SSH to a second machine. A setting names that machine; the owner chooses it.
    - **Reboot.** The user unit starts the engine again. Rootless containers do not restart after a host reboot, so the host check (5.10) marks them `stopped`, and the next wake starts them.
 
+### Settled owner decisions (do not reopen)
+
+The owner settled these. A review does not raise them as findings, and only the owner reopens them.
+
+1. **Root's default host exec includes the control plane** (decision 6; owner, q50). Root can therefore reach the control plane's model sign-ins and GitHub token. This is the one exception to goal 3, by owner decision.
+2. **No Claude Code fallback adapter** (decision 4; owner, q51). Pi is the only harness, and the accepted risk in decision 4 stays.
+3. **The library is cut** from v2 for now (decision 9; owner, 2026-10-30).
+4. **Integration tests only for important owner-facing features**: one or two each, and no end-to-end tests in the repository (10.1; owner, 2026-10-30).
+5. **No cutover rollback step** (goal 6; owner, 2026-10-31). The cutover has no step that restores v1 service. The frozen backup and the dry-run gate bound the data risk.
+
 ## 1. Goals and non-goals
 
 ### Goals
 
 1. **Agents never load the owner's machine.** Every session runs in a box on a capacity host. The control plane runs no agents, builds or tests.
 2. **One contract.** Events, operations, grants, the API and the migration bundle are defined once in `contract/`. The engine, the CLI, the box agent and the web app use the same types. TypeScript is generated.
-3. **No secret in a box.** Model calls, git, GitHub writes and host commands go through the engine. The engine knows the caller by its socket.
+3. **No secret in a box, with one exception by owner decision.** Model calls, git, GitHub writes and host commands go through the engine. The engine knows the caller by its socket. The exception is root: its default host exec includes the control plane, which holds the model sign-ins and the GitHub token (settled decision 1).
 4. **Small and legible.** v1 has about 260,000 lines of Go (without tests) in 138 packages. v2 targets under 60,000 lines at the cutover, in nine top-level packages, with no compatibility code.
 5. **Fast, honest tests.** The repository holds fast unit tests, plus one or two fast integration tests for each important owner-facing feature. A person or agent checks each milestone end to end by hand in a sandbox (section 10).
 6. **A clean cutover.** One bundle, one commit, no rollback. The store guard protects every other install.
