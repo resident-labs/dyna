@@ -168,7 +168,7 @@ func seedRoom(ctx context.Context, s *engine.Service, posts int) {
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	room, e1 := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "web-studio", RootProfile: "fake"})
 	lead, e2 := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "lead-web", Profile: "fake", Goal: "Build the room view"})
-	child, e3 := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "builder-feed", Parent: lead.Session, Profile: "fake", Goal: "Build the feed", Brief: "Build the feed rows."})
+	child, e3 := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "builder-feed", Parent: lead.Session, Profile: "fake", Goal: "Build the feed", Brief: "[fail] Build the feed rows."})
 	for _, e := range []*contract.Error{e1, e2, e3} {
 		if e != nil {
 			log.Fatal(e.Message)

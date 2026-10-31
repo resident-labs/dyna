@@ -12,6 +12,8 @@ export class RoomStore {
   readonly sessions = new SvelteMap<string, SessionStarted>();
   readonly boxes = new SvelteMap<string, BoxState>();
   readonly turns = new SvelteMap<string, string>();
+  // The running turn's latest activity label per session, such as "read spec.md".
+  readonly activity = new SvelteMap<string, string>();
   readonly failed = new SvelteSet<string>();
   // Sessions whose box runs a computer the owner can watch.
   readonly computers = new SvelteSet<string>();
@@ -62,6 +64,7 @@ export class RoomStore {
       this.names.set(session.id, session.name);
       this.boxes.set(session.id, session.boxState);
       if (session.turn) this.turns.set(session.id, session.turn);
+      if (session.turn && session.activity) this.activity.set(session.id, session.activity);
       if (session.lastOutcome === "failed") this.failed.add(session.id);
       if (session.computer === "running") this.computers.add(session.id);
     }
@@ -83,6 +86,11 @@ export class RoomStore {
   leave(window: EventWindow): void { this.windows.delete(window); }
 
   apply(event: Event): void {
+    // A live activity label has seq 0 and never reaches a window; a label of another turn is stale.
+    if (event.type === "turn.activity") {
+      if (this.turns.get(event.body.session) === event.body.turn) this.activity.set(event.body.session, event.body.label);
+      return;
+    }
     if (event.seq <= this.head) return;
     this.head = event.seq;
     this.step(event);
@@ -95,7 +103,10 @@ export class RoomStore {
         this.sessions.set(event.body.session, event.body);
         this.names.set(event.body.session, event.body.name);
         break;
-      case "session.closed": this.sessions.delete(event.body.session); break;
+      case "session.closed":
+        this.sessions.delete(event.body.session);
+        this.activity.delete(event.body.session);
+        break;
       case "session.moved": {
         const moved = this.sessions.get(event.body.session);
         if (moved) this.sessions.set(event.body.session, { ...moved, parent: event.body.newParent });
@@ -110,11 +121,18 @@ export class RoomStore {
         if (event.body.to === "running") this.computers.add(event.body.session);
         else this.computers.delete(event.body.session);
         break;
-      case "turn.started": this.turns.set(event.body.session, event.body.turn); break;
+      case "turn.started":
+        this.turns.set(event.body.session, event.body.turn);
+        this.activity.delete(event.body.session);
+        break;
       case "turn.ended":
-        if (this.turns.get(event.body.session) === event.body.turn) this.turns.delete(event.body.session);
+        if (this.turns.get(event.body.session) === event.body.turn) {
+          this.turns.delete(event.body.session);
+          this.activity.delete(event.body.session);
+        }
+        // Only a completed turn clears the Failed pill; a stopped turn did not succeed.
         if (event.body.outcome === "failed") this.failed.add(event.body.session);
-        else this.failed.delete(event.body.session);
+        else if (event.body.outcome === "completed") this.failed.delete(event.body.session);
         break;
       case "op.requested": this.operations.set(event.body.id, event.body); break;
       case "op.decided": case "op.ran":
