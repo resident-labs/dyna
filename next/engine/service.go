@@ -682,8 +682,9 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if e := s.roomAccess(ctx, caller, req.Room); e != nil {
 		return contract.PostResponse{}, e
 	}
-	if strings.TrimSpace(req.Text) == "" {
-		return contract.PostResponse{}, invalid("post text is required")
+	// A post carries text, files or both.
+	if strings.TrimSpace(req.Text) == "" && len(req.Attachments) == 0 {
+		return contract.PostResponse{}, invalid("post text or a file is required")
 	}
 	if len(req.Attachments) > 16 {
 		return contract.PostResponse{}, invalid("too many attachments")
