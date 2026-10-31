@@ -1,12 +1,13 @@
 <script lang="ts">
   import Avatar from "./Avatar.svelte";
   import { hue } from "../identity.ts";
-  // One sessions panel row: the avatar, the name in its identity color, and one muted status line.
+  // One sessions panel row: the avatar, the name in its identity color, and a muted status line only when there is
+  // state to show; an idle session is one line.
   let { name, status, root }: { name: string; status: string; root: boolean } = $props();
 </script>
 
 <Avatar kind="session" {name} {root} size={28} />
-<span class="who"><span class="name" style:--hue={hue(name)}>{name}</span><span class="status">{status}</span></span>
+<span class="who"><span class="name" style:--hue={hue(name)}>{name}</span>{#if status}<span class="status">{status}</span>{/if}</span>
 
 <style>
   .who { flex: 1; min-width: 0; display: grid; line-height: 1.3; }
