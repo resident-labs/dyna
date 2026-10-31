@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-var ErrNoGrant = errors.New("no-grant")
+var ErrNoGrant = errors.New("no_grant")
 
 func Match(grants []contract.Grant, host contract.HostName, now time.Time) (contract.Grant, error) {
 	for _, grant := range grants {
