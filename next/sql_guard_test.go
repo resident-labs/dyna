@@ -33,7 +33,6 @@ var sqlAllowlist = map[string]int{
 	"engine/computer.go":        2,
 	"engine/control.go":         3,
 	"engine/files.go":           5,
-	"engine/hostexec_grant.go":  2,
 	"engine/hostexec_run.go":    1,
 	"engine/lifecycle/close.go": 1,
 	"engine/lists.go":           7,
