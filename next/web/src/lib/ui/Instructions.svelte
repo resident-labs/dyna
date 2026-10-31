@@ -66,7 +66,7 @@
     const current = generation;
     try {
       const result = await call("instructions.get", request());
-      if (current !== generation) return;
+      if (current !== generation || saving) return;
       if (result.hash !== hash) {
         if (draft !== base) other = result;
         else { base = draft = result.text; hash = result.hash; savedAt = result.savedAt ?? undefined; }
@@ -74,15 +74,18 @@
     } catch { /* The open editor keeps its draft when the engine is offline. */ }
   }
   async function save(overwrite = false) {
-    if (saving || loading || failed || draft === base) return;
+    if (saving || loading || failed || (draft === base && !(overwrite && other))) return;
     saving = true; saveFailed = false;
     const text = draft;
     try {
       const result = await call("instructions.set", { ...request(), text, base: overwrite && other ? other.hash : hash });
       clearDrafts(); hash = result.hash; base = text; other = undefined;
       keepDraft();
-      const current = await call("instructions.get", request());
-      savedAt = current.savedAt ?? undefined;
+      savedAt = new Date().toISOString();
+      try {
+        const current = await call("instructions.get", request());
+        if (current.hash === hash) savedAt = current.savedAt ?? savedAt;
+      } catch { /* The save succeeded even if its timestamp cannot be refreshed. */ }
     } catch (error: unknown) {
       if (error instanceof APIError && error.detail.code === "stale") {
         try { other = await call("instructions.get", request()); }
@@ -94,9 +97,14 @@
     if (!other) return;
     clearDrafts(); base = draft = other.text; hash = other.hash; savedAt = other.savedAt ?? undefined; other = undefined;
   }
-  function discard() { clearDrafts(); draft = base; other = undefined; }
-  function find() {
-    if (!search || !editor) return;
+  function discard() {
+    if (other) { useTheirs(); return; }
+    clearDrafts(); draft = base;
+  }
+  async function find() {
+    if (!search) return;
+    mobile = "edit"; await tick();
+    if (!editor) return;
     const at = draft.toLocaleLowerCase().indexOf(search.toLocaleLowerCase(), editor.selectionEnd);
     const found = at < 0 ? draft.toLocaleLowerCase().indexOf(search.toLocaleLowerCase()) : at;
     if (found >= 0) { editor.focus(); editor.setSelectionRange(found, found + search.length); }
@@ -108,7 +116,7 @@
     editor.scrollTop = Math.max(0, (line - 3) * 20);
   }
   function keys(event: KeyboardEvent) {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void save(); }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); if (!other) void save(); }
     else if (event.key === "/" && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) {
       event.preventDefault(); finder?.focus();
     }
@@ -141,7 +149,7 @@
       <section class:mobile-hidden={mobile !== "edit"} class="edit" aria-label="Instruction editor">
         <p class="facts">{selected === "room" ? `Every session in ${roomName} reads this file after the file for all rooms.` : "Every session reads this file first."}
           <span>·</span> <b>{count}</b> items <span>·</span> about <b>{tokens.toLocaleString()}</b> tokens <span>·</span> {savedLabel.toLowerCase()}</p>
-        <label class="find">Find in file <input bind:this={finder} bind:value={search} onkeydown={event => { if (event.key === "Enter") { event.preventDefault(); find(); } }} placeholder="Find text" /></label>
+        <label class="find">Find in file <input bind:this={finder} bind:value={search} onkeydown={event => { if (event.key === "Enter") { event.preventDefault(); void find(); } }} placeholder="Find text" /></label>
         <textarea bind:this={editor} value={draft} oninput={event => { draft = event.currentTarget.value; keepDraft(); }} spellcheck="false"
           placeholder={selected === "room" ? `Write instructions for every session in ${roomName}` : "Write instructions for every session"} aria-label="Markdown instructions"></textarea>
         <p class="editor-foot">{draft === base ? savedLabel : `${changed.length} lines changed`}</p>
@@ -180,14 +188,14 @@
           </div>
         {/if}
         <div class="actions">
-          {#if other}<button type="button" onclick={useTheirs}>Use theirs</button><button class="primary" type="button" disabled={saving} onclick={() => void save(true)}>Save mine over it</button>
+          {#if other}<button type="button" disabled={saving} onclick={useTheirs}>Use theirs</button><button class="primary" type="button" disabled={saving} onclick={() => void save(true)}>Save mine over it</button>
           {:else}<button type="button" disabled={draft === base} onclick={discard}>Discard</button><button class="primary" type="button" disabled={saving || draft === base} onclick={() => void save()}>Save</button>{/if}
         </div>
       </aside>
     </div>
     <div class="mobile-save">
       <span>{draft === base ? savedLabel : `${changed.length} lines changed`}</span>
-      {#if other}<button type="button" onclick={useTheirs}>Use theirs</button><button class="primary" type="button" onclick={() => void save(true)}>Save mine</button>
+      {#if other}<button type="button" disabled={saving} onclick={useTheirs}>Use theirs</button><button class="primary" type="button" disabled={saving} onclick={() => void save(true)}>Save mine</button>
       {:else}<button class="primary" type="button" disabled={saving || draft === base} onclick={() => void save()}>Save</button>{/if}
     </div>
   {/if}
@@ -223,6 +231,6 @@
     header { padding: 0 8px; }.crumb, .slash { display: none; }.files button { min-height: 40px; }
     .mobile-tabs { display: flex; padding: 4px 8px; border-bottom: 1px solid var(--line); }.mobile-tabs button { min-height: 40px; }
     .mobile-hidden { display: none !important; }.edit { padding: 12px; }.facts { line-height: 1.4; }.find input { min-height: 40px; }.body aside { width: 100%; border: 0; }.actions { display: none; }
-    .mobile-save { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }.mobile-save button { min-height: 40px; }.back { min-width: 40px; min-height: 40px; }
+    .mobile-save { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }.mobile-save button, .line-number, .error button { min-height: 40px; }.back { min-width: 40px; min-height: 40px; }
   }
 </style>
