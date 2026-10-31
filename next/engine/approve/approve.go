@@ -20,7 +20,7 @@ var ErrConflict = errors.New("operation is no longer pending")
 
 type Entry struct {
 	Class   func(contract.OpArgs, contract.Principal) contract.Class
-	Card    func(contract.OpArgs, contract.Principal) contract.Card
+	Card    func(context.Context, contract.OpArgs, contract.Principal) contract.Card
 	Check   func(context.Context, contract.OpArgs, contract.Principal) error
 	Execute func(context.Context, contract.OpArgs, contract.Principal) contract.OpResult
 	Decode  func(json.RawMessage) (contract.OpArgs, error)
@@ -103,7 +103,7 @@ func (s *Service) Submit(ctx context.Context, who contract.Principal, input cont
 	if err != nil {
 		return contract.Operation{}, err
 	}
-	op := contract.Operation{ID: contract.OpID(id), Kind: kind, Room: input.Room, By: who, Args: input.Args, Class: class, Card: entry.Card(input.Args, who), State: contract.OpPending, Created: now, Expires: now.Add(s.Expiry)}
+	op := contract.Operation{ID: contract.OpID(id), Kind: kind, Room: input.Room, By: who, Args: input.Args, Class: class, Card: entry.Card(ctx, input.Args, who), State: contract.OpPending, Created: now, Expires: now.Add(s.Expiry)}
 	if immediate {
 		op.State = contract.OpApproved
 	}
