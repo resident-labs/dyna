@@ -19,7 +19,7 @@
   .unit { margin-left: 4px; color: var(--muted); font-size: 12.5px; }
   .track { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--text) 7%, transparent); overflow: hidden; }
   .fill { display: block; height: 100%; background: color-mix(in srgb, var(--muted) 70%, transparent); }
-  .text { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .text { overflow: hidden; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
   .busy strong, .busy .text { color: var(--attention); }
   .busy .fill { background: var(--attention); }
 </style>
