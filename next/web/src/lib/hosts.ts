@@ -30,11 +30,13 @@ export function lastSeen(h: HostSummary, now: number): string | undefined {
   return "Last seen " + (minutes < 1 ? "just now" : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`);
 }
 
-// The sessions panel's foot: up to 3 reachable hosts that report load, busiest first by the higher of CPU and memory.
-export function hostLoads(hosts: HostSummary[]): { name: string; meters: Meter[] }[] {
+// The sessions panel's foot: at most 3 hosts. Unreachable hosts come first, since they need attention; then the
+// reachable ones that report load, busiest first by the higher of CPU and memory.
+export function hostLoads(hosts: HostSummary[]): { name: string; reachable: boolean; meters: Meter[] }[] {
   const load = (meters: Meter[]) => Math.max(...meters.map(m => m.percent));
-  return hosts.filter(h => h.reachable).map(h => ({ name: h.name, meters: hostMeters(h).slice(0, 2) })).filter(h => h.meters.length)
-    .sort((a, b) => load(b.meters) - load(a.meters)).slice(0, 3);
+  const loads = hosts.filter(h => h.reachable).map(h => ({ name: h.name, reachable: true, meters: hostMeters(h).slice(0, 2) }))
+    .filter(h => h.meters.length).sort((a, b) => load(b.meters) - load(a.meters));
+  return [...hosts.filter(h => !h.reachable).map(h => ({ name: h.name, reachable: false, meters: [] })), ...loads].slice(0, 3);
 }
 
 // host.list now, then every 10 s to match the engine's beat, only while the page is visible. A tick skips while a
