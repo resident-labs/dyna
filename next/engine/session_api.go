@@ -49,11 +49,17 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	if _, ok := box.Size(req.Size); req.Size != "" && !ok {
 		return contract.SessionStartResponse{}, invalid("unknown size")
 	}
-	if _, _, err := s.profiles.Model(req.Profile); err != nil {
+	choice, allowed, err := s.profiles.Model(req.Profile)
+	if err != nil {
 		if roomName != "" {
 			return contract.SessionStartResponse{}, invalid("unknown profile")
 		}
 		return contract.SessionStartResponse{}, failure(err)
+	}
+	if s.modelNamespace != nil {
+		if _, err := s.modelNamespace(choice, allowed); err != nil {
+			return contract.SessionStartResponse{}, invalid(err.Error())
+		}
 	}
 	tree, err := s.store.RoomTree(ctx, req.Room)
 	if err != nil {
@@ -248,8 +254,14 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 	if problem != nil {
 		return response, problem
 	}
-	if _, _, err := s.profiles.Model(req.Profile); err != nil {
+	choice, allowed, err := s.profiles.Model(req.Profile)
+	if err != nil {
 		return response, invalid("unknown profile")
+	}
+	if s.modelNamespace != nil {
+		if _, err := s.modelNamespace(choice, allowed); err != nil {
+			return response, invalid(err.Error())
+		}
 	}
 	event, err := s.event(target.Room, caller, contract.SessionProfileChanged{Session: target.ID, Profile: req.Profile})
 	if err != nil {

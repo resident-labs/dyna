@@ -25,8 +25,8 @@ type RouteError struct {
 
 // Handler returns a route bound to one session and its allowed models.
 // socket is the proxy listener; clientKey never leaves the engine.
-func Handler(socket string, clientKey, sessionID string, allowedModels, eligibleIDs []string) http.Handler {
-	return handler(unixClient(socket), clientKey, sessionID, allowedModels, eligibleIDs)
+func Handler(socket string, clientKey, sessionID, namespace string, allowedModels, eligibleIDs []string) http.Handler {
+	return handler(unixClient(socket), clientKey, sessionID, namespace, allowedModels, eligibleIDs)
 }
 
 func unixClient(socket string) *http.Client {
@@ -35,7 +35,7 @@ func unixClient(socket string) *http.Client {
 	}}, Timeout: 30 * time.Second}
 }
 
-func handler(client *http.Client, clientKey, sessionID string, allowedModels, eligibleIDs []string) http.Handler {
+func handler(client *http.Client, clientKey, sessionID, namespace string, allowedModels, eligibleIDs []string) http.Handler {
 	allowed := make(map[string]struct{}, len(allowedModels))
 	for _, name := range allowedModels {
 		allowed[name] = struct{}{}
@@ -44,14 +44,17 @@ func handler(client *http.Client, clientKey, sessionID string, allowedModels, el
 	proxy.Transport = client.Transport
 	proxy.FlushInterval = -1
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/model/v1/messages", "/model/v1/chat/completions", "/model/v1/responses":
-			if r.Method != http.MethodPost {
-				refuse(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST is supported.")
-				return
-			}
-		default:
+		gemini := strings.HasPrefix(r.URL.Path, "/model/v1beta/models/") && (strings.HasSuffix(r.URL.Path, ":generateContent") || strings.HasSuffix(r.URL.Path, ":streamGenerateContent"))
+		if r.URL.Path != "/model/v1/messages" && r.URL.Path != "/model/v1/chat/completions" && r.URL.Path != "/model/v1/responses" && !gemini {
 			refuse(w, http.StatusNotFound, "unsupported_route", "The model endpoint is not supported.")
+			return
+		}
+		if r.Method != http.MethodPost {
+			refuse(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST is supported.")
+			return
+		}
+		if namespace == "" || (gemini && strings.HasPrefix(namespace, "plan_")) {
+			refuse(w, http.StatusForbidden, "model_forbidden", "The profile does not allow this model.")
 			return
 		}
 		body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBytes+1))
@@ -63,54 +66,74 @@ func handler(client *http.Client, clientKey, sessionID string, allowedModels, el
 			refuse(w, http.StatusRequestEntityTooLarge, "request_too_large", "Model request exceeds 32 MiB.")
 			return
 		}
-		decoder := json.NewDecoder(bytes.NewReader(body))
-		token, err := decoder.Token()
-		if err != nil || token != json.Delim('{') {
-			refuse(w, http.StatusBadRequest, "invalid_request", "A model is required.")
-			return
-		}
-		var model string
-		seenModel := false
-		valid := true
-		for decoder.More() {
-			key, err := decoder.Token()
-			if err != nil {
-				valid = false
-				break
+		if gemini {
+			modelAction := strings.TrimPrefix(r.URL.Path, "/model/v1beta/models/")
+			model, action, _ := strings.Cut(modelAction, ":")
+			if _, ok := allowed[model]; !ok || len(eligibleIDs) == 0 {
+				refuse(w, http.StatusForbidden, "model_forbidden", "The profile does not allow this model.")
+				return
 			}
-			var value json.RawMessage
-			if decoder.Decode(&value) != nil {
-				valid = false
-				break
+			r.URL.Path = "/model/v1beta/models/" + namespace + "/" + model + ":" + action
+			r.URL.RawPath = "/model/v1beta/models/" + url.PathEscape(namespace) + "%2F" + url.PathEscape(model) + ":" + action
+		} else {
+			decoder := json.NewDecoder(bytes.NewReader(body))
+			token, err := decoder.Token()
+			if err != nil || token != json.Delim('{') {
+				refuse(w, http.StatusBadRequest, "invalid_request", "A model is required.")
+				return
 			}
-			if key == "model" {
-				if seenModel || json.Unmarshal(value, &model) != nil {
+			var model string
+			var valueStart, valueEnd int64
+			seenModel := false
+			valid := true
+			for decoder.More() {
+				key, err := decoder.Token()
+				if err != nil {
 					valid = false
 					break
 				}
-				seenModel = true
+				var value json.RawMessage
+				if decoder.Decode(&value) != nil {
+					valid = false
+					break
+				}
+				if key == "model" {
+					if seenModel || json.Unmarshal(value, &model) != nil {
+						valid = false
+						break
+					}
+					valueEnd = decoder.InputOffset()
+					valueStart = valueEnd - int64(len(value))
+					seenModel = true
+				}
 			}
-		}
-		if valid {
-			_, err = decoder.Token()
-			valid = err == nil && decoder.Decode(new(json.RawMessage)) == io.EOF
-		}
-		if !valid || model == "" {
-			refuse(w, http.StatusBadRequest, "invalid_request", "A model is required.")
-			return
-		}
-		if _, ok := allowed[model]; !ok {
-			refuse(w, http.StatusForbidden, "model_forbidden", "The profile does not allow this model.")
-			return
-		}
-		if len(eligibleIDs) == 0 {
-			refuse(w, http.StatusForbidden, "account_forbidden", "No account is available to this room.")
-			return
+			if valid {
+				_, err = decoder.Token()
+				valid = err == nil && decoder.Decode(new(json.RawMessage)) == io.EOF
+			}
+			if !valid || model == "" {
+				refuse(w, http.StatusBadRequest, "invalid_request", "A model is required.")
+				return
+			}
+			if _, ok := allowed[model]; !ok {
+				refuse(w, http.StatusForbidden, "model_forbidden", "The profile does not allow this model.")
+				return
+			}
+			if len(eligibleIDs) == 0 {
+				refuse(w, http.StatusForbidden, "account_forbidden", "No account is available to this room.")
+				return
+			}
+			encoded, _ := json.Marshal(namespace + "/" + model)
+			body = append(append(append([]byte(nil), body[:valueStart]...), encoded...), body[valueEnd:]...)
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		r.ContentLength = int64(len(body))
 		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/model")
-		r.URL.RawPath = ""
+		if gemini {
+			r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, "/model")
+		} else {
+			r.URL.RawPath = ""
+		}
 		query := r.URL.Query()
 		for _, name := range []string{"key", "api_key", "access_token"} {
 			query.Del(name)

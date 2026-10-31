@@ -8,6 +8,8 @@ import (
 	"net/http/httputil"
 	"strings"
 	"time"
+
+	"github.com/resident-labs/dyna/contract"
 )
 
 // ModelRoute forwards the incoming HTTP request over the box socket without retry.
@@ -49,10 +51,10 @@ type ModelsConfig struct {
 	Providers map[string]ModelProvider `json:"providers"`
 }
 
-func Models() ModelsConfig {
-	origin := "http://127.0.0.1:7781"
-	return ModelsConfig{Providers: map[string]ModelProvider{
-		"anthropic": {BaseURL: origin, APIKey: "box"},
-		"openai":    {BaseURL: origin + "/v1", APIKey: "box"},
-	}}
+func Models(routes map[contract.ModelProvider]string) ModelsConfig {
+	providers := make(map[string]ModelProvider, len(routes))
+	for provider, suffix := range routes {
+		providers[string(provider)] = ModelProvider{BaseURL: "http://127.0.0.1:7781" + suffix, APIKey: "box"}
+	}
+	return ModelsConfig{Providers: providers}
 }

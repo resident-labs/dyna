@@ -459,6 +459,8 @@ The bundle has mode 0700. It contains no raw secrets but does contain device tok
 
 Sessions are not imported. Each imported author is `ImportedAuthor{Kind, Label}`, with kind `owner`, `session` or `engine` and the v1 address as display-only text. Only new room roots get real session IDs. An unanswered question whose asker is gone goes to root; root assigns unheld goals. Each open session gets a handoff card with name, profile, parent, goals, archive ref and last post, capped at 2,000 characters. Sessions, turns, harness conversations, CI results, shell output and jobs do not carry over. `archive/` holds feeds, files, transcripts, finished goals and closed issues, with a manifest of paths, sizes and hashes; it is never imported.
 
+The importer maps the legacy account provider `kimi` to `kimi-coding`.
+
 ### 8.2 How the exporter gets the types
 
 The v1 module adds `cmd/dyna-export`, which imports `next/contract` through a `go.mod` replace. The contract uses only the standard library. Old CI compares `go list -m all` with and without the replace: only `github.com/resident-labs/dyna` may differ. Build the exporter only at `v1-final`; the cutover removes the old module and replace. Build steps that copy `go.mod` also copy `next/go.mod`.

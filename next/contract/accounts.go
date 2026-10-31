@@ -25,13 +25,6 @@ type AccountsActionArgs struct {
 func (AccountsActionArgs) OpKind() OpKind { return "accounts.action" }
 func (AccountsActionArgs) isOpArgs()      {}
 
-type ConnectMethod string
-
-const (
-	ConnectOAuth ConnectMethod = "oauth"
-	ConnectKey   ConnectMethod = "key"
-)
-
 type AccountState string
 
 const (
@@ -42,13 +35,20 @@ const (
 	AccountFailedState   AccountState = "failed"
 )
 
+type CatalogModel struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type AccountProviderInfo struct {
-	ID            AccountProvider `json:"id"`
-	DisplayName   string          `json:"displayName"`
-	ConnectMethod ConnectMethod   `json:"connectMethod"`
-	ConnectFlow   ConnectFlow     `json:"connectFlow"`
+	ID          AccountProvider `json:"id"`
+	DisplayName string          `json:"displayName"`
+	Flows       []ConnectFlow   `json:"flows"`
+	KeyName     string          `json:"keyName,omitempty"`
+	Models      []CatalogModel  `json:"models"`
 }
 type Account struct {
+	Flow     ConnectFlow          `json:"flow"`
 	ID       AccountID            `json:"id"`
 	Provider AccountProvider      `json:"provider"`
 	Label    string               `json:"label"`
@@ -138,6 +138,7 @@ type AccountsSetLimitsRequest struct {
 }
 type AccountsSetLimitsResponse struct{}
 type Profile struct {
+	Billing        ModelBilling  `json:"billing,omitempty"`
 	Description    string        `json:"description"`
 	Taste          int           `json:"taste"`
 	Diagnostics    int           `json:"diagnostics"`

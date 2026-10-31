@@ -23,7 +23,7 @@ import (
 
 type oauthProxyService interface {
 	DeleteDynaCredential(context.Context, string) error
-	ActivateDynaCredential(context.Context, string, string) error
+	ActivateDynaCredential(context.Context, string, string, string) error
 }
 
 // proxyOAuthComplete keeps an ordinary rejected attempt local to its credential.
@@ -45,7 +45,7 @@ func proxyOAuthComplete(client *rpc.Client, credentials *proxyStore, service oau
 	if !bound {
 		return errors.New("account completion unavailable")
 	}
-	return service.ActivateDynaCredential(context.Background(), id, "")
+	return service.ActivateDynaCredential(context.Background(), id, result.Model, result.Prefix)
 }
 
 func proxyCommand() *cobra.Command {
@@ -65,7 +65,7 @@ func proxyCommand() *cobra.Command {
 		storeConn := os.NewFile(4, "proxy-store.sock")
 		client := rpc.NewClient(storeConn)
 		defer client.Close()
-		credentials := &proxyStore{client: client}
+		credentials := &proxyStore{client: client, catalog: cfg.OpenAICompatibility}
 		sdkauth.RegisterTokenStore(credentials)
 		cliproxy.EnableDynaMemoryOAuthCallbacks()
 		var service *cliproxy.Service

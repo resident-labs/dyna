@@ -7,9 +7,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/resident-labs/dyna/contract"
-	"github.com/resident-labs/dyna/engine/model"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -17,6 +17,17 @@ type proxyKeyRequest struct {
 	ID       string                   `json:"id"`
 	Provider contract.AccountProvider `json:"provider"`
 	Key      string                   `json:"key"`
+}
+
+func keyAuth(provider config.OpenAICompatibility, id, key string) *coreauth.Auth {
+	name := provider.Name
+	// The proxy SDK defines credential metadata as map[string]any.
+	return &coreauth.Auth{
+		ID: id, Provider: "openai-compatible-" + name, Label: name,
+		Prefix: name, Status: coreauth.StatusActive,
+		Attributes: map[string]string{"api_key": key, "auth_kind": "apikey", "base_url": provider.BaseURL, "compat_name": name, "provider_key": "openai-compatible-" + name, "dyna_provider": name},
+		Metadata:   map[string]any{"type": "openai-compatibility"},
+	}
 }
 
 func validProxyKeyID(id string) bool {
@@ -40,20 +51,11 @@ func proxyKeyRoutes(router *gin.Engine, service **cliproxy.Service, credentials 
 			c.Status(http.StatusBadRequest)
 			return
 		}
-		for _, provider := range model.KeyProviders() {
-			if provider.Provider != req.Provider {
+		for _, provider := range credentials.catalog {
+			if provider.Name != string(req.Provider) {
 				continue
 			}
-			name := string(provider.Provider)
-			// The proxy SDK defines provider metadata as map[string]any.
-			auth := &coreauth.Auth{
-				ID:         req.ID,
-				Provider:   "openai-compatible-" + name,
-				Label:      name,
-				Status:     coreauth.StatusActive,
-				Attributes: map[string]string{"api_key": req.Key, "auth_kind": "apikey", "base_url": provider.URL, "compat_name": name, "provider_key": "openai-compatible-" + name},
-				Metadata:   map[string]any{"type": "openai-compatibility"},
-			}
+			auth := keyAuth(provider, req.ID, req.Key)
 			if err := (*service).RegisterDynaCredential(c.Request.Context(), auth); err != nil {
 				c.Status(http.StatusServiceUnavailable)
 				return
@@ -82,15 +84,16 @@ func proxyKeyRoutes(router *gin.Engine, service **cliproxy.Service, credentials 
 	})
 	dyna.POST("/credentials/activate", func(c *gin.Context) {
 		var req struct {
-			ID    string `json:"id"`
-			Model string `json:"model"`
+			ID     string `json:"id"`
+			Model  string `json:"model"`
+			Prefix string `json:"prefix"`
 		}
 		if c.ShouldBindJSON(&req) != nil || req.ID == "" {
 			c.Status(http.StatusBadRequest)
 			return
 		}
 		bound, err := credentials.bound(req.ID)
-		if err != nil || !bound || (*service).ActivateDynaCredential(c.Request.Context(), req.ID, req.Model) != nil {
+		if err != nil || !bound || (*service).ActivateDynaCredential(c.Request.Context(), req.ID, req.Model, req.Prefix) != nil {
 			c.Status(http.StatusServiceUnavailable)
 			return
 		}

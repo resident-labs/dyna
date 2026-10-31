@@ -13,9 +13,9 @@ import (
 
 func (c *Connections) SetKey(ctx context.Context, req contract.AccountsSetKeyRequest) (contract.AccountsSetKeyResponse, error) {
 	var model string
-	for _, provider := range KeyProviders() {
+	for _, provider := range c.proxy.keyProviders {
 		if provider.Provider == req.Provider {
-			model = provider.Models[0]
+			model = provider.Models[0].ID
 			break
 		}
 	}
@@ -54,9 +54,10 @@ func (c *Connections) SetKey(ctx context.Context, req contract.AccountsSetKeyReq
 	}
 	bound = true
 	payload, err := json.Marshal(struct {
-		ID    string `json:"id"`
-		Model string `json:"model"`
-	}{proxyID, model})
+		ID     string `json:"id"`
+		Model  string `json:"model"`
+		Prefix string `json:"prefix"`
+	}{proxyID, string(req.Provider) + "/" + model, string(req.Provider)})
 	if err != nil {
 		return contract.AccountsSetKeyResponse{}, errConnect
 	}

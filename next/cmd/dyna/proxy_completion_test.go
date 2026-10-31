@@ -18,7 +18,7 @@ type fakeCompletionService struct {
 func (s *fakeCompletionService) DeleteDynaCredential(ctx context.Context, id string) error {
 	return s.store.Delete(ctx, id)
 }
-func (s *fakeCompletionService) ActivateDynaCredential(context.Context, string, string) error {
+func (s *fakeCompletionService) ActivateDynaCredential(context.Context, string, string, string) error {
 	s.activated = true
 	return nil
 }

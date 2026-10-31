@@ -5,18 +5,21 @@ import (
 	"encoding/json"
 	"errors"
 	"net/rpc"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/resident-labs/dyna/engine/model"
 	"github.com/resident-labs/dyna/engine/store"
 	proxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 )
 
 // proxyStore is the only Dyna component that serializes proxy credentials.
 type proxyStore struct {
-	mu     sync.Mutex
-	client *rpc.Client
+	mu      sync.Mutex
+	client  *rpc.Client
+	catalog []config.OpenAICompatibility
 }
 
 func (*proxyStore) RequireDurableAuth() bool { return true }
@@ -41,18 +44,42 @@ func (s *proxyStore) List(context.Context) ([]*proxyauth.Auth, error) {
 	}
 	auths := make([]*proxyauth.Auth, 0, len(records))
 	for _, record := range records {
-		switch record.Provider {
-		case "claude", "codex", "kimi", "xai", "openai-compatible-zai", "openai-compatible-opencode-go", "openai-compatible-deepseek":
-		default:
-			continue
-		}
 		var auth proxyauth.Auth
 		if err := json.Unmarshal(record.Record, &auth); err != nil {
 			return nil, errors.New("proxy store record invalid")
 		}
-		// Only bound credentials may be enabled after proxy restart.
-		auth.Disabled = !record.Bound
-		if record.Bound && auth.Status == proxyauth.StatusDisabled {
+		missing := false
+		if strings.HasPrefix(record.ID, "dyna-key-") {
+			provider := auth.Attributes["dyna_provider"]
+			if provider == "" {
+				// Legacy shim: keys saved before the catalog stored compat_name.
+				provider = auth.Attributes["compat_name"]
+			}
+			missing = true
+			for _, entry := range s.catalog {
+				if entry.Name == provider {
+					auth = *keyAuth(entry, record.ID, auth.Attributes["api_key"])
+					missing = false
+					break
+				}
+			}
+		} else {
+			switch record.Provider {
+			case "claude":
+				auth.Prefix = "plan_anthropic"
+			case "codex":
+				auth.Prefix = "plan_openai"
+			case "kimi":
+				auth.Prefix = "plan_kimi-coding"
+			case "xai":
+				auth.Prefix = "plan_xai"
+			default:
+				continue
+			}
+		}
+		// Only bound credentials from the current catalog may route.
+		auth.Disabled = !record.Bound || missing
+		if !auth.Disabled && auth.Status == proxyauth.StatusDisabled {
 			auth.Status = proxyauth.StatusActive
 		}
 		auths = append(auths, &auth)

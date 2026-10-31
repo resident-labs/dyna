@@ -109,7 +109,7 @@ func (c *Connections) start(ctx context.Context, req contract.AccountsConnectReq
 	var flow contract.ConnectFlow
 	for _, option := range oauthProviders {
 		if option.info.ID == req.Provider {
-			provider, flow = option.proxy, option.info.ConnectFlow
+			provider, flow = option.proxy, option.info.Flows[0]
 			break
 		}
 	}

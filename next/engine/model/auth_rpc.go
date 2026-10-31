@@ -19,7 +19,11 @@ type AuthRPC struct {
 	Connections *Connections
 }
 
-type OAuthCompletionResult struct{ Accepted bool }
+type OAuthCompletionResult struct {
+	Accepted bool
+	Prefix   string
+	Model    string
+}
 
 type OAuthCompletion struct {
 	State  string
@@ -140,8 +144,21 @@ func (r *AuthRPC) OAuthCompleted(req OAuthCompletion, out *OAuthCompletionResult
 	if err != nil {
 		return errors.New("account completion unavailable")
 	}
-	out.Accepted = true
-	return nil
+	r.Connections.mu.Lock()
+	defer r.Connections.mu.Unlock()
+	for _, attempt := range r.Connections.attempts {
+		if attempt.state == req.State {
+			model := r.Connections.proxy.planModels[attempt.provider]
+			if model == "" {
+				return errors.New("plan model unavailable")
+			}
+			out.Prefix = "plan_" + string(attempt.provider)
+			out.Model = out.Prefix + "/" + model
+			out.Accepted = true
+			return nil
+		}
+	}
+	return errors.New("account completion unavailable")
 }
 
 func serveAuthRPC(conn io.ReadWriteCloser, st AuthStore, complete func(context.Context, OAuthCompletion) error, connections *Connections) {
