@@ -60,13 +60,14 @@
     const sessions = [...(store?.sessions.values() ?? [])];
     const ids = new Set(sessions.map(item => item.session));
     const children = (parent: string | undefined) => sessions.filter(item => (item.parent && ids.has(item.parent) ? item.parent : undefined) === parent);
-    const size = (parent: string): number => children(parent).reduce((total, item) => total + 1 + size(item.session), 0);
-    const rows: { session: SessionStarted; depth: number; parent: boolean; hidden: number }[] = [];
+    const under = (parent: string): string[] => children(parent).flatMap(item => [item.session, ...under(item.session)]);
+    const rows: { session: SessionStarted; depth: number; parent: boolean; hidden: number; hiddenTrouble: boolean }[] = [];
     const walk = (parent: string | undefined, depth: number) => {
       for (const item of children(parent)) {
-        const hidden = folded.has(item.session) ? size(item.session) : 0;
-        rows.push({ session: item, depth, parent: children(item.session).length > 0, hidden });
-        if (!hidden) walk(item.session, depth + 1);
+        const hidden = folded.has(item.session) ? under(item.session) : [];
+        // A folded row keeps the failure of a session it hides in sight, with the same rule as the row pill.
+        rows.push({ session: item, depth, parent: children(item.session).length > 0, hidden: hidden.length, hiddenTrouble: hidden.some(id => trouble(id)) });
+        if (!hidden.length) walk(item.session, depth + 1);
       }
     };
     walk(undefined, 0);
@@ -202,7 +203,7 @@
         {#if wide.current || panel}<ComputerView session={watching} name={store?.names.get(watching) ?? "Session"} onback={() => void stopWatching()} />{/if}
       {:else}
       <header class="label">Sessions</header>
-      {#each tree as { session: item, depth, parent, hidden } (item.session)}
+      {#each tree as { session: item, depth, parent, hidden, hiddenTrouble } (item.session)}
         <div class="row">{#if parent}<button type="button" class="fold" aria-expanded={!hidden} style:left="{depth * 14}px"
           aria-label={hidden ? `Show ${count(hidden, "session")} under ${item.name}` : `Hide the sessions under ${item.name}`}
           title={hidden ? `${count(hidden, "session")} folded` : "Fold"} onclick={() => { if (!folded.delete(item.session)) folded.add(item.session); }}
@@ -211,7 +212,8 @@
           onkeydown={event => { walkTree(event); if (parent) fold(event, item.session); }}
           aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{16 + depth * 14}px">
           <SessionRow name={item.name} root={!item.parent} status={status(item.session)} />
-          {#if trouble(item.session)}<StatusPill tone="failed">{store?.failed.has(item.session) ? "Failed" : trouble(item.session)}</StatusPill>{/if}</a>
+          {#if trouble(item.session)}<StatusPill tone="failed">{store?.failed.has(item.session) ? "Failed" : trouble(item.session)}</StatusPill>
+          {:else if hiddenTrouble}<StatusPill tone="failed">Failed</StatusPill>{/if}</a>
           {#if store?.computers.has(item.session)}<button type="button" class="watch" data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
             title={`Watch ${item.name}'s computer`} onclick={() => { watching = item.session; }}><Icon name="monitor" /></button>{/if}</div>
       {:else}<p class="hint">No sessions yet.</p>{/each}
