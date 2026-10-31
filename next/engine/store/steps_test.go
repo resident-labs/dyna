@@ -190,3 +190,33 @@ func TestUpgradeBoxIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestUpgradeRecoversPRBranchAfterHandoff(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, err = db.Exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+ INSERT INTO meta VALUES ('schema_version','28');
+ CREATE TABLE pr_owners (repo TEXT, number INTEGER, session TEXT);
+ INSERT INTO pr_owners VALUES ('owner/repo',42,'parent'),('owner/repo',43,'parent');
+ CREATE TABLE events (seq INTEGER PRIMARY KEY, type TEXT, body BLOB);
+ INSERT INTO events VALUES (1,'pr.opened','{"repo":"owner/repo","number":42,"session":"child"}');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := upgrade(db, 1, "", map[int][]string{28: steps[28]}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var branch, unknown string
+	if err := db.QueryRow("SELECT branch FROM pr_owners WHERE number=42").Scan(&branch); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow("SELECT branch FROM pr_owners WHERE number=43").Scan(&unknown); err != nil {
+		t.Fatal(err)
+	}
+	if branch != "v2/child" || unknown != "" {
+		t.Fatalf("branches %q, %q", branch, unknown)
+	}
+}
