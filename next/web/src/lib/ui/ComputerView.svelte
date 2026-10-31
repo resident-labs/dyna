@@ -74,13 +74,14 @@
   // hold a key up or a mouse up, and a later batch that lands does not send it.
   let stuck = $state(false);
   const queue = new InputQueue(async (events, frame) => { await input?.(events, frame); }, ok => { if (!ok) stuck = true; });
+  // While a refused batch waits, moves and scrolls are dropped, so Retry does not replay a stream of them.
   const send = (events: ComputerInput[]) => {
+    if (stuck) events = events.filter(event => event.kind !== "mouse.move" && event.kind !== "wheel");
     if (input && picture && events.length) queue.push(events, { width: picture.naturalWidth, height: picture.naturalHeight });
   };
   async function take() { control = true; await tick(); screen?.focus(); }
   const hold = new MouseHold();
-  const letGo = () => send(hold.release());
-  // Control ends or the view closes: the release goes even behind a refused batch, so the queue drops what waits first.
+    // Control ends or the view closes: the release goes even behind a refused batch, so the queue drops what waits first.
   const drop = () => { const up = hold.release(); if (stuck) queue.clear(); send(up); };
   function release() { drop(); control = false; stuck = false; keyboardOpen = false; field?.blur(); }
   $effect(() => { if (phase !== "live") release(); });
@@ -134,8 +135,9 @@
       if (!control) return;
       if (touching(event)) { void send(finger.up()); return; }
       // A release outside the picture still lets go, where the pointer last was inside it.
-      letGo();
+      send(hold.release(buttonOf(event.button)));
     };
+    const cancel = () => { if (control) send(hold.release()); };
     const wheel = (event: WheelEvent) => {
       if (!control) return;
       event.preventDefault();
@@ -146,7 +148,7 @@
     node.addEventListener("pointerdown", down);
     node.addEventListener("pointermove", move);
     node.addEventListener("pointerup", up);
-    node.addEventListener("pointercancel", up);
+    node.addEventListener("pointercancel", cancel);
     node.addEventListener("contextmenu", menu);
     // Not passive: the wheel must not also scroll the page.
     node.addEventListener("wheel", wheel, { passive: false });
@@ -156,7 +158,7 @@
       node.removeEventListener("pointerdown", down);
       node.removeEventListener("pointermove", move);
       node.removeEventListener("pointerup", up);
-      node.removeEventListener("pointercancel", up);
+      node.removeEventListener("pointercancel", cancel);
       node.removeEventListener("contextmenu", menu);
       node.removeEventListener("wheel", wheel);
     };
