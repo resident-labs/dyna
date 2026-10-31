@@ -564,6 +564,8 @@ Drafted by dyna:node-shell.
 
 ### 5.1 Control plane and hosts
 
+The engine flags `--git.name` and `--git.email` set the Git commit identity sent in `box.hello`. Each box writes nonempty values to its global Git config. Empty values leave the corresponding setting unchanged (owner, q61).
+
 The control plane runs on an always-on host (decision 14). The engine itself runs no boxes, but its machine may also be a capacity host, as hermeslab is; the engine then reaches it over SSH like any other host. It opens one SSH master to each host and does all host work over it. v2 keeps the v1 design from #1250: one Dyna-owned `ControlMaster` per host with `ControlPersist`, and framed replies. Input starts with a `DYNA-IN <bytes>` header, and output ends with a fixed-width `DYNA-END <bytes> <status>` trailer. A reply without a valid trailer is a transport failure, never a success.
 
 The owner adds a host with `dyna host add <name> --ssh user@addr`. Repeat `--room <room ID>` to restrict placement to those rooms. Without rooms, the host serves every room. The engine then runs the **host check** over the master. A host is `ready` only when every item passes:
