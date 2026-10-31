@@ -3,7 +3,6 @@ package pi
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -80,20 +79,25 @@ type event struct {
 }
 
 type Harness struct {
-	Activity  func(contract.TurnID, string)
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	session   string
-	writeMu   sync.Mutex
-	mu        sync.Mutex
-	pending   map[string]chan event
-	events    chan event
-	done      chan struct{}
-	stop      chan struct{}
-	readErr   error
-	sequence  atomic.Uint64
-	closeOnce sync.Once
-	closeErr  error
+	Activity          func(contract.TurnID, string)
+	cmd               *exec.Cmd
+	stdin             io.WriteCloser
+	session           string
+	writeMu           sync.Mutex
+	mu                sync.Mutex
+	pending           map[string]chan event
+	events            chan event
+	done              chan struct{}
+	stop              chan struct{}
+	readErr           error
+	sequence          atomic.Uint64
+	closeOnce         sync.Once
+	closeErr          error
+	deliveryMu        sync.Mutex
+	deliveryPath      string
+	deliveryOffset    int64
+	deliveryLineLimit int
+	delivered         map[string]struct{}
 }
 
 var _ harness.Harness = (*Harness)(nil)
@@ -297,17 +301,10 @@ func (h *Harness) SessionFile() string { return h.session }
 // Done closes when Pi's RPC stream ends.
 func (h *Harness) Done() <-chan struct{} { return h.done }
 
-func completeLines(data []byte, atEOF bool) (int, []byte, error) {
-	if i := bytes.IndexByte(data, '\n'); i >= 0 {
-		return i + 1, data[:i], nil
-	}
-	if atEOF {
-		return len(data), nil, nil
-	}
-	return 0, nil, nil
-}
-
 func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, error) {
+	h.deliveryMu.Lock()
+	defer h.deliveryMu.Unlock()
+
 	file, err := os.Open(h.session)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
@@ -316,25 +313,65 @@ func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, e
 		return false, err
 	}
 	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 4096), 16<<20)
-	scanner.Split(completeLines)
-	for scanner.Scan() {
-		var entry struct {
-			Type    string `json:"type"`
-			Message struct {
-				Role       string `json:"role"`
-				DeliveryID string `json:"deliveryId"`
-			} `json:"message"`
-		}
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			continue // Pi ignores malformed session lines after interrupted writes.
-		}
-		if entry.Type == "message" && entry.Message.Role == "user" && entry.Message.DeliveryID == strconv.FormatInt(int64(id), 10) {
-			return true, nil
-		}
+	info, err := file.Stat()
+	if err != nil {
+		return false, err
 	}
-	return false, scanner.Err()
+	if h.deliveryPath != h.session || info.Size() < h.deliveryOffset {
+		h.deliveryPath, h.deliveryOffset = h.session, 0
+		h.delivered = nil
+	}
+	if _, err := file.Seek(h.deliveryOffset, io.SeekStart); err != nil {
+		return false, err
+	}
+	if h.delivered == nil {
+		h.delivered = make(map[string]struct{})
+	}
+	limit := h.deliveryLineLimit
+	if limit == 0 {
+		limit = 16 << 20
+	}
+	reader := bufio.NewReader(file)
+	var line []byte
+	var length int64
+	tooLong := false
+	for {
+		part, readErr := reader.ReadSlice('\n')
+		length += int64(len(part))
+		if !tooLong {
+			if len(line)+len(part) > limit {
+				tooLong = true
+				line = nil
+			} else {
+				line = append(line, part...)
+			}
+		}
+		if readErr == bufio.ErrBufferFull {
+			continue
+		}
+		if readErr == io.EOF {
+			break // Re-read a partial line on the next call.
+		}
+		if readErr != nil {
+			return false, readErr
+		}
+		if !tooLong {
+			var entry struct {
+				Type    string `json:"type"`
+				Message struct {
+					Role       string `json:"role"`
+					DeliveryID string `json:"deliveryId"`
+				} `json:"message"`
+			}
+			if json.Unmarshal(line, &entry) == nil && entry.Type == "message" && entry.Message.Role == "user" {
+				h.delivered[entry.Message.DeliveryID] = struct{}{}
+			}
+		}
+		h.deliveryOffset += length
+		line, length, tooLong = nil, 0, false
+	}
+	_, found := h.delivered[strconv.FormatInt(int64(id), 10)]
+	return found, nil
 }
 
 func (h *Harness) Close() error {
