@@ -126,3 +126,11 @@ test("after a refusal, clear lets a release go ahead of what waited", async () =
   await done;
   assert.deepEqual(sent, [["key.down"], ["mouse.up"]]);
 });
+
+test("two held buttons are let go one at a time, each where it was", () => {
+  const hold = new MouseHold();
+  hold.down("left", { x: 1, y: 1 });
+  hold.down("right", { x: 2, y: 2 });
+  assert.deepEqual(hold.release("left"), [{ kind: "mouse.up", x: 1, y: 1, button: "left" }]);
+  assert.deepEqual(hold.release(), [{ kind: "mouse.up", x: 2, y: 2, button: "right" }]);
+});
