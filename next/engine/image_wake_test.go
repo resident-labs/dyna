@@ -21,7 +21,7 @@ type imageWakeHost struct {
 }
 
 func (h *imageWakeHost) Inspect(_ context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
-	return box.ContainerStatus{Box: id, LegacySharedMount: h.legacy}, true, nil
+	return box.ContainerStatus{Box: id, StaleLayout: h.legacy}, true, nil
 }
 
 func (h *imageWakeHost) CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error) {

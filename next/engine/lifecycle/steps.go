@@ -159,9 +159,9 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		}
 		if inspectErr != nil {
 			workErr = inspectErr
-		} else if imageErr != nil && (slice != b.Slice || !found || status.LegacySharedMount) {
+		} else if imageErr != nil && (slice != b.Slice || !found || status.StaleLayout) {
 			workErr = imageErr
-		} else if slice != b.Slice || image.Tag != b.Image || !found || status.LegacySharedMount {
+		} else if slice != b.Slice || image.Tag != b.Image || !found || status.StaleLayout {
 			r.mu.Lock()
 			repos := r.repos
 			r.mu.Unlock()
