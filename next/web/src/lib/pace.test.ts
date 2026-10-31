@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { meterWake, paceOf, poolPace } from "./pace.ts";
 
 const now = Date.parse("2026-10-20T12:00:00Z");
-const window = { name: "week", seconds: 7 * 86400, resetsAt: "2026-10-24T12:00:00Z", usedPercent: 43 };
+const window = { name: "week", kind: "weekly" as const, seconds: 7 * 86400, resetsAt: "2026-10-24T12:00:00Z", usedPercent: 43 };
 
 test("pace compares used and elapsed shares within a five-point band", () => {
   const even = paceOf(window, now);
