@@ -53,6 +53,7 @@ func TestDryRunRefusesInvalidBundle(t *testing.T) {
 		{"room name", "global.json", `"alpha"`, `"../evil"`},
 		{"room mismatch", "rooms/alpha.json", `"name":"alpha"`, `"name":"other"`},
 		{"duplicate room", "global.json", `"rooms":["alpha"]`, `"rooms":["alpha","alpha"]`},
+		{"missing manifest", "global.json", `"rooms":["alpha"]`, `"rooms":null`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := fixture(t)
