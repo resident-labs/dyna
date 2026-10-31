@@ -11,8 +11,8 @@
   // A row without a value does not show. Jobs opens the dock's list on this session, and stays while the box is ready so a
   // finished job can be reached. It counts the jobs the engine lists, as that list does, because session.list's count can
   // lag, and a job's shell.job.ended takes it off at once; until they load, or with none running, it reads Jobs.
-  let { store, room, session, navigate, onjobs }: {
-    store: RoomStore; room: string; session: string; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onjobs: (event: MouseEvent) => void;
+  let { store, room, session, switchable, navigate, onjobs }: {
+    store: RoomStore; room: string; session: string; switchable: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onjobs: (event: MouseEvent) => void;
   } = $props();
   const boxes: Record<BoxState, string> = {
     pending: "Starting", creating: "Starting", starting: "Starting", ready: "Ready", stopped: "Stopped",
@@ -45,7 +45,7 @@
     {#if store.turns.has(session)}<dt>Turn</dt><dd>{#if store.stopping.has(session)}Stopping{:else}Running · <button type="button" onclick={() => store.stop(session)}>Stop</button>{/if}
       {#if store.stopFailed.has(session)}<span class="failed">The stop did not reach the engine.</span>{/if}</dd>{/if}
     {#if parent && open?.parent}<dt>Parent</dt><dd><a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(open.parent)}`} onclick={navigate}>{parent}</a></dd>{/if}
-    {#if open?.profile}<dt>Profile</dt><dd><ProfileMenu {session} profile={open.profile} /></dd>{/if}
+    {#if open?.profile}<dt>Profile</dt><dd><ProfileMenu {session} profile={open.profile} {switchable} /></dd>{/if}
     {#if box}<dt>Box</dt><dd>{#if failure}<StatusPill tone="failed" word label="Failed" /> · {boxReason(failure)}{:else if reason === "room-host"}<StatusPill tone="warning" word label={waits[reason]} />{:else}{reason ? waits[reason] : boxes[box]}{/if}</dd>{/if}
     {#if hasJobs}<dt>Jobs</dt><dd><button type="button" onclick={onjobs}>{running ? `${count(running, "job")} running` : "Jobs"}</button>{#if failures}{" · "}<StatusPill tone="failed" label="{failures} failed" word />{/if}</dd>{/if}
     {#if open?.startedAt}<dt>Started</dt><dd class="muted"><time datetime={open.startedAt} title={fullTime(open.startedAt)}>{fromNow(open.startedAt, Math.max(now, Date.parse(open.startedAt)))}</time></dd>{/if}

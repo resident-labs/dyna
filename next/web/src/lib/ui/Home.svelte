@@ -169,8 +169,8 @@
         <span class="line">{#if line.named}{line.text}<code>{line.named}</code>{clause(line.after)}{" · "}{:else if value.target.kind === "host"}on <code>{value.target.name}</code>{" · "}{:else if value.body}{clause(value.body)}{" · "}{:else if value.target.kind !== "room"}on {value.target.kind} {value.target.name}{" · "}{/if}{room.name} ·
           {#if soon}<StatusPill tone="warning" label="Expires {fromNow(value.expires, now)}" />{:else}Expires {fromNow(value.expires, now)}{/if}</span>
         {#if refused.has(id)}<span class="line" role="alert">{refused.get(id)}</span>{/if}</span>
-      <span class="acts"><button type="button" class="approve" disabled={deciding.has(id)} onclick={event => void decide(id, `${who} ${value.title}`, true, event.currentTarget.closest(".request") ?? event.currentTarget)}>Approve</button>
-        <button type="button" disabled={deciding.has(id)} onclick={event => void decide(id, `${who} ${value.title}`, false, event.currentTarget.closest(".request") ?? event.currentTarget)}>Deny</button>
+      <span class="acts">{#if attention.can("admin")}<button type="button" class="approve" disabled={deciding.has(id)} onclick={event => void decide(id, `${who} ${value.title}`, true, event.currentTarget.closest(".request") ?? event.currentTarget)}>Approve</button>
+        <button type="button" disabled={deciding.has(id)} onclick={event => void decide(id, `${who} ${value.title}`, false, event.currentTarget.closest(".request") ?? event.currentTarget)}>Deny</button>{/if}
         <a class="open" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>Open</a></span></div>{/each}{/each}
       {#each failures as { room, title, reason } (room.id)}<div class="item failure"><Avatar kind="room" name={room.name} label={initials.get(room.name)} size={28} />
         <span class="lines"><span class="title">{title}</span><span class="line"><StatusPill tone="failed" label={reason} /> · {room.name}</span></span>
