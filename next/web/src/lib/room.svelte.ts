@@ -18,6 +18,9 @@ export class RoomStore {
   readonly sessions = new SvelteMap<string, SessionStarted & { startedAt: string; lastTurnAt?: string }>();
   readonly boxes = new SvelteMap<string, BoxState>();
   readonly turns = new SvelteMap<string, string>();
+  // Sessions the owner asked to stop until their turn ends, and those whose request did not reach the engine.
+  readonly stopping = new SvelteSet<string>();
+  readonly stopFailed = new SvelteSet<string>();
   // The running turn's latest activity label per session, such as "read spec.md".
   readonly activity = new SvelteMap<string, string>();
   // The running turn's labels so far, newest last, kept while the page is open: the engine keeps only the latest one,
@@ -90,6 +93,13 @@ export class RoomStore {
   get error(): unknown { this.subscribe(); return this.failure; }
   // Pending owner-class operations wait for the owner; agent-class ones wait for an ancestor session first.
   get waiting(): number { return [...this.requests.values()].filter(request => request.state === "pending" && request.class === "owner").length; }
+  // The turn may end before the answer comes, so only a turn still running counts as stopping.
+  stop(id: string): void {
+    this.stopFailed.delete(id);
+    void call("session.stop", { session: id }).then(({ stopping }) => { if (stopping && this.turns.has(id)) this.stopping.add(id); },
+      () => { this.stopFailed.add(id); });
+  }
+
   // Each session's one status (status.ts): a request it made waits for the owner, its failure is unseen or its box
   // failed, or a turn runs. The header, the panel and the counts read only these.
   status(id: string): Status { return this.statusWith(id, this.asking()); }
@@ -222,6 +232,7 @@ export class RoomStore {
       case "turn.ended":
         if (this.turns.get(event.body.session) === event.body.turn) {
           this.turns.delete(event.body.session);
+          this.stopping.delete(event.body.session);
           this.activity.delete(event.body.session);
           this.steps.delete(event.body.session);
         }
