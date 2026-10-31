@@ -11,6 +11,7 @@ type ProxyAuth struct {
 	Provider  string
 	Record    []byte
 	UpdatedAt int64
+	Bound     bool
 }
 
 func (s *Store) SaveProxyAuth(ctx context.Context, auth ProxyAuth, create bool) error {
@@ -45,7 +46,7 @@ func (s *Store) SaveProxyAuth(ctx context.Context, auth ProxyAuth, create bool) 
 }
 
 func (s *Store) ListProxyAuths(ctx context.Context) ([]ProxyAuth, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT id,provider,record,updated_at FROM proxy_auths ORDER BY id")
+	rows, err := s.Read().QueryContext(ctx, "SELECT p.id,p.provider,p.record,p.updated_at,EXISTS (SELECT 1 FROM accounts a WHERE a.proxy_id=p.id) FROM proxy_auths p ORDER BY p.id")
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +54,7 @@ func (s *Store) ListProxyAuths(ctx context.Context) ([]ProxyAuth, error) {
 	var auths []ProxyAuth
 	for rows.Next() {
 		var auth ProxyAuth
-		if err := rows.Scan(&auth.ID, &auth.Provider, &auth.Record, &auth.UpdatedAt); err != nil {
+		if err := rows.Scan(&auth.ID, &auth.Provider, &auth.Record, &auth.UpdatedAt, &auth.Bound); err != nil {
 			return nil, err
 		}
 		auths = append(auths, auth)

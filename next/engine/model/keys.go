@@ -12,14 +12,14 @@ import (
 )
 
 func (c *Connections) SetKey(ctx context.Context, req contract.AccountsSetKeyRequest) (contract.AccountsSetKeyResponse, error) {
-	found := false
+	var model string
 	for _, provider := range KeyProviders() {
 		if provider.Provider == req.Provider {
-			found = true
+			model = provider.Models[0]
 			break
 		}
 	}
-	if !found || strings.TrimSpace(req.Key) == "" || len(req.Key) > 4096 {
+	if model == "" || strings.TrimSpace(req.Key) == "" || len(req.Key) > 4096 {
 		return contract.AccountsSetKeyResponse{}, errConnect
 	}
 	var raw [32]byte
@@ -53,5 +53,15 @@ func (c *Connections) SetKey(ctx context.Context, req contract.AccountsSetKeyReq
 		return contract.AccountsSetKeyResponse{}, errConnect
 	}
 	bound = true
+	payload, err := json.Marshal(struct {
+		ID    string `json:"id"`
+		Model string `json:"model"`
+	}{proxyID, model})
+	if err != nil {
+		return contract.AccountsSetKeyResponse{}, errConnect
+	}
+	if _, err = c.management.request(ctx, http.MethodPost, "/dyna/credentials/activate", payload); err != nil {
+		return contract.AccountsSetKeyResponse{}, errConnect
+	}
 	return contract.AccountsSetKeyResponse{AccountID: accountID}, nil
 }
