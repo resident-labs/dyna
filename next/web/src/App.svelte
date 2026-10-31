@@ -217,6 +217,19 @@
   const settle = (request: PostRequest) => { unsent = { ...unsent, [keyOf(request)]: (unsent[keyOf(request)] ?? []).filter(kept => kept !== request) }; };
   // A forwarded post waits in its conversation's composer like a draft.
   let quotes: Record<string, Quote | undefined> = $state({});
+  let replaced: Record<string, Quote | undefined> = $state({});
+  const replaceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  function clearReplacement() { clearTimeout(replaceTimers.get(key)); replaceTimers.delete(key); replaced[key] = undefined; }
+  function forward(quote: Quote) {
+    clearReplacement();
+    const previous = quotes[key], conversation = key;
+    if (previous) {
+      replaced[key] = previous;
+      replaceTimers.set(key, setTimeout(() => { replaced[conversation] = undefined; replaceTimers.delete(conversation); }, 5000));
+    }
+    quotes[key] = quote;
+    composer?.focus({ preventScroll: true });
+  }
   // Each conversation keeps its own draft files; FileDraft is reactive inside, so a plain map holds them.
   const fileDrafts = new Map<string, FileDraft>();
   const files = (key: string) => { let draft = fileDrafts.get(key); if (!draft) fileDrafts.set(key, draft = new FileDraft()); return draft; };
@@ -243,6 +256,7 @@
     const attachments = [...quote?.attachments ?? [], ...draft.take()];
     drafts[key] = "";
     quotes[key] = undefined;
+    clearReplacement();
     // The engine refuses mentions on a DM post; in the feed, @names of open sessions become mentions.
     // Mentions come from the owner's own words only, so an @name inside a forwarded post wakes nobody.
     const post = session ? { text, mentions: [] } : parseMentions(text, store.sessions.values());
@@ -616,8 +630,8 @@
         onactive={event => { toggle = event.currentTarget; void showPanel(true, event.detail > 0); }} />
       {:else if unavailable === "unreachable"}<Blocked kind="unreachable" onretry={reopen} />
       {:else if store && !unavailable}
-        {#key key}<Feed bind:this={view} {store} {home} admin={attention.can("admin")} operate={attention.can("operate")} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
-          onforward={quote => { quotes[key] = quote; composer?.focus(); }} onclosed={() => composer?.focus()} onjobs={item => void jobsTool?.show(item)}
+        {#key key}<Feed bind:this={view} {store} {home} admin={attention.can("admin")} operate={attention.can("operate") && !closed} waiting={quotes[key]} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
+          onforward={forward} onclosed={() => composer?.focus()} onjobs={item => void jobsTool?.show(item)}
           onvisual={(versions, selected) => { visualTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : undefined; visual = { versions, selected }; }} />{/key}
         <!-- The empty feed stays mounted behind the error, as it is how the page learns the session has no history. -->
         {#if missing && room}<Blocked kind="no-session" back={{ href: "/r/" + encodeURIComponent(room), label: `Back to ${roomName}` }} {navigate} />{/if}
@@ -628,8 +642,8 @@
       {#if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
         {#if attention.can("operate")}<button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button>{/if}</p>
       {:else if store}<WorkingLine {store} {home} />{/if}
-      {#if attention.can("operate")}<Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; }} onsend={send} placeholder={"Message " + title}
-        quote={quotes[key]} onunquote={() => { quotes[key] = undefined; }} sessions={mentions} files={files(key)} {stop} />
+      {#if attention.can("operate")}<Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; clearReplacement(); }} onsend={send} placeholder={"Message " + title}
+        quote={quotes[key]} replacement={replaced[key]} onundo={() => { quotes[key] = replaced[key]; clearReplacement(); }} onunquote={() => { quotes[key] = undefined; clearReplacement(); }} sessions={mentions} files={files(key)} {stop} />
       {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
     {/if}{/if}
     <TermDock bind:this={terminals} terminal={attention.can("terminal")} bind:element={dock} onempty={() => composer?.focus()} phone={phone.current} strip={!!room && !unavailable}
