@@ -29,12 +29,12 @@ and its files 0600. The archive is outside this counts-only rehearsal.
 | Global and room rules | `goal_rooms.body`, `internal/goals/sqlite.go` | global room `*`; each room's rules |
 | Settings | `settings.json`, `internal/settings/settings.go` | only contract fields; minutes to milliseconds |
 | Profiles | `profiles.json`, `internal/profile/profile.go` | proxy-supported models; mapping needs review below |
-| Hosts | `machines`, `internal/machines/store.go` | names, SSH, labels, room IDs resolved to names; selection needs review |
+| Hosts | `machines`, `internal/machines/store.go` | enabled remote hosts only; room IDs resolved to names |
 | Accounts | `accounts.metadata`, `account_repo_scopes`, `internal/account/store` | provider, label, repository scope; never credentials |
 | Devices | `web_devices` and scope grants, `internal/websvc/devicestore`, `internal/devicesvc` | token hash, name, dates, scopes; never tokens |
 | Repos and room metadata | room records, repository settings, `internal/room/room.go` | resolve repository paths to repository identities; preserve default |
 | Skills | skill registry and `SKILL.md` files | installed package reference or owner body |
-| Subscriptions | hook documents, `internal/hooks`, script files | only supported Run hooks; exclude built-in timers, librarian and updater; conversion needs review |
+| Subscriptions | hook documents, `internal/hooks`, script files | only hooks that map cleanly to Wake; report others and include them in the handoff |
 | Goals and items | `goals`, `goal_items`, `internal/goals/sqlite.go` | open goals and all their items; no holder |
 | Issues and next number | `room_issues`, `room_issue_numbers`, room JSONL feed; `internal/room/issues.go` | open and goal-linked; retain number, body and notes |
 | PRs | `pr_records` and record parts, `internal/pr/state` | open tracked PRs; branch and ownership only |
@@ -48,31 +48,28 @@ should still appear in the report, separately from `BundleCounts`.
 
 The lead approved the following additive bundle fields and mapping decisions. Do not silently discard or invent data.
 
-* The contract has no room manifest. A missing room file cannot be detected
-  from a directory alone. Add an explicit room-name list to `GlobalBundle`
-  and reject missing, extra, duplicate or name-mismatched room files. The manifest is now part of the contract.
+* `GlobalBundle.Rooms` is the room manifest. The importer rejects missing,
+  extra, duplicate or name-mismatched room files.
 * A terminal request has `Argv`, `Cwd`, `Reason`, `Stage` and `Holder`,
-  but the bundle has only `Command`. A joined command loses argv boundaries
-  and cwd. Carry argv, cwd and reason; route unanswered requests to root.
+  and `Command` alone loses argv boundaries and cwd. The bundle carries argv,
+  cwd and reason; unanswered requests go to root.
 * Hook `Command`, `Cwd`, `Timeout`, `OnFail` and script dependencies do
-  not directly supply `Run.Image`, `Run.Size` and `Run.Files`. Define
-  no Run mapping is invented. Report unmapped active hooks and include them in the handoff.
+  not directly supply `Run.Image`, `Run.Size` and `Run.Files`. Do not invent
+  a Run mapping. Report unmapped active hooks and include them in the handoff.
 * Hosts have `Enabled` and `Local`, neither in the bundle. Profiles have
   `Disabled`, `Harness` and `Uses`, and provider model IDs may differ.
-  Account `RoomID` has no bundle field. Set explicit selection and mapping
-  policy before export. Device scope grants need a precise conversion.
+  Skip disabled profiles; use an explicit model map and report unknown models.
+  Account rooms have a bundle field. Map known device scopes and report unknowns.
 * Rule `SetterName` and `Edits`; goal `Holders`, `Shared`, `NextItem`,
   `ItemsClosed`, `State`, `UpdatedAt`, `Edits`, `Done`,
   `ExpediteUntil`, `LegacyOwnerHeld`; item `UpdatedAt`; question `To`,
   `Post`, `State`, `Answer`, `Withdrawn`, `GroupKey`, `AskedTurn`
   and `AnswerDelivered` have no direct bundle home. Many describe dropped
-  history or live v1 execution, but that classification needs review.
-  Machine probe, resource, grant and scheduling fields also have no home.
+  history or live v1 execution, which spec 8.1 drops. Machine probe, resource,
+  grant and scheduling fields are dropped because v2 probes hosts again.
 * Source `Commit`, `Backup`, `BackupSHA256` and export time are generated,
-  not record fields. Subscription image, size and generated file paths likewise
-  need policy. An exhaustive per-type field-loss inventory and exact SQL
-  predicates are still required before approval; the table above is not that
-  inventory.
+  not record fields. The exporter report must classify every v1 field as carried,
+  dropped by spec 8.1, or a gap. Raise each gap for the lead to decide.
 
 ## Independent check and dry run
 
