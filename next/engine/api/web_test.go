@@ -214,7 +214,7 @@ func TestPublicRoutesLeaveOutLoopback(t *testing.T) {
 	if err := w.SetRoutes([]string{"https://b.example.com", "https://a.example.com"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := w.publicRoutes(); !slices.Equal(got, []string{"https://a.example.com", "https://b.example.com"}) {
+	if got := w.PublicRoutes(); !slices.Equal(got, []string{"https://a.example.com", "https://b.example.com"}) {
 		t.Fatalf("routes: %v", got)
 	}
 	rec := httptest.NewRecorder()
