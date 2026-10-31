@@ -15,16 +15,17 @@ type GitHubWriteRule string
 type GitHubWriteReason string
 
 const (
-	GitHubWriteReadOnly       GitHubWriteReason = "read-only-room"
-	GitHubWriteOther          GitHubWriteReason = "not-room-repository"
-	GitHubWriteBranchDelete   GitHubWriteReason = "upstream-branch-delete"
-	GitHubWriteForeignItem    GitHubWriteReason = "not-room-account-item"
-	GitHubWriteForeignComment GitHubWriteReason = "foreign-comment"
-	GitHubWriteForeignHead    GitHubWriteReason = "upstream-edit-foreign-head"
-	GitHubWriteUpstreamVerb   GitHubWriteReason = "upstream-verb-not-allowed"
+	GitHubWriteReadOnly          GitHubWriteReason = "read-only-room"
+	GitHubWriteRepositoryUnknown GitHubWriteReason = "repository-unknown"
+	GitHubWriteOther             GitHubWriteReason = "not-room-repository"
+	GitHubWriteBranchDelete      GitHubWriteReason = "upstream-branch-delete"
+	GitHubWriteForeignItem       GitHubWriteReason = "not-room-account-item"
+	GitHubWriteForeignComment    GitHubWriteReason = "foreign-comment"
+	GitHubWriteForeignHead       GitHubWriteReason = "upstream-edit-foreign-head"
+	GitHubWriteUpstreamVerb      GitHubWriteReason = "upstream-verb-not-allowed"
 )
 
-var gitHubWriteReasons = []GitHubWriteReason{GitHubWriteReadOnly, GitHubWriteOther, GitHubWriteBranchDelete, GitHubWriteForeignItem, GitHubWriteForeignComment, GitHubWriteForeignHead, GitHubWriteUpstreamVerb}
+var gitHubWriteReasons = []GitHubWriteReason{GitHubWriteRepositoryUnknown, GitHubWriteReadOnly, GitHubWriteOther, GitHubWriteBranchDelete, GitHubWriteForeignItem, GitHubWriteForeignComment, GitHubWriteForeignHead, GitHubWriteUpstreamVerb}
 
 type GitHubWriteRefusedEvent struct {
 	Requester  string            `json:"requester"`
