@@ -15,12 +15,12 @@ type maintenanceAdapter struct {
 	calls int
 }
 
-func (a *maintenanceAdapter) MaintainHost(_ context.Context, _ contract.HostName) error {
+func (a *maintenanceAdapter) MaintainHost(_ context.Context, _ contract.HostName) ([]contract.RoomShared, error) {
 	a.calls++
 	if a.calls == 1 {
-		return errors.New("offline")
+		return nil, errors.New("offline")
 	}
-	return nil
+	return nil, nil
 }
 
 func TestDailyHostMaintenanceRetriesFailure(t *testing.T) {
