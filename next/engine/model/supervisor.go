@@ -22,6 +22,11 @@ func (p *Proxy) Supervise(ctx context.Context, executable string, st *store.Stor
 	defer file.Close()
 	supervise(ctx, time.Now, time.After, func() <-chan error {
 		done := make(chan error, 1)
+		p.generation.Add(1)
+		if err := st.PruneUnboundProxyKeys(ctx); err != nil {
+			done <- err
+			return done
+		}
 		cmd := exec.CommandContext(ctx, executable, "proxy", "--config", p.Config)
 		fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
 		if err != nil {
@@ -43,7 +48,6 @@ func (p *Proxy) Supervise(ctx context.Context, executable string, st *store.Stor
 		}
 		// Upstream logs can include provider identities and token-exchange responses.
 		cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
-		p.generation.Add(1)
 		if err := cmd.Start(); err != nil {
 			_ = parent.Close()
 			_ = child.Close()
