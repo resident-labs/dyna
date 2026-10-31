@@ -24,6 +24,7 @@ import (
 	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/hostexec"
 	engineimages "github.com/resident-labs/dyna/engine/images"
+	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -292,7 +293,7 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) error 
 	return nil
 }
 
-func (b *Boxes) Create(ctx context.Context, spec engine.BoxSpec) (string, error) {
+func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, error) {
 	h, err := b.host(ctx, spec.Host)
 	if err != nil {
 		return "", err
@@ -500,7 +501,7 @@ func (b *Boxes) StopHostexec(ctx context.Context, host contract.HostName, scope 
 }
 
 // Recreate replaces a moved container without touching its volume.
-func (b *Boxes) Recreate(ctx context.Context, spec engine.BoxSpec, image, oldSlice string) error {
+func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, oldSlice string) error {
 	h, err := b.host(ctx, spec.Host)
 	if err != nil {
 		return err
@@ -526,7 +527,7 @@ func (b *Boxes) Recreate(ctx context.Context, spec engine.BoxSpec, image, oldSli
 	return h.StartContainer(ctx, spec.Box)
 }
 
-func (b *Boxes) container(spec engine.BoxSpec, image string) (box.Slice, box.ContainerSpec) {
+func (b *Boxes) container(spec lifecycle.BoxSpec, image string) (box.Slice, box.ContainerSpec) {
 	size := spec.Size
 	slice := box.Slice{Name: spec.Slice, CPUs: size.CPUs, MemHigh: size.MemBytes, MemMax: size.MemBytes * 3 / 2, Pids: size.Pids}
 	c := box.ContainerSpec{Box: spec.Box, Image: image, Slice: spec.Slice, Mounts: []box.Mount{

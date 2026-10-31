@@ -52,7 +52,7 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		if parent != "" {
 			parentID = &parent
 		}
-		_, err := tx.ExecContext(ctx, "INSERT INTO sessions(id,room,name,parent,repo,profile,state,goal,created_at) VALUES(?,?,?,?,?,?,?,?,?)", session.ID, session.Room, session.Name, parentID, session.Repo, session.Profile, "pending", goal, event.Time.UnixMilli())
+		_, err := tx.ExecContext(ctx, "INSERT INTO sessions(id,room,name,parent,repo,profile,state,goal,created_at) VALUES(?,?,?,?,?,?,?,?,?)", session.ID, session.Room, session.Name, parentID, session.Repo, session.Profile, "open", goal, event.Time.UnixMilli())
 		if err != nil {
 			return err
 		}
@@ -210,7 +210,19 @@ func (s *Store) InsertDelivery(ctx context.Context, tx *sql.Tx, seq int64, d con
 		home += ":" + string(d.Reply.Home.Session)
 	}
 	_, err := tx.ExecContext(ctx, "INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state) VALUES(?,?,?,?,?,?,?,?,?,?,?)", d.To.Kind, d.To.Session, seq, d.Surface, d.Reply.Kind, d.Reply.Target.Kind, d.Reply.Target.Session, home, d.Reply.ReplyTo, d.Wake, "pending")
-	if err == nil && d.To.Kind == contract.PrincipalSession {
+	if err != nil {
+		return err
+	}
+	if d.Wake && d.To.Kind == contract.PrincipalSession {
+		_, err = tx.ExecContext(ctx, `WITH RECURSIVE ancestors(id,parent) AS (
+			SELECT id,parent FROM boxes WHERE session=?
+			UNION SELECT b.id,b.parent FROM boxes b JOIN ancestors a ON b.id=a.parent
+		) UPDATE boxes SET want='run' WHERE id IN (SELECT id FROM ancestors) AND want='stop'`, d.To.Session)
+		if err != nil {
+			return err
+		}
+	}
+	if d.To.Kind == contract.PrincipalSession {
 		s.wakePending = append(s.wakePending, d.To.Session)
 	}
 	return err

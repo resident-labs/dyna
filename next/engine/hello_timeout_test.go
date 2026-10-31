@@ -14,9 +14,10 @@ func TestFailStaleStarts(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if err := s.FailStaleStarts(ctx); err != nil {
+	if err := s.reconciler.Pass(ctx); err != nil {
 		t.Fatal(err)
 	}
+	s.reconciler.Wait()
 	old, err := s.store.Session(ctx, first)
 	if err != nil {
 		t.Fatal(err)

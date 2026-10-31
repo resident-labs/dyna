@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
@@ -13,6 +15,7 @@ import (
 
 type movingHost struct {
 	fakeBoxes
+	mu        sync.Mutex
 	stopped   []contract.BoxID
 	oldSlices []string
 	recreated []BoxSpec
@@ -20,6 +23,8 @@ type movingHost struct {
 }
 
 func (h *movingHost) Stop(_ context.Context, id contract.BoxID) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.stopped = append(h.stopped, id)
 	if h.failStop {
 		return errors.New("stop failed")
@@ -27,6 +32,8 @@ func (h *movingHost) Stop(_ context.Context, id contract.BoxID) error {
 	return nil
 }
 func (h *movingHost) Recreate(_ context.Context, spec BoxSpec, _, oldSlice string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.oldSlices = append(h.oldSlices, oldSlice)
 	h.recreated = append(h.recreated, spec)
 	return nil
@@ -37,12 +44,14 @@ func TestMoveIdleSubtree(t *testing.T) {
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	host := &movingHost{}
 	s.boxes = host
+	resetLifecycle(s)
 	start := func(name string, parent contract.SessionID) contract.SessionStartResponse {
 		t.Helper()
 		r, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Parent: parent, Name: name, Profile: "test", Goal: "goal"})
 		if e != nil {
 			t.Fatal(e)
 		}
+		passLifecycle(t, s, ctx)
 		if _, e := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: r.Session}, contract.BoxHelloRequest{}); e != nil {
 			t.Fatal(e)
 		}
@@ -98,6 +107,7 @@ func TestMoveIdleSubtree(t *testing.T) {
 	if _, e := s.SessionMove(ctx, owner, contract.SessionMoveRequest{Session: child.Session, NewParent: destination.Session}); e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
 	events, err := s.store.Events(ctx, room, 0, 256, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -117,7 +127,8 @@ func TestMoveIdleSubtree(t *testing.T) {
 	}
 	oldSlice := b.Slice
 	wakeSession(t, s, ctx, room, leaf.Session)
-	s.ReconcileDormancy(ctx, false, true)
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
 	if len(host.recreated) != 2 || host.recreated[0].Box != child.Box || host.recreated[1].Box != leaf.Box {
 		t.Fatalf("recreate order: %+v", host.recreated)
 	}
@@ -141,21 +152,32 @@ func TestMoveUnderCallerAfterStopFailure(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	passLifecycle(t, s, ctx)
 	if _, e := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, contract.BoxHelloRequest{}); e != nil {
 		t.Fatal(e)
 	}
 	s.boxes = &movingHost{failStop: true}
+	resetLifecycle(s)
 	if _, e := s.SessionMove(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: parent}, contract.SessionMoveRequest{Session: child.Session, NewParent: parent}); e != nil {
 		t.Fatal(e)
 	}
-	wakeSession(t, s, ctx, room, child.Session)
-	s.ReconcileDormancy(ctx, false, true)
+	passLifecycle(t, s, ctx)
 	host := s.boxes.(*movingHost)
-	if len(host.stopped) == 0 || len(host.recreated) != 0 {
-		t.Fatal("failed stop must prevent wake")
+	if len(host.stopped) != 1 || stateOf(t, s, ctx, child.Session) != contract.BoxReady {
+		t.Fatal("failed stop changed box state")
 	}
 	host.failStop = false
-	s.ReconcileDormancy(ctx, false, true)
+	passLifecycle(t, s, ctx)
+	if len(host.stopped) != 1 {
+		t.Fatal("stop retried before its deadline")
+	}
+	s.now = func() time.Time { return time.Unix(1031, 0) }
+	passLifecycle(t, s, ctx)
+	if stateOf(t, s, ctx, child.Session) != contract.BoxStopped {
+		t.Fatal("box did not stop after retry")
+	}
+	wakeSession(t, s, ctx, room, child.Session)
+	passLifecycle(t, s, ctx)
 	if stateOf(t, s, ctx, child.Session) != contract.BoxStarting {
 		t.Fatal("box did not wake after retry")
 	}
