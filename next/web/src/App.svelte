@@ -15,7 +15,7 @@
   import Icon from "./lib/ui/Icon.svelte";
   import Avatar, { setSessionLabels } from "./lib/ui/Avatar.svelte";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
-  import { boxReason, count, quoted, turnReason, type Quote } from "./lib/feed.ts";
+  import { boxReason, count, quoted, turnReason, waits, type Quote } from "./lib/feed.ts";
   import { urgency, type Status } from "./lib/status.ts";
   import { FileDraft } from "./lib/attach.svelte.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
@@ -268,16 +268,17 @@
     target()?.focus();
   }
   let roomName = $derived(attention.rooms.get(room ?? "")?.name ?? "Room");
-  // A session's line says what it does, from its one status (status.ts). A failed session's line is the reason
-  // after "Failed", which the row draws; an idle one says Starting while its box starts, else Idle. Its profile is the
-  // row's hover title.
+  // A session's line says what it does, from its one status (status.ts). A waiting one names what the owner must do;
+  // a box no host takes for its room comes first, since its requests show in the feed and Requests too. A failed
+  // session's line is the reason after "Failed", which the row draws; an idle one says why its pending box waits, or
+  // Starting while its box starts, else Idle. Its profile is the row's hover title.
   const status = (id: string) => {
-    const box = store?.boxes.get(id), broken = store?.boxFailures.get(id), cause = store?.causes.get(id);
+    const broken = store?.boxFailures.get(id), cause = store?.causes.get(id), reason = store?.pendingReasons.get(id);
     switch (store?.status(id)) {
-      case "waiting": return "Waiting for your approval";
+      case "waiting": return reason === "room-host" ? waits[reason] : "Waiting for your approval";
       case "working": { const label = store?.activity.get(id); return label ? `Working · ${label}` : "Working"; }
       case "failed": return broken ? boxReason(broken) : turnReason(cause);
-      default: return starting(id) ? "Starting" : "Idle";
+      default: return reason ? waits[reason] : starting(id) ? "Starting" : "Idle";
     }
   };
   // A DM's header says only the status word; the live line and About say what the session does. A failed session has

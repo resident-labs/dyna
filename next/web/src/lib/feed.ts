@@ -1,5 +1,6 @@
 import type { Attachment, BoxState, Card, Conversation, Event, FailureCause, Principal } from "./contract.gen.ts";
 import type { BoxFailure } from "./status.ts";
+import type { PendingReason } from "./event.ts";
 import type { Request } from "./room.svelte.ts";
 
 export type Row =
@@ -29,6 +30,12 @@ export const boxReason = ({ box, cause }: BoxFailure): string => {
 export const turnReason = (cause?: FailureCause): string => {
   const reason = cause ? causes[cause] : "the last turn failed";
   return reason[0].toLowerCase() + reason.slice(1);
+};
+
+// Why a pending box waits, in place of "Starting" on its session's line and in About.
+export const waits: Record<PendingReason, string> = {
+  cpu: "Waiting for CPU", memory: "Waiting for memory", disk: "Waiting for disk space", "room-limit": "Room limit",
+  "no-ready-host": "Waiting for a host", "room-host": "No host takes this room", "invalid-size": "Unknown box size",
 };
 
 // A box's failed row, in the feed and at the end of a DM. A stopped box with a cause may still start, so it has not failed.
