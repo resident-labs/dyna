@@ -15,7 +15,7 @@
 <script lang="ts">
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
-  import { fileSize, formatTime, isImage, type Row } from "../feed.ts";
+  import { fileSize, formatTime, isImage, isThumb, type Row } from "../feed.ts";
   import type { Attachment } from "../contract.gen.ts";
   import { hue } from "../identity.ts";
   let { row, author, to, root, onretry, ondiscard, onforward }: {
@@ -34,8 +34,13 @@
   const url = (file: Attachment) => `/v1/files/${encodeURIComponent(file.sha256)}`;
   // The type badge on a file card, such as "TXT", as in v1.
   const extension = (name: string) => /\.([A-Za-z0-9]{1,6})$/.exec(name)?.[1].toUpperCase() ?? "FILE";
-  let images = $derived(row.attachments.filter(isImage));
-  let others = $derived(row.attachments.filter(file => !isImage(file)));
+  // Images the engine refused. Each shows as a file card without a link, as its link would open only the refusal.
+  let failed: string[] = $state([]);
+  // Images already retried once; a second failure leaves the card without Retry.
+  let retried: string[] = $state([]);
+  const retry = (file: Attachment) => { retried = [...retried, file.sha256]; failed = failed.filter(sha => sha !== file.sha256); };
+  let images = $derived(row.attachments.filter(file => isThumb(file, failed)));
+  let others = $derived(row.attachments.filter(file => !isThumb(file, failed)));
 </script>
 
 <!-- A tap focuses the row on a touch screen, so focus shows its action bar as hover does. -->
@@ -52,12 +57,14 @@
   <!-- As in v1, images come first as thumbnails, then a card per other file. Each opens the file in a new tab. -->
   {#if images.length}<div class="images" class:many={images.length > 1}>{#each images as file, i (i)}
     <a class="thumb" href={url(file)} target="_blank" rel="noopener" title={`${file.name} · ${fileSize(file.bytes)}`}>
-      <img src={url(file)} alt={file.name} loading="lazy" /></a>{/each}</div>{/if}
-  {#each others as file, i (i)}
-    <a class="file" href={url(file)} target="_blank" rel="noopener" title={`Open ${file.name}`}>
+      <img src={url(file)} alt={file.name} loading="lazy" onerror={() => { failed = [...failed, file.sha256]; }} /></a>{/each}</div>{/if}
+  {#each others as file, i (i)}{@const dead = failed.includes(file.sha256)}
+    <svelte:element this={dead ? "span" : "a"} class="file" class:dead href={dead ? undefined : url(file)} target={dead ? undefined : "_blank"} rel={dead ? undefined : "noopener"}
+      title={dead ? `${file.name} did not load` : `Open ${file.name}`}>
       <span class="ext" aria-hidden="true">{extension(file.name)}</span>
-      <span class="meta"><span class="file-name">{file.name}</span><span class="size">{fileSize(file.bytes)}</span></span>
-      <span class="open" aria-hidden="true">↗</span></a>{/each}
+      <span class="meta"><span class="file-name">{file.name}</span><span class="size">{dead ? "Did not load" : fileSize(file.bytes)}</span></span>
+      {#if !dead}<span class="open" aria-hidden="true">↗</span>
+      {:else if isImage(file) && !retried.includes(file.sha256)}<button type="button" class="reload" onclick={() => retry(file)}>Retry</button>{/if}</svelte:element>{/each}
   {#if row.pending?.failed}{@const id = row.pending.id}<p class="unsent" role="alert">Not sent
     <button type="button" onclick={() => onretry(id)}>Retry</button><button type="button" onclick={() => ondiscard(id)}>Discard</button></p>{/if}
 </article>
@@ -102,6 +109,11 @@
   .file { display: flex; align-items: center; gap: 12px; width: min(420px, 100%); margin: 6px 0 2px; padding: 10px 12px;
     background: var(--sidebar); border: 1px solid var(--line); border-radius: 8px; color: var(--text); text-decoration: none; }
   .file:hover { background: var(--hover); }
+  /* A file that did not load is plain text: nothing to open. */
+  .file.dead { cursor: default; }
+  .file.dead .file-name { color: var(--text); }
+  .reload { margin-left: auto; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+  .reload:hover { color: var(--text); text-decoration: underline; }
   .ext { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: 6px; background: var(--raised);
     color: var(--muted); font: 600 10.5px var(--mono); }
   .meta { display: flex; flex-direction: column; min-width: 0; }
