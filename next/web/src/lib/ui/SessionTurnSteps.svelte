@@ -6,9 +6,9 @@
   import Icon from "./Icon.svelte";
   import StepList from "./StepList.svelte";
 
-  let { turn, transcripts, opened, ontoggle, activity, answered }: {
+  let { turn, transcripts, opened, ontoggle, activity, answered, live }: {
     turn: WorkTurn; transcripts: TurnTranscripts; opened: ReadonlySet<string>;
-    ontoggle: (key: string) => void; activity?: string; answered: boolean;
+    ontoggle: (key: string) => void; activity?: string; answered: boolean; live: boolean;
   } = $props();
   let id = $derived(turn.started.body.turn);
   let events = $derived(turn.ended ? [turn.started, turn.ended] : [turn.started]);
@@ -38,7 +38,8 @@
       </div>
     {/if}
   </div>
-{:else}<p class="live">Working{activity ? ` · ${activity}` : "…"}</p>{/if}
+{:else if live}<p class="live">Working{activity ? ` · ${activity}` : "…"}</p>
+{:else}<p class="live">Stopped before it finished</p>{/if}
 
 <style>
   .work-steps { margin: 6px 0 0 64px; color: var(--muted); font-size: 12.5px; }
