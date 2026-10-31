@@ -143,10 +143,11 @@ type Config struct {
 
 // Server owns the box's jobs. They outlive any Pi process.
 type Server struct {
-	cfg    Config
-	closed chan struct{}
-	mu     sync.Mutex
-	jobs   []*job
+	cfg      Config
+	closed   chan struct{}
+	mu       sync.Mutex
+	jobs     []*job
+	viewNext int
 }
 
 func New(cfg Config) *Server {
@@ -294,14 +295,25 @@ func (s *Server) View(reset bool) []contract.ShellJobOutput {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var result []contract.ShellJobOutput
-	for _, j := range s.jobs {
+	budget := 256 << 10
+	first := s.viewNext
+	for i := range s.jobs {
+		index := (first + i) % len(s.jobs)
+		j := s.jobs[index]
 		j.mu.Lock()
-		fresh := reset || j.owner < j.base
+		if reset {
+			j.owner = -1
+		}
+		if budget <= 0 {
+			j.mu.Unlock()
+			continue
+		}
 		start := max(j.owner, j.base) - j.base
 		end := len(j.output)
 		if !j.finished {
 			end = bytes.LastIndexByte(j.output, '\n') + 1
 		}
+		fresh := j.owner < j.base || end-start > 64<<10
 		if fresh {
 			start = max(0, end-(64<<10))
 			if start > 0 {
@@ -316,7 +328,9 @@ func (s *Server) View(reset bool) []contract.ShellJobOutput {
 			end = start
 		}
 		if fresh || end > start || j.ownerFinished != j.finished {
-			result = append(result, contract.ShellJobOutput{Job: j.id, Command: j.command, Running: !j.finished, ExitCode: j.exit, Text: Mask(string(j.output[start:end])), Reset: fresh})
+			result = append(result, contract.ShellJobOutput{Job: j.id, Command: Mask(j.command), Running: !j.finished, ExitCode: j.exit, Text: Mask(string(j.output[start:end])), Reset: fresh})
+			budget -= end - start
+			s.viewNext = (index + 1) % len(s.jobs)
 		}
 		j.owner, j.ownerFinished = j.base+end, j.finished
 		j.mu.Unlock()
