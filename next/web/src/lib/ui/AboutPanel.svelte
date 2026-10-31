@@ -2,7 +2,7 @@
   import { SvelteMap } from "svelte/reactivity";
   import ProfileMenu from "./ProfileMenu.svelte";
   import StatusPill from "./StatusPill.svelte";
-  import { boxReason, count, fromNow, fullTime } from "../feed.ts";
+  import { boxReason, count, fromNow, fullTime, waits } from "../feed.ts";
   import { failed } from "../jobs.ts";
   import { watchShell, type ShellJob } from "../shell.ts";
   import type { RoomStore } from "../room.svelte.ts";
@@ -22,6 +22,7 @@
   let parent = $derived(open?.parent && store.names.get(open.parent));
   let box = $derived(store.boxes.get(session));
   let failure = $derived(store.boxFailures.get(session));
+  let reason = $derived(store.pendingReasons.get(session));
   let hasJobs = $derived(box === "ready" && store.hadJobs.has(session));
   const listed = new SvelteMap<string, ShellJob>();
   let visible = $state(document.visibilityState === "visible");
@@ -45,7 +46,7 @@
       {#if store.stopFailed.has(session)}<span class="failed">The stop did not reach the engine.</span>{/if}</dd>{/if}
     {#if parent && open?.parent}<dt>Parent</dt><dd><a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(open.parent)}`} onclick={navigate}>{parent}</a></dd>{/if}
     {#if open?.profile}<dt>Profile</dt><dd><ProfileMenu {session} profile={open.profile} /></dd>{/if}
-    {#if box}<dt>Box</dt><dd>{#if failure}<StatusPill tone="failed" word label="Failed" /> · {boxReason(failure)}{:else}{boxes[box]}{/if}</dd>{/if}
+    {#if box}<dt>Box</dt><dd>{#if failure}<StatusPill tone="failed" word label="Failed" /> · {boxReason(failure)}{:else}{reason ? waits[reason] : boxes[box]}{/if}</dd>{/if}
     {#if hasJobs}<dt>Jobs</dt><dd><button type="button" onclick={onjobs}>{running ? `${count(running, "job")} running` : "Jobs"}</button>{#if failures}{" · "}<StatusPill tone="failed" label="{failures} failed" word />{/if}</dd>{/if}
     {#if open?.startedAt}<dt>Started</dt><dd class="muted"><time datetime={open.startedAt} title={fullTime(open.startedAt)}>{fromNow(open.startedAt, Math.max(now, Date.parse(open.startedAt)))}</time></dd>{/if}
     {#if open?.lastTurnAt}<dt>Last turn</dt><dd class="muted"><time datetime={open.lastTurnAt} title={fullTime(open.lastTurnAt)}>{fromNow(open.lastTurnAt, Math.max(now, Date.parse(open.lastTurnAt)))}</time></dd>{/if}
