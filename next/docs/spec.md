@@ -35,7 +35,7 @@ The owner settled the design on the card. Writing the spec needed the decisions 
      - **Budget:** about 100 engine lines and 40 box agent lines. Any owner gets the full `gh` command for agents, with no token in a box and one guard for the GitHub quota.
 14. **The engine runs on an always-on host** (owner, q54; root, 2026-10-31). The control plane carries every model byte, git push and transcript. On a desktop that sleeps, reboots or loses its network, every box stalls. So the control plane runs on an always-on host, which may also be a capacity host. Today that host is hermeslab: the trial engine runs there as a systemd user unit with linger and a restart rule. The owner's desktop is a client only.
    - **Web app and desktop window.** The web listener binds only loopback. Until remote access lands (M3), the owner reaches it through an SSH local forward. After that, a paired device opens it directly, and the desktop window is such a paired client.
-   - **CLI.** The owner forwards the owner socket over SSH and passes `--socket`, or runs `dyna` on the engine host over SSH. The engine's `SO_PEERCRED` check sees the owner's UID, because sshd serves the forward as that user.
+   - **CLI.** The owner forwards the owner socket over SSH and passes `--socket`, or runs `dyna` on the engine host over SSH. The engine's `SO_PEERCRED` check sees the owner's UID, because sshd serves the forward as that user. A connection through sshd carries no `dyna-hostexec-` scope, so it is one more way to leave the scope, an accepted risk in 6.4. When remote access lands, the desktop CLI can use a paired device token with scopes instead.
    - **GitHub token.** It stays in `gh`'s own store on the engine host. The engine reads it when it starts, so Dyna's files and unit files hold no token.
    - **Backups.** The daily `store.db` backup is also copied over SSH to a second machine. A setting names that machine; the owner chooses it.
    - **Reboot.** The user unit starts the engine again. Rootless containers do not restart after a host reboot, so the host check (5.10) marks them `stopped`, and the next wake starts them.
@@ -890,7 +890,7 @@ Host exec on the control plane runs as the owner's user. To stop such a command 
 Accepted risks (owner, 2026-10-30):
 
 - Every grant gives full access to its hosts. On the control plane, that includes the CLIProxyAPI sign-ins and the owner's files. Root's default grant relies on root's judgment.
-- A command can leave its scope, for example with `systemd-run --user`. The scope check stops mistakes, not a hostile command.
+- A command can leave its scope, for example with `systemd-run --user`, or with SSH to the engine host as the owner's user, which reaches the owner socket outside any scope (decision 14). The scope check stops mistakes, not a hostile command.
 - A capacity-host command runs as the host user. It can read or change every box on that host and the shared caches. It can also connect to any box's forwarded socket under `<hostdata>/sock/` and act as that box's session, with its model route and git push rights. Hosts hold no model or GitHub credentials, and only we have admin on them.
 - Output can contain host secrets. Only the room's sessions and the owner can see it.
 
