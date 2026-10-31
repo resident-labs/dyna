@@ -285,13 +285,14 @@
     target()?.focus();
   }
   let roomName = $derived(attention.rooms.get(room ?? "")?.name ?? "Room");
-  // A session's line says what it does, from its one status (status.ts). A failed session's line is the reason
-  // after "Failed", which the row draws; an idle one says why its pending box waits, or Starting while its box starts,
-  // else Idle. Its profile is the row's hover title.
+  // A session's line says what it does, from its one status (status.ts). A waiting one names what the owner must do;
+  // a box no host takes for its room comes first, since its requests show in the feed and Requests too. A failed
+  // session's line is the reason after "Failed", which the row draws; an idle one says why its pending box waits, or
+  // Starting while its box starts, else Idle. Its profile is the row's hover title.
   const status = (id: string) => {
     const broken = store?.boxFailures.get(id), cause = store?.causes.get(id), reason = store?.pendingReasons.get(id);
     switch (store?.status(id)) {
-      case "waiting": return "Waiting for your approval";
+      case "waiting": return reason === "room-host" ? waits[reason] : "Waiting for your approval";
       case "working": { const label = store?.activity.get(id); return label ? `Working · ${label}` : "Working"; }
       case "failed": return broken ? boxReason(broken) : turnReason(cause);
       default: return reason ? waits[reason] : starting(id) ? "Starting" : "Idle";

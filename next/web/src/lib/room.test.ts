@@ -305,7 +305,7 @@ test("session.list and later events set and clear the running computers", async 
   } finally { server.restore(); }
 });
 
-test("a pending box's reason comes from history, follows a pending to pending change, and free text gives none", async () => {
+test("a pending box's reason comes from history, follows a pending to pending change, waits for the owner on room-host, and free text gives none", async () => {
   const original = globalThis.fetch;
   const session = { id: "s", lastRead: 0, name: "Agent", parent: "", profile: "p", box: "b", boxState: "pending", computer: "stopped", goal: "", startedAt: "", hadJobs: false };
   const changed = (seq: number, from: BoxState, to: BoxState, reason?: string) => event(seq, { type: "box.changed", body: { box: "b", session: "s", from, to, reason } });
@@ -319,8 +319,11 @@ test("a pending box's reason comes from history, follows a pending to pending ch
     await room.open();
     assert.equal(room.pendingReasons.get("s"), "cpu");
     room.apply(changed(3, "pending", "pending", "room-limit"));
-    assert.equal(room.pendingReasons.get("s"), "room-limit");
-    room.apply(changed(4, "creating", "pending", "dial tcp: connection refused"));
+    assert.deepEqual([room.pendingReasons.get("s"), room.status("s")], ["room-limit", "idle"]);
+    // Only the owner can end a wait for a host that takes the room, so it waits for the owner.
+    room.apply(changed(4, "pending", "pending", "room-host"));
+    assert.equal(room.status("s"), "waiting");
+    room.apply(changed(5, "creating", "pending", "dial tcp: connection refused"));
     assert.equal(room.pendingReasons.has("s"), false);
   } finally { globalThis.fetch = original; }
 });
