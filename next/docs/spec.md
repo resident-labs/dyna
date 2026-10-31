@@ -663,7 +663,7 @@ The reconciler runs one pass when a store commit changes a box, a session or a t
 
 | Want | State | Step | Commit |
 |---|---|---|---|
-| run | creating | `repos.Get` and `Create`. After a restart, `Remove` the partial parts first. | `starting`, `due_at=now+60 s`. On error: `failed` (cause `create_failed`). |
+| run | creating | `repos.Get` and `Create`. After a restart, `Remove` the partial parts first. | `starting`, `due_at=now+60 s`, unless hello already made it `ready`. Save the returned image in either state. On error: `failed` (cause `create_failed`), even if hello arrived. |
 | run | starting, `due_at=0` | `Start`, or `Recreate` if the slice changed | `due_at=now+60 s`. On error: `stopped`, `due_at=now+30 s`. |
 | run | starting, past `due_at` | A box with no turns: `Remove`. A box with turns: `Stop`. | No turns: `failed` (cause `no_hello`). With turns: `stopped`, reason `no hello`, `due_at=now+30 s`. The volume stays. |
 | stop | ready | `Stop` | `stopped`. On error: `due_at=now+30 s`. |
@@ -677,7 +677,7 @@ The table below lists the transitions. Each row is one observed change, and it e
 | pending | pending | admission still does not fit; the reason changed, and the new reason is recorded |
 | pending | creating | admission placed it |
 | creating | starting | volume, repository copy and slice are ready, and `podman run` succeeded |
-| starting | ready | the box agent sent `hello` on the box socket within 60 s |
+| creating, starting | ready | the box agent sent `hello` on the box socket within 60 s |
 | starting | stopped | the host start failed during a wake |
 | ready | stopped | the session went dormant: no running turn, shell job or wake |
 | stopped | starting | a delivery wakes the session, and admission fits it again |
@@ -685,7 +685,7 @@ The table below lists the transitions. Each row is one observed change, and it e
 | pending | starting | admission fits a box that already has its container |
 | pending, creating, starting, ready, stopped, failed | closing | the session closes, or its parent closes |
 | closing | deleted | archive pushed or not needed, children deleted, container removed |
-| creating, starting | failed | a step failed, or `hello` timed out |
+| creating, starting, ready | failed | create failed (including after an early hello), or `hello` timed out |
 | ready, stopped, closing | lost | the host is unreachable (5.10) |
 | lost | closing | the session closes while its host is unreachable; closing waits for the host or its removal |
 | closing | failed | the host returns without the container, or the owner removes the host; there is no archive |
