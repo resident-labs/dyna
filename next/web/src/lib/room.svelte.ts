@@ -191,6 +191,11 @@ export class RoomStore {
       case "session.closed":
         if (event.seq > this.sessionBaseline) state.sessions.delete(event.body.session);
         break;
+      case "session.moved": {
+        const moved = state.sessions.get(event.body.session);
+        if (moved && event.seq > this.sessionBaseline) state.sessions.set(event.body.session, { ...moved, parent: event.body.newParent });
+        break;
+      }
       case "box.changed":
         if (event.seq > this.sessionBaseline) state.boxes.set(event.body.session, event.body.to);
         break;
