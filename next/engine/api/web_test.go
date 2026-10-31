@@ -16,14 +16,21 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
-type streamDeviceStore struct{ live atomic.Bool }
+type streamDeviceStore struct {
+	live atomic.Bool
+	read atomic.Bool
+}
 
 func (s *streamDeviceStore) CreateDevice(context.Context, store.Device) error { return nil }
 func (s *streamDeviceStore) RedeemPairCode(context.Context, string, string, []contract.Scope, time.Time) (string, store.Device, error) {
 	return "", store.Device{}, store.ErrPair
 }
 func (s *streamDeviceStore) AuthenticateDevice(context.Context, [32]byte, time.Time) (store.Device, bool, error) {
-	return store.Device{}, s.live.Load(), nil
+	var scopes []contract.Scope
+	if s.read.Load() {
+		scopes = []contract.Scope{contract.ScopeRead}
+	}
+	return store.Device{Scopes: scopes}, s.live.Load(), nil
 }
 
 func TestWebStreamEndsAfterDeviceRevocation(t *testing.T) {
@@ -45,6 +52,30 @@ func TestWebStreamEndsAfterDeviceRevocation(t *testing.T) {
 	go func() { w.ServeHTTP(httptest.NewRecorder(), r); close(ended) }()
 	<-started
 	devices.live.Store(false)
+	tick <- time.Time{}
+	<-ended
+}
+
+func TestWebStreamEndsAfterScopeRemoval(t *testing.T) {
+	devices := &streamDeviceStore{}
+	devices.live.Store(true)
+	devices.read.Store(true)
+	w, err := NewWeb(New(&fakeService{}, nil), "127.0.0.1:7790", fstest.MapFS{}, time.Now, devices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tick := make(chan time.Time)
+	w.ticks = func() (<-chan time.Time, func()) { return tick, func() {} }
+	started, ended := make(chan struct{}), make(chan struct{})
+	w.handler = http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+	})
+	r := httptest.NewRequest(http.MethodGet, "http://dyna.localhost:7790/v1/events", nil)
+	r.AddCookie(&http.Cookie{Name: "dyna_device", Value: "token"})
+	go func() { w.ServeHTTP(httptest.NewRecorder(), r); close(ended) }()
+	<-started
+	devices.read.Store(false)
 	tick <- time.Time{}
 	<-ended
 }
