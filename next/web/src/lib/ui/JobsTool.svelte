@@ -7,8 +7,8 @@
   import StatusPill from "./StatusPill.svelte";
   import { endCause, failed, jobGroups, jobTime, jobTitle } from "../jobs.ts";
   import { ShellWatches, type ShellJob } from "../shell.ts";
-  // The room header's Jobs tool (dock design C). Its slot never moves; only its counts change: the running jobs with
-  // the soft Working dot, then the failures the owner has not opened, in the failed tone. A click opens a popover under
+  // The room header's Jobs tool (dock design C). Its slot never moves; only its counts change: the running jobs as a
+  // muted count, then the failures the owner has not opened, in the failed tone; only a failure gets a mark. A click opens a popover under
   // it, or a sheet on a phone, with the jobs grouped by session; a job opens as a dock tab (onopen), or on a phone as
   // a full-height sheet. The lists watch each session's jobs only while they are open and the page is visible.
   type JobSession = { id: string; name: string; root: boolean; running: number };
@@ -86,10 +86,9 @@
 <span class="jobs" bind:this={root}>
   <button type="button" class="open" class:live={running || failures.length} class:phone bind:this={button} aria-haspopup="dialog" aria-expanded={open}
     aria-label={`Jobs, ${summary}`} title={summary} onclick={() => { if (open) void close(); else void show(); }}>
-    <Icon name="prompt" />{#if phone}{#if failures.length}<span class="corner"><StatusPill tone="failed" dot label="Failed" /></span>
-      {:else if running}<span class="corner"><StatusPill tone="working" dot label="Running" /></span>{/if}
+    <Icon name="prompt" />{#if phone}{#if failures.length}<span class="corner"><StatusPill tone="failed" dot label="Failed" /></span>{/if}
     {:else}<span>Jobs</span>
-      {#if running}<StatusPill tone="working" dot label="Running" /><span class="n">{running}</span>{/if}
+      {#if running}<span class="n">{running}</span>{/if}
       {#if failures.length}<StatusPill tone="failed" label={`${failures.length} failed`} />{/if}
       <Icon name="chevron" size={12} />{/if}</button>
   {#if open}
