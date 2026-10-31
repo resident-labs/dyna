@@ -8,9 +8,11 @@ import (
 
 func activityLabel(e event) string {
 	label := e.ToolName
+	var args map[string]json.RawMessage
+	_ = json.Unmarshal(e.Args, &args)
 	for _, key := range []string{"path", "command", "pattern", "query", "url"} {
 		var value string
-		if json.Unmarshal(e.Args[key], &value) != nil || value == "" {
+		if json.Unmarshal(args[key], &value) != nil || value == "" {
 			continue
 		}
 		if key == "path" {
@@ -21,9 +23,5 @@ func activityLabel(e event) string {
 	}
 	label = strings.SplitN(label, "\n", 2)[0]
 	label = strings.ReplaceAll(label, "\r", " ")
-	runes := []rune(label)
-	if len(runes) > 80 {
-		label = string(runes[:79]) + "…"
-	}
 	return label
 }
