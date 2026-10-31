@@ -50,7 +50,7 @@
   // A pairing link leaves the address bar and history at once, whatever this browser's state. Only a signed-out page uses it.
   const move = new URLSearchParams(location.hash.slice(1));
   const moveData = move.has("route") ? move : new URLSearchParams(sessionStorage.getItem("dyna-connect-move") ?? "");
-  let routeNotice = $state(moveData.get("route") ? `Moved to ${moveData.get("route")}${moveData.has("lost") ? " because the connection was lost" : ""}.` : "");
+  let routeNotice = $state(moveData.get("route") ?? "");
   if (move.has("route")) sessionStorage.setItem("dyna-connect-move", move.toString());
   if (move.has("route")) history.replaceState(null, "", location.pathname + location.search);
   const pairCode = linkCode(window.location.hash);
@@ -662,7 +662,7 @@
           {#if busy.length > 3}<span class="more">+{busy.length - 3}</span>{/if}<span class="count">{working} working</span>
         {:else}<Icon name="people" />{#if store?.ready}<span class="count phone">{store.sessions.size}</span>{/if}{/if}
         {#if store?.counts.failed && !panelShown}<span class="attention"></span>{/if}</button>{/if}</header>
-    {#if routeNotice}<div class="route-notice">{routeNotice}<button type="button" aria-label="Dismiss route notice" onclick={() => { routeNotice = ""; sessionStorage.removeItem("dyna-connect-move"); }}>✕</button></div>{/if}
+    {#if routeNotice}<div class="route-notice"><Icon name="globe" size={18} /><span><strong>Moved to {routeNotice}</strong>{moveData.has("old") ? `: ${moveData.get("old")} stopped answering for 20 seconds.` : `, a nearer route to ${moveData.get("name") || "this machine"}. Same session, same room.`}</span><button type="button" aria-label="Dismiss route notice" onclick={() => { routeNotice = ""; sessionStorage.removeItem("dyna-connect-move"); }}>✕</button></div>{/if}
     {#if reloadPending}<p class="reload-notice" role="status">Dyna updated. Reload to use the new version. <button type="button" onclick={() => location.reload()}>Reload</button></p>{/if}
     {#if section === "instructions" && room && store && !unavailable}<Instructions {room} {roomName} rooms={rooms.length} sessions={store.sessions.size} onclose={() => void closeSection()} />{/if}
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} admin={attention.can("admin")} onclose={() => void closeSection()} />{/if}
@@ -743,7 +743,8 @@
 </div>{/if}
 
 <style>
-  .route-notice { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; color: var(--muted); font-size: 12.5px; border-bottom: 1px solid var(--line); }
+  .route-notice { display: flex; align-items: center; gap: 10px; padding: 8px 16px; color: var(--muted); font-size: 12.5px; border-bottom: 1px solid var(--line); }
+  .route-notice span { flex: 1; } .route-notice strong { color: var(--text); }
   .route-notice button { border: 0; background: none; color: inherit; cursor: pointer; }
   :global(.shell.open:has(.visual-pane)) { grid-template-columns: 64px minmax(0, 1fr) min(660px, calc(100vw - 64px)); }
   .visual-pane { min-width: 0; overflow: hidden; border-left: 1px solid var(--line); }

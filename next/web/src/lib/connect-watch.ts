@@ -61,12 +61,12 @@ export async function watchConnect(): Promise<{ stream(up: boolean): void; stop(
     if (!result?.ok) { moving = false; return; }
     const body: unknown = await result.json();
     if (typeof body !== "object" || body === null || !("code" in body) || typeof body.code !== "string") { moving = false; return; }
-    const fragment = new URLSearchParams({ handoff: body.code, mid: pin.machine, mk: pin.key, relay: pin.relay, route: label(target), return: location.pathname + location.search });
+    const fragment = new URLSearchParams({ handoff: body.code, mid: pin.machine, mk: pin.key, relay: pin.relay, route: label(target), name: pin.name ?? "this machine", return: location.pathname + location.search });
     location.assign(target + "/connect#" + fragment);
   }
   async function fallback() {
     const target = await find(data.routes.filter(route => route !== data.current));
-    if (target && !stopped) location.assign(target + location.pathname + location.search + "#" + new URLSearchParams({ route: label(target), lost: "1" }));
+    if (target && !stopped) location.assign(target + location.pathname + location.search + "#" + new URLSearchParams({ route: label(target), old: label(data.current) }));
   }
   arm(Math.max(expires - Date.now() - 120_000, 1000));
   void move();
