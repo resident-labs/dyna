@@ -3,7 +3,8 @@ package computer
 import (
 	"context"
 	"encoding/json"
-	"sync"
+	"log"
+	"time"
 	"unicode/utf8"
 
 	"github.com/resident-labs/dyna/contract"
@@ -13,9 +14,40 @@ import (
 // the mouse buttons held down, so a drag moves with its button.
 type Input struct {
 	Base    string
-	mu      sync.Mutex
+	queue   chan contract.ComputerInputBatch
 	d       *DevTools
 	buttons int
+}
+
+func NewInput(base string) *Input {
+	return &Input{Base: base, queue: make(chan contract.ComputerInputBatch, 64)}
+}
+
+// Enqueue never blocks, so a stuck browser cannot hold the box channel. It reports false when the
+// queue is full and the batch is dropped.
+func (in *Input) Enqueue(batch contract.ComputerInputBatch) bool {
+	select {
+	case in.queue <- batch:
+		return true
+	default:
+		return false
+	}
+}
+
+// Run sends queued batches in order until ctx ends. It gives each batch 2 seconds.
+func (in *Input) Run(ctx context.Context) {
+	for {
+		select {
+		case batch := <-in.queue:
+			sendCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			if err := in.Send(sendCtx, batch); err != nil {
+				log.Printf("computer input: %v", err)
+			}
+			cancel()
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 type keyParams struct {
@@ -47,8 +79,6 @@ var virtualKeys = map[string]int{
 
 // Send dispatches a batch in order. It drops the connection on an error so the next batch reconnects.
 func (in *Input) Send(ctx context.Context, batch contract.ComputerInputBatch) error {
-	in.mu.Lock()
-	defer in.mu.Unlock()
 	if in.d == nil {
 		d, err := Connect(ctx, in.Base)
 		if err != nil {
