@@ -401,7 +401,7 @@ For speed, stat context files and the skills folder first; read only changed fil
 
 #### Tools
 
-Each `contract/tools/` toolkit registers one area tool with a flat `action` enum, title, MCP hints, action help and typed `Access` (`session`, `tree`, `grant`, `owner`). CLI help uses the same registry. The server omits owner entries. Refusals return `isError` and shared typed `{code, message}` with a fix. Creating actions accept optional `client_id`; the same caller's retry returns the first result. This covers post, session start, hostexec request_grant, goal set and issue file.
+Each `contract/tools/` toolkit registers one area tool with a flat `action` enum, title, MCP hints, action help and typed `Access` (`OwnerAccess`, `UserAccess`, `BoxAccess`, `OwnerLocalAccess`). Tree and grant checks stay in the services. CLI help uses the same registry. The server omits owner entries. Refusals return `isError` and shared typed `{code, message}` with a fix. Creating actions accept optional `client_id`; the same caller's retry returns the first result. This covers post, session start, hostexec request_grant, goal set and issue file.
 
 | Tool | Actions | Methods | Phase |
 |---|---|---|---|

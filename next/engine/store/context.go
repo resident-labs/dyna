@@ -8,6 +8,33 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+type ContextData struct {
+	Children []ContextChild
+	Requests []ContextRequest
+	PRs      []ContextPR
+	Depth    int
+}
+
+// ContextDataForSession reads a bounded number of indexed queries for one snapshot.
+func (s *Store) ContextDataForSession(ctx context.Context, id contract.SessionID) (ContextData, error) {
+	var data ContextData
+	var err error
+	if _, err = s.Session(ctx, id); err != nil {
+		return data, err
+	}
+	if data.Children, err = s.ContextChildren(ctx, id); err != nil {
+		return data, err
+	}
+	if data.Requests, err = s.ContextRequests(ctx, id); err != nil {
+		return data, err
+	}
+	if data.PRs, err = s.ContextPRs(ctx, id); err != nil {
+		return data, err
+	}
+	data.Depth, err = s.ContextDepth(ctx, id)
+	return data, err
+}
+
 type ContextChild struct {
 	Name    string
 	Profile contract.ProfileName
@@ -24,7 +51,7 @@ type ContextPR struct {
 }
 
 func (s *Store) ContextChildren(ctx context.Context, id contract.SessionID) ([]ContextChild, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT s.name,s.profile,b.state FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.parent=? AND s.closed_at IS NULL ORDER BY COALESCE((SELECT MAX(t.started_at) FROM turns t WHERE t.session=s.id),s.created_at),s.id`, id)
+	rows, err := s.Read().QueryContext(ctx, `SELECT s.name,s.profile,b.state FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.parent=? AND s.closed_at IS NULL ORDER BY COALESCE((SELECT t.started_at FROM turns t WHERE t.session=s.id ORDER BY t.started_at DESC LIMIT 1),s.created_at),s.id`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +127,7 @@ func (s *Store) TurnSections(ctx context.Context, turn contract.TurnID, sections
 		return nil, err
 	}
 	err = s.Write(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, "UPDATE turns SET sections=? WHERE id=? AND sections IS NULL", data, turn); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE turns SET sections=? WHERE id=? AND ended_at IS NULL AND sections IS NULL", data, turn); err != nil {
 			return err
 		}
 		return tx.QueryRowContext(ctx, "SELECT sections FROM turns WHERE id=?", turn).Scan(&data)
