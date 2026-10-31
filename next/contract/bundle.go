@@ -57,6 +57,7 @@ type BundleCounts struct {
 // GlobalBundle is global.json.
 type GlobalBundle struct {
 	Version       BundleVersion   `json:"version"`
+	Rooms         []RoomName      `json:"rooms"`
 	Exported      time.Time       `json:"exported"`
 	Source        BundleSource    `json:"source"`
 	Rules         []Rule          `json:"rules"`
@@ -149,6 +150,7 @@ type AccountLabel struct {
 	Provider AccountProvider `json:"provider"`
 	Label    string          `json:"label"`
 	Repos    []RepoName      `json:"repos,omitempty"` // empty: every repository
+	Rooms    []RoomName      `json:"rooms,omitempty"` // empty: every room
 }
 
 type DeviceScope string
@@ -299,6 +301,9 @@ type QuestionBundle struct {
 	Options   []string       `json:"options,omitempty"`
 	Meanwhile string         `json:"meanwhile,omitempty"`
 	Command   string         `json:"command,omitempty"` // terminal requests only
+	Argv      []string       `json:"argv,omitempty"`
+	Cwd       string         `json:"cwd,omitempty"`
+	Reason    string         `json:"reason,omitempty"`
 	Asked     time.Time      `json:"asked"`
 }
 
