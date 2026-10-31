@@ -1,9 +1,21 @@
 package main
 
 import (
+	"bytes"
+
+	"github.com/resident-labs/dyna/contract"
 	"strings"
 	"testing"
 )
+
+func TestVisualCheckOutput(t *testing.T) {
+	var out bytes.Buffer
+	printVisualChecks(&out, []contract.VisualCheck{{Name: contract.VisualCheckRenders, Status: contract.VisualCheckPass}, {Name: contract.VisualCheckWidths, Status: contract.VisualCheckWarn, Detail: "360"}})
+	out.WriteString("/tmp/banner.webp\n")
+	if got, want := out.String(), "renders: pass \nwidths: warn 360\n/tmp/banner.webp\n"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
 
 func TestVisualFlagsAndMetadata(t *testing.T) {
 	for _, tc := range []struct {

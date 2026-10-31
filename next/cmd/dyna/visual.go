@@ -44,9 +44,7 @@ func visualCommand() *cobra.Command {
 			_, err := fmt.Fprintln(cmd.OutOrStdout(), path)
 			return err
 		}
-		for _, c := range result.Checks {
-			fmt.Fprintf(cmd.OutOrStdout(), "%s: %s %s\\n", c.Name, c.Status, c.Detail)
-		}
+		printVisualChecks(cmd.OutOrStdout(), result.Checks)
 		if err := write("banner.webp", result.Banner); err != nil {
 			return err
 		}
@@ -63,6 +61,12 @@ func visualCommand() *cobra.Command {
 	check.Flags().BoolVar(&allowNet, "allow-net", false, "Allow HTTPS resources")
 	cmd.AddCommand(check)
 	return cmd
+}
+
+func printVisualChecks(w io.Writer, checks []contract.VisualCheck) {
+	for _, check := range checks {
+		fmt.Fprintf(w, "%s: %s %s\n", check.Name, check.Status, check.Detail)
+	}
 }
 
 func visualCSP(net bool) string {
