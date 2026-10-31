@@ -175,6 +175,10 @@ func ghQuotaCaller(path string) string {
 		return "run"
 	case rest == "actions/runs":
 		return runListCaller(query)
+	case strings.HasPrefix(rest, "actions/artifacts/"):
+		return "artifact-zip"
+	case strings.HasPrefix(rest, "compare/"):
+		return "compare"
 	case strings.HasPrefix(rest, "contents/"):
 		return "contents"
 	case rest == "statuses":
