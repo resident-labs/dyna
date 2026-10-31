@@ -3,6 +3,7 @@
   import { readWork, type WorkTurn } from "../session-work.ts";
   import { causes, dayLabel, describe, formatTime } from "../feed.ts";
   import { hue } from "../identity.ts";
+  import { isLiveTurn } from "../work-steps.ts";
   import { SvelteSet } from "svelte/reactivity";
   import { TurnTranscripts } from "../transcripts.svelte.ts";
   import SessionTurnSteps from "./SessionTurnSteps.svelte";
@@ -22,9 +23,8 @@
   let failures = $derived(turns.filter(turn => turn.ended?.body.outcome === "failed"));
   let failureIndex = 0;
   const opened = new SvelteSet<string>();
-  // The view belongs to one session; transcript state survives virtual row recycling.
-  // svelte-ignore state_referenced_locally
-  const transcripts = new TurnTranscripts(session);
+  // The keyed view belongs to one session; transcript state survives virtual row recycling.
+  const transcripts = untrack(() => new TurnTranscripts(session));
   function toggle(key: string) { list?.hold(); if (!opened.delete(key)) opened.add(key); }
   const name = (id: string) => store.names.get(id) ?? "Closed session";
   const author = (person: Principal) => person.kind === "owner" ? "You" : person.session ? name(person.session) : "Dyna";
@@ -119,7 +119,7 @@
             <p>{post.body.text}</p>
           </div>
         {/each}
-        <SessionTurnSteps {turn} {transcripts} {opened} ontoggle={toggle} activity={store.activity.get(session)} answered={turn.posts.some(post => post.body.home.kind === "dm") || !!turn.ended?.body.replies?.some(reply => reply.reply.home?.kind === "dm")} />
+        <SessionTurnSteps {turn} {transcripts} {opened} ontoggle={toggle} live={isLiveTurn(turn.started.body.turn, turns[0].started.body.turn, store.turns.get(session))} activity={store.activity.get(session)} answered={turn.posts.some(post => post.body.home.kind === "dm") || !!turn.ended?.body.replies?.some(reply => reply.reply.home?.kind === "dm")} />
         {#if turn.ended?.body.outcome === "failed"}
           {@const end = turn.ended}
           <div class="failure"><FailedTurnRow compact row={{ kind: "failed", key: end.id, seq: end.seq, session, at: end.at, label: "Turn failed", cause: end.body.cause ? causes[end.body.cause] : "The turn failed" }} author={name(session)} root={!store.sessions.get(session)?.parent} onseen={() => store.see({ kind: "dm", session }, end.seq)}>
