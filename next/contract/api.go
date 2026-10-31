@@ -552,14 +552,15 @@ type TranscriptItem struct {
 	Attachments []Attachment       `json:"attachments,omitempty"`
 }
 type TranscriptInput struct {
-	At   time.Time `json:"at"`
-	ID   EventID   `json:"id"`
-	Seq  int64     `json:"seq"`
-	Room RoomID    `json:"room"`
-	Type EventType `json:"type"`
-	From Principal `json:"from"`
-	Text string    `json:"text"`
-	More bool      `json:"more,omitempty"`
+	Home *Conversation `json:"home,omitempty"`
+	At   time.Time     `json:"at"`
+	ID   EventID       `json:"id"`
+	Seq  int64         `json:"seq"`
+	Room RoomID        `json:"room"`
+	Type EventType     `json:"type"`
+	From Principal     `json:"from"`
+	Text string        `json:"text"`
+	More bool          `json:"more,omitempty"`
 }
 type TranscriptTurn struct {
 	ID         TurnID            `json:"id"`
