@@ -160,7 +160,8 @@ func (b *browser) inspect(ctx context.Context, doc []byte, csp string, allowNet 
 		return Result{}, err
 	}
 	metrics := func(w int) error {
-		return c.call(ctx, "Emulation.setDeviceMetricsOverride", params{Width: w, Height: 800, DeviceScaleFactor: 1}, nil)
+		mobile := false
+		return c.call(ctx, "Emulation.setDeviceMetricsOverride", params{Width: w, Height: 800, DeviceScaleFactor: 1, Mobile: &mobile}, nil)
 	}
 	if err = metrics(1280); err != nil {
 		return Result{}, err
