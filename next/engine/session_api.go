@@ -192,12 +192,19 @@ func (s *Service) closeSession(ctx context.Context, session store.Session, disca
 
 // SessionRestart retries an open session whose box has failed.
 func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal, req contract.SessionRestartRequest) (contract.SessionRestartResponse, *contract.Error) {
-	if caller.Kind != contract.PrincipalOwner {
-		return contract.SessionRestartResponse{}, forbidden()
-	}
 	session, err := s.store.Session(ctx, req.Session)
 	if err != nil {
 		return contract.SessionRestartResponse{}, failure(err)
+	}
+	if e := s.roomAccess(ctx, caller, session.Room); e != nil {
+		return contract.SessionRestartResponse{}, e
+	}
+	tree, err := s.store.RoomTree(ctx, session.Room)
+	if err != nil {
+		return contract.SessionRestartResponse{}, failure(err)
+	}
+	if !tree.CanManage(caller, session.ID) {
+		return contract.SessionRestartResponse{}, forbidden()
 	}
 	event, err := s.event(session.Room, caller, contract.BoxChanged{})
 	if err != nil {
