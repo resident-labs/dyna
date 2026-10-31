@@ -23,7 +23,7 @@ import (
 
 type mintCode struct {
 	JKT, Origin, Device, User string
-	Epoch                     int64
+	Epoch, Generation         int64
 	End                       time.Time
 }
 type handoffCode struct {
@@ -137,7 +137,11 @@ func (s *Sessions) relay(ctx context.Context, l Link) (*Relay, error) {
 	return &Relay{Base: l.Relay, Key: key, Client: s.client, Now: s.now}, nil
 }
 func (s *Sessions) relayClaims(r *http.Request, op string) (Link, RelayClaims, error) {
-	l, err := s.link(r.Context())
+	state, err := s.store.ConnectLink(r.Context())
+	if err != nil || !state.Linked {
+		return Link{}, RelayClaims{}, errors.New("not linked")
+	}
+	l, err := s.files.Link()
 	if err != nil {
 		return l, RelayClaims{}, err
 	}
@@ -152,7 +156,8 @@ func (s *Sessions) relayClaims(r *http.Request, op string) (Link, RelayClaims, e
 	info, statErr := os.Stat(filepath.Join(s.files.dir, "jwks.json"))
 	if err == nil && statErr == nil && s.now().Sub(info.ModTime()) < 7*24*time.Hour {
 		if c, e := VerifyRelay(strings.TrimSpace(string(body)), op, l.Relay, l.Machine, keys, s.now()); e == nil {
-			e = s.store.ConsumeConnectNonce(r.Context(), c.Epoch, "relay:"+c.Nonce, s.now(), time.Unix(c.Exp, 0).Add(time.Minute))
+			c.Generation = state.Generation
+			e = s.store.ConsumeConnectNonceForLink(r.Context(), c.Epoch, c.Generation, "relay:"+c.Nonce, s.now(), time.Unix(c.Exp, 0).Add(time.Minute))
 			return l, c, e
 		}
 	}
@@ -180,10 +185,11 @@ func (s *Sessions) relayClaims(r *http.Request, op string) (Link, RelayClaims, e
 	if err != nil {
 		return l, c, err
 	}
-	err = s.store.ConsumeConnectNonce(r.Context(), c.Epoch, "relay:"+c.Nonce, s.now(), time.Unix(c.Exp, 0).Add(time.Minute))
+	c.Generation = state.Generation
+	err = s.store.ConsumeConnectNonceForLink(r.Context(), c.Epoch, c.Generation, "relay:"+c.Nonce, s.now(), time.Unix(c.Exp, 0).Add(time.Minute))
 	return l, c, err
 }
-func (s *Sessions) proof(ctx context.Context, token, origin, path, want string, epoch int64) error {
+func (s *Sessions) proof(ctx context.Context, token, origin, path, want string, epoch, generation int64) error {
 	p, err := verifyProof(token, origin+path, s.now())
 	if err != nil {
 		return err
@@ -191,7 +197,7 @@ func (s *Sessions) proof(ctx context.Context, token, origin, path, want string, 
 	if want != "" && p.JKT != want {
 		return errors.New("proof is from another key")
 	}
-	return s.store.ConsumeConnectNonce(ctx, epoch, "proof:"+p.JTI, s.now(), s.now().Add(2*time.Minute))
+	return s.store.ConsumeConnectNonceForLink(ctx, epoch, generation, "proof:"+p.JTI, s.now(), s.now().Add(2*time.Minute))
 }
 
 // ServePublic handles relay requests and unauthenticated browser exchanges.
@@ -260,7 +266,7 @@ func (s *Sessions) ServePublic(w http.ResponseWriter, r *http.Request, origin st
 				delete(s.codes, k)
 			}
 		}
-		s.codes[hashToken(code)] = mintCode{c.JKT, c.Origin, c.Dev, c.Sub, c.Epoch, s.now().Add(5 * time.Minute)}
+		s.codes[hashToken(code)] = mintCode{c.JKT, c.Origin, c.Dev, c.Sub, c.Epoch, c.Generation, s.now().Add(5 * time.Minute)}
 		s.mu.Unlock()
 		sig := ed25519.Sign(relay.Key, []byte("dyna-connect-mint.v1\n"+c.Nonce+"\n"+hashToken(code)))
 		reply(w, 200, struct {
@@ -330,11 +336,11 @@ func (s *Sessions) exchange(w http.ResponseWriter, r *http.Request, origin strin
 			fail(w, 403, "invalid code")
 			return
 		}
-		if err := s.proof(r.Context(), req.Proof, origin, "/api/connect/session", c.JKT, c.Epoch); err != nil {
+		if err := s.proof(r.Context(), req.Proof, origin, "/api/connect/session", c.JKT, c.Epoch, c.Generation); err != nil {
 			fail(w, 403, "invalid proof")
 			return
 		}
-		x = store.ConnectSession{RelayDevice: c.Device, Origin: origin, JKT: c.JKT, User: c.User, Epoch: c.Epoch, Created: now, End: now.Add(30 * 24 * time.Hour), Grant: now}
+		x = store.ConnectSession{RelayDevice: c.Device, Origin: origin, JKT: c.JKT, User: c.User, Epoch: c.Epoch, Generation: c.Generation, Created: now, End: now.Add(30 * 24 * time.Hour), Grant: now}
 	case req.Handoff != "":
 		h, ok := s.handoffs[hashToken(req.Handoff)]
 		delete(s.handoffs, hashToken(req.Handoff))
@@ -352,7 +358,7 @@ func (s *Sessions) exchange(w http.ResponseWriter, r *http.Request, origin strin
 			fail(w, 403, "invalid proof")
 			return
 		}
-		if err = s.store.ConsumeConnectNonce(r.Context(), src.Epoch, "proof:"+p.JTI, now, now.Add(2*time.Minute)); err != nil {
+		if err = s.store.ConsumeConnectNonceForLink(r.Context(), src.Epoch, src.Generation, "proof:"+p.JTI, now, now.Add(2*time.Minute)); err != nil {
 			fail(w, 403, "invalid proof")
 			return
 		}

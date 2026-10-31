@@ -41,7 +41,7 @@ func (s *Sessions) checkGrant(ctx context.Context, x store.ConnectSession) (bool
 		}
 		cached = grantCacheEntry{Grant: grant, At: s.now()}
 		if grant.Epoch > x.Epoch {
-			if err := s.store.AdvanceConnectEpoch(ctx, grant.Epoch); err != nil {
+			if err := s.store.AdvanceConnectEpoch(ctx, grant.Epoch, x.Generation); err != nil {
 				return false, false, err
 			}
 		}
@@ -69,7 +69,7 @@ func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin s
 	}
 	switch r.URL.Path {
 	case "/api/connect/renew":
-		if err := s.proof(r.Context(), req.Proof, origin, r.URL.Path, x.JKT, x.Epoch); err != nil {
+		if err := s.proof(r.Context(), req.Proof, origin, r.URL.Path, x.JKT, x.Epoch, x.Generation); err != nil {
 			fail(w, 403, "invalid proof")
 			return
 		}
@@ -126,7 +126,7 @@ func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin s
 			fail(w, 401, "renew session")
 			return
 		}
-		if err := s.proof(r.Context(), req.Proof, origin, r.URL.Path, x.JKT, x.Epoch); err != nil {
+		if err := s.proof(r.Context(), req.Proof, origin, r.URL.Path, x.JKT, x.Epoch, x.Generation); err != nil {
 			fail(w, 403, "invalid proof")
 			return
 		}
