@@ -123,6 +123,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodHostAdd, c, contract.ScopeAdmin, owner, a.service.HostAdd)
 	call(mux, contract.MethodHostList, c, contract.ScopeRead, owner, a.service.HostList)
 	call(mux, contract.MethodProfileList, c, contract.ScopeRead, owner, a.service.ProfileList)
+	call(mux, contract.MethodAccountsList, c, contract.ScopeRead, owner, a.service.AccountsList)
 	call(mux, contract.MethodAccountsConnect, c, contract.ScopeAdmin, owner, a.service.AccountsConnect)
 	call(mux, contract.MethodAccountsConnectCallback, c, contract.ScopeAdmin, owner, a.service.AccountsConnectCallback)
 	call(mux, contract.MethodAccountsConnectStatus, c, contract.ScopeRead, owner, a.service.AccountsConnectStatus)

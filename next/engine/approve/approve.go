@@ -20,13 +20,14 @@ var ErrInvalid = errors.New("invalid operation")
 var ErrConflict = errors.New("operation is no longer pending")
 
 type Entry struct {
-	Global  bool
-	Scope   contract.Scope
-	Class   func(contract.OpArgs, contract.Principal) contract.Class
-	Card    func(context.Context, contract.OpArgs, contract.Principal) contract.Card
-	Check   func(context.Context, contract.OpArgs, contract.Principal) error
-	Execute func(context.Context, contract.OpID, contract.OpArgs, contract.Principal) contract.OpResult
-	Decode  func(json.RawMessage) (contract.OpArgs, error)
+	Ephemeral bool
+	Global    bool
+	Scope     contract.Scope
+	Class     func(contract.OpArgs, contract.Principal) contract.Class
+	Card      func(context.Context, contract.OpArgs, contract.Principal) contract.Card
+	Check     func(context.Context, contract.OpArgs, contract.Principal) error
+	Execute   func(context.Context, contract.OpID, contract.OpArgs, contract.Principal) contract.OpResult
+	Decode    func(json.RawMessage) (contract.OpArgs, error)
 }
 
 type Service struct {
@@ -81,6 +82,18 @@ func (s *Service) access(ctx context.Context, who contract.Principal, room contr
 	return nil
 }
 func (s *Service) Submit(ctx context.Context, who contract.Principal, input contract.Operation) (contract.Operation, error) {
+	return s.submit(ctx, who, input, nil)
+}
+
+// SubmitEphemeral runs an owner action whose secrets must not enter its record.
+func (s *Service) SubmitEphemeral(ctx context.Context, who contract.Principal, input contract.Operation, execute func(context.Context) contract.OpResult) (contract.Operation, error) {
+	if execute == nil {
+		return contract.Operation{}, ErrInvalid
+	}
+	return s.submit(ctx, who, input, execute)
+}
+
+func (s *Service) submit(ctx context.Context, who contract.Principal, input contract.Operation, execute func(context.Context) contract.OpResult) (contract.Operation, error) {
 	if err := s.access(ctx, who, input.Room); err != nil {
 		return contract.Operation{}, err
 	}
@@ -95,8 +108,13 @@ func (s *Service) Submit(ctx context.Context, who contract.Principal, input cont
 	if !ok {
 		return contract.Operation{}, ErrInvalid
 	}
-	if (input.Room == "") != entry.Global || (entry.Global && who.Kind != contract.PrincipalOwner) {
+	if (input.Room == "") != entry.Global || (entry.Global && who.Kind != contract.PrincipalOwner) || entry.Ephemeral != (execute != nil) || (entry.Ephemeral && !entry.Global) {
 		return contract.Operation{}, ErrForbidden
+	}
+	if execute != nil {
+		entry.Execute = func(ctx context.Context, _ contract.OpID, _ contract.OpArgs, _ contract.Principal) contract.OpResult {
+			return execute(ctx)
+		}
 	}
 	checkErr := entry.Check(ctx, input.Args, who)
 	args, err := json.Marshal(input.Args)

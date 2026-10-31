@@ -9,17 +9,21 @@ import (
 const schemaVersion = 44
 
 // Every schema change adds an entry here and updates schema.sql.
-var steps = map[int][]string{}
-=======
 var steps = map[int][]string{
 	43: {
-		`PRAGMA defer_foreign_keys=ON`,
+		`CREATE TEMP TABLE hostexec_runs_backup AS SELECT * FROM hostexec_runs`,
+		`DROP TABLE hostexec_runs`,
 		`CREATE TABLE operations_new (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT REFERENCES rooms(id), by_kind TEXT NOT NULL, by_id TEXT NOT NULL, class TEXT NOT NULL, state TEXT NOT NULL, card BLOB NOT NULL, args BLOB NOT NULL, args_sha256 BLOB NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, decision BLOB, result BLOB)`,
 		`INSERT INTO operations_new SELECT * FROM operations`,
 		`DROP TABLE operations`,
 		`ALTER TABLE operations_new RENAME TO operations`,
 		`CREATE UNIQUE INDEX operations_pending_dedup ON operations(room, by_kind, by_id, kind, args_sha256) WHERE state = 'pending'`,
 		`CREATE INDEX operations_state_expires ON operations(state, expires_at)`,
+		`CREATE TABLE hostexec_runs (op TEXT PRIMARY KEY REFERENCES operations(id), grant_id TEXT NOT NULL REFERENCES grants(id), host TEXT NOT NULL, scope TEXT NOT NULL, started_at INTEGER NOT NULL, timeout_ms INTEGER NOT NULL, ended_at INTEGER, output_bytes INTEGER NOT NULL DEFAULT 0, stopped TEXT NOT NULL DEFAULT '', lost_at INTEGER)`,
+		`INSERT INTO hostexec_runs SELECT * FROM hostexec_runs_backup`,
+		`CREATE INDEX hostexec_runs_grant ON hostexec_runs(grant_id, ended_at)`,
+		`CREATE INDEX hostexec_runs_pending ON hostexec_runs(ended_at) WHERE ended_at IS NULL`,
+		`DROP TABLE hostexec_runs_backup`,
 	},
 	42: {`CREATE TABLE proxy_auths (id TEXT PRIMARY KEY, provider TEXT NOT NULL, record BLOB NOT NULL, updated_at INTEGER NOT NULL)`},
 }

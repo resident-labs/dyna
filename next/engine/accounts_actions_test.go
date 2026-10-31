@@ -25,8 +25,8 @@ func TestAccountActionKeepsSecretOutOfAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := actions
-	secret := "invented-callback-address-and-key"
-	result, problem := s.runAccountAction(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.AccountActionCallback, func(context.Context) accountActionResult {
+	secret := "invented-private-api-key"
+	result, problem := s.runAccountAction(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.AccountActionSetKey, func(context.Context) accountActionResult {
 		if secret == "" {
 			t.Fatal("missing invented secret")
 		}

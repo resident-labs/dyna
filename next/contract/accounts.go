@@ -13,10 +13,9 @@ const (
 	AccountActionComplete AccountAction = "complete"
 )
 
-// AccountsActionArgs contains only an ephemeral ticket, never account secrets.
+// AccountsActionArgs contains only the action kind, never account secrets.
 type AccountsActionArgs struct {
 	Action AccountAction `json:"action"`
-	Ticket string        `json:"ticket"`
 }
 
 func (AccountsActionArgs) OpKind() OpKind { return "accounts.action" }
