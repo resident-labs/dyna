@@ -7,9 +7,15 @@ import (
 	"time"
 )
 
-// ExpireArchives deletes expired remote archive refs before forgetting their records.
+const replayRetryWindow = 24 * time.Hour
+
+// ExpireArchives deletes expired replay keys and remote archive refs.
 func (s *Service) ExpireArchives(ctx context.Context) error {
-	archives, err := s.store.ExpiredArchives(ctx, s.now())
+	now := s.now()
+	if err := s.store.ExpireReplayKeys(ctx, now.Add(-replayRetryWindow)); err != nil {
+		return err
+	}
+	archives, err := s.store.ExpiredArchives(ctx, now)
 	if err != nil {
 		return err
 	}
