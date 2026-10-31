@@ -72,6 +72,9 @@ type TurnEnded struct {
 	Replies []FinalReply `json:"replies,omitempty"` // where Final was delivered
 	Usage   Usage        `json:"usage"`
 	Error   string       `json:"error,omitempty"` // failed only
+	// ShellJobs counts the background shell jobs still running when the turn ended. Each job's
+	// end wakes the session, so the next turn.ended carries the new count.
+	ShellJobs int `json:"shellJobs,omitempty"`
 }
 
 // TurnActivity is live only. The engine keeps each running turn's latest label in memory and
