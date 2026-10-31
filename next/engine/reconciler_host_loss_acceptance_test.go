@@ -34,7 +34,7 @@ func TestReconcilerRecoversLostHost(t *testing.T) {
 		found, running bool
 		want           contract.BoxState
 	}{
-		{"running", true, true, contract.BoxLost},
+		{"running", true, true, contract.BoxReady},
 		{"exited", true, false, contract.BoxStopped},
 		{"missing", false, false, contract.BoxFailed},
 	} {
