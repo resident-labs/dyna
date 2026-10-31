@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { busiestWindow, causeText, providerName, visibleWindows, windowLabel, windowMeter } from "./usage.ts";
-import type { UsageWindow } from "./contract.gen.ts";
+import type { AccountProviderInfo, UsageWindow } from "./contract.gen.ts";
+
+const providers: AccountProviderInfo[] = [{ id: "anthropic", displayName: "Claude", connectMethod: "oauth", connectFlow: "callback", flows: ["callback"], models: [] }];
 
 test("labels each window and hides only unused model-specific windows", () => {
   const five: UsageWindow = { name: "session", kind: "five_hour", usedPercent: 0, seconds: 18000, resetsAt: "" };
@@ -11,7 +13,7 @@ test("labels each window and hides only unused model-specific windows", () => {
   assert.equal(windowLabel(weekly), "Weekly");
   assert.equal(windowLabel(fable), "Weekly · Fable");
   assert.deepEqual(visibleWindows([five, weekly, fable, { ...fable, usedPercent: 0.1 }, { ...fable, usedPercent: 0.6 }]), [five, weekly, { ...fable, usedPercent: 0.6 }]);
-  assert.equal(busiestWindow([{ provider: "claude", label: "private", cause: "", windows: [{ ...fable, usedPercent: 80 }] }]), "Claude · Weekly (Fable) 80% used");
+  assert.equal(busiestWindow([{ provider: "anthropic", label: "private", cause: "", windows: [{ ...fable, usedPercent: 80 }] }], providers), "Claude · Weekly (Fable) 80% used");
 });
 
 test("unreachable usage is muted while expired sign-in needs attention", () => {
@@ -20,7 +22,7 @@ test("unreachable usage is muted while expired sign-in needs attention", () => {
 });
 
 test("names a usage account by its provider, never by its label", () => {
-  assert.equal(providerName("claude"), "Claude");
+  assert.equal(providerName("anthropic", providers), "Claude");
 });
 
 test("words a usage window by its span, percent used, percent left and time to reset; busy at 90% used", () => {
@@ -37,8 +39,8 @@ test("words a usage window by its span, percent used, percent left and time to r
 test("names the busiest usage window of any account by its provider, skipping accounts with a cause", () => {
   const w = (usedPercent: number, seconds: number): UsageWindow => ({ name: "", kind: seconds === 18000 ? "five_hour" : "weekly", usedPercent, seconds, resetsAt: "" });
   assert.equal(busiestWindow([
-    { provider: "claude", label: "me@example.com", cause: "", windows: [w(61.6, 18000), w(40, 604800)] },
-    { provider: "codex", label: "team", cause: "sign_in_expired", windows: [w(99, 604800)] },
-    { provider: "kimi", label: "spare", cause: "", windows: null }]), "Claude · 5-hour 62% used");
-  assert.equal(busiestWindow([]), undefined);
+    { provider: "anthropic", label: "me@example.com", cause: "", windows: [w(61.6, 18000), w(40, 604800)] },
+    { provider: "openai", label: "team", cause: "sign_in_expired", windows: [w(99, 604800)] },
+    { provider: "kimi-coding", label: "spare", cause: "", windows: null }], providers), "Claude · 5-hour 62% used");
+  assert.equal(busiestWindow([], providers), undefined);
 });

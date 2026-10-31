@@ -245,7 +245,7 @@ func (m *BoxMessage) UnmarshalJSON(data []byte) error {
 				ts.WriteString("export type Event = { seq: number; id: EventID; at: string; room?: RoomID; from: Principal } & EventBody;\n")
 				continue
 			}
-			if values := enums[t.Name.Name]; len(values) > 0 && t.Name.Name != "EventType" && t.Name.Name != "OpKind" && t.Name.Name != "HostName" {
+			if values := enums[t.Name.Name]; len(values) > 0 && t.Name.Name != "EventType" && t.Name.Name != "OpKind" && t.Name.Name != "HostName" && t.Name.Name != "AccountProvider" && t.Name.Name != "ModelProvider" {
 				fmt.Fprintf(&ts, "export type %s = %s;\n", t.Name.Name, strings.Join(values, " | "))
 				continue
 			}

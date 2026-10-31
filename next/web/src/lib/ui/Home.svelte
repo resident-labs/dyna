@@ -4,7 +4,7 @@
   import { APIError, call } from "../client.ts";
   import { failedRooms, type RoomLine } from "../active.ts";
   import type { Attention } from "../attention.svelte.ts";
-  import type { AccountUsage, Card, HostSummary, Principal, SessionListResponse } from "../contract.gen.ts";
+  import type { AccountProviderInfo, AccountUsage, Card, HostSummary, Principal, SessionListResponse } from "../contract.gen.ts";
   import { clause, fromNow, requestLine } from "../feed.ts";
   import { hostLabel, hostMeters, largeShared, sharedSize, watchHosts } from "../hosts.ts";
   import { busiestWindow } from "../usage.ts";
@@ -128,10 +128,12 @@
   $effect(() => { if (machines && location.hash === "#machines") machines.scrollIntoView({ block: "start" }); });
   // Model usage loads once when Home opens: the engine caches it for 5 min. Reset times count from that answer.
   let accounts: AccountUsage[] | undefined = $state();
+  let providers: AccountProviderInfo[] = $state([]);
   let accountsFailed = $state(false);
   let loadedAt = $state(0);
   $effect(() => {
     void call("accounts.quota", {}).then(list => { accounts = list.accounts ?? []; loadedAt = Date.now(); }, () => { accountsFailed = true; });
+    void call("accounts.list", {}).then(list => { providers = list.providers ?? []; }, () => {});
   });
   // One sentence says what needs the owner: the same items as the Needs you card. Under it, a muted line sums low disk,
   // a large shared folder, machines and the busiest usage window; a part with nothing to say is left out.
@@ -149,7 +151,7 @@
       + (shared.length > 1 ? `, and ${shared.length - 1} more ${shared.length === 2 ? "is" : "are"} large` : ""),
     !active.length && "No room is working",
     hosts?.length && count(hosts.length, "machine") + (unreachable ? `, ${unreachable} unreachable` : ""),
-    accounts && busiestWindow(accounts),
+    accounts && busiestWindow(accounts, providers),
   ].filter(Boolean).join(" · "));
 </script>
 
@@ -190,7 +192,7 @@
   {#if hosts?.length}<div class="cards">{#each hosts as host (host.name)}<HostCard {host} now={hostsAt} {roomName} />{/each}</div>{/if}
   {#if accounts?.length || accountsFailed}<h2>Usage{#if accounts?.length}<span>{accounts.length}</span>{/if}</h2>{/if}
   {#if accountsFailed}<p class="failed">Model usage could not load.</p>{/if}
-  {#if accounts?.length}<div class="cards">{#each accounts as account, i (i)}<UsageCard {account} now={loadedAt} />{/each}</div>{/if}
+  {#if accounts?.length}<div class="cards">{#each accounts as account, i (i)}<UsageCard {account} {providers} now={loadedAt} />{/each}</div>{/if}
 </div>
 
 <style>
