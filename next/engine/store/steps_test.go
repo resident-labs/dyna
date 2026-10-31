@@ -83,7 +83,7 @@ func TestUpgradeSetsOpenTurnStartSeq(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = upgrade(db, 1, "", map[int][]string{16: steps[16], 17: {}}); err != nil {
+	if err = upgrade(db, 1, "", map[int][]string{16: steps[16], 17: {}, 18: steps[18]}); err != nil {
 		t.Fatal(err)
 	}
 	var seq sql.NullInt64
