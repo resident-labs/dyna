@@ -2,7 +2,7 @@
   import { tick, untrack } from "svelte";
   import { RoomStore } from "./lib/room.svelte.ts";
   import { ForwardExpiry } from "./lib/forward-clock.ts";
-  import { replaceForward, undoForward } from "./lib/forward-state.ts";
+  import { replaceForward, sameForward, undoForward } from "./lib/forward-state.ts";
   import { blockedBy, call, retryDelay, type Blocked as BlockedState } from "./lib/client.ts";
   import Blocked from "./lib/ui/Blocked.svelte";
   import PairScreen from "./lib/ui/PairScreen.svelte";
@@ -223,8 +223,9 @@
   const expiry = new ForwardExpiry(conversation => { replaced[conversation] = undefined; });
   function clearReplacement() { expiry.clear(key); replaced[key] = undefined; }
   function forward(quote: Quote) {
+    if (sameForward(quotes[key], quote)) { composer?.focus({ preventScroll: true }); return; }
     clearReplacement();
-    const next = replaceForward({ quote: quotes[key], draft: drafts[key] ?? "" }, quote);
+    const next = replaceForward({ quote: quotes[key] }, quote);
     if (next.previous) {
       replaced[key] = next.previous;
       expiry.start(key);
@@ -645,7 +646,7 @@
         {#if attention.can("operate")}<button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button>{/if}</p>
       {:else if store}<WorkingLine {store} {home} />{/if}
       {#if attention.can("operate")}<Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; clearReplacement(); }} onsend={send} placeholder={"Message " + title}
-        quote={quotes[key]} replacement={replaced[key]} onundo={() => { quotes[key] = undoForward({ quote: quotes[key], previous: replaced[key], draft: drafts[key] ?? "" }).quote; clearReplacement(); }} onunquote={() => { quotes[key] = undefined; clearReplacement(); }} sessions={mentions} files={files(key)} {stop} />
+        quote={quotes[key]} replacement={replaced[key]} onundo={() => { quotes[key] = undoForward({ quote: quotes[key], previous: replaced[key] }).quote; clearReplacement(); }} onunquote={() => { quotes[key] = undefined; clearReplacement(); }} sessions={mentions} files={files(key)} {stop} />
       {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
     {/if}{/if}
     <TermDock bind:this={terminals} terminal={attention.can("terminal")} bind:element={dock} onempty={() => composer?.focus()} phone={phone.current} strip={!!room && !unavailable}
