@@ -11,12 +11,12 @@
   import { pagingEdge, shouldPage } from "../paging.ts";
   import { SCROLL_QUIET_MS, ScrollHold } from "../scrollHold.ts";
 
-  let { items, key, row, sticky, label, role = "feed", align = "bottom", follow = false, estimate = 44, onstart, onend, onbottom, element = $bindable() }: {
+  let { items, key, row, sticky, label, role = "feed", align = "bottom", follow = false, estimate = 44, onstart, onend, onbottom, ontop, element = $bindable() }: {
     items: T[]; key: (item: T) => string; row: Snippet<[T]>; sticky?: Snippet<[T]>; label: string; role?: "feed" | "group"; align?: "top" | "bottom";
     // Chat mode: open at the newest row and follow new rows while the reader is at the bottom.
     follow?: boolean; estimate?: number | ((item: T) => number);
     // onbottom tells whether the end of the rows is within 24 px of the view's bottom edge.
-    onstart?: () => void; onend?: () => void; onbottom?: (shown: boolean) => void; element?: HTMLDivElement;
+    onstart?: () => void; onend?: () => void; onbottom?: (shown: boolean) => void; ontop?: (shown: boolean) => void; element?: HTMLDivElement;
   } = $props();
 
   const edge = () => pagingEdge(element?.clientHeight ?? 0);
@@ -33,7 +33,7 @@
     count: rows.length, getScrollElement: () => element ?? null, estimateSize: index => typeof estimate === "number" ? estimate : estimate(rows[index]),
     getItemKey: index => key(rows[index]), overscan: 8, anchorTo: "end", followOnAppend: follow, scrollEndThreshold: held || holding() ? -1 : 1,
     scrollToFn: elementScroll, observeElementRect, observeElementOffset, measureElement,
-    onChange: instance => { visible = instance.getVirtualItems(); total = instance.getTotalSize(); },
+    onChange: instance => { visible = instance.getVirtualItems(); total = instance.getTotalSize(); const first = visible.find(item => item.index === 0); ontop?.(!!first && first.end > (instance.scrollOffset ?? 0)); },
   });
   const scrollHold = new ScrollHold();
   const holding = () => scrollHold.active(performance.now());

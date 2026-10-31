@@ -74,7 +74,7 @@
     {#if open}<div class="opened">
       {#if read === "loading"}<p>Loading steps…</p>
       {:else if read === "failed"}<p>The steps did not load. <button type="button" class="retry" onclick={() => transcripts?.read(row.events, true)}>Retry</button></p>
-      {:else if saved && steps.length}<StepList {steps} truncated={saved.truncated} id={row.key} {opened} {ontoggle} />{/if}
+      {:else if saved && (steps.length || saved.truncated)}<StepList {steps} truncated={saved.truncated} id={row.key} {opened} {ontoggle} />{/if}
       {#if workers.length}{#if workers.length > 1}<button class="detail" type="button" aria-expanded={!opened.has(`${row.key}-workers`)} onclick={() => ontoggle(`${row.key}-workers`)}><Icon name="terminal" size={14} /> {workers.length === 1 ? `${name(workers[0])} worked` : `${workers.length} sessions worked`} <Icon name="chevron" size={14} /><time datetime={row.events[0].at}>{timeSpan(row.events[0].at, row.until ?? row.events.at(-1)?.at ?? row.events[0].at)}</time></button>{/if}
         {#if workers.length === 1 || !opened.has(`${row.key}-workers`)}<ul class="workers">{#each workers.slice(0, allWorkers ? undefined : 6) as session (session)}
           {@const own = events.filter(event => subject(event) === session && (event.type === "turn.started" || event.type === "turn.ended"))}
@@ -83,7 +83,7 @@
             {@const transcript = sessionTranscripts.get(session)?.of(own)}
             {#if transcript === "loading"}<li class="step">Loading steps…</li>
             {:else if transcript === "failed"}<li class="step">The steps did not load. <button class="retry" type="button" onclick={() => sessionTranscripts.get(session)?.read(own, true)}>Retry</button></li>
-            {:else if transcript && transcript.steps.length}<li class="step"><StepList steps={transcript.steps} truncated={transcript.truncated} id={`${row.key}-${session}`} {opened} {ontoggle} /></li>
+            {:else if transcript && (transcript.steps.length || transcript.truncated)}<li class="step step-list"><StepList steps={transcript.steps} truncated={transcript.truncated} id={`${row.key}-${session}`} {opened} {ontoggle} /></li>
             {:else}{#each own as event (event.seq)}{#if describe(event, name)}<li class="step"><time datetime={event.at}>{formatTime(event.at)}</time><span>{describe(event, name)}</span></li>{/if}{/each}{/if}
           {/if}
         {/each}{#if !allWorkers && workers.length > 6}<li><button class="detail" type="button" onclick={() => ontoggle(`${row.key}-all`)}>Show {workers.length - 6} more sessions</button></li>{/if}</ul>{/if}
@@ -122,6 +122,7 @@
   .opened > .detail time { margin-left: auto; }
   .workers { margin-left: 6px; padding-left: 10px; border-left: 1px solid var(--line); }
   .step { margin-left: 16px; }
+  .step-list { display: block; min-width: 0; }
   details { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
   summary::-webkit-details-marker { display: none; }
