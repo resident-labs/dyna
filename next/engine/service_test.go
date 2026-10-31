@@ -348,6 +348,40 @@ func TestSessionStartWithoutGoalOrBriefHasNoWake(t *testing.T) {
 		t.Fatalf("unexpected brief wake: %+v", start)
 	}
 }
+func TestChannelSkipsUnhandledDelivery(t *testing.T) {
+	s, room, session, ctx := setup(t)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	delivery := contract.Delivery{To: caller, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}
+	unknown, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionClosed{Session: "other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq, err := s.store.Post(ctx, unknown, []contract.Delivery{delivery})
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid, err := s.event(room, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostCreated{Text: "after"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.Post(ctx, valid, []contract.Delivery{delivery}); err != nil {
+		t.Fatal(err)
+	}
+	channel, problem := testChannel(t, s, ctx, caller)
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	message, open := <-channel
+	start, ok := message.Body.(contract.TurnStart)
+	if !open || !ok || len(start.Inputs) != 2 || start.Inputs[1].Text != "after" {
+		t.Fatalf("next delivery: %+v open=%v", message, open)
+	}
+	var state string
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT state FROM deliveries WHERE to_id=? AND seq=?", session, seq).Scan(&state); err != nil || state != "read" {
+		t.Fatalf("unhandled delivery state %q: %v", state, err)
+	}
+}
+
 func TestMentionSteersRunningTurn(t *testing.T) {
 	s, room, session, ctx := setup(t)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
