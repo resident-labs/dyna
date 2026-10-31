@@ -293,9 +293,12 @@ test("activity labels follow the running turn and never reach a window", async (
     assert.equal(room.activity.get("s"), "read spec.md");
     room.apply(label("t", "ran go test"));
     room.apply(label("old", "stale"));
+    room.apply(label("t", "ran go test"));
     assert.equal(room.activity.get("s"), "ran go test");
+    assert.deepEqual(room.steps.get("s"), ["read spec.md", "ran go test"]);
     room.apply(event(2, { type: "turn.ended", body: { session: "s", turn: "t", outcome: "completed", usage } }));
     assert.equal(room.activity.has("s"), false);
+    assert.equal(room.steps.has("s"), false);
     assert.equal(feedWindow.ordered.some(item => item.type === "turn.activity"), false);
   } finally { server.restore(); }
 });
