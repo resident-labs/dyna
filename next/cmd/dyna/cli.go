@@ -369,7 +369,10 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		for i, room := range hostRooms {
 			rooms[i] = contract.RoomID(room)
 		}
-		_, err := getClient().HostAdd(cmd.Context(), contract.HostAddRequest{Name: contract.HostName(args[0]), SSH: ssh, OwnerOnlyAdmin: admin, Rooms: rooms})
+		result, err := getClient().HostAdd(cmd.Context(), contract.HostAddRequest{Name: contract.HostName(args[0]), SSH: ssh, OwnerOnlyAdmin: admin, Rooms: rooms})
+		if err == nil && result.NoSwap {
+			fmt.Fprintln(cmd.ErrOrStderr(), "Warning: host has no swap; memory pressure can kill box processes.")
+		}
 		return err
 	}}
 	add.Flags().StringSliceVar(&hostRooms, "room", nil, "Room ID allowed on this host (repeatable; default: all rooms)")

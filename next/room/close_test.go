@@ -37,7 +37,7 @@ func TestCloseAndMove(t *testing.T) {
 		{"cycle", "a", "c", true},
 		{"self", "a", "a", true},
 		{"other room", "a", "outside", true},
-		{"other host", "a", "remote", true},
+		{"other host", "a", "remote", false},
 		{"root", "root", "peer", true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

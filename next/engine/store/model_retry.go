@@ -48,10 +48,7 @@ func (s *Store) WakeModelRetries(ctx context.Context, now time.Time) error {
 			if count == 0 {
 				continue
 			}
-			_, err = tx.ExecContext(ctx, `WITH RECURSIVE ancestors(id,parent) AS (
-    SELECT id,parent FROM boxes WHERE session=?
-    UNION SELECT b.id,b.parent FROM boxes b JOIN ancestors a ON b.id=a.parent
-   ) UPDATE boxes SET want='run' WHERE id IN (SELECT id FROM ancestors) AND want='stop'`, id)
+			_, err = tx.ExecContext(ctx, `UPDATE boxes SET want='run' WHERE session=? AND want='stop'`, id)
 			if err != nil {
 				return err
 			}
