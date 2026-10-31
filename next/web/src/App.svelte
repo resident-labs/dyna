@@ -1,12 +1,14 @@
 <script lang="ts">
   import { RoomStore } from "./lib/room.svelte.ts";
   import { APIError, call } from "./lib/client.ts";
-  import type { Conversation, Principal, RoomSummary } from "./lib/contract.gen.ts";
+  import Feed from "./lib/ui/Feed.svelte";
+  import StatusPill from "./lib/ui/StatusPill.svelte";
+  import type { Conversation, RoomSummary, SessionStarted } from "./lib/contract.gen.ts";
+  const signedOut = (error: unknown) => error instanceof APIError && error.detail.code === "forbidden";
   let rooms: RoomSummary[] = $state([]);
   let roomsError = $state("");
   void call("room.list", {}).then(result => { rooms = result.rooms ?? []; }).catch((error: unknown) => {
-    roomsError = error instanceof APIError && error.detail.code === "forbidden"
-      ? "Your sign-in ended. Run dyna web to sign in again." : "Rooms are not available.";
+    roomsError = signedOut(error) ? "Your sign-in ended. Run dyna web to sign in again." : "Rooms are not available.";
   });
   let path = $state(window.location.pathname);
   window.addEventListener("popstate", () => { path = window.location.pathname; });
@@ -14,15 +16,16 @@
   let room = $derived(segment(/^\/r\/([^/]+)/));
   let session = $derived(segment(/^\/r\/[^/]+\/s\/([^/]+)/));
   let store: RoomStore | undefined = $state();
-  let unavailable = $state(false);
   $effect(() => {
     if (!room) return;
     const current = new RoomStore(room);
     store = current;
-    unavailable = false;
-    void current.open().catch(() => { if (store === current) unavailable = true; });
+    void current.open();
     return () => current.close();
   });
+  // A room that failed to open is unavailable; later load errors show inside the feed.
+  let unavailable = $derived(!store || store.ready || store.error === undefined ? ""
+    : signedOut(store.error) ? "Your sign-in ended. Run dyna web to sign in again." : "This room is not available.");
   function navigate(event: MouseEvent & { currentTarget: HTMLAnchorElement }) {
     if (event.button || event.metaKey || event.ctrlKey || event.shiftKey) return;
     event.preventDefault();
@@ -30,11 +33,21 @@
     path = window.location.pathname;
   }
   let home: Conversation = $derived(session ? { kind: "dm", session } : { kind: "feed" });
-  let posts = $derived(store?.posts(home) ?? []);
-  let pending = $derived([...(store?.pendingPosts ?? [])].filter(post => post.home.session === session));
-  const author = (from: Principal) => from.kind === "owner" ? "You" : from.kind === "engine" ? "Dyna"
-    : store?.sessions.get(from.session ?? "")?.name ?? "Agent";
-  const sameAuthor = (a: Principal, b: Principal | undefined) => a.kind === b?.kind && a.session === b.session;
+  // The sessions panel lists each child under its parent; PR 5 makes the full tree.
+  let tree = $derived.by(() => {
+    const sessions = [...(store?.sessions.values() ?? [])];
+    const ids = new Set(sessions.map(item => item.session));
+    const rows: { session: SessionStarted; depth: number }[] = [];
+    const walk = (parent: string | undefined, depth: number) => {
+      for (const item of sessions) {
+        if ((item.parent && ids.has(item.parent) ? item.parent : undefined) !== parent) continue;
+        rows.push({ session: item, depth });
+        walk(item.session, depth + 1);
+      }
+    };
+    walk(undefined, 0);
+    return rows;
+  });
   // Drafts and send errors belong to one conversation, keyed by room and session.
   let drafts: Record<string, string> = $state({});
   let failed: string | undefined = $state();
@@ -47,10 +60,11 @@
     if (!text.trim()) return;
     drafts[sent] = "";
     failed = undefined;
-    store.post({ room, text, home: session ? home : undefined }).catch(() => { drafts[sent] = text; failed = sent; });
+    view?.send({ room, text, home: session ? home : undefined }).catch(() => { drafts[sent] = text; failed = sent; });
   }
+  let view: Feed | undefined = $state();
   let rail: HTMLElement;
-  let feed: HTMLElement;
+  let feed: HTMLDivElement | undefined = $state();
   let composer: HTMLElement | undefined = $state();
   let members: HTMLElement | undefined = $state();
   // F6 (mod+F6 in a browser) moves focus between areas; Shift goes back.
@@ -78,16 +92,11 @@
   </aside>
   <main>
     <header><span>{title}</span></header>
-    <section class="feed" aria-label="Feed" tabindex="-1" bind:this={feed}>
-      {#each posts as post, index (post.seq)}
-        {#if !sameAuthor(post.from, posts[index - 1]?.from)}<p class="author">{author(post.from)}</p>{/if}
-        <p class="post">{post.body.text}</p>
-      {/each}
-      {#each pending as post}<p class="post pending">{post.text}</p>{/each}
-      {#if !posts.length && !pending.length}
-        <p class="empty">{unavailable ? "This room is not available." : !room ? "Select a room." : session ? "No messages yet." : "No posts yet."}</p>
-      {/if}
-    </section>
+    <div class="feed">
+      {#if store && !unavailable}
+        {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} empty={session ? "No messages yet." : "No posts yet."} />{/key}
+      {:else}<p class="empty">{unavailable || "Select a room."}</p>{/if}
+    </div>
     {#if room && !unavailable}
       <textarea class="composer" rows="1" aria-label="Message" bind:this={composer} bind:value={drafts[key]} onkeydown={send}
         placeholder={"Message " + title}></textarea>
@@ -97,7 +106,9 @@
   {#if room}
     <aside class="members" aria-label="Sessions" tabindex="-1" bind:this={members}>
       <header class="label">Sessions</header>
-      {#each [...(store?.sessions.values() ?? [])] as item (item.session)}<div class="member">{item.name}</div>
+      {#each tree as { session: item, depth } (item.session)}
+        <div class="member" style:padding-left="{16 + depth * 14}px">{item.name}
+          {#if store?.failed.has(item.session)}<StatusPill tone="failed">Failed</StatusPill>{/if}</div>
       {:else}<p class="hint">No sessions yet.</p>{/each}
     </aside>
   {/if}
