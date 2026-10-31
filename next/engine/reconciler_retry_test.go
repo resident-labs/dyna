@@ -36,6 +36,7 @@ func (h *retryHost) Recreate(context.Context, lifecycle.BoxSpec, string, string)
 type retryView struct{}
 
 func (retryView) OpenTerminal(contract.SessionID) bool { return false }
+func (retryView) Connected(contract.SessionID) bool    { return false }
 
 func TestReconcilerResumesInterruptedCreate(t *testing.T) {
 	s, _, sid, ctx := setup(t)
