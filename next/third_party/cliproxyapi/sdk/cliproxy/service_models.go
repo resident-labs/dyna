@@ -734,7 +734,7 @@ func applyModelPrefixes(models []*ModelInfo, prefix string, forceModelPrefix boo
 		if baseID == "" {
 			continue
 		}
-		if !forceModelPrefix || trimmedPrefix == baseID {
+		if !forceModelPrefix {
 			addModel(model)
 		}
 		clone := cloneModelInfoForCatalogRoute(model)
