@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -47,7 +48,7 @@ func DryRun(dir string) (Report, error) {
 	}
 	slices.Sort(report.ModelsCheckedAtImport)
 	report.Global = contract.BundleCounts{
-		Hosts: len(global.Hosts), Accounts: len(global.Accounts),
+		InstructionChars: utf8.RuneCountInString(global.Instructions), Hosts: len(global.Hosts), Accounts: len(global.Accounts),
 		Devices: len(global.Devices), Subscriptions: len(global.Subscriptions),
 	}
 	if err := compareCounts(report.Global, global.Counts); err != nil {
@@ -92,7 +93,7 @@ func DryRun(dir string) (Report, error) {
 			return report, fmt.Errorf("room %s: name mismatch", name)
 		}
 		counts := contract.BundleCounts{
-			Goals: len(room.Goals), Issues: len(room.Issues),
+			InstructionChars: utf8.RuneCountInString(room.Instructions), Goals: len(room.Goals), Issues: len(room.Issues),
 			PRs: len(room.PRs), Questions: len(room.Questions),
 			Subscriptions: len(room.Subscriptions), Sessions: len(room.Handoff),
 		}
@@ -112,7 +113,7 @@ func compareCounts(actual, declared contract.BundleCounts) error {
 		name             string
 		actual, declared int
 	}{
-		{"goals", actual.Goals, declared.Goals},
+		{"instructionChars", actual.InstructionChars, declared.InstructionChars}, {"goals", actual.Goals, declared.Goals},
 		{"goalItems", actual.GoalItems, declared.GoalItems}, {"issues", actual.Issues, declared.Issues},
 		{"prs", actual.PRs, declared.PRs}, {"questions", actual.Questions, declared.Questions},
 		{"subscriptions", actual.Subscriptions, declared.Subscriptions}, {"hosts", actual.Hosts, declared.Hosts},
