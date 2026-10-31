@@ -24,6 +24,7 @@
   let account = $derived(accounts.find(a => a.id === accountId));
   let accountProvider = $derived(providers.find(p => p.id === account?.provider));
   let accountUsage = $derived(usage.find(u => u.accountId === accountId));
+  let selectedReportsWindows = $derived(selected?.connectFlow === "callback" && usage.some(u => accounts.some(a => a.provider === selected?.id && a.id === u.accountId) && u.windows?.some(w => w.kind === "five_hour") && u.windows?.some(w => w.kind === "weekly")));
   const groups = [{ flow: "callback", title: "Sign in with your plan" }, { flow: "device", title: "Sign in with a code" }, { flow: "key", title: "API key" }] as const;
   const providerPath = (id: string) => base + "/add/" + encodeURIComponent(id);
   const accountPath = (id: string) => base + "/account/" + encodeURIComponent(id);
@@ -120,7 +121,7 @@
         <section class="card connect">
           <h2><span class="initial">{selected.displayName.slice(0, 1)}</span>{selected.displayName}<span class="muted">{accounts.filter(a => a.provider === selected.id).length} connected</span></h2>
           {#if !attempt}
-            <p><strong>{selected.connectFlow === "callback" ? "Sign in with your plan." : selected.connectFlow === "device" ? "Sign in with a code." : "API key."}</strong> {selected.connectFlow === "callback" ? `Use a ${selected.displayName}${selected.id === "anthropic" ? " Pro or Max" : ""} plan you already pay for. Dyna shows its 5-hour and weekly limits.` : selected.connectFlow === "device" ? "Dyna shows a short code here. You enter it on the provider’s page, and Dyna finishes by itself." : "You paste a key once. It stays on this computer, and Dyna never shows it again."}</p>
+            <p><strong>{selected.connectFlow === "callback" ? "Sign in with your plan." : selected.connectFlow === "device" ? "Sign in with a code." : "API key."}</strong> {selected.connectFlow === "callback" ? `Use a ${selected.displayName} plan you already pay for. Dyna shows its usage limits when available.` : selected.connectFlow === "device" ? "Dyna shows a short code here. You enter it on the provider’s page, and Dyna finishes by itself." : "You paste a key once. It stays on this computer, and Dyna never shows it again."}</p>
             <p class="muted">Dyna keeps the sign-in on this computer and sends it only to {selected.displayName}.{#if selected.connectFlow === "callback"}{" "}It sees your plan limits, not your chats.{/if}</p>
             <label class="label-field">Label <input bind:value={label} placeholder="Work, Personal, …" disabled={busy} /></label>
             {#if selected.connectFlow === "key"}<label>API key <input type="password" bind:value={secret} autocomplete="off" disabled={busy} /></label>{/if}
@@ -145,7 +146,7 @@
         </section>
         <section class="card legend">
           <h2>{attempt ? "After you finish" : "Three ways to connect"}</h2>
-          {#if attempt}<p class="muted after"><strong>{label}</strong>{" "}joins {selected.displayName} in your account list, with its 5-hour and Weekly limits.</p><p class="muted after">It serves every room until you choose rooms in its view.</p>
+          {#if attempt}<p class="muted after"><strong>{label}</strong>{" "}joins {selected.displayName} in your account list{#if selectedReportsWindows}, with its 5-hour and Weekly limits{/if}.</p><p class="muted after">It serves every room until you choose rooms in its view.</p>
           {:else}<p><strong>Sign in with your plan</strong> <span class="muted">You approve Dyna on the provider's page, then paste back the address it lands on. Dyna shows your plan's limits.</span></p>
           <p><strong>Sign in with a code</strong> <span class="muted">Dyna shows a short code here. You enter it on the provider's page, and Dyna finishes by itself.</span></p>
           <p><strong>API key</strong> <span class="muted">You paste a key once. It stays on this computer, and Dyna never shows it again.</span></p>{/if}
