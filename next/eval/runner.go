@@ -3,6 +3,7 @@ package eval
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -42,7 +43,8 @@ type CellResult struct {
 // RunSuite executes the fixed schedule once. Setup, observation and cleanup errors
 // stop the run; a repeated early provider failure is retained as unmeasured.
 // The backend must journal attempts durably before execution and refuse replays.
-func RunSuite(ctx context.Context, backend Backend, emit func(CellResult) error) error {
+// task11Fallback is chosen once from the fake pass and applies to every arm.
+func RunSuite(ctx context.Context, backend Backend, task11Fallback bool, emit func(CellResult) error) error {
 	if err := backend.Preflight(ctx); err != nil {
 		return fmt.Errorf("evaluation preflight: %w", err)
 	}
@@ -51,9 +53,14 @@ func RunSuite(ctx context.Context, backend Backend, emit func(CellResult) error)
 		if err != nil {
 			return fmt.Errorf("prepare task %d: %w", cell.Task, err)
 		}
+		fixture.Task11Fallback = task11Fallback
 		if err := fixture.Validate(); err != nil {
 			_ = backend.Cleanup(ctx, cell, fixture)
 			return fmt.Errorf("fixture task %d: %w", cell.Task, err)
+		}
+		if strings.Contains(tasks[cell.Task-1].PromptFor(fixture), fixture.ReadValue) {
+			_ = backend.Cleanup(ctx, cell, fixture)
+			return fmt.Errorf("fixture task %d: read value appears in prompt", cell.Task)
 		}
 		start := time.Now()
 		result := CellResult{Cell: cell}

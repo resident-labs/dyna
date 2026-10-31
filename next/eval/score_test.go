@@ -1,6 +1,9 @@
 package eval
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestScoreTaskUsesObservedCallsAndState(t *testing.T) {
 	want := Expectation{
@@ -36,5 +39,31 @@ func TestReadScoreUsesUniqueAnswerNotCalls(t *testing.T) {
 	got = ScoreTask(want, Observation{Complete: true, Calls: []Call{{Operation: "events.list"}}, Answer: "not found"})
 	if got.Correct {
 		t.Fatal("calls alone passed a read")
+	}
+}
+
+func TestFrozenReplacementOutcomes(t *testing.T) {
+	f := Fixture{A: "child", AName: "child-name", File: "/seed/file", FileSHA256: "sha", ReadValue: "unique-code"}
+	restart, _ := Expected(17, f)
+	if !ScoreTask(restart, Observation{Complete: true, State: []Field{field("child.box.replaced", "true"), field("child.state", "idle")}}).Correct {
+		t.Fatal("restart state not credited")
+	}
+	attachment, _ := Expected(18, f)
+	state := []Field{field("posts", "1"), field("recipient", f.A), field("text", "Results attached."), field("attachments", "1"), field("attachment.sha256", f.FileSHA256)}
+	if !ScoreTask(attachment, Observation{Complete: true, State: state}).Correct {
+		t.Fatal("attachment state not credited")
+	}
+	state[4].Value = "wrong"
+	if ScoreTask(attachment, Observation{Complete: true, State: state}).Correct {
+		t.Fatal("wrong attachment passed")
+	}
+	reveal, _ := Expected(20, f)
+	if !ScoreTask(reveal, Observation{Complete: true, Answer: "unique-code"}).Correct {
+		t.Fatal("reveal code not credited")
+	}
+	f.Task11Fallback = true
+	fallback, _ := Expected(11, f)
+	if fallback.Calls[0].Operation != "room.log" || !strings.Contains(tasks[10].PromptFor(f), "visual") {
+		t.Fatal("fallback not applied")
 	}
 }
