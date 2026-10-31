@@ -1,10 +1,10 @@
 import type { AccountUsage, UsageCause, UsageWindow } from "./contract.gen.ts";
 import type { Meter } from "./hosts.ts";
 
-// An expired sign-in is a warning, for the owner to fix; an account Dyna cannot reach is an error.
-export const causeText: Record<Exclude<UsageCause, "">, { pill: string; line: string; tone: "warning" | "error" }> = {
+// An expired sign-in needs attention; an unreachable usage reading is a muted fact.
+export const causeText: Record<Exclude<UsageCause, "">, { pill: string; line: string; tone?: "warning" }> = {
   sign_in_expired: { pill: "Sign-in expired", line: "Sign in again to see its limits.", tone: "warning" },
-  unreachable: { pill: "Unreachable", line: "Dyna could not read its limits.", tone: "error" },
+  unreachable: { pill: "Unreachable", line: "Dyna could not read its limits." },
 };
 
 const count = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
