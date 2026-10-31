@@ -157,6 +157,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `host_labels` |
 | `boxes` |
 | `operations` |
+| `client_replays` |
 | `archives` |
 | `transcript_offsets` |
 | `transcript_turns` |
