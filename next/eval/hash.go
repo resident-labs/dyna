@@ -1,5 +1,7 @@
 package eval
 
+import "encoding/hex"
+
 // HashRecord is metadata only. Generation is set by a verified join to the
 // Pi compaction record; nil means the join is missing or ambiguous.
 type HashRecord struct {
@@ -26,16 +28,24 @@ func CompareToolArrays(records []HashRecord) HashCheck {
 		return result
 	}
 	for i, current := range records {
-		if current.Session == "" || current.Provider == "" || current.Ordinal < 1 || len(current.ToolsSHA256) != 64 || current.Generation == nil {
+		_, hashErr := hex.DecodeString(current.ToolsSHA256)
+		if current.Session == "" || current.Provider == "" || current.Ordinal < 1 || len(current.ToolsSHA256) != 64 || hashErr != nil || current.Generation == nil {
 			result.Unmeasured = true
 			continue
 		}
 		if i == 0 {
+			if current.Ordinal != 1 {
+				result.Unmeasured = true
+			}
 			continue
 		}
 		previous := records[i-1]
 		if previous.Session != current.Session || previous.Provider != current.Provider || previous.Ordinal+1 != current.Ordinal ||
 			previous.Generation == nil || len(previous.ToolsSHA256) != 64 {
+			result.Unmeasured = true
+			continue
+		}
+		if *current.Generation < *previous.Generation {
 			result.Unmeasured = true
 			continue
 		}
