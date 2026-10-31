@@ -2,6 +2,7 @@
   import { onMount, tick } from "svelte";
   import { APIError, call } from "../client.ts";
   import { instructionDiff } from "../instruction-diff.ts";
+  import { recoverInstructionDraft } from "../instruction-draft.ts";
   import StatusPill from "./StatusPill.svelte";
 
   let { room, roomName, sessions, onclose }: { room: string; roomName: string; sessions: number; onclose: () => void } = $props();
@@ -48,13 +49,10 @@
       base = result.text; hash = result.hash; savedAt = result.savedAt ?? undefined; draft = result.text;
       const storedKey = Object.keys(localStorage).find(item => item.startsWith(key));
       if (storedKey) {
-        const raw: unknown = JSON.parse(localStorage.getItem(storedKey) ?? "null");
-        if (raw && typeof raw === "object" && "text" in raw && typeof raw.text === "string" &&
-          "base" in raw && typeof raw.base === "string") {
-          draft = raw.text;
-          if (storedKey !== key + result.hash) {
-            base = raw.base; hash = storedKey.slice(key.length); other = result;
-          }
+        const recovered = recoverInstructionDraft(localStorage.getItem(storedKey) ?? "", storedKey.slice(key.length), result);
+        if (recovered) {
+          draft = recovered.draft; base = recovered.base; hash = recovered.hash;
+          if (recovered.stale) other = result;
         }
       }
     } catch { if (current === generation) failed = true; }
