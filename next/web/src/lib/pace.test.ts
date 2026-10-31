@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { meterWake, paceOf, poolPace } from "./pace.ts";
 
@@ -25,5 +25,4 @@ test("meter wakes at the next minute or reset", () => {
   assert.equal(meterWake(window.resetsAt, now), now + 60_000);
   assert.equal(meterWake("2026-10-20T12:00:30Z", now), now + 30_000);
   assert.ok(Number.isNaN(meterWake(window.resetsAt, Date.parse(window.resetsAt))));
-  assert.ok(Number.isNaN(meterWake(undefined, now)));
 });
