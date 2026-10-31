@@ -15,7 +15,7 @@ func visualCommand() *cobra.Command {
 	var allowNet bool
 	cmd := &cobra.Command{Use: "visual"}
 	check := &cobra.Command{Use: "check FILE", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		data, err := readVisual(args[0])
+		data, err := visual.ReadFile(args[0])
 		if err != nil {
 			return err
 		}
@@ -61,13 +61,4 @@ func printVisualChecks(w io.Writer, checks []contract.VisualCheck) {
 	for _, check := range checks {
 		fmt.Fprintf(w, "%s: %s %s\n", check.Name, check.Status, check.Detail)
 	}
-}
-
-func readVisual(path string) ([]byte, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	return io.ReadAll(io.LimitReader(f, (25<<20)+1))
 }
