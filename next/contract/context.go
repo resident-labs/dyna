@@ -2,6 +2,14 @@ package contract
 
 const MethodContextSnapshot Method = "context.snapshot"
 
+type AgentSurface string
+
+const (
+	AgentSurfaceOff      AgentSurface = "off"
+	AgentSurfaceCaller   AgentSurface = "caller"
+	AgentSurfaceDeclared AgentSurface = "declared"
+)
+
 // ContextSnapshotRequest selects one section. An empty section requests all sections.
 type ContextSnapshotRequest struct {
 	Section string `json:"section,omitempty"`

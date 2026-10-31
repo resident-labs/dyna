@@ -6,10 +6,11 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 49
+const schemaVersion = 50
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	49: {`ALTER TABLE turns ADD COLUMN sections BLOB`, `CREATE INDEX pr_owners_session ON pr_owners(session)`, `CREATE INDEX operations_pending_caller ON operations(by_kind, by_id, created_at, id) WHERE state='pending'`},
 	48: {`CREATE TABLE transcript_turns (session TEXT NOT NULL REFERENCES sessions(id), turn TEXT NOT NULL, path TEXT NOT NULL, start INTEGER NOT NULL, PRIMARY KEY(session, turn, path))`, `CREATE UNIQUE INDEX transcript_turns_path_start ON transcript_turns(session, path, start)`},
 	47: {`CREATE TABLE connect_attempt (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL, expires INTEGER NOT NULL)`, `CREATE TABLE connect_connector (id INTEGER PRIMARY KEY CHECK(id=1), missing INTEGER NOT NULL CHECK(missing IN (0,1)))`},
 	46: {`CREATE TABLE connect_link_state (id INTEGER PRIMARY KEY CHECK(id=1), epoch INTEGER NOT NULL CHECK(epoch>=0), linked INTEGER NOT NULL CHECK(linked IN (0,1)))`, `CREATE TABLE connect_nonces (nonce TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)`},
