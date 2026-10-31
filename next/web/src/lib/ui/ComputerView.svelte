@@ -80,7 +80,9 @@
   async function take() { control = true; await tick(); screen?.focus(); }
   const hold = new MouseHold();
   const letGo = () => send(hold.release());
-  function release() { letGo(); if (stuck) queue.clear(); control = false; stuck = false; keyboardOpen = false; field?.blur(); }
+  // Control ends or the view closes: the release goes even behind a refused batch, so the queue drops what waits first.
+  const drop = () => { const up = hold.release(); if (stuck) queue.clear(); send(up); };
+  function release() { drop(); control = false; stuck = false; keyboardOpen = false; field?.blur(); }
   $effect(() => { if (phase !== "live") release(); });
   function toggleKeyboard() {
     keyboardOpen = !keyboardOpen;
@@ -149,6 +151,7 @@
     // Not passive: the wheel must not also scroll the page.
     node.addEventListener("wheel", wheel, { passive: false });
     return () => {
+      drop();
       cancelAnimationFrame(frame);
       node.removeEventListener("pointerdown", down);
       node.removeEventListener("pointermove", move);
