@@ -89,3 +89,45 @@ func TestReconcilerWakeDuringStop(t *testing.T) {
 		t.Fatalf("wake during stop: state=%s, want starting", b.State)
 	}
 }
+
+type openTerminalView struct{}
+
+func (openTerminalView) OpenTerminal(contract.SessionID) bool { return true }
+func (openTerminalView) Connected(contract.SessionID) bool    { return false }
+
+type stopCountingHost struct {
+	fakeBoxes
+	stops int
+}
+
+func (h *stopCountingHost) Stop(context.Context, contract.BoxID) error {
+	h.stops++
+	return nil
+}
+
+func TestOpenTerminalPreventsCommittedQuietStop(t *testing.T) {
+	s, _, sid, ctx := setup(t)
+	if _, problem := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid}, contract.BoxHelloRequest{}); problem != nil {
+		t.Fatal(problem)
+	}
+	session, err := s.store.Session(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE boxes SET want='stop' WHERE id=?", session.Box)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	host := &stopCountingHost{}
+	r := lifecycle.New(s.store, host, openTerminalView{}, nil, s.event, s.now)
+	if err := r.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.Wait()
+	b, err := s.store.Box(ctx, session.Box)
+	if err != nil || b.State != contract.BoxReady || host.stops != 0 {
+		t.Fatalf("box=%+v stops=%d err=%v", b, host.stops, err)
+	}
+}
