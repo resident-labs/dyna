@@ -117,9 +117,14 @@ esac
 }
 
 func TestSessionCredentialsCoverRegisteredRepositories(t *testing.T) {
-	records := setupRooms(t, "work/main", "work/extra")
-	if err := room.DefaultStore().AddRepo(records[0].ID, records[1].Repo, ""); err != nil {
-		t.Fatal(err)
+	records := setupRooms(t, "work/main", "work/extra", "work/foreign")
+	if out, err := exec.Command("/usr/bin/git", "-C", records[2].Repo, "remote", "set-url", "origin", "https://other.example/work/foreign.git").CombinedOutput(); err != nil {
+		t.Fatalf("git: %v: %s", err, out)
+	}
+	for _, rec := range records[1:] {
+		if err := room.DefaultStore().AddRepo(records[0].ID, rec.Repo, ""); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
 		t.Fatal(err)
@@ -143,6 +148,9 @@ esac
 				t.Errorf("%s = %q, want %q", key, got, want)
 			}
 		}
+	}
+	if got := gitConfigValue(session.Env, "credential.https://other.example/work/foreign.helper"); got != "" {
+		t.Errorf("foreign host received helper: %q", got)
 	}
 }
 

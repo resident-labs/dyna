@@ -137,7 +137,7 @@ func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary str
 	// Read-only rooms get no helper; its keys still clear a parent's helper.
 	credentials := sessionCredentialHelper(r, cmd.Path)
 	for _, checkout := range rec.ExtraRepos {
-		if extra, ok := checkoutOrigin(ctx, rec, checkout); ok && extra != r {
+		if extra, ok := checkoutOrigin(ctx, rec, checkout); ok && strings.EqualFold(extra.host, r.host) && extra != r {
 			credentials = append(credentials, sessionCredentialHelper(extra, cmd.Path)...)
 		}
 	}
