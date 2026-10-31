@@ -112,6 +112,38 @@ func TestUpgradeRemovesLegacyGrantRequestFromList(t *testing.T) {
 	}
 }
 
+func TestHostGrantAfterEngineMove(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	no := false
+	if err := s.store.AddHost(ctx, box.Host{Name: "capacity", EngineHost: &no}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.grant": s.HostexecGrant()}, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	to := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
+	args := contract.HostexecGrantArgs{Room: room, To: to, Hosts: []contract.HostName{"capacity"}, Reason: "Inspect"}
+	result, problem := s.OpSubmit(ctx, to, contract.OpSubmitRequest{Operation: contract.Operation{Room: room, Kind: "hostexec.grant", Args: args}})
+	if problem != nil || result.Operation.State != contract.OpPending {
+		t.Fatalf("submit: %+v %v", result, problem)
+	}
+	// Startup clears comparisons and expires cards made before the engine moved.
+	if err := s.store.ResetEngineHosts(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ExpireHostexecGrantRequests(ctx); err != nil {
+		t.Fatal(err)
+	}
+	old, err := s.store.Operation(ctx, result.Operation.ID)
+	if err != nil || old.Operation.State != contract.OpExpired {
+		t.Fatalf("old request: %+v %v", old, err)
+	}
+	card := s.HostexecGrant().Card(ctx, args, to)
+	if !strings.Contains(card.Body, "cannot confirm whether a host holds the model sign-ins") {
+		t.Fatal(card.Body)
+	}
+}
+
 func TestGrantCardEngineHost(t *testing.T) {
 	s, room, worker, ctx := setup(t)
 	yes := true
