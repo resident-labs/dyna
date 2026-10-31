@@ -16,6 +16,8 @@ export function watchTranscripts(listener: (session?: string) => void): () => vo
   return () => { transcriptListeners.delete(listener); };
 }
 
+let onStreamState: (up: boolean) => void = () => {};
+export function watchStreamState(listener: (up: boolean) => void): void { onStreamState = listener; }
 let onHello: (hello: StreamHello) => void = () => {};
 export function watchHello(listener: (hello: StreamHello) => void): void { onHello = listener; }
 
@@ -39,7 +41,7 @@ export function stream(
       if (typeof value === "object" && value !== null && "build" in value && typeof value.build === "string") {
         const hello: StreamHello = { build: value.build };
         onHello(hello);
-        if (!room) for (const listener of transcriptListeners) listener();
+        if (!room) { onStreamState(true); for (const listener of transcriptListeners) listener(); }
       }
     });
     source.onmessage = message => {
@@ -53,6 +55,7 @@ export function stream(
     source.onerror = () => {
       source.close();
       if (closed) return;
+      if (!room) onStreamState(false);
       cancel = schedule(connect, delay);
       delay = Math.min(delay * 2, 10_000);
     };

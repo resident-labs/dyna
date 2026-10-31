@@ -119,6 +119,16 @@ func (o *Operations) Resume(ctx context.Context) error {
 }
 
 func (o *Operations) Start(ctx context.Context, req contract.ConnectStartRequest) error {
+	if req.Relay == "" {
+		req.Relay = DefaultRelay
+	}
+	if req.Name == "" {
+		name, err := os.Hostname()
+		if err != nil || name == "" {
+			return errors.New("machine name unavailable")
+		}
+		req.Name = name
+	}
 	if _, err := CheckRelayURL(req.Relay); err != nil {
 		return err
 	}
@@ -168,6 +178,20 @@ func (o *Operations) Status(ctx context.Context) (contract.ConnectStatusResponse
 		return contract.ConnectStatusResponse{}, err
 	}
 	out := contract.ConnectStatusResponse{Attempt: a, Linked: linked, ConnectorMissing: missing}
+	if linked {
+		link, err := o.files.Link()
+		if err != nil {
+			return out, err
+		}
+		out.Relay = link.Relay
+	}
+	if linked || a.State == contract.ConnectAttemptPending {
+		key, err := o.files.existingKey()
+		if err != nil {
+			return out, err
+		}
+		out.Fingerprint = Fingerprint(key.Public().(ed25519.PublicKey))
+	}
 	if a.State != contract.ConnectAttemptPending || linked {
 		return out, nil
 	}
@@ -179,14 +203,7 @@ func (o *Operations) Status(ctx context.Context) (contract.ConnectStatusResponse
 	if err := json.Unmarshal(b, &p); err != nil || p.Start.Expires != a.Expires {
 		return out, errors.New("invalid pending link")
 	}
-	if _, err := os.Stat(filepath.Join(o.files.dir, "machine.key")); err != nil {
-		return out, err
-	}
-	key, err := o.files.Key()
-	if err != nil {
-		return out, err
-	}
-	out.URL, out.Code, out.Fingerprint = p.Start.URL, p.Start.UserCode, Fingerprint(key.Public().(ed25519.PublicKey))
+	out.URL, out.Code = p.Start.URL, p.Start.UserCode
 	return out, nil
 }
 
@@ -260,10 +277,7 @@ func (o *Operations) unlink(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if _, err := os.Stat(filepath.Join(o.files.dir, "machine.key")); err != nil {
-			return err
-		}
-		key, err := o.files.Key()
+		key, err := o.files.existingKey()
 		if err != nil {
 			return err
 		}

@@ -57,17 +57,22 @@ func (f *Files) write(name string, b []byte) error {
 	return os.Rename(tmp.Name(), filepath.Join(f.dir, name))
 }
 
-func (f *Files) Key() (ed25519.PrivateKey, error) {
+func (f *Files) existingKey() (ed25519.PrivateKey, error) {
 	b, err := os.ReadFile(filepath.Join(f.dir, "machine.key"))
-	if err == nil {
-		seed, e := b64.DecodeString(string(b))
-		if e != nil || len(seed) != ed25519.SeedSize {
-			return nil, errors.New("invalid machine key")
-		}
-		return ed25519.NewKeyFromSeed(seed), nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
+	if err != nil {
 		return nil, err
+	}
+	seed, err := b64.DecodeString(string(b))
+	if err != nil || len(seed) != ed25519.SeedSize {
+		return nil, errors.New("invalid machine key")
+	}
+	return ed25519.NewKeyFromSeed(seed), nil
+}
+
+func (f *Files) Key() (ed25519.PrivateKey, error) {
+	key, err := f.existingKey()
+	if !errors.Is(err, os.ErrNotExist) {
+		return key, err
 	}
 	seed := make([]byte, ed25519.SeedSize)
 	if _, err = rand.Read(seed); err != nil {
@@ -83,10 +88,9 @@ func (f *Files) Key() (ed25519.PrivateKey, error) {
 func (f *Files) Link() (Link, error) {
 	var link Link
 	b, err := os.ReadFile(filepath.Join(f.dir, "link.json"))
-	if err != nil {
-		return link, err
+	if err == nil {
+		err = json.Unmarshal(b, &link)
 	}
-	err = json.Unmarshal(b, &link)
 	return link, err
 }
 
@@ -104,18 +108,13 @@ func (f *Files) Keys(now time.Time) (KeySet, error) {
 	return keys, err
 }
 
-func (f *Files) SaveLink(link Link) error {
-	b, err := json.Marshal(link)
+func saveJSON[T Link | KeySet](f *Files, name string, value T) error {
+	b, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	return f.write("link.json", b)
+	return f.write(name, b)
 }
-func (f *Files) SaveKeys(keys KeySet) error {
-	b, err := json.Marshal(keys)
-	if err != nil {
-		return err
-	}
-	return f.write("jwks.json", b)
-}
+func (f *Files) SaveLink(link Link) error           { return saveJSON(f, "link.json", link) }
+func (f *Files) SaveKeys(keys KeySet) error         { return saveJSON(f, "jwks.json", keys) }
 func (f *Files) SaveTunnelToken(token string) error { return f.write("tunnel-token", []byte(token)) }
