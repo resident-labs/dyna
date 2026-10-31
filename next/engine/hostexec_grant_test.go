@@ -91,6 +91,7 @@ func TestUpgradeRemovesLegacyGrantRequestFromList(t *testing.T) {
  ALTER TABLE grants ADD COLUMN mode TEXT NOT NULL DEFAULT '';
  ALTER TABLE grants ADD COLUMN commands BLOB NOT NULL DEFAULT '[]';
  ALTER TABLE grants DROP COLUMN reason;
+ DROP TABLE visuals;
  DROP TABLE conversation_reads;
  DROP TABLE rules;
  DROP TABLE uploads;
