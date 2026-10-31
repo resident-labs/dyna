@@ -4,9 +4,11 @@
   import RequestCard from "./RequestCard.svelte";
   import type { RoomStore } from "../room.svelte.ts";
   let { store, room, onback, element = $bindable() }: { store: RoomStore; room: string; onback: () => void; element?: HTMLElement } = $props();
-  // Waiting requests first, in the order they came; then the ones decided since the room opened, newest first.
+  // Waiting requests first, in the order they came: the owner's own, which Home and the room badge count, then
+  // the ones a session above the asker may also decide. Then the ones decided since the room opened, newest first.
   let requests = $derived([...store.requests.values()]);
-  let waiting = $derived(requests.filter(request => request.state === "pending"));
+  let waiting = $derived(requests.filter(request => request.state === "pending" && request.class === "owner"));
+  let shared = $derived(requests.filter(request => request.state === "pending" && request.class !== "owner"));
   let decided = $derived(requests.filter(request => request.state !== "pending")
     .sort((a, b) => (b.decision?.at ?? "").localeCompare(a.decision?.at ?? "")));
   // Relative times refresh each half minute while the panel is open; this reads nothing from the engine.
@@ -26,6 +28,10 @@
     <h2 class="label">Waiting for you</h2>
     {#each waiting as request (request.id)}<RequestCard {request} {store} {now} />
     {:else}{#if store.ready}<p class="none">No requests are waiting.</p>{/if}{/each}
+    {#if shared.length}
+      <h2 class="label">Waiting for a session</h2>
+      {#each shared as request (request.id)}<RequestCard {request} {store} {now} />{/each}
+    {/if}
     {#if decided.length}
       <h2 class="label">Decided</h2>
       {#each decided as request (request.id)}<RequestCard {request} {store} {now} />{/each}
