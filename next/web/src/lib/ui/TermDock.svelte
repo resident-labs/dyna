@@ -66,6 +66,8 @@
     await tick();
     if (key === JOBS) jobsPane?.focus(); else panes[key]?.focus();
   }
+  // Opens a session's shell directly, for the DM header's Terminal button.
+  export function shell(id: string, name: string) { open({ box: id }, `${name} · bash`); }
   function open(target: TerminalTarget, label: string) {
     picking = false;
     const tab = { key: next++, target, label };
@@ -131,7 +133,7 @@
         onclick={() => { if (picking) picking = false; else void pick(); }}><Icon name="plus" /></button>
       {#if picking}<div class="list" role="menu" tabindex="-1" bind:this={menu} onkeydown={walk}>
         {#if sessions.length}<p class="label">Sessions</p>{/if}
-        {#each sessions as session (session.id)}<button type="button" role="menuitem" tabindex="-1" onclick={() => open({ box: session.id }, `${session.name} · bash`)}>{session.name}</button>{/each}
+        {#each sessions as session (session.id)}<button type="button" role="menuitem" tabindex="-1" onclick={() => shell(session.id, session.name)}>{session.name}</button>{/each}
         {#if hosts.length}<p class="label">Hosts</p>{/if}
         {#each hosts as host (host)}<button type="button" role="menuitem" tabindex="-1" onclick={() => open({ host }, hostLabel(host))}>{hostLabel(host)}</button>{/each}
       </div>{/if}
