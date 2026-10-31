@@ -58,9 +58,9 @@
   .window { position: relative; display: flex; flex-direction: column; min-height: 0; }
   .window:focus { outline: none; }
   .window:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-  /* A float has a clear edge over the feed. --firm comes with the theme tokens (#1606); until then the window keeps
-     the line color. Only its body clips, so the resize handles past the edge and the header's menus stay whole. */
-  .floating { position: fixed; z-index: 3; background: var(--raised); border: 1px solid var(--firm, var(--line)); border-radius: 16px; box-shadow: 0 12px 32px var(--shadow-lg); }
+  /* A float has a clear edge over the feed. Only its body clips, so the resize handles past the edge and the
+     header's menus stay whole. */
+  .floating { position: fixed; z-index: 3; background: var(--raised); border: 1px solid var(--firm); border-radius: 16px; box-shadow: 0 12px 32px var(--shadow-lg); }
   .body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .floating:not(.full) .body { overflow: hidden; border-radius: 0 0 15px 15px; }
   header { gap: 6px; padding: 0 6px 0 12px; }
