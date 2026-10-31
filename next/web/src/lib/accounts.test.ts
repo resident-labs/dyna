@@ -1,7 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountRows, accountState, removalPrompt } from "./accounts.ts";
+import { accountRows, accountState, removalPrompt, canReconnect } from "./accounts.ts";
 import type { Account } from "./contract.gen.ts";
+
+test("only expired sign-ins offer reconnect", () => {
+  const account: Account = { id: "a", provider: "anthropic", label: "Work", rooms: null, state: "sign_in_expired" };
+  assert.equal(canReconnect(account, "oauth"), true);
+  assert.equal(canReconnect({ ...account, state: "connected" }, "oauth"), false);
+  assert.equal(canReconnect(account, "key"), false);
+});
 
 test("removal explains what Dyna deletes for each connection method", () => {
   assert.equal(removalPrompt("key"), "Remove this account? Dyna deletes its key. You can connect it again later.");
