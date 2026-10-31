@@ -10,8 +10,13 @@ import (
 )
 
 func (s *Service) Events(ctx context.Context, caller contract.Principal, room contract.RoomID, after int64) (<-chan contract.Event, *contract.Error) {
-	if e := s.roomAccess(ctx, caller, room); e != nil {
-		return nil, e
+	if room == "" && caller.Kind != contract.PrincipalOwner {
+		return nil, forbidden()
+	}
+	if room != "" {
+		if e := s.roomAccess(ctx, caller, room); e != nil {
+			return nil, e
+		}
 	}
 	sub, cancel := s.store.Subscribe()
 	out := make(chan contract.Event)
@@ -19,7 +24,13 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 		defer close(out)
 		defer func() { cancel() }()
 		for {
-			events, err := s.store.Events(ctx, room, after, 256, nil)
+			var events []contract.Event
+			var err error
+			if room == "" {
+				events, err = s.store.OwnerEvents(ctx, after, 256)
+			} else {
+				events, err = s.store.Events(ctx, room, after, 256, nil)
+			}
 			if err != nil {
 				return
 			}
