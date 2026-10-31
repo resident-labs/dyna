@@ -2,9 +2,11 @@ package model
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/rpc"
+	"strings"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/contract/private"
@@ -39,6 +41,32 @@ func (r *AuthRPC) List(_ struct{}, out *[]private.ProxyAuth) error {
 	return nil
 }
 
+// rawCredentialIdentity reads only provider identity fields from an opaque proxy record.
+func rawCredentialIdentity(raw []byte) (string, string) {
+	var record struct {
+		Metadata struct {
+			AccountID   string `json:"account_id"`
+			AccountUUID string `json:"account_uuid"`
+			Subject     string `json:"sub"`
+			Email       string `json:"email"`
+		} `json:"metadata"`
+	}
+	if json.Unmarshal(raw, &record) != nil {
+		return "", ""
+	}
+	for _, field := range []struct{ name, value string }{
+		{"account_id", record.Metadata.AccountID},
+		{"account_uuid", record.Metadata.AccountUUID},
+		{"sub", record.Metadata.Subject},
+		{"email", record.Metadata.Email},
+	} {
+		if strings.TrimSpace(field.value) != "" {
+			return field.name, field.value
+		}
+	}
+	return "", ""
+}
+
 func (r *AuthRPC) Save(req AuthSave, _ *struct{}) error {
 	ctx := context.Background()
 	if req.Create && r.Connections != nil {
@@ -51,7 +79,24 @@ func (r *AuthRPC) Save(req AuthSave, _ *struct{}) error {
 			c.mu.Lock()
 		}
 		defer c.mu.Unlock()
-		if a := c.attempts[req.Attempt]; a != nil && a.account != "" && a.proxyID == req.Record.ID && a.status == contract.ConnectPending && !a.saved && c.now().Before(a.expires) && a.generation == c.proxy.generation.Load() {
+		if a := c.attempts[req.Attempt]; a != nil && a.account != "" && a.status == contract.ConnectPending && !a.saved && c.now().Before(a.expires) && a.generation == c.proxy.generation.Load() {
+			records, err := r.Store.ListProxyAuths(ctx)
+			if err != nil {
+				return errors.New("proxy store unavailable")
+			}
+			var saved private.ProxyAuth
+			for _, record := range records {
+				if record.ID == a.proxyID {
+					saved = record
+					break
+				}
+			}
+			kind, identity := rawCredentialIdentity(saved.Record)
+			newKind, newIdentity := rawCredentialIdentity(req.Record.Record)
+			if saved.ID == "" || saved.Provider != req.Record.Provider || req.Record.ID != a.proxyID || identity == "" || kind != newKind || identity != newIdentity {
+				a.status, a.reason = contract.ConnectFailed, contract.ConnectWrongAccount
+				return errors.New("account completion rejected")
+			}
 			if err := r.Store.SaveProxyAuth(ctx, req.Record, false); err != nil {
 				return errors.New("proxy store unavailable")
 			}
