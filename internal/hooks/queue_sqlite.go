@@ -31,9 +31,14 @@ func (s Service) queueDB() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "hooks.queue", 1, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "hooks.queue", 2, func(conn *sql.Conn, old int) error {
 		if old < 1 {
-			_, err := conn.ExecContext(context.Background(), queueSchema)
+			if _, err := conn.ExecContext(context.Background(), queueSchema); err != nil {
+				return err
+			}
+		}
+		if old < 2 {
+			_, err := conn.ExecContext(context.Background(), `CREATE TABLE hook_queue_keys (key TEXT PRIMARY KEY)`)
 			return err
 		}
 		return nil
@@ -55,6 +60,16 @@ func (s Service) appendQueued(ctx context.Context, e Event) error {
 		return err
 	}
 	return statewrite.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		if e.DedupKey != "" {
+			result, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO hook_queue_keys(key) VALUES(?)", e.DedupKey)
+			if err != nil {
+				return err
+			}
+			inserted, err := result.RowsAffected()
+			if err != nil || inserted == 0 {
+				return err
+			}
+		}
 		_, err := conn.ExecContext(ctx, "INSERT INTO hook_queue(body) VALUES(?)", string(body))
 		return err
 	})
