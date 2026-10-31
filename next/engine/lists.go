@@ -112,7 +112,8 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 		COALESCE((SELECT id FROM turns WHERE session=s.id AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1),''),
 		COALESCE((SELECT outcome FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND outcome!='stopped' ORDER BY ended_at DESC LIMIT 1),''),
 		s.shell_jobs, COALESCE(c.seq,0), s.created_at,
-		(SELECT ended_at FROM turns WHERE session=s.id AND ended_at IS NOT NULL ORDER BY ended_at DESC LIMIT 1)
+		(SELECT ended_at FROM turns WHERE session=s.id AND ended_at IS NOT NULL ORDER BY ended_at DESC LIMIT 1),
+		EXISTS (SELECT 1 FROM shell_jobs j WHERE j.session=s.id)
 		FROM sessions s LEFT JOIN boxes b ON b.session=s.id LEFT JOIN conversation_reads c ON c.room=s.room AND c.conversation='dm:'||s.id WHERE s.room=? AND s.closed_at IS NULL ORDER BY s.created_at,s.id`, req.Room)
 	if err != nil {
 		return contract.SessionListResponse{}, failure(err)
@@ -123,7 +124,7 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 		var session contract.SessionSummary
 		var started int64
 		var lastTurn sql.NullInt64
-		if err := rows.Scan(&session.ID, &session.Name, &session.Parent, &session.Profile, &session.Box, &session.BoxState, &session.Goal, &session.Turn, &session.LastOutcome, &session.ShellJobs, &session.LastRead, &started, &lastTurn); err != nil {
+		if err := rows.Scan(&session.ID, &session.Name, &session.Parent, &session.Profile, &session.Box, &session.BoxState, &session.Goal, &session.Turn, &session.LastOutcome, &session.ShellJobs, &session.LastRead, &started, &lastTurn, &session.HadJobs); err != nil {
 			return contract.SessionListResponse{}, failure(err)
 		}
 		session.StartedAt = time.UnixMilli(started).UTC()

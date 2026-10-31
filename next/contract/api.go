@@ -149,6 +149,7 @@ type SessionSummary struct {
 	Activity    string        `json:"activity,omitempty"`    // the running turn's latest TurnActivity label
 	LastOutcome TurnOutcome   `json:"lastOutcome,omitempty"` // of the last ended turn that was not stopped; a stopped turn neither fails nor succeeds
 	ShellJobs   int           `json:"shellJobs,omitempty"`   // TurnEnded.ShellJobs of the last ended turn
+	HadJobs     bool          `json:"hadJobs"`               // the session has ever run a background shell job, so a finished job stays reachable
 	StartedAt   time.Time     `json:"startedAt"`             // when the session was created
 	LastTurnAt  time.Time     `json:"lastTurnAt,omitzero"`   // when the latest turn ended; empty when no turn has ended
 }
