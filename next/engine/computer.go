@@ -25,11 +25,11 @@ func (s *Service) computerEvent(ctx context.Context, session contract.SessionID,
 }
 
 func (s *Service) clearComputerLocked(id contract.SessionID) {
-	c := s.computers[id]
+	c := s.sessionLocked(id).computer
 	if c == nil {
 		return
 	}
-	delete(s.computers, id)
+	s.sessionLocked(id).computer = nil
 	for ch := range c.watchers {
 		close(ch)
 		delete(c.watchers, ch)
@@ -52,13 +52,14 @@ func (s *Service) ComputerChanged(ctx context.Context, caller contract.Principal
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.channels[session.ID] == nil {
+	state := s.sessionLocked(session.ID)
+	if state.channel == nil {
 		return contract.ComputerChangedResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "box channel is not ready"}
 	}
-	c := s.computers[session.ID]
+	c := state.computer
 	if c == nil {
 		c = &computerState{state: contract.ComputerStopped, room: session.Room, watchers: make(map[chan []byte]struct{})}
-		s.computers[session.ID] = c
+		state.computer = c
 	}
 	if c.state == req.To {
 		return contract.ComputerChangedResponse{}, nil
@@ -68,7 +69,7 @@ func (s *Service) ComputerChanged(ctx context.Context, caller contract.Principal
 	}
 	c.state = req.To
 	if req.To == contract.ComputerStopped {
-		wakeChannel(s.channels[session.ID])
+		wakeChannel(state.channel)
 		for ch := range c.watchers {
 			close(ch)
 			delete(c.watchers, ch)
@@ -95,11 +96,12 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	channel := s.channels[id]
-	if box.State != contract.BoxReady || channel == nil {
+	state := s.sessionLocked(id)
+	if box.State != contract.BoxReady || state.channel == nil {
 		return nil, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
 	}
-	c := s.computers[id]
+	channel := state.channel
+	c := state.computer
 	if c == nil || c.state != contract.ComputerRunning {
 		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "computer is not running"}
 	}
@@ -119,7 +121,7 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 		}
 		delete(c.watchers, ch)
 		close(ch)
-		if len(c.watchers) == 0 && s.channels[id] == channel {
+		if len(c.watchers) == 0 && state.channel == channel {
 			wakeChannel(channel)
 		}
 	}()
@@ -131,12 +133,13 @@ func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal,
 		return forbidden()
 	}
 	s.mu.Lock()
-	channel, computer := s.channels[caller.Session], s.computers[caller.Session]
+	state := s.sessionLocked(caller.Session)
+	channel, computer := state.channel, state.computer
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if computer == nil || channel == nil || s.computers[caller.Session] != computer || s.channels[caller.Session] != channel || computer.generation != generation {
+		if computer == nil || channel == nil || state.computer != computer || state.channel != channel || computer.generation != generation {
 			return
 		}
 		for ch := range computer.watchers {
@@ -159,7 +162,7 @@ func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal,
 			return nil
 		}
 		s.mu.Lock()
-		if c := s.computers[caller.Session]; c != nil && c.state == contract.ComputerRunning && c.generation == generation {
+		if c := state.computer; c != nil && c.state == contract.ComputerRunning && c.generation == generation {
 			for ch := range c.watchers {
 				select {
 				case <-ch:
