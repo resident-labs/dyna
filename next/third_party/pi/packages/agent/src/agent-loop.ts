@@ -235,6 +235,12 @@ async function runLoop(
 			);
 			if (requestUpdate) {
 				currentContext = requestUpdate.context ?? currentContext;
+				for (const message of requestUpdate.messages ?? []) {
+					await emit({ type: "message_start", message });
+					await emit({ type: "message_end", message });
+					currentContext.messages.push(message);
+					newMessages.push(message);
+				}
 				config = {
 					...config,
 					model: requestUpdate.model ?? config.model,

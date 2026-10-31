@@ -45,7 +45,7 @@ import { parseJsonWithRepair, parseStreamingJson, parseToolCallArguments } from 
 import { getProviderEnvValue } from "../utils/provider-env.ts";
 import { retryProviderRequest } from "../utils/provider-retry.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
-import { getSystemMessageText, renderSystemMessageUpdate } from "../utils/text.ts";
+import { getSystemMessageText } from "../utils/text.ts";
 import {
 	getCurrentTools,
 	getInitialSystemMessage,
@@ -1378,9 +1378,7 @@ function convertMessages(
 		if (msg.role === "system") {
 			// Later system messages only reach this point when the model accepts them natively;
 			// otherwise the transcript was collapsed into the leading message before conversion.
-			const text = renderSystemMessageUpdate(msg);
 			const blocks: ContentBlockParam[] = [];
-			if (text.length > 0) blocks.push({ type: "text", text: sanitizeSurrogates(text) });
 			if (convertToolDefinitions) {
 				const added = msg.toolsAdded ?? [];
 				const redefined = new Set(added.map((tool) => tool.name));
