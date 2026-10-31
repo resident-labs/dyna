@@ -1,5 +1,5 @@
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
-import { call } from "./client.ts";
+import { call, retryDelay } from "./client.ts";
 import { stream } from "./stream.ts";
 import type { Event, RoomSummary, SessionListResponse, SessionSummary } from "./contract.gen.ts";
 
@@ -40,23 +40,32 @@ export class Attention {
   // root's session.started; room.list then names it. One read runs at a time. Events from unknown rooms wait in
   // early while it runs; the answer covers those up to its seq, and the newer ones apply on top. Events from a room
   // the answer does not name yet wait for one more read, as when the read started before the room existed.
+  // A failed read keeps them: the stream has moved past them, so only a later read can bring them back. It tries
+  // again with the client's capped backoff, or at once when the next unknown room's event arrives.
   private refreshing: Promise<void> | undefined;
   private early: Event[] = [];
   private again = false;
+  private tries = 0;
+  private timer: ReturnType<typeof setTimeout> | undefined;
   private refresh(): void {
-    this.refreshing ??= call("room.list", {}).then(list => {
+    if (this.refreshing) return;
+    clearTimeout(this.timer);
+    this.timer = undefined;
+    this.refreshing = call("room.list", {}).then(list => {
+      this.tries = 0;
       for (const room of list.rooms ?? []) if (!this.rooms.has(room.id)) this.add(room);
       const newer = this.early.filter(event => event.seq > list.seq);
       this.early = newer.filter(event => !this.rooms.has(event.room ?? ""));
       for (const event of newer) if (this.rooms.has(event.room ?? "")) this.applyRoom(event);
-    }, () => { this.early = []; }).finally(() => {
-      this.refreshing = undefined;
       this.again = !this.again && this.early.length > 0;
-      if (this.again) this.refresh(); else this.early = [];
+      if (!this.again) this.early = [];
+    }, () => { this.timer = setTimeout(() => this.refresh(), retryDelay(this.tries++)); }).finally(() => {
+      this.refreshing = undefined;
+      if (this.again && !this.timer) this.refresh();
     });
   }
 
-  close(): void { this.stop(); }
+  close(): void { this.stop(); clearTimeout(this.timer); }
 
   // A room's sessions for Home, which seed the room's set once. A failed call keeps no buffer.
   listSessions(room: string): Promise<SessionListResponse> {
