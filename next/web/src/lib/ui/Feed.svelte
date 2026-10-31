@@ -82,6 +82,7 @@
     const current = store.boxFailures.get(row.session);
     return operate && !!current && (row.label === "Failed" || row.label === "Could not start") &&
       (row.key === "box-failed" || (newestBoxRows.get(row.session) === row.key && row.at === current.at));
+  }
   let visualPosts = $derived(view.posts().flatMap(event => (event.body.attachments ?? []).flatMap(file => file.visual ? [{ event, visual: file.visual }] : [])));
   let newest = $derived(new Map(visualPosts.map(({ visual }) => [visual.id, visual])));
   function openVisual(visual: VisualCard) {

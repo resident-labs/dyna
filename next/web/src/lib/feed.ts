@@ -112,7 +112,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     let more: Extract<Row, { kind: "more-failures" }> | undefined;
     for (const row of deferred) {
       if (row.kind === "notice") dated(row.event.at);
-      else if (row.kind === "request") dated(row.at);
+      else if (row.kind === "request" || row.kind === "restarted") dated(row.at);
       else if (row.kind === "failed") {
         dated(row.at); fresh(row.seq, { kind: "session", session: row.session });
         if (++failures > 5) {
@@ -138,7 +138,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
   for (const event of events) {
     // Account alerts are owner-only and never belong to a room feed.
     if (event.type === "account.failed" || event.type === "account.quota_low") continue;
-    const firstAt = work[0]?.at ?? (deferred[0]?.kind === "notice" ? deferred[0].event.at : deferred[0]?.kind === "failed" || deferred[0]?.kind === "request" ? deferred[0].at : undefined);
+    const firstAt = work[0]?.at ?? (deferred[0]?.kind === "notice" ? deferred[0].event.at : deferred[0]?.kind === "failed" || deferred[0]?.kind === "request" || deferred[0]?.kind === "restarted" ? deferred[0].at : undefined);
     if (firstAt && new Date(firstAt).toDateString() !== new Date(event.at).toDateString()) flush();
     if (event.type === "post.created") {
       if (sameHome(event.body.home, home)) post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, event.body.attachments ?? [], event.body.mentions ?? []);
@@ -164,6 +164,10 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       const row = { kind: "request" as const, key: `r${event.seq}`, at: event.at, request: { ...event.body, state: "pending" as const } };
       requests.set(event.body.id, row);
       deferred.push(row);
+      continue;
+    }
+    if (event.type === "session.restarted") {
+      deferred.push({ kind: "restarted", key: `restart${event.seq}`, session: event.body.session, at: event.at });
       continue;
     }
     // Box lifecycle stays out of the feed; only a failed or lost box, or a close that failed to archive,
@@ -381,7 +385,8 @@ export function describe(event: Event, name: Name): string {
       return failed(event.body) ? `${who}'s ${job} failed: ${endCause(event.body, who)}` : `${who}'s ${job} finished`;
     }
     case "op.decided": return `${event.body.decision.by.session ? name(event.body.decision.by.session) : "You"} ${event.body.decision.approved ? "approved" : "denied"} a request`;
-    case "op.requested": case "op.ran": return "";
+    case "op.requested": return `${event.body.by.kind === "owner" ? "You" : event.body.by.session ? name(event.body.by.session) : "Dyna"} ${event.body.card.title}${event.body.card.target.name ? ` · ${event.body.card.target.name}` : ""}`;
+    case "op.ran": return "";
     case "image.built": return `Image ${event.body.name}:${event.body.tag} built in ${event.body.seconds} s`;
     // The reason is raw build output (r8); the build log holds it.
     case "image.failed": return `Image ${event.body.name}:${event.body.tag} failed`;
