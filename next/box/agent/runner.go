@@ -22,6 +22,7 @@ type Runner struct {
 	Harness  harness.Harness
 	Sink     turnSink
 	Setup    func(context.Context) error
+	Model    contract.ModelChoice // the model Pi last applied; the box.hello model at first
 	setupErr error
 	mu       sync.Mutex
 	active   contract.TurnID
@@ -109,17 +110,34 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 		defer started()
 		var result contract.TurnEnded
 		var err error
+		cause := contract.CauseHarnessFailed
+		// A turn that runs keeps its model; the next turn applies a changed one.
+		applyModel := func() error {
+			if start.Model.ID == "" || start.Model == r.Model {
+				return nil
+			}
+			if err := r.Harness.SetModel(ctx, start.Model); err != nil {
+				cause = contract.CauseSetModelFailed
+				return err
+			}
+			r.Model = start.Model
+			return nil
+		}
 		if len(pending) > 0 {
-			result, err = r.Harness.Start(ctx, start.Turn, pending, started)
+			if err = applyModel(); err == nil {
+				result, err = r.Harness.Start(ctx, start.Turn, pending, started)
+			}
 		} else {
 			var settled bool
 			result, settled, err = r.Harness.Recover(start.Turn, start.Inputs)
 			if err == nil && !settled {
-				result, err = r.Harness.Continue(ctx, start.Turn, started)
+				if err = applyModel(); err == nil {
+					result, err = r.Harness.Continue(ctx, start.Turn, started)
+				}
 			}
 		}
 		if err != nil {
-			result = contract.TurnEnded{Turn: start.Turn, Outcome: contract.TurnOutcome("failed"), Error: err.Error(), Cause: contract.CauseHarnessFailed}
+			result = contract.TurnEnded{Turn: start.Turn, Outcome: contract.TurnOutcome("failed"), Error: err.Error(), Cause: cause}
 		}
 		r.mu.Lock()
 		r.settling = true

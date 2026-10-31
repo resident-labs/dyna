@@ -22,6 +22,7 @@ type fakeClient struct {
 	repoList     contract.RoomReposRequest
 	start        contract.SessionStartRequest
 	close        contract.SessionCloseRequest
+	setProfile   contract.SessionSetProfileRequest
 	restart      contract.SessionRestartRequest
 	post         contract.PostRequest
 	events       []contract.Event
@@ -74,6 +75,10 @@ func (f *fakeClient) RoomRepos(_ context.Context, q contract.RoomReposRequest) (
 func (f *fakeClient) SessionStart(_ context.Context, q contract.SessionStartRequest) (contract.SessionStartResponse, error) {
 	f.start = q
 	return contract.SessionStartResponse{Session: "ses_1"}, nil
+}
+func (f *fakeClient) SessionSetProfile(_ context.Context, q contract.SessionSetProfileRequest) (contract.SessionSetProfileResponse, error) {
+	f.setProfile = q
+	return contract.SessionSetProfileResponse{}, nil
 }
 func (f *fakeClient) SessionClose(_ context.Context, q contract.SessionCloseRequest) (contract.SessionCloseResponse, error) {
 	f.close = q
@@ -155,6 +160,13 @@ func TestSessionStartMapsFlags(t *testing.T) {
 	runCLI(t, f, "session", "start", "--room", "r", "--name", "n", "--profile", "p", "--goal", "g", "--brief", "b", "--repo", "owner/name", "--parent", "s", "--size", "large")
 	if f.start.Size != "large" || f.start.Room != "r" || f.start.Name != "n" || f.start.Profile != "p" || f.start.Goal != "g" || f.start.Brief != "b" || f.start.Repo != "owner/name" || f.start.Parent != "s" {
 		t.Fatalf("%+v", f.start)
+	}
+}
+func TestSessionSetProfileMapsArgs(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "session", "set-profile", "ses_1", "gpt")
+	if f.setProfile.Session != "ses_1" || f.setProfile.Profile != "gpt" {
+		t.Fatalf("%+v", f.setProfile)
 	}
 }
 func TestSessionRestartMapsID(t *testing.T) {
