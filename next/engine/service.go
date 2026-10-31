@@ -88,8 +88,12 @@ func (s *Service) lockBox(id contract.SessionID) func() {
 	return lock.Unlock
 }
 
-func (s *Service) transition(ctx context.Context, room contract.RoomID, b box.Box, state contract.BoxState, reason string) (box.Box, error) {
-	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{})
+func (s *Service) transition(ctx context.Context, room contract.RoomID, b box.Box, state contract.BoxState, reason string, causes ...contract.FailureCause) (box.Box, error) {
+	var cause contract.FailureCause
+	if len(causes) != 0 {
+		cause = causes[0]
+	}
+	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Cause: cause})
 	if err != nil {
 		return box.Box{}, err
 	}
@@ -382,7 +386,7 @@ func (s *Service) createPlaced(ctx, writeCtx context.Context, room contract.Room
 		if closing {
 			return nil
 		}
-		_, err := s.transition(writeCtx, room, current, contract.BoxFailed, createErr.Error())
+		_, err := s.transition(writeCtx, room, current, contract.BoxFailed, createErr.Error(), contract.CauseCreateFailed)
 		return err
 	}
 	current.Image = image
@@ -613,7 +617,7 @@ func (s *Service) closeSession(ctx context.Context, caller contract.Principal, s
 func (s *Service) finishClose(ctx context.Context, session store.Session, current box.Box, caller contract.Principal, discard bool) *contract.Error {
 	if current.State != contract.BoxDeleted {
 		if err := s.boxes.Remove(ctx, session.Box); err != nil {
-			_, transitionErr := s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxFailed, err.Error())
+			_, transitionErr := s.transition(context.WithoutCancel(ctx), session.Room, current, contract.BoxFailed, err.Error(), contract.CauseRemoveFailed)
 			if transitionErr != nil {
 				return failure(transitionErr)
 			}
