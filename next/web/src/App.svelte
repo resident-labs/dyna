@@ -18,7 +18,7 @@
   import Icon from "./lib/ui/Icon.svelte";
   import Avatar, { setSessionLabels } from "./lib/ui/Avatar.svelte";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
-  import { boxReason, count, quoted, turnReason, type Quote } from "./lib/feed.ts";
+  import { boxReason, count, quoted, turnReason, waits, type Quote } from "./lib/feed.ts";
   import { urgency, type Status } from "./lib/status.ts";
   import { FileDraft } from "./lib/attach.svelte.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
@@ -285,16 +285,17 @@
     target()?.focus();
   }
   let roomName = $derived(attention.rooms.get(room ?? "")?.name ?? "Room");
-  // A session's line says what it does, from its one status (status.ts). A failed session's line is the reason
-  // after "Failed", which the row draws; an idle one says Starting while its box starts, else Idle. Its profile is the
-  // row's hover title.
+  // A session's line says what it does, from its one status (status.ts). A waiting one names what the owner must do;
+  // a box no host takes for its room comes first, since its requests show in the feed and Requests too. A failed
+  // session's line is the reason after "Failed", which the row draws; an idle one says why its pending box waits, or
+  // Starting while its box starts, else Idle. Its profile is the row's hover title.
   const status = (id: string) => {
-    const box = store?.boxes.get(id), broken = store?.boxFailures.get(id), cause = store?.causes.get(id);
+    const broken = store?.boxFailures.get(id), cause = store?.causes.get(id), reason = store?.pendingReasons.get(id);
     switch (store?.status(id)) {
-      case "waiting": return "Waiting for your approval";
+      case "waiting": return reason === "room-host" ? waits[reason] : "Waiting for your approval";
       case "working": { const label = store?.activity.get(id); return label ? `Working · ${label}` : "Working"; }
       case "failed": return broken ? boxReason(broken) : turnReason(cause);
-      default: return starting(id) ? "Starting" : "Idle";
+      default: return reason ? waits[reason] : starting(id) ? "Starting" : "Idle";
     }
   };
   // A DM's header says only the status word; the live line and About say what the session does. A failed session has
@@ -474,12 +475,13 @@
   <aside class="rail" aria-label="Rooms" tabindex="-1" bind:this={rail} inert={phone.current && !drawer} role={drawer ? "dialog" : undefined} aria-modal={drawer || undefined}
     onclick={event => { if (drawer && event.target instanceof Element && event.target.closest("a, button")) void showDrawer(false, false); }}>
     <nav aria-label="Rooms"><a class="home" href="/" onclick={navigate} aria-current={room || inSettings ? undefined : "page"} aria-label="Home" title="Home"><Icon name="home" /></a>
-      <!-- A room with requests that wait for the owner gets an amber dot on its corner, with no number (spec 5.13). A room
-           with a failed session gets a red one instead, in the priority order of status.ts. -->
-      {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}{@const failing = attention.failing(item.id)}
+      <!-- A room with requests, or with sessions whose box waits for a host that takes the room, waits for the owner and
+           gets an amber dot on its corner, with no number (spec 5.13). A room with a failed session gets a red one
+           instead, in the priority order of status.ts. -->
+      {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}{@const hostless = attention.hostless.get(item.id)?.size ?? 0}{@const failing = attention.failing(item.id)}
       <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id && !inSettings ? "page" : undefined}
-        aria-label={[item.name, failing && `${count(failing, "session")} failed`, waiting && `${count(waiting, "request")} waiting`].filter(Boolean).join(", ")} title={item.name}>
-        <Avatar kind="room" name={item.name} label={initials.get(item.name)} size={40} />{#if failing}<StatusPill tone="failed" label="Failed" dot />{:else if waiting}<StatusPill tone="warning" label="Waiting" dot />{/if}</a>
+        aria-label={[item.name, failing && `${count(failing, "session")} failed`, waiting && `${count(waiting, "request")} waiting`, hostless && `${count(hostless, "session")} waiting for a host`].filter(Boolean).join(", ")} title={item.name}>
+        <Avatar kind="room" name={item.name} label={initials.get(item.name)} size={40} />{#if failing}<StatusPill tone="failed" label="Failed" dot />{:else if waiting || hostless}<StatusPill tone="warning" label="Waiting" dot />{/if}</a>
     {/each}</nav>
     <footer><a class="gear" href="/settings" onclick={navigate} aria-current={inSettings ? "page" : undefined} aria-label="Settings" title="Settings"><Icon name="gear" size={20} /></a></footer>
     <!-- The drawer's second column: the open room's pages, or on Home every room by name. Counts are muted; only Requests

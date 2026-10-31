@@ -2,6 +2,7 @@ import { SvelteMap, SvelteSet, createSubscriber } from "svelte/reactivity";
 import { call } from "./client.ts";
 import { stream } from "./stream.ts";
 import { EventWindow } from "./window.svelte.ts";
+import { pendingReason, type PendingReason } from "./event.ts";
 import { boxFailures, countOf, failedJobs, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
 import type { BoxState, Conversation, FailureCause, Decision, Event, OpRequested, OpResult, OpState, RoomRule, SessionStarted } from "./contract.gen.ts";
 
@@ -32,6 +33,8 @@ export class RoomStore {
   readonly causes = new SvelteMap<string, FailureCause>();
   // Sessions whose box failed or was lost, with why.
   readonly boxFailures = new SvelteMap<string, BoxFailure>();
+  // Why each pending box waits, when admission said.
+  readonly pendingReasons = new SvelteMap<string, PendingReason>();
   // The owner's read position per conversation, by readKey; the newest seq wins.
   private readonly read = new SvelteMap<string, number>();
   // Sessions whose box runs a computer the owner can watch.
@@ -100,13 +103,15 @@ export class RoomStore {
       () => { this.stopFailed.add(id); });
   }
 
-  // Each session's one status (status.ts): a request it made waits for the owner, its failure is unseen or its box
-  // failed, or a turn runs. The header, the panel and the counts read only these.
+  // Each session's one status (status.ts): a request it made or its box waits for the owner, its failure is unseen or
+  // its box failed, or a turn runs. The header, the panel and the counts read only these.
   status(id: string): Status { return this.statusWith(id, this.asking()); }
   get counts(): Counts { const asking = this.asking(); return countOf([...this.sessions.keys()].map(id => this.statusWith(id, asking))); }
   private statusWith(id: string, asking: Set<string>): Status {
     const box = this.boxes.get(id);
-    return statusOf({ broken: box === "failed" || box === "lost", waiting: asking.has(id), working: this.turns.has(id), failed: this.unseen(id) });
+    // A box that no host takes for its room waits until the owner changes a host, so it waits for the owner too.
+    const waiting = asking.has(id) || this.pendingReasons.get(id) === "room-host";
+    return statusOf({ broken: box === "failed" || box === "lost", waiting, working: this.turns.has(id), failed: this.unseen(id) });
   }
   // The sessions whose requests wait for the owner.
   private asking(): Set<string> {
@@ -142,6 +147,8 @@ export class RoomStore {
       this.noteRead({ kind: "dm", session: session.id }, session.lastRead);
       this.boxes.set(session.id, session.boxState);
       if (session.boxState === "failed" || session.boxState === "lost") this.boxFailures.set(session.id, { box: session.boxState });
+      const reason = pendingReason(session.boxState, session.boxReason);
+      if (reason) this.pendingReasons.set(session.id, reason);
       if (session.turn) this.turns.set(session.id, session.turn);
       if (session.turn && session.activity) { this.activity.set(session.id, session.activity); this.steps.set(session.id, [session.activity]); }
       if (session.lastOutcome === "failed") this.failed.set(session.id, list.seq);
@@ -215,15 +222,18 @@ export class RoomStore {
         if (moved) this.sessions.set(event.body.session, { ...moved, parent: event.body.newParent });
         break;
       }
-      case "box.changed":
-        this.boxes.set(event.body.session, event.body.to);
-        if (event.body.to === "failed" || event.body.to === "lost") {
-          const { session, to, cause } = event.body;
-          this.boxFailures.set(session, { box: to, cause: cause ?? this.boxFailures.get(session)?.cause, at: event.at });
-        } else this.boxFailures.delete(event.body.session);
+      case "box.changed": {
+        const { session, to, cause } = event.body, reason = pendingReason(to, event.body.reason);
+        this.boxes.set(session, to);
+        if (to === "failed" || to === "lost") this.boxFailures.set(session, { box: to, cause: cause ?? this.boxFailures.get(session)?.cause, at: event.at });
+        else this.boxFailures.delete(session);
+        // A pending to pending change can name a new reason.
+        if (reason) this.pendingReasons.set(session, reason);
+        else this.pendingReasons.delete(session);
         // A computer runs only inside a ready box.
-        if (event.body.to !== "ready") this.computers.delete(event.body.session);
+        if (to !== "ready") this.computers.delete(session);
         break;
+      }
       case "computer.changed":
         if (event.body.to === "running") this.computers.add(event.body.session);
         else this.computers.delete(event.body.session);
