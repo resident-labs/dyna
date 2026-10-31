@@ -16,6 +16,7 @@ import (
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/store"
 )
@@ -35,7 +36,10 @@ func (instructionStore) Session(context.Context, contract.SessionID) (store.Sess
 	return store.Session{Room: "room"}, nil
 }
 
-type instructionTransport struct{ offline bool }
+type instructionTransport struct {
+	offline  bool
+	commands int
+}
 
 func (r *instructionTransport) Run(ctx context.Context, input []byte, args ...string) ([]byte, error) {
 	for _, arg := range args {
@@ -43,6 +47,7 @@ func (r *instructionTransport) Run(ctx context.Context, input []byte, args ...st
 			return nil, nil
 		}
 	}
+	r.commands++
 	if r.offline {
 		return nil, errors.New("offline")
 	}
@@ -73,14 +78,22 @@ func TestInstructionsRepairAfterOfflineSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := &Boxes{Store: instructionStore{}, InstructionsDir: data, HostData: hostData, hosts: map[contract.HostName]*podman.Host{"host": host}}
-	heartbeat := b.instructionHeartbeat(ctx, "host", host)
+	heartbeat := func(ok bool) {
+		if ok {
+			_ = b.syncInstructions(ctx, host)
+		}
+	}
 	heartbeat(true)
-	heartbeat(true) // Establish the current master generation.
+	count := transport.commands
+	heartbeat(true) // Unchanged host needs no command.
+	if transport.commands != count {
+		t.Fatal("unchanged host was synced")
+	}
 	if err := os.WriteFile(source, []byte("new"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	transport.offline = true
-	b.PublishInstructions(ctx)
+	b.instructionSaves.Add(1)
 	heartbeat(true) // Failed repair stays pending.
 	transport.offline = false
 	heartbeat(true) // The next healthy heartbeat retries.
@@ -203,6 +216,69 @@ func TestAddHostCopiesPreviouslySavedInstructions(t *testing.T) {
 	}
 	got, err := os.ReadFile(filepath.Join(remote, "instructions", "rooms", "room", "AGENTS.md"))
 	if err != nil || string(got) != "saved before host" {
+		t.Fatalf("got %q: %v", got, err)
+	}
+}
+
+// delayedInstructionStore holds the background publish before it can reach a host.
+type delayedInstructionStore struct {
+	instructionStore
+	entered, release chan struct{}
+}
+
+func (s delayedInstructionStore) Hosts(context.Context) ([]box.Host, error) {
+	close(s.entered)
+	<-s.release
+	return nil, nil
+}
+
+func TestSaveThenResumeRepairsBeforeDelayedPublish(t *testing.T) {
+	ctx := context.Background()
+	data, remote := t.TempDir(), t.TempDir()
+	path := filepath.Join(data, "instructions", "global", "AGENTS.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	transport := &instructionTransport{}
+	host, err := podman.New("user@host", t.TempDir(), "host", transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delayed := delayedInstructionStore{entered: make(chan struct{}), release: make(chan struct{})}
+	defer close(delayed.release)
+	b := &Boxes{Store: delayed, InstructionsDir: filepath.Join(data, "instructions"), HostData: remote, hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}}
+	if err := b.syncInstructions(ctx, host); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	service := engine.New(st, nil, nil, nil)
+	service.SetFilesDir(data)
+	service.SetInstructionsPublisher(b.PublishInstructions)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	before, problem := service.InstructionsGet(ctx, owner, contract.InstructionsGetRequest{})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	_, problem = service.InstructionsSet(ctx, owner, contract.InstructionsSetRequest{Base: before.Hash, Text: "new"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if b.instructionSaves.Load() != 1 {
+		t.Fatal("save was not marked before return")
+	}
+	<-delayed.entered
+	if err := b.Start(ctx, "box"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(remote, "instructions", "global", "AGENTS.md"))
+	if err != nil || string(got) != "new" {
 		t.Fatalf("got %q: %v", got, err)
 	}
 }
