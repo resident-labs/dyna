@@ -90,6 +90,14 @@ func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
 	return hosts, rows.Err()
 }
 
+// ResetEngineHosts discards comparisons made by a previous engine process.
+func (s *Store) ResetEngineHosts(ctx context.Context) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE hosts SET engine_host=NULL")
+		return err
+	})
+}
+
 func (s *Store) SetEngineHost(ctx context.Context, name contract.HostName, value bool) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "UPDATE hosts SET engine_host=? WHERE name=?", value, name)
