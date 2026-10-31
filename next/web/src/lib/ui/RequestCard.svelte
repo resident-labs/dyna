@@ -32,7 +32,7 @@
   async function decide(approve: boolean) {
     busy = true;
     failure = "";
-    await call("op.decide", { id: request.id, approve, reason: approve ? undefined : reason.trim() || undefined }).catch((error: unknown) => {
+    await call("op.decide", { id: request.id, approve, reason: reason.trim() || undefined }).catch((error: unknown) => {
       failure = error instanceof APIError && error.detail.code === "conflict" ? "This request is no longer waiting." : "Your decision was not saved. Try again.";
     });
     busy = false;
