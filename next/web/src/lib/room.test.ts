@@ -38,19 +38,27 @@ test("a pending post gives way to its event in either order, and a failed one st
     assert.deepEqual(rows(), ["work", "p2 hello", "p3 hello", "n2 hello"]);
     window.apply(event(4, { type: "post.created", body: { text: "hello", home: feed } }));
     assert.deepEqual(rows(), ["work", "p2 hello", "p3 hello", "p4 hello"]);
-    // A failed call keeps the row; a retry sends the same body once.
+    // A failed call keeps the row and hands the post to the app; a retry takes it back and sends the same body once.
+    const kept = new Set<PostRequest>();
+    window.onunsent = request => kept.add(request);
+    window.onsettled = request => kept.delete(request);
     const bodies: unknown[] = [];
     globalThis.fetch = (_, init) => { bodies.push(init?.body); return Promise.reject(new Error("offline")); };
-    assert.equal(await window.post({ room: "r", text: "later" }), false);
-    assert.deepEqual([...window.pendingPosts.values()].map(({ failed, seq }) => [failed, seq]), [[true, undefined]]);
+    await window.post({ room: "r", text: "later" });
+    assert.deepEqual([[...window.pendingPosts.values()].map(({ failed, seq }) => [failed, seq]), kept.size], [[[true, undefined]], 1]);
     globalThis.fetch = (_, init) => { bodies.push(init?.body); return Promise.resolve(new Response(JSON.stringify({ seq: 5, event: "5" }))); };
     // A second Retry while the first sends, as from a double click, sends nothing more.
-    assert.deepEqual(await Promise.all([window.retry(3), window.retry(3)]), [true, true]);
-    assert.deepEqual([...window.pendingPosts.values()].map(({ failed, seq }) => [failed, seq]), [[false, 5]]);
+    await Promise.all([window.retry(3), window.retry(3)]);
+    assert.deepEqual([[...window.pendingPosts.values()].map(({ failed, seq }) => [failed, seq]), kept.size], [[[false, 5]], 0]);
     assert.deepEqual([bodies.length, bodies[0] === bodies[1]], [2, true]);
     window.apply(event(5, { type: "post.created", body: { text: "later", home: feed } }));
     assert.deepEqual(rows().at(-1), "p5 later");
     assert.equal(window.pendingPosts.size, 0);
+    // A post the app kept shows as failed in a new window, and Discard gives it up.
+    const request = { room: "r", text: "kept" };
+    kept.add(request);
+    window.discard(window.unsent(request));
+    assert.deepEqual([window.pendingPosts.size, kept.size], [0, 0]);
   } finally { globalThis.fetch = original; }
 });
 
