@@ -151,7 +151,12 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		if err != nil {
 			return err
 		}
-		if slice != b.Slice {
+		image, imageErr := r.boxes.CurrentImage(ctx, b.Session, b.Host)
+		if imageErr != nil {
+			image = b.Image
+			next.Reason = imageErr.Error()
+		}
+		if slice != b.Slice || image != b.Image {
 			r.mu.Lock()
 			repos := r.repos
 			r.mu.Unlock()
@@ -160,11 +165,12 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 				sources, workErr = repos.Get(ctx, b.Session, b.Host, false)
 			}
 			if workErr == nil {
-				workErr = r.boxes.Recreate(ctx, BoxSpec{Box: b.ID, Session: b.Session, Host: b.Host, Slice: slice, Size: b.Size, Repos: sources}, b.Image, b.Slice)
+				workErr = r.boxes.Recreate(ctx, BoxSpec{Box: b.ID, Session: b.Session, Host: b.Host, Slice: slice, Size: b.Size, Repos: sources}, image, b.Slice)
 			}
 			if workErr == nil {
-				workErr = r.store.SetRecreated(ctx, b.ID, slice)
+				workErr = r.store.SetRecreated(ctx, b.ID, slice, image)
 				next.Slice = slice
+				next.Image = image
 			}
 		} else {
 			workErr = r.boxes.Start(ctx, b.ID)
