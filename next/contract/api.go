@@ -19,11 +19,13 @@ const (
 	MethodHostList          Method = "host.list"
 	MethodProfileList       Method = "profile.list"
 	MethodAccountsQuota     Method = "accounts.quota"
+	MethodRoomPause         Method = "room.pause"
 	MethodRoomCreate        Method = "room.create"
 	MethodRoomRepoAdd       Method = "room.repo.add"
 	MethodRoomRepos         Method = "room.repos"
 	MethodSessionStart      Method = "session.start"
 	MethodSessionClose      Method = "session.close"
+	MethodSessionStop       Method = "session.stop"
 	MethodSessionSetProfile Method = "session.set_profile"
 	MethodSessionRestart    Method = "session.restart"
 	MethodSessionMove       Method = "session.move"
@@ -110,10 +112,23 @@ type ProfileListResponse struct {
 	Profiles []ProfileSummary `json:"profiles"`
 }
 
+type RoomPauseRequest struct {
+	Room   RoomID `json:"room"`
+	Paused bool   `json:"paused"`
+}
+type RoomPauseResponse struct{}
+type SessionStopRequest struct {
+	Session SessionID `json:"session"`
+}
+type SessionStopResponse struct {
+	Stopping bool `json:"stopping"`
+}
+
 type RoomListRequest struct{}
 type RoomSummary struct {
 	ID       RoomID      `json:"id"`
 	Name     string      `json:"name"`
+	Paused   bool        `json:"paused"`
 	Created  time.Time   `json:"created"`
 	LastRead int64       `json:"lastRead"`
 	Waiting  []OpID      `json:"waiting"` // pending owner-class operations, which only the owner decides

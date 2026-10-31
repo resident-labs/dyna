@@ -62,7 +62,7 @@ const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.sessio
 // The session an event is about; events without one belong to the room feed only.
 function subject(event: Event): string | undefined {
   switch (event.type) {
-    case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "rule.added": case "rule.removed": case "rule.edited": case "session.profile_changed": return undefined;
+    case "room.paused": case "room.resumed": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "rule.added": case "rule.removed": case "rule.edited": case "session.profile_changed": return undefined;
     case "op.requested": return event.body.by.session;
     case "op.decided": case "op.ran": return event.from.session;
     default: return event.body.session;
@@ -320,6 +320,8 @@ export function describe(event: Event, name: Name): string {
     case "image.failed": return `Image ${event.body.name}:${event.body.tag} failed`;
     case "pr.opened": return `${name(event.body.session)} opened pull request ${event.body.repo}#${event.body.number}`;
     case "grant.expired": return "A host execution grant expired";
+    case "room.paused": return "Room paused";
+    case "room.resumed": return "Room resumed";
     case "rule.added": return `Rule r${event.body.number} added: ${event.body.text}`;
     case "rule.removed": return `Rule r${event.body.number} removed`;
     case "rule.edited": return `Rule r${event.body.number} changed: ${event.body.text}`;

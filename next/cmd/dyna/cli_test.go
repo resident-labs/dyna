@@ -15,6 +15,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func (f *fakeClient) RoomPause(context.Context, contract.RoomPauseRequest) (contract.RoomPauseResponse, error) {
+	return contract.RoomPauseResponse{}, nil
+}
+func (f *fakeClient) SessionStop(context.Context, contract.SessionStopRequest) (contract.SessionStopResponse, error) {
+	return contract.SessionStopResponse{}, nil
+}
+
 type fakeClient struct {
 	host         contract.HostAddRequest
 	room         contract.RoomCreateRequest

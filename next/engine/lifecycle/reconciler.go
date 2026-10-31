@@ -207,7 +207,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 				rows[i].Want = store.WantStop
 			}
 		}
-		if row.Want != store.WantRun || (b.State != contract.BoxPending && b.State != contract.BoxStopped) || (!row.DueAt.IsZero() && row.DueAt.After(r.now())) {
+		if row.Paused || row.Want != store.WantRun || (b.State != contract.BoxPending && b.State != contract.BoxStopped) || (!row.DueAt.IsZero() && row.DueAt.After(r.now())) {
 			continue
 		}
 		placement := box.Admit(hosts, all, b, 20*box.GiB)

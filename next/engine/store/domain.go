@@ -228,7 +228,7 @@ func (s *Store) InsertDelivery(ctx context.Context, tx *sql.Tx, seq int64, d con
 	}
 	if d.Wake && d.To.Kind == contract.PrincipalSession {
 		_, err = tx.ExecContext(ctx, `WITH RECURSIVE ancestors(id,parent) AS (
-			SELECT id,parent FROM boxes WHERE session=?
+			SELECT b.id,b.parent FROM boxes b JOIN sessions s ON s.id=b.session JOIN rooms r ON r.id=s.room WHERE b.session=? AND r.paused_at IS NULL
 			UNION SELECT b.id,b.parent FROM boxes b JOIN ancestors a ON b.id=a.parent
 		) UPDATE boxes SET want='run' WHERE id IN (SELECT id FROM ancestors) AND want='stop'`, d.To.Session)
 		if err != nil {
@@ -293,8 +293,9 @@ func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn c
 	var active contract.TurnID
 	var inputs []FeedInput
 	var profile contract.ProfileName
+	var paused bool
 	err := s.Write(ctx, func(tx *sql.Tx) error {
-		err := tx.QueryRowContext(ctx, `SELECT s.profile FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.state='open' AND s.closed_at IS NULL AND b.want='run' AND b.state='ready'`, session).Scan(&profile)
+		err := tx.QueryRowContext(ctx, `SELECT s.profile,r.paused_at IS NOT NULL FROM sessions s JOIN boxes b ON b.session=s.id JOIN rooms r ON r.id=s.room WHERE s.id=? AND s.state='open' AND s.closed_at IS NULL AND b.want='run' AND b.state='ready'`, session).Scan(&profile, &paused)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -327,7 +328,7 @@ func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn c
 			}
 			kind, session, _ := strings.Cut(v.home, ":")
 			v.input.Reply.Home = contract.Conversation{Kind: contract.ConversationKind(kind), Session: contract.SessionID(session)}
-			if active == "" || v.wake || v.turn.Valid {
+			if (!paused || (replay && v.turn.Valid && contract.TurnID(v.turn.String) == active)) && (active == "" || v.wake || v.turn.Valid) {
 				items = append(items, v)
 			}
 		}
