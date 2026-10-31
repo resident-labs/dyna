@@ -88,7 +88,7 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		"Add --size agent, small, medium or large to a start to request a box size.\n" +
 		"Use dyna session stop SESSION or dyna session close SESSION to manage a child.\n" +
 		"Use dyna room log ROOM to read the feed.\n" +
-		"Use dyna op list ROOM, dyna op approve ID, or dyna op deny ID --reason WHY for requests.\n" +
+		"Use dyna op list ROOM to list pending requests.\n" +
 		"Use dyna pr open --title TITLE --body-file FILE to open a pull request."
 	return contract.BoxHelloResponse{GitName: s.gitName, GitEmail: s.gitEmail, Session: session.ID, Box: session.Box, Model: model, CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: instructions}, nil
 }
