@@ -61,14 +61,16 @@ func setup(t *testing.T) *fixture {
 	f.s = New(st, ctx, nil, func() time.Time { return f.now }, 24*time.Hour, func(prefix string) (string, error) { return fmt.Sprintf("%s%d", prefix, ids.Add(1)), nil })
 	f.s.Kinds = map[contract.OpKind]Entry{"test.run": {
 		Class: func(contract.OpArgs, contract.Principal) contract.Class { return f.class },
-		Card:  func(contract.OpArgs, contract.Principal) contract.Card { return contract.Card{Title: "Run"} },
+		Card: func(context.Context, contract.OpArgs, contract.Principal) contract.Card {
+			return contract.Card{Title: "Run"}
+		},
 		Check: func(context.Context, contract.OpArgs, contract.Principal) error {
 			if f.stale {
 				return errors.New("changed")
 			}
 			return nil
 		},
-		Execute: func(context.Context, contract.OpArgs, contract.Principal) contract.OpResult {
+		Execute: func(context.Context, contract.OpID, contract.OpArgs, contract.Principal) contract.OpResult {
 			f.runs.Add(1)
 			return contract.OpResult{}
 		},
@@ -227,7 +229,7 @@ func TestCanceledSubmitWakesWhenExecutionFinishes(t *testing.T) {
 	f.class = contract.ClassAuto
 	started, release := make(chan struct{}), make(chan struct{})
 	entry := f.s.Kinds["test.run"]
-	entry.Execute = func(context.Context, contract.OpArgs, contract.Principal) contract.OpResult {
+	entry.Execute = func(context.Context, contract.OpID, contract.OpArgs, contract.Principal) contract.OpResult {
 		close(started)
 		<-release
 		return contract.OpResult{}
@@ -266,7 +268,7 @@ func TestDecideReturnsBeforeExecutorAndWakesSubmitter(t *testing.T) {
 	f := setup(t)
 	started, release := make(chan struct{}), make(chan struct{})
 	entry := f.s.Kinds["test.run"]
-	entry.Execute = func(ctx context.Context, _ contract.OpArgs, _ contract.Principal) contract.OpResult {
+	entry.Execute = func(ctx context.Context, _ contract.OpID, _ contract.OpArgs, _ contract.Principal) contract.OpResult {
 		close(started)
 		<-release
 		if ctx.Err() != nil {
@@ -322,5 +324,17 @@ func TestInterruptedExecutionIsNotRetried(t *testing.T) {
 	record, err = f.s.Store.Operation(context.Background(), op.ID)
 	if err != nil || record.Operation.State != contract.OpFailed || f.runs.Load() != 0 {
 		t.Fatalf("record %+v err %v", record, err)
+	}
+}
+
+type scopedArgs struct{ fakeArgs }
+
+func (scopedArgs) OperationRoom() contract.RoomID { return "other" }
+
+func TestSubmitRejectsMismatchedArgumentRoom(t *testing.T) {
+	f := setup(t)
+	_, err := f.s.Submit(context.Background(), principal("worker"), contract.Operation{Room: "room", Args: scopedArgs{}})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("mismatched room: %v", err)
 	}
 }
