@@ -143,6 +143,52 @@ func (r *hostedCIRegistry) SaveHostedRuns(_ context.Context, _, _ string, runs l
 	return nil
 }
 
+type relocationRegistry struct{ hostedCIRegistry }
+
+func (r *relocationRegistry) Nodes(context.Context) ([]localci.Node, error) {
+	return []localci.Node{
+		{Name: "first", Enabled: true, CPUs: 16, Labels: []string{"ci"}},
+		{Name: "second", Enabled: true, CPUs: 16, Labels: []string{"ci"}},
+	}, nil
+}
+
+func TestRegisteredCIRelocationDoesNotReturnToVisitedNode(t *testing.T) {
+	registry := &relocationRegistry{}
+	dir := t.TempDir()
+	machinesStore := machines.Store{DataDir: dir}
+	for _, name := range []string{"first", "second"} {
+		m, err := machinesStore.Save(t.Context(), machines.Machine{Name: name, SSH: name, Enabled: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := machinesStore.SaveProbe(t.Context(), m.ID, machines.ProbeResult{Health: machines.HealthOnline, Capabilities: machines.Capabilities{CPUs: 16, MemTotal: 32 << 30}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := &Service{Store: &Store{Root: filepath.Join(dir, "prs")}, LocalCIRegistry: registry}
+	job := registeredCIJob{record: Record{Kind: "local"}, head: strings.Repeat("a", 40), trial: true}
+	starts := 0
+	s.RunNodeCI = func(ctx context.Context, node localci.Node, req localci.Request) (localci.Result, error) {
+		starts++
+		if starts == 1 {
+			next := req.OnQueue(ctx)
+			if next == nil || next.Name != "second" {
+				t.Fatalf("first relocation = %v, want second", next)
+			}
+			return localci.Result{}, &localci.RelocateError{Node: *next}
+		}
+		if next := req.OnQueue(ctx); next != nil {
+			t.Fatalf("relocation returned to visited node %s", next.Name)
+		}
+		return localci.Result{Status: "passed"}, nil
+	}
+	run := &registeredCIRun{Cancel: func() {}, Ended: make(chan struct{}), Stopped: make(chan struct{})}
+	s.executeRegisteredCI(context.Background(), job, localCIPlan{execution: watchDynaDefinition(t), suites: []localci.Suite{"go-static"}}, "repo", localci.Node{Name: "first"}, "key", run, "", false)
+	if starts != 2 {
+		t.Fatalf("starts = %d, want 2", starts)
+	}
+}
+
 func TestRegisteredCIRelocationCancelsHostedOnce(t *testing.T) {
 	registry := &hostedCIRegistry{}
 	s := &Service{Store: &Store{Root: filepath.Join(t.TempDir(), "prs")}, LocalCIRegistry: registry}
