@@ -69,10 +69,12 @@ var withHeadChunkTimeout = context.WithTimeout
 // readHeads bounds each query and retries failed records in two halves once.
 func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]headProbe, map[string]RateLimit, error) {
 	const headBatchSize = 20
-	// laterChunkReserve keeps time in the parent budget for each chunk that runs after this one.
-	const laterChunkReserve = 2 * time.Second
 	if g.requests == nil {
 		g.requests = &requestCache{rates: map[string]RateLimit{}, now: g.now}
+	}
+	now := g.now
+	if now == nil {
+		now = time.Now
 	}
 	out := map[string]headProbe{}
 	var failures []error
@@ -81,8 +83,10 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 		chunk := records[start:min(start+headBatchSize, len(records))]
 		chunkCtx, stop := ctx, context.CancelFunc(func() {})
 		if deadline, ok := ctx.Deadline(); ok {
-			later := (len(records) - (start + len(chunk)) + headBatchSize - 1) / headBatchSize
-			chunkCtx, stop = context.WithDeadline(ctx, deadline.Add(-time.Duration(later)*laterChunkReserve))
+			// Each remaining chunk gets an equal share of the time left, so a stall cannot take it all.
+			at := now()
+			chunksLeft := (len(records) - start + headBatchSize - 1) / headBatchSize
+			chunkCtx, stop = context.WithDeadline(ctx, at.Add(deadline.Sub(at)/time.Duration(chunksLeft)))
 		}
 		heads, _, err := g.readHeadChunk(chunkCtx, chunk)
 		stop()
