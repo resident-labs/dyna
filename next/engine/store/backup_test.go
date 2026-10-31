@@ -3,8 +3,10 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -54,35 +56,43 @@ func TestBackupAndCopyStatus(t *testing.T) {
 }
 
 func TestUpgradeBackup(t *testing.T) {
+	ctx := context.Background()
 	dir := t.TempDir()
-	s, err := Open(dir)
+	db, err := sql.Open("sqlite", filepath.Join(dir, "store.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.writer.Exec("DROP TABLE account_alerts; DROP TABLE account_rooms; DROP TABLE accounts; DROP TABLE visuals; DROP TRIGGER session_search_insert; DROP TRIGGER session_search_update; DROP TRIGGER session_search_delete; DROP TABLE session_search; DROP TRIGGER post_search_insert; DROP TRIGGER post_search_delete; DROP TABLE post_search; ALTER TABLE deliveries DROP COLUMN handoff_from; ALTER TABLE archives DROP COLUMN retry_at; DROP INDEX events_client_id; ALTER TABLE events DROP COLUMN client_id; ALTER TABLE sessions DROP COLUMN close_reason; ALTER TABLE boxes ADD COLUMN parent TEXT REFERENCES boxes(id); DROP TABLE room_shared; DROP TABLE host_rooms; DROP TABLE device_scopes; DROP TABLE devices; DROP TABLE pairing_codes; DROP TABLE backup_copy_status; ALTER TABLE pr_owners DROP COLUMN branch; UPDATE meta SET value='27' WHERE key='schema_version'"); err != nil {
+	defer db.Close()
+	if _, err := db.Exec("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Close(); err != nil {
+	if _, err := db.Exec("INSERT INTO meta(key,value) VALUES ('schema_version', ?)", strconv.Itoa(schemaVersion-1)); err != nil {
 		t.Fatal(err)
+	}
+	stepsForTest := map[int][]string{schemaVersion - 1: {"CREATE TABLE probe (id INTEGER PRIMARY KEY)"}}
+	before := func(version int) error {
+		_, err := backup(ctx, db, dir, fmt.Sprintf("pre-upgrade-v%d-", version), "pre-upgrade-v*-*.db", time.Now())
+		return err
 	}
 	// A failed backup must leave the old version untouched.
 	backupDir := filepath.Join(dir, "backups")
 	if err := os.WriteFile(backupDir, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if s, err := Open(dir); err == nil {
-		s.Close()
+	if err := upgrade(db, 1, "", stepsForTest, before); err == nil {
 		t.Fatal("upgrade succeeded without backup")
+	}
+	var value string
+	if err := db.QueryRow("SELECT value FROM meta WHERE key = 'schema_version'").Scan(&value); err != nil || value != strconv.Itoa(schemaVersion-1) {
+		t.Fatalf("schema_version after failed backup = %q, %v", value, err)
 	}
 	if err := os.Remove(backupDir); err != nil {
 		t.Fatal(err)
 	}
-	s, err = Open(dir)
-	if err != nil {
+	if err := upgrade(db, 1, "", stepsForTest, before); err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
-	names, err := filepath.Glob(filepath.Join(backupDir, "pre-upgrade-v27-*.db"))
+	names, err := filepath.Glob(filepath.Join(backupDir, "pre-upgrade-v41-*.db"))
 	if err != nil || len(names) != 1 {
 		t.Fatalf("backups: %v, %v", names, err)
 	}
@@ -90,13 +100,20 @@ func TestUpgradeBackup(t *testing.T) {
 	if err != nil || info.Mode().Perm() != 0600 {
 		t.Fatalf("mode: %v, %v", info, err)
 	}
-	db, err := sql.Open("sqlite", names[0])
+	// The backup must hold the old schema without the probe table, so it was taken before the step ran.
+	backupDB, err := sql.Open("sqlite", names[0])
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
-	var version string
-	if err := db.QueryRow("SELECT value FROM meta WHERE key='schema_version'").Scan(&version); err != nil || version != "27" {
-		t.Fatalf("backup version %q: %v", version, err)
+	defer backupDB.Close()
+	if err := backupDB.QueryRow("SELECT value FROM meta WHERE key = 'schema_version'").Scan(&value); err != nil || value != strconv.Itoa(schemaVersion-1) {
+		t.Fatalf("backup version %q: %v", value, err)
+	}
+	var probes int
+	if err := backupDB.QueryRow("SELECT count(*) FROM sqlite_master WHERE name = 'probe'").Scan(&probes); err != nil || probes != 0 {
+		t.Fatalf("backup has probe table: %d, %v", probes, err)
+	}
+	if err := db.QueryRow("SELECT value FROM meta WHERE key = 'schema_version'").Scan(&value); err != nil || value != strconv.Itoa(schemaVersion) {
+		t.Fatalf("schema_version after upgrade = %q, %v", value, err)
 	}
 }

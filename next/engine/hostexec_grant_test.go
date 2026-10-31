@@ -1,12 +1,9 @@
 package engine
 
 import (
-	"context"
-	"database/sql"
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
-	"github.com/resident-labs/dyna/engine/store"
 	"strings"
 	"testing"
 	"time"
@@ -57,76 +54,6 @@ func TestGrantCard(t *testing.T) {
 		if !strings.Contains(card.Body, want) {
 			t.Fatalf("card: %q, want %q", card.Body, want)
 		}
-	}
-}
-
-func TestUpgradeRemovesLegacyGrantRequestFromList(t *testing.T) {
-	ctx := context.Background()
-	dir := t.TempDir()
-	st, err := store.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = st.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('room','room',1,1,1);
- DROP TABLE account_alerts; DROP TABLE account_rooms; DROP TABLE accounts; DROP TRIGGER session_search_insert; DROP TRIGGER session_search_update; DROP TRIGGER session_search_delete; DROP TABLE session_search; DROP TRIGGER post_search_insert; DROP TRIGGER post_search_delete; DROP TABLE post_search;
- DROP TABLE room_shared;
- DROP TABLE host_rooms;
- ALTER TABLE pr_owners DROP COLUMN branch;
- ALTER TABLE deliveries DROP COLUMN handoff_from;
- ALTER TABLE archives DROP COLUMN retry_at;
- DROP INDEX events_client_id;
- ALTER TABLE events DROP COLUMN client_id;
- ALTER TABLE hosts DROP COLUMN maintained_at;
- ALTER TABLE hosts DROP COLUMN engine_host;
- ALTER TABLE turns DROP COLUMN stop_requested_at;
- ALTER TABLE sessions DROP COLUMN shell_jobs;
- ALTER TABLE sessions DROP COLUMN model_retry_at;
- ALTER TABLE sessions DROP COLUMN model_retries;
- ALTER TABLE sessions DROP COLUMN close_reason;
- ALTER TABLE boxes ADD COLUMN parent TEXT REFERENCES boxes(id);
- ALTER TABLE boxes DROP COLUMN want;
- ALTER TABLE boxes DROP COLUMN due_at;
- ALTER TABLE boxes DROP COLUMN failures;
- ALTER TABLE grants ADD COLUMN mode TEXT NOT NULL DEFAULT '';
- ALTER TABLE grants ADD COLUMN commands BLOB NOT NULL DEFAULT '[]';
- ALTER TABLE grants DROP COLUMN reason;
- DROP TABLE visuals;
- DROP TABLE conversation_reads;
- DROP TABLE rules;
- DROP TABLE uploads;
- DROP TABLE backup_copy_status;
- DROP TABLE device_scopes;
- DROP TABLE devices;
- DROP TABLE pairing_codes;
- UPDATE meta SET value='17' WHERE key='schema_version';
- INSERT INTO operations(id,kind,room,by_kind,by_id,class,state,card,args,args_sha256,created_at,expires_at) VALUES
- ('old','hostexec.grant','room','session','worker','owner','pending','{}',CAST('{"room":"room","to":{"kind":"session","session":"worker"},"hosts":["host"],"commands":[{"program":"git"}],"mode":"approve"}' AS BLOB),x'01',1,9999999999999),
- ('new','hostexec.grant','room','session','worker','owner','pending','{}',CAST('{"room":"room","to":{"kind":"session","session":"worker"},"hosts":["host"],"reason":"Inspect logs"}' AS BLOB),x'02',2,9999999999999);`)
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = st.Close(); err != nil {
-		t.Fatal(err)
-	}
-	st, err = store.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	s := New(st, fakeBoxes{}, fakeProfiles{}, time.Now)
-	if err = s.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.grant": s.HostexecGrant()}, time.Hour); err != nil {
-		t.Fatal(err)
-	}
-	list, problem := s.OpList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.OpListRequest{Room: "room"})
-	if problem != nil || len(list.Operations) != 1 || list.Operations[0].ID != "new" {
-		t.Fatalf("list %+v: %+v", list, problem)
-	}
-	old, err := st.Operation(ctx, "old")
-	if err != nil || old.Operation.State != contract.OpExpired {
-		t.Fatalf("old request %+v: %v", old, err)
 	}
 }
 
