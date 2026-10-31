@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { diffLines } from "diff";
 import type { CustomMessage } from "./messages.ts";
 import type { SessionEntry } from "./session-manager.ts";
@@ -43,16 +44,25 @@ function isContextDetails(details: unknown): details is { sections: ContextSecti
  * Render only changed sections. The full state travels in details, not in a separate
  * session entry, so a restart can distinguish a delivered update from an interrupted one.
  */
-export function createContextUpdate(previous: ContextSections, current: ContextSections): CustomMessage | undefined {
+export function createContextUpdate(
+	previous: ContextSections,
+	current: ContextSections,
+	operations: { hash: (text: string) => string; diff: typeof diffLines } = {
+		hash: (text) => createHash("sha256").update(text).digest("hex"),
+		diff: diffLines,
+	},
+): CustomMessage | undefined {
 	const changes: string[] = [];
 	for (const [key, text] of Object.entries(current)) {
 		const old = Object.hasOwn(previous, key) ? previous[key] : undefined;
 		if (old === text) continue;
+		if (old !== undefined && operations.hash(old) === operations.hash(text)) continue;
 		if (old === undefined) {
 			changes.push(`New section ${key}:\n${text}`);
 			continue;
 		}
-		const diff = diffLines(old, text)
+		const diff = operations
+			.diff(old, text)
 			.map((part) => {
 				const prefix = part.added ? "+" : part.removed ? "-" : " ";
 				return part.value
