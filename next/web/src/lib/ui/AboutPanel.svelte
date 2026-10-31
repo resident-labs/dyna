@@ -1,5 +1,6 @@
 <script lang="ts">
   import { SvelteMap } from "svelte/reactivity";
+  import ProfileMenu from "./ProfileMenu.svelte";
   import StatusPill from "./StatusPill.svelte";
   import { boxReason, count } from "../feed.ts";
   import { failed } from "../jobs.ts";
@@ -37,7 +38,7 @@
   {#if open?.goal}<h3>Goal</h3><p class="goal">{open.goal}</p>{/if}
   <dl>
     {#if parent && open?.parent}<dt>Parent</dt><dd><a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(open.parent)}`} onclick={navigate}>{parent}</a></dd>{/if}
-    {#if open?.profile}<dt>Profile</dt><dd>{open.profile}</dd>{/if}
+    {#if open?.profile}<dt>Profile</dt><dd><ProfileMenu {session} profile={open.profile} /></dd>{/if}
     {#if box}<dt>Box</dt><dd>{#if failure}<StatusPill tone="failed" word label="Failed" /> · {boxReason(failure)}{:else}{boxes[box]}{/if}</dd>{/if}
     {#if hasJobs}<dt>Jobs</dt><dd><button type="button" onclick={onjobs}>{running ? `${count(running, "job")} running` : "Jobs"}</button>{#if failures}{" · "}<StatusPill tone="failed" label="{failures} failed" word />{/if}</dd>{/if}
   </dl>

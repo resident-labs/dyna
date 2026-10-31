@@ -81,6 +81,8 @@ test("folds sessions, box, turns and pending operations", () => {
   room.apply(event(7, { type: "session.closed", body: { session: "s" } }));
   assert.equal(room.waiting, 0);
   assert.equal(room.sessions.has("s"), false);
+  room.apply(event(8, { type: "session.profile_changed", body: { session: "p", profile: "deep" } }));
+  assert.equal(room.sessions.get("p")?.profile, "deep");
 });
 
 test("the waiting count holds pending owner-class operations from op.list and op events after the baseline", async () => {
