@@ -26,10 +26,12 @@ func scanOperation(row operationRow) (StoredOperation, error) {
 	var r StoredOperation
 	var card, decision, result []byte
 	var created, expires int64
+	var room sql.NullString
 	o := &r.Operation
-	if err := row.Scan(&o.ID, &o.Kind, &o.Room, &o.By.Kind, &o.By.Session, &o.Class, &o.State, &card, &r.Args, &created, &expires, &decision, &result); err != nil {
+	if err := row.Scan(&o.ID, &o.Kind, &room, &o.By.Kind, &o.By.Session, &o.Class, &o.State, &card, &r.Args, &created, &expires, &decision, &result); err != nil {
 		return r, err
 	}
+	o.Room = contract.RoomID(room.String)
 	o.Created, o.Expires = time.UnixMilli(created).UTC(), time.UnixMilli(expires).UTC()
 	if err := json.Unmarshal(card, &o.Card); err != nil {
 		return r, err
@@ -86,7 +88,7 @@ func (s *Store) PendingOperation(tx *sql.Tx, room contract.RoomID, by contract.P
 		return StoredOperation{}, errors.New("operation transaction is not the active writer transaction")
 	}
 	hash := sha256.Sum256(args)
-	return scanOperation(tx.QueryRow("SELECT "+operationColumns+" FROM operations WHERE room=? AND by_kind=? AND by_id=? AND kind=? AND args_sha256=? AND state='pending'", room, by.Kind, by.Session, kind, hash[:]))
+	return scanOperation(tx.QueryRow("SELECT "+operationColumns+" FROM operations WHERE room IS ? AND by_kind=? AND by_id=? AND kind=? AND args_sha256=? AND state='pending'", sql.NullString{String: string(room), Valid: room != ""}, by.Kind, by.Session, kind, hash[:]))
 }
 
 func (s *Store) operationEvent(tx *sql.Tx, event contract.Event, deliveries []contract.Delivery) error {
@@ -132,7 +134,7 @@ func (s *Store) InsertOperation(tx *sql.Tx, record StoredOperation, event contra
 		return err
 	}
 	hash := sha256.Sum256(record.Args)
-	_, err = tx.Exec("INSERT INTO operations("+operationColumns+",args_sha256) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", o.ID, o.Kind, o.Room, o.By.Kind, o.By.Session, o.Class, o.State, card, []byte(record.Args), o.Created.UnixMilli(), o.Expires.UnixMilli(), nullableJSON(o.Decision != nil, decision), nullableJSON(o.Result != nil, result), hash[:])
+	_, err = tx.Exec("INSERT INTO operations("+operationColumns+",args_sha256) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", o.ID, o.Kind, sql.NullString{String: string(o.Room), Valid: o.Room != ""}, o.By.Kind, o.By.Session, o.Class, o.State, card, []byte(record.Args), o.Created.UnixMilli(), o.Expires.UnixMilli(), nullableJSON(o.Decision != nil, decision), nullableJSON(o.Result != nil, result), hash[:])
 	if err != nil {
 		return err
 	}

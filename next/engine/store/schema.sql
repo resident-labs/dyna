@@ -25,7 +25,7 @@ CREATE TABLE host_rooms (host TEXT NOT NULL REFERENCES hosts(name), room TEXT NO
 CREATE TABLE host_labels (host TEXT NOT NULL REFERENCES hosts(name), label TEXT NOT NULL, PRIMARY KEY(host, label));
 CREATE TABLE boxes (id TEXT PRIMARY KEY, session TEXT NOT NULL UNIQUE REFERENCES sessions(id), host TEXT REFERENCES hosts(name), image TEXT NOT NULL, size TEXT NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL, slice TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, want TEXT NOT NULL DEFAULT 'run', due_at INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX boxes_host_state ON boxes(host, state);
-CREATE TABLE operations (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id), by_kind TEXT NOT NULL, by_id TEXT NOT NULL, class TEXT NOT NULL, state TEXT NOT NULL, card BLOB NOT NULL, args BLOB NOT NULL, args_sha256 BLOB NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, decision BLOB, result BLOB);
+CREATE TABLE operations (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT REFERENCES rooms(id), by_kind TEXT NOT NULL, by_id TEXT NOT NULL, class TEXT NOT NULL, state TEXT NOT NULL, card BLOB NOT NULL, args BLOB NOT NULL, args_sha256 BLOB NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, decision BLOB, result BLOB);
 CREATE UNIQUE INDEX operations_pending_dedup ON operations(room, by_kind, by_id, kind, args_sha256) WHERE state = 'pending';
 CREATE TABLE archives (session TEXT NOT NULL REFERENCES sessions(id), repo TEXT NOT NULL REFERENCES repos(repo), ref TEXT NOT NULL, commit_sha TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, retry_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(session, repo));
 CREATE TABLE transcript_offsets (session TEXT NOT NULL REFERENCES sessions(id), path TEXT NOT NULL, acked INTEGER NOT NULL, PRIMARY KEY(session, path));
@@ -56,6 +56,7 @@ CREATE TABLE devices (id TEXT PRIMARY KEY, name TEXT NOT NULL, token_sha256 BLOB
 CREATE TABLE device_scopes (device TEXT NOT NULL REFERENCES devices(id), scope TEXT NOT NULL, PRIMARY KEY(device, scope));
 CREATE TABLE pairing_codes (id INTEGER PRIMARY KEY CHECK(id=1), code_hash BLOB NOT NULL, scopes BLOB NOT NULL, expires_at INTEGER NOT NULL, tries INTEGER NOT NULL);
 
+CREATE TABLE proxy_auths (id TEXT PRIMARY KEY, provider TEXT NOT NULL, record BLOB NOT NULL, updated_at INTEGER NOT NULL);
 CREATE TABLE accounts (id TEXT PRIMARY KEY, proxy_id TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, label TEXT NOT NULL);
 CREATE TABLE account_rooms (account TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, room TEXT NOT NULL REFERENCES rooms(id), PRIMARY KEY(account, room));
 CREATE TABLE account_alerts (account TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, window TEXT NOT NULL, kind TEXT NOT NULL, active INTEGER NOT NULL, PRIMARY KEY(account, window, kind));
