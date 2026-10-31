@@ -496,36 +496,102 @@ func TestFailedResultReachesParent(t *testing.T) {
 	}
 }
 
-func TestFailedTurnConsumesInputs(t *testing.T) {
-	s, room, session, ctx := setup(t)
-	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
-	channelCtx, cancel := context.WithCancel(ctx)
-	channel, e := testChannel(t, s, channelCtx, caller)
-	if e != nil {
-		t.Fatal(e)
-	}
-	start := (<-channel).Body.(contract.TurnStart)
-	cancel()
-	for range channel {
-	}
-	if _, e := s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnFailed, Error: "setup failed"}); e != nil {
-		t.Fatal(e)
-	}
-	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.TurnStarted{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	turn, inputs, err := s.store.Dispatch(ctx, session, "retry", event, false)
-	if err != nil || turn != "" || len(inputs) != 0 {
-		t.Fatalf("failure retried: turn %q inputs %+v error %v", turn, inputs, err)
-	}
-	var pending int
-	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM deliveries WHERE to_id=? AND state IN ('pending','taken')", session).Scan(&pending); err != nil || pending != 0 {
-		t.Fatalf("unconsumed deliveries %d: %v", pending, err)
-	}
-	events, e := s.EventsList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.EventsListRequest{Room: room, Types: []contract.EventType{"turn.started"}})
-	if e != nil || len(events.Events) != 1 {
-		t.Fatalf("started events %+v: %v", events.Events, e)
+func TestFailedTurnReturnsInputsWithoutWaking(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		outcome        contract.TurnOutcome
+		cause          contract.FailureCause
+		read, returned bool
+	}{
+		{"failed taken", contract.TurnFailed, contract.CauseModelFailed, false, true},
+		{"failed read", contract.TurnFailed, contract.CauseModelFailed, true, true},
+		{"output limit", contract.TurnFailed, contract.CauseOutputLimit, true, false},
+		{"stopped", contract.TurnStopped, "", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, room, session, ctx := setup(t)
+			caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+			channelCtx, cancel := context.WithCancel(ctx)
+			channel, problem := testChannel(t, s, channelCtx, caller)
+			if problem != nil {
+				t.Fatal(problem)
+			}
+			start := (<-channel).Body.(contract.TurnStart)
+			if len(start.Inputs) != 1 {
+				t.Fatalf("first turn inputs: %+v", start.Inputs)
+			}
+			first := start.Inputs[0]
+			if tc.read {
+				if _, problem := s.DeliveryDone(ctx, caller, contract.DeliveryDoneRequest{Delivery: first.Delivery}); problem != nil {
+					t.Fatal(problem)
+				}
+			}
+			cancel()
+			for range channel {
+			}
+			output := contract.TurnOutputRequest{Turn: start.Turn, Outcome: tc.outcome, Cause: tc.cause}
+			if _, problem := s.TurnOutput(ctx, caller, output); problem != nil {
+				t.Fatal(problem)
+			}
+			event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.TurnStarted{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			turn, inputs, err := s.store.Dispatch(ctx, session, "retry", event, false)
+			if err != nil || turn != "" || len(inputs) != 0 {
+				t.Fatalf("started without wake: turn=%q inputs=%+v err=%v", turn, inputs, err)
+			}
+			var pending int
+			if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM deliveries WHERE to_id=? AND state='pending' AND wake=0 AND turn IS NULL AND queue IS NULL", session).Scan(&pending); err != nil {
+				t.Fatal(err)
+			}
+			want := 0
+			if tc.returned {
+				want = 1
+			}
+			if pending != want {
+				t.Fatalf("returned pending inputs=%d want %d", pending, want)
+			}
+			if !tc.returned {
+				return
+			}
+			post, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: room, Text: "next", Mentions: []string{"worker"}})
+			if problem != nil {
+				t.Fatal(problem)
+			}
+			event, err = s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.TurnStarted{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			turn, inputs, err = s.store.Dispatch(ctx, session, "retry", event, false)
+			if err != nil || turn != "retry" || len(inputs) != 2 || inputs[0].Seq != first.Delivery || int64(inputs[1].Seq) != post.Seq {
+				t.Fatalf("retry: turn=%q inputs=%+v err=%v", turn, inputs, err)
+			}
+			if _, problem := s.TurnOutput(ctx, caller, output); problem != nil {
+				t.Fatalf("replay: %v", problem)
+			}
+			if _, problem := s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: turn, Outcome: contract.TurnCompleted, Final: "done"}); problem != nil {
+				t.Fatal(problem)
+			}
+			list, problem := s.EventsList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.EventsListRequest{Room: room, Types: []contract.EventType{"turn.ended"}})
+			if problem != nil {
+				t.Fatal(problem)
+			}
+			var matched bool
+			for _, event := range list.Events {
+				ended := event.Body.(contract.TurnEnded)
+				if ended.Turn == turn {
+					for _, reply := range ended.Replies {
+						if reply.Reply == first.Reply && reply.Posted == "" {
+							matched = true
+						}
+					}
+				}
+			}
+			if !matched {
+				t.Fatalf("final did not reach first reply target: %+v", list.Events)
+			}
+		})
 	}
 }
 
