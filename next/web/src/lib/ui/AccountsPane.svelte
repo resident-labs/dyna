@@ -10,7 +10,7 @@
 
   let { bar, phone, signedout, path, navigate }: { bar: Snippet<[string, number | undefined, Snippet | undefined]>; phone: boolean; signedout: () => void; path: string; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void } = $props();
   let providers: AccountProviderInfo[] = $state([]), accounts: Account[] = $state([]), rooms: RoomSummary[] = $state([]), usage: AccountUsage[] = $state([]);
-  let loaded = $state(false), failed = $state(false), busy = $state(false);
+  let loaded = $state(false), quotaLoaded = $state(false), failed = $state(false), busy = $state(false);
   let query = $state(""), expanded = $state(false), label = $state(""), secret = $state(""), redirect = $state("");
   let attempt: AccountsConnectResponse | undefined = $state();
   let connectState: "idle" | "pending" | "failed" | "expired" = $state("idle");
@@ -33,7 +33,7 @@
   }
   function reload() {
     void call("accounts.list", {}).then(result => { providers = result.providers ?? []; accounts = result.accounts ?? []; loaded = true; failed = false; }, (e: unknown) => { if (e instanceof SignedOut) signedout(); else if (!loaded) failed = true; });
-    void call("accounts.quota", {}).then(result => { usage = result.accounts ?? []; }, () => {});
+    void call("accounts.quota", {}).then(result => { usage = result.accounts ?? []; quotaLoaded = true; }, () => { quotaLoaded = true; });
     void call("room.list", {}).then(result => { rooms = result.rooms ?? []; }, () => {});
   }
   onMount(() => { reload(); window.addEventListener("focus", reload); return () => { reset(); window.removeEventListener("focus", reload); }; });
@@ -96,7 +96,7 @@
 {#if adding || accountId}
   <header class="subbar">{#if phone}<a href={adding && selected ? base + "/add" : base} onclick={navigate} aria-label={adding && selected ? "Back to providers" : "Back to Accounts"}><Icon name="backChevron" size={20} /></a>{:else}{@render back()} <span>/</span>{/if} <strong>{adding ? (phone && selected ? selected.displayName : "Add an account") : account?.label || "Account"}</strong></header>
 {:else}{@render bar("Accounts", loaded ? accounts.length : undefined, action)}{/if}
-<div class="body" data-page-ready={loaded}>
+<div class="body" data-page-ready={loaded && quotaLoaded}>
 {#if failed}<p>Accounts did not load. <button class="btn" type="button" onclick={reload}>Try again</button></p>
 {:else if !loaded}<p class="muted">Loading accounts…</p>
 {:else if adding}
