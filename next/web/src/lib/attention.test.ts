@@ -48,6 +48,27 @@ test("a room's hostless count loads which sessions wait for a host that takes th
   } finally { globalThis.fetch = original; }
 });
 
+test("Home's session read and the room's own seed share one read, so a box change during it applies on top", async () => {
+  const original = globalThis.fetch;
+  let reads = 0, answer!: () => void;
+  globalThis.fetch = async input => {
+    if (String(input).endsWith("room.list")) return new Response(JSON.stringify({ seq: 3, rooms: [{ id: "a", name: "A", created: "", waiting: [], working: [], failed: 0, hostless: 1 }] }));
+    reads++;
+    await new Promise<void>(done => { answer = done; });
+    return new Response(JSON.stringify({ seq: 3, sessions: [{ id: "s1", boxState: "pending", boxReason: "room-host" }] }));
+  };
+  try {
+    const attention = new Attention(() => () => {});
+    await attention.open();
+    const home = attention.listSessions("a");
+    attention.apply(event(4, "a", { type: "box.changed", body: { box: "b", session: "s1", from: "pending", to: "creating" } }));
+    await new Promise(setImmediate);
+    answer();
+    await home;
+    assert.deepEqual([reads, attention.hostless.get("a")!.size], [1, 0]);
+  } finally { globalThis.fetch = original; }
+});
+
 test("room.list seeds each room's waiting requests and working sessions, and the owner stream updates them", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({ seq: 5, rooms: [
