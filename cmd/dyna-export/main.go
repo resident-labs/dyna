@@ -24,6 +24,7 @@ func run(args []string) error {
 	}
 	flags := flag.NewFlagSet("dyna-export", flag.ContinueOnError)
 	data := flags.String("data", "", "captured v1 data directory")
+	feeds := flags.String("feeds", "", "read-only v1 room feed root")
 	config := flags.String("config", "", "captured v1 config directory")
 	backup := flags.String("backup", "", "standalone v1 SQLite backup")
 	manifest := flags.String("manifest", "", "captured repository, ref, and skill manifest")
@@ -32,8 +33,8 @@ func run(args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if flags.NArg() != 0 || *data == "" || *config == "" || *backup == "" || *manifest == "" || *out == "" {
-		return fmt.Errorf("require --data, --config, --backup, --manifest and --out")
+	if flags.NArg() != 0 || *data == "" || *feeds == "" || *config == "" || *backup == "" || *manifest == "" || *out == "" {
+		return fmt.Errorf("require --data, --feeds, --config, --backup, --manifest and --out")
 	}
 	if !verify && !commitPattern.MatchString(*commit) {
 		return fmt.Errorf("export requires a full lowercase --commit SHA")
@@ -57,7 +58,7 @@ func run(args []string) error {
 		fmt.Println("Bundle counts match the captured inputs.")
 		return nil
 	}
-	global, rooms, report, err := buildBundle(db, *backup, *data, *config, *commit, cap)
+	global, rooms, report, err := buildBundle(db, *backup, *data, *feeds, *config, *commit, cap)
 	if err != nil {
 		return err
 	}

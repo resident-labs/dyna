@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -18,14 +19,15 @@ type issueFeed struct {
 type roomFeed struct {
 	issues    map[string]issueFeed
 	lastPosts map[string]string
+	partial   bool
 }
 
-// readFeed consumes only the captured feed. It never follows live store APIs.
-func readFeed(data, roomID string) (roomFeed, error) {
+// readFeed opens the append-only feed without using live store APIs.
+func readFeed(feeds, roomID string) (roomFeed, error) {
 	if !room.ValidID(roomID) {
 		return roomFeed{}, fmt.Errorf("invalid room ID")
 	}
-	root, err := os.OpenRoot(data)
+	root, err := os.OpenRoot(feeds)
 	if err != nil {
 		return roomFeed{}, err
 	}
@@ -38,6 +40,16 @@ func readFeed(data, roomID string) (roomFeed, error) {
 	out := roomFeed{issues: make(map[string]issueFeed), lastPosts: make(map[string]string)}
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 4096), 16<<20)
+	scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
+		if i := bytes.IndexByte(data, '\n'); i >= 0 {
+			return i + 1, data[:i], nil
+		}
+		if atEOF && len(data) > 0 {
+			out.partial = true
+			return len(data), nil, nil
+		}
+		return 0, nil, nil
+	})
 	for scanner.Scan() {
 		var msg room.Message
 		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
