@@ -129,23 +129,32 @@ func (s *Service) Connected(id contract.SessionID) bool {
 	return state != nil && state.channel != nil
 }
 
+// managedSession loads a target and checks the caller's authority over it.
+func (s *Service) managedSession(ctx context.Context, caller contract.Principal, id contract.SessionID) (store.Session, *contract.Error) {
+	session, err := s.store.Session(ctx, id)
+	if err != nil {
+		return store.Session{}, failure(err)
+	}
+	if problem := s.roomAccess(ctx, caller, session.Room); problem != nil {
+		return store.Session{}, problem
+	}
+	tree, err := s.store.RoomTree(ctx, session.Room)
+	if err != nil {
+		return store.Session{}, failure(err)
+	}
+	if !tree.CanManage(caller, session.ID) {
+		return store.Session{}, forbidden()
+	}
+	return session, nil
+}
+
 func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, req contract.SessionCloseRequest) (contract.SessionCloseResponse, *contract.Error) {
 	if req.Discard && caller.Kind != contract.PrincipalOwner {
 		return contract.SessionCloseResponse{}, forbidden()
 	}
-	session, err := s.store.Session(ctx, req.Session)
-	if err != nil {
-		return contract.SessionCloseResponse{}, failure(err)
-	}
-	if e := s.roomAccess(ctx, caller, session.Room); e != nil {
-		return contract.SessionCloseResponse{}, e
-	}
-	tree, err := s.store.RoomTree(ctx, session.Room)
-	if err != nil {
-		return contract.SessionCloseResponse{}, failure(err)
-	}
-	if !tree.CanManage(caller, session.ID) {
-		return contract.SessionCloseResponse{}, forbidden()
+	session, problem := s.managedSession(ctx, caller, req.Session)
+	if problem != nil {
+		return contract.SessionCloseResponse{}, problem
 	}
 	if e := s.closeSession(ctx, session, req.Discard, false); e != nil {
 		return contract.SessionCloseResponse{}, e
@@ -192,19 +201,9 @@ func (s *Service) closeSession(ctx context.Context, session store.Session, disca
 
 // SessionRestart retries an open session whose box has failed.
 func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal, req contract.SessionRestartRequest) (contract.SessionRestartResponse, *contract.Error) {
-	session, err := s.store.Session(ctx, req.Session)
-	if err != nil {
-		return contract.SessionRestartResponse{}, failure(err)
-	}
-	if e := s.roomAccess(ctx, caller, session.Room); e != nil {
-		return contract.SessionRestartResponse{}, e
-	}
-	tree, err := s.store.RoomTree(ctx, session.Room)
-	if err != nil {
-		return contract.SessionRestartResponse{}, failure(err)
-	}
-	if !tree.CanManage(caller, session.ID) {
-		return contract.SessionRestartResponse{}, forbidden()
+	session, problem := s.managedSession(ctx, caller, req.Session)
+	if problem != nil {
+		return contract.SessionRestartResponse{}, problem
 	}
 	event, err := s.event(session.Room, caller, contract.BoxChanged{})
 	if err != nil {
@@ -228,19 +227,9 @@ func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal,
 // SessionSetProfile moves a session to another profile. A failed session wakes to carry its failed input with it.
 func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Principal, req contract.SessionSetProfileRequest) (contract.SessionSetProfileResponse, *contract.Error) {
 	var response contract.SessionSetProfileResponse
-	target, err := s.store.Session(ctx, req.Session)
-	if err != nil {
-		return response, failure(err)
-	}
-	if e := s.roomAccess(ctx, caller, target.Room); e != nil {
-		return response, e
-	}
-	tree, err := s.store.RoomTree(ctx, target.Room)
-	if err != nil {
-		return response, failure(err)
-	}
-	if !tree.CanManage(caller, target.ID) {
-		return response, forbidden()
+	target, problem := s.managedSession(ctx, caller, req.Session)
+	if problem != nil {
+		return response, problem
 	}
 	if _, _, err := s.profiles.Model(req.Profile); err != nil {
 		return response, invalid("unknown profile")
