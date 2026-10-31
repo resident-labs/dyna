@@ -148,7 +148,7 @@ func Run(ctx context.Context) error {
 	mux.Handle("/shell/", http.StripPrefix("/shell", jobs.Handler()))
 	mux.Handle("/", ModelRoute(engineSocket))
 	mcpPath := filepath.Join(piDir, "mcp.json")
-	if hello.AgentSurface == contract.AgentSurfaceOff {
+	if hello.AgentSurface != contract.AgentSurfaceCaller && hello.AgentSurface != contract.AgentSurfaceDeclared {
 		err = pi.WriteMCPConfig(mcpPath, "shell", "http://127.0.0.1:7781/shell/")
 	} else {
 		dynaTools, problem := dynamcp.New(client.forward, dynamcp.BoxTools("/run/dyna/agent.sock"))
