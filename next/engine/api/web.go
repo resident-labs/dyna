@@ -72,6 +72,8 @@ func (w *Web) SetConnect(s ConnectSessions) { w.connect = s }
 
 // SetRoutes adds the public origins served by the loopback listener.
 func (w *Web) SetRoutes(routes []string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	for _, route := range routes {
 		u, err := url.Parse(route)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || (route != u.Scheme+"://"+u.Host && route != u.Scheme+"://"+u.Host+"/") || strings.ContainsAny(route, "*; \t\r\n") {
@@ -89,6 +91,8 @@ func (w *Web) SetRoutes(routes []string) error {
 
 // PublicRoutes lists the origins set with SetRoutes, without the loopback one.
 func (w *Web) PublicRoutes() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	out := []string{}
 	for host, origin := range w.routes {
 		if host != w.host {
@@ -100,10 +104,12 @@ func (w *Web) PublicRoutes() []string {
 }
 
 func (w *Web) routeOrigins(ctx context.Context) ([]string, string) {
+	w.mu.Lock()
 	var routes []string
 	for _, route := range w.routes {
 		routes = append(routes, route)
 	}
+	w.mu.Unlock()
 	var managed string
 	if w.connect != nil {
 		managed = w.connect.ManagedOrigin(ctx)
@@ -146,7 +152,9 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 		http.Error(out, "forbidden", http.StatusForbidden)
 		return
 	}
+	w.mu.Lock()
 	origin, known := w.routes[strings.ToLower(r.Host)]
+	w.mu.Unlock()
 	if !known && w.connect != nil {
 		if u, err := url.Parse(managed); err == nil && strings.EqualFold(u.Host, r.Host) && (u.Scheme == "https" || u.Scheme == "http") {
 			origin, known = managed, true
@@ -345,10 +353,13 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 	http.ServeContent(out, r, path, time.Time{}, bytes.NewReader(data))
 }
 
-func (w *Web) Listen() (net.Listener, error) {
+func (w *Web) Listen(prepare func(int)) (net.Listener, error) {
 	l, err := net.Listen("tcp", w.address)
 	if err != nil {
 		return nil, err
+	}
+	if prepare != nil {
+		prepare(l.Addr().(*net.TCPAddr).Port)
 	}
 	server := &http.Server{Handler: w, ReadHeaderTimeout: 10 * time.Second}
 	go server.Serve(l)
