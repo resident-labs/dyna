@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -311,8 +312,13 @@ func (s *Sessions) ServePublic(w http.ResponseWriter, r *http.Request, origin st
 	return true
 }
 
+func browserRequest(r *http.Request, origin string) bool {
+	media, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	return r.Method == http.MethodPost && r.Header.Get("Origin") == origin && r.Header.Get("X-Dyna") == "1" && media == "application/json"
+}
+
 func (s *Sessions) exchange(w http.ResponseWriter, r *http.Request, origin string) {
-	if r.Method != http.MethodPost || r.Header.Get("Origin") != origin {
+	if !browserRequest(r, origin) {
 		fail(w, 403, "forbidden")
 		return
 	}

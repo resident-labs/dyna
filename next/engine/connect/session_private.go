@@ -29,7 +29,7 @@ func (s *Sessions) checkGrant(ctx context.Context, x store.ConnectSession) (bool
 		grant, err := relay.CheckGrant(ctx, l.Machine, x.User, x.RelayDevice)
 		if err != nil {
 			var re *RelayError
-			if errors.As(err, &re) && (re.Status == http.StatusForbidden || re.Status == http.StatusUnauthorized || re.Status == http.StatusGone) {
+			if errors.As(err, &re) {
 				if re.Status == http.StatusGone {
 					if e := s.store.UnlinkConnectGeneration(ctx, x.Generation); e != nil {
 						return false, false, e
@@ -55,7 +55,7 @@ func (s *Sessions) checkGrant(ctx context.Context, x store.ConnectSession) (bool
 
 // ServePrivate handles proof-bound renewal and handoff.
 func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin string, routes []string, x store.ConnectSession) {
-	if r.Method != http.MethodPost || r.Header.Get("Origin") != origin {
+	if !browserRequest(r, origin) {
 		fail(w, 403, "forbidden")
 		return
 	}
