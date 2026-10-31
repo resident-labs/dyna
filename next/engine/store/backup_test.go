@@ -52,3 +52,51 @@ func TestBackupAndCopyStatus(t *testing.T) {
 		t.Fatalf("backup failure = %q, %v", failure, err)
 	}
 }
+
+func TestUpgradeBackup(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.writer.Exec("DROP TABLE backup_copy_status; UPDATE meta SET value='27' WHERE key='schema_version'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// A failed backup must leave the old version untouched.
+	backupDir := filepath.Join(dir, "backups")
+	if err := os.WriteFile(backupDir, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if s, err := Open(dir); err == nil {
+		s.Close()
+		t.Fatal("upgrade succeeded without backup")
+	}
+	if err := os.Remove(backupDir); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	names, err := filepath.Glob(filepath.Join(backupDir, "pre-upgrade-v27-*.db"))
+	if err != nil || len(names) != 1 {
+		t.Fatalf("backups: %v, %v", names, err)
+	}
+	info, err := os.Stat(names[0])
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("mode: %v, %v", info, err)
+	}
+	db, err := sql.Open("sqlite", names[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var version string
+	if err := db.QueryRow("SELECT value FROM meta WHERE key='schema_version'").Scan(&version); err != nil || version != "27" {
+		t.Fatalf("backup version %q: %v", version, err)
+	}
+}
