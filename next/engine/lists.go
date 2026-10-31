@@ -34,20 +34,21 @@ func (s *Service) RoomList(ctx context.Context, caller contract.Principal, _ con
 		return contract.RoomListResponse{}, failure(err)
 	}
 	rows.Close()
-	failed, err := s.store.Read().QueryContext(ctx, `SELECT s.room,COUNT(*) FROM sessions s WHERE s.closed_at IS NULL AND ((SELECT outcome FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND outcome!='stopped' ORDER BY ended_at DESC LIMIT 1)='failed' OR EXISTS (SELECT 1 FROM boxes b WHERE b.session=s.id AND b.state IN ('failed','lost'))) GROUP BY s.room`)
+	failed, err := s.store.Read().QueryContext(ctx, `SELECT s.room,COUNT(*) FILTER (WHERE (SELECT outcome FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND outcome!='stopped' ORDER BY ended_at DESC LIMIT 1)='failed' OR EXISTS (SELECT 1 FROM boxes b WHERE b.session=s.id AND b.state IN ('failed','lost'))),COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM boxes b WHERE b.session=s.id AND b.state='pending' AND b.reason='room-host')) FROM sessions s WHERE s.closed_at IS NULL GROUP BY s.room`)
 	if err != nil {
 		return contract.RoomListResponse{}, failure(err)
 	}
 	for failed.Next() {
 		var id contract.RoomID
-		var count int
-		if err := failed.Scan(&id, &count); err != nil {
+		var count, hostless int
+		if err := failed.Scan(&id, &count, &hostless); err != nil {
 			failed.Close()
 			return contract.RoomListResponse{}, failure(err)
 		}
 		for i := range rooms {
 			if rooms[i].ID == id {
 				rooms[i].Failed = count
+				rooms[i].Hostless = hostless
 			}
 		}
 	}
