@@ -187,11 +187,15 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("recover hostexec runs: %w", err)
 	}
 	quotas := proxy.Quotas(managementKey, st, time.Now)
-	accounts := engine.NewAccountActions(service, proxy.Connections(managementKey, st, time.Now), quotas)
+	connections := proxy.Connections(managementKey, st, time.Now)
+	accounts := engine.NewAccountActions(service, connections, quotas)
 	if err := service.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": accounts.Entry(), "pr.open": service.PrOpen(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport), "hostexec.grant": service.HostexecGrant(), "hostexec.run": service.HostexecRunEntry()}, cfg.ApprovalsExpiry); err != nil {
 		return err
 	}
-	go func() { defer close(done); proxy.Supervise(proxyCtx, executable, st, accounts.CompleteOAuth) }()
+	go func() {
+		defer close(done)
+		proxy.Supervise(proxyCtx, executable, st, accounts.CompleteOAuth, connections)
+	}()
 	defer func() { stopProxy(); <-done }()
 	if err := service.ExpireHostexecGrantRequests(ctx); err != nil {
 		return fmt.Errorf("expire host grant requests: %w", err)

@@ -53,6 +53,9 @@ func (devService) AccountsList(context.Context, contract.Principal, contract.Acc
 func (devService) AccountsConnect(context.Context, contract.Principal, contract.AccountsConnectRequest) (contract.AccountsConnectResponse, *contract.Error) {
 	return contract.AccountsConnectResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable in webdev"}
 }
+func (devService) AccountsReconnect(context.Context, contract.Principal, contract.AccountsReconnectRequest) (contract.AccountsReconnectResponse, *contract.Error) {
+	return contract.AccountsReconnectResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable in webdev"}
+}
 func (devService) AccountsConnectStatus(context.Context, contract.Principal, contract.AccountsConnectStatusRequest) (contract.AccountsConnectStatusResponse, *contract.Error) {
 	return contract.AccountsConnectStatusResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable in webdev"}
 }
