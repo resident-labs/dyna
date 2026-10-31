@@ -22,6 +22,7 @@ func TestUpgradeSessionWorkFrom42(t *testing.T) {
 		"INSERT INTO meta VALUES ('schema_version','42')",
 		"CREATE TABLE events (seq INTEGER PRIMARY KEY, room TEXT, from_kind TEXT, from_id TEXT, type TEXT, body BLOB)",
 		"CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT, started_seq INTEGER)",
+		"CREATE TABLE pr_owners (session TEXT)",
 		"CREATE TABLE operations (id TEXT PRIMARY KEY, kind TEXT, room TEXT, by_kind TEXT, by_id TEXT, class TEXT, state TEXT, card BLOB, args BLOB, args_sha256 BLOB, created_at INTEGER, expires_at INTEGER, decision BLOB, result BLOB)",
 		"CREATE TABLE hostexec_runs (op TEXT PRIMARY KEY, grant_id TEXT, host TEXT, scope TEXT, started_at INTEGER, timeout_ms INTEGER, ended_at INTEGER, output_bytes INTEGER, stopped TEXT, lost_at INTEGER)",
 		"INSERT INTO turns VALUES ('turn1','session1',NULL)",
@@ -82,6 +83,8 @@ func TestUpgradeDropsRules(t *testing.T) {
 	if _, err := db.Exec(`PRAGMA foreign_keys=ON;
 		CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO meta VALUES ('schema_version','45');
 		CREATE TABLE rules (room TEXT, number INTEGER, PRIMARY KEY(room,number)); INSERT INTO rules VALUES ('room',1);
+		CREATE TABLE turns (id TEXT PRIMARY KEY); CREATE TABLE pr_owners (session TEXT);
+		CREATE TABLE operations (id TEXT, by_kind TEXT, by_id TEXT, created_at INTEGER, state TEXT);
 		CREATE TABLE events (seq INTEGER PRIMARY KEY, id TEXT, at INTEGER, room TEXT, type TEXT, from_kind TEXT, from_id TEXT, body BLOB);
 		CREATE TABLE deliveries (seq INTEGER REFERENCES events(seq));
 		CREATE TABLE event_files (seq INTEGER REFERENCES events(seq));
