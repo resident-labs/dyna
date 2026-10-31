@@ -352,3 +352,23 @@ func (r rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	return r.next.RoundTrip(req)
 }
+
+func TestChannelSkipsAnUnknownMessageType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("{\"type\":\"computer.watch.stop\",\"body\":{}}\n{\"type\":\"from.a.newer.engine\",\"body\":{}}\n{\"type\":\"computer.watch.stop\",\"body\":{}}\n"))
+	}))
+	defer server.Close()
+	c := &Client{http: server.Client()}
+	c.http.Transport = rewriteTransport{base: server.URL, next: c.http.Transport}
+	stop := errors.New("second message reached the handler")
+	received := 0
+	err := c.Channel(context.Background(), func(contract.BoxMessage) error {
+		if received++; received == 2 {
+			return stop
+		}
+		return nil
+	}, func(bool) {})
+	if !errors.Is(err, stop) || received != 2 {
+		t.Fatalf("channel ended with %v after %d messages, want the second known message to reach the handler", err, received)
+	}
+}
