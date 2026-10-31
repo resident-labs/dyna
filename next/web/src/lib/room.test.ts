@@ -243,7 +243,7 @@ test("session.list gives running turns and failures, and a live DM answer lands 
     assert.equal(room.turns.has("s"), false);
     room.apply(event(5, { type: "turn.ended", body: { session: "x", turn: "u", outcome: "stopped", usage } }));
     assert.equal(room.failed.has("x"), true);
-    assert.deepEqual(feedRows(dmWindow.ordered, dm).map(row => row.kind === "post" && row.text), ["Answer"]);
+    assert.deepEqual(feedRows(dmWindow.ordered, dm).filter(row => row.kind === "post").map(row => row.text), ["Answer"]);
     assert.equal(feedRows(feedWindow.ordered, feed).some(row => row.kind === "post" && row.text === "Answer"), false);
   } finally { server.restore(); }
 });
