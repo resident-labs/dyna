@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -38,8 +40,13 @@ func (r *runner) Run(_ context.Context, _ []byte, args ...string) ([]byte, error
 			return nil, nil
 		}
 		if a == "-M" {
+			// Like ssh, a new master keeps an existing control socket and then serves none.
+			socket := args[slices.Index(args, "-S")+1]
+			if _, err := os.Lstat(socket); err == nil {
+				return nil, nil
+			}
 			r.dead = false
-			return nil, nil
+			return nil, os.WriteFile(socket, nil, 0600)
 		}
 	}
 	if r.fail {
@@ -231,6 +238,22 @@ func TestForwardRemovesStaleHostSocketFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	removedBeforeForward("restore", "'rm' '-f' '--' '/remote/sock/a/engine.sock'")
+}
+
+// A master killed with SIGKILL leaves its control socket. Each heartbeat then started one more
+// master that served no socket, and every host command failed.
+func TestRestartRemovesDeadMasterSocket(t *testing.T) {
+	r := &runner{dead: true}
+	h := newTestHost(t, r)
+	if err := os.WriteFile(h.socket, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.StartContainer(context.Background(), "a"); err != nil {
+		t.Fatal(err)
+	}
+	if r.dead {
+		t.Fatal("the new master did not serve the control socket")
+	}
 }
 
 type resetRunner struct{ calls [][]string }
