@@ -100,7 +100,17 @@ func TestCloseHandsPRsThroughSubtree(t *testing.T) {
 	if err := s.Read().QueryRowContext(ctx, "SELECT count(*) FROM pr_owners WHERE session='root'").Scan(&count); err != nil || count != 2 {
 		t.Fatalf("handed off %d PRs: %v", count, err)
 	}
-	if err := s.RecordPROpen(ctx, "owner/repo", 3, "leaf", event("late-open"), nil); err == nil {
-		t.Fatal("recorded a PR for a closed session")
+	if err := s.RecordPROpen(ctx, "owner/repo", 3, "leaf", event("late-open"), nil); err != nil {
+		t.Fatal(err)
+	}
+	var owner string
+	if err := s.Read().QueryRowContext(ctx, "SELECT session FROM pr_owners WHERE number=3").Scan(&owner); err != nil || owner != "root" {
+		t.Fatalf("late PR owner = %q: %v", owner, err)
+	}
+	if err := s.CloseSession(ctx, "root", event("close-root")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordPROpen(ctx, "owner/repo", 4, "leaf", event("no-owner"), nil); err == nil {
+		t.Fatal("accepted PR with no open ancestor")
 	}
 }

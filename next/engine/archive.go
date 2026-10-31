@@ -2,8 +2,6 @@ package engine
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -24,36 +22,6 @@ func (s *Service) archiveReason(ctx context.Context, room contract.RoomID, curre
 	return s.store.SetClosingReason(ctx, current.ID, reason, event)
 }
 
-// ResumeClosures finishes interrupted closes that no longer need an archive.
-func (s *Service) ResumeClosures(ctx context.Context) *contract.Error {
-	boxes, err := s.store.Boxes(ctx)
-	if err != nil {
-		return failure(err)
-	}
-	for _, current := range boxes {
-		if current.State != contract.BoxClosing && current.State != contract.BoxDeleted {
-			leaf, err := s.store.ClosingLeaf(ctx, current.Session)
-			if err != nil {
-				return failure(err)
-			}
-			if !leaf {
-				continue
-			}
-		}
-		session, err := s.store.Session(ctx, current.Session)
-		if errors.Is(err, sql.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			return failure(err)
-		}
-		if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session.ID}); e != nil {
-			return e
-		}
-	}
-	return nil
-}
-
 func (s *Service) ArchiveDone(ctx context.Context, caller contract.Principal, req contract.ArchiveDoneRequest) (contract.ArchiveDoneResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalSession {
 		return contract.ArchiveDoneResponse{}, forbidden()
@@ -62,8 +30,6 @@ func (s *Service) ArchiveDone(ctx context.Context, caller contract.Principal, re
 	if err != nil {
 		return contract.ArchiveDoneResponse{}, failure(err)
 	}
-	unlock := s.lockBox(session.ID)
-	defer unlock()
 	current, err := s.store.Box(ctx, session.Box)
 	if err != nil {
 		return contract.ArchiveDoneResponse{}, failure(err)
@@ -75,9 +41,10 @@ func (s *Service) ArchiveDone(ctx context.Context, caller contract.Principal, re
 		return contract.ArchiveDoneResponse{}, nil
 	}
 	if session.Repo == "" && req.Repo == "" {
-		if err := s.finishClose(context.WithoutCancel(ctx), session, current, contract.Principal{Kind: contract.PrincipalEngine}, false); err != nil {
-			return contract.ArchiveDoneResponse{}, err
+		if err := s.store.CompleteArchives(ctx, session.ID, nil); err != nil {
+			return contract.ArchiveDoneResponse{}, failure(err)
 		}
+		s.reconciler.Kick()
 		return contract.ArchiveDoneResponse{}, nil
 	}
 	if session.Repo == "" || session.Repo != req.Repo {
@@ -110,11 +77,9 @@ func (s *Service) ArchiveDone(ctx context.Context, caller contract.Principal, re
 	}
 	now := s.now()
 	report := store.Archive{Session: session.ID, Repo: req.Repo, Ref: ref, Commit: req.Commit, CreatedAt: now, ExpiresAt: now.Add(14 * 24 * time.Hour)}
-	if err := s.store.SaveArchives(ctx, []store.Archive{report}); err != nil {
+	if err := s.store.CompleteArchives(ctx, session.ID, []store.Archive{report}); err != nil {
 		return contract.ArchiveDoneResponse{}, failure(err)
 	}
-	if err := s.finishClose(context.WithoutCancel(ctx), session, current, contract.Principal{Kind: contract.PrincipalEngine}, false); err != nil {
-		return contract.ArchiveDoneResponse{}, err
-	}
+	s.reconciler.Kick()
 	return contract.ArchiveDoneResponse{}, nil
 }

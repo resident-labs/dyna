@@ -183,9 +183,7 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := boxes.Restore(ctx); err != nil {
 		return err
 	}
-	if problem := service.ResumeClosures(ctx); problem != nil {
-		return fmt.Errorf("resume close: %s", problem.Message)
-	}
+
 	proxyCtx, stopProxy := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() { defer close(done); proxy.Supervise(proxyCtx, executable) }()
