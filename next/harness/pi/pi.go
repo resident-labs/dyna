@@ -294,6 +294,9 @@ func (h *Harness) Abort(ctx context.Context) error { return h.send(ctx, "abort",
 
 func (h *Harness) SessionFile() string { return h.session }
 
+// Done closes when Pi's RPC stream ends.
+func (h *Harness) Done() <-chan struct{} { return h.done }
+
 func completeLines(data []byte, atEOF bool) (int, []byte, error) {
 	if i := bytes.IndexByte(data, '\n'); i >= 0 {
 		return i + 1, data[:i], nil
