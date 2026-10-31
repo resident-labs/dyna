@@ -101,7 +101,7 @@ func (s *Store) TransitionBox(ctx context.Context, b box.Box, to contract.BoxSta
 		if next.Host != "" {
 			host = &next.Host
 		}
-		result, err := tx.ExecContext(ctx, "UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,updated_at=?,due_at=CASE WHEN ?='ready' THEN 0 ELSE due_at END,failures=CASE WHEN ?='ready' THEN 0 ELSE failures END WHERE id=? AND state=? AND (?!='ready' OR ? NOT IN ('creating','starting') OR due_at=0 OR due_at>?) AND (?!='ready' OR ?!='creating' OR due_at=0) AND (?!='lost' OR ?!='ready' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state!='unreachable' AND state!='removed'))", host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, event.Time.UnixMilli(), next.State, next.State, next.ID, b.State, next.State, b.State, event.Time.UnixMilli(), next.State, b.State, b.State, next.State)
+		result, err := tx.ExecContext(ctx, "UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,updated_at=?,due_at=CASE WHEN ?='ready' THEN 0 ELSE due_at END,failures=CASE WHEN ?='ready' THEN 0 ELSE failures END WHERE id=? AND state=? AND (?!='ready' OR ? NOT IN ('creating','starting') OR due_at=0 OR due_at>?) AND (?!='lost' OR ?!='ready' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state!='unreachable' AND state!='removed'))", host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, event.Time.UnixMilli(), next.State, next.State, next.ID, b.State, next.State, b.State, event.Time.UnixMilli(), b.State, next.State)
 		if err != nil {
 			return err
 		}
@@ -194,26 +194,6 @@ func (s *Store) SetBoxLifecycle(ctx context.Context, old, next box.Box, due time
 	return updated, err
 }
 
-// BeginCreate clears the retry deadline after cleanup, only while the same create
-// is still wanted. This lets the new container send hello before Create returns.
-func (s *Store) BeginCreate(ctx context.Context, id contract.BoxID, due time.Time) (bool, error) {
-	var dueMS int64
-	if !due.IsZero() {
-		dueMS = due.UnixMilli()
-	}
-	var begun bool
-	err := s.Write(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `UPDATE boxes SET due_at=0 WHERE id=? AND state='creating' AND want='run' AND due_at=?`, id, dueMS)
-		if err != nil {
-			return err
-		}
-		n, err := result.RowsAffected()
-		begun = n != 0
-		return err
-	})
-	return begun, err
-}
-
 // FinishCreate records the host result without overwriting a concurrent hello.
 func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure string, due time.Time, failures int, event contract.Event) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
@@ -228,8 +208,11 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 		to := state
 		reason := ""
 		if failure != "" {
+			image = b.Image
 			if state != contract.BoxCreating || failures >= 3 {
 				to, reason = contract.BoxFailed, failure
+			} else {
+				to, reason = contract.BoxPending, string(box.PendingCreateRetry)
 			}
 		} else if state == contract.BoxCreating {
 			to = contract.BoxStarting
@@ -246,7 +229,7 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 			event.Body = body
 		}
 		dueMS := int64(0)
-		if (to == contract.BoxStarting || to == contract.BoxCreating) && !due.IsZero() {
+		if (to == contract.BoxStarting || to == contract.BoxPending) && !due.IsZero() {
 			dueMS = due.UnixMilli()
 		}
 		result, err := tx.ExecContext(ctx, `UPDATE boxes SET image=?,state=?,reason=?,due_at=?,failures=? WHERE id=? AND state=?`, image, to, reason, dueMS, failures, b.ID, state)

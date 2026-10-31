@@ -663,7 +663,7 @@ The reconciler runs one pass when a store commit changes a box, a session or a t
 
 | Want | State | Step | Commit |
 |---|---|---|---|
-| run | creating | `repos.Get` and `Create`. After a restart, `Remove` the partial parts first. | `starting`, `due_at=now+60 s`, unless hello already made it `ready`. Save the returned image in either state. On error: retry in `creating` after 30 s, then 60 s; after the third failure, `failed` (cause `create_failed`). Each retry removes partial parts first. If hello already advanced the box, an error fails it immediately. |
+| run | creating | `repos.Get` and `Create`. After a restart, `Remove` the partial parts first. | `starting`, `due_at=now+60 s`, unless hello already made it `ready`. Save the returned image in either state. On error: move to `pending` with reason `create-retry` and retry after 30 s, then 60 s; after the third failure, `failed` (cause `create_failed`). Each retry removes partial parts first. If hello already advanced the box, an error fails it immediately. |
 | run | starting, `due_at=0` | `Start`, or `Recreate` if the slice changed | `due_at=now+60 s`. On error: `stopped`, `due_at=now+30 s`. |
 | run | starting, past `due_at` | A box with no turns: `Remove`. A box with turns: `Stop`. | No turns: `failed` (cause `no_hello`). With turns: `stopped`, reason `no hello`, `due_at=now+30 s`. The volume stays. |
 | stop | ready | `Stop` | `stopped`. On error: `due_at=now+30 s`. |
@@ -676,6 +676,7 @@ The table below lists the transitions. Each row is one observed change, and it e
 |---|---|---|
 | pending | pending | admission still does not fit; the reason changed, and the new reason is recorded |
 | pending | creating | admission placed it |
+| creating | pending | a create failed and will retry on the same host |
 | creating | starting | volume, repository copy and slice are ready, and `podman run` succeeded |
 | creating, starting | ready | the box agent sent `hello` on the box socket within 60 s |
 | starting | stopped | the host start failed during a wake |
