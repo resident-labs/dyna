@@ -191,6 +191,17 @@ test("a search jump waits for an in-flight page before seeking the post", async 
   } finally { server.restore(); }
 });
 
+test("a search jump reaches a newer post after the window has moved back", async () => {
+  const server = engine(1500);
+  try {
+    const window = await opened();
+    for (let i = 0; i < 5; i++) await window.loadOlder();
+    assert.equal(window.events.has(1500), false);
+    await window.seek(1500);
+    assert.equal(window.events.has(1500), true);
+  } finally { server.restore(); }
+});
+
 test("holds live events while the window is away from the present", async () => {
   const server = engine(1500);
   try {
