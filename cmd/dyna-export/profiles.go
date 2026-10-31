@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"dyna-agent/internal/profile"
 	"github.com/resident-labs/dyna/contract"
@@ -13,6 +14,13 @@ import (
 // These names are listed in the vendored proxy's model catalog. Unknown
 // models are reported rather than inferred from a provider prefix.
 var proxyModels = map[string]string{
+	"haiku":                               "claude-haiku-5-5",
+	"opus":                                "claude-opus-5-5",
+	"sonnet":                              "claude-sonnet-5-5",
+	"openai-codex/gpt-6-luna":             "gpt-6-luna",
+	"openai-codex/gpt-6.1-terra":          "gpt-6.1-terra",
+	"zai/glm-5.3":                         "glm-5.3",
+	"zai/glm-5.3-flash":                   "glm-5.3-flash",
 	"anthropic/claude-opus-5-5":           "claude-opus-5-5",
 	"claude-opus-5-5":                     "claude-opus-5-5",
 	"anthropic/claude-sonnet-5-5":         "claude-sonnet-5-5",
@@ -64,7 +72,32 @@ func readProfiles(config string) ([]contract.ProfileBundle, []string, []profileG
 		if unknown {
 			continue
 		}
-		out := contract.ProfileBundle{Name: contract.ProfileName(p.Name), Description: p.Description, Model: mapped[0],
+		var thinking contract.ThinkingLevel
+		for i := 0; i < len(p.ExtraArgs); i++ {
+			arg := p.ExtraArgs[i]
+			key, val, eq := strings.Cut(arg, "=")
+			if key != "--effort" && key != "--thinking" {
+				continue
+			}
+			if !eq {
+				i++
+				if i >= len(p.ExtraArgs) {
+					return nil, nil, nil, fmt.Errorf("profile thinking level is missing")
+				}
+				val = p.ExtraArgs[i]
+			}
+			level := contract.ThinkingLevel(val)
+			switch level {
+			case contract.ThinkingOff, contract.ThinkingMinimal, contract.ThinkingLow, contract.ThinkingMedium, contract.ThinkingHigh, contract.ThinkingXHigh:
+			default:
+				return nil, nil, nil, fmt.Errorf("profile thinking level is unsupported")
+			}
+			if thinking != "" && thinking != level {
+				return nil, nil, nil, fmt.Errorf("conflicting profile thinking levels")
+			}
+			thinking = level
+		}
+		out := contract.ProfileBundle{Thinking: thinking, Name: contract.ProfileName(p.Name), Description: p.Description, Model: mapped[0],
 			Fallback: contract.ProfileName(p.Fallback), Taste: p.Taste, Intelligence: p.Intelligence,
 			Cost: p.Cost, Diagnostics: p.Diagnostics, MaxConcurrent: p.MaxConcurrent,
 			MaxCallsPerRun: p.MaxCallsPerRun, Default: p.Default}
