@@ -30,6 +30,8 @@ func TestComputerWatchResponseAndErrorsAreNotCached(t *testing.T) {
 		status  int
 	}{
 		{nil, http.StatusOK}, {&contract.Error{Code: contract.ErrNotFound}, http.StatusNotFound}, {&contract.Error{Code: contract.ErrConflict}, http.StatusConflict},
+		{&contract.Error{Code: contract.ErrNoGrant}, http.StatusForbidden}, {&contract.Error{Code: contract.ErrMoveBusy}, http.StatusConflict},
+		{&contract.Error{Code: contract.ErrHasChildren}, http.StatusConflict}, {&contract.Error{Code: contract.ErrParentClosing}, http.StatusConflict},
 	} {
 		s := computerService{fakeService: &fakeService{}, problem: tc.problem}
 		h := New(s, nil).handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true})
