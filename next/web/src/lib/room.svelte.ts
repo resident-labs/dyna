@@ -59,6 +59,8 @@ export class RoomStore {
   noteRead(conversation: Conversation, seq: number): void {
     if (seq > (this.read.get(readKey(conversation)) ?? 0)) this.read.set(readKey(conversation), seq);
   }
+  // The newest event the owner has read in a conversation, or 0.
+  readAt(conversation: Conversation): number { return this.read.get(readKey(conversation)) ?? 0; }
   // The owner has seen a conversation up to seq; the engine keeps it for every device.
   see(conversation: Conversation, seq: number): void {
     if ((this.read.get(readKey(conversation)) ?? 0) >= seq) return;
