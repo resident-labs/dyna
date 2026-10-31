@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack, type Snippet } from "svelte";
   import { APIError, call, SignedOut } from "../client.ts";
+  import AppearancePane from "./AppearancePane.svelte";
   import DevicesPane from "./DevicesPane.svelte";
   import Icon, { type IconName } from "./Icon.svelte";
   import type { Device } from "../contract.gen.ts";
@@ -22,7 +23,9 @@
   }
   untrack(reload);
 
-  let panes: { id: string; label: string; icon: IconName }[] = $derived(admin ? [{ id: "devices", label: "Devices", icon: "devices" }] : []);
+  // Appearance is on every device; Devices only on one with admin.
+  let panes: { id: string; label: string; icon: IconName }[] = $derived([{ id: "appearance", label: "Appearance", icon: "palette" },
+    ...admin ? [{ id: "devices", label: "Devices", icon: "devices" } as const] : []]);
   let shown = $derived(panes.find(pane => path === `/settings/${pane.id}`) ?? (phone ? undefined : panes[0]));
 </script>
 
@@ -36,12 +39,12 @@
     <nav aria-label="Settings panes">{#each panes as pane (pane.id)}
       <a href={`/settings/${pane.id}`} onclick={navigate} aria-current={shown === pane ? "page" : undefined}><Icon name={pane.icon} />{pane.label}</a>{/each}</nav></aside>{/if}
   <div class="pane">
-    {#if shown?.id === "devices"}<DevicesPane {devices} {failed} {reload} {signedout} {bar} />
+    {#if shown?.id === "appearance"}<AppearancePane {bar} />
+    {:else if shown?.id === "devices"}<DevicesPane {devices} {failed} {reload} {signedout} {bar} />
     {:else}
       <header><button type="button" class="round menu" bind:this={menu} aria-label="Rooms and pages" title="Rooms and pages" onclick={onmenu}><Icon name="menu" /></button><strong>Settings</strong></header>
-      {#if panes.length}<nav class="list" aria-label="Settings panes">{#each panes as pane (pane.id)}
+      <nav class="list" aria-label="Settings panes">{#each panes as pane (pane.id)}
         <a href={`/settings/${pane.id}`} onclick={navigate}><Icon name={pane.icon} />{pane.label}<Icon name="forwardChevron" /></a>{/each}</nav>
-      {:else}<p class="empty">This device has no settings it can change.</p>{/if}
     {/if}
   </div>
 </section>
@@ -63,7 +66,6 @@
   .list { padding: 8px; }
   .list a { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 8px; border-radius: 6px; color: var(--text); font-size: 15px; font-weight: 500; text-decoration: none; }
   .list a :global(svg:last-child) { margin-left: auto; color: var(--muted); }
-  .empty { margin: 24px; color: var(--muted); font-size: 14px; }
   @media (max-width: 640px) {
     .settings { left: env(safe-area-inset-left); grid-template-columns: minmax(0, 1fr); }
     .menu { display: grid; }

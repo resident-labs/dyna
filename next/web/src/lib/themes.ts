@@ -1,6 +1,6 @@
 // The named themes. Every color on screen comes from one token set: a token missing from a theme is a compile
 // error. v1 follows the OS in CSS and has a dark-only terminal; v2 has named themes and opens on Carbon.
-export type ThemeId = "carbon" | "oled" | "light";
+export type ThemeId = "carbon" | "oled" | "ink" | "nord" | "light" | "paper";
 export type ThemeMode = "dark" | "light";
 export type Token =
   // Surfaces, then the washes and lines drawn over them.
@@ -45,6 +45,12 @@ const darkTerminal = {
   selection: "rgb(255 255 255 / 22%)",
 } as const;
 
+const lightTerminal = {
+  ansi: ["#24262b", "#b3332e", "#3d7a3a", "#8a6100", "#3d5bd0", "#8a3fae", "#1f7a8c", "#6f737c",
+    "#5f636c", "#c9463f", "#4c8f48", "#a37300", "#5571db", "#a050c2", "#2a8ea3", "#8a8e96"],
+  selection: "rgb(61 91 208 / 22%)",
+} as const;
+
 export const carbon: Theme = {
   id: "carbon", label: "Carbon", mode: "dark",
   tokens: { "--bg": "#131416", "--sidebar": "#0c0d0e", "--raised": "#1b1c1f", "--line": "rgb(255 255 255 / 8%)", "--firm": "rgb(255 255 255 / 14%)", "--selected": "rgb(255 255 255 / 9%)",
@@ -63,16 +69,34 @@ export const themes: readonly Theme[] = [
     terminal: darkTerminal,
   },
   {
+    id: "ink", label: "Ink", mode: "dark",
+    tokens: { "--bg": "#0e1117", "--sidebar": "#090c11", "--raised": "#161b23", "--line": "rgb(196 212 255 / 9%)", "--firm": "rgb(196 212 255 / 14%)", "--selected": "rgb(196 212 255 / 10%)",
+      "--hover": "rgb(196 212 255 / 5%)", "--track": "rgb(196 212 255 / 8%)", "--focus": "#8fb0ff", "--text": "#e6ebf3", "--muted": "#97a0ae",
+      "--attention": "#efb66d", "--attention-fill": "#efb66d", "--danger": "#ef8a86", "--success": "#7fcba0", ...glass, ...darkShadows, ...screen, ...qr },
+    terminal: darkTerminal,
+  },
+  {
+    id: "nord", label: "Nord", mode: "dark",
+    tokens: { "--bg": "#262b35", "--sidebar": "#20242d", "--raised": "#313745", "--line": "rgb(236 239 244 / 11%)", "--firm": "rgb(236 239 244 / 14%)", "--selected": "rgb(236 239 244 / 11%)",
+      "--hover": "rgb(236 239 244 / 6%)", "--track": "rgb(236 239 244 / 8%)", "--focus": "#88c0d0", "--text": "#f4f6f9", "--muted": "#b4bccb",
+      "--attention": "#ebcb8b", "--attention-fill": "#ebcb8b", "--danger": "#f0a0a7", "--success": "#a3be8c", ...glass, ...darkShadows, ...screen, ...qr },
+    terminal: darkTerminal,
+  },
+  {
     id: "light", label: "Light", mode: "light",
     tokens: { "--bg": "#fafafb", "--sidebar": "#f1f2f4", "--raised": "#ffffff", "--line": "rgb(20 24 34 / 11%)", "--firm": "rgb(20 24 34 / 14%)", "--selected": "rgb(20 24 34 / 8%)",
       "--hover": "rgb(20 24 34 / 4%)", "--track": "rgb(20 24 34 / 8%)", "--focus": "#3d5bd0", "--text": "#24262b", "--muted": "#5f636c",
       "--attention": "#a45500", "--attention-fill": "#c27412", "--danger": "#b3332e", "--success": "#2f7d4a",
       "--id-name": "47% 0.13", "--id-face": "62% 0.13", "--id-alpha": "12%", "--id-initials": "38% 0.11", ...lightShadows, ...screen, ...qr },
-    terminal: {
-      ansi: ["#24262b", "#b3332e", "#3d7a3a", "#8a6100", "#3d5bd0", "#8a3fae", "#1f7a8c", "#6f737c",
-        "#5f636c", "#c9463f", "#4c8f48", "#a37300", "#5571db", "#a050c2", "#2a8ea3", "#8a8e96"],
-      selection: "rgb(61 91 208 / 22%)",
-    },
+    terminal: lightTerminal,
+  },
+  {
+    id: "paper", label: "Paper", mode: "light",
+    tokens: { "--bg": "#fbf9f6", "--sidebar": "#f3efe9", "--raised": "#ffffff", "--line": "rgb(60 40 20 / 12%)", "--firm": "rgb(60 40 20 / 14%)", "--selected": "rgb(60 40 20 / 8%)",
+      "--hover": "rgb(60 40 20 / 4%)", "--track": "rgb(60 40 20 / 8%)", "--focus": "#3d5bd0", "--text": "#2a2723", "--muted": "#63605a",
+      "--attention": "#a45500", "--attention-fill": "#c27412", "--danger": "#b3332e", "--success": "#2e7b49",
+      "--id-name": "47% 0.13", "--id-face": "62% 0.13", "--id-alpha": "12%", "--id-initials": "38% 0.11", ...lightShadows, ...screen, ...qr },
+    terminal: lightTerminal,
   },
 ];
 
