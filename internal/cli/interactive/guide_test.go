@@ -54,11 +54,15 @@ func TestGuideExcludesUnsupportedWorkflowConcepts(t *testing.T) {
 }
 
 func TestReadmeDocumentsDesktopAndPublicCommands(t *testing.T) {
-	b, err := os.ReadFile("../../../README.md")
-	if err != nil {
-		t.Fatal(err)
+	// The README stays short; docs/concepts.md holds the detail it links to.
+	var doc string
+	for _, path := range []string{"../../../README.md", "../../../docs/concepts.md"} {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		doc += string(b) + "\n"
 	}
-	doc := string(b)
 	for _, want := range []string{
 		"desktop/build.sh", "`/<profile> <task>`", "member list", "dyna engine run", "dyna guide",
 		"dyna post", "dyna room watch", "dyna room log", "dyna room read", "dyna room members",
@@ -66,7 +70,7 @@ func TestReadmeDocumentsDesktopAndPublicCommands(t *testing.T) {
 		"dyna root attach", "dyna subagent start", "dyna workflow run", "dyna request question", "Authors\nnever merge",
 	} {
 		if !strings.Contains(doc, want) {
-			t.Errorf("README is missing %q", want)
+			t.Errorf("README and docs/concepts.md are missing %q", want)
 		}
 	}
 	for _, old := range []string{
@@ -76,7 +80,7 @@ func TestReadmeDocumentsDesktopAndPublicCommands(t *testing.T) {
 		"dyna tui", "four views", "terminal dashboard",
 	} {
 		if strings.Contains(strings.ToLower(doc), strings.ToLower(old)) {
-			t.Errorf("README contains retired surface %q", old)
+			t.Errorf("README or docs/concepts.md contains retired surface %q", old)
 		}
 	}
 }
