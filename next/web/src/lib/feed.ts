@@ -202,11 +202,13 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
 // A full moment for a title, such as "Oct 31, 2026, 4:48 AM".
 export const fullTime = (value: string): string => new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 
-// The muted time on a row's name line: the clock today, else the date and the clock.
+// The muted time on a row's name line: the clock today, else the date and the clock. Every row that scrolls in calls
+// it, and toLocaleTimeString builds a new formatter on each call, so the two formatters are made once.
+const clock = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" });
+const date = new Intl.DateTimeFormat([], { month: "short", day: "numeric" });
 export function formatTime(value: string): string {
   const at = new Date(value);
-  const clock = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  return at.toDateString() === new Date().toDateString() ? clock : `${at.toLocaleDateString([], { month: "short", day: "numeric" })}, ${clock}`;
+  return at.toDateString() === new Date().toDateString() ? clock.format(at) : `${date.format(at)}, ${clock.format(at)}`;
 }
 
 // A post the owner forwards, as the composer holds it until a send or a remove.
