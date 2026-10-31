@@ -167,6 +167,8 @@ export class Finger {
   }
 }
 
+const isRelease = (event: ComputerInput) => event.kind === "mouse.up" || event.kind === "key.up";
+
 // One request in flight: the engine keeps order only inside a batch, so a later request could pass an earlier one. Events
 // that come while one is in flight wait and go together as the next batch (at most 256, the route's limit). A refused
 // batch pauses the queue and stays first, with everything after it in order, until retry: a key up never goes before its down.
@@ -175,6 +177,8 @@ export class InputQueue {
   private frame: Size = { width: 0, height: 0 };
   private busy = false;
   private paused = false;
+  // After finish, a refused batch is tried again this many times, keeping only its releases, and is then given up.
+  private tries = 0;
   private readonly deliver: (events: ComputerInput[], frame: Size) => Promise<void>;
   private readonly settled: (ok: boolean) => void;
   constructor(deliver: (events: ComputerInput[], frame: Size) => Promise<void>, settled: (ok: boolean) => void) {
@@ -191,12 +195,16 @@ export class InputQueue {
     while (this.waiting.length && !this.paused) {
       const batch = this.waiting.splice(0, 256);
       const ok = await this.deliver(batch, this.frame).then(() => true, () => false);
-      if (!ok) {
+      if (!ok && this.tries > 0) {
+        this.waiting.unshift(...batch.filter(isRelease));
+        if (--this.tries === 0) this.waiting = [];
+      } else if (!ok) {
         this.waiting.unshift(...batch);
         this.paused = true;
       }
       this.settled(ok);
     }
+    this.tries = 0;
     this.busy = false;
   }
   // Sends the refused batch and what came after it, in order.
@@ -204,10 +212,14 @@ export class InputQueue {
     this.paused = false;
     if (!this.busy) void this.run();
   }
-  // Drops what waits behind a refused batch, when the owner gives control back.
-  clear(): void {
-    this.waiting = [];
+  // Control ends or the view closes: with a refused batch paused, only the releases that wait go on, then `events`. The
+  // queue sends them even when a request now in flight is refused, so the computer is not left with a key or button down.
+  finish(events: ComputerInput[]): void {
+    if (this.paused) this.waiting = this.waiting.filter(isRelease);
+    this.waiting.push(...events);
     this.paused = false;
+    this.tries = 3;
+    if (!this.busy) void this.run();
   }
 }
 
