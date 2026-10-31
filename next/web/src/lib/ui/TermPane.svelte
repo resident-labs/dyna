@@ -1,21 +1,11 @@
 <script lang="ts" module>
   import type { GhosttyTheme } from "../ghostty/core.ts";
-  // ANSI colors per theme, in order: black, red, green, yellow, blue, magenta, cyan, white, then the
-  // bright set. The terminal follows the app's theme, as T3 Code's does; v1's was dark only.
-  const palettes = {
-    dark: ["#2b2a2d", "#ef8a80", "#9ccf9a", "#e8c27a", "#8fa8f0", "#d3a6ef", "#8cc8e3", "#d8d3cb",
-      "#6c675f", "#f4a59c", "#b4dcb2", "#f0d39c", "#bccbff", "#e6c6f7", "#b0d9ee", "#f3efe9"],
-    light: ["#2a2723", "#b3332e", "#3d7a3a", "#8a6100", "#3d5bd0", "#8a3fae", "#1f7a8c", "#d8d3cb",
-      "#63605a", "#c9463f", "#4c8f48", "#a37300", "#5571db", "#a050c2", "#2a8ea3", "#fbf9f6"],
-  };
-  const rgb = (hex: string) => { const n = parseInt(hex.trim().slice(1), 16); return { r: n >> 16 & 255, g: n >> 8 & 255, b: n & 255 }; };
-  // The background, text and cursor come from the app's tokens, so the terminal matches the dock.
-  function theme(dark: boolean): GhosttyTheme {
-    const css = getComputedStyle(document.documentElement);
-    const token = (name: string) => rgb(css.getPropertyValue(name));
-    return { background: token("--bg"), foreground: token("--text"), cursor: token("--focus"),
-      palette: palettes[dark ? "dark" : "light"].map(rgb), selectionBackground: dark ? "rgb(255 235 210 / 22%)" : "rgb(61 91 208 / 22%)" };
-  }
+  import type { Theme } from "../themes.ts";
+  const rgb = (hex: string) => { const n = parseInt(hex.slice(1), 16); return { r: n >> 16 & 255, g: n >> 8 & 255, b: n & 255 }; };
+  // The terminal follows the app's theme, as T3 Code's does; v1's was dark only. Its background, text and cursor are
+  // the app's tokens, so it matches the dock.
+  const ghosttyTheme = ({ tokens, terminal }: Theme): GhosttyTheme => ({ background: rgb(tokens["--bg"]), foreground: rgb(tokens["--text"]),
+    cursor: rgb(tokens["--focus"]), palette: terminal.ansi.map(rgb), selectionBackground: terminal.selection });
   // Canvas font strings reject CSS keywords such as ui-monospace, so only the named faces go in; the
   // surface adds its own monospace fallbacks.
   const font = () => ({ size: 13, family: getComputedStyle(document.documentElement).getPropertyValue("--mono")
@@ -24,25 +14,24 @@
 
 <script lang="ts">
   import { onMount } from "svelte";
-  import { MediaQuery } from "svelte/reactivity";
   import type { GhosttyTerminalSurface } from "../ghostty/surface.ts";
   import { openTerminal, type TerminalTarget } from "../terminal.ts";
+  import { theme } from "../theme.svelte.ts";
   // One live terminal, drawn by libghostty-vt on a canvas (see ../ghostty, vendored from v1). The socket
   // opens at the size the first fit measures; leaving closes it, and the engine hangs up the shell.
   let { target, label, onexit }: { target: TerminalTarget; label: string; onexit: (code?: number) => void } = $props();
   let host: HTMLElement;
   let surface: GhosttyTerminalSurface | undefined;
   let failed = $state(false);
-  const dark = new MediaQuery("prefers-color-scheme: dark");
   export function focus() { surface?.focus(); }
-  $effect(() => { const isDark = dark.current; surface?.setTheme(theme(isDark)); });
+  $effect(() => { const next = ghosttyTheme(theme()); surface?.setTheme(next); });
   onMount(() => {
     let gone = false;
     const socket = openTerminal($state.snapshot(target), { output: bytes => surface?.write(bytes), exit: code => { if (!gone) onexit(code); } });
     // The WebAssembly runtime loads only when the first terminal opens.
     import("../ghostty/surface.ts").then(async ({ GhosttyTerminalSurface: Surface }) => {
       const made = await Surface.create(host, {
-        theme: theme(dark.current), font: font(),
+        theme: ghosttyTheme(theme()), font: font(),
         onData: data => socket.send(data),
         // dispose() flushes a pending resize, so a pane that has gone opens no shell.
         onResize: (cols, rows) => { if (!gone) socket.resize(cols, rows); },

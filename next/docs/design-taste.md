@@ -24,7 +24,7 @@ Each rule is one line, imperative and checkable on a screenshot. The tag at the 
 
 ## Tokens
 
-Use tokens from `next/web/src/app.css`. Never write a literal color in a component. Add a token when no token fits.
+Use the tokens of `next/web/src/lib/themes.ts`. Never write a literal color in a component or in `app.css`. Add a token when no token fits.
 
 ### Fonts
 
@@ -40,6 +40,7 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 
 | Token | Size | Use |
 |---|---|---|
+| face | 9 px | Avatar initials under 24 px |
 | cap | 11 px | Timestamps, meta lines |
 | sm | 12.5 px | Muted second lines, "X of Y", status labels |
 | ui | 13 px | Controls, menu items, panel rows |
@@ -70,16 +71,17 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 
 ### Colors and tones
 
-- Keep the warm dark and light themes. Never use pure black or pure white as the page. [lead, polish pass] [v1]
+- Make Carbon, a neutral dark, the default theme, and open dark even when the OS asks for light. Name every theme, and build it from the one token set. Use a pure black page only in the OLED theme, and pure white as the page in no theme. [owner, 2026-10-31]
 - Build surfaces from three levels: sidebar (sunk), page, and raised (card or popover). [v1] [T3 `--sidebar`, `--background`, `--card`]
-- Draw borders as low-alpha lines (about 8%). Use a firmer line (about 14%) only for inputs. [v1 `--border`] [T3 dark `--border` white 8%]
+- Draw borders as low-alpha lines (about 8%; 13% in the OLED theme, because its page is black). Use a firmer line (about 14%) only for inputs. [v1 `--border`] [T3 dark `--border` white 8%]
 - Draw hover and selection as washes of the text color (about 4% and 8%), so that they work on every surface. [v1] [T3 `--accent` white 4%]
 - Use one accent (`--focus`) for focus rings, selection and links. Do not use it for data. [v1 `--iris`] [T3 `--ring`]
 - Use the tones success, warning, danger, info and neutral. Each tone has a dot or bar color, a text color, a wash (about 14%) and an edge (about 28%). [v1 `tone.ts`] [T3 badge `bg-warning/8`]
 - Show nothing for a healthy, online or idle state: no green dot, no "OK" and no "Idle" mark. [root, 2026-10-31, owner found the pills and green dots ugly] [T3 `Sidebar.logic.ts` `resolveThreadStatusPill` returns null]
 - Show unknown (not probed yet) as a hollow ring. Show switched off as a grey dot. Use red only for unreachable or failed. [v1 MachineRow]
 - Turn a figure and its bar to the warning color only at or above 90%. Below that, use the normal colors. [root]
-- Color a name with its identity hue, and draw an avatar as initials on that hue. [lead, polish pass] [spec 5.13]
+- Color a session name with its identity hue in the feed. On Home, use the text color for every name, and let the avatar carry the hue. [owner, 2026-10-31] [spec 5.13]
+- Draw an avatar as initials on a low-alpha tint of its hue, because solid faces turn warm hues brown. [owner, 2026-10-31]
 
 ### Motion
 
@@ -113,7 +115,7 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 - Use a card only for a thing with its own data, such as a machine or a model account. Never use a card as a frame around one line of text. [root]
 - When the total is known, lead each metric tile with a large percent (the stat size, 24 px), then a thin bar, then muted "X of Y" below it. [root] [v1 `.stat-grid`, UsageMeter]
 - When the total is unknown (a provider reports no limit), lead with the counted figure at the stat size, show muted "Limit not reported" below it, and draw no bar. Never hide the counted usage. [spec, accounts check 10] [v1 UsageMeter "Not reported"]
-- Draw meters 6 px high on a track of about 7% alpha. Use 3 px bars in list rows. [v1 `--meter-h`, MachineRow]
+- Draw meters 6 px high on a track of about 8% alpha. Use 3 px bars in list rows. [v1 `--meter-h`, MachineRow]
 - Never show an empty or hollow card. When live data is missing, show the last known data dimmed (about 40% opacity) with its age. [root] [v1 `.dimmed`]
 - When a card has no data at all, leave it out. Do not show "No data". [root, #1461]
 - Lay out card grids with `repeat(auto-fit, minmax(…, 1fr))`, so that they use the page width. [root] [v1 `.stat-grid`]

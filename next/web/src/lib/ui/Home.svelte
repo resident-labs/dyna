@@ -264,6 +264,7 @@
   .fold[aria-expanded="true"] :global(svg) { transform: none; }
   .quiet { width: 100%; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; min-height: 36px; }
   .stack { display: flex; flex: none; align-items: center; }
+  .stack > :global(.avatar) { --under: var(--raised); box-shadow: 0 0 0 2px var(--raised); }
   .stack > :global(*) + :global(*) { margin-left: -4px; }
   .more-count { margin-left: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
   .decided { margin: 0; padding: 8px; color: var(--muted); font-size: 13px; }

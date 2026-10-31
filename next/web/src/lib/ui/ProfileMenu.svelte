@@ -70,7 +70,7 @@
   .open[aria-disabled="true"] { opacity: 0.6; cursor: default; }
   .open:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 2; width: 232px; max-width: calc(100vw - 32px); padding: 4px; display: grid;
-    background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 18%); }
+    background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px var(--shadow-md); }
   [role="menuitemradio"] { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 6px 8px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; line-height: 18px; text-align: left; cursor: pointer; }
   [role="menuitemradio"] :global(svg) { flex: none; width: 16px; height: 16px; margin-top: 1px; color: var(--muted); }
   /* Items have no border or ring of their own; a fill marks the hovered or focused one. */

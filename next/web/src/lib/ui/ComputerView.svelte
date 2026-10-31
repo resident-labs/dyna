@@ -77,19 +77,20 @@
   .connecting { color: var(--muted); font-weight: 400; }
   .first { margin-left: auto; }
   /* Full screen, the whole window is one near-black surface, as the screen is, from the notch to the home bar; the
-     dark theme's colors keep its text and buttons legible in both themes. */
-  :global(.window.computer.full) { --text: #ece6de; --muted: #a39b91; --line: rgb(255 235 210 / 8%); --hover: rgb(255 235 210 / 4%); --focus: #93a6f5; background: #0d0d0f; }
+     --screen tokens keep its text, buttons and avatar legible in both themes. */
+  :global(.window.computer.full) { --text: var(--screen-text); --muted: var(--screen-muted); --line: var(--screen-line); --hover: var(--screen-hover); --focus: var(--screen-focus); --raised: var(--screen);
+    --id-face: var(--screen-id-face); --id-alpha: var(--screen-id-alpha); --id-initials: var(--screen-id-initials); background: var(--screen); }
   /* The screen is near-black in both themes, as a display is. Docked, it takes the panel width at the screen's ratio;
      floating, it fills the window body edge to edge and the dark background fills the letterbox. */
-  .screen { position: relative; display: grid; place-items: center; flex: 1; margin: 0; border-radius: 0 0 7px 7px; overflow: hidden; background: #0d0d0f; }
+  .screen { position: relative; display: grid; place-items: center; flex: 1; margin: 0; border-radius: 0 0 7px 7px; overflow: hidden; background: var(--screen); }
   .screen.foot { border-radius: 0; }
   /* Full screen, the picture sits under the title bar at its own shape; a short screen shrinks it to keep the steps. */
   .screen.full { flex: 0 1 auto; width: 100%; aspect-ratio: var(--ratio); border-radius: 0; }
   .screen.docked { flex: none; aspect-ratio: var(--ratio); margin: 12px 12px 0; border: 1px solid var(--line); border-radius: 8px; }
   img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
   /* v1's badge: a dark chip over the last picture, readable on any frame. */
-  .badge { position: absolute; left: 12px; top: 12px; margin: 0; padding: 3px 11px; border-radius: 12px; background: rgb(20 19 22 / 82%); color: #d8d3cc; font-size: 12px; }
-  .badge .retry { margin-left: 4px; color: #f4f0ea; }
+  .badge { position: absolute; left: 12px; top: 12px; margin: 0; padding: 3px 11px; border-radius: 12px; background: var(--screen-chip); color: var(--screen-text); font-size: 12px; }
+  .badge .retry { margin-left: 4px; color: var(--screen-text); }
   .activity { flex: none; margin: 0; padding: 6px 12px; overflow: hidden; color: var(--muted); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
   .earlier { flex: none; margin: 0; padding: 0 12px 6px; color: var(--muted); font-size: 12.5px; line-height: 20px; list-style: none; }
   .earlier li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
