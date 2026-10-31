@@ -503,8 +503,80 @@ type SessionWorkResponse struct {
 }
 
 type TranscriptReadRequest struct {
-	Session SessionID `json:"session"`
-	Turn    TurnID    `json:"turn,omitempty"`
+	Session   SessionID      `json:"session"`
+	Turn      TurnID         `json:"turn,omitempty"`
+	Before    TurnID         `json:"before,omitempty"`
+	Limit     int            `json:"limit,omitempty"`
+	Item      string         `json:"item,omitempty"`
+	Part      TranscriptPart `json:"part,omitempty"`
+	Offset    int            `json:"offset,omitempty"`
+	AfterItem string         `json:"afterItem,omitempty"`
+	ItemIndex int            `json:"itemIndex,omitempty"`
+	Tail      bool           `json:"tail,omitempty"`
+	PostIndex int            `json:"postIndex,omitempty"`
+}
+type TranscriptPart string
+
+const (
+	TranscriptPartOutput    TranscriptPart = "output"
+	TranscriptPartText      TranscriptPart = "text"
+	TranscriptPartArguments TranscriptPart = "arguments"
+)
+
+type TranscriptItemKind string
+
+const (
+	TranscriptText     TranscriptItemKind = "text"
+	TranscriptThinking TranscriptItemKind = "thinking"
+	TranscriptTool     TranscriptItemKind = "tool"
+	TranscriptPost     TranscriptItemKind = "post"
+	TranscriptTooLarge TranscriptItemKind = "too_large"
+)
+
+type TranscriptItem struct {
+	ID          string             `json:"id"`
+	Turn        TurnID             `json:"turn"`
+	Kind        TranscriptItemKind `json:"kind"`
+	At          time.Time          `json:"at"`
+	Ended       *time.Time         `json:"ended,omitempty"`
+	Text        string             `json:"text,omitempty"`
+	Tool        string             `json:"tool,omitempty"`
+	Arguments   string             `json:"arguments,omitempty"`
+	Output      string             `json:"output,omitempty"`
+	Failed      bool               `json:"failed,omitempty"`
+	More        bool               `json:"more,omitempty"`
+	Event       EventID            `json:"event,omitempty"`
+	Room        RoomID             `json:"room,omitempty"`
+	Seq         int64              `json:"seq,omitempty"`
+	Home        *Conversation      `json:"home,omitempty"`
+	Bytes       int64              `json:"bytes,omitempty"`
+	Attachments []Attachment       `json:"attachments,omitempty"`
+}
+type TranscriptInput struct {
+	Home *Conversation `json:"home,omitempty"`
+	At   time.Time     `json:"at"`
+	ID   EventID       `json:"id"`
+	Seq  int64         `json:"seq"`
+	Room RoomID        `json:"room"`
+	Type EventType     `json:"type"`
+	From Principal     `json:"from"`
+	Text string        `json:"text"`
+	More bool          `json:"more,omitempty"`
+}
+type TranscriptTurn struct {
+	ID         TurnID            `json:"id"`
+	Started    time.Time         `json:"started"`
+	Ended      *time.Time        `json:"ended,omitempty"`
+	DurationMS int64             `json:"durationMs,omitempty"`
+	Outcome    TurnOutcome       `json:"outcome,omitempty"`
+	Cause      FailureCause      `json:"cause,omitempty"`
+	Inputs     []TranscriptInput `json:"inputs"`
+	Items      []TranscriptItem  `json:"items"`
+	More       bool              `json:"more"`
+	After      string            `json:"after,omitempty"`
+	NextItem   int               `json:"nextItem,omitempty"`
+	Tail       bool              `json:"tail,omitempty"`
+	NextPost   int               `json:"nextPost,omitempty"`
 }
 type TranscriptStep struct {
 	Turn    TurnID     `json:"turn"`
@@ -516,8 +588,13 @@ type TranscriptStep struct {
 	Preview string     `json:"preview"`
 }
 type TranscriptReadResponse struct {
-	Steps     []TranscriptStep `json:"steps"`
-	Truncated bool             `json:"truncated"`
+	Steps      []TranscriptStep `json:"steps"`
+	Truncated  bool             `json:"truncated"`
+	Turns      []TranscriptTurn `json:"turns"`
+	Before     TurnID           `json:"before,omitempty"`
+	More       bool             `json:"more"`
+	Chunk      string           `json:"chunk,omitempty"`
+	NextOffset int              `json:"nextOffset,omitempty"`
 }
 type TranscriptAppendRequest struct {
 	Path   string `json:"path"`

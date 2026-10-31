@@ -50,7 +50,10 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 				continue
 			}
 			select {
-			case event := <-live:
+			case event, ok := <-live:
+				if !ok {
+					return
+				}
 				select {
 				case out <- event:
 				case <-ctx.Done():
