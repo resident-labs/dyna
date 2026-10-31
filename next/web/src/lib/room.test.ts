@@ -53,6 +53,10 @@ function engine(count: number) {
   globalThis.fetch = async (input, init) => {
     const method = String(input).replace("/v1/", "");
     const request: { afterSeq?: number; beforeSeq?: number; limit?: number } = JSON.parse(String(init?.body));
+    if (method === "post") {
+      posts.push(event(posts.length + 1, { type: "post.created", body: { text: "sent", home: { kind: "feed" } } }));
+      return new Response(JSON.stringify({ seq: posts.length, event: String(posts.length) }));
+    }
     if (method !== "events.list") return new Response(JSON.stringify({}));
     const limit = request.limit ?? PAGE;
     if (request.beforeSeq) {
@@ -94,5 +98,19 @@ test("holds live events while the window is away from the present", async () => 
     server.posts.push(event(1501, { type: "post.created", body: { text: "new", home: { kind: "feed" } } }));
     await room.jumpToPresent();
     assert.deepEqual([room.newest, room.atPresent], [1501, true]);
+  } finally { server.restore(); }
+});
+
+test("a post sent while an older page loads still brings the window to the present", async () => {
+  const server = engine(1500);
+  try {
+    const room = new RoomStore("r", () => () => {});
+    await room.open();
+    for (let i = 0; i < 4; i++) await room.loadOlder();
+    const older = room.loadOlder();
+    await room.post({ room: "r", text: "sent" });
+    await older;
+    assert.deepEqual([room.newest, room.atPresent, room.pendingPosts.size], [1501, true, 0]);
+    assert.equal(room.posts({ kind: "feed" }).at(-1)?.body.text, "sent");
   } finally { server.restore(); }
 });
