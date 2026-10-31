@@ -1,13 +1,11 @@
 package model
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/url"
 	"sync"
@@ -32,16 +30,16 @@ type connectAttempt struct {
 }
 
 type Connections struct {
-	proxy    *Proxy
-	key      string
-	store    *store.Store
-	now      func() time.Time
-	mu       sync.Mutex
-	attempts map[string]*connectAttempt
+	proxy      *Proxy
+	management managementClient
+	store      *store.Store
+	now        func() time.Time
+	mu         sync.Mutex
+	attempts   map[string]*connectAttempt
 }
 
 func (p *Proxy) Connections(key string, st *store.Store, now func() time.Time) *Connections {
-	return &Connections{proxy: p, key: key, store: st, now: now, attempts: make(map[string]*connectAttempt)}
+	return &Connections{proxy: p, management: managementClient{client: p.client, key: key}, store: st, now: now, attempts: make(map[string]*connectAttempt)}
 }
 
 type oauthResponse struct {
@@ -56,21 +54,8 @@ type oauthResponse struct {
 }
 
 func (c *Connections) request(ctx context.Context, method, path string, body []byte, out *oauthResponse) error {
-	req, err := http.NewRequestWithContext(ctx, method, "http://cliproxy/v8/management/"+path, bytes.NewReader(body))
-	if err != nil {
-		return errConnect
-	}
-	req.Header.Set("Authorization", "Bearer "+c.key)
-	req.Header.Set("Content-Type", "application/json")
-	res, err := c.proxy.client.Do(req)
-	if err != nil {
-		return errConnect
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return errConnect
-	}
-	if err := json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(out); err != nil {
+	data, err := c.management.request(ctx, method, "/v8/management/"+path, body)
+	if err != nil || json.Unmarshal(data, out) != nil {
 		return errConnect
 	}
 	return nil

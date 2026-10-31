@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -22,37 +21,18 @@ type quotaEntry struct {
 }
 
 type Quotas struct {
-	client *http.Client
-	key    string
-	now    func() time.Time
-	mu     sync.Mutex
-	cache  map[string]quotaEntry
+	management managementClient
+	now        func() time.Time
+	mu         sync.Mutex
+	cache      map[string]quotaEntry
 }
 
 func (p *Proxy) Quotas(key string, now func() time.Time) *Quotas {
-	return &Quotas{client: p.client, key: key, now: now, cache: make(map[string]quotaEntry)}
+	return &Quotas{management: managementClient{client: p.client, key: key}, now: now, cache: make(map[string]quotaEntry)}
 }
 
-// request never returns management response headers or errors that could contain credentials.
 func (q *Quotas) request(ctx context.Context, path string) (json.RawMessage, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://cliproxy/v0/management/"+path, nil)
-	if err != nil {
-		return nil, errors.New("management request failed")
-	}
-	req.Header.Set("Authorization", "Bearer "+q.key)
-	res, err := q.client.Do(req)
-	if err != nil {
-		return nil, errors.New("management request failed")
-	}
-	defer res.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
-	if res.StatusCode != http.StatusOK {
-		return nil, errors.New("management request failed")
-	}
-	if err != nil || !json.Valid(data) {
-		return nil, errors.New("management response invalid")
-	}
-	return data, nil
+	return q.management.request(ctx, http.MethodGet, "/v0/management/"+path, nil)
 }
 
 func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, error) {
