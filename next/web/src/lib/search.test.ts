@@ -7,6 +7,8 @@ test("a late search cannot replace the newer query", async () => {
   const old = new Promise<SearchResponse>(resolve => { resolveOld = resolve; });
   const search = new MessageSearch(request => request.query === "old" ? old : Promise.resolve({ posts: [], total: 7, names: {} }));
   const first = search.start("old");
+  search.prepare("new");
+  assert.equal(search.snapshot.state, "searching");
   await search.start("new");
   resolveOld({ posts: [], total: 42, names: {} });
   await first;
