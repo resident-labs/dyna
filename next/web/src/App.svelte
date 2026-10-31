@@ -298,7 +298,7 @@
     {:else}<div class="feed">
       {#if blocked}<Blocked kind={blocked} onretry={blocked === "unreachable" ? connect : undefined} />
       {:else if !room && roomsLoaded && !rooms.length}<Blocked kind="no-rooms" />
-      {:else if !room}<Home {attention} {navigate} onrequests={() => { section = "requests"; }} />
+      {:else if !room}<Home {attention} loaded={roomsLoaded} {navigate} onrequests={() => { section = "requests"; }} />
       {:else if unavailable && unavailable !== "room"}<Blocked kind={unavailable} onretry={unavailable === "unreachable" ? reopen : undefined} />
       {:else if store && !unavailable}
         {#key key}<Feed bind:this={view} {store} {home} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
