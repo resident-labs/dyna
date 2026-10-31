@@ -30,19 +30,20 @@
   function retrying(open: () => Promise<BlockedState | undefined>) {
     let tries = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let pending = false, stopped = false;
+    let pending = false, stopped = false, failing = false;
     const run = () => {
       if (pending || stopped) return;
       clearTimeout(timer);
       pending = true;
       void open().then(state => {
         pending = false;
+        failing = state === "unreachable";
         if (stopped) return;
-        if (state !== "unreachable") { tries = 0; return; }
+        if (!failing) { tries = 0; return; }
         if (document.visibilityState === "visible") timer = setTimeout(run, retryDelay(tries++));
       });
     };
-    const wake = () => { if (document.visibilityState === "hidden") clearTimeout(timer); else if (tries) run(); };
+    const wake = () => { if (document.visibilityState === "hidden") clearTimeout(timer); else if (failing) run(); };
     document.addEventListener("visibilitychange", wake);
     return { run, stop: () => { stopped = true; clearTimeout(timer); document.removeEventListener("visibilitychange", wake); } };
   }
