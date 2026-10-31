@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
-  import { accountRows, accountState, refused, removalPrompt, canReconnect } from "../accounts.ts";
+  import { accountRows, accountState, refused, removalPrompt, canReconnect, reconnectUnavailable } from "../accounts.ts";
   import type { Account, AccountProviderInfo, AccountsConnectResponse } from "../contract.gen.ts";
   import StatusPill from "./StatusPill.svelte";
   import Icon from "./Icon.svelte";
@@ -16,6 +16,7 @@
   let busy = $state(false), opened = $state(false), now = $state(Date.now());
   let reconnectId: string | undefined = $state();
   let removing: string | undefined = $state(), removeFailed = $state(false), unreachable = $state(false);
+  let replaceAfterRemove = $state(false), cannotReconnect = $state(false), wrongAccount = $state(false);
   let timer: ReturnType<typeof setTimeout> | undefined;
   let generation = 0, loadGeneration = 0;
 
@@ -34,7 +35,7 @@
   });
   function close() {
     generation++; clearTimeout(timer); adding = false; inline = false; selected = undefined; attempt = undefined;
-    reconnectId = undefined; label = ""; secret = ""; redirect = ""; connectState = "idle"; unreachable = false; opened = false;
+    reconnectId = undefined; label = ""; secret = ""; redirect = ""; connectState = "idle"; unreachable = false; cannotReconnect = false; wrongAccount = false; opened = false;
   }
   function choose(provider: AccountProviderInfo, inPlace: boolean) {
     close(); adding = true; selected = provider; inline = inPlace;
@@ -46,13 +47,13 @@
         if (ticket !== generation) return;
         if (result.status === "connected") { close(); reload(); }
         else if (result.status === "pending") watch(id, ticket);
-        else connectState = result.status;
+        else { connectState = result.status; wrongAccount = result.reason === "wrong_account"; }
       }, (error: unknown) => { if (ticket === generation) { connectState = "failed"; unreachable = !refused(error); } });
     }, 2000);
   }
   async function start() {
     if (!selected || busy) return;
-    busy = true; connectState = "idle"; unreachable = false;
+    busy = true; connectState = "idle"; unreachable = false; cannotReconnect = false; wrongAccount = false;
     const ticket = ++generation;
     if (selected.connectMethod === "key") {
       const key = secret; secret = "";
@@ -65,7 +66,7 @@
         const url = URL.canParse(result.link) ? new URL(result.link) : undefined;
         linkText = url ? url.host + url.pathname : result.link;
         connectState = "pending"; now = Date.now(); watch(result.attempt, ticket);
-      }, (error: unknown) => { if (ticket === generation) { connectState = "failed"; unreachable = !refused(error); } });
+      }, (error: unknown) => { if (ticket === generation) { connectState = "failed"; cannotReconnect = !!reconnectId && reconnectUnavailable(error); unreachable = !cannotReconnect && !refused(error); } });
     }
     busy = false;
   }
@@ -78,7 +79,11 @@
   async function remove(account: Account) {
     if (busy) return;
     busy = true; removeFailed = false;
-    await call("accounts.remove", { accountId: account.id }).then(() => { removing = undefined; reload(); }, () => { removeFailed = true; });
+    const provider = replaceAfterRemove ? providers.find(item => item.id === account.provider) : undefined;
+    await call("accounts.remove", { accountId: account.id }).then(() => {
+      removing = undefined; replaceAfterRemove = false; reload();
+      if (provider) { choose(provider, false); label = account.label; }
+    }, () => { removeFailed = true; });
     busy = false;
   }
   const remaining = (at: string, time: number) => {
@@ -103,7 +108,11 @@
         {#if connectState === "expired"}
         <p>The code expired.</p><button class="btn fill" type="button" disabled={busy} onclick={() => { attempt = undefined; void start(); }}>Get a new code</button>
       {:else if connectState === "failed"}
-        <p class="error" role="alert">{unreachable ? "Could not reach the service. Try again." : `${selected.displayName} did not accept the sign-in.`}</p><button class="btn fill" type="button" disabled={busy} onclick={() => { attempt = undefined; void start(); }}>Try again</button>
+        {#if cannotReconnect}
+          <p class="muted">Dyna cannot reconnect this saved sign-in. Remove the account and add it again.</p><button class="btn" type="button" onclick={() => { removing = reconnectId; replaceAfterRemove = true; close(); }}>Remove and add again</button>
+        {:else}
+          <p class="error" role="alert">{wrongAccount ? "That sign-in belongs to a different account. Sign in with the original account." : unreachable ? "Could not reach the service. Try again." : `${selected.displayName} did not accept the sign-in.`}</p><button class="btn fill" type="button" disabled={busy} onclick={() => { attempt = undefined; void start(); }}>Try again</button>
+        {/if}
       {:else if !attempt}
         <p>Connect this account to let Dyna use it.</p><button class="btn fill" type="button" disabled={busy || (!reconnectId && !label.trim())} onclick={() => void start()}>Start sign-in</button>
       {:else if attempt.flow === "device"}
@@ -153,8 +162,8 @@
                 {#if account.state === "sign_in_expired"}
                   <div class="expired">{#if canReconnect(account, provider.connectMethod)}<button class="btn fill" type="button" onclick={() => { choose(provider, true); reconnectId = account.id; label = account.label; }}>Sign in again</button>{/if}<span>Its limits show once it is signed in.</span></div>
                 {/if}
-                  {#if removing === account.id}<div class="remove-confirm"><span>{removalPrompt(provider.connectMethod)}</span><button class="btn danger" type="button" disabled={busy} onclick={() => void remove(account)}>Remove</button><button class="btn ghost" type="button" disabled={busy} onclick={() => { removing = undefined; removeFailed = false; }}>Keep</button>{#if removeFailed}<span class="error" role="alert">The account was not removed. Try again.</span>{/if}</div>
-                  {:else}<button class="btn ghost" type="button" onclick={() => { removing = account.id; removeFailed = false; }}>Remove</button>{/if}
+                  {#if removing === account.id}<div class="remove-confirm"><span>{removalPrompt(provider.connectMethod)}</span><button class="btn danger" type="button" disabled={busy} onclick={() => void remove(account)}>Remove</button><button class="btn ghost" type="button" disabled={busy} onclick={() => { removing = undefined; removeFailed = false; replaceAfterRemove = false; }}>Keep</button>{#if removeFailed}<span class="error" role="alert">The account was not removed. Try again.</span>{/if}</div>
+                  {:else}<button class="btn ghost" type="button" onclick={() => { removing = account.id; removeFailed = false; replaceAfterRemove = false; }}>Remove</button>{/if}
               </div>
               {#if reconnectId === account.id}{@render form()}{/if}
             {/each}
