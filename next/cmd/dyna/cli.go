@@ -249,9 +249,18 @@ func (c *socketClient) Events(ctx context.Context, room contract.RoomID, after i
 	}
 	scan := bufio.NewScanner(resp.Body)
 	scan.Buffer(make([]byte, 4096), 4<<20)
+	var name string
 	for scan.Scan() {
 		line := scan.Text()
-		if !strings.HasPrefix(line, "data: ") {
+		if line == "" {
+			name = ""
+			continue
+		}
+		if after, ok := strings.CutPrefix(line, "event: "); ok {
+			name = after
+			continue
+		}
+		if !strings.HasPrefix(line, "data: ") || (name != "" && name != "message") {
 			continue
 		}
 		var event contract.Event
