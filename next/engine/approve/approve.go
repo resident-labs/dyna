@@ -116,7 +116,7 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 			return contract.Operation{}, err
 		}
 		if previous.Operation.ID != "" {
-			return s.decodeReplay(previous)
+			return s.decodeReplay(previous, input)
 		}
 	}
 	if input.Args == nil {
@@ -208,7 +208,7 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 		return contract.Operation{}, err
 	}
 	if previous.Operation.ID != "" {
-		return s.decodeReplay(previous)
+		return s.decodeReplay(previous, input)
 	}
 	if !immediate {
 		return op, nil
@@ -235,7 +235,11 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 	}
 }
 
-func (s *Service) decodeReplay(record store.StoredOperation) (contract.Operation, error) {
+func (s *Service) decodeReplay(record store.StoredOperation, input contract.Operation) (contract.Operation, error) {
+	// The API authorized the submitted kind. Never return a different kind or room.
+	if record.Operation.Kind != input.Kind || record.Operation.Room != input.Room {
+		return contract.Operation{}, ErrForbidden
+	}
 	entry, ok := s.Kinds[record.Operation.Kind]
 	if !ok {
 		return contract.Operation{}, ErrInvalid
