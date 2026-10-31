@@ -100,7 +100,11 @@ func (s services) classifyGitHubWrite(ctx context.Context, actor authority.Actor
 			if senderErr != nil {
 				return approvals.Class(""), senderErr
 			}
-			event := room.GitHubWriteRefusedEvent{Requester: sender.Session.Address(), Verb: room.GitHubWriteVerb(refusal.Write.Verb), Repository: refusal.Write.Host + "/" + refusal.Write.Repo, Reason: room.GitHubWriteReason(refusal.Decision.Refusal), Rule: room.GitHubWriteRule(refusal.Decision.Rule)}
+			repository := refusal.Write.Host + "/" + refusal.Write.Repo
+			if refusal.Decision.Refusal == ghclient.ReasonRepositoryUnknown {
+				repository = "unknown repository"
+			}
+			event := room.GitHubWriteRefusedEvent{Requester: sender.Session.Address(), Verb: room.GitHubWriteVerb(refusal.Write.Verb), Repository: repository, Reason: room.GitHubWriteReason(refusal.Decision.Refusal), Rule: room.GitHubWriteRule(refusal.Decision.Rule)}
 			if _, postErr := s.rooms.Notify.Rooms.PostEventInput(room.PostEventInput{RoomID: actor.Room, Event: event, FreshID: true, Producer: room.ProducerEngine, To: []string{rec.Name}}); postErr != nil {
 				return approvals.Class(""), postErr
 			}

@@ -7,6 +7,7 @@
   let { post, surface = 'feed' }: { post: EventPost; surface?: EventSurface } = $props()
   let event = $derived(isGitHubWriteRefusedEvent(post.payload) ? post.payload : undefined)
   const reasons: Record<GitHubWriteReason, string> = {
+    'repository-unknown': 'Use --repo, a pull request URL, or a checkout with an origin remote.',
     'read-only-room': 'This room does not allow GitHub writes. Ask the owner to enable them.',
     'not-room-repository': 'This repository is not registered to the room. Choose a room repository.',
     'upstream-branch-delete': 'An upstream close cannot delete a branch. Remove the branch deletion option.',

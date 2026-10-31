@@ -2,6 +2,7 @@ package ghclient
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,14 @@ import (
 	"dyna-agent/internal/approvals"
 	"dyna-agent/internal/room"
 )
+
+func TestUnknownRepositoryWriteRefused(t *testing.T) {
+	_, err := ClassifyForApproval(context.Background(), "gh", t.TempDir(), []string{"pr", "edit", "1", "--title", "new"})
+	var refusal *RefusalError
+	if !errors.As(err, &refusal) || refusal.Decision.Refusal != Reason("repository-unknown") {
+		t.Fatalf("got %v, want repository-unknown refusal", err)
+	}
+}
 
 func TestClassifyForApprovalUsesRoomAccountAndCommand(t *testing.T) {
 	records := setupRooms(t, "owner/project")
