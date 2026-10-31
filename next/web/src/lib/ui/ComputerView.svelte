@@ -70,14 +70,15 @@
   const phoneKeys = new PhoneState(state => { held = state; });
   const twice = escTwice();
   // A batch goes with the size of the picture the owner sees, which its positions are in. A batch the engine refuses
-  // shows as a notice under the screen; the next batch that lands clears it.
+  // shows as a notice under the screen with Retry. It stays until Retry or Return control, because the refused batch may
+  // hold a key up or a mouse up, and a later batch that lands does not send it.
   let stuck = $state(false);
-  const queue = new InputQueue(async (events, frame) => { await input?.(events, frame); }, ok => { stuck = !ok; });
+  const queue = new InputQueue(async (events, frame) => { await input?.(events, frame); }, ok => { if (!ok) stuck = true; });
   const send = (events: ComputerInput[]) => {
     if (input && picture && events.length) queue.push(events, { width: picture.naturalWidth, height: picture.naturalHeight });
   };
   async function take() { control = true; await tick(); screen?.focus(); }
-  function release() { control = false; keyboardOpen = false; field?.blur(); }
+  function release() { control = false; stuck = false; keyboardOpen = false; field?.blur(); }
   $effect(() => { if (phase !== "live") release(); });
   function toggleKeyboard() {
     keyboardOpen = !keyboardOpen;
@@ -174,7 +175,7 @@
     {:else}<span class="line">{activity ? `${name} · ${activity}` : name}</span>{/if}
     {#if input && control}
       <button type="button" class="tool" class:on={keyboardOpen} aria-label="Phone keyboard" aria-pressed={keyboardOpen} title="Phone keyboard" onpointerdown={event => event.preventDefault()} onclick={toggleKeyboard}><Icon name="keyboard" size={18} /></button>
-      {#if stuck}<button type="button" class="take" onclick={() => queue.retry()}>Retry</button>{/if}
+      {#if stuck}<button type="button" class="take" onclick={() => { stuck = false; queue.retry(); }}>Retry</button>{/if}
       <button type="button" class="take" onclick={release}>Return control</button>
     {:else if input}<button type="button" class="take" disabled={phase !== "live"} onclick={take}>Take control</button>{/if}
   </div>{/if}
