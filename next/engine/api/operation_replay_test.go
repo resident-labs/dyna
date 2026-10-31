@@ -13,6 +13,18 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
+type replayService struct {
+	*fakeService
+	core *engine.Service
+}
+
+func (s replayService) OperationScope(kind contract.OpKind) contract.Scope {
+	return s.core.OperationScope(kind)
+}
+func (s replayService) OpSubmit(ctx context.Context, caller contract.Principal, req contract.OpSubmitRequest) (contract.OpSubmitResponse, *contract.Error) {
+	return s.core.OpSubmit(ctx, caller, req)
+}
+
 func TestOperationReplayRespectsDeviceScopes(t *testing.T) {
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -41,7 +53,7 @@ func TestOperationReplayRespectsDeviceScopes(t *testing.T) {
 	if err := core.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.grant": entry, "pr.open": {Scope: contract.ScopeOperate}}, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	a := New(core, nil)
+	a := New(replayService{fakeService: &fakeService{}, core: core}, nil)
 	admin := Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner, Device: "admin"}, Web: true, Scopes: []contract.Scope{contract.ScopeAdmin}}
 	limited := Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner, Device: "limited"}, Web: true, Scopes: []contract.Scope{contract.ScopeOperate}}
 	first := request(a.handler(admin), "/v1/op.submit", `{"clientId":"shared","operation":{"room":"room","kind":"hostexec.grant","args":{"room":"room","to":{"kind":"session","session":"worker"},"hosts":["host"],"reason":"private"}}}`)
