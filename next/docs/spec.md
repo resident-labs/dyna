@@ -906,8 +906,8 @@ A computer is one browser per box, so an agent can open a web page, act on it an
 - **Where it runs.** Inside the box, as a child of the box agent, in the box's own budget slice. Nothing runs on the host or the control plane. It starts on first use and stops when the box stops.
 - **What it is.** One Chromium from the image, with its DevTools port on the box's loopback only. The agent drives it with `dyna computer` (open a URL, click, type, read the page text, take a screenshot to a file) or with any client that speaks the DevTools protocol, such as Playwright.
 - **What it opens.** Pages that the agent serves inside its own box, such as a dev server of the web app it builds, on the box's loopback, and public sites. It cannot open the engine's web app: network listeners accept only paired devices, and boxes hold no device keys (5.7).
-- **Watching.** The box agent sends the browser's screencast frames over the box socket. The engine passes them to the web app, which shows a live view on the session page. The view is read-only: the owner watches and does not type into it.
-- **Not built.** No second browser, no recording, no owner input, no reminders, and no computer outside a box.
+- **Watching.** The box agent sends the browser's screencast frames over the box socket. The engine passes them to the web app, which shows a live view on the session page. The owner can also take control: a paired device with the `computers` scope, or the local owner, sends key, mouse and wheel events with `POST /v1/computer.input`. The engine passes each batch over the box socket and the box agent sends it to Chromium as DevTools input events. A session cannot send owner input, agent input through `dyna computer` works as before, and owner input never stops or pauses the session.
+- **Not built.** No second browser, no recording, no reminders, and no computer outside a box.
 - **Budget.** About 500 Go lines (box agent, engine route, `dyna computer`) and 200 TypeScript lines (the live view).
 
 M2 acceptance check 13 covers it.
