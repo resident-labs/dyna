@@ -31,6 +31,7 @@ CREATE TABLE archives (session TEXT NOT NULL REFERENCES sessions(id), repo TEXT 
 CREATE TABLE transcript_offsets (session TEXT NOT NULL REFERENCES sessions(id), path TEXT NOT NULL, acked INTEGER NOT NULL, PRIMARY KEY(session, path));
 CREATE TABLE shell_jobs (session TEXT NOT NULL REFERENCES sessions(id), job TEXT NOT NULL, PRIMARY KEY(session, job));
 CREATE TABLE event_files (seq INTEGER NOT NULL REFERENCES events(seq), sha256 TEXT NOT NULL, media TEXT NOT NULL, PRIMARY KEY(sha256, seq));
+CREATE TABLE visuals (id TEXT PRIMARY KEY, room TEXT NOT NULL, author_kind TEXT NOT NULL, author_id TEXT NOT NULL, version INTEGER NOT NULL);
 CREATE TABLE uploads (sha256 TEXT NOT NULL, room TEXT NOT NULL, PRIMARY KEY(sha256, room));
 CREATE TABLE pr_owners (repo TEXT NOT NULL REFERENCES repos(repo), number INTEGER NOT NULL, session TEXT NOT NULL REFERENCES sessions(id), goal TEXT NOT NULL, approved_head TEXT NOT NULL, branch TEXT NOT NULL DEFAULT '', PRIMARY KEY(repo, number));
 

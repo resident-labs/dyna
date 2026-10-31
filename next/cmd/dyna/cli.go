@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
+	"github.com/resident-labs/dyna/box/visual"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/spf13/cobra"
 )
@@ -531,10 +532,21 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	}}
 	session.AddCommand(start, closeCmd, restart, setProfile)
 	root.AddCommand(session)
-	var postRoom string
+	var postRoom, htmlPath, update string
+	var allowNet bool
 	var mentions, paths []string
 	post := &cobra.Command{Use: "post TEXT", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		if len(paths) > 16 {
+		if (update != "" || allowNet) && htmlPath == "" {
+			return fmt.Errorf("--update and --allow-net need --html")
+		}
+		if htmlPath != "" && strings.TrimSpace(args[0]) == "" {
+			return fmt.Errorf("--html needs post text")
+		}
+		count := len(paths)
+		if htmlPath != "" {
+			count++
+		}
+		if count > 16 {
 			return fmt.Errorf("a post can carry at most 16 attachments")
 		}
 		c := getClient()
@@ -546,16 +558,52 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			}
 			attachments = append(attachments, attachment)
 		}
-		r, err := c.Post(cmd.Context(), contract.PostRequest{Room: contract.RoomID(postRoom), Text: args[0], Mentions: mentions, Attachments: attachments})
+		if htmlPath != "" {
+			data, err := readVisual(htmlPath)
+			if err != nil {
+				return err
+			}
+			title, height, err := visualMeta(htmlPath, data)
+			if err != nil {
+				return err
+			}
+			card := &contract.VisualCard{Title: title, Height: height, AllowNet: allowNet}
+			result := visual.Preview(cmd.Context(), data, visualCSP(allowNet), allowNet)
+			for _, check := range result.Checks {
+				fmt.Fprintf(cmd.ErrOrStderr(), "%s: %s %s\n", check.Name, check.Status, check.Detail)
+			}
+			if err := visualImages(cmd.Context(), c, result, card); err != nil {
+				return err
+			}
+			dir, err := os.MkdirTemp("", "dyna-card-")
+			if err != nil {
+				return err
+			}
+			defer os.RemoveAll(dir)
+			copyPath := filepath.Join(dir, filepath.Base(htmlPath))
+			if err = os.WriteFile(copyPath, data, 0600); err != nil {
+				return err
+			}
+			file, err := c.Upload(cmd.Context(), copyPath)
+			if err != nil {
+				return err
+			}
+			file.Visual = card
+			attachments = append(attachments, file)
+		}
+		r, err := c.Post(cmd.Context(), contract.PostRequest{Room: contract.RoomID(postRoom), Text: args[0], Mentions: mentions, Attachments: attachments, VisualUpdate: contract.EventID(update)})
 		if err == nil {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), r.Event)
 		}
 		return err
 	}}
+	post.Flags().StringVar(&htmlPath, "html", "", "Attach an HTML visual card")
+	post.Flags().StringVar(&update, "update", "", "Add a version to a visual post")
+	post.Flags().BoolVar(&allowNet, "allow-net", false, "Allow HTTPS resources in the visual")
 	post.Flags().StringArrayVar(&paths, "attach", nil, "Attach a file (repeatable)")
 	post.Flags().StringVar(&postRoom, "room", "", "Room ID")
 	post.Flags().StringSliceVar(&mentions, "mention", nil, "Session mentions")
-	root.AddCommand(post)
+	root.AddCommand(post, visualCommand())
 
 	op := &cobra.Command{Use: "op"}
 	opList := &cobra.Command{Use: "list ROOM", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
