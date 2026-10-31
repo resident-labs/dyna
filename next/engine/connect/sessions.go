@@ -272,7 +272,7 @@ func (s *Sessions) ServePublic(w http.ResponseWriter, r *http.Request, origin st
 				delete(s.codes, k)
 			}
 		}
-		s.codes[hashToken(code)] = mintCode{c.JKT, c.Origin, c.Dev, c.Sub, c.Epoch, c.Generation, s.now().Add(5 * time.Minute), s.now()}
+		s.codes[hashToken(code)] = mintCode{c.JKT, c.Origin, c.Dev, c.Sub, c.Epoch, c.Generation, s.now().Add(5 * time.Minute), time.Unix(c.Iat, 0)}
 		s.mu.Unlock()
 		sig := ed25519.Sign(relay.Key, []byte("dyna-connect-mint.v1\n"+c.Nonce+"\n"+hashToken(code)))
 		reply(w, 200, struct {
