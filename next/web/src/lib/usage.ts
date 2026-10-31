@@ -1,4 +1,4 @@
-import type { AccountUsage, UsageCause, UsageWindow } from "./contract.gen.ts";
+import type { AccountProviderInfo, AccountUsage, UsageCause, UsageWindow } from "./contract.gen.ts";
 import type { Meter } from "./hosts.ts";
 
 // An expired sign-in needs attention; an unreachable usage reading is a muted fact.
@@ -18,15 +18,15 @@ const unitOf = (seconds: number): [number, string] =>
 const span = (seconds: number) => count(...unitOf(seconds));
 
 // An account's name on screen: its provider, such as "Claude". The label is never shown, because it can be a sign-in address.
-export const providerName = (provider: string) => `${provider.charAt(0).toUpperCase()}${provider.slice(1)}`;
+export const providerName = (provider: string, providers: AccountProviderInfo[]) => providers.find(item => item.id === provider)?.displayName ?? provider;
 
 // The busiest visible window by provider, such as "Claude · 5-hour 62% used"; none without one.
-export function busiestWindow(accounts: AccountUsage[]): string | undefined {
+export function busiestWindow(accounts: AccountUsage[], providers: AccountProviderInfo[]): string | undefined {
   const windows = accounts.flatMap(a => a.cause ? [] : visibleWindows(a.windows ?? []).map(w => ({ provider: a.provider, w })));
   const top = windows.reduce<(typeof windows)[number] | undefined>((max, next) => !max || next.w.usedPercent > max.w.usedPercent ? next : max, undefined);
   if (!top) return undefined;
   const label = windowLabel({ ...top.w, model: undefined });
-  return `${providerName(top.provider)} · ${label}${top.w.model ? ` (${top.w.model})` : ""} ${Math.round(top.w.usedPercent)}% used`;
+  return `${providerName(top.provider, providers)} · ${label}${top.w.model ? ` (${top.w.model})` : ""} ${Math.round(top.w.usedPercent)}% used`;
 }
 
 // "2 h 10 min", "3 d 4 h" or "10 min" until a time, with no-break spaces so it wraps as one; none when it is not

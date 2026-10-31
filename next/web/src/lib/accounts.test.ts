@@ -5,7 +5,7 @@ import { APIError } from "./client.ts";
 import type { Account, AccountProviderInfo } from "./contract.gen.ts";
 
 test("search unfolds matching API key providers", () => {
-  const providers: AccountProviderInfo[] = Array.from({ length: 12 }, (_, i) => ({ id: "anthropic", displayName: `Provider ${i}`, connectMethod: "key", connectFlow: "key" }));
+  const providers: AccountProviderInfo[] = Array.from({ length: 12 }, (_, i) => ({ id: "anthropic", displayName: `Provider ${i}`, connectMethod: "key", connectFlow: "key", flows: ["key"], models: [] }));
   assert.equal(providerGroup(providers, "key", "", false).remaining, 2);
   assert.equal(providerGroup(providers, "key", "provider 11", false).items[0].displayName, "Provider 11");
   assert.equal(providerGroup(providers, "key", "", true).items.length, 12);
@@ -18,7 +18,7 @@ test("only the typed unavailable error offers remove and add again", () => {
 });
 
 test("only expired sign-ins offer reconnect", () => {
-  const account: Account = { id: "a", provider: "anthropic", label: "Work", rooms: null, state: "sign_in_expired" };
+  const account: Account = { id: "a", provider: "anthropic", flow: "callback", label: "Work", rooms: null, state: "sign_in_expired" };
   assert.equal(canReconnect(account, "oauth"), true);
   assert.equal(canReconnect({ ...account, state: "connected" }, "oauth"), false);
   assert.equal(canReconnect(account, "key"), false);
@@ -30,7 +30,7 @@ test("removal explains what Dyna deletes for each connection method", () => {
 });
 
 test("unknown is muted and expired accounts sort first", () => {
-  const unknown: Account = { id: "a", provider: "anthropic", label: "Alpha", rooms: null, state: "unknown" };
+  const unknown: Account = { id: "a", provider: "anthropic", flow: "callback", label: "Alpha", rooms: null, state: "unknown" };
   const expired: Account = { ...unknown, id: "z", label: "Zulu", state: "sign_in_expired" };
   assert.deepEqual(accountState(unknown), { line: "Not checked yet" });
   assert.deepEqual(accountRows([unknown, expired]).map(a => a.id), ["z", "a"]);
