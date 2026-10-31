@@ -59,7 +59,11 @@ const replayOperationQuery = "SELECT " + operationColumns + " FROM operations WH
 
 // ReadReplayOperation finds a caller's keyed operation outside a write transaction.
 func (s *Store) ReadReplayOperation(ctx context.Context, caller contract.Principal, clientID string) (StoredOperation, error) {
-	return scanOperation(s.read.QueryRowContext(ctx, replayOperationQuery, contract.MethodOpSubmit, caller.Kind, caller.Session, clientID))
+	record, err := scanOperation(s.read.QueryRowContext(ctx, replayOperationQuery, contract.MethodOpSubmit, caller.Kind, caller.Session, clientID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return StoredOperation{}, nil
+	}
+	return record, err
 }
 
 func (s *Store) InsertOperationReplay(tx *sql.Tx, caller contract.Principal, clientID string, op contract.OpID, now time.Time) error {
@@ -190,4 +194,85 @@ func nullableJSON(present bool, data []byte) []byte {
 		return nil
 	}
 	return data
+}
+
+// OperationExpiry constructs the decision and event only when expiry is needed.
+type OperationExpiry func(contract.Operation) (contract.Decision, contract.Event, []contract.Delivery, error)
+
+func (s *Store) expireOperation(tx *sql.Tx, op contract.Operation, expiry OperationExpiry) error {
+	d, event, deliveries, err := expiry(op)
+	if err != nil {
+		return err
+	}
+	_, err = s.TransitionOperation(tx, op.ID, contract.OpPending, contract.OpExpired, &d, nil, event, deliveries)
+	return err
+}
+
+func (s *Store) SubmitOperation(ctx context.Context, record StoredOperation, request contract.Event, clientID string, now time.Time, checkErr error, expiry OperationExpiry) (previous StoredOperation, replay bool, err error) {
+	op := record.Operation
+	err = s.Write(ctx, func(tx *sql.Tx) error {
+		if clientID != "" {
+			found, err := s.ReplayOperation(tx, op.By, clientID)
+			if err == nil {
+				previous = found
+				replay = true
+				return nil
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+		}
+		found, err := s.PendingOperation(tx, op.Room, op.By, op.Kind, record.Args)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err == nil && !found.Operation.Expires.After(now) {
+			if err := s.expireOperation(tx, found.Operation, expiry); err != nil {
+				return err
+			}
+		} else if err == nil {
+			previous = found
+			if clientID != "" {
+				return s.InsertOperationReplay(tx, op.By, clientID, found.Operation.ID, now)
+			}
+			return nil
+		}
+		if checkErr != nil {
+			return checkErr
+		}
+		if err := s.InsertOperation(tx, record, request, nil); err != nil {
+			return err
+		}
+		if clientID != "" {
+			return s.InsertOperationReplay(tx, op.By, clientID, op.ID, now)
+		}
+		return nil
+	})
+	return
+}
+
+func (s *Store) DecideOperation(ctx context.Context, op contract.Operation, state contract.OpState, decision contract.Decision, event contract.Event, deliveries []contract.Delivery, now func() time.Time, expiry OperationExpiry) (expired, changed bool, err error) {
+	err = s.Write(ctx, func(tx *sql.Tx) error {
+		if !op.Expires.After(now()) {
+			expired = true
+			return s.expireOperation(tx, op, expiry)
+		}
+		var err error
+		changed, err = s.TransitionOperation(tx, op.ID, contract.OpPending, state, &decision, nil, event, deliveries)
+		return err
+	})
+	return
+}
+
+func (s *Store) ExpireOperation(ctx context.Context, op contract.Operation, expiry OperationExpiry) error {
+	return s.Write(ctx, func(tx *sql.Tx) error { return s.expireOperation(tx, op, expiry) })
+}
+
+func (s *Store) ChangeOperation(ctx context.Context, id contract.OpID, from, to contract.OpState, result *contract.OpResult, event contract.Event, deliveries []contract.Delivery) (changed bool, err error) {
+	err = s.Write(ctx, func(tx *sql.Tx) error {
+		var err error
+		changed, err = s.TransitionOperation(tx, id, from, to, nil, result, event, deliveries)
+		return err
+	})
+	return
 }
