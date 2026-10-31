@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"database/sql"
 	"math"
 
 	"github.com/resident-labs/dyna/contract"
@@ -60,21 +59,7 @@ func (s *Service) RoomSetLimits(ctx context.Context, caller contract.Principal, 
 	if err != nil {
 		return contract.RoomSetLimitsResponse{}, failure(err)
 	}
-	err = s.store.Write(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, "UPDATE rooms SET cpus=?,mem_bytes=? WHERE id=?", req.CPUs, req.MemBytes, req.Room)
-		if err != nil {
-			return err
-		}
-		n, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			return sql.ErrNoRows
-		}
-		_, err = s.store.AppendEvent(tx, event)
-		return err
-	})
+	err = s.store.SetRoomLimits(ctx, req.Room, req.CPUs, req.MemBytes, event)
 	if err != nil {
 		return contract.RoomSetLimitsResponse{}, failure(err)
 	}
