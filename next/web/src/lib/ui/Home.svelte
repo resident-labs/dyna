@@ -4,7 +4,7 @@
   import { APIError, call } from "../client.ts";
   import type { Attention } from "../attention.svelte.ts";
   import type { AccountUsage, Card, HostSummary, Principal, SessionListResponse } from "../contract.gen.ts";
-  import { fromNow } from "../feed.ts";
+  import { fromNow, requestLine } from "../feed.ts";
   import { hostMeters, watchHosts } from "../hosts.ts";
   import { busiestWindow } from "../usage.ts";
   import { distinctInitials, hue, initials as letters } from "../identity.ts";
@@ -22,7 +22,7 @@
   // Each room's sessions load once while Home is open, for Activity's counts and names. Requests load per room, and
   // again only when a room gains a request or requester that no answer named yet. A failed load forgets its IDs and
   // offers Try again.
-  const requests = new SvelteMap<string, { title: string; by: Principal; target: Card["target"]; expires: string }>();
+  const requests = new SvelteMap<string, { title: string; body: string; by: Principal; target: Card["target"]; expires: string }>();
   const sessions = new SvelteMap<string, { name: string; root: boolean; room: string }>();
   // Requester IDs a session.list answered for; one it did not name is a closed session.
   const answered = new SvelteSet<string>();
@@ -47,7 +47,7 @@
     for (const room of attention.rooms.keys()) {
       load([room], listed, () => attention.listSessions(room), keepSessions(room));
       load(attention.waiting.get(room) ?? [], requests, () => call("op.list", { room }), list => {
-        for (const op of list.operations ?? []) requests.set(op.id, { title: op.card.title, by: op.by, target: op.card.target, expires: op.expires });
+        for (const op of list.operations ?? []) requests.set(op.id, { title: op.card.title, body: op.card.body?.split("\n")[0] ?? "", by: op.by, target: op.card.target, expires: op.expires });
       });
       // A requester that started after the room's list loads it again.
       const by = [...attention.waiting.get(room) ?? []].flatMap(id => requests.get(id)?.by.session ?? []);
@@ -159,14 +159,15 @@
       <div class="list">{#each groups as { room, count } (room.id)}<a class="item fold" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>
         <Icon name="chevron" /><Avatar kind="room" name={room.name} label={initials.get(room.name)} size={28} />
         <span class="lines"><span class="title room" style:--hue={hue(room.name)}>{room.name}</span><span class="line">{count} waiting</span></span></a>
-      {:else}{#each waiting as { id, room, value, who, root } (id)}{@const soon = Date.parse(value.expires) - now < 5 * 60_000}<div class="item request">
+      {:else}{#each waiting as { id, room, value, who, root } (id)}{@const soon = Date.parse(value.expires) - now < 5 * 60_000}{@const line = requestLine(value)}<div class="item request">
         <Avatar kind={value.by.kind} name={who} label={value.by.session ? sessionInitials.get(value.by.session) : undefined} {root} size={28} />
-        <span class="lines"><span class="title">{value.title}</span>
-          <span class="line"><b class="who {value.by.kind}" class:root style:--hue={hue(who)}>{who}</b> · {#if value.target.kind === "host"}on <code>{value.target.name}</code> · {:else if value.target.kind !== "room"}on {value.target.kind} {value.target.name} · {/if}{room.name} ·
+        <!-- The title is the phrase after the asker's name, as on the request card. The body's first line says who gets what for how long, so Approve never hides it; only a line that does not name the host gives way to the host. -->
+        <span class="lines"><span class="title"><b class="who {value.by.kind}" class:root style:--hue={hue(who)}>{who}</b> {value.title}</span>
+          <span class="line">{#if line.named}{line.text}<code>{line.named}</code>{line.after}{" · "}{:else if value.target.kind === "host"}on <code>{value.target.name}</code>{" · "}{:else if value.body}{value.body}{" · "}{:else if value.target.kind !== "room"}on {value.target.kind} {value.target.name}{" · "}{/if}{room.name} ·
             {#if soon}<StatusPill tone="warning" label="Expires {fromNow(value.expires, now)}" />{:else}Expires {fromNow(value.expires, now)}{/if}</span>
           {#if failures.has(id)}<span class="line" role="alert">{failures.get(id)}</span>{/if}</span>
-        <span class="acts"><button type="button" class="approve" disabled={deciding.has(id)} onclick={event => void decide(id, value.title, true, event.currentTarget.closest(".request") ?? event.currentTarget)}>Approve</button>
-          <button type="button" disabled={deciding.has(id)} onclick={event => void decide(id, value.title, false, event.currentTarget.closest(".request") ?? event.currentTarget)}>Deny</button>
+        <span class="acts"><button type="button" class="approve" disabled={deciding.has(id)} onclick={event => void decide(id, `${who} ${value.title}`, true, event.currentTarget.closest(".request") ?? event.currentTarget)}>Approve</button>
+          <button type="button" disabled={deciding.has(id)} onclick={event => void decide(id, `${who} ${value.title}`, false, event.currentTarget.closest(".request") ?? event.currentTarget)}>Deny</button>
           <a class="open" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>Open</a></span></div>{/each}{/each}
         {#each [...decided] as [id, line] (id)}<p class="decided">{line}</p>{/each}</div>
       </section>{/if}
@@ -223,6 +224,8 @@
   /* Requests are one column: each row carries its actions. A decided request is one muted line. */
   .list { display: grid; margin: 0 -8px; }
   .request { flex-wrap: wrap; }
+  /* The owner approves from this line, so it wraps rather than cutting off who gets access or for how long. */
+  .request .line { white-space: normal; }
   .who { font-weight: 500; color: oklch(var(--id-name) var(--hue)); }
   .who.owner { color: var(--focus); }
   .who.engine, .who.root { color: var(--text); }
