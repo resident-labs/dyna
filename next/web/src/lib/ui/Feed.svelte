@@ -14,9 +14,9 @@
   import type { Conversation, PostRequest, Principal } from "../contract.gen.ts";
 
   // unsent holds the app's failed sends of this conversation; see EventWindow.onunsent.
-  let { store, home, admin, operate, intro, unsent, onunsent, onsettled, onforward, onclosed, onjobs, element = $bindable() }: {
+  let { store, home, admin, operate, intro, unsent, onunsent, onsettled, onforward, onclosed, onjobs, target, ontarget, element = $bindable() }: {
     store: RoomStore; home: Conversation; admin: boolean; operate: boolean; intro: Snippet<[boolean]>; unsent: PostRequest[];
-    onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onforward: (quote: Quote) => void; onclosed: () => void; onjobs: (session: string) => void; element?: HTMLDivElement;
+    onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onforward: (quote: Quote) => void; onclosed: () => void; onjobs: (session: string) => void; target?: number; ontarget: () => void; element?: HTMLDivElement;
   } = $props();
 
   // The view is keyed by its conversation, so its window lives as long as the view.
@@ -92,6 +92,25 @@
   let list: VirtualList<Item> | undefined = $state();
   // True once the conversation has loaded with no event at all; a session that never existed reads so.
   export const empty = () => view.ready && !view.ordered.length;
+  let ring: number | undefined = $state();
+  $effect(() => {
+    const seq = target;
+    if (seq === undefined || !view.ready) return;
+    let cancelled = false;
+    void (async () => {
+      await view.seek(seq);
+      if (cancelled) return;
+      await tick();
+      const index = items.findIndex(item => item.key === `p${seq}`);
+      if (index >= 0) {
+        await list?.reveal(index);
+        ring = seq;
+        setTimeout(() => { if (ring === seq) ring = undefined; }, 1000);
+      }
+      ontarget();
+    })();
+    return () => { cancelled = true; };
+  });
   // The owner's own post and a jump always land on the newest row, even from inside the present window.
   // It never rejects: a failed send stays in the feed as a row with Retry.
   export async function send(request: PostRequest): Promise<void> {
@@ -135,8 +154,8 @@
   <VirtualList bind:this={list} {items} key={item => item.key} label="Feed" follow={view.atPresent} bind:element
     onstart={() => void view.loadOlder()} onend={() => void view.loadNewer()} onbottom={shown => { if (shown) markRead(); }}>
     {#snippet row(item: Item)}
-      {#if item.kind === "post"}<PostRow row={item} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
-        onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} onforward={operate ? () => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments }) : undefined} />
+      {#if item.kind === "post"}<div class:ring={item.key === `p${ring}`}><PostRow row={item} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
+        onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} onforward={operate ? () => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments }) : undefined} /></div>
       {:else if item.kind === "notice"}<p class="hint">{describe(item.event, name)} · <time datetime={item.event.at}>{formatTime(item.event.at)}</time></p>
       {:else if item.kind === "restarted"}<p class="hint">{name(item.session)}'s box was replaced. Unpushed work in the old volume is gone.</p>
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} root={root(item.session)}
@@ -166,6 +185,9 @@
 {/if}
 
 <style>
+  .ring { animation: highlight 1s ease-out; }
+  @keyframes highlight { from { box-shadow: inset 0 0 0 2px var(--focus); } to { box-shadow: inset 0 0 0 2px transparent; } }
+  @media (prefers-reduced-motion: reduce) { .ring { animation: none; box-shadow: inset 0 0 0 2px var(--focus); } }
   /* The running turn's steps sit where its work line will fold, in the work list's form. */
   .steps { margin: 4px 16px 4px var(--gutter); padding: 0 0 0 12px; border-left: 1px solid var(--line); list-style: none; color: var(--muted); font-size: 12.5px; }
   .steps li { padding: 1px 0; overflow-wrap: anywhere; }
