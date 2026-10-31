@@ -328,8 +328,10 @@ func (s *Server) View(reset bool) []contract.ShellJobOutput {
 			end = start
 		}
 		if fresh || end > start || j.ownerFinished != j.finished {
-			result = append(result, contract.ShellJobOutput{Job: j.id, Command: Mask(j.command), Running: !j.finished, ExitCode: j.exit, Text: Mask(string(j.output[start:end])), Reset: fresh})
-			budget -= end - start
+			command := Mask(j.command)
+			command = strings.ToValidUTF8(command[:min(len(command), 4<<10)], "")
+			result = append(result, contract.ShellJobOutput{Job: j.id, Command: command, Running: !j.finished, ExitCode: j.exit, Text: Mask(string(j.output[start:end])), Reset: fresh})
+			budget -= end - start + len(command) + 256 // JSON fields and job ID
 			s.viewNext = (index + 1) % len(s.jobs)
 		}
 		j.owner, j.ownerFinished = j.base+end, j.finished
