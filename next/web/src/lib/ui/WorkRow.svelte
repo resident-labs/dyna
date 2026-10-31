@@ -57,6 +57,7 @@
 </script>
 
 {#snippet requestDetails(event: Extract<Event, { type: "op.requested" }>)}<li class="step"><details><summary>Request details</summary>
+  <p>Target: {event.body.card.target.kind}{#if event.body.card.target.name} · {event.body.card.target.name}{/if}</p>
   {#if event.body.card.body}<p>{event.body.card.body}</p>{/if}
   {#if event.body.card.command?.length}<pre>{commandLine(event.body.card.command)}</pre>{/if}
   {#each event.body.card.changes ?? [] as change (change.field)}<p>{change.field}: {change.old || "none"} → {change.new || "none"}</p>{/each}
