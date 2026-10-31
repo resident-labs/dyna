@@ -46,6 +46,18 @@ func TestReconnectRequiresRawMatchingIdentity(t *testing.T) {
 	if err != nil || string(rows[0].Record) != string(old.Record) {
 		t.Fatal("saved credential changed")
 	}
+	status, err := c.Status(ctx, contract.AccountsConnectStatusRequest{Attempt: a.Attempt}, nil)
+	if err != nil || status.Status != contract.ConnectFailed || status.Reason != contract.ConnectWrongAccount {
+		t.Fatal("wrong account did not produce a typed failure")
+	}
+	a, err = c.Reconnect(ctx, "account", old.ID, contract.ProviderXAI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next.Record = []byte(`{"metadata":{}}`)
+	if err := rpc.Save(AuthSave{Record: next, Create: true, Attempt: a.Attempt}, &struct{}{}); err == nil {
+		t.Fatal("new grant without identity replaced the saved credential")
+	}
 	missing := private.ProxyAuth{ID: "no-identity", Provider: "kimi", Record: []byte(`{"metadata":{"type":"kimi"}}`)}
 	if err := st.SaveProxyAuth(ctx, missing, true); err != nil {
 		t.Fatal(err)
@@ -53,7 +65,7 @@ func TestReconnectRequiresRawMatchingIdentity(t *testing.T) {
 	if _, err := c.Reconnect(ctx, "other", missing.ID, contract.ProviderXAI); err == nil {
 		t.Fatal("started reconnect without saved identity")
 	}
-	if calls != 1 {
+	if calls != 2 {
 		t.Fatal("started provider login without saved identity")
 	}
 }
