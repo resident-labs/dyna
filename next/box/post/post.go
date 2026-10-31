@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -20,16 +19,14 @@ import (
 
 type Upload func(context.Context, string) (contract.Attachment, error)
 
-func Prepare(ctx context.Context, upload Upload, in tools.PostInput) (contract.PostRequest, []contract.VisualCheck, error) {
-	return (Preparer{Render: visual.Preview}).Prepare(ctx, upload, in)
-}
-
-// Preparer renders a visual before uploading it.
+// Preparer uploads local files and renders visuals before posting.
 type Preparer struct {
+	Upload Upload
 	Render func(context.Context, []byte, string, bool) visual.Result
+	Dir    string
 }
 
-func (p Preparer) Prepare(ctx context.Context, upload Upload, in tools.PostInput) (contract.PostRequest, []contract.VisualCheck, error) {
+func (p Preparer) Prepare(ctx context.Context, in tools.PostInput) (contract.PostRequest, []contract.VisualCheck, error) {
 	req := contract.PostRequest{Room: in.Room, Text: in.Text, Mentions: in.Mentions, Home: in.Home, ReplyTo: in.ReplyTo, ClientID: in.ClientID, VisualUpdate: in.VisualUpdate, VisualReply: in.VisualReply}
 	if (in.VisualUpdate != "" || in.AllowNet) && in.HTML == "" {
 		return req, nil, fmt.Errorf("visualUpdate and allowNet need html")
@@ -45,7 +42,10 @@ func (p Preparer) Prepare(ctx context.Context, upload Upload, in tools.PostInput
 		return req, nil, fmt.Errorf("a post can carry at most 16 attachments")
 	}
 	for _, path := range in.Paths {
-		file, err := upload(ctx, path)
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(p.Dir, path)
+		}
+		file, err := p.Upload(ctx, path)
 		if err != nil {
 			return req, nil, err
 		}
@@ -54,12 +54,11 @@ func (p Preparer) Prepare(ctx context.Context, upload Upload, in tools.PostInput
 	if in.HTML == "" {
 		return req, nil, nil
 	}
-	f, err := os.Open(in.HTML)
-	if err != nil {
-		return req, nil, err
+	htmlPath := in.HTML
+	if !filepath.IsAbs(htmlPath) {
+		htmlPath = filepath.Join(p.Dir, htmlPath)
 	}
-	data, err := io.ReadAll(io.LimitReader(f, 25<<20+1))
-	_ = f.Close()
+	data, err := visual.ReadFile(htmlPath)
 	if err != nil {
 		return req, nil, err
 	}
@@ -69,7 +68,7 @@ func (p Preparer) Prepare(ctx context.Context, upload Upload, in tools.PostInput
 	}
 	card := &contract.VisualCard{Title: title, Height: height, AllowNet: in.AllowNet}
 	preview := p.Render(ctx, data, visual.CSP(in.AllowNet), in.AllowNet)
-	if err = visualImages(ctx, upload, preview, card); err != nil {
+	if err = visualImages(ctx, p.Upload, preview, card); err != nil {
 		return req, nil, err
 	}
 	dir, err := os.MkdirTemp("", "dyna-card-")
@@ -81,7 +80,7 @@ func (p Preparer) Prepare(ctx context.Context, upload Upload, in tools.PostInput
 	if err = os.WriteFile(path, data, 0600); err != nil {
 		return req, nil, err
 	}
-	file, err := upload(ctx, path)
+	file, err := p.Upload(ctx, path)
 	if err != nil {
 		return req, nil, err
 	}
