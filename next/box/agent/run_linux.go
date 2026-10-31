@@ -98,6 +98,11 @@ func Run(ctx context.Context, version string) error {
 		return err
 	}
 	defer h.Close()
+	activity := &activity{}
+	h.Activity = activity.set
+	activityTicks := time.NewTicker(time.Second)
+	defer activityTicks.Stop()
+	go activity.run(ctx, activityTicks.C, client.turnActivity)
 	transcript := NewTranscript(client, sessions)
 	transcript.syncLogged(ctx, h.SessionFile())
 	ticks := time.NewTicker(transcriptInterval)
