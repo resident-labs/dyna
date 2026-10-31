@@ -15,7 +15,7 @@
   import Icon from "./lib/ui/Icon.svelte";
   import Avatar, { setSessionLabels } from "./lib/ui/Avatar.svelte";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
-  import { boxReason, causes, count, quoted, type Quote } from "./lib/feed.ts";
+  import { boxReason, count, quoted, turnReason, type Quote } from "./lib/feed.ts";
   import { urgency, type Status } from "./lib/status.ts";
   import { FileDraft } from "./lib/attach.svelte.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
@@ -256,11 +256,7 @@
     switch (store?.status(id)) {
       case "waiting": return "Waiting for your approval";
       case "working": { const label = store?.activity.get(id); return label ? `Working · ${label}` : "Working"; }
-      case "failed": {
-        if (broken) return boxReason(broken);
-        const reason = cause ? causes[cause] : "the last turn failed";
-        return reason[0].toLowerCase() + reason.slice(1);
-      }
+      case "failed": return broken ? boxReason(broken) : turnReason(cause);
       default: return starting(id) ? "Starting" : "Idle";
     }
   };

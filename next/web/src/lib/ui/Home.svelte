@@ -4,7 +4,7 @@
   import { APIError, call } from "../client.ts";
   import type { Attention } from "../attention.svelte.ts";
   import type { AccountUsage, Card, HostSummary, Principal, SessionListResponse } from "../contract.gen.ts";
-  import { boxReason, fromNow, requestLine } from "../feed.ts";
+  import { boxReason, fromNow, requestLine, turnReason } from "../feed.ts";
   import { hostLabel, hostMeters, watchHosts } from "../hosts.ts";
   import { busiestWindow } from "../usage.ts";
   import { distinctInitials, hue, initials as letters } from "../identity.ts";
@@ -75,17 +75,19 @@
     return count ? [{ room, count }] : [];
   }));
   const count = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
-  // Activity has one row per room, never one per session: rooms with requests or a failed box first, then working
-  // rooms, each by name. A failed box comes first in its row, with its reason, as it needs the owner.
+  // Activity has one row per room, never one per session: rooms with requests or a failed session first, then working
+  // rooms, each by name. A failed session comes first in its row, with its reason, as it needs the owner, so a red rail
+  // mark always has its reason here.
   // A working room names its busiest agent, the one with the newest activity label. Quiet rooms fold into one line.
   let activity = $derived([...attention.rooms.values()].map(room => {
-    const working = attention.busy(room.id), asks = attention.waiting.get(room.id)?.size ?? 0, broken = [...attention.broken.get(room.id) ?? []];
-    const idle = Math.max(0, (attention.sessions.get(room.id)?.size ?? 0) - working.length - broken.length);
-    const failed = broken.length > 1 ? `${broken.length} sessions failed` : broken.map(([id, failure]) => `${sessions.get(id)?.name ?? "A session"} failed · ${boxReason(failure)}`)[0];
+    const working = attention.busy(room.id), asks = attention.waiting.get(room.id)?.size ?? 0;
+    const down = [...[...attention.broken.get(room.id) ?? []].map(([id, failure]) => ({ id, reason: boxReason(failure) })), ...attention.unseen(room.id).map(({ id, cause }) => ({ id, reason: turnReason(cause) }))];
+    const idle = Math.max(0, (attention.sessions.get(room.id)?.size ?? 0) - new Set([...working, ...down.map(({ id }) => id)]).size);
+    const failed = down.length > 1 ? `${down.length} sessions failed` : down.map(({ id, reason }) => `${sessions.get(id)?.name ?? "A session"} failed · ${reason}`)[0];
     const [busiest, label] = [...attention.activity].findLast(([id]) => working.includes(id)) ?? [];
     const name = busiest && (sessions.get(busiest)?.name ?? (room.latest?.session === busiest ? room.latest.name : undefined));
-    const line = [asks && count(asks, "request"), working.length ? `${working.length} working` : idle ? `${idle} idle` : broken.length ? "" : "No open session", name, label];
-    return { room, working, failed, rank: asks || broken.length ? 0 : working.length ? 1 : 2, line: line.filter(Boolean).join(" · ") };
+    const line = [asks && count(asks, "request"), working.length ? `${working.length} working` : idle ? `${idle} idle` : down.length ? "" : "No open session", name, label];
+    return { room, working, failed, rank: asks || down.length ? 0 : working.length ? 1 : 2, line: line.filter(Boolean).join(" · ") };
   }).sort((a, b) => a.rank - b.rank || a.room.name.localeCompare(b.room.name)));
   let active = $derived(activity.filter(row => row.rank < 2));
   let quiet = $derived(activity.filter(row => row.rank === 2));
@@ -145,7 +147,7 @@
   let workingCounts = $derived([...attention.rooms.keys()].map(room => attention.busy(room).length));
   let roomsWorking = $derived(workingCounts.filter(Boolean).length);
   let unreachable = $derived(hosts?.filter(h => !h.reachable).length ?? 0);
-  let failing = $derived(total(attention.broken));
+  let failing = $derived([...attention.rooms.keys()].reduce((sum, room) => sum + attention.failing(room), 0));
   let low = $derived(hosts?.filter(h => h.diskLow) ?? []);
   let lowDisk = $derived(low.length === 1 ? `${hostLabel(low[0].name)} is low on disk` : `${low.length} machines are low on disk`);
   let summary = $derived([
