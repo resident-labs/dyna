@@ -365,7 +365,7 @@ func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 			args = append(args[:len(args)-4], append([]string{"--device", "/dev/net/tun", "--security-opt", "unmask=/proc/sys"}, args[len(args)-4:]...)...)
 		case box.NeedKVM:
 			checks += "test -c /dev/kvm || { printf kvm; exit 254; }; "
-			args = append(args[:len(args)-4], append([]string{"--device", "/dev/kvm"}, args[len(args)-4:]...)...)
+			args = append(args[:len(args)-4], append([]string{"--device", "/dev/kvm", "--group-add", "keep-groups"}, args[len(args)-4:]...)...)
 		}
 	}
 	if checks == "" {
