@@ -362,6 +362,22 @@ func TestOwnerViewKeepsAgentPosition(t *testing.T) {
 	}
 }
 
+func TestOwnerViewCarriesJobTimes(t *testing.T) {
+	r := newRig("ok\n", syscall.SIGKILL)
+	started, ended := time.Unix(100, 0), time.Unix(138, 0)
+	times := []time.Time{started, ended}
+	r.server.cfg.now = func() time.Time { now := times[0]; times = times[1:]; return now }
+	r.proc.exit <- 0
+	j, err := r.server.run(nil, "make", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-j.done
+	if view := r.server.View(true); len(view) != 1 || !view[0].Started.Equal(started) || !view[0].Ended.Equal(ended) {
+		t.Fatalf("times: %+v", view)
+	}
+}
+
 func TestOwnerViewBudgetsAndResets(t *testing.T) {
 	s := New(Config{})
 	for i := 0; i < 8; i++ {
