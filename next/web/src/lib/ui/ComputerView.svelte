@@ -8,6 +8,7 @@
   import { onMount, tick } from "svelte";
   import Icon from "./Icon.svelte";
   import Avatar from "./Avatar.svelte";
+  import StatusPill from "./StatusPill.svelte";
   import FloatWindow from "./FloatWindow.svelte";
   import { shortPaths } from "../feed.ts";
   import type { Rect } from "../float.ts";
@@ -168,9 +169,12 @@
        stays between steps, so the screen keeps the shape the window was fitted to. Where the owner may control the
        computer, the line carries the Take control step; in control it says how to return. -->
   {#if foot}<div class="activity">
-    <span class="line" class:wrap={control}>{control ? stuck ? "Your input did not reach the computer." : "You are in control. Esc twice returns it." :activity ? `${name} · ${activity}` : name}</span>
+    {#if control && stuck}<span class="line wrap"><StatusPill tone="error" word label="Input not sent" title="Your input did not reach the computer." /></span>
+    {:else if control}<span class="line wrap">You are in control.<span class="hint"> Esc twice returns it.</span></span>
+    {:else}<span class="line">{activity ? `${name} · ${activity}` : name}</span>{/if}
     {#if input && control}
       <button type="button" class="tool" class:on={keyboardOpen} aria-label="Phone keyboard" aria-pressed={keyboardOpen} title="Phone keyboard" onpointerdown={event => event.preventDefault()} onclick={toggleKeyboard}><Icon name="keyboard" size={18} /></button>
+      {#if stuck}<button type="button" class="take" onclick={() => queue.retry()}>Retry</button>{/if}
       <button type="button" class="take" onclick={release}>Return control</button>
     {:else if input}<button type="button" class="take" disabled={phase !== "live"} onclick={take}>Take control</button>{/if}
   </div>{/if}
@@ -209,6 +213,8 @@
   .activity { display: flex; flex: none; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; color: var(--muted); font-size: 12.5px; }
   .line { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .line.wrap { white-space: normal; }
+  /* The key row has its own Esc, which goes to the computer, so a phone does not read the two-Esc step. */
+  @media (hover: none) { .hint { display: none; } }
   /* Take control and Return control are controls, not statuses: an outline button, with the accent only on focus. */
   .take { flex: none; height: 28px; padding: 0 12px; border: 1px solid var(--firm); border-radius: 6px; background: none; color: var(--text); font: 500 13px var(--sans); cursor: pointer; }
   .take:hover:not(:disabled) { background: var(--hover); }
