@@ -52,6 +52,11 @@ func NewProxy(dataDir, managementKey string) (*Proxy, error) {
 	}
 	socket := filepath.Join(dir, "proxy.sock")
 	// store.Open holds the data folder lock. A socket here is stale, or belongs to a dying child that no client can reach once it is unlinked.
+	if info, err := os.Lstat(socket); err == nil && info.Mode()&os.ModeSocket == 0 {
+		return nil, fmt.Errorf("proxy path is not a socket: %s", socket)
+	} else if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
 	if err := os.Remove(socket); err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
