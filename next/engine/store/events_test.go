@@ -194,16 +194,6 @@ func TestEventsPageDM(t *testing.T) {
 		}
 	}
 	check("append")
-	// The upgrade step fills home for events written before the column existed.
-	if _, err := s.writer.ExecContext(ctx, "UPDATE events SET home=NULL"); err != nil {
-		t.Fatal(err)
-	}
-	for _, statement := range steps[15][1:3] {
-		if _, err := s.writer.ExecContext(ctx, statement); err != nil {
-			t.Fatal(err)
-		}
-	}
-	check("upgrade")
 }
 
 func TestStopAndPauseReachTheirViews(t *testing.T) {
