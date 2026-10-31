@@ -26,8 +26,9 @@ func (s *Service) RegisterDynaCredential(ctx context.Context, auth *coreauth.Aut
 }
 
 // ActivateDynaCredential publishes a credential only after its account is bound.
-func (s *Service) ActivateDynaCredential(ctx context.Context, id, model string) error {
+func (s *Service) ActivateDynaCredential(ctx context.Context, id, model, prefix string) error {
 	auth, ok, err := s.coreManager.Modify(ctx, id, 0, func(auth *coreauth.Auth) error {
+		auth.Prefix = prefix
 		auth.Disabled = false
 		if auth.Status == coreauth.StatusDisabled {
 			auth.Status = coreauth.StatusActive

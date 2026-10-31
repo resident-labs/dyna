@@ -22,7 +22,7 @@ func TestDynaStagedCredentialCannotRouteBeforeBinding(t *testing.T) {
 			return
 		}
 		<-bind
-		done <- service.ActivateDynaCredential(ctx, "invented-staged", "")
+		done <- service.ActivateDynaCredential(ctx, "invented-staged", "", "plan_test")
 	}()
 	if err := <-ready; err != nil {
 		t.Fatal(err)
