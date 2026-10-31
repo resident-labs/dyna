@@ -52,7 +52,7 @@ const nouns: Record<Scope, string> = { rooms: "rooms", sessions: "sessions", mes
 // A group of the mixed list shows this many rows, then its Show all row.
 export const CAP = 3;
 
-export type Place = { id: string; name: string; paused: boolean; sessions: number; working: number };
+export type Place = { id: string; name: string; paused: boolean; sessions?: number; working: number };
 export type Person = { id: string; room: string; roomName: string; name: string; root: boolean; closed: boolean; working: boolean };
 export type ActionId = "requests" | "pause" | "theme" | "settings";
 export type Action = { id: ActionId; label: string; hint: string; keys: string[]; icon: "inbox" | "pause" | "palette" | "gear" };

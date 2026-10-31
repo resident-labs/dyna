@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
+  import { MediaQuery } from "svelte/reactivity";
   import { call } from "../client.ts";
   import type { RoomSummary } from "../contract.gen.ts";
   import { build, rows, marks, count, showAll, move, parse, escape, backspace, stamp, type Action, visits, type Item, type Person, type Place, type Scope, type Visit } from "../palette.ts";
@@ -11,11 +12,13 @@
   let { rooms, room, search, onclose, onopen }: {
     rooms: RoomSummary[]; room?: string; search: SearchCall; onclose: () => void; onopen: (item: Item) => void;
   } = $props();
+  const phone = new MediaQuery("max-width: 640px");
   let input: HTMLInputElement;
   let list: HTMLDivElement;
   let dialog: HTMLElement;
   let text = $state(""), scope: Scope | undefined = $state(), local = $state(false), pick = $state(0);
   let people: Person[] = $state.raw([]);
+  let loadedRooms: Set<string> = $state.raw(new Set());
   let recent: Visit[] = $state.raw([]);
   let retry = $state(0);
   const messages = new MessageSearch(untrack(() => search));
@@ -23,13 +26,14 @@
   let actions: Action[] = $derived([
     ...current ? [
       { id: "requests", label: "Requests", hint: current.waiting?.length ? `${current.waiting.length} wait for you` : "", keys: ["G", "R"], icon: "inbox" },
-      { id: "pause", label: current.paused ? "Resume the room" : "Pause the room", hint: current.paused ? "Sessions can start turns again" : "No session starts a new turn", keys: [], icon: "pause" },
+      { id: "pause", label: current.paused ? "Resume the room" : "Pause the room", hint: `${current.name} · ${current.paused ? "Sessions can start turns again" : "No session starts a new turn"}`, keys: [], icon: "pause" },
     ] satisfies Action[] : [],
     { id: "theme", label: "Theme", hint: "Carbon, Ink, Nord, Paper, Light or OLED black", keys: [], icon: "palette" },
     { id: "settings", label: "Settings", hint: "", keys: ["Ctrl", ","], icon: "gear" },
   ]);
   let places: Place[] = $derived(rooms.map(found => ({ id: found.id, name: found.name, paused: found.paused,
-    sessions: people.filter(person => person.room === found.id).length, working: found.working?.length ?? 0 })));
+    sessions: loadedRooms.has(found.id) ? people.filter(person => person.room === found.id && !person.closed).length : undefined,
+    working: found.working?.length ?? 0 })));
   let mode = $derived(parse(text, scope));
   let recentItems: Item[] = $derived(recent.flatMap((visit): Item[] => {
     if (visit.session) {
@@ -49,6 +53,7 @@
       void call("session.list", { room: found.id }).then(result => {
         people = [...people, ...(result.sessions ?? []).map(person => ({ id: person.id, name: person.name, room: found.id,
           roomName: found.name, root: !person.parent, closed: false, working: !!person.turn }))];
+        loadedRooms = new Set([...loadedRooms, found.id]);
       }, () => {});
     }
   });
@@ -67,7 +72,7 @@
   }
   function keys(event: KeyboardEvent) {
     if (event.key === "Tab") {
-      const controls = [...dialog.querySelectorAll<HTMLElement>("input, button:not([disabled])")];
+      const controls = [...dialog.querySelectorAll<HTMLElement>('input, button:not([disabled]):not([tabindex="-1"])')].filter(control => control.getClientRects().length > 0);
       const index = controls.findIndex(control => control === document.activeElement);
       if ((event.shiftKey && index <= 0) || (!event.shiftKey && index === controls.length - 1)) {
         event.preventDefault();
@@ -98,7 +103,7 @@
   <div class="palette" role="dialog" aria-modal="true" aria-label="Search and actions" tabindex="-1" bind:this={dialog} onkeydown={keys}>
     <div class="input"><Icon name="search" size={20} />
       {#if scope}<button class="chip" onclick={() => { scope = undefined; input.focus(); }}>{scope} <Icon name="close" size={12} /></button>{/if}
-      <input bind:this={input} bind:value={text} placeholder="Search rooms, sessions, messages and actions" aria-label="Search rooms, sessions, messages and actions"
+      <input bind:this={input} bind:value={text} placeholder={phone.current ? "Search everything" : "Search rooms, sessions, messages and actions"} aria-label="Search rooms, sessions, messages and actions"
         role="combobox" aria-expanded="true" aria-controls="palette-list" aria-activedescendant={items[pick] ? `palette-${pick}` : undefined} autocomplete="off" />
       {#if mode.query && mode.scope !== "actions" && room}<button class="scope" onclick={() => local = !local}>{local ? roomName(room) : "All rooms"} <Icon name="chevron" size={12} /></button>{/if}
       <button class="cancel" onclick={onclose}>Cancel</button><kbd class="esc">Esc</kbd>
@@ -108,12 +113,12 @@
         <div class="group">{#if scope === "messages" && section.group === "messages"}{section.total.toLocaleString()} messages<span>· newest first</span>{:else}{section.title} {#if count(section)}<span>{count(section)}</span>{/if}{/if}</div>
         {#each section.items as item}
           {@const index = items.indexOf(item)}
-          <button type="button" id="palette-{index}" role="option" aria-selected={pick === index} class="row" class:chosen={pick === index}
-            class:message={item.kind === "message"} class:more={item.kind === "more"} onmousemove={() => pick = index} onclick={() => choose(item)}>
+          <button type="button" id="palette-{index}" role="option" aria-selected={pick === index} tabindex="-1" class="row" class:chosen={pick === index}
+            class:message={item.kind === "message"} class:action={item.kind === "action"} class:more={item.kind === "more"} onmousemove={() => pick = index} onclick={() => choose(item)}>
             {#if item.kind === "room"}
               <Avatar kind="room" name={item.room.name} size={22} />
               <span class="name">{#each marks(item.room.name, mode.query, Infinity) as part}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</span>
-              <span class="sub">{item.room.paused ? "Paused · " : ""}{item.room.sessions} sessions</span>
+              {#if item.room.paused || item.room.sessions !== undefined}<span class="sub">{item.room.paused ? "Paused" : ""}{item.room.paused && item.room.sessions !== undefined ? " · " : ""}{item.room.sessions !== undefined ? `${item.room.sessions} ${item.room.sessions === 1 ? "session" : "sessions"}` : ""}</span>{/if}
             {:else if item.kind === "session"}
               <Avatar kind="session" name={item.session.name} root={item.session.root} size={22} />
               <span class="name">{#each marks(item.session.name, mode.query, Infinity) as part}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</span>
@@ -159,7 +164,7 @@
   .row { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 6px 10px; border: 0; border-radius: 6px; background: none; color: var(--text); text-align: left; }
   .row.chosen { background: var(--selected); }
   .name { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
-  .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; }
+  .sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; }
   .icon { width: 22px; flex: none; display: grid; place-items: center; color: var(--muted); }
   .keys { margin-left: auto; display: flex; gap: 4px; }
   .message { align-items: flex-start; }
@@ -180,6 +185,7 @@
     .palette { width: 100%; height: 100dvh; max-height: none; border: 0; border-radius: 0; }
     .list { flex: 1; }
     .row { min-height: 44px; }
+    .action .sub { display: none; }
     .cancel { display: block; }
     .esc, footer, .keys { display: none; }
   }
