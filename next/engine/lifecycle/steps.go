@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -21,7 +22,6 @@ func (r *Reconciler) retryAt(failures int) time.Time {
 }
 
 func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
-	// A previous step can finish after Pass reads its snapshot but before launch.
 	rows, err := r.store.LifecycleBoxes(ctx)
 	if err != nil {
 		return err
@@ -46,6 +46,19 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 	var cause contract.FailureCause
 	var workErr error
 	switch {
+	case b.State == contract.BoxLost:
+		status, found, inspectErr := r.boxes.Inspect(ctx, b.ID)
+		workErr = inspectErr
+		if workErr != nil || found && status.Running && !r.view.Connected(b.Session) {
+			due = r.now().Add(60 * time.Second)
+		} else if found && status.Running {
+			next.State, next.Reason = contract.BoxReady, ""
+		} else if found {
+			next.State, next.Reason = contract.BoxStopped, "container stopped"
+		} else {
+			next.State, next.Reason = contract.BoxFailed, "container missing"
+			cause = contract.CauseHostLost
+		}
 	case row.Want == store.WantStop:
 		// A terminal admitted after this check ends with the box. WakeTerminal already set
 		// want=run, so the box restarts; serializing admission would bring back the per-session lock.
@@ -161,5 +174,5 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		ctx = context.WithoutCancel(ctx)
 	}
 	_, err = r.change(ctx, b, next, due, failures, cause)
-	return err
+	return errors.Join(err, workErr)
 }

@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"context"
+
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -15,6 +17,7 @@ type BoxSpec struct {
 }
 
 type BoxAdapter interface {
+	Inspect(context.Context, contract.BoxID) (box.ContainerStatus, bool, error)
 	TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error)
 	Create(context.Context, BoxSpec) (string, error)
 	Remove(context.Context, contract.BoxID) error

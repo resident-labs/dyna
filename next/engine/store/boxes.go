@@ -101,7 +101,7 @@ func (s *Store) TransitionBox(ctx context.Context, b box.Box, to contract.BoxSta
 		if next.Host != "" {
 			host = &next.Host
 		}
-		result, err := tx.ExecContext(ctx, "UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,updated_at=?,due_at=CASE WHEN ?='ready' THEN 0 ELSE due_at END,failures=CASE WHEN ?='ready' THEN 0 ELSE failures END WHERE id=? AND state=? AND (?!='ready' OR due_at=0 OR due_at>?)", host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, event.Time.UnixMilli(), next.State, next.State, next.ID, b.State, next.State, event.Time.UnixMilli())
+		result, err := tx.ExecContext(ctx, "UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,updated_at=?,due_at=CASE WHEN ?='ready' THEN 0 ELSE due_at END,failures=CASE WHEN ?='ready' THEN 0 ELSE failures END WHERE id=? AND state=? AND (?!='ready' OR ? NOT IN ('creating','starting') OR due_at=0 OR due_at>?) AND (?!='lost' OR ?!='ready' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state!='unreachable' AND state!='removed'))", host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, event.Time.UnixMilli(), next.State, next.State, next.ID, b.State, next.State, b.State, event.Time.UnixMilli(), b.State, next.State)
 		if err != nil {
 			return err
 		}
@@ -139,6 +139,14 @@ func (s *Store) BoxAncestry(ctx context.Context, id contract.BoxID) ([]box.Box, 
 	return result, rows.Err()
 }
 
+// WakeLostInventory schedules inventory; an in-flight check may defer it by up to 60 seconds.
+func (s *Store) WakeLostInventory(ctx context.Context, id contract.BoxID) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE boxes SET due_at=0 WHERE id=? AND state='lost' AND due_at!=0`, id)
+		return err
+	})
+}
+
 // SetBoxLifecycle commits an observed transition and retry data together.
 // A stale observed state returns false without publishing an event.
 func (s *Store) SetBoxLifecycle(ctx context.Context, old, next box.Box, due time.Time, failures int, event contract.Event) (bool, error) {
@@ -169,7 +177,7 @@ func (s *Store) SetBoxLifecycle(ctx context.Context, old, next box.Box, due time
 			host = &next.Host
 		}
 		admission := (old.State == contract.BoxPending || old.State == contract.BoxStopped) && next.State != contract.BoxClosing
-		result, err := tx.ExecContext(ctx, `UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,updated_at=?,due_at=?,failures=? WHERE id=? AND state=? AND (NOT ? OR (want='run' AND due_at<=?))`, host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, event.Time.UnixMilli(), dueMS, failures, old.ID, old.State, admission, event.Time.UnixMilli())
+		result, err := tx.ExecContext(ctx, `UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,updated_at=?,due_at=?,failures=? WHERE id=? AND state=? AND (NOT ? OR (want='run' AND due_at<=?)) AND (?!='lost' OR ?='closing' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state='ready')) AND (?!='lost' OR ?!='ready' OR want IN ('run','stop'))`, host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, event.Time.UnixMilli(), dueMS, failures, old.ID, old.State, admission, event.Time.UnixMilli(), old.State, next.State, old.State, next.State)
 		if err != nil {
 			return err
 		}
