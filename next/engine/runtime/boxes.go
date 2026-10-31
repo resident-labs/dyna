@@ -636,7 +636,7 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, old
 	if err := h.RemoveContainer(ctx, spec.Box); err != nil {
 		return err
 	}
-	if oldSlice != "" {
+	if oldSlice != "" && oldSlice != spec.Slice {
 		if err := h.RemoveSlice(ctx, oldSlice); err != nil {
 			return err
 		}
