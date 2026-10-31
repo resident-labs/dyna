@@ -430,15 +430,6 @@ func (s *Service) finishPoll(ctx context.Context, st State, result pollResult) e
 	}
 	if err == nil && !result.unchanged {
 		entries = gh.requests.used
-	} else if err != nil {
-		// A partial poll cannot supply a complete review snapshot, even when
-		// discussion metadata did not change. Keep validators for the retry.
-		for path, response := range entries {
-			if strings.Contains(path, "/comments?") || strings.Contains(path, "/reviews?") {
-				response.Stale = true
-				entries[path] = response
-			}
-		}
 	}
 	unlock := gh.requests.lockRate()
 	rates := cloneRates(gh.requests.rates)
@@ -448,6 +439,20 @@ func (s *Service) finishPoll(ctx context.Context, st State, result pollResult) e
 	}, func(current *State) error {
 		if current.Responses == nil {
 			current.Responses = map[string]map[string]cachedResponse{}
+		}
+		// A newer head refresh or failed poll may have invalidated these
+		// pages while this worker was reading them.
+		live := current.Records[key]
+		if live != nil && (err != nil || live.Polling.DiscussionGeneration != r.Polling.DiscussionGeneration) {
+			for path, response := range entries {
+				if strings.Contains(path, "/comments?") || strings.Contains(path, "/reviews?") {
+					response.Stale = true
+					entries[path] = response
+				}
+			}
+		}
+		if live != nil && err != nil {
+			live.Polling.DiscussionGeneration++
 		}
 		// Bodies are immutable; detach the worker's mutable response entry map.
 		current.Responses[key] = maps.Clone(entries)

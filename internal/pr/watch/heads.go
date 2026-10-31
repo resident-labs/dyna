@@ -428,6 +428,7 @@ func (s *Service) refreshHeads(ctx context.Context, st State, polledAt time.Time
 				r.HeadVerifiedAt = s.now()
 			}
 			if r.Polling.PullVersion != pullVersion(pull, EffectivePolicy(*current, *r)) || pull.DiscussionVersion == "" || r.Polling.DiscussionVersion != pull.DiscussionVersion {
+				r.Polling.DiscussionGeneration++
 				for path := range current.Responses[key] {
 					if strings.Contains(path, "/comments?") || strings.Contains(path, "/reviews?") {
 						response := current.Responses[key][path]
