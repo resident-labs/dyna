@@ -63,6 +63,20 @@ type MethodEntry struct {
 	Actions []Action
 }
 
+type PostInput struct {
+	Room         contract.RoomID       `json:"room"`
+	Text         string                `json:"text"`
+	Mentions     []string              `json:"mentions,omitempty"`
+	Home         contract.Conversation `json:"home,omitempty"`
+	ReplyTo      contract.EventID      `json:"replyTo,omitempty"`
+	ClientID     string                `json:"clientId,omitempty"`
+	VisualUpdate contract.EventID      `json:"visualUpdate,omitempty"`
+	VisualReply  contract.EventID      `json:"visualReply,omitempty"`
+	Paths        []string              `json:"paths,omitempty"`
+	HTML         string                `json:"html,omitempty"`
+	AllowNet     bool                  `json:"allowNet,omitempty"`
+}
+
 type FileRequest struct {
 	File string `json:"file"`
 }

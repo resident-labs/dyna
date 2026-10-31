@@ -111,6 +111,32 @@ func (c *Client) post(ctx context.Context, method contract.Method, body []byte) 
 	return data, nil
 }
 
+// forward sends an agent tool call once. It does not queue or retry a creation.
+func (c *Client) forward(ctx context.Context, method contract.Method, body []byte) ([]byte, *contract.Error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://dyna/v1/"+string(method), bytes.NewReader(body))
+	if err != nil {
+		return nil, &contract.Error{Code: contract.ErrUnavailable, Message: err.Error()}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, &contract.Error{Code: contract.ErrUnavailable, Message: err.Error()}
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, outgoingLimit))
+	if err != nil {
+		return nil, &contract.Error{Code: contract.ErrUnavailable, Message: err.Error()}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var problem contract.Error
+		if err := json.Unmarshal(data, &problem); err != nil {
+			return nil, &contract.Error{Code: contract.ErrUnavailable, Message: resp.Status}
+		}
+		return nil, &problem
+	}
+	return data, nil
+}
+
 func (c *Client) call(ctx context.Context, method contract.Method, body []byte) ([]byte, error) {
 	if len(body) > outgoingLimit {
 		return nil, fmt.Errorf("box API request exceeds outgoing buffer")
