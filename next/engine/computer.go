@@ -140,6 +140,31 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 	return ch, nil
 }
 
+// computerInputHandle holds the queue and lifetime of one box channel.
+type computerInputHandle struct {
+	queue chan contract.ComputerInputBatch
+	done  <-chan struct{}
+}
+
+// Only input that races cancellation may be dropped; later input reports replacement.
+func (h computerInputHandle) send(ctx context.Context, batch contract.ComputerInputBatch) *contract.Error {
+	select {
+	case <-h.done:
+		return &contract.Error{Code: contract.ErrConflict, Message: "box replaced"}
+	default:
+	}
+	select {
+	case <-h.done:
+		return &contract.Error{Code: contract.ErrConflict, Message: "box replaced"}
+	case <-ctx.Done():
+		return failure(ctx.Err())
+	case h.queue <- batch:
+		return nil
+	default:
+		return &contract.Error{Code: contract.ErrConflict, Message: "input queue is full"}
+	}
+}
+
 // ComputerInput queues owner events for the box's computer. It does not touch the session's turn.
 func (s *Service) ComputerInput(ctx context.Context, caller contract.Principal, req contract.ComputerInputRequest) (contract.ComputerInputResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalOwner {
@@ -149,20 +174,18 @@ func (s *Service) ComputerInput(ctx context.Context, caller contract.Principal, 
 		return contract.ComputerInputResponse{}, failure(err)
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	state := s.sessionLocked(req.Session)
 	if state.channel == nil {
+		s.mu.Unlock()
 		return contract.ComputerInputResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
 	}
 	if c := state.computer; c == nil || c.state != contract.ComputerRunning {
+		s.mu.Unlock()
 		return contract.ComputerInputResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "computer is not running"}
 	}
-	select {
-	case state.channel.input <- contract.ComputerInputBatch{Frame: req.Frame, Events: req.Events}:
-		return contract.ComputerInputResponse{}, nil
-	default:
-		return contract.ComputerInputResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "input queue is full"}
-	}
+	input := state.channel.input
+	s.mu.Unlock()
+	return contract.ComputerInputResponse{}, input.send(ctx, contract.ComputerInputBatch{Frame: req.Frame, Events: req.Events})
 }
 
 func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal, generation uint64, r io.Reader) *contract.Error {
