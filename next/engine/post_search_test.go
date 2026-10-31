@@ -40,7 +40,22 @@ func TestPostSearch(t *testing.T) {
 			}
 		}
 	}
-	_, e := s.Post(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.PostRequest{Room: room, Text: "blue"})
+	other, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "other", RootProfile: "test"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = s.Post(ctx, owner, contract.PostRequest{Room: other.Room, Text: "deploy blue"}); e != nil {
+		t.Fatal(e)
+	}
+	all, e := s.PostSearch(ctx, owner, contract.PostSearchRequest{Query: "deploy blue"})
+	if e != nil || all.Total != 3 || all.Posts[0].Room != other.Room {
+		t.Fatalf("all rooms: %+v, %v", all, e)
+	}
+	one, e := s.PostSearch(ctx, owner, contract.PostSearchRequest{Query: "deploy blue", Room: room, Limit: 1})
+	if e != nil || one.Total != 2 || len(one.Posts) != 1 {
+		t.Fatalf("one room: %+v, %v", one, e)
+	}
+	_, e = s.Post(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.PostRequest{Room: room, Text: "blue"})
 	if e != nil {
 		t.Fatal(e)
 	}
