@@ -91,7 +91,7 @@ export class RoomStore {
   // True once session.list and op.list have loaded.
   get ready(): boolean { this.subscribe(); return this.loaded; }
   get error(): unknown { this.subscribe(); return this.failure; }
-  // Pending owner-class operations wait for the owner; agent-class ones wait for an ancestor session first.
+  // Pending owner-class operations wait for the owner.
   get waiting(): number { return [...this.requests.values()].filter(request => request.state === "pending" && request.class === "owner").length; }
   // The turn may end before the answer comes, so only a turn still running counts as stopping.
   stop(id: string): void {

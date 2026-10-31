@@ -42,7 +42,7 @@ const bodies: Record<string, Check> = {
     replies: optional(nullable(array(object({ reply, posted: optional(string) })))), usage, error: optional(string), cause, shellJobs: optional(number) }),
   "conversation.read": object({ room: string, conversation, seq: number }),
   "turn.activity": object({ session: string, turn: string, label: string }),
-  "op.requested": object({ id: string, kind: string, by: principal, class: oneOf("auto", "agent", "owner"), card, expires: string }),
+  "op.requested": object({ id: string, kind: string, by: principal, class: oneOf("auto", "owner"), card, expires: string }),
   "op.decided": object({ id: string, state, decision: object({ by: principal, approved: boolean, reason: optional(string), at: string }) }),
   "op.ran": object({ id: string, state, result: object({ exitCode: number, cause, error: optional(string), output: optional(string), outputFile: optional(string) }) }),
   "shell.job.ended": object({ session: string, job: string, exitCode: number, tail: string }),
