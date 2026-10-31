@@ -1583,6 +1583,9 @@ func TestOwnerAttention(t *testing.T) {
 	passLifecycle(t, s, ctx)
 	passLifecycle(t, s, ctx)
 	closed := <-stream
+	for _, ok := closed.Body.(contract.BoxChanged); ok; _, ok = closed.Body.(contract.BoxChanged) {
+		closed = <-stream // the owner stream now carries box.changed too
+	}
 	if body, ok := closed.Body.(contract.SessionClosed); !ok || body.Session != worker {
 		t.Fatalf("expected session.closed for %s, got %+v", worker, closed)
 	}
