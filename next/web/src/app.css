@@ -24,7 +24,7 @@
 body { margin: 0; background: var(--bg); color: var(--text); }
 /* The app fills the viewport exactly; only the feed and the side panels scroll. */
 .shell { display: grid; grid-template-columns: 64px 1fr; grid-template-rows: minmax(0, 1fr); height: 100dvh; overflow: hidden; }
-.shell.open { grid-template-columns: 64px 1fr 260px; }
+.shell.open { grid-template-columns: 64px 1fr 264px; }
 main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 aside { background: var(--sidebar); border-right: 1px solid var(--line); overflow-y: auto; }
 aside.members { border-right: 0; border-left: 1px solid var(--line); }
