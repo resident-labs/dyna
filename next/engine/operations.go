@@ -25,7 +25,10 @@ func (s *Service) ExpireHostexecGrantRequests(ctx context.Context) error {
 }
 func (s *Service) ExpireOperations(ctx context.Context) error { return s.approvals.Expire(ctx) }
 func (s *Service) OpSubmit(ctx context.Context, caller contract.Principal, req contract.OpSubmitRequest) (contract.OpSubmitResponse, *contract.Error) {
-	op, err := s.approvals.Submit(ctx, caller, req.Operation)
+	if len(req.ClientID) > 64 {
+		return contract.OpSubmitResponse{}, invalid("clientId is longer than 64 characters")
+	}
+	op, err := s.approvals.SubmitWithClientID(ctx, caller, req.Operation, req.ClientID)
 	if err != nil {
 		return contract.OpSubmitResponse{}, failure(err)
 	}
