@@ -20,6 +20,8 @@
   let html = $derived(DOMPurify.sanitize(marked.parse(row.text, { async: false, gfm: true, breaks: true }), { FORBID_TAGS: ["img"] }));
   // The engine serves each file sandboxed; the owner's cookie covers the request.
   const url = (file: Attachment) => `/v1/files/${encodeURIComponent(file.sha256)}`;
+  // The type badge on a file card, such as "TXT", as in v1.
+  const extension = (name: string) => /\.([A-Za-z0-9]{1,6})$/.exec(name)?.[1].toUpperCase() ?? "FILE";
   let images = $derived(row.attachments.filter(isImage));
   let others = $derived(row.attachments.filter(file => !isImage(file)));
 </script>
@@ -37,7 +39,7 @@
       <img src={url(file)} alt={file.name} loading="lazy" /></a>{/each}</div>{/if}
   {#each others as file, i (i)}
     <a class="file" href={url(file)} target="_blank" rel="noopener" title={`Open ${file.name}`}>
-      <span class="ext">{/\.([A-Za-z0-9]{1,6})$/.exec(file.name)?.[1].toUpperCase() ?? "FILE"}</span>
+      <span class="ext">{extension(file.name)}</span>
       <span class="meta"><span class="file-name">{file.name}</span><span class="size">{fileSize(file.bytes)}</span></span>
       <span class="open" aria-hidden="true">↗</span></a>{/each}
 </article>
