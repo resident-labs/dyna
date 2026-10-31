@@ -117,12 +117,15 @@ case "$suite" in
         exit 1
       fi
     fi
-    cd next
-    go vet ./...
-    go test -count=1 ./...
-    # Join the vendored management handler and engine over private RPC.
-    go test -count=1 -tags=dyna_integration ./engine/model -run '^TestKimiCompletionBindsAcrossProxyNotification$'
-    (cd third_party/cliproxyapi && go test -count=1 ./internal/api/handlers/management -run '^TestDyna(KimiOAuthCompletesAfterAdoption|CompletionRejectsDifferentRuntimeGrant|CompletionRejectsEnabledRuntimeGrant)$')
+    (
+      cd next
+      go vet ./...
+      go test -count=1 ./...
+      # Join the vendored management handler and engine over private RPC.
+      go test -count=1 -tags=dyna_integration ./engine/model -run '^TestKimiCompletionBindsAcrossProxyNotification$'
+      (cd third_party/cliproxyapi && go test -count=1 ./internal/api/handlers/management -run '^TestDyna(KimiOAuthCompletesAfterAdoption|CompletionRejectsDifferentRuntimeGrant|CompletionRejectsEnabledRuntimeGrant)$')
+    )
+    (cd cmd/dyna-export && go vet ./... && go test -count=1 ./...)
     ;;
   next-web)
     # next/web is the v2 web app, a Svelte project with its own package.json.
