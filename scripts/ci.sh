@@ -158,6 +158,18 @@ case "$suite" in
     npm test
     npm run build
     ;;
+  next-web-width-build)
+    : "${DYNA_WEBDEV_BIN:?Set DYNA_WEBDEV_BIN to the output path}"
+    npm ci --prefix next/web --prefer-offline --no-audit
+    npm run build --prefix next/web
+    (cd next && go build -p 2 -o "$DYNA_WEBDEV_BIN" ./cmd/dyna-webdev)
+    ;;
+  next-web-width)
+    : "${DYNA_WEBDEV_BIN:?Set DYNA_WEBDEV_BIN to the built binary}"
+    export CHROMIUM="${CHROMIUM:-$(command -v chromium || command -v chromium-browser)}"
+    npm ci --prefix internal/cli/computer/browserdeps --ignore-scripts --no-audit --no-fund
+    node next/web/width-check.ts
+    ;;
   cross-build)
     started=$SECONDS
     # An optional target (goos/goarch) builds only that one.
