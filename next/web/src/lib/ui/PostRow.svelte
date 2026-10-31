@@ -32,6 +32,7 @@
   import type { Attachment, VisualCard } from "../contract.gen.ts";
   import { hue } from "../identity.ts";
   import { beginSwipe, moveSwipe, releaseSwipe, ignoredSwipeTarget, type Swipe } from "../swipe.ts";
+  import { canForwardPost } from "../forward-state.ts";
   let { row, author, to, root, onretry, ondiscard, onforward, swipeDisabled = false, newest, onvisual }: {
     row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; newest: Map<string, VisualCard>; onvisual: (visual: VisualCard) => void;
   } = $props();
@@ -67,7 +68,7 @@
     function end(event: TouchEvent) {
       if (!state) return;
       const touch = [...event.changedTouches].find(item => item.identifier === id);
-      const forward = touch && !row.pending && event.touches.length === 0 && releaseSwipe(state, touch.clientX);
+      const forward = touch && canForwardPost(!!row.pending, swipeDisabled, row.text, row.attachments.length) && event.touches.length === 0 && releaseSwipe(state, touch.clientX);
       if (state.dragging) { suppress = Date.now() + 500; if (event.cancelable) event.preventDefault(); }
       reset();
       if (forward) setTimeout(() => {
@@ -184,7 +185,7 @@
 <style>
   .swipe { position: relative; }
   @media (pointer: coarse) { .swipe { overflow: hidden; } }
-  .cue { position: absolute; left: 12px; top: 14px; z-index: 1; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--selected); color: var(--muted); opacity: .4; transform: scale(.8); }
+  .cue { position: absolute; left: 12px; top: 20px; z-index: 1; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--selected); color: var(--muted); opacity: .4; transform: scale(.8); }
   .cue.ready { background: var(--focus); color: var(--bg); opacity: 1; transform: scale(1.15); }
   .post { transition: transform 150ms ease; }
   .post.dragging { transition: none; }
