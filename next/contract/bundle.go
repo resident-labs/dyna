@@ -88,6 +88,7 @@ type RoomBundle struct {
 	Subscriptions []Subscription   `json:"subscriptions"` // room and session scope
 	Handoff       []SessionHandoff `json:"handoff"`
 	HookHandoff   []HookHandoff    `json:"hookHandoff,omitempty"`
+	LimitHandoff  []RoomLimitGap   `json:"limitHandoff,omitempty"`
 	Counts        BundleCounts     `json:"counts"`
 }
 
@@ -307,6 +308,11 @@ type QuestionBundle struct {
 	Reason    string         `json:"reason,omitempty"`
 	Asked     time.Time      `json:"asked"`
 }
+
+// RoomLimitGap identifies a v1 limit that needs manual review.
+type RoomLimitGap string
+
+const RoomLimitMemoryMaxWithoutHigh RoomLimitGap = "memoryMaxWithoutHigh"
 
 // HookHandoff names an active v1 hook that needs manual recreation.
 type HookHandoff struct {
