@@ -60,8 +60,14 @@ func (c *Connections) SetKey(ctx context.Context, req contract.AccountsSetKeyReq
 	if err != nil {
 		return contract.AccountsSetKeyResponse{}, errConnect
 	}
-	if _, err = c.management.request(ctx, http.MethodPost, "/dyna/credentials/activate", payload); err != nil {
-		return contract.AccountsSetKeyResponse{}, errConnect
+	// Finish activation or rollback even when the request is canceled after binding.
+	finish := context.WithoutCancel(ctx)
+	if _, err = c.management.request(finish, http.MethodPost, "/dyna/credentials/activate", payload); err != nil {
+		if c.RemoveCredential(finish, proxyID) == nil && c.store.RemoveAccount(finish, accountID) == nil {
+			return contract.AccountsSetKeyResponse{}, errConnect
+		}
+		// A cleanup failure leaves an owned account. Return it so a retry does not create another.
+		return contract.AccountsSetKeyResponse{AccountID: accountID}, nil
 	}
 	return contract.AccountsSetKeyResponse{AccountID: accountID}, nil
 }

@@ -60,7 +60,11 @@ func TestKimiCompletionBindsAcrossProxyNotification(t *testing.T) {
 	defer client.Close()
 	var completionErr error
 	harness := cliproxy.NewDynaIntegrationHarness(integrationCredentialStore{client}, func(state, id string) {
-		completionErr = client.Call("Auth.OAuthCompleted", OAuthCompletion{State: state, AuthID: id}, &struct{}{})
+		var result OAuthCompletionResult
+		completionErr = client.Call("Auth.OAuthCompleted", OAuthCompletion{State: state, AuthID: id}, &result)
+		if completionErr == nil && !result.Accepted {
+			completionErr = ErrCompletionRejected
+		}
 	})
 	defer harness.Close()
 	server := httptest.NewServer(harness)
