@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/resident-labs/dyna/contract"
 
@@ -44,6 +45,7 @@ type request struct {
 	done chan error
 }
 type Store struct {
+	lock          *os.File
 	writer        *sql.DB
 	read          *sql.DB
 	checkpoint    *sql.DB
@@ -67,8 +69,27 @@ func Open(dir string) (*Store, error) {
 	return open(dir, floorVersion, floorCommit, nil)
 }
 func open(dir string, floor int, commit string, checkpointRun func() error) (*Store, error) {
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, err
+	}
+	lock, err := os.OpenFile(filepath.Join(dir, "store.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, err
+	}
+	owned := false
+	defer func() {
+		if !owned {
+			_ = lock.Close()
+		}
+	}()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, errors.New("data folder is in use by another engine")
+		}
+		return nil, err
+	}
 	path := filepath.Join(dir, "store.db")
-	_, err := os.Stat(path)
+	_, err = os.Stat(path)
 	fresh := errors.Is(err, os.ErrNotExist)
 	if err != nil && !fresh {
 		return nil, err
@@ -78,9 +99,6 @@ func open(dir string, floor int, commit string, checkpointRun func() error) (*St
 		if _, err := os.Stat(old); err == nil {
 			return nil, &Error{Code: StoreFromV1, Message: fmt.Sprintf("This folder holds a Dyna v1 store (%s). Dyna v2 cannot open it, and there is no way back to v1 after you import. To move your data: (1) stop the v1 engine; (2) build the exporter from tag `v1-final`: `git clone --branch v1-final https://github.com/resident-labs/dyna && cd dyna && go build ./cmd/dyna-export`; (3) run `./dyna-export --out ~/dyna-bundle`; (4) run `dyna import ~/dyna-bundle`. See docs/migrate.md.", old)}
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return nil, err
-		}
-		if err := os.MkdirAll(dir, 0700); err != nil {
 			return nil, err
 		}
 		if err := initialize(dir, path); err != nil {
@@ -120,11 +138,12 @@ func open(dir string, floor int, commit string, checkpointRun func() error) (*St
 		return fail(err)
 	}
 	checkpoint.SetMaxOpenConns(1)
-	s := &Store{writer: writer, read: read, checkpoint: checkpoint, requests: make(chan request), stop: make(chan struct{}), done: make(chan struct{}), checkDone: make(chan struct{})}
+	s := &Store{lock: lock, writer: writer, read: read, checkpoint: checkpoint, requests: make(chan request), stop: make(chan struct{}), done: make(chan struct{}), checkDone: make(chan struct{})}
 	if checkpointRun == nil {
 		checkpointRun = func() error { _, err := s.checkpoint.Exec("PRAGMA wal_checkpoint(PASSIVE)"); return err }
 	}
 	s.checkpointRun = checkpointRun
+	owned = true
 	go s.writeLoop()
 	go s.checkLoop(path)
 	return s, nil
@@ -303,6 +322,9 @@ func (s *Store) Close() error {
 		if e := db.Close(); err == nil {
 			err = e
 		}
+	}
+	if e := s.lock.Close(); err == nil {
+		err = e
 	}
 	return err
 }
