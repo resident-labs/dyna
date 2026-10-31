@@ -1274,6 +1274,8 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 
 **What the owner gives up from the cutover until each port:** voice calls, web search through Dyna, issue watches, room MCP servers, and several settings panes. External members (7.3), the reviewer service (decision 13) and, for now, the library are dropped. Paired devices, the desktop window, issues, goals, PRs and rules keep working.
 
+**What the owner gives up at the cutover, with no port planned yet: readable room history.** `dyna room log` starts empty. Room feeds, files, finished goals and closed issues stay in `archive/` in the data folder (8.1), and they are never imported, but nothing reads them. The `dyna` room alone holds 65,088 posts and 1,965 attachments, and with the library cut, the feed is the main record of decisions. The owner chooses whether to accept this loss or to wait for `dyna room log --archive`, held until M3 (about 60 lines, no store change). Until then, keep `archive/`.
+
 ### 9.1 What we lose from Claude Code
 
 Pi is the only harness (section 0, decision 4). These Claude Code features have no v2 form:
