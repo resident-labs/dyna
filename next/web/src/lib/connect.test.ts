@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { allowedOrigin, encode, fingerprint, hello, verifyHello } from "./connect.ts";
 import { checkPin, finishConnect } from "./connect-flow.ts";
+import { parseRoutes } from "./connect-watch.ts";
 
 test("a hello binds the fresh nonce, origin and machine to the pinned key", async () => {
   const pair = await crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"]);
@@ -21,6 +22,9 @@ test("a hello binds the fresh nonce, origin and machine to the pinned key", asyn
     assert.equal(await verifyHello({ ...result, machine: "other" }, key), false);
     const pin = { machine: result.machine, key, relay: result.relay, at: 1 };
     assert.equal(await checkPin(result, pin), undefined);
+    const changed = { ...result, machine: "other" };
+    changed.sig = encode(await crypto.subtle.sign("Ed25519", pair.privateKey, new TextEncoder().encode(`dyna-connect-hello.v1\n${changed.machine}\n${changed.origin}\n${changed.nonce}`)));
+    assert.deepEqual(await checkPin(changed, pin), { kind: "stop", pin, offered: "", field: "proof" });
     assert.equal((await checkPin({ ...result, relay: "https://other.example" }, pin))?.kind, "stop");
     assert.equal((await checkPin({ ...result, machine: "other" }, pin))?.kind, "stop");
     assert.equal((await checkPin({ ...result, machine: "other" }, undefined))?.kind, "failed");
@@ -29,6 +33,13 @@ test("a hello binds the fresh nonce, origin and machine to the pinned key", asyn
     assert.equal(allowedOrigin("http://127.0.0.1:1234"), true);
     assert.equal(allowedOrigin("https://relay.example/path"), false);
   } finally { globalThis.fetch = original; }
+});
+
+test("unsupported routes do not disable a valid session response", () => {
+  const current = "https://machine.example";
+  const parsed = parseRoutes({ machine: "invented", current, expires: "2030-01-01T00:00:00Z", routes: [current, "http://127.0.0.2:3000"] });
+  assert.ok(parsed);
+  assert.deepEqual(parsed.routes, [current]);
 });
 
 test("a return checks its saved machine and key before it contacts the machine", async () => {

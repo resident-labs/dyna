@@ -32,7 +32,11 @@ async function stored<T>(store: string, mode: IDBTransactionMode, action: (objec
   });
 }
 export const getPin = (machine: string): Promise<Pin | undefined> => stored("pins", "readonly", object => object.get(machine));
-export const putPin = (pin: Pin) => stored("pins", "readwrite", object => object.put(pin, pin.machine));
+export const getOriginPin = (origin: string): Promise<Pin | undefined> => stored("pins", "readonly", object => object.get(["origin", origin]));
+export const putPin = (pin: Pin, origin = location.origin) => stored("pins", "readwrite", object => {
+  object.put(pin, pin.machine);
+  return object.put(pin, ["origin", origin]);
+});
 
 let keyPromise: Promise<CryptoKeyPair> | undefined;
 export function deviceKey(): Promise<CryptoKeyPair> {
