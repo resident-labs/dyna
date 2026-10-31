@@ -19,6 +19,7 @@ import (
 	"dyna-agent/internal/doctoralert"
 	"dyna-agent/internal/escalate"
 	"dyna-agent/internal/ghclient"
+	"dyna-agent/internal/ghquota"
 	"dyna-agent/internal/goals"
 	harnesshealth "dyna-agent/internal/harness/health"
 	"dyna-agent/internal/harness/modelcooldown"
@@ -91,6 +92,7 @@ var migrations = []func(dataDir string) error{
 	// ghclient keeps the proved GitHub account of each room, so turn startup
 	// makes no GitHub API call after an engine restart.
 	ghclient.Migrate,
+	ghquota.Migrate,
 	// genstate keeps the generation leases and publication views the harness
 	// runtime queries at cleanup.
 	genstate.Migrate,
