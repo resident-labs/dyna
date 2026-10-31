@@ -10,8 +10,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -77,7 +75,7 @@ func (s *Sessions) link(ctx context.Context) (Link, int64, error) {
 }
 func (s *Sessions) ManagedOrigin(ctx context.Context) string {
 	l, _, err := s.link(ctx)
-	if err != nil {
+	if err != nil || routeRank(l.App, l.App) < 0 {
 		return ""
 	}
 	return l.App
@@ -135,10 +133,7 @@ var browserKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 var helloNoncePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{16,64}$`)
 
 func (s *Sessions) relay(l Link) (*Relay, error) {
-	if _, err := os.Stat(filepath.Join(s.files.dir, "machine.key")); err != nil {
-		return nil, err
-	}
-	key, err := s.files.Key()
+	key, err := s.files.existingKey()
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +224,9 @@ func (s *Sessions) ServePublic(w http.ResponseWriter, r *http.Request, origin st
 			Origin  string `json:"origin"`
 			Nonce   string `json:"nonce"`
 			Sig     string `json:"sig"`
-		}{l.Machine, origin, nonce, b64.EncodeToString(sig)})
+			Relay   string `json:"relay"`
+			Key     string `json:"key"`
+		}{l.Machine, origin, nonce, b64.EncodeToString(sig), l.Relay, b64.EncodeToString(relay.Key.Public().(ed25519.PublicKey))})
 	case "/connect/v1/mint":
 		l, generation, err := s.link(r.Context())
 		if err != nil || l.App != origin {

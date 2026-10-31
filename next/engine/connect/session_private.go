@@ -66,7 +66,7 @@ func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin s
 	}
 	switch r.URL.Path {
 	case "/api/connect/routes":
-		s.routeList(w, r, origin, routes)
+		s.routeList(w, r, origin, routes, x)
 	case "/api/connect/handoff":
 		s.issueHandoff(w, r, origin, req.Target, req.Proof, x, routes)
 	case "/api/connect/renew":

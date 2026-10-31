@@ -3,7 +3,7 @@
   import { APIError, call, SignedOut } from "../client.ts";
   import Blocked from "./Blocked.svelte";
   import AppearancePane from "./AppearancePane.svelte";
-  import DevicesPane from "./DevicesPane.svelte";
+  import SharingPane from "./SharingPane.svelte";
   import AccountsPane from "./AccountsPane.svelte";
   import ProfilesPane from "./ProfilesPane.svelte";
   import Icon, { type IconName } from "./Icon.svelte";
@@ -28,7 +28,7 @@
 
   // Appearance is on every device; Devices only on one with admin.
   let panes: { id: string; label: string; icon: IconName }[] = $derived([{ id: "appearance", label: "Appearance", icon: "palette" },
-    ...admin ? [{ id: "devices", label: "Devices", icon: "devices" }, { id: "accounts", label: "Accounts", icon: "plug" }, { id: "profiles", label: "Profiles", icon: "tool" }] as const : []]);
+    ...admin ? [{ id: "devices", label: "Sharing & access", icon: "devices" }, { id: "accounts", label: "Accounts", icon: "plug" }, { id: "profiles", label: "Profiles", icon: "tool" }] as const : []]);
   let shown = $derived(panes.find(pane => path === `/settings/${pane.id}` || (pane.id === "accounts" && path.startsWith("/settings/accounts/"))) ?? (phone ? undefined : panes[0]));
   // /settings and its trailing slash open the first pane or the list; any other path has no page.
   let lost = $derived(!/^\/settings\/?$/.test(path) && !panes.some(pane => path === `/settings/${pane.id}` || (pane.id === "accounts" && /^\/settings\/accounts\/(?:add(?:\/[^/]+)?|account\/[^/]+)$/.test(path))));
@@ -46,7 +46,7 @@
   <div class="pane">
     {#if lost}<Blocked kind="no-page" back={{ href: "/settings", label: "Back to Settings" }} {navigate} />
     {:else if shown?.id === "appearance"}<AppearancePane {bar} />
-    {:else if shown?.id === "devices"}<DevicesPane {devices} {failed} {reload} {signedout} {bar} />
+    {:else if shown?.id === "devices"}<SharingPane {devices} {failed} {reload} {signedout} {bar} />
     {:else if shown?.id === "accounts"}<AccountsPane {bar} {phone} {signedout} {path} {navigate} />
     {:else if shown?.id === "profiles"}<ProfilesPane {bar} {phone} {signedout} />
     {:else}
