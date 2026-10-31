@@ -150,11 +150,17 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 						end = *r.End
 					}
 					// Never read bytes after the committed acknowledgment.
+					acknowledged := false
 					for _, f := range files {
-						if f.Path == r.Path && f.Acked < end {
-							end = f.Acked
+						if f.Path == r.Path {
+							end = min(end, f.Acked)
+							acknowledged = true
 							break
 						}
+					}
+					if !acknowledged {
+						file.Close()
+						continue
 					}
 					items, seen, more, err := pi.ReadTranscript(io.NewSectionReader(file, r.Start, max(0, end-r.Start)), deliveries, r.Path, req.Item, skip, max(0, 6-len(t.Items)))
 					file.Close()
@@ -343,10 +349,11 @@ func applyTranscriptPost(item *contract.TranscriptItem, event contract.Event) {
 	for i := range item.Attachments {
 		a := &item.Attachments[i]
 		a.Name = harness.Mask(a.Name)
+		a.Media = clipTranscript(harness.Mask(a.Media), 1024)
 		if a.Visual != nil {
 			a.Visual.Title = harness.Mask(a.Visual.Title)
 			for j := range a.Visual.Checks {
-				a.Visual.Checks[j].Detail = harness.Mask(a.Visual.Checks[j].Detail)
+				a.Visual.Checks[j].Detail = clipTranscript(harness.Mask(a.Visual.Checks[j].Detail), 4096)
 			}
 		}
 	}
