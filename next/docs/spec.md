@@ -783,7 +783,7 @@ Only one layer retries a model call: Pi. The model route never retries, and CLIP
 
 **Transcript read.** Owner-only `transcript.read` returns tool steps from the acknowledged transcript, optionally filtered by turn. Pi maps delivery IDs to turns and joins tool calls with results. Running calls have no end time. The response keeps at most the newest 200 steps and 256 KiB, caps each output preview at 1 KiB, and reports truncation. The reader streams bounded JSONL records; an oversized record is skipped and marks the response truncated. No event or table is added.
 
-**Release skew.** `hello` carries the binary version. When it differs from the engine's, the engine sends `Upgrade` once the box is idle, and the box agent runs `/opt/dyna/bin/current/dyna box-agent` in its place. This comes in M2. In M1, the engine accepts a `hello` with another version, and the owner closes every box before an engine upgrade.
+**Release skew.** The API is additive. A quiet box stops after 10 minutes and starts the host's current binary on its next wake. The engine does not send an upgrade message.
 
 ### 5.9 Close (archive in M2)
 

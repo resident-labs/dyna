@@ -296,7 +296,7 @@ func (b *boxes) Remove(ctx context.Context, id contract.BoxID) error {
 func (b *boxes) run(ctx context.Context, id contract.BoxID) {
 	c := agent.NewClient(filepath.Join(b.dir, "boxes", string(id)+".sock"))
 	go c.Run(ctx)
-	for _, err := c.Hello(ctx, "dev"); err != nil && ctx.Err() == nil; _, err = c.Hello(ctx, "dev") { // Create returns before the box is starting.
+	for _, err := c.Hello(ctx); err != nil && ctx.Err() == nil; _, err = c.Hello(ctx) { // Create returns before the box is starting.
 		time.Sleep(50 * time.Millisecond)
 	}
 	runner := &agent.Runner{Harness: &scripted{box: c}, Sink: c}
