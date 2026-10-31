@@ -2,6 +2,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -18,6 +19,10 @@ var version = "dev"
 
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
+		var exit commandExit
+		if errors.As(err, &exit) {
+			os.Exit(int(exit))
+		}
 		os.Exit(1)
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/api"
 	enginegit "github.com/resident-labs/dyna/engine/git"
+	"github.com/resident-labs/dyna/engine/hostexec"
 	engineimages "github.com/resident-labs/dyna/engine/images"
 	"github.com/resident-labs/dyna/engine/store"
 )
@@ -310,4 +311,30 @@ func removeHostBox(ctx context.Context, h box.HostDriver, record box.Box, forwar
 		return err
 	}
 	return h.RemoveSlice(ctx, record.Slice)
+}
+
+type scopeRunner interface {
+	RunHostexec(context.Context, contract.HostexecRunArgs, contract.OpID) ([]byte, int, bool, error)
+	StopHostexec(context.Context, string) error
+}
+
+func (b *Boxes) scopeRunner(ctx context.Context, host contract.HostName) (scopeRunner, error) {
+	if host == contract.ControlPlane {
+		return hostexec.Local{}, nil
+	}
+	return b.host(ctx, host)
+}
+func (b *Boxes) RunHostexec(ctx context.Context, a contract.HostexecRunArgs, op contract.OpID) ([]byte, int, bool, error) {
+	r, err := b.scopeRunner(ctx, a.Host)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	return r.RunHostexec(ctx, a, op)
+}
+func (b *Boxes) StopHostexec(ctx context.Context, host contract.HostName, scope string) error {
+	r, err := b.scopeRunner(ctx, host)
+	if err != nil {
+		return err
+	}
+	return r.StopHostexec(ctx, scope)
 }

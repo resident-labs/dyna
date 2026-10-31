@@ -70,7 +70,7 @@ func setup(t *testing.T) *fixture {
 			}
 			return nil
 		},
-		Execute: func(context.Context, contract.OpArgs, contract.Principal) contract.OpResult {
+		Execute: func(context.Context, contract.OpID, contract.OpArgs, contract.Principal) contract.OpResult {
 			f.runs.Add(1)
 			return contract.OpResult{}
 		},
@@ -229,7 +229,7 @@ func TestCanceledSubmitWakesWhenExecutionFinishes(t *testing.T) {
 	f.class = contract.ClassAuto
 	started, release := make(chan struct{}), make(chan struct{})
 	entry := f.s.Kinds["test.run"]
-	entry.Execute = func(context.Context, contract.OpArgs, contract.Principal) contract.OpResult {
+	entry.Execute = func(context.Context, contract.OpID, contract.OpArgs, contract.Principal) contract.OpResult {
 		close(started)
 		<-release
 		return contract.OpResult{}
@@ -268,7 +268,7 @@ func TestDecideReturnsBeforeExecutorAndWakesSubmitter(t *testing.T) {
 	f := setup(t)
 	started, release := make(chan struct{}), make(chan struct{})
 	entry := f.s.Kinds["test.run"]
-	entry.Execute = func(ctx context.Context, _ contract.OpArgs, _ contract.Principal) contract.OpResult {
+	entry.Execute = func(ctx context.Context, _ contract.OpID, _ contract.OpArgs, _ contract.Principal) contract.OpResult {
 		close(started)
 		<-release
 		if ctx.Err() != nil {

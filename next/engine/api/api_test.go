@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
@@ -273,5 +274,39 @@ func TestEventsReconnectUsesLastEventID(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusOK || s.after != 9 {
 		t.Fatalf("status %d after %d", w.Code, s.after)
+	}
+}
+
+func TestOwnerSocketRejectsHostexecScope(t *testing.T) {
+	dir := t.TempDir()
+	sockets := NewSockets(New(&fakeService{}, nil), dir, 1, func(net.Conn) (uint32, error) { return 1, nil })
+	sockets.scope = func(net.Conn) bool { return true }
+	t.Cleanup(func() { _ = sockets.Close() })
+	if err := sockets.OpenOwner(); err != nil {
+		t.Fatal(err)
+	}
+	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(dir, "owner.sock"))
+	}}
+	defer transport.CloseIdleConnections()
+	resp, err := (&http.Client{Transport: transport}).Post("http://dyna/v1/session.close", "application/json", strings.NewReader(`{"session":"x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var e contract.Error
+	if err = json.NewDecoder(resp.Body).Decode(&e); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusForbidden || e.Code != contract.ErrHostexecScope {
+		t.Fatalf("status %d, error %+v", resp.StatusCode, e)
+	}
+}
+
+func TestOpSubmitRejectsHostexecRun(t *testing.T) {
+	body := `{"operation":{"kind":"hostexec.run","room":"room-a","args":{"room":"room-a","host":"host","argv":["true"],"timeout":1000,"grant":"grant","mode":"preapproved"}}}`
+	response := request(New(&fakeService{}, nil).handler(boxCaller()), "/v1/op.submit", body)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status %d: %s", response.Code, response.Body.String())
 	}
 }
