@@ -19,6 +19,13 @@ export function fitted(rect: Rect, ratio: number, chrome: number, bottom: number
   return { ...rect, w, h, x: rect.x + rect.w - w };
 }
 
+// A computer's first place: against the app's right edge, 416 px wide, over the sessions panel. clear says that it
+// leaves the cards alone, whose right edge is cards.
+export function computerPlace(width: number, top: number, cards: number): { rect: Rect; clear: boolean } {
+  const rect = { x: width - 432, y: top, w: 416, h: 300 };
+  return { rect, clear: rect.x >= cards + 16 };
+}
+
 // The rect after a drag of (dx, dy) on the given edges, from the rect when the drag began.
 // A left or top resize that reaches the minimum size stops there instead of pushing the window.
 export function dragged(start: Rect, [left, top, right, bottom]: Edges, dx: number, dy: number): Rect {
