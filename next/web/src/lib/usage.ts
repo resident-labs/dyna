@@ -4,6 +4,7 @@ import type { Meter } from "./hosts.ts";
 // An expired sign-in needs attention; an unreachable usage reading is a muted fact.
 export const causeText: Record<Exclude<UsageCause, "">, { pill: string; line: string; tone?: "warning" }> = {
   sign_in_expired: { pill: "Sign-in expired", line: "Sign in again to see its limits.", tone: "warning" },
+  rate_limited: { pill: "Rate limited", line: "The provider asked Dyna to try again later." },
   unreachable: { pill: "Unreachable", line: "Dyna could not read its limits." },
 };
 
