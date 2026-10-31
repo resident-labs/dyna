@@ -30,6 +30,9 @@ var steps = map[int][]string{
 		`CREATE TABLE grant_hosts (grant_id TEXT NOT NULL REFERENCES grants(id), host TEXT NOT NULL, PRIMARY KEY(grant_id, host));`,
 		`CREATE TABLE grant_commands (grant_id TEXT NOT NULL REFERENCES grants(id), idx INTEGER NOT NULL, program TEXT NOT NULL, prefix INTEGER NOT NULL, PRIMARY KEY(grant_id, idx));`,
 		`CREATE TABLE grant_command_args (grant_id TEXT NOT NULL, idx INTEGER NOT NULL, pos INTEGER NOT NULL, arg TEXT NOT NULL, PRIMARY KEY(grant_id, idx, pos), FOREIGN KEY(grant_id, idx) REFERENCES grant_commands(grant_id, idx));`,
+		`INSERT INTO grants(id,kind,room,to_kind,to_id,mode,by_kind,by_id,created_at) SELECT 'grant_'||id,'hostexec',room,'session',id,'preapproved','engine','',created_at FROM sessions WHERE parent IS NULL AND closed_at IS NULL;`,
+		`INSERT INTO grant_hosts(grant_id,host) SELECT 'grant_'||id,'*' FROM sessions WHERE parent IS NULL AND closed_at IS NULL;`,
+		`INSERT INTO grant_commands(grant_id,idx,program,prefix) SELECT 'grant_'||id,0,'*',1 FROM sessions WHERE parent IS NULL AND closed_at IS NULL;`,
 	},
 }
 
