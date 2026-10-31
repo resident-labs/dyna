@@ -4,7 +4,6 @@ package runtime
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -306,7 +305,7 @@ func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host,
 			return h, nil
 		}
 	}
-	return nil, fmt.Errorf("host %q: %w", name, sql.ErrNoRows)
+	return nil, fmt.Errorf("host %q: %w", name, store.ErrNotFound)
 }
 
 func (b *Boxes) MaintainHost(ctx context.Context, name contract.HostName) ([]contract.RoomShared, error) {
