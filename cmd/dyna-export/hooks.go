@@ -73,7 +73,7 @@ func readHooks(db *sql.DB, repoRooms map[contract.RepoName][]contract.RoomName, 
 			}
 			// v1 hooks always execute a shell command; the typed Wake form
 			// cannot faithfully represent an arbitrary shell command.
-			fields := []string{"Event", "Command", "Cwd", "Timeout", "OnFail"}
+			fields := []string{"Label", "Event", "Command", "Cwd", "Timeout", "OnFail", "Scope", "AddedBy", "AddedAt", "EditedBy", "EditedAt", "EveryMinutes"}
 			gaps = append(gaps, hookGap{Repo: repo, Name: hook.Name, Fields: fields, UnverifiedCheckout: unverified, WithoutRoom: len(targets) == 0})
 			for _, target := range targets {
 				handoff := contract.HookHandoff{Name: hook.Name, Fields: fields}
