@@ -1,8 +1,10 @@
 <script lang="ts">
   import { hostLabel, hostLoads, watchHosts } from "../hosts.ts";
+  import StatusPill from "./StatusPill.svelte";
   // The hosts' load at the foot of the sessions panel, so a slow machine shows from the room (mockup note 7, fix 7):
-  // up to 3 hosts, busiest first, each its name and "CPU 19% · Mem 32%" muted. A figure at 90% or more takes the
-  // warning color, as on Home's meters. It links to Machines on Home. Before the first answer, or with no host that
+  // up to 3 hosts. An unreachable host comes first, its name then "Unreachable" in the danger tone. The others follow
+  // busiest first, each its name and "CPU 19% · Mem 32%" muted; a figure at 90% or more takes the warning color, as
+  // on Home's meters. It links to Machines on Home. Before the first answer, or with no host that
   // reports load, it shows nothing; a failed call keeps the last answer.
   type Navigate = (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void;
   let { navigate }: { navigate: Navigate } = $props();
@@ -12,7 +14,7 @@
 
 {#if hosts.length}<a class="hosts" href="/#machines" onclick={navigate} title="Machines on Home">
   {#each hosts as host (host.name)}<span class="host"><span class="name">{hostLabel(host.name)}</span>
-    <span class="load">{#each host.meters as m, i (m.label)}{#if i}{" · "}{/if}<span class:busy={m.busy}>{m.label === "Memory" ? "Mem" : m.label} {m.percent}%</span>{/each}</span></span>{/each}</a>{/if}
+    <span class="load">{#if !host.reachable}<StatusPill tone="error" word label="Unreachable" />{/if}{#each host.meters as m, i (m.label)}{#if i}{" · "}{/if}<span class:busy={m.busy}>{m.label === "Memory" ? "Mem" : m.label} {m.percent}%</span>{/each}</span></span>{/each}</a>{/if}
 
 <style>
   /* It stays at the bottom of the panel while the list scrolls above it. */
