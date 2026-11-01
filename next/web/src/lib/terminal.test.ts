@@ -6,7 +6,9 @@ function fake() {
   const sent: (string | Uint8Array)[] = [];
   const socket: Connection = { binaryType: "blob", onopen: null, onmessage: null, onclose: null, send: data => { sent.push(data); }, close() {} };
   const message = (data: unknown) => socket.onmessage?.(new MessageEvent("message", { data }));
-  return { socket, sent, message, open: () => socket.onopen?.(new Event("open")), close: () => socket.onclose?.(new CloseEvent("close")) };
+  // The adapter ignores close details; Node does not provide the browser's CloseEvent constructor.
+  const close = () => socket.onclose?.(new Event("close") as CloseEvent);
+  return { socket, sent, message, open: () => socket.onopen?.(new Event("open")), close };
 }
 
 test("the terminal adapter carries bytes, resizes and the shell's exit over one socket", () => {

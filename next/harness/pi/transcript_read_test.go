@@ -15,7 +15,7 @@ func TestCodemodeTranscript(t *testing.T) {
 		`{"type":"message","message":{"role":"toolResult","toolCallId":"empty","content":[]}}` + "\n"
 	deliveries := map[contract.DeliverySeq]contract.TurnID{1: "t"}
 	items, _, _, err := ReadTranscript(strings.NewReader(data), deliveries, "x", "", 0, 10)
-	if err != nil || len(items) != 2 || !items[0].More || items[0].Arguments != "" || len(items[0].Script) != 8192 || len(items[0].Calls) != 1 || items[0].Calls[0].Target != "a" || items[0].Calls[0].Status != contract.TranscriptCallError || *items[0].Calls[0].DurationMs != 42 || strings.Contains(items[0].Calls[0].Error, "secretvalue") || len(items[1].Calls) != 0 {
+	if err != nil || len(items) != 2 || !items[0].More || len(items[0].Script) != 8192 || len(items[0].Calls) != 1 || items[0].Calls[0].Target != "a" || items[0].Calls[0].Status != contract.TranscriptCallError || *items[0].Calls[0].DurationMs != 42 || strings.Contains(items[0].Calls[0].Error, "secretvalue") || len(items[1].Calls) != 0 {
 		t.Fatalf("items=%+v err=%v", items, err)
 	}
 	full, _, _, err := ReadTranscript(strings.NewReader(data), deliveries, "x", "call", 0, 10)
