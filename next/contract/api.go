@@ -239,13 +239,16 @@ type AccountUsage struct {
 	Provider   string        `json:"provider"`
 	Label      string        `json:"label"`
 	Windows    []UsageWindow `json:"windows"`
-	Cause      UsageCause    `json:"cause"`
+	// Balances are prepaid amounts for display only. They carry no meter or alert.
+	Balances []UsageBalance `json:"balances,omitempty"`
+	Cause    UsageCause     `json:"cause"`
 }
 type UsageWindowKind string
 
 const (
 	UsageWindowFiveHour UsageWindowKind = "five_hour"
 	UsageWindowWeekly   UsageWindowKind = "weekly"
+	UsageWindowMonthly  UsageWindowKind = "monthly"
 	UsageWindowOther    UsageWindowKind = "other"
 )
 
@@ -256,6 +259,12 @@ type UsageWindow struct {
 	UsedPercent float64         `json:"usedPercent"`
 	Seconds     int64           `json:"seconds"`
 	ResetsAt    time.Time       `json:"resetsAt"`
+}
+
+// UsageBalance keeps the provider's decimal text, so no currency is converted or rounded.
+type UsageBalance struct {
+	Currency string `json:"currency"`
+	Amount   string `json:"amount"`
 }
 
 type HostAddRequest struct {
