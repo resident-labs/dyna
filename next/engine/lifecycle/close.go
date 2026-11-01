@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 )
@@ -14,7 +15,7 @@ const archiveRetry = 10 * time.Minute
 // closeNotConnected marks a box that started for archive and never connected, so it shows as stuck rather than running.
 const closeNotConnected = "box did not connect to archive"
 
-func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox) error {
+func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox, host box.HostState) error {
 	leaf, err := r.store.ClosingLeaf(ctx, row.Session)
 	if err != nil || !leaf {
 		return err
@@ -43,6 +44,9 @@ func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox) erro
 			return err
 		}
 		row.Box, row.DueAt = next, time.Time{}
+	}
+	if row.Deleting && r.roomHosts != nil && row.Host != "" && host != box.HostReady {
+		return r.abandon(ctx, row)
 	}
 	if row.Reason == closeNotConnected && r.view.Connected(row.Session) {
 		return r.retryArchive(ctx, row) // It was only slow.

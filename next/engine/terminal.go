@@ -28,9 +28,13 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 			copyFailure = contract.BackupCopyNoSpace
 		}
 	}
+	leftovers, err := s.store.LeftoverCounts(ctx)
+	if err != nil {
+		return contract.HostListResponse{}, failure(err)
+	}
 	result := contract.HostListResponse{Hosts: []contract.HostSummary{{Name: contract.ControlPlane, Shared: []contract.RoomShared{}, BackupCopyAt: status.LastSuccess, BackupCopyFailure: copyFailure}}}
 	for _, host := range hosts {
-		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, Shared: append([]contract.RoomShared{}, shared[host.Name]...), CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.CheckedAt.IsZero() && host.DiskBytes < box.DiskWarn(host.DiskFloor)})
+		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, Shared: append([]contract.RoomShared{}, shared[host.Name]...), CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.CheckedAt.IsZero() && host.DiskBytes < box.DiskWarn(host.DiskFloor), Leftovers: leftovers[host.Name]})
 	}
 	return result, nil
 }
