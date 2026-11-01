@@ -45,6 +45,7 @@
   }
 </script>
 
+<div class="pagebar"><span class="hash">#</span> {roomName} <span class="slash">/</span> New session</div>
 <form onsubmit={event => { event.preventDefault(); void start(); }} onkeydown={event => {
   if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); void start(); }
 }}>
@@ -85,6 +86,8 @@
 </form>
 
 <style>
+  .pagebar { flex: none; height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 20px; border-bottom: 1px solid var(--line); font-weight: 600; }
+  .hash, .slash { color: var(--muted); }
   form { display: grid; align-content: start; flex: 1; min-height: 0; overflow-y: auto; gap: 24px; width: min(100%, 800px); margin: 0 auto; padding: 32px 24px 48px; color: var(--text); }
   header { display: flex; align-items: center; gap: 18px; }
   h1 { margin: 0; font-size: 21px; line-height: 28px; }
