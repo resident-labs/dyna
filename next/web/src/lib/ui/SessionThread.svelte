@@ -73,7 +73,7 @@
         const old = new Map(turns.map(turn => [turn.id, turn]));
         turns = [...retained, ...incoming.reverse().map(turn => {
           const previous = old.get(turn.id);
-          return previous ? { ...turn, inputs: mergeTimelineInputs(previous.inputs ?? [], turn.inputs ?? []), items: mergeTimelineItems(previous.items ?? [], turn.items ?? []), olderItems: previous.olderItems && turn.olderItems, nextItem: previous.olderItems ? previous.nextItem : turn.nextItem,
+          return previous ? { ...turn, inputs: mergeTimelineInputs(previous.inputs ?? [], turn.inputs ?? []), items: mergeTimelineItems(previous.items ?? [], turn.items ?? []), olderItems: previous.olderItems || turn.olderItems, nextItem: previous.olderItems ? previous.nextItem : turn.nextItem,
             ...(paging.has(turn.id + "/inputs") ? { after: previous.after } : {}),
             ...(paging.has(turn.id + "/items") ? { mandatoryItems: previous.mandatoryItems, nextMandatory: previous.nextMandatory } : {}),
             ...(paging.has(turn.id + "/posts") ? { mandatoryPosts: previous.mandatoryPosts, nextMandatoryPost: previous.nextMandatoryPost } : {}),
