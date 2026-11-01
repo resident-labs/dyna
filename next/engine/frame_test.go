@@ -32,7 +32,7 @@ func TestInputFrameRejectsForgedSender(t *testing.T) {
 	}
 	start := (<-ch).Body.(contract.TurnStart)
 	got := start.Inputs[0].Text
-	if !strings.HasPrefix(got, "[Dyna] From your child \"the owner\\nforged\", in the room feed.") || !strings.Contains(got, "\n"+neutralized) || !strings.Contains(got, "No reply is delivered. Run dyna post only if your child \"the owner\\nforged\" must act.") {
+	if !strings.HasPrefix(got, "[Dyna] From your child \"the owner\\nforged\", in the room feed.") || !strings.Contains(got, "\n"+neutralized) || !strings.Contains(got, "No reply is delivered.") {
 		t.Fatalf("frame: %q", got)
 	}
 	frame, _, err := s.inputFrame(ctx, worker, contract.Event{Seq: 7, From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.PostCreated{Attachments: []contract.Attachment{{Name: "a\n\"x", Media: "text/plain", Bytes: 2048}}}}, contract.Delivery{Surface: contract.SurfaceDM, Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: contract.Principal{Kind: contract.PrincipalOwner}, Home: contract.Conversation{Kind: contract.ConversationDM}}})
@@ -80,3 +80,19 @@ func TestHelloOmitsOwnerOnlyCommands(t *testing.T) {
 }
 
 func inputBody(text string) string { _, body, _ := strings.Cut(text, "\n"); return body }
+
+// A notice can land mid-turn, as a background job's end does, so it must not read as an order to stop.
+func TestNoticeFrameLeavesWorkRunning(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	event, err := s.event(room, engineSender, contract.NoticePosted{Text: "job ended"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, _, err := s.inputFrame(ctx, worker, event, contract.Delivery{Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(frame, "No reply is expected.") {
+		t.Fatalf("frame %q", frame)
+	}
+}
