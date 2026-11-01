@@ -146,8 +146,12 @@ func TestAMixedPassGivesOneEventAndOneWake(t *testing.T) {
 	if got := r.eventCount(t, "pr.changed") - before; got != 1 {
 		t.Fatalf("%d pr.changed events", got)
 	}
-	if got := r.eventCount(t, "issue.changed"); got != 0 {
+	// The typed event sits beside the pr.changed for subscribers and tells nobody by itself.
+	if got := r.eventCount(t, "issue.changed"); got != 1 {
 		t.Fatalf("%d issue.changed events beside the pr.changed", got)
+	}
+	if got := r.deliveryCount(t, "issue.changed", r.child, true) + r.deliveryCount(t, "issue.changed", r.child, false); got != 0 {
+		t.Fatalf("the owner has %d deliveries of the typed event", got)
 	}
 	got := r.wakes(t, r.child)
 	if len(got) != 1 || len(got[0].Changes) != 2 || len(got[0].Issues) != 2 {
@@ -161,6 +165,102 @@ func TestAMixedPassGivesOneEventAndOneWake(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("%q lacks %q", text, want)
 		}
+	}
+}
+
+// subscribe adds a room subscription on issue.changed that wakes a session.
+func (r *prRig) subscribe(t *testing.T, to contract.SessionID) {
+	t.Helper()
+	wake := sessionCaller(to)
+	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"issue.changed"}, Wake: &wake}); e != nil {
+		t.Fatalf("%+v", e)
+	}
+}
+
+func TestASubscriberHearsEveryIssueChangeOnceAndTheOwnerOneWake(t *testing.T) {
+	r := newPRRig(t)
+	r.subscribe(t, r.root)
+	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})
+	r.track(t, fakegithub.Issue{Repo: "owner/repo", Number: 2})
+	r.dispatch(t)
+
+	// A mixed pass.
+	r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) { p.Rollup = "SUCCESS" })
+	r.github.EditIssue("owner/repo", 2, func(i *fakegithub.Issue) { i.Meta.Labels = []string{"bug"} })
+	r.pass(t)
+	r.dispatch(t)
+	if got := len(r.wakes(t, r.child)); got != 1 {
+		t.Fatalf("the owner woke %d times", got)
+	}
+	if got := r.deliveryCount(t, "issue.changed", r.root, true); got != 1 {
+		t.Fatalf("the subscriber heard %d times", got)
+	}
+	if got := r.deliveryCount(t, "issue.changed", r.child, true) + r.deliveryCount(t, "issue.changed", r.child, false); got != 0 {
+		t.Fatalf("the owner heard the typed event %d times", got)
+	}
+
+	// A pass with only the issue reaches the subscriber the same way, and a restart repeats neither.
+	r.github.EditIssue("owner/repo", 2, func(i *fakegithub.Issue) { i.State = "CLOSED" })
+	r.clock.add(11 * time.Minute)
+	r.pass(t)
+	r.connect()
+	r.clock.add(11 * time.Minute)
+	r.pass(t)
+	r.dispatch(t)
+	if got := r.deliveryCount(t, "issue.changed", r.root, true); got != 2 {
+		t.Fatalf("the subscriber heard %d times", got)
+	}
+	if got := r.deliveryCount(t, "issue.changed", r.child, true); got != 1 {
+		t.Fatalf("the owner heard the issue-only pass %d times", got)
+	}
+}
+
+func TestAnOwnerSubscribedToIssueChangedHearsOnePass(t *testing.T) {
+	r := newPRRig(t)
+	r.subscribe(t, r.child)
+	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})
+	r.track(t, fakegithub.Issue{Repo: "owner/repo", Number: 2})
+	r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) { p.Rollup = "SUCCESS" })
+	r.github.EditIssue("owner/repo", 2, func(i *fakegithub.Issue) { i.Meta.Labels = []string{"bug"} })
+	r.pass(t)
+	r.dispatch(t)
+	if got := len(r.wakes(t, r.child)); got != 1 {
+		t.Fatalf("%d pr.changed wakes", got)
+	}
+	if got := r.deliveryCount(t, "issue.changed", r.child, true) + r.deliveryCount(t, "issue.changed", r.child, false); got != 0 {
+		t.Fatalf("the owner heard one pass twice: %d", got)
+	}
+	// Its own subscription on an issue-only pass adds nothing to the delivery it already has.
+	r.github.EditIssue("owner/repo", 2, func(i *fakegithub.Issue) { i.State = "CLOSED" })
+	r.clock.add(11 * time.Minute)
+	r.pass(t)
+	r.dispatch(t)
+	if got := r.deliveryCount(t, "issue.changed", r.child, true); got != 1 {
+		t.Fatalf("%d deliveries", got)
+	}
+}
+
+func TestAQuietIssueChangeWakesNoSubscriber(t *testing.T) {
+	r := newPRRig(t)
+	r.subscribe(t, r.root)
+	r.track(t, fakegithub.Issue{Repo: "owner/repo", Number: 1})
+	r.github.EditIssue("owner/repo", 1, func(i *fakegithub.Issue) { i.Title = "first" })
+	r.pass(t)
+	r.dispatch(t)
+	if got := r.deliveryCount(t, "issue.changed", r.root, true); got != 1 {
+		t.Fatalf("the subscriber heard %d times", got)
+	}
+	// Inside the window a new title moves the row and has nothing to tell yet.
+	r.github.EditIssue("owner/repo", 1, func(i *fakegithub.Issue) { i.Title = "second" })
+	r.clock.add(61 * time.Second)
+	before := r.eventCount(t, "issue.changed")
+	r.pass(t)
+	r.dispatch(t)
+	if got := r.eventCount(t, "issue.changed"); got != before+1 {
+		t.Fatalf("no quiet refresh: %d events, was %d", got, before)
+	}
+	if got := r.deliveryCount(t, "issue.changed", r.root, true); got != 1 {
+		t.Fatalf("a quiet change woke the subscriber: %d", got)
 	}
 }
 

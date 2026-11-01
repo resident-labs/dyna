@@ -308,11 +308,20 @@ func subscriptionMatches(sub Subscription, event contract.Event, dm bool) bool {
 	if owned, ok := event.Body.(interface{ OwnedBy() contract.SessionID }); ok && sub.Default && owned.OwnedBy() != "" {
 		return false
 	}
+	// An issue.changed with no news only keeps rows current, so it has nothing to say.
+	issues, isIssues := event.Body.(contract.IssueChanged)
+	if isIssues && !issues.Waking() {
+		return false
+	}
 	if sub.Wake == nil {
 		return true
 	}
 	// A session does not wake on its own events, or a turn's end would start the next turn forever.
 	if event.From.Kind == contract.PrincipalSession && event.From.Session == sub.Wake.Session {
+		return false
+	}
+	// The issue's owner already has the pass in its one delivery, on this event or on the pr.changed beside it.
+	if isIssues && issues.Session == sub.Wake.Session {
 		return false
 	}
 	_, err := room.RenderDelivery(event.Body)
