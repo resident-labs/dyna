@@ -18,7 +18,7 @@
   let latest = $derived(allVersions[0]);
   let older = $derived(current.visual.version < latest.visual.version);
   let menu = $state(false);
-  let menuButton: HTMLButtonElement;
+  let menuButton = $state<HTMLButtonElement>();
   let anchor: HTMLElement;
   function closeMenu() { menu = false; menuButton?.focus(); }
   function outside(event: PointerEvent) { if (menu && !anchor.contains(event.target as Node)) closeMenu(); }
@@ -121,13 +121,13 @@
     {#if overlay}<button class="back" type="button" onclick={onclose}>‹ {roomName}</button>{/if}
     <strong title={current.visual.title}>{current.visual.title}</strong>
     <div class="anchor" bind:this={anchor}>
-      {#if allVersions.length > 1}<button class="version" bind:this={menuButton} type="button" aria-expanded={menu} onclick={() => menu = !menu}>v{version} ⌄</button>
+      {#if allVersions.length > 1}<button class="version" class:active={menu} bind:this={menuButton} type="button" aria-expanded={menu} onclick={() => menu = !menu}>v{version} ⌄</button>
       {:else}<span class="version">v{version}</span>{/if}
       {#if menu}<div class="popover versions">{#each allVersions as item (item.event.id)}<button type="button" onclick={() => { pick(item.visual.version); menuButton?.focus(); }}><span class="pill">v{item.visual.version}</span><span class="version-meta">{author(item)} · {formatTime(item.event.at)}<small>{item.event.body.text.split(/\r?\n/)[0]}</small></span></button>{/each}</div>{/if}
     </div>
     <span class="byline">{author(current)} · {formatTime(current.event.at)}</span>
     <span class="spacer"></span>
-    <a class="icon" href={url} target="_blank" rel="noopener noreferrer" title="Open in a new tab" aria-label="Open in a new tab"><Icon name="maximize" /></a>
+    <a class="icon" href={url} target="_blank" rel="noopener noreferrer" title="Open in a new tab" aria-label="Open in a new tab"><Icon name="external" /></a>
     {#if !overlay}<button class="icon" type="button" title="Close" aria-label="Close" onclick={onclose}><Icon name="close" /></button>{/if}
   </header>
   {#if superseded}<div class="older" role="alert">This card has a newer version. <button type="button" onclick={openNew}>Open v{superseded.version}</button>{#if openFailed} The version did not open. Try again.{/if}</div>
@@ -161,6 +161,8 @@
   .spacer { flex:1; }
   .anchor { position:relative; flex:none; }
   .version { color:var(--muted); font-size:12px; white-space:nowrap; }
+  .version.active { background:var(--selected); color:var(--text); }
+  button:focus-visible, a:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
   .popover { position:absolute; z-index:2; top:calc(100% + 12px); left:0; min-width:260px; padding:6px; background:var(--raised); border:1px solid var(--line); border-radius:8px; box-shadow:0 8px 24px var(--shadow-lg); }
   .versions button { display:flex; align-items:flex-start; gap:10px; width:100%; text-align:left; }
   .pill { padding:2px 6px; border-radius:8px; color:var(--focus); background:var(--selected); font:600 11px var(--mono); }
