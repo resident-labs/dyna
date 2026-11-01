@@ -1,9 +1,7 @@
 package websearch
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +13,7 @@ const testAnswer = "Go is a language and the docs cover it."
 
 // answerStream is the answer stream of one search: text deltas, the finished
 // message with its citations, and the completed answer that repeats them.
-func answerStream(t *testing.T, answer string, cites ...chatGPTCite) string {
+func answerStream(t *testing.T, answer string, cites ...responsesCitation) string {
 	t.Helper()
 	encoded, err := json.Marshal(cites)
 	if err != nil {
@@ -62,7 +60,7 @@ type chatGPTBody struct {
 }
 
 func TestChatGPTAsksItsSearchToolAndMapsCitations(t *testing.T) {
-	cites := []chatGPTCite{{Type: "url_citation", URL: "https://go.dev", Title: "Go", StartIndex: 0, EndIndex: 16}}
+	cites := []responsesCitation{{Type: "url_citation", URL: "https://go.dev", Title: "Go", StartIndex: 0, EndIndex: 16}}
 	stream := answerStream(t, testAnswer, cites...)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body chatGPTBody
@@ -72,7 +70,7 @@ func TestChatGPTAsksItsSearchToolAndMapsCitations(t *testing.T) {
 		if r.Method != http.MethodPost || r.URL.Path != "/responses" {
 			t.Errorf("request = %s %s, want POST /responses", r.Method, r.URL.Path)
 		}
-		if r.Header.Get("Authorization") != "Bearer access-token" || r.Header.Get("ChatGPT-Account-ID") != "account-id" || r.Header.Get("originator") != "codex_cli_rs" {
+		if r.Header.Get("Authorization") != "" || r.Header.Get("ChatGPT-Account-ID") != "" {
 			t.Errorf("headers = %v", r.Header)
 		}
 		if body.Model != ChatGPTModel || len(body.Tools) != 1 || body.Tools[0].Type != "web_search" || !body.Tools[0].ExternalWebAccess || body.Store || !body.Stream {
@@ -90,7 +88,7 @@ func TestChatGPTAsksItsSearchToolAndMapsCitations(t *testing.T) {
 	}))
 	defer server.Close()
 
-	chat := ChatGPT{BaseURL: server.URL, Credential: staticCredential{access: "access-token", account: "account-id"}}
+	chat := ChatGPT{BaseURL: server.URL, Client: server.Client()}
 	got, err := chat.Search(t.Context(), Query{Text: "go language", Limit: 2})
 	if err != nil {
 		t.Fatal(err)
@@ -106,8 +104,8 @@ func TestChatGPTAsksItsSearchToolAndMapsCitations(t *testing.T) {
 // An annotation event adds its source once, and the finished message that
 // repeats it does not double the result.
 func TestChatGPTReadsCitationsFromTheWholeStream(t *testing.T) {
-	server := chatGPTServer(t, answerStream(t, testAnswer, chatGPTCite{Type: "url_citation", URL: "https://go.dev", Title: "Go", StartIndex: 0, EndIndex: 16}))
-	chat := ChatGPT{BaseURL: server.URL, Credential: staticCredential{access: "token", account: "account"}}
+	server := chatGPTServer(t, answerStream(t, testAnswer, responsesCitation{Type: "url_citation", URL: "https://go.dev", Title: "Go", StartIndex: 0, EndIndex: 16}))
+	chat := ChatGPT{BaseURL: server.URL, Client: server.Client()}
 	got, err := chat.Search(t.Context(), Query{Text: "go"})
 	if err != nil {
 		t.Fatal(err)
@@ -124,28 +122,18 @@ func TestChatGPTReadsCitationsFromTheWholeStream(t *testing.T) {
 }
 
 func TestChatGPTKeepsTheLimit(t *testing.T) {
-	server := chatGPTServer(t, answerStream(t, testAnswer, chatGPTCite{Type: "url_citation", URL: "https://go.dev", Title: "Go", StartIndex: 0, EndIndex: 16}))
-	chat := ChatGPT{BaseURL: server.URL, Credential: staticCredential{access: "token", account: "account"}}
+	server := chatGPTServer(t, answerStream(t, testAnswer, responsesCitation{Type: "url_citation", URL: "https://go.dev", Title: "Go", StartIndex: 0, EndIndex: 16}))
+	chat := ChatGPT{BaseURL: server.URL, Client: server.Client()}
 	got, err := chat.Search(t.Context(), Query{Text: "go", Limit: 1})
 	if err != nil || len(got) != 1 || got[0].URL != "https://go.dev" {
 		t.Fatalf("results = %+v, %v; want only the first source", got, err)
 	}
 }
 
-func TestChatGPTWithoutASignInIsNotSignedIn(t *testing.T) {
-	chat := ChatGPT{Credential: staticCredential{err: ErrNotSignedIn}}
-	if _, err := chat.Search(t.Context(), Query{Text: "go"}); !errors.Is(err, ErrNotSignedIn) {
-		t.Fatalf("err = %v, want ErrNotSignedIn", err)
-	}
-	if _, err := (ChatGPT{}).Search(t.Context(), Query{Text: "go"}); !errors.Is(err, ErrNotSignedIn) {
-		t.Fatalf("without a credential: err = %v, want ErrNotSignedIn", err)
-	}
-}
-
 // A stream error is a failure, never an empty answer with no source.
 func TestChatGPTReportsAStreamError(t *testing.T) {
 	server := chatGPTServer(t, "data: {\"type\":\"error\",\"message\":\"rate limit\"}\n\ndata: [DONE]\n\n")
-	chat := ChatGPT{BaseURL: server.URL, Credential: staticCredential{access: "token", account: "account"}}
+	chat := ChatGPT{BaseURL: server.URL, Client: server.Client()}
 	_, err := chat.Search(t.Context(), Query{Text: "go"})
 	if err == nil || !strings.Contains(err.Error(), "rate limit") {
 		t.Fatalf("err = %v, want the stream's reason", err)
@@ -162,7 +150,7 @@ func TestChatGPTReportsTheRefusalReasonWithoutTheToken(t *testing.T) {
 	}))
 	defer server.Close()
 
-	chat := ChatGPT{BaseURL: server.URL, Credential: staticCredential{access: token, account: "account-id"}}
+	chat := ChatGPT{BaseURL: server.URL, Client: server.Client()}
 	_, err := chat.Search(t.Context(), Query{Text: "go"})
 	if err == nil || !strings.Contains(err.Error(), "model is not supported") {
 		t.Fatalf("err = %v, want the refusal reason", err)
@@ -170,14 +158,4 @@ func TestChatGPTReportsTheRefusalReasonWithoutTheToken(t *testing.T) {
 	if strings.Contains(err.Error(), token) {
 		t.Fatalf("err = %v, want the token redacted", err)
 	}
-}
-
-// staticCredential is one ChatGPT sign-in for a test.
-type staticCredential struct {
-	access, account string
-	err             error
-}
-
-func (c staticCredential) Token(context.Context) (string, string, error) {
-	return c.access, c.account, c.err
 }

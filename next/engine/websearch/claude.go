@@ -14,8 +14,6 @@ import (
 )
 
 const (
-	// ClaudeEndpoint is the Anthropic API root.
-	ClaudeEndpoint = "https://api.anthropic.com"
 	// ClaudeModel runs the search. The engine passes its own choice in
 	// Claude.Model.
 	ClaudeModel = "claude-sonnet-4-6"
@@ -24,11 +22,6 @@ const (
 	// claudeBetas are the betas the Claude Code client sends for a search: its
 	// own client beta, its OAuth sign-in beta, and the web search tool beta.
 	claudeBetas = "claude-code-20250219,oauth-2025-04-20,web-search-2025-03-05"
-	// claudeAgent is the client the saved sign-in belongs to. Anthropic binds
-	// an OAuth token to its client, so the request states that client.
-	claudeAgent = "claude-cli/2.1.309 (external, cli)"
-	// claudeApp is the client app header of the same bundle.
-	claudeApp = "cli"
 	// claudeSearchTool is the server-side search tool the API runs.
 	claudeSearchTool = "web_search_20250305"
 	// claudeSearchName is the tool's name in a request and in its blocks.
@@ -49,21 +42,15 @@ const (
 	claudeIdentity = "You are Claude Code, Anthropic's official CLI for Claude."
 )
 
-// claudeClient is how long one Claude answer may take.
-var claudeClient = &http.Client{Timeout: 90 * time.Second}
-
 // Claude searches with the Anthropic API and the owner's saved Claude sign-in.
 // One request forces the server-side web search tool, which runs the search
 // and returns its hits, so the provider never runs a CLI.
 type Claude struct {
-	// BaseURL is the API root; empty uses ClaudeEndpoint.
+	// BaseURL is the proxy API root.
 	BaseURL string
 	// Model runs the search; empty uses ClaudeModel.
 	Model string
-	// Token reads the sign-in's access token, or returns ErrNotSignedIn when
-	// the owner saved no Claude sign-in.
-	Token func(ctx context.Context) (string, error)
-	// Client sends the request; nil uses a client with a 90 s timeout.
+	// Client sends requests through the model proxy.
 	Client *http.Client
 }
 
@@ -72,20 +59,12 @@ func (c Claude) Name() string { return "claude" }
 
 // Search asks the Claude web search tool about q.
 func (c Claude) Search(ctx context.Context, q Query) ([]Result, error) {
-	if c.Token == nil {
+	if c.Client == nil || c.BaseURL == "" {
 		return nil, ErrNotSignedIn
 	}
-	token, err := c.Token(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if token == "" {
-		return nil, ErrNotSignedIn
-	}
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
 	base := c.BaseURL
-	if base == "" {
-		base = ClaudeEndpoint
-	}
 	model := c.Model
 	if model == "" {
 		model = ClaudeModel
@@ -95,22 +74,15 @@ func (c Claude) Search(ctx context.Context, q Query) ([]Result, error) {
 		return nil, err
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		strings.TrimSuffix(base, "/")+"/v1/messages?beta=true", bytes.NewReader(body))
+		strings.TrimSuffix(base, "/")+"/messages?beta=true", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("anthropic-version", claudeVersion)
 	request.Header.Set("anthropic-beta", claudeBetas)
-	request.Header.Set("User-Agent", claudeAgent)
-	request.Header.Set("x-app", claudeApp)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "text/event-stream")
-	client := c.Client
-	if client == nil {
-		client = claudeClient
-	}
-	response, err := client.Do(request)
+	response, err := c.Client.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("claude request failed: %w", err)
 	}
@@ -119,7 +91,7 @@ func (c Claude) Search(ctx context.Context, q Query) ([]Result, error) {
 		return nil, ErrNotSignedIn
 	}
 	if response.StatusCode != http.StatusOK {
-		return nil, statusError("claude", response.StatusCode, response.Body, token)
+		return nil, statusError("claude", response.StatusCode, response.Body)
 	}
 	answer, err := readClaudeStream(response.Body)
 	if err != nil {
@@ -345,7 +317,7 @@ func (a *claudeAnswer) fail(reason, fallback string) {
 	if a.failure != nil {
 		return
 	}
-	reason = text(reason)
+	reason = text(redact(reason))
 	if reason == "" {
 		reason = fallback
 	}
