@@ -90,7 +90,13 @@ func (p *Proxy) initPools(c Catalog) error {
 			}
 		}
 		if selected != "" {
-			p.pools["plan_"+string(provider.ID)] = makePool(info, proxy, selected)
+			entry := makePool(info, proxy, selected)
+			for _, model := range p.pools[string(provider.ID)].info.Models {
+				if !entry.models[model.ID] {
+					entry.info.Models = append(entry.info.Models, model)
+				}
+			}
+			p.pools["plan_"+string(provider.ID)] = entry
 		}
 	}
 	return nil
