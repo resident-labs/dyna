@@ -542,11 +542,16 @@ func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn c
 	if s.draining {
 		return "", nil, "", nil
 	}
+	var hasDeliveries bool
+	err := s.Read().QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM deliveries WHERE to_kind=? AND to_id=? AND (state IN ('pending','taken') OR (state='read' AND queue IS NULL AND ?)))`, contract.PrincipalSession, session, replay).Scan(&hasDeliveries)
+	if err != nil || !hasDeliveries {
+		return "", nil, "", err
+	}
 	var active contract.TurnID
 	var inputs []FeedInput
 	var profile contract.ProfileName
 	var paused bool
-	err := s.Write(ctx, func(tx *sql.Tx) error {
+	err = s.Write(ctx, func(tx *sql.Tx) error {
 		err := tx.QueryRowContext(ctx, `SELECT s.profile,r.paused_at IS NOT NULL FROM sessions s JOIN boxes b ON b.session=s.id JOIN rooms r ON r.id=s.room WHERE s.id=? AND s.state='open' AND s.closed_at IS NULL AND b.want='run' AND b.state='ready'`, session).Scan(&profile, &paused)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil

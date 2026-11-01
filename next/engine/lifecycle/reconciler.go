@@ -210,15 +210,6 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			}
 			continue
 		}
-		if row.Want == store.WantRun && b.State == contract.BoxReady && !r.view.OpenTerminal(b.Session) {
-			stopped, err := r.store.StopQuiet(ctx, b.Session, r.now().Add(-10*time.Minute))
-			if err != nil {
-				return err
-			}
-			if stopped {
-				rows[i].Want = store.WantStop
-			}
-		}
 		if row.Paused || row.Want != store.WantRun || (b.State != contract.BoxPending && b.State != contract.BoxStopped) || (!row.DueAt.IsZero() && row.DueAt.After(r.now())) {
 			continue
 		}
@@ -264,6 +255,25 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 				r.fresh[b.ID] = true
 				r.mu.Unlock()
 			}
+		}
+	}
+	var quietCandidates []contract.SessionID
+	for _, row := range rows {
+		if row.Want == store.WantRun && row.Box.State == contract.BoxReady && !r.view.OpenTerminal(row.Box.Session) {
+			quietCandidates = append(quietCandidates, row.Box.Session)
+		}
+	}
+	stopped, err := r.store.StopQuiet(ctx, quietCandidates, r.now().Add(-10*time.Minute))
+	if err != nil {
+		return err
+	}
+	stoppedSet := make(map[contract.SessionID]bool, len(stopped))
+	for _, id := range stopped {
+		stoppedSet[id] = true
+	}
+	for i := range rows {
+		if stoppedSet[rows[i].Box.Session] {
+			rows[i].Want = store.WantStop
 		}
 	}
 	for _, row := range rows {

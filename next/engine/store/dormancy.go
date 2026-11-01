@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -18,19 +19,32 @@ func (s *Store) CanDispatch(ctx context.Context, id contract.SessionID) (bool, e
 	return ok, err
 }
 
-// StopQuiet requests a stop only while the session still satisfies the quiet policy.
-func (s *Store) StopQuiet(ctx context.Context, id contract.SessionID, cutoff time.Time) (bool, error) {
-	var changed bool
-	err := s.Write(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `UPDATE boxes SET want='stop' WHERE session=? AND want='run' AND state='ready' AND EXISTS (SELECT 1 FROM sessions s WHERE s.id=boxes.session AND s.closed_at IS NULL AND s.state!='closing' AND `+quiet+`)`, id, cutoff.UnixMilli())
+// StopQuiet requests stops for candidates that still satisfy the quiet policy.
+func (s *Store) StopQuiet(ctx context.Context, ids []contract.SessionID, cutoff time.Time) ([]contract.SessionID, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	data, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	var stopped []contract.SessionID
+	err = s.Write(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `UPDATE boxes SET want='stop' WHERE session IN (SELECT value FROM json_each(?)) AND want='run' AND state='ready' AND EXISTS (SELECT 1 FROM sessions s WHERE s.id=boxes.session AND s.closed_at IS NULL AND s.state!='closing' AND `+quiet+`) RETURNING session`, string(data), cutoff.UnixMilli())
 		if err != nil {
 			return err
 		}
-		n, err := result.RowsAffected()
-		changed = n != 0
-		return err
+		defer rows.Close()
+		for rows.Next() {
+			var id contract.SessionID
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			stopped = append(stopped, id)
+		}
+		return rows.Err()
 	})
-	return changed, err
+	return stopped, err
 }
 
 // dormantClose is shared by the candidate read and the final write check.
