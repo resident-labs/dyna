@@ -102,6 +102,16 @@ test("a failed turn with a final reply keeps its failed row", () => {
   assert.deepEqual(rows[1], { kind: "failed", key: "f1", seq: 1, session: "l", at: ended.at, label: "Turn failed", cause: "The model provider refused or failed the request" });
 });
 
+test("a post that carried a final reply names the reply's target once", () => {
+  const owner: Principal = { kind: "owner" }, parent: Principal = { kind: "session", session: "p" };
+  const posted = event(1, { type: "post.created", body: { text: "Report", home: { kind: "feed" }, mentions: [parent] } }, { kind: "session", session: "l" });
+  const ended = event(2, { type: "turn.ended", body: { session: "l", turn: "t", outcome: "completed", usage, replies: [
+    { reply: { kind: "final", target: owner, home: { kind: "feed" } }, posted: "1" }, { reply: { kind: "final", target: parent, home: { kind: "feed" } }, posted: "1" }] } });
+  const row = feedRows([posted, ended], { kind: "feed" })[0];
+  assert.deepEqual(row.kind === "post" && row.to, [parent, owner]);
+  assert.deepEqual(feedRows([posted], { kind: "feed" }).map(item => item.kind === "post" && item.to), [[parent]]);
+});
+
 test("puts a turn's final reply in its home only, and a DM keeps a work row above it so the turn can open", () => {
   const ended = event(3, { type: "turn.ended", body: { session: "l", turn: "t", outcome: "completed", final: "Answer", usage,
     replies: [{ reply: { kind: "final", target: { kind: "owner" }, home: { kind: "dm", session: "l" } } }] } });
