@@ -231,7 +231,7 @@ func Run(ctx context.Context, cfg Config) error {
 				http.Error(w, "session unavailable", http.StatusServiceUnavailable)
 				return
 			}
-			allowed, err := service.AllowedModels(r.Context(), session)
+			allowed, crew, err := service.AllowedModels(r.Context(), session)
 			if err != nil {
 				http.Error(w, "profile unavailable", http.StatusServiceUnavailable)
 				return
@@ -246,7 +246,7 @@ func Run(ctx context.Context, cfg Config) error {
 			if err != nil {
 				pinned = ""
 			}
-			proxy.Handler(string(session.ID), allowed, eligible, pinned).ServeHTTP(w, r)
+			proxy.Handler(string(session.ID), allowed, eligible, pinned, crew).ServeHTTP(w, r)
 		}))
 	})
 	apiServer.Build = cfg.Version

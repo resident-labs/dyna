@@ -78,7 +78,7 @@ func TestReportHeartbeatFreeDisk(t *testing.T) {
 func TestHostLoadJudgesControlPlaneDisk(t *testing.T) {
 	b := &Boxes{Store: listStore{}}
 	total := 1000 * box.GiB
-	for free, low := range map[int64]bool{151 * box.GiB: false, 149 * box.GiB: true} {
+	for free, low := range map[int64]bool{181 * box.GiB: false, 179 * box.GiB: true} {
 		b.record(contract.ControlPlane, true, podman.Load{DiskBytes: total, DiskUsed: total - free}, time.Now())
 		hosts := []contract.HostSummary{{Name: contract.ControlPlane}}
 		if err := b.HostLoad(context.Background(), hosts); err != nil {

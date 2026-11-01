@@ -8,6 +8,8 @@ import (
 	"net/http/httputil"
 	"strings"
 	"time"
+
+	"github.com/resident-labs/dyna/contract"
 )
 
 // socketWait is how long a request waits for the box socket. It covers an engine restart on any host, and is short enough
@@ -67,8 +69,9 @@ func modelRoute(transport http.RoundTripper) http.Handler {
 
 // ModelProvider describes a generated Pi provider and its API origin.
 type ModelProvider struct {
-	BaseURL string `json:"baseUrl"`
-	APIKey  string `json:"apiKey"`
+	BaseURL string            `json:"baseUrl"`
+	APIKey  string            `json:"apiKey"`
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 type ModelsConfig struct {
@@ -81,4 +84,15 @@ func Models() ModelsConfig {
 		"anthropic": {BaseURL: origin, APIKey: "box"},
 		"openai":    {BaseURL: origin + "/v1", APIKey: "box"},
 	}}
+}
+
+// WorkerModels is one crew worker's configuration. The engine's route reads the header, so each worker holds its own account
+// affinity although a crew is one session.
+func WorkerModels(worker string) ModelsConfig {
+	config := Models()
+	for name, provider := range config.Providers {
+		provider.Headers = map[string]string{contract.WorkerHeader: worker}
+		config.Providers[name] = provider
+	}
+	return config
 }
