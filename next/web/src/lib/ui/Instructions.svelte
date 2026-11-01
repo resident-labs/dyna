@@ -3,27 +3,38 @@
   import { APIError, call } from "../client.ts";
   import { instructionDiff, instructionHunks, type DiffLine } from "../instruction-diff.ts";
   import { recoverInstructionDraft } from "../instruction-draft.ts";
+  import Icon from "./Icon.svelte";
   import StatusPill from "./StatusPill.svelte";
   import { count } from "../feed.ts";
 
+  type Scope = "room" | "global";
+  type File = { text: string; hash: string; savedAt?: string | null };
+  // The page opens on its two choices, the file for all rooms and this room's own. Choosing one opens it in a plain
+  // editor, with a review beside it only once there are changes to review.
   let { room, roomName, rooms, sessions, onclose }: { room: string; roomName: string; rooms: number; sessions: number; onclose: () => void } = $props();
-  let selected = $state<"room" | "global">("room");
+  let selected = $state<Scope>();
+  let files = $state<Record<Scope, File>>();
+  let unsaved = $state<Record<Scope, boolean>>({ room: false, global: false });
   let base = $state(""), hash = $state(""), savedAt = $state<string>(), draft = $state("");
-  let other = $state<{ text: string; hash: string; savedAt?: string | null }>();
-  let peer = $state<{ text: string; savedAt?: string | null }>({ text: "" });
+  let other = $state<File>();
   let loading = $state(true), failed = $state(false), saveFailed = $state(false), saving = $state(false);
   let mobile = $state<"edit" | "changes">("edit");
   let search = $state("");
   let editor: HTMLTextAreaElement, finder: HTMLInputElement;
   let generation = 0;
-  const prefix = () => `dyna.instructions.${selected === "room" ? room : "global"}.`;
+  const prefixOf = (which: Scope) => `dyna.instructions.${which === "room" ? room : "global"}.`;
+  const prefix = () => prefixOf(selected ?? "global");
   const request = () => selected === "room" ? { room } : {};
+  const title = (which: Scope) => which === "room" ? `Only ${roomName}` : "All rooms";
+  const reach = (which: Scope) => which === "room" ? `${count(sessions, "open session")} in this room` : `Every session in ${count(rooms, "room")}`;
+  const tokensOf = (text: string) => Math.ceil(text.length / 4);
   let changes = $derived(instructionDiff(base, draft));
   let changed = $derived(changes.filter(line => line.kind !== "same"));
-  let tokens = $derived(Math.ceil(draft.length / 4));
-  let delta = $derived(tokens - Math.ceil(base.length / 4));
-  let peerTokens = $derived(Math.ceil(peer.text.length / 4));
+  let tokens = $derived(tokensOf(draft));
+  let delta = $derived(tokens - tokensOf(base));
   let savedLabel = $derived(savedAt ? `Saved ${relative(savedAt)}` : "Not saved yet");
+  let reviewable = $derived(changed.length > 0 || !!other);
+  let reviewing = $derived(mobile === "changes" && reviewable);
   function relative(value: string) {
     const minutes = Math.floor((Date.now() - new Date(value).getTime()) / 60000);
     if (minutes < 1) return "just now";
@@ -41,13 +52,25 @@
     clearDrafts();
     if (draft !== base) localStorage.setItem(prefix() + hash, JSON.stringify({ text: draft, base }));
   }
+  // Both files for the choices. A quiet load keeps the cards in place while it runs.
+  async function loadChoices(quiet = false) {
+    const current = ++generation;
+    if (!quiet) { loading = true; failed = false; }
+    try {
+      const [global, own] = await Promise.all([call("instructions.get", {}), call("instructions.get", { room })]);
+      if (current !== generation) return;
+      const stored = Object.keys(localStorage);
+      files = { global, room: own };
+      unsaved = { global: stored.some(key => key.startsWith(prefixOf("global"))), room: stored.some(key => key.startsWith(prefixOf("room"))) };
+    } catch { if (current === generation && !quiet) failed = true; }
+    finally { if (current === generation) loading = false; }
+  }
   async function load() {
-    const current = ++generation, key = prefix(), req = request();
+    const current = ++generation, key = prefix();
     loading = true; failed = false; saveFailed = false; other = undefined;
     try {
-      const [result, companion] = await Promise.all([call("instructions.get", req), call("instructions.get", selected === "room" ? {} : { room })]);
+      const result = await call("instructions.get", request());
       if (current !== generation) return;
-      peer = companion;
       base = result.text; hash = result.hash; savedAt = result.savedAt ?? undefined; draft = result.text;
       const storedKey = Object.keys(localStorage).find(item => item.startsWith(key));
       if (storedKey) {
@@ -61,6 +84,7 @@
     finally { if (current === generation) loading = false; }
   }
   async function refresh() {
+    if (!selected) { if (!loading) void loadChoices(true); return; }
     if (loading || failed || saving) return;
     const current = generation;
     try {
@@ -115,15 +139,32 @@
     editor.scrollTop = Math.max(0, (line - 3) * 20);
   }
   function keys(event: KeyboardEvent) {
+    if (!selected) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); if (!other) void save(); }
     else if (event.key === "/" && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) {
       event.preventDefault(); finder?.focus();
     }
   }
-  onMount(() => { void load(); window.addEventListener("focus", refresh); return () => { generation++; window.removeEventListener("focus", refresh); }; });
-  function select(which: "room" | "global") { if (!saving && selected !== which) { selected = which; mobile = "edit"; void load(); } }
+  function choose(which: Scope) { selected = which; mobile = "edit"; search = ""; void load(); }
+  // Back leaves a draft in the browser, where the choice marks it and the editor restores it.
+  function back() {
+    if (saving) return;
+    if (!selected) { onclose(); return; }
+    selected = undefined;
+    void loadChoices();
+  }
+  onMount(() => { void loadChoices(); window.addEventListener("focus", refresh); return () => { generation++; window.removeEventListener("focus", refresh); }; });
 </script>
 
+{#snippet choice(which: Scope, file: File)}
+  <button type="button" class="choice" onclick={() => choose(which)}>
+    <span class="choice-head"><strong>{title(which)}</strong><Icon name="chevron" size={14} /></span>
+    <span class="reach">{reach(which)}</span>
+    <span class="preview" class:empty={!file.text.trim()}>{file.text.trim() || "Nothing written yet"}</span>
+    <span class="meta">{#if file.text.trim()}about {tokensOf(file.text).toLocaleString()} tokens{#if file.savedAt}{" · "}saved {relative(file.savedAt)}{/if}{/if}
+      {#if unsaved[which]}<StatusPill tone="warning" label="Unsaved draft" />{/if}</span>
+  </button>
+{/snippet}
 {#snippet diffView(lines: DiffLine[])}
   {#each instructionHunks(lines) as hunk}
     <button class="line-number" type="button" onclick={() => void jump(hunk.line)}>Line {hunk.line}</button>
@@ -135,62 +176,60 @@
 <svelte:window onkeydown={keys} />
 <div class="instructions">
   <header>
-    <button class="back" type="button" aria-label="Back to room" onclick={onclose}>‹</button>
-    <span class="crumb">{roomName}</span><span class="slash">/</span><strong>Instructions</strong>
-    <nav class="files" aria-label="Instruction file">
-      <button type="button" class:active={selected === "room"} onclick={() => select("room")}>{roomName}</button>
-      <button type="button" class:active={selected === "global"} onclick={() => select("global")}>All rooms</button>
-    </nav>
+    <button class="back" type="button" aria-label={selected ? "Back to the instructions" : "Back to room"} title="Back" onclick={back}><Icon name="backChevron" /></button>
+    {#if selected}<span class="crumb">Instructions</span><span class="slash">/</span><strong>{title(selected)}</strong>
+    {:else}<span class="crumb">{roomName}</span><span class="slash">/</span><strong>Instructions</strong>{/if}
+    {#if selected && !loading && !failed && !other}<span class="actions">
+      <span class="state">{draft === base ? savedLabel : "Not saved"}</span>
+      {#if draft !== base}<button type="button" onclick={discard}>Discard</button>{/if}
+      <button class="primary" type="button" title="Ctrl S" disabled={saving || draft === base} onclick={() => void save()}>Save</button>
+    </span>{/if}
   </header>
   {#if loading}
     <div class="loading" aria-label="Loading instructions"><span></span><span></span><span></span></div>
   {:else if failed}
-    <p class="error">Instructions could not be loaded or saved. <button type="button" onclick={() => void load()}>Retry</button></p>
-  {:else}
+    <p class="error">Instructions could not be loaded. <button type="button" onclick={() => void (selected ? load() : loadChoices())}>Retry</button></p>
+  {:else if !selected && files}
+    <div class="choices">
+      <div class="column">
+        <h2>Where should these instructions apply?</h2>
+        <div class="grid">{@render choice("global", files.global)}{@render choice("room", files.room)}</div>
+        <p class="order">Sessions read all rooms first, then this room, then each repository’s AGENTS.md. A change reaches running sessions at their next run.</p>
+      </div>
+    </div>
+  {:else if selected}
     {#if saveFailed}<p class="error" role="status">Your changes were not saved. <button type="button" onclick={() => void save()}>Retry</button></p>{/if}
-    <nav class="mobile-tabs" aria-label="Editor view">
-      <button type="button" class:active={mobile === "edit"} onclick={() => mobile = "edit"}>Edit</button>
-      <button type="button" class:active={mobile === "changes"} onclick={() => mobile = "changes"}>Changes <span>{changed.length || ""}</span></button>
-    </nav>
+    {#if reviewable}<nav class="mobile-tabs" aria-label="Editor view">
+      <button type="button" class:active={!reviewing} onclick={() => mobile = "edit"}>Edit</button>
+      <button type="button" class:active={reviewing} onclick={() => mobile = "changes"}>Changes <span>{changed.length || ""}</span></button>
+    </nav>{/if}
     <div class="body">
-      <section class:mobile-hidden={mobile !== "edit"} class="edit" aria-label="Instruction editor">
-        <p class="facts">{selected === "room" ? `Every session in ${roomName} reads this file at its next run, after the file for all rooms.` : "Every session reads this file first."}
-          <span>·</span> about <b>{tokens.toLocaleString()}</b> tokens <span>·</span> {draft !== base ? "not saved" : savedLabel.toLowerCase()}</p>
-        <label class="find"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg><input aria-label="Find in file" bind:this={finder} bind:value={search} onkeydown={event => { if (event.key === "Enter") { event.preventDefault(); void find(); } }} placeholder="Find in file" /><kbd>/</kbd></label>
+      <section class:mobile-hidden={reviewing} class="edit" aria-label="Instruction editor">
+        <div class="tools">
+          <p class="facts">{reach(selected)} <span>·</span> about <b>{tokens.toLocaleString()}</b> tokens</p>
+          <label class="find"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg><input aria-label="Find in file" bind:this={finder} bind:value={search} onkeydown={event => { if (event.key === "Enter") { event.preventDefault(); void find(); } }} placeholder="Find" /><kbd>/</kbd></label>
+        </div>
         <textarea bind:this={editor} value={draft} oninput={event => { draft = event.currentTarget.value; keepDraft(); }} spellcheck="false"
           placeholder={selected === "room" ? `Write instructions for every session in ${roomName}` : "Write instructions for every session"} aria-label="Markdown instructions"></textarea>
       </section>
-      <aside class:mobile-hidden={mobile !== "changes"} aria-label="Instruction review">
+      {#if reviewable}<aside class:mobile-hidden={!reviewing} aria-label="Instruction review">
         {#if other}
-          <div class="side-head review-title"><strong>What sessions get</strong> <span>· {count(changed.length, "line")} changed</span></div>
           <div class="side-head"><StatusPill tone="warning" label="Changed on another device" /><p>Nothing was saved. Your text is unchanged.</p></div>
           <div class="review"><strong>Their change</strong>
             {@render diffView(instructionDiff(base, other.text))}
             <strong>Yours</strong>
             {@render diffView(changes)}
           </div>
-        {:else if changed.length}
+          <p class="overwrite-note">Save mine over it replaces their change with your file.</p>
+          <div class="resolve"><button class="outlined" type="button" disabled={saving} onclick={useTheirs}>Use theirs</button><button class="primary" type="button" disabled={saving} onclick={() => void save(true)}>Save mine over it</button></div>
+        {:else}
           <div class="side-head review-title"><strong>What sessions get</strong> <span>{count(changed.length, "line")} changed</span></div>
           <div class="review">
-            <p>{delta >= 0 ? "Adds" : "Removes"} about {Math.abs(delta).toLocaleString()} tokens {delta >= 0 ? "to" : "from"} every prompt · {count(sessions, "open session")} in {roomName}</p>
+            <p>{delta >= 0 ? "Adds" : "Removes"} about {Math.abs(delta).toLocaleString()} tokens {delta >= 0 ? "to" : "from"} every prompt</p>
             {@render diffView(changes)}
-            <p>Running sessions get these changed lines at their next run.</p>
-          </div>
-        {:else}
-          <div class="side-head"><strong>Read by</strong></div>
-          <div class="review"><strong>Sessions in {roomName} read, in this order</strong>
-            <ol><li class:current={selected === "global"}><b>All rooms</b> <span>about {(selected === "global" ? tokens : peerTokens).toLocaleString()} tokens</span><small>Every session in {rooms} {rooms === 1 ? "room" : "rooms"}</small></li>
-              <li class:current={selected === "room"}><b>{roomName}</b> <span>about {(selected === "room" ? tokens : peerTokens).toLocaleString()} tokens</span><small>{sessions} open sessions</small></li>
-              <li><b>Each repository’s AGENTS.md</b><small>Read from the checkout and edited in the repository</small></li></ol>
-            <p>A change reaches each running session as a diff at its next run, and it becomes part of the system prompt at the next compaction.</p>
           </div>
         {/if}
-        {#if other}<p class="overwrite-note">Save mine over it replaces their change with your file.</p>{/if}
-        <div class="actions">
-          {#if other}<button class="outlined" type="button" disabled={saving} onclick={useTheirs}>Use theirs</button><button class="primary" type="button" disabled={saving} onclick={() => void save(true)}>Save mine over it</button>
-          {:else}<button type="button" disabled={draft === base} onclick={discard}>Discard</button>{#if draft !== base}<kbd>Ctrl S</kbd>{/if}<button class="primary" type="button" disabled={saving || draft === base} onclick={() => void save()}>Save</button>{/if}
-        </div>
-      </aside>
+      </aside>{/if}
     </div>
     <div class="mobile-save">
       <span>{draft === base ? savedLabel : `${count(changed.length, "line")} changed`}</span>
@@ -203,34 +242,90 @@
 <style>
   .instructions { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; background: var(--bg); color: var(--text); }
   header { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--line); }
-  .crumb, .slash, .facts, .review p, .side-head span, .mobile-tabs span { color: var(--muted); }
-  .back { font-size: 24px; }
-  .files { margin-left: auto; display: flex; gap: 4px; }
+  .crumb, .slash, .facts, .state, .review p, .side-head span, .mobile-tabs span { color: var(--muted); }
+  .back { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; color: var(--muted); }
+  .actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .state { font-size: 12.5px; margin-right: 4px; }
   button { font: inherit; color: inherit; cursor: pointer; border: 0; border-radius: 6px; background: transparent; padding: 6px 10px; }
   button:hover, button.active { background: var(--selected); }
   button:disabled { opacity: .5; cursor: default; }
+  .primary { padding-inline: 14px; background: var(--focus); color: var(--bg); }
+  .primary:hover { background: var(--focus); opacity: .85; }
+  .primary:disabled:hover { opacity: .5; }
+  .outlined { border: 1px solid var(--muted); }
+
+  .choices { flex: 1; min-height: 0; overflow-y: auto; display: flex; padding: 32px 24px; }
+  .column { width: min(760px, 100%); margin: auto; }
+  h2 { margin: 0 0 20px; font-size: 20px; font-weight: 600; line-height: 1.25; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .choice { display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 168px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); text-align: left; }
+  .choice:hover { background: var(--hover); border-color: var(--muted); }
+  .choice:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .choice-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 15px; }
+  .choice-head strong { min-width: 0; overflow-wrap: anywhere; }
+  .choice-head :global(svg) { flex: none; color: var(--muted); transform: rotate(-90deg); }
+  .reach { color: var(--muted); font-size: 12.5px; }
+  .preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; width: 100%; margin-top: 12px; text-align: left; color: var(--text); font-size: 13px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .preview.empty { color: var(--muted); }
+  .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: auto; padding-top: 12px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .order { margin: 16px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+
   .body { display: flex; flex: 1; min-height: 0; }
-  .edit { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 8px; padding: 16px 24px; }
-  .facts { margin: 0; font-size: 12.5px; font-variant-numeric: tabular-nums; }
-  .facts span { padding: 0 4px; }.facts b { color: var(--text); }
-  .find { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; border: 1px solid var(--line); border-radius: 6px; padding: 0 10px; }
-  .find input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; } kbd { font: inherit; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 2px 5px; }
-  input { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
-  textarea { flex: 1; resize: none; width: 100%; min-height: 0; box-sizing: border-box; background: var(--bg); color: var(--text);
-    border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px; font: inherit; line-height: 1.45; }
+  .edit { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 12px; width: 100%; max-width: 960px; margin: 0 auto; padding: 16px 24px 24px; }
+  .tools { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .facts { margin: 0; min-width: 0; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .facts span { padding: 0 4px; }
+  .facts b { color: var(--text); }
+  .find { display: flex; flex: 0 1 200px; align-items: center; gap: 6px; min-width: 120px; padding: 0 6px 0 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: 12.5px; }
+  .find:focus-within { border-color: var(--focus); }
+  .find input { flex: 1; min-width: 0; height: 28px; padding: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; }
+  kbd { padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font: inherit; font-size: 11px; }
+  textarea { flex: 1; resize: none; width: 100%; min-height: 0; box-sizing: border-box; padding: 16px 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); color: var(--text); font: inherit; font-size: 14px; line-height: 1.5; }
   textarea:focus { outline: 2px solid var(--focus); outline-offset: -1px; }
-  aside { width: 380px; flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--line); min-height: 0; }
-  .side-head { padding: 16px; border-bottom: 1px solid var(--line); }.side-head span { font-size: 12.5px; margin-left: 4px; }.side-head p { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
-  .review { flex: 1; overflow: auto; padding: 16px; font-size: 12.5px; }.review strong { display: block; margin-bottom: 12px; }.review p { line-height: 1.45; font-variant-numeric: tabular-nums; }.review ol { padding: 0; list-style: none; counter-reset: layers; }.review li { counter-increment: layers; position: relative; padding: 10px 8px 10px 38px; border-radius: 6px; }.review li::before { content: counter(layers); position: absolute; left: 8px; width: 20px; height: 20px; border: 1px solid var(--line); border-radius: 50%; text-align: center; line-height: 20px; color: var(--muted); }.review li.current { background: var(--selected); }.review li span { float: right; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .review li small { display: block; color: var(--muted); margin-top: 4px; }
+
+  aside { width: 360px; flex: none; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); }
+  .side-head { padding: 16px; border-bottom: 1px solid var(--line); }
+  .side-head span { margin-left: 4px; font-size: 12.5px; }
+  .side-head p { margin: 8px 0 0; color: var(--muted); font-size: 12.5px; }
+  .review { flex: 1; overflow: auto; padding: 16px; font-size: 12.5px; }
+  .review strong { display: block; margin-bottom: 12px; }
+  .review p { margin: 0 0 12px; line-height: 1.45; font-variant-numeric: tabular-nums; }
   .line-number { display: block; width: 100%; border-radius: 0; background: var(--hover); color: var(--muted); text-align: left; font-size: 11px; padding: 3px 10px; }
-  .diff { display: flex; gap: 8px; padding: 4px 10px; white-space: pre-wrap; overflow-wrap: anywhere; }.diff span { flex: none; width: 8px; }.diff.same { color: var(--muted); }.diff.add { background: color-mix(in srgb, var(--success) 12%, transparent); }.diff.remove { background: color-mix(in srgb, var(--danger) 12%, transparent); }
-  .overwrite-note { margin: 0; padding: 12px 16px 0; color: var(--muted); font-size: 12.5px; }.outlined { border: 1px solid var(--muted); }.actions kbd { align-self: center; margin-left: auto; margin-right: 6px; }.actions { display: flex; justify-content: space-between; padding: 12px 16px; border-top: 1px solid var(--line); }.primary { background: var(--focus); color: var(--bg); }.primary:hover { background: var(--focus); opacity: .85; }
-  .mobile-tabs, .mobile-save { display: none; }.loading { padding: 24px; display: grid; gap: 12px; }.loading span { display: block; height: 14px; width: 70%; background: var(--hover); border-radius: 6px; }.loading span:nth-child(2) { width: 90%; }.error { color: var(--muted); padding: 16px; }
+  .diff { display: flex; gap: 8px; padding: 4px 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .diff span { flex: none; width: 8px; }
+  .diff.same { color: var(--muted); }
+  .diff.add { background: color-mix(in srgb, var(--success) 12%, transparent); }
+  .diff.remove { background: color-mix(in srgb, var(--danger) 12%, transparent); }
+  .overwrite-note { margin: 0; padding: 12px 16px 0; color: var(--muted); font-size: 12.5px; }
+  .resolve { display: flex; justify-content: space-between; padding: 12px 16px; border-top: 1px solid var(--line); }
+
+  .mobile-tabs, .mobile-save { display: none; }
+  .loading { padding: 24px; display: grid; gap: 12px; }
+  .loading span { display: block; height: 14px; width: 70%; background: var(--hover); border-radius: 6px; }
+  .loading span:nth-child(2) { width: 90%; }
+  .error { margin: 0; padding: 16px; color: var(--muted); }
   @media (max-width: 700px) {
-    header { height: auto; min-height: 52px; padding: 0 8px; flex-wrap: wrap; }.crumb, .slash { display: none; }.files { order: 2; flex-basis: 100%; margin-left: 0; border-top: 1px solid var(--line); }.files button { min-height: 40px; }
-    .mobile-tabs { display: flex; padding: 4px 8px; border-bottom: 1px solid var(--line); }.mobile-tabs button { min-height: 40px; border-radius: 0; }.mobile-tabs button.active { background: transparent; border-bottom: 2px solid var(--focus); }.review-title { display: none; }.review { font-size: 13px; }
-    .mobile-hidden { display: none !important; }.edit { padding: 12px; }.facts { line-height: 1.4; }.find input { min-height: 40px; }.body aside { width: 100%; border: 0; }.actions { display: none; }
-    .mobile-save { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }.mobile-save span { margin-right: auto; }.mobile-save button, .line-number, .error button { min-height: 40px; }.back { min-width: 40px; min-height: 40px; }
+    header { padding: 0 8px; }
+    .back { width: 40px; height: 40px; }
+    .crumb, .slash, .actions { display: none; }
+    .choices { padding: 20px 16px; }
+    .column { margin-block: 0 auto; }
+    .grid { grid-template-columns: minmax(0, 1fr); }
+    .choice { min-height: 160px; }
+    .mobile-tabs { display: flex; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+    .mobile-tabs button { min-height: 40px; border-radius: 0; }
+    .mobile-tabs button.active { background: transparent; border-bottom: 2px solid var(--focus); }
+    .review-title { display: none; }
+    .review { font-size: 13px; }
+    .mobile-hidden { display: none !important; }
+    .edit { padding: 12px; }
+    .facts { line-height: 1.4; }
+    .find { flex-basis: 140px; }
+    .find input { height: 40px; }
+    .find kbd { display: none; }
+    .body aside { width: 100%; border: 0; }
+    .mobile-save { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
+    .mobile-save span { margin-right: auto; }
+    .mobile-save button, .line-number, .error button { min-height: 40px; }
   }
 </style>
