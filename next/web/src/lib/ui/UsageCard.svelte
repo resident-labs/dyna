@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { balancesText, limitReached, windowMeter, type UsageRow } from "../usage.ts";
+  import { balancesText, outOfLimit, windowMeter, type UsageRow } from "../usage.ts";
   import MeterTile from "./MeterTile.svelte";
   import StatusPill from "./StatusPill.svelte";
   // One model account on Home, in the machine cards' style: its label, the provider's name when that adds to it, then a
-  // tile per usage window, then any prepaid balance as muted text. A spent window marks the whole card, since the
-  // account takes no more work until it resets.
+  // tile per usage window, then any prepaid balance as muted text. A spent window or an empty balance marks the
+  // whole card, since the account takes no more work until then.
   let { row, now }: { row: UsageRow; now: number } = $props();
-  let spent = $derived(row.windows.some(w => limitReached(w, now)));
+  let spent = $derived(outOfLimit(row, now));
 </script>
 
 <section class="card" aria-label={row.title}>
