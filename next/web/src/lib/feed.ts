@@ -92,7 +92,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
   const rows: Row[] = [];
   let work: Event[] = [];
   let deferred: Row[] = [];
-  const turns = new Map<string, { start: Event; posted: boolean; significant: boolean; events: Event[] }>();
+  const turns = new Map<string, { session: string; at: string; posted: boolean; significant: boolean; events: Event[] }>();
   const turnRequests = new Map<string, string>();
   let today = "";
   const requests = new Map<string, Extract<Row, { kind: "request" }>>();
@@ -143,8 +143,10 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     const firstAt = work[0]?.at ?? (deferred[0]?.kind === "notice" ? deferred[0].event.at : deferred[0]?.kind === "failed" || deferred[0]?.kind === "request" || deferred[0]?.kind === "restarted" ? deferred[0].at : undefined);
     if (firstAt && new Date(firstAt).toDateString() !== new Date(event.at).toDateString()) flush();
     if (event.type === "post.created") {
-      for (const turn of turns.values()) if (sameHome(event.body.home, home) && turn.start.type === "turn.started" && turn.start.body.session === event.from.session) turn.posted = true;
-      if (sameHome(event.body.home, home)) post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, event.body.attachments ?? [], event.body.mentions ?? []);
+      if (sameHome(event.body.home, home)) {
+        for (const turn of turns.values()) if (turn.session === event.from.session) turn.posted = true;
+        post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, event.body.attachments ?? [], event.body.mentions ?? []);
+      }
       continue;
     }
     // A decision can come from a session outside a DM, so it updates the request's row before the DM filter.
@@ -158,19 +160,23 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     }
     const session = subject(event);
     if (event.type === "turn.started") {
-      if (home.kind !== "dm" || session === home.session) turns.set(event.body.turn, { start: event, posted: false, significant: false, events: [] });
+      if (home.kind !== "dm" || session === home.session) turns.set(event.body.turn, { session: event.body.session, at: event.at, posted: false, significant: false, events: [event] });
       continue;
     }
     if (event.type === "shell.job.ended" || event.type === "op.requested") {
-      for (const [id, turn] of turns) if (turn.start.type === "turn.started" && turn.start.body.session === session) {
+      const entry = [...turns].find(([, turn]) => turn.session === session);
+      let claimed = false;
+      if (entry) {
+        const [id, turn] = entry;
         turn.significant = true;
         if (event.type === "shell.job.ended" || (decided.has(event.body.id) && !retainedRequests.has(event.body.id))) {
           turn.events.push(event);
           if (event.type === "op.requested") turnRequests.set(event.body.id, id);
-          break;
+          claimed = true;
         }
       }
-      if (event.type === "shell.job.ended" ? [...turns.values()].some(turn => turn.events.includes(event)) : turnRequests.has(event.body.id)) continue;
+      if (claimed) continue;
+      // A job without an open turn stays in the work buffer below.
     }
     if (home.kind === "dm" && session !== home.session) continue;
     if (event.type === "room.paused" || event.type === "room.resumed" || event.type === "room.limits_changed") {
@@ -212,14 +218,15 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       // A failed turn always gets its own row, even after its answer; it never folds into a work row. Its error is the
       // harness's raw text (r8), so the row shows only the owner words for its typed cause.
       if (event.body.outcome === "failed") {
-        if (turn?.events.length) work.push(turn.start, ...turn.events);
+        if (turn && turn.events.length > 1) work.push(...turn.events);
         const cause = event.body.cause;
         deferred.push({ kind: "failed", key: `f${event.seq}`, seq: event.seq, session: event.body.session, at: event.at, label: "Turn failed", cause: cause ? causes[cause] : "" });
       }
       const posted = turn?.posted || !!answer;
-      const duration = turn ? Date.parse(event.at) - Date.parse(turn.start.at) : NaN;
+      const duration = turn ? Date.parse(event.at) - Date.parse(turn.at) : NaN;
+      // A turn whose start is outside the window keeps its row.
       if (event.body.outcome !== "failed" && (!posted || turn?.significant || event.body.outcome === "stopped" || !(duration < 60_000))) {
-        if (turn) work.push(turn.start, ...turn.events);
+        if (turn) work.push(...turn.events);
         work.push(event);
       }
       continue;
@@ -257,13 +264,15 @@ export const eventGroups: Record<Event["type"], string> = {
 // A full moment for a title, such as "Oct 31, 2026, 4:48 AM".
 export const fullTime = (value: string): string => new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 
+export const clock = (at: string): string => clockFormatter.format(new Date(at));
+
 // The muted time on a row's name line: the clock today, else the date and the clock. Every row that scrolls in calls
 // it, and toLocaleTimeString builds a new formatter on each call, so the two formatters are made once.
-const clock = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" });
+const clockFormatter = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" });
 const date = new Intl.DateTimeFormat([], { month: "short", day: "numeric" });
 export function formatTime(value: string): string {
   const at = new Date(value);
-  return at.toDateString() === new Date().toDateString() ? clock.format(at) : `${date.format(at)}, ${clock.format(at)}`;
+  return at.toDateString() === new Date().toDateString() ? clockFormatter.format(at) : `${date.format(at)}, ${clockFormatter.format(at)}`;
 }
 
 // A post the owner forwards, as the composer holds it until a send or a remove.
@@ -372,8 +381,11 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
   const minutes = Math.round((last - first) / 60_000);
   const took = minutes < 1 ? "under a minute" : minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${minutes % 60} min` : ""}`;
   const sessions = [...turns];
+  const named = sessions.slice(0, 3).map(name);
+  const names = named.length < 2 ? named[0] : named.length === 2 ? named.join(" and ") : `${named.slice(0, -1).join(", ")} and ${named.at(-1)}`;
+  const workers = sessions.length > 3 ? `${named.join(", ")} and ${sessions.length - 3} more` : names;
   const parts = [
-    sessions.length && `${sessions.length === 1 ? name(sessions[0]) : count(sessions.length, "session")} worked${sessions.length === 1 && last >= first ? ` for ${took}` : ""}`,
+    sessions.length && `${workers} worked${sessions.length === 1 && last >= first ? ` for ${took}` : ""}`,
     stopped && `${count(stopped, "turn")} stopped`,
     jobs && count(jobs, "job"),
     images && `${count(images, "image")} built`,
