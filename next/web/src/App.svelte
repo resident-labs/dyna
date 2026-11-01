@@ -646,7 +646,7 @@
   </aside>
   {#if drawer || (panel && phone.current)}<button type="button" class="scrim" tabindex="-1" aria-label={drawer ? "Close the menu" : room ? "Close the sessions" : "Close the active rooms"}
     onclick={() => void (drawer ? showDrawer(false, true, true) : showPanel(false, true))}></button>{/if}
-  <main bind:clientWidth={mainWidth} class:header-tight={mainWidth <= 1000} class:header-narrow={mainWidth <= 600} inert={drawer || (panel && phone.current) || covered || inSettings}>
+  <main bind:clientWidth={mainWidth} class:header-tight={mainWidth <= 1000} class:header-narrow={mainWidth <= 600} inert={drawer || (panel && phone.current) || covered || inSettings || (!!visual && visualOverlay)}>
     {#if section === "instructions" && room && store && !unavailable}<Instructions {room} {roomName} rooms={rooms.length} sessions={store.sessions.size} onclose={() => void closeSection()} />
     {:else}
     <header class="bar" class:session-bar={!!session}>{#if room && session && phone.current}<a class="menu-toggle" href={"/r/" + encodeURIComponent(room)} aria-label={`Back to ${roomName}`} title={`Back to ${roomName}`}
@@ -766,11 +766,6 @@
   .route-notice { display: flex; align-items: center; gap: 10px; padding: 8px 16px; color: var(--muted); font-size: 12.5px; border-bottom: 1px solid var(--line); }
   .route-notice span { flex: 1; } .route-notice strong { color: var(--text); }
   .route-notice button { border: 0; background: none; color: inherit; cursor: pointer; }
-  .shell.open.open:has(.visual-pane) { position:relative; grid-template-columns:64px minmax(0, 1fr) clamp(560px, calc((100% - 64px) * .45), 960px); }
-  .visual-pane { min-width:0; overflow:hidden; border-left:1px solid var(--line); }
-  .shell.open.open.visual-overlay:has(.visual-pane) { grid-template-columns:64px minmax(0, 1fr); }
-  .visual-overlay .visual-pane { position:absolute; z-index:4; inset:0 0 0 64px; }
-  @media (max-width:640px) { .shell.open.open.visual-overlay:has(.visual-pane) { grid-template-columns:minmax(0, 1fr); } .visual-overlay .visual-pane { left:0; } }
   .reload-notice { margin: 0; padding: 7px 16px; color: var(--muted); border-bottom: 1px solid var(--line); font-size: 13px; }
   .reload-notice button { margin-left: 4px; padding: 8px 4px; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
   /* Two-line rows around the 28 px avatar, as in the chosen mockup: the name, then what the session does. */
@@ -822,6 +817,11 @@
   .shell.open.tucked, .shell.open:has(:global(.instructions)) { grid-template-columns: 64px 1fr; }
   .shell.open:has(:global(.instructions)) aside.members { display: none; }
   @media (max-width: 640px) { .shell.open:has(:global(.instructions)) { grid-template-columns: minmax(0, 1fr); } }
+  .shell.open:has(.visual-pane) { position:relative; grid-template-columns:64px minmax(0, 1fr) clamp(560px, calc((100% - 64px) * .45), 960px); }
+  .visual-pane { min-width:0; overflow:hidden; border-left:1px solid var(--line); }
+  .shell.open.visual-overlay:has(.visual-pane) { grid-template-columns:64px minmax(0, 1fr); }
+  .visual-overlay .visual-pane { position:absolute; z-index:4; inset:0 0 0 64px; }
+  @media (max-width:640px) { .shell.open.visual-overlay:has(.visual-pane) { grid-template-columns:minmax(0, 1fr); } .visual-overlay .visual-pane { left:0; } }
   .shell.tucked > aside.members { display: none; }
   .narrow, .phone, .menu-toggle { display: none; }
   @media (max-width: 760px) { .narrow { display: inline; } }

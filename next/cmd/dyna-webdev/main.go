@@ -566,6 +566,25 @@ func seedRoom(ctx context.Context, s *engine.Service, posts, agents int) {
 	}
 	var png bytes.Buffer
 	fatal(pngenc.Encode(&png, shot))
+	// An invented three-version card exercises both superseded chips and the
+	// in-view preview when a capture is unavailable.
+	visualAuthor := contract.Principal{Kind: contract.PrincipalSession, Session: lead.Session}
+	var original contract.EventID
+	thumbnail := upload(visualAuthor, "weekly-thumbnail.png", "image/png", png.String())
+	for i, summary := range []string{"Weekly report mockup.", "Renamed the chart and fixed the labels.", "Updated the report with this week's numbers."} {
+		html := fmt.Sprintf(`<!doctype html><html><head><meta name="viewport" content="width=device-width"><title>Weekly Report</title><style>
+body{font:15px system-ui;margin:0;padding:24px;color:#e8e9eb;background:#0d0f13}h1{font-size:24px;margin:0 0 4px}p{color:#a3a8b4}.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}.tile,.chart{background:#151820;border:1px solid #272b34;border-radius:8px;padding:16px}.tile strong{display:block;font-size:24px}.chart{margin-top:12px}.bars{display:flex;align-items:end;gap:12px;height:150px}.bars span{flex:1;background:#91a2ee;min-width:12px}
+</style></head><body><h1>Weekly Report</h1><p>Oct 25 – Oct 31, 2026 · sample data</p><div class="tiles"><div class="tile">Tasks done<strong>%d</strong>12%% increase</div><div class="tile">Open PRs<strong>7</strong>3 awaiting review</div><div class="tile">Failed runs<strong>2</strong>1 vs last week</div></div><div class="chart">Daily throughput<div class="bars"><span style="height:35%%"></span><span style="height:50%%"></span><span style="height:42%%"></span><span style="height:78%%"></span><span style="height:66%%"></span><span style="height:25%%"></span><span style="height:85%%"></span></div></div></body></html>`, 40+i)
+		file := upload(visualAuthor, "weekly-report.html", "text/html", html)
+		file.Visual = &contract.VisualCard{Title: "Weekly Report", Height: 900, Thumbnail: thumbnail.SHA256}
+		result, problem := s.Post(ctx, visualAuthor, contract.PostRequest{Room: room.Room, Text: summary, VisualUpdate: original, Attachments: []contract.Attachment{file}})
+		if problem != nil {
+			log.Fatal(problem.Message)
+		}
+		if i == 0 {
+			original = result.Event
+		}
+	}
 	post(owner, contract.PostRequest{Text: "Review these examples.", Attachments: []contract.Attachment{
 		upload(owner, "preview.png", "image/png", png.String()),
 		upload(owner, "card.html", "text/html", "<!doctype html><title>Review</title><h1>Feed review</h1><p>Ready to inspect.</p>"),
