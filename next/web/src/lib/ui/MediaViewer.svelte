@@ -11,7 +11,7 @@
     root: (session?: string) => boolean; room: string; onclose: () => void; onjump: (key: string) => void;
   } = $props();
   let index = $state(initial), view = $state<View>(FIT), menu = $state(false);
-  let dialog: HTMLDialogElement, stage: HTMLDivElement, img: HTMLImageElement;
+  let dialog: HTMLDialogElement, stage: HTMLDivElement;
   let natural = $state<Size>({ width: 0, height: 0 }), box = $state<Size>({ width: 0, height: 0 });
   let item = $derived(items[index]);
   let author = $derived(item.from.kind === "owner" ? "You" : item.from.session ? name(item.from.session) : "Dyna");
@@ -73,7 +73,9 @@
   });
 </script>
 
-<dialog bind:this={dialog} aria-label="Media viewer" onclose={onclose} onkeydown={key} onclick={e => { if (e.target === dialog) dialog.close(); }}>
+<svelte:window onkeydown={key} />
+
+<dialog bind:this={dialog} aria-label="Media viewer" onclose={onclose} onclick={e => { if (e.target === dialog) dialog.close(); }}>
   <header>
     <button class="round phone" aria-label="Close" onclick={() => dialog.close()}>×</button>
     <Avatar kind={item.from.kind} name={author} root={root(item.from.session)} size={32} />
@@ -96,13 +98,13 @@
     {#if item.file.media.startsWith("video/")}
       {#key src}<video {src} controls preload="metadata" autoplay></video>{/key}
     {:else}
-      <img bind:this={img} {src} alt={item.file.name} draggable="false" onload={() => natural = { width: img.naturalWidth, height: img.naturalHeight }}
+      <img {src} alt={item.file.name} draggable="false" onload={event => natural = { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }}
         style:width={natural.width ? `${content.width}px` : undefined} style:height={natural.height ? `${content.height}px` : undefined}
         style:transform="translate({view.x}px, {view.y}px) scale({view.scale})" />
     {/if}
   </div>
   {#if items.length > 1}<button class="round prev desktop" aria-label="Previous media" onclick={() => move(-1)}>‹</button><button class="round next desktop" aria-label="Next media" onclick={() => move(1)}>›</button>{/if}
-  <footer>{item.file.name}{#if items.length > 1}<span> · {index + 1} of {items.length}</span>{/if}</footer>
+  <footer>{item.file.name}{#if items.length > 1}<span>{" · "}{index + 1} of {items.length}</span>{/if}</footer>
 </dialog>
 
 <style>
@@ -133,7 +135,7 @@
   @media (max-width: 640px) {
     header { padding: env(safe-area-inset-top) 8px 0; height: calc(56px + env(safe-area-inset-top)); gap: 4px; }
     .desktop { display: none; } .phone { display: block; } .round { width: 44px; height: 44px; }
-    .identity { display: grid; gap: 1px; } .identity span { font-size: 11px; }
+    .identity { display: grid; gap: 1px; } .sender { min-height: 44px; display: flex; align-items: center; } .identity span { font-size: 11px; }
     .more { position: relative; } .menu { position: absolute; right: 0; top: 44px; min-width: 150px; padding: 4px; background: var(--screen-chip); border: 1px solid var(--screen-line); border-radius: 8px; }
     .menu a, .menu button { display: block; width: 100%; box-sizing: border-box; padding: 12px; text-align: left; text-decoration: none; font-size: 13px; }
     footer { bottom: calc(16px + env(safe-area-inset-bottom)); }
