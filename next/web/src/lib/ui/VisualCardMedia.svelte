@@ -1,16 +1,17 @@
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { untrack } from "svelte";
   import { cardMessage, visualReplyFailure, type VisualVersion } from "../visual.ts";
   import Icon from "./Icon.svelte";
+  import { theme } from "../theme.svelte.ts";
   import { formatTime } from "../feed.ts";
   import { theme } from "../theme.svelte.ts";
   import { call } from "../client.ts";
   import { decodeEvent } from "../event.ts";
   import type { VisualSuperseded } from "../contract.gen.ts";
 
-  let { versions, selected, room, roomName, overlay, names, send, onclose }: {
-    versions: VisualVersion[]; selected: number; room: string; roomName: string; overlay: boolean; names: Map<string, string>;
-    send: (text: string, event: string) => Promise<void>; onclose: () => void;
+  let { versions, selected, room, names, send }: {
+    versions: VisualVersion[]; selected: number; room: string; names: Map<string, string>;
+    send: (text: string, event: string) => Promise<void>;
   } = $props();
   let version = $state(untrack(() => selected));
   let extra = $state<VisualVersion[]>([]);
@@ -25,8 +26,6 @@
   function outside(event: PointerEvent) { if (menu && event.target instanceof Node && !anchor.contains(event.target)) closeMenu(); }
   function author(item: VisualVersion) { return item.event.from.session ? names.get(item.event.from.session) ?? item.event.from.session : item.event.from.kind === "owner" ? "You" : "Dyna"; }
   let frame = $state<HTMLIFrameElement>();
-  let panel: HTMLElement;
-  onMount(() => panel.focus());
   let pending = $state<string | null>(null);
   let loading = $state(true);
   let failed = $state(false);
@@ -117,9 +116,8 @@
 </script>
 
 <svelte:window onmessage={message} onpointerdown={outside} onblur={() => { menu = false; }} />
-<section class="viewer" aria-label="Visual card" tabindex="-1" bind:this={panel} onkeydown={event => { if (event.key === "Escape") { if (menu) { event.stopPropagation(); closeMenu(); } else onclose(); } }}>
+<section class="viewer" aria-label="Visual card" onkeydown={event => { if (event.key === "Escape" && menu) { event.stopPropagation(); event.preventDefault(); closeMenu(); } }}>
   <header>
-    {#if overlay}<button class="back" type="button" onclick={onclose}>‹ {roomName}</button>{/if}
     <strong title={current.visual.title}>{current.visual.title}</strong>
     <div class="anchor" bind:this={anchor}>
       {#if allVersions.length > 1}<button class="version" class:active={menu} bind:this={menuButton} type="button" aria-haspopup="menu" aria-expanded={menu} onclick={() => menu = !menu}>v{version} ⌄</button>
@@ -129,7 +127,6 @@
     <span class="byline">{author(current)} · {formatTime(current.event.at)}</span>
     <span class="spacer"></span>
     <a class="icon" href={url} target="_blank" rel="noopener noreferrer" title="Open in a new tab" aria-label="Open in a new tab"><Icon name="external" /></a>
-    {#if !overlay}<button class="icon" type="button" title="Close" aria-label="Close" onclick={onclose}><Icon name="close" /></button>{/if}
   </header>
   {#if superseded}<div class="older" role="alert">This card has a newer version. <button type="button" onclick={openNew}>Open v{superseded.version}</button>{#if openFailed} The version did not open. Try again.{/if}</div>
   {:else if older}<div class="older">A newer loaded version is available. <button type="button" onclick={() => pick(latest.visual.version)}>Show v{latest.visual.version}</button></div>{/if}
