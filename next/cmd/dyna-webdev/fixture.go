@@ -31,6 +31,18 @@ func fixtureTurns() []contract.TranscriptTurn {
 		{"edit", "src/ui/SyncBanner.tsx", "- Sync failed\n+ Sync failed. Check your connection. It is safe to try again."},
 		{"bash", "npm test -- sync-status.test.ts", "Test Files  1 passed (1)\nTests       3 passed (3)"},
 	}
+	// Dyna: The first turn matches the reference timeline capture.
+	referenceTools := []struct{ name, input, output string }{
+		{"bash", "rg -n 'syncStatus|SyncStatus' src test", "src/sync/status.ts:18:export function syncStatus\nsrc/ui/SyncBanner.tsx:24: const status = syncStatus(result)\ntest/sync-status.test.ts:8:describe('sync status'"},
+		{"read", "src/sync/status.ts", "export function syncStatus(result: SyncResult) {\n  return result.ok ? 'ready' : 'failed';\n}"},
+		{"read", "src/ui/SyncBanner.tsx", "return <p>{status === 'failed' ? 'Sync failed' : 'Up to date'}</p>;"},
+		{"grep", "retry in src and test", "src/sync/client.ts:42: retrySync()\ntest/sync-client.test.ts:61: retries transient errors"},
+		{"bash", "git status --short", ""},
+		{"edit", "src/ui/SyncBanner.tsx", "--- a/src/ui/SyncBanner.tsx\n+++ b/src/ui/SyncBanner.tsx\n@@ -21,7 +21,9 @@\n- Sync failed\n+ Sync failed. Check your connection and try again."},
+		{"edit", "test/sync-status.test.ts", "--- a/test/sync-status.test.ts\n+++ b/test/sync-status.test.ts\n@@ -12,3 +12,7 @@\n+  it('shows a retry hint after failure', () => {\n+    expect(renderFailure()).toContain('try again');\n+  });"},
+		{"bash", "npm test -- sync-status.test.ts", "✓ test/sync-status.test.ts (3 tests)\nTest Files  1 passed (1)\nTests       3 passed (3)"},
+		{"bash", "git diff --stat", " src/ui/SyncBanner.tsx    | 4 +++-\n test/sync-status.test.ts | 4 ++++\n 2 files changed, 7 insertions(+), 1 deletion(-)"},
+	}
 	base := time.Now().Add(-2 * time.Hour)
 	turns := make([]contract.TranscriptTurn, 0, len(requests))
 	for i, request := range requests {
@@ -40,7 +52,11 @@ func fixtureTurns() []contract.TranscriptTurn {
 		turn := contract.TranscriptTurn{ID: id, Started: start, Ended: &end, DurationMS: 120000, Outcome: contract.TurnCompleted,
 			Inputs: []contract.TranscriptInput{{ID: contract.EventID(fmt.Sprintf("fixture-input-%d", i)), At: start, Type: contract.EventType("post.created"), From: contract.Principal{Kind: contract.PrincipalOwner}, Text: request}}}
 		turn.Items = append(turn.Items, contract.TranscriptItem{ID: fmt.Sprintf("%s-text", id), Turn: id, Kind: contract.TranscriptText, At: start, Text: "I’ll trace the sync state and its current tests before changing the UI."})
-		for j, tool := range tools {
+		turnTools := tools
+		if i == 0 {
+			turnTools = referenceTools
+		}
+		for j, tool := range turnTools {
 			at := start.Add(time.Duration(j+1) * 10 * time.Second)
 			done := at.Add(time.Second)
 			key := "path"
@@ -63,8 +79,8 @@ func fixtureTurns() []contract.TranscriptTurn {
 				item.Output = "Checking sync banner…"
 				item.Ended = nil
 			}
-			if i < 3 && j == 1 {
-				item.Posts = []contract.TranscriptItem{{ID: fmt.Sprintf("%s-post", id), Turn: id, Kind: contract.TranscriptPost, At: at, Text: []string{"I found the sync status and its banner.", "The retry wording is ready for review.", "I am checking the narrow layout."}[i]}}
+			if i >= 1 && i <= 3 && j == 1 {
+				item.Posts = []contract.TranscriptItem{{ID: fmt.Sprintf("%s-post", id), Turn: id, Kind: contract.TranscriptPost, At: at, Text: []string{"I found the sync status and its banner.", "The retry wording is ready for review.", "I am checking the narrow layout."}[i-1]}}
 			}
 			turn.Items = append(turn.Items, item)
 		}
