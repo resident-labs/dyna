@@ -707,7 +707,7 @@
       {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
     {/if}
     {/if}
-    <div hidden={section === "instructions"}>
+    <div class="terminal-holder" hidden={section === "instructions"}>
       <TermDock bind:this={terminals} terminal={attention.can("terminal")} bind:element={dock} onempty={() => composer?.focus()} phone={phone.current} strip={!!room && !session && !unavailable}
         sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
     </div>
@@ -799,6 +799,7 @@
   .requests:hover, .requests[aria-pressed="true"] { background: var(--hover); color: var(--text); }
   @media (min-width: 761px) { .requests.waiting { margin-right: 4px; } }
   main { position: relative; }
+  .terminal-holder:not([hidden]) { display: contents; }
   :where(main.header-tight) .tool { justify-content: center; width: 28px; padding: 0; }
   :where(main.header-tight) .tool span { display: none; }
   main.header-narrow .desktop-tabs { display: none; }
