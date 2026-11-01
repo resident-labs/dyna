@@ -47,7 +47,7 @@
     onclick={() => void show(!open)} onkeydown={event => { if (event.key === "ArrowDown") { event.preventDefault(); void show(true); } }}>
     <span class="names">{label.model}{#if label.detail}<small>{label.detail}</small>{/if}</span><Icon name="chevron" /></button>{/if}
   {#if open && profiles}
-    <MenuList label="Profiles" items={rows} keyOf={entry => entry.name} checked={profile} onchoose={name => void choose(name)} onclose={refocus => void show(false, refocus)}>
+    <MenuList label="Profiles" items={rows} keyOf={entry => entry.name} checked={profile} anchor={root} onchoose={name => void choose(name)} onclose={refocus => void show(false, refocus)}>
       {#snippet row(entry)}<span class="names">{entry.shown.model}<small>{entry.shown.detail}</small></span>{/snippet}
     </MenuList>
   {/if}
