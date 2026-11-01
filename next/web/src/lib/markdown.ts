@@ -1,12 +1,11 @@
 import { Marked, type Token, type Tokens } from "marked";
 
 // Post images wait for the files view, so each one becomes a link to its web address, labeled with its alt text.
-// An image without a web address keeps its label as plain text. An image inside a link is only its label, so the
-// link does not nest another link.
+// An image without a web address keeps its label as plain text. An image inside a link, at any depth, becomes its
+// label, so the link does not nest another link.
 const markdown = new Marked({
   walkTokens(token) {
-    if (token.type !== "link" || !token.tokens) return;
-    token.tokens = token.tokens.map((child): Token => child.type === "image" ? { type: "text", raw: child.raw, text: child.text || "Image" } : child);
+    if (token.type === "link" && token.tokens) token.tokens = labelImages(token.tokens);
   },
   renderer: {
     image({ href, text }: Tokens.Image): string {
@@ -16,6 +15,15 @@ const markdown = new Marked({
     },
   },
 });
+
+// Replaces each image in a token list, and in the lists nested under it, with its label as text.
+function labelImages(tokens: Token[]): Token[] {
+  return tokens.map((child): Token => {
+    if (child.type === "image") return { type: "text", raw: child.raw, text: child.text || "Image" };
+    if ("tokens" in child && child.tokens) child.tokens = labelImages(child.tokens);
+    return child;
+  });
+}
 
 // Escapes HTML but keeps entities the Markdown source already wrote, such as &amp;, so each one shows once.
 function escapeHtml(text: string): string {

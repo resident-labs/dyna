@@ -32,3 +32,10 @@ test("an image address and label keep each entity once", () => {
     '<p><a href="https://example.com/?a=1&amp;b=2">A &amp; B</a></p>\n',
   );
 });
+
+test("an image nested in formatting inside a link shows its label without a nested link", () => {
+  assert.equal(
+    parse("[**![Logo](https://a.com/x.png)**](https://b.com/)"),
+    '<p><a href="https://b.com/"><strong>Logo</strong></a></p>\n',
+  );
+});
