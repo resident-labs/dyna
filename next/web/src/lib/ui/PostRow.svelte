@@ -9,8 +9,8 @@
   import { beginSwipe, moveSwipe, releaseSwipe, ignoredSwipeTarget, type Swipe } from "../swipe.ts";
   import { canForwardPost } from "../forward-state.ts";
   import { SwipeForward } from "../swipe-forward.ts";
-  let { row, author, to, root, onretry, ondiscard, onforward, swipeDisabled = false, newest, visualEvent, onmedia }: {
-    row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; newest: Map<string, VisualCard>; visualEvent: EventID | undefined; onmedia: (position: number) => void;
+  let { row, author, to, root, room, navigate, onretry, ondiscard, onforward, swipeDisabled = false, newest, visualEvent, onmedia }: {
+    room: string; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; newest: Map<string, VisualCard>; visualEvent: EventID | undefined; onmedia: (position: number) => void;
   } = $props();
   let distance = $state(0), dragging = $state(false), ready = $state(false);
   function swipe(node: HTMLElement) {
@@ -127,7 +127,7 @@
     <button type="button" onclick={event => { event.currentTarget.closest("dialog")?.close(); copy(); }}><Icon name="copy" />Copy text</button></dialog>{/if}
   {#if row.first}
     <Avatar kind={row.from.kind} name={author} {root} size={40} />
-    <p class="name"><strong class={row.from.kind} style:--hue={hue(author)}>{author}</strong>
+    <p class="name">{#if row.from.session}<a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(row.from.session)}`} onclick={navigate} style:--hue={hue(author)}>{author}</a>{:else}<strong class={row.from.kind} style:--hue={hue(author)}>{author}</strong>{/if}
       <time datetime={row.at}>{formatTime(row.at)}</time>{#if to}<span class="to">→ {to}</span>{/if}</p>
   {:else}
     <time class="follow-time" datetime={row.at}>{clock(row.at)}</time>
@@ -186,7 +186,10 @@
   .unsent button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   /* The name line stays one line: a long name or recipient list truncates and the time stays whole. */
   .name { margin: 0; display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
-  strong { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; color: oklch(var(--id-name) var(--hue)); }
+  strong, .name a { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; color: oklch(var(--id-name) var(--hue)); }
+  .name a { text-decoration: none; font-weight: 600; }
+  .name a:hover { text-decoration: underline; }
+  .name a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   time { flex: none; }
   /* A name stays whole up to 60% of the line, so "You" never truncates; the recipient list takes the rest. */
   .to { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
