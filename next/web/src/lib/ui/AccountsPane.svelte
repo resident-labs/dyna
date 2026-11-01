@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { onMount, type Snippet } from "svelte";
+  import { onMount, tick, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
-  import { accountPath, accountRows, accountState, providerGroup, reconnectPath, refused, reconnectUnavailable } from "../accounts.ts";
+  import { accountPath, accountRows, accountState, labelRefusal, providerGroup, reconnectPath, refused, reconnectUnavailable } from "../accounts.ts";
   import { visibleWindows } from "../usage.ts";
   import type { Account, AccountProviderInfo, AccountUsage, AccountsConnectResponse, RoomSummary } from "../contract.gen.ts";
   import StatusPill from "./StatusPill.svelte";
@@ -16,7 +16,8 @@
   let connectState: "idle" | "pending" | "failed" | "expired" = $state("idle");
   let error = $state(""), copied = $state(false), opened = $state(false), now = $state(Date.now());
   let timer: ReturnType<typeof setTimeout> | undefined, generation = 0;
-  let body: HTMLDivElement;
+  let body: HTMLDivElement, labelButton: HTMLButtonElement | undefined = $state();
+  let labelEditing = $state(false), labelSaving = $state(false), labelDraft = $state(""), labelError = $state("");
   const base = "/settings/accounts";
   let reconnectRoute = $derived(path.startsWith(reconnectPath("")) ? decodeURIComponent(path.slice(reconnectPath("").length)) : "");
   let reconnecting = $derived(accounts.find(a => a.id === reconnectRoute));
@@ -28,6 +29,7 @@
   $effect(() => { if (reconnecting) label = reconnecting.label; });
   let account = $derived(accounts.find(a => a.id === accountId));
   let accountProvider = $derived(providers.find(p => p.id === account?.provider));
+  let crumb = $derived(reconnecting ? reconnecting.label : adding ? (phone && selected ? selected.displayName : "Add an account") : account?.label || "Account");
   let accountUsage = $derived(usage.find(u => u.accountId === accountId));
   let selectedReportsWindows = $derived(selected?.connectFlow === "callback" && usage.some(u => accounts.some(a => a.provider === selected?.id && a.id === u.accountId) && u.windows?.some(w => w.kind === "five_hour") && u.windows?.some(w => w.kind === "weekly")));
   const groups = [{ flow: "callback", title: "Sign in with your plan" }, { flow: "device", title: "Sign in with a code" }, { flow: "key", title: "API key" }] as const;
@@ -41,7 +43,7 @@
     void call("room.list", {}).then(result => { rooms = result.rooms ?? []; }, () => {});
   }
   onMount(() => { reload(); window.addEventListener("focus", reload); return () => { reset(); window.removeEventListener("focus", reload); }; });
-  $effect(() => { path; if (body) body.scrollTop = 0; return () => { generation++; clearTimeout(timer); attempt = undefined; connectState = "idle"; redirect = ""; secret = ""; error = ""; }; });
+  $effect(() => { path; if (body) body.scrollTop = 0; return () => { generation++; clearTimeout(timer); attempt = undefined; connectState = "idle"; redirect = ""; secret = ""; error = ""; labelEditing = false; labelError = ""; }; });
   function watch(id: string, ticket: number) {
     timer = setTimeout(() => {
       now = Date.now();
@@ -92,13 +94,33 @@
     await call("accounts.set_limits", { accountId: a.id, rooms: ids }).then(reload, () => { error = "Room limits could not be saved. Try again."; });
     busy = false;
   }
+  function editLabel(current: string) { labelDraft = current; labelError = ""; labelEditing = true; }
+  async function closeLabel(refocus: boolean) {
+    labelEditing = false; labelError = "";
+    if (refocus) { await tick(); labelButton?.focus(); }
+  }
+  // Removing the field blurs it, so this also runs after Enter and Escape, and then finds nothing to save. A refused
+  // label keeps the field open with the owner's text.
+  async function saveLabel(refocus: boolean) {
+    const a = account, next = labelDraft.trim(), ticket = generation;
+    if (!a || !labelEditing || labelSaving) return;
+    if (next === a.label) { void closeLabel(refocus); return; }
+    labelSaving = true; labelError = "";
+    await call("accounts.rename", { accountId: a.id, label: next }).then(() => {
+      accounts = accounts.map(item => item.id === a.id ? { ...item, label: next } : item);
+      reload();
+      if (ticket === generation) void closeLabel(refocus);
+    }, (e: unknown) => { if (e instanceof SignedOut) signedout(); else if (ticket === generation) labelError = labelRefusal(e); });
+    labelSaving = false;
+  }
+  function openField(input: HTMLInputElement) { input.focus(); input.select(); }
 </script>
 
 {#snippet action()}<a class="btn add-button" href={base + "/add"} onclick={(e) => { reset(); label = ""; navigate(e); }}>+ Add an account</a>{/snippet}
 {#snippet back()}<a href={base} onclick={navigate}>Accounts</a>{/snippet}
 <a id="accounts-back" href={base} onclick={navigate} hidden>Back to Accounts</a>
 {#if adding || accountId}
-  <header class="subbar">{#if phone}<a href={adding && selected && !reconnecting ? base + "/add" : base} onclick={navigate} aria-label={adding && selected && !reconnecting ? "Back to providers" : "Back to Accounts"}><Icon name="backChevron" size={20} /></a>{:else}{@render back()} <span>/</span>{/if} <strong>{reconnecting ? reconnecting.label : adding ? (phone && selected ? selected.displayName : "Add an account") : account?.label || "Account"}</strong></header>
+  <header class="subbar">{#if phone}<a href={adding && selected && !reconnecting ? base + "/add" : base} onclick={navigate} aria-label={adding && selected && !reconnecting ? "Back to providers" : "Back to Accounts"}><Icon name="backChevron" size={20} /></a>{:else}{@render back()} <span>/</span>{/if} <strong title={crumb}>{crumb}</strong></header>
 {:else}{@render bar("Accounts", loaded ? accounts.length : undefined, action)}{/if}
 <div class="body" data-page-ready={loaded && quotaLoaded} bind:this={body}>
 {#if failed}<p>Accounts did not load. <button class="btn" type="button" onclick={reload}>Try again</button></p>
@@ -161,7 +183,8 @@
 {:else if accountId}
   {#if account && accountProvider}
     <section class="account-view">
-      <h1><span class="initial">{accountProvider.displayName.slice(0, 1)}</span>{account.label}</h1>
+      <h1><span class="initial">{accountProvider.displayName.slice(0, 1)}</span>{#if labelEditing}<input class="label-input" aria-label="Account label" aria-invalid={!!labelError} autocomplete="off" bind:value={labelDraft} readonly={labelSaving} use:openField onblur={() => void saveLabel(false)} onkeydown={(e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); void saveLabel(true); } }} />{:else}<button type="button" class="label-name" title="Rename" aria-label={`Rename ${account.label}`} bind:this={labelButton} onclick={() => editLabel(account.label)}>{account.label}<Icon name="edit" size={16} /></button>{/if}</h1>
+      {#if labelError}<p role="alert">{labelError}</p>{/if}
       <p class="muted">{accountProvider.displayName}{#if accountUsage?.observedAt}{" · "}usage at {new Date(accountUsage.observedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}{/if}</p>
       <h2>Usage</h2>
       {#if accountUsage && visibleWindows(accountUsage.windows ?? []).length}<div class="meters">{#each visibleWindows(accountUsage.windows ?? []) as window (window.name)}<AccountMeter {window} now={Date.now()} />{/each}</div>{:else}<p class="muted">No usage limits reported.</p>{/if}
@@ -189,10 +212,11 @@
 {/if}
 </div>
 
-<svelte:window onkeydown={(e) => { if (e.key === "Escape" && attempt) { reset(); document.getElementById("picker-back")?.click(); } }} />
+<!-- Escape listens here because a refused label leaves its field open after focus has gone. -->
+<svelte:window onkeydown={(e) => { if (e.key !== "Escape" || e.isComposing) return; if (attempt) { reset(); document.getElementById("picker-back")?.click(); } else if (labelEditing && !labelSaving) void closeLabel(true); }} />
 <style>
   .subbar { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 24px; border-bottom: 1px solid var(--line); }
-  .subbar a, .subbar span { color: var(--muted); } .subbar a { text-decoration: none; display: inline-flex; align-items: center; }
+  .subbar a, .subbar span { color: var(--muted); } .subbar a { text-decoration: none; display: inline-flex; align-items: center; } .subbar strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .body { flex: 1; min-height: 0; overflow: auto; box-sizing: border-box; padding: 20px 24px; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 18px; }
   p { margin: 0; line-height: 1.45; } .muted { color: var(--muted); font-size: 12.5px; }
   h1, h2, h3 { margin: 0; font-weight: 600; } h1 { font-size: 20px; display: flex; align-items: center; gap: 12px; } h2 { font-size: 16px; } h3 { font-size: 13px; color: var(--muted); margin: 16px 8px 4px; }
@@ -200,10 +224,13 @@
   .initial { display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 6px; background: var(--selected); color: var(--muted); font-size: 12px; }
   .heading { display: flex; align-items: center; gap: 8px; margin: 0 8px 8px; } .heading h2, .connect h2 { display: flex; align-items: center; gap: 8px; } .heading .btn { margin-left: auto; }
   .list, .card, .picker { border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
-  .account-row { display: flex; align-items: center; } .account-row + .account-row { border-top: 1px solid var(--line); } .row { flex: 1; min-width: 0; min-height: 58px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; color: var(--text); text-decoration: none; } .row:hover, .picker a:hover { background: var(--hover); } .row .muted { margin-top: 4px; } .row-meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; flex: 1 1 420px; min-width: 0; max-width: 700px; margin-left: auto; }
+  .account-row { display: flex; align-items: center; } .account-row + .account-row { border-top: 1px solid var(--line); } .row { flex: 1; min-width: 0; min-height: 58px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; color: var(--text); text-decoration: none; } .row:hover, .picker a:hover { background: var(--hover); } .row > div:first-child { min-width: 0; overflow-wrap: anywhere; } .row .muted { margin-top: 4px; } .row-meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; flex: 1 1 420px; min-width: 0; max-width: 700px; margin-left: auto; }
   .add-layout { display: grid; grid-template-columns: minmax(280px, 300px) minmax(420px, 1fr); gap: 20px; align-items: start; } .body { container: accounts / inline-size; } .all-providers { display: none; } .picker { padding: 8px; } .search { display: flex; align-items: center; gap: 8px; padding-left: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--muted); } .picker .search input { border: 0; } .picker a { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; padding: 8px; border-radius: 6px; } .picker a .muted { margin-left: auto; } .picker a.chosen { background: var(--selected); }
   .details { display: grid; gap: 16px; min-width: 0; container: account-detail / inline-size; } .card { padding: 20px; } .connect { display: grid; justify-items: start; gap: 16px; } .connect h2 .muted { font-weight: 400; } .connect label, form { display: grid; gap: 8px; width: 100%; } .connect .label-field { grid-template-columns: 64px minmax(0, 320px); align-items: center; color: var(--muted); } .connect input, .picker input { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; } .step-row { display: flex; align-items: flex-start; gap: 10px; width: 100%; } .step-badge { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--selected); color: var(--muted); font-size: 12px; } .step-badge.checked { background: transparent; border: 1px solid var(--line); box-sizing: border-box; } .callback-entry { display: flex; gap: 8px; width: 100%; } .callback-entry input { flex: 1; min-width: 0; } .actions, .start-actions { display: flex; gap: 8px; align-items: center; } .retry { display: flex; align-items: center; gap: 12px; padding: 8px; text-decoration: none; } .retry .btn { text-decoration: none; } .chevron { padding: 12px 14px; color: var(--muted); text-decoration: none; } .no-usage { margin-left: auto; } .btn:not(.fill):not(.danger) { color: var(--text); } .code { display: flex; gap: 12px; align-items: center; font-family: var(--mono); font-size: 20px; }
-  .legend { display: grid; gap: 16px; } .legend .after strong { color: var(--text); } .legend p:not(.after) { display: grid; grid-template-columns: 180px 1fr; gap: 16px; } .account-view { display: grid; justify-items: start; gap: 12px; max-width: 900px; } .account-view h2 { margin-top: 28px; } .meters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; width: 100%; } .remove { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 20px; width: 100%; display: flex; justify-content: space-between; gap: 16px; }
+  .legend { display: grid; gap: 16px; } .legend .after strong { color: var(--text); } .legend p:not(.after) { display: grid; grid-template-columns: 180px 1fr; gap: 16px; } .account-view { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; gap: 12px; max-width: 900px; overflow-wrap: anywhere; } .account-view h1 { width: 100%; } .account-view h2 { margin-top: 28px; }
+  /* The name and its field share a box, so the text stays put when one replaces the other. */
+  .label-name, .label-input { box-sizing: border-box; min-width: 0; margin-left: -9px; padding: 2px 8px; border: 1px solid transparent; border-radius: 6px; color: var(--text); font: inherit; line-height: 1.25; } .label-name { display: inline-flex; align-items: center; gap: 8px; background: none; text-align: left; cursor: pointer; } .label-name:hover { background: var(--hover); } .label-name :global(svg) { flex: none; color: var(--muted); opacity: 0; } .label-name:hover :global(svg), .label-name:focus-visible :global(svg) { opacity: 1; } .label-input { flex: 0 1 420px; border-color: var(--firm); background: var(--bg); }
+  @media (hover: none) { .label-name { min-height: 40px; } .label-name :global(svg) { opacity: 1; } } .meters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; width: 100%; } .remove { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 20px; width: 100%; display: flex; justify-content: space-between; gap: 16px; } .remove > div { min-width: 0; }
   @container accounts (max-width: 739px) { .add-layout { display: block; } .add-layout.has-provider .picker, .add-layout:not(.has-provider) .details { display: none; } .all-providers { display: inline-block; } .connect .label-field { grid-template-columns: 1fr; } }
   @container account-detail (max-width: 500px) { .legend p:not(.after) { grid-template-columns: 1fr; gap: 4px; } .legend { gap: 12px; } }
   @media (max-width: 640px) { .body { padding: 12px 16px; } .subbar { padding: 0 16px; } .add-layout { display: block; } .picker { border: 0; padding: 0; } .search { position: sticky; top: 0; z-index: 1; } .connect .label-field { grid-template-columns: 1fr; } .meters { grid-template-columns: 1fr; } .account-row, .row { flex-wrap: wrap; } .account-view .start-actions { flex-direction: column; align-items: flex-start; } .remove { flex-direction: column; } .remove .btn { width: 100%; } .retry { order: 2; flex-basis: 100%; } .chevron { order: 1; } .row-meters { order: 3; width: 100%; grid-template-columns: 1fr; } .callback-entry { display: block; } .actions { position: fixed; z-index: 2; bottom: 0; left: 0; right: 0; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--bg); flex-wrap: wrap; } .actions .btn { flex: 1; min-height: 44px; } .actions .muted { width: 100%; text-align: center; } }
