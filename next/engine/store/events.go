@@ -200,18 +200,18 @@ func (s *Store) EventInRoom(ctx context.Context, room contract.RoomID, id contra
 
 // Event returns one event by sequence, including events from another room.
 func (s *Store) Event(ctx context.Context, seq int64) (contract.Event, error) {
-	var room sql.NullString
-	if err := s.Read().QueryRowContext(ctx, "SELECT room FROM events WHERE seq=?", seq).Scan(&room); err != nil {
-		return contract.Event{}, err
-	}
-	events, err := s.Events(ctx, contract.RoomID(room.String), seq-1, 1, nil)
+	rows, err := s.Read().QueryContext(ctx, "SELECT seq,id,at,room,type,from_kind,from_id,body FROM events WHERE seq=?", seq)
 	if err != nil {
 		return contract.Event{}, err
 	}
-	if len(events) == 0 || events[0].Seq != seq {
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return contract.Event{}, err
+		}
 		return contract.Event{}, sql.ErrNoRows
 	}
-	return events[0], nil
+	return scanEvent(rows)
 }
 
 // StreamMatches applies the same room and type rules as Events and OwnerEvents.
