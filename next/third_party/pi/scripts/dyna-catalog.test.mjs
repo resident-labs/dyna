@@ -11,6 +11,8 @@ test("catalog validates at pack time and emits routable completions", () => {
   assert.deepEqual(result.keys[0].headers, { "X-Static": "fixed" });
   assert.equal(result.keys[0].defaultModel, "model");
   assert.equal(result.keys[0].url, "https://example.com/v1");
+  const kimi = buildCatalog([provider({ id: "kimi-coding", getModels: () => [{ id: "k3", name: "K3" }, { id: "unknown", name: "Unknown" }] })]);
+  assert.deepEqual(kimi.plans[0].models, [{ id: "k3", name: "K3", proxyID: "kimi-k3" }]);
   for (const headers of [{ "X-Test": "$request" }, { Authorization: "secret" }]) assert.equal(buildCatalog([provider({ headers })]).keys.length, 0);
   for (const url of ["http://localhost/v1", "https://user@example.com/v1", "https://example.com:444/v1", "https://example.com/v1?key=x", "https://example.com/v1?", "https://{host}/v1"]) {
     assert.equal(buildCatalog([provider({ getModels: () => [{ id: "model", api: "openai-completions", baseUrl: url }] })]).keys.length, 0);
