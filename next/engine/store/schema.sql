@@ -82,7 +82,7 @@ CREATE TABLE session_accounts (session TEXT PRIMARY KEY REFERENCES sessions(id),
 
 CREATE TABLE client_replays (method TEXT NOT NULL, caller_kind TEXT NOT NULL, caller_id TEXT NOT NULL, client_id TEXT NOT NULL, ref TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(method, caller_kind, caller_id, client_id));
 
-CREATE TABLE questions (id TEXT PRIMARY KEY, room TEXT NOT NULL REFERENCES rooms(id), session TEXT NOT NULL REFERENCES sessions(id), text TEXT NOT NULL, state TEXT NOT NULL, answer TEXT NOT NULL DEFAULT '', asked_at INTEGER NOT NULL, answered_at INTEGER);
+CREATE TABLE questions (id TEXT PRIMARY KEY, room TEXT NOT NULL REFERENCES rooms(id), session TEXT NOT NULL REFERENCES sessions(id), text TEXT NOT NULL, state TEXT NOT NULL, answer TEXT NOT NULL DEFAULT '', asked_at INTEGER NOT NULL, answered_at INTEGER, meanwhile TEXT NOT NULL DEFAULT '', blocked INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX questions_room_state ON questions(room, state, asked_at);
 CREATE INDEX questions_session_pending ON questions(session, asked_at) WHERE state='pending';
 CREATE TABLE goals (room TEXT NOT NULL REFERENCES rooms(id), number INTEGER NOT NULL, session TEXT REFERENCES sessions(id), text TEXT NOT NULL, done_when TEXT NOT NULL, state TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(room, number));

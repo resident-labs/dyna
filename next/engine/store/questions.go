@@ -13,16 +13,20 @@ var ErrNoAskGrant = errors.New("this session has no ask-owner grant")
 var ErrQuestionNotWaiting = errors.New("question is no longer waiting")
 
 // noOpenQuestion holds for a session s the owner owes no answer. A session that waits for one is not finished, however
-// quiet it is, so whatever acts on idle sessions needs this. Its box may still stop: the answer wakes it.
+// quiet it is, so whatever closes idle sessions needs this. Its box may still stop: the answer wakes it.
 const noOpenQuestion = `NOT EXISTS (SELECT 1 FROM questions q WHERE q.session=s.id AND q.state='pending')`
 
-const questionColumns = "id,room,session,text,state,answer,asked_at,answered_at"
+// blockedOnQuestion holds for a session s with nothing safe left to do until the owner answers. Only this excuses a quiet
+// session from check-ins: any other question leaves it work to do.
+const blockedOnQuestion = `EXISTS (SELECT 1 FROM questions q WHERE q.session=s.id AND q.state='pending' AND q.blocked=1)`
+
+const questionColumns = "id,room,session,text,state,answer,asked_at,answered_at,meanwhile,blocked"
 
 func scanQuestion(row interface{ Scan(...any) error }) (contract.Question, error) {
 	var q contract.Question
 	var asked int64
 	var answered sql.NullInt64
-	if err := row.Scan(&q.ID, &q.Room, &q.Session, &q.Text, &q.State, &q.Answer, &asked, &answered); err != nil {
+	if err := row.Scan(&q.ID, &q.Room, &q.Session, &q.Text, &q.State, &q.Answer, &asked, &answered, &q.Meanwhile, &q.Blocked); err != nil {
 		return q, err
 	}
 	q.Asked = time.UnixMilli(asked).UTC()
@@ -65,7 +69,7 @@ func (s *Store) AskQuestion(ctx context.Context, q contract.Question, event cont
 		if state != "open" {
 			return ErrSessionClosing
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO questions(id,room,session,text,state,asked_at) VALUES(?,?,?,?,?,?)", q.ID, q.Room, q.Session, q.Text, contract.QuestionStatePending, q.Asked.UnixMilli()); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO questions(id,room,session,text,state,asked_at,meanwhile,blocked) VALUES(?,?,?,?,?,?,?,?)", q.ID, q.Room, q.Session, q.Text, contract.QuestionStatePending, q.Asked.UnixMilli(), q.Meanwhile, q.Blocked); err != nil {
 			return err
 		}
 		if clientID != "" {
