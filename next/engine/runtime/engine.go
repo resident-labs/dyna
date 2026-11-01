@@ -189,6 +189,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("recover hostexec runs: %w", err)
 	}
 	quotas := proxy.Quotas(managementKey, st, time.Now)
+	service.SetWebSearchProxy(proxy, quotas)
 	connections := proxy.Connections(managementKey, st, time.Now)
 	accounts := engine.NewAccountActions(service, connections, quotas)
 	if err := service.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": accounts.Entry(), "pr.open": service.PrOpen(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport), "hostexec.grant": service.HostexecGrant(), "hostexec.run": service.HostexecRunEntry()}, cfg.ApprovalsExpiry); err != nil {

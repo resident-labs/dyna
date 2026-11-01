@@ -69,14 +69,16 @@ func newClient(socket string) *socketClient {
 }
 
 type requestType interface {
-	contract.ContextSnapshotRequest |
+	contract.WebSearchRequest | contract.WebsearchSetKeyRequest | contract.WebsearchRemoveKeyRequest |
+		contract.ContextSnapshotRequest |
 		contract.OpWithdrawRequest |
 		contract.SessionMoveRequest |
 		contract.SessionListRequest |
 		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest
 }
 type responseType interface {
-	contract.ContextSnapshotResponse |
+	contract.WebSearchResponse | contract.WebsearchSetKeyResponse | contract.WebsearchRemoveKeyResponse |
+		contract.ContextSnapshotResponse |
 		contract.OpWithdrawResponse |
 		contract.SessionMoveResponse |
 		contract.SessionListResponse |
