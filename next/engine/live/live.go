@@ -31,6 +31,7 @@ type Session struct {
 	removed       bool
 	activity      contract.TurnActivity
 	activityOrder uint64
+	channel       *Channel
 }
 
 // Subscription uses mu to serialize sends with close.
@@ -110,23 +111,28 @@ func (l *Live) LookupSession(id contract.SessionID) (*Session, bool) {
 	return s, ok
 }
 
-// CloseSession atomically removes the entry and records its closed ID.
-func (l *Live) CloseSession(id contract.SessionID) {
+// RetireSession closes the creation gate and returns the removed handle locked.
+// The caller completes teardown and unlocks the returned handle.
+func (l *Live) RetireSession(id contract.SessionID) *Session {
 	l.mu.Lock()
 	s := l.sessions[id]
 	if s == nil {
 		l.closed[id] = struct{}{}
 		l.mu.Unlock()
-		return
+		return nil
 	}
 	l.mu.Unlock()
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	if s.removed {
+		s.mu.Unlock()
+		return nil
+	}
 	l.mu.Lock()
 	delete(l.sessions, id)
 	l.closed[id] = struct{}{}
 	s.removed = true
 	l.mu.Unlock()
+	return s
 }
 
 // PublishActivity serializes updates and publication so streams see the same order as lists.

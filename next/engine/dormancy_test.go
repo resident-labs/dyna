@@ -160,9 +160,7 @@ func TestWakeWithoutRoomWaitsPending(t *testing.T) {
 func TestDormancyRetriesFailedStop(t *testing.T) {
 	s, h, _, sid, ctx := quietSession(t, 0)
 	// This test retries a stop on a connected box, not a lost box.
-	s.mu.Lock()
-	s.sessionLocked(sid).channel = &boxChannel{wake: make(chan struct{}, 1)}
-	s.mu.Unlock()
+	attachTestChannel(t, s, sid)
 	h.stopErr = errors.New("unavailable")
 	passLifecycle(t, s, ctx)
 	h.stopErr = nil
