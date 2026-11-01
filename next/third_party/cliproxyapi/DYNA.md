@@ -37,6 +37,8 @@ Each later patch to this folder must be its own commit. Each patch must add an e
 
 - Meta device sign-in adoption: 1 product line changed, plus a 42-line test. `engine/model` binds a Meta account only after it sees an adopted credential, as for Kimi and xAI, so the Meta flow reports through the existing Dyna completion path. Meta OAuth itself is upstream; the 2026-11-01 check of `v8.0.49` found no adoption path for it.
 
+- xAI `api-call` refresh through the manager: 17 product lines added, 128 removed, plus 5 test lines added and 2 removed. `resolveXAIToken` refreshed outside the credential's refresh lock and saved the result itself, and xAI reportedly rotates refresh tokens, so a concurrent refresh could spend the grant. It now calls `ForceRefreshAuth` behind a singleflight. This protects the `xai` credentials `engine/model` binds; Dyna's own usage reader sends the stored token and never refreshes. The 2026-11-01 check of `v8.0.49` found the old path unchanged upstream.
+
 ## Pulls
 
 - `v8.0.49` (2026-11-01): `git subtree pull` merged with no conflicts. Every patch above still applies, and none is obsolete: PR #5434 stays open and unmerged, PR #5833 was closed unmerged. The release changes plugin login, Gemini sanitizing and Codex commentary through Claude clients. The commentary option defaults to off, so `engine/model` sees no change in routing, management paths or credential handling. `TestResponsesInterruptStopsHTTPUpstream` and `TestCodexClientModelsApplyPatchRouting` are flaky on `v8.0.48` with Dyna's patches too, so this pull did not cause them; CI does not run them.
