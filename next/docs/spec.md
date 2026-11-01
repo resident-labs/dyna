@@ -133,7 +133,7 @@ The contract package is the authority for method names, fields, body variants an
 
 The engine holds one SQLite `store.db`, protected by an exclusive `store.lock`. It uses WAL, `synchronous=NORMAL`, foreign keys and incremental auto-vacuum. `schema.sql` is the current schema; fresh stores run it, while existing stores run numbered steps from their version. The engine refuses a live schema that differs from it. Stores below the upgrade floor get `store_too_old` and the commit to update through (r17). The guard refuses a v1 `dyna.db` without `store.db`, and a store without the v2 format marker.
 
-One writer commits each state change and its events in one transaction, then publishes events in sequence order. Reads use a read-only pool. A separate connection checkpoints the WAL; commits never wait for a checkpoint. Typed body columns hold JSON, but queried state is not kept in JSON files. Settings and other configuration may use JSON. Transcripts are append-only JSONL; attachments and large outputs are files addressed by SHA-256.
+One writer commits each state change and its events in one transaction, then publishes events in sequence order. Reads use a read-only pool. A separate connection checkpoints the WAL; commits never wait for a checkpoint. Typed body columns hold JSON, but queried state is not kept in JSON files. Settings and other configuration may use JSON. Transcripts are append-only JSONL; attachments and large outputs are files addressed by SHA-256, per room (4.3).
 
 Daily SQLite backups retain three local copies; an upgrade makes a backup before its first schema step and stops if it fails. Optional off-host archives use the restricted, encrypted path in decision 14. The backup receiver keeps at least 14 archives and every copy less than 14 days old, and refuses uploads over 16 GiB or that leave less than 50 GiB free. A restore check verifies SQLite integrity and restored files. Relocation uses a fresh snapshot after writes stop, not a daily backup (5.10). After cutover, measured growth may trigger archival of events older than 180 days for closed sessions.
 
@@ -166,7 +166,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `shell_jobs` |
 | `event_files` |
 | `visuals` |
-| `uploads` |
+| `room_leftovers` |
 | `pr_owners` |
 | `grants` |
 | `hostexec_runs` |
@@ -188,13 +188,31 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `search_keys` |
 | `proxy_auths` |
 
+### 4.3 Data on disk
+
+A room's data is one folder on each side, so deleting a room removes one folder per machine. `box.Layout` names these paths; no other code spells them.
+
+```text
+<data>/AGENTS.md                                global instructions
+<data>/rooms/<room>/AGENTS.md                   room instructions
+<data>/rooms/<room>/files/<sha256>              attachments and large outputs
+<data>/rooms/<room>/transcripts/<session>/      transcript copies
+<hostdata>/instructions/global/AGENTS.md        the global copy a box mounts
+<hostdata>/rooms/<room>/instructions/AGENTS.md  the room copy a box mounts
+<hostdata>/rooms/<room>/shared/                 /box/shared
+```
+
+Everything else stays where its role puts it: `store.db`, `backups/`, `archive/`, `cliproxy/`, `connect/` and `git/` under `<data>`, and `bin/`, `cache/`, `git/` and `sock/` under `<hostdata>`.
+
+Blobs are per room. A blob's name is its hash and its bytes never change, so each room that uses one holds its own hard link, with no reference counts: removing a room's folder cannot break another room. Every upload names a room. A session's room comes from its socket and the owner gives one in the query. A blob in the folder is what lets a post use it, so no table records uploads. When the owner forwards a post, the engine links each blob into the target room before the post commits. Sessions cannot reach another room's blobs. `event_files` joined to `events` gives the room of every stored reference: the owner reads a hash through its newest reference in a room that is not being deleted.
+
 ## 5. Machines and box lifecycle
 
 ### 5.1 Control plane and hosts
 
 The control plane runs on an always-on host. That machine may also be a capacity host, reached over SSH like any other host (decision 14). The engine runs no boxes. One Dyna-owned SSH ControlMaster per host carries framed requests; a missing or invalid reply trailer is a transport failure.
 
-The owner registers hosts with `dyna host add <name> --ssh user@addr`, optionally restricting rooms. A host becomes ready after checks for delegated cgroup v2 controllers, rootless Podman 5 or later, SSH StreamLocalForwarding, curl, git, free disk and memory, and owner-only administration. Podman is required: the installer installs it and registration reports a typed error when it is absent (owner, q60). Schedulable memory excludes the host floor; CPUs exclude one, with a minimum of one.
+The owner registers hosts with `dyna host add <name> --ssh user@addr`, optionally restricting rooms; `dyna host limit <name>` (`host.set_limits`) later replaces that list, like `accounts.set_limits` for an account, and boxes already on the host stay there. A host becomes ready after checks for delegated cgroup v2 controllers, rootless Podman 5 or later, SSH StreamLocalForwarding, curl, git, free disk and memory, and owner-only administration. Podman is required: the installer installs it and registration reports a typed error when it is absent (owner, q60). Schedulable memory excludes the host floor; CPUs exclude one, with a minimum of one.
 
 Admission serializes placement. Each placed box counts one quarter of its CPU and memory size until stopped, failed or deleted; lost boxes count. A stopped box counts only disk. A host must fit requests, remain below 80% measured memory and retain its disk floor after new requests. An ineligible room waits with `room-host`; other waits report their reason. `--git.name` and `--git.email` set box Git identity only when nonempty (owner, q61).
 
@@ -275,6 +293,14 @@ Close durably closes the subtree deepest child first; move a child first to keep
 
 A dormant box starts for archive without admission. Archive or removal failure leaves it closing for retry; a failed archive retries every 10 minutes, and so does a box that keeps failing to start or that started without connecting, which shows a reason rather than looking like a running close. Disk eviction closes the same way, so a box is removed only after its ref is verified. A clean tree already on the remote needs no disk to skip its archive. The engine cannot see from outside whether other work is pushed, so it never discards unasked. Only owner `dyna session close --discard` can delete a box that cannot start without an archive. Archive refs expire after 14 days; `dyna session restore <session>` starts a new box from one.
 
+**Room delete.** Only the owner deletes a room: `dyna room delete ROOM --discard`. The flag is the confirmation, as for `session close`, and `room.delete` refuses a request without it. Deleting a room never widens access. An empty account or host limit means every room, so the delete refuses with `room_limited`, naming each account and host with no other open room, until the owner changes those limits with `accounts.set_limits` or `host.set_limits`. A limit that also covers another open room just loses this one. One transaction makes this check and sets the room to `deleting`, so a concurrent limit change cannot slip past, and from then on no account or host limit can name the room. The same transaction starts every open session on the close path with discard, stops host commands, and makes pending operations and archive refs due. From then on the room refuses new sessions, posts, uploads, instruction saves and transcript chunks, mentions cannot name it, no box in it can wake, and a second delete gets a conflict that carries the reason, if any, the first one is held.
+
+The reconciler does the rest, with one step per room at a time. When every session is closed and no operation or host command still runs, it removes `<hostdata>/rooms/<room>` from each ready host, in the host's user namespace, since a box can leave files that the host user cannot remove. It then removes `<data>/rooms/<room>` and deletes the rows in one transaction, children first. Each step tolerates having run, so a crash at any point resumes from the top on the next pass. A ready host that fails, whether removing the folder or a box, holds the room and shows why in `room.list`.
+
+An offline host neither holds the delete nor gets skipped. A closing box on a host that is not ready counts as deleted at once, and each such box, and the room's folder on each such host, becomes a row in `room_leftovers`, which outlives the room. `host.list` counts these rows. When the host is ready again the reconciler removes the boxes and then the folder, and only then the rows. Until it does, the host keeps the room's data and any such box keeps running, cut off from the engine.
+
+Accounts and hosts survive a room delete with their links to the room dropped. A repository another room lists stays, with its default room moved to one of those rooms. One that no room lists goes, with its CI hosts. Archive refs outlive the room: `archives` holds no foreign keys, and the expiry sweep deletes each ref and its row within the hour, retrying an outage hourly without holding the room.
+
 ### 5.10 Host failure and relocation
 
 Three missed 10-second heartbeats make a host unreachable and its ready boxes lost. Lost boxes wait for that host; they never start on another (owner, r22). On return, running containers await agent reconnection, exited containers stop, and missing containers fail. Removing a host fails its boxes and loses unpushed work. Host drain is not built.
@@ -333,11 +359,11 @@ Host exec on the control plane runs as the owner and can use the owner socket. A
 
 ### Standing instructions
 
-v2 has no rules feature. Pi loads global `/box/pi/AGENTS.md`, room `/box/work/AGENTS.md`, and each repository's own file. The engine stores the first two as owner configuration at `<data>/files/instructions/global/AGENTS.md` and `<data>/files/instructions/rooms/<room-id>/AGENTS.md`. It atomically replaces files; boxes mount their folders read-only at `/run/dyna/instructions/{global,room}` and symlink to them. The room file is outside every checkout.
+v2 has no rules feature. Pi loads global `/box/pi/AGENTS.md`, room `/box/work/AGENTS.md`, and each repository's own file. The engine stores the first two as owner configuration at `<data>/AGENTS.md` and `<data>/rooms/<room-id>/AGENTS.md` (4.3). It atomically replaces files; boxes mount their folders read-only at `/run/dyna/instructions/{global,room}` and symlink to them. The room file is outside every checkout.
 
 Pi starts in the default repository's checkout, or in `/box/work` when the session has no repository.
 
-For remote hosts, the engine copies both files over its SSH master to `<hostdata>/instructions/`, reconciles hashes before box start or resume and after reconnection, and tests new and offline hosts. Only the owner edits them, in the web markdown editor; `instructions.set` uses the read hash and returns a typed conflict for stale saves. Agents ask the owner for changes. Pi sends changes as context diffs at the next run and folds them into the head at compaction; there is no delivery or event. The v1 import writes rule texts as plain Markdown bullets under a short heading, without numbers or authors.
+For remote hosts, the engine copies both files over its SSH master to the host paths in 4.3, skipping a room being deleted, reconciles hashes before box start or resume and after reconnection, and tests new and offline hosts. Only the owner edits them, in the web markdown editor; `instructions.set` uses the read hash and returns a typed conflict for stale saves. Agents ask the owner for changes. Pi sends changes as context diffs at the next run and folds them into the head at compaction; there is no delivery or event. The v1 import writes rule texts as plain Markdown bullets under a short heading, without numbers or authors.
 
 ### 7.1 Principals
 

@@ -37,6 +37,7 @@ const (
 	MethodArchiveDone             Method = "archive.done"
 	MethodDeliveryDone            Method = "delivery.done"
 	MethodHostAdd                 Method = "host.add"
+	MethodHostSetLimits           Method = "host.set_limits"
 	MethodHostList                Method = "host.list"
 	MethodAccountsList            Method = "accounts.list"
 	MethodAccountsConnect         Method = "accounts.connect"
@@ -55,6 +56,7 @@ const (
 	MethodRoomPause               Method = "room.pause"
 	MethodRoomSetLimits           Method = "room.set_limits"
 	MethodRoomCreate              Method = "room.create"
+	MethodRoomDelete              Method = "room.delete"
 	MethodRoomRepoAdd             Method = "room.repo.add"
 	MethodRoomRepos               Method = "room.repos"
 	MethodRepoCISet               Method = "repo.ci.set"
@@ -90,6 +92,7 @@ const (
 	ErrNotFound             ErrorCode = "not_found"
 	ErrForbidden            ErrorCode = "forbidden"
 	ErrConflict             ErrorCode = "conflict"
+	ErrRoomLimited          ErrorCode = "room_limited"
 	ErrProfileExists        ErrorCode = "profile_exists"
 	ErrMoveBusy             ErrorCode = "move_busy"
 	ErrHasChildren          ErrorCode = "has_children"
@@ -107,12 +110,20 @@ type Error struct {
 	Code    ErrorCode         `json:"code"`
 	Message string            `json:"message"`
 	Visual  *VisualSuperseded `json:"visual,omitempty"`
+	Limited *RoomLimited      `json:"limited,omitempty"`
 }
 
 type VisualSuperseded struct {
 	Event   EventID `json:"event"`
 	Version int     `json:"version"`
 	Seq     int64   `json:"seq"`
+}
+
+// RoomLimited names the accounts and hosts whose limit holds no other open room. An empty limit means every room,
+// so deleting that room would widen them; room.delete refuses until the owner changes those limits.
+type RoomLimited struct {
+	Accounts []AccountID `json:"accounts,omitempty"`
+	Hosts    []HostName  `json:"hosts,omitempty"`
 }
 
 type ConversationReadRequest struct {
@@ -172,6 +183,9 @@ type RoomSummary struct {
 	Working  []SessionID `json:"working"`  // open sessions with a running turn
 	Failed   int         `json:"failed"`   // open sessions whose last turn that was not stopped failed, or whose box failed or is lost; each counts once
 	Hostless int         `json:"hostless"` // open sessions whose box waits for a room host
+	// Deleting marks a room on its way out; it refuses new work. DeleteReason says what holds it, if anything does.
+	Deleting     bool   `json:"deleting,omitempty"`
+	DeleteReason string `json:"deleteReason,omitempty"`
 	// Latest is the newest current-turn activity among the working sessions; none when no working session reported one.
 	Latest *RoomActivity `json:"latest,omitempty"`
 }
@@ -270,6 +284,14 @@ type HostAddResponse struct {
 	NoSwap bool `json:"noSwap"`
 }
 
+// HostSetLimitsRequest replaces the rooms a host serves. No rooms means every room, as for an account.
+// Boxes already on the host stay there. A room being deleted is refused.
+type HostSetLimitsRequest struct {
+	Host  HostName `json:"host"`
+	Rooms []RoomID `json:"rooms"`
+}
+type HostSetLimitsResponse struct{}
+
 // HostListRequest asks for the hosts an owner terminal can open (5.15). Only the owner calls it.
 type HostListRequest struct{}
 type HostListResponse struct {
@@ -290,6 +312,7 @@ type RoomShared struct {
 
 type HostSummary struct {
 	Shared            []RoomShared      `json:"shared"`
+	Leftovers         int               `json:"leftovers,omitempty"` // boxes and room folders of deleted rooms that this host still holds, removed when it returns
 	Name              HostName          `json:"name"`
 	Reachable         bool              `json:"reachable"`
 	Boxes             int               `json:"boxes"`
@@ -321,6 +344,14 @@ type RoomCreateRequest struct {
 type RoomCreateResponse struct {
 	Room RoomID `json:"room"`
 }
+
+// RoomDeleteRequest deletes a room and all its data. Discard must be set, as the deletion skips every archive.
+type RoomDeleteRequest struct {
+	Room    RoomID `json:"room"`
+	Discard bool   `json:"discard"`
+}
+
+type RoomDeleteResponse struct{}
 type RoomRepoAddRequest struct {
 	Room    RoomID   `json:"room"`
 	Repo    RepoName `json:"repo"`

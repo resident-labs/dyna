@@ -37,6 +37,7 @@ type boxStore interface {
 	Session(context.Context, contract.SessionID) (store.Session, error)
 	Box(context.Context, contract.BoxID) (box.Box, error)
 	Boxes(context.Context) ([]box.Box, error)
+	OpenRooms(context.Context) ([]contract.RoomID, error)
 }
 
 type heartbeatStore interface {
@@ -48,8 +49,7 @@ type Boxes struct {
 	Store             boxStore
 	Sockets           *api.Sockets
 	Runtime           string
-	HostData          string
-	InstructionsDir   string
+	Layout            box.Layout
 	instructionsMu    sync.Mutex
 	hostRunner        podman.Runner
 	machineIDFile     string
@@ -90,7 +90,7 @@ func (b *Boxes) installBinary(ctx context.Context, h *podman.Host) error {
 	if b.binErr != nil {
 		return b.binErr
 	}
-	return h.InstallBinary(ctx, b.HostData, b.Version, b.binSum, readExecutable)
+	return h.InstallBinary(ctx, b.Layout.HostData, b.Version, b.binSum, readExecutable)
 }
 
 // ciHost gives the CI pool a host's runner operations.
@@ -104,7 +104,7 @@ func (h ciHost) EnsureEgress(ctx context.Context, image string) error {
 	if err := h.boxes.installBinary(ctx, h.Host); err != nil {
 		return err
 	}
-	return h.Host.EnsureEgress(ctx, image, h.boxes.HostData)
+	return h.Host.EnsureEgress(ctx, image, h.boxes.Layout.HostData)
 }
 
 func (b *Boxes) ciDriver(ctx context.Context, name contract.HostName) (ci.Driver, error) {
@@ -144,7 +144,7 @@ func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
 	ticker := time.NewTicker(10 * time.Second)
 	go func() {
 		defer ticker.Stop()
-		h.Heartbeat(b.Context, ticker.C, b.HostData, func(ok bool, load podman.Load) {
+		h.Heartbeat(b.Context, ticker.C, b.Layout.HostData, func(ok bool, load podman.Load) {
 			now := time.Now()
 			if ok {
 				if err := b.syncInstructions(b.Context, h); err != nil {
@@ -340,12 +340,38 @@ func (b *Boxes) MaintainHost(ctx context.Context, name contract.HostName) ([]con
 	if err != nil {
 		return nil, err
 	}
-	return h.Maintain(ctx, b.HostData)
+	return h.Maintain(ctx, b.Layout.HostData)
 }
+
+// RemoveRoom removes a room's folder from a host.
+func (b *Boxes) RemoveRoom(ctx context.Context, name contract.HostName, room contract.RoomID) error {
+	dir, err := b.Layout.HostRoom(room)
+	if err != nil {
+		return err
+	}
+	h, err := b.host(ctx, name)
+	if err != nil {
+		return err
+	}
+	b.instructionState(h).settle()
+	return h.RemoveRoom(ctx, dir)
+}
+
+// RemoveLeftoverBox removes a box that an offline host still held when its room was deleted. The box has no row any more.
+func (b *Boxes) RemoveLeftoverBox(ctx context.Context, name contract.HostName, id contract.BoxID, slice string) error {
+	h, err := b.host(ctx, name)
+	if err != nil {
+		return err
+	}
+	return removeHostBox(ctx, h, box.Box{ID: id, Slice: slice}, b.forward(id))
+}
+
+// ForgetBox closes the engine's socket for a box that its offline host still holds.
+func (b *Boxes) ForgetBox(id contract.BoxID) error { return b.Sockets.RemoveBox(id) }
 
 func (b *Boxes) CacheHost(ctx context.Context, name contract.HostName) (enginegit.CacheHost, string, error) {
 	h, err := b.host(ctx, name)
-	return h, b.HostData, err
+	return h, b.Layout.HostData, err
 }
 
 func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool, error) {
@@ -353,7 +379,7 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool,
 	if err != nil {
 		return false, err
 	}
-	check := h.Check(ctx, podman.CheckOptions{HostData: b.HostData, Runtime: b.Runtime, AdminOnly: req.OwnerOnlyAdmin})
+	check := h.Check(ctx, podman.CheckOptions{HostData: b.Layout.HostData, Runtime: b.Runtime, AdminOnly: req.OwnerOnlyAdmin})
 	if !check.Ready() {
 		for _, item := range check.Items {
 			if !item.OK {
@@ -390,7 +416,7 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool,
 }
 
 func (b *Boxes) forward(id contract.BoxID) box.Forward {
-	return box.Forward{Box: id, HostPath: filepath.Join(b.HostData, "sock", string(id), "engine.sock"), EnginePath: filepath.Join(b.Runtime, "boxes", string(id)+".sock")}
+	return box.Forward{Box: id, HostPath: filepath.Join(b.Layout.HostData, "sock", string(id), "engine.sock"), EnginePath: filepath.Join(b.Runtime, "boxes", string(id)+".sock")}
 }
 
 func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, error) {
@@ -727,12 +753,12 @@ func (b *Boxes) container(spec lifecycle.BoxSpec, image string) (box.Slice, box.
 	size := spec.Size
 	slice := box.Slice{Name: spec.Slice, CPUs: size.CPUs, MemHigh: size.MemBytes, MemMax: size.MemBytes * 3 / 2, Pids: size.Pids}
 	c := box.ContainerSpec{Box: spec.Box, Image: image, Slice: spec.Slice, Needs: spec.Needs, Labels: []box.Label{{Key: "dyna.layout", Value: box.ContainerLayout}}, Mounts: []box.Mount{
-		{HostPath: filepath.Join(b.HostData, "sock", string(spec.Box)), BoxPath: "/run/dyna/engine", ReadOnly: true},
-		{HostPath: filepath.Join(b.HostData, "bin"), BoxPath: "/opt/dyna/bin", ReadOnly: true},
-		{HostPath: filepath.Join(b.HostData, "cache"), BoxPath: "/box/cache"},
-		{HostPath: filepath.Join(b.HostData, "rooms", string(spec.Room)), BoxPath: "/box/shared"},
-		{HostPath: filepath.Join(b.HostData, "instructions", "global"), BoxPath: "/run/dyna/instructions/global", ReadOnly: true, MakeDir: true},
-		{HostPath: filepath.Join(b.HostData, "instructions", "rooms", string(spec.Room)), BoxPath: "/run/dyna/instructions/room", ReadOnly: true, MakeDir: true},
+		{HostPath: filepath.Join(b.Layout.HostData, "sock", string(spec.Box)), BoxPath: "/run/dyna/engine", ReadOnly: true},
+		{HostPath: filepath.Join(b.Layout.HostData, "bin"), BoxPath: "/opt/dyna/bin", ReadOnly: true},
+		{HostPath: filepath.Join(b.Layout.HostData, "cache"), BoxPath: "/box/cache"},
+		{HostPath: b.Layout.HostShared(spec.Room), BoxPath: "/box/shared"},
+		{HostPath: filepath.Dir(b.Layout.HostInstructions("")), BoxPath: "/run/dyna/instructions/global", ReadOnly: true, MakeDir: true},
+		{HostPath: filepath.Dir(b.Layout.HostInstructions(spec.Room)), BoxPath: "/run/dyna/instructions/room", ReadOnly: true, MakeDir: true},
 	}, Env: []box.EnvVar{{Name: "GOMODCACHE", Value: "/box/cache/gomod"}, {Name: "GOCACHE", Value: "/box/cache/gocache"}, {Name: "CARGO_HOME", Value: "/box/cache/cargo"}, {Name: "npm_config_store_dir", Value: "/box/cache/pnpm"}}}
 	for _, repo := range spec.Repos {
 		c.Mounts = append(c.Mounts, box.Mount{HostPath: repo.Cache, BoxPath: repo.Cache, ReadOnly: true})

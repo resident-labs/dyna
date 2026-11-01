@@ -100,6 +100,9 @@ func (s *Store) SetAccountRooms(ctx context.Context, account contract.AccountID,
 			return err
 		}
 		for _, room := range rooms {
+			if err := refuseNewWork(ctx, tx, room); err != nil {
+				return err
+			}
 			if _, err := tx.ExecContext(ctx, "INSERT INTO account_rooms(account,room) VALUES(?,?)", account, room); err != nil {
 				return err
 			}

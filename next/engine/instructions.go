@@ -18,14 +18,33 @@ func (s *Service) SetInstructionsPublisher(publish func(context.Context)) {
 }
 
 func (s *Service) instructionsPath(ctx context.Context, room contract.RoomID) (string, *contract.Error) {
-	root := filepath.Join(s.filesDir, "instructions")
-	if room == "" {
-		return filepath.Join(root, "global", "AGENTS.md"), nil
+	if room != "" {
+		if err := s.store.RoomExists(ctx, room); err != nil {
+			return "", failure(err)
+		}
 	}
-	if err := s.store.RoomExists(ctx, room); err != nil {
-		return "", failure(err)
+	return s.layout.Instructions(room), nil
+}
+
+// writeInstructions replaces the file atomically.
+func writeInstructions(path, text string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
 	}
-	return filepath.Join(root, "rooms", string(room), "AGENTS.md"), nil
+	f, err := os.CreateTemp(filepath.Dir(path), ".instructions-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	_, writeErr := f.WriteString(text)
+	closeErr := f.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Rename(f.Name(), path)
 }
 
 func readInstructions(path string) (string, string, error) {
@@ -82,23 +101,13 @@ func (s *Service) InstructionsSet(ctx context.Context, caller contract.Principal
 	if req.Base != hash {
 		return out, &contract.Error{Code: contract.ErrStale, Message: "instructions changed since they were read"}
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return out, failure(err)
+	save := func() error { return writeInstructions(path, req.Text) }
+	if req.Room == "" {
+		err = save()
+	} else {
+		err = s.roomWrite(ctx, req.Room, save)
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".instructions-*")
 	if err != nil {
-		return out, failure(err)
-	}
-	defer os.Remove(f.Name())
-	_, writeErr := f.WriteString(req.Text)
-	closeErr := f.Close()
-	if writeErr != nil {
-		return out, failure(writeErr)
-	}
-	if closeErr != nil {
-		return out, failure(closeErr)
-	}
-	if err := os.Rename(f.Name(), path); err != nil {
 		return out, failure(err)
 	}
 	sum := sha256.Sum256([]byte(req.Text))
