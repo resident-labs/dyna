@@ -9,15 +9,18 @@ import (
 
 func questionCommand(get func() *socketClient) *cobra.Command {
 	c := &cobra.Command{Use: "question"}
-	var clientID string
-	ask := &cobra.Command{Use: "ask TEXT", Short: "Ask the owner a question. It needs the ask-owner grant.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		result, err := call[contract.QuestionAskRequest, contract.QuestionAskResponse](cmd.Context(), get(), contract.MethodQuestionAsk, contract.QuestionAskRequest{Text: args[0], ClientID: clientID})
+	var clientID, meanwhile string
+	var blocked bool
+	ask := &cobra.Command{Use: "ask TEXT", Short: "Ask the owner a question and keep working. It needs the ask-owner grant.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := call[contract.QuestionAskRequest, contract.QuestionAskResponse](cmd.Context(), get(), contract.MethodQuestionAsk, contract.QuestionAskRequest{Text: args[0], Meanwhile: meanwhile, Blocked: blocked, ClientID: clientID})
 		if err != nil {
 			return err
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 	}}
 	ask.Flags().StringVar(&clientID, "client-id", "", "Retry key: the same key returns the first question")
+	ask.Flags().StringVar(&meanwhile, "meanwhile", "", "Useful safe work you will do while you wait (required); with --blocked, why there is none")
+	ask.Flags().BoolVar(&blocked, "blocked", false, "Nothing safe is left to do until the answer")
 	var room string
 	list := &cobra.Command{Use: "list", Short: "List a room's waiting questions and its latest answered ones", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		result, err := call[contract.QuestionListRequest, contract.QuestionListResponse](cmd.Context(), get(), contract.MethodQuestionList, contract.QuestionListRequest{Room: contract.RoomID(room)})

@@ -54,14 +54,19 @@ func TestPlanCheckins(t *testing.T) {
 		{"background job", func(s []CheckinSession) { c := childOf(s); c.Jobs, c.Last = 1, ago(time.Hour) }, nil},
 		{"pending input", func(s []CheckinSession) { childOf(s).Pending = true }, nil},
 		{"model retry due", func(s []CheckinSession) { childOf(s).Retrying = true }, nil},
-		{"waiting for the owner's answer", func(s []CheckinSession) { childOf(s).Asking = true }, nil},
-		{"asleep waiting for the owner's answer", func(s []CheckinSession) {
+		{"blocked on the owner's answer", func(s []CheckinSession) { childOf(s).Blocked = true }, nil},
+		{"asleep and blocked on the owner's answer", func(s []CheckinSession) {
 			c := childOf(s)
-			c.Asking, c.Box = true, contract.BoxStopped
+			c.Blocked, c.Box = true, contract.BoxStopped
 		}, nil},
 		{"a failed box outranks the question", func(s []CheckinSession) {
 			c := childOf(s)
-			c.Asking, c.Box, c.BoxChanged = true, contract.BoxFailed, ago(time.Hour)
+			c.Blocked, c.Box, c.BoxChanged = true, contract.BoxFailed, ago(time.Hour)
+		}, []contract.SessionID{"lead"}},
+		{"an open question that blocks nothing", func(s []CheckinSession) { childOf(s).Asking = true }, []contract.SessionID{"lead"}},
+		{"asleep with an open question that blocks nothing", func(s []CheckinSession) {
+			c := childOf(s)
+			c.Asking, c.Box = true, contract.BoxStopped
 		}, []contract.SessionID{"lead"}},
 		{"box starting", func(s []CheckinSession) {
 			c := childOf(s)
@@ -131,6 +136,35 @@ func TestPlanCheckinsExcusesOnlyWorkBelow(t *testing.T) {
 	got := PlanCheckins(sessions, checkinNow)
 	if len(got) != 1 || got[0].To != "root" || got[0].Children[0].Session != "lead" {
 		t.Fatalf("a stuck child excused its lead: %+v", got)
+	}
+}
+
+func TestPlanCheckinsOnlyABlockedQuestionExcusesAncestors(t *testing.T) {
+	sessions := family()
+	child := childOf(sessions)
+	child.Goal = ""
+	lead := leadOf(sessions)
+	lead.Goal, lead.Text = "g2", "lead"
+	child.Asking = true
+	got := PlanCheckins(sessions, checkinNow)
+	if len(got) != 1 || got[0].To != "root" || got[0].Children[0].Session != "lead" {
+		t.Fatalf("an open question excused its lead: %+v", got)
+	}
+	child.Blocked = true
+	if got := PlanCheckins(sessions, checkinNow); len(got) != 0 {
+		t.Fatalf("a lead below which a session waits for the owner stalled: %+v", got)
+	}
+}
+
+func TestPlanCheckinsMentionsAnOpenQuestion(t *testing.T) {
+	sessions := family()
+	childOf(sessions).Asking = true
+	got := PlanCheckins(sessions, checkinNow)
+	if len(got) != 1 || !got[0].Children[0].Asking {
+		t.Fatalf("plan: %+v", got)
+	}
+	if text := renderCheckin(contract.CheckinDue{Session: got[0].To, Children: got[0].Children}); !strings.Contains(text, "has an open question for the owner") {
+		t.Fatalf("report: %s", text)
 	}
 }
 

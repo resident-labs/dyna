@@ -412,11 +412,20 @@ func TestPostedOrRepliedTurnIsNotSilent(t *testing.T) {
 	r.wantCheckins(r.lead, 0)
 }
 
-func TestQuestionForTheOwnerIsNotAStall(t *testing.T) {
+// askAs has a session ask the owner.
+func (r *goalRig) askAs(session contract.SessionID, blocked bool) {
+	r.t.Helper()
+	grantAsk(r.t, r.s, r.ctx, r.room, session)
+	if _, e := r.s.QuestionAsk(r.ctx, asSession(session), contract.QuestionAskRequest{Text: "which one?", Meanwhile: "the next item", Blocked: blocked}); e != nil {
+		r.t.Fatal(e)
+	}
+}
+
+func TestBlockedQuestionIsNotAStall(t *testing.T) {
 	r := newGoalRig(t)
 	r.turn(r.child, "asking")
 	r.turn(r.lead, "good")
-	r.exec("INSERT INTO questions(id,room,session,text,state,asked_at) VALUES('q_1',?,?,'which one?','pending',?)", r.room, r.child, r.now().UnixMilli())
+	r.askAs(r.child, true)
 	r.advance(24 * time.Hour)
 	r.pass()
 	r.wantCheckins(r.lead, 0)
@@ -425,6 +434,50 @@ func TestQuestionForTheOwnerIsNotAStall(t *testing.T) {
 	r.exec("UPDATE questions SET state='answered'")
 	r.pass()
 	r.wantCheckins(r.lead, 1)
+}
+
+func TestOpenQuestionDoesNotExcuseAnIdleSession(t *testing.T) {
+	r := newGoalRig(t)
+	r.turn(r.child, "asking")
+	r.turn(r.lead, "good")
+	r.askAs(r.child, false)
+	r.advance(room.CheckinIdle + time.Minute)
+	r.pass()
+	got := r.checkins(r.lead)
+	if len(got) != 1 || len(got[0].Children) != 1 || got[0].Children[0].Session != r.child || !got[0].Children[0].Asking {
+		t.Fatalf("check-ins %+v", got)
+	}
+}
+
+// A question from before blocked existed gets the same treatment, however long it has waited.
+func TestQuestionFromBeforeTheUpgradeExcusesNothing(t *testing.T) {
+	r := newGoalRig(t)
+	r.turn(r.child, "asking")
+	r.turn(r.lead, "good")
+	r.exec("INSERT INTO questions(id,room,session,text,state,asked_at) VALUES('q_1',?,?,'which one?','pending',?)", r.room, r.child, r.now().UnixMilli())
+	r.advance(room.CheckinIdle + time.Minute)
+	r.pass()
+	r.wantCheckins(r.lead, 1)
+}
+
+func TestOnlyABlockedQuestionExcusesTheAncestors(t *testing.T) {
+	for _, blocked := range []bool{false, true} {
+		r := newGoalRig(t)
+		r.turn(r.child, "asking")
+		if _, e := r.s.GoalSet(r.ctx, asSession(r.root), contract.GoalSetRequest{Session: r.lead, Text: "lead it", DoneWhen: "all merged"}); e != nil {
+			t.Fatal(e)
+		}
+		r.turn(r.lead, "on it")
+		r.turn(r.root, "good")
+		r.askAs(r.child, blocked)
+		r.advance(room.CheckinIdle + time.Minute)
+		r.pass()
+		want := 1
+		if blocked {
+			want = 0
+		}
+		r.wantCheckins(r.root, want)
+	}
 }
 
 func TestLeadWithWorkingChildIsNotStalled(t *testing.T) {
