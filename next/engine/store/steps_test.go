@@ -53,6 +53,7 @@ func TestUpgradeSessionWorkFrom42(t *testing.T) {
 		"CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT, started_seq INTEGER, started_at INTEGER, ended_at INTEGER)",
 		"CREATE TABLE pr_owners (session TEXT)",
 		"CREATE TABLE operations (id TEXT PRIMARY KEY, kind TEXT, room TEXT, by_kind TEXT, by_id TEXT, class TEXT, state TEXT, card BLOB, args BLOB, args_sha256 BLOB, created_at INTEGER, expires_at INTEGER, decision BLOB, result BLOB)",
+		"CREATE TABLE grants (id TEXT, kind TEXT, expires_at INTEGER, revoked_at INTEGER, expired_at INTEGER)",
 		"CREATE TABLE hostexec_runs (op TEXT PRIMARY KEY, grant_id TEXT, host TEXT, scope TEXT, started_at INTEGER, timeout_ms INTEGER, ended_at INTEGER, output_bytes INTEGER, stopped TEXT, lost_at INTEGER)",
 		"INSERT INTO turns(id,session,started_seq) VALUES ('turn1','session1',NULL)",
 		`INSERT INTO events VALUES (5,'room','engine','','turn.started','{"turn":"turn1"}')`,
@@ -113,7 +114,8 @@ func TestUpgradeDropsRules(t *testing.T) {
 		CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO meta VALUES ('schema_version','45');
 		CREATE TABLE rules (room TEXT, number INTEGER, PRIMARY KEY(room,number)); INSERT INTO rules VALUES ('room',1);
 		CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT, started_at INTEGER, ended_at INTEGER); CREATE TABLE pr_owners (session TEXT);
-		CREATE TABLE operations (id TEXT, by_kind TEXT, by_id TEXT, created_at INTEGER, state TEXT);
+		CREATE TABLE operations (id TEXT, kind TEXT, args BLOB, by_kind TEXT, by_id TEXT, created_at INTEGER, state TEXT);
+		CREATE TABLE grants (id TEXT, kind TEXT, expires_at INTEGER, revoked_at INTEGER, expired_at INTEGER);
 		CREATE TABLE events (seq INTEGER PRIMARY KEY, id TEXT, at INTEGER, room TEXT, type TEXT, from_kind TEXT, from_id TEXT, body BLOB);
 		CREATE TABLE deliveries (seq INTEGER REFERENCES events(seq));
 		CREATE TABLE event_files (seq INTEGER REFERENCES events(seq));
