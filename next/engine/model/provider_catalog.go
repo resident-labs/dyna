@@ -41,6 +41,19 @@ func (p *Proxy) AccountProviders() []contract.AccountProviderInfo {
 	}
 	// TODO: legacy/shim remove later — connectMethod and connectFlow; catalog PR 4 removes them.
 	for i := range providers {
+		provider := &providers[i]
+		provider.Models = append([]contract.CatalogModel(nil), provider.Models...)
+		plan := p.pools["plan_"+string(provider.ID)]
+		key := p.pools[string(provider.ID)]
+		for j := range provider.Models {
+			model := &provider.Models[j]
+			if plan.models[model.ID] {
+				model.Billing = append(model.Billing, contract.ModelBillingPlan)
+			}
+			if key.models[model.ID] {
+				model.Billing = append(model.Billing, contract.ModelBillingKey)
+			}
+		}
 		providers[i].ConnectFlow = providers[i].Flows[0]
 		providers[i].ConnectMethod = contract.ConnectOAuth
 		if providers[i].Flows[0] == contract.ConnectFlowKey {
