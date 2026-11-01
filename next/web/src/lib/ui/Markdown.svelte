@@ -66,7 +66,7 @@
   /* The copy row sits above the code and takes its own space, so the button never covers a line of code. */
   .markdown :global(.code-head) { display: flex; justify-content: flex-end; padding: 2px 4px 0; background: var(--sidebar); border-radius: 6px 6px 0 0; }
   .markdown :global(.code-block > pre) { border-radius: 0 0 6px 6px; }
-  .markdown :global(.code-copy) { height: 24px; padding: 0 8px; border-radius: 6px; color: var(--muted); font: inherit; font-size: 12.5px; }
+  .markdown :global(.code-copy) { height: 24px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; }
   .markdown :global(.code-copy:hover) { color: var(--text); background: var(--hover); }
   .markdown :global(.code-copy:focus-visible) { outline: 2px solid var(--focus); outline-offset: 0; }
   @media (hover: none) {
