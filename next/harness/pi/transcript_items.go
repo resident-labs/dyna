@@ -129,6 +129,7 @@ func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contrac
 						var args struct{ Code string }
 						if json.Unmarshal(b.Arguments, &args) == nil {
 							item.Script = harness.Mask(args.Code)
+							item.Arguments = ""
 						}
 					}
 					if len(b.ID) <= 4096 {

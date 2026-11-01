@@ -535,6 +535,7 @@ const (
 	TranscriptPartOutput    TranscriptPart = "output"
 	TranscriptPartText      TranscriptPart = "text"
 	TranscriptPartArguments TranscriptPart = "arguments"
+	TranscriptPartScript    TranscriptPart = "script"
 	TranscriptPartDiff      TranscriptPart = "diff"
 )
 
