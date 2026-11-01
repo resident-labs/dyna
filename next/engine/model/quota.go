@@ -113,6 +113,36 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 	return result, nil
 }
 
+// RoutingPlace is one credential in the proxy's routing order. Rank 1 takes new work,
+// and 0 means routing cannot use the credential now.
+type RoutingPlace struct {
+	Index string `json:"auth_index"`
+	Rank  int    `json:"rank"`
+	Spent bool   `json:"spent"`
+}
+
+// Routing reads the order the proxy's selector would use, by credential index. It costs
+// no provider request. ok is false when the proxy reports no order.
+func (q *Quotas) Routing(ctx context.Context) (map[string]RoutingPlace, bool) {
+	data, err := q.management.request(ctx, http.MethodGet, "/v8/management/routing/status", nil)
+	if err != nil {
+		return nil, false
+	}
+	var status struct {
+		Providers map[string][]RoutingPlace `json:"providers"`
+	}
+	if json.Unmarshal(data, &status) != nil || len(status.Providers) == 0 {
+		return nil, false
+	}
+	places := make(map[string]RoutingPlace)
+	for _, provider := range status.Providers {
+		for _, place := range provider {
+			places[place.Index] = place
+		}
+	}
+	return places, true
+}
+
 // usage returns the cached reading or reads the proxy, one read per credential at a time.
 func (q *Quotas) usage(ctx context.Context, file Credential, account contract.Account) contract.AccountUsage {
 	if entry, ok := q.cached(file.Index); ok {

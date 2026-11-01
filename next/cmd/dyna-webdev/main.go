@@ -204,6 +204,42 @@ func (d devService) AccountsQuota(context.Context, contract.Principal, contract.
 	return response, nil
 }
 
+// devPins holds the dev sessions' account choices for as long as the server runs.
+var devPins sync.Map
+
+// SessionAccount offers the invented accounts as they would be for a session.
+func (d devService) SessionAccount(_ context.Context, _ contract.Principal, req contract.SessionAccountRequest) (contract.SessionAccountResponse, *contract.Error) {
+	response := contract.SessionAccountResponse{Choices: []contract.SessionAccountChoice{}}
+	for _, a := range d.accounts(time.Now()) {
+		if a.usage.Provider != "claude" || a.usage.Cause != "" {
+			continue
+		}
+		response.Choices = append(response.Choices, contract.SessionAccountChoice{ID: a.usage.AccountID, Label: a.usage.Label})
+	}
+	if pin, ok := devPins.Load(req.Session); ok {
+		response.Account = pin.(contract.AccountID)
+		for _, choice := range response.Choices {
+			if choice.ID == response.Account {
+				response.Label = choice.Label
+			}
+		}
+		if response.Account == "spent" {
+			response.Issue = contract.SessionAccountSpent
+		}
+	}
+	return response, nil
+}
+
+// SessionSetAccount keeps a choice in memory.
+func (d devService) SessionSetAccount(_ context.Context, _ contract.Principal, req contract.SessionSetAccountRequest) (contract.SessionSetAccountResponse, *contract.Error) {
+	if req.Account == "" {
+		devPins.Delete(req.Session)
+	} else {
+		devPins.Store(req.Session, req.Account)
+	}
+	return contract.SessionSetAccountResponse{}, nil
+}
+
 // HostList gives the dev host a busy beat (CPU near its limit, disk low) and adds a host that has stopped
 // answering, so Home shows each look; engine/runtime fills the real load.
 func (d devService) HostList(ctx context.Context, p contract.Principal, req contract.HostListRequest) (contract.HostListResponse, *contract.Error) {

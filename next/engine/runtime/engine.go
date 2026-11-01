@@ -231,7 +231,12 @@ func Run(ctx context.Context, cfg Config) error {
 				http.Error(w, "account policy unavailable", http.StatusServiceUnavailable)
 				return
 			}
-			proxy.Handler(string(session.ID), allowed, eligible).ServeHTTP(w, r)
+			// A choice that cannot be read is Automatic: it must never fail the turn.
+			pinned, err := st.SessionPinnedProxyID(r.Context(), session.ID)
+			if err != nil {
+				pinned = ""
+			}
+			proxy.Handler(string(session.ID), allowed, eligible, pinned).ServeHTTP(w, r)
 		}))
 	})
 	apiServer.Build = cfg.Version
