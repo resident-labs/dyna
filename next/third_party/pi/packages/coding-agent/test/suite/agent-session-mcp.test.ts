@@ -1,5 +1,6 @@
 import { readFileSync, rmSync } from "node:fs";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { buildBaseOptions } from "@earendil-works/pi-ai/api/simple-options";
 import type { SystemMessage, ToolResultMessage } from "@earendil-works/pi-ai/compat";
 import { type JsonRpcRequest, LATEST_PROTOCOL_VERSION } from "@earendil-works/pi-mcp";
 import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
@@ -101,6 +102,8 @@ function createFakeServer(
 				if (params.name === "shot") {
 					return { content: [{ type: "image", data: TINY_PNG_BASE64, mimeType: "image/png" }] };
 				}
+				// A server that drops an empty string's field, as Dyna's did.
+				if (params.name === "click") return { content: [{ type: "text" }] };
 				return { content: [{ type: "text", text: "server exploded" }], isError: true };
 			}
 			default:
@@ -227,6 +230,25 @@ describe("AgentSession MCP integration", () => {
 	function nestedToolNames(harness: Harness): string[] {
 		return harness.session.getCallableToolNames();
 	}
+
+	it("sends the next request after a server's text block without text", async () => {
+		const click = { name: "click", description: "Prints nothing.", inputSchema: { type: "object", properties: {} } };
+		const { harness } = await setup("direct", () => [...SERVER_TOOLS, click]);
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("mcp__docs__click", {}), { stopReason: "toolUse" }),
+			(context, _options, _state, model) => {
+				// The faux provider skips this step of a real request.
+				buildBaseOptions(model, context);
+				return fauxAssistantMessage("clicked");
+			},
+		]);
+
+		await harness.session.prompt("click it");
+
+		expect(toolResult(harness, "mcp__docs__click").isError).toBe(false);
+		expect(harness.session.messages.at(-1)).toMatchObject({ role: "assistant", stopReason: "stop" });
+		expect(getAssistantTexts(harness).at(-1)).toBe("clicked");
+	});
 
 	it("keeps MCP tools when --tools names no MCP tool", async () => {
 		for (const exposure of ["codemode", "deferred"] as const) {
