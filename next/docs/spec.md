@@ -304,7 +304,7 @@ A grant names hosts, reason and expiry, and permits any command until expiry or 
 
 Each room's root gets a revocable default grant for all hosts, including the control plane, with no expiry. Only the owner grants host exec. A request names hosts, reason and duration; the default is 24 hours, and `--expires never` must be explicit. Revocation prevents pending runs and stops running units, with retries and forced termination. Expiry prevents new runs but does not stop running commands. The engine emits `grant.expired`; the web lists active grants and revoke controls.
 
-Use the planned `show_pty` tool (`dyna show-pty`) only to show the owner a live terminal. Never use it to obtain permission or a sign-in the agent can use itself. Owner questions remain separate.
+The planned `show_pty` tool (`dyna show-pty`) requests a live terminal for the owner to see. Owner questions remain separate.
 
 ### 6.3 Run path
 
