@@ -25,7 +25,7 @@ func (s *Service) WebsearchSetKey(ctx context.Context, caller contract.Principal
 	if caller.Kind != contract.PrincipalOwner {
 		return contract.WebsearchSetKeyResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "owner access required"}
 	}
-	if !searchKeyProvider(req.Provider) || strings.TrimSpace(req.Key) == "" {
+	if !searchKeyProvider(req.Provider) || strings.TrimSpace(req.Key) == "" || len(req.Key) > 4096 {
 		return contract.WebsearchSetKeyResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "provider and key are required"}
 	}
 	if err := s.store.SetSearchKey(ctx, string(req.Provider), req.Key); err != nil {

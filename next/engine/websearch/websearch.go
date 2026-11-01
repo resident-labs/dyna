@@ -217,7 +217,10 @@ func errorReason(body io.Reader) string {
 	if body == nil {
 		return ""
 	}
-	raw, _ := io.ReadAll(io.LimitReader(body, 64<<10))
+	raw, err := io.ReadAll(io.LimitReader(body, (64<<10)+1))
+	if err != nil || len(raw) > 64<<10 {
+		return ""
+	}
 	var refusal errorBody
 	if json.Unmarshal(raw, &refusal) == nil {
 		for _, named := range []string{refusal.Detail, refusal.Message} {
