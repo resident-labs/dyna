@@ -30,9 +30,9 @@ func (s *Service) ComputerChanged(ctx context.Context, caller contract.Principal
 	if !open {
 		return contract.ComputerChangedResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 	}
-	handle, ok := s.lockSession(session.ID)
-	if !ok {
-		return contract.ComputerChangedResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+	handle, problem := s.lockSession(ctx, session.ID)
+	if problem != nil {
+		return contract.ComputerChangedResponse{}, problem
 	}
 	defer handle.Unlock()
 	if handle.Channel() == nil {

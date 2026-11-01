@@ -57,7 +57,7 @@ func TestClosedSessionRejectsStaleReadAndHandle(t *testing.T) {
 	if _, problem := s.TurnActivity(ctx, caller, contract.TurnActivityRequest{Label: "stale"}); problem == nil || problem.Code != contract.ErrNotFound {
 		t.Fatalf("closed activity: %v", problem)
 	}
-	if _, ok := s.lockSession(row.ID); ok {
+	if _, problem := s.lockSession(ctx, row.ID); problem == nil {
 		t.Fatal("stale channel writer recreated the session")
 	}
 	if handle.Lock() {
