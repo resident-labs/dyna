@@ -35,6 +35,7 @@ type Service struct {
 	// beforeCloseTransfer lets a test act after the notice scan, before the transfer commits.
 	beforeCloseTransfer func(key string)
 	tickReads           *tickReadView
+	mainRecheckCache    mainRecheckCache
 	// RunNodeCI runs one admitted job on a machine. LocalCIRegistry holds the
 	// saved results, machines and CI mode that both a local head and a pull
 	// request head use.

@@ -40,19 +40,20 @@ func (e *rateLimitError) Error() string {
 }
 
 type requestCache struct {
-	forceBudgets  bool // Existing full polls also refresh completed timing evidence.
-	forceSnapshot bool // Reconcile a committed budget through the normal full poll.
-	cacheOnly     bool // Read saved evidence without transport or entry mutation.
-	countSavedCI  bool // Keep the CI decode test hook specific to CI evidence.
-	savedComments *[]Comment
-	entries       map[string]cachedResponse
-	used          map[string]cachedResponse
-	notModified   map[string]bool
-	rates         map[string]RateLimit
-	legacyPause   time.Time
-	account       string
-	rateMu        *sync.Mutex
-	now           func() time.Time
+	forceBudgets    bool // Existing full polls also refresh completed timing evidence.
+	forceSnapshot   bool // Reconcile a committed budget through the normal full poll.
+	cacheOnly       bool // Read saved evidence without transport or entry mutation.
+	countSavedCI    bool // Keep the CI decode test hook specific to CI evidence.
+	savedComments   *[]Comment
+	entries         map[string]cachedResponse
+	used            map[string]cachedResponse
+	notModified     map[string]bool
+	rates           map[string]RateLimit
+	legacyPause     time.Time
+	account         string
+	expectedAccount string // Reject an identity change before sending cached validators.
+	rateMu          *sync.Mutex
+	now             func() time.Time
 }
 
 func (g GitHub) request(ctx context.Context, r Ref, path string) ([]byte, string, error) {
@@ -115,6 +116,9 @@ func (g GitHub) requestBody(ctx context.Context, r Ref, path, method string, raw
 		scope.Account = strings.ToLower(account)
 		if g.requests == nil {
 			return nil
+		}
+		if g.requests.expectedAccount != "" && scope.Account != g.requests.expectedAccount {
+			return fmt.Errorf("GitHub account changed during main CI recheck")
 		}
 		g.requests.account = scope.Account
 		until := g.requests.pauseUntil(scope)

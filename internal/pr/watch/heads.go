@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -660,6 +661,15 @@ func (s *Service) observeHeadBatch(ctx context.Context, st State, records []*Rec
 	return heads, errors.Join(readErr, recheckErr, saveErr)
 }
 
+// mainRecheckCache retains only the last complete recheck. Each page still
+// makes a conditional request; this cache never makes a CI decision by itself.
+// Bound the cache to avoid retaining large GitHub responses indefinitely.
+type mainRecheckCache struct {
+	mu      sync.Mutex
+	key     string
+	entries map[string]cachedResponse
+}
+
 // recheckCancelledMainCI replaces a red rollup that counted a cancelled run with
 // the commit's own CI. GitHub keeps counting a cancelled run after a later run of
 // the same workflow passed, so the latest completed result of each check decides
@@ -675,17 +685,50 @@ func (s *Service) recheckCancelledMainCI(ctx context.Context, gh GitHub, records
 		if !ok || probe.Err != nil || localRepos[defaultRepo(*r)] || !probe.Default.cancelledFailure() {
 			continue
 		}
-		identity := defaultRepo(*r) + "@" + probe.Default.Head
+		identity := defaultRepo(*r) + "@" + probe.Default.Head + "\n" + r.RoomID + "\n" + strings.ToLower(probe.Account)
 		if failed[identity] {
 			continue
 		}
 		result, read := results[identity]
 		if !read {
 			var snap Snapshot
-			if err := gh.readCommitCI(ctx, refRecord(*r), probe.Default.Head, &snap); err != nil {
+			// The selected login from the head probe scopes every validator. The
+			// execution callback checks that account selection did not change.
+			useCache := probe.Account != ""
+			if gh.requests == nil {
+				gh.requests = &requestCache{}
+			}
+			if gh.requests.rates == nil {
+				gh.requests.rates = map[string]RateLimit{}
+			}
+			request := *gh.requests
+			request.entries, request.used = nil, map[string]cachedResponse{}
+			request.expectedAccount = strings.ToLower(probe.Account)
+			if useCache {
+				s.mainRecheckCache.mu.Lock()
+				if s.mainRecheckCache.key == identity {
+					request.entries = s.mainRecheckCache.entries
+				}
+				s.mainRecheckCache.mu.Unlock()
+			}
+			reader := gh
+			reader.RoomID = r.RoomID
+			reader.requests = &request
+			if err := reader.readCommitCI(ctx, refRecord(*r), probe.Default.Head, &snap); err != nil {
 				failures = append(failures, err)
 				failed[identity] = true
 				continue
+			}
+			if useCache {
+				size := 0
+				for key, entry := range request.used {
+					size += len(key) + len(entry.Body) + len(entry.ETag) + len(entry.Next)
+				}
+				if size <= 16*1024*1024 {
+					s.mainRecheckCache.mu.Lock()
+					s.mainRecheckCache.key, s.mainRecheckCache.entries = identity, request.used
+					s.mainRecheckCache.mu.Unlock()
+				}
 			}
 			snap.Pull.Head.SHA, snap.Pull.Head.Repo.FullName = probe.Default.Head, r.Repo
 			result = mainCIResult{state: rollupState(mainCIVerdict(snap)), count: len(snap.currentChecks())}
