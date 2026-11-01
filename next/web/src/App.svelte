@@ -690,7 +690,7 @@
         <button type="button" aria-pressed={about} onclick={() => tabs.set(key, "about")}>About</button></header>
       {:else}<header class="bar"><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}{#if attention.can("operate")}<button type="button" class="tool" title="New session" aria-label="New session" onclick={() => openNew("session")}><Icon name="plus" /></button>{/if}</header>{/if}
       <!-- A long tree renders only its visible rows, through the feed's shared list (spec: long lists are virtual). -->
-      {#if about && session && store}<AboutPanel {store} room={room} {session} switchable={attention.can("operate")} navigate={openSession} onjobs={async event => { if (!wide.current) await showPanel(false, event.detail > 0); void jobsTool?.show(session); }} />
+      {#if about && session && store}<AboutPanel {store} room={room} {session} switchable={attention.can("operate")} navigate={openSession} onclosed={() => openLocation(room!)} onjobs={async event => { if (!wide.current) await showPanel(false, event.detail > 0); void jobsTool?.show(session); }} />
       {:else if tree.length}<div class="tree"><VirtualList bind:this={sessionList} items={tree} key={treeKey}
         label="Session list" role="group" align="top" estimate={48}>
         {#snippet row(entry: TreeRow)}

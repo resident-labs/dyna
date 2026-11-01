@@ -12,8 +12,8 @@
   // A row without a value does not show. Jobs opens the dock's list on this session, and stays while the box is ready so a
   // finished job can be reached. It counts the jobs the engine lists, as that list does, because session.list's count can
   // lag, and a job's shell.job.ended takes it off at once; until they load, or with none running, it reads Jobs.
-  let { store, room, session, switchable, navigate, onjobs }: {
-    store: RoomStore; room: string; session: string; switchable: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onjobs: (event: MouseEvent) => void;
+  let { store, room, session, switchable, navigate, onjobs, onclosed }: {
+    store: RoomStore; room: string; session: string; switchable: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onjobs: (event: MouseEvent) => void; onclosed: () => void;
   } = $props();
   const boxes: Record<BoxState, string> = {
     pending: "Starting", creating: "Starting", starting: "Starting", ready: "Ready", stopped: "Stopped",
@@ -39,11 +39,12 @@
   let failures = $derived([...listed.values()].filter(failed).length);
   // Closing ends this session and every session under it. The engine archives their work first, deepest child first.
   let descendants = $derived.by(() => {
-    const found: string[] = [];
-    for (let parents = [session]; parents.length; ) {
-      parents = [...store.sessions.values()].filter(child => parents.includes(child.parent ?? "")).map(child => child.session);
-      found.push(...parents);
+    const children = new Map<string, string[]>();
+    for (const child of store.sessions.values()) {
+      if (child.parent) children.set(child.parent, [...(children.get(child.parent) ?? []), child.session]);
     }
+    const found = [...(children.get(session) ?? [])];
+    for (let i = 0; i < found.length; i++) found.push(...(children.get(found[i]) ?? []));
     return found;
   });
   let archiveNote = $derived.by(() => {
@@ -55,14 +56,10 @@
   });
   let closing = $state(false);
   let closeFailed = $state(false);
-  // Closing opens the room feed. App follows popstate, so this moves the page without a callback from App.
   function close(): void {
     closing = true;
     closeFailed = false;
-    void call("session.close", { session }).then(() => {
-      history.pushState(null, "", `/r/${encodeURIComponent(room)}`);
-      window.dispatchEvent(new PopStateEvent("popstate"));
-    }, () => { closing = false; closeFailed = true; });
+    void call("session.close", { session }).then(onclosed, () => { closing = false; closeFailed = true; });
   }
 </script>
 
