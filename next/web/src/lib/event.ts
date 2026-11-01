@@ -34,6 +34,9 @@ const visual = object({ id: string, version: number, title: string, height: numb
   shots: nullable(array(object({ width: number, file: string }))), checks: nullable(array(object({
     name: oneOf("renders", "console", "widths", "contrast", "network"), status: oneOf("pass", "warn", "fail", "skip"), detail: optional(string),
   }))) });
+const prChangeKind = oneOf("ci_failed", "ci_passed", "changes_requested", "approved", "conflict", "merged", "closed", "comment");
+const prSummary = object({ repo: string, number: number, url: string, title: string, author: string, session: string, draft: boolean, state: oneOf("open", "merged", "closed"), head: string,
+  review: oneOf("", "approved", "changes_requested", "review_required"), ci: oneOf("", "none", "pending", "success", "failure"), merge: oneOf("", "clean", "blocked", "behind", "conflict") });
 const bodies: Record<string, Check> = {
   "connect.connector": object({ missing: boolean }),
   "account.failed": object({ accountId: string, reason: oneOf("sign_in_rejected", "refresh_failed") }),
@@ -63,6 +66,12 @@ const bodies: Record<string, Check> = {
   "host.disk_low": object({ host: string, freeBytes: number, floorBytes: number }),
   "grant.expired": object({ grant: string }),
   "pr.opened": object({ repo: string, number: number, session: string, url: string }),
+  "pr.merged": object({ repo: string, number: number, session: string, url: string }),
+  "pr.closed": object({ repo: string, number: number, session: string, url: string }),
+  "ci.finished": object({ repo: string, number: number, session: string, url: string, head: string, result: oneOf("", "none", "pending", "success", "failure") }),
+  "repo.main_updated": object({ repo: string, head: string }),
+  "pr.changed": object({ session: string, changes: nullable(array(object({ pr: prSummary, kinds: optional(nullable(array(prChangeKind))), failedChecks: optional(nullable(array(string))),
+    outside: boolean, comments: optional(nullable(array(object({ author: string, body: string, url: string, outside: boolean })))), moreComments: optional(number) }))) }),
   "hook.finished": object({ subscription: string, result: oneOf("passed", "failed", "stopped"), exitCode: number, cause, output: optional(string), failures: optional(number), retryAt: optional(string) }),
   "hook.due": object({ subscription: string }),
   "notice.posted": object({ text: string }),

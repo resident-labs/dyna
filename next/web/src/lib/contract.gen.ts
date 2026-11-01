@@ -41,8 +41,8 @@ export type InstructionsGetRequest = { room?: RoomID; };
 export type InstructionsGetResponse = { text: string; hash: string; savedAt?: string | null; };
 export type InstructionsSetRequest = { room?: RoomID; text: string; base: string; };
 export type InstructionsSetResponse = { hash: string; };
-export type Method = "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "question.ask" | "question.answer" | "question.list" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled";
-export type ErrorCode = "podman_required" | "invalid" | "unknown_action" | "not_found" | "forbidden" | "conflict" | "room_limited" | "profile_exists" | "move_busy" | "has_children" | "parent_closing" | "session_closing" | "stale" | "visual_superseded" | "unavailable" | "reconnect_unavailable" | "models_unavailable" | "store_from_v1" | "store_too_old" | "no_grant";
+export type Method = "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled";
+export type ErrorCode = "podman_required" | "invalid" | "unknown_action" | "not_found" | "forbidden" | "conflict" | "room_limited" | "profile_exists" | "move_busy" | "has_children" | "parent_closing" | "session_closing" | "stale" | "github_quota" | "visual_superseded" | "unavailable" | "reconnect_unavailable" | "models_unavailable" | "store_from_v1" | "store_too_old" | "no_grant";
 export type Error = { code: ErrorCode; message: string; visual?: VisualSuperseded | null; limited?: RoomLimited | null; };
 export type VisualSuperseded = { event: EventID; version: number; seq: number; };
 export type RoomLimited = { accounts?: Array<AccountID> | null; hosts?: Array<HostName> | null; };
@@ -382,6 +382,27 @@ export type OpListResponse = { operations: Array<Operation> | null; };
 export type OpRequested = { id: OpID; kind: OpKind; by: Principal; class: Class; card: Card; expires: string; };
 export type OpDecided = { id: OpID; state: OpState; decision: Decision; };
 export type OpRan = { id: OpID; state: OpState; result: OpResult; };
+export type PrState = "open" | "merged" | "closed";
+export type PrReview = "" | "approved" | "changes_requested" | "review_required";
+export type PrCI = "" | "none" | "pending" | "success" | "failure";
+export type PrMerge = "" | "clean" | "blocked" | "behind" | "conflict";
+export type PrChangeKind = "ci_failed" | "ci_passed" | "changes_requested" | "approved" | "conflict" | "merged" | "closed" | "comment";
+export type PrSummary = { repo: RepoName; number: number; url: string; title: string; author: string; session: SessionID; draft: boolean; state: PrState; head: string; review: PrReview; ci: PrCI; merge: PrMerge; };
+export type PrListRequest = { room?: RoomID; all?: boolean; };
+export type PrListResponse = { prs: Array<PrSummary> | null; };
+export type PrStatusRequest = { repo?: RepoName; number: number; };
+export type PrStatusResponse = { pr: PrSummary; };
+export type PrTrackRequest = { repo?: RepoName; number: number; room?: RoomID; session?: SessionID; };
+export type PrTrackResponse = { pr: PrSummary; };
+export type PrUntrackRequest = { repo?: RepoName; number: number; };
+export type PrUntrackResponse = { };
+export type PrComment = { author: string; body: string; url: string; outside: boolean; };
+export type PrChange = { pr: PrSummary; kinds?: Array<PrChangeKind> | null; failedChecks?: Array<string> | null; outside: boolean; comments?: Array<PrComment> | null; moreComments?: number; };
+export type PrChanged = { session: SessionID; changes: Array<PrChange> | null; };
+export type PrMergedEvent = { repo: RepoName; number: number; session: SessionID; url: string; };
+export type PrClosedEvent = { repo: RepoName; number: number; session: SessionID; url: string; };
+export type CIFinished = { repo: RepoName; number: number; session: SessionID; url: string; head: string; result: PrCI; };
+export type RepoMainUpdated = { repo: RepoName; head: string; };
 export type QuestionState = "pending" | "answered" | "withdrawn";
 export type Question = { id: QuestionID; room: RoomID; session: SessionID; text: string; state: QuestionState; answer?: string; asked: string; answered?: string; };
 export type QuestionAskRequest = { text: string; clientId?: string; };
@@ -429,6 +450,7 @@ export type EventBody =
   | { type: "box.changed"; body: BoxChanged }
   | { type: "box.pressure"; body: BoxPressure }
   | { type: "checkin.due"; body: CheckinDue }
+  | { type: "ci.finished"; body: CIFinished }
   | { type: "computer.changed"; body: ComputerChanged }
   | { type: "connect.connector"; body: ConnectConnector }
   | { type: "conversation.read"; body: ConversationRead }
@@ -446,10 +468,14 @@ export type EventBody =
   | { type: "op.ran"; body: OpRan }
   | { type: "op.requested"; body: OpRequested }
   | { type: "post.created"; body: PostCreated }
+  | { type: "pr.changed"; body: PrChanged }
+  | { type: "pr.closed"; body: PrClosedEvent }
+  | { type: "pr.merged"; body: PrMergedEvent }
   | { type: "pr.opened"; body: PrOpened }
   | { type: "question.answered"; body: QuestionAnswered }
   | { type: "question.asked"; body: QuestionAsked }
   | { type: "question.withdrawn"; body: QuestionWithdrawn }
+  | { type: "repo.main_updated"; body: RepoMainUpdated }
   | { type: "room.deleted"; body: RoomDeleted }
   | { type: "room.deleting"; body: RoomDeleting }
   | { type: "room.limits_changed"; body: RoomLimitsChanged }
@@ -560,6 +586,10 @@ export interface MethodMap {
   "op.decide": { request: OpDecideRequest; response: OpDecideResponse };
   "op.withdraw": { request: OpWithdrawRequest; response: OpWithdrawResponse };
   "op.list": { request: OpListRequest; response: OpListResponse };
+  "pr.list": { request: PrListRequest; response: PrListResponse };
+  "pr.status": { request: PrStatusRequest; response: PrStatusResponse };
+  "pr.track": { request: PrTrackRequest; response: PrTrackResponse };
+  "pr.untrack": { request: PrUntrackRequest; response: PrUntrackResponse };
   "question.ask": { request: QuestionAskRequest; response: QuestionAskResponse };
   "question.answer": { request: QuestionAnswerRequest; response: QuestionAnswerResponse };
   "question.list": { request: QuestionListRequest; response: QuestionListResponse };
