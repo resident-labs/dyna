@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/ghclient"
+	"dyna-agent/internal/ghquota"
 	"dyna-agent/internal/gitexec"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/locallane"
@@ -750,7 +751,9 @@ func (s *Service) mergeTrialCI(ctx context.Context, r Record, branch, head strin
 		return s.localTrialCI(ctx, r, head)
 	}
 	var snap Snapshot
-	if err := s.github(r.RoomID).readCommitCI(ctx, refRecord(r), head, &snap); err != nil {
+	gh := s.github(r.RoomID)
+	gh.runPhase = ghquota.RunMergeTrial
+	if err := gh.readCommitCI(ctx, refRecord(r), head, &snap); err != nil {
 		return trialCI{}, err
 	}
 	var pushes []Run

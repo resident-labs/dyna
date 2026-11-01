@@ -26,6 +26,12 @@ const (
 	RunWatchSnapshot
 	RunCancellation
 	RunBudgetRecovery
+	RunDirectSnapshot
+	RunMainRecheck
+	RunMergeTrial
+	RunTrialSchedule
+	RunReviewContext
+	RunFailureReport
 )
 
 // quotaLog counts completed requests and writes a summary for each window.
@@ -127,6 +133,10 @@ func (q *quotaLog) summary(now time.Time) {
 		logf("GitHub exact-head run lists: snapshot %d counted %d free; cancellation %d counted %d free; budget-recovery %d counted %d free; other %d counted %d free",
 			q.runPhases[RunWatchSnapshot], q.runPhasesFree[RunWatchSnapshot], q.runPhases[RunCancellation], q.runPhasesFree[RunCancellation],
 			q.runPhases[RunBudgetRecovery], q.runPhasesFree[RunBudgetRecovery], q.runPhases[RunOther], q.runPhasesFree[RunOther])
+		logf("GitHub other exact-head sources: direct-snapshot %d counted %d free; main-recheck %d counted %d free; merge-trial %d counted %d free; trial-schedule %d counted %d free; review-context %d counted %d free; failure-report %d counted %d free",
+			q.runPhases[RunDirectSnapshot], q.runPhasesFree[RunDirectSnapshot], q.runPhases[RunMainRecheck], q.runPhasesFree[RunMainRecheck],
+			q.runPhases[RunMergeTrial], q.runPhasesFree[RunMergeTrial], q.runPhases[RunTrialSchedule], q.runPhasesFree[RunTrialSchedule],
+			q.runPhases[RunReviewContext], q.runPhasesFree[RunReviewContext], q.runPhases[RunFailureReport], q.runPhasesFree[RunFailureReport])
 	}
 	q.counted, q.free, q.runPhases, q.runPhasesFree, q.since = map[string]int{}, map[string]int{}, nil, nil, now
 }
