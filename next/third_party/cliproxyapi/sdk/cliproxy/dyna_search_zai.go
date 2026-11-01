@@ -245,9 +245,9 @@ func zaiItems(answer zaiEnvelope) ([]zaiItem, error) {
 // zaiError reports a JSON-RPC failure with its code and a message that never
 // carries the key.
 func zaiError(code int, message, key string) error {
-	message = text(strings.ReplaceAll(message, key, "[redacted]"))
+	message = text(searchRedact(message, key))
 	if message == "" {
-		return fmt.Errorf("zai answered MCP error %d", code)
+		return searchRefusal(fmt.Sprintf("zai answered MCP error %d", code))
 	}
-	return fmt.Errorf("zai answered MCP error %d: %s", code, message)
+	return searchRefusal(fmt.Sprintf("zai answered MCP error %d: %s", code, message))
 }
