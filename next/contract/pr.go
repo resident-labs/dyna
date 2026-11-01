@@ -60,6 +60,7 @@ const (
 	PrChangeMerged           PrChangeKind = "merged"
 	PrChangeClosed           PrChangeKind = "closed"
 	PrChangeComment          PrChangeKind = "comment"
+	PrChangeMetadata         PrChangeKind = "metadata"
 )
 
 // PrSummary is what Dyna last read about a tracked PR. Repo is the PR's base repository, which may not be a room repository.
@@ -131,12 +132,14 @@ type PrChange struct {
 	Outside      bool           `json:"outside"`                // the PR's author is not the owner's GitHub account
 	Comments     []PrComment    `json:"comments,omitempty"`
 	MoreComments int            `json:"moreComments,omitempty"`
+	Meta         *MetaChange    `json:"meta,omitempty"`
 }
 
-// PrChanged batches one poll's changes for the session that owns those PRs.
+// PrChanged batches one poll's changes for the session that owns those PRs. Issues holds its issues that moved in the same pass.
 type PrChanged struct {
-	Session SessionID  `json:"session"`
-	Changes []PrChange `json:"changes"`
+	Session SessionID     `json:"session"`
+	Changes []PrChange    `json:"changes"`
+	Issues  []IssueChange `json:"issues,omitempty"`
 }
 
 func (PrChanged) EventType() EventType { return "pr.changed" }
@@ -195,5 +198,5 @@ func (b PrChanged) Waking() bool {
 			return true
 		}
 	}
-	return false
+	return issuesWake(b.Issues)
 }

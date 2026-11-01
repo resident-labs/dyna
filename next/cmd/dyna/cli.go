@@ -67,6 +67,10 @@ type client interface {
 	PrStatus(context.Context, contract.PrStatusRequest) (contract.PrStatusResponse, error)
 	PrTrack(context.Context, contract.PrTrackRequest) (contract.PrTrackResponse, error)
 	PrUntrack(context.Context, contract.PrUntrackRequest) (contract.PrUntrackResponse, error)
+	IssueList(context.Context, contract.IssueListRequest) (contract.IssueListResponse, error)
+	IssueStatus(context.Context, contract.IssueStatusRequest) (contract.IssueStatusResponse, error)
+	IssueTrack(context.Context, contract.IssueTrackRequest) (contract.IssueTrackResponse, error)
+	IssueUntrack(context.Context, contract.IssueUntrackRequest) (contract.IssueUntrackResponse, error)
 	HostList(context.Context, contract.HostListRequest) (contract.HostListResponse, error)
 }
 
@@ -87,6 +91,7 @@ type requestType interface {
 		contract.SubscriptionAddRequest | contract.SubscriptionListRequest | contract.SubscriptionRemoveRequest | contract.SubscriptionSetEnabledRequest |
 		contract.WebSearchRequest | contract.WebsearchSetKeyRequest | contract.WebsearchRemoveKeyRequest |
 		contract.ContextSnapshotRequest |
+		contract.IssueListRequest | contract.IssueStatusRequest | contract.IssueTrackRequest | contract.IssueUntrackRequest |
 		contract.QuestionAskRequest | contract.QuestionAnswerRequest | contract.QuestionListRequest |
 		contract.OpWithdrawRequest |
 		contract.SessionMoveRequest |
@@ -99,6 +104,7 @@ type responseType interface {
 		contract.SubscriptionAddResponse | contract.SubscriptionListResponse | contract.SubscriptionRemoveResponse | contract.SubscriptionSetEnabledResponse |
 		contract.WebSearchResponse | contract.WebsearchSetKeyResponse | contract.WebsearchRemoveKeyResponse |
 		contract.ContextSnapshotResponse |
+		contract.IssueListResponse | contract.IssueStatusResponse | contract.IssueTrackResponse | contract.IssueUntrackResponse |
 		contract.QuestionAskResponse | contract.QuestionAnswerResponse | contract.QuestionListResponse |
 		contract.OpWithdrawResponse |
 		contract.SessionMoveResponse |
@@ -283,6 +289,18 @@ func (c *socketClient) PrTrack(ctx context.Context, q contract.PrTrackRequest) (
 }
 func (c *socketClient) PrUntrack(ctx context.Context, q contract.PrUntrackRequest) (contract.PrUntrackResponse, error) {
 	return call[contract.PrUntrackRequest, contract.PrUntrackResponse](ctx, c, contract.MethodPrUntrack, q)
+}
+func (c *socketClient) IssueList(ctx context.Context, q contract.IssueListRequest) (contract.IssueListResponse, error) {
+	return call[contract.IssueListRequest, contract.IssueListResponse](ctx, c, contract.MethodIssueList, q)
+}
+func (c *socketClient) IssueStatus(ctx context.Context, q contract.IssueStatusRequest) (contract.IssueStatusResponse, error) {
+	return call[contract.IssueStatusRequest, contract.IssueStatusResponse](ctx, c, contract.MethodIssueStatus, q)
+}
+func (c *socketClient) IssueTrack(ctx context.Context, q contract.IssueTrackRequest) (contract.IssueTrackResponse, error) {
+	return call[contract.IssueTrackRequest, contract.IssueTrackResponse](ctx, c, contract.MethodIssueTrack, q)
+}
+func (c *socketClient) IssueUntrack(ctx context.Context, q contract.IssueUntrackRequest) (contract.IssueUntrackResponse, error) {
+	return call[contract.IssueUntrackRequest, contract.IssueUntrackResponse](ctx, c, contract.MethodIssueUntrack, q)
 }
 func (c *socketClient) DeviceSetScopes(ctx context.Context, q contract.DeviceSetScopesRequest) (contract.DeviceSetScopesResponse, error) {
 	return call[contract.DeviceSetScopesRequest, contract.DeviceSetScopesResponse](ctx, c, contract.MethodDeviceSetScopes, q)
@@ -925,6 +943,76 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	}
 	pr.AddCommand(prOpen, prList, prStatus, prTrack, prUntrack)
 	root.AddCommand(pr)
+	root.AddCommand(issueCommand(getClient))
+}
+
+// issueCommand holds the issue commands, which mirror pr list, status, track and untrack.
+func issueCommand(getClient func() client) *cobra.Command {
+	issue := &cobra.Command{Use: "issue"}
+	var repo, room, session string
+	var all bool
+	number := func(arg string) (int, error) {
+		n, err := strconv.Atoi(arg)
+		if err != nil || n <= 0 {
+			return 0, fmt.Errorf("%q is not an issue number", arg)
+		}
+		return n, nil
+	}
+	printIssue := func(cmd *cobra.Command, i contract.IssueSummary) error {
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s#%d\t%s\tlabels=%s\tassignees=%s\t%s\n", i.Repo, i.Number, i.State, strings.Join(i.Labels, ","), strings.Join(i.Assignees, ","), i.URL)
+		return err
+	}
+	list := &cobra.Command{Use: "list", Args: cobra.NoArgs, Short: "List tracked issues", RunE: func(cmd *cobra.Command, _ []string) error {
+		r, err := getClient().IssueList(cmd.Context(), contract.IssueListRequest{Room: contract.RoomID(room), All: all})
+		if err != nil {
+			return err
+		}
+		for _, i := range r.Issues {
+			if err := printIssue(cmd, i); err != nil {
+				return err
+			}
+		}
+		return nil
+	}}
+	list.Flags().StringVar(&room, "room", "", "Room id (default: the session's room, or every room for the owner)")
+	list.Flags().BoolVar(&all, "all", false, "Also list closed issues")
+	status := &cobra.Command{Use: "status NUMBER", Args: cobra.ExactArgs(1), Short: "Show a tracked issue as of the last change told", RunE: func(cmd *cobra.Command, args []string) error {
+		n, err := number(args[0])
+		if err != nil {
+			return err
+		}
+		r, err := getClient().IssueStatus(cmd.Context(), contract.IssueStatusRequest{Repo: contract.RepoName(repo), Number: n})
+		if err != nil {
+			return err
+		}
+		return printIssue(cmd, r.Issue)
+	}}
+	track := &cobra.Command{Use: "track NUMBER", Args: cobra.ExactArgs(1), Short: "Track an issue and wake its session when it changes", RunE: func(cmd *cobra.Command, args []string) error {
+		n, err := number(args[0])
+		if err != nil {
+			return err
+		}
+		r, err := getClient().IssueTrack(cmd.Context(), contract.IssueTrackRequest{Repo: contract.RepoName(repo), Number: n, Room: contract.RoomID(room), Session: contract.SessionID(session)})
+		if err != nil {
+			return err
+		}
+		return printIssue(cmd, r.Issue)
+	}}
+	track.Flags().StringVar(&room, "room", "", "Owner only: room whose root owns the issue")
+	track.Flags().StringVar(&session, "session", "", "Owner only: session id that owns the issue")
+	untrack := &cobra.Command{Use: "untrack NUMBER", Args: cobra.ExactArgs(1), Short: "Stop tracking an issue", RunE: func(cmd *cobra.Command, args []string) error {
+		n, err := number(args[0])
+		if err != nil {
+			return err
+		}
+		_, err = getClient().IssueUntrack(cmd.Context(), contract.IssueUntrackRequest{Repo: contract.RepoName(repo), Number: n})
+		return err
+	}}
+	for _, command := range []*cobra.Command{status, track, untrack} {
+		command.Flags().StringVar(&repo, "repo", "", "Repository as owner/name (default: the session's repository)")
+	}
+	issue.AddCommand(list, status, track, untrack)
+	return issue
 }
 
 // goalCommand holds the goal commands. Inside a box --room may stay empty: the engine uses the caller's room.

@@ -1,4 +1,4 @@
-// Package fakegithub is an httptest GitHub for PR tests: the one GraphQL query and the one REST read the engine makes.
+// Package fakegithub is an httptest GitHub for PR and issue tests: the one GraphQL query and the one REST read the engine makes.
 package fakegithub
 
 import (
@@ -46,6 +46,28 @@ type Pull struct {
 	FailedChecks   []string
 	Reviews        []Comment
 	Comments       []Comment
+	Meta           Meta
+	Reviewers      []string
+}
+
+// Meta is what a PR and an issue share. An empty EditedAt answers null, as for a body nobody edited. Reopens is GitHub's count of reopen events.
+type Meta struct {
+	Labels    []string
+	Assignees []string
+	Milestone string
+	EditedAt  string
+	Reopens   int
+}
+
+// Issue is one issue.
+type Issue struct {
+	Repo     contract.RepoName
+	Number   int
+	Title    string
+	Author   string
+	State    string // OPEN or CLOSED
+	Comments []Comment
+	Meta     Meta
 }
 
 // Server counts what it answers. Hold no reference to a Pull across a call: use Edit.
@@ -61,12 +83,15 @@ type Server struct {
 	retryAfter  int
 	mains       map[contract.RepoName]string
 	pulls       map[string]*Pull
+	issues      map[string]*Issue
+	hidden      map[contract.RepoName]bool
 	graphql     int
 	rest        int
 	notModified int
 	sentETags   []string
 	tokens      []string
 	sizes       []int
+	issueSizes  []int
 }
 
 func key(repo contract.RepoName, number int) string { return fmt.Sprintf("%s#%d", repo, number) }
@@ -74,7 +99,7 @@ func key(repo contract.RepoName, number int) string { return fmt.Sprintf("%s#%d"
 // New starts a server with one account, arismoko-like viewer "owner-account", and plenty of quota.
 func New(t *testing.T) *Server {
 	t.Helper()
-	s := &Server{t: t, viewer: "owner-account", limit: 5000, remaining: 5000, reset: time.Unix(1<<31, 0), mains: map[contract.RepoName]string{}, pulls: map[string]*Pull{}}
+	s := &Server{t: t, viewer: "owner-account", limit: 5000, remaining: 5000, reset: time.Unix(1<<31, 0), mains: map[contract.RepoName]string{}, pulls: map[string]*Pull{}, issues: map[string]*Issue{}, hidden: map[contract.RepoName]bool{}}
 	s.Server = httptest.NewServer(s)
 	t.Cleanup(s.Close)
 	return s
@@ -121,6 +146,36 @@ func (s *Server) Edit(repo contract.RepoName, number int, change func(*Pull)) {
 	change(s.pulls[key(repo, number)])
 }
 
+// AddIssue creates an open issue, unless i says otherwise.
+func (s *Server) AddIssue(i Issue) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if i.State == "" {
+		i.State = "OPEN"
+	}
+	if i.Author == "" {
+		i.Author = s.viewer
+	}
+	if i.Title == "" {
+		i.Title = fmt.Sprintf("Issue %d", i.Number)
+	}
+	s.issues[key(i.Repo, i.Number)] = &i
+}
+
+// EditIssue changes an issue under the server's lock.
+func (s *Server) EditIssue(repo contract.RepoName, number int, change func(*Issue)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	change(s.issues[key(repo, number)])
+}
+
+// HideRepo makes a repository answer as GitHub does when it has none by that name, or the token cannot see it.
+func (s *Server) HideRepo(repo contract.RepoName) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hidden[repo] = true
+}
+
 // SetMain moves a repository's default branch.
 func (s *Server) SetMain(repo contract.RepoName, head string) {
 	s.mu.Lock()
@@ -163,7 +218,15 @@ func (s *Server) QuerySizes() []int {
 	return append([]int(nil), s.sizes...)
 }
 
+// IssueQuerySizes lists how many issues each GraphQL query asked for.
+func (s *Server) IssueQuerySizes() []int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]int(nil), s.issueSizes...)
+}
+
 var alias = regexp.MustCompile(`pr(\d+):pullRequest\(number:(\d+)\)`)
+var issueAlias = regexp.MustCompile(`issue(\d+):issue\(number:(\d+)\)`)
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
@@ -239,6 +302,26 @@ func commentNode(url string) func(Comment) map[string]any {
 	}
 }
 
+// metaNode puts the metadata fields in a PR's or an issue's node.
+func metaNode(node map[string]any, m Meta) map[string]any {
+	node["labels"] = nodes(m.Labels, func(name string) map[string]any { return map[string]any{"name": name} })
+	node["assignees"] = nodes(m.Assignees, func(login string) map[string]any { return map[string]any{"login": login} })
+	node["milestone"], node["lastEditedAt"] = nil, nil
+	if m.Milestone != "" {
+		node["milestone"] = map[string]string{"title": m.Milestone}
+	}
+	if m.EditedAt != "" {
+		node["lastEditedAt"] = m.EditedAt
+	}
+	node["timelineItems"] = map[string]int{"totalCount": m.Reopens}
+	return node
+}
+
+func (s *Server) issueNode(i *Issue) map[string]any {
+	link := fmt.Sprintf("https://github.com/%s/issues/%d", i.Repo, i.Number)
+	return metaNode(map[string]any{"number": i.Number, "url": link, "title": i.Title, "state": i.State, "author": map[string]string{"login": i.Author}, "comments": nodes(i.Comments, commentNode(link))}, i.Meta)
+}
+
 func (s *Server) pullNode(p *Pull) map[string]any {
 	link := s.link(p)
 	var decision, rollup any
@@ -250,7 +333,7 @@ func (s *Server) pullNode(p *Pull) map[string]any {
 			return map[string]any{"__typename": "CheckRun", "name": name, "conclusion": "FAILURE"}
 		})}
 	}
-	return map[string]any{
+	return metaNode(map[string]any{
 		"number": p.Number, "url": link, "title": p.Title, "isDraft": p.Draft, "state": p.State, "merged": p.State == "MERGED", "author": map[string]string{"login": p.Author},
 		"headRefOid": p.Head, "headRepository": map[string]string{"nameWithOwner": string(p.HeadRepo)}, "mergeable": p.Mergeable, "mergeStateStatus": p.MergeState, "reviewDecision": decision,
 		"latestOpinionatedReviews": nodes(p.LatestReviews, func(state string) map[string]any { return map[string]any{"state": state} }),
@@ -262,7 +345,10 @@ func (s *Server) pullNode(p *Pull) map[string]any {
 			return node
 		}),
 		"comments": nodes(p.Comments, commentNode(link)),
-	}
+		"reviewRequests": nodes(p.Reviewers, func(login string) map[string]any {
+			return map[string]any{"requestedReviewer": map[string]string{"__typename": "User", "login": login}}
+		}),
+	}, p.Meta)
 }
 
 func (s *Server) serveGraphQL(w http.ResponseWriter, r *http.Request) {
@@ -276,15 +362,17 @@ func (s *Server) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	repo := contract.RepoName(input.Variables["owner"] + "/" + input.Variables["name"])
-	repository := map[string]any{"defaultBranchRef": nil}
+	repository := map[string]any{"nameWithOwner": string(repo), "defaultBranchRef": nil}
 	if head, ok := s.mains[repo]; ok {
 		repository["defaultBranchRef"] = map[string]any{"target": map[string]string{"oid": head}}
 	}
 	var failures []map[string]any
 	asked := alias.FindAllStringSubmatch(input.Query, -1)
+	askedIssues := issueAlias.FindAllStringSubmatch(input.Query, -1)
 	s.sizes = append(s.sizes, len(asked))
-	if len(asked) == 0 && strings.Contains(input.Query, "fragment ") {
-		if err := json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]string{{"type": "undefinedFragment", "message": "Fragment pull was defined, but not used"}}}); err != nil {
+	s.issueSizes = append(s.issueSizes, len(askedIssues))
+	if len(asked) == 0 && strings.Contains(input.Query, "fragment pull") || len(askedIssues) == 0 && strings.Contains(input.Query, "fragment issue") {
+		if err := json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]string{{"type": "undefinedFragment", "message": "Fragment was defined, but not used"}}}); err != nil {
 			s.t.Error(err)
 		}
 		return
@@ -302,7 +390,24 @@ func (s *Server) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 			failures = append(failures, map[string]any{"type": "NOT_FOUND", "message": "Could not resolve to a PullRequest"})
 		}
 	}
-	body := map[string]any{"data": map[string]any{"viewer": map[string]string{"login": s.viewer}, "rateLimit": map[string]any{"limit": s.limit, "remaining": s.remaining, "resetAt": s.reset.UTC().Format(time.RFC3339)}, "repository": repository}}
+	for _, match := range askedIssues {
+		number, err := strconv.Atoi(match[2])
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if issue := s.issues[key(repo, number)]; issue != nil {
+			repository["issue"+match[1]] = s.issueNode(issue)
+		} else {
+			repository["issue"+match[1]] = nil
+			failures = append(failures, map[string]any{"type": "NOT_FOUND", "message": "Could not resolve to an Issue"})
+		}
+	}
+	var answer any = repository
+	if s.hidden[repo] {
+		answer, failures = nil, []map[string]any{{"type": "NOT_FOUND", "message": "Could not resolve to a Repository"}}
+	}
+	body := map[string]any{"data": map[string]any{"viewer": map[string]string{"login": s.viewer}, "rateLimit": map[string]any{"limit": s.limit, "remaining": s.remaining, "resetAt": s.reset.UTC().Format(time.RFC3339)}, "repository": answer}}
 	if failures != nil {
 		body["errors"] = failures
 	}

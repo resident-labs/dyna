@@ -285,6 +285,8 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 			named[body.Session] = true
 		case contract.PrChanged:
 			named[body.Session] = true
+		case contract.IssueChanged:
+			named[body.Session] = true
 		case contract.OpRequested:
 			named[body.By.Session] = true
 		case contract.QuestionAnswered:
