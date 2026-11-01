@@ -82,7 +82,7 @@
   .step:hover { color: var(--text); opacity: 1; }
   .step:disabled { opacity: .2; cursor: default; }
   .previous :global(svg) { transform: rotate(180deg); }
-  .preview { position: absolute; left: 32px; width: 320px; max-width: calc(100vw - 60px); transform: translateY(-50%); padding: 12px; border-radius: 12px; background: var(--raised); box-shadow: 0 8px 24px #0004; pointer-events: none; color: var(--text); font-size: 14px; line-height: 20px; }
+  .preview { position: absolute; left: 32px; width: 320px; max-width: calc(100vw - 60px); transform: translateY(-50%); padding: 12px; border-radius: 12px; background: var(--raised); box-shadow: 0 8px 24px var(--shadow-lg); pointer-events: none; color: var(--text); font-size: 14px; line-height: 20px; }
   .preview.first { transform: none; } .preview.last { transform: translateY(-100%); }
   .preview strong { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .preview span { display: -webkit-box; margin-top: 4px; color: var(--muted); overflow: hidden; -webkit-line-clamp: 3; -webkit-box-orient: vertical; white-space: pre-wrap; overflow-wrap: anywhere; }
