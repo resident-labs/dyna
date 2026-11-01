@@ -49,11 +49,10 @@ var methodTable = []MethodEntry{
 	method(contract.MethodHostAdd, contract.ScopeAdmin, OwnerAccess,
 		act("host", "add", typ[contract.HostAddRequest](), "Add a host", "host add"),
 	),
-	method(contract.MethodHostList, contract.ScopeRead, OwnerAccess),
-	method(contract.MethodHostexecList, contract.ScopeAdmin, OwnerAccess),
-	method(contract.MethodHostexecRevoke, contract.ScopeAdmin, OwnerAccess,
-		act("hostexec", "revoke", typ[contract.HostexecRevokeRequest](), "Revoke a host grant", "hostexec revoke"),
+	method(contract.MethodHostList, contract.ScopeRead, OwnerAccess,
+		act("host", "list", typ[contract.HostListRequest](), "List hosts with disk use and whether disk is low", "host list"),
 	),
+	method(contract.MethodHostexecList, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodHostexecRun, contract.ScopeRead, BoxAccess,
 		act("hostexec", "run", typ[contract.HostexecRunRequest](), "Run argv on host with a grant. cwd and timeout are optional.", "hostexec run"),
 	),
@@ -66,7 +65,7 @@ var methodTable = []MethodEntry{
 	method(contract.MethodOpList, contract.ScopeRead, UserAccess),
 	// op.submit checks its own scope by operation kind, so the row names none.
 	method(contract.MethodOpSubmit, "", UserAccess,
-		opAct("hostexec", "request_grant", contract.HostexecGrantArgs{}.OpKind(), typ[contract.HostexecGrantArgs](), "Request access to hosts with a reason. Omit room and to to use your own; omit expires for the default duration.", "hostexec grant"),
+		opAct("hostexec", "request_grant", contract.HostexecGrantArgs{}.OpKind(), typ[contract.HostexecGrantArgs](), "Request host access with a reason. The grant lasts until the session closes.", "hostexec grant"),
 		opAct("pr", "open", contract.PrOpenArgs{}.OpKind(), typ[contract.PrOpenArgs](), "Open a pull request with title and base. Body and draft are optional; omit head to use your session branch.", "pr open"),
 	),
 	method(contract.MethodOpWithdraw, contract.ScopeOperate, UserAccess,
@@ -127,6 +126,9 @@ var methodTable = []MethodEntry{
 	method(contract.MethodTurnActivity, contract.ScopeRead, BoxAccess),
 	method(contract.MethodTurnOutput, contract.ScopeRead, BoxAccess),
 	method(contract.MethodWebLogin, contract.ScopeAdmin, OwnerLocalAccess),
+	method(contract.MethodWebSearch, contract.ScopeRead, UserAccess, act("web", "search", typ[contract.WebSearchRequest](), "Search the web for query. Limit is 1 to 10 results; omit it for 5. An empty provider means all providers failed; a named provider can return zero results.", "web search")),
+	method(contract.MethodWebsearchSetKey, contract.ScopeAdmin, OwnerAccess),
+	method(contract.MethodWebsearchRemoveKey, contract.ScopeAdmin, OwnerAccess),
 }
 
 var methodRows = buildMethodRows(methodTable)

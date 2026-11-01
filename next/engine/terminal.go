@@ -30,7 +30,7 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 	}
 	result := contract.HostListResponse{Hosts: []contract.HostSummary{{Name: contract.ControlPlane, Shared: []contract.RoomShared{}, BackupCopyAt: status.LastSuccess, BackupCopyFailure: copyFailure}}}
 	for _, host := range hosts {
-		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, Shared: append([]contract.RoomShared{}, shared[host.Name]...), CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.CheckedAt.IsZero() && host.DiskBytes < 20*box.GiB})
+		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, Shared: append([]contract.RoomShared{}, shared[host.Name]...), CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.CheckedAt.IsZero() && host.DiskBytes < box.DiskWarn(host.DiskFloor)})
 	}
 	return result, nil
 }

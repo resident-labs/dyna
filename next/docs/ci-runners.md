@@ -5,12 +5,11 @@ Dyna serves a repository's GitHub Actions jobs from one runner scale set, named
 repository. For each job GitHub assigns, admission picks a CI host and the engine
 starts one ephemeral runner container there. The container ends with its job.
 
-This replaces v1's local CI (`internal/localci`, `docs/local-ci.md`). What stays
-is that CI work runs in a capped container, off the owner's machine, and that a
-fork's change cannot decide its own checks. What goes is Dyna's scheduler, act,
-trial suites and report parsing: GitHub runs the workflow and reports the result.
-v1's node queue becomes admission, and its free-disk rule becomes the same disk
-floor boxes use.
+This replaces v1's local CI. What stays is that CI work runs in a capped container,
+off the owner's machine, and that a fork's change cannot decide its own checks. What
+goes is Dyna's scheduler, act, trial suites and report parsing: GitHub runs the
+workflow and reports the result. v1's node queue becomes admission, and its
+free-disk rule becomes the disk floor boxes use.
 
 ## Turn it on
 
@@ -53,13 +52,9 @@ needs a second scale set, which is not built.
 
 ## What runs here
 
-`ci.yml` sends `pi`, `next-pi`, `next`, `go-static`, `desktop` and the frontend jobs
-to the pool. Some jobs stay on GitHub-hosted runners: `changes`, `pool-watch` and
-the aggregates decide things while the pool may be down, `relay` needs a container
-runtime, `computer-smoke` needs a desktop session, and `cache-warm` serves hosted
-jobs. v1's `go-shard` stays hosted because two of its tests fail in the image: one
-needs a newer Git than Ubuntu 24.04 ships, and one races coarse tmpfs timestamps.
-v1's tests leave at cutover.
+`ci.yml` sends `next`, `next-extras`, `next-web` and `next-pi` to the pool. `changes`
+and `pool-watch` stay on GitHub-hosted runners, because they decide things while the
+pool may be down. `relay` stays hosted because it needs a container runtime.
 
 ## What a runner can touch
 
@@ -96,7 +91,7 @@ there, which is why the way out is a proxy and not a filtered network.
 Three layers, because the first two are in files a pull request can edit:
 
 1. GitHub's fork approval setting holds a fork's run until the owner approves it.
-2. `scripts/ci-runner.sh` routes a fork's pull request to `ubuntu-latest`.
+2. `next/scripts/ci-runner.sh` routes a fork's pull request to `ubuntu-latest`.
 3. `job-started.sh` is in the runner image, so no pull request can edit it. It runs
    before any step and fails any job that is not a push, a manual run, or a pull
    request from this repository. If an approved fork rewrites `runs-on: dyna`, this

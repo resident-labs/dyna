@@ -3,6 +3,7 @@ package ci
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -12,7 +13,7 @@ import (
 
 func routing(t *testing.T, env ...string) string {
 	t.Helper()
-	cmd := exec.Command("bash", "../../../scripts/ci-runner.sh")
+	cmd := exec.Command("bash", "../../scripts/ci-runner.sh")
 	cmd.Env = append([]string{"PATH=" + os.Getenv("PATH")}, env...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -69,8 +70,15 @@ func TestWorkflowKeepsTheGate(t *testing.T) {
 			t.Errorf("unrouted self-hosted job: %s", line)
 		}
 	}
-	for _, name := range []string{"image.yml", "race-nightly.yml", "release.yml"} {
-		other, err := os.ReadFile("../../../.github/workflows/" + name)
+	names, err := filepath.Glob("../../../.github/workflows/*.yml")
+	if err != nil || len(names) == 0 {
+		t.Fatal(names, err)
+	}
+	for _, name := range names {
+		if filepath.Base(name) == "ci.yml" {
+			continue
+		}
+		other, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
 		}

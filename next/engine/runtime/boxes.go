@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -41,7 +40,7 @@ type boxStore interface {
 }
 
 type heartbeatStore interface {
-	RecordHostHeartbeat(context.Context, contract.HostName, bool, *int64, time.Time) error
+	RecordHostHeartbeat(context.Context, contract.HostName, bool, *int64, int64, time.Time) error
 }
 
 type Boxes struct {
@@ -167,7 +166,7 @@ func (b *Boxes) reportHeartbeat(ctx context.Context, name contract.HostName, ok 
 		value := load.DiskBytes - load.DiskUsed
 		free = &value
 	}
-	if err := b.HeartbeatStore.RecordHostHeartbeat(ctx, name, ok, free, now); err != nil {
+	if err := b.HeartbeatStore.RecordHostHeartbeat(ctx, name, ok, free, load.DiskBytes, now); err != nil {
 		log.Printf("host %s: record heartbeat: %v", name, err)
 		return
 	}
@@ -199,6 +198,7 @@ func (b *Boxes) HostLoad(ctx context.Context, hosts []contract.HostSummary) erro
 		}
 		if h.Name == contract.ControlPlane {
 			h.Reachable, h.CPUs, h.MemBytes = true, goruntime.NumCPU(), load.MemBytes
+			h.DiskLow = load.DiskBytes > 0 && load.DiskBytes-load.DiskUsed < box.DiskWarn(box.DiskFloor(load.DiskBytes))
 		}
 	}
 	return nil
@@ -260,12 +260,9 @@ func (b *Boxes) controlPlane(data string) {
 			if mem, err := os.ReadFile(filepath.Join(root, "meminfo")); err == nil {
 				load.MemBytes, load.MemUsed = memory(string(mem))
 			}
-			var fs syscall.Statfs_t
-			if syscall.Statfs(data, &fs) == nil {
-				load.DiskBytes = int64(fs.Blocks) * fs.Bsize
-				load.DiskUsed = int64(fs.Blocks-fs.Bfree) * fs.Bsize
-			}
+			load.DiskBytes, load.DiskUsed = podman.LocalDisk(b.Context, data)
 			b.record(contract.ControlPlane, true, load, now)
+			b.reportHeartbeat(b.Context, contract.ControlPlane, true, load, now)
 		}
 	}
 }
