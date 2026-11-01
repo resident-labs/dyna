@@ -164,7 +164,7 @@ func (s *Service) Files(caller contract.Principal, room contract.RoomID) http.Ha
 			http.NotFound(w, r)
 			return
 		}
-		media, home, found, err := s.store.FileMedia(r.Context(), hash, room, caller.Kind == contract.PrincipalOwner)
+		media, home, found, err := s.store.FileMedia(r.Context(), hash, room, caller.Session, caller.Kind == contract.PrincipalOwner)
 		if !found && err == nil {
 			http.NotFound(w, r)
 			return

@@ -82,7 +82,7 @@ func TestCloseHandsPendingInputToParent(t *testing.T) {
 	if !inputFound {
 		t.Fatalf("handoff not dispatched: %+v", inputs)
 	}
-	frame, err := s.inputFrame(ctx, parent, contract.Event{From: owner, Body: contract.PostCreated{Text: "hello"}}, contract.Delivery{Surface: surface, Reply: contract.ReplyChannel{Kind: kind}, HandoffFrom: origin})
+	frame, _, err := s.inputFrame(ctx, parent, contract.Event{From: owner, Body: contract.PostCreated{Text: "hello"}}, contract.Delivery{Surface: surface, Reply: contract.ReplyChannel{Kind: kind}, HandoffFrom: origin})
 	if err != nil || !strings.Contains(frame, "worker") || !strings.Contains(frame, "closed") {
 		t.Fatalf("frame %q: %v", frame, err)
 	}

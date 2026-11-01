@@ -328,6 +328,14 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET shell_jobs=MAX(0,?) WHERE id=?", output.ShellJobs, session); err != nil {
 			return err
 		}
+		// A failed turn hands back every input below, without waking. These inputs still wake the session.
+		if output.Outcome != contract.TurnFailed && output.Cause != contract.CauseNotStarted {
+			for _, seq := range output.Unread {
+				if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='pending',turn=NULL,queue=NULL WHERE to_kind=? AND to_id=? AND seq=? AND turn=? AND state='taken'", contract.PrincipalSession, session, seq, output.Turn); err != nil {
+					return err
+				}
+			}
+		}
 		if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='read' WHERE to_kind=? AND to_id=? AND turn=? AND state='taken'", contract.PrincipalSession, session, output.Turn); err != nil {
 			return err
 		}

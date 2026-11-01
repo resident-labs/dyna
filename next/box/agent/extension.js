@@ -1,7 +1,16 @@
 // Dyna's Pi extension. The box agent replaces the placeholders at startup.
+import { readFile } from "node:fs/promises";
+
 const callIDArgument = "__DYNA_CALL_ID_ARGUMENT__";
 const dynaURL = "__DYNA_MCP_URL__";
 const postTool = "mcp__dyna__post";
+
+// What one model request can carry in images. The model route takes 32 MiB in all, and the rest is for the conversation.
+const imageLimit = 20;
+const imageBytesLimit = 20 << 20;
+// An image the engine's frame shows the model: see attachedFiles in engine/input_frame.go.
+const framedImage = /(\/\S+\/\d+\/\S+) \((image\/\S+), [^,)]+, shown to you\)/g;
+const attachments = "__DYNA_ATTACHMENTS__/";
 
 // Pi's own MCP client numbers its requests on this server, so these IDs are strings.
 let requests = 0;
@@ -26,7 +35,56 @@ const resultSchema = {
 	additionalProperties: true,
 };
 
+// The image for one attachment, shrunk to the model's limit, or the note that takes its place.
+async function loadImage(path, media, model) {
+	try {
+		const { resizeImage, formatDimensionNote } = await import("@earendil-works/pi-coding-agent");
+		const resized = await resizeImage(await readFile(path), media, model?.inputLimits?.images?.resize);
+		if (!resized) return { note: `[Dyna could not shrink ${path} to fit the model. Read the file with your tools.]` };
+		return { image: { type: "image", data: resized.data, mimeType: resized.mimeType }, note: formatDimensionNote(resized) };
+	} catch (error) {
+		return { note: `[Dyna could not show ${path}: ${error.code ?? error.message}]` };
+	}
+}
+
+// Pi's session file keeps only each input's frame, so an image adds nothing to the transcript and stays
+// visible across a restart. Each request takes the images back from their files, newest first, up to the
+// limits. A request is the only place the bytes appear, and an image left out can still be read as a file.
+function imageContext() {
+	let loaded = new Map();
+	return async (event, ctx) => {
+		const kept = new Map();
+		let images = 0;
+		let bytes = 0;
+		for (const message of event.messages.toReversed()) {
+			if (message.role !== "user" || !Array.isArray(message.content)) continue;
+			const frame = message.content[0]?.text?.split("\n", 1)[0];
+			if (!frame?.startsWith("[Dyna] ")) continue;
+			for (const [, path, media] of frame.matchAll(framedImage)) {
+				if (!path.startsWith(attachments)) continue;
+				const room = images < imageLimit;
+				const entry = room ? (loaded.get(path) ?? (await loadImage(path, media, ctx?.model))) : {};
+				const size = entry.image?.data.length ?? 0;
+				if (!room || bytes + size > imageBytesLimit) {
+					message.content.push({ type: "text", text: `[${path} is left out of this request to save space. Read the file to see it.]` });
+					continue;
+				}
+				kept.set(path, entry);
+				if (entry.image) {
+					message.content.push(entry.image);
+					images++;
+					bytes += size;
+				}
+				if (entry.note) message.content.push({ type: "text", text: entry.note });
+			}
+		}
+		loaded = kept;
+		return { messages: event.messages };
+	};
+}
+
 export default async function (pi) {
+	pi.on("context", imageContext());
 	const roots = new Map();
 	pi.on("turn_start", () => roots.clear());
 	pi.on("tool_call", (event) => {

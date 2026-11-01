@@ -23,9 +23,11 @@ type turnSink interface {
 
 // Runner forwards inputs to Pi without maintaining a second input queue.
 type Runner struct {
-	Harness  harness.Harness
-	Sink     turnSink
-	Setup    func(context.Context) error
+	Harness harness.Harness
+	Sink    turnSink
+	Setup   func(context.Context) error
+	// Attach stores an input's files in the box before Pi reads the input. It fails only when its context ends.
+	Attach   func(context.Context, contract.TurnInput) (contract.TurnInput, error)
 	setupErr error
 	// What the last transfer applied. Both start empty, so a new Pi process runs its transfer on the first turn:
 	// box.hello started Pi on the session's profile, and only Pi knows whether the conversation fits that model.
@@ -36,12 +38,15 @@ type Runner struct {
 	settling      bool
 	sent          map[contract.DeliverySeq]struct{}
 	errors        chan error
-	// A transfer can take minutes, and a stop must reach it, so the channel keeps reading while it runs.
+	// A transfer or a download can take minutes, and a stop must reach it, so the channel keeps reading while it runs.
 	ready        chan struct{}        // closes when Pi accepts the active turn
 	transferring bool                 // Pi is preparing the turn and has not taken its inputs
 	stopped      bool                 // a stop arrived while transferring
-	holding      bool                 // steers wait in held until Pi accepts the turn
+	holding      bool                 // steers wait in held: Pi has not accepted the turn, or one worker is sending them in order
 	held         []contract.TurnSteer // in arrival order
+	flushing     sync.WaitGroup
+	attaching    context.Context // ends with the turn, so a download cannot outlive it
+	stopAttach   context.CancelFunc
 }
 
 func (r *Runner) Errors() <-chan error {
@@ -70,6 +75,7 @@ func (r *Runner) Handle(ctx context.Context, message contract.BoxMessage) error 
 		active, transferring, ready := r.active == m.Turn, r.transferring, r.ready
 		if active && transferring {
 			r.stopped = true
+			r.stopAttach()
 		}
 		r.mu.Unlock()
 		if !active {
@@ -121,19 +127,29 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 		return nil
 	}
 	ready := make(chan struct{})
+	attaching, stopAttach := context.WithCancel(ctx)
 	r.mu.Lock()
 	r.active = start.Turn
 	r.ready = ready
+	r.attaching, r.stopAttach = attaching, stopAttach
+	r.holding = true
 	r.sent = make(map[contract.DeliverySeq]struct{}, len(pending))
 	for _, input := range pending {
 		r.sent[input.Delivery] = struct{}{}
 	}
 	r.mu.Unlock()
 	transferring := make(chan struct{})
+	preparing := sync.OnceFunc(func() {
+		r.mu.Lock()
+		r.transferring = true
+		r.mu.Unlock()
+		close(transferring)
+	})
 	var readyOnce sync.Once
 	started := func() { readyOnce.Do(func() { close(ready) }) }
 	go func() {
 		defer started()
+		defer stopAttach()
 		var result contract.TurnEnded
 		var err error
 		cause := contract.CauseHarnessFailed
@@ -143,10 +159,7 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 			if start.Model.ID == "" || (start.Model == r.model && start.CompactTokens == r.compactTokens) {
 				return nil
 			}
-			r.mu.Lock()
-			r.transferring, r.holding = true, true
-			r.mu.Unlock()
-			close(transferring)
+			preparing()
 			moved, err := r.Harness.TransferModel(ctx, start.Turn, start.Model, start.CompactTokens)
 			if errors.Is(err, harness.ErrRefused) {
 				cause = contract.CauseSetModelFailed
@@ -160,7 +173,30 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 			}
 			return nil
 		}
+		attach := func() error {
+			for i, input := range pending {
+				if len(input.Files) == 0 {
+					continue
+				}
+				preparing()
+				var err error
+				if pending[i], err = r.Attach(attaching, input); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
 		prepare := func() error {
+			attached := attach()
+			r.mu.Lock()
+			stopped := r.stopped
+			r.mu.Unlock()
+			if stopped {
+				return errStopped
+			}
+			if attached != nil {
+				return attached
+			}
 			if err := transfer(); err != nil {
 				return err
 			}
@@ -175,10 +211,11 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 			}
 			return nil
 		}
-		var flushing sync.WaitGroup
 		accepted := func() {
 			started()
-			flushing.Go(func() { r.flushHeld(ctx) })
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			r.flushing.Go(func() { r.flushHeld(ctx) })
 		}
 		if len(pending) > 0 {
 			if err = prepare(); err == nil {
@@ -193,16 +230,18 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 				}
 			}
 		}
-		flushing.Wait()
+		// Settling comes first, so no steer starts another flush while this one ends.
+		r.mu.Lock()
+		r.settling = true
+		r.mu.Unlock()
+		stopAttach()
+		r.flushing.Wait()
 		if errors.Is(err, errStopped) {
 			// Pi never saw the inputs, so they wait for the next turn instead of counting as read.
 			result = contract.TurnEnded{Turn: start.Turn, Outcome: contract.TurnOutcome("stopped"), Cause: contract.CauseNotStarted}
 		} else if err != nil {
 			result = contract.TurnEnded{Turn: start.Turn, Outcome: contract.TurnOutcome("failed"), Error: err.Error(), Cause: cause}
 		}
-		r.mu.Lock()
-		r.settling = true
-		r.mu.Unlock()
 		if err := r.finish(ctx, result); err != nil {
 			select {
 			case r.errors <- err:
@@ -220,7 +259,8 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 	}
 }
 
-// flushHeld sends the steers that waited for Pi to accept the turn, in order, and then stops holding.
+// flushHeld sends the held steers in order, each once its files are in the box, and then stops holding. What the turn ends
+// without sending stays in held, and finish hands it back.
 func (r *Runner) flushHeld(ctx context.Context) {
 	for {
 		r.mu.Lock()
@@ -230,6 +270,15 @@ func (r *Runner) flushHeld(ctx context.Context) {
 			return
 		}
 		next := r.held[0]
+		attaching := r.attaching
+		r.mu.Unlock()
+		if len(next.Input.Files) > 0 {
+			var err error
+			if next.Input, err = r.Attach(attaching, next.Input); err != nil {
+				return
+			}
+		}
+		r.mu.Lock()
 		r.held = r.held[1:]
 		r.mu.Unlock()
 		if err := r.forward(ctx, next); err != nil {
@@ -264,6 +313,14 @@ func (r *Runner) steer(ctx context.Context, input contract.TurnSteer) error {
 		r.mu.Unlock()
 		return nil
 	}
+	// A download can take minutes, so it runs off the channel, and later steers line up behind it.
+	if len(input.Input.Files) > 0 {
+		r.holding = true
+		r.held = append(r.held, input)
+		r.flushing.Go(func() { r.flushHeld(ctx) })
+		r.mu.Unlock()
+		return nil
+	}
 	r.mu.Unlock()
 	return r.forward(ctx, input)
 }
@@ -291,6 +348,9 @@ func (r *Runner) finish(ctx context.Context, result contract.TurnEnded) error {
 	ids := make([]contract.DeliverySeq, 0, len(r.sent))
 	for id := range r.sent {
 		ids = append(ids, id)
+	}
+	for _, left := range r.held {
+		result.Unread = append(result.Unread, left.Input.Delivery)
 	}
 	r.mu.Unlock()
 	for _, id := range ids {

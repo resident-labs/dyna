@@ -63,7 +63,7 @@ func runExtension(t *testing.T, driverSource string) []byte {
 	}
 	dir := t.TempDir()
 	extension, driver := filepath.Join(dir, "extension.mjs"), filepath.Join(dir, "driver.mjs")
-	if err := os.WriteFile(extension, []byte(renderExtension()), 0600); err != nil {
+	if err := os.WriteFile(extension, []byte(RenderExtension()), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(driver, []byte(driverSource), 0600); err != nil {
