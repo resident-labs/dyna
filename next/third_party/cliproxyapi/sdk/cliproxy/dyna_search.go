@@ -46,9 +46,13 @@ func text(s string) string {
 	return s
 }
 
-type searchRefusal string
+type searchRefusal struct {
+	status  int
+	message string
+}
 
-func (e searchRefusal) Error() string { return string(e) }
+func (e searchRefusal) Error() string   { return e.message }
+func (e searchRefusal) StatusCode() int { return e.status }
 
 var searchSecretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._\-]{8,}`),
@@ -96,7 +100,7 @@ func statusError(provider string, status int, body io.Reader, secrets ...string)
 	if reason != "" {
 		message += ": " + reason
 	}
-	return searchRefusal(message)
+	return searchRefusal{status: status, message: message}
 }
 
 // DynaSearchAuth applies the same request access manager as the model routes.
@@ -155,9 +159,12 @@ func (s *Service) DynaSearch(ctx context.Context, provider, query string, limit 
 			results, err = (Zai{Key: func(context.Context) (string, error) { return secret, nil }}).Search(ctx, q)
 		}
 		if err != nil {
+			if errors.Is(err, ErrNotSignedIn) {
+				return nil, ErrNotSignedIn
+			}
 			var refusal searchRefusal
 			if errors.As(err, &refusal) {
-				return nil, searchRefusal(searchRedact(refusal.Error(), secret))
+				return nil, searchRefusal{status: refusal.status, message: searchRedact(refusal.Error(), secret)}
 			}
 			return nil, errors.New("search provider unavailable")
 		}
