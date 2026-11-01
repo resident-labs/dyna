@@ -53,7 +53,7 @@
         <span class="bars">
           {#each [{ name: "Taste", value: profile.taste }, { name: "Diagnostics", value: profile.diagnostics }, { name: "Intelligence", value: profile.intelligence }, { name: "Cost", value: profile.cost }] as rating}
             <span class="rating" aria-label={`${rating.name}: ${rating.value} out of 10`}>
-              <span>{rating.name}</span><span class="track"><span style:width={`${Math.max(0, Math.min(10, rating.value)) * 10}%`}></span></span>
+              <span>{rating.name} {rating.value}</span><span class="track"><span style:width={`${Math.max(0, Math.min(10, rating.value)) * 10}%`}></span></span>
             </span>
           {/each}
         </span>

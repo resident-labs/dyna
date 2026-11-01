@@ -20,7 +20,7 @@
     profileFailure = "";
     await call("profile.list", {}).then(result => {
       profiles = result.profiles ?? [];
-      if (!profiles.some(item => item.name === profile)) profile = profiles[0]?.name ?? "";
+      if (!profiles.some(item => item.name === profile)) profile = [...profiles].sort((a, b) => b.inUse - a.inUse)[0]?.name ?? "";
     }, () => { profileFailure = "Profiles did not load."; });
     loading = false;
   }
@@ -45,8 +45,8 @@
     if (repo.trim()) {
       try {
         await call("room.repo.add", { room: created, repo: repo.trim(), default: true });
-      } catch {
-        failure = "The room was created, but the repository could not be added. Check its name and try again.";
+      } catch (error: unknown) {
+        failure = `${name} exists, but adding ${repo.trim()} failed: ${error instanceof Error ? error.message : "Try again."}`; 
         busy = false;
         return;
       }
@@ -59,14 +59,14 @@
 <div class="bar">New room</div>
 <div class="page">
   <form onsubmit={event => { event.preventDefault(); void submit(); }} onkeydown={event => {
-    if (event.ctrlKey && event.key === "Enter") { event.preventDefault(); void submit(); }
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); void submit(); }
   }}>
     <h1>{first ? "Create your first room" : "Create a room"}</h1>
     <p class="intro">Each room is one feed with its own root session. Root starts as soon as the room exists.</p>
     {#if !created}
       <div class="field">
         <label for="room-name">Name</label>
-        <input id="room-name" class="mono" bind:value={name} disabled={busy} aria-invalid={attempted && !!problem} aria-describedby="room-name-hint" autocomplete="off" />
+        <input id="room-name" class="mono" bind:value={name} oninput={() => attempted = true} onblur={() => attempted = true} disabled={busy} aria-invalid={attempted && !!problem} aria-describedby="room-name-hint" autocomplete="off" />
         <span id="room-name-hint" class:error={attempted && !!problem}>
           {#if attempted && problem}{problem}{:else if name.trim()}Agents address it as <span class="mono">#{name.trim()}</span>.{:else}Use letters, digits, dots, underscores or hyphens.{/if}
         </span>
@@ -83,7 +83,7 @@
     </div>
     {#if failure}<p class="error" role="alert">{failure}</p>{/if}
     <div class="actions">
-      <button class="primary" type="submit" disabled={busy || (!created && (loading || !profile))}>{busy ? "Saving…" : created ? "Retry repository" : "Create room"} <kbd>Ctrl Enter</kbd></button>
+      <button class="primary" type="submit" disabled={busy || (!created && (loading || !profile || !!problem))}>{busy ? "Saving…" : created ? "Retry repository" : "Create room"} <kbd>Ctrl Enter</kbd></button>
       {#if created}<button type="button" class="quiet" disabled={busy} onclick={() => oncreated(created)}>Open room</button>
       {:else if !first}<button type="button" class="quiet" disabled={busy} onclick={onclose}>Cancel</button>{/if}
     </div>
@@ -111,5 +111,6 @@
   .quiet:hover { background: var(--hover); color: var(--text); }
   .retry { min-height: 0; padding: 0; background: none; color: inherit; text-decoration: underline; }
   kbd { margin-left: 7px; font: inherit; font-size: 11px; opacity: .75; }
+  @media (pointer: coarse) { kbd { display: none; } }
   @media (max-width: 640px) { .page { padding: 24px 16px; } button { min-height: 44px; } }
 </style>
