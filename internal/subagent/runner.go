@@ -602,7 +602,7 @@ func (m *Manager) prepareTurnProfile(meta Meta, id string, writes *runnerWrites)
 	childenv.SetTrimpath(prof.Env)
 	scratchPath, err := scratch.Ensure(id)
 	if err != nil {
-		log.Printf("session scratch unavailable: %v", err)
+		return profile.Profile{}, fmt.Errorf("prepare session scratch: %w", err)
 	}
 	prof.Env[scratch.Env] = scratchPath
 	if err := scratch.SetTemp(prof.Env, id); err != nil {
