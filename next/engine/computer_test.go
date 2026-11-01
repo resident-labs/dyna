@@ -13,8 +13,8 @@ import (
 
 func attachTestChannel(t *testing.T, s *Service, id contract.SessionID) *live.Channel {
 	t.Helper()
-	handle, _, ok := s.lockSession(id)
-	if !ok {
+	handle, problem := s.lockSession(context.Background(), id)
+	if problem != nil {
 		t.Fatal("session closed")
 	}
 	channel := live.NewChannel(func() {}, make(chan struct{}))
@@ -25,12 +25,23 @@ func attachTestChannel(t *testing.T, s *Service, id contract.SessionID) *live.Ch
 
 func computerWatchGeneration(t *testing.T, s *Service, id contract.SessionID) uint64 {
 	t.Helper()
-	handle, _, ok := s.lookupSession(id)
+	handle, ok := s.lookupSession(id)
 	if !ok {
 		t.Fatal("session missing")
 	}
 	defer handle.Unlock()
 	return handle.ComputerWatchGeneration()
+}
+
+func TestComputerFramesRequiresComputer(t *testing.T) {
+	s, _, id, ctx := setup(t)
+	if _, ok := s.live.CreateSession(id); !ok {
+		t.Fatal("live session refused")
+	}
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
+	if problem := s.ComputerFrames(ctx, caller, 0, bytes.NewReader(nil)); problem == nil || problem.Code != contract.ErrNotFound {
+		t.Fatalf("computer frames without computer: %v", problem)
+	}
 }
 
 func TestComputerWatchFanoutAndState(t *testing.T) {
@@ -241,7 +252,7 @@ func TestComputerChannelCloseEndsWatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handle, _, ok := s.lookupSession(id)
+	handle, ok := s.lookupSession(id)
 	if !ok {
 		t.Fatal("session missing")
 	}

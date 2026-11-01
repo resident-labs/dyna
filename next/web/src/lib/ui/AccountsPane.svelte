@@ -101,7 +101,7 @@
 {#if failed}<p>Accounts did not load. <button class="btn" type="button" onclick={reload}>Try again</button></p>
 {:else if !loaded}<p class="muted">Loading accounts…</p>
 {:else if adding}
-  <a id="picker-back" href={base + "/add"} onclick={navigate} hidden>Back to providers</a><div class="add-layout" class:has-provider={!!providerId}>
+  <a id="picker-back" href={base + "/add"} onclick={navigate} hidden>Back to providers</a><div class="add-layout" class:has-provider={!!providerId && !!selected}>
       <section class="picker">
         <div class="search"><Icon name="search" size={18} /><input aria-label="Search providers" placeholder={`Search ${providers.length} providers`} bind:value={query} /></div>
         {#each groups as group}

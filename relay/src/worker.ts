@@ -1,6 +1,6 @@
 // Resident Labs Connect relay: accounts, machine links, managed tunnels,
 // and the broker step for short-lived machine sessions. It is never in the
-// traffic path between a browser and a machine. See docs/desktop/CONNECT.md.
+// traffic path between a browser and a machine. See relay/CONNECT.md.
 
 import * as auth from "./auth";
 import * as machines from "./machines";
