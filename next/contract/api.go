@@ -89,6 +89,7 @@ const (
 	ErrNotFound             ErrorCode = "not_found"
 	ErrForbidden            ErrorCode = "forbidden"
 	ErrConflict             ErrorCode = "conflict"
+	ErrRoomLimited          ErrorCode = "room_limited"
 	ErrProfileExists        ErrorCode = "profile_exists"
 	ErrMoveBusy             ErrorCode = "move_busy"
 	ErrHasChildren          ErrorCode = "has_children"
@@ -106,12 +107,20 @@ type Error struct {
 	Code    ErrorCode         `json:"code"`
 	Message string            `json:"message"`
 	Visual  *VisualSuperseded `json:"visual,omitempty"`
+	Limited *RoomLimited      `json:"limited,omitempty"`
 }
 
 type VisualSuperseded struct {
 	Event   EventID `json:"event"`
 	Version int     `json:"version"`
 	Seq     int64   `json:"seq"`
+}
+
+// RoomLimited names the accounts and hosts whose limit holds no other open room. An empty limit means every room,
+// so deleting that room would widen them; room.delete refuses until the owner changes those limits.
+type RoomLimited struct {
+	Accounts []AccountID `json:"accounts,omitempty"`
+	Hosts    []HostName  `json:"hosts,omitempty"`
 }
 
 type ConversationReadRequest struct {
@@ -330,11 +339,7 @@ type RoomDeleteRequest struct {
 	Discard bool   `json:"discard"`
 }
 
-// RoomDeleteResponse names the accounts and hosts this room alone limited. An empty room list means every room, so the deletion opens them to all rooms.
-type RoomDeleteResponse struct {
-	OpenedAccounts []AccountID `json:"openedAccounts,omitempty"`
-	OpenedHosts    []HostName  `json:"openedHosts,omitempty"`
-}
+type RoomDeleteResponse struct{}
 type RoomRepoAddRequest struct {
 	Room    RoomID   `json:"room"`
 	Repo    RepoName `json:"repo"`

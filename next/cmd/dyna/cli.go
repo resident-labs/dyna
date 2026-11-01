@@ -424,21 +424,12 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	}}
 	create.Flags().StringVar(&rootProfile, "root-profile", "", "Root session profile")
 	var discardRoom bool
-	deleteRoom := &cobra.Command{Use: "delete ROOM --discard", Short: "Delete a room and all its data", Long: "Delete a room: its sessions, boxes, posts, files, transcripts and shared folder. Unpushed work is lost and archive refs are deleted. The deletion runs in the background; it resumes after a restart. A host that is offline is cleaned when it returns; host list counts what it still holds.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	deleteRoom := &cobra.Command{Use: "delete ROOM --discard", Short: "Delete a room and all its data", Long: "Delete a room: its sessions, boxes, posts, files, transcripts and shared folder. Unpushed work is lost and archive refs are deleted. The deletion runs in the background; it resumes after a restart. A host that is offline is cleaned when it returns; host list counts what it still holds. It refuses while an account or host is limited to this room alone, because an empty limit means every room: change those limits first.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if !discardRoom {
 			return fmt.Errorf("deleting a room discards all its work; pass --discard to confirm")
 		}
-		r, err := getClient().RoomDelete(cmd.Context(), contract.RoomDeleteRequest{Room: contract.RoomID(args[0]), Discard: true})
-		if err != nil {
-			return err
-		}
-		for _, account := range r.OpenedAccounts {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: account %s was limited to this room; it now serves every room.\n", account)
-		}
-		for _, host := range r.OpenedHosts {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: host %s was limited to this room; it now takes every room.\n", host)
-		}
-		return nil
+		_, err := getClient().RoomDelete(cmd.Context(), contract.RoomDeleteRequest{Room: contract.RoomID(args[0]), Discard: true})
+		return err
 	}}
 	deleteRoom.Flags().BoolVar(&discardRoom, "discard", false, "Confirm that all the room's work is discarded")
 	var follow bool
