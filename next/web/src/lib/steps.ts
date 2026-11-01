@@ -6,7 +6,7 @@ export type StepKind = "read" | "edit" | "write" | "search" | "list" | "run" | "
 // What a step did, not which tool did it. Each harness tool name maps to one kind; any other tool keeps its own name,
 // written as words, so the view never shows a tool ID (r8).
 const kinds: Record<string, StepKind> = {
-  read: "read", edit: "edit", write: "write", grep: "search", find: "search", web_search: "search", ls: "list", bash: "run", web_fetch: "fetch",
+  read: "read", edit: "edit", write: "write", grep: "search", find: "search", web_search: "search", ls: "list", bash: "run", mcp__shell__shell: "run", web_fetch: "fetch",
 };
 const verbs: Record<Exclude<StepKind, "tool">, string> = {
   read: "Read", edit: "Edited", write: "Wrote", search: "Searched", list: "Listed", run: "Ran", fetch: "Fetched",
@@ -17,7 +17,7 @@ const verbs: Record<Exclude<StepKind, "tool">, string> = {
 export function stepTitle({ tool, label }: Pick<TranscriptStep, "tool" | "label">): { kind: StepKind; verb: string; target: string; full: string } {
   const kind = kinds[tool] ?? "tool";
   const words = tool.split("__").at(-1)!.replace(/[_-]+/g, " ").trim();
-  const verb = kind === "tool" ? words.charAt(0).toUpperCase() + words.slice(1) : verbs[kind];
+  const verb = kind === "tool" ? `Called ${words}` : verbs[kind];
   const full = label.startsWith(tool) ? label.slice(tool.length).trim() : label;
   return { kind, verb, target: shortPaths(full), full };
 }
