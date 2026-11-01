@@ -10,6 +10,7 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
+// LEGACY(v1-transfer): this test, the old agentSurface switch in profiles.json. Remove after the transfer.
 func TestProfilesLoadLegacySurface(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	data := `{"p":{"provider":"anthropic","model":"a","allowedModels":["a"],"thinking":"low","agentSurface":"caller"}}`
