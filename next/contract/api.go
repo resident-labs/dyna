@@ -507,23 +507,29 @@ type SessionWorkResponse struct {
 }
 
 type TranscriptReadRequest struct {
-	Session        SessionID      `json:"session"`
-	Turn           TurnID         `json:"turn,omitempty"`
-	Before         TurnID         `json:"before,omitempty"`
-	Limit          int            `json:"limit,omitempty"`
-	Item           string         `json:"item,omitempty"`
-	Part           TranscriptPart `json:"part,omitempty"`
-	Offset         int            `json:"offset,omitempty"`
-	AfterItem      string         `json:"afterItem,omitempty"`
-	ItemIndex      int            `json:"itemIndex,omitempty"`
-	OlderItems     bool           `json:"olderItems,omitempty"`
-	MandatoryItems bool           `json:"mandatoryItems,omitempty"`
-	MandatoryIndex int            `json:"mandatoryIndex,omitempty"`
-	MandatoryPosts bool           `json:"mandatoryPosts,omitempty"`
-	MandatoryPost  int            `json:"mandatoryPost,omitempty"`
-	Tail           bool           `json:"tail,omitempty"`
-	PostIndex      int            `json:"postIndex,omitempty"`
+	Session   SessionID      `json:"session"`
+	Turn      TurnID         `json:"turn,omitempty"`
+	Before    TurnID         `json:"before,omitempty"`
+	Limit     int            `json:"limit,omitempty"`
+	Item      string         `json:"item,omitempty"`
+	Part      TranscriptPart `json:"part,omitempty"`
+	Offset    int            `json:"offset,omitempty"`
+	AfterItem string         `json:"afterItem,omitempty"`
+	Page      TranscriptPage `json:"page,omitempty"`
+	Cursor    int            `json:"cursor,omitempty"`
+	Tail      bool           `json:"tail,omitempty"`
+	PostIndex int            `json:"postIndex,omitempty"`
 }
+
+// TranscriptPage selects one kind of turn continuation.
+type TranscriptPage string
+
+const (
+	TranscriptPageOlderItems     TranscriptPage = "older_items"
+	TranscriptPageMandatoryItems TranscriptPage = "mandatory_items"
+	TranscriptPageMandatoryPosts TranscriptPage = "mandatory_posts"
+)
+
 type TranscriptPart string
 
 const (
@@ -559,6 +565,7 @@ type TranscriptItem struct {
 	More         bool                    `json:"more,omitempty"`
 	Event        EventID                 `json:"event,omitempty"`
 	Room         RoomID                  `json:"room,omitempty"`
+	From         *Principal              `json:"from,omitempty"`
 	Seq          int64                   `json:"seq,omitempty"`
 	Home         *Conversation           `json:"home,omitempty"`
 	Bytes        int64                   `json:"bytes,omitempty"`
