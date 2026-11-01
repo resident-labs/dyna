@@ -209,7 +209,11 @@ func (g GitHub) readHeadChunk(ctx context.Context, records []*Record) (map[strin
 				return nil, rates, fmt.Errorf("invalid repository %q", repo)
 			}
 
-			fmt.Fprintf(&query, "r%d:repository(owner:%s,name:%s){defaultBranchRef{name target{... on Commit{oid statusCheckRollup{state contexts{totalCount checkRunCountsByState{state count} statusContextCountsByState{state count}}} workflows:file(path:\".github/workflows\"){object{... on Tree{entries{name type object{... on Blob{text isTruncated}}}}}}}}}", i, strconv.Quote(owner), strconv.Quote(name))
+			if g.unwatchedHeads {
+				fmt.Fprintf(&query, "r%d:repository(owner:%s,name:%s){", i, strconv.Quote(owner), strconv.Quote(name))
+			} else {
+				fmt.Fprintf(&query, "r%d:repository(owner:%s,name:%s){defaultBranchRef{name target{... on Commit{oid statusCheckRollup{state contexts{totalCount checkRunCountsByState{state count} statusContextCountsByState{state count}}} workflows:file(path:\".github/workflows\"){object{... on Tree{entries{name type object{... on Blob{text isTruncated}}}}}}}}}", i, strconv.Quote(owner), strconv.Quote(name))
+			}
 			sort.Slice(grouped[repo], func(a, b int) bool {
 				x, y := grouped[repo][a], grouped[repo][b]
 				if x.Number != y.Number {
@@ -222,7 +226,11 @@ func (g GitHub) readHeadChunk(ctx context.Context, records []*Record) (map[strin
 					fmt.Fprintf(&query, "b%d:pullRequests(first:1,headRefName:%s,states:OPEN){nodes{number headRefName isCrossRepository headRefOid}}", j, strconv.Quote(r.Branch))
 					continue
 				}
-				fmt.Fprintf(&query, "p%d:pullRequest(number:%d){number title state merged isDraft mergeable updatedAt comments{totalCount} reviews{totalCount} reviewThreads(first:100){totalCount nodes{comments{totalCount}}} headRefOid headRefName headRepository{nameWithOwner} baseRefOid baseRefName author{login __typename} labels(first:100){nodes{name}} commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{... on CheckRun{completedAt} ... on StatusContext{createdAt}}}}}}}}", r.Number, r.Number)
+				if g.unwatchedHeads {
+					fmt.Fprintf(&query, "p%d:pullRequest(number:%d){number state merged headRefOid}", r.Number, r.Number)
+				} else {
+					fmt.Fprintf(&query, "p%d:pullRequest(number:%d){number title state merged isDraft mergeable updatedAt comments{totalCount} reviews{totalCount} reviewThreads(first:100){totalCount nodes{comments{totalCount}}} headRefOid headRefName headRepository{nameWithOwner} baseRefOid baseRefName author{login __typename} labels(first:100){nodes{name}} commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{... on CheckRun{completedAt} ... on StatusContext{createdAt}}}}}}}}", r.Number, r.Number)
+				}
 			}
 			query.WriteString("}")
 		}
