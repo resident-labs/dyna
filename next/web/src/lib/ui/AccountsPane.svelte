@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
-  import { accountRows, accountState, providerGroup, refused, reconnectUnavailable } from "../accounts.ts";
+  import { accountPath, accountRows, accountState, providerGroup, reconnectPath, refused, reconnectUnavailable } from "../accounts.ts";
   import { visibleWindows } from "../usage.ts";
   import type { Account, AccountProviderInfo, AccountUsage, AccountsConnectResponse, RoomSummary } from "../contract.gen.ts";
   import StatusPill from "./StatusPill.svelte";
@@ -14,23 +14,26 @@
   let query = $state(""), expanded = $state(false), label = $state(""), secret = $state(""), redirect = $state("");
   let attempt: AccountsConnectResponse | undefined = $state();
   let connectState: "idle" | "pending" | "failed" | "expired" = $state("idle");
-  let reconnectId: string | undefined = $state(), error = $state(""), copied = $state(false), opened = $state(false), now = $state(Date.now());
+  let error = $state(""), copied = $state(false), opened = $state(false), now = $state(Date.now());
   let timer: ReturnType<typeof setTimeout> | undefined, generation = 0;
   let body: HTMLDivElement;
   const base = "/settings/accounts";
-  let adding = $derived(path === base + "/add" || path.startsWith(base + "/add/"));
-  let providerId = $derived(path.startsWith(base + "/add/") ? decodeURIComponent(path.slice((base + "/add/").length)) : "");
+  let reconnectRoute = $derived(path.startsWith(reconnectPath("")) ? decodeURIComponent(path.slice(reconnectPath("").length)) : "");
+  let reconnecting = $derived(accounts.find(a => a.id === reconnectRoute));
+  let adding = $derived(path === base + "/add" || path.startsWith(base + "/add/") || !!reconnecting);
+  let providerId = $derived(reconnecting?.provider ?? (path.startsWith(base + "/add/") ? decodeURIComponent(path.slice((base + "/add/").length)) : ""));
   let selected = $derived(providers.find(p => p.id === providerId) ?? (!phone && adding && !providerId ? providers[0] : undefined));
-  let accountId = $derived(path.startsWith(base + "/account/") ? decodeURIComponent(path.slice((base + "/account/").length)) : "");
+  // A reconnect link for an account that is gone lands on the account view's "not found".
+  let accountId = $derived(path.startsWith(accountPath("")) ? decodeURIComponent(path.slice(accountPath("").length)) : reconnecting ? "" : reconnectRoute);
+  $effect(() => { if (reconnecting) label = reconnecting.label; });
   let account = $derived(accounts.find(a => a.id === accountId));
   let accountProvider = $derived(providers.find(p => p.id === account?.provider));
   let accountUsage = $derived(usage.find(u => u.accountId === accountId));
   let selectedReportsWindows = $derived(selected?.connectFlow === "callback" && usage.some(u => accounts.some(a => a.provider === selected?.id && a.id === u.accountId) && u.windows?.some(w => w.kind === "five_hour") && u.windows?.some(w => w.kind === "weekly")));
   const groups = [{ flow: "callback", title: "Sign in with your plan" }, { flow: "device", title: "Sign in with a code" }, { flow: "key", title: "API key" }] as const;
   const providerPath = (id: string) => base + "/add/" + encodeURIComponent(id);
-  const accountPath = (id: string) => base + "/account/" + encodeURIComponent(id);
   function reset() {
-    generation++; clearTimeout(timer); attempt = undefined; connectState = "idle"; redirect = ""; secret = ""; error = ""; reconnectId = undefined; copied = false; opened = false;
+    generation++; clearTimeout(timer); attempt = undefined; connectState = "idle"; redirect = ""; secret = ""; error = ""; copied = false; opened = false;
   }
   function reload() {
     void call("accounts.list", {}).then(result => { providers = result.providers ?? []; accounts = result.accounts ?? []; loaded = true; failed = false; }, (e: unknown) => { if (e instanceof SignedOut) signedout(); else if (!loaded) failed = true; });
@@ -64,7 +67,7 @@
       const key = secret; secret = "";
       await call("accounts.set_key", { provider: selected.id, label, key }).then(() => { if (ticket === generation) { reset(); reload(); document.getElementById("accounts-back")?.click(); } }, () => { if (ticket === generation) error = "Could not save the key. Try again."; });
     } else {
-      const request = reconnectId ? call("accounts.reconnect", { accountId: reconnectId }) : call("accounts.connect", { provider: selected.id, label });
+      const request = reconnecting ? call("accounts.reconnect", { accountId: reconnecting.id }) : call("accounts.connect", { provider: selected.id, label });
       await request.then(result => {
         if (ticket !== generation) { popup?.close(); return; }
         attempt = result; connectState = "pending"; now = Date.now(); watch(result.attempt, ticket);
@@ -95,7 +98,7 @@
 {#snippet back()}<a href={base} onclick={navigate}>Accounts</a>{/snippet}
 <a id="accounts-back" href={base} onclick={navigate} hidden>Back to Accounts</a>
 {#if adding || accountId}
-  <header class="subbar">{#if phone}<a href={adding && selected ? base + "/add" : base} onclick={navigate} aria-label={adding && selected ? "Back to providers" : "Back to Accounts"}><Icon name="backChevron" size={20} /></a>{:else}{@render back()} <span>/</span>{/if} <strong>{adding ? (phone && selected ? selected.displayName : "Add an account") : account?.label || "Account"}</strong></header>
+  <header class="subbar">{#if phone}<a href={adding && selected && !reconnecting ? base + "/add" : base} onclick={navigate} aria-label={adding && selected && !reconnecting ? "Back to providers" : "Back to Accounts"}><Icon name="backChevron" size={20} /></a>{:else}{@render back()} <span>/</span>{/if} <strong>{reconnecting ? reconnecting.label : adding ? (phone && selected ? selected.displayName : "Add an account") : account?.label || "Account"}</strong></header>
 {:else}{@render bar("Accounts", loaded ? accounts.length : undefined, action)}{/if}
 <div class="body" data-page-ready={loaded && quotaLoaded} bind:this={body}>
 {#if failed}<p>Accounts did not load. <button class="btn" type="button" onclick={reload}>Try again</button></p>
@@ -123,7 +126,7 @@
           {#if !attempt}
             <p><strong>{selected.connectFlow === "callback" ? "Sign in with your plan." : selected.connectFlow === "device" ? "Sign in with a code." : "API key."}</strong> {selected.connectFlow === "callback" ? `Use a ${selected.displayName} plan you already pay for. Dyna shows its usage limits when available.` : selected.connectFlow === "device" ? "Dyna shows a short code here. You enter it on the provider’s page, and Dyna finishes by itself." : "You paste a key once. It stays where Dyna runs, and Dyna never shows it again."}</p>
             <p class="muted">Dyna keeps the sign-in where Dyna runs and sends it only to {selected.displayName}.{#if selected.connectFlow === "callback"}{" "}It sees your plan limits, not your chats.{/if}</p>
-            <label class="label-field">Label <input bind:value={label} placeholder="Work, Personal, …" disabled={busy} /></label>
+            <label class="label-field">Label <input bind:value={label} placeholder="Work, Personal, …" disabled={busy || !!reconnecting} /></label>
             {#if selected.connectFlow === "key"}<label>API key <input type="password" bind:value={secret} autocomplete="off" disabled={busy} /></label>{/if}
             <div class="start-actions"><button class="btn fill" type="button" disabled={busy || (selected.connectFlow === "key" && !secret.trim())} onclick={() => void start()}>{selected.connectFlow === "callback" ? `Sign in with ${selected.displayName}` : selected.connectFlow === "device" ? "Get a code" : "Save key"}</button>{#if selected.connectFlow === "key"}<a class="btn" href={base + "/add"} onclick={navigate}>Cancel</a>{/if}</div>
           {:else}
@@ -166,7 +169,7 @@
       <p><label><input type="radio" name="room-scope" checked={!account.rooms?.length} disabled={busy} onchange={() => void setRooms(account, [])} /> Every room</label> <label><input type="radio" name="room-scope" checked={!!account.rooms?.length} disabled={busy || !rooms.length} onchange={() => void setRooms(account, [rooms[0].id])} /> Only these rooms</label></p>
       {#if account.rooms?.length}{#each rooms as room (room.id)}<label><input type="checkbox" checked={account.rooms.includes(room.id)} disabled={busy || (account.rooms.length === 1 && account.rooms.includes(room.id))} onchange={(e) => void setRooms(account, e.currentTarget.checked ? [...(account.rooms ?? []), room.id] : (account.rooms ?? []).filter(id => id !== room.id))} /> {room.name}</label>{/each}{/if}
       <h2>Sign-in</h2>
-      {#if accountProvider.connectMethod === "oauth"}<div class="start-actions"><a class="btn" href={providerPath(accountProvider.id)} onclick={(e) => { navigate(e); label = account.label; reconnectId = account.id; }}>Sign in again</a> <span class="muted">Use it if the account changed plans or Dyna asks.</span></div>{:else}<p class="muted">This account uses an API key.</p>{/if}
+      {#if accountProvider.connectMethod === "oauth"}<div class="start-actions"><a class="btn" href={reconnectPath(account.id)} onclick={navigate}>Sign in again</a> <span class="muted">Use it if the account changed plans or Dyna asks.</span></div>{:else}<p class="muted">This account uses an API key.</p>{/if}
       <div class="remove"><div><strong>Remove {account.label}</strong><p class="muted">Dyna deletes this sign-in from this computer. {#if accounts.some(a => a.provider === account.provider && a.id !== account.id)}Sessions on it move to another {accountProvider.displayName} account at their next model call.{:else}You can connect it again later.{/if}</p></div><button class="btn danger" type="button" disabled={busy} onclick={() => void remove(account)}>Remove</button></div>
       {#if error}<p role="alert">{error}</p>{/if}
     </section>
@@ -179,7 +182,7 @@
       <div class="list">{#each group as item, index (item.id)}
         {@const status = accountState(item)}
         {@const rowUsage = usage.find(u => u.accountId === item.id)}
-        <div class="account-row"><a class="row" href={accountPath(item.id)} onclick={navigate}><div><strong>{item.label || `${provider.displayName} account ${index + 1}`}</strong>{#if status.pill}{" "}<StatusPill tone={status.pill.tone} label={status.pill.label} />{/if}<div class="muted">{item.rooms?.length ? `${item.rooms.length} rooms` : "Every room"}{#if status.line}{" · "}{status.line}{/if}{#if rowUsage?.observedAt}{" · "}usage at {new Date(rowUsage.observedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}{/if}</div></div>{#if rowUsage && !rowUsage.cause && visibleWindows(rowUsage.windows ?? []).length}<div class="row-meters">{#each visibleWindows(rowUsage.windows ?? []) as window (window.name)}<AccountMeter {window} now={Date.now()} />{/each}</div>{:else if item.state !== "sign_in_expired"}<span class="muted no-usage">No usage data for this provider yet.</span>{/if}</a>{#if item.state === "sign_in_expired" && provider.connectMethod === "oauth"}<div class="retry"><a class="btn fill" href={providerPath(provider.id)} onclick={(e) => { navigate(e); label = item.label; reconnectId = item.id; }}>Sign in again</a><span class="muted">Its limits show once it is signed in.</span></div>{/if}<a class="chevron" href={accountPath(item.id)} onclick={navigate} aria-label={`View ${item.label}`}>›</a></div>
+        <div class="account-row"><a class="row" href={accountPath(item.id)} onclick={navigate}><div><strong>{item.label || `${provider.displayName} account ${index + 1}`}</strong>{#if status.pill}{" "}<StatusPill tone={status.pill.tone} label={status.pill.label} />{/if}<div class="muted">{item.rooms?.length ? `${item.rooms.length} rooms` : "Every room"}{#if status.line}{" · "}{status.line}{/if}{#if rowUsage?.observedAt}{" · "}usage at {new Date(rowUsage.observedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}{/if}</div></div>{#if rowUsage && !rowUsage.cause && visibleWindows(rowUsage.windows ?? []).length}<div class="row-meters">{#each visibleWindows(rowUsage.windows ?? []) as window (window.name)}<AccountMeter {window} now={Date.now()} />{/each}</div>{:else if item.state !== "sign_in_expired"}<span class="muted no-usage">No usage data for this provider yet.</span>{/if}</a>{#if item.state === "sign_in_expired" && provider.connectMethod === "oauth"}<div class="retry"><a class="btn fill" href={reconnectPath(item.id)} onclick={navigate}>Sign in again</a><span class="muted">Its limits show once it is signed in.</span></div>{/if}<a class="chevron" href={accountPath(item.id)} onclick={navigate} aria-label={`View ${item.label}`}>›</a></div>
       {/each}</div>
     </section>
   {/each}

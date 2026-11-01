@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { activeVerb, elapsed, stepTime, stepTitle, titleOf, workingGroup, workSummary } from "./steps.ts";
+import { activityLabel, activeVerb, elapsed, stepTime, stepTitle, titleOf, workingGroup, workSummary } from "./steps.ts";
 import type { TranscriptItem } from "./contract.gen.ts";
 
 test("a live duration uses the injected clock", () => {
@@ -35,4 +35,10 @@ test("a step's time reads in ms, then seconds, then minutes, and an unfinished s
   assert.equal(stepTime({ started, ended: "2026-10-31T00:00:02.360Z" }), "2.4 s");
   assert.equal(stepTime({ started, ended: "2026-10-31T00:01:36.400Z" }), "1 min 36 s");
   assert.equal(stepTime({ started, ended: null }), "");
+});
+
+test("an activity label never shows an MCP tool ID", () => {
+  assert.equal(activityLabel("mcp__dyna__session"), "Session");
+  assert.equal(activityLabel("mcp__shell__shell go test ./..."), "Ran go test ./...");
+  assert.equal(activityLabel("read spec.md"), "read spec.md");
 });
