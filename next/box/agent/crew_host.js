@@ -62,6 +62,7 @@ function install(bridge, argsText, parent, depth) {
   globalThis.console = { log, info: log, warn: log, error: log };
   globalThis.agent = (prompt, opts) => call({ op: "agent", payload: String(prompt), opts: opts ?? {} });
   globalThis.run = (command, opts) => call({ op: "run", payload: command, opts: opts ?? {} });
+  globalThis.merge = (results, opts) => call({ op: "merge", payload: results, opts: opts ?? {} });
   globalThis.post = (to, text, data) => call({ op: "post", payload: { to, text: String(text), data } });
   globalThis.parallel = (thunks) =>
     Promise.all(

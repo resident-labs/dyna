@@ -212,6 +212,23 @@ func TestHandlerRunsAShellCall(t *testing.T) {
 	}
 }
 
+func TestAWorkersShellStartsInItsOwnTree(t *testing.T) {
+	for cwd, want := range map[string]string{"": "/box/work/repo.worktrees/one", "src": "/box/work/repo.worktrees/one/src", "/tmp": "/tmp"} {
+		r := newRig("", syscall.SIGKILL)
+		var got string
+		r.server.cfg.start = func(_, dir, _ string, _ io.Writer) (process, error) {
+			got = dir
+			return r.proc, nil
+		}
+		r.proc.exit <- 0
+		body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"shell","arguments":{"command":"pwd","cwd":"` + cwd + `"}}}`
+		r.server.Handler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?dir=/box/work/repo.worktrees/one", strings.NewReader(body)))
+		if got != want {
+			t.Fatalf("cwd %q: started in %q, want %q", cwd, got, want)
+		}
+	}
+}
+
 func TestMCPPassesCallIDToShell(t *testing.T) {
 	r := newRig("", syscall.SIGKILL)
 	var got string

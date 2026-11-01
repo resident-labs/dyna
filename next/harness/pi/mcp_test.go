@@ -9,7 +9,7 @@ import (
 
 func TestAgentMCPExposure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mcp.json")
-	if err := WriteAgentMCPConfig(path, "areas"); err != nil {
+	if err := WriteAgentMCPConfig(path, "areas", ""); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)
