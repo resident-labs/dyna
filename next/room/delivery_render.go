@@ -41,7 +41,7 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		if b.Description != "" {
 			name = "'" + b.Description + "'"
 		}
-		// TODO: legacy/shim remove later — events saved before End have no End; the next floor raise converts them (D-659).
+		// TODO: legacy/shim remove later — old boxes still send shell.job.ended without End, and saved events lack it. Remove when the engine fills End at the request boundary, every supported box version sends End, and a floor migration converts saved events (D-659).
 		result := fmt.Sprintf("exited with code %d", b.ExitCode)
 		if b.End != nil {
 			switch b.End.Kind {
