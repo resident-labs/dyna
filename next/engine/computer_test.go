@@ -8,16 +8,26 @@ import (
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/live"
 )
+
+func attachTestChannel(t *testing.T, s *Service, id contract.SessionID) *live.Channel {
+	t.Helper()
+	handle, _, ok := s.lockSession(id)
+	if !ok {
+		t.Fatal("session closed")
+	}
+	channel := live.NewChannel(func() {}, make(chan struct{}))
+	handle.SetChannel(channel)
+	handle.Unlock()
+	return channel
+}
 
 func TestComputerWatchFanoutAndState(t *testing.T) {
 	s, room, id, ctx := setup(t)
 	connectAgent(ctx, t, s, id)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
-	channel := &boxChannel{wake: make(chan struct{}, 1)}
-	s.mu.Lock()
-	s.sessionLocked(id).channel = channel
-	s.mu.Unlock()
+	channel := attachTestChannel(t, s, id)
 	if _, err := s.ComputerWatch(ctx, id); err == nil || err.Code != contract.ErrNotFound {
 		t.Fatalf("without computer: %v", err)
 	}
@@ -32,7 +42,7 @@ func TestComputerWatchFanoutAndState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	<-channel.wake
+	<-channel.WakeSignal()
 	second, err := s.ComputerWatch(secondCtx, id)
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +102,7 @@ func TestComputerWatchFanoutAndState(t *testing.T) {
 	if _, ok := <-second; ok {
 		t.Fatal("watcher stayed open")
 	}
-	<-channel.wake
+	<-channel.WakeSignal()
 	_ = writer.Close()
 	if err := <-done; err != nil {
 		t.Fatal(err)
@@ -221,9 +231,7 @@ func TestComputerChannelCloseEndsWatch(t *testing.T) {
 	s, room, id, ctx := setup(t)
 	connectAgent(ctx, t, s, id)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
-	s.mu.Lock()
-	s.sessionLocked(id).channel = &boxChannel{wake: make(chan struct{}, 1)}
-	s.mu.Unlock()
+	attachTestChannel(t, s, id)
 	if _, err := s.ComputerChanged(ctx, caller, contract.ComputerChangedRequest{To: contract.ComputerRunning}); err != nil {
 		t.Fatal(err)
 	}
@@ -231,10 +239,10 @@ func TestComputerChannelCloseEndsWatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.mu.Lock()
-	state := s.sessionLocked(id)
-	s.mu.Unlock()
-	state.computerLock.Lock()
+	handle, _, ok := s.lookupSession(id)
+	if !ok {
+		t.Fatal("session missing")
+	}
 	s.mu.Lock()
 	stopRoom, stopped, watchers := s.clearComputerLocked(id)
 	s.mu.Unlock()
@@ -246,7 +254,7 @@ func TestComputerChannelCloseEndsWatch(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	state.computerLock.Unlock()
+	handle.Unlock()
 	if _, ok := <-watch; ok {
 		t.Fatal("watch stayed open")
 	}
@@ -260,9 +268,7 @@ func TestOldComputerStreamDoesNotEndNewWatch(t *testing.T) {
 	s, _, id, ctx := setup(t)
 	connectAgent(ctx, t, s, id)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
-	s.mu.Lock()
-	s.sessionLocked(id).channel = &boxChannel{wake: make(chan struct{}, 1)}
-	s.mu.Unlock()
+	attachTestChannel(t, s, id)
 	if _, err := s.ComputerChanged(ctx, caller, contract.ComputerChangedRequest{To: contract.ComputerRunning}); err != nil {
 		t.Fatal(err)
 	}
@@ -362,18 +368,22 @@ func TestShellWatchGenerationAndStop(t *testing.T) {
 // A replaced box rejects input even when its queue has room.
 func TestComputerInputReplacement(t *testing.T) {
 	done := make(chan struct{})
-	handle := computerInputHandle{queue: make(chan contract.ComputerInputBatch, 1), done: done}
+	channel := live.NewChannel(func() {}, done)
 	close(done)
-	problem := handle.send(context.Background(), contract.ComputerInputBatch{})
+	problem := channel.SendInput(context.Background(), contract.ComputerInputBatch{})
 	if problem == nil || problem.Code != contract.ErrConflict || problem.Message != "box replaced" {
 		t.Fatalf("replacement: %v", problem)
 	}
 }
 
 func TestComputerInputFullQueue(t *testing.T) {
-	handle := computerInputHandle{queue: make(chan contract.ComputerInputBatch, 1), done: make(chan struct{})}
-	handle.queue <- contract.ComputerInputBatch{}
-	problem := handle.send(context.Background(), contract.ComputerInputBatch{})
+	channel := live.NewChannel(func() {}, make(chan struct{}))
+	for i := 0; i < 64; i++ {
+		if problem := channel.SendInput(context.Background(), contract.ComputerInputBatch{}); problem != nil {
+			t.Fatal(problem)
+		}
+	}
+	problem := channel.SendInput(context.Background(), contract.ComputerInputBatch{})
 	if problem == nil || problem.Code != contract.ErrConflict || problem.Message != "input queue is full" {
 		t.Fatalf("full queue: %v", problem)
 	}
