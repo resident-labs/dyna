@@ -65,6 +65,7 @@ type Service interface {
 	AccountsQuota(context.Context, contract.Principal, contract.AccountsQuotaRequest) (contract.AccountsQuotaResponse, *contract.Error)
 	RoomCreate(context.Context, contract.Principal, contract.RoomCreateRequest) (contract.RoomCreateResponse, *contract.Error)
 	RoomDelete(context.Context, contract.Principal, contract.RoomDeleteRequest) (contract.RoomDeleteResponse, *contract.Error)
+	HostSetLimits(context.Context, contract.Principal, contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, *contract.Error)
 	RoomRepoAdd(context.Context, contract.Principal, contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, *contract.Error)
 	RoomRepos(context.Context, contract.Principal, contract.RoomReposRequest) (contract.RoomReposResponse, *contract.Error)
 	SessionStart(context.Context, contract.Principal, contract.SessionStartRequest) (contract.SessionStartResponse, *contract.Error)
