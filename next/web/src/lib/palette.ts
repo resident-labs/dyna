@@ -54,8 +54,8 @@ export const CAP = 3;
 
 export type Place = { id: string; name: string; paused: boolean; sessions?: number; working: number };
 export type Person = { id: string; room: string; roomName: string; name: string; root: boolean; closed: boolean; working: boolean };
-export type ActionId = "requests" | "pause" | "theme" | "settings";
-export type Action = { id: ActionId; label: string; hint: string; keys: string[]; icon: "inbox" | "pause" | "palette" | "gear" };
+export type ActionId = "requests" | "pause" | "theme" | "settings" | "new-session" | "new-room";
+export type Action = { id: ActionId; label: string; hint: string; keys: string[]; icon: "inbox" | "pause" | "palette" | "gear" | "plus" };
 
 export type Item =
   | { kind: "room"; room: Place }
