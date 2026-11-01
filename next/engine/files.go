@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -97,6 +98,11 @@ func (s *Service) Files(caller contract.Principal, room contract.RoomID) http.Ha
 					return
 				}
 				defer f.Close()
+				doc, err := io.ReadAll(f)
+				if err != nil {
+					http.Error(w, "unavailable", 500)
+					return
+				}
 				info, err := f.Stat()
 				if err != nil {
 					http.NotFound(w, r)
@@ -106,7 +112,7 @@ func (s *Service) Files(caller contract.Principal, room contract.RoomID) http.Ha
 				w.Header().Set("Cache-Control", "no-store")
 				w.Header().Set("Referrer-Policy", "no-referrer")
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				http.ServeContent(w, r, file.Name, info.ModTime(), f)
+				http.ServeContent(w, r, file.Name, info.ModTime(), bytes.NewReader(visual.ColorScheme(doc)))
 				return
 			}
 			http.NotFound(w, r)
