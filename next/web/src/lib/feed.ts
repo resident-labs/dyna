@@ -352,6 +352,9 @@ export const shortPaths = (label: string) => label.replace(/\S+(?:\/\S+){4,}/g, 
 
 export const count = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
+// How long an image build took, such as "under a second", "12 s" or "3 min".
+const buildTime = (seconds: number) => seconds < 1 ? "under a second" : seconds < 60 ? `${Math.round(seconds)} s` : `${Math.round(seconds / 60)} min`;
+
 // A session the room no longer lists.
 export const closedSession = "A closed session";
 const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
@@ -438,9 +441,9 @@ export function describe(event: Event, name: Name): string {
     case "op.decided": return `${event.body.decision.by.session ? name(event.body.decision.by.session) : "You"} ${event.body.decision.approved ? "approved" : "denied"} a request`;
     case "op.requested": return `${event.body.by.kind === "owner" ? "You" : event.body.by.session ? name(event.body.by.session) : "Dyna"} ${event.body.by.kind === "owner" ? event.body.card.title.replace(/^asks\b/, "ask") : event.body.card.title}${event.body.card.target.name ? ` · ${event.body.card.target.name}` : ""}`;
     case "op.ran": return "";
-    case "image.built": return `Image ${event.body.name}:${event.body.tag} built in ${event.body.seconds} s`;
+    case "image.built": return `Image for ${event.body.repo} built in ${buildTime(event.body.seconds)}`;
     // The reason is raw build output (r8); the build log holds it.
-    case "image.failed": return `Image ${event.body.name}:${event.body.tag} failed`;
+    case "image.failed": return `Image for ${event.body.repo} failed`;
     case "pr.opened": return `${name(event.body.session)} opened pull request ${event.body.repo}#${event.body.number}`;
     case "grant.expired": return "A host execution grant expired";
     // The owner reads this feed; a room's root may also pause it.

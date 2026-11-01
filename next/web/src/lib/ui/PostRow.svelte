@@ -205,7 +205,7 @@
   .name a { text-decoration: none; font-weight: 600; }
   .name a:hover { text-decoration: underline; }
   .name a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-  /* A name stays whole up to 60% of the line, so "You" never truncates; the recipient list takes the rest. */
+  /* A name stays whole up to 60% of the line, so "you" never truncates; the recipient list takes the rest. */
   time { flex: none; }
   strong.owner { color: var(--focus); }
   strong.engine { color: var(--text); }

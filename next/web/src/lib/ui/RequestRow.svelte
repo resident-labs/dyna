@@ -12,7 +12,7 @@
     row: Row; store: RoomStore; admin: boolean; now: number; current?: boolean; grouped?: boolean;
   } = $props();
   let request = $derived(row.request);
-  let name = $derived(request.by.kind === "owner" ? "You" : request.by.session ? store.names.get(request.by.session) ?? closedSession : "Dyna");
+  let name = $derived(request.by.kind === "owner" ? "you" : request.by.session ? store.names.get(request.by.session) ?? closedSession : "Dyna");
   let soon = $derived(Date.parse(request.expires) - now < 300_000);
   let note = $state(false), reason = $state(""), busy = $state(false), failure = $state("");
   export async function decide(approve: boolean) {
