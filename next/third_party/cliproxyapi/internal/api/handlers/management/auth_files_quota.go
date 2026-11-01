@@ -43,6 +43,7 @@ type authFileQuotaWindow struct {
 	Utilization float64 `json:"utilization"`
 	ResetsAt    string  `json:"resets_at,omitempty"`
 	Scope       string  `json:"scope,omitempty"`
+	dynaQuotaWindowFields
 }
 
 // authFileQuotaEntry is the per-credential result. Either Windows or Error is
@@ -56,6 +57,7 @@ type authFileQuotaEntry struct {
 	StatusCode int                   `json:"status_code,omitempty"`
 	Windows    []authFileQuotaWindow `json:"windows,omitempty"`
 	Error      string                `json:"error,omitempty"`
+	dynaQuotaEntryFields
 }
 
 // claudeOAuthUsageResponse is the subset of the Anthropic usage payload that
@@ -118,6 +120,10 @@ func (h *Handler) GetAuthFileQuota(c *gin.Context) {
 			if auth == nil || !matchesAuthFileLookup(auth, name, authIndex) {
 				continue
 			}
+			if _, ok := dynaUsageSourceFor(auth); ok {
+				targets = append(targets, auth)
+				continue
+			}
 			if !strings.EqualFold(strings.TrimSpace(auth.Provider), "claude") {
 				continue
 			}
@@ -141,6 +147,10 @@ func (h *Handler) GetAuthFileQuota(c *gin.Context) {
 			defer wg.Done()
 			slots <- struct{}{}
 			defer func() { <-slots }()
+			if source, ok := dynaUsageSourceFor(auth); ok {
+				entries[i] = h.readDynaUsage(c.Request.Context(), source, auth)
+				return
+			}
 			entries[i] = fetchClaudeOAuthQuota(c.Request.Context(), cfg, auth)
 		}()
 	}

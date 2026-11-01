@@ -103,12 +103,12 @@ func TestGetAuthFileQuotaReportsClaudeOAuthWindows(t *testing.T) {
 		Metadata:   map[string]any{"access_token": "stray-token"},
 	})
 	registerAuthForLookupTest(t, manager, &coreauth.Auth{
-		ID:         "codex.json",
-		FileName:   "codex.json",
-		Provider:   "codex",
+		ID:         "gemini.json",
+		FileName:   "gemini.json",
+		Provider:   "gemini",
 		Status:     coreauth.StatusActive,
-		Attributes: map[string]string{"path": "/tmp/codex.json"},
-		Metadata:   map[string]any{"access_token": "codex-token"},
+		Attributes: map[string]string{"path": "/tmp/gemini.json"},
+		Metadata:   map[string]any{"access_token": "gemini-token"},
 	})
 	h := &Handler{authManager: manager}
 
