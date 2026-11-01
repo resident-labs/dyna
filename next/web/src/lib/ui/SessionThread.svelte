@@ -41,11 +41,16 @@
   let frameWidth = $state(0), currentTurn = $state<string | null>(null);
   let visibleTurns: string[] = $state([]);
   let minimapTurns = $derived(turns.map(turn => ({ id: turn.id, userText: turn.inputs?.[0]?.text ?? null, assistantText: turn.items?.findLast(item => item.kind === "text")?.text ?? null, visible: visibleTurns.includes(turn.id) })));
+  let positionFrame = 0;
   function updatePosition() {
+    if (positionFrame) return;
+    positionFrame = requestAnimationFrame(() => {
+    positionFrame = 0;
     const bounds = scroller.getBoundingClientRect();
     const visible = [...scroller.querySelectorAll<HTMLElement>("article[data-turn]")].filter(el => { const rect = el.getBoundingClientRect(); return rect.bottom > bounds.top && rect.top < bounds.bottom; });
-    visibleTurns = visible.map(el => el.dataset.turn!);
+    visibleTurns = visible.flatMap(el => el.dataset.turn ? [el.dataset.turn] : []);
     currentTurn = visibleTurns[0] ?? null;
+    });
   }
   let atBottom = $state(true);
   let loaded = $state(false);
@@ -88,6 +93,10 @@
     finally {
       loading = false;
       if (pending && !destroyed) { pending = false; void load(); }
+      else if (!failed && !destroyed && before) {
+        await tick();
+        if (!destroyed && !loading && scroller.scrollHeight <= scroller.clientHeight) void load(true);
+      }
     }
   }
   function markRead() {
@@ -98,7 +107,7 @@
     document.addEventListener("visibilitychange", markRead);
     const stop = watchTranscripts(id => { if (!id || id === session) void load(); });
     void load();
-    return () => { destroyed = true; stop(); document.removeEventListener("visibilitychange", markRead); };
+    return () => { destroyed = true; cancelAnimationFrame(positionFrame); stop(); document.removeEventListener("visibilitychange", markRead); };
   });
   const paging = new Set<string>();
   async function readContinuation(turn: TranscriptTurn, kind: "items" | "posts" | "older") {
@@ -186,7 +195,7 @@
 {/snippet}
 
 <div class="thread-frame" bind:clientWidth={frameWidth}>
-{#if frameWidth >= 880}<TimelineMinimap turns={minimapTurns} current={currentTurn} persistent={true} onselect={(id) => scroller.querySelector<HTMLElement>(`article[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" })} />{/if}
+{#if frameWidth >= 880}<TimelineMinimap turns={minimapTurns} current={currentTurn} onselect={(id) => scroller.querySelector<HTMLElement>(`article[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" })} />{/if}
 <div class="thread" bind:this={scroller} onscroll={() => { atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; updatePosition(); if (loaded && before && !loading && scroller.scrollTop < 100) void load(true); }}>
   <div class="body">
     {#each turns as turn (turn.id)}
@@ -202,9 +211,9 @@
         {#each deriveTimelineGroups(turn.items ?? []) as group (group.id)}
           {#if group.kind === "work"}
             {#if !turn.ended || expandedTurns[turn.id]}
-            <TranscriptWorkRow items={group.items} ended={!!turn.ended} started={turn.started} {now}
+            <TranscriptWorkRow items={group.items} ended={!!turn.ended} started={turn.started} {now} {chunks}
               onopen={() => { if (turn.olderItems) void readContinuation(turn, "older"); }}
-              onload={async (item, part) => { await fetchPart(turn.id, item.id, part); const value = chunks[item.id + "/" + part]; if (value === undefined) throw new Error("Part did not load"); return value; }} />
+              onload={async (item, part) => { await fetchPart(turn.id, item.id, part); const value = chunks[item.id + "/" + part]; if (value === undefined) throw new Error("Part did not load"); }} />
             {/if}
           {:else if group.kind === "posts"}
             {#each group.item.posts ?? [] as post (post.id)}
