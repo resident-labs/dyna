@@ -153,7 +153,8 @@
   .post { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr); column-gap: 16px; padding: 1px 16px; font-size: 15px; }
   /* The wash follows the pointer only; a tap or a closed menu leaves none behind. */
   @media (hover: hover) { .post:hover { background: var(--hover); } }
-  .mention { padding-top: 4px; padding-bottom: 4px; background: var(--mention-bg); box-shadow: inset 2px 0 var(--mention-bar); }
+  .mention { padding-top: 4px; padding-bottom: 4px; background: var(--mention-bg); }
+  .mention::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 2px; background: var(--mention-bar); }
   @media (hover: hover) { .post.mention:hover { background: linear-gradient(var(--hover), var(--hover)), var(--mention-bg); } }
   .post .follow-time { grid-column: 1; grid-row: 1; align-self: start; text-align: center; font-size: 11px; visibility: hidden; }
   @media (hover: hover) { .post:hover .follow-time { visibility: visible; } }
