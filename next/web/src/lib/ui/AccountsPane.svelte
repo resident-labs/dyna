@@ -2,7 +2,7 @@
   import { onMount, tick, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
   import { accountPath, accountRows, accountState, labelRefusal, providerGroup, reconnectPath, refused, reconnectUnavailable } from "../accounts.ts";
-  import { visibleWindows } from "../usage.ts";
+  import { balancesText, visibleWindows } from "../usage.ts";
   import type { Account, AccountProviderInfo, AccountUsage, AccountsConnectResponse, RoomSummary } from "../contract.gen.ts";
   import StatusPill from "./StatusPill.svelte";
   import Icon from "./Icon.svelte";
@@ -11,7 +11,7 @@
   let { bar, phone, signedout, path, navigate }: { bar: Snippet<[string, number | undefined, Snippet | undefined]>; phone: boolean; signedout: () => void; path: string; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void } = $props();
   let providers: AccountProviderInfo[] = $state([]), accounts: Account[] = $state([]), rooms: RoomSummary[] = $state([]), usage: AccountUsage[] = $state([]);
   let loaded = $state(false), quotaLoaded = $state(false), failed = $state(false), busy = $state(false);
-  let query = $state(""), expanded = $state(false), label = $state(""), secret = $state(""), redirect = $state("");
+  let query = $state(""), expanded = $state(false), label = $state(""), secret = $state(""), redirect = $state(""), useKey = $state(false);
   let attempt: AccountsConnectResponse | undefined = $state();
   let connectState: "idle" | "pending" | "failed" | "expired" = $state("idle");
   let error = $state(""), copied = $state(false), opened = $state(false), now = $state(Date.now());
@@ -24,6 +24,7 @@
   let adding = $derived(path === base + "/add" || path.startsWith(base + "/add/") || !!reconnecting);
   let providerId = $derived(reconnecting?.provider ?? (path.startsWith(base + "/add/") ? decodeURIComponent(path.slice((base + "/add/").length)) : ""));
   let selected = $derived(providers.find(p => p.id === providerId) ?? (!phone && adding && !providerId ? providers[0] : undefined));
+  let flow = $derived(useKey ? "key" : selected?.connectFlow);
   // A reconnect link for an account that is gone lands on the account view's "not found".
   let accountId = $derived(path.startsWith(accountPath("")) ? decodeURIComponent(path.slice(accountPath("").length)) : reconnecting ? "" : reconnectRoute);
   $effect(() => { if (reconnecting) label = reconnecting.label; });
@@ -35,7 +36,7 @@
   const groups = [{ flow: "callback", title: "Sign in with your plan" }, { flow: "device", title: "Sign in with a code" }, { flow: "key", title: "API key" }] as const;
   const providerPath = (id: string) => base + "/add/" + encodeURIComponent(id);
   function reset() {
-    generation++; clearTimeout(timer); attempt = undefined; connectState = "idle"; redirect = ""; secret = ""; error = ""; copied = false; opened = false;
+    generation++; clearTimeout(timer); attempt = undefined; connectState = "idle"; redirect = ""; secret = ""; error = ""; copied = false; opened = false; useKey = false;
   }
   function reload() {
     void call("accounts.list", {}).then(result => { providers = result.providers ?? []; accounts = result.accounts ?? []; loaded = true; failed = false; }, (e: unknown) => { if (e instanceof SignedOut) signedout(); else if (!loaded) failed = true; });
@@ -63,9 +64,9 @@
     if (!selected || busy) return;
     busy = true; error = ""; const ticket = ++generation;
     label = label.trim() || `${selected.displayName} account`;
-    const popup = selected.connectMethod === "oauth" ? window.open("", "_blank") : null;
+    const popup = flow !== "key" ? window.open("", "_blank") : null;
     if (popup) popup.opener = null;
-    if (selected.connectMethod === "key") {
+    if (flow === "key") {
       const key = secret; secret = "";
       await call("accounts.set_key", { provider: selected.id, label, key }).then(() => { if (ticket === generation) { reset(); reload(); document.getElementById("accounts-back")?.click(); } }, () => { if (ticket === generation) error = "Could not save the key. Try again."; });
     } else {
@@ -146,11 +147,11 @@
         <section class="card connect">
           <h2><span class="initial">{selected.displayName.slice(0, 1)}</span>{selected.displayName}{#if !attempt}<span class="muted">{accounts.filter(a => a.provider === selected.id).length} connected</span>{:else if !phone && attempt.flow === "callback"}<span class="muted">Sign in with your plan · Dyna sees your plan limits, not your chats</span>{/if}</h2>
           {#if !attempt}
-            <p><strong>{selected.connectFlow === "callback" ? "Sign in with your plan." : selected.connectFlow === "device" ? "Sign in with a code." : "API key."}</strong> {selected.connectFlow === "callback" ? `Use a ${selected.displayName} plan you already pay for. Dyna shows its usage limits when available.` : selected.connectFlow === "device" ? "Dyna shows a short code here. You enter it on the provider’s page, and Dyna finishes by itself." : "You paste a key once. It stays where Dyna runs, and Dyna never shows it again."}</p>
-            <p class="muted">Dyna keeps the sign-in where Dyna runs and sends it only to {selected.displayName}.{#if selected.connectFlow === "callback"}{" "}It sees your plan limits, not your chats.{/if}</p>
+            <p><strong>{flow === "callback" ? "Sign in with your plan." : flow === "device" ? "Sign in with a code." : "API key."}</strong> {flow === "callback" ? `Use a ${selected.displayName} plan you already pay for. Dyna shows its usage limits when available.` : flow === "device" ? "Dyna shows a short code here. You enter it on the provider’s page, and Dyna finishes by itself." : "You paste a key once. It stays where Dyna runs, and Dyna never shows it again."}</p>
+            <p class="muted">Dyna keeps the sign-in where Dyna runs and sends it only to {selected.displayName}.{#if flow === "callback"}{" "}It sees your plan limits, not your chats.{/if}</p>
             <label class="label-field">Label <input bind:value={label} placeholder="Work, Personal, …" disabled={busy || !!reconnecting} /></label>
-            {#if selected.connectFlow === "key"}<label>API key <input type="password" bind:value={secret} autocomplete="off" disabled={busy} /></label>{/if}
-            <div class="start-actions"><button class="btn fill" type="button" disabled={busy || (selected.connectFlow === "key" && !secret.trim())} onclick={() => void start()}>{selected.connectFlow === "callback" ? `Sign in with ${selected.displayName}` : selected.connectFlow === "device" ? "Get a code" : "Save key"}</button>{#if selected.connectFlow === "key"}<a class="btn" href={base + "/add"} onclick={navigate}>Cancel</a>{/if}</div>
+            {#if flow === "key"}<label>API key <input type="password" bind:value={secret} autocomplete="off" disabled={busy} /></label>{/if}
+            <div class="start-actions"><button class="btn fill" type="button" disabled={busy || (flow === "key" && !secret.trim())} onclick={() => void start()}>{flow === "callback" ? `Sign in with ${selected.displayName}` : flow === "device" ? "Get a code" : "Save key"}</button>{#if selected.alsoKey && !reconnecting}<button class="btn" type="button" disabled={busy} onclick={() => { useKey = !useKey; secret = ""; }}>{useKey ? "Sign in instead" : "Use an API key"}</button>{/if}{#if flow === "key"}<a class="btn" href={base + "/add"} onclick={navigate}>Cancel</a>{/if}</div>
           {:else}
             <label class="label-field">Label <input value={label} disabled /></label>
             {#if attempt.flow === "device"}
@@ -187,7 +188,8 @@
       {#if labelError}<p role="alert">{labelError}</p>{/if}
       <p class="muted">{accountProvider.displayName}{#if accountUsage?.observedAt}{" · "}usage at {new Date(accountUsage.observedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}{/if}</p>
       <h2>Usage</h2>
-      {#if accountUsage && visibleWindows(accountUsage.windows ?? []).length}<div class="meters">{#each visibleWindows(accountUsage.windows ?? []) as window (window.name)}<AccountMeter {window} now={Date.now()} />{/each}</div>{:else}<p class="muted">No usage limits reported.</p>{/if}
+      {#if accountUsage && visibleWindows(accountUsage.windows ?? []).length}<div class="meters">{#each visibleWindows(accountUsage.windows ?? []) as window (window.name)}<AccountMeter {window} now={Date.now()} />{/each}</div>{:else if !accountUsage?.balances?.length}<p class="muted">No usage limits reported.</p>{/if}
+      {#if accountUsage?.balances?.length}<p class="muted">Balance {balancesText(accountUsage.balances)}</p>{/if}
       <h2>Rooms</h2>
       <p><label><input type="radio" name="room-scope" checked={!account.rooms?.length} disabled={busy} onchange={() => void setRooms(account, [])} /> Every room</label> <label><input type="radio" name="room-scope" checked={!!account.rooms?.length} disabled={busy || !rooms.length} onchange={() => void setRooms(account, [rooms[0].id])} /> Only these rooms</label></p>
       {#if account.rooms?.length}{#each rooms as room (room.id)}<label><input type="checkbox" checked={account.rooms.includes(room.id)} disabled={busy || (account.rooms.length === 1 && account.rooms.includes(room.id))} onchange={(e) => void setRooms(account, e.currentTarget.checked ? [...(account.rooms ?? []), room.id] : (account.rooms ?? []).filter(id => id !== room.id))} /> {room.name}</label>{/each}{/if}
@@ -205,7 +207,7 @@
       <div class="list">{#each group as item, index (item.id)}
         {@const status = accountState(item)}
         {@const rowUsage = usage.find(u => u.accountId === item.id)}
-        <div class="account-row"><a class="row" href={accountPath(item.id)} onclick={navigate}><div><strong>{item.label || `${provider.displayName} account ${index + 1}`}</strong>{#if status.pill}{" "}<StatusPill tone={status.pill.tone} label={status.pill.label} />{/if}<div class="muted">{item.rooms?.length ? `${item.rooms.length} rooms` : "Every room"}{#if status.line}{" · "}{status.line}{/if}{#if rowUsage?.observedAt}{" · "}usage at {new Date(rowUsage.observedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}{/if}</div></div>{#if rowUsage && !rowUsage.cause && visibleWindows(rowUsage.windows ?? []).length}<div class="row-meters">{#each visibleWindows(rowUsage.windows ?? []) as window (window.name)}<AccountMeter {window} now={Date.now()} />{/each}</div>{:else if item.state !== "sign_in_expired"}<span class="muted no-usage">No usage data for this provider yet.</span>{/if}</a>{#if item.state === "sign_in_expired" && provider.connectMethod === "oauth"}<div class="retry"><a class="btn fill" href={reconnectPath(item.id)} onclick={navigate}>Sign in again</a><span class="muted">Its limits show once it is signed in.</span></div>{/if}<a class="chevron" href={accountPath(item.id)} onclick={navigate} aria-label={`View ${item.label}`}>›</a></div>
+        <div class="account-row"><a class="row" href={accountPath(item.id)} onclick={navigate}><div><strong>{item.label || `${provider.displayName} account ${index + 1}`}</strong>{#if status.pill}{" "}<StatusPill tone={status.pill.tone} label={status.pill.label} />{/if}<div class="muted">{item.rooms?.length ? `${item.rooms.length} rooms` : "Every room"}{#if status.line}{" · "}{status.line}{/if}{#if rowUsage?.observedAt}{" · "}usage at {new Date(rowUsage.observedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}{/if}</div></div>{#if rowUsage && !rowUsage.cause && visibleWindows(rowUsage.windows ?? []).length}<div class="row-meters">{#each visibleWindows(rowUsage.windows ?? []) as window (window.name)}<AccountMeter {window} now={Date.now()} />{/each}</div>{:else if rowUsage?.balances?.length}<span class="muted no-usage">{balancesText(rowUsage.balances)}</span>{:else if item.state !== "sign_in_expired"}<span class="muted no-usage">No usage data for this provider yet.</span>{/if}</a>{#if item.state === "sign_in_expired" && provider.connectMethod === "oauth"}<div class="retry"><a class="btn fill" href={reconnectPath(item.id)} onclick={navigate}>Sign in again</a><span class="muted">Its limits show once it is signed in.</span></div>{/if}<a class="chevron" href={accountPath(item.id)} onclick={navigate} aria-label={`View ${item.label}`}>›</a></div>
       {/each}</div>
     </section>
   {/each}

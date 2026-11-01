@@ -1,4 +1,4 @@
-import type { AccountProviderInfo, AccountUsage, AccountsListResponse, UsageWindow } from "./contract.gen.ts";
+import type { AccountProviderInfo, AccountUsage, AccountsListResponse, UsageBalance, UsageWindow } from "./contract.gen.ts";
 import type { Meter } from "./hosts.ts";
 
 const count = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
@@ -31,20 +31,25 @@ function named(account: AccountUsage, catalog?: AccountsListResponse) {
   return { title: account.label || name || "Model account", provider: name && account.label && addsToLabel(account.label, name) ? name : undefined, info };
 }
 
-export type UsageRow = { title: string; provider?: string; windows: UsageWindow[] };
+export type UsageRow = { title: string; provider?: string; windows: UsageWindow[]; balances: UsageBalance[] };
 
 // The accounts that report usage, highest figure first, then by name, so the order holds between loads.
-// An expired sign-in is an alert instead. Any other account without windows says nothing, so it is left out, whatever
-// its cause: rate limits and failed readings pass by themselves.
+// An expired sign-in is an alert instead. Any other account without windows or a balance says nothing, so it is left
+// out, whatever its cause: rate limits and failed readings pass by themselves.
 export function usageRows(accounts: AccountUsage[], catalog?: AccountsListResponse): UsageRow[] {
-  const peak = (row: UsageRow) => Math.max(...row.windows.map(usedOf));
+  const peak = (row: UsageRow) => Math.max(-1, ...row.windows.map(usedOf));
   return accounts.flatMap(account => {
-    const windows = account.cause === "sign_in_expired" ? [] : visibleWindows(account.windows ?? []);
-    if (!windows.length) return [];
+    const expired = account.cause === "sign_in_expired";
+    const windows = expired ? [] : visibleWindows(account.windows ?? []);
+    const balances = expired ? [] : account.balances ?? [];
+    if (!windows.length && !balances.length) return [];
     const { title, provider } = named(account, catalog);
-    return [{ title, provider, windows }];
+    return [{ title, provider, windows, balances }];
   }).sort((a, b) => peak(b) - peak(a) || a.title.localeCompare(b.title));
 }
+
+// Prepaid balances as text, such as "110.00 CNY · 3.50 USD". They are not limits, so they get no meter.
+export const balancesText = (balances: readonly UsageBalance[]) => balances.map(b => `${b.amount} ${b.currency}`).join(" · ");
 
 export type AccountAlert = { id: string; title: string; provider?: string; reconnect: boolean };
 
@@ -59,7 +64,7 @@ export function accountAlerts(accounts: AccountUsage[], catalog?: AccountsListRe
 }
 
 // The busiest window by account, such as "pipsqueak.tasks · 5-hour 62% used"; none without one.
-export function busiestWindow(rows: UsageRow[]): string | undefined {
+export function busiestWindow(rows: Pick<UsageRow, "title" | "windows">[]): string | undefined {
   const windows = rows.flatMap(({ title, windows }) => windows.map(w => ({ title, w })));
   const top = windows.reduce<(typeof windows)[number] | undefined>((max, next) => !max || next.w.usedPercent > max.w.usedPercent ? next : max, undefined);
   if (!top) return undefined;
@@ -78,7 +83,7 @@ function until(at: string, now: number): string | undefined {
 
 // A typed kind names the period; a model-specific limit names its model too.
 export function windowLabel(w: UsageWindow): string {
-  const period = w.kind === "five_hour" ? "5-hour" : w.kind === "weekly" ? "Weekly" : w.seconds > 0 ? span(w.seconds) : "Usage";
+  const period = w.kind === "five_hour" ? "5-hour" : w.kind === "weekly" ? "Weekly" : w.kind === "monthly" ? "Monthly" : w.seconds > 0 ? span(w.seconds) : "Usage";
   return w.model ? `${period} · ${w.model}` : period;
 }
 

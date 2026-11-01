@@ -10,6 +10,11 @@ type KeyProvider struct {
 	Models      []string
 }
 
+// MetaKeyModel proves a Meta key reached the proxy's own Meta catalog. Meta keys run
+// on that native executor, not as an OpenAI-compatible upstream, so they stay out of
+// KeyProviders.
+const MetaKeyModel = "muse-wonder-full-1.0"
+
 // KeyProviders is the supported key catalog. Endpoints are provider documentation URLs.
 func KeyProviders() []KeyProvider {
 	return []KeyProvider{

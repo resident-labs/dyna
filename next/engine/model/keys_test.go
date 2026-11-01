@@ -147,11 +147,19 @@ func TestKeyProvidersBindOnlyDurableCredentials(t *testing.T) {
 	defer st.Close()
 	ctx := context.Background()
 	var lastID string
+	activated := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer invented-management-key" {
 			t.Error("missing proxy authentication")
 		}
 		if r.URL.Path == "/dyna/credentials/activate" {
+			var input struct {
+				Model string `json:"model"`
+			}
+			if json.NewDecoder(r.Body).Decode(&input) != nil {
+				t.Error("invalid activation")
+			}
+			activated = activated || input.Model == MetaKeyModel
 			_, _ = w.Write([]byte("{}"))
 			return
 		}
@@ -172,10 +180,17 @@ func TestKeyProvidersBindOnlyDurableCredentials(t *testing.T) {
 	defer server.Close()
 	p := &Proxy{client: &http.Client{Transport: quotaTestTransport{url: server.URL, base: http.DefaultTransport}}}
 	c := p.Connections("invented-management-key", st, time.Now)
+	providers := []contract.AccountProvider{contract.ProviderMeta}
 	for _, provider := range KeyProviders() {
-		response, err := c.SetKey(ctx, contract.AccountsSetKeyRequest{Provider: provider.Provider, Label: "Invented", Key: "invented-key"})
+		providers = append(providers, provider.Provider)
+	}
+	for _, provider := range providers {
+		response, err := c.SetKey(ctx, contract.AccountsSetKeyRequest{Provider: provider, Label: "Invented", Key: "invented-key"})
 		if err != nil || response.AccountID == "" || string(response.AccountID) == lastID {
 			t.Fatal("key was not bound privately")
 		}
+	}
+	if !activated {
+		t.Fatal("no Meta key activation named its model")
 	}
 }

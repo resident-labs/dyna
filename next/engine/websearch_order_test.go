@@ -101,3 +101,32 @@ func TestSearchAccountsUsesEligibleHeadroom(t *testing.T) {
 		t.Fatalf("reason %q", reason)
 	}
 }
+
+func TestSearchAccountsIgnoresFailedUsageReadsOutsideClaude(t *testing.T) {
+	accounts := []store.AccountBinding{{ProxyID: "kimi", Account: contract.Account{ID: "a", Provider: contract.ProviderKimi}}}
+	for _, cause := range []contract.UsageCause{contract.UsageUnreachable, contract.UsageRateLimited} {
+		cached := func(contract.AccountID) (contract.AccountUsage, bool) {
+			return contract.AccountUsage{Cause: cause}, true
+		}
+		if ids, headroom, reason := searchAccounts(accounts, []string{"kimi"}, contract.ProviderKimi, cached); len(ids) != 1 || headroom != -1 || reason != "" {
+			t.Fatalf("%s: %v %v %q", cause, ids, headroom, reason)
+		}
+	}
+	claude := []store.AccountBinding{{ProxyID: "claude", Account: contract.Account{ID: "a", Provider: contract.ProviderAnthropic}}}
+	cached := func(contract.AccountID) (contract.AccountUsage, bool) {
+		return contract.AccountUsage{Cause: contract.UsageUnreachable}, true
+	}
+	if _, _, reason := searchAccounts(claude, []string{"claude"}, contract.ProviderAnthropic, cached); reason != contract.WebSearchFailed {
+		t.Fatalf("reason %q", reason)
+	}
+}
+
+func TestSearchAccountsIgnoresModelLimitsOutsideClaude(t *testing.T) {
+	accounts := []store.AccountBinding{{ProxyID: "codex", Account: contract.Account{ID: "a", Provider: contract.ProviderOpenAI}}}
+	cached := func(contract.AccountID) (contract.AccountUsage, bool) {
+		return contract.AccountUsage{Windows: []contract.UsageWindow{{UsedPercent: 20}, {Model: "Spark", UsedPercent: 100}}}, true
+	}
+	if ids, headroom, reason := searchAccounts(accounts, []string{"codex"}, contract.ProviderOpenAI, cached); len(ids) != 1 || headroom != 80 || reason != "" {
+		t.Fatalf("%v %v %q", ids, headroom, reason)
+	}
+}
