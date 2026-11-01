@@ -48,7 +48,7 @@
 {:else}
   {@render bar("Profiles", loaded ? profiles.length : undefined, action)}
 {/if}
-<div class="content">
+<div class="content" data-page-ready={loaded}>
   {#if phone && creating}
     <ProfileEditor profile={blank} isNew={true} {busy} {error} {save} cancel={close} remove={() => {}} />
   {:else if phone && editing}
