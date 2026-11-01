@@ -70,7 +70,10 @@ needs a second scale set, which is not built.
   still gets a runner. To stop every job, use `--mode github`.
 - **Remove the pool:** `dyna room repo ci resident-labs/dyna --mode github`. The
   next tick kills that repository's runners, even mid-job, and deletes its scale
-  set and registrations. The host's proxy goes with its last runner.
+  set and registrations. The host's proxy goes with its last runner. On pve that
+  took under a minute. GitHub still shows a killed job in progress for about 11
+  minutes, then ends it. A queued job has nothing left to serve it, so it waits for
+  `pool-watch`, or cancel it by hand.
 - **Revoke:** do both, then rotate the engine's `GH_TOKEN`. The repository's
   Settings > Actions > Runners page shows whatever is left, and each entry there
   can be removed by hand. A JIT config is good for one job on one runner, so there
