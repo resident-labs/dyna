@@ -66,7 +66,7 @@
     </div>
     {#if failure}<p class="error" role="alert">{failure}</p>{/if}
     <div class="actions">
-      <button class="primary" type="submit" disabled={busy || (!created && (!profile || !!problem))}>{busy ? "Saving…" : created ? "Retry repository" : "Create room"} <kbd>Ctrl Enter</kbd></button>
+      <button class="primary" type="submit" aria-keyshortcuts="Control+Enter Meta+Enter" disabled={busy || (!created && (!profile || !!problem))}>{busy ? "Saving…" : created ? "Retry repository" : "Create room"}</button>
       {#if created}<button type="button" class="quiet" disabled={busy} onclick={() => oncreated(created)}>Open room</button>
       {:else if !first}<button type="button" class="quiet" disabled={busy} onclick={onclose}>Cancel</button>{/if}
     </div>
@@ -93,7 +93,5 @@
   .quiet { background: transparent; color: var(--muted); }
   .quiet:hover { background: var(--hover); color: var(--text); }
   .retry { min-height: 0; padding: 0; background: none; color: inherit; text-decoration: underline; }
-  kbd { margin-left: 7px; font: inherit; font-size: 11px; opacity: .75; }
-  @media (pointer: coarse) { kbd { display: none; } }
   @media (max-width: 640px) { .page { padding: 24px 16px; } button { min-height: 44px; } }
 </style>
