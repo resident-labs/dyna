@@ -7,6 +7,7 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 )
 
 func testPlanModels() map[contract.AccountProvider][]contract.CatalogModel {
@@ -32,7 +33,37 @@ func TestPinnedPlanCatalogDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := &Proxy{}
+	keys := catalog.KeyProviders()
+	p, err := NewProxy(t.TempDir(), "fixture", keys...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Listener.Close()
+	cfg, err := config.LoadConfig(p.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range keys {
+		var registered []config.OpenAICompatibilityModel
+		for _, entry := range cfg.OpenAICompatibility {
+			if entry.Name == string(key.Provider) {
+				registered = entry.Models
+				break
+			}
+		}
+		for _, model := range key.Models {
+			found := false
+			for _, item := range registered {
+				if item.Name == model.ID && item.Alias == model.ID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("%s/%s has no proxy key registration", key.Provider, model.ID)
+			}
+		}
+	}
 	if err := p.SetPlanModels(catalog); err != nil {
 		t.Fatal(err)
 	}
