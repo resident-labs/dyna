@@ -141,3 +141,30 @@ func TestUpgradeDropsRules(t *testing.T) {
 		}
 	}
 }
+
+func TestPermanentHostexecGrantMigration(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, err = db.Exec(`CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO meta VALUES('schema_version','53');
+ CREATE TABLE grants(id TEXT,kind TEXT,expires_at INTEGER,revoked_at INTEGER,expired_at INTEGER);
+ INSERT INTO grants VALUES('active','hostexec',4102444800000,NULL,NULL),('past','hostexec',1,NULL,NULL),('revoked','hostexec',4102444800000,1,NULL);
+ CREATE TABLE operations(kind TEXT,state TEXT,args BLOB);
+ INSERT INTO operations VALUES('hostexec.grant','pending','{"expires":"future","never":false,"reason":"x"}');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := upgrade(db, 1, "", steps, nil); err != nil {
+		t.Fatal(err)
+	}
+	var active, past, revoked int
+	if err := db.QueryRow(`SELECT sum(id='active' AND expires_at IS NULL),sum(id='past' AND expired_at=1),sum(id='revoked' AND expires_at IS NOT NULL) FROM grants`).Scan(&active, &past, &revoked); err != nil || active != 1 || past != 1 || revoked != 1 {
+		t.Fatalf("grants: %d %d %d: %v", active, past, revoked, err)
+	}
+	var state, args string
+	if err := db.QueryRow(`SELECT state,args FROM operations`).Scan(&state, &args); err != nil || state != "expired" || args != `{"reason":"x"}` {
+		t.Fatalf("operation %q %q: %v", state, args, err)
+	}
+}

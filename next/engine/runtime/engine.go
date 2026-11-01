@@ -355,9 +355,6 @@ func Run(ctx context.Context, cfg Config) error {
 			if err := service.ExpireOperations(ctx); err != nil {
 				log.Printf("operation expiry sweep: %v", err)
 			}
-			if err := service.ExpireHostexecGrants(ctx); err != nil {
-				log.Printf("grant expiry sweep: %v", err)
-			}
 			if err := service.StopHostexecs(ctx); err != nil {
 				log.Printf("hostexec stop sweep: %v", err)
 			}
