@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/engine/websearch"
@@ -29,6 +30,47 @@ func BenchmarkWebSearchOrderToFirstProvider(b *testing.B) {
 	for b.Loop() {
 		_, headroom, _ := searchAccounts(accounts, eligible, contract.ProviderOpenAI, cached)
 		candidates := []searchCandidate{{provider: benchmarkSearchProvider("codex"), headroom: headroom}, {provider: benchmarkSearchProvider("claude")}, {provider: benchmarkSearchProvider("brave")}}
+		service.orderSearchCandidates("room", candidates, nil)
+		_, _ = candidates[0].provider.Search(ctx, websearch.Query{Text: "query"})
+	}
+}
+
+func BenchmarkWebSearchOrderWithStore(b *testing.B) {
+	st, err := store.Open(b.TempDir())
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	if err := st.SetSearchKey(ctx, "brave", "benchmark-key"); err != nil {
+		b.Fatal(err)
+	}
+	if err := st.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT INTO accounts(id,proxy_id,provider,label) VALUES('account','proxy','openai','benchmark')")
+		return err
+	}); err != nil {
+		b.Fatal(err)
+	}
+	now := time.Unix(1000, 0)
+	service := &Service{now: func() time.Time { return now }}
+	cached := func(contract.AccountID) (contract.AccountUsage, bool) { return contract.AccountUsage{}, false }
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		accounts, err := st.Accounts(ctx)
+		if err != nil {
+			b.Fatal(err)
+		}
+		eligible, err := st.EligibleAccountProxyIDs(ctx, "room")
+		if err != nil {
+			b.Fatal(err)
+		}
+		_, err = st.SearchKey(ctx, "brave")
+		if err != nil {
+			b.Fatal(err)
+		}
+		_, headroom, _ := searchAccounts(accounts, eligible, contract.ProviderOpenAI, cached)
+		candidates := []searchCandidate{{provider: benchmarkSearchProvider("chatgpt"), headroom: headroom}, {provider: benchmarkSearchProvider("brave")}}
 		service.orderSearchCandidates("room", candidates, nil)
 		_, _ = candidates[0].provider.Search(ctx, websearch.Query{Text: "query"})
 	}
