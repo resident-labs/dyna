@@ -29,6 +29,8 @@ Each later patch to this folder must be its own commit. Each patch must add an e
 
 - Request-scoped credential eligibility: the engine sends encoded bound credential IDs over its private proxy socket; the handler removes the header and captures the set in context. Local selection, affinity and retries must stay within that set. The 2026-10-31 upstream search found issue [#6972](https://github.com/router-for-me/CLIProxyAPI/issues/6972) for external single-ID dispatch and PR [#5660](https://github.com/router-for-me/CLIProxyAPI/pull/5660) for provider prefixes, but neither implements a request-local multi-credential allowlist.
 
+- OpenCode Go session forwarding adapts upstream PR [#5833](https://github.com/router-for-me/CLIProxyAPI/pull/5833), head `6adf6ea6008c8fdbc934139d743ab030d0af55d2`, for the OpenAI-compatible executor. It uses the canonical session identity on streaming and non-streaming requests, without leaking it to unrelated providers. Drop this patch when upstream includes it.
+
 ## Update
 
 Run this command from the Dyna repository root, replacing `<tag>` with the new upstream tag:

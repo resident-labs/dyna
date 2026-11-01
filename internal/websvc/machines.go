@@ -179,6 +179,9 @@ func (a MachineAPI) SaveNode(ctx context.Context, ref string, patch MachinePatch
 
 // applyMachinePatch writes the fields the patch names.
 func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
+	if patch.WakeCommand != nil {
+		m.WakeCommand = slices.Clone(*patch.WakeCommand)
+	}
 	if patch.Name != nil {
 		name := strings.TrimSpace(*patch.Name)
 		if err := machines.ValidateName(name); err != nil {

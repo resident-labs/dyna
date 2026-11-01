@@ -55,8 +55,11 @@ func (s *Service) Terminal(ctx context.Context, session contract.SessionID, host
 			return nil, release, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
 		}
 		host, id = current.Host, current.ID
-		handle, ok := s.live.CreateSession(session)
-		if !ok || !handle.OpenTerminal() {
+		handle, problem := s.createSession(ctx, session)
+		if problem != nil {
+			return nil, release, problem
+		}
+		if !handle.OpenTerminal() {
 			return nil, release, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 		}
 		release = handle.CloseTerminal

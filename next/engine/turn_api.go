@@ -132,8 +132,11 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return contract.TurnActivityResponse{}, failure(err)
 	}
-	handle, ok := s.live.CreateSession(session.ID)
-	if !ok || !handle.PublishActivity(session.Room, body, event) {
+	handle, problem := s.createSession(ctx, session.ID)
+	if problem != nil {
+		return contract.TurnActivityResponse{}, problem
+	}
+	if !handle.PublishActivity(session.Room, body, event) {
 		return contract.TurnActivityResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 	}
 	return contract.TurnActivityResponse{}, nil
