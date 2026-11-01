@@ -2,7 +2,7 @@
 # Shared CI commands. Reports live outside the checkout.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-suite=${1:?usage: scripts/ci.sh relay|frontend|pi|go|next|cross-build|android [phase]}
+suite=${1:?usage: scripts/ci.sh relay|frontend|pi|go|next|next-extras|cross-build|android [phase]}
 phase=${2:-all}
 export RUNNER_TEMP=${RUNNER_TEMP:-${TMPDIR:-/tmp}}
 # web/embed.go embeds all:dist, but only the frontend suite builds it. Every
@@ -123,8 +123,12 @@ case "$suite" in
       go test -count=1 -timeout 3m ./...
       # Join the vendored management handler and engine over private RPC.
       go test -count=1 -tags=dyna_integration ./engine/model -run '^TestKimiCompletionBindsAcrossProxyNotification$'
-      (cd third_party/cliproxyapi && go test -count=1 ./internal/api/handlers/management -run '^TestDyna(KimiOAuthCompletesAfterAdoption|CompletionRejectsDifferentRuntimeGrant|CompletionRejectsEnabledRuntimeGrant)$')
     )
+    ;;
+  next-extras)
+    # The vendored CLIProxyAPI management test and the dyna-export tool are separate Go modules.
+    # They run as their own check, in parallel with next, to keep the next job under its budget.
+    (cd next/third_party/cliproxyapi && go test -count=1 ./internal/api/handlers/management -run '^TestDyna(KimiOAuthCompletesAfterAdoption|CompletionRejectsDifferentRuntimeGrant|CompletionRejectsEnabledRuntimeGrant)$')
     (cd cmd/dyna-export && go vet ./... && go test -count=1 ./...)
     ;;
   next-pi)

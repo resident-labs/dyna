@@ -184,6 +184,19 @@ checks:
       GOFLAGS: -p=2
     reports: none
 
+  # The vendored CLIProxyAPI test and dyna-export run as their own check, as in the hosted next-extras job.
+  - id: next-extras
+    name: next-extras
+    image: golang:1.26.10
+    hostUser: true
+    command: bash scripts/ci.sh next-extras
+    caches: [go-build, go-mod]
+    env:
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: 3GiB
+      GOFLAGS: -p=2
+    reports: none
+
   # Run real OpenSSH in an isolated container with a key-only test account.
   - id: next-ssh
     image: golang:1.26.10
@@ -442,7 +455,7 @@ suites:
 
   - id: next
     files: ['(\.go$|^internal/|^next/|^go\.(mod|sum)$|^tygo\.yaml$|^tygo/.*\.yaml$|^desktop/|^web/|^install\.sh$|^\.github/|^scripts/ci\.sh$)']
-    checks: [next, next-ssh]
+    checks: [next, next-ssh, next-extras]
 
   - id: next-pi
     files: ['^next/third_party/pi/|^scripts/ci-changes\.sh$|^scripts/ci\.sh$|^\.github/']
