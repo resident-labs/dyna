@@ -190,19 +190,34 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 
 ### 4.3 Data on disk
 
-A room's data is one folder on each side, so deleting a room removes one folder per machine. `box.Layout` names these paths; no other code spells them.
+`box.Layout` names every path of Dyna's data on both sides. No other code spells them, and a test refuses a data folder joined anywhere else. A room's data is one folder on each side, so deleting a room removes one folder per machine.
 
 ```text
-<data>/AGENTS.md                                global instructions
 <data>/rooms/<room>/AGENTS.md                   room instructions
 <data>/rooms/<room>/files/<sha256>              attachments and large outputs
 <data>/rooms/<room>/transcripts/<session>/      transcript copies
-<hostdata>/instructions/global/AGENTS.md        the global copy a box mounts
 <hostdata>/rooms/<room>/instructions/AGENTS.md  the room copy a box mounts
 <hostdata>/rooms/<room>/shared/                 /box/shared
 ```
 
-Everything else stays where its role puts it: `store.db`, `backups/`, `archive/`, `cliproxy/`, `connect/` and `git/` under `<data>`, and `bin/`, `cache/`, `git/` and `sock/` under `<hostdata>`.
+Everything else belongs to no single room:
+
+```text
+<data>/AGENTS.md                                global instructions
+<data>/store.db, <data>/store.lock              the store and its lock
+<data>/backups/                                 local copies of the store
+<data>/archive/                                 the read-only v1 archive
+<data>/connect/                                 Connect credentials
+<data>/cliproxy/, <data>/cliproxy/auth-v2/      the model proxy and its sign-in folder
+<data>/git/<owner>/<repo>.git                   repository mirrors
+<hostdata>/instructions/global/AGENTS.md        the global copy a box mounts
+<hostdata>/git/<owner>/<repo>.git               repository caches
+<hostdata>/bin/<version>/dyna                   engine binaries, with a current link
+<hostdata>/cache/                               dependency caches
+<hostdata>/sock/<box>/engine.sock               a box's forwarded socket
+```
+
+Mirrors and caches are named by repository, and rooms share them, so deleting a room leaves them. Dependency caches are shared across a host. A box's socket goes with its box. Box volumes are Podman's.
 
 Blobs are per room. A blob's name is its hash and its bytes never change, so each room that uses one holds its own hard link, with no reference counts: removing a room's folder cannot break another room. Every upload names a room. A session's room comes from its socket and the owner gives one in the query. A blob in the folder is what lets a post use it, so no table records uploads. When the owner forwards a post, the engine links each blob into the target room before the post commits. Sessions cannot reach another room's blobs. `event_files` joined to `events` gives the room of every stored reference: the owner reads a hash through its newest reference in a room that is not being deleted.
 

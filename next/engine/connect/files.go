@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/resident-labs/dyna/box"
 )
 
 type Link struct {
@@ -27,7 +29,7 @@ type Files struct {
 }
 
 func OpenFiles(data string) (*Files, error) {
-	dir := filepath.Join(data, "connect")
+	dir := box.Layout{Data: data}.Connect()
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}

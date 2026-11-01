@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/resident-labs/dyna/box"
 )
 
 type fakeRunner struct {
@@ -44,7 +46,7 @@ func (r *fakeRunner) Run(_ context.Context, _ []string, args ...string) ([]byte,
 
 func TestDeleteArchiveRefUsesLease(t *testing.T) {
 	r := &fakeRunner{remote: "abc\trefs/dyna/archive/s\n"}
-	m := &Mirror{Data: t.TempDir(), Token: "secret", Runner: r}
+	m := &Mirror{Layout: box.Layout{Data: t.TempDir(), HostData: "/host"}, Token: "secret", Runner: r}
 	if err := m.DeleteArchiveRef(context.Background(), "owner/repo", "refs/dyna/archive/s", "abc"); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +69,7 @@ type fakeCache struct {
 	refs   []string
 }
 
-func (c *fakeCache) PushCache(_ context.Context, mirror, _, _ string, refs []string) error {
+func (c *fakeCache) PushCache(_ context.Context, mirror, _ string, refs []string) error {
 	c.called = true
 	c.mirror = mirror
 	c.refs = refs
@@ -77,8 +79,8 @@ func TestPrepareFetchesBeforePushingCache(t *testing.T) {
 	r := &fakeRunner{}
 	c := &fakeCache{}
 	dir := t.TempDir()
-	m := &Mirror{Data: dir, Token: "secret", Runner: r}
-	result, err := m.Prepare(context.Background(), c, "/host", "owner/repo", "ses_1", true)
+	m := &Mirror{Layout: box.Layout{Data: dir, HostData: "/host"}, Token: "secret", Runner: r}
+	result, err := m.Prepare(context.Background(), c, "owner/repo", "ses_1", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,8 +99,8 @@ func TestPrepareRefreshesDefaultBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := &fakeRunner{}
-	m := &Mirror{Data: dir, Token: "secret", Runner: r}
-	result, err := m.Prepare(context.Background(), &fakeCache{}, "/host", "owner/repo", "ses_1", true)
+	m := &Mirror{Layout: box.Layout{Data: dir, HostData: "/host"}, Token: "secret", Runner: r}
+	result, err := m.Prepare(context.Background(), &fakeCache{}, "owner/repo", "ses_1", true)
 	if err != nil || result.Base != "new-default" {
 		t.Fatalf("base %q, error %v", result.Base, err)
 	}
@@ -127,8 +129,8 @@ func TestRefReadsTheRequestedRemoteReference(t *testing.T) {
 }
 
 func TestPrepareRejectsMissingToken(t *testing.T) {
-	m := &Mirror{Data: t.TempDir(), Runner: &fakeRunner{}}
-	_, err := m.Prepare(context.Background(), &fakeCache{}, "/host", "owner/repo", "ses_1", true)
+	m := &Mirror{Layout: box.Layout{Data: t.TempDir(), HostData: "/host"}, Runner: &fakeRunner{}}
+	_, err := m.Prepare(context.Background(), &fakeCache{}, "owner/repo", "ses_1", true)
 	var missing MissingTokenError
 	if !errors.As(err, &missing) {
 		t.Fatalf("expected missing-token error, got %v", err)
@@ -138,8 +140,8 @@ func TestPrepareRejectsMissingToken(t *testing.T) {
 func TestPrepareDoesNotPushWhenCloneFails(t *testing.T) {
 	r := &fakeRunner{fail: "clone"}
 	c := &fakeCache{}
-	m := &Mirror{Data: t.TempDir(), Token: "secret", Runner: r}
-	_, err := m.Prepare(context.Background(), c, "/host", "owner/repo", "ses_1", true)
+	m := &Mirror{Layout: box.Layout{Data: t.TempDir(), HostData: "/host"}, Token: "secret", Runner: r}
+	_, err := m.Prepare(context.Background(), c, "owner/repo", "ses_1", true)
 	if err == nil || c.called {
 		t.Fatalf("error %v, cache called %v", err, c.called)
 	}
