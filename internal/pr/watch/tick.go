@@ -307,19 +307,7 @@ func (s *Service) Tick(ctx context.Context) (time.Time, error) {
 	if !next.IsZero() && fresh.LegacyPause.After(next) {
 		next = fresh.LegacyPause
 	}
-	for _, key := range keys {
-		if ctx.Err() != nil {
-			return retry(errors.Join(first, ctx.Err()))
-		}
-		if !shouldRefreshUnwatched(st, st.Records[key], s.now(), false) {
-			continue
-		}
-		recordCtx, stop := context.WithTimeout(ctx, s.recordBudget())
-		started := time.Now()
-		remember(s.refreshUnwatched(recordCtx, key, false, pauses))
-		stop()
-		slog.Debug("PR watcher phase", "key", key, "phase", "unwatched", "duration", time.Since(started))
-	}
+	remember(s.refreshUnwatchedBatch(ctx, st, keys, pauses))
 	issueCtx, stopIssues := context.WithTimeout(ctx, s.recordBudget())
 	issuesWatched, issueErr := s.pollIssueWatches(issueCtx)
 	remember(issueErr)
