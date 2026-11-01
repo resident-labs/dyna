@@ -17,7 +17,7 @@ func TestUpgradeConnectSessionsFrom48(t *testing.T) {
 	defer db.Close()
 	var old []string
 	for _, line := range strings.Split(schema, "\n") {
-		if strings.HasPrefix(line, "CREATE TABLE repo_ci_hosts ") || strings.HasPrefix(line, "CREATE TABLE search_keys ") || strings.HasPrefix(line, "CREATE INDEX turns_session_started_at ") || strings.HasPrefix(line, "CREATE TABLE client_replays ") || strings.HasPrefix(line, "CREATE TABLE connect_devices ") || strings.HasPrefix(line, "CREATE TABLE connect_sessions ") || strings.HasPrefix(line, "CREATE TABLE connect_revocations ") || strings.HasPrefix(line, "CREATE TABLE transcript_turns ") || strings.HasPrefix(line, "CREATE UNIQUE INDEX transcript_turns_path_start ") || strings.HasPrefix(line, "CREATE INDEX pr_owners_session ") || strings.HasPrefix(line, "CREATE INDEX operations_pending_caller ") || strings.HasPrefix(line, "CREATE TABLE disk_warnings ") || strings.HasPrefix(line, "CREATE TABLE room_leftovers ") || strings.HasPrefix(line, "CREATE TABLE session_accounts ") || strings.HasPrefix(line, "CREATE TABLE questions ") || strings.HasPrefix(line, "CREATE INDEX questions_") {
+		if strings.HasPrefix(line, "CREATE TABLE repo_ci_hosts ") || strings.HasPrefix(line, "CREATE TABLE search_keys ") || strings.HasPrefix(line, "CREATE INDEX turns_session_started_at ") || strings.HasPrefix(line, "CREATE TABLE client_replays ") || strings.HasPrefix(line, "CREATE TABLE connect_devices ") || strings.HasPrefix(line, "CREATE TABLE connect_sessions ") || strings.HasPrefix(line, "CREATE TABLE connect_revocations ") || strings.HasPrefix(line, "CREATE TABLE transcript_turns ") || strings.HasPrefix(line, "CREATE UNIQUE INDEX transcript_turns_path_start ") || strings.HasPrefix(line, "CREATE INDEX pr_owners_session ") || strings.HasPrefix(line, "CREATE INDEX operations_pending_caller ") || strings.HasPrefix(line, "CREATE TABLE disk_warnings ") || strings.HasPrefix(line, "CREATE TABLE room_leftovers ") || strings.HasPrefix(line, "CREATE TABLE session_accounts ") || strings.HasPrefix(line, "CREATE TABLE questions ") || strings.HasPrefix(line, "CREATE INDEX questions_") || strings.HasPrefix(line, "CREATE TABLE goals ") || strings.HasPrefix(line, "CREATE INDEX goals_holder ") || strings.HasPrefix(line, "CREATE TABLE goal_items ") || strings.HasPrefix(line, "CREATE TABLE goal_journal ") || strings.HasPrefix(line, "CREATE TABLE checkins ") {
 			continue
 		}
 		line = strings.Replace(line, ", generation INTEGER NOT NULL DEFAULT 0", "", 1)
@@ -63,7 +63,7 @@ func TestUpgradeSessionWorkFrom42(t *testing.T) {
 	for _, statement := range []string{
 		"CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
 		"CREATE TABLE rules (room TEXT, number INTEGER)",
-		"CREATE TABLE rooms (id TEXT); CREATE TABLE sessions (id TEXT, room TEXT, parent TEXT, created_at INTEGER, closed_at INTEGER); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);",
+		"CREATE TABLE rooms (id TEXT PRIMARY KEY); CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT, parent TEXT, goal TEXT, created_at INTEGER, closed_at INTEGER); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);",
 		"CREATE TABLE hosts (name TEXT)",
 		"CREATE TABLE deliveries (seq INTEGER)",
 		"CREATE TABLE event_files (seq INTEGER)",
@@ -132,7 +132,7 @@ func TestUpgradeDropsRules(t *testing.T) {
 	if _, err := db.Exec(`PRAGMA foreign_keys=ON;
 		CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO meta VALUES ('schema_version','45');
 		CREATE TABLE rules (room TEXT, number INTEGER, PRIMARY KEY(room,number)); INSERT INTO rules VALUES ('room',1);
-		CREATE TABLE rooms (id TEXT); CREATE TABLE sessions (id TEXT, room TEXT, parent TEXT, created_at INTEGER, closed_at INTEGER); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);
+		CREATE TABLE rooms (id TEXT PRIMARY KEY); CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT, parent TEXT, goal TEXT, created_at INTEGER, closed_at INTEGER); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);
 		CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT, started_at INTEGER, ended_at INTEGER); CREATE TABLE pr_owners (session TEXT); CREATE TABLE hosts (name TEXT);
 		CREATE TABLE operations (id TEXT, kind TEXT, args BLOB, by_kind TEXT, by_id TEXT, created_at INTEGER, state TEXT);
 		CREATE TABLE grants (id TEXT, kind TEXT, room TEXT, to_kind TEXT, to_id TEXT, hosts BLOB, by_kind TEXT, by_id TEXT, created_at INTEGER, expires_at INTEGER, revoked_at INTEGER, expired_at INTEGER);
@@ -175,7 +175,7 @@ func TestPermanentHostexecGrantMigration(t *testing.T) {
  INSERT INTO grants(id,kind,expires_at,revoked_at,expired_at) VALUES('active','hostexec',4102444800000,NULL,NULL),('past','hostexec',1,NULL,NULL),('revoked','hostexec',4102444800000,1,NULL);
  CREATE TABLE operations(kind TEXT,state TEXT,args BLOB);
  INSERT INTO operations VALUES('hostexec.grant','pending','{"expires":"future","never":false,"reason":"x"}');
- CREATE TABLE rooms (id TEXT); CREATE TABLE sessions (id TEXT, room TEXT, parent TEXT, created_at INTEGER, closed_at INTEGER); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);
+ CREATE TABLE rooms (id TEXT PRIMARY KEY); CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT, parent TEXT, goal TEXT, created_at INTEGER, closed_at INTEGER); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);
  CREATE TABLE hosts(name TEXT); CREATE TABLE turns(id TEXT);`)
 	if err != nil {
 		t.Fatal(err)
@@ -201,10 +201,10 @@ func TestOpenRootsGetTheAskGrant(t *testing.T) {
 	defer db.Close()
 	_, err = db.Exec(`CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO meta VALUES('schema_version','61');
  CREATE TABLE rooms (id TEXT PRIMARY KEY);
- CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT, parent TEXT, created_at INTEGER, closed_at INTEGER);
+ CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT, parent TEXT, created_at INTEGER, closed_at INTEGER, goal TEXT);
  CREATE TABLE grants (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT NOT NULL, to_kind TEXT NOT NULL, to_id TEXT NOT NULL, hosts BLOB NOT NULL, expires_at INTEGER, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at INTEGER NOT NULL, revoked_at INTEGER, expired_at INTEGER, reason TEXT NOT NULL DEFAULT '');
  INSERT INTO rooms VALUES('room');
- INSERT INTO sessions VALUES('root','room',NULL,5,NULL),('child','room','root',6,NULL),('gone','room',NULL,7,9);`)
+ INSERT INTO sessions VALUES('root','room',NULL,5,NULL,''),('child','room','root',6,NULL,''),('gone','room',NULL,7,9,'');`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,5 +214,50 @@ func TestOpenRootsGetTheAskGrant(t *testing.T) {
 	var to string
 	if err := db.QueryRow(`SELECT group_concat(to_id) FROM grants WHERE kind='ask-owner' AND revoked_at IS NULL AND expired_at IS NULL`).Scan(&to); err != nil || to != "root" {
 		t.Fatalf("grants: %q: %v", to, err)
+	}
+}
+
+func TestUpgradeMakesStartGoalsReal(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(dir, "store.db"))
+	var old []string
+	for _, line := range strings.Split(schema, "\n") {
+		if strings.HasPrefix(line, "CREATE TABLE goals ") || strings.HasPrefix(line, "CREATE INDEX goals_holder ") || strings.HasPrefix(line, "CREATE TABLE goal_items ") || strings.HasPrefix(line, "CREATE TABLE goal_journal ") || strings.HasPrefix(line, "CREATE TABLE checkins ") {
+			continue
+		}
+		old = append(old, line)
+	}
+	if _, err = db.Exec(strings.Join(old, "\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`INSERT INTO meta(key,value) VALUES ('schema_version','62');
+		INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0),('q','q',0,0,0);
+		INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at) VALUES('root','r','root',NULL,'p','open','run the room',1),('a','r','a','root','p','open','first',2),('b','r','b','root','p','open','second',3),('none','r','none','root','p','open','',4),('q','q','q',NULL,'p','open','',1),('c','q','c','q','p','open','third',5);
+		INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at,closed_at) VALUES('gone','r','gone','root','p','closed','old',1,2)`); err != nil {
+		t.Fatal(err)
+	}
+	if err = upgrade(db, floorVersion, floorCommit, steps, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = compareSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query("SELECT room,number,session,text,state FROM goals ORDER BY room,number")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var room, session, text, state string
+		var number int
+		if err := rows.Scan(&room, &number, &session, &text, &state); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, room+" "+strconv.Itoa(number)+" "+session+" "+text+" "+state)
+	}
+	want := "q 1 c third active|r 1 a first active|r 2 b second active"
+	if strings.Join(got, "|") != want {
+		t.Fatalf("goals %v, want %s", got, want)
 	}
 }

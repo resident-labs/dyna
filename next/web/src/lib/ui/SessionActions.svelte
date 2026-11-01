@@ -28,7 +28,7 @@
     if (step === "move") return { label: `Move ${name} under`, items: sessions.filter(item => item.session !== session && !under.includes(item.session)).map(item => ({ key: item.session, label: item.name })), note: failure };
     if (step === "close") return { label: `Close ${name}`, items: confirm("Close session"), note: failure || closeNote(under.map(id => store.names.get(id) ?? id)) };
     if (step === "restart") return { label: `Restart ${name}'s box`, items: confirm("Restart box"), note: failure || restartNote };
-    const actions = sessionActions(open?.parent, store.turns.has(session) && !store.stopping.has(session), store.boxes.get(session));
+    const actions = sessionActions(open?.parent, store.running(session) && !store.stopping.has(session), store.boxes.get(session));
     return { label: `Actions for ${name}`, items: actions.map(key => ({ key, label: labels[key] })) };
   });
   async function run(work: Promise<unknown>, refused: string, done: () => void) {
