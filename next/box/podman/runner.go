@@ -60,7 +60,8 @@ func (h *Host) BuildRunnerImage(ctx context.Context) (string, error) {
 }
 
 func egressArgs(image, hostData string) []string {
-	return []string{"podman", "--cgroup-manager=systemd", "run", "--detach", "--replace", "--name", egressName,
+	// A runner with no proxy holds its slot until its time limit, so a crashed proxy restarts by itself.
+	return []string{"podman", "--cgroup-manager=systemd", "run", "--detach", "--replace", "--restart=always", "--name", egressName,
 		"--label", ciLabel + "=egress", "--cgroup-parent=" + runnerSlice,
 		// The proxy alone sees the host's network, and only to leave it for a public address.
 		"--network=host", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges", "--user", "1001:1001",
