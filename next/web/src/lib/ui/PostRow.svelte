@@ -173,7 +173,7 @@
   /* The wash follows the pointer only; a tap or a closed menu leaves none behind. */
   @media (hover: hover) { .post:hover { background: var(--hover); } }
   .post:focus { outline: none; }
-  .post > :not(:global(.avatar), .bar, .sheet) { grid-column: 2; }
+  .post > :global(*) { grid-column: 2; }
   /* v1's bar: it floats over the row's top right and is laid out while hidden, so showing it never moves the row. */
   .bar { position: absolute; top: calc(-14px + var(--lift, 0px)); right: 16px; z-index: 1; display: flex; align-items: center; gap: 2px; padding: 2px;
     background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 14px var(--shadow-md); opacity: 0; pointer-events: none; }
@@ -191,7 +191,7 @@
   .sheet button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .status { color: var(--muted); font-size: 12px; }
   .status:not(:empty) { padding: 0 6px; }
-  .post > :global(.avatar) { grid-row: 1 / span 3; margin-top: 2px; }
+  .post > :global(.avatar) { grid-column: 1; grid-row: 1 / span 3; margin-top: 2px; }
   .post.first { padding-top: 14px; }
   /* A post the engine has not confirmed is dimmed; its Not sent line keeps full contrast in the danger color, because the owner must act. */
   .pending > :global(:not(.unsent, .sheet)) { opacity: 0.5; }
