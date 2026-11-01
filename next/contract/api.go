@@ -383,8 +383,6 @@ type RepoCIHost struct {
 	Host    HostName    `json:"host"`
 	Runners int         `json:"runners"`
 	Size    BoxSizeName `json:"size"`
-	// Room is the repository's default room. Admission checks it against the host; the engine sets it.
-	Room RoomID `json:"room,omitempty"`
 }
 
 // RepoCISetRequest replaces a repository's CI mode and runner hosts.

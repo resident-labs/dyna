@@ -20,7 +20,7 @@ import (
 
 func testSpec() box.RunnerSpec {
 	size, _ := box.Size(contract.BoxSizeLarge)
-	return box.RunnerSpec{Name: "dyna-ci-pve-1", Image: "localhost/dyna-ci-runner:abc", Config: "jit-secret", Repo: "owner/repo", ID: 42, Size: size}
+	return box.RunnerSpec{Name: "dyna-ci-pve-1", Image: "localhost/dyna-ci-runner:abc", Config: "jit-secret", Repo: "owner/repo", ID: 42, Slot: 3, Size: size}
 }
 
 // frameRunner answers every SSH framed command with success and keeps what it saw.
@@ -62,6 +62,7 @@ func TestRunnerArgsKeepTheContainerSealed(t *testing.T) {
 		"--cpus=8", "--memory=17179869184", "--memory-swap=17179869184", "--pids-limit=8192",
 		"--tmpfs /home/runner:rw,exec,U,mode=0755,size=12884901888", "--tmpfs /tmp:rw,exec,mode=1777,size=12884901888",
 		"--cgroup-parent=dyna-ci.slice", "--env ACTIONS_RUNNER_INPUT_JITCONFIG", "--env DYNA_CI_REPO=owner/repo",
+		"--label dyna.ci.slot=3", "--mount type=volume,source=dyna-ci-egress,destination=/run/dyna-egress,subpath=3,ro",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("args miss %q: %s", want, joined)
@@ -71,8 +72,8 @@ func TestRunnerArgsKeepTheContainerSealed(t *testing.T) {
 		t.Fatal("the JIT config is on the command line")
 	}
 	for i, arg := range args {
-		if (arg == "--volume" || arg == "-v") && args[i+1] != "dyna-ci-egress:/run/dyna-egress:ro" {
-			t.Errorf("unexpected mount %s", args[i+1])
+		if arg == "--volume" || arg == "-v" {
+			t.Errorf("a whole volume is mounted, so a job could reach another's socket: %s", args[i+1])
 		}
 		for _, banned := range []string{"--privileged", "--network=host", "podman.sock", "docker.sock", "--cap-add"} {
 			if strings.Contains(arg, banned) {
@@ -103,6 +104,8 @@ func TestStartRunnerRefusesUnsafeInput(t *testing.T) {
 		func(s *box.RunnerSpec) { s.Config = "two\nlines" },
 		func(s *box.RunnerSpec) { s.Config = "" },
 		func(s *box.RunnerSpec) { s.Image = "" },
+		func(s *box.RunnerSpec) { s.Slot = -1 },
+		func(s *box.RunnerSpec) { s.Slot = box.RunnerSlots },
 	} {
 		spec := testSpec()
 		change(&spec)
@@ -114,7 +117,7 @@ func TestStartRunnerRefusesUnsafeInput(t *testing.T) {
 
 func TestEgressAloneHasHostNetworkAndNoCapabilities(t *testing.T) {
 	args := strings.Join(egressArgs("image", "/data/bin"), " ")
-	for _, want := range []string{"--network=host", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges", "--user 1001:1001", "/data/bin:/opt/dyna/bin:ro", "ci-egress --socket /run/dyna-egress/egress.sock"} {
+	for _, want := range []string{"--network=host", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges", "--user 1001:1001", "/data/bin:/opt/dyna/bin:ro", "ci-egress --dir /run/dyna-egress"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("args miss %q: %s", want, args)
 		}
@@ -124,14 +127,14 @@ func TestEgressAloneHasHostNetworkAndNoCapabilities(t *testing.T) {
 func TestListRunnersSeparatesTheProxy(t *testing.T) {
 	h, runner := newFrameHost(t)
 	runner.reply = []byte(`[
-{"Names":["dyna-ci-pve-1"],"State":"running","Labels":{"dyna.ci":"runner","dyna.ci.repo":"owner/repo","dyna.ci.id":"42"}},
-{"Names":["dyna-ci-pve-2"],"State":"created","Labels":{"dyna.ci":"runner","dyna.ci.repo":"owner/repo","dyna.ci.id":"43"}},
+{"Names":["dyna-ci-pve-1"],"State":"running","Labels":{"dyna.ci":"runner","dyna.ci.repo":"owner/repo","dyna.ci.id":"42","dyna.ci.slot":"3"}},
+{"Names":["dyna-ci-pve-2"],"State":"created","Labels":{"dyna.ci":"runner","dyna.ci.repo":"owner/repo","dyna.ci.id":"43","dyna.ci.slot":"0"}},
 {"Names":["dyna-ci-egress"],"State":"running","Labels":{"dyna.ci":"egress"}}]`)
 	found, egress, err := h.ListRunners(context.Background())
 	if err != nil || !egress || len(found) != 2 {
 		t.Fatalf("%+v %v %v", found, egress, err)
 	}
-	if found[0] != (box.Runner{Name: "dyna-ci-pve-1", Repo: "owner/repo", ID: 42, Running: true}) || found[1].Running {
+	if found[0] != (box.Runner{Name: "dyna-ci-pve-1", Repo: "owner/repo", ID: 42, Slot: 3, Running: true}) || found[1].Running {
 		t.Fatalf("%+v", found)
 	}
 }
@@ -177,6 +180,35 @@ func hook(t *testing.T, event, payload, repo string) (string, error) {
 	cmd.Env = append(os.Environ(), "GITHUB_REPOSITORY="+repo, "DYNA_CI_REPO=owner/repo", "GITHUB_EVENT_NAME="+event, "GITHUB_EVENT_PATH="+path)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// The runner treats a hook it cannot start as one failed step, so an image with a
+// broken hook must not reach a job at all.
+func TestARunnerWithABrokenHookTakesNoJob(t *testing.T) {
+	data, err := images.Runner.ReadFile("ci-runner/entrypoint.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	script := filepath.Join(dir, "entrypoint.sh")
+	if err := os.WriteFile(script, data, 0700); err != nil {
+		t.Fatal(err)
+	}
+	broken := filepath.Join(dir, "broken.sh")
+	if err := os.WriteFile(broken, []byte("if then\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, hook := range []string{broken, filepath.Join(dir, "missing.sh")} {
+		home := t.TempDir()
+		cmd := exec.Command("bash", script)
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "ACTIONS_RUNNER_HOOK_JOB_STARTED=" + hook}
+		if out, err := cmd.CombinedOutput(); err == nil {
+			t.Fatalf("%s: the runner started: %s", hook, out)
+		}
+		if entries, err := os.ReadDir(home); err != nil || len(entries) != 0 {
+			t.Fatalf("%s: the entrypoint went on: %v %v", hook, entries, err)
+		}
+	}
 }
 
 func TestJobStartedHookKillsTheWorkerOfARefusedJob(t *testing.T) {

@@ -71,7 +71,6 @@ func TestRepoCISettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := s.CIHosts(ctx)
-	host.Room = id
 	if err != nil || !reflect.DeepEqual(got, []contract.RepoCIHost{host}) {
 		t.Fatalf("%+v %v", got, err)
 	}
