@@ -525,6 +525,7 @@ const (
 	TranscriptPartOutput    TranscriptPart = "output"
 	TranscriptPartText      TranscriptPart = "text"
 	TranscriptPartArguments TranscriptPart = "arguments"
+	TranscriptPartDiff      TranscriptPart = "diff"
 )
 
 type TranscriptItemKind string
@@ -547,6 +548,7 @@ type TranscriptItem struct {
 	Tool         string                  `json:"tool,omitempty"`
 	Arguments    string                  `json:"arguments,omitempty"`
 	Output       string                  `json:"output,omitempty"`
+	Diff         string                  `json:"diff,omitempty"`
 	Failed       bool                    `json:"failed,omitempty"`
 	More         bool                    `json:"more,omitempty"`
 	Event        EventID                 `json:"event,omitempty"`
