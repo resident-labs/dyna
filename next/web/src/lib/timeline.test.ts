@@ -10,6 +10,7 @@ test("summarizes nested actions rather than their script", () => {
   ] }];
   assert.equal(summarizeWork(items), "Ran 1 command, read 2 files, and wrote 1 file");
   assert.equal(summarizeWork([{ id: "l", turn: "t", at: "", kind: "tool", tool: "ls" }, { id: "s", turn: "t", at: "", kind: "tool", tool: "codemode" }]), "Used 1 tool and ran 1 script");
+  assert.equal(summarizeWork([{ id: "l", turn: "t", at: "", kind: "tool", tool: "ls" }, { id: "f", turn: "t", at: "", kind: "tool", tool: "web_fetch" }]), "Used 2 tools");
 });
 
 // Dyna: Transcript items embed posts on their tool call.

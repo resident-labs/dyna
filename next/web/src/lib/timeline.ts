@@ -56,7 +56,11 @@ export function summarizeWork(items: TranscriptItem[]): string {
   for (const item of tools) {
     if (item.tool === "codemode" && !item.calls?.length) { scripts++; continue; }
     const kinds = item.tool === "codemode" ? item.calls!.map(call => stepTitle({ tool: call.tool, label: call.target ?? "" }).kind) : [titleOf(item).kind];
-    for (const kind of kinds) groups.set(kind, (groups.get(kind) ?? 0) + 1);
+    // Listing and fetching read as tools, so they share one label rather than repeat it.
+    for (const kind of kinds) {
+      const group = kind === "list" || kind === "fetch" ? "tool" : kind;
+      groups.set(group, (groups.get(group) ?? 0) + 1);
+    }
   }
   const selected = [...groups].map(([kind, count], index) => ({ kind, count, index }));
   const labels = selected.map(({kind, count}) => {
