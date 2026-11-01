@@ -306,6 +306,56 @@ func TestCloseRetryResendsArchiveOnLiveChannel(t *testing.T) {
 	}
 }
 
+func TestArchiveFailureRetriesOnTimerAndKeepsBox(t *testing.T) {
+	s, room, session, ctx := setupArchive(t)
+	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
+		t.Fatal(err)
+	}
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	channel, e := testChannel(t, s, ctx, caller)
+	if e != nil {
+		t.Fatal(e)
+	}
+	<-channel
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session}); e != nil {
+		t.Fatal(e)
+	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
+	if _, ok := (<-channel).Body.(contract.Archive); !ok {
+		t.Fatal("expected archive")
+	}
+	if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{Repo: "owner/repo", Error: "no space left on device"}); e != nil {
+		t.Fatal(e)
+	}
+	record, err := s.store.Session(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reason := func() string {
+		t.Helper()
+		current, err := s.store.Box(ctx, record.Box)
+		if err != nil || current.State != contract.BoxClosing {
+			t.Fatalf("box left closing: %+v, %v", current, err)
+		}
+		return current.Reason
+	}
+	start := s.now()
+	s.now = func() time.Time { return start.Add(10*time.Minute - time.Second) }
+	passLifecycle(t, s, ctx)
+	if reason() == "" {
+		t.Fatal("retried before the timer")
+	}
+	s.now = func() time.Time { return start.Add(10 * time.Minute) }
+	passLifecycle(t, s, ctx)
+	if reason() != "" {
+		t.Fatal("timer did not clear the archive failure")
+	}
+	if _, ok := (<-channel).Body.(contract.Archive); !ok {
+		t.Fatal("expected archive on the timed retry")
+	}
+}
+
 func TestCloseKeepsBoxOnArchiveMismatch(t *testing.T) {
 	s, room, session, ctx := setupArchive(t)
 	if err := s.store.AddRoomRepo(ctx, room, "owner/repo", true); err != nil {
