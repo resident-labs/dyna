@@ -150,7 +150,7 @@
 
 <style>
   .viewer { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
-  header { display:flex; align-items:center; gap:8px; height:52px; flex:none; min-width:0; padding:0 12px; border-bottom:1px solid var(--line); }
+  header { position:relative; display:flex; align-items:center; gap:8px; height:52px; flex:none; min-width:0; padding:0 12px; border-bottom:1px solid var(--line); }
   header strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:15px; font-weight:600; }
   button, a { font:inherit; font-size:13px; color:var(--muted); cursor:pointer; }
   button { border:0; border-radius:6px; background:none; padding:6px 8px; }
@@ -165,6 +165,7 @@
   button:focus-visible, a:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
   .popover { position:absolute; z-index:2; top:calc(100% + 12px); left:0; min-width:260px; padding:6px; background:var(--raised); border:1px solid var(--line); border-radius:8px; box-shadow:0 8px 24px var(--shadow-lg); }
   .versions button { display:flex; align-items:flex-start; gap:10px; width:100%; text-align:left; }
+  .versions button[aria-current="true"] { background:var(--selected); }
   .pill { padding:2px 6px; border-radius:8px; color:var(--focus); background:var(--selected); font:600 11px var(--mono); }
   .version-meta { min-width:0; color:var(--text); }
   .version-meta small { display:block; max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); }
@@ -182,5 +183,5 @@
   .confirm .send { border-color: var(--focus); background: var(--focus); color: var(--bg); font-weight: 600; }
   .confirm .send:hover:enabled { background: color-mix(in srgb, var(--focus) 88%, var(--text)); }
   .confirm button:disabled { opacity: .5; cursor: default; }
-  @media (max-width:640px) { .icon { width:44px; height:44px; } .back, button.version, .versions button { min-height:44px; } .byline { display:none; } }
+  @media (max-width:640px) { .icon { width:44px; height:44px; } .back, button.version, .versions button { min-height:44px; } .byline { display:none; } .anchor { position:static; } .popover { top:52px; left:12px; right:12px; min-width:0; } }
 </style>
