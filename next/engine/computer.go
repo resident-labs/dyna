@@ -51,10 +51,7 @@ func (s *Service) ComputerChanged(ctx context.Context, caller contract.Principal
 	if err != nil {
 		return contract.ComputerChangedResponse{}, failure(err)
 	}
-	s.mu.Lock()
-	state := s.sessionLocked(session.ID)
-	s.mu.Unlock()
-	state.computerLock.Lock()
+	state := s.lockSession(session.ID)
 	defer state.computerLock.Unlock()
 	s.mu.Lock()
 	if state.channel == nil {
@@ -112,10 +109,7 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 	if err != nil {
 		return nil, failure(err)
 	}
-	s.mu.Lock()
-	state := s.sessionLocked(id)
-	s.mu.Unlock()
-	state.computerLock.Lock()
+	state := s.lockSession(id)
 	defer state.computerLock.Unlock()
 	s.mu.Lock()
 	if box.State != contract.BoxReady || state.channel == nil {
@@ -242,6 +236,7 @@ func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal,
 		}
 		wakeChannel(channel)
 	}()
+	var watchers []chan []byte
 	for {
 		var size uint32
 		if err := binary.Read(r, binary.BigEndian, &size); err != nil {
@@ -256,7 +251,7 @@ func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal,
 		}
 		state.computerLock.Lock()
 		s.mu.Lock()
-		var watchers []chan []byte
+		watchers = watchers[:0]
 		if c := state.computer; c != nil && c.state == contract.ComputerRunning && c.generation == generation {
 			c.lastFrame = frame
 			for ch := range c.watchers {
