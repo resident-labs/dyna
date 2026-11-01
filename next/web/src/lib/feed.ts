@@ -34,6 +34,12 @@ export const turnReason = (cause?: FailureCause): string => {
   return reason[0].toLowerCase() + reason.slice(1);
 };
 
+// A box's state in owner terms, in About and on a machine's session list.
+export const boxWords: Record<BoxState, string> = {
+  pending: "Starting", creating: "Starting", starting: "Starting", ready: "Ready", stopped: "Asleep",
+  closing: "Closing", deleted: "Deleted", failed: "Failed", lost: "Stopped unexpectedly",
+};
+
 // Why a pending box waits, in place of "Starting" on its session's line and in About.
 export const waits: Record<PendingReason, string> = {
   cpu: "Waiting for CPU", memory: "Waiting for memory", disk: "Waiting for disk space", "room-limit": "Room limit",
