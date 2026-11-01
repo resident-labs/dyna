@@ -40,6 +40,19 @@ type content struct {
 	Data     string `json:"data,omitempty"`
 	MimeType string `json:"mimeType,omitempty"`
 }
+
+// MarshalJSON keeps "text" on an empty text block, as MCP requires. Actions that print nothing return one.
+func (c content) MarshalJSON() ([]byte, error) {
+	if c.Type == "text" {
+		return json.Marshal(struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}{c.Type, c.Text})
+	}
+	type block content
+	return json.Marshal(block(c))
+}
+
 type result struct {
 	Content           []content       `json:"content"`
 	IsError           bool            `json:"isError,omitempty"`

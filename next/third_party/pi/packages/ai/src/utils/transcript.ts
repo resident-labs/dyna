@@ -22,6 +22,24 @@ export function createInitialSystemMessage(
 	};
 }
 
+function lacksText(block: { type: string; text?: unknown }): boolean {
+	return block.type === "text" && typeof block.text !== "string";
+}
+
+/**
+ * Give a text block without text an empty string. MCP servers and JS extensions are outside the
+ * type checks, and session files are parsed without validation, so `{"type":"text"}` can sit in a
+ * saved transcript. Left in place it fails token estimation before every request.
+ */
+function withBlockText(message: Message): Message {
+	const content: unknown = message.content;
+	if (!Array.isArray(content) || !content.some(lacksText)) return message;
+	return {
+		...message,
+		content: content.map((block) => (lacksText(block) ? { ...block, text: "" } : block)),
+	} as Message;
+}
+
 /**
  * Fold `Context.systemPrompt` and `Context.tools` into a leading system message.
  * This is the only entry point that produces a {@link TranscriptContext}; every
@@ -29,8 +47,8 @@ export function createInitialSystemMessage(
  */
 export function normalizeContext(context: Context): TranscriptContext {
 	const initialMessage = createInitialSystemMessage(context.systemPrompt, context.tools);
-	const messages = initialMessage ? [initialMessage, ...context.messages] : context.messages;
-	return { messages } as TranscriptContext;
+	const messages = context.messages.map(withBlockText);
+	return { messages: initialMessage ? [initialMessage, ...messages] : messages } as TranscriptContext;
 }
 
 /**
