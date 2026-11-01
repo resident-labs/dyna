@@ -14,6 +14,7 @@ import (
 	"github.com/resident-labs/dyna/box/post"
 	"github.com/resident-labs/dyna/box/visual"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/contract/tools"
 )
 
 func TestStreamCancellationAndTypedErrors(t *testing.T) {
@@ -97,6 +98,41 @@ func TestActionDecodeIsStrict(t *testing.T) {
 	res = server.call(context.Background(), callParams{Name: "session", Arguments: args})
 	if !res.IsError || !strings.Contains(string(res.StructuredContent), "unknown_action") || !strings.Contains(string(res.StructuredContent), "start") {
 		t.Fatalf("%+v", res)
+	}
+}
+
+// A text block without its text field is invalid MCP, and it failed every later Pi request of the session.
+func TestComputerResultsKeepTheirMCPShape(t *testing.T) {
+	server, err := New(nil, func(_ context.Context, handler tools.BoxHandler, _ []byte) (result, *contract.Error) {
+		if handler == tools.ComputerScreenshot {
+			return result{Content: []content{{Type: "image", Data: "cG5n", MimeType: "image/png"}}}, nil
+		}
+		return result{Content: []content{{Type: "text", Text: ""}}}, nil // Only text prints anything.
+	}, post.Preparer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty := `[{"type":"text","text":""}]`
+	for _, test := range []struct{ arguments, want string }{
+		{`{"action":"open","url":"https://example.com"}`, empty},
+		{`{"action":"click","selector":"#go"}`, empty},
+		{`{"action":"type","selector":"#q","text":"hello"}`, empty},
+		{`{"action":"screenshot"}`, `[{"type":"image","data":"cG5n","mimeType":"image/png"}]`},
+	} {
+		rpc := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"computer","arguments":` + test.arguments + `}}`
+		w := httptest.NewRecorder()
+		server.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/dyna/", strings.NewReader(rpc)))
+		var response struct {
+			Result struct {
+				Content json.RawMessage `json:"content"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if got := string(response.Result.Content); got != test.want {
+			t.Errorf("%s: content = %s, want %s", test.arguments, got, test.want)
+		}
 	}
 }
 
