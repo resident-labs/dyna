@@ -38,6 +38,7 @@ func TestInspectWithFakeBrowser(t *testing.T) {
 						Method string `json:"method"`
 						Params struct {
 							Expression string `json:"expression"`
+							Mobile     *bool  `json:"mobile"`
 						} `json:"params"`
 					}
 					if json.Unmarshal(raw[:len(raw)-1], &cmd) != nil {
@@ -49,6 +50,11 @@ func TestInspectWithFakeBrowser(t *testing.T) {
 						result = `{"targetId":"target"}`
 					case "Target.attachToTarget":
 						result = `{"sessionId":"session"}`
+					case "Emulation.setDeviceMetricsOverride":
+						if cmd.Params.Mobile == nil || *cmd.Params.Mobile {
+							c.messages <- message{ID: cmd.ID, Error: &struct{ Message string }{Message: "mobile must be false"}}
+							continue
+						}
 					case "Page.navigate":
 						c.messages <- message{Method: "Page.loadEventFired", SessionID: "session"}
 					case "Runtime.evaluate":

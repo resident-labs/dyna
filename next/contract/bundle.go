@@ -105,20 +105,19 @@ type SettingsBundle struct {
 }
 
 type ProfileBundle struct {
-	Name           ProfileName   `json:"name"`
-	Description    string        `json:"description"`
-	Model          string        `json:"model"` // a model ID that CLIProxyAPI serves
-	Thinking       ThinkingLevel `json:"thinking,omitempty"`
-	Models         []string      `json:"models,omitempty"`
-	Fallback       ProfileName   `json:"fallback,omitempty"`
-	Taste          int           `json:"taste"`
-	Intelligence   int           `json:"intelligence"`
-	Cost           int           `json:"cost"`
-	Diagnostics    int           `json:"diagnostics"`
-	CompactTokens  int           `json:"compactTokens,omitempty"` // 0: Pi's default
-	MaxConcurrent  int           `json:"maxConcurrent,omitempty"`
-	MaxCallsPerRun int           `json:"maxCallsPerRun,omitempty"`
-	Default        bool          `json:"default,omitempty"`
+	Name          ProfileName   `json:"name"`
+	Description   string        `json:"description"`
+	Model         string        `json:"model"` // a model ID that CLIProxyAPI serves
+	Thinking      ThinkingLevel `json:"thinking,omitempty"`
+	Models        []string      `json:"models,omitempty"`
+	Fallback      ProfileName   `json:"fallback,omitempty"`
+	Taste         int           `json:"taste"`
+	Intelligence  int           `json:"intelligence"`
+	Cost          int           `json:"cost"`
+	Diagnostics   int           `json:"diagnostics"`
+	CompactTokens int           `json:"compactTokens,omitempty"` // 0: Pi's default
+	MaxConcurrent int           `json:"maxConcurrent,omitempty"`
+	Default       bool          `json:"default,omitempty"`
 }
 
 // HostBundle comes from the v1 machines table. The host check measures
@@ -303,7 +302,7 @@ const (
 	QuestionTerminal QuestionKind = "terminal"
 )
 
-// QuestionBundle is an unanswered question or terminal request.
+// QuestionBundle is an unanswered question or show_pty request.
 type QuestionBundle struct {
 	Label     QuestionLabel  `json:"label"`
 	Kind      QuestionKind   `json:"kind"`
@@ -311,7 +310,7 @@ type QuestionBundle struct {
 	Text      string         `json:"text"`
 	Options   []string       `json:"options,omitempty"`
 	Meanwhile string         `json:"meanwhile,omitempty"`
-	Command   string         `json:"command,omitempty"` // terminal requests only
+	Command   string         `json:"command,omitempty"` // show_pty requests only
 	Argv      []string       `json:"argv,omitempty"`
 	Cwd       string         `json:"cwd,omitempty"`
 	Reason    string         `json:"reason,omitempty"`

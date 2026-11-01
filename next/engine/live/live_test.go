@@ -25,20 +25,46 @@ func TestConcurrentPublishClosesFullOwnerStream(t *testing.T) {
 	}
 }
 
-// An older activity that arrives late cannot replace the newest label.
-func TestPublishActivityKeepsNewest(t *testing.T) {
+// A full room stream closes when it drops a read position, so the client reconnects and reads the stored position.
+func TestPublishClosesFullRoomStreamOnDroppedRead(t *testing.T) {
+	l := New(func(map[contract.SessionID]bool) {})
+	_, events := l.Subscribe("r", 1)
+	events <- contract.Event{}
+	l.Publish("r", contract.Event{Body: contract.ConversationRead{Room: "r", Seq: 10}}, false)
+	<-events
+	select {
+	case _, ok := <-events:
+		if ok {
+			t.Fatal("full room stream delivered a dropped event")
+		}
+	default:
+		t.Fatal("full room stream stayed open after dropping a read position")
+	}
+}
+
+// Concurrent updates reach streams in the same order that room lists use.
+func TestActivityPublicationOrder(t *testing.T) {
 	l := New(func(map[contract.SessionID]bool) {})
 	_, events := l.Subscribe("r", 2)
-	newer := contract.Event{Body: contract.TurnActivity{Session: "s", Label: "new"}}
-	older := contract.Event{Body: contract.TurnActivity{Session: "s", Label: "old"}}
-	l.PublishActivity("r", "s", 2, newer)
-	l.PublishActivity("r", "s", 1, older)
-	if got := (<-events).Body.(contract.TurnActivity).Label; got != "new" {
-		t.Fatalf("label: %s", got)
+	start := make(chan struct{})
+	var done sync.WaitGroup
+	for _, session := range []contract.SessionID{"a", "b"} {
+		done.Add(1)
+		go func() {
+			defer done.Done()
+			<-start
+			body := contract.TurnActivity{Session: session, Label: string(session)}
+			handle, _ := l.CreateSession(session)
+			handle.PublishActivity("r", body, contract.Event{Body: body})
+		}()
 	}
-	select {
-	case event := <-events:
-		t.Fatalf("stale activity published: %+v", event)
-	default:
+	close(start)
+	done.Wait()
+	first := (<-events).Body.(contract.TurnActivity)
+	last := (<-events).Body.(contract.TurnActivity)
+	gotFirst, firstOrder := l.Activity(first.Session)
+	gotLast, lastOrder := l.Activity(last.Session)
+	if gotFirst != first || gotLast != last || firstOrder >= lastOrder {
+		t.Fatalf("activity order disagrees with stream: %v (%d), %v (%d)", gotFirst, firstOrder, gotLast, lastOrder)
 	}
 }

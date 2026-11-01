@@ -140,10 +140,12 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 }
 
 func (s *Service) Connected(id contract.SessionID) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	state := s.sessions[id]
-	return state != nil && state.channel != nil
+	handle, ok := s.live.LookupSession(id)
+	if !ok {
+		return false
+	}
+	connected, _ := handle.Connected()
+	return connected
 }
 
 // managedSession loads a target and checks the caller's authority over it.
@@ -189,7 +191,7 @@ func (s *Service) closeSession(ctx context.Context, session store.Session, disca
 		return forbidden()
 	}
 	if dormant {
-		changed, err := s.store.MarkDormantClosing(ctx, session.ID, s.now().Add(-7*24*time.Hour))
+		changed, err := s.store.MarkDormantClosing(ctx, session.ID, s.now().Add(-7*24*time.Hour), s.now().Add(-diskLowWait))
 		if err != nil {
 			return failure(err)
 		}
@@ -197,6 +199,9 @@ func (s *Service) closeSession(ctx context.Context, session store.Session, disca
 			return nil
 		}
 	} else if err := s.store.MarkClosing(ctx, session.ID, discard); err != nil {
+		return failure(err)
+	}
+	if err := s.StopHostexecs(ctx); err != nil {
 		return failure(err)
 	}
 	if !discard {

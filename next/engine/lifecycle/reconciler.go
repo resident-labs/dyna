@@ -137,27 +137,25 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	for _, host := range hosts {
 		hostState[host.Name] = host.State
 		if host.State == box.HostReady && !host.MaintainedAt.After(r.now().Add(-24*time.Hour)) {
-			{
-				claimed, err := r.store.ClaimHostMaintenance(ctx, host.Name, r.now())
-				if err != nil {
-					return err
-				}
-				if claimed {
-					r.wg.Add(1)
-					go func(name contract.HostName) {
-						defer r.wg.Done()
-						sizes, err := r.boxes.MaintainHost(ctx, name)
-						if err != nil {
-							if ctx.Err() == nil {
-								log.Printf("host %s: maintenance: %v", name, err)
-							}
-							return
+			claimed, err := r.store.ClaimHostMaintenance(ctx, host.Name, r.now())
+			if err != nil {
+				return err
+			}
+			if claimed {
+				r.wg.Add(1)
+				go func(name contract.HostName) {
+					defer r.wg.Done()
+					sizes, err := r.boxes.MaintainHost(ctx, name)
+					if err != nil {
+						if ctx.Err() == nil {
+							log.Printf("host %s: maintenance: %v", name, err)
 						}
-						if err := r.store.FinishHostMaintenance(ctx, name, sizes, r.now()); err != nil && ctx.Err() == nil {
-							log.Printf("host %s: record maintenance: %v", name, err)
-						}
-					}(host.Name)
-				}
+						return
+					}
+					if err := r.store.FinishHostMaintenance(ctx, name, sizes, r.now()); err != nil && ctx.Err() == nil {
+						log.Printf("host %s: record maintenance: %v", name, err)
+					}
+				}(host.Name)
 			}
 		}
 	}
@@ -210,15 +208,6 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			}
 			continue
 		}
-		if row.Want == store.WantRun && b.State == contract.BoxReady && !r.view.OpenTerminal(b.Session) {
-			stopped, err := r.store.StopQuiet(ctx, b.Session, r.now().Add(-10*time.Minute))
-			if err != nil {
-				return err
-			}
-			if stopped {
-				rows[i].Want = store.WantStop
-			}
-		}
 		if row.Paused || row.Want != store.WantRun || (b.State != contract.BoxPending && b.State != contract.BoxStopped) || (!row.DueAt.IsZero() && row.DueAt.After(r.now())) {
 			continue
 		}
@@ -234,7 +223,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 		if row.Limits.CPUs > 0 && cpus > 4*row.Limits.CPUs || row.Limits.MemBytes > 0 && memory > 4*row.Limits.MemBytes {
 			placement.Reason = box.PendingRoomLimit
 		} else {
-			placement = box.Admit(hosts, all, b, 20*box.GiB)
+			placement = box.Admit(hosts, all, b)
 		}
 		next := b
 		if placement.Reason != "" {
@@ -266,8 +255,27 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			}
 		}
 	}
+	var quietCandidates []contract.SessionID
 	for _, row := range rows {
-		if row.State == contract.BoxLost && hostState[row.Host] == box.HostReady && row.Want != store.WantClose && row.Want != store.WantDiscard {
+		if row.Want == store.WantRun && row.Box.State == contract.BoxReady && !r.view.OpenTerminal(row.Box.Session) {
+			quietCandidates = append(quietCandidates, row.Box.Session)
+		}
+	}
+	stopped, err := r.store.StopQuiet(ctx, quietCandidates, r.now().Add(-10*time.Minute))
+	if err != nil {
+		return err
+	}
+	stoppedSet := make(map[contract.SessionID]bool, len(stopped))
+	for _, id := range stopped {
+		stoppedSet[id] = true
+	}
+	for i := range rows {
+		if stoppedSet[rows[i].Box.Session] {
+			rows[i].Want = store.WantStop
+		}
+	}
+	for _, row := range rows {
+		if row.Box.State == contract.BoxLost && hostState[row.Host] == box.HostReady && row.Want != store.WantClose && row.Want != store.WantDiscard {
 			if row.DueAt.IsZero() || !row.DueAt.After(r.now()) {
 				r.launch(ctx, row)
 			}

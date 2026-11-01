@@ -2,10 +2,13 @@ package connect
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -28,7 +31,7 @@ type tunnelHooks struct {
 }
 
 // SuperviseTunnel runs cloudflared as a child and retries failures until shutdown.
-func SuperviseTunnel(ctx context.Context, files *Files, state tunnelState, appPort, cardPort int, routes []string, wake <-chan struct{}) {
+func SuperviseTunnel(ctx context.Context, files *Files, state tunnelState, appPort, cardPort int, routes func(context.Context) []string, wake <-chan struct{}) {
 	h := tunnelHooks{
 		find: func() (string, error) { return exec.LookPath("cloudflared") }, now: time.Now, after: time.After,
 		prepare: func(ctx context.Context) (string, error) {
@@ -47,7 +50,7 @@ func SuperviseTunnel(ctx context.Context, files *Files, state tunnelState, appPo
 			if err := relay.ReportOrigin(ctx, link.Machine, appPort, cardPort); err != nil {
 				return "", err
 			}
-			if err := relay.reportRoutes(ctx, link, routes); err != nil {
+			if err := relay.reportRoutes(ctx, link, routes(ctx)); err != nil {
 				return "", err
 			}
 			token := filepath.Join(files.dir, "tunnel-token")
@@ -107,4 +110,36 @@ func superviseTunnel(ctx context.Context, state tunnelState, enabled bool, wake 
 		}
 		return h.start(ctx, path, token)
 	}, func(error) {})
+}
+
+// TailscaleRoute discovers existing Serve mappings; it never changes them.
+func TailscaleRoute(ctx context.Context, appPort int) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "tailscale", "serve", "status", "--json")
+	cmd.Env = []string{"HOME=" + os.Getenv("HOME"), "PATH=" + os.Getenv("PATH")}
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return parseTailscaleServe(out, appPort)
+}
+
+func parseTailscaleServe(out []byte, appPort int) (string, error) {
+	var status struct {
+		Web map[string]struct {
+			Handlers map[string]struct{ Proxy string }
+		}
+	}
+	if err := json.Unmarshal(out, &status); err != nil {
+		return "", err
+	}
+	port := strconv.Itoa(appPort)
+	for hostPort, web := range status.Web {
+		switch strings.TrimSuffix(web.Handlers["/"].Proxy, "/") {
+		case "http://127.0.0.1:" + port, "http://localhost:" + port, "127.0.0.1:" + port:
+			return "https://" + strings.TrimSuffix(hostPort, ":443"), nil
+		}
+	}
+	return "", nil
 }

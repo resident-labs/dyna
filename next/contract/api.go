@@ -28,6 +28,9 @@ const (
 	MethodInstructionsGet         Method = "instructions.get"
 	MethodInstructionsSet         Method = "instructions.set"
 	MethodWebLogin                Method = "web.login"
+	MethodWebSearch               Method = "web.search"
+	MethodWebsearchSetKey         Method = "websearch.set_key"
+	MethodWebsearchRemoveKey      Method = "websearch.remove_key"
 	MethodConversationRead        Method = "conversation.read"
 	MethodRoomList                Method = "room.list"
 	MethodSessionList             Method = "session.list"
@@ -41,6 +44,7 @@ const (
 	MethodAccountsConnectCallback Method = "accounts.connect_callback"
 	MethodAccountsConnectStatus   Method = "accounts.connect_status"
 	MethodAccountsSetKey          Method = "accounts.set_key"
+	MethodAccountsImportOAuth     Method = "accounts.import_oauth"
 	MethodAccountsRemove          Method = "accounts.remove"
 	MethodAccountsSetLimits       Method = "accounts.set_limits"
 	MethodProfileSet              Method = "profile.set"
@@ -118,20 +122,19 @@ type ConversationReadResponse struct{}
 
 type ProfileListRequest struct{}
 type ProfileSummary struct {
-	InUse          int           `json:"inUse"`
-	Description    string        `json:"description"`
-	Taste          int           `json:"taste"`
-	Diagnostics    int           `json:"diagnostics"`
-	Intelligence   int           `json:"intelligence"`
-	Cost           int           `json:"cost"`
-	Name           ProfileName   `json:"name"`
-	Provider       ModelProvider `json:"provider"`
-	Model          string        `json:"model"`
-	Thinking       ThinkingLevel `json:"thinking"`
-	AllowedModels  []string      `json:"allowedModels,omitempty"`
-	CompactTokens  int           `json:"compactTokens,omitempty"`
-	MaxConcurrent  int           `json:"maxConcurrent,omitempty"`
-	MaxCallsPerRun int           `json:"maxCallsPerRun,omitempty"`
+	InUse         int           `json:"inUse"`
+	Description   string        `json:"description"`
+	Taste         int           `json:"taste"`
+	Diagnostics   int           `json:"diagnostics"`
+	Intelligence  int           `json:"intelligence"`
+	Cost          int           `json:"cost"`
+	Name          ProfileName   `json:"name"`
+	Provider      ModelProvider `json:"provider"`
+	Model         string        `json:"model"`
+	Thinking      ThinkingLevel `json:"thinking"`
+	AllowedModels []string      `json:"allowedModels,omitempty"`
+	CompactTokens int           `json:"compactTokens,omitempty"`
+	MaxConcurrent int           `json:"maxConcurrent,omitempty"`
 }
 type ProfileListResponse struct {
 	Profiles []ProfileSummary `json:"profiles"`
@@ -460,7 +463,6 @@ type BoxRepo struct {
 }
 
 type BoxHelloResponse struct {
-	AgentSurface  AgentSurface     `json:"agentSurface"`
 	GitName       string           `json:"gitName,omitempty"`
 	GitEmail      string           `json:"gitEmail,omitempty"`
 	CompactTokens int              `json:"compactTokens,omitempty"`
@@ -516,16 +518,28 @@ type TranscriptReadRequest struct {
 	Part      TranscriptPart `json:"part,omitempty"`
 	Offset    int            `json:"offset,omitempty"`
 	AfterItem string         `json:"afterItem,omitempty"`
-	ItemIndex int            `json:"itemIndex,omitempty"`
+	Page      TranscriptPage `json:"page,omitempty"`
+	Cursor    int            `json:"cursor,omitempty"`
 	Tail      bool           `json:"tail,omitempty"`
 	PostIndex int            `json:"postIndex,omitempty"`
 }
+
+// TranscriptPage selects one kind of turn continuation.
+type TranscriptPage string
+
+const (
+	TranscriptPageOlderItems     TranscriptPage = "older_items"
+	TranscriptPageMandatoryItems TranscriptPage = "mandatory_items"
+	TranscriptPageMandatoryPosts TranscriptPage = "mandatory_posts"
+)
+
 type TranscriptPart string
 
 const (
 	TranscriptPartOutput    TranscriptPart = "output"
 	TranscriptPartText      TranscriptPart = "text"
 	TranscriptPartArguments TranscriptPart = "arguments"
+	TranscriptPartDiff      TranscriptPart = "diff"
 )
 
 type TranscriptItemKind string
@@ -538,8 +552,26 @@ const (
 	TranscriptTooLarge TranscriptItemKind = "too_large"
 )
 
+type TranscriptCallStatus string
+
+const (
+	TranscriptCallRunning   TranscriptCallStatus = "running"
+	TranscriptCallOK        TranscriptCallStatus = "ok"
+	TranscriptCallError     TranscriptCallStatus = "error"
+	TranscriptCallCancelled TranscriptCallStatus = "cancelled"
+)
+
+type TranscriptCall struct {
+	Tool       string               `json:"tool"`
+	Target     string               `json:"target,omitempty"`
+	Status     TranscriptCallStatus `json:"status"`
+	DurationMs *int64               `json:"durationMs,omitempty"`
+	Error      string               `json:"error,omitempty"`
+}
+
 type TranscriptItem struct {
 	ID           string                  `json:"id"`
+	Index        int                     `json:"index,omitempty"`
 	Turn         TurnID                  `json:"turn"`
 	Kind         TranscriptItemKind      `json:"kind"`
 	At           time.Time               `json:"at"`
@@ -547,11 +579,16 @@ type TranscriptItem struct {
 	Text         string                  `json:"text,omitempty"`
 	Tool         string                  `json:"tool,omitempty"`
 	Arguments    string                  `json:"arguments,omitempty"`
+	Script       string                  `json:"script,omitempty"`
+	Calls        []TranscriptCall        `json:"calls,omitempty"`
+	CallsOmitted int                     `json:"callsOmitted,omitempty"`
 	Output       string                  `json:"output,omitempty"`
+	Diff         string                  `json:"diff,omitempty"`
 	Failed       bool                    `json:"failed,omitempty"`
 	More         bool                    `json:"more,omitempty"`
 	Event        EventID                 `json:"event,omitempty"`
 	Room         RoomID                  `json:"room,omitempty"`
+	From         *Principal              `json:"from,omitempty"`
 	Seq          int64                   `json:"seq,omitempty"`
 	Home         *Conversation           `json:"home,omitempty"`
 	Bytes        int64                   `json:"bytes,omitempty"`
@@ -567,30 +604,36 @@ type TranscriptPostLocation struct {
 	Seq  int64  `json:"seq"`
 }
 type TranscriptInput struct {
-	Home *Conversation `json:"home,omitempty"`
-	At   time.Time     `json:"at"`
-	ID   EventID       `json:"id"`
-	Seq  int64         `json:"seq"`
-	Room RoomID        `json:"room"`
-	Type EventType     `json:"type"`
-	From Principal     `json:"from"`
-	Text string        `json:"text"`
-	More bool          `json:"more,omitempty"`
+	Home        *Conversation `json:"home,omitempty"`
+	At          time.Time     `json:"at"`
+	ID          EventID       `json:"id"`
+	Seq         int64         `json:"seq"`
+	Room        RoomID        `json:"room"`
+	Type        EventType     `json:"type"`
+	From        Principal     `json:"from"`
+	Text        string        `json:"text"`
+	More        bool          `json:"more,omitempty"`
+	Attachments []Attachment  `json:"attachments,omitempty"`
 }
 type TranscriptTurn struct {
-	ID         TurnID            `json:"id"`
-	Started    time.Time         `json:"started"`
-	Ended      *time.Time        `json:"ended,omitempty"`
-	DurationMS int64             `json:"durationMs,omitempty"`
-	Outcome    TurnOutcome       `json:"outcome,omitempty"`
-	Cause      FailureCause      `json:"cause,omitempty"`
-	Inputs     []TranscriptInput `json:"inputs"`
-	Items      []TranscriptItem  `json:"items"`
-	More       bool              `json:"more"`
-	After      string            `json:"after,omitempty"`
-	NextItem   int               `json:"nextItem,omitempty"`
-	Tail       bool              `json:"tail,omitempty"`
-	NextPost   int               `json:"nextPost,omitempty"`
+	ID                TurnID            `json:"id"`
+	Started           time.Time         `json:"started"`
+	Ended             *time.Time        `json:"ended,omitempty"`
+	DurationMS        int64             `json:"durationMs,omitempty"`
+	Outcome           TurnOutcome       `json:"outcome,omitempty"`
+	Cause             FailureCause      `json:"cause,omitempty"`
+	Inputs            []TranscriptInput `json:"inputs"`
+	Items             []TranscriptItem  `json:"items"`
+	More              bool              `json:"more"`
+	After             string            `json:"after,omitempty"`
+	NextItem          int               `json:"nextItem,omitempty"`
+	OlderItems        bool              `json:"olderItems,omitempty"`
+	MandatoryItems    bool              `json:"mandatoryItems,omitempty"`
+	NextMandatory     int               `json:"nextMandatory,omitempty"`
+	MandatoryPosts    bool              `json:"mandatoryPosts,omitempty"`
+	NextMandatoryPost int               `json:"nextMandatoryPost,omitempty"`
+	Tail              bool              `json:"tail,omitempty"`
+	NextPost          int               `json:"nextPost,omitempty"`
 }
 type TranscriptStep struct {
 	Turn    TurnID     `json:"turn"`

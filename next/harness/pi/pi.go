@@ -387,17 +387,3 @@ func (h *Harness) Close() error {
 	})
 	return h.closeErr
 }
-
-// WriteMCPConfig writes Pi's --mcp-config file for one HTTP server.
-func WriteMCPConfig(path, name, url string) error {
-	type server struct {
-		URL string `json:"url"`
-	}
-	data, err := json.Marshal(struct {
-		Servers map[string]server `json:"mcpServers"`
-	}{map[string]server{name: {URL: url}}})
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0600)
-}

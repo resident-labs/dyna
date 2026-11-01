@@ -74,6 +74,18 @@ func (s *Store) AppendEvent(tx *sql.Tx, event contract.Event) (int64, error) {
 		return 0, err
 	}
 	event.Seq = seq
+	event.Time = time.UnixMilli(event.Time.UnixMilli()).UTC()
+	event.From = contract.Principal{Kind: event.From.Kind}
+	switch event.From.Kind {
+	case contract.PrincipalSession:
+		event.From.Session = contract.SessionID(id)
+	case contract.PrincipalOwner:
+		event.From.Device = contract.DeviceID(id)
+	}
+	event.Body, err = contract.DecodeEventBody(event.Body.EventType(), body)
+	if err != nil {
+		return 0, err
+	}
 	s.pending = append(s.pending, event)
 	return seq, nil
 }
@@ -188,18 +200,33 @@ func (s *Store) EventInRoom(ctx context.Context, room contract.RoomID, id contra
 
 // Event returns one event by sequence, including events from another room.
 func (s *Store) Event(ctx context.Context, seq int64) (contract.Event, error) {
-	var room sql.NullString
-	if err := s.Read().QueryRowContext(ctx, "SELECT room FROM events WHERE seq=?", seq).Scan(&room); err != nil {
-		return contract.Event{}, err
-	}
-	events, err := s.Events(ctx, contract.RoomID(room.String), seq-1, 1, nil)
+	rows, err := s.Read().QueryContext(ctx, "SELECT seq,id,at,room,type,from_kind,from_id,body FROM events WHERE seq=?", seq)
 	if err != nil {
 		return contract.Event{}, err
 	}
-	if len(events) == 0 || events[0].Seq != seq {
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return contract.Event{}, err
+		}
 		return contract.Event{}, sql.ErrNoRows
 	}
-	return events[0], nil
+	return scanEvent(rows)
+}
+
+// StreamMatches applies the same room and type rules as Events and OwnerEvents.
+func StreamMatches(event contract.Event, room contract.RoomID) bool {
+	if room != "" {
+		return event.Room == room
+	}
+	switch event.Body.EventType() {
+	case "op.requested", "op.decided", "op.ran":
+		return true
+	case "turn.started", "turn.ended", "session.started", "session.closed", "box.changed", "room.paused", "room.resumed":
+		return event.Room != ""
+	default:
+		return false
+	}
 }
 
 // Subscribe registers a live feed. Overflow closes the channel; resubscribe

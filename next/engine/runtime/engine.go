@@ -137,7 +137,10 @@ func Run(ctx context.Context, cfg Config) error {
 	backupDone := make(chan struct{})
 	go func() {
 		defer close(backupDone)
-		(&backupLoop{store: st, dir: filepath.Join(cfg.Data, "backups"), dest: cfg.BackupDest, recipient: recipient, now: time.Now, run: sshBackup}).start(backupCtx)
+		(&backupLoop{store: st, dir: filepath.Join(cfg.Data, "backups"), dest: cfg.BackupDest, recipient: recipient, now: time.Now, run: sshBackup, free: func(ctx context.Context) (int64, bool) {
+			total, used := podman.LocalDisk(ctx, cfg.Data)
+			return total - used, total > 0
+		}}).start(backupCtx)
 	}()
 	defer func() { stopBackup(); <-backupDone }()
 	if err := st.ResetEngineHosts(ctx); err != nil {
@@ -164,13 +167,13 @@ func Run(ctx context.Context, cfg Config) error {
 	boxCtx, stopBoxes := context.WithCancel(ctx)
 	defer stopBoxes()
 	boxes := &Boxes{Store: st, HeartbeatStore: st, Runtime: cfg.Runtime, HostData: cfg.HostData, InstructionsDir: filepath.Join(cfg.Data, "files", "instructions"), Version: cfg.Version, PiTarball: pi, Context: boxCtx}
-	go boxes.controlPlane(cfg.Data)
 	service := engine.New(st, boxes, profiles, time.Now)
 	service.SetMaxDepth(cfg.SessionMaxDepth)
 	service.Reconciler().SetHostMemory(boxes.hostMemory)
 	service.SetGitIdentity(cfg.GitName, cfg.GitEmail)
 	service.SetHostexecRunner(boxes)
 	boxes.Pressure = service
+	go boxes.controlPlane(cfg.Data)
 	hosts, err := st.Hosts(ctx)
 	if err != nil {
 		return fmt.Errorf("list hosts: %w", err)
@@ -189,6 +192,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("recover hostexec runs: %w", err)
 	}
 	quotas := proxy.Quotas(managementKey, st, time.Now)
+	service.SetWebSearchProxy(proxy, quotas)
 	connections := proxy.Connections(managementKey, st, time.Now)
 	accounts := engine.NewAccountActions(service, connections, quotas)
 	if err := service.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": accounts.Entry(), "pr.open": service.PrOpen(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport), "hostexec.grant": service.HostexecGrant(), "hostexec.run": service.HostexecRunEntry()}, cfg.ApprovalsExpiry); err != nil {
@@ -243,14 +247,21 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	sessions := connect.NewSessions(files, st, time.Now, nil)
+	card, cardServer, err := connect.CardListener()
+	if err != nil {
+		return err
+	}
+	go cardServer.Serve(card)
+	defer card.Close()
 	appPort := 0
-	var webRoutes []string
+	webRoutes := func(context.Context) []string { return nil }
+	var webServer *api.Web
 	if cfg.WebListen != "" {
 		app, err := fs.Sub(web.Dist, "dist")
 		if err != nil {
 			return err
 		}
-		webServer, err := api.NewWeb(apiServer, cfg.WebListen, app, time.Now, st)
+		webServer, err = api.NewWeb(apiServer, cfg.WebListen, app, time.Now, st)
 		if err != nil {
 			return err
 		}
@@ -264,16 +275,19 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 		defer listener.Close()
 		appPort = listener.Addr().(*net.TCPAddr).Port
-		webRoutes = webServer.PublicRoutes()
 	}
-	card, cardServer, err := connect.CardListener()
-	if err != nil {
-		return err
-	}
-	go cardServer.Serve(card)
-	defer card.Close()
 	connectOps := connect.NewOperations(ctx, files, st, appPort, card.Addr().(*net.TCPAddr).Port)
 	defer connectOps.Close()
+	if webServer != nil {
+		webServer.SetDiscovery(connect.TailscaleRoute, func() {
+			select {
+			case connectOps.Wake() <- struct{}{}:
+			default:
+			}
+		})
+		webRoutes = webServer.RefreshRoutes
+	}
+
 	if err := connectOps.Resume(ctx); err != nil {
 		return err
 	}
@@ -342,11 +356,11 @@ func Run(ctx context.Context, cfg Config) error {
 				}
 				lastDormant = now
 			}
+			if err := service.EvictDisk(ctx); err != nil {
+				log.Printf("disk eviction: %v", err)
+			}
 			if err := service.ExpireOperations(ctx); err != nil {
 				log.Printf("operation expiry sweep: %v", err)
-			}
-			if err := service.ExpireHostexecGrants(ctx); err != nil {
-				log.Printf("grant expiry sweep: %v", err)
 			}
 			if err := service.StopHostexecs(ctx); err != nil {
 				log.Printf("hostexec stop sweep: %v", err)

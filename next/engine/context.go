@@ -82,7 +82,7 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	if s.maxDepth == 0 || data.Depth < s.maxDepth {
 		lines = nil
 		for _, p := range s.profiles.List() {
-			lines = append(lines, fmt.Sprintf("%s: taste %d, diagnostics %d, intelligence %d, cost %d; max concurrent %d, max calls %d", p.Name, p.Taste, p.Diagnostics, p.Intelligence, p.Cost, p.MaxConcurrent, p.MaxCallsPerRun))
+			lines = append(lines, fmt.Sprintf("%s: taste %d, diagnostics %d, intelligence %d, cost %d; max concurrent %d", p.Name, p.Taste, p.Diagnostics, p.Intelligence, p.Cost, p.MaxConcurrent))
 		}
 		add(contract.ContextProfiles, lines, 1200, 0)
 	}
