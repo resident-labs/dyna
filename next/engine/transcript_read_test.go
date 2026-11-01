@@ -4,10 +4,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness/pi"
 )
@@ -181,6 +183,7 @@ func TestTranscriptTurnPageAndFullOutput(t *testing.T) {
 	if _, ok := <-ownerLive; ok {
 		t.Fatal("full owner stream did not close for reconnect")
 	}
+	// LEGACY(v1-transfer): this part of the test, the backfill of files from before the turn index. Remove after the transfer.
 	// A file from before indexing must remain readable after backfill.
 	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "DELETE FROM transcript_turns WHERE session=?", caller.Session)
@@ -419,6 +422,169 @@ func TestTranscriptInputAttachmentsAndBudget(t *testing.T) {
 	}
 	if count != len(ids) {
 		t.Fatalf("received %d of %d inputs", count, len(ids))
+	}
+}
+
+// A real steer: the engine hands it to the running turn, and Pi's record of reading it reaches the engine in a later chunk.
+func TestSteerTakesItsPlaceInTheTurn(t *testing.T) {
+	s, ctx, caller := transcriptCaller(t)
+	session, err := s.store.Session(ctx, caller.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	channel, e := testChannel(t, s, ctx, caller)
+	if e != nil {
+		t.Fatal(e)
+	}
+	start, ok := (<-channel).Body.(contract.TurnStart)
+	if !ok {
+		t.Fatal("expected start")
+	}
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	home := contract.Conversation{Kind: contract.ConversationDM, Session: caller.Session}
+	text := strings.Repeat("stop here ", 500) + " token=secretvalue"
+	sent, e := s.Post(ctx, owner, contract.PostRequest{Room: session.Room, Home: home, Text: text})
+	if e != nil {
+		t.Fatal(e)
+	}
+	steer, ok := (<-channel).Body.(contract.TurnSteer)
+	if !ok || steer.Queue != contract.QueueSteer {
+		t.Fatalf("expected steer: %+v", steer)
+	}
+	// A running turn takes a shell job's end as a steer too, and it has no message to show.
+	if _, e = s.ShellJobEnded(ctx, caller, contract.ShellJobEndedRequest{Job: "job_1", Description: "Build", End: &contract.ShellJobEnd{Kind: contract.ShellJobSignaled, Signal: "SIGTERM"}, ExitCode: -1, Tail: "boom"}); e != nil {
+		t.Fatal(e)
+	}
+	wake, ok := (<-channel).Body.(contract.TurnSteer)
+	if !ok {
+		t.Fatal("expected a wake")
+	}
+
+	read := func(turn contract.TurnID) (kinds []contract.TranscriptItemKind, placed *contract.TranscriptItem) {
+		t.Helper()
+		page, e := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: caller.Session})
+		if e != nil {
+			t.Fatal(e)
+		}
+		for _, candidate := range page.Turns {
+			if candidate.ID != turn {
+				continue
+			}
+			for _, input := range candidate.Inputs {
+				if input.ID == sent.Event {
+					t.Fatalf("a steer is no input of its turn: %+v", candidate.Inputs)
+				}
+			}
+			for i := range candidate.Items {
+				kinds = append(kinds, candidate.Items[i].Kind)
+				if candidate.Items[i].Kind == contract.TranscriptSteer {
+					placed = &candidate.Items[i]
+				}
+			}
+		}
+		return kinds, placed
+	}
+	before := fmt.Sprintf(`{"type":"message","id":"u1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","deliveryId":"%d","content":[{"type":"text","text":"framed"}]}}
+{"type":"message","id":"a1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"read","arguments":{}}]}}
+{"type":"message","id":"r1","timestamp":"2026-01-01T00:00:02Z","message":{"role":"toolResult","toolCallId":"c1","content":[]}}
+`, start.Inputs[0].Delivery)
+	if _, e := appendTranscript(s, ctx, caller, "a.jsonl", 0, before); e != nil {
+		t.Fatal(e)
+	}
+	if kinds, placed := read(start.Turn); placed != nil || !slices.Equal(kinds, []contract.TranscriptItemKind{contract.TranscriptTool}) {
+		t.Fatalf("a steer Pi has not read shows in the turn: %v %+v", kinds, placed)
+	}
+
+	ownerSub, ownerLive := s.live.Subscribe("", 1)
+	defer s.live.Unsubscribe(ownerSub)
+	after := fmt.Sprintf(`{"type":"message","id":"u2","timestamp":"2026-01-01T00:00:03Z","message":{"role":"user","deliveryId":"%d","content":[{"type":"text","text":"framed steer"}]}}
+{"type":"message","id":"u3","timestamp":"2026-01-01T00:00:03Z","message":{"role":"user","deliveryId":"%d","content":[{"type":"text","text":"framed wake"}]}}
+{"type":"message","id":"a2","timestamp":"2026-01-01T00:00:04Z","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}
+`, steer.Input.Delivery, wake.Input.Delivery)
+	if _, e := appendTranscript(s, ctx, caller, "a.jsonl", int64(len(before)), after); e != nil {
+		t.Fatal(e)
+	}
+	select {
+	case event := <-ownerLive:
+		if changed, ok := event.Body.(contract.TranscriptChanged); !ok || changed.Turn != start.Turn {
+			t.Fatalf("notice %+v", event)
+		}
+	default:
+		t.Fatal("the read reached no open thread")
+	}
+	want := []contract.TranscriptItemKind{contract.TranscriptTool, contract.TranscriptSteer, contract.TranscriptText}
+	kinds, placed := read(start.Turn)
+	if !slices.Equal(kinds, want) || placed == nil {
+		t.Fatalf("kinds=%v", kinds)
+	}
+	event, err := s.store.Event(ctx, sent.Seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if placed.Event != sent.Event || placed.Seq != sent.Seq || placed.From == nil || placed.From.Kind != contract.PrincipalOwner || placed.Home == nil || placed.Home.Session != caller.Session || !placed.At.Equal(event.Time) {
+		t.Fatalf("placed=%+v", placed)
+	}
+	if !placed.More || len(placed.Text) != 4096 || strings.Contains(placed.Text, "framed") {
+		t.Fatalf("preview of %d bytes, more=%v", len(placed.Text), placed.More)
+	}
+	full, e := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: caller.Session, Turn: start.Turn, Item: placed.ID, Part: contract.TranscriptPartText})
+	if e != nil || len(full.Chunk) <= 4096 || !strings.HasPrefix(full.Chunk, "stop here ") || strings.Contains(full.Chunk, "secretvalue") {
+		t.Fatalf("chunk of %d bytes: %v", len(full.Chunk), e)
+	}
+	if len(full.Steps) != 0 {
+		t.Fatalf("a steer is no step: %+v", full.Steps)
+	}
+
+	// The next message starts a new turn. The steer keeps its place, on any later read.
+	if _, e := s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnCompleted, Final: "answer"}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.Post(ctx, owner, contract.PostRequest{Room: session.Room, Home: home, Text: "next"}); e != nil {
+		t.Fatal(e)
+	}
+	for {
+		if next, ok := (<-channel).Body.(contract.TurnStart); ok && next.Turn != start.Turn {
+			break
+		}
+	}
+	if kinds, placed := read(start.Turn); !slices.Equal(kinds, want) || placed == nil {
+		t.Fatalf("after the next turn: %v", kinds)
+	}
+}
+
+// A child's reply that reaches a running parent is a message too: it takes its place, with the body the thread decodes.
+func TestChildReplyReadDuringATurnTakesItsPlace(t *testing.T) {
+	r := newGoalRig(t)
+	r.s.SetLayout(box.Layout{Data: t.TempDir()})
+	lead := asSession(r.lead)
+	r.notice(r.lead)
+	running := r.begin(r.lead)
+	r.turn(r.child, "The feed is merged.")
+	started, err := r.s.event(r.room, contract.Principal{Kind: contract.PrincipalEngine}, contract.TurnStarted{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, inputs, _, err := r.st.Dispatch(r.ctx, r.lead, "turn_unused", started, false)
+	if err != nil || active != running || len(inputs) == 0 || inputs[len(inputs)-1].Queue == nil {
+		t.Fatalf("steer: active %q, inputs %+v: %v", active, inputs, err)
+	}
+	data := fmt.Sprintf(`{"type":"message","id":"u1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","deliveryId":"%d"}}
+{"type":"message","id":"a1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}
+`, inputs[len(inputs)-1].Seq)
+	if _, e := appendTranscript(r.s, r.ctx, lead, "a.jsonl", 0, data); e != nil {
+		t.Fatal(e)
+	}
+	page, e := r.s.TranscriptRead(r.ctx, ownerCaller, contract.TranscriptReadRequest{Session: r.lead, Turn: running})
+	if e != nil || len(page.Turns) != 1 || len(page.Turns[0].Items) != 2 {
+		t.Fatalf("page %+v: %v", page, e)
+	}
+	steer := page.Turns[0].Items[0]
+	var body contract.TurnEnded
+	if err := json.Unmarshal([]byte(steer.Text), &body); err != nil {
+		t.Fatal(err)
+	}
+	if steer.Kind != contract.TranscriptSteer || steer.Type != "turn.ended" || body.Final != "The feed is merged." || steer.From == nil || steer.From.Session != r.child {
+		t.Fatalf("steer %+v", steer)
 	}
 }
 

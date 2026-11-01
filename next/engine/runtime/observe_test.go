@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -91,6 +92,10 @@ func TestHostLoadJudgesControlPlaneDisk(t *testing.T) {
 
 type offlineRestoreStore struct{ boxStore }
 
+func (offlineRestoreStore) Hosts(context.Context) ([]box.Host, error) {
+	return []box.Host{{Name: "h", State: box.HostReady}}, nil
+}
+func (offlineRestoreStore) SetEngineHost(context.Context, contract.HostName, bool) error { return nil }
 func (offlineRestoreStore) Boxes(context.Context) ([]box.Box, error) {
 	return []box.Box{{ID: "b", Session: "s", Host: "h", State: contract.BoxStopped}}, nil
 }
@@ -102,11 +107,14 @@ func (offlineRestoreStore) Session(context.Context, contract.SessionID) (store.S
 }
 
 type offlineRunner struct {
+	mu               sync.Mutex
 	offline          bool
 	forward, started bool
 }
 
 func (r *offlineRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.offline {
 		return nil, errors.New("host offline")
 	}
@@ -148,16 +156,22 @@ func TestRestoreToleratesOfflineHost(t *testing.T) {
 	t.Cleanup(func() { _ = sockets.Close() })
 	b := &Boxes{Store: offlineRestoreStore{}, Sockets: sockets, Runtime: runtimeDir, Layout: box.Layout{HostData: filepath.Join(runtimeDir, "host")}, Version: "v1", hosts: map[contract.HostName]*podman.Host{"h": host}}
 	b.binOnce.Do(func() { b.binSum = "sum" })
-	if err := b.Restore(context.Background()); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() { cancel(); b.WaitRecovered() }()
+	if err := b.Restore(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(runtimeDir, "boxes", "b.sock")); err != nil {
 		t.Fatalf("local box socket: %v", err)
 	}
+	runner.mu.Lock()
 	runner.offline = false
+	runner.mu.Unlock()
 	if err := b.Start(context.Background(), "b"); err != nil {
 		t.Fatal(err)
 	}
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
 	if !runner.forward || !runner.started {
 		t.Fatalf("forward=%v started=%v", runner.forward, runner.started)
 	}

@@ -130,6 +130,7 @@ func TestSetupDoneCheckoutKeepsFilesWithoutIndex(t *testing.T) {
 	}
 }
 
+// LEGACY(v1-transfer): this test, a checkout older than setup state. Remove after the transfer.
 func TestSetupLegacyCheckoutWithoutStateIsKept(t *testing.T) {
 	root, stateRoot := t.TempDir(), t.TempDir()
 	repo := contract.BoxRepo{Name: "owner/repo", Cache: "/cache", Branch: "branch", Base: "main"}

@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// LEGACY(v1-transfer): this test, which pins the steps from schema 42. Remove after the transfer.
 func TestGlobalOperationUpgradePreservesReferences(t *testing.T) {
 	db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "fixture.db")+"?_pragma=foreign_keys(1)")
 	if err != nil {
@@ -21,7 +22,7 @@ func TestGlobalOperationUpgradePreservesReferences(t *testing.T) {
 		INSERT INTO meta VALUES ('schema_version','42');
 		CREATE TABLE events (seq INTEGER PRIMARY KEY, room TEXT, from_kind TEXT, from_id TEXT, type TEXT, body BLOB);
 		CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT, started_seq INTEGER, started_at INTEGER, ended_at INTEGER);
-		CREATE TABLE pr_owners (session TEXT);
+		CREATE TABLE pr_owners (repo TEXT, number INTEGER, session TEXT, goal TEXT, approved_head TEXT, branch TEXT); CREATE TABLE repos (repo TEXT PRIMARY KEY);
 		CREATE TABLE rooms(id TEXT PRIMARY KEY); CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT, parent TEXT, goal TEXT, created_at INTEGER, closed_at INTEGER); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);
 		INSERT INTO rooms VALUES ('room');
 		CREATE TABLE operations (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id), by_kind TEXT NOT NULL, by_id TEXT NOT NULL, class TEXT NOT NULL, state TEXT NOT NULL, card BLOB NOT NULL, args BLOB NOT NULL, args_sha256 BLOB NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, decision BLOB, result BLOB);

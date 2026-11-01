@@ -82,7 +82,7 @@ func TestRecreateMovesAStoppedBoxToANewImageAndKeepsItsVolume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := &Boxes{hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}}
+	b := &Boxes{hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}}
 	b.Layout.HostData = data
 	slice := "dyna-swap-test-" + strings.TrimPrefix(string(id), "box_swap_test_") + ".slice"
 	spec := lifecycle.BoxSpec{Box: id, Room: "room", Host: "host", Slice: slice, Size: contract.BoxSize{CPUs: 1, MemBytes: 1 << 30, Pids: 512}}

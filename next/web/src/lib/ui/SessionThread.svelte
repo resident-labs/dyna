@@ -5,10 +5,11 @@
   import { hue } from "../identity.ts";
   import { causes, dayLabel, formatTime } from "../feed.ts";
   import { watchTranscripts } from "../stream.ts";
-  import type { Attachment, Principal, PostRequest, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn, TranscriptPage } from "../contract.gen.ts";
+  import type { Attachment, Principal, PostRequest, TranscriptInput, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn, TranscriptPage } from "../contract.gen.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import Icon from "./Icon.svelte";
   import Avatar from "./Avatar.svelte";
+  import CollapsibleBody from "./CollapsibleBody.svelte";
   import Markdown from "./Markdown.svelte";
   import PostAttachments from "./PostAttachments.svelte";
   import MediaViewer from "./MediaViewer.svelte";
@@ -17,7 +18,7 @@
   import TimelineMinimap from "./TimelineMinimap.svelte";
   import PostTarget from "./PostTarget.svelte";
   import QuestionCard from "./QuestionCard.svelte";
-  import { deriveTimelineGroups, finalTimelineItem, ownPost, postDestination, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, timelineInputText, timelineItemRunning, pendingStartBrief } from "../timeline.ts";
+  import { deriveTimelineGroups, finalTimelineItem, ownPost, postDestination, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief } from "../timeline.ts";
 
   let { session, roomName, store, operate, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { startingBrief?: string; session: string; roomName: string; store: RoomStore; operate: boolean; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
   const view = untrack(() => store.window({ kind: "dm", session }));
@@ -227,7 +228,7 @@
         if (input.more && chunks[key] === undefined && !chunkFailed[key]) void fetchPart(turn.id, "input:" + input.id, "text");
       }
       for (const item of turn.items ?? []) {
-        const messages = item.kind === "text" || item.kind === "post" ? [item] : item.posts ?? [];
+        const messages = item.kind === "text" || item.kind === "post" || item.kind === "steer" ? [item] : item.posts ?? [];
         for (const message of messages) {
           const key = message.id + "/text";
           if (message.more && chunks[key] === undefined && !chunkFailed[key]) void fetchPart(turn.id, message.id, "text");
@@ -277,14 +278,12 @@
   </div>
 {/snippet}
 
-{#snippet inbound(key: string, from: Principal, at: string, body: Snippet)}
+<!-- Another speaker mirrors the owner's bubble from the left. Attachments stay in view, so a message with them never folds. -->
+{#snippet inbound(key: string, from: Principal, at: string, body: Snippet, whole: boolean)}
   {@const name = sender(from.kind, from.session)}
   <div class="agent-input" data-media-key={key}>
-    <Avatar kind={from.kind} {name} size={32} />
-    <div class="agent-body">
-      <div class="agent-sender">{#if from.session}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(from.session)}`} onclick={navigate} style:--hue={hue(name)}>{name}</a>{:else}<strong>{name}</strong>{/if}<time datetime={at}>{formatTime(at)}</time></div>
-      {@render body()}
-    </div>
+    <div class="agent-sender"><Avatar kind={from.kind} {name} size={20} />{#if from.session}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(from.session)}`} onclick={navigate} style:--hue={hue(name)}>{name}</a>{:else}<strong>{name}</strong>{/if}<time datetime={at}>{formatTime(at)}</time></div>
+    {#if whole}{@render body()}{:else}<CollapsibleBody>{@render body()}</CollapsibleBody>{/if}
   </div>
 {/snippet}
 
@@ -295,8 +294,27 @@
     {@render message(item.id, chunks[item.id + "/text"] ?? item.text ?? "", item.attachments, item.event ?? item.id, item.at)}
     {@render textRetry(turn, item.id)}
   {/snippet}
-  {#if item.kind === "post" && !ownPost(item, session)}{@render inbound(item.id, item.from ?? { kind: "engine" }, item.at, body)}
+  {#if item.kind === "post" && !ownPost(item, session)}{@render inbound(item.id, item.from ?? { kind: "engine" }, item.at, body, !!item.attachments?.length)}
   {:else}<div class="agent-message" class:working data-media-key={item.id}>{@render body()}</div>{/if}
+{/snippet}
+
+<!-- What a session read, at the start of a turn or as a steer. Part names the item whose full text loads for it. -->
+{#snippet inputRow(turn: TranscriptTurn, key: string, part: string, input: TranscriptInput)}
+  {@const shown = timelineInput(input, chunks[part + "/text"])}
+  {#snippet body()}
+    {@render message(key, shown.text, input.attachments, input.id, input.at)}
+    {@render textRetry(turn, part)}
+  {/snippet}
+  {#if shown.kind !== "message"}
+    {@const name = input.from.session ? sender("session", input.from.session) : undefined}
+    <div class="muted turn-note input-line" class:failure={shown.kind === "failed"} title={formatTime(input.at)}>
+      <span class="slot"><Icon name={shown.kind === "failed" ? "warning" : "inbox"} size={14} /></span>
+      {#if name}<span class="agent-sender"><a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(input.from.session ?? "")}`} onclick={navigate} style:--hue={hue(name)}>{name}</a></span>{/if}
+      <span>{shown.text}</span>
+    </div>
+    {@render textRetry(turn, part)}
+  {:else if input.from.kind === "owner"}{@render ownerMessage(key, input.at, false, body)}
+  {:else}{@render inbound(key, input.from, input.at, body, !!input.attachments?.length)}{/if}
 {/snippet}
 
 {#snippet dayMark(at: string, before?: string)}
@@ -317,36 +335,33 @@
       {@render ownerMessage("brief", undefined, false, brief)}
     {/if}
     {#each turns as turn, index (turn.id)}
-      {@const hasWork = !!turn.olderItems || (turn.items ?? []).some(item => item.kind === "tool" || item.kind === "thinking")}
+      {@const segments = timelineSegments(turn.id, turn.items ?? [])}
       {@const finalText = turn.ended ? finalTimelineItem(turn.items ?? [], session)?.id : undefined}
       {@render dayMark(turn.started, turns[index - 1]?.started)}
       <article data-turn={turn.id} class:ended={turn.ended || stalled}>
-        {#each turn.inputs ?? [] as input (input.id)}
-          {#snippet body()}
-            {@render message(input.id, timelineInputText(input, chunks["input:" + input.id + "/text"]), input.attachments, input.id, input.at)}
-            {@render textRetry(turn, "input:" + input.id)}
-          {/snippet}
-          {#if input.from.kind === "owner"}{@render ownerMessage(input.id, input.at, false, body)}
-          {:else}{@render inbound(input.id, input.from, input.at, body)}{/if}
-        {/each}
-        <!-- Dyna: Posts and the final answer remain visible outside the work fold. -->
-        {#if turn.ended && hasWork}
-          <button class="work-header" aria-expanded={!!expandedTurns[turn.id]} onclick={() => { expandedTurns[turn.id] = !expandedTurns[turn.id]; if (expandedTurns[turn.id] && turn.olderItems) void readContinuation(turn, "older"); }}>Worked for {formatTimelineDuration(Date.parse(turn.ended) - Date.parse(turn.started))}<span class:open={expandedTurns[turn.id]}><Icon name="chevron" size={14} /></span></button>
-        {/if}
-        {#each deriveTimelineGroups(turn.items ?? []) as group (group.id)}
-          {#if group.kind === "work"}
-            {#if !turn.ended || expandedTurns[turn.id]}
-            <TranscriptWorkRow items={group.items} ended={!!turn.ended || stalled} started={turn.started} {now} {chunks}
-              onopen={() => { if (turn.olderItems) void readContinuation(turn, "older"); }}
-              onload={async (item, part) => { if (!await fetchPart(turn.id, item.id, part)) throw new Error("Part did not load"); }} />
-            {/if}
-          {:else if group.kind === "posts"}
-            {#each group.item.posts ?? [] as post (post.id)}
-              {@render postItem(turn, post)}
-            {/each}
-          {:else if group.item.kind === "text" || group.item.kind === "post"}
-            {#if group.item.kind === "post" || visibleTimelineText(group.item.id, finalText, !!turn.ended, hasWork, !!expandedTurns[turn.id])}{@render postItem(turn, group.item, !!turn.ended && hasWork && group.item.kind === "text" && group.item.id !== finalText)}{/if}
-          {:else if group.item.kind === "too_large"}<p class="muted">This item is too large to show.</p>{/if}
+        {#each turn.inputs ?? [] as input (input.id)}{@render inputRow(turn, input.id, "input:" + input.id, input)}{/each}
+        {#each segments as segment, position (segment.id)}
+          {@const hasWork = (!position && !!turn.olderItems) || segment.items.some(item => item.kind === "tool" || item.kind === "thinking")}
+          {#each segment.steers as steer (steer.id)}{@render inputRow(turn, steer.id, steer.id, steerInput(steer))}{/each}
+          <!-- Dyna: Posts and the final answer remain visible outside the work fold. -->
+          {#if turn.ended && hasWork}
+            <button class="work-header" aria-expanded={!!expandedTurns[segment.id]} onclick={() => { expandedTurns[segment.id] = !expandedTurns[segment.id]; if (expandedTurns[segment.id] && turn.olderItems) void readContinuation(turn, "older"); }}>{position ? "Continued" : "Worked"} for {formatTimelineDuration(segmentDuration(segments, position, turn.started, turn.ended))}<span class:open={expandedTurns[segment.id]}><Icon name="chevron" size={14} /></span></button>
+          {/if}
+          {#each deriveTimelineGroups(segment.items) as group (group.id)}
+            {#if group.kind === "work"}
+              {#if !turn.ended || expandedTurns[segment.id]}
+              <TranscriptWorkRow items={group.items} ended={!!turn.ended || stalled} started={turn.started} {now} {chunks}
+                onopen={() => { if (turn.olderItems) void readContinuation(turn, "older"); }}
+                onload={async (item, part) => { if (!await fetchPart(turn.id, item.id, part)) throw new Error("Part did not load"); }} />
+              {/if}
+            {:else if group.kind === "posts"}
+              {#each group.item.posts ?? [] as post (post.id)}
+                {@render postItem(turn, post)}
+              {/each}
+            {:else if group.item.kind === "text" || group.item.kind === "post"}
+              {#if group.item.kind === "post" || visibleTimelineText(group.item.id, finalText, !!turn.ended, hasWork, !!expandedTurns[segment.id])}{@render postItem(turn, group.item, !!turn.ended && hasWork && group.item.kind === "text" && group.item.id !== finalText)}{/if}
+            {:else if group.item.kind === "too_large"}<p class="muted">This item is too large to show.</p>{/if}
+          {/each}
         {/each}
         {#if turn.outcome === "failed"}<div class="failure"><span class="slot"><Icon name="warning" size={16} /></span>{turn.cause ? causes[turn.cause] : "The turn failed"}</div>
         {:else if turn.outcome === "stopped"}<p class="muted turn-note">Stopped</p>{/if}
@@ -361,7 +376,7 @@
       {#snippet queued()}<p class="owner-note queued">Queued</p>{/snippet}
       {#if post.from.kind === "owner"}{@render ownerMessage(post.id, post.at, false, body, closed ? undefined : queued)}
       {:else if post.from.kind === "session" && post.from.session === session}<div class="agent-message" data-media-key={post.id}>{@render body()}</div>
-      {:else}{@render inbound(post.id, post.from, post.at, body)}{/if}
+      {:else}{@render inbound(post.id, post.from, post.at, body, !!post.body.attachments?.length)}{/if}
     {/each}
     {#each pendingPosts as post (post.id)}
       {#snippet body()}{@render message(pendingKey(post.id), post.request.text, post.request.attachments)}{/snippet}
@@ -397,9 +412,11 @@
   .agent-message { min-width: 0; }
   .agent-message.working { color: var(--muted); }
   .post-destination { display: flex; min-width: 0; margin-bottom: 4px; }
-  .agent-input { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; }
-  .agent-body { min-width: 0; }
-  .agent-sender { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  /* Mirrors .bubble from the other side. */
+  .agent-input { align-self: flex-start; max-width: 80%; min-width: 0; padding: 12px 16px; background: var(--raised); border-radius: 12px; }
+  .agent-input .agent-sender { margin-bottom: 4px; }
+  .agent-sender { display: flex; flex: none; align-items: center; gap: 8px; min-width: 0; }
+  .input-line { align-items: flex-start; line-height: 24px; overflow-wrap: anywhere; }
   .agent-sender :is(a, strong) { min-width: 0; overflow: hidden; color: oklch(var(--id-name) var(--hue)); font-size: 14px; font-weight: 600; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
   .agent-sender strong { color: var(--text); }
   .agent-sender a:hover { text-decoration: underline; }

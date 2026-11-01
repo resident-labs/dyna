@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// LEGACY(v1-transfer): the v1 bundle types and DecodeBundle in this file, not the shared types named in docs/legacy-removal.md. Remove after the transfer.
 // The migration bundle (spec section 8.1) is the only bridge from v1. The v1
 // exporter writes it before v2 exists, so records name each other by their v1
 // labels; the import makes the v2 IDs and keeps the labels for display.

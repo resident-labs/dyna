@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// LEGACY(v1-transfer): this whole file, the dyna import command. Remove after the transfer.
 func importCommand() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{Use: "import BUNDLE", Short: "Check a v1 migration bundle", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {

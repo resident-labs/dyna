@@ -17,7 +17,7 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
-// PrOpen registers the only PR write needed for the self-hosting trial.
+// PrOpen registers the one PR write Dyna makes.
 func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTripper) approve.Entry {
 	lookup := func(ctx context.Context, who contract.Principal) (store.Session, string, error) {
 		if who.Kind != contract.PrincipalSession {
@@ -115,12 +115,13 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 				if err != nil {
 					return err
 				}
-				return s.store.RecordPROpen(ctx, session.Repo, payload.Number, who.Session, head, event, nil)
+				return s.store.RecordPROpen(ctx, session.Repo, payload.Number, who.Session, head, input.Title, link, event, nil)
 			}()
 			if err != nil {
 				result.Cause = contract.CauseInternal
 				result.Error = "PR opened but ownership could not be recorded; reconcile before retrying: " + link
 			}
+			s.resetPRPoll(session.Repo)
 			return result
 		},
 	}
