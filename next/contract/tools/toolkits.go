@@ -26,6 +26,7 @@ var toolkits = map[string]Toolkit{
 	"subscription": {Name: "subscription", Title: "Subscriptions", Destructive: true},
 	"visual":       {Name: "visual", Title: "Visual checks", Idempotent: true},
 	"web":          {Name: "web", Title: "Web search", Idempotent: true, OpenWorld: true},
+	"workflow":     {Name: "workflow", Title: "Workflows", Destructive: true, OpenWorld: true},
 }
 
 // ToolkitFor returns the registered metadata for an area.

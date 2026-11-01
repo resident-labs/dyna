@@ -28,7 +28,7 @@ func (s *Service) RoomCreate(ctx context.Context, caller contract.Principal, req
 		return contract.RoomCreateResponse{}, failure(err)
 	}
 	room := contract.RoomID(value)
-	if _, e := s.startSession(ctx, caller, contract.SessionStartRequest{Room: room, Name: "root", Profile: req.RootProfile}, req.Name); e != nil {
+	if _, e := s.startSession(ctx, caller, contract.SessionStartRequest{Room: room, Name: "root", Profile: req.RootProfile}, req.Name, nil); e != nil {
 		return contract.RoomCreateResponse{}, e
 	}
 	return contract.RoomCreateResponse{Room: room}, nil

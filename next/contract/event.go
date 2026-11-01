@@ -280,6 +280,7 @@ const (
 	CauseSetModelFailed      FailureCause = "set_model_failed"      // the agent program refused the session's new model
 	CauseNotStarted          FailureCause = "not_started"           // on a stopped turn: it stopped before Pi took its inputs, so they stay pending
 	CauseRunTimeout          FailureCause = "run_timeout"           // a subscription's Run reached its time limit
+	CauseWorkflowFailed      FailureCause = "workflow_failed"       // a workflow's script threw, or its script host could not run it
 )
 
 // PressureKind is "high" for memory throttling that lasts 60 s, or "max" for a
@@ -344,6 +345,7 @@ const (
 	BoxSizeSmall  BoxSizeName = "small"
 	BoxSizeMedium BoxSizeName = "medium"
 	BoxSizeLarge  BoxSizeName = "large"
+	BoxSizeXLarge BoxSizeName = "xlarge"
 )
 
 type BoxSize struct {

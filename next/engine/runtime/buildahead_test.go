@@ -29,6 +29,9 @@ type aheadStore struct {
 }
 
 func (s aheadStore) Hosts(context.Context) ([]box.Host, error) { return s.hosts, nil }
+func (aheadStore) PinWorkflowImage(context.Context, contract.SessionID, string) (string, error) {
+	return "", nil
+}
 func (s aheadStore) OpenRooms(context.Context) ([]contract.RoomID, error) {
 	var rooms []contract.RoomID
 	for room := range s.rooms {

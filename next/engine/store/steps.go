@@ -6,11 +6,16 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 66
+const schemaVersion = 67
 
 // LEGACY(v1-transfer): steps 42 to 63, which only upgrade stores older than schema 64. Remove after the transfer.
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	66: {
+		`CREATE TABLE workflow_runs (id TEXT PRIMARY KEY, room TEXT NOT NULL REFERENCES rooms(id), session TEXT NOT NULL UNIQUE REFERENCES sessions(id), name TEXT NOT NULL, description TEXT NOT NULL, script TEXT NOT NULL, args TEXT NOT NULL, profiles TEXT NOT NULL, repo TEXT NOT NULL, commit_sha TEXT NOT NULL, image TEXT NOT NULL, state TEXT NOT NULL, result TEXT NOT NULL DEFAULT '', started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL DEFAULT 0)`,
+		`CREATE INDEX workflow_runs_room ON workflow_runs(room, started_at)`,
+		`CREATE TABLE workflow_steps (run TEXT NOT NULL REFERENCES workflow_runs(id), key TEXT NOT NULL, parent TEXT NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL, phase TEXT NOT NULL, profile TEXT NOT NULL, detail TEXT NOT NULL, state TEXT NOT NULL, result TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL DEFAULT '', transcript TEXT NOT NULL DEFAULT '', input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, cache_read_tokens INTEGER NOT NULL DEFAULT 0, cache_write_tokens INTEGER NOT NULL DEFAULT 0, started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(run, key))`,
+	},
 	65: {`ALTER TABLE questions ADD COLUMN meanwhile TEXT NOT NULL DEFAULT ''`, `ALTER TABLE questions ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0`},
 	64: {
 		// A tracked PR may sit on a repository no room lists, so pr_owners drops that key. Rows from before tracking start

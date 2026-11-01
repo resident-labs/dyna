@@ -198,6 +198,8 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `subscription_args` |
 | `subscription_files` |
 | `subscription_runs` | one row for each Run in progress, which is what stops a subscription overlapping itself |
+| `workflow_runs` | one row for each run of a script, tied to its crew session (9.2) |
+| `workflow_steps` | a run's journal: each step's start and result, by step key |
 
 ### 4.3 Data on disk
 
@@ -274,6 +276,7 @@ The owner or an authorized ancestor can restart an open session with a failed bo
 | small | 2 | 4 GiB | 6 GiB | 2048 | 10 GiB |
 | medium | 4 | 8 GiB | 12 GiB | 4096 | 20 GiB |
 | large | 8 | 16 GiB | 24 GiB | 8192 | 40 GiB |
+| xlarge | 16 | 32 GiB | 48 GiB | 16384 | 80 GiB |
 
 Disk requests are accounting, not quotas. Any session may request any size. Defaults are agent for root and children, medium for leads, or a repository default. The engine emits non-waking `box.pressure` once per pressure episode. Box growth is cut until after cutover (owner, q40); start a new, larger box instead.
 
@@ -306,7 +309,7 @@ Dependency caches are shared read-write per host; cross-box cache poisoning is a
 
 Each box receives only its own forwarded Unix socket. The engine derives session identity from that listener; no token is sent. The engine restores forwards after master failure, and the box agent retries and buffers output. Standing instructions mount read-only.
 
-Pi sends model calls to its loopback box agent with a placeholder key. The engine checks the profile, substitutes the CLIProxyAPI client key and streams through the proxy's Unix socket. Besides the profile's models it passes the models of the session's last two dispatched turns, so a session that changed profile can finish its running turn and compact on the model it left. The engine records those itself at dispatch, so a box cannot name one. Pi alone retries model calls. A call that cannot reach the box socket has reached nothing, so the box agent holds it for up to 5 minutes, which carries a turn across an engine restart. Failed turns retry pending inputs with bounded backoff; paused rooms wait for resume. Before M3 enables a second sign-in, account affinity must survive proxy restarts.
+Pi sends model calls to its loopback box agent with a placeholder key. The engine checks the profile, substitutes the CLIProxyAPI client key and streams through the proxy's Unix socket. Besides the profile's models it passes the models of the session's last two dispatched turns, so a session that changed profile can finish its running turn and compact on the model it left. The engine records those itself at dispatch, so a box cannot name one. A crew may also call every model of its script's profiles (9.2). Pi alone retries model calls. A call that cannot reach the box socket has reached nothing, so the box agent holds it for up to 5 minutes, which carries a turn across an engine restart. Failed turns retry pending inputs with bounded backoff; paused rooms wait for resume. Before M3 enables a second sign-in, account affinity must survive proxy restarts.
 
 CLIProxyAPI is a pinned vendored fork supervised as a separate child. Its patch ledger is `next/third_party/cliproxyapi/DYNA.md`. Strict cloak mode stays off. Claude sign-ins use cloaking, with the accepted account risk in decision 4. M1 stores proxy sign-ins in its protected file store; M3 moves them into its SQLite token store. Only the engine holds its management key. Shutdown drains admitted model calls before stopping the proxy.
 
@@ -314,7 +317,7 @@ From M2, git smart HTTP goes through the engine. Fetches cover room repositories
 
 ### 5.8 Box agent (M1; shell server and transcript stream in M2)
 
-The box agent runs Pi over RPC and the Dyna MCP server (7.9). M2 adds a secret-masking shell server and transcript stream. Shell jobs run locally in process groups; stopping a job kills its group. There is no `node=` option. M1 uses Pi's bash tool.
+The box agent runs Pi over RPC and the Dyna MCP server (7.9). In a crew's box it runs the script instead (9.2), and no session Pi. M2 adds a secret-masking shell server and transcript stream. Shell jobs run locally in process groups; stopping a job kills its group. There is no `node=` option. M1 uses Pi's bash tool.
 
 Pi owns steer and follow-up queues. A delivery is done only when Pi's session file records its ID. Until `turn.output` commits, each reconnect resends `TurnStart` with all original inputs, including done deliveries, then unread later inputs as `TurnSteer` in sequence order. The runner skips IDs already in the session file. Identical turn-result retries do not duplicate events; conflicting results fail. Failed turns except `output_limit` return inputs to pending without waking, preserving reply channels. Pi controls compaction.
 
@@ -582,7 +585,7 @@ Each `contract/tools/` toolkit registers one area tool with a flat `action` enum
 | `goal` | set, list, item, done, journal | `goal.*` (done) | 2 |
 | `issue` | file, list, show, close | `issue.*` | 2 |
 | `question` | ask, list | `question.*`; ask needs the `ask-owner` grant (7.10) | 2 |
-| `workflow` | run, status, list | `workflow.*` | 2 |
+| `workflow` | run, status, list | `workflow.run`, `workflow.status`, `workflow.list` | 2 |
 | `subscription` | list, add, remove | `subscription.*` | 2 |
 
 Every session initially declares all Dyna tools and four shell tools, with `codemode` active (`--tools +codemode`; `codemode.mode` stays `on`, so declared tools stay direct and scripts can call them) and without `tool_search`. Pi waits for direct servers before the first prompt. Maximum-depth starts fail with a typed refusal. Dyna calls use the MCP route; the box resolves names and actions, returning `unknown_action` with valid names. The handler strictly decodes arguments once and returns its typed error unchanged. Room MCP servers use codemode exposure; owner-only methods stay in CLI and web. `session.restart` requires tree access; `room.repos` allows a session its own room. The Dyna MCP timeout is 600 seconds with progress notifications; longer work returns an operation immediately and wakes the session on `op.ran`.
@@ -618,7 +621,7 @@ After the M2 trial parts, phase 1 ships the registry, ten phase-1 toolkits, MCP 
 
 The owner shipped this without the evaluation gate (q68).
 
-Phase 2 in M3 adds `issue`, `workflow`, `subscription`, PR status, and skills with their features. PR approval is deferred (7.6). `goal`, `dyna_goal`, `question` and `dyna_usage` have shipped.
+Phase 2 in M3 adds `issue`, `workflow`, `subscription`, PR status, and skills with their features. PR approval is deferred (7.6). `goal`, `dyna_goal`, `question`, `workflow` and `dyna_usage` have shipped.
 
 ### 7.10 Questions
 
@@ -688,7 +691,7 @@ All M1–M3 features below are cutover gates. Imported data is not the same as a
 - **M3:** goals and check-ins (done, section 7.4), questions, issues, thin PR approval and GitHub merges, the Actions runner pool, typed subscriptions, settings, accounts, backups, remote access, Connect and device scopes, web push, desktop, skills, install guard, manual update, command palette and workflows. Add arch, lt-24-005, Boat and pve only after each passes the host check and real-box QA. The relay remains unchanged. Remote access precedes workflows. Daily maintenance includes backups, archive-ref expiry, host pruning and closing eligible boxes stopped for seven days; root and sessions with open PRs, goals, children, questions or pending input are excluded.
 - **Web search:** The direct MCP web tool searches through eligible providers. CLIProxyAPI holds model credentials; the engine holds search-only keys, including the Muse search key. The owner requested this port before cutover on 2026-10-31.
 - **After cutover:** voice returns as the existing Go service and persona without redesign; issue watches, room MCP, computer reminders, idle compaction, settings panes, release pipeline, WSL and branch QA follow. Issue-watch and room-MCP data are not imported. Manual update ships in M3; hourly auto-update follows.
-- **Dropped:** reviewer service and workspace, Dyna merge trials, comment-trust holds, CI budget service, conflict radar, room PR views, jobs, worktrees, load doctor, test slots, harness settings, Claude Code and session-format conversion. Session profile changes remain. The library is cut for now; its map stays in the frozen v1 backup. External members and placement by device needs are absent. GitHub supplies PR state; outside text is wrapped, with the accepted risks in decision 13.
+- **Dropped:** reviewer service and workspace, Dyna merge trials, comment-trust holds, CI budget service, conflict radar, room PR views, jobs, session worktrees, load doctor, test slots, harness settings, Claude Code and session-format conversion. Session profile changes remain. The library is cut for now; its map stays in the frozen v1 backup. External members and placement by device needs are absent. GitHub supplies PR state; outside text is wrapped, with the accepted risks in decision 13.
 
 Readable room history is given up (owner q57): `dyna room log` starts empty. The data remains in `archive/` and backups, but no archive reader is planned. Paired devices, desktop, issues, goals, PRs and standing instructions work at cutover.
 
@@ -698,7 +701,35 @@ Pi replaces Claude Code, including its model-specific prompt and built-in tools.
 
 ### 9.2 Workflows (M3)
 
-Port v1 plain-JavaScript scripts before cutover for fl-rea. A run is a child session with a small box; scripts never run in the engine. Agent steps are child sessions in separate boxes, closed once their results are stored. All steps use `sameHost` and share `/box/shared`; a step that cannot fit waits. `run()` executes in the run box; `job()` uses host exec under the run's grants. Store step starts and results as events. On restart, replay deterministic scripts and return stored results without repeating steps. Admission bounds fan-out; profile `maxConcurrent` bounds concurrent calls, with zero unlimited, and import preserves it. The owner removed the per-run call limit; v2 does not import or enforce it. Budget 1,000–1,500 product lines. The M3 design check chooses Node in `dyna-base` or an interpreter in `dyna box-agent`.
+A **crew** is one Dyna session with one box. The agents inside it are Pi processes, not sessions, so `boxes.session`, the box socket's identity, the reconciler, dormancy, restart and admission work as they do for any session. A crew has one identity: its workers share its push rights and see each other's files, so third-party PR review stays in normal child sessions. A script coordinates the fan-out, in Node, run by the box agent; scripts never run in the engine. Stages: (1) crew, script host and journal, which is built, (2) worktrees and `merge()`, (3) the run page, (4) `team()`, `ask()`, budgets and quota pause. Budget 1,000–1,500 product lines per stage.
+
+**Start.** `dyna workflow run FILE [--args JSON] [--resume RUN]` (`workflow.run`). Only the owner or a room's root may start one. A script begins with `export const meta = {...}`, a pure literal that the engine reads without running it: `name` and `profiles` are required, and `description`, `size` and `repo` are optional. Unknown keys, unknown profiles, unknown sizes and repositories the room does not list all fail here, before a box exists. The run becomes a child session of the caller in one transaction, on a host chosen by normal admission, on the room's default repository unless `repo` names one. The owner has no session, so the owner's crew sits under root and its reply is the owner's. Its first profile is the session's.
+
+**Fixed at start.** The script, its profile list and its size never change. The box reports the commit its checkout started on and a later box starts there, unless the crew has pushed its branch. The first image choice stands too, while the host holds that tag; a host without it builds what the repository holds now.
+
+**Script.** Plain JavaScript with top-level `await` and `return`, in its own `vm` context, with no modules, files or network. That context keeps the script away from the clock and is not a security boundary. `Date.now()`, `Math.random()` and argless `new Date()` throw.
+
+| Call | What it does |
+|---|---|
+| `agent(prompt, opts)` | starts one Pi and returns its final text, or with `schema` its validated JSON, with up to three attempts. It throws on failure. Options: `profile` (default the first), `schema`, `label`, `phase`, `timeout` in seconds (default 5 hours). A profile outside the list fails |
+| `parallel(thunks)` | runs all and keeps input order |
+| `pipeline(items, ...stages)` | runs each item through the stages with no barrier between stages, and keeps input order. A stage gets `(previous, item, index)` |
+| `workflow(path, args)` | runs a script from the checkout in its own context, under the run's profiles. Nesting is one level |
+| `run(command, opts)` | runs a string in `sh -c`, or a list directly, in the box, one at a time because builds must not fan out. It returns `{code, stdout, stderr, durationMs}`, 64 KiB of each stream, and throws on a nonzero exit unless `check: false`. Options: `cwd`, `env`, `timeout`, `check`, `label`, `phase` |
+| `post(to, text, data)` | posts as the crew, once however often the script replays |
+| `phase(title)`, `log(message)`, `args` | group later steps, add a line to the journal, and read `--args` |
+
+`parallel` and `pipeline` turn a failure into an entry `{failed: true, step, reason}`, and a failed pipeline item skips its later stages. An error no step recorded joins the journal there too, so the run's end counts it. There is no silent `null`.
+
+**Workers.** Each `agent()` is a Pi process started like a session's, with its model, the session's instructions plus one paragraph on being a worker, and its own session file in `/box/pi/sessions`. All workers share the box's tree and tools. The box's memory bounds them, at one worker per 512 MiB of `memory.high`, and a profile's `maxConcurrent` bounds its own; zero is unlimited. A crew's turn ends when the script does, and a step the script did not wait for fails. Its transcripts carry the crew's input, so `transcript_turns` files every worker under the crew's one turn, by path.
+
+**Model route.** The route allows every model of the run's profiles. Each worker's Pi sends `X-Dyna-Worker`, which a crew's route adds to the session's affinity ID and then drops, so each worker keeps its own account while the room's accounts and the owner's choice apply as for any session. The journal totals usage, and that total is the crew's turn.
+
+**Journal and resume.** The engine stores each step's start and result in `workflow_steps`, through the box socket. A step key is the SHA-256 of the kind, the prompt or command, the options as written, the effective profile and the parent step's key, which is the enclosing `workflow()` call; only a true duplicate adds an ordinal. Order plays no part, so parallel steps replay safely. A new box starts the script again: stored steps return at once, stored failures throw again, and a step that was running reruns. A `workflow()` step always reruns, so an edited child script takes effect while its unchanged steps return. An engine restart does not touch the script, which is running in its box and waits for the socket as a turn does. A step that stopped with the run stores nothing. `--resume RUN` starts a new crew on the same repository from an ended run: it keeps that run's finished steps, commit and image, so a changed step alone reruns, and failed steps run again. Usage counts only what the new run spends. The tree is the new box's own: what stored steps left in the old tree is on the old crew's archive ref (5.9), not here. The same holds for a box replaced with its volume gone. A script that reads the tree must expect that until stage 2.
+
+**End.** The script's return value is the run's result and the caller's normal final reply, which adds a line naming any failed steps. No post of the crew stands in for that reply. `workflow.ended` records the state, the count and names of the failed steps, and the usage. Then the crew closes, which archives its tree. A script that throws fails the run the same way, with the reason in the turn's error, and nothing retries it. A run stops if its turn is stopped or its session closes. A box that cannot set up or cannot start is a failed session, and `session.failed` tells the parent, who may restart it; the run waits. `workflow.status` and `workflow.list` read runs and their steps.
+
+Workflows have no per-run call limit; the owner removed it.
 
 ## 10. Test strategy
 

@@ -190,7 +190,21 @@ var methodTable = []MethodEntry{
 	method(contract.MethodWebSearch, contract.ScopeRead, UserAccess, act("web", "search", typ[contract.WebSearchRequest](), "Search the web for query. Limit is 1 to 10 results; omit it for 5. An empty provider means all providers failed; a named provider can return zero results.", "web search")),
 	method(contract.MethodWebsearchSetKey, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodWebsearchRemoveKey, contract.ScopeAdmin, OwnerAccess),
+	method(contract.MethodWorkflowList, contract.ScopeRead, UserAccess,
+		act("workflow", "list", typ[contract.WorkflowListRequest](), "List the room's workflow runs, newest first. Omit room for your own.", "workflow list"),
+	),
+	method(contract.MethodWorkflowPin, contract.ScopeRead, BoxAccess),
+	method(contract.MethodWorkflowRun, contract.ScopeOperate, UserAccess,
+		act("workflow", "run", typ[contract.WorkflowRunRequest](), workflowHelp, "workflow run"),
+	),
+	method(contract.MethodWorkflowStatus, contract.ScopeRead, UserAccess,
+		act("workflow", "status", typ[contract.WorkflowStatusRequest](), "Show one run and its steps. Step results stay in the journal.", "workflow status"),
+	),
+	method(contract.MethodWorkflowStepEnd, contract.ScopeRead, BoxAccess),
+	method(contract.MethodWorkflowStepStart, contract.ScopeRead, BoxAccess),
 }
+
+const workflowHelp = "Start a workflow: a child session with one box, where a script fans out to Pi workers that share one tree. Only the owner or root may start one. script is the JavaScript source; args is JSON text. It begins with export const meta = {name, profiles: [...], description, size, repo}, a pure literal. It has top-level await, and what it returns is your final reply. agent(prompt, {profile, schema, label, phase, timeout in seconds}) returns the worker's text or schema output and throws on failure; parallel(thunks) and pipeline(items, ...stages) turn a failure into {failed: true, step, reason}; run(command, {cwd, env, timeout, check, label, phase}) runs one command at a time in the box; workflow(path, args) runs one script from the repository; post(to, text, data), phase(title), log(message) and args do what they say. Date.now(), Math.random() and new Date() throw. resume names an ended run: its finished steps return their stored results, so a changed step alone reruns."
 
 var methodRows = buildMethodRows(methodTable)
 

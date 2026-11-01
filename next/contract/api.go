@@ -565,6 +565,7 @@ type BoxRepo struct {
 	Cache  string   `json:"cache"`
 	Branch string   `json:"branch"`
 	Base   string   `json:"base"`
+	Commit string   `json:"commit,omitempty"` // a crew's fixed commit: a new branch starts here, not at Base
 }
 
 type BoxHelloResponse struct {
@@ -577,6 +578,7 @@ type BoxHelloResponse struct {
 	Model         ModelChoice      `json:"model"`
 	Repos         []BoxRepo        `json:"repos,omitempty"`
 	Transcripts   []TranscriptFile `json:"transcripts,omitempty"`
+	Workflow      *BoxWorkflow     `json:"workflow,omitempty"` // a crew's box runs this script and no Pi of its own
 }
 type TurnOutputRequest struct {
 	ShellJobs int          `json:"shellJobs"`

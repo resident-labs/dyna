@@ -128,6 +128,10 @@ type composeStore struct {
 	boxStore
 }
 
+func (composeStore) PinWorkflowImage(context.Context, contract.SessionID, string) (string, error) {
+	return "", nil
+}
+
 func (composeStore) Box(_ context.Context, id contract.BoxID) (box.Box, error) {
 	size, _ := box.Size(contract.BoxSizeAgent)
 	return box.Box{ID: id, Session: "ses_1", Host: "host", Size: size}, nil
@@ -220,6 +224,10 @@ func TestCurrentImageRefusesAFileThatChanged(t *testing.T) {
 type closingStore struct {
 	boxStore
 	state contract.BoxState
+}
+
+func (closingStore) PinWorkflowImage(context.Context, contract.SessionID, string) (string, error) {
+	return "", nil
 }
 
 func (s closingStore) Box(_ context.Context, id contract.BoxID) (box.Box, error) {

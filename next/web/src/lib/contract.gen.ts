@@ -41,7 +41,7 @@ export type InstructionsGetRequest = { room?: RoomID; };
 export type InstructionsGetResponse = { text: string; hash: string; savedAt?: string | null; };
 export type InstructionsSetRequest = { room?: RoomID; text: string; base: string; };
 export type InstructionsSetResponse = { hash: string; };
-export type Method = "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled";
+export type Method = "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled" | "workflow.run" | "workflow.status" | "workflow.list" | "workflow.pin" | "workflow.step_start" | "workflow.step_end";
 export type ErrorCode = "podman_required" | "invalid" | "unknown_action" | "not_found" | "forbidden" | "conflict" | "room_limited" | "profile_exists" | "move_busy" | "has_children" | "parent_closing" | "session_closing" | "stale" | "github_quota" | "visual_superseded" | "unavailable" | "reconnect_unavailable" | "models_unavailable" | "store_from_v1" | "store_too_old" | "no_grant";
 export type Error = { code: ErrorCode; message: string; visual?: VisualSuperseded | null; limited?: RoomLimited | null; };
 export type VisualSuperseded = { event: EventID; version: number; seq: number; };
@@ -124,8 +124,8 @@ export type BoxHelloRequest = { };
 export type ModelProvider = "anthropic" | "openai";
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 export type ModelChoice = { provider: ModelProvider; id: string; thinking: ThinkingLevel; };
-export type BoxRepo = { name: RepoName; cache: string; branch: string; base: string; };
-export type BoxHelloResponse = { gitName?: string; gitEmail?: string; compactTokens?: number; instructions: string; session: SessionID; box: BoxID; model: ModelChoice; repos?: Array<BoxRepo> | null; transcripts?: Array<TranscriptFile> | null; };
+export type BoxRepo = { name: RepoName; cache: string; branch: string; base: string; commit?: string; };
+export type BoxHelloResponse = { gitName?: string; gitEmail?: string; compactTokens?: number; instructions: string; session: SessionID; box: BoxID; model: ModelChoice; repos?: Array<BoxRepo> | null; transcripts?: Array<TranscriptFile> | null; workflow?: BoxWorkflow | null; };
 export type TurnOutputRequest = { shellJobs: number; error?: string; cause?: FailureCause; turn: TurnID; outcome: TurnOutcome; final?: string; endPosts?: Array<EventID> | null; model: string; usage: Usage; unread?: Array<DeliverySeq> | null; };
 export type TurnOutputResponse = { };
 export type TurnActivityRequest = { turn: TurnID; label: string; };
@@ -300,14 +300,14 @@ export type ShellJobEnded = { description?: string; end?: ShellJobEnd | null; se
 export type ComputerState = "running" | "stopped";
 export type ComputerChanged = { session: SessionID; to: ComputerState; };
 export type BoxChanged = { box: BoxID; session: SessionID; host?: HostName; from?: BoxState; to: BoxState; cause?: FailureCause; reason?: string; };
-export type FailureCause = "nested_device_missing" | "kvm_device_missing" | "create_failed" | "start_failed" | "no_hello" | "engine_restarted" | "remove_failed" | "archive_failed" | "grant_inactive" | "host_lost" | "host_busy" | "github_failed" | "stale" | "interrupted" | "internal" | "setup_failed" | "model_failed" | "output_limit" | "harness_failed" | "set_model_failed" | "not_started" | "run_timeout";
+export type FailureCause = "nested_device_missing" | "kvm_device_missing" | "create_failed" | "start_failed" | "no_hello" | "engine_restarted" | "remove_failed" | "archive_failed" | "grant_inactive" | "host_lost" | "host_busy" | "github_failed" | "stale" | "interrupted" | "internal" | "setup_failed" | "model_failed" | "output_limit" | "harness_failed" | "set_model_failed" | "not_started" | "run_timeout" | "workflow_failed";
 export type PressureKind = "high" | "max";
 export type HostDiskLow = { host: HostName; freeBytes: number; floorBytes: number; };
 export type BoxPressure = { box: BoxID; kind: PressureKind; };
 export type ImageBuilt = { host: HostName; repo: RepoName; name: string; tag: string; seconds: number; };
 export type ImageFailed = { host: HostName; repo: RepoName; name: string; tag: string; reason: string; logTail: string; };
 export type BoxState = "pending" | "creating" | "starting" | "ready" | "stopped" | "closing" | "deleted" | "failed" | "lost";
-export type BoxSizeName = "agent" | "small" | "medium" | "large";
+export type BoxSizeName = "agent" | "small" | "medium" | "large" | "xlarge";
 export type BoxSize = { name: BoxSizeName; cpus: number; memBytes: number; pids: number; };
 export type GoalState = "active" | "done" | "dropped";
 export type GoalItemState = "open" | "done" | "dropped";
@@ -353,6 +353,7 @@ export type TurnID = string;
 export type DeviceID = string;
 export type SubscriptionID = string;
 export type GoalID = string;
+export type WorkflowRunID = string;
 export type HostName = string;
 export type RepoName = string;
 export type ProfileName = string;
@@ -446,6 +447,26 @@ export type WebsearchSetKeyRequest = { provider: WebSearchProvider; key: string;
 export type WebsearchSetKeyResponse = { };
 export type WebsearchRemoveKeyRequest = { provider: WebSearchProvider; };
 export type WebsearchRemoveKeyResponse = { };
+export type WorkflowState = "running" | "done" | "failed" | "stopped";
+export type WorkflowStepKind = "agent" | "run" | "post" | "workflow" | "log";
+export type WorkflowStepState = "running" | "done" | "failed";
+export type WorkflowRunRequest = { room?: RoomID; script: string; args?: string; resume?: WorkflowRunID; clientId?: string; };
+export type WorkflowRunResponse = { run: WorkflowRunID; session: SessionID; box: BoxID; };
+export type WorkflowInfo = { run: WorkflowRunID; room: RoomID; session: SessionID; name: string; description?: string; profiles: Array<ProfileName> | null; repo?: RepoName; commit?: string; state: WorkflowState; result?: string; failed: number; failedSteps?: Array<string> | null; usage: Usage; started: string; ended?: string; };
+export type WorkflowStep = { key: string; parent?: string; kind: WorkflowStepKind; name: string; phase?: string; profile?: ProfileName; state: WorkflowStepState; reason?: string; transcript?: string; usage: Usage; started: string; ended?: string; };
+export type WorkflowStatusRequest = { run: WorkflowRunID; };
+export type WorkflowStatusResponse = { run: WorkflowInfo; steps: Array<WorkflowStep> | null; };
+export type WorkflowListRequest = { room?: RoomID; };
+export type WorkflowListResponse = { runs: Array<WorkflowInfo> | null; };
+export type BoxWorkflow = { run: WorkflowRunID; name: string; script: string; args?: string; profiles: Array<WorkflowProfile> | null; workers: number; };
+export type WorkflowProfile = { name: ProfileName; model: ModelChoice; compactTokens?: number; maxConcurrent?: number; };
+export type WorkflowPinRequest = { commit: string; };
+export type WorkflowPinResponse = { };
+export type WorkflowStepStartRequest = { key: string; parent?: string; kind: WorkflowStepKind; name: string; phase?: string; profile?: ProfileName; detail: string; };
+export type WorkflowStepStartResponse = { state?: WorkflowStepState; result?: string; reason?: string; };
+export type WorkflowStepEndRequest = { key: string; state: WorkflowStepState; result?: string; reason?: string; transcript?: string; usage: Usage; };
+export type WorkflowStepEndResponse = { };
+export type WorkflowEnded = { run: WorkflowRunID; session: SessionID; name: string; state: WorkflowState; failed: number; failedSteps?: Array<string> | null; usage: Usage; };
 export type EventBody =
   | { type: "account.failed"; body: AccountFailed }
   | { type: "account.quota_low"; body: AccountQuotaLow }
@@ -494,6 +515,7 @@ export type EventBody =
   | { type: "turn.activity"; body: TurnActivity }
   | { type: "turn.ended"; body: TurnEnded }
   | { type: "turn.started"; body: TurnStarted }
+  | { type: "workflow.ended"; body: WorkflowEnded }
 ;
 export type OpArgs = AccountsActionArgs | HostexecGrantArgs | HostexecRunArgs | PrOpenArgs;
 export type BoxMessageBody =
@@ -599,4 +621,10 @@ export interface MethodMap {
   "subscription.list": { request: SubscriptionListRequest; response: SubscriptionListResponse };
   "subscription.remove": { request: SubscriptionRemoveRequest; response: SubscriptionRemoveResponse };
   "subscription.set_enabled": { request: SubscriptionSetEnabledRequest; response: SubscriptionSetEnabledResponse };
+  "workflow.run": { request: WorkflowRunRequest; response: WorkflowRunResponse };
+  "workflow.status": { request: WorkflowStatusRequest; response: WorkflowStatusResponse };
+  "workflow.list": { request: WorkflowListRequest; response: WorkflowListResponse };
+  "workflow.pin": { request: WorkflowPinRequest; response: WorkflowPinResponse };
+  "workflow.step_start": { request: WorkflowStepStartRequest; response: WorkflowStepStartResponse };
+  "workflow.step_end": { request: WorkflowStepEndRequest; response: WorkflowStepEndResponse };
 }

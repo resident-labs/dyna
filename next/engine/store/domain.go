@@ -39,6 +39,8 @@ type Session struct {
 	CloseReason contract.SessionCloseReason
 	NewRoomName string // nonempty only for a new room root
 	Compose     string // the compose file this session chose when it started, or ""
+	// Workflow makes the new session a crew. It is set only to start one: Session does not read it back.
+	Workflow *WorkflowRun
 }
 
 // RoomExists returns sql.ErrNoRows when the room does not exist.
@@ -139,6 +141,11 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		if err != nil {
 			return err
 		}
+		if session.Workflow != nil {
+			if err := insertWorkflow(ctx, tx, session.ID, *session.Workflow, event.Time); err != nil {
+				return err
+			}
+		}
 		if started, _ := event.Body.(contract.SessionStarted); goal != "" && parent != "" {
 			var number int64
 			if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(number),0)+1 FROM goals WHERE room=?", session.Room).Scan(&number); err != nil {
@@ -173,6 +180,10 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		reply := contract.ReplyChannel{Kind: contract.ReplyNone}
 		if parent != "" {
 			reply = contract.ReplyChannel{Kind: contract.ReplyFinal, Target: contract.Principal{Kind: contract.PrincipalSession, Session: parent}, Home: contract.Conversation{Kind: contract.ConversationFeed}}
+		}
+		// A workflow answers whoever ran it, and the owner's crew sits under root only because the owner has no session.
+		if session.Workflow != nil && event.From.Kind == contract.PrincipalOwner {
+			reply.Target = contract.Principal{Kind: contract.PrincipalOwner}
 		}
 		if started, _ := event.Body.(contract.SessionStarted); goal != "" || started.Brief != "" {
 			err = s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: session.ID}, Surface: contract.SurfaceSession, Reply: reply, Wake: true})
@@ -270,7 +281,7 @@ func (s *Store) DeliveryDone(ctx context.Context, session contract.SessionID, se
 
 var ErrTurnConflict = errors.New("turn output differs from the committed result")
 
-func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output contract.TurnOutputRequest, event contract.Event) error {
+func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output contract.TurnOutputRequest, event contract.Event, also ...func(*sql.Tx) error) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, "UPDATE turns SET ended_at=?,outcome=?,model=?,input_tokens=?,output_tokens=?,cache_read_tokens=?,cache_write_tokens=?,shell_jobs=?,sections=NULL WHERE id=? AND session=? AND ended_at IS NULL", event.Time.UnixMilli(), output.Outcome, output.Model, output.Usage.InputTokens, output.Usage.OutputTokens, output.Usage.CacheReadTokens, output.Usage.CacheWriteTokens, output.ShellJobs, output.Turn, session)
 		if err != nil {
@@ -343,7 +354,8 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 		if err != nil {
 			return err
 		}
-		if (output.Outcome == contract.TurnFailed && output.Cause != contract.CauseOutputLimit) || output.Cause == contract.CauseNotStarted {
+		// A workflow's failure is its result, and running the script again would end the same way.
+		if (output.Outcome == contract.TurnFailed && output.Cause != contract.CauseOutputLimit && output.Cause != contract.CauseWorkflowFailed) || output.Cause == contract.CauseNotStarted {
 			if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='pending',turn=NULL,queue=NULL,wake=0 WHERE to_kind=? AND to_id=? AND turn=? AND state IN ('taken','read')", contract.PrincipalSession, session, output.Turn); err != nil {
 				return err
 			}
@@ -357,7 +369,16 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			endIDs[i] = post.ID
 		}
 		body := event.Body.(contract.TurnEnded)
-		body.Replies = room.FinalReplies(inputs, room.PostsForReplies(inputs, posts, session), endIDs)
+		replyPosts := room.PostsForReplies(inputs, posts, session)
+		// A crew's posts are its script's and its workers'. None of them answers the run.
+		var crew bool
+		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM workflow_runs WHERE session=?)", session).Scan(&crew); err != nil {
+			return err
+		}
+		if crew {
+			replyPosts = nil
+		}
+		body.Replies = room.FinalReplies(inputs, replyPosts, endIDs)
 		event.Body = body
 		seq, err := s.AppendEvent(tx, event)
 		if err != nil {
@@ -387,6 +408,11 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 				continue
 			}
 			if err := s.InsertDelivery(ctx, tx, seq, event.Body, d); err != nil {
+				return err
+			}
+		}
+		for _, step := range also {
+			if err := step(tx); err != nil {
 				return err
 			}
 		}
