@@ -99,9 +99,8 @@ type cpuTimes struct {
 // One runs at a time on a host, so boxes that race after a deploy send the bytes once: three copies at once over a relay took
 // minutes where one takes 40 seconds.
 func (b *Boxes) installBinary(ctx context.Context, h *podman.Host) error {
-	b.binOnce.Do(func() { b.binSum, b.binErr = executableSum() })
-	if b.binErr != nil {
-		return b.binErr
+	if _, err := b.binarySum(); err != nil {
+		return err
 	}
 	b.mu.Lock()
 	if b.installs == nil {
@@ -120,6 +119,11 @@ func (b *Boxes) installBinary(ctx context.Context, h *podman.Host) error {
 		return ctx.Err()
 	}
 	return h.InstallBinary(ctx, b.Layout.HostBin(), b.Version, b.binSum, readExecutable)
+}
+
+func (b *Boxes) binarySum() (string, error) {
+	b.binOnce.Do(func() { b.binSum, b.binErr = executableSum() })
+	return b.binSum, b.binErr
 }
 
 // ciHost gives the CI pool a host's runner operations.

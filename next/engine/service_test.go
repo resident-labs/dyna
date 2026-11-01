@@ -69,7 +69,7 @@ func testChannel(t *testing.T, s *Service, ctx context.Context, caller contract.
 		t.Fatalf("test agent cannot dispatch: session=%+v box=%+v err=%v", session, current, err)
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	channel, problem := s.BoxChannel(ctx, caller)
+	channel, problem := s.BoxChannel(ctx, caller, "")
 	if problem != nil {
 		cancel()
 		return nil, problem

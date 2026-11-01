@@ -362,7 +362,7 @@ func TestChannelSkipsAnUnknownMessageType(t *testing.T) {
 	c.http.Transport = rewriteTransport{base: server.URL, next: c.http.Transport}
 	stop := errors.New("second message reached the handler")
 	received := 0
-	err := c.Channel(context.Background(), func(contract.BoxMessage) error {
+	err := c.Channel(context.Background(), "", func(contract.BoxMessage) error {
 		if received++; received == 2 {
 			return stop
 		}

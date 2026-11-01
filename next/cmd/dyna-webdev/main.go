@@ -573,7 +573,7 @@ func (b *boxes) run(ctx context.Context, id contract.BoxID) {
 		cancel()
 	}
 	runner := &agent.Runner{Harness: &scripted{box: c, lose: lose}, Sink: c}
-	if err := c.Channel(ctx, func(m contract.BoxMessage) error { return runner.Handle(ctx, m) }, func(bool) {}); err != nil && ctx.Err() == nil {
+	if err := c.Channel(ctx, "", func(m contract.BoxMessage) error { return runner.Handle(ctx, m) }, func(bool) {}); err != nil && ctx.Err() == nil {
 		log.Printf("box channel: %v", err)
 	}
 }

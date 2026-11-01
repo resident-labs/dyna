@@ -130,5 +130,5 @@ type Service interface {
 	Events(context.Context, contract.Principal, contract.RoomID, int64) (<-chan contract.Event, *contract.Error)
 	// BoxChannel subscribes atomically and first emits the current durable
 	// delivery and turn state. Reconnects repeat unfinished work.
-	BoxChannel(context.Context, contract.Principal) (<-chan contract.BoxMessage, *contract.Error)
+	BoxChannel(context.Context, contract.Principal, string) (<-chan contract.BoxMessage, *contract.Error)
 }

@@ -48,6 +48,7 @@ type RoomData interface {
 type View interface {
 	OpenTerminal(contract.SessionID) bool
 	Connected(contract.SessionID) bool
+	Stale(contract.SessionID) bool // its connected box agent is older than the engine
 	SessionClosed(contract.SessionID)
 }
 type Repositories interface {

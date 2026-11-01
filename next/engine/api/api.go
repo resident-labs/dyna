@@ -515,7 +515,7 @@ func (a *API) handler(c Caller) http.Handler {
 			writeError(w, forbidden())
 			return
 		}
-		ch, err := a.service.BoxChannel(r.Context(), c.Principal)
+		ch, err := a.service.BoxChannel(r.Context(), c.Principal, r.URL.Query().Get("binary"))
 		if err != nil {
 			writeError(w, err)
 			return

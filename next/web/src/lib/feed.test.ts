@@ -252,6 +252,14 @@ test("a long path in an activity label keeps its first folder and its file, and 
   assert.equal(shortPaths("editing next/engine/files.go and web/src/a.ts"), "editing next/engine/files.go and web/src/a.ts");
 });
 
+test("a session's own notice is held in its DM and a room's notice is not", () => {
+  const own = decodeEvent(event(1, { type: "notice.posted", body: { text: "update", session: "l" } }));
+  const room = decodeEvent(event(2, { type: "notice.posted", body: { text: "disk" } }));
+  assert.ok(own && room);
+  assert.equal(dmOf(own), "l");
+  assert.equal(dmOf(room), undefined);
+});
+
 test("a restart warning remains visible beside other work in a session DM", () => {
   const notice = decodeEvent(event(2, { type: "session.restarted", body: { session: "l" } }));
   assert.ok(notice);

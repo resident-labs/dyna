@@ -40,6 +40,18 @@ func (s *Session) Connected() (connected, open bool) {
 	return s.channel != nil, true
 }
 
+// Stale reports whether the connected box agent is older than the engine. Each connection sets it anew.
+func (s *Session) Stale() bool {
+	if !s.Lock() {
+		return false
+	}
+	defer s.Unlock()
+	return s.channel != nil && s.stale
+}
+
+// SetStale records what the connecting box agent reported. The caller holds the session lock.
+func (s *Session) SetStale(stale bool) { s.stale = stale }
+
 // Channel returns the attached channel. The caller holds the session lock.
 func (s *Session) Channel() *Channel { return s.channel }
 

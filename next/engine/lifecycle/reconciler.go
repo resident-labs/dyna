@@ -138,6 +138,9 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	if err := r.store.WakeModelRetries(ctx, r.now()); err != nil {
 		return err
 	}
+	if err := r.store.WakeStopped(ctx); err != nil {
+		return err
+	}
 	rows, err := r.store.LifecycleBoxes(ctx)
 	if err != nil {
 		return err
@@ -273,9 +276,14 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			}
 		}
 	}
-	var quietCandidates []contract.SessionID
+	var quietCandidates, staleCandidates []contract.SessionID
 	for _, row := range rows {
-		if row.Want == store.WantRun && row.Box.State == contract.BoxReady && !r.view.OpenTerminal(row.Box.Session) {
+		if row.Want != store.WantRun || row.Box.State != contract.BoxReady || r.view.OpenTerminal(row.Box.Session) {
+			continue
+		}
+		if r.view.Stale(row.Box.Session) {
+			staleCandidates = append(staleCandidates, row.Box.Session)
+		} else {
 			quietCandidates = append(quietCandidates, row.Box.Session)
 		}
 	}
@@ -283,6 +291,11 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	stale, err := r.store.StopStale(ctx, staleCandidates)
+	if err != nil {
+		return err
+	}
+	stopped = append(stopped, stale...)
 	stoppedSet := make(map[contract.SessionID]bool, len(stopped))
 	for _, id := range stopped {
 		stoppedSet[id] = true
