@@ -96,7 +96,7 @@ func (e Exa) Search(ctx context.Context, q Query) ([]Result, error) {
 			Snippet: text(strings.Join(found.Highlights, " ")),
 		})
 	}
-	return capped(e.Name(), q, results), nil
+	return capped(e.Name(), q, results, key), nil
 }
 
 // exaRequest is the body of a search request.

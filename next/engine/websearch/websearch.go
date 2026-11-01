@@ -150,13 +150,16 @@ func oneLine(err error) string {
 }
 
 // capped returns results limited to q, tagged with the provider that found them.
-func capped(provider string, q Query, results []Result) []Result {
+func capped(provider string, q Query, results []Result, secrets ...string) []Result {
 	limit := q.results()
 	if len(results) > limit {
 		results = results[:limit]
 	}
 	for i := range results {
 		results[i].Provider = provider
+		results[i].Title = redact(results[i].Title, secrets...)
+		results[i].URL = redact(results[i].URL, secrets...)
+		results[i].Snippet = redact(results[i].Snippet, secrets...)
 	}
 	return results
 }

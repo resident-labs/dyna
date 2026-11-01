@@ -15,7 +15,7 @@ func TestBraveSendsTheQueryWithItsKey(t *testing.T) {
 		gotKey = r.Header.Get("X-Subscription-Token")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"web":{"results":[
-			{"title":"Go","url":"https://go.dev","description":"The Go language."},
+			{"title":"Go","url":"https://go.dev","description":"The Go language. brave-key"},
 			{"title":"Docs","url":"https://go.dev/doc","description":"Documentation."}
 		]}}`))
 	}))
@@ -32,7 +32,7 @@ func TestBraveSendsTheQueryWithItsKey(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("results = %+v, want one result", got)
 	}
-	if got[0].Title != "Go" || got[0].URL != "https://go.dev" || got[0].Snippet != "The Go language." || got[0].Provider != "brave" {
+	if got[0].Title != "Go" || got[0].URL != "https://go.dev" || got[0].Snippet != "The Go language. [redacted]" || got[0].Provider != "brave" {
 		t.Fatalf("result = %+v", got[0])
 	}
 }
