@@ -10,9 +10,13 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/model"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
-var errAccountAction = errors.New("account action unavailable")
+var (
+	errAccountAction  = errors.New("account action unavailable")
+	errAccountMissing = errors.New("account not found")
+)
 
 type accountActionResult struct {
 	connect  contract.AccountsConnectResponse
@@ -57,6 +61,8 @@ func (a *AccountActions) Entry() approve.Entry {
 				name = "Remove account"
 			case contract.AccountActionSetLimits:
 				name = "Set account room limits"
+			case contract.AccountActionRename:
+				name = "Rename account"
 			}
 			return contract.Card{Title: name, Target: contract.Target{Kind: contract.TargetAccount}}
 		},
@@ -93,6 +99,9 @@ func (s *AccountActions) runAccountAction(ctx context.Context, caller contract.P
 		case result := <-resultCh:
 			if errors.Is(result.err, model.ErrReconnectUnavailable) {
 				return accountActionResult{}, &contract.Error{Code: contract.ErrReconnectUnavailable, Message: "reconnect unavailable"}
+			}
+			if errors.Is(result.err, errAccountMissing) {
+				return accountActionResult{}, &contract.Error{Code: contract.ErrNotFound, Message: "account not found"}
 			}
 		default:
 		}
@@ -146,10 +155,11 @@ func (s *AccountActions) AccountsList(ctx context.Context, caller contract.Princ
 }
 
 func (s *AccountActions) AccountsConnect(ctx context.Context, caller contract.Principal, req contract.AccountsConnectRequest) (contract.AccountsConnectResponse, *contract.Error) {
-	req.Label = strings.TrimSpace(req.Label)
-	if req.Label == "" || len(req.Label) > 128 || strings.ContainsAny(req.Label, "\r\n@") {
+	label, ok := model.CleanAccountLabel(req.Label)
+	if !ok {
 		return contract.AccountsConnectResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "invalid account label"}
 	}
+	req.Label = label
 	result, problem := s.runAccountAction(ctx, caller, contract.AccountActionConnect, "", func(ctx context.Context) accountActionResult {
 		out, err := s.connections.Start(ctx, req)
 		return accountActionResult{connect: out, err: err}
@@ -195,10 +205,11 @@ func (s *AccountActions) AccountsRemove(ctx context.Context, caller contract.Pri
 }
 
 func (s *AccountActions) AccountsSetKey(ctx context.Context, caller contract.Principal, req contract.AccountsSetKeyRequest) (contract.AccountsSetKeyResponse, *contract.Error) {
-	req.Label = strings.TrimSpace(req.Label)
-	if req.Label == "" || len(req.Label) > 128 || strings.ContainsAny(req.Label, "\r\n@") || strings.TrimSpace(req.Key) == "" || len(req.Key) > 4096 {
+	label, ok := model.CleanAccountLabel(req.Label)
+	if !ok || strings.TrimSpace(req.Key) == "" || len(req.Key) > 4096 {
 		return contract.AccountsSetKeyResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "invalid account input"}
 	}
+	req.Label = label
 	result, problem := s.runAccountAction(ctx, caller, contract.AccountActionSetKey, "", func(ctx context.Context) accountActionResult {
 		out, err := s.connections.SetKey(ctx, req)
 		return accountActionResult{key: out, err: err}
@@ -254,14 +265,35 @@ func (s *AccountActions) AccountsSetLimits(ctx context.Context, caller contract.
 	return contract.AccountsSetLimitsResponse{}, problem
 }
 
+// AccountsRename changes only the label in the store. The proxy never sees a label,
+// and accounts.quota reads it fresh, so no credential or usage cache changes.
+func (s *AccountActions) AccountsRename(ctx context.Context, caller contract.Principal, req contract.AccountsRenameRequest) (contract.AccountsRenameResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalOwner {
+		return contract.AccountsRenameResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "forbidden"}
+	}
+	label, ok := model.CleanAccountLabel(req.Label)
+	if !ok {
+		return contract.AccountsRenameResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "invalid account label"}
+	}
+	_, problem := s.runAccountAction(ctx, caller, contract.AccountActionRename, req.AccountID, func(ctx context.Context) accountActionResult {
+		err := s.service.store.RenameAccount(ctx, req.AccountID, label)
+		if errors.Is(err, store.ErrNotFound) {
+			err = errAccountMissing
+		}
+		return accountActionResult{err: err}
+	})
+	return contract.AccountsRenameResponse{}, problem
+}
+
 func (s *AccountActions) AccountsImportOAuth(ctx context.Context, caller contract.Principal, req contract.AccountsImportOAuthRequest) (contract.AccountsImportOAuthResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalOwner {
 		return contract.AccountsImportOAuthResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "forbidden"}
 	}
-	req.Label = strings.TrimSpace(req.Label)
-	if _, ok := model.OAuthProxyProvider(req.Provider); !ok || req.Label == "" || len(req.Label) > 128 || strings.ContainsAny(req.Label, "\r\n@") || req.ExpiresAt.Unix() <= 0 || len(req.Credential) == 0 || len(req.Credential) > 16384 {
+	label, labelOK := model.CleanAccountLabel(req.Label)
+	if _, ok := model.OAuthProxyProvider(req.Provider); !ok || !labelOK || req.ExpiresAt.Unix() <= 0 || len(req.Credential) == 0 || len(req.Credential) > 16384 {
 		return contract.AccountsImportOAuthResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "invalid account input"}
 	}
+	req.Label = label
 	result, problem := s.runAccountAction(ctx, caller, contract.AccountActionImportOAuth, "", func(ctx context.Context) accountActionResult {
 		out, err := s.connections.ImportOAuth(ctx, req)
 		return accountActionResult{imported: out, err: err}
