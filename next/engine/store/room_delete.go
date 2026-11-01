@@ -162,9 +162,10 @@ var deleteRoom = []string{
 	`DELETE FROM sessions WHERE room=?1`,
 	`DELETE FROM room_repos WHERE room=?1`,
 	// A repository another room lists stays, with a default room that exists. One no room lists goes, and with it any PR a
-	// session of another room opened there, since no room watches that repository any more.
+	// session of another room opened there, since no room watches that repository any more, and its CI runners, as --mode github would.
 	`UPDATE repos SET default_room=(SELECT MIN(room) FROM room_repos WHERE repo=repos.repo) WHERE default_room=?1 AND EXISTS (SELECT 1 FROM room_repos WHERE repo=repos.repo)`,
 	`DELETE FROM pr_owners WHERE repo IN (SELECT repo FROM repos WHERE default_room=?1)`,
+	`DELETE FROM repo_ci_hosts WHERE repo IN (SELECT repo FROM repos WHERE default_room=?1)`,
 	`DELETE FROM repos WHERE default_room=?1`,
 	`DELETE FROM host_rooms WHERE room=?1`,
 	`DELETE FROM room_shared WHERE room=?1`,

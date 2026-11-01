@@ -330,6 +330,7 @@ func (r *deleteRig) fillRoom(t *testing.T, ctx context.Context, room contract.Ro
 			`INSERT INTO transcript_turns(session,turn,path,start) VALUES(?2,'turn_delete','a.jsonl',0)`,
 			`INSERT INTO shell_jobs(session,job) VALUES(?2,'job_1')`,
 			`INSERT INTO pr_owners(repo,number,session,goal,approved_head) VALUES('owner/only',7,?2,'','')`,
+			`INSERT INTO repo_ci_hosts(repo,host,runners,size) VALUES('owner/only','host',1,'large'),('owner/both','host',1,'large')`,
 			`INSERT INTO archives(session,repo,ref,commit_sha,created_at,expires_at) VALUES(?2,'owner/only','','',0,99999999)`,
 			`INSERT INTO operations(id,kind,room,by_kind,by_id,class,state,card,args,args_sha256,created_at,expires_at) VALUES('op_delete','hostexec.run',?1,'session',?2,'auto','done','{}','{}',x'01',0,0)`,
 			`INSERT INTO operations(id,kind,room,by_kind,by_id,class,state,card,args,args_sha256,created_at,expires_at) VALUES('op_global','accounts.action',NULL,'session',?2,'owner','done','{}','{}',x'02',0,0)`,
@@ -396,6 +397,12 @@ func TestRoomDeleteRemovesEveryRowAndFolder(t *testing.T) {
 	var defaultRoom contract.RoomID
 	if err := r.st.Read().QueryRowContext(ctx, "SELECT default_room FROM repos WHERE repo='owner/both'").Scan(&defaultRoom); err != nil || defaultRoom != other {
 		t.Errorf("default room %s: %v", defaultRoom, err)
+	}
+	if n := r.count(t, ctx, "SELECT count(*) FROM repo_ci_hosts WHERE repo='owner/both'"); n != 1 {
+		t.Errorf("CI hosts of a repository that stays: %d", n)
+	}
+	if n := r.count(t, ctx, "SELECT count(*) FROM repo_ci_hosts WHERE repo='owner/only'"); n != 0 {
+		t.Errorf("CI hosts of a repository that went: %d", n)
 	}
 	if n := r.count(t, ctx, "SELECT count(*) FROM repos WHERE repo='owner/only'"); n != 0 {
 		t.Errorf("repo only this room listed: %d", n)
