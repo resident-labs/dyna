@@ -148,7 +148,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 	channel := live.NewChannel(stop, ctx.Done())
 	handle.SetChannel(channel)
 	s.mu.Unlock()
-	handle.CloseChannel(computerWatchers, shellWatchers, previous)
+	previous.Close(computerWatchers, shellWatchers)
 	if stopped {
 		_ = s.computerEvent(context.Background(), session.ID, roomID, contract.ComputerStopped)
 	}
@@ -172,7 +172,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				shellWatchers = s.clearShellLocked(session.ID)
 			}
 			s.mu.Unlock()
-			handle.CloseChannel(computerWatchers, shellWatchers, channel)
+			channel.Close(computerWatchers, shellWatchers)
 			if stopped {
 				_ = s.computerEvent(context.Background(), session.ID, roomID, contract.ComputerStopped)
 			}
