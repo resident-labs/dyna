@@ -9,8 +9,10 @@
   import Markdown from "./Markdown.svelte";
   import StatusPill from "./StatusPill.svelte";
   import CodemodeScript from "./CodemodeScript.svelte";
+  import ReadThumb from "./ReadThumb.svelte";
+  import { readMedia } from "../media.ts";
 
-  let { items, ended, started, now, chunks, onload, onopen }: {
+  let { items, ended, started, now, chunks, onload, onopen, session, onmedia }: {
     items: TranscriptItem[];
     ended: boolean;
     started: string;
@@ -18,6 +20,8 @@
     chunks: Record<string, string>;
     onload: (item: TranscriptItem, part: TranscriptPart) => Promise<void>;
     onopen: () => void;
+    session: string;
+    onmedia: (key: string) => void;
   } = $props();
 
   const icons: Record<StepKind, IconName> = { read: "file", edit: "edit", write: "write", search: "search", list: "list", run: "terminal", fetch: "globe", tool: "tool" };
@@ -92,10 +96,11 @@
   {#if item.tool === "codemode"}
     <CodemodeScript {item} {ended} {chunks} {onload} {onopen} />
   {:else}
-  <details class="entry" ontoggle={(event) => { if (event.currentTarget.open) { onopen(); if (item.more) { void load(item, "arguments"); void load(item, "output"); if (item.diff) void load(item, "diff"); } } }}>
+  <details class="entry" data-media-key={item.image?.item} ontoggle={(event) => { if (event.currentTarget.open) { onopen(); if (item.more) { void load(item, "arguments"); void load(item, "output"); if (item.diff) void load(item, "diff"); } } }}>
     <summary>
       <span class="slot">{#if running}<span class="spinner" aria-label="Working" role="img"></span>{:else}{#if ["run", "search", "read", "edit", "write"].includes(title.kind)}<TranscriptIcon kind={title.kind} />{:else}<Icon name={icons[title.kind]} size={16} />{/if}{/if}</span>
       {#if running}<span class="target" title={title.full}>{activeVerb(title.kind, title.verb)} {title.target}</span>{:else if title.kind === "run" || title.kind === "edit" || title.kind === "write"}<span class="target" title={title.full}>{title.target || title.verb}</span>{:else}<span class="target" title={title.full}>{title.verb} {title.target}</span>{/if}
+      {#if item.image}{@const media = readMedia(session, item.turn, item.at, title.full, item.image)}<ReadThumb src={media.src} name={media.attachments[0].name} onopen={() => onmedia(media.key)} />{/if}
       <span class="time">{running ? elapsed(item.at, now) : stepTime({ started: item.at, ended: item.ended })}</span>
       {#if item.failed}<StatusPill tone="failed" label="Failed" word />{/if}
       <span class="entry-chevron"><TranscriptIcon kind="chevron" /></span>

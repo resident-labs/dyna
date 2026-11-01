@@ -5,11 +5,12 @@
   import StepList from "./StepList.svelte";
   import { changeLine, clock, commandLine, describe, eventGroups, formatTime, prKey, prWords, subject, timeSpan, wakingChanges, workIsBare, workSummary, type Row } from "../feed.ts";
   import type { Event, PrSummary } from "../contract.gen.ts";
+  import type { MediaRow } from "../media.ts";
   import type { TurnTranscripts } from "../transcripts.svelte.ts";
 
-  let { row, name, opened, ontoggle, transcripts, transcriptOf, onjobs, prs }: {
+  let { row, name, opened, ontoggle, transcripts, transcriptOf, onjobs, prs, onmedia }: {
     row: Extract<Row, { kind: "work" }>; name: (session: string) => string; opened: ReadonlySet<string>; ontoggle: (key: string) => void;
-    transcripts: ReadonlyMap<string, TurnTranscripts>; transcriptOf: (session: string) => TurnTranscripts; onjobs: (session: string) => void; prs: ReadonlyMap<string, PrSummary>;
+    transcripts: ReadonlyMap<string, TurnTranscripts>; transcriptOf: (session: string) => TurnTranscripts; onjobs: (session: string) => void; prs: ReadonlyMap<string, PrSummary>; onmedia: (row: MediaRow) => void;
   } = $props();
   let open = $derived(opened.has(row.key));
   let bare = $derived(workIsBare(row.events, name, row.until));
@@ -62,7 +63,7 @@
         {@const transcript = transcripts.get(session)?.of(own)}
         {#if transcript === "loading" || !transcript}<p>Loading steps…</p>
         {:else if transcript === "failed"}<p>The steps did not load. <button type="button" class="retry" onclick={() => transcriptOf(session).read(own, true)}>Retry</button></p>
-        {:else if transcript.steps.length || transcript.truncated}<StepList steps={transcript.steps} truncated={transcript.truncated} id={row.key} {opened} {ontoggle} />{:else}<p>No steps were recorded.</p>{/if}
+        {:else if transcript.steps.length || transcript.truncated}<StepList steps={transcript.steps} truncated={transcript.truncated} id={row.key} {opened} {ontoggle} {session} {onmedia} />{:else}<p>No steps were recorded.</p>{/if}
       {:else if workers.length > 1}
         <ul class="workers">{#each workers.slice(0, allWorkers ? undefined : 6) as session (session)}
           {@const own = events.filter(event => subject(event) === session)}
@@ -71,7 +72,7 @@
           {#if opened.has(`${row.key}-${session}`)}
             {#if transcript === "loading" || !transcript}<li class="step">Loading steps…</li>
             {:else if transcript === "failed"}<li class="step">The steps did not load. <button class="retry" type="button" onclick={() => transcriptOf(session).read(own, true)}>Retry</button></li>
-            {:else if transcript.steps.length || transcript.truncated}<li class="step step-list"><StepList steps={transcript.steps} truncated={transcript.truncated} id={`${row.key}-${session}`} {opened} {ontoggle} /></li>{:else}<li class="step">No steps were recorded.</li>{/if}
+            {:else if transcript.steps.length || transcript.truncated}<li class="step step-list"><StepList steps={transcript.steps} truncated={transcript.truncated} id={`${row.key}-${session}`} {opened} {ontoggle} {session} {onmedia} /></li>{:else}<li class="step">No steps were recorded.</li>{/if}
           {/if}
         {/each}{#if !allWorkers && workers.length > 6}<li><button class="detail" type="button" onclick={() => ontoggle(`${row.key}-all`)}>Show {workers.length - 6} more sessions</button></li>{/if}</ul>
       {/if}

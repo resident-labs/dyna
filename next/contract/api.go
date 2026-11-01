@@ -702,9 +702,17 @@ type TranscriptItem struct {
 	Home         *Conversation           `json:"home,omitempty"`
 	Bytes        int64                   `json:"bytes,omitempty"`
 	Attachments  []Attachment            `json:"attachments,omitempty"`
+	Image        *TranscriptImage        `json:"image,omitempty"`
 	Posts        []TranscriptItem        `json:"posts,omitempty"`
 	PostsOmitted int                     `json:"postsOmitted,omitempty"`
 	PostsNext    *TranscriptPostLocation `json:"postsNext,omitempty"`
+}
+
+// TranscriptImage marks a read that returned an image. The bytes stay in the transcript, and /v1/files/transcript serves them.
+type TranscriptImage struct {
+	Item  string `json:"item"`
+	Media string `json:"media"`
+	Bytes int64  `json:"bytes"`
 }
 
 // Session-origin posts can only use a room feed; post_api rejects DM homes.
@@ -745,13 +753,14 @@ type TranscriptTurn struct {
 	NextPost          int               `json:"nextPost,omitempty"`
 }
 type TranscriptStep struct {
-	Turn    TurnID     `json:"turn"`
-	Tool    string     `json:"tool"`
-	Label   string     `json:"label"`
-	Started time.Time  `json:"started"`
-	Ended   *time.Time `json:"ended,omitempty"`
-	Failed  bool       `json:"failed"`
-	Preview string     `json:"preview"`
+	Turn    TurnID           `json:"turn"`
+	Tool    string           `json:"tool"`
+	Label   string           `json:"label"`
+	Started time.Time        `json:"started"`
+	Ended   *time.Time       `json:"ended,omitempty"`
+	Failed  bool             `json:"failed"`
+	Preview string           `json:"preview"`
+	Image   *TranscriptImage `json:"image,omitempty"`
 }
 type TranscriptReadResponse struct {
 	Steps      []TranscriptStep `json:"steps"`
