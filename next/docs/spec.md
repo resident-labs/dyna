@@ -14,7 +14,7 @@ Only the owner can reopen a settled owner decision. Sources and history are in [
 6. **Host exec.** Only the owner grants it. Root's default grant covers all hosts, including the control plane, without approval. Root can therefore reach model sign-ins and the GitHub token. This is the exception to the no-secret-in-a-box goal. A control-plane grant gives full owner power, including owner-only API calls (owner, 2026-10-31, msg_462f3f1d210856c2).
 7. **Root.** Root is a position in the tree. An ancestor can start, move or close descendants. Root's extra powers are the ask-owner and host-exec grants and the engine-notice subscription.
 8. **Self-hosting.** Trial v2 beside v1 before cutover, with separate data, runtime and SSH control folders. Start in M2 once a box can build and test Dyna. v1 remains the fallback until the trial works and a dry-run import passes.
-9. **Scope.** Voice and Dyna web search return after cutover. The library is cut for now. Minimal computers ship in M2; workflows and the desktop window ship in M3. The frozen v1 backup keeps the feature map.
+9. **Scope.** Voice returns after cutover. Dyna web search ships in v2 now (owner, 2026-10-31). The library is cut for now. Minimal computers ship in M2; workflows and the desktop window ship in M3. The frozen v1 backup keeps the feature map.
 10. **Node jobs.** Do not port them. GitHub Actions runs CI with self-hosted runners in boxes. Host-specific work uses host exec or a room restricted to a suitable host. Admission does not yet select hosts by device needs.
 11. **Proxy process.** Vendor CLIProxyAPI in `next/third_party/cliproxyapi`. The engine supervises a child of the same binary over a Unix socket.
 12. **Size and cuts.** Milestone reports count product lines per package against the plan. Keep subtree moves, `Run` subscriptions and `show_pty` requests. Defer box growth, cross-host restart, checkpoints, relocation commands, bundle data for issue watches and room MCP servers, one cgroup per shell job, `node_modules` reflink seeding and external members. Ship `box.pressure`; use process groups for shell jobs and a manual relocation procedure.
@@ -183,6 +183,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `accounts` |
 | `account_rooms` |
 | `account_alerts` |
+| `search_keys` |
 | `proxy_auths` |
 
 ## 5. Machines and box lifecycle
@@ -504,14 +505,15 @@ All M1–M3 features below are cutover gates. Imported data is not the same as a
 
 - **M1 and M2:** The thin slice and trial features are in section 11.
 - **M3:** goals, check-ins, questions, issues, thin PR approval and GitHub merges, Actions runners in boxes, typed subscriptions, settings, accounts, backups, remote access, Connect and device scopes, web push, desktop, skills, install guard, manual update, command palette and workflows. Add arch, lt-24-005, Boat and pve only after each passes the host check and real-box QA. The relay remains unchanged. Remote access precedes workflows. Daily maintenance includes backups, archive-ref expiry, host pruning and closing eligible boxes stopped for seven days; root and sessions with open PRs, goals, children or pending input are excluded.
-- **After cutover:** voice returns as the existing Go service and persona without redesign; web search, issue watches, room MCP, computer reminders, idle compaction, settings panes, release pipeline, WSL and branch QA follow. Issue-watch and room-MCP data are not imported. Agents have no web search until its port. Manual update ships in M3; hourly auto-update follows.
+- **Web search:** The direct MCP web tool searches through eligible providers. CLIProxyAPI holds model credentials; the engine holds search-only keys, including the Muse key. The owner requested this port before cutover on 2026-10-31.
+- **After cutover:** voice returns as the existing Go service and persona without redesign; issue watches, room MCP, computer reminders, idle compaction, settings panes, release pipeline, WSL and branch QA follow. Issue-watch and room-MCP data are not imported. Manual update ships in M3; hourly auto-update follows.
 - **Dropped:** reviewer service and workspace, Dyna merge trials, comment-trust holds, CI budget service, conflict radar, room PR views, jobs, worktrees, load doctor, test slots, harness settings, Claude Code and session-format conversion. Session profile changes remain. The library is cut for now; its map stays in the frozen v1 backup. External members and placement by device needs are absent. GitHub supplies PR state; outside text is wrapped, with the accepted risks in decision 13.
 
 Readable room history is given up (owner q57): `dyna room log` starts empty. The data remains in `archive/` and backups, but no archive reader is planned. Paired devices, desktop, issues, goals, PRs and standing instructions work at cutover.
 
 ### 9.1 What we lose from Claude Code
 
-Pi replaces Claude Code, including its model-specific prompt and tools. Web search and fetch, todo list, plan mode and notebook editing are gone. New Claude features may reach Pi later. The owner accepts the subscription-terms risk in decision 4. The trial compares real work quality.
+Pi replaces Claude Code, including its model-specific prompt and built-in tools. Claude Code's web search and fetch, todo list, plan mode and notebook editing are gone; Dyna provides a direct web search tool. New Claude features may reach Pi later. The owner accepts the subscription-terms risk in decision 4. The trial compares real work quality.
 
 ### 9.2 Workflows (M3)
 

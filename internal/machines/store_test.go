@@ -593,6 +593,23 @@ func TestMigrateDropsRolesAndSlots(t *testing.T) {
 	}
 }
 
+func TestWakeCommandPreservesArgumentOrder(t *testing.T) {
+	ctx := context.Background()
+	s := fixture(t)
+	want := []string{"/usr/bin/tool", "z", "a", "z"}
+	m, err := s.Save(ctx, Machine{Name: "wake", SSH: "user@wake", Enabled: true, WakeCommand: want})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err = s.Get(ctx, m.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(m.WakeCommand, want) {
+		t.Fatalf("wake command = %q; want %q", m.WakeCommand, want)
+	}
+}
+
 func TestMigrateImportsSuiteFiltersAsOwnerLabels(t *testing.T) {
 	dir := storetest.DataDir(t)
 	db, err := database.Open(dir)
@@ -605,6 +622,7 @@ func TestMigrateImportsSuiteFiltersAsOwnerLabels(t *testing.T) {
 	if version14 == schema {
 		t.Fatal("the version 14 fixture could not add its suites column")
 	}
+	version14 = strings.Replace(version14, ",\n\twake_command TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(wake_command))", "", 1)
 	version14 = strings.Replace(version14, "\n\tquick_slots INTEGER NOT NULL DEFAULT 0 CHECK(quick_slots >= 0),", "", 1)
 	version14 = strings.Replace(version14, ",\n\tmounts TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(mounts)),\n\tdevices TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(devices))", "", 1)
 	_, err = db.Exec(version14 + `
