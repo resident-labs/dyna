@@ -3,7 +3,7 @@
   import Icon from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
   import PostAttachments from "./PostAttachments.svelte";
-  import { formatTime, type Row } from "../feed.ts";
+  import { clock, formatTime, type Row } from "../feed.ts";
   import type { Attachment, EventID, VisualCard } from "../contract.gen.ts";
   import { hue } from "../identity.ts";
   import { beginSwipe, moveSwipe, releaseSwipe, ignoredSwipeTarget, type Swipe } from "../swipe.ts";
@@ -130,7 +130,7 @@
     <p class="name"><strong class={row.from.kind} style:--hue={hue(author)}>{author}</strong>
       <time datetime={row.at}>{formatTime(row.at)}</time>{#if to}<span class="to">→ {to}</span>{/if}</p>
   {:else}
-    <time class="follow-time" datetime={row.at}>{new Date(row.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>
+    <time class="follow-time" datetime={row.at}>{clock(row.at)}</time>
   {/if}
   <Markdown text={row.text} />
   <PostAttachments {onmedia} attachments={row.attachments} {newest} event={visualEvent} at={row.at} />
@@ -148,13 +148,13 @@
   .post { transition: transform 150ms ease; }
   .post.dragging { transition: none; }
   @media (prefers-reduced-motion: reduce) { .post { transition: none; } }
-  /* The avatar sits in a 32 px gutter; later posts of a run align under the first one's text. */
+  /* The avatar sits in a 40 px gutter; later posts of a run align under the first one's text. */
   .post { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr); column-gap: 16px; padding: 1px 16px; font-size: 15px; }
   /* The wash follows the pointer only; a tap or a closed menu leaves none behind. */
   @media (hover: hover) { .post:hover { background: var(--hover); } }
   .mention { background: var(--mention-bg); box-shadow: inset 2px 0 var(--mention-bar); }
   @media (hover: hover) { .post.mention:hover { background: linear-gradient(var(--hover), var(--hover)), var(--mention-bg); } }
-  .post .follow-time { grid-column: 1 !important; grid-row: 1; align-self: start; text-align: center; font-size: 11px; visibility: hidden; }
+  .post .follow-time { grid-column: 1; grid-row: 1; align-self: start; text-align: center; font-size: 11px; visibility: hidden; }
   @media (hover: hover) { .post:hover .follow-time { visibility: visible; } }
   @media (max-width: 640px) { .post { column-gap: 8px; } }
   .post:focus { outline: none; }
@@ -192,5 +192,5 @@
   .to { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   strong.owner { color: var(--focus); }
   strong.engine { color: var(--text); }
-  time, .to { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  time, .to { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 </style>
