@@ -58,13 +58,17 @@ func TestBackupFlags(t *testing.T) {
 func TestBackupStartAge(t *testing.T) {
 	now := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
 	for _, age := range []time.Duration{23 * time.Hour, 25 * time.Hour} {
-		dir := t.TempDir()
+		layout := box.Layout{Data: t.TempDir()}
+		dir := layout.Backups()
+		if err := os.Mkdir(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
 		name := "store-" + now.Add(-age).Format(backupStamp) + ".db"
 		if err := os.WriteFile(filepath.Join(dir, name), nil, 0600); err != nil {
 			t.Fatal(err)
 		}
 		st := &fakeBackupStore{dir: dir}
-		b := backupLoop{store: st, dir: dir, free: plentyFree, now: func() time.Time { return now }}
+		b := backupLoop{store: st, layout: layout, free: plentyFree, now: func() time.Time { return now }}
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		b.start(ctx)
@@ -75,11 +79,12 @@ func TestBackupStartAge(t *testing.T) {
 }
 
 func TestBackupWaitsForRoomAndClearsPartials(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "backups")
+	layout := box.Layout{Data: t.TempDir()}
+	dir := layout.Backups()
 	if err := os.Mkdir(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(filepath.Dir(dir), "store.db"), make([]byte, 1024), 0600); err != nil {
+	if err := os.WriteFile(layout.Store(), make([]byte, 1024), 0600); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"store-1.db.partial", ".encrypted-2.partial", "store-3.db"} {
@@ -94,7 +99,7 @@ func TestBackupWaitsForRoomAndClearsPartials(t *testing.T) {
 	need := 2*1024 + 20*box.GiB
 	free := need - 1
 	st := &fakeBackupStore{dir: dir}
-	b := backupLoop{store: st, dir: dir, recipient: identity.Recipient(), free: func(context.Context) (int64, bool) { return free, true }, now: time.Now, run: func(context.Context, string, int64, *os.File) error { return nil }}
+	b := backupLoop{store: st, layout: layout, recipient: identity.Recipient(), free: func(context.Context) (int64, bool) { return free, true }, now: time.Now, run: func(context.Context, string, int64, *os.File) error { return nil }}
 	b.backup(context.Background())
 	if st.calls != 0 || st.alerts != 1 || st.free != need-1 || st.need != need || st.failure != "low disk" {
 		t.Fatalf("low disk: %+v", st)
@@ -112,12 +117,13 @@ func TestBackupWaitsForRoomAndClearsPartials(t *testing.T) {
 
 // A broken probe reads as zero free. It must not stop backups for good, nor claim the disk is full.
 func TestBackupRunsWhenDiskCannotBeMeasured(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "backups")
+	layout := box.Layout{Data: t.TempDir()}
+	dir := layout.Backups()
 	if err := os.Mkdir(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	st := &fakeBackupStore{dir: dir}
-	b := backupLoop{store: st, dir: dir, free: func(context.Context) (int64, bool) { return 0, false }, now: time.Now}
+	b := backupLoop{store: st, layout: layout, free: func(context.Context) (int64, bool) { return 0, false }, now: time.Now}
 	b.backup(context.Background())
 	if st.calls != 1 || st.alerts != 0 {
 		t.Fatalf("calls %d alerts %d", st.calls, st.alerts)
@@ -125,7 +131,8 @@ func TestBackupRunsWhenDiskCannotBeMeasured(t *testing.T) {
 }
 
 func TestBackupCopyFailure(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "backups")
+	layout := box.Layout{Data: t.TempDir()}
+	dir := layout.Backups()
 	if err := os.Mkdir(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -135,9 +142,8 @@ func TestBackupCopyFailure(t *testing.T) {
 	}
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	st := &fakeBackupStore{dir: dir}
-	dataDir := filepath.Dir(dir)
-	for _, name := range []string{"AGENTS.md", "rooms/r/files/a", "rooms/r/transcripts/s/b", "archive/d", "connect/pending.json", "cliproxy/auth/c"} {
-		path := filepath.Join(dataDir, name)
+	for _, name := range []string{"AGENTS.md", "rooms/r/files/a", "rooms/r/transcripts/s/b", "archive/d", "connect/pending.json", "cliproxy/auth-v2/c"} {
+		path := filepath.Join(layout.Data, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -145,7 +151,7 @@ func TestBackupCopyFailure(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	b := backupLoop{store: st, dir: dir, dest: "backup-host", recipient: identity.Recipient(), free: plentyFree, now: func() time.Time { return now }, run: func(_ context.Context, dest string, size int64, input *os.File) error {
+	b := backupLoop{store: st, layout: layout, dest: "backup-host", recipient: identity.Recipient(), free: plentyFree, now: func() time.Time { return now }, run: func(_ context.Context, dest string, size int64, input *os.File) error {
 		data, err := io.ReadAll(input)
 		if err != nil {
 			t.Fatal(err)
@@ -177,7 +183,7 @@ func TestBackupCopyFailure(t *testing.T) {
 			}
 			members[h.Name] = string(body)
 		}
-		for _, name := range []string{"AGENTS.md", "rooms/r/files/a", "rooms/r/transcripts/s/b", "archive/d", "connect/pending.json", "cliproxy/auth/c"} {
+		for _, name := range []string{"AGENTS.md", "rooms/r/files/a", "rooms/r/transcripts/s/b", "archive/d", "connect/pending.json", "cliproxy/auth-v2/c"} {
 			if members[name] != name {
 				t.Fatalf("missing %s: %v", name, members)
 			}
