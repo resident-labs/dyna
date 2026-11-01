@@ -13,6 +13,9 @@ import (
 
 func (c *Connections) SetKey(ctx context.Context, req contract.AccountsSetKeyRequest) (contract.AccountsSetKeyResponse, error) {
 	var model string
+	if req.Provider == contract.ProviderMeta {
+		model = MetaKeyModel
+	}
 	for _, provider := range KeyProviders() {
 		if provider.Provider == req.Provider {
 			model = provider.Models[0]

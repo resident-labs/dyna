@@ -61,7 +61,7 @@ func (s *Store) ListProxyAuths(ctx context.Context) ([]ProxyAuth, error) {
 // PruneUnboundProxyAuths reconciles interrupted account creation before proxy startup.
 func (s *Store) PruneUnboundProxyAuths(ctx context.Context) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "DELETE FROM proxy_auths WHERE (provider IN ('claude','codex','kimi','xai') OR id GLOB 'dyna-key-[0-9a-f]*') AND NOT EXISTS (SELECT 1 FROM accounts WHERE proxy_id=proxy_auths.id)")
+		_, err := tx.ExecContext(ctx, "DELETE FROM proxy_auths WHERE (provider IN ('claude','codex','kimi','xai','meta') OR id GLOB 'dyna-key-[0-9a-f]*') AND NOT EXISTS (SELECT 1 FROM accounts WHERE proxy_id=proxy_auths.id)")
 		return err
 	})
 }

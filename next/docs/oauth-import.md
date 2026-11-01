@@ -1,13 +1,13 @@
 # Import an existing OAuth sign-in
 
 `accounts.import_oauth` is an owner-only API method. It imports one copy of a
-Claude, ChatGPT, Kimi Code, or xAI OAuth sign-in. It does not read a v1 store.
+Claude, ChatGPT, Kimi Code, xAI, or Meta OAuth sign-in. It does not read a v1 store.
 Prepare the request on the control plane and send it to the owner socket. Do not
 put credentials in command arguments, shell history, room posts, or logs.
 
 The request has these fields:
 
-- `provider`: `anthropic`, `openai`, `kimi`, or `xai`.
+- `provider`: `anthropic`, `openai`, `kimi`, `xai`, or `meta`.
 - `label`: the account label.
 - `expiresAt`: the access token expiry as an RFC 3339 timestamp.
 - `credential`: a JSON-encoded string containing an object with `access_token`
@@ -17,6 +17,9 @@ The request has these fields:
   - `openai`: `account_id` is required. `email` is optional.
   - `kimi`: `domain` (`kimi.com` or `kimi.ai`) and `device_id` are optional.
   - `xai`: there are no other fields.
+  - `meta`: `refresh_token` is Meta's identity token, which starts with `dca:`.
+    `access_token` is the minted key, or the identity token if none was minted.
+    `email` is optional, and reconnect needs it.
 
 For v1 Claude Code sign-ins, send `accessToken`, `refreshToken`, and the account
 email as `access_token`, `refresh_token`, and `email`. Convert `expiresAt` from
@@ -26,7 +29,13 @@ convert the expiry from Unix seconds. Preserve the Kimi domain and device ID
 when present. For v1 Grok, use the OIDC entry for `https://auth.x.ai` and the
 Grok client; its `key` is the access token, and its `expires_at` is the expiry.
 Pi OAuth entries use `access`, `refresh`, and a Unix-millisecond `expires`
-value. Send only the mapped values to this method.
+value. Send only the mapped values to this method. For a Pi Meta entry, `refresh`
+is the identity token and `access` is the key minted from it.
+
+Meta has no refresh grant. The proxy stores the identity token and mints a new key
+after a 401, and it ignores `expiresAt`. When the identity token itself expires, the
+owner signs in again. A Meta sign-in can also start from the Accounts page, and a
+Meta API key goes through `accounts.set_key`.
 
 The proxy refreshes both sign-ins with the OAuth clients that Claude Code and Pi
 use. A Claude sign-in has no account UUID or device ID at import. The first
