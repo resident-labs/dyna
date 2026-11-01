@@ -126,7 +126,7 @@
   .open.live { color: var(--text); }
   .open:hover, .open[aria-expanded="true"] { background: var(--selected); color: var(--text); }
   .open:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
-  .open.phone { position: relative; justify-content: center; width: 40px; height: 40px; padding: 0; }
+  .open.phone { position: relative; justify-content: center; width: 44px; height: 44px; padding: 0; }
   .corner { position: absolute; top: 4px; right: 2px; }
   .n { font-variant-numeric: tabular-nums; }
   .open > :global(svg:last-child) { color: var(--muted); }

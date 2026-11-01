@@ -14,3 +14,8 @@ export function requestGroups(waiting: Request[]): [string, Request[]][] {
 export function requestOrder(waiting: Request[], shared: Request[], groups: [string, Request[]][], grouped: boolean): Request[] {
   return [...(grouped ? groups.flatMap(([, items]) => items) : waiting), ...shared];
 }
+
+// Scope the request list to the selected conversation.
+export function requestsFor(requests: Iterable<Request>, session?: string): Request[] {
+  return [...requests].filter(request => !session || request.by.session === session);
+}
