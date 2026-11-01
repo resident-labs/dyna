@@ -228,8 +228,23 @@ func TestExistingKeyAccountsSurviveTheMoveToPresets(t *testing.T) {
 	go r.ServeConn(server)
 	p := &proxyStore{client: rpc.NewClient(client)}
 	defer p.client.Close()
+	// A custom provider must come back too, with its prefix and own models.
+	const customID = "dyna-key-00000000000000000000000000000004"
+	custom, err := json.Marshal(coreauth.Auth{ID: customID, Provider: "openai-compatible-custom-acme", Prefix: "custom-acme", Status: coreauth.StatusActive, Attributes: map[string]string{
+		"api_key": "invented-custom", "auth_kind": "apikey", "base_url": "http://models.local/v1", "compat_name": "custom-acme", "provider_key": "openai-compatible-custom-acme",
+		cliproxy.DynaModelsAttribute: "local-one", cliproxy.DynaDisplayNameAttribute: "Acme",
+	}, Metadata: map[string]any{"type": "openai-compatibility"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveProxyAuth(ctx, store.ProxyAuth{ID: customID, Provider: "openai-compatible-custom-acme", Record: custom}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.BindAccount(ctx, "custom", customID, "custom-acme", "custom"); err != nil {
+		t.Fatal(err)
+	}
 	loaded, err := p.List(ctx)
-	if err != nil || len(loaded) != len(existing) {
+	if err != nil || len(loaded) != len(existing)+1 {
 		t.Fatalf("loaded %d credentials: %v", len(loaded), err)
 	}
 	manager, service, _ := importTestRoutes(t)
@@ -240,6 +255,10 @@ func TestExistingKeyAccountsSurviveTheMoveToPresets(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err := service.ActivateDynaCredential(ctx, customID, "custom-acme/local-one"); err != nil {
+		t.Fatal("the custom provider lost its model")
+	}
+	defer cliproxy.GlobalModelRegistry().UnregisterClient(customID)
 	for _, account := range existing {
 		if err := service.ActivateDynaCredential(ctx, account.id, account.model); err != nil {
 			t.Fatalf("%s lost its model %s", account.name, account.model)

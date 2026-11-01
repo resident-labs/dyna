@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -240,5 +241,21 @@ func TestRouteAllowsACustomProviderModel(t *testing.T) {
 	route.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/model/v1/responses", strings.NewReader(`{"model":"custom-acme/one"}`)))
 	if response.Code != http.StatusOK || seen != "/v1/responses" {
 		t.Fatalf("code = %d, path = %q", response.Code, seen)
+	}
+}
+
+func TestProxyConfigHasNoProviderCatalog(t *testing.T) {
+	proxy, err := NewProxy(t.TempDir(), "invented-management-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer proxy.Listener.Close()
+	data, err := os.ReadFile(proxy.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := string(data)
+	if !strings.Contains(config, "force-model-prefix: true") || strings.Contains(config, "z.ai") || strings.Contains(config, "deepseek") {
+		t.Fatalf("config:\n%s", config)
 	}
 }
