@@ -141,6 +141,7 @@
 
 <style>
   .swipe { position: relative; }
+  .swipe:has(.post.first) { margin-top: 16px; }
   @media (pointer: coarse) { .swipe { overflow-x: clip; } }
   .cue { position: absolute; left: 12px; top: 29px; z-index: 1; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--selected); color: var(--muted); opacity: .4; transform: scale(.8); }
   .cue:not(.first) { top: 15px; }
@@ -152,7 +153,7 @@
   .post { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr); column-gap: 16px; padding: 1px 16px; font-size: 15px; }
   /* The wash follows the pointer only; a tap or a closed menu leaves none behind. */
   @media (hover: hover) { .post:hover { background: var(--hover); } }
-  .mention { background: var(--mention-bg); box-shadow: inset 2px 0 var(--mention-bar); }
+  .mention { padding-top: 4px; padding-bottom: 4px; background: var(--mention-bg); box-shadow: inset 2px 0 var(--mention-bar); }
   @media (hover: hover) { .post.mention:hover { background: linear-gradient(var(--hover), var(--hover)), var(--mention-bg); } }
   .post .follow-time { grid-column: 1; grid-row: 1; align-self: start; text-align: center; font-size: 11px; visibility: hidden; }
   @media (hover: hover) { .post:hover .follow-time { visibility: visible; } }
@@ -177,7 +178,7 @@
   .status { color: var(--muted); font-size: 12px; }
   .status:not(:empty) { padding: 0 6px; }
   .post > :global(.avatar) { grid-column: 1; grid-row: 1 / span 3; margin-top: 2px; }
-  .post.first { padding-top: 16px; }
+
   /* A post the engine has not confirmed is dimmed; its Not sent line keeps full contrast in the danger color, because the owner must act. */
   .pending > :global(:not(.unsent, .sheet)) { opacity: 0.5; }
   .unsent { margin: 2px 0 0; display: flex; align-items: baseline; gap: 12px; color: var(--danger); font-size: 12px; }

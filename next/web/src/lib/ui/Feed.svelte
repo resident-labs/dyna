@@ -12,7 +12,6 @@
   import Icon from "./Icon.svelte";
   import RequestCard from "./RequestCard.svelte";
   import StatusPill from "./StatusPill.svelte";
-  import { TurnTranscripts } from "../transcripts.svelte.ts";
   import { boxRow, closedSession, describe, formatTime, shortPaths, dayLabel, feedRows, timeSpan, type Quote, type Row } from "../feed.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { Conversation, PostRequest, Principal } from "../contract.gen.ts";
@@ -105,7 +104,6 @@
   // Opened work rows, steps and transcripts stay while the list recycles their elements.
   const opened = new SvelteSet<string>();
   // svelte-ignore state_referenced_locally
-  const transcripts = home.kind === "dm" && home.session ? new TurnTranscripts(home.session) : undefined;
   const name = (session: string) => store.names.get(session) ?? closedSession;
   const author = (from: Principal) => from.kind === "owner" ? "You" : from.session ? name(from.session) : "Dyna";
   // The root session is the open session with no parent.
@@ -203,7 +201,7 @@
         shows as waiting that the store lacks was decided outside the window, so it gets no buttons. -->
       {:else if item.kind === "request"}{@const live = store.requests.get(item.request.id)}
         <RequestCard {admin} request={live ?? item.request} gone={!live && item.request.state === "pending"} {store} {now} feed />
-      {:else if item.kind === "work"}<WorkRow row={item} {name} {opened} ontoggle={toggle} {transcripts} {onjobs} />
+      {:else if item.kind === "work"}<WorkRow row={item} {name} {opened} ontoggle={toggle} {onjobs} />
       {:else if item.kind === "new"}<p class="new"><span>New</span></p>
       {:else if item.kind === "day"}<p class="day"><span>{dayLabel(item.at, Date.now())}</span></p>
       {:else if item.kind === "steps"}<ul class="steps" aria-label="Finished steps">
