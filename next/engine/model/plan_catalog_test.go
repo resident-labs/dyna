@@ -51,6 +51,24 @@ func TestPlanCatalogUsesDefaultAndExactAliases(t *testing.T) {
 	}
 }
 
+func TestDualProviderPublishesBothPools(t *testing.T) {
+	p := &Proxy{}
+	catalog := Catalog{Plans: []PlanProvider{{ID: "anthropic", Models: []contract.CatalogModel{{ID: "claude-sonnet-4-6"}}}}, Keys: []KeyProvider{{Provider: "anthropic", DefaultModel: "key-only", Models: []contract.CatalogModel{{ID: "key-only"}, {ID: "claude-sonnet-4-6"}}}}}
+	if err := p.initPools(catalog); err != nil {
+		t.Fatal(err)
+	}
+	info := p.AccountProviders()[0]
+	if len(info.Models) != 2 {
+		t.Fatalf("published models: %+v", info.Models)
+	}
+	if _, err := p.Namespace(contract.ModelChoice{Provider: "anthropic", Billing: contract.ModelBillingPlan, ID: "key-only"}, nil); err == nil {
+		t.Fatal("plan accepted a key-only model")
+	}
+	if _, err := p.Namespace(contract.ModelChoice{Provider: "anthropic", Billing: contract.ModelBillingKey, ID: "key-only"}, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPinnedPlanCatalogDrift(t *testing.T) {
 	path := os.Getenv("DYNA_PI_TARBALL")
 	if path == "" {
@@ -126,6 +144,9 @@ func TestPinnedPlanCatalogDrift(t *testing.T) {
 			set[name] = true
 		}
 		for _, model := range p.pools["plan_"+string(id)].info.Models {
+			if !p.pools["plan_"+string(id)].models[model.ID] {
+				continue
+			}
 			if !set[planProxyModel(id, model.ID)] {
 				t.Errorf("%s/%s has no compiled proxy model", id, model.ID)
 			}
@@ -150,7 +171,7 @@ func TestPinnedPlanCatalogDrift(t *testing.T) {
 		}
 		expected := ""
 		for _, model := range p.pools["plan_"+string(id)].info.Models {
-			if common[planProxyModel(id, model.ID)] && (expected == "" || model.ID == defaultID) {
+			if p.pools["plan_"+string(id)].models[model.ID] && common[planProxyModel(id, model.ID)] && (expected == "" || model.ID == defaultID) {
 				expected = model.ID
 			}
 		}
