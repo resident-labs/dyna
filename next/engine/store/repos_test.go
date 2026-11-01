@@ -2,10 +2,12 @@ package store
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -41,5 +43,42 @@ func TestRoomRepos(t *testing.T) {
 	}
 	if err := s.AddRoomRepo(ctx, "missing", "three", false); err == nil {
 		t.Fatal("accepted missing room")
+	}
+}
+
+func TestRepoCISettings(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	const id contract.RoomID = "room"
+	if err := s.CreateRoom(ctx, id, "room", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddRoomRepo(ctx, id, "owner/repo", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddHost(ctx, box.Host{Name: "pve", SSH: "user@pve", State: box.HostReady}); err != nil {
+		t.Fatal(err)
+	}
+	host := contract.RepoCIHost{Repo: "owner/repo", Host: "pve", Runners: 2, Size: contract.BoxSizeLarge}
+	if err := s.SetRepoCI(ctx, "missing/repo", []contract.RepoCIHost{host}); !errors.Is(err, ErrRepoNotFound) {
+		t.Fatalf("unknown repository: %v", err)
+	}
+	if err := s.SetRepoCI(ctx, "owner/repo", []contract.RepoCIHost{host}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.CIHosts(ctx)
+	host.Room = id
+	if err != nil || !reflect.DeepEqual(got, []contract.RepoCIHost{host}) {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if err := s.SetRepoCI(ctx, "owner/repo", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.CIHosts(ctx); err != nil || len(got) != 0 {
+		t.Fatalf("after github mode: %+v %v", got, err)
 	}
 }
