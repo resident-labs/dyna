@@ -22,6 +22,9 @@ export const removalPrompt = (method: ConnectMethod) => `Remove this account? Dy
 
 export const refused = (error: unknown) => error instanceof APIError && error.detail.code === "conflict";
 
+// The engine alone decides what a label may be, so the page only words its answer.
+export const labelRefusal = (error: unknown) => error instanceof APIError && error.detail.code === "invalid" ? "Use 1 to 128 characters, without @." : "The label was not saved. Try again.";
+
 // Problems come first; unknown accounts remain in label order with connected accounts.
 export function accountRows(accounts: readonly Account[]): Account[] {
   const rank = (account: Account) => account.state === "sign_in_expired" ? 0 : account.state === "quota_low" ? 1 : 2;

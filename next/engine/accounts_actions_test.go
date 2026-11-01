@@ -150,6 +150,80 @@ func TestAccountLimitsOwnerAction(t *testing.T) {
 	}
 }
 
+func TestAccountRename(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	for _, id := range []string{"one", "two"} {
+		if err := st.SaveProxyAuth(ctx, store.ProxyAuth{ID: id, Provider: "claude", Record: []byte("{}")}, true); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.BindAccount(ctx, contract.AccountID(id), id, contract.ProviderAnthropic, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	core := New(st, nil, nil, time.Now)
+	actions := NewAccountActions(core, nil, nil)
+	if err := core.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": actions.Entry()}, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	label := func(id contract.AccountID) string {
+		t.Helper()
+		bindings, err := st.Accounts(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, binding := range bindings {
+			if binding.Account.ID == id {
+				return binding.Account.Label
+			}
+		}
+		t.Fatalf("account %s is gone", id)
+		return ""
+	}
+
+	if _, problem := actions.AccountsRename(ctx, contract.Principal{Kind: contract.PrincipalSession}, contract.AccountsRenameRequest{AccountID: "one", Label: "Work"}); problem == nil || problem.Code != contract.ErrForbidden {
+		t.Fatalf("session: %v", problem)
+	}
+	if got := label("one"); got != "one" {
+		t.Fatalf("session renamed the account to %q", got)
+	}
+
+	for name, value := range map[string]string{"empty": "", "blank": " \t ", "too long": strings.Repeat("a", 129), "line feed": "a\nb", "return": "a\rb", "at sign": "me@example.test"} {
+		if _, problem := actions.AccountsRename(ctx, owner, contract.AccountsRenameRequest{AccountID: "one", Label: value}); problem == nil || problem.Code != contract.ErrInvalid {
+			t.Fatalf("%s: %v", name, problem)
+		}
+	}
+	if got := label("one"); got != "one" {
+		t.Fatalf("an invalid label was stored: %q", got)
+	}
+
+	if _, problem := actions.AccountsRename(ctx, owner, contract.AccountsRenameRequest{AccountID: "missing", Label: "Work"}); problem == nil || problem.Code != contract.ErrNotFound {
+		t.Fatalf("unknown account: %v", problem)
+	}
+
+	for _, tc := range []struct {
+		id          contract.AccountID
+		input, want string
+	}{
+		{"one", "  Work  ", "Work"},
+		{"one", "Work", "Work"}, // the same label again is not an unknown account
+		{"two", "Work", "Work"}, // labels are display names, and connecting already allows a repeat
+		{"one", strings.Repeat("a", 128), strings.Repeat("a", 128)},
+	} {
+		if _, problem := actions.AccountsRename(ctx, owner, contract.AccountsRenameRequest{AccountID: tc.id, Label: tc.input}); problem != nil {
+			t.Fatalf("rename %s to %q: %v", tc.id, tc.input, problem)
+		}
+		if got := label(tc.id); got != tc.want {
+			t.Fatalf("%s is %q, want %q", tc.id, got, tc.want)
+		}
+	}
+}
+
 func TestOAuthImportRejectsSession(t *testing.T) {
 	actions := &AccountActions{}
 	_, problem := actions.AccountsImportOAuth(context.Background(), contract.Principal{Kind: contract.PrincipalSession}, contract.AccountsImportOAuthRequest{Provider: contract.ProviderKimi, Label: "Example", ExpiresAt: time.Unix(2000000000, 0), Credential: `{"access_token":"invented","refresh_token":"invented"}`})
