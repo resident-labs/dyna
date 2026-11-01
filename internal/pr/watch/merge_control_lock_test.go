@@ -91,10 +91,12 @@ func TestAutomaticRecoveryRefreshesOnlyPendingSuccessInItsRoom(t *testing.T) {
 	run := e.s.GH.run
 	e.s.GH.run = func(ctx context.Context, cmd *exec.Cmd) error {
 		args := strings.Join(cmd.Args, " ")
-		if strings.Contains(args, "/actions/runs?head_sha=") {
-			for n, f := range fixtures {
-				if strings.Contains(args, f.Pull.Head.SHA) {
-					counts[fmt.Sprint(n)]++
+		for _, endpoint := range []string{"/actions/runs?head_sha=", "/check-runs?", "/statuses?"} {
+			if strings.Contains(args, endpoint) {
+				for n, f := range fixtures {
+					if strings.Contains(args, f.Pull.Head.SHA) {
+						counts[fmt.Sprint(n)+endpoint]++
+					}
 				}
 			}
 		}
@@ -104,8 +106,10 @@ func TestAutomaticRecoveryRefreshesOnlyPendingSuccessInItsRoom(t *testing.T) {
 	if _, err := e.s.mergeTickLocked(ctx, e.author.RoomID, nil); err != nil {
 		t.Fatal(err)
 	}
-	if counts["1"] != 1 || counts["2"] != 0 || counts["3"] != 0 || counts["4"] != 0 || len(*merged) != 0 {
-		t.Fatalf("run reads=%v merged=%v", counts, *merged)
+	for _, endpoint := range []string{"/actions/runs?head_sha=", "/check-runs?", "/statuses?"} {
+		if counts["1"+endpoint] != 1 || counts["2"+endpoint] != 0 || counts["3"+endpoint] != 0 || counts["4"+endpoint] != 0 || len(*merged) != 0 {
+			t.Fatalf("CI reads=%v merged=%v", counts, *merged)
+		}
 	}
 }
 
