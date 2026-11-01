@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -45,8 +46,15 @@ var fixtureSession contract.SessionID
 
 type devService struct {
 	*engine.Service
-	empty bool
+	empty   bool
+	renames *devRenames
 } // api.Service needs HostAdd; engine/runtime adds the real one.
+
+// devRenames keeps this run's new labels over devAccounts' invented ones.
+type devRenames struct {
+	mu     sync.Mutex
+	labels map[contract.AccountID]string
+}
 
 func (devService) HostAdd(context.Context, contract.Principal, contract.HostAddRequest) (contract.HostAddResponse, *contract.Error) {
 	return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "webdev uses only " + host}
@@ -75,11 +83,11 @@ func (devConnect) Unlink(context.Context) error {
 	return fmt.Errorf("Connect actions are disabled in webdev")
 }
 
-// Account actions are disabled in the fake-model development engine.
+// Account actions other than a rename are disabled in the fake-model development engine.
 func (d devService) AccountsList(context.Context, contract.Principal, contract.AccountsListRequest) (contract.AccountsListResponse, *contract.Error) {
 	accounts := []contract.Account{}
 	if !d.empty {
-		for _, a := range devAccounts(time.Now()) {
+		for _, a := range d.accounts(time.Now()) {
 			state := contract.AccountConnected
 			if a.usage.Cause == contract.UsageSignInExpired {
 				state = contract.AccountSignInExpired
@@ -109,6 +117,34 @@ func (devService) AccountsSetLimits(context.Context, contract.Principal, contrac
 }
 func (devService) AccountsRemove(context.Context, contract.Principal, contract.AccountsRemoveRequest) (contract.AccountsRemoveResponse, *contract.Error) {
 	return contract.AccountsRemoveResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable in webdev"}
+}
+
+// AccountsRename checks a label as the engine does, so the page's refusal shows here too.
+func (d devService) AccountsRename(_ context.Context, _ contract.Principal, req contract.AccountsRenameRequest) (contract.AccountsRenameResponse, *contract.Error) {
+	label, ok := model.CleanAccountLabel(req.Label)
+	if !ok {
+		return contract.AccountsRenameResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "invalid account label"}
+	}
+	if d.empty || !slices.ContainsFunc(devAccounts(time.Now()), func(a devAccount) bool { return a.usage.AccountID == req.AccountID }) {
+		return contract.AccountsRenameResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "account not found"}
+	}
+	d.renames.mu.Lock()
+	defer d.renames.mu.Unlock()
+	d.renames.labels[req.AccountID] = label
+	return contract.AccountsRenameResponse{}, nil
+}
+
+// accounts is devAccounts with this run's renames.
+func (d devService) accounts(now time.Time) []devAccount {
+	accounts := devAccounts(now)
+	d.renames.mu.Lock()
+	defer d.renames.mu.Unlock()
+	for i := range accounts {
+		if label, ok := d.renames.labels[accounts[i].usage.AccountID]; ok {
+			accounts[i].usage.Label = label
+		}
+	}
+	return accounts
 }
 
 // devAccounts are invented, never a real sign-in. They show each look of Home's Usage and Needs you: a card of several
@@ -156,7 +192,7 @@ func devAccounts(now time.Time) []devAccount {
 func (d devService) AccountsQuota(context.Context, contract.Principal, contract.AccountsQuotaRequest) (contract.AccountsQuotaResponse, *contract.Error) {
 	response := contract.AccountsQuotaResponse{Accounts: []contract.AccountUsage{}}
 	if !d.empty {
-		for _, a := range devAccounts(time.Now()) {
+		for _, a := range d.accounts(time.Now()) {
 			response.Accounts = append(response.Accounts, a.usage)
 		}
 	}
@@ -532,7 +568,7 @@ func main() {
 	svc := engine.New(st, b, profiles{empty: *fixture == "empty"}, time.Now)
 	fatal(svc.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.grant": svc.HostexecGrant()}, time.Hour))
 	svc.SetLayout(box.Layout{Data: data})
-	a := api.New(devService{Service: svc, empty: *fixture == "empty"}, nil)
+	a := api.New(devService{Service: svc, empty: *fixture == "empty", renames: &devRenames{labels: map[contract.AccountID]string{}}}, nil)
 	a.SetConnectOperations(devConnect{empty: *fixture == "empty"})
 	a.SetFilesRoute(func(c api.Caller) http.Handler { return svc.Files(c.Principal, c.Room) })
 	app, err := fs.Sub(web.Dist, "dist")
