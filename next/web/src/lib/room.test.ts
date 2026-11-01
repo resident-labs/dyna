@@ -464,7 +464,7 @@ test("a read that passes a counted failed job clears its mark, even when the rea
     answer(new Response(JSON.stringify({ events: ends })));
     await new Promise(setImmediate);
     assert.deepEqual([...room.failedJobs], ["s/unread"]);
-    room.apply(event(0, { type: "conversation.read", body: { conversation: dm, seq: 4 } }));
+    room.apply(event(0, { type: "conversation.read", body: { room: "r", conversation: dm, seq: 4 } }));
     assert.equal(room.failedJobs.size, 0);
   } finally { globalThis.fetch = original; }
 });
