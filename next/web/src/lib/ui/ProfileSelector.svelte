@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { tick } from "svelte";
   import type { ProfileSummary } from "../contract.gen.ts";
   import { call } from "../client.ts";
   import Icon from "./Icon.svelte";
@@ -9,12 +9,11 @@
   let profiles: ProfileSummary[] = $state([]);
   let loading = $state(true), failure = $state(false), expanded = $state(false);
   let container: HTMLDivElement;
-  let sorted = $derived(profiles);
   const limit = 3;
   let visible = $derived.by(() => {
-    if (expanded || sorted.length <= limit) return sorted;
-    const top = sorted.slice(0, limit);
-    const selected = sorted.find(profile => profile.name === value);
+    if (expanded || profiles.length <= limit) return profiles;
+    const top = profiles.slice(0, limit);
+    const selected = profiles.find(profile => profile.name === value);
     if (selected && !top.includes(selected)) top[limit - 1] = selected;
     return top;
   });
@@ -30,7 +29,7 @@
     }, () => { failure = true; });
     loading = false;
   }
-  onMount(() => { void loadProfiles(); });
+  $effect(() => { void loadProfiles(); });
 
   async function move(event: KeyboardEvent, index: number) {
     const step = event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 :
@@ -71,9 +70,9 @@
       </button>
     {/each}
   </div>
-  {#if sorted.length > limit}
+  {#if profiles.length > limit}
     <button type="button" class="more" aria-expanded={expanded} onclick={() => expanded = !expanded}>
-      <span class:up={expanded}><Icon name="chevron" /></span> {expanded ? "Show fewer profiles" : `Show all ${sorted.length} profiles`}
+      <span class:up={expanded}><Icon name="chevron" /></span> {expanded ? "Show fewer profiles" : `Show all ${profiles.length} profiles`}
     </button>
   {/if}
   {/if}
