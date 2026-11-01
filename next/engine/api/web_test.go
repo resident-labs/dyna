@@ -415,3 +415,43 @@ func TestWebGuardAndLogin(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestWebReusesMuxWithCurrentScopes(t *testing.T) {
+	devices := &streamDeviceStore{}
+	devices.live.Store(true)
+	w, err := NewWeb(New(&fakeService{}, nil), "127.0.0.1:7790", fstest.MapFS{}, time.Now, devices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.ticks = func() (<-chan time.Time, func()) {
+		t.Fatal("non-stream request started a ticker")
+		return nil, func() {}
+	}
+	for _, read := range []bool{true, false} {
+		devices.read.Store(read)
+		r := httptest.NewRequest(http.MethodPost, "http://dyna.localhost:7790/v1/device.scopes", strings.NewReader("{}"))
+		r.AddCookie(&http.Cookie{Name: "dyna_device", Value: "token"})
+		out := httptest.NewRecorder()
+		w.ServeHTTP(out, r)
+		if out.Code != http.StatusOK || strings.Contains(out.Body.String(), `"read"`) != read {
+			t.Fatalf("read=%v: %d %s", read, out.Code, out.Body.String())
+		}
+	}
+}
+
+func BenchmarkWebMux(b *testing.B) {
+	a := New(&fakeService{}, nil)
+	c := Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true}
+	b.Run("build", func(b *testing.B) {
+		for b.Loop() {
+			_ = a.handler(c)
+		}
+	})
+	b.Run("reuse", func(b *testing.B) {
+		h := a.handler(c)
+		b.ResetTimer()
+		for b.Loop() {
+			_ = h
+		}
+	})
+}
