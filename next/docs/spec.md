@@ -276,7 +276,7 @@ The owner manages accounts and room limits in the web app. The engine alone call
 
 ### 5.13 Web design
 
-The Svelte 5 app uses engine read positions and follows `docs/design-taste.md`. Its Discord-like layout has a shared room feed and composer, with the session tree at right. Posts have no bubbles; agent work folds into muted lines except failed turns. Color marks attention, not ordinary facts. Approvals appear in place; no modal dialogs ship. Only card send, failed-box restart, device revoke and removal of this device's admin scope have confirmations.
+The Svelte 5 app uses engine read positions and follows `docs/design-taste.md`. Its Discord-like layout has a shared room feed and composer, with the session tree at right. Posts have no bubbles; agent work folds into muted lines except failed turns. Color marks attention, not ordinary facts. Approvals appear in place. The media viewer is the one modal dialog exception: "Please make sure that media (videos, photos, etc) open in a modal similar to t3 code and dyna v1. With the same level of polish." (Owner, 2026-10-31). Only card send, failed-box restart, device revoke and removal of this device's admin scope have confirmations.
 
 Themes use typed tokens for all colors. Carbon dark is the default regardless of OS; Settings offers named themes including OLED black and Light. Enter sends, Shift+Enter adds a line, and F6 moves focus. Focus rings and reduced motion are required. Shared virtual lists preserve reading position. There are no reactions, event toasts, unread badges, onboarding pictures, raw IDs, logs or markdown labels.
 

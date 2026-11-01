@@ -4,13 +4,13 @@
   import Markdown from "./Markdown.svelte";
   import PostAttachments from "./PostAttachments.svelte";
   import { formatTime, type Row } from "../feed.ts";
-  import type { EventID, VisualCard } from "../contract.gen.ts";
+  import type { Attachment, EventID, VisualCard } from "../contract.gen.ts";
   import { hue } from "../identity.ts";
   import { beginSwipe, moveSwipe, releaseSwipe, ignoredSwipeTarget, type Swipe } from "../swipe.ts";
   import { canForwardPost } from "../forward-state.ts";
   import { SwipeForward } from "../swipe-forward.ts";
-  let { row, author, to, root, onretry, ondiscard, onforward, swipeDisabled = false, newest, visualEvent, onvisual }: {
-    row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; newest: Map<string, VisualCard>; visualEvent: EventID | undefined; onvisual: (visual: VisualCard) => void;
+  let { row, author, to, root, onretry, ondiscard, onforward, swipeDisabled = false, newest, visualEvent, onvisual, onmedia }: {
+    row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; newest: Map<string, VisualCard>; visualEvent: EventID | undefined; onvisual: (visual: VisualCard) => void; onmedia: (position: number) => void;
   } = $props();
   let distance = $state(0), dragging = $state(false), ready = $state(false);
   function swipe(node: HTMLElement) {
@@ -131,7 +131,7 @@
       <time datetime={row.at}>{formatTime(row.at)}</time>{#if to}<span class="to">→ {to}</span>{/if}</p>
   {/if}
   <Markdown text={row.text} />
-  <PostAttachments attachments={row.attachments} {newest} {onvisual} event={visualEvent} at={row.at} />
+  <PostAttachments {onmedia} attachments={row.attachments} {newest} {onvisual} event={visualEvent} at={row.at} />
   {#if row.pending?.failed}{@const id = row.pending.id}<p class="unsent" role="alert">Not sent
     <button type="button" onclick={() => onretry(id)}>Retry</button><button type="button" onclick={() => ondiscard(id)}>Discard</button></p>{/if}
 </article>
