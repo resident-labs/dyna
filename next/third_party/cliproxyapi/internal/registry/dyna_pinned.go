@@ -3,9 +3,9 @@ package registry
 import "encoding/json"
 
 // DynaPinnedPlanModels returns only the immutable catalog embedded in this build.
-// Codex contains the union of tiers; CodexCommon contains their intersection.
+// Codex tiers are returned separately so consumers can choose their policy.
 type DynaPinnedPlanModels struct {
-	Claude, Codex, CodexCommon, Kimi, XAI []string
+	Claude, Kimi, XAI, CodexFree, CodexTeam, CodexPlus, CodexPro []string
 }
 
 func DynaPinnedModels() (DynaPinnedPlanModels, error) {
@@ -20,28 +20,5 @@ func DynaPinnedModels() (DynaPinnedPlanModels, error) {
 		}
 		return out
 	}
-	sets := []map[string]bool{}
-	for _, models := range [][]*ModelInfo{catalog.CodexFree, catalog.CodexTeam, catalog.CodexPlus, catalog.CodexPro} {
-		set := make(map[string]bool, len(models))
-		for _, model := range models {
-			set[model.ID] = true
-		}
-		sets = append(sets, set)
-	}
-	var codex, common []string
-	seen := make(map[string]bool)
-	for _, tier := range [][]*ModelInfo{catalog.CodexFree, catalog.CodexTeam, catalog.CodexPlus, catalog.CodexPro} {
-		for _, id := range ids(tier) {
-			if !seen[id] {
-				codex = append(codex, id)
-				seen[id] = true
-			}
-		}
-	}
-	for _, id := range codex {
-		if sets[0][id] && sets[1][id] && sets[2][id] && sets[3][id] {
-			common = append(common, id)
-		}
-	}
-	return DynaPinnedPlanModels{Claude: ids(catalog.Claude), Codex: codex, CodexCommon: common, Kimi: ids(catalog.Kimi), XAI: ids(catalog.XAI)}, nil
+	return DynaPinnedPlanModels{Claude: ids(catalog.Claude), Kimi: ids(catalog.Kimi), XAI: ids(catalog.XAI), CodexFree: ids(catalog.CodexFree), CodexTeam: ids(catalog.CodexTeam), CodexPlus: ids(catalog.CodexPlus), CodexPro: ids(catalog.CodexPro)}, nil
 }
