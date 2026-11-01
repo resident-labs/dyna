@@ -401,7 +401,8 @@ type GitHub struct {
 	now            func() time.Time
 	requests       *requestCache
 	// run replaces process execution in tests; production uses the shared account-aware path.
-	run func(context.Context, *exec.Cmd) error
+	run         func(context.Context, *exec.Cmd) error
+	testAccount string // Selected identity for the fake runner.
 }
 
 func (g GitHub) command(ctx context.Context, dir string, tail bool, args ...string) ([]byte, error) {
@@ -455,7 +456,7 @@ func (g GitHub) commandWithAccount(ctx context.Context, dir string, tail bool, l
 	if g.run != nil {
 		run = func() error {
 			if before != nil {
-				if err := before(""); err != nil {
+				if err := before(g.testAccount); err != nil {
 					return err
 				}
 			}
