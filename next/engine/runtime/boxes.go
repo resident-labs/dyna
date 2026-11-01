@@ -419,6 +419,7 @@ func (b *Boxes) forward(id contract.BoxID) box.Forward {
 }
 
 func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, error) {
+	steps := box.NewStepLog("box " + string(spec.Box))
 	h, err := b.host(ctx, spec.Host)
 	if err != nil {
 		return "", err
@@ -426,6 +427,7 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	if err := b.syncInstructions(ctx, h); err != nil {
 		return "", err
 	}
+	steps.Done("instructions")
 	session, err := b.Store.Session(ctx, spec.Session)
 	if err != nil {
 		return "", err
@@ -455,20 +457,24 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	if err = b.installBinary(ctx, h); err != nil {
 		return "", err
 	}
+	steps.Done("binary")
 	image, err := b.CurrentImage(ctx, spec.Session, spec.Host)
 	if err != nil {
 		return "", err
 	}
+	steps.Done("image")
 	spec.Needs = image.Needs
 	slice, c := b.container(spec, image.Tag)
 	if err = h.EnsureSlice(ctx, slice); err != nil {
 		return "", err
 	}
 	sliced = true
+	steps.Done("slice")
 	if err = h.AddForward(ctx, forward); err != nil {
 		return "", err
 	}
 	forwarded = true
+	steps.Done("forward")
 	if err = h.CreateContainer(ctx, c); err != nil {
 		var missing box.MissingDevice
 		if errors.As(err, &missing) {
@@ -478,9 +484,11 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 		return "", err
 	}
 	created = true
+	steps.Done("container create")
 	if err = h.StartContainer(ctx, spec.Box); err != nil {
 		return "", err
 	}
+	steps.Done("container start")
 	ok = true
 	return image.Tag, nil
 }
@@ -686,22 +694,26 @@ func (b *Boxes) CurrentImage(ctx context.Context, sessionID contract.SessionID, 
 	if err != nil {
 		return box.Image{}, err
 	}
+	steps := box.NewStepLog("session " + string(sessionID))
 	tag, err := h.BuildBase(ctx, images.BaseContainerfile, b.PiTarball)
 	if err != nil {
 		return box.Image{}, err
 	}
+	steps.Done("base image")
 	var needs []box.Need
 	if session.Repo != "" {
 		name, tree, data, imageNeeds, err := b.Mirror.ImageContext(ctx, session.Repo)
 		if err != nil {
 			return box.Image{}, err
 		}
+		steps.Done("image context")
 		needs = imageNeeds
 		if name != "" {
 			tag, err = b.Images.Build(ctx, h, session.Room, host, session.Repo, name, tag, tree, data)
 			if err != nil {
 				return box.Image{}, err
 			}
+			steps.Done("toolchain image")
 		}
 	}
 	return box.Image{Tag: tag, Needs: needs}, nil
@@ -717,6 +729,7 @@ func (b *Boxes) StopHostexec(ctx context.Context, host contract.HostName, scope 
 
 // Recreate replaces a container without touching its volume or a legacy parent slice.
 func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, _ string) error {
+	steps := box.NewStepLog("box " + string(spec.Box))
 	if err := b.restoreHost(ctx, spec.Host); err != nil {
 		return err
 	}
@@ -727,16 +740,19 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, _ s
 	if err := b.syncInstructions(ctx, h); err != nil {
 		return err
 	}
+	steps.Done("instructions")
 	if err := h.StopContainer(ctx, spec.Box); err != nil {
 		return err
 	}
 	if err := h.RemoveContainer(ctx, spec.Box); err != nil {
 		return err
 	}
+	steps.Done("remove old container")
 	slice, c := b.container(spec, image)
 	if err := h.EnsureSlice(ctx, slice); err != nil {
 		return err
 	}
+	steps.Done("slice")
 	if err := h.CreateContainer(ctx, c); err != nil {
 		var missing box.MissingDevice
 		if errors.As(err, &missing) {
@@ -745,7 +761,12 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, _ s
 		}
 		return err
 	}
-	return h.StartContainer(ctx, spec.Box)
+	steps.Done("container create")
+	if err := h.StartContainer(ctx, spec.Box); err != nil {
+		return err
+	}
+	steps.Done("container start")
+	return nil
 }
 
 func (b *Boxes) container(spec lifecycle.BoxSpec, image string) (box.Slice, box.ContainerSpec) {

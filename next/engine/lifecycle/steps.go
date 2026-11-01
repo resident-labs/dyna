@@ -87,15 +87,19 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		delete(r.fresh, b.ID)
 		repos := r.repos
 		r.mu.Unlock()
+		steps := box.NewStepLog("box " + string(b.ID))
 		if !fresh {
 			workErr = r.boxes.Remove(ctx, b.ID)
+			steps.Done("remove old")
 		}
 		var sources []contract.BoxRepo
 		if workErr == nil && repos != nil {
 			sources, workErr = repos.Get(ctx, b.Session, b.Host, true)
+			steps.Done("repositories")
 		}
 		if workErr == nil {
 			next.Image, workErr = r.boxes.Create(ctx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources})
+			steps.Done("create")
 		}
 		var missing box.MissingDevice
 		if errors.As(workErr, &missing) {
