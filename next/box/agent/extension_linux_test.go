@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -12,8 +13,10 @@ import (
 // The driver loads the extension with a fake Pi and a fake dyna server, then prints each call's result.
 const extensionDriver = `
 const posts = [];
+const ids = new Set();
 globalThis.fetch = async (_url, init) => {
-	const { method, params } = JSON.parse(init.body);
+	const { id, method, params } = JSON.parse(init.body);
+	ids.add(id);
 	if (method === "tools/list") return { json: async () => ({ result: { tools: [{ name: "post", description: "Post.", inputSchema: { type: "object" }, annotations: {} }] } }) };
 	posts.push(params.arguments);
 	const failed = params.arguments.text === "refused";
@@ -31,15 +34,29 @@ const call = async (id, parent, input) => {
 };
 console.log(JSON.stringify({
 	tool: { name: tool.name, exposure: tool.exposure, description: tool.description },
-	direct: await call("a", undefined, { text: "done", end_turn: true }),
+	direct: await call("a", undefined, { text: "done", endTurn: true }),
 	plain: await call("b", undefined, { text: "update" }),
-	failed: await call("c", undefined, { text: "refused", end_turn: true }),
-	nested: await call("d/1", "d", { text: "from a script", end_turn: true }),
+	failed: await call("c", undefined, { text: "refused", endTurn: true }),
+	nested: await call("d/1", "d", { text: "from a script", endTurn: true }),
 	calls: posts.map((post) => post._dynaCallId),
+	ids: [...ids],
 }));
 `
 
-func TestExtensionEndsTheTurnOnADirectPost(t *testing.T) {
+// The server fails tools/list, so the extension must keep its call IDs and leave Pi's plain tool in place.
+const extensionFailureDriver = `
+globalThis.fetch = async () => ({ json: async () => ({ error: { message: "down" } }) });
+const handlers = {};
+let tool;
+const { default: load } = await import(process.argv[2]);
+await load({ on: (name, handler) => { handlers[name] = handler; }, registerTool: (definition) => { tool = definition; } });
+const event = { toolName: "mcp__dyna__post", toolCallId: "a", input: {} };
+handlers.tool_call(event);
+console.log(JSON.stringify({ registered: tool !== undefined, call: event.input._dynaCallId }));
+`
+
+func runExtension(t *testing.T, driverSource string) []byte {
+	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node is not installed")
@@ -49,13 +66,34 @@ func TestExtensionEndsTheTurnOnADirectPost(t *testing.T) {
 	if err := os.WriteFile(extension, []byte(renderExtension()), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(driver, []byte(extensionDriver), 0600); err != nil {
+	if err := os.WriteFile(driver, []byte(driverSource), 0600); err != nil {
 		t.Fatal(err)
 	}
-	out, err := exec.Command(node, driver, extension).CombinedOutput()
-	if err != nil {
+	var out, problems bytes.Buffer
+	command := exec.Command(node, driver, extension)
+	command.Stdout, command.Stderr = &out, &problems
+	if err := command.Run(); err != nil {
+		t.Fatalf("%v: %s", err, problems.String())
+	}
+	return out.Bytes()
+}
+
+func TestExtensionKeepsCallIDsWhenThePostToolCannotBeRead(t *testing.T) {
+	out := runExtension(t, extensionFailureDriver)
+	var got struct {
+		Registered bool
+		Call       string
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
+	if got.Registered || got.Call != "a" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestExtensionEndsTheTurnOnADirectPost(t *testing.T) {
+	out := runExtension(t, extensionDriver)
 	type result struct {
 		Terminate bool `json:"terminate"`
 		IsError   bool `json:"isError"`
@@ -74,7 +112,7 @@ func TestExtensionEndsTheTurnOnADirectPost(t *testing.T) {
 			Name, Exposure, Description string
 		}
 		Direct, Plain, Failed, Nested result
-		Calls                         []string
+		Calls, IDs                    []string
 	}
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatalf("%v: %s", err, out)
@@ -96,5 +134,8 @@ func TestExtensionEndsTheTurnOnADirectPost(t *testing.T) {
 	}
 	if want := []string{"a", "b", "c", "d"}; !slices.Equal(got.Calls, want) {
 		t.Fatalf("call IDs %v, want %v", got.Calls, want)
+	}
+	if len(got.IDs) != 5 {
+		t.Fatalf("request IDs must differ: %v", got.IDs)
 	}
 }

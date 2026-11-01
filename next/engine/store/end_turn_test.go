@@ -90,7 +90,7 @@ func parentDeliveries(t *testing.T, s *Store) []string {
 	return got
 }
 
-// A parent the end_turn post never mentioned still gets its answer: the post itself, which wakes it.
+// A parent the endTurn post never mentioned still gets its answer: the post itself, which wakes it.
 func TestEndPostAnswersAWaitingParent(t *testing.T) {
 	channel := contract.ReplyChannel{Kind: contract.ReplyFinal, Target: endTurnParent, Home: endTurnFeed}
 	s, post := endTurnFixture(t, []contract.ReplyChannel{channel}, contract.PostCreated{Text: "report", Home: endTurnDM})

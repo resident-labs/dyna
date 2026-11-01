@@ -46,7 +46,19 @@ type contentBlocks []contentBlock
 
 // resultDetails holds what the box's Pi extension records on a tool result.
 type resultDetails struct {
-	EndPost contract.EventID `json:"endPost"`
+	EndPost contract.EventID
+}
+
+// UnmarshalJSON reads only endPost. Details belong to each tool and message type and can be any JSON value,
+// and one that fails to decode here must not cost the whole event.
+func (d *resultDetails) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		EndPost contract.EventID `json:"endPost"`
+	}
+	if json.Unmarshal(data, &fields) == nil {
+		d.EndPost = fields.EndPost
+	}
+	return nil
 }
 
 // endBatch finds whether the latest tool batch ended the turn. Pi stops only when every call in
