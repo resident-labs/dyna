@@ -40,7 +40,10 @@ import (
 // host is the dev engine's one host, named as an owner's build machine might be, since the page shows it.
 const host = "build-server"
 
-var fixtureSession contract.SessionID
+var (
+	fixtureSession contract.SessionID
+	fixtureRoom    contract.RoomID
+)
 
 type devService struct{ *engine.Service } // api.Service needs HostAdd; engine/runtime adds the real one.
 
@@ -550,7 +553,7 @@ func seedRoom(ctx context.Context, s *engine.Service, st *store.Store, posts, ag
 	if e != nil {
 		log.Fatal(e.Message)
 	}
-	fixtureSession = fixture.Session
+	fixtureSession, fixtureRoom = fixture.Session, room.Room
 	post := func(p contract.Principal, r contract.PostRequest) {
 		r.Room = room.Room
 		if _, e := s.Post(ctx, p, r); e != nil {

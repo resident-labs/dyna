@@ -46,6 +46,29 @@ export function visibleTimelineText(id: string, final: string | undefined, compl
   return !completed || !hasWork || id === final || expanded;
 }
 
+// Dyna: The transcript holds a session's own posts: nested under their tool call, or sent from a shell at the end of the items.
+export function ownPost(item: TranscriptItem, session: string): boolean {
+  return item.kind === "post" && item.from?.kind === "session" && item.from.session === session;
+}
+
+// Dyna: A turn's last message is its answer. It can be a post that ended the turn, so earlier text folds as working text.
+// A post from a shell sorts after every item, so the time decides; equal times keep item order.
+export function finalTimelineItem(items: TranscriptItem[], session: string): TranscriptItem | undefined {
+  let final: TranscriptItem | undefined;
+  for (const item of items.flatMap(item => [item, ...(item.posts ?? [])])) {
+    if (item.kind !== "text" && !ownPost(item, session)) continue;
+    if (!final || !(Date.parse(item.at) < Date.parse(final.at))) final = item;
+  }
+  return final;
+}
+
+// Dyna: A post names its destination only when it left the DM on screen.
+export function postDestination(item: TranscriptItem, session: string, room: string, roomName: string, sessionName: (id: string) => string): string | undefined {
+  if (item.home?.kind === "dm") return item.home.session && item.home.session !== session ? sessionName(item.home.session) : undefined;
+  if (item.home?.kind === "feed") return item.room === room ? `#${roomName}` : "another room";
+  return undefined;
+}
+
 // Ported from T3 Code (packages/client-runtime/src/work-log/presentation.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 // Dyna: Transcript tools have no T3 source or integration metadata.
 export function summarizeWork(items: TranscriptItem[]): string {
