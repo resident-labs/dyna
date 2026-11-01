@@ -8,7 +8,7 @@
   import type { AccountUsage, AccountsListResponse, Card, HostSummary, Principal, SessionListResponse } from "../contract.gen.ts";
   import { clause, fromNow, requestLine } from "../feed.ts";
   import { hostLabel, hostMeters, largeShared, sharedSize, watchHosts } from "../hosts.ts";
-  import { accountAlerts, busiestWindow, outOfLimit, usageRows } from "../usage.ts";
+  import { accountAlerts, busiestWindow, holdFor, holding, outOfLimit, usageRows, type UsageHold, type UsageRow } from "../usage.ts";
   import { distinctInitials, initials as letters } from "../identity.ts";
   import Avatar from "./Avatar.svelte";
   import HostCard from "./HostCard.svelte";
@@ -143,26 +143,25 @@
       if (quota.status === "fulfilled") { accounts = quota.value.accounts ?? []; accountsFailed = false; loadedAt = Date.now(); } else accountsFailed = true;
     });
   });
-  const hiddenKey = "dyna.usage.hidden";
+  const holdsKey = "dyna.usage.holds";
   let usage = $derived(usageRows(accounts ?? [], catalog));
-  // An account with nothing left waits in a closed section under the others, since it takes no work until then. The
-  // owner can hide one there, in this browser, and it comes back once it resets or its balance rises.
-  let usable = $derived(usage.filter(row => !outOfLimit(row, loadedAt)));
-  let out = $derived(usage.filter(row => outOfLimit(row, loadedAt)));
-  let hidden = $state<string[]>(savedHidden());
-  let spent = $derived(out.filter(row => !hidden.includes(row.id)));
-  let hiddenRows = $derived(out.filter(row => hidden.includes(row.id)));
-  function savedHidden(): string[] {
-    try { return JSON.parse(localStorage.getItem(hiddenKey) ?? "[]"); } catch { return []; }
+  // Hidden is a closed section under the cards. A spent account goes there by itself, since it takes no work until it
+  // resets or its balance rises, and the owner can send any other there until the same happens. Those holds stay in
+  // this browser.
+  let holds = $state<Record<string, UsageHold>>(savedHolds());
+  const held = (row: UsageRow) => row.id in holds && holding(row, holds[row.id], loadedAt);
+  const tucked = (row: UsageRow) => outOfLimit(row, loadedAt) || held(row);
+  let shown = $derived(usage.filter(row => !tucked(row)));
+  let hiddenRows = $derived(usage.filter(tucked));
+  function savedHolds(): Record<string, UsageHold> {
+    try { return JSON.parse(localStorage.getItem(holdsKey) ?? "{}"); } catch { return {}; }
   }
-  function hide(next: string[]) {
-    hidden = next;
-    try { localStorage.setItem(hiddenKey, JSON.stringify(next)); } catch { /* Storage is blocked: the choice lasts until the page closes. */ }
+  function setHolds(next: Record<string, UsageHold>) {
+    holds = next;
+    try { localStorage.setItem(holdsKey, JSON.stringify(next)); } catch { /* Storage is blocked: the choice lasts until the page closes. */ }
   }
-  $effect(() => {
-    const back = usable.map(row => row.id).filter(id => hidden.includes(id));
-    if (back.length) hide(hidden.filter(id => !back.includes(id)));
-  });
+  const release = (id: string) => setHolds(Object.fromEntries(Object.entries(holds).filter(([key]) => key !== id)));
+  $effect(() => { for (const row of usage) if (row.id in holds && !held(row)) release(row.id); });
   let alerts = $derived(accountAlerts(accounts ?? [], catalog));
   // One sentence says what needs the owner: the same items as the Needs you card. Under it, a muted line sums low disk,
   // a large shared folder, machines and the busiest usage window; a part with nothing to say is left out.
@@ -180,7 +179,7 @@
       + (shared.length > 1 ? `, and ${shared.length - 1} more ${shared.length === 2 ? "is" : "are"} large` : ""),
     !active.length && "No room is working",
     hosts?.length && count(hosts.length, "machine") + (unreachable ? `, ${unreachable} unreachable` : ""),
-    busiestWindow(usable),
+    busiestWindow(shown),
   ].filter(Boolean).join(" · "));
 </script>
 
@@ -223,12 +222,11 @@
   {#if hosts?.length || hostsFailed}<h2 id="machines" bind:this={machines}>Machines{#if hosts?.length}<span>{hosts.length}</span>{/if}</h2>{/if}
   {#if !hosts && hostsFailed}<p class="failed">Machines could not load.</p>{/if}
   {#if hosts?.length}<div class="cards">{#each hosts as host (host.name)}<HostCard {host} now={hostsAt} {roomName} />{/each}</div>{/if}
-  {#if usage.length || accountsFailed}<h2>Usage{#if usage.length}<span>{usage.length - hiddenRows.length}</span>{/if}</h2>{/if}
+  {#if usage.length || accountsFailed}<h2>Usage{#if shown.length}<span>{shown.length}</span>{/if}</h2>{/if}
   {#if accountsFailed}<p class="failed">Model usage could not load.</p>{/if}
-  {#if usable.length}<div class="cards">{#each usable as row, i (i)}<UsageCard {row} now={loadedAt} />{/each}</div>{/if}
-  {#if spent.length}<details class="spent"><summary>Limit reached<span>{spent.length}</span><i><Icon name="chevron" /></i></summary>
-    <div class="cards">{#each spent as row, i (i)}<UsageCard {row} now={loadedAt} onhide={() => hide([...hidden, row.id])} />{/each}</div></details>{/if}
-  {#if hiddenRows.length}<button type="button" class="unhide" onclick={() => hide([])}>Show {count(hiddenRows.length, "hidden account")}</button>{/if}
+  {#if shown.length}<div class="cards">{#each shown as row, i (i)}<UsageCard {row} now={loadedAt} onhide={() => setHolds({ ...holds, [row.id]: holdFor(row, loadedAt) })} />{/each}</div>{/if}
+  {#if hiddenRows.length}<details class="tucked"><summary>Hidden<span>{hiddenRows.length}</span><i><Icon name="chevron" /></i></summary>
+    <div class="cards">{#each hiddenRows as row, i (i)}<UsageCard {row} now={loadedAt} onshow={held(row) && !outOfLimit(row, loadedAt) ? () => release(row.id) : undefined} />{/each}</div></details>{/if}
 </div>
 
 <style>
@@ -244,13 +242,11 @@
   h2 { display: flex; align-items: baseline; gap: 8px; margin: 24px 8px 12px; font-size: 18px; font-weight: 600; line-height: 1.25; }
   .card h2 { margin: 0 0 8px; font-size: 16px; }
   h2 span { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
-  .spent summary { display: flex; align-items: center; gap: 8px; width: fit-content; margin: 16px 8px 12px; color: var(--muted); font-size: 13px; cursor: pointer; list-style: none; }
-  .spent summary:focus-visible, .unhide:focus-visible { outline: 2px solid var(--focus); }
-  .unhide { all: unset; width: fit-content; margin: 12px 8px; color: var(--muted); font-size: 13px; cursor: pointer; }
-  .unhide:hover { color: var(--text); }
-  .spent summary span { font-variant-numeric: tabular-nums; }
-  .spent summary i { display: inline-flex; transform: rotate(-90deg); }
-  .spent[open] summary i { transform: none; }
+  .tucked summary { display: flex; align-items: center; gap: 8px; width: fit-content; margin: 16px 8px 12px; color: var(--muted); font-size: 13px; cursor: pointer; list-style: none; }
+  .tucked summary:focus-visible { outline: 2px solid var(--focus); }
+  .tucked summary span { font-variant-numeric: tabular-nums; }
+  .tucked summary i { display: inline-flex; transform: rotate(-90deg); }
+  .tucked[open] summary i { transform: none; }
   .item { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 44px; padding: 6px 8px; border-radius: 8px; color: var(--text); text-decoration: none; }
   .item:hover { background: var(--hover); }
   .failed { margin: 12px 8px; color: var(--muted); font-size: 13px; }
