@@ -375,11 +375,11 @@ The engine derives surface and reply channel from the input, including for root.
 
 A final response is delivered to its target and home; if the turn already posted to that target, delivery is quiet and links that post. A `post` channel sends nothing automatically. A `none` response stays in the transcript; the frame asks for one line. Multiple inputs require one reply per distinct final target and home.
 
-To answer, a session ends the turn with text; that text is the reply. A post with `end_turn` replaces that text when the reply needs attachments or mentions, or goes elsewhere. A plain post is a mid-turn update. `box.hello` states this rule.
+To answer, a session ends the turn with text; that text is the reply. A post with `endTurn` replaces that text when the reply needs attachments or mentions, or goes elsewhere. A plain post is a mid-turn update. `box.hello` states this rule.
 
-`end_turn` ends the turn with no further model call and makes the post the turn's reply. The turn has no final text, and `turn.output` names the post in `endPosts`. Every final channel of the turn links that post in `turn.ended.replies`; no event or table records `end_turn`. A session target that the post mentioned already has it. Any other session target receives the post itself as a waking delivery. A `post` or `none` channel owes nothing.
+`endTurn` ends the turn with no further model call and makes the post the turn's reply. The turn has no final text, and `turn.output` names the post in `endPosts`. Every final channel of the turn links that post in `turn.ended.replies`; no event or table records `endTurn`. A session target that the post mentioned already has it. Any other session target receives the post itself as a waking delivery. A `post` or `none` channel owes nothing.
 
-Pi stops only when every tool call in the message ends the turn and no steering is queued. So a post that fails, a post beside another tool call and a turn that takes steering all continue, and the turn ends on text as usual. A post from a codemode script sends and the turn continues, because nested results never reach the agent loop; its result carries `turnContinues: true`. Recovery treats an end batch as settled and makes no model call. `end_turn` exists only on the MCP tool; `dyna post` has no turn to end.
+Pi stops only when every tool call in the message ends the turn and no steering is queued. So a post that fails, a post beside another tool call and a turn that takes steering all continue, and the turn ends on text as usual. A post from a codemode script sends and the turn continues, because nested results never reach the agent loop; its result carries `turnContinues: true`. Recovery treats an end batch as settled and makes no model call. `endTurn` exists only on the MCP tool; `dyna post` has no turn to end.
 
 ### 7.6 Rooms and repositories
 
