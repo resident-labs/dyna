@@ -2,6 +2,7 @@
 # Dyna has no installer now. This stub stays at the published curl URL on purpose:
 # a missing file there would pipe nothing to bash, which exits 0 and installs nothing.
 # Keep it failing until v2 has releases, and replace it then.
+# LEGACY(v1-transfer): the v1 lines of this message, not the failing stub itself. Remove after the transfer.
 cat >&2 <<'EOF'
 Dyna cannot be installed from main. Nothing was changed on this machine.
 
