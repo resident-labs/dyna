@@ -93,8 +93,8 @@ export function subject(event: Event): string | undefined {
 }
 
 // Events with no row. Goals show in About and the session list; failures show on the box and turn events they report.
-// A pull request's rows come from pr.changed. The typed PR events and repo.main_updated exist for subscribers.
-const unshown = new Set<Event["type"]>(["workflow.ended", "session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due", "pr.merged", "pr.closed", "ci.finished", "repo.main_updated"]);
+// A pull request's rows come from pr.changed. The typed PR events, issue events and repo.main_updated exist for subscribers and sessions.
+const unshown = new Set<Event["type"]>(["workflow.ended", "session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due", "pr.merged", "pr.closed", "ci.finished", "repo.main_updated", "issue.changed", "issue.closed"]);
 
 // Builds the rows of one conversation. Posts and final answers become post rows, a
 // failed turn and a request are each their own row, and all other events between them fold into one work row.
@@ -287,7 +287,7 @@ export const eventGroups: Record<Event["type"], string> = {
   "op.requested": "requests", "op.decided": "requests decided", "op.ran": "requests run",
   "question.asked": "questions", "question.answered": "questions answered", "question.withdrawn": "questions withdrawn",
   "image.built": "images built", "image.failed": "image builds failed", "pr.opened": "pull requests opened", "pr.changed": "pull request updates",
-  "pr.merged": "pull requests merged", "pr.closed": "pull requests closed", "ci.finished": "CI results", "repo.main_updated": "default branch moves",
+  "pr.merged": "pull requests merged", "pr.closed": "pull requests closed", "ci.finished": "CI results", "repo.main_updated": "default branch moves", "issue.changed": "issue updates", "issue.closed": "issues closed",
   "hook.finished": "subscription runs", "hook.due": "subscription wakes", "notice.posted": "notices",
   "shell.job.ended": "jobs finished", "grant.expired": "host grants expired",
   "host.disk_low": "disk warnings", "conversation.read": "read positions", "workflow.ended": "workflow runs",
@@ -386,7 +386,7 @@ const closeReasons: Record<SessionCloseReason, string> = { dormant: "after 7 qui
 
 const changeWords: Record<PrChangeKind, string> = {
   ci_failed: "CI failed", ci_passed: "CI passed", changes_requested: "changes requested", approved: "approved",
-  conflict: "conflicts with its base", merged: "merged", closed: "closed without merging", comment: "new comments",
+  conflict: "conflicts with its base", merged: "merged", closed: "closed without merging", comment: "new comments", metadata: "details changed",
 };
 
 // The changes of a pr.changed event that say something; the rest only keep state current.
@@ -496,7 +496,7 @@ export function describe(event: Event, name: Name): string {
     case "image.failed": return `Image for ${event.body.repo} failed`;
     case "pr.opened": return `${name(event.body.session)} opened pull request ${event.body.repo}#${event.body.number}`;
     case "pr.changed": return wakingChanges(event.body).map(changeLine).join(" · ");
-    case "pr.merged": case "pr.closed": case "ci.finished": case "repo.main_updated": return ""; // feedRows shows no row for them.
+    case "pr.merged": case "pr.closed": case "ci.finished": case "repo.main_updated": case "issue.changed": case "issue.closed": return ""; // feedRows shows no row for them.
     case "grant.expired": return "A host execution grant expired";
     // The owner reads this feed; a room's root may also pause it.
     case "room.paused": case "room.resumed": return `${event.from.session ? name(event.from.session) : "You"} ${event.type === "room.paused" ? "paused" : "resumed"} the room`;

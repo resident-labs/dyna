@@ -1,4 +1,4 @@
-// Package prs reads tracked pull requests from GitHub inside the request budget of spec 7.7 and tells their sessions what changed.
+// Package prs reads tracked pull requests and issues from GitHub inside the request budget of spec 7.7 and tells their sessions what changed.
 package prs
 
 import (
@@ -10,19 +10,21 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 // ErrPaused means GitHub refused for its quota and the wait it asked for has not passed.
 var ErrPaused = errors.New("GitHub request budget: paused")
 
-// ErrNotFound means GitHub has no such pull request, or the token cannot see it.
-var ErrNotFound = errors.New("pull request not found")
+// ErrNotFound means GitHub has no such repository, pull request or issue, or the token cannot see it.
+var ErrNotFound = errors.New("not found on GitHub")
 
 // Client reads GitHub with the engine's token. REST and GraphQL have separate quotas.
 type Client struct {
@@ -287,21 +289,45 @@ type Observed struct {
 	Reviews        []Comment
 	ReviewComments []Comment
 	Comments       []Comment
+	Meta           store.ItemMeta
 }
 
-// Snapshot is one poll of one repository. A number missing from PRs is one GitHub no longer has.
+// ObservedIssue is one issue as one poll read it. Its title is in Meta.
+type ObservedIssue struct {
+	Number   int
+	URL      string
+	Author   string
+	State    contract.IssueState
+	Comments []Comment
+	Meta     store.ItemMeta
+}
+
+// Snapshot is one poll of one repository. Repo is the name GitHub gives it. A number missing from PRs or Issues is one GitHub no longer has.
 type Snapshot struct {
+	Repo   contract.RepoName
 	Viewer string
 	Main   string
 	PRs    map[int]Observed
+	Issues map[int]ObservedIssue
 }
+
+// metaFields is the metadata a poll reads on PRs and issues alike. lastEditedAt says a body changed without reading it, and
+// the reopen count says an item came back between two polls, which its state cannot.
+const metaFields = `labels(first:100){nodes{name}} assignees(first:20){nodes{login}} milestone{title} lastEditedAt timelineItems(itemTypes:[REOPENED_EVENT],first:0){totalCount}`
+
+// commentFields is what a poll reads of a conversation.
+const commentFields = `comments(last:10){nodes{fullDatabaseId body url author{login}}}`
 
 // pullFields is everything a poll reads per PR.
 const pullFields = `number url title isDraft state merged author{login} headRefOid headRepository{nameWithOwner} mergeable mergeStateStatus reviewDecision
 latestOpinionatedReviews(first:20,writersOnly:true){nodes{state}}
 commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:50){nodes{__typename ...on CheckRun{name conclusion} ...on StatusContext{context state}}}}}}}
 reviews(last:10){nodes{fullDatabaseId state body url author{login} comments(last:20){nodes{fullDatabaseId body url author{login}}}}}
-comments(last:10){nodes{fullDatabaseId body url author{login}}}`
+reviewRequests(first:20){nodes{requestedReviewer{__typename ...on User{login} ...on Bot{login} ...on Mannequin{login} ...on Team{combinedSlug}}}}
+` + commentFields + ` ` + metaFields
+
+// issueFields is everything a poll reads per issue.
+const issueFields = `number url title state author{login} ` + commentFields + ` ` + metaFields
 
 type gqlAuthor struct {
 	Login string `json:"login"`
@@ -315,7 +341,66 @@ type gqlComment struct {
 	Author *gqlAuthor `json:"author"`
 }
 
+type gqlMeta struct {
+	Labels struct {
+		Nodes []struct {
+			Name string `json:"name"`
+		} `json:"nodes"`
+	} `json:"labels"`
+	Assignees struct {
+		Nodes []gqlAuthor `json:"nodes"`
+	} `json:"assignees"`
+	Milestone *struct {
+		Title string `json:"title"`
+	} `json:"milestone"`
+	LastEditedAt  string `json:"lastEditedAt"`
+	TimelineItems struct {
+		TotalCount int `json:"totalCount"`
+	} `json:"timelineItems"`
+}
+
+// meta sorts the names, because GitHub's order means nothing and a change in it is no change.
+func (m gqlMeta) meta(title string) store.ItemMeta {
+	meta := store.ItemMeta{Title: title, EditedAt: m.LastEditedAt, Reopened: m.TimelineItems.TotalCount}
+	for _, label := range m.Labels.Nodes {
+		meta.Labels = append(meta.Labels, label.Name)
+	}
+	for _, assignee := range m.Assignees.Nodes {
+		meta.Assignees = append(meta.Assignees, assignee.Login)
+	}
+	if m.Milestone != nil {
+		meta.Milestone = m.Milestone.Title
+	}
+	slices.Sort(meta.Labels)
+	slices.Sort(meta.Assignees)
+	return meta
+}
+
+type gqlIssue struct {
+	gqlMeta
+	Number   int        `json:"number"`
+	URL      string     `json:"url"`
+	Title    string     `json:"title"`
+	State    string     `json:"state"`
+	Author   *gqlAuthor `json:"author"`
+	Comments struct {
+		Nodes []gqlComment `json:"nodes"`
+	} `json:"comments"`
+}
+
+func (i gqlIssue) observed() ObservedIssue {
+	seen := ObservedIssue{Number: i.Number, URL: i.URL, Author: login(i.Author), State: contract.IssueOpen, Meta: i.meta(i.Title)}
+	if i.State == "CLOSED" {
+		seen.State = contract.IssueClosed
+	}
+	for _, node := range i.Comments.Nodes {
+		seen.Comments = append(seen.Comments, comment(node))
+	}
+	return seen
+}
+
 type gqlPull struct {
+	gqlMeta
 	Number         int        `json:"number"`
 	URL            string     `json:"url"`
 	Title          string     `json:"title"`
@@ -363,11 +448,19 @@ type gqlPull struct {
 	Comments struct {
 		Nodes []gqlComment `json:"nodes"`
 	} `json:"comments"`
+	ReviewRequests struct {
+		Nodes []struct {
+			RequestedReviewer *struct {
+				Login        string `json:"login"`
+				CombinedSlug string `json:"combinedSlug"`
+			} `json:"requestedReviewer"`
+		} `json:"nodes"`
+	} `json:"reviewRequests"`
 }
 
-// Poll reads every given PR and the default branch head in one GraphQL query (spec 7.7). A failure to find one PR leaves
-// the others usable, as GitHub answers such a query with partial data.
-func (c *Client) Poll(ctx context.Context, repo contract.RepoName, numbers []int) (Snapshot, error) {
+// Poll reads every given PR and issue and the default branch head in one GraphQL query (spec 7.7). A failure to find one
+// leaves the others usable, as GitHub answers such a query with partial data.
+func (c *Client) Poll(ctx context.Context, repo contract.RepoName, numbers, issues []int) (Snapshot, error) {
 	owner, name, ok := strings.Cut(string(repo), "/")
 	if !ok || !ValidRepo(repo) {
 		return Snapshot{}, fmt.Errorf("invalid repository %q", repo)
@@ -376,10 +469,16 @@ func (c *Client) Poll(ctx context.Context, repo contract.RepoName, numbers []int
 	for _, number := range numbers {
 		fmt.Fprintf(&fields, "pr%d:pullRequest(number:%d){...pull}\n", number, number)
 	}
-	query := "query($owner:String!,$name:String!){viewer{login} rateLimit{limit remaining resetAt} repository(owner:$owner,name:$name){defaultBranchRef{target{oid}}\n" + fields.String() + "}}"
-	// GitHub refuses a fragment nothing uses, and a repository with no tracked PR asks only for its head.
+	for _, number := range issues {
+		fmt.Fprintf(&fields, "issue%d:issue(number:%d){...issue}\n", number, number)
+	}
+	query := "query($owner:String!,$name:String!){viewer{login} rateLimit{limit remaining resetAt} repository(owner:$owner,name:$name){nameWithOwner defaultBranchRef{target{oid}}\n" + fields.String() + "}}"
+	// GitHub refuses a fragment nothing uses, and a repository with nothing tracked asks only for its head.
 	if len(numbers) > 0 {
 		query += "\nfragment pull on PullRequest{" + pullFields + "}"
+	}
+	if len(issues) > 0 {
+		query += "\nfragment issue on Issue{" + issueFields + "}"
 	}
 	input, err := json.Marshal(map[string]any{"query": query, "variables": map[string]string{"owner": owner, "name": name}})
 	if err != nil {
@@ -428,10 +527,18 @@ func (c *Client) Poll(ctx context.Context, repo contract.RepoName, numbers []int
 		message := "repository not readable"
 		if len(payload.Errors) > 0 {
 			message = strings.ReplaceAll(payload.Errors[0].Message, c.Token, "***")
+			if payload.Errors[0].Type == "NOT_FOUND" {
+				return Snapshot{}, fmt.Errorf("%w: %s", ErrNotFound, message)
+			}
 		}
 		return Snapshot{}, fmt.Errorf("GitHub: %s", message)
 	}
-	snapshot := Snapshot{Viewer: payload.Data.Viewer.Login, PRs: make(map[int]Observed, len(numbers))}
+	snapshot := Snapshot{Repo: repo, Viewer: payload.Data.Viewer.Login, PRs: make(map[int]Observed, len(numbers)), Issues: make(map[int]ObservedIssue, len(issues))}
+	if raw := payload.Data.Repository["nameWithOwner"]; raw != nil {
+		if err := json.Unmarshal(raw, &snapshot.Repo); err != nil {
+			return Snapshot{}, fmt.Errorf("GitHub answer: %w", err)
+		}
+	}
 	var branch *struct {
 		Target struct {
 			Oid string `json:"oid"`
@@ -456,7 +563,35 @@ func (c *Client) Poll(ctx context.Context, repo contract.RepoName, numbers []int
 		}
 		snapshot.PRs[number] = pull.observed()
 	}
+	for _, number := range issues {
+		raw := payload.Data.Repository[fmt.Sprintf("issue%d", number)]
+		if raw == nil || string(raw) == "null" {
+			continue
+		}
+		var issue gqlIssue
+		if err := json.Unmarshal(raw, &issue); err != nil {
+			return Snapshot{}, fmt.Errorf("GitHub answer: %w", err)
+		}
+		snapshot.Issues[number] = issue.observed()
+	}
 	return snapshot, nil
+}
+
+// Issue reads one issue when it is first tracked, in the query the poll uses, so tracking adds no REST read. It returns the
+// repository's name as GitHub gives it. GitHub has no issue at a PR's number.
+func (c *Client) Issue(ctx context.Context, repo contract.RepoName, number int) (contract.RepoName, ObservedIssue, error) {
+	if !ValidRepo(repo) || number <= 0 {
+		return "", ObservedIssue{}, ErrNotFound
+	}
+	snapshot, err := c.Poll(ctx, repo, nil, []int{number})
+	if err != nil {
+		return "", ObservedIssue{}, err
+	}
+	issue, found := snapshot.Issues[number]
+	if !found {
+		return "", ObservedIssue{}, ErrNotFound
+	}
+	return snapshot.Repo, issue, nil
 }
 
 func login(author *gqlAuthor) string {
@@ -542,5 +677,13 @@ func (p gqlPull) observed() Observed {
 	for _, node := range p.Comments.Nodes {
 		seen.Comments = append(seen.Comments, comment(node))
 	}
+	seen.Meta = p.meta(p.Title)
+	seen.Meta.Draft = p.IsDraft
+	for _, node := range p.ReviewRequests.Nodes {
+		if reviewer := node.RequestedReviewer; reviewer != nil {
+			seen.Meta.Reviewers = append(seen.Meta.Reviewers, reviewer.Login+reviewer.CombinedSlug)
+		}
+	}
+	slices.Sort(seen.Meta.Reviewers)
 	return seen
 }

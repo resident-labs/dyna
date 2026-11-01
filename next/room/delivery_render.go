@@ -55,6 +55,10 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		return fmt.Sprintf("Question: %s\n\nAnswer: %s", b.Question, b.Answer), nil
 	case contract.PrChanged:
 		return renderPRChanged(b), nil
+	case contract.IssueChanged:
+		return strings.Join(issueBlocks(b.Changes), "\n\n"), nil
+	case contract.IssueClosedEvent:
+		return fmt.Sprintf("Issue %s#%d closed. %s", b.Repo, b.Number, b.URL), nil
 	case contract.PrMergedEvent:
 		return fmt.Sprintf("PR %s#%d merged. %s", b.Repo, b.Number, b.URL), nil
 	case contract.PrClosedEvent:
@@ -119,18 +123,119 @@ var prChangeWords = map[contract.PrChangeKind]string{
 	contract.PrChangeComment:          "new comments",
 }
 
-// renderPRChanged leaves out titles, which an outside author writes, and wraps what it must carry.
+var issueChangeWords = map[contract.PrChangeKind]string{
+	contract.PrChangeClosed:  "closed",
+	contract.PrChangeComment: "new comments",
+}
+
+// names joins names, each with a mark such as + or @, in the order given.
+func names(mark string, items []string) string {
+	marked := make([]string, len(items))
+	for i, item := range items {
+		marked[i] = mark + item
+	}
+	return strings.Join(marked, " ")
+}
+
+// metaParts states a metadata change. Logins and facts go in said. Free text an outside author may have written goes in
+// outside instead, for the caller to wrap, and said only names what moved.
+func metaParts(m *contract.MetaChange, wrapped bool) (said, outside []string) {
+	text := func(what, value string) {
+		if wrapped {
+			said = append(said, what+" changed")
+			outside = append(outside, what+" "+value)
+			return
+		}
+		said = append(said, what+" "+value)
+	}
+	if m.Title != "" {
+		text("title", m.Title)
+	}
+	if len(m.LabelsAdded)+len(m.LabelsRemoved) > 0 {
+		text("labels", strings.TrimSpace(names("+", m.LabelsAdded)+" "+names("-", m.LabelsRemoved)))
+	}
+	if m.Milestone != "" {
+		text("milestone", m.Milestone)
+	}
+	if m.MilestoneRemoved {
+		said = append(said, "milestone removed")
+	}
+	if len(m.Assigned) > 0 {
+		said = append(said, "assigned "+names("@", m.Assigned))
+	}
+	if len(m.Unassigned) > 0 {
+		said = append(said, "unassigned "+names("@", m.Unassigned))
+	}
+	if len(m.ReviewersAdded) > 0 {
+		said = append(said, "review requested from "+names("@", m.ReviewersAdded))
+	}
+	if len(m.ReviewersRemoved) > 0 {
+		said = append(said, "review request removed for "+names("@", m.ReviewersRemoved))
+	}
+	if m.BodyEdited {
+		said = append(said, "body edited")
+	}
+	if m.Reopened {
+		said = append(said, "reopened")
+	}
+	if m.Draft {
+		said = append(said, "now a draft")
+	}
+	if m.Ready {
+		said = append(said, "ready for review")
+	}
+	return said, outside
+}
+
+// changeHead states one item's changes in a line of facts, with any outside text wrapped beneath it.
+func changeHead(noun string, repo contract.RepoName, number int, url, author string, outside bool, words map[contract.PrChangeKind]string, kinds []contract.PrChangeKind, meta *contract.MetaChange) []string {
+	said := make([]string, 0, len(kinds))
+	for _, kind := range kinds {
+		if kind != contract.PrChangeMetadata {
+			said = append(said, words[kind])
+		}
+	}
+	parts := []string{}
+	if len(said) > 0 {
+		parts = append(parts, strings.Join(said, ", "))
+	}
+	var text []string
+	if meta != nil {
+		var metaSaid []string
+		metaSaid, text = metaParts(meta, outside)
+		parts = append(parts, metaSaid...)
+	}
+	lines := []string{fmt.Sprintf("%s %s#%d: %s. %s", noun, repo, number, strings.Join(parts, "; "), url)}
+	if len(text) > 0 {
+		lines = append(lines, WrapExternal(author, strings.Join(text, "\n")))
+	}
+	return lines
+}
+
+// commentLines shows comments, wrapping those by anyone but the owner's account.
+func commentLines(comments []contract.PrComment, more int) []string {
+	var lines []string
+	for _, comment := range comments {
+		text := comment.Body
+		if comment.Outside {
+			text = WrapExternal(comment.Author, text)
+		}
+		lines = append(lines, fmt.Sprintf("Comment by @%s, %s:\n%s", comment.Author, comment.URL, text))
+	}
+	if more > 0 {
+		lines = append(lines, fmt.Sprintf("%d more comments on GitHub.", more))
+	}
+	return lines
+}
+
+// renderPRChanged leaves out titles, which an outside author writes, unless one changed, and wraps what it must carry.
 func renderPRChanged(b contract.PrChanged) string {
 	var blocks []string
 	for _, change := range b.Changes {
 		if len(change.Kinds) == 0 {
 			continue
 		}
-		words := make([]string, 0, len(change.Kinds))
-		for _, kind := range change.Kinds {
-			words = append(words, prChangeWords[kind])
-		}
-		lines := []string{fmt.Sprintf("PR %s#%d: %s. %s", change.PR.Repo, change.PR.Number, strings.Join(words, ", "), change.PR.URL)}
+		lines := changeHead("PR", change.PR.Repo, change.PR.Number, change.PR.URL, change.PR.Author, change.Outside, prChangeWords, change.Kinds, change.Meta)
 		if len(change.FailedChecks) > 0 {
 			checks := strings.Join(change.FailedChecks, ", ")
 			if change.Outside {
@@ -138,19 +243,23 @@ func renderPRChanged(b contract.PrChanged) string {
 			}
 			lines = append(lines, "Failed checks: "+checks)
 		}
-		for _, comment := range change.Comments {
-			text := comment.Body
-			if comment.Outside {
-				text = WrapExternal(comment.Author, text)
-			}
-			lines = append(lines, fmt.Sprintf("Comment by @%s, %s:\n%s", comment.Author, comment.URL, text))
-		}
-		if change.MoreComments > 0 {
-			lines = append(lines, fmt.Sprintf("%d more comments on GitHub.", change.MoreComments))
-		}
+		lines = append(lines, commentLines(change.Comments, change.MoreComments)...)
 		blocks = append(blocks, strings.Join(lines, "\n"))
 	}
-	return strings.Join(blocks, "\n\n")
+	return strings.Join(append(blocks, issueBlocks(b.Issues)...), "\n\n")
+}
+
+func issueBlocks(changes []contract.IssueChange) []string {
+	var blocks []string
+	for _, change := range changes {
+		if len(change.Kinds) == 0 {
+			continue
+		}
+		issue := change.Issue
+		lines := changeHead("Issue", issue.Repo, issue.Number, issue.URL, issue.Author, change.Outside, issueChangeWords, change.Kinds, change.Meta)
+		blocks = append(blocks, strings.Join(append(lines, commentLines(change.Comments, change.MoreComments)...), "\n"))
+	}
+	return blocks
 }
 
 // renderCheckin shows one line per session. Goal text is the sessions' own words, so it stays on one quoted line.

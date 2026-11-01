@@ -98,7 +98,7 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		return contract.ContextSnapshotResponse{}, forbidden()
 	}
 	switch req.Section {
-	case "", contract.ContextGoal, contract.ContextChildren, contract.ContextRequests, contract.ContextPRs, contract.ContextProfiles, contract.ContextUsage:
+	case "", contract.ContextGoal, contract.ContextChildren, contract.ContextRequests, contract.ContextPRs, contract.ContextIssues, contract.ContextProfiles, contract.ContextUsage:
 	default:
 		return contract.ContextSnapshotResponse{}, invalid("unknown context section")
 	}
@@ -149,6 +149,11 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		lines = append(lines, fmt.Sprintf("%s #%d: %s", p.Repo, p.Number, prLine(p)))
 	}
 	add(contract.ContextPRs, lines, 600, 0)
+	lines = nil
+	for _, i := range data.Issues {
+		lines = append(lines, fmt.Sprintf("%s #%d", i.Repo, i.Number))
+	}
+	add(contract.ContextIssues, lines, 400, 0)
 	if s.maxDepth == 0 || data.Depth < s.maxDepth {
 		lines = nil
 		for _, p := range s.profiles.List() {

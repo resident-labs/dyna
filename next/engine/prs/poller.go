@@ -19,8 +19,8 @@ const (
 	lowQuotaWait = 10 * time.Minute
 )
 
-// Poller reads each repository a room lists or a tracked open PR sits on, by the back-off of spec 7.7. The schedule lives
-// in memory: an engine restart polls once and starts from a minute again.
+// Poller reads each repository a room lists or a tracked open PR or issue sits on, by the back-off of spec 7.7. The schedule
+// lives in memory: an engine restart polls once and starts from a minute again.
 type Poller struct {
 	Store  *store.Store
 	GitHub *Client
@@ -72,8 +72,8 @@ func (p *Poller) Reset(repo contract.RepoName) {
 	}
 }
 
-// due refreshes the schedule from the tracked PRs and listed repositories, and returns the repositories to poll now.
-func (p *Poller) due(rows []store.TrackedPR, heads map[contract.RepoName]string) []contract.RepoName {
+// due refreshes the schedule from the tracked PRs and issues and listed repositories, and returns the repositories to poll now.
+func (p *Poller) due(rows []store.TrackedPR, issues []store.TrackedIssue, heads map[contract.RepoName]string) []contract.RepoName {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.slots == nil {
@@ -91,6 +91,9 @@ func (p *Poller) due(rows []store.TrackedPR, heads map[contract.RepoName]string)
 		}
 	}
 	p.bases = bases
+	for _, row := range issues {
+		polled[row.Repo] = true
+	}
 	for repo := range polled {
 		if p.slots[repo] == nil {
 			p.slots[repo] = &slot{}
@@ -141,21 +144,31 @@ func (p *Poller) Pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	issues, err := p.Store.TrackedIssues(ctx)
+	if err != nil {
+		return err
+	}
 	heads, err := p.Store.RepoHeads(ctx)
 	if err != nil {
 		return err
 	}
-	due := p.due(rows, heads)
+	due := p.due(rows, issues, heads)
 	var updates []store.PRUpdate
+	var issueUpdates []store.IssueUpdate
 	var moves []store.RepoHead
 	for _, repo := range due {
-		var numbers []int
+		var numbers, issueNumbers []int
 		for _, row := range rows {
 			if row.Repo == repo {
 				numbers = append(numbers, row.Number)
 			}
 		}
-		snapshot, err := p.GitHub.Poll(ctx, repo, numbers)
+		for _, row := range issues {
+			if row.Repo == repo {
+				issueNumbers = append(issueNumbers, row.Number)
+			}
+		}
+		snapshot, err := p.GitHub.Poll(ctx, repo, numbers, issueNumbers)
 		if errors.Is(err, ErrPaused) {
 			continue
 		}
@@ -176,13 +189,24 @@ func (p *Poller) Pass(ctx context.Context) error {
 				moved = true
 			}
 		}
+		for _, row := range issues {
+			seen, ok := snapshot.Issues[row.Number]
+			if row.Repo != repo || !ok {
+				continue
+			}
+			update, changed := CompareIssue(row, seen, snapshot.Viewer, p.Now())
+			if changed {
+				issueUpdates = append(issueUpdates, update)
+				moved = true
+			}
+		}
 		if stored, listed := heads[repo]; listed && snapshot.Main != "" && snapshot.Main != stored {
 			moves = append(moves, store.RepoHead{Repo: repo, Head: snapshot.Main})
 		}
 		p.settle(repo, moved, snapshot.Main)
 	}
-	if len(updates) == 0 && len(moves) == 0 {
+	if len(updates) == 0 && len(issueUpdates) == 0 && len(moves) == 0 {
 		return nil
 	}
-	return p.Store.ApplyPRPoll(ctx, updates, moves, p.Now())
+	return p.Store.ApplyPRPoll(ctx, updates, issueUpdates, moves, p.Now())
 }

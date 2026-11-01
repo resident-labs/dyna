@@ -13,6 +13,7 @@ type ContextData struct {
 	Children []ContextChild
 	Requests []ContextRequest
 	PRs      []ContextPR
+	Issues   []ContextIssue
 	Accounts []ContextAccount
 	Depth    int
 }
@@ -34,6 +35,9 @@ func (s *Store) ContextDataForSession(ctx context.Context, id contract.SessionID
 		return data, err
 	}
 	if data.PRs, err = s.ContextPRs(ctx, id); err != nil {
+		return data, err
+	}
+	if data.Issues, err = s.ContextIssues(ctx, id); err != nil {
 		return data, err
 	}
 	if data.Accounts, err = s.ContextAccounts(ctx, id); err != nil {

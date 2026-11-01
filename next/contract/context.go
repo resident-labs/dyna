@@ -9,6 +9,7 @@ const (
 	ContextChildren ContextSectionKey = "dyna_children"
 	ContextRequests ContextSectionKey = "dyna_requests"
 	ContextPRs      ContextSectionKey = "dyna_prs"
+	ContextIssues   ContextSectionKey = "dyna_issues"
 	ContextProfiles ContextSectionKey = "dyna_profiles"
 	ContextUsage    ContextSectionKey = "dyna_usage"
 )
