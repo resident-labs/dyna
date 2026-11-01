@@ -37,7 +37,7 @@ export type InstructionsGetRequest = { room?: RoomID; };
 export type InstructionsGetResponse = { text: string; hash: string; savedAt?: string | null; };
 export type InstructionsSetRequest = { room?: RoomID; text: string; base: string; };
 export type InstructionsSetResponse = { hash: string; };
-export type Method = "instructions.get" | "instructions.set" | "web.login" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.remove" | "accounts.set_limits" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.repo.add" | "room.repos" | "session.start" | "session.close" | "session.stop" | "session.set_profile" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "hostexec.run" | "hostexec.revoke" | "op.submit" | "op.decide" | "op.withdraw" | "op.list";
+export type Method = "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.remove" | "accounts.set_limits" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.repo.add" | "room.repos" | "session.start" | "session.close" | "session.stop" | "session.set_profile" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "hostexec.run" | "hostexec.revoke" | "op.submit" | "op.decide" | "op.withdraw" | "op.list";
 export type ErrorCode = "podman_required" | "invalid" | "unknown_action" | "not_found" | "forbidden" | "conflict" | "profile_exists" | "move_busy" | "has_children" | "parent_closing" | "session_closing" | "stale" | "visual_superseded" | "unavailable" | "reconnect_unavailable" | "store_from_v1" | "store_too_old" | "no_grant" | "hostexec_scope";
 export type Error = { code: ErrorCode; message: string; visual?: VisualSuperseded | null; };
 export type VisualSuperseded = { event: EventID; version: number; seq: number; };
@@ -339,6 +339,13 @@ export type OpRequested = { id: OpID; kind: OpKind; by: Principal; class: Class;
 export type OpDecided = { id: OpID; state: OpState; decision: Decision; };
 export type OpRan = { id: OpID; state: OpState; result: OpResult; };
 export type Scope = "read" | "operate" | "files" | "terminal" | "computers" | "admin";
+export type WebSearchRequest = { query: string; limit?: number; };
+export type WebSearchResult = { title: string; url: string; snippet: string; provider: string; };
+export type WebSearchResponse = { results: Array<WebSearchResult> | null; };
+export type WebsearchSetKeyRequest = { provider: string; key: string; };
+export type WebsearchSetKeyResponse = { };
+export type WebsearchRemoveKeyRequest = { provider: string; };
+export type WebsearchRemoveKeyResponse = { };
 export type EventBody =
   | { type: "account.failed"; body: AccountFailed }
   | { type: "account.quota_low"; body: AccountQuotaLow }
@@ -386,6 +393,9 @@ export interface MethodMap {
   "instructions.get": { request: InstructionsGetRequest; response: InstructionsGetResponse };
   "instructions.set": { request: InstructionsSetRequest; response: InstructionsSetResponse };
   "web.login": { request: WebLoginRequest; response: WebLoginResponse };
+  "web.search": { request: WebSearchRequest; response: WebSearchResponse };
+  "websearch.set_key": { request: WebsearchSetKeyRequest; response: WebsearchSetKeyResponse };
+  "websearch.remove_key": { request: WebsearchRemoveKeyRequest; response: WebsearchRemoveKeyResponse };
   "conversation.read": { request: ConversationReadRequest; response: ConversationReadResponse };
   "room.list": { request: RoomListRequest; response: RoomListResponse };
   "session.list": { request: SessionListRequest; response: SessionListResponse };
