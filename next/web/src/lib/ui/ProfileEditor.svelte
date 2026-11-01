@@ -46,7 +46,7 @@
 <style>
   .editor-container { container-type: inline-size; }
   .editor { padding: 16px 5%; border-top: 1px solid var(--line); display: grid; gap: 12px; }
-  .field { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; align-items: start; color: var(--muted); }
+  .field { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; align-items: baseline; color: var(--muted); }
   input, select, textarea { box-sizing: border-box; width: 100%; max-width: 260px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; padding: 8px 10px; }
   textarea { max-width: 440px; resize: none; }
   .numeric { width: 110px; }
