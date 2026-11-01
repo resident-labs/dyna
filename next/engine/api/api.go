@@ -58,6 +58,9 @@ func requestCaller(ctx context.Context, fallback Caller) Caller {
 
 func (a *API) handler(c Caller) http.Handler {
 	mux := http.NewServeMux()
+	call(mux, contract.MethodWebSearch, c, a.service.WebSearch)
+	call(mux, contract.MethodWebsearchSetKey, c, a.service.WebsearchSetKey)
+	call(mux, contract.MethodWebsearchRemoveKey, c, a.service.WebsearchRemoveKey)
 	call(mux, contract.MethodConnectStart, c, func(ctx context.Context, _ contract.Principal, req contract.ConnectStartRequest) (contract.ConnectStartResponse, *contract.Error) {
 		if a.connect == nil {
 			return contract.ConnectStartResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Connect unavailable"}
