@@ -18,7 +18,7 @@ func (s *Service) ShellWatch(ctx context.Context, id contract.SessionID) (<-chan
 	if err != nil {
 		return nil, failure(err)
 	}
-	handle, _, ok := s.lockSession(id)
+	handle, ok := s.lockSession(id)
 	if !ok {
 		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 	}
@@ -42,7 +42,7 @@ func (s *Service) ShellOutput(_ context.Context, caller contract.Principal, req 
 	if caller.Kind != contract.PrincipalSession {
 		return contract.ShellOutputResponse{}, forbidden()
 	}
-	handle, _, ok := s.lookupSession(caller.Session)
+	handle, ok := s.lookupSession(caller.Session)
 	if !ok {
 		return contract.ShellOutputResponse{}, nil
 	}

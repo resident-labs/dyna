@@ -55,23 +55,11 @@ func (s *Service) Terminal(ctx context.Context, session contract.SessionID, host
 			return nil, release, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
 		}
 		host, id = current.Host, current.ID
-		handle, state, ok := s.lockSession(session)
-		if !ok {
+		handle, ok := s.live.CreateSession(session)
+		if !ok || !handle.OpenTerminal() {
 			return nil, release, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 		}
-		s.mu.Lock()
-		state.terminals++
-		s.mu.Unlock()
-		handle.Unlock()
-		release = func() {
-			if !handle.Lock() {
-				return
-			}
-			defer handle.Unlock()
-			s.mu.Lock()
-			state.terminals--
-			s.mu.Unlock()
-		}
+		release = handle.CloseTerminal
 		if err := s.store.WakeTerminal(ctx, id); err != nil {
 			release()
 			return nil, func() {}, failure(err)
