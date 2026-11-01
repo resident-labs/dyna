@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { profileForSave, profileLabel, profileModels, slugName } from "./profiles.ts";
+import { profileForSave, profileLabel, profileModels, replacements, sessionCount, slugName } from "./profiles.ts";
 import type { Account, ProfileSummary } from "./contract.gen.ts";
 
 test("saving a profile keeps its hidden limit and allowed models", () => {
@@ -22,6 +22,15 @@ test("a profile reads as its name and thinking", () => {
   assert.deepEqual(profileLabel(glm), { name: "GLM Flash", detail: "no thinking" });
   assert.equal(slugName("claude-opus-5-5"), "Claude Opus 5.5");
   assert.equal(slugName("terra"), "Terra");
+});
+
+test("a removed profile's sessions can move to any other profile, by its shown name", () => {
+  const profile = (name: string, thinking: ProfileSummary["thinking"]): ProfileSummary => ({ name, provider: "openai", model: "m", description: "", taste: 0, diagnostics: 0, intelligence: 0, cost: 0, inUse: 0, thinking });
+  const list = [profile("opus-rewrite", "xhigh"), profile("glm-flash", "off")];
+  assert.deepEqual(replacements(list, "opus-rewrite"), [{ name: "glm-flash", label: "GLM Flash · no thinking" }]);
+  assert.deepEqual(replacements(list.slice(0, 1), "opus-rewrite"), []);
+  assert.equal(sessionCount(1), "1 session");
+  assert.equal(sessionCount(3), "3 sessions");
 });
 
 test("a profile can choose any model the proxy routes, custom providers included", () => {

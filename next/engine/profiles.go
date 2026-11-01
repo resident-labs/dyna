@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 type profile struct {
@@ -122,6 +123,21 @@ func (s *Service) ProfileList(ctx context.Context, who contract.Principal, _ con
 	return contract.ProfileListResponse{Profiles: profiles}, nil
 }
 
+// AllowedModels returns the models a session may call: its profile's, and the ones its last turns ran on. A session
+// that changed profile needs the old model until it has moved: its running turn keeps that model, and its next turn
+// compacts on it. The old model stays reachable after its profile is removed.
+func (s *Service) AllowedModels(ctx context.Context, session store.Session) ([]string, error) {
+	_, allowed, err := s.profiles.Model(session.Profile)
+	if err != nil {
+		return nil, err
+	}
+	recent, err := s.store.RecentTurnModels(ctx, session.ID)
+	if err != nil {
+		return nil, err
+	}
+	return append(allowed, recent...), nil
+}
+
 func (p *ProfileConfig) CompactionTokens(name contract.ProfileName) int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -231,6 +247,24 @@ func (p *ProfileConfig) Remove(name contract.ProfileName, inUse func() (bool, er
 	return p.updateLocked(name, nil, false)
 }
 
+// Replace moves every open session off name, then removes it. Assignments hold the read lock until they commit, so
+// none can land on name between the move and the removal. If the removal fails the sessions stay moved, and the
+// profile can be removed again.
+func (p *ProfileConfig) Replace(name, replacement contract.ProfileName, move func() error) *contract.Error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, ok := p.entries[name]; !ok {
+		return &contract.Error{Code: contract.ErrNotFound, Message: "profile not found"}
+	}
+	if _, ok := p.entries[replacement]; !ok || replacement == name {
+		return invalid("replacement must be another profile")
+	}
+	if err := move(); err != nil {
+		return failure(err)
+	}
+	return p.updateLocked(name, nil, false)
+}
+
 func (s *Service) withProfile(name contract.ProfileName, fn func() *contract.Error) *contract.Error {
 	if p, ok := s.profiles.(*ProfileConfig); ok {
 		return p.WithProfile(name, fn)
@@ -248,6 +282,23 @@ func (s *Service) ProfileRemove(ctx context.Context, who contract.Principal, req
 	p, ok := s.profiles.(*ProfileConfig)
 	if !ok {
 		return contract.ProfileRemoveResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "profile configuration is read-only"}
+	}
+	if req.Replacement != "" {
+		return contract.ProfileRemoveResponse{}, p.Replace(req.Name, req.Replacement, func() error {
+			sessions, err := s.store.SessionsOnProfile(ctx, req.Name)
+			if err != nil {
+				return err
+			}
+			moves := make([]store.ProfileMove, 0, len(sessions))
+			for _, session := range sessions {
+				event, err := s.event(session.Room, who, contract.SessionProfileChanged{Session: session.ID, Profile: req.Replacement})
+				if err != nil {
+					return err
+				}
+				moves = append(moves, store.ProfileMove{Session: session.ID, Event: event})
+			}
+			return s.store.MoveProfile(ctx, req.Replacement, moves)
+		})
 	}
 	return contract.ProfileRemoveResponse{}, p.Remove(req.Name, func() (bool, error) {
 		return s.store.ProfileInUse(ctx, req.Name)
