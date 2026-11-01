@@ -149,3 +149,11 @@ func TestAccountLimitsOwnerAction(t *testing.T) {
 		t.Fatalf("rollback %v %v", ids, err)
 	}
 }
+
+func TestOAuthImportRejectsSession(t *testing.T) {
+	actions := &AccountActions{}
+	_, problem := actions.AccountsImportOAuth(context.Background(), contract.Principal{Kind: contract.PrincipalSession}, contract.AccountsImportOAuthRequest{Provider: contract.ProviderKimi, Label: "Example", ExpiresAt: time.Unix(2000000000, 0), Credential: `{"access_token":"invented","refresh_token":"invented"}`})
+	if problem == nil || problem.Code != contract.ErrForbidden {
+		t.Fatal("session was not denied")
+	}
+}
