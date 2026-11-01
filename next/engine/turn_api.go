@@ -129,13 +129,7 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return contract.TurnActivityResponse{}, failure(err)
 	}
-	s.mu.Lock()
-	s.activityCount++
-	state := s.sessionLocked(caller.Session)
-	state.activity, state.activityOrder = body, s.activityCount
-	order := s.activityCount
-	s.mu.Unlock()
-	s.live.PublishActivity(session.Room, caller.Session, order, event)
+	s.live.PublishActivity(session.Room, body, event)
 	return contract.TurnActivityResponse{}, nil
 }
 
