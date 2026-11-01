@@ -54,13 +54,30 @@ type Service struct {
 	publishInstructions func(context.Context)
 }
 
-// lockSession creates a handle only for a session the caller read as open.
-func (s *Service) lockSession(id contract.SessionID) (*live.Session, bool) {
-	handle, ok := s.live.CreateSession(id)
-	if !ok || !handle.Lock() {
-		return nil, false
+// createSession publishes before checking the store, so close can retire the handle.
+func (s *Service) createSession(ctx context.Context, id contract.SessionID) (*live.Session, *contract.Error) {
+	handle, _ := s.live.CreateSession(id)
+	_, open, err := s.store.OpenSession(ctx, id)
+	if err != nil {
+		// A failed read after close can leave an empty handle; it is a store fault.
+		return nil, failure(err)
 	}
-	return handle, true
+	if !open {
+		s.retireSession(s.live.RetireHandle(handle), id)
+		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+	}
+	return handle, nil
+}
+
+func (s *Service) lockSession(ctx context.Context, id contract.SessionID) (*live.Session, *contract.Error) {
+	handle, problem := s.createSession(ctx, id)
+	if problem != nil {
+		return nil, problem
+	}
+	if !handle.Lock() {
+		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+	}
+	return handle, nil
 }
 
 // lookupSession reads existing session state without creating it.
@@ -97,7 +114,10 @@ func (s *Service) Reconciler() *lifecycle.Reconciler { return s.reconciler }
 
 // SessionClosed retires live session state after the close commits.
 func (s *Service) SessionClosed(id contract.SessionID) {
-	handle := s.live.RetireSession(id)
+	s.retireSession(s.live.RetireSession(id), id)
+}
+
+func (s *Service) retireSession(handle *live.Session, id contract.SessionID) {
 	if handle == nil {
 		return
 	}
