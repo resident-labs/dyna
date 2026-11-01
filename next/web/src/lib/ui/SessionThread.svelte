@@ -10,6 +10,7 @@
   import { activeVerb, elapsed, stepTime, titleOf, workingGroup, workSummary, type StepKind } from "../steps.ts";
   import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
+  import Markdown from "./Markdown.svelte";
 
   let { session, roomName, store, unsent, onunsent, onsettled, onpostlocation, clock = Date.now }: { session: string; roomName: string; store: RoomStore; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; clock?: () => number } = $props();
   const view = untrack(() => store.window({ kind: "dm", session }));
@@ -123,7 +124,7 @@
 </script>
 
 {#snippet postItem(turn: TranscriptTurn, item: TranscriptItem)}
-  <p class="message">{chunks[item.id + "/text"] ?? item.text}</p>{#if item.more && chunks[item.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Show all</button>{/if}
+  <div class="message"><Markdown text={chunks[item.id + "/text"] ?? item.text} /></div>{#if item.more && chunks[item.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Show all</button>{/if}
 {/snippet}
 
 <div class="thread" bind:this={scroller} onscroll={() => { atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; }}>
@@ -133,7 +134,7 @@
       <article>
         <div class="rule"><span><strong>Turn {Math.max(1, total - turns.length + index + 1)}</strong>{#if turn.durationMs !== undefined}{" · "}{duration(turn.durationMs)}{:else if !turn.ended}{" · "}{elapsed(turn.started, now)}{/if}{#if !turn.ended}{" · running"}{:else if turn.outcome === "failed"}{" · "}<StatusPill tone="failed" label="failed" word />{/if}</span><i></i></div>
         {#each turn.inputs ?? [] as input (input.id)}
-          <div class="input"><div class="who"><Avatar kind={input.from.kind} name={sender(input.from.kind, input.from.session)} size={22} />{#if input.from.kind === "owner"}<strong>You</strong>{:else}<strong class:identity={input.from.kind === "session"} style:--hue={hue(sender(input.from.kind, input.from.session))}>{sender(input.from.kind, input.from.session)}</strong>{/if}{#if input.home}<span class="muted">{input.home.kind === "feed" ? `in ${roomName}` : input.home.session === session ? "in your DM" : "in a DM"}</span>{/if}<time datetime={input.at}>{formatTime(input.at)}</time></div><p>{input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"}</p>{#if input.more && input.type === "post.created" && chunks["input:" + input.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Show all</button>{/if}</div>
+          <div class="input"><div class="who"><Avatar kind={input.from.kind} name={sender(input.from.kind, input.from.session)} size={22} />{#if input.from.kind === "owner"}<strong>You</strong>{:else}<strong class:identity={input.from.kind === "session"} style:--hue={hue(sender(input.from.kind, input.from.session))}>{sender(input.from.kind, input.from.session)}</strong>{/if}{#if input.home}<span class="muted">{input.home.kind === "feed" ? `in ${roomName}` : input.home.session === session ? "in your DM" : "in a DM"}</span>{/if}<time datetime={input.at}>{formatTime(input.at)}</time></div><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{#if input.more && input.type === "post.created" && chunks["input:" + input.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Show all</button>{/if}</div>
         {/each}
         {#each groups(turn.items ?? []) as group (group.id)}
           {#if group.kind === "work"}
@@ -156,7 +157,7 @@
             {/each}
             {#if group.item.postsOmitted && group.item.postsNext}<button class="muted" onclick={() => onpostlocation(group.item.postsNext!.room, group.item.postsNext!.seq)}>+{group.item.postsOmitted} more posts</button>{/if}
           {:else if group.item.kind === "thinking"}
-            <details><summary><span class="chevron"><Icon name="chevron" size={14} /></span> Thought</summary><p>{chunks[group.item.id + "/text"] ?? group.item.text}</p>{#if group.item.more && chunks[group.item.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, group.item.id, "text")}>Show all</button>{/if}</details>
+            <details><summary><span class="chevron"><Icon name="chevron" size={14} /></span> Thought</summary><div class="thought"><Markdown text={chunks[group.item.id + "/text"] ?? group.item.text} /></div>{#if group.item.more && chunks[group.item.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, group.item.id, "text")}>Show all</button>{/if}</details>
           {:else if group.item.kind === "text" || group.item.kind === "post"}
             {@render postItem(turn, group.item)}
           {:else if group.item.kind === "too_large"}<p class="muted">This item is too large to show.</p>{/if}
@@ -167,10 +168,10 @@
       </article>
     {:else}{#if !loading && !failed}<p class="muted">The conversation will appear here.</p>{/if}{/each}
     {#each queuedPosts as post (post.id)}
-      <div class="input"><div class="who"><Avatar kind={post.from.kind} name={sender(post.from.kind, post.from.session)} size={22} /><strong>{sender(post.from.kind, post.from.session)}</strong></div><p>{post.body.text}</p></div>
+      <div class="input"><div class="who"><Avatar kind={post.from.kind} name={sender(post.from.kind, post.from.session)} size={22} /><strong>{sender(post.from.kind, post.from.session)}</strong></div><Markdown text={post.body.text} /></div>
     {/each}
     {#each [...view.pendingPosts.values()] as post (post.id)}
-      <div class="input" class:pending={!post.failed}><strong>You</strong><p>{post.request.text}</p>{#if post.failed}<StatusPill tone="failed" label="Not sent" word /> <button onclick={() => void view.retry(post.id)}>Retry</button> <button onclick={() => view.discard(post.id)}>Discard</button>{/if}</div>
+      <div class="input" class:pending={!post.failed}><strong>You</strong><Markdown text={post.request.text} />{#if post.failed}<StatusPill tone="failed" label="Not sent" word /> <button onclick={() => void view.retry(post.id)}>Retry</button> <button onclick={() => view.discard(post.id)}>Discard</button>{/if}</div>
     {/each}
     {#if failed}<p class="muted" role="alert">The conversation did not load. <button onclick={() => void load()}>Try again</button></p>{/if}
   </div>
@@ -195,7 +196,7 @@
   .who strong, .who .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .who .identity { flex-shrink: 0; max-width: 60%; color: oklch(var(--id-name) var(--hue)); }
   .who time { flex: none; margin-left: auto; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .input p { margin: 4px 0 0; }
+  .input :global(.markdown) { margin: 4px 0 0; }
   .pending { opacity: 0.5; }
   .message { margin: 12px 0; }
   .muted, details { color: var(--muted); }
@@ -205,7 +206,7 @@
   summary::-webkit-details-marker { display: none; }
   .chevron { display: inline-flex; flex: none; transition: transform 150ms; }
   details:not([open]) > summary .chevron { transform: rotate(-90deg); }
-  details > p { margin-left: 20px; }
+  details > .thought { margin-left: 20px; }
   .steps { border-left: 1px solid var(--line); margin-left: 7px; padding-left: 12px; }
   .time { margin-left: auto; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
   code { min-width: 0; overflow-wrap: anywhere; font: 12.5px var(--mono); }

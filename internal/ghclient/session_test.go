@@ -116,6 +116,44 @@ esac
 	}
 }
 
+func TestSessionCredentialsCoverRegisteredRepositories(t *testing.T) {
+	records := setupRooms(t, "work/main", "work/extra", "work/foreign")
+	if out, err := exec.Command("/usr/bin/git", "-C", records[2].Repo, "remote", "set-url", "origin", "https://other.example/work/foreign.git").CombinedOutput(); err != nil {
+		t.Fatalf("git: %v: %s", err, out)
+	}
+	for _, rec := range records[1:] {
+		if err := room.DefaultStore().AddRepo(records[0].ID, rec.Repo, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
+		t.Fatal(err)
+	}
+	bin := installFakeGH(t, `#!/bin/sh
+case "$1 $2" in
+"auth status") echo '{"hosts":{"github.com":[{"login":"worker"}]}}';;
+"auth token") echo worker-secret;;
+"api --hostname") echo '{"permissions":{"push":true}}';;
+esac
+`)
+	session, err := SessionEnvironment(context.Background(), records[0].ID, t.TempDir(), "/real/dyna", os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "!" + shellquote.Quote(filepath.Join(bin, "gh")) + " auth git-credential"
+	for _, repo := range []string{"work/main", "work/extra"} {
+		for _, suffix := range []string{"", ".git"} {
+			key := "credential.https://github.com/" + repo + suffix + ".helper"
+			if got := gitConfigValue(session.Env, key); got != want {
+				t.Errorf("%s = %q, want %q", key, got, want)
+			}
+		}
+	}
+	if got := gitConfigValue(session.Env, "credential.https://other.example/work/foreign.helper"); got != "" {
+		t.Errorf("foreign host received helper: %q", got)
+	}
+}
+
 func TestSessionRemovesStaleShims(t *testing.T) {
 	records := setupRooms(t, "work/service")
 	installFakeGH(t, "#!/bin/sh\nexit 1\n")

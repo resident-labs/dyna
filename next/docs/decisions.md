@@ -1716,3 +1716,7 @@ Acceptance:
 - **Manual checks** are run by one terra agent per milestone, in a sandbox box.
 - **v1 is frozen.** Only blocking bugs are fixed there. The old side gets only `cmd/dyna-export`.
 - **Reporting.** Area owners report to the lead. The lead reports to @root for decisions, blockers and milestone results.
+
+### Declared agent surface (owner q68)
+
+The owner chose to ship without the five-provider evaluation gate. A Claude sanity run passed both shapes. Declared used 165,534 tokens against 179,099 for caller; this was not a controlled comparison. The lead chose declared for its simpler model and lower token count in that run. Caller ended one turn with text about the wrong action. The old surface and switch are removed.

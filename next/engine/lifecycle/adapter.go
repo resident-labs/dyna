@@ -33,6 +33,7 @@ type BoxAdapter interface {
 type View interface {
 	OpenTerminal(contract.SessionID) bool
 	Connected(contract.SessionID) bool
+	SessionClosed(contract.SessionID)
 }
 type Repositories interface {
 	Get(context.Context, contract.SessionID, contract.HostName, bool) ([]contract.BoxRepo, error)

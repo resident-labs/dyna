@@ -10,28 +10,26 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
-func TestProfileSurfaceValidation(t *testing.T) {
+func TestProfilesLoadLegacySurface(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.json")
-	config := `{"p":{"provider":"anthropic","model":"a","allowedModels":["a"],"thinking":"low","agentSurface":"caller"}}`
-	if err := os.WriteFile(path, []byte(config), 0600); err != nil {
+	data := `{"p":{"provider":"anthropic","model":"a","allowedModels":["a"],"thinking":"low","agentSurface":"caller"}}`
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
 		t.Fatal(err)
 	}
 	profiles, err := LoadProfiles(path)
-	if err != nil || profiles.Surface("p") != contract.AgentSurfaceCaller {
-		t.Fatalf("surface: %v %v", profiles, err)
-	}
-	if err := os.WriteFile(path, []byte(strings.Replace(config, `,"agentSurface":"caller"`, "", 1)), 0600); err != nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-	profiles, err = LoadProfiles(path)
-	if err != nil || profiles.Surface("p") != contract.AgentSurfaceOff {
-		t.Fatalf("default surface: %v %v", profiles, err)
+	choice, _, err := profiles.Model("p")
+	if err != nil || choice.ID != "a" {
+		t.Fatalf("model: %+v, %v", choice, err)
 	}
-	if err := os.WriteFile(path, []byte(strings.Replace(config, "caller", "unknown", 1)), 0600); err != nil {
-		t.Fatal(err)
+	if problem := profiles.update("p", &profile{Provider: contract.ModelProviderAnthropic, Model: "a", AllowedModels: []string{"a"}, Thinking: contract.ThinkingLow}, false); problem != nil {
+		t.Fatal(problem)
 	}
-	if _, err := LoadProfiles(path); err == nil {
-		t.Fatal("unknown surface accepted")
+	saved, err := os.ReadFile(path)
+	if err != nil || strings.Contains(string(saved), "agentSurface") {
+		t.Fatalf("saved profile: %s, %v", saved, err)
 	}
 }
 

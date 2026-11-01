@@ -139,8 +139,26 @@ func Ensure(owner string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if !info.IsDir() || info.Mode().Perm() != 0700 {
-			return "", fmt.Errorf("scratch directory must be a real directory with mode 0700: %s", name)
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !info.IsDir() || !ok || int(stat.Uid) != os.Getuid() {
+			return "", fmt.Errorf("scratch directory must be a real directory owned by the current user: %s", name)
+		}
+		if info.Mode().Perm() != 0700 {
+			f, err := r.Open(name)
+			if err != nil {
+				return "", err
+			}
+			opened, err := f.Stat()
+			if err == nil && !os.SameFile(info, opened) {
+				err = fmt.Errorf("scratch directory changed during repair: %s", name)
+			}
+			if err == nil {
+				err = f.Chmod(0700)
+			}
+			f.Close()
+			if err != nil {
+				return "", fmt.Errorf("repair scratch permissions for %s: %w", name, err)
+			}
 		}
 	}
 	return filepath.Join(root, owner), nil

@@ -460,7 +460,6 @@ type BoxRepo struct {
 }
 
 type BoxHelloResponse struct {
-	AgentSurface  AgentSurface     `json:"agentSurface"`
 	GitName       string           `json:"gitName,omitempty"`
 	GitEmail      string           `json:"gitEmail,omitempty"`
 	CompactTokens int              `json:"compactTokens,omitempty"`

@@ -27,6 +27,63 @@ func TestQuickLaneUnitLimits(t *testing.T) {
 	}
 }
 
+func TestAdmissionUsesAvailableMemoryAndDefaultReservation(t *testing.T) {
+	probe := time.Unix(100, 0)
+	machine := machines.Machine{Name: "node", LastProbe: probe, Capabilities: machines.Capabilities{CPUs: 32, MemTotal: 30 << 30}, Load: machines.Load{MemTotal: 30 << 30, MemAvailable: 4 << 30}}
+	q := nodeQueue{running: []Job{{ID: "running", Host: true, Started: probe.Add(-time.Second)}}, queued: []Job{
+		{ID: "one", Host: true, Created: probe},
+		{ID: "two", Host: true, Created: probe.Add(time.Second)},
+		{ID: "three", Host: true, Created: probe.Add(2 * time.Second)},
+	}}
+	admitted, reasons := map[string]bool{}, map[string]string{}
+	needsWrite := false
+	if err := passNode(context.Background(), nil, probe, "node", machine, nil, q, nil, admitted, reasons, &needsWrite); err != nil {
+		t.Fatal(err)
+	}
+	if !admitted["one"] || !admitted["two"] || admitted["three"] || !strings.Contains(reasons["three"], "available") {
+		t.Fatalf("admitted %v, reasons %v", admitted, reasons)
+	}
+	if got := jobDemand(q.running[0], machine).MemoryMiB; got != 1024 {
+		t.Fatalf("reservation = %d MiB, want 1024", got)
+	}
+	if got := ClampResources(true, 0, 0, MachineFacts(machine)).Scope(true).MemoryMiB; got != 5120 {
+		t.Fatalf("hard limit = %d MiB, want 5120", got)
+	}
+	q.running = append(q.running, Job{ID: "one", Host: true, Started: probe.Add(time.Second)}, Job{ID: "two", Host: true, Started: probe.Add(time.Second)})
+	q.queued = q.queued[2:]
+	admitted, reasons = map[string]bool{}, map[string]string{}
+	if err := passNode(context.Background(), nil, probe, "node", machine, nil, q, nil, admitted, reasons, &needsWrite); err != nil {
+		t.Fatal(err)
+	}
+	if admitted["three"] || !strings.Contains(reasons["three"], "available") {
+		t.Fatalf("second pass admitted %v, reasons %v", admitted, reasons)
+	}
+}
+
+func TestAdmissionAllowsSmallNodesAndLargeRequests(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		total, available uint64
+		request          int64
+	}{
+		{"small node", 2 << 30, 1536 << 20, 0},
+		{"large request", 8 << 30, 6 << 30, 7 * 1024},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := machines.Machine{Capabilities: machines.Capabilities{CPUs: 8, MemTotal: tc.total}, Load: machines.Load{MemTotal: tc.total, MemAvailable: tc.available}}
+			q := nodeQueue{queued: []Job{{ID: "job", Host: true, MemoryMiB: tc.request}}}
+			admitted, reasons := map[string]bool{}, map[string]string{}
+			needsWrite := false
+			if err := passNode(context.Background(), nil, time.Time{}, "node", machine, nil, q, nil, admitted, reasons, &needsWrite); err != nil {
+				t.Fatal(err)
+			}
+			if !admitted["job"] {
+				t.Fatalf("job did not start: %v", reasons)
+			}
+		})
+	}
+}
+
 func TestQuickLaneReservesMemory(t *testing.T) {
 	machine := machines.Machine{Name: "node", Capabilities: machines.Capabilities{CPUs: 8, MemTotal: 8 << 30}}
 	q := nodeQueue{queued: []Job{
