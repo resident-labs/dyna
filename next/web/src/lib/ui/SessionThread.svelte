@@ -30,6 +30,7 @@
   onDestroy(() => store.leave(view));
   export async function send(request: PostRequest) { await view.post(request); }
   let turns: TranscriptTurn[] = $state([]);
+  let pendingBrief = $derived(pendingStartBrief(startingBrief, turns));
   let expandedTurns: Record<string, boolean> = $state({});
   let before: string | undefined = $state();
   let now = $state(clock());
@@ -239,7 +240,6 @@
 {#if frameWidth >= 880}<TimelineMinimap turns={minimapTurns} current={currentTurn} onselect={(id) => scroller.querySelector<HTMLElement>(`article[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" })} />{/if}
 <div class="thread" bind:this={scroller} onscroll={() => { atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; updatePosition(); if (loaded && before && !loading && scroller.scrollTop < 100) void load(true); }}>
   <div class="body">
-    {@const pendingBrief = pendingStartBrief(startingBrief, turns)}
     {#if pendingBrief}<div class="owner-message"><Markdown text={pendingBrief} /></div>{/if}
     {#each turns as turn (turn.id)}
       {@const hasWork = !!turn.olderItems || (turn.items ?? []).some(item => item.kind === "tool" || item.kind === "thinking")}
