@@ -1,6 +1,7 @@
 <script lang="ts">
   import { SvelteMap } from "svelte/reactivity";
   import ProfileMenu from "./ProfileMenu.svelte";
+  import ParentMenu from "./ParentMenu.svelte";
   import StatusPill from "./StatusPill.svelte";
   import { boxReason, count, fromNow, fullTime, waits } from "../feed.ts";
   import { call } from "../client.ts";
@@ -47,6 +48,8 @@
     for (let i = 0; i < found.length; i++) found.push(...(children.get(found[i]) ?? []));
     return found;
   });
+  // A session may move under any session in its room except itself and its descendants. The engine checks the same rule.
+  let parents = $derived([...store.sessions.values()].filter(item => item.session !== session && !descendants.includes(item.session)));
   let archiveNote = $derived.by(() => {
     if (!descendants.length) return "Its work is archived first.";
     const names = descendants.map(id => store.names.get(id) ?? id);
@@ -69,7 +72,7 @@
   <dl>
     {#if store.turns.has(session)}<dt>Turn</dt><dd>{#if store.stopping.has(session)}Stopping{:else}Running · <button type="button" onclick={() => store.stop(session)}>Stop</button>{/if}
       {#if store.stopFailed.has(session)}<span class="failed">The stop did not reach the engine.</span>{/if}</dd>{/if}
-    {#if parent && open?.parent}<dt>Parent</dt><dd><a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(open.parent)}`} onclick={navigate}>{parent}</a></dd>{/if}
+    {#if parent && open?.parent}<dt>Parent</dt><dd><a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(open.parent)}`} onclick={navigate}>{parent}</a>{#if switchable} <ParentMenu {session} parent={open.parent} candidates={parents} />{/if}</dd>{/if}
     {#if open?.profile}<dt>Profile</dt><dd><ProfileMenu {session} profile={open.profile} {switchable} /></dd>{/if}
     {#if box}<dt>Box</dt><dd>{#if failure}<StatusPill tone="failed" word label="Failed" /> · {boxReason(failure)}{:else if reason === "room-host"}<StatusPill tone="warning" word label={waits[reason]} />{:else}{reason ? waits[reason] : boxes[box]}{/if}</dd>{/if}
     {#if hasJobs}<dt>Jobs</dt><dd><button type="button" onclick={onjobs}>{running ? `${count(running, "job")} running` : "Jobs"}</button>{#if failures}{" · "}<StatusPill tone="failed" label="{failures} failed" word />{/if}</dd>{/if}
