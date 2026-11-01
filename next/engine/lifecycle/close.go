@@ -8,6 +8,9 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
+// archiveRetry spaces out tries on a box whose archive failed, as a full disk makes it do.
+const archiveRetry = 10 * time.Minute
+
 func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox) error {
 	leaf, err := r.store.ClosingLeaf(ctx, row.Session)
 	if err != nil || !leaf {
@@ -46,10 +49,26 @@ func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox) erro
 		return err
 	}
 	if row.Want == store.WantClose && hadTurns && r.view.Connected(row.Session) {
-		return nil
+		if row.Reason == "" || row.Updated.Add(archiveRetry).After(r.now()) {
+			return nil
+		}
+		return r.retryArchive(ctx, row)
 	}
 	r.launch(ctx, row)
 	return nil
+}
+
+// retryArchive clears a failed archive, so the stream sends it again. The box keeps its volume until a ref is verified.
+func (r *Reconciler) retryArchive(ctx context.Context, row store.LifecycleBox) error {
+	session, err := r.store.Session(ctx, row.Session)
+	if err != nil {
+		return err
+	}
+	event, err := r.event(session.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Box: row.ID, Session: row.Session, Host: row.Host, From: contract.BoxClosing, To: contract.BoxClosing})
+	if err != nil {
+		return err
+	}
+	return r.store.SetClosingReason(ctx, row.ID, "", event)
 }
 
 func (r *Reconciler) closeStep(ctx context.Context, row store.LifecycleBox) error {

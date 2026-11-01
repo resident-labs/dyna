@@ -152,6 +152,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `deliveries` |
 | `turns` |
 | `hosts` |
+| `disk_warnings` |
 | `room_shared` |
 | `host_rooms` |
 | `host_labels` |
@@ -222,6 +223,8 @@ The owner or an authorized ancestor can restart an open session with a failed bo
 
 Disk requests are accounting, not quotas. Any session may request any size. Defaults are agent for root and children, medium for leads, or a repository default. The engine emits non-waking `box.pressure` once per pressure episode. Box growth is cut until after cutover (owner, q40); start a new, larger box instead.
 
+Heartbeats measure each host and the control plane with one script. Free space is what `df` calls available. On btrfs, under 2 GiB of metadata room (free metadata chunks plus half the unallocated space) counts as no free space; an unreadable sysfs falls back to `df`. The disk floor is the larger of 20 GiB and 10% of the disk, so at 90% used, new boxes and wakes wait with `disk`. The warn level is 85% used, and always at least the largest request above the floor, so it comes before any size is refused. The first sample under it posts `host.disk_low` in every room and wakes each root; the next waits until free space passes the warn level by a tenth. `dyna host list` shows use and the low flag for every host.
+
 ### 5.5 Budgets and placement
 
 Each box has its own slice and hard limit; the session tree carries no resources. All box slices sit under a host Dyna slice. Admission counts one quarter of each box's CPU and memory.high. At 80% measured use admission stops; at 90% memory.high slows allocation; at the host limit the kernel can swap. Registration warns if swap is absent.
@@ -229,6 +232,16 @@ Each box has its own slice and hard limit; the session tree carries no resources
 The owner accepts a kernel kill when RAM and swap fill, or at a box's own limit. A build may exit 137; a killed Pi, agent or init follows the crash path. The volume and session stay, and `box.pressure` records the kill. No pause policy ships unless pressure shows real kills.
 
 New boxes choose the ready host with most free memory; existing boxes stay on their host. Children can run while their parent is dormant. `sameHost` pins a child to its parent's host. Default maximum depth is 3; zero removes the limit. Room limits count placed requests across hosts; zero means unlimited. There is no subtree cap. M1 uses hermeslab.
+
+While a ready host is at or below its floor, the engine closes its oldest idle leaves, stopped or failed, without the 7-day wait or the PR exemption. It takes four per read, every 10 seconds, and skips a host with four closes running. It never closes a root, a session with an open child, a running turn, shell jobs, or a pending delivery or operation, and it leaves paused rooms alone. The normal sweep runs hourly, takes 200 leaves that passed 7 days, and keeps the PR exemption.
+
+Disk work that is designed but not built:
+
+- **Per-box quota.** A hard limit needs root plus an XFS graphroot with project quota, because rootless Podman has no volume quota and `--storage-opt size` covers only the rootfs. Measure instead: an hourly per-box volume size, `box.pressure` at the disk request, and a stop at a set multiple of it.
+- **Shared cache caps.** `<hostdata>/cache` has no limit and no measure. Add it to the daily size pass and `host.list`, and delete a tool's folder past a cap. Share only Cargo's registry and git folders.
+- **Image prune.** Tagged images stay forever. Use `podman image prune -af --filter until=168h`, which spares images that stopped containers use. Check this on a real host first.
+- **Orphan reaper.** Daily, list `podman ps -a --filter label=dyna.box` and `podman volume ls --filter name=dyna-box-`, and after a grace period remove any box whose row is deleted or missing.
+- **Transcript retention.** Transcripts and files of closed sessions stay forever. Keep 30 days, delete by 90, alert at 20 GiB, and sweep files with no reference weekly.
 
 ### 5.6 Repository copy and shared caches (M2)
 
@@ -258,7 +271,7 @@ The transcript stream sends offset-addressed chunks and resumes from the last ac
 
 Close durably closes the subtree deepest child first; move a child first to keep it running. Stop the harness and jobs, then archive HEAD and the dirty tree, including unignored untracked files, to `refs/dyna/archive/<session>`, without changing the branch or index. Skip a clean tree whose HEAD is remote. Remove box resources and emit deleted and `session.closed`.
 
-A dormant box starts for archive without admission. Archive or removal failure leaves it closing for retry. Only owner `dyna session close --discard` can delete a box that cannot start without an archive. Archive refs expire after 14 days; `dyna session restore <session>` starts a new box from one.
+A dormant box starts for archive without admission. Archive or removal failure leaves it closing for retry; a failed archive retries every 10 minutes. Disk eviction closes the same way, so a box is removed only after its ref is verified. A clean tree already on the remote needs no disk to skip its archive. The engine cannot see from outside whether other work is pushed, so it never discards unasked. Only owner `dyna session close --discard` can delete a box that cannot start without an archive. Archive refs expire after 14 days; `dyna session restore <session>` starts a new box from one.
 
 ### 5.10 Host failure and relocation
 

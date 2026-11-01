@@ -6,10 +6,11 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 53
+const schemaVersion = 54
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	53: {`ALTER TABLE hosts ADD COLUMN disk_floor INTEGER NOT NULL DEFAULT 21474836480`, `CREATE TABLE disk_warnings (host TEXT PRIMARY KEY)`},
 	52: {`CREATE INDEX turns_session_started_at ON turns(session, started_at DESC)`, `UPDATE turns SET sections=NULL WHERE ended_at IS NOT NULL AND sections IS NOT NULL`},
 	51: {`CREATE TABLE client_replays (method TEXT NOT NULL, caller_kind TEXT NOT NULL, caller_id TEXT NOT NULL, client_id TEXT NOT NULL, ref TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(method, caller_kind, caller_id, client_id))`},
 	50: {`ALTER TABLE connect_link_state ADD COLUMN generation INTEGER NOT NULL DEFAULT 0`, `CREATE TABLE connect_revocations (relay_device TEXT PRIMARY KEY, revoked_at INTEGER NOT NULL)`, `CREATE TABLE connect_devices (relay_device TEXT PRIMARY KEY, device TEXT NOT NULL UNIQUE REFERENCES devices(id))`, `CREATE TABLE connect_sessions (id TEXT PRIMARY KEY, relay_device TEXT NOT NULL REFERENCES connect_devices(relay_device), origin TEXT NOT NULL, jkt TEXT NOT NULL, user_id TEXT NOT NULL, epoch INTEGER NOT NULL, generation INTEGER NOT NULL, token_hash BLOB NOT NULL UNIQUE, old1 BLOB, old2 BLOB, old3 BLOB, prev_until INTEGER NOT NULL, created_at INTEGER NOT NULL, access_until INTEGER NOT NULL, grant_end INTEGER NOT NULL, grant_at INTEGER NOT NULL)`},
