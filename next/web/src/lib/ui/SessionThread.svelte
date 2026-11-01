@@ -16,7 +16,7 @@
   import PostAttachments from "./PostAttachments.svelte";
   import TranscriptWorkRow from "./TranscriptWorkRow.svelte";
   import TimelineMinimap from "./TimelineMinimap.svelte";
-  import { deriveTimelineGroups, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems } from "../timeline.ts";
+  import { deriveTimelineGroups, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems } from "../timeline.ts";
 
   let { session, roomName, store, unsent, onunsent, onsettled, onpostlocation, navigate, onvisual, clock = Date.now }: { session: string; roomName: string; store: RoomStore; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onvisual: (versions: VisualVersion[], selected: number, send: (text: string, event: string) => Promise<void>) => void; clock?: () => number } = $props();
   const view = untrack(() => store.window({ kind: "dm", session }));
@@ -225,6 +225,7 @@
 <div class="thread" bind:this={scroller} onscroll={() => { atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; updatePosition(); if (loaded && before && !loading && scroller.scrollTop < 100) void load(true); }}>
   <div class="body">
     {#each turns as turn (turn.id)}
+      {@const hasWork = !!turn.olderItems || (turn.items ?? []).some(item => item.kind === "tool" || item.kind === "thinking")}
       {@const finalText = turn.ended ? (turn.items ?? []).findLast(item => item.kind === "text")?.id : undefined}
       <article data-turn={turn.id}>
         {#each turn.inputs ?? [] as input (input.id)}
@@ -235,7 +236,7 @@
           {/if}
         {/each}
         <!-- Dyna: Posts and the final answer remain visible outside the work fold. -->
-        {#if turn.ended && (turn.olderItems || (turn.items ?? []).some(item => item.kind === "tool" || item.kind === "thinking"))}
+        {#if turn.ended && hasWork}
           <button class="work-header" aria-expanded={!!expandedTurns[turn.id]} onclick={() => { expandedTurns[turn.id] = !expandedTurns[turn.id]; if (expandedTurns[turn.id] && turn.olderItems) void readContinuation(turn, "older"); }}>Worked for {formatTimelineDuration(Date.parse(turn.ended) - Date.parse(turn.started))}<span class:open={expandedTurns[turn.id]}><Icon name="chevron" size={14} /></span></button>
         {/if}
         {#each deriveTimelineGroups(turn.items ?? []) as group (group.id)}
@@ -250,7 +251,7 @@
               {@render postItem(turn, post)}
             {/each}
           {:else if group.item.kind === "text" || group.item.kind === "post"}
-            {#if group.item.kind === "post" || !turn.ended || group.item.id === finalText || expandedTurns[turn.id]}{@render postItem(turn, group.item)}{/if}
+            {#if group.item.kind === "post" || visibleTimelineText(group.item.id, finalText, !!turn.ended, hasWork, !!expandedTurns[turn.id])}{@render postItem(turn, group.item)}{/if}
           {:else if group.item.kind === "too_large"}<p class="muted">This item is too large to show.</p>{/if}
         {/each}
         {#if turn.outcome === "failed"}<div class="failure"><Icon name="warning" size={16} /><div><strong>{turn.cause ? causes[turn.cause] : "The turn failed"}</strong></div></div>{/if}
