@@ -32,6 +32,7 @@ import (
 	"github.com/resident-labs/dyna/engine/api"
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/lifecycle"
+	"github.com/resident-labs/dyna/engine/model"
 	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/harness/fakeharness"
 	"github.com/resident-labs/dyna/web"
@@ -81,9 +82,15 @@ func (devConnect) Unlink(context.Context) error {
 func (d devService) AccountsList(context.Context, contract.Principal, contract.AccountsListRequest) (contract.AccountsListResponse, *contract.Error) {
 	accounts := []contract.Account{}
 	if !d.empty {
-		accounts = []contract.Account{{ID: "studio", Provider: "claude", Label: "Claude · studio", State: contract.AccountConnected}, {ID: "team", Provider: "codex", Label: "ChatGPT · team", State: contract.AccountConnected}, {ID: "spare", Provider: "kimi", Label: "Kimi · spare", State: contract.AccountSignInExpired}}
+		for _, a := range devAccounts(time.Now()) {
+			state := contract.AccountConnected
+			if a.usage.Cause == contract.UsageSignInExpired {
+				state = contract.AccountSignInExpired
+			}
+			accounts = append(accounts, contract.Account{ID: a.usage.AccountID, Provider: a.provider, Label: a.usage.Label, State: state})
+		}
 	}
-	return contract.AccountsListResponse{Providers: []contract.AccountProviderInfo{{ID: "claude", DisplayName: "Claude", ConnectMethod: contract.ConnectOAuth, ConnectFlow: contract.ConnectFlowCallback}, {ID: "codex", DisplayName: "ChatGPT", ConnectMethod: contract.ConnectOAuth, ConnectFlow: contract.ConnectFlowDevice}, {ID: "kimi", DisplayName: "Kimi", ConnectMethod: contract.ConnectKey, ConnectFlow: contract.ConnectFlowKey}}, Accounts: accounts}, nil
+	return contract.AccountsListResponse{Providers: model.AccountProviders(), Accounts: accounts}, nil
 }
 func (devService) AccountsConnect(context.Context, contract.Principal, contract.AccountsConnectRequest) (contract.AccountsConnectResponse, *contract.Error) {
 	return contract.AccountsConnectResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable in webdev"}
@@ -107,22 +114,56 @@ func (devService) AccountsRemove(context.Context, contract.Principal, contract.A
 	return contract.AccountsRemoveResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable in webdev"}
 }
 
-// AccountsQuota answers with invented accounts, never a real sign-in: one busy, one calm and one expired.
-func (d devService) AccountsQuota(context.Context, contract.Principal, contract.AccountsQuotaRequest) (contract.AccountsQuotaResponse, *contract.Error) {
-	if d.empty {
-		return contract.AccountsQuotaResponse{Accounts: []contract.AccountUsage{}}, nil
+// devAccounts are invented, never a real sign-in. They show each look of Home's Usage and Needs you: a card of several
+// windows, one of a single window, spent windows, a long label, a label that says its provider, an expired sign-in, and
+// accounts Home leaves out: those that report nothing, rate limited or not. As in the engine, usage names its provider
+// as the proxy does.
+type devAccount struct {
+	provider contract.AccountProvider
+	usage    contract.AccountUsage
+}
+
+func devAccounts(now time.Time) []devAccount {
+	window := func(kind contract.UsageWindowKind, used float64, reset time.Duration) contract.UsageWindow {
+		w := contract.UsageWindow{Name: "seven_day", Kind: kind, UsedPercent: used, Seconds: 604800, ResetsAt: now.Add(reset)}
+		if kind == contract.UsageWindowFiveHour {
+			w.Name, w.Seconds = "five_hour", 18000
+		}
+		return w
 	}
-	at := func(d time.Duration) time.Time { return time.Now().Add(d) }
-	return contract.AccountsQuotaResponse{Accounts: []contract.AccountUsage{
-		{AccountID: "studio", Provider: "claude", Label: "Claude · studio", Windows: []contract.UsageWindow{
-			{Name: "five_hour", Kind: contract.UsageWindowFiveHour, UsedPercent: 62, Seconds: 18000, ResetsAt: at(2*time.Hour + 10*time.Minute)},
-			{Name: "seven_day", Kind: contract.UsageWindowWeekly, UsedPercent: 91, Seconds: 604800, ResetsAt: at(76 * time.Hour)},
-			{Name: "Fable Weekly", Kind: contract.UsageWindowWeekly, Model: "Fable", UsedPercent: 0, Seconds: 604800, ResetsAt: at(76 * time.Hour)},
-			{Name: "Opus Weekly", Kind: contract.UsageWindowWeekly, Model: "Opus", UsedPercent: 35, Seconds: 604800, ResetsAt: at(76 * time.Hour)}}},
-		{AccountID: "team", Provider: "codex", Label: "ChatGPT · team", Windows: []contract.UsageWindow{
-			{Name: "seven_day", Kind: contract.UsageWindowWeekly, UsedPercent: 35, Seconds: 604800, ResetsAt: at(100 * time.Hour)}}},
-		{AccountID: "spare", Provider: "kimi", Label: "Kimi · spare", Cause: contract.UsageSignInExpired},
-	}}, nil
+	model := func(name string, used float64) contract.UsageWindow {
+		w := window(contract.UsageWindowWeekly, used, 76*time.Hour)
+		w.Name, w.Model = name+" Weekly", name
+		return w
+	}
+	account := func(provider contract.AccountProvider, proxy string, id contract.AccountID, label string, cause contract.UsageCause, windows ...contract.UsageWindow) devAccount {
+		return devAccount{provider, contract.AccountUsage{AccountID: id, Provider: proxy, Label: label, Cause: cause, Windows: windows}}
+	}
+	return []devAccount{
+		account(contract.ProviderKimi, "kimi", "kimi", "kimi", ""),
+		account(contract.ProviderZAI, "openai-compatible-zai", "zai", "zai", ""),
+		account(contract.ProviderAnthropic, "claude", "unused", "unused.seat", "", model("Fable", 0)),
+		account(contract.ProviderAnthropic, "claude", "calm", "review.bot", "", window(contract.UsageWindowFiveHour, 0, 0), window(contract.UsageWindowWeekly, 60, 24*time.Hour)),
+		account(contract.ProviderAnthropic, "claude", "studio", "Claude · studio", "", window(contract.UsageWindowFiveHour, 62, 2*time.Hour+10*time.Minute), window(contract.UsageWindowWeekly, 91, 76*time.Hour), model("Fable", 0), model("Opus", 35)),
+		account(contract.ProviderOpenAI, "codex", "team", "chatgpt", "", window(contract.UsageWindowWeekly, 35, 100*time.Hour)),
+		account(contract.ProviderAnthropic, "claude", "single", "night.shift", "", window(contract.UsageWindowWeekly, 56, 5*time.Hour+34*time.Minute)),
+		account(contract.ProviderAnthropic, "claude", "spent", "pipsqueak.demo", "", window(contract.UsageWindowFiveHour, 0, 0), window(contract.UsageWindowWeekly, 100, 38*time.Hour)),
+		account(contract.ProviderAnthropic, "claude", "long", "a-rather-long-shared-team-account-label-for-the-nightly-builds", "", window(contract.UsageWindowFiveHour, 100, 3*time.Hour), window(contract.UsageWindowWeekly, 40, 96*time.Hour)),
+		account(contract.ProviderAnthropic, "claude", "spare", "weekend.plan", contract.UsageSignInExpired),
+		account(contract.ProviderOpenAI, "codex", "busy", "shared.pool", contract.UsageRateLimited),
+		account(contract.ProviderAnthropic, "claude", "lost", "side.project", contract.UsageUnreachable),
+	}
+}
+
+// AccountsQuota answers with devAccounts.
+func (d devService) AccountsQuota(context.Context, contract.Principal, contract.AccountsQuotaRequest) (contract.AccountsQuotaResponse, *contract.Error) {
+	response := contract.AccountsQuotaResponse{Accounts: []contract.AccountUsage{}}
+	if !d.empty {
+		for _, a := range devAccounts(time.Now()) {
+			response.Accounts = append(response.Accounts, a.usage)
+		}
+	}
+	return response, nil
 }
 
 // HostList gives the dev host a busy beat (CPU near its limit, disk low) and adds a host that has stopped
