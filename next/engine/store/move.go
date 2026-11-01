@@ -46,10 +46,21 @@ func (s *Store) MoveSession(ctx context.Context, target, parent contract.Session
 	})
 }
 
-// SetRecreated records the new slice after the container was created.
-func (s *Store) SetRecreated(ctx context.Context, id contract.BoxID, slice, image string) error {
+// SetRecreated records the new slice and image after the container was created. A notice tells the session once, with
+// its next turn.
+func (s *Store) SetRecreated(ctx context.Context, id contract.BoxID, slice, image string, notice *contract.Event) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "UPDATE boxes SET slice=?, image=? WHERE id=?", slice, image, id)
-		return err
+		if _, err := tx.ExecContext(ctx, "UPDATE boxes SET slice=?, image=? WHERE id=?", slice, image, id); err != nil {
+			return err
+		}
+		if notice == nil {
+			return nil
+		}
+		seq, err := s.AppendEvent(tx, *notice)
+		if err != nil {
+			return err
+		}
+		to := contract.Principal{Kind: contract.PrincipalSession, Session: notice.Body.(contract.SessionRestarted).Session}
+		return s.InsertDelivery(ctx, tx, seq, notice.Body, contract.Delivery{To: to, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: false})
 	})
 }

@@ -40,7 +40,7 @@ const bodies: Record<string, Check> = {
   "account.quota_low": object({ accountId: string, window: string, remainingPercent: number, floor: number }),
   "post.created": object({ text: string, home: conversation, turn: optional(string), mentions: optional(nullable(array(principal))), replyTo: optional(string), clientId: optional(string),
     attachments: optional(nullable(array(object({ name: string, media: string, bytes: number, sha256: string, visual: optional(nullable(visual)) })))) }),
-  "session.restarted": object({ session: string }),
+  "session.restarted": object({ session: string, imageUpdated: optional(boolean) }),
   "session.started": object({ session: string, name: string, parent: optional(string), profile: string, goal: optional(string), brief: optional(string) }),
   "session.moved": object({ session: string, newParent: string }),
   "session.closed": object({ session: string, reason: optional(oneOf("dormant", "disk")), archive: optional(string), unheld: optional(nullable(array(string))) }),
