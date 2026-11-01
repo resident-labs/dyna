@@ -53,8 +53,8 @@ func TestLayoutKeepsARoomInOneFolder(t *testing.T) {
 		l.Compose("r"):          room + "/compose",
 		l.File("r", "abc"):      room + "/files/abc",
 		l.Transcripts("r", "s"): room + "/transcripts/s",
+		l.Shared("r"):           room + "/shared",
 		l.HostInstructions("r"): hostRoom + "/instructions/AGENTS.md",
-		l.HostShared("r"):       hostRoom + "/shared",
 	} {
 		if got != want {
 			t.Errorf("got %s, want %s", got, want)
@@ -97,9 +97,26 @@ func TestLayoutNamesWhatNoRoomOwns(t *testing.T) {
 		l.HostSocket("b"):       "/host/sock/b/engine.sock",
 		l.HostProbeSocket("t"):  "/host/sock/probe-t.sock",
 		l.HostRooms():           "/host/rooms",
+		l.HostBinary():          "/host/bin/current/dyna",
+		l.HostShareMount():      "/host/share/rooms",
+		l.HostShareCache():      "/host/share/cache",
+		l.HostShareSocket():     "/host/sock/share.sock",
+		l.HostShared("r"):       "/host/share/rooms/r/shared",
 	} {
 		if got != want {
 			t.Errorf("got %s, want %s", got, want)
+		}
+	}
+}
+
+func TestLayoutKnowsARoomsSharedFolder(t *testing.T) {
+	l := box.Layout{Data: "/data"}
+	if !l.IsShared(l.Shared("r")) {
+		t.Error("a room's shared folder was not recognised")
+	}
+	for _, path := range []string{l.Files("r"), "/data/rooms/shared", "/data/rooms/r/files/shared", "/data/rooms/r/shared/shared"} {
+		if l.IsShared(path) {
+			t.Errorf("%s is not a room's shared folder", path)
 		}
 	}
 }

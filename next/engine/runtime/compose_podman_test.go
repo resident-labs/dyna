@@ -68,6 +68,7 @@ type stackStore struct {
 func (stackStore) PinWorkflowImage(context.Context, contract.SessionID, string) (string, error) {
 	return "", nil
 }
+func (stackStore) Hosts(context.Context) ([]box.Host, error) { return engineHosts("host"), nil }
 
 func (s stackStore) Box(_ context.Context, id contract.BoxID) (box.Box, error) {
 	return box.Box{ID: id, Session: s.session, Host: "host", State: contract.BoxReady}, nil
