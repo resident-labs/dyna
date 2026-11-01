@@ -166,10 +166,23 @@ case "$suite" in
     ;;
   next-web-width)
     : "${DYNA_WEBDEV_BIN:?Set DYNA_WEBDEV_BIN to the built binary}"
-    export DYNA_CHROMIUM="${DYNA_CHROMIUM:-$(command -v google-chrome || command -v chromium || { test -x /snap/bin/chromium && echo /snap/bin/chromium; })}"
+    npm ci --prefix internal/cli/computer/browserdeps --ignore-scripts --no-audit --no-fund
+    if [[ -z ${DYNA_CHROMIUM:-} ]]; then
+      # Use the headless shell for the pinned Playwright version, not snap Chromium.
+      managed=$(node -e 'const path = require("node:path"); const { chromium } = require("./internal/cli/computer/browserdeps/node_modules/playwright-core"); const dir = path.dirname(path.dirname(chromium.executablePath())).replace(/chromium-(\d+)$/, "chromium_headless_shell-$1"); console.log(path.join(dir, "chrome-headless-shell-linux64", "chrome-headless-shell"));')
+      if [[ -x "$managed" ]]; then
+        DYNA_CHROMIUM=$managed
+      else
+        DYNA_CHROMIUM=$(command -v google-chrome || command -v google-chrome-stable || true)
+      fi
+    fi
+    if [[ -z "$DYNA_CHROMIUM" || ! -x "$DYNA_CHROMIUM" ]]; then
+      echo "No non-snap Chromium found. Install the pinned Playwright headless shell or set DYNA_CHROMIUM to a non-snap browser." >&2
+      exit 1
+    fi
+    export DYNA_CHROMIUM
     echo "Browser: $DYNA_CHROMIUM"
     "$DYNA_CHROMIUM" --version
-    npm ci --prefix internal/cli/computer/browserdeps --ignore-scripts --no-audit --no-fund
     npm ci --prefix next/web --prefer-offline --no-audit
     (cd next/web && ./node_modules/.bin/tsc --strict --noEmit --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 --allowImportingTsExtensions width-check.ts)
     node next/web/width-check.ts
