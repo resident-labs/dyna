@@ -79,6 +79,9 @@ test("keeps dormant closes out of the summary and explains them in detail", () =
   assert.ok(quiet && plain);
   assert.equal(workSummary([quiet, plain], id => id), "1 closed");
   assert.equal(describe(quiet, id => id), "scout closed after 7 quiet days");
+  const evicted = decodeEvent(event(3, { type: "session.closed", body: { session: "worker", reason: "disk" } }));
+  assert.ok(evicted);
+  assert.equal(describe(evicted, id => id), "worker closed to free disk");
 });
 
 test("splits activity at midnight and caps failures", () => {

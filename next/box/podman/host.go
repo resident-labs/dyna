@@ -416,7 +416,7 @@ func (h *Host) StopContainer(ctx context.Context, id contract.BoxID) error {
 	return err
 }
 func (h *Host) RemoveContainer(ctx context.Context, id contract.BoxID) error {
-	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "rm", "--ignore", string(id))
+	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "rm", "--ignore", "--volumes", string(id))
 	return err
 }
 func (h *Host) RemoveVolume(ctx context.Context, id contract.BoxID) error {

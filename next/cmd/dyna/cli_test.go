@@ -65,6 +65,7 @@ type fakeClient struct {
 	devices      []contract.Device
 	deviceRevoke contract.DeviceRevokeRequest
 	deviceScopes contract.DeviceSetScopesRequest
+	hosts        []contract.HostSummary
 }
 
 func (f *fakeClient) DevicePair(_ context.Context, q contract.DevicePairRequest) (contract.DevicePairResponse, error) {
@@ -90,6 +91,9 @@ func (f *fakeClient) File(context.Context, string, io.Writer) error { return nil
 func (f *fakeClient) Upload(_ context.Context, path string) (contract.Attachment, error) {
 	f.uploads = append(f.uploads, path)
 	return contract.Attachment{Name: path}, nil
+}
+func (f *fakeClient) HostList(context.Context, contract.HostListRequest) (contract.HostListResponse, error) {
+	return contract.HostListResponse{Hosts: f.hosts}, nil
 }
 func (f *fakeClient) HostAdd(_ context.Context, q contract.HostAddRequest) (contract.HostAddResponse, error) {
 	f.host = q
@@ -359,6 +363,13 @@ func TestDeviceListPrintsDevices(t *testing.T) {
 	}}}
 	out := runCLI(t, f, "device", "list")
 	if out != "dev_1\tphone\tread,operate\t2026-10-31T07:00:00Z\t2026-11-30T07:00:00Z\n" {
+		t.Fatalf("output=%q", out)
+	}
+}
+func TestHostListPrintsDiskState(t *testing.T) {
+	f := &fakeClient{hosts: []contract.HostSummary{{Name: contract.ControlPlane, DiskBytes: 100 << 30, DiskUsed: 40 << 30}, {Name: "worker", DiskBytes: 100 << 30, DiskUsed: 90 << 30, DiskLow: true}}}
+	out := runCLI(t, f, "host", "list")
+	if out != "control-plane\t40 GiB\t100 GiB\tok\nworker\t90 GiB\t100 GiB\tlow\n" {
 		t.Fatalf("output=%q", out)
 	}
 }
