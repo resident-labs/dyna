@@ -47,7 +47,7 @@ func (d *fakeDriver) StartRunner(_ context.Context, s box.RunnerSpec) error {
 	if d.startErr != nil {
 		return d.startErr
 	}
-	d.runners = append(d.runners, box.Runner{Name: s.Name, Repo: s.Repo, ID: s.ID, Running: true})
+	d.runners = append(d.runners, box.Runner{Name: s.Name, Repo: s.Repo, ID: s.ID, Slot: s.Slot, Running: true})
 	return nil
 }
 func (d *fakeDriver) ListRunners(ctx context.Context) ([]box.Runner, bool, error) {
@@ -128,7 +128,7 @@ type fixture struct {
 }
 
 func setting(host contract.HostName, runners int) contract.RepoCIHost {
-	return contract.RepoCIHost{Repo: repo, Host: host, Runners: runners, Size: contract.BoxSizeLarge, Room: "room"}
+	return contract.RepoCIHost{Repo: repo, Host: host, Runners: runners, Size: contract.BoxSizeLarge}
 }
 
 func readyHost(name contract.HostName, memory int64) box.Host {
@@ -230,11 +230,50 @@ func TestAddingAHostIsOnlyASetting(t *testing.T) {
 	}
 }
 
-func TestRoomBoundHostRefusesAnotherRoomsRepository(t *testing.T) {
+// host_rooms keeps sessions off a host. A repository names its CI hosts itself, so
+// a host held for CI by a dedicated room still serves it.
+func TestAHostKeptFromSessionsStillServesTheRepositoryThatNamesIt(t *testing.T) {
 	f := newFixture(1)
-	f.store.hosts[0].Rooms = []contract.RoomID{"other"}
-	if capacity := f.scale(1); capacity != 0 || len(f.sets.names) != 0 {
-		t.Fatalf("capacity %d, registered %v", capacity, f.sets.names)
+	f.store.hosts[0].Rooms = []contract.RoomID{"ci-only"}
+	if capacity := f.scale(1); capacity != 1 || len(f.drivers["pve"].runners) != 1 {
+		t.Fatalf("capacity %d, runners %+v", capacity, f.drivers["pve"].runners)
+	}
+}
+
+func TestEachRunnerGetsItsOwnProxySlotAndAFinishedOneFreesIt(t *testing.T) {
+	f := newFixture(3)
+	f.scale(3)
+	d := f.drivers["pve"]
+	if got := []int{d.specs[0].Slot, d.specs[1].Slot, d.specs[2].Slot}; !slices.Equal(got, []int{0, 1, 2}) {
+		t.Fatalf("slots %v", got)
+	}
+	d.runners = slices.DeleteFunc(d.runners, func(r box.Runner) bool { return r.Slot == 1 })
+	f.scale(3)
+	if slot := d.specs[3].Slot; slot != 1 {
+		t.Fatalf("the replacement took slot %d, want the free one", slot)
+	}
+}
+
+func TestAnotherRepositorysRunnerHoldsItsSlot(t *testing.T) {
+	f := newFixture(1)
+	d := f.drivers["pve"]
+	other := contract.RepoName("owner/other")
+	d.runners = []box.Runner{{Name: "dyna-ci-pve-other", Repo: other, ID: 9, Slot: 0, Running: true}}
+	f.store.settings = append(f.store.settings, contract.RepoCIHost{Repo: other, Host: "pve", Runners: 1, Size: contract.BoxSizeLarge})
+	f.scale(1)
+	if slot := d.specs[0].Slot; slot != 1 {
+		t.Fatalf("took slot %d, which another repository's runner holds", slot)
+	}
+}
+
+func TestAHostWithEverySlotInUseStartsNoRunner(t *testing.T) {
+	f := newFixture(box.RunnerSlots + 1)
+	f.store.hosts[0].CPUs, f.store.hosts[0].MemBytes = 64, 256*box.GiB
+	if capacity := f.scale(box.RunnerSlots + 1); capacity != box.RunnerSlots+1 {
+		t.Fatalf("capacity %d", capacity)
+	}
+	if got := len(f.drivers["pve"].runners); got != box.RunnerSlots {
+		t.Fatalf("%d runners on %d slots", got, box.RunnerSlots)
 	}
 }
 

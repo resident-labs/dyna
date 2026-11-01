@@ -39,7 +39,7 @@ func (s *Store) SetRepoCI(ctx context.Context, repo contract.RepoName, hosts []c
 
 // CIHosts lists the runner hosts of repositories in box mode.
 func (s *Store) CIHosts(ctx context.Context) ([]contract.RepoCIHost, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT c.repo,c.host,c.runners,c.size,r.default_room FROM repo_ci_hosts c JOIN repos r ON r.repo=c.repo ORDER BY c.repo,c.host")
+	rows, err := s.Read().QueryContext(ctx, "SELECT repo,host,runners,size FROM repo_ci_hosts ORDER BY repo,host")
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +47,7 @@ func (s *Store) CIHosts(ctx context.Context) ([]contract.RepoCIHost, error) {
 	var hosts []contract.RepoCIHost
 	for rows.Next() {
 		var host contract.RepoCIHost
-		if err := rows.Scan(&host.Repo, &host.Host, &host.Runners, &host.Size, &host.Room); err != nil {
+		if err := rows.Scan(&host.Repo, &host.Host, &host.Runners, &host.Size); err != nil {
 			return nil, err
 		}
 		hosts = append(hosts, host)
