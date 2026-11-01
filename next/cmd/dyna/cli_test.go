@@ -52,6 +52,7 @@ type fakeClient struct {
 	repoCI       contract.RepoCISetRequest
 	repoList     contract.RoomReposRequest
 	start        contract.SessionStartRequest
+	composeList  contract.ComposeListRequest
 	close        contract.SessionCloseRequest
 	setProfile   contract.SessionSetProfileRequest
 	restart      contract.SessionRestartRequest
@@ -129,6 +130,10 @@ func (f *fakeClient) RoomRepoAdd(_ context.Context, q contract.RoomRepoAddReques
 func (f *fakeClient) RoomRepos(_ context.Context, q contract.RoomReposRequest) (contract.RoomReposResponse, error) {
 	f.repoList = q
 	return contract.RoomReposResponse{Repos: []contract.RoomRepo{{Repo: "owner/a", Default: true}, {Repo: "owner/b"}}}, nil
+}
+func (f *fakeClient) ComposeList(_ context.Context, q contract.ComposeListRequest) (contract.ComposeListResponse, error) {
+	f.composeList = q
+	return contract.ComposeListResponse{Files: []contract.ComposeFile{{Name: "default", Level: contract.ComposeRepo}, {Name: "broken", Level: contract.ComposeRoom, Problem: "privileged is not allowed"}}}, nil
 }
 func (f *fakeClient) SessionStart(_ context.Context, q contract.SessionStartRequest) (contract.SessionStartResponse, error) {
 	f.start = q
@@ -257,6 +262,20 @@ func TestSessionStartMapsFlags(t *testing.T) {
 	runCLI(t, f, "session", "start", "--room", "r", "--name", "n", "--profile", "p", "--goal", "g", "--brief", "b", "--repo", "owner/name", "--parent", "s", "--size", "large")
 	if f.start.Size != "large" || f.start.Room != "r" || f.start.Name != "n" || f.start.Profile != "p" || f.start.Goal != "g" || f.start.Brief != "b" || f.start.Repo != "owner/name" || f.start.Parent != "s" {
 		t.Fatalf("%+v", f.start)
+	}
+}
+func TestSessionStartPassesAComposeName(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "session", "start", "--room", "r", "--name", "n", "--profile", "p", "--compose", "ci")
+	if f.start.Compose != "ci" {
+		t.Fatalf("%+v", f.start)
+	}
+}
+func TestSessionComposeListShowsLevelsAndProblems(t *testing.T) {
+	f := &fakeClient{}
+	out := runCLI(t, f, "session", "compose-list", "--room", "r", "--repo", "owner/name")
+	if f.composeList.Room != "r" || f.composeList.Repo != "owner/name" || out != "default (repo)\nbroken (room): privileged is not allowed\n" {
+		t.Fatalf("%+v: %q", f.composeList, out)
 	}
 }
 func TestSessionSetProfileMapsArgs(t *testing.T) {

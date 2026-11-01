@@ -12,6 +12,7 @@ import (
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
+	"github.com/resident-labs/dyna/engine/compose"
 	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/live"
 	"github.com/resident-labs/dyna/engine/model"
@@ -48,6 +49,8 @@ type Service struct {
 	reconciler        *lifecycle.Reconciler
 	profiles          Profiles
 	repos             Repositories
+	compose           *compose.Files
+	imageSize         func(context.Context, contract.RepoName, string) (contract.BoxSizeName, error)
 	approvals         *approve.Service
 	hostexec          HostexecRunner
 	hostexecTimeout   func(context.Context, time.Duration) (context.Context, context.CancelFunc)
@@ -124,6 +127,11 @@ func (s *Service) SetMaxDepth(depth int) { s.maxDepth = depth }
 func (s *Service) SetRepositories(repos Repositories) {
 	s.repos = repos
 	s.reconciler.SetRepositories(repos)
+}
+
+// SetCompose configures compose files before the service starts. imageSize reads the default size of one image.
+func (s *Service) SetCompose(files *compose.Files, imageSize func(context.Context, contract.RepoName, string) (contract.BoxSizeName, error)) {
+	s.compose, s.imageSize = files, imageSize
 }
 
 func (s *Service) Reconciler() *lifecycle.Reconciler { return s.reconciler }

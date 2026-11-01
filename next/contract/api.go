@@ -61,6 +61,7 @@ const (
 	MethodRoomRepos               Method = "room.repos"
 	MethodRepoCISet               Method = "repo.ci.set"
 	MethodSessionStart            Method = "session.start"
+	MethodComposeList             Method = "compose.list"
 	MethodSessionClose            Method = "session.close"
 	MethodSessionStop             Method = "session.stop"
 	MethodSessionSetProfile       Method = "session.set_profile"
@@ -406,10 +407,35 @@ type SessionStartRequest struct {
 	Brief    string      `json:"brief,omitempty"`
 	Size     BoxSizeName `json:"size,omitempty"`
 	SameHost bool        `json:"sameHost,omitempty"`
+	Compose  string      `json:"compose,omitempty"`
 }
 type SessionStartResponse struct {
 	Session SessionID `json:"session"`
 	Box     BoxID     `json:"box"`
+}
+
+// ComposeLevel is where a compose file lives.
+type ComposeLevel string
+
+const (
+	ComposeGlobal ComposeLevel = "global"
+	ComposeRoom   ComposeLevel = "room"
+	ComposeRepo   ComposeLevel = "repo"
+)
+
+type ComposeListRequest struct {
+	Room RoomID   `json:"room"`
+	Repo RepoName `json:"repo,omitempty"`
+}
+
+// ComposeFile is one name a session can start with, at the level that wins. Problem says why starting with it would be refused.
+type ComposeFile struct {
+	Name    string       `json:"name"`
+	Level   ComposeLevel `json:"level"`
+	Problem string       `json:"problem,omitempty"`
+}
+type ComposeListResponse struct {
+	Files []ComposeFile `json:"files"`
 }
 type SessionMoveRequest struct {
 	Session   SessionID `json:"session"`

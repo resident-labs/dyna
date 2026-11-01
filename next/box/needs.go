@@ -13,6 +13,8 @@ const (
 type Image struct {
 	Tag   string
 	Needs []Need
+	// Stack is what a compose file adds to the box. A box with no compose file has none.
+	Stack *Stack
 }
 
 // MissingDevice identifies a need that the selected host cannot supply.
