@@ -1,8 +1,26 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { summarizeWork, deriveTimelineGroups, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning } from "./timeline.ts";
+import { summarizeWork, deriveTimelineGroups, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout } from "./timeline.ts";
 import type { TranscriptInput, TranscriptItem } from "./contract.gen.ts";
+
+test("one item of work has no heading to open first, and a script keeps the heading that counts its actions", () => {
+  const thought: TranscriptItem = { id: "a", turn: "t", at: "", kind: "thinking", text: "Plan" };
+  const tool: TranscriptItem = { id: "b", turn: "t", at: "", kind: "tool", tool: "bash" };
+  const script: TranscriptItem = { id: "c", turn: "t", at: "", kind: "tool", tool: "codemode" };
+  assert.equal(workLayout([thought]), "single");
+  assert.equal(workLayout([tool]), "single");
+  assert.equal(workLayout([script]), "mixed");
+  assert.equal(workLayout([thought, { ...thought, id: "z" }]), "thoughts");
+  assert.equal(workLayout([thought, tool]), "mixed");
+  assert.equal(workLayout([tool, { ...tool, id: "z" }]), "mixed");
+});
+
+test("thoughts alone count as thoughts, with no title beside the count", () => {
+  const thought: TranscriptItem = { id: "a", turn: "t", at: "", kind: "thinking", text: "Plan" };
+  assert.equal(summarizeWork([thought, { ...thought, id: "b" }, { ...thought, id: "c" }]), "3 thoughts");
+  assert.equal(summarizeWork([thought, { id: "d", turn: "t", at: "", kind: "tool", tool: "bash" }]), "Ran 1 command");
+});
 
 test("summarizes nested actions rather than their script", () => {
   const items: TranscriptItem[] = [{ id: "c", turn: "t", at: "", kind: "tool", tool: "codemode", calls: [
