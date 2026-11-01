@@ -15,6 +15,7 @@ const (
 	AccountActionComplete    AccountAction = "complete"
 	AccountActionRemove      AccountAction = "remove"
 	AccountActionSetLimits   AccountAction = "set_limits"
+	AccountActionRename      AccountAction = "rename"
 )
 
 // AccountsActionArgs contains only the action kind, never account secrets.
@@ -153,6 +154,11 @@ type AccountsSetLimitsRequest struct {
 	Rooms     []RoomID  `json:"rooms"`
 }
 type AccountsSetLimitsResponse struct{}
+type AccountsRenameRequest struct {
+	AccountID AccountID `json:"accountId"`
+	Label     string    `json:"label"`
+}
+type AccountsRenameResponse struct{}
 type Profile struct {
 	Description   string        `json:"description"`
 	Taste         int           `json:"taste"`
