@@ -157,3 +157,16 @@ func TestOAuthImportRejectsSession(t *testing.T) {
 		t.Fatal("session was not denied")
 	}
 }
+
+func TestOAuthImportProviders(t *testing.T) {
+	for _, provider := range []contract.AccountProvider{contract.ProviderAnthropic, contract.ProviderOpenAI, contract.ProviderKimi, contract.ProviderXAI} {
+		if _, ok := model.OAuthProxyProvider(provider); !ok {
+			t.Fatalf("%s has no proxy provider", provider)
+		}
+	}
+	actions := &AccountActions{}
+	_, problem := actions.AccountsImportOAuth(context.Background(), contract.Principal{Kind: contract.PrincipalOwner}, contract.AccountsImportOAuthRequest{Provider: contract.ProviderZAI, Label: "Example", ExpiresAt: time.Unix(2000000000, 0), Credential: `{"access_token":"invented","refresh_token":"invented"}`})
+	if problem == nil || problem.Code != contract.ErrInvalid {
+		t.Fatal("key provider was not rejected")
+	}
+}
