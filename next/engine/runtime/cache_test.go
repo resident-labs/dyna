@@ -8,9 +8,9 @@ import (
 )
 
 func TestContainerMountsRoomSharedReadWrite(t *testing.T) {
-	b := &Boxes{HostData: "/host"}
+	b := &Boxes{Layout: box.Layout{HostData: "/host"}}
 	_, c := b.container(lifecycle.BoxSpec{Room: "room"}, "image")
-	want := box.Mount{HostPath: "/host/rooms/room", BoxPath: "/box/shared"}
+	want := box.Mount{HostPath: "/host/rooms/room/shared", BoxPath: "/box/shared"}
 	found := false
 	for _, mount := range c.Mounts {
 		if mount == want {
@@ -23,7 +23,7 @@ func TestContainerMountsRoomSharedReadWrite(t *testing.T) {
 }
 
 func TestContainerSharesDependencyCaches(t *testing.T) {
-	b := &Boxes{HostData: "/host"}
+	b := &Boxes{Layout: box.Layout{HostData: "/host"}}
 	_, c := b.container(lifecycle.BoxSpec{}, "image")
 	want := box.Mount{HostPath: "/host/cache", BoxPath: "/box/cache"}
 	found := false

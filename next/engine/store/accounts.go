@@ -52,6 +52,25 @@ func (s *Store) RemoveAccount(ctx context.Context, id contract.AccountID) error 
 	})
 }
 
+// RenameAccount changes an account's label. A label is only a display name: two
+// accounts may share one, and nothing joins on it.
+func (s *Store) RenameAccount(ctx context.Context, id contract.AccountID, label string) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "UPDATE accounts SET label=? WHERE id=?", label, id)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return ErrNotFound
+		}
+		return nil
+	})
+}
+
 // BindAccount associates an opaque account with a private proxy credential.
 func (s *Store) BindAccount(ctx context.Context, id contract.AccountID, proxyID string, provider contract.AccountProvider, label string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
@@ -81,6 +100,9 @@ func (s *Store) SetAccountRooms(ctx context.Context, account contract.AccountID,
 			return err
 		}
 		for _, room := range rooms {
+			if err := refuseNewWork(ctx, tx, room); err != nil {
+				return err
+			}
 			if _, err := tx.ExecContext(ctx, "INSERT INTO account_rooms(account,room) VALUES(?,?)", account, room); err != nil {
 				return err
 			}

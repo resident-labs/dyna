@@ -188,7 +188,8 @@
 </div>
 
 <style>
-  .virtual { height: 100%; overflow-y: auto; display: flex; flex-direction: column; }
+  /* A container, so a row in the capped column can reach the pane's edges with cqw (PostRow). */
+  .virtual { container-type: inline-size; height: 100%; overflow-x: hidden; overflow-y: auto; display: flex; flex-direction: column; }
   .sticky { position: sticky; top: 0; height: 0; z-index: 1; }
   .space { position: relative; flex: none; margin-top: auto; }
   .space.top { margin-top: 0; }

@@ -177,6 +177,11 @@ export class Attention {
       }
       return;
     }
+    // A deleted room has no rows left, so this live event also has seq 0.
+    if (event.type === "room.deleted") {
+      for (const map of [this.rooms, this.waiting, this.working, this.sessions, this.broken, this.failed, this.hostless]) map.delete(event.room ?? "");
+      return;
+    }
     // A read position also has seq 0. The feed's moves only forward, so a room store opened later starts from it.
     if (event.type === "conversation.read") {
       const room = this.rooms.get(event.body.room);
@@ -203,6 +208,11 @@ export class Attention {
       case "room.paused": case "room.resumed": {
         const room = this.rooms.get(event.room ?? "");
         if (room) this.rooms.set(room.id, { ...room, paused: event.type === "room.paused" });
+        break;
+      }
+      case "room.deleting": {
+        const room = this.rooms.get(event.room ?? "");
+        if (room) this.rooms.set(room.id, { ...room, deleting: true });
         break;
       }
       case "turn.started": working.add(event.body.session); this.turns.set(event.body.session, event.body.turn); this.activity.delete(event.body.session); break;
