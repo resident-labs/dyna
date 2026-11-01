@@ -80,6 +80,7 @@ func readTranscript(r io.Reader, deliveries map[contract.DeliverySeq]contract.Tu
 				Role, DeliveryID, ToolCallID string
 				IsError                      bool
 				Content                      json.RawMessage
+				Details                      struct{ Diff string }
 			}
 		}
 		if json.Unmarshal(line, &entry) != nil || entry.Type != "message" {
@@ -155,7 +156,15 @@ func readTranscript(r io.Reader, deliveries map[contract.DeliverySeq]contract.Tu
 				}
 			}
 			items[i].Output, items[i].Failed = harness.Mask(strings.Join(text, "\n")), m.IsError
+			// Pi records applied edit details separately from the result text.
+			if (items[i].Tool == "edit" || items[i].Tool == "write") && !m.IsError {
+				items[i].Diff = harness.Mask(m.Details.Diff)
+			}
 			items[i].Ended = &entry.Timestamp
+			if items[i].ID != fullItem && len(items[i].Diff) > 8192 {
+				items[i].Diff = strings.ToValidUTF8(items[i].Diff[:8192], "")
+				items[i].More = true
+			}
 			if items[i].ID != fullItem && len(items[i].Output) > 1024 {
 				items[i].Output = strings.ToValidUTF8(items[i].Output[:1024], "")
 				items[i].More = true
