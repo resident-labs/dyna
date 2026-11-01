@@ -221,7 +221,7 @@ func Run(ctx context.Context, cfg Config) error {
 				http.Error(w, "session unavailable", http.StatusServiceUnavailable)
 				return
 			}
-			_, allowed, err := profiles.Model(session.Profile)
+			allowed, err := service.AllowedModels(r.Context(), session)
 			if err != nil {
 				http.Error(w, "profile unavailable", http.StatusServiceUnavailable)
 				return

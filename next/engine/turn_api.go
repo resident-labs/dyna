@@ -95,11 +95,15 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 	if req.Outcome != contract.TurnCompleted && req.Outcome != contract.TurnFailed && req.Outcome != contract.TurnStopped {
 		return contract.TurnOutputResponse{}, invalid("invalid turn outcome")
 	}
-	if req.Cause != "" && req.Outcome != contract.TurnFailed {
+	if req.Cause == contract.CauseNotStarted {
+		if req.Outcome != contract.TurnStopped {
+			return contract.TurnOutputResponse{}, invalid("not_started needs a stopped outcome")
+		}
+	} else if req.Cause != "" && req.Outcome != contract.TurnFailed {
 		return contract.TurnOutputResponse{}, invalid("turn cause needs a failed outcome")
 	}
 	switch req.Cause {
-	case "", contract.CauseSetupFailed, contract.CauseModelFailed, contract.CauseOutputLimit, contract.CauseHarnessFailed, contract.CauseSetModelFailed:
+	case "", contract.CauseSetupFailed, contract.CauseModelFailed, contract.CauseOutputLimit, contract.CauseHarnessFailed, contract.CauseSetModelFailed, contract.CauseNotStarted:
 	default:
 		return contract.TurnOutputResponse{}, invalid("invalid turn cause")
 	}

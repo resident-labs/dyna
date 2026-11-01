@@ -110,6 +110,7 @@ const (
 	streamSectionsReadFailed   streamStopReason = "sections_read_failed"
 	streamSnapshotFailed       streamStopReason = "snapshot_failed"
 	streamSectionsSaveFailed   streamStopReason = "sections_save_failed"
+	streamModelSaveFailed      streamStopReason = "model_save_failed"
 	streamStopReadFailed       streamStopReason = "stop_read_failed"
 )
 
@@ -304,6 +305,10 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 					reason, cause = streamProfileFailed, err
 					return
 				}
+				if err = s.store.DispatchTurnModel(ctx, turn, model.ID); err != nil {
+					reason, cause = streamModelSaveFailed, err
+					return
+				}
 				sections, saved, err := s.store.SavedTurnSections(ctx, turn)
 				if err != nil {
 					reason, cause = streamSectionsReadFailed, err
@@ -323,7 +328,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 					}
 				}
 				select {
-				case out <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start, Model: model, Sections: sections}}:
+				case out <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start, Model: model, CompactTokens: s.profiles.CompactionTokens(profile), Sections: sections}}:
 				case <-ctx.Done():
 					reason, cause = streamCanceled, ctx.Err()
 					return
