@@ -18,7 +18,6 @@ import (
 )
 
 type Profiles interface {
-	Surface(contract.ProfileName) contract.AgentSurface
 	List() []contract.ProfileSummary
 	CompactionTokens(contract.ProfileName) int
 	Model(contract.ProfileName) (contract.ModelChoice, []string, error)
@@ -49,7 +48,6 @@ type Service struct {
 	live               *live.Live
 	sessions           map[contract.SessionID]*sessionState
 	computerGeneration uint64
-	activityCount      uint64
 	shellGeneration    uint64
 	readMu             sync.Mutex // preserves commit and live broadcast order
 	// transcriptMu serializes appends, so each offset check and write runs alone.
@@ -61,17 +59,14 @@ type Service struct {
 }
 
 // sessionState is the engine's in-memory state for one session. s.mu guards its fields.
-// computerLock serializes computer transitions and channel replacement.
+// computerLock serializes computer transitions, channel replacement and watcher delivery.
 // Take computerLock before s.mu, never the reverse.
 type sessionState struct {
 	computerLock sync.Mutex
 	channel      *boxChannel
-	activity     contract.TurnActivity
 	computer     *computerState
 	terminals    int
 	watch        *shellWatch
-	// activityOrder is the s.activityCount value when activity was set, so a room's newest label wins.
-	activityOrder uint64
 }
 
 // sessionLocked creates the entry if needed. Callers hold s.mu and pass the id of a session that exists or is being started.
@@ -81,6 +76,15 @@ func (s *Service) sessionLocked(id contract.SessionID) *sessionState {
 		state = &sessionState{}
 		s.sessions[id] = state
 	}
+	return state
+}
+
+// lockSession returns the session with its computer lock held.
+func (s *Service) lockSession(id contract.SessionID) *sessionState {
+	s.mu.Lock()
+	state := s.sessionLocked(id)
+	s.mu.Unlock()
+	state.computerLock.Lock()
 	return state
 }
 
@@ -106,6 +110,42 @@ func (s *Service) SetRepositories(repos Repositories) {
 }
 
 func (s *Service) Reconciler() *lifecycle.Reconciler { return s.reconciler }
+
+// SessionClosed retires live and legacy session state after the close commits.
+func (s *Service) SessionClosed(id contract.SessionID) {
+	s.live.CloseSession(id)
+	s.mu.Lock()
+	state := s.sessions[id]
+	s.mu.Unlock()
+	if state == nil {
+		return
+	}
+	state.computerLock.Lock()
+	defer state.computerLock.Unlock()
+	s.mu.Lock()
+	if s.sessions[id] != state {
+		s.mu.Unlock()
+		return
+	}
+	channel := state.channel
+	state.channel = nil
+	room, stopped, computerWatchers := s.clearComputerLocked(id)
+	shellWatchers := s.clearShellLocked(id)
+	delete(s.sessions, id)
+	s.mu.Unlock()
+	for _, ch := range computerWatchers {
+		close(ch)
+	}
+	for _, ch := range shellWatchers {
+		close(ch)
+	}
+	if channel != nil {
+		channel.stop()
+	}
+	if stopped {
+		_ = s.computerEvent(context.Background(), id, room, contract.ComputerStopped)
+	}
+}
 
 func (s *Service) OpenTerminal(id contract.SessionID) bool {
 	s.mu.Lock()

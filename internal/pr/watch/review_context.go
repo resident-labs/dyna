@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/changepolicy"
+	"dyna-agent/internal/ghquota"
 	"dyna-agent/internal/pr/state"
 )
 
@@ -229,7 +230,9 @@ func (s *Service) reviewChecks(ctx context.Context, r Record) ([]CheckSummary, e
 		return r.Checks, nil
 	}
 	var snap Snapshot
-	if err := s.github(r.RoomID).readCommitCI(ctx, refRecord(r), r.Head, &snap); err != nil {
+	gh := s.github(r.RoomID)
+	gh.runPhase = ghquota.RunReviewContext
+	if err := gh.readCommitCI(ctx, refRecord(r), r.Head, &snap); err != nil {
 		return nil, err
 	}
 	return snap.CheckSummaries(refRecord(r)), nil
