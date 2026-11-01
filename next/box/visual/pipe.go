@@ -40,7 +40,7 @@ type params struct {
 	Width                 int      `json:"width,omitempty"`
 	Height                int      `json:"height,omitempty"`
 	DeviceScaleFactor     int      `json:"deviceScaleFactor,omitempty"`
-	Mobile                bool     `json:"mobile,omitempty"`
+	Mobile                *bool    `json:"mobile,omitempty"`
 	RequestID             string   `json:"requestId,omitempty"`
 	ResponseCode          int      `json:"responseCode,omitempty"`
 	ResponseHeaders       []header `json:"responseHeaders,omitempty"`
