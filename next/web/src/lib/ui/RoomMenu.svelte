@@ -3,7 +3,7 @@
   import Icon from "./Icon.svelte";
   import StatusPill from "./StatusPill.svelte";
   // The room's less frequent actions. Requests has its own header button.
-  let { paused, operate, admin, onpause, oninstructions, onterminal, oncomputer, onrequests, onjobs, onsessions, jobFailed = false, waiting = 0 }: { onsessions?: () => void; onrequests?: () => void; onjobs?: () => void; jobFailed?: boolean; waiting?: number; paused: boolean; operate: boolean; admin: boolean; onpause: () => void; oninstructions: () => void; onterminal?: () => void; oncomputer?: () => void } = $props();
+  let { paused, operate, admin, onpause, oninstructions, onterminal, oncomputer, onrequests, onjobs, jobFailed = false, waiting = 0 }: { onrequests?: () => void; onjobs?: () => void; jobFailed?: boolean; waiting?: number; paused: boolean; operate: boolean; admin: boolean; onpause: () => void; oninstructions: () => void; onterminal?: () => void; oncomputer?: () => void } = $props();
   let open = $state(false);
   let root: HTMLDivElement;
   let button: HTMLButtonElement;
@@ -37,7 +37,6 @@
   {#if open}
     <div class="list" role="menu" id="room-menu" tabindex="-1" bind:this={list} onkeydown={move}>
       {#if onrequests}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onrequests(); }}>Requests{#if waiting}<StatusPill tone="warning" label="Requests waiting" count={waiting} />{/if}</button>{/if}
-      {#if onsessions}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onsessions(); }}>Sessions</button>{/if}
       {#if onjobs}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onjobs(); }}>Jobs{#if jobFailed}<StatusPill tone="failed" label="A job failed" dot />{/if}</button>{/if}
       {#if onterminal}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onterminal(); }}>Terminal</button>{/if}
       {#if oncomputer}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); oncomputer(); }}>Computer</button>{/if}
