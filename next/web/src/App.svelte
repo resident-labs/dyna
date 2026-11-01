@@ -15,8 +15,6 @@
   import { linkCode } from "./lib/devices.ts";
   import Feed from "./lib/ui/Feed.svelte";
   import SessionThread from "./lib/ui/SessionThread.svelte";
-  import VisualView from "./lib/ui/VisualView.svelte";
-  import type { VisualVersion } from "./lib/visual.ts";
   import StatusPill from "./lib/ui/StatusPill.svelte";
   import Composer from "./lib/ui/Composer.svelte";
   import WorkingLine from "./lib/ui/WorkingLine.svelte";
@@ -130,7 +128,6 @@
     if (inSettings) return;
     behind = path;
     section = /\/instructions\/?$/.test(path) ? "instructions" : undefined;
-    visual = undefined;
   }
   window.addEventListener("popstate", follow);
   function dismissRequests(event: MouseEvent) {
@@ -138,10 +135,6 @@
   }
   // The requests view shows in place of the conversation until Back, Escape or the control that opened it.
   let section: "requests" | "instructions" | undefined = $state(/\/instructions\/?$/.test(behind) ? "instructions" : undefined);
-  let visual: { versions: VisualVersion[]; selected: number; send: (text: string, event: string) => Promise<void> } | undefined = $state();
-  let visualTrigger: HTMLElement | undefined;
-  let shellWidth = $state(0);
-  let visualOverlay = $derived(shellWidth - (shellWidth <= 640 ? 0 : 64) < 1200);
   let requestsButton: HTMLButtonElement | undefined = $state();
   function openInstructions() {
     history.pushState({ instructionsBack: behind }, "", `/r/${encodeURIComponent(room!)}/instructions`);
@@ -581,7 +574,7 @@
 {/snippet}
 
 {#if signedOut}<ConnectScreen code={pairCode} />
-{:else}<div class="shell" bind:clientWidth={shellWidth} class:visual-overlay={visualOverlay} class:open={room || activity.active.length} class:drawer class:tucked={room && wide.current && tucked} class:settings={inSettings}>
+{:else}<div class="shell" class:open={room || activity.active.length} class:drawer class:tucked={room && wide.current && tucked} class:settings={inSettings}>
   <aside class="rail" aria-label="Rooms" tabindex="-1" bind:this={rail} inert={phone.current && !drawer} role={drawer ? "dialog" : undefined} aria-modal={drawer || undefined}
     onclick={event => { if (drawer && event.target instanceof Element && event.target.closest("a, button")) void showDrawer(false, false); }}>
     <nav aria-label="Rooms"><a class="home" href="/" onclick={navigate} aria-current={room || inSettings ? undefined : "page"} aria-label="Home" title="Home"><Icon name="home" /></a>
@@ -615,7 +608,7 @@
   </aside>
   {#if drawer || (panel && phone.current)}<button type="button" class="scrim" tabindex="-1" aria-label={drawer ? "Close the menu" : room ? "Close the sessions" : "Close the active rooms"}
     onclick={() => void (drawer ? showDrawer(false, true, true) : showPanel(false, true))}></button>{/if}
-  <main bind:clientWidth={mainWidth} class:header-tight={mainWidth <= 1000} class:header-narrow={mainWidth <= 600} inert={drawer || (panel && phone.current) || covered || inSettings || (!!visual && visualOverlay)}>
+  <main bind:clientWidth={mainWidth} class:header-tight={mainWidth <= 1000} class:header-narrow={mainWidth <= 600} inert={drawer || (panel && phone.current) || covered || inSettings}>
     {#if section === "instructions" && room && store && !unavailable}<Instructions {room} {roomName} rooms={rooms.length} sessions={store.sessions.size} onclose={() => void closeSection()} />
     {:else}
     <header class="bar" class:session-bar={!!session}>{#if room && session && phone.current}<a class="menu-toggle" href={"/r/" + encodeURIComponent(room)} aria-label={`Back to ${roomName}`} title={`Back to ${roomName}`}
@@ -651,9 +644,9 @@
         onactive={event => { toggle = event.currentTarget; void showPanel(true, event.detail > 0); }} />
       {:else if unavailable === "unreachable"}<Blocked kind="unreachable" onretry={reopen} />
       {:else if store && !unavailable}
-        {#if session}{#key session}<SessionThread bind:this={thread} {store} {session} {roomName} {navigate} onvisual={(versions, selected, send) => { visualTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : undefined; visual = { versions, selected, send }; }} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{/key}{:else}{#key key}<Feed bind:this={view} {store} {home} admin={attention.can("admin")} operate={attention.can("operate") && !closed} waiting={quotes[key]} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
+        {#if session}{#key session}<SessionThread bind:this={thread} {store} {session} {roomName} {navigate} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{/key}{:else}{#key key}<Feed bind:this={view} {store} {home} admin={attention.can("admin")} operate={attention.can("operate") && !closed} waiting={quotes[key]} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
           onforward={forward} onclosed={() => composer?.focus()} onjobs={item => void jobsTool?.show(item)}
-          onvisual={(versions, selected, send) => { visualTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : undefined; visual = { versions, selected, send }; }} />{/key}{/if}
+          />{/key}{/if}
         <!-- The empty feed stays mounted behind the error, as it is how the page learns the session has no history. -->
         {#if missing && room}<Blocked kind="no-session" back={{ href: "/r/" + encodeURIComponent(room), label: `Back to ${roomName}` }} {navigate} />{/if}
       {:else}<p class="empty">This room is not available. <button type="button" class="retry" onclick={reopen}>Try again</button></p>{/if}
@@ -673,7 +666,6 @@
         sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
     </div>
   </main>
-  {#if visual && store && !inSettings}<aside class="visual-pane"><VisualView {...visual} room={store.room} {roomName} overlay={visualOverlay} names={store.names} onclose={() => { visual = undefined; void tick().then(() => visualTrigger?.focus()); }} /></aside>
   {:else if room}
     <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} class:watching={watching && docked} aria-label="Sessions" tabindex="-1" role={panel && phone.current && !covered ? "dialog" : undefined} aria-modal={(panel && phone.current && !covered) || undefined} bind:this={members} inert={drawer || covered || inSettings}>
       <!-- Docked, the computer sits above the session list. -->
@@ -758,11 +750,6 @@
   .shell.open.tucked, .shell.open:has(:global(.instructions)) { grid-template-columns: 64px 1fr; }
   .shell.open:has(:global(.instructions)) aside.members { display: none; }
   @media (max-width: 640px) { .shell.open:has(:global(.instructions)) { grid-template-columns: minmax(0, 1fr); } }
-  .shell.open:has(.visual-pane) { position:relative; grid-template-columns:64px minmax(0, 1fr) clamp(560px, calc((100% - 64px) * .45), 960px); }
-  .visual-pane { min-width:0; overflow:hidden; border-left:1px solid var(--line); }
-  .shell.open.visual-overlay:has(.visual-pane) { grid-template-columns:64px minmax(0, 1fr); }
-  .visual-overlay .visual-pane { position:absolute; z-index:4; inset:0 0 0 64px; }
-  @media (max-width:640px) { .shell.open.visual-overlay:has(.visual-pane) { grid-template-columns:minmax(0, 1fr); } .visual-overlay .visual-pane { left:0; } }
   .shell.tucked > aside.members { display: none; }
   .narrow, .menu-toggle { display: none; }
   @media (max-width: 760px) { .narrow { display: inline; } }
