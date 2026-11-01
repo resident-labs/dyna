@@ -2,7 +2,7 @@ import { test } from "node:test";
 import { decodeEvent } from "./event.ts";
 import { dmOf } from "./window.svelte.ts";
 import assert from "node:assert/strict";
-import { clause, commandLine, dayLabel, describe, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, isThumb, quoted, requestLine, shortPaths, workSummary } from "./feed.ts";
+import { clause, commandLine, dayLabel, describe, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, isThumb, quoted, requestLine, shortPaths, workIsBare, workSummary } from "./feed.ts";
 import type { BoxState, Event, EventBody, FailureCause, Principal } from "./contract.gen.ts";
 
 test("a forward quotes every line of the post under its label, then the owner's words", () => {
@@ -71,6 +71,17 @@ test("places completed work after the last post and suppresses short quiet turns
   assert.deepEqual(rows.map(row => row.kind), ["post", "post", "work"]);
   const work = rows[2];
   assert.equal(work.kind === "work" && workSummary(work.events, id => id), "l worked for 1 min · 1 job");
+});
+
+test("a work row opens only when it has more to show than its summary", () => {
+  const started = decodeEvent(event(1, { type: "session.started", body: { session: "eval-worker", name: "eval-worker", profile: "trial" } }));
+  const dormant = decodeEvent(event(2, { type: "session.closed", body: { session: "scout", reason: "dormant" } }));
+  const pr = decodeEvent(event(3, { type: "pr.opened", body: { repo: "dyna", number: 7, session: "builder", url: "https://example.com/7" } }));
+  assert.ok(started && dormant && pr);
+  assert.equal(workIsBare([started], id => id), true);
+  assert.equal(workIsBare([dormant], id => id), true);
+  assert.equal(workIsBare([started, started], id => id), false);
+  assert.equal(workIsBare([pr], id => id), false);
 });
 
 test("keeps dormant closes out of the summary and explains them in detail", () => {
