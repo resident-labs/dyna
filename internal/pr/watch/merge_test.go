@@ -946,3 +946,18 @@ func TestObservedMergeRetargetRespectsRoomAndHead(t *testing.T) {
 		})
 	}
 }
+
+func TestMergeQueueNonDefaultBase(t *testing.T) {
+	child := &Record{Key: "child", Repo: "owner/repo", HeadRepo: "owner/repo", Branch: "feature", BaseRef: "mod-api", DefaultBranch: "main", State: "open", Watching: true}
+	st := State{Records: map[string]*Record{"child": child}}
+	rows := mergeQueue(st, nil, nil)
+	if len(rows) != 1 || rows[0].State != "unmanaged-base" {
+		t.Fatalf("non-default base: %+v", rows)
+	}
+	st.Records["parent"] = &Record{Key: "parent", Repo: "owner/repo", HeadRepo: "owner/repo", Branch: "mod-api", BaseRef: "main", DefaultBranch: "main", State: "open", Watching: true}
+	for _, row := range mergeQueue(st, nil, nil) {
+		if row.ChangeID == changeID(*child) && row.State != "waiting-base" {
+			t.Fatalf("stacked base: %+v", row)
+		}
+	}
+}
