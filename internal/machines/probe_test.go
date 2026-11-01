@@ -7,7 +7,28 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestOlderProbeCannotReplaceNewerResult(t *testing.T) {
+	ctx := context.Background()
+	s := fixture(t)
+	m, err := s.Save(ctx, Machine{Name: "build", SSH: "user@build", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if _, err := s.SaveProbe(ctx, m.ID, ProbeResult{At: now, Health: HealthOffline, Err: "unreachable"}); err != nil {
+		t.Fatal(err)
+	}
+	m, err = s.SaveProbe(ctx, m.ID, ProbeResult{At: now.Add(-time.Second), Health: HealthOnline, Capabilities: Capabilities{CPUs: 8}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Health != HealthOffline || m.Capabilities.CPUs == 8 {
+		t.Fatalf("older probe replaced newer result: %+v", m)
+	}
+}
 
 // probeText is what one probe prints on a Linux machine.
 const probeText = `os=Linux
