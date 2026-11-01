@@ -15,8 +15,13 @@
     if (list) {
       const box = anchor.getBoundingClientRect();
       const left = Math.min(box.right - list.offsetWidth, document.documentElement.clientWidth - list.offsetWidth - 16);
+      const below = document.documentElement.clientHeight - box.bottom - 16;
+      const above = box.top - 16;
+      const opensUp = list.offsetHeight > below && above > below;
+      const space = opensUp ? above : below;
       list.style.left = `${Math.max(16, left)}px`;
-      list.style.top = `${box.bottom + 4}px`;
+      list.style.maxHeight = `${space}px`;
+      list.style.top = `${opensUp ? box.top - Math.min(list.offsetHeight, space) - 4 : box.bottom + 4}px`;
     }
     (entries().find(item => item.ariaChecked === "true") ?? entries()[0])?.focus();
   });
@@ -36,7 +41,7 @@
 </div>
 
 <style>
-  .list { position: fixed; z-index: 2; width: 232px; max-width: calc(100vw - 32px); padding: 4px; display: grid;
+  .list { position: fixed; z-index: 2; width: 232px; max-width: calc(100vw - 32px); padding: 4px; display: grid; overflow-y: auto;
     background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px var(--shadow-md); }
   [role="menuitemradio"] { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 6px 8px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; line-height: 18px; text-align: left; cursor: pointer; }
   [role="menuitemradio"] :global(svg) { flex: none; width: 16px; height: 16px; margin-top: 1px; color: var(--muted); }
