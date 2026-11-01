@@ -244,7 +244,7 @@ func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event c
 				return item.Kind == contract.ResponsibilityGoal && slices.Contains(unheld, contract.GoalID(item.ID))
 			})
 			result, err := tx.ExecContext(ctx, `INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state,handoff_from)
-SELECT 'session',?,seq,'session','post','','','','',1,'pending',COALESCE(handoff_from,?) FROM deliveries WHERE to_kind='session' AND to_id=? AND state IN ('pending','taken')
+SELECT 'session',?,seq,'session','post','','','','',1,'pending',COALESCE(handoff_from,?) FROM deliveries d WHERE d.to_kind='session' AND d.to_id=? AND d.state IN ('pending','taken') AND NOT `+boxUpdateNotice+`
 ON CONFLICT(to_kind,to_id,seq) DO NOTHING`, parent, id, id)
 			if err != nil {
 				return err
