@@ -38,7 +38,7 @@
 {#snippet entry(item: TranscriptItem)}
   {@const title = titleOf(item)}
   {@const running = !ended && !item.ended}
-  <details class="entry" ontoggle={(event) => { if (event.currentTarget.open) { onopen(); if (item.more) { if (item.kind === "thinking") void load(item, "text"); else { void load(item, "arguments"); void load(item, "output"); } } } }}>
+  <details class="entry" ontoggle={(event) => { if (event.currentTarget.open) { onopen(); if (item.more) { if (item.kind === "thinking") void load(item, "text"); else { void load(item, "arguments"); void load(item, "output"); if (item.diff) void load(item, "diff"); } } } }}>
     <summary>
       <span class="slot">{#if running}<span class="spinner" aria-label="Working" role="img"></span>{:else}<Icon name={item.kind === "thinking" ? "chat" : icons[title.kind]} size={16} />{/if}</span>
       <span>{item.kind === "thinking" ? "Thought" : running ? activeVerb(title.kind, title.verb) : title.verb}</span>
@@ -53,6 +53,7 @@
           <button disabled={loading[key(item, "text")]} onclick={() => void load(item, "text")}>{failures[key(item, "text")] ? "Could not load thought. Try again" : "Show all"}</button>
         {/if}
       {:else}
+        {#if item.diff}<pre class="diff">{#each (chunks[key(item, "diff")] ?? item.diff).split("\n") as line}<span class:add={line.startsWith("+")} class:remove={line.startsWith("-")}>{line}&#10;</span>{/each}</pre>{/if}
         {#each ["arguments", "output"] as part}
           {@const name = part as "arguments" | "output"}
           {#if item[name] || chunks[key(item, name)] !== undefined}<pre>{chunks[key(item, name)] ?? item[name]}</pre>{/if}
@@ -89,6 +90,8 @@
   .content { margin-left: 28px; padding: 4px 0; max-height: 384px; overflow: auto; }
   code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); }
   pre { max-height: 256px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.625 var(--mono); }
+  .diff .add { color: var(--success, #65a972); }
+  .diff .remove { color: var(--danger, #d97b7b); }
   .time { margin-left: auto; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
   button { border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
   button:hover { color: var(--text); }
