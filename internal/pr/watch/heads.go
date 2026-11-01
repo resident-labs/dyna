@@ -694,7 +694,7 @@ func (s *Service) recheckCancelledMainCI(ctx context.Context, gh GitHub, records
 			var snap Snapshot
 			// The selected login from the head probe scopes every validator. The
 			// execution callback checks that account selection did not change.
-			useCache := probe.Account != ""
+			useCache := probe.Account != "" && s.mainRecheckCache != nil
 			if gh.requests == nil {
 				gh.requests = &requestCache{}
 			}
