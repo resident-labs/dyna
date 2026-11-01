@@ -19,6 +19,11 @@ export function deriveTimelineGroups(items: TranscriptItem[]): TimelineGroup[] {
   return result;
 }
 
+// Dyna: Text can fold only when a work disclosure is present.
+export function visibleTimelineText(id: string, final: string | undefined, completed: boolean, hasWork: boolean, expanded: boolean): boolean {
+  return !completed || !hasWork || id === final || expanded;
+}
+
 // Ported from T3 Code (packages/client-runtime/src/work-log/presentation.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 // Dyna: Transcript tools have no T3 source or integration metadata.
 export function summarizeWork(items: TranscriptItem[]): string {
