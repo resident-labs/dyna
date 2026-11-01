@@ -29,7 +29,7 @@ The owner settled the design on the card. Writing the spec needed the decisions 
 7. **Root is a position in the tree.** Any session above another may start, move or close it. Root is above every session, so it can do all of that with no root check. Its only extra powers are two grants (ask the owner, host exec) and one subscription (engine notices).
 8. **Self-hosting comes before the cutover.** v2 first runs its own development in a trial room beside v1. Until the cutover, v2 uses its own data, runtime and SSH control folders (`dyna-next`), so its store, owner socket, box sockets and SSH masters never meet v1's. The trial starts in M2, as soon as one box can build and test dyna (root, 2026-10-30). From then on, v2 sessions do part of the M2 and M3 work, and v1 stays the fallback until the cutover. The cutover follows only after the trial works and a dry-run import passes (section 11).
 9. **Some v1 features wait until after the cutover.** Voice comes back after the cutover. The owner requested Dyna web search in v2 now on 2026-10-31, replacing its earlier deferral. The library (the feature map, the librarian and its page) is cut from v2 for now (owner, 2026-10-30); the frozen v1 backup keeps the map. Computers come back early, in M2, in a minimal form (5.14), so that agents can check web views from inside v2 (owner, 2026-10-30). Workflows are ported in M3, before the cutover, because fl-rea depends on them (owner, 2026-10-30; 9.2). The desktop window is ported in M3, so the owner keeps it. Section 9 lists every feature. There is no rollback, so the owner should check that list.
-10. **Node jobs are not ported.** CI runs on GitHub Actions, with self-hosted runners in boxes (decision 13). Host-specific work uses host exec or a room restricted to a suitable host. Admission does not yet select hosts by device needs (5.2).
+10. **Node jobs are not ported.** CI runs on GitHub Actions, with self-hosted runners in containers on hosts each repository chooses (decision 13, [CI runners](ci-runners.md)). Host-specific work uses host exec or a room restricted to a suitable host. Admission does not yet select hosts by device needs (5.2).
 11. **CLIProxyAPI is vendored and runs in a child process.** We keep a fork in `next/third_party/cliproxyapi`, as v1 keeps Pi, so that we can extend it. `dyna engine` supervises a child of the same binary over a Unix socket, so a proxy panic cannot stop the engine (5.7). It lands in M1, because the model route needs it.
 12. **Size budget and scope cuts (r22).** Each milestone report counts product lines per package against the plan's budget. On 2026-10-30 the owner kept subtree moves, `Run` subscriptions and `show_pty` requests, and cut these until a need shows: box growth (`box.grow`; only the `box.pressure` report ships, 5.4, owner q40), a box starting again on another host after a host failure (a lost box waits for its host, 5.10), box checkpoints, the relocation commands (a manual procedure instead, 5.10), the bundle data of issue watches and room MCP servers, one cgroup per shell job (process groups instead, 5.8), `node_modules` reflink seeding, and external members (7.3). M1 also moves the Dyna shell server and the transcript stream to M2 (5.8).
 13. **GitHub is the source of truth for PRs, merges and CI.** The owner chose this on 2026-10-30 (option B of the forge note), in place of porting v1's 42,510 lines. Dyna is stateless here: it stores only which session owns which PR and whether that PR is approved (`pr_owners`), and it reads PRs and checks from GitHub when it needs them, within the request budget of 7.7: one batched GraphQL query per repository per poll, and ETags on REST reads. CI runs on GitHub Actions: self-hosted runners in boxes run the owner's and Dyna's PRs, each box gets only a single-job just-in-time runner token from the engine, and outside PRs use GitHub-hosted runners or wait for the owner. Comment trust, merge trials, the CI time budget, the conflict radar and the room PR views are dropped. Budget: about 2,500 Go lines for PRs, approval, merges and CI, plus about 450 product lines for `gh` through the engine (the spike's range is 430 to 660, and it replaces a loopback-HTTP sketch that `gh` refuses).
@@ -855,7 +855,7 @@ The new host must reach every host over SSH. When the old engine host is also a 
 ### 5.11 Carried from D-585
 
 - The shell tool runs locally in the box. `node=` is not built, and the #1243 SSH hint is gone.
-- Node jobs are not ported (section 0, decision 10). CI runs on GitHub Actions, with runners in boxes. Host-specific work uses host exec or a room restricted to a suitable host. The snapshot method from #1246 lives on as the archive.
+- Node jobs are not ported (section 0, decision 10). CI runs on GitHub Actions, on the [runner pool](ci-runners.md). Host-specific work uses host exec or a room restricted to a suitable host. The snapshot method from #1246 lives on as the archive.
 - One host has one master, from #1250. It carries image builds, host exec and the box socket forwards.
 
 
@@ -866,7 +866,7 @@ The owner manages every model account on one page of the v2 web app. It has the 
 - **Providers.** One row per provider and account, with its label, state and room limits. A provider with a sign-in has a "Connect" button, which starts CLIProxyAPI's own OAuth or device-code flow. The page shows the link or code, and the token goes straight to CLIProxyAPI. A provider with a key has a key field. The engine passes the key to CLIProxyAPI and never shows it again; only the proxy's token store keeps it.
 - **Quota.** For each account and each provider: the usage against each limit window and the time of the next reset. Usage reporting is the proxy's responsibility (owner, 2026-11-01). On request, the engine makes one call per account to the patched `auth-files/quota` management endpoint, so it never holds a model token. It runs at most four reads at once and caches each account's result for five minutes. A reader that cannot read a value reports it as unknown, never as zero, and only Claude's read can report an expired sign-in. Windows are five-hour, weekly, monthly or other. A prepaid balance is display-only text with no meter or alert. Meta has no usage endpoint, so its windows come from the `response.subscription_usage` event on model traffic, and a Meta account shows nothing until it serves a request.
 - **Alerts.** The events `account.quota_low` (below 10% of a window, or an owner-set floor) and `account.failed` (sign-in rejected or refresh failed) are typed and carry the account and the reason. Only these two states get a colored chip, through the shared `StatusPill` (r8, r16). Every other value is muted text.
-- **Methods.** `accounts.list`, `accounts.connect`, `accounts.set_key`, `accounts.remove` and `accounts.set_limits` are owner-class operations (3.5). The quota view reads `accounts.quota`.
+- **Methods.** `accounts.list`, `accounts.connect`, `accounts.set_key`, `accounts.remove`, `accounts.rename` and `accounts.set_limits` are owner-class operations (3.5). The quota view reads `accounts.quota`.
 
 ### 5.13 Web design
 
@@ -1089,7 +1089,7 @@ type RoomRepo struct {
 }
 
 type MergePolicy string     // "queue" (Dyna merges when the approval flag matches the head and CI is green, through GitHub's merge queue where the repository has one) | "manual"
-type CIMode string          // where Actions jobs run: "github" (GitHub-hosted) | "box" (a self-hosted runner in a box)
+type CIMode string          // where Actions jobs run: "github" (GitHub-hosted) | "box" (Dyna's runner pool)
 type AttributionKind string // "commit" | "pr" | "comment"
 
 type AttributionLine struct {
@@ -1142,7 +1142,7 @@ Owner, 2026-10-31 (decision 15). Agents reach Dyna through one MCP server that t
 | Box agent | The `dyna` MCP server at `127.0.0.1:7781/dyna/`, beside `/shell/`. Each `tools/call` becomes one `POST /v1/<method>` on the box socket. It writes Pi's `mcp.json` entry for `dyna`, sends the snapshot sections with `set_prompt_sections`, and writes skill and room MCP changes for `reload_resources` (below). It holds no authority and no credential. |
 | Engine | The only authority. A tool call and a CLI command reach the same method, through the same box socket, as the same principal, under the same checks (3.7, 7.1). It renders the snapshot with `context.snapshot`. |
 
-Dyna ships no Pi extension (owner, 2026-10-31: this changes how Pi's base systems work). Pi owns the timing as general features; Dyna owns only the content.
+Pi owns the timing as general features; Dyna owns only the content. Dyna's one Pi extension, `box/agent/extension.js`, stays small and changes none of Pi's base systems: it links tool calls and lets a post end the turn (owner, 2026-11-01: extend Dyna's extension rather than fork Pi for `terminate`). This corrects the earlier line that Dyna ships no Pi extension (owner, 2026-10-31), which was already out of date when `call_id.ts` shipped.
 
 **Pi work.** Cherry-pick two merged upstream tool-search ranking fixes, earendil-works/pi#11625 (names weigh above descriptions) and #11632 (more matched terms rank first), and make the core change below. `third_party/pi/DYNA.md` names the cherry-picks and the core change (r26).
 
@@ -1506,7 +1506,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | prs | M3, thin and stateless (decision 13) | Dyna stores only which session owns which PR and its approval flag, and reads the rest from GitHub |
 | reviewer-pool, review-workspace | dropped | a lead approves with `dyna pr approve`, or starts its own reviewer session (decision 13) |
 | pr-merge-queue | M3: Dyna merges when the approval flag matches the head and CI is green, through GitHub's merge queue where the repository has one (decision 13) | no merge trials of our own |
-| local-ci | M3 as GitHub Actions with self-hosted runners in boxes; act dropped | merges need a CI result |
+| local-ci | M3 as GitHub Actions with Dyna's [runner pool](ci-runners.md); act dropped | merges need a CI result |
 | local-issues, github-issues | M3 | 288 open issues keep their D-numbers |
 | hooks | M3 | typed subscriptions, imported |
 | maintenance | daily backups (4.1), 14-day expiry of archive refs (5.9), the 7-day dormant close, and daily host maintenance | A session whose box stayed stopped for 7 days closes through the normal close path, with its archive, if it has no open PR, goal, open child or pending input. Root never closes this way (hour 9 review; v1 `internal/subagent/dormant.go`). A child closes first, so its parent can close on a later pass. Each ready host prunes dangling Podman images and runs `git gc --no-prune` on bare repository caches. The latter preserves objects borrowed by boxes. |
@@ -1531,7 +1531,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | pr-comment-trust | dropped; outside text is wrapped instead (decision 13) | no hold and no state; the owner accepted the risk |
 | ci-test-budget, pr-conflict-radar, room-prs | dropped | an Actions step fails slow tests; GitHub shows conflicts and the PR list (decision 13) |
 | session-transfer | moving a session to another model is kept as `session.set_profile`; format conversion stays dropped | one harness, so no session format to convert; Pi's session file keeps its history when the model changes |
-| jobs | dropped | CI runs on Actions runners in boxes; host-specific work uses host exec or a room restricted to a suitable host |
+| jobs | dropped | CI runs on Dyna's Actions runner pool; host-specific work uses host exec or a room restricted to a suitable host |
 | worktrees | dropped | the box volume is the worktree; close archives to a ref; each box has its own ports |
 | load-doctor | dropped | box limits and admission replace it: work that does not fit waits in `pending` |
 | test-slots | dropped | each box has its own limit, and admission bounds how many run |

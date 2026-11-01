@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"strconv"
@@ -24,6 +25,10 @@ func (s *Service) TranscriptAppend(ctx context.Context, caller contract.Principa
 	if !filepath.IsLocal(req.Path) || req.Offset < 0 {
 		return contract.TranscriptAppendResponse{}, invalid("transcript path must be local and offset must not be negative")
 	}
+	room, err := s.store.TranscriptRoom(ctx, caller.Session)
+	if err != nil {
+		return contract.TranscriptAppendResponse{}, failure(err)
+	}
 	s.transcriptMu.Lock()
 	defer s.transcriptMu.Unlock()
 	acked, err := s.store.TranscriptOffset(ctx, caller.Session, req.Path)
@@ -33,24 +38,37 @@ func (s *Service) TranscriptAppend(ctx context.Context, caller contract.Principa
 	if req.Offset > acked {
 		return contract.TranscriptAppendResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "transcript chunk starts past the acknowledged offset"}
 	}
+	name := filepath.Join(s.layout.Transcripts(room, caller.Session), req.Path)
+	// A copy shorter than its acknowledgment is gone, as for a session open across the move to room folders. Writing at the
+	// offset would leave a hole that reads as a transcript, so the answer rewinds the box, which still has the whole file.
+	if info, err := os.Stat(name); acked > 0 && (errors.Is(err, os.ErrNotExist) || err == nil && info.Size() < acked) {
+		if err := s.store.ResetTranscriptOffset(ctx, caller.Session, req.Path); err != nil {
+			return contract.TranscriptAppendResponse{}, failure(err)
+		}
+		return contract.TranscriptAppendResponse{}, nil
+	}
 	end := req.Offset + int64(len(req.Bytes))
 	if end <= acked {
 		return contract.TranscriptAppendResponse{AckedOffset: acked}, nil
 	}
-	name := filepath.Join(s.transcriptDir, string(caller.Session), req.Path)
-	if err := os.MkdirAll(filepath.Dir(name), 0700); err != nil {
-		return contract.TranscriptAppendResponse{}, failure(err)
+	var file *os.File
+	err = s.roomWrite(ctx, room, func() error {
+		if err := os.MkdirAll(filepath.Dir(name), 0700); err != nil {
+			return err
+		}
+		var err error
+		if file, err = os.OpenFile(name, os.O_RDWR|os.O_CREATE, 0600); err != nil {
+			return err
+		}
+		if _, err := file.WriteAt(req.Bytes[acked-req.Offset:], acked); err != nil {
+			return err
+		}
+		return file.Sync()
+	})
+	if file != nil {
+		defer file.Close()
 	}
-	file, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
-		return contract.TranscriptAppendResponse{}, failure(err)
-	}
-	defer file.Close()
-	tail := req.Bytes[acked-req.Offset:]
-	if _, err := file.WriteAt(tail, acked); err != nil {
-		return contract.TranscriptAppendResponse{}, failure(err)
-	}
-	if err := file.Sync(); err != nil {
 		return contract.TranscriptAppendResponse{}, failure(err)
 	}
 
@@ -61,16 +79,12 @@ func (s *Service) TranscriptAppend(ctx context.Context, caller contract.Principa
 	if err != nil {
 		return contract.TranscriptAppendResponse{}, failure(err)
 	}
-	session, err := s.store.Session(ctx, caller.Session)
-	if err != nil {
-		return contract.TranscriptAppendResponse{}, failure(err)
-	}
 	for _, turn := range turns {
-		event, err := s.event(session.Room, caller, contract.TranscriptChanged{Session: caller.Session, Turn: turn})
+		event, err := s.event(room, caller, contract.TranscriptChanged{Session: caller.Session, Turn: turn})
 		if err != nil {
 			return contract.TranscriptAppendResponse{}, failure(err)
 		}
-		s.live.Publish(session.Room, event, true)
+		s.live.Publish(room, event, true)
 	}
 
 	return contract.TranscriptAppendResponse{AckedOffset: end}, nil
@@ -84,6 +98,10 @@ func (s *Service) TranscriptFetch(ctx context.Context, caller contract.Principal
 	if !filepath.IsLocal(req.Path) || req.Offset < 0 {
 		return contract.TranscriptFetchResponse{}, invalid("invalid transcript path or offset")
 	}
+	room, err := s.store.TranscriptRoom(ctx, caller.Session)
+	if err != nil {
+		return contract.TranscriptFetchResponse{}, failure(err)
+	}
 	s.transcriptMu.Lock()
 	defer s.transcriptMu.Unlock()
 	ack, err := s.store.TranscriptOffset(ctx, caller.Session, req.Path)
@@ -93,7 +111,7 @@ func (s *Service) TranscriptFetch(ctx context.Context, caller contract.Principal
 	if req.Offset > ack {
 		return contract.TranscriptFetchResponse{}, invalid("offset past acknowledged transcript")
 	}
-	f, err := os.Open(filepath.Join(s.transcriptDir, string(caller.Session), req.Path))
+	f, err := os.Open(filepath.Join(s.layout.Transcripts(room, caller.Session), req.Path))
 	if err != nil {
 		return contract.TranscriptFetchResponse{}, failure(err)
 	}

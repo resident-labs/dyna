@@ -186,6 +186,20 @@ test("the owner stream keeps a room's paused state current", async () => {
   } finally { globalThis.fetch = original; }
 });
 
+test("the owner stream marks a room deleting, and removes it when it is gone", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ seq: 1, rooms: [{ id: "a", name: "A", paused: false, created: "", lastRead: 0, waiting: [], working: [] }] }));
+  try {
+    const attention = new Attention(() => () => {});
+    await attention.open();
+    attention.apply(event(2, "a", { type: "room.deleting", body: {} }));
+    assert.equal(attention.rooms.get("a")?.deleting, true);
+    attention.apply(event(0, "a", { type: "room.deleted", body: {} }));
+    assert.equal(attention.rooms.has("a"), false);
+    assert.equal(attention.waiting.has("a"), false);
+  } finally { globalThis.fetch = original; }
+});
+
 test("the page reads its device's scopes once at connect, and offers every control when the engine has no such method", async () => {
   const original = globalThis.fetch;
   const connect = async (scopes: Response) => {

@@ -122,8 +122,8 @@ func visualImages(ctx context.Context, uploadFile Upload, result visual.Result, 
 	return nil
 }
 
-// UploadHTTP sends a local file over the caller's authenticated transport.
-func UploadHTTP(ctx context.Context, client *http.Client, path string) (contract.Attachment, error) {
+// UploadHTTP sends a local file over the caller's authenticated transport. The owner names the room; a box's socket already fixes it.
+func UploadHTTP(ctx context.Context, client *http.Client, room contract.RoomID, path string) (contract.Attachment, error) {
 	var attachment contract.Attachment
 	file, err := os.Open(path)
 	if err != nil {
@@ -131,7 +131,7 @@ func UploadHTTP(ctx context.Context, client *http.Client, path string) (contract
 	}
 	defer file.Close()
 	name := filepath.Base(path)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://dyna/v1/files?name="+url.QueryEscape(name), file)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://dyna/v1/files?name="+url.QueryEscape(name)+"&room="+url.QueryEscape(string(room)), file)
 	if err != nil {
 		return attachment, err
 	}

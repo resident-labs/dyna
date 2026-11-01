@@ -341,6 +341,9 @@ func tsType(e ast.Expr) string {
 			parts := strings.Split(strings.TrimPrefix(tag, "json:\""), "\",")
 			raw := strings.TrimSuffix(parts[0], "\"")
 			name := strings.Split(raw, ",")[0]
+			if name == "-" {
+				continue
+			}
 			optional := strings.Contains(tag, "omitempty") || strings.Contains(tag, "omitzero")
 			fmt.Fprintf(&b, " %s", name)
 			if optional {
