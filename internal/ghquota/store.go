@@ -32,7 +32,7 @@ func Migrate(dataDir string) error {
 func UseStore(w *state.Writer) func() {
 	engineGHQuota.mu.Lock()
 	defer engineGHQuota.mu.Unlock()
-	engineGHQuota.save = func(now time.Time, kind, label string, free bool) {
+	engineGHQuota.save = func(now time.Time, kind, label, phaseLabel string, free bool) {
 		ctx := context.Background()
 		hour := now.UTC().Truncate(time.Hour).Unix()
 		counted, gratis := 1, 0
@@ -45,6 +45,13 @@ func UseStore(w *state.Writer) func() {
 				counted=counted+excluded.counted, free=free+excluded.free`,
 				hour, kind, label, counted, gratis); err != nil {
 				return err
+			}
+			if phaseLabel != "" {
+				if _, err := conn.ExecContext(ctx, `INSERT INTO ghquota_counts(hour,kind,label,counted,free)
+					VALUES(?,'endpoint-phase',?,?,?) ON CONFLICT(hour,kind,label) DO UPDATE SET
+					counted=counted+excluded.counted, free=free+excluded.free`, hour, phaseLabel, counted, gratis); err != nil {
+					return err
+				}
 			}
 			_, err := conn.ExecContext(ctx, "DELETE FROM ghquota_counts WHERE hour < ?", hour-7*24*3600)
 			return err
