@@ -297,3 +297,22 @@ func TestReconnectSaveAttributionAndExpiry(t *testing.T) {
 		t.Fatal("reconnect changed account label or rooms")
 	}
 }
+
+func TestSameAccountComparesStrongestSharedField(t *testing.T) {
+	imported := OAuthIdentity{Email: "Owner@example.test"}
+	for _, test := range []struct {
+		name         string
+		saved, fresh OAuthIdentity
+		want         bool
+	}{
+		{"imported email matches a fresh sign-in", imported, OAuthIdentity{AccountUUID: "new", Email: "owner@example.test"}, true},
+		{"imported email rejects another person", imported, OAuthIdentity{AccountUUID: "new", Email: "other@example.test"}, false},
+		{"a shared ID outranks a matching email", OAuthIdentity{AccountUUID: "one", Email: "a@example.test"}, OAuthIdentity{AccountUUID: "two", Email: "a@example.test"}, false},
+		{"nothing shared is no match", OAuthIdentity{AccountUUID: "one"}, OAuthIdentity{Subject: "two"}, false},
+		{"nothing saved is no match", OAuthIdentity{}, OAuthIdentity{Email: "a@example.test"}, false},
+	} {
+		if got := sameAccount(test.saved, test.fresh); got != test.want {
+			t.Errorf("%s: got %v", test.name, got)
+		}
+	}
+}
