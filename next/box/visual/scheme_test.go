@@ -1,6 +1,25 @@
 package visual
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestTheme(t *testing.T) {
+	for _, mode := range []string{"light", "dark"} {
+		got := string(Theme([]byte("<head></head>"), mode))
+		if !strings.Contains(got, "html{color-scheme:"+mode+";background:transparent}") {
+			t.Fatalf("%s: %s", mode, got)
+		}
+	}
+	declared := []byte(`<meta name="color-scheme" content="light">`)
+	if string(Theme(declared, "dark")) != string(declared) {
+		t.Fatal("changed the card's declared scheme")
+	}
+	if strings.Contains(string(Theme([]byte("<p>x"), "dark}</style>")), "<style>") {
+		t.Fatal("accepted an invalid theme")
+	}
+}
 
 func TestColorScheme(t *testing.T) {
 	for _, tc := range []struct{ name, in, want string }{
