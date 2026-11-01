@@ -94,6 +94,10 @@ type Machine struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	SSH  string `json:"ssh"`
+	// WakeCommand is trusted owner configuration, never exposed in node views.
+	WakeCommand []string `json:"-"`
+	// WakeReady is an admission-only fact and is never stored in the registry.
+	WakeReady bool `json:"-"`
 	// MaxIOHeavy caps how many IO-heavy jobs and checks the node runs at once.
 	// Zero reads the default of one per sixteen probed CPUs, at least one.
 	MaxIOHeavy int `json:"maxIOHeavy"`
@@ -437,6 +441,16 @@ func (m Machine) Validate() error {
 			return err
 		}
 	}
+	if len(m.WakeCommand) > 0 {
+		if m.Local || !path.IsAbs(m.WakeCommand[0]) || path.Clean(m.WakeCommand[0]) != m.WakeCommand[0] {
+			return errors.New("a wake command needs a clean absolute executable path on a remote node")
+		}
+		for _, arg := range m.WakeCommand {
+			if strings.ContainsRune(arg, 0) {
+				return errors.New("wake command arguments cannot contain NUL")
+			}
+		}
+	}
 	if m.SSHConnectTimeout < 0 || m.SSHConnectTimeout > MaxSSHConnectTimeout {
 		return fmt.Errorf("SSH connect timeout must not be negative or longer than %s", MaxSSHConnectTimeout)
 	}
@@ -517,7 +531,7 @@ func validateGrants(grants []HostChecksGrant) error {
 	return nil
 }
 
-const schemaVersion = 18
+const schemaVersion = 19
 
 const schema = `CREATE TABLE machines (
 	id             TEXT    PRIMARY KEY,
@@ -544,7 +558,8 @@ const schema = `CREATE TABLE machines (
 	max_disk_percent INTEGER NOT NULL DEFAULT 0 CHECK(max_disk_percent BETWEEN 0 AND 100),
 	resources TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(resources)),
 	mounts TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(mounts)),
-	devices TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(devices))
+	devices TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(devices)),
+	wake_command TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(wake_command))
 );
 
 CREATE TABLE IF NOT EXISTS machine_setting_changes (node_id TEXT NOT NULL, changed_ms INTEGER NOT NULL, actor_role TEXT NOT NULL, actor_session TEXT NOT NULL, actor_room TEXT NOT NULL, field TEXT NOT NULL);
@@ -583,7 +598,7 @@ var degradedColumns = []string{
 // change only through SaveProbe.
 const registryColumns = `id,name,ssh,enabled,local,created_ms,updated_ms`
 
-const columns = registryColumns + `,capabilities,health,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources,mounts,devices,quick_slots`
+const columns = registryColumns + `,capabilities,health,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources,mounts,devices,quick_slots,wake_command`
 
 // Store keeps the machines registry in dyna.db.
 type Store struct{ DataDir string }
@@ -635,6 +650,11 @@ func prepare(conn *sql.Conn, old int) error {
 			return err
 		}
 		return importLocalCINodes(ctx, conn)
+	}
+	if old < 19 {
+		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN wake_command TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(wake_command))`); err != nil {
+			return err
+		}
 	}
 	if old < 18 {
 		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN quick_slots INTEGER NOT NULL DEFAULT 0 CHECK(quick_slots >= 0)`); err != nil {
@@ -1073,11 +1093,14 @@ type scanner interface{ Scan(...any) error }
 
 func scan(row scanner) (Machine, error) {
 	var m Machine
-	var capabilities, health, load, probeError, grants, rooms, labels, resources, mounts, devices string
+	var capabilities, health, load, probeError, grants, rooms, labels, resources, mounts, devices, wakeCommand string
 	var created, updated, probed, seen, connectMs int64
 	if err := row.Scan(&m.ID, &m.Name, &m.SSH, &m.Enabled, &m.Local, &created, &updated,
-		&capabilities, &health, &probed, &seen, &probeError, &load, &grants, &rooms, &labels, &m.ContainerSocket, &connectMs, &m.CheckTmp, &m.MaxIOHeavy, &m.MaxDiskPercent, &resources, &mounts, &devices, &m.QuickSlots); err != nil {
+		&capabilities, &health, &probed, &seen, &probeError, &load, &grants, &rooms, &labels, &m.ContainerSocket, &connectMs, &m.CheckTmp, &m.MaxIOHeavy, &m.MaxDiskPercent, &resources, &mounts, &devices, &m.QuickSlots, &wakeCommand); err != nil {
 		return Machine{}, err
+	}
+	if err := json.Unmarshal([]byte(wakeCommand), &m.WakeCommand); err != nil {
+		return Machine{}, fmt.Errorf("node %s wake command: %w", m.Name, err)
 	}
 	m.SSHConnectTimeout = time.Duration(connectMs) * time.Millisecond
 	if err := json.Unmarshal([]byte(resources), &m.Resources); err != nil {
@@ -1211,17 +1234,17 @@ func (s Store) SaveProbe(ctx context.Context, id string, r ProbeResult) (Machine
 	}
 	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: key}, func(conn *sql.Conn) error {
 		if health == HealthOnline {
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET capabilities=?, last_load=?, health=?, last_probe_ms=?, last_seen_ms=?, probe_error='' WHERE id=?`,
-				capabilities, load, string(health), probed, probed, id)
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET capabilities=?, last_load=?, health=?, last_probe_ms=?, last_seen_ms=?, probe_error='' WHERE id=? AND last_probe_ms<=? AND enabled=1`,
+				capabilities, load, string(health), probed, probed, id, probed)
 			return err
 		}
 		if health == HealthDisabled {
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET health=?, last_probe_ms=?, probe_error='' WHERE id=?`,
-				string(health), probed, id)
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET health=?, last_probe_ms=?, probe_error='' WHERE id=? AND last_probe_ms<=? AND enabled=0`,
+				string(health), probed, id, probed)
 			return err
 		}
-		_, err := conn.ExecContext(ctx, `UPDATE machines SET health=?, last_probe_ms=?, probe_error=? WHERE id=?`,
-			string(health), probed, probeErr, id)
+		_, err := conn.ExecContext(ctx, `UPDATE machines SET health=?, last_probe_ms=?, probe_error=? WHERE id=? AND last_probe_ms<=? AND enabled=1`,
+			string(health), probed, probeErr, id, probed)
 		return err
 	})
 	if err != nil {
@@ -1265,6 +1288,7 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 			if err != nil {
 				return err
 			}
+			m.WakeCommand = stored.WakeCommand
 			m.HostChecksGrants = stored.HostChecksGrants
 			m.Rooms = stored.Rooms
 			m.Mounts = stored.Mounts
@@ -1281,9 +1305,9 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources,mounts,devices,quick_slots) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources,mounts,devices,quick_slots,wake_command) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			m.ID, m.Name, m.SSH, m.Enabled, m.Local,
-			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, mounts, devices, m.QuickSlots)
+			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, mounts, devices, m.QuickSlots, marshalNames(m.WakeCommand))
 		if err != nil {
 			return err
 		}
@@ -1455,8 +1479,8 @@ func (s Store) LatestFieldChanges(ctx context.Context, id string) ([]FieldChange
 }
 
 func updateMachine(ctx context.Context, conn *sql.Conn, m Machine) error {
-	_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, ssh=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, host_checks_grants=?, rooms=?, labels=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=?, resources=?, mounts=?, devices=?, quick_slots=? WHERE id=?`,
-		m.Name, m.SSH, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), marshalGrants(m.HostChecksGrants), marshalNames(m.Rooms), marshalNames(m.Labels), m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, marshalResources(m.Resources), marshalContainerRegistrations(m.Mounts), marshalContainerRegistrations(m.Devices), m.QuickSlots, m.ID)
+	_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, ssh=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, host_checks_grants=?, rooms=?, labels=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=?, resources=?, mounts=?, devices=?, quick_slots=?, wake_command=? WHERE id=?`,
+		m.Name, m.SSH, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), marshalGrants(m.HostChecksGrants), marshalNames(m.Rooms), marshalNames(m.Labels), m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, marshalResources(m.Resources), marshalContainerRegistrations(m.Mounts), marshalContainerRegistrations(m.Devices), m.QuickSlots, marshalNames(m.WakeCommand), m.ID)
 	return err
 }
 
