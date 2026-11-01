@@ -12,7 +12,7 @@ type shellWatch struct {
 
 func (s *Service) clearShellLocked(id contract.SessionID) []chan contract.ShellJobOutput {
 	var watchers []chan contract.ShellJobOutput
-	if state := s.sessionLocked(id); state.watch != nil {
+	if state := s.sessions[id]; state != nil && state.watch != nil {
 		w := state.watch
 		for ch := range w.watchers {
 			watchers = append(watchers, ch)
@@ -24,22 +24,28 @@ func (s *Service) clearShellLocked(id contract.SessionID) []chan contract.ShellJ
 }
 
 func (s *Service) ShellWatch(ctx context.Context, id contract.SessionID) (<-chan contract.ShellJobOutput, *contract.Error) {
-	session, err := s.store.Session(ctx, id)
+	session, open, err := s.store.OpenSession(ctx, id)
 	if err != nil {
 		return nil, failure(err)
+	}
+	if !open {
+		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 	}
 	b, err := s.store.Box(ctx, session.Box)
 	if err != nil {
 		return nil, failure(err)
 	}
-	state := s.lockSession(id)
-	defer state.computerLock.Unlock()
+	handle, state, ok := s.lockSession(id)
+	if !ok {
+		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+	}
+	defer handle.Unlock()
 	s.mu.Lock()
-	if b.State != contract.BoxReady || state.channel == nil {
+	if b.State != contract.BoxReady || handle.Channel() == nil {
 		s.mu.Unlock()
 		return nil, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
 	}
-	channel := state.channel
+	channel := handle.Channel()
 	w := state.watch
 	if w == nil {
 		w = &shellWatch{watchers: make(map[chan contract.ShellJobOutput]struct{})}
@@ -50,22 +56,24 @@ func (s *Service) ShellWatch(ctx context.Context, id contract.SessionID) (<-chan
 	ch := make(chan contract.ShellJobOutput, 128)
 	w.watchers[ch] = struct{}{}
 	s.mu.Unlock()
-	wakeChannel(channel)
+	channel.Wake()
 	go func() {
 		<-ctx.Done()
-		state.computerLock.Lock()
-		defer state.computerLock.Unlock()
+		if !handle.Lock() {
+			return
+		}
+		defer handle.Unlock()
 		s.mu.Lock()
 		if _, ok := w.watchers[ch]; !ok {
 			s.mu.Unlock()
 			return
 		}
 		delete(w.watchers, ch)
-		wake := len(w.watchers) == 0 && state.channel == channel
+		wake := len(w.watchers) == 0 && handle.Channel() == channel
 		s.mu.Unlock()
 		close(ch)
 		if wake {
-			wakeChannel(channel)
+			channel.Wake()
 		}
 	}()
 	return ch, nil
@@ -75,8 +83,14 @@ func (s *Service) ShellOutput(_ context.Context, caller contract.Principal, req 
 	if caller.Kind != contract.PrincipalSession {
 		return contract.ShellOutputResponse{}, forbidden()
 	}
-	state := s.lockSession(caller.Session)
-	defer state.computerLock.Unlock()
+	handle, state, ok := s.lookupSession(caller.Session)
+	if !ok || state == nil {
+		if ok {
+			handle.Unlock()
+		}
+		return contract.ShellOutputResponse{}, nil
+	}
+	defer handle.Unlock()
 	s.mu.Lock()
 	w := state.watch
 	if w == nil || w.generation != req.Generation {
@@ -104,14 +118,14 @@ watcher:
 	for _, ch := range dropped {
 		delete(w.watchers, ch)
 	}
-	channel := state.channel
+	channel := handle.Channel()
 	wake := len(w.watchers) == 0 && channel != nil
 	s.mu.Unlock()
 	for _, ch := range dropped {
 		close(ch)
 	}
 	if wake {
-		wakeChannel(channel)
+		channel.Wake()
 	}
 	return contract.ShellOutputResponse{}, nil
 }
