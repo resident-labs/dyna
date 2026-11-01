@@ -107,7 +107,7 @@ func readProfiles(config string) ([]contract.ProfileBundle, []string, []profileG
 		out := contract.ProfileBundle{Thinking: thinking, Name: contract.ProfileName(p.Name), Description: p.Description, Model: mapped[0],
 			Fallback: contract.ProfileName(p.Fallback), Taste: p.Taste, Intelligence: p.Intelligence,
 			Cost: p.Cost, Diagnostics: p.Diagnostics, MaxConcurrent: p.MaxConcurrent,
-			MaxCallsPerRun: p.MaxCallsPerRun, Default: p.Default}
+			Default: p.Default}
 		if len(mapped) > 1 {
 			out.Models = mapped
 		}

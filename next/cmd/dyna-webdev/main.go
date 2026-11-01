@@ -40,6 +40,8 @@ import (
 // host is the dev engine's one host, named as an owner's build machine might be, since the page shows it.
 const host = "build-server"
 
+var fixtureSession contract.SessionID
+
 type devService struct {
 	*engine.Service
 	empty bool
@@ -219,6 +221,9 @@ var devSteps = []struct {
 // TranscriptRead keeps the real checks, then answers with devSteps. Each turn picks a run of them from its ID, so turns
 // differ in length, and the longest say that their record is cut.
 func (d devService) TranscriptRead(ctx context.Context, p contract.Principal, req contract.TranscriptReadRequest) (contract.TranscriptReadResponse, *contract.Error) {
+	if req.Session == fixtureSession && fixtureSession != "" && req.Turn == "" && req.Before == "" && p.Kind == contract.PrincipalOwner {
+		return contract.TranscriptReadResponse{Turns: fixtureTurns()}, nil
+	}
 	response, problem := d.Service.TranscriptRead(ctx, p, req)
 	if problem != nil {
 		return response, problem
@@ -233,6 +238,14 @@ func (d devService) TranscriptRead(ctx context.Context, p contract.Principal, re
 	}
 	response.Truncated = sum%4 == 0
 	return response, nil
+}
+
+func (d devService) SessionWork(ctx context.Context, p contract.Principal, req contract.SessionWorkRequest) (contract.SessionWorkResponse, *contract.Error) {
+	response, problem := d.Service.SessionWork(ctx, p, req)
+	if problem == nil && req.Session == fixtureSession && fixtureSession != "" {
+		response.Total = len(fixtureTurns())
+	}
+	return response, problem
 }
 
 // SessionList shows builder-feed's computer as running, so the computer view can be opened.
@@ -586,6 +599,11 @@ func seedRoom(ctx context.Context, s *engine.Service, posts, agents int) {
 			log.Fatal(e.Message)
 		}
 	}
+	fixture, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "sync-review", Profile: "fake", Goal: "Add retry hints to the sync status"})
+	if e != nil {
+		log.Fatal(e.Message)
+	}
+	fixtureSession = fixture.Session
 	post := func(p contract.Principal, r contract.PostRequest) {
 		r.Room = room.Room
 		if _, e := s.Post(ctx, p, r); e != nil {
@@ -619,6 +637,25 @@ func seedRoom(ctx context.Context, s *engine.Service, posts, agents int) {
 	}
 	var png bytes.Buffer
 	fatal(pngenc.Encode(&png, shot))
+	// An invented three-version card exercises both superseded chips and the
+	// in-view preview when a capture is unavailable.
+	visualAuthor := contract.Principal{Kind: contract.PrincipalSession, Session: lead.Session}
+	var original contract.EventID
+	thumbnail := upload(visualAuthor, "weekly-thumbnail.png", "image/png", png.String())
+	for i, summary := range []string{"Weekly report mockup.", "Renamed the chart and fixed the labels.", "Updated the report with this week's numbers."} {
+		html := fmt.Sprintf(`<!doctype html><html><head><meta name="viewport" content="width=device-width"><title>Weekly Report</title><style>
+body{font:15px system-ui;margin:0;padding:24px;color:#e8e9eb;background:#0d0f13}h1{font-size:24px;margin:0 0 4px}p{color:#a3a8b4}.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}.tile,.chart{background:#151820;border:1px solid #272b34;border-radius:8px;padding:16px}.tile strong{display:block;font-size:24px}.chart{margin-top:12px}.bars{display:flex;align-items:end;gap:12px;height:150px}.bars span{flex:1;background:#91a2ee;min-width:12px}
+</style></head><body><h1>Weekly Report</h1><p>Oct 25 – Oct 31, 2026 · sample data</p><div class="tiles"><div class="tile">Tasks done<strong>%d</strong>12%% increase</div><div class="tile">Open PRs<strong>7</strong>3 awaiting review</div><div class="tile">Failed runs<strong>2</strong>1 vs last week</div></div><div class="chart">Daily throughput<div class="bars"><span style="height:35%%"></span><span style="height:50%%"></span><span style="height:42%%"></span><span style="height:78%%"></span><span style="height:66%%"></span><span style="height:25%%"></span><span style="height:85%%"></span></div></div></body></html>`, 40+i)
+		file := upload(visualAuthor, "weekly-report.html", "text/html", html)
+		file.Visual = &contract.VisualCard{Title: "Weekly Report", Height: 900, Thumbnail: thumbnail.SHA256}
+		result, problem := s.Post(ctx, visualAuthor, contract.PostRequest{Room: room.Room, Text: summary, VisualUpdate: original, Attachments: []contract.Attachment{file}})
+		if problem != nil {
+			log.Fatal(problem.Message)
+		}
+		if i == 0 {
+			original = result.Event
+		}
+	}
 	post(owner, contract.PostRequest{Text: "Review these examples.", Attachments: []contract.Attachment{
 		upload(owner, "preview.png", "image/png", png.String()),
 		upload(owner, "card.html", "text/html", "<!doctype html><title>Review</title><h1>Feed review</h1><p>Ready to inspect.</p>"),

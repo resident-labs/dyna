@@ -155,3 +155,30 @@ func TestLegacyParentWakeKeepsRunningChild(t *testing.T) {
 		t.Fatal("image refresh stopped the running child slice")
 	}
 }
+
+type blockedHostsStore struct {
+	boxStore
+	entered, release chan struct{}
+}
+
+func (s blockedHostsStore) Hosts(context.Context) ([]box.Host, error) {
+	close(s.entered)
+	<-s.release
+	return nil, nil
+}
+func TestHostLookupDoesNotLockHeartbeat(t *testing.T) {
+	s := blockedHostsStore{entered: make(chan struct{}), release: make(chan struct{})}
+	b := &Boxes{Store: s}
+	done := make(chan struct{})
+	go func() { defer close(done); _, _ = b.host(context.Background(), "slow") }()
+	<-s.entered
+	locked := b.mu.TryLock()
+	if locked {
+		b.mu.Unlock()
+	}
+	close(s.release)
+	<-done
+	if !locked {
+		t.Fatal("host lookup holds heartbeat lock during store I/O")
+	}
+}
