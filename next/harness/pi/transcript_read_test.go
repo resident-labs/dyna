@@ -1,7 +1,6 @@
 package pi
 
 import (
-	"io"
 	"strings"
 	"testing"
 
@@ -46,15 +45,13 @@ func TestTranscriptItemIndexContinuesInOrder(t *testing.T) {
 	}
 }
 
-func TestTranscriptPostClaimRequiresMatchingBash(t *testing.T) {
-	data := `{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"other","name":"read"},{"type":"toolCall","id":"right","name":"bash"}]}}
-{"type":"message","message":{"role":"toolResult","toolCallId":"other","content":[{"type":"text","text":"evt"}]}}
-{"type":"message","message":{"role":"toolResult","toolCallId":"right","content":[{"type":"text","text":"evt"}]}}
+func TestTranscriptCallClaimRequiresExactID(t *testing.T) {
+	data := `{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"right","name":"mcp__shell__shell"}]}}
+{"type":"message","message":{"role":"toolResult","toolCallId":"right","content":[{"type":"text","text":"fake-id"}]}}
 `
-	reader := strings.NewReader(data)
-	found, err := TranscriptHasPost(io.NewSectionReader(reader, 0, int64(len(data))), "evt")
-	if err != nil || !found {
-		t.Fatalf("found=%v err=%v", found, err)
+	ids := map[string]bool{"right": false, "fake-id": false}
+	if err := TranscriptFindCalls(strings.NewReader(data), ids); err != nil || !ids["right"] || ids["fake-id"] {
+		t.Fatalf("calls=%v err=%v", ids, err)
 	}
 }
 

@@ -8,6 +8,13 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+// FileInRoom reports whether a file was uploaded or used in this room.
+func (s *Store) FileInRoom(ctx context.Context, hash string, room contract.RoomID) (bool, error) {
+	var found bool
+	err := s.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM uploads WHERE sha256=?1 AND room=?2) OR EXISTS(SELECT 1 FROM event_files f JOIN events e ON e.seq=f.seq WHERE f.sha256=?1 AND e.room=?2)", hash, room).Scan(&found)
+	return found, err
+}
+
 // RecordUpload records an uploaded file's room.
 func (s *Store) RecordUpload(ctx context.Context, hash string, room contract.RoomID) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
