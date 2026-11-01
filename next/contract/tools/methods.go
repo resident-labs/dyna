@@ -49,6 +49,7 @@ var methodTable = []MethodEntry{
 		act("host", "add", typ[contract.HostAddRequest](), "Add a host", "host add"),
 	),
 	method(contract.MethodHostList, contract.ScopeRead, OwnerAccess),
+	method(contract.MethodHostexecList, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodHostexecRun, contract.ScopeRead, BoxAccess,
 		act("hostexec", "run", typ[contract.HostexecRunRequest](), "Run argv on host with a grant. cwd and timeout are optional.", "hostexec run"),
 	),
