@@ -1,6 +1,6 @@
 <script lang="ts" module>
   // Hand-drawn 16 px line icons on a 24-unit grid.
-  const paths = {
+  export const paths = {
     send: "M5 12h13M12 5l7 7-7 7",
     stop: "M7 7h10v10H7z",
     warning: "M12 3 2 20h20zM12 9v5M12 17h.01",

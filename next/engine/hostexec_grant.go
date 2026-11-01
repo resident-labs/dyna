@@ -16,7 +16,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 		Class: func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassOwner },
 
 		// The title is the phrase after the asker's name, as for every card: "<session> asks for host access".
-		// The body then says "Run any command on <host> for 24 hours."
+		// The body then says "Run any command on <host> until the session closes."
 		// A single host is the target, so the web can show its name in mono.
 		Card: func(ctx context.Context, args contract.OpArgs, who contract.Principal) contract.Card {
 			a := args.(contract.HostexecGrantArgs)
@@ -66,7 +66,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 			}
 			body := fmt.Sprintf("%s any command on %s until the session closes.\nReason: %s", run, strings.Join(hosts, ", "), a.Reason)
 			if warning {
-				body += "\nThis host also runs the engine and holds the model sign-ins."
+				body += "\nThis host also runs the engine. This grant gives full owner power, including the model sign-ins."
 			}
 			if unknown {
 				body += "\nA host here may hold the model sign-ins. Approve only if you trust this session with them."
