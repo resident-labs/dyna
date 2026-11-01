@@ -193,6 +193,11 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `session_accounts` | the account the owner chose for a session; no row means Automatic |
 | `search_keys` |
 | `proxy_auths` |
+| `subscriptions` |
+| `subscription_events` |
+| `subscription_args` |
+| `subscription_files` |
+| `subscription_runs` | one row for each Run in progress, which is what stops a subscription overlapping itself |
 
 ### 4.3 Data on disk
 

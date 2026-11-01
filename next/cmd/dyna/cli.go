@@ -83,7 +83,8 @@ func newClient(socket string) *socketClient {
 }
 
 type requestType interface {
-	contract.WebSearchRequest | contract.WebsearchSetKeyRequest | contract.WebsearchRemoveKeyRequest |
+	contract.SubscriptionAddRequest | contract.SubscriptionListRequest | contract.SubscriptionRemoveRequest | contract.SubscriptionSetEnabledRequest |
+		contract.WebSearchRequest | contract.WebsearchSetKeyRequest | contract.WebsearchRemoveKeyRequest |
 		contract.ContextSnapshotRequest |
 		contract.QuestionAskRequest | contract.QuestionAnswerRequest | contract.QuestionListRequest |
 		contract.OpWithdrawRequest |
@@ -93,7 +94,8 @@ type requestType interface {
 		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostSetLimitsRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomDeleteRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.ComposeListRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest | contract.PrListRequest | contract.PrStatusRequest | contract.PrTrackRequest | contract.PrUntrackRequest
 }
 type responseType interface {
-	contract.WebSearchResponse | contract.WebsearchSetKeyResponse | contract.WebsearchRemoveKeyResponse |
+	contract.SubscriptionAddResponse | contract.SubscriptionListResponse | contract.SubscriptionRemoveResponse | contract.SubscriptionSetEnabledResponse |
+		contract.WebSearchResponse | contract.WebsearchSetKeyResponse | contract.WebsearchRemoveKeyResponse |
 		contract.ContextSnapshotResponse |
 		contract.QuestionAskResponse | contract.QuestionAnswerResponse | contract.QuestionListResponse |
 		contract.OpWithdrawResponse |
