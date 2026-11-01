@@ -41,7 +41,7 @@ export type InstructionsGetRequest = { room?: RoomID; };
 export type InstructionsGetResponse = { text: string; hash: string; savedAt?: string | null; };
 export type InstructionsSetRequest = { room?: RoomID; text: string; base: string; };
 export type InstructionsSetResponse = { hash: string; };
-export type Method = "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled" | "workflow.run" | "workflow.status" | "workflow.list" | "workflow.pin" | "workflow.step_start" | "workflow.step_end";
+export type Method = "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "issue.list" | "issue.status" | "issue.track" | "issue.untrack" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled" | "workflow.run" | "workflow.status" | "workflow.list" | "workflow.pin" | "workflow.step_start" | "workflow.step_end";
 export type ErrorCode = "podman_required" | "invalid" | "unknown_action" | "not_found" | "forbidden" | "conflict" | "room_limited" | "profile_exists" | "move_busy" | "has_children" | "parent_closing" | "session_closing" | "stale" | "github_quota" | "visual_superseded" | "unavailable" | "reconnect_unavailable" | "models_unavailable" | "store_from_v1" | "store_too_old" | "no_grant";
 export type Error = { code: ErrorCode; message: string; visual?: VisualSuperseded | null; limited?: RoomLimited | null; };
 export type VisualSuperseded = { event: EventID; version: number; seq: number; };
@@ -246,7 +246,7 @@ export type ConnectUnlinkResponse = { };
 export type ConnectConnector = { missing: boolean; };
 export type ConnectAttemptState = "idle" | "starting" | "pending" | "linked" | "unlinking" | "canceled" | "failed";
 export type ConnectAttempt = { state: ConnectAttemptState; expires: number; };
-export type ContextSectionKey = "dyna_goal" | "dyna_children" | "dyna_requests" | "dyna_prs" | "dyna_profiles" | "dyna_usage";
+export type ContextSectionKey = "dyna_goal" | "dyna_children" | "dyna_requests" | "dyna_prs" | "dyna_issues" | "dyna_profiles" | "dyna_usage";
 export type ContextSnapshotRequest = { section?: ContextSectionKey; };
 export type ContextSnapshotResponse = { sections: Array<ContextSection> | null; };
 export type ContextSection = { key: ContextSectionKey; text: string; };
@@ -360,6 +360,20 @@ export type ProfileName = string;
 export type DurationMS = number;
 export type PrincipalKind = "owner" | "session" | "engine";
 export type Principal = { kind: PrincipalKind; session?: SessionID; device?: DeviceID; };
+export type IssueState = "open" | "closed";
+export type IssueSummary = { repo: RepoName; number: number; url: string; title: string; author: string; session: SessionID; state: IssueState; labels?: Array<string> | null; assignees?: Array<string> | null; milestone?: string; };
+export type IssueListRequest = { room?: RoomID; all?: boolean; };
+export type IssueListResponse = { issues: Array<IssueSummary> | null; };
+export type IssueStatusRequest = { repo?: RepoName; number: number; };
+export type IssueStatusResponse = { issue: IssueSummary; };
+export type IssueTrackRequest = { repo?: RepoName; number: number; room?: RoomID; session?: SessionID; };
+export type IssueTrackResponse = { issue: IssueSummary; };
+export type IssueUntrackRequest = { repo?: RepoName; number: number; };
+export type IssueUntrackResponse = { };
+export type MetaChange = { title?: string; labelsAdded?: Array<string> | null; labelsRemoved?: Array<string> | null; assigned?: Array<string> | null; unassigned?: Array<string> | null; milestone?: string; milestoneRemoved?: boolean; bodyEdited?: boolean; reopened?: boolean; draft?: boolean; ready?: boolean; reviewersAdded?: Array<string> | null; reviewersRemoved?: Array<string> | null; };
+export type IssueChange = { issue: IssueSummary; kinds?: Array<PrChangeKind> | null; outside: boolean; comments?: Array<PrComment> | null; moreComments?: number; meta?: MetaChange | null; };
+export type IssueChanged = { session: SessionID; changes: Array<IssueChange> | null; };
+export type IssueClosedEvent = { repo: RepoName; number: number; session: SessionID; url: string; };
 export type OpKind = string;
 export type Class = "auto" | "owner";
 export type OpState = "pending" | "approved" | "running" | "denied" | "expired" | "withdrawn" | "done" | "failed";
@@ -389,7 +403,7 @@ export type PrState = "open" | "merged" | "closed";
 export type PrReview = "" | "approved" | "changes_requested" | "review_required";
 export type PrCI = "" | "none" | "pending" | "success" | "failure";
 export type PrMerge = "" | "clean" | "blocked" | "behind" | "conflict";
-export type PrChangeKind = "ci_failed" | "ci_passed" | "changes_requested" | "approved" | "conflict" | "merged" | "closed" | "comment";
+export type PrChangeKind = "ci_failed" | "ci_passed" | "changes_requested" | "approved" | "conflict" | "merged" | "closed" | "comment" | "metadata";
 export type PrSummary = { repo: RepoName; number: number; url: string; title: string; author: string; session: SessionID; draft: boolean; state: PrState; head: string; review: PrReview; ci: PrCI; merge: PrMerge; };
 export type PrListRequest = { room?: RoomID; all?: boolean; };
 export type PrListResponse = { prs: Array<PrSummary> | null; };
@@ -400,8 +414,8 @@ export type PrTrackResponse = { pr: PrSummary; };
 export type PrUntrackRequest = { repo?: RepoName; number: number; };
 export type PrUntrackResponse = { };
 export type PrComment = { author: string; body: string; url: string; outside: boolean; };
-export type PrChange = { pr: PrSummary; kinds?: Array<PrChangeKind> | null; failedChecks?: Array<string> | null; outside: boolean; comments?: Array<PrComment> | null; moreComments?: number; };
-export type PrChanged = { session: SessionID; changes: Array<PrChange> | null; };
+export type PrChange = { pr: PrSummary; kinds?: Array<PrChangeKind> | null; failedChecks?: Array<string> | null; outside: boolean; comments?: Array<PrComment> | null; moreComments?: number; meta?: MetaChange | null; };
+export type PrChanged = { session: SessionID; changes: Array<PrChange> | null; issues?: Array<IssueChange> | null; };
 export type PrMergedEvent = { repo: RepoName; number: number; session: SessionID; url: string; };
 export type PrClosedEvent = { repo: RepoName; number: number; session: SessionID; url: string; };
 export type CIFinished = { repo: RepoName; number: number; session: SessionID; url: string; head: string; result: PrCI; };
@@ -486,6 +500,8 @@ export type EventBody =
   | { type: "host.disk_low"; body: HostDiskLow }
   | { type: "image.built"; body: ImageBuilt }
   | { type: "image.failed"; body: ImageFailed }
+  | { type: "issue.changed"; body: IssueChanged }
+  | { type: "issue.closed"; body: IssueClosedEvent }
   | { type: "notice.posted"; body: NoticePosted }
   | { type: "op.decided"; body: OpDecided }
   | { type: "op.ran"; body: OpRan }
@@ -606,6 +622,10 @@ export interface MethodMap {
   "goal.journal": { request: GoalJournalRequest; response: GoalJournalResponse };
   "hostexec.list": { request: HostexecListRequest; response: HostexecListResponse };
   "hostexec.run": { request: HostexecRunRequest; response: HostexecRunResponse };
+  "issue.list": { request: IssueListRequest; response: IssueListResponse };
+  "issue.status": { request: IssueStatusRequest; response: IssueStatusResponse };
+  "issue.track": { request: IssueTrackRequest; response: IssueTrackResponse };
+  "issue.untrack": { request: IssueUntrackRequest; response: IssueUntrackResponse };
   "op.submit": { request: OpSubmitRequest; response: OpSubmitResponse };
   "op.decide": { request: OpDecideRequest; response: OpDecideResponse };
   "op.withdraw": { request: OpWithdrawRequest; response: OpWithdrawResponse };

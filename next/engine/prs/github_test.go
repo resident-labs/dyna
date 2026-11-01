@@ -82,7 +82,7 @@ func TestPollAsksOnceForEveryPRAndTheDefaultBranch(t *testing.T) {
 		numbers = append(numbers, number)
 	}
 	server.SetMain("owner/repo", "main1")
-	snapshot, err := c.Poll(context.Background(), "owner/repo", numbers)
+	snapshot, err := c.Poll(context.Background(), "owner/repo", numbers, nil)
 	if err != nil || len(snapshot.PRs) != 20 || snapshot.Main != "main1" || snapshot.Viewer != "owner-account" {
 		t.Fatalf("%+v %v", snapshot, err)
 	}
@@ -95,7 +95,7 @@ func TestPollAsksOnceForEveryPRAndTheDefaultBranch(t *testing.T) {
 func TestPollWithNoPRsAsksOnlyForTheHead(t *testing.T) {
 	c, server, _ := client(t)
 	server.SetMain("owner/repo", "main1")
-	snapshot, err := c.Poll(context.Background(), "owner/repo", nil)
+	snapshot, err := c.Poll(context.Background(), "owner/repo", nil, nil)
 	if err != nil || snapshot.Main != "main1" || len(snapshot.PRs) != 0 {
 		t.Fatalf("%+v %v", snapshot, err)
 	}
@@ -104,7 +104,7 @@ func TestPollWithNoPRsAsksOnlyForTheHead(t *testing.T) {
 func TestPollKeepsTheOthersWhenOnePRIsGone(t *testing.T) {
 	c, server, _ := client(t)
 	server.Add(fakegithub.Pull{Repo: "owner/repo", Number: 1})
-	snapshot, err := c.Poll(context.Background(), "owner/repo", []int{1, 2})
+	snapshot, err := c.Poll(context.Background(), "owner/repo", []int{1, 2}, nil)
 	if _, found := snapshot.PRs[1]; err != nil || !found || len(snapshot.PRs) != 1 {
 		t.Fatalf("%+v %v", snapshot, err)
 	}
@@ -115,7 +115,7 @@ func TestPollReadsReviewsWhereNoBranchRuleDecides(t *testing.T) {
 	server.Add(fakegithub.Pull{Repo: "owner/repo", Number: 1, LatestReviews: []string{"APPROVED", "CHANGES_REQUESTED"}})
 	server.Add(fakegithub.Pull{Repo: "owner/repo", Number: 2, LatestReviews: []string{"APPROVED"}})
 	server.Add(fakegithub.Pull{Repo: "owner/repo", Number: 3, ReviewDecision: "REVIEW_REQUIRED", LatestReviews: []string{"APPROVED"}})
-	snapshot, err := c.Poll(context.Background(), "owner/repo", []int{1, 2, 3})
+	snapshot, err := c.Poll(context.Background(), "owner/repo", []int{1, 2, 3}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,21 +132,21 @@ func TestLowQuotaHoldsUntilResetOrMoreRoom(t *testing.T) {
 	server.Add(fakegithub.Pull{Repo: "owner/repo", Number: 1})
 	reset := at.Now().Add(30 * time.Minute)
 	server.SetQuota(5000, 999, reset)
-	if _, err := c.Poll(ctx, "owner/repo", []int{1}); err != nil {
+	if _, err := c.Poll(ctx, "owner/repo", []int{1}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if until, low := c.Low(); !low || !until.Equal(reset) {
 		t.Fatalf("low %v until %v", low, until)
 	}
 	server.SetQuota(5000, 1000, reset)
-	if _, err := c.Poll(ctx, "owner/repo", []int{1}); err != nil {
+	if _, err := c.Poll(ctx, "owner/repo", []int{1}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, low := c.Low(); low {
 		t.Fatal("exactly 20% left is not below the floor")
 	}
 	server.SetQuota(5000, 1, reset)
-	if _, err := c.Poll(ctx, "owner/repo", []int{1}); err != nil {
+	if _, err := c.Poll(ctx, "owner/repo", []int{1}, nil); err != nil {
 		t.Fatal(err)
 	}
 	at.add(31 * time.Minute)
@@ -160,18 +160,18 @@ func TestRefusalPausesUntilGitHubsWaitEnds(t *testing.T) {
 	ctx := context.Background()
 	server.Add(fakegithub.Pull{Repo: "owner/repo", Number: 1})
 	server.RefuseFor(120)
-	if _, err := c.Poll(ctx, "owner/repo", []int{1}); !errors.Is(err, ErrPaused) {
+	if _, err := c.Poll(ctx, "owner/repo", []int{1}, nil); !errors.Is(err, ErrPaused) {
 		t.Fatal(err)
 	}
 	server.RefuseFor(0)
-	if _, err := c.Poll(ctx, "owner/repo", []int{1}); !errors.Is(err, ErrPaused) {
+	if _, err := c.Poll(ctx, "owner/repo", []int{1}, nil); !errors.Is(err, ErrPaused) {
 		t.Fatalf("sent while paused: %v", err)
 	}
 	if graphql, _, _ := server.Counts(); graphql != 0 {
 		t.Fatalf("%d queries reached GitHub", graphql)
 	}
 	at.add(121 * time.Second)
-	if _, err := c.Poll(ctx, "owner/repo", []int{1}); err != nil {
+	if _, err := c.Poll(ctx, "owner/repo", []int{1}, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -180,7 +180,7 @@ func TestBadTokenReportsNoToken(t *testing.T) {
 	c, server, _ := client(t)
 	c.Token = "not-the-token"
 	server.Add(fakegithub.Pull{Repo: "owner/repo", Number: 1})
-	_, err := c.Poll(context.Background(), "owner/repo", []int{1})
+	_, err := c.Poll(context.Background(), "owner/repo", []int{1}, nil)
 	if err == nil || err.Error() != "GitHub HTTP 401" {
 		t.Fatalf("%v", err)
 	}

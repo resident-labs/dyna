@@ -9,8 +9,37 @@ import (
 	"testing"
 )
 
-// beforeWorkflows is the schema without the tables of step 66, which come last in the file.
-var beforeWorkflows = schema[:strings.Index(schema, "CREATE TABLE workflow_runs")]
+// beforeWorkflows is the schema without the tables of steps 66 and 67, which come last in the file, and step 67's columns.
+var beforeWorkflows = strings.Replace(schema[:strings.Index(schema, "CREATE TABLE workflow_runs")], ", meta TEXT NOT NULL DEFAULT '', meta_wake_at INTEGER NOT NULL DEFAULT 0", "", 1)
+
+func TestUpgradeGivesTrackedPRsNoMetadata(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	before := schema[:strings.Index(schema, "CREATE TABLE issue_owners")]
+	if _, err = db.Exec(strings.Replace(before, ", meta TEXT NOT NULL DEFAULT '', meta_wake_at INTEGER NOT NULL DEFAULT 0", "", 1)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`INSERT INTO meta(key,value) VALUES ('schema_version','67');
+		INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+		INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('s','r','s','p','open','',0);
+		INSERT INTO pr_owners(repo,number,session,goal,approved_head,baseline) VALUES('o/r',7,'s','','',0)`); err != nil {
+		t.Fatal(err)
+	}
+	if err = upgrade(db, floorVersion, floorCommit, steps, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = compareSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	var meta string
+	var baseline bool
+	if err = db.QueryRow("SELECT meta,baseline FROM pr_owners WHERE number=7").Scan(&meta, &baseline); err != nil || meta != "" || baseline {
+		t.Fatalf("meta %q baseline %v: %v", meta, baseline, err)
+	}
+}
 
 // LEGACY(v1-transfer): every test here but TestUpgradeRunsOneStep, which pin steps 42 to 63. Remove after the transfer.
 func TestUpgradeConnectSessionsFrom48(t *testing.T) {

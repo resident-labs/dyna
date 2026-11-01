@@ -77,19 +77,27 @@ func (s *Service) trackedPR(ctx context.Context, caller contract.Principal, repo
 	return pr, s.roomAccess(ctx, caller, pr.Room)
 }
 
-func (s *Service) PrList(ctx context.Context, caller contract.Principal, req contract.PrListRequest) (contract.PrListResponse, *contract.Error) {
-	target := req.Room
+// listRoom finds the room a list reads: a session's own when it names none, and for the owner possibly every room.
+func (s *Service) listRoom(ctx context.Context, caller contract.Principal, target contract.RoomID) (contract.RoomID, *contract.Error) {
 	if caller.Kind == contract.PrincipalSession && target == "" {
 		session, err := s.store.Session(ctx, caller.Session)
 		if err != nil {
-			return contract.PrListResponse{}, failure(err)
+			return "", failure(err)
 		}
 		target = session.Room
 	}
 	if target != "" || caller.Kind != contract.PrincipalOwner {
 		if e := s.roomAccess(ctx, caller, target); e != nil {
-			return contract.PrListResponse{}, e
+			return "", e
 		}
+	}
+	return target, nil
+}
+
+func (s *Service) PrList(ctx context.Context, caller contract.Principal, req contract.PrListRequest) (contract.PrListResponse, *contract.Error) {
+	target, e := s.listRoom(ctx, caller, req.Room)
+	if e != nil {
+		return contract.PrListResponse{}, e
 	}
 	rows, err := s.store.RoomPRs(ctx, target, req.All)
 	if err != nil {
@@ -152,6 +160,17 @@ func (s *Service) prTracker(ctx context.Context, caller contract.Principal, req 
 	return session, nil
 }
 
+// trackQuota refuses a track that GitHub cannot serve. Tracking is the one PR or issue call a box can spend quota on.
+func (s *Service) trackQuota(caller contract.Principal) *contract.Error {
+	if s.pulls == nil {
+		return &contract.Error{Code: contract.ErrUnavailable, Message: "GitHub is not connected"}
+	}
+	if reset, low := s.pulls.Low(); low && caller.Kind == contract.PrincipalSession {
+		return &contract.Error{Code: contract.ErrGitHubQuota, Message: fmt.Sprintf("GitHub quota is low; try again after %s", reset.UTC().Format(time.RFC3339))}
+	}
+	return nil
+}
+
 func (s *Service) PrTrack(ctx context.Context, caller contract.Principal, req contract.PrTrackRequest) (contract.PrTrackResponse, *contract.Error) {
 	owner, e := s.prTracker(ctx, caller, req)
 	if e != nil {
@@ -161,12 +180,8 @@ func (s *Service) PrTrack(ctx context.Context, caller contract.Principal, req co
 	if e != nil {
 		return contract.PrTrackResponse{}, e
 	}
-	if s.pulls == nil {
-		return contract.PrTrackResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "GitHub is not connected"}
-	}
-	// This is the one PR call a box can spend quota on.
-	if reset, low := s.pulls.Low(); low && caller.Kind == contract.PrincipalSession {
-		return contract.PrTrackResponse{}, &contract.Error{Code: contract.ErrGitHubQuota, Message: fmt.Sprintf("GitHub quota is low; try again after %s", reset.UTC().Format(time.RFC3339))}
+	if e := s.trackQuota(caller); e != nil {
+		return contract.PrTrackResponse{}, e
 	}
 	pull, err := s.pulls.Pull(ctx, repo, req.Number)
 	if errors.Is(err, prs.ErrNotFound) {
@@ -197,34 +212,57 @@ func (s *Service) PrTrack(ctx context.Context, caller contract.Principal, req co
 	return contract.PrTrackResponse{PR: prFor(caller, stored, s.prViewer())}, nil
 }
 
-// HookTrack tracks a PR the way the named session would for itself, or root with no name, so a Run gets no reach that
-// the session lacks: the room must list the PR's repository, and tracking grants no push right.
-func (s *Service) HookTrack(ctx context.Context, id contract.RoomID, name string, req contract.PrTrackRequest) (contract.PrTrackResponse, *contract.Error) {
+// hookSession finds who a Run tracks for: the session it names in its room, or root with no name.
+func (s *Service) hookSession(ctx context.Context, id contract.RoomID, name string) (contract.Principal, *contract.Error) {
 	if id == "" {
-		return contract.PrTrackResponse{}, invalid("a machine run has no room to track for")
+		return contract.Principal{}, invalid("a machine run has no room to track for")
 	}
 	tree, err := s.store.RoomTree(ctx, id)
 	if err != nil {
-		return contract.PrTrackResponse{}, failure(err)
+		return contract.Principal{}, failure(err)
 	}
 	session := tree.Root()
 	if name = strings.TrimPrefix(name, "@"); name != "" {
 		named, err := s.store.SessionByName(ctx, id, name)
 		if errors.Is(err, store.ErrNotFound) {
-			return contract.PrTrackResponse{}, invalid("unknown session @" + name)
+			return contract.Principal{}, invalid("unknown session @" + name)
 		}
 		if err != nil {
-			return contract.PrTrackResponse{}, failure(err)
+			return contract.Principal{}, failure(err)
 		}
 		session = named.ID
 	}
 	if session == "" {
-		return contract.PrTrackResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "room has no open root"}
+		return contract.Principal{}, &contract.Error{Code: contract.ErrNotFound, Message: "room has no open root"}
 	}
-	return s.PrTrack(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session}, req)
+	return contract.Principal{Kind: contract.PrincipalSession, Session: session}, nil
 }
 
-// PrUntrack is for the owner, the session that owns the PR, and that session's ancestors.
+// HookTrack tracks a PR the way the named session would for itself, or root with no name, so a Run gets no reach that
+// the session lacks: the room must list the PR's repository, and tracking grants no push right.
+func (s *Service) HookTrack(ctx context.Context, id contract.RoomID, name string, req contract.PrTrackRequest) (contract.PrTrackResponse, *contract.Error) {
+	caller, e := s.hookSession(ctx, id, name)
+	if e != nil {
+		return contract.PrTrackResponse{}, e
+	}
+	return s.PrTrack(ctx, caller, req)
+}
+
+// mayUntrack allows the owner, the session that owns a PR or an issue, and that session's ancestors.
+func (s *Service) mayUntrack(ctx context.Context, caller contract.Principal, id contract.RoomID, owner contract.SessionID) *contract.Error {
+	if caller.Kind != contract.PrincipalSession || caller.Session == owner {
+		return nil
+	}
+	tree, err := s.store.RoomTree(ctx, id)
+	if err != nil {
+		return failure(err)
+	}
+	if !tree.CanManage(caller, owner) {
+		return forbidden()
+	}
+	return nil
+}
+
 func (s *Service) PrUntrack(ctx context.Context, caller contract.Principal, req contract.PrUntrackRequest) (contract.PrUntrackResponse, *contract.Error) {
 	repo, e := s.prRepo(ctx, caller, req.Repo, req.Number)
 	if e != nil {
@@ -234,14 +272,8 @@ func (s *Service) PrUntrack(ctx context.Context, caller contract.Principal, req 
 	if e != nil {
 		return contract.PrUntrackResponse{}, e
 	}
-	if caller.Kind == contract.PrincipalSession && caller.Session != pr.Session {
-		tree, err := s.store.RoomTree(ctx, pr.Room)
-		if err != nil {
-			return contract.PrUntrackResponse{}, failure(err)
-		}
-		if !tree.CanManage(caller, pr.Session) {
-			return contract.PrUntrackResponse{}, forbidden()
-		}
+	if e := s.mayUntrack(ctx, caller, pr.Room, pr.Session); e != nil {
+		return contract.PrUntrackResponse{}, e
 	}
 	if err := s.store.UntrackPR(ctx, repo, req.Number); err != nil {
 		return contract.PrUntrackResponse{}, failure(err)

@@ -6,11 +6,19 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 67
+const schemaVersion = 68
 
 // LEGACY(v1-transfer): steps 42 to 63, which only upgrade stores older than schema 64. Remove after the transfer.
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	67: {
+		// An empty meta means no poll has read it, so a PR tracked before this step reports none of what it already shows.
+		`ALTER TABLE pr_owners ADD COLUMN meta TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE pr_owners ADD COLUMN meta_wake_at INTEGER NOT NULL DEFAULT 0`,
+		`CREATE TABLE issue_owners (repo TEXT NOT NULL, number INTEGER NOT NULL, session TEXT NOT NULL REFERENCES sessions(id), url TEXT NOT NULL, title TEXT NOT NULL, author TEXT NOT NULL, state TEXT NOT NULL, seen_comments INTEGER NOT NULL DEFAULT 0, own_wake_at INTEGER NOT NULL DEFAULT 0, meta TEXT NOT NULL DEFAULT '', meta_wake_at INTEGER NOT NULL DEFAULT 0, baseline INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(repo, number))`,
+		`CREATE INDEX issue_owners_session ON issue_owners(session)`,
+		`CREATE INDEX issue_owners_state ON issue_owners(state)`,
+	},
 	66: {
 		`CREATE TABLE workflow_runs (id TEXT PRIMARY KEY, room TEXT NOT NULL REFERENCES rooms(id), session TEXT NOT NULL UNIQUE REFERENCES sessions(id), name TEXT NOT NULL, description TEXT NOT NULL, script TEXT NOT NULL, args TEXT NOT NULL, profiles TEXT NOT NULL, repo TEXT NOT NULL, commit_sha TEXT NOT NULL, image TEXT NOT NULL, state TEXT NOT NULL, result TEXT NOT NULL DEFAULT '', started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE INDEX workflow_runs_room ON workflow_runs(room, started_at)`,

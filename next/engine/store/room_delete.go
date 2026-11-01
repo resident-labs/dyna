@@ -169,6 +169,7 @@ var deleteRoom = []string{
 	`DELETE FROM workflow_runs WHERE room=?1`,
 	`DELETE FROM shell_jobs WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM pr_owners WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
+	`DELETE FROM issue_owners WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM goal_journal WHERE room=?1`,
 	`DELETE FROM goal_items WHERE room=?1`,
 	`DELETE FROM goals WHERE room=?1`,
@@ -177,10 +178,11 @@ var deleteRoom = []string{
 	`DELETE FROM archives WHERE ref='' AND session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM sessions WHERE room=?1`,
 	`DELETE FROM room_repos WHERE room=?1`,
-	// A repository another room lists stays, with a default room that exists. One no room lists goes, and with it any PR a
-	// session of another room opened there, since no room watches that repository any more, and its CI runners, as --mode github would.
+	// A repository another room lists stays, with a default room that exists. One no room lists goes, and with it any PR or issue
+	// a session of another room holds there, since no room watches that repository any more, and its CI runners, as --mode github would.
 	`UPDATE repos SET default_room=(SELECT MIN(room) FROM room_repos WHERE repo=repos.repo) WHERE default_room=?1 AND EXISTS (SELECT 1 FROM room_repos WHERE repo=repos.repo)`,
 	`DELETE FROM pr_owners WHERE repo IN (SELECT repo FROM repos WHERE default_room=?1)`,
+	`DELETE FROM issue_owners WHERE repo IN (SELECT repo FROM repos WHERE default_room=?1)`,
 	`DELETE FROM repo_ci_hosts WHERE repo IN (SELECT repo FROM repos WHERE default_room=?1)`,
 	`DELETE FROM repos WHERE default_room=?1`,
 	`DELETE FROM host_rooms WHERE room=?1`,
