@@ -26,7 +26,7 @@
   import Avatar, { setSessionLabels } from "./lib/ui/Avatar.svelte";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
   import { boxReason, count, quoted, turnReason, waits, type Quote } from "./lib/feed.ts";
-  import { urgency, type Status } from "./lib/status.ts";
+  import { sessionTree, type TreeRow } from "./lib/session-tree.ts";
   import { FileDraft } from "./lib/attach.svelte.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
   import type { Size } from "./lib/computerInput.ts";
@@ -47,7 +47,7 @@
   import { mentionable, parseMentions } from "./lib/mentions.ts";
   import { distinctInitials } from "./lib/identity.ts";
   import { computerPlace, fitted, type Rect } from "./lib/float.ts";
-  import type { ComputerInput, Conversation, PostRequest, SessionStarted } from "./lib/contract.gen.ts";
+  import type { ComputerInput, Conversation, PostRequest } from "./lib/contract.gen.ts";
   // A pairing link leaves the address bar and history at once, whatever this browser's state. Only a signed-out page uses it.
   const move = new URLSearchParams(location.hash.slice(1));
   const moveData = move.has("route") ? move : new URLSearchParams(sessionStorage.getItem("dyna-connect-move") ?? "");
@@ -206,47 +206,10 @@
   // more idle siblings fold into one "N idle" row that opens in place, so a room of 100 sessions shows its work first.
   const folded = new SvelteSet<string>();
   const openIdle = new SvelteSet<string>();
-  type TreeRow = { kind: "session"; session: SessionStarted; depth: number; parent: boolean; hidden: number; state: Status; dot: Status; mark?: string }
-    | { kind: "idle"; key: string; depth: number; count: number; open: boolean };
   const treeKey = (entry: TreeRow) => entry.kind === "idle" ? `idle ${entry.key}` : entry.session.session;
   let sessionList: VirtualList<TreeRow> | undefined = $state();
-  const folds: Record<Status, string> = { waiting: "A folded session waits for you", failed: "A folded session failed", working: "A folded session is working", idle: "" };
   const starting = (id: string) => { const box = store?.boxes.get(id); return box === "pending" || box === "creating" || box === "starting"; };
-  let tree = $derived.by(() => {
-    const sessions = [...(store?.sessions.values() ?? [])];
-    const ids = new Set(sessions.map(item => item.session));
-    const children = (parent: string | undefined) => sessions.filter(item => (item.parent && ids.has(item.parent) ? item.parent : undefined) === parent);
-    const under = (parent: string): string[] => children(parent).flatMap(item => [item.session, ...under(item.session)]);
-    const own = new Map(sessions.map(item => [item.session, store?.status(item.session) ?? "idle"]));
-    const most = (list: string[]) => list.reduce<Status>((best, id) => urgency(own.get(id) ?? "idle") < urgency(best) ? own.get(id) ?? "idle" : best, "idle");
-    const top = new Map(sessions.map(item => [item.session, most([item.session, ...under(item.session)])]));
-    // Only rows that read Idle fold, by the state that writes the row's words, so a starting session stays out.
-    const quiet = new Map(sessions.map(item => [item.session, [item.session, ...under(item.session)].every(id => own.get(id) === "idle" && !starting(id))]));
-    // The open DM's row and its ancestors never fold away as idle.
-    const keep = new Set<string>();
-    for (let id = session; id && ids.has(id); id = store?.sessions.get(id)?.parent) keep.add(id);
-    const rows: TreeRow[] = [];
-    const walk = (parent: string | undefined, depth: number) => {
-      const kids = children(parent).sort((a, b) => urgency(top.get(a.session) ?? "idle") - urgency(top.get(b.session) ?? "idle")
-        || Number(quiet.get(a.session)) - Number(quiet.get(b.session)));
-      const idle = kids.filter(item => quiet.get(item.session) && !keep.has(item.session));
-      const key = parent ?? "";
-      const open = idle.length < 2 || openIdle.has(key);
-      for (const item of kids) {
-        if (item === idle[0] && idle.length >= 2) rows.push({ kind: "idle", key, depth, count: idle.length, open });
-        if (!open && idle.includes(item)) continue;
-        const hidden = folded.has(item.session) ? under(item.session) : [];
-        // A folded row shows the most urgent status it hides when that is more urgent than its own.
-        const inside = most(hidden), state = own.get(item.session) ?? "idle";
-        const shown = urgency(inside) < urgency(state) ? inside : state;
-        rows.push({ kind: "session", session: item, depth, parent: children(item.session).length > 0, hidden: hidden.length, state, dot: shown,
-          mark: shown === state ? undefined : folds[shown] });
-        if (!hidden.length) walk(item.session, depth + 1);
-      }
-    };
-    walk(undefined, 0);
-    return rows;
-  });
+  let tree = $derived(sessionTree([...(store?.sessions.values() ?? [])], store?.statuses() ?? new Map(), starting, session, folded, openIdle));
   // Left folds a parent's subtree and Right opens it, on its row or its chevron.
   function fold(event: KeyboardEvent, id: string) {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
