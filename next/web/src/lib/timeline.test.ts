@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { deriveTimelineGroups } from "./timeline.ts";
 import type { TranscriptItem } from "./contract.gen.ts";
 
+// Dyna: Transcript items embed posts on their tool call.
 test("work stays together until a visible message separates it", () => {
   const items: TranscriptItem[] = [
     { id: "a", turn: "t", at: "", kind: "thinking", text: "Plan" },
