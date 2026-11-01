@@ -81,10 +81,10 @@ func PostsForReplies(inputs []contract.Delivery, events []contract.Event, sessio
 		post := event.Body.(contract.PostCreated)
 		for _, input := range inputs {
 			channel := input.Reply
-			if channel.Kind != contract.ReplyFinal {
+			if channel.Kind != contract.ReplyFinal || channel.Home != post.Home {
 				continue
 			}
-			matched := channel.Target.Kind == contract.PrincipalOwner && channel.Home == post.Home
+			matched := channel.Target.Kind == contract.PrincipalOwner
 			for _, mentioned := range post.Mentions {
 				if mentioned == channel.Target {
 					matched = true

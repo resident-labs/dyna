@@ -7,6 +7,23 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+func TestCodemodeTranscript(t *testing.T) {
+	code := strings.Repeat("x", 9000)
+	data := `{"type":"message","message":{"role":"user","deliveryId":"1"}}` + "\n" +
+		`{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"call","name":"codemode","arguments":{"code":"` + code + `"}},{"type":"toolCall","id":"empty","name":"codemode","arguments":{"code":"ok"}}]}}` + "\n" +
+		`{"type":"message","message":{"role":"toolResult","toolCallId":"call","content":[{"type":"text","text":"` + strings.Repeat("o", 1100) + `"}],"details":{"calls":[{"name":"read","args":"{\"path\":\"/tmp/a\"}","status":"error","durationMs":42,"error":"token=secretvalue"}]}}}` + "\n" +
+		`{"type":"message","message":{"role":"toolResult","toolCallId":"empty","content":[]}}` + "\n"
+	deliveries := map[contract.DeliverySeq]contract.TurnID{1: "t"}
+	items, _, _, err := ReadTranscript(strings.NewReader(data), deliveries, "x", "", 0, 10)
+	if err != nil || len(items) != 2 || !items[0].More || len(items[0].Script) != 8192 || len(items[0].Calls) != 1 || items[0].Calls[0].Target != "a" || items[0].Calls[0].Status != contract.TranscriptCallError || *items[0].Calls[0].DurationMs != 42 || strings.Contains(items[0].Calls[0].Error, "secretvalue") || len(items[1].Calls) != 0 {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	full, _, _, err := ReadTranscript(strings.NewReader(data), deliveries, "x", "call", 0, 10)
+	if err != nil || len(full) != 1 || full[0].Script != code || len(full[0].Output) != 1100 {
+		t.Fatalf("full item unavailable: %+v %v", full, err)
+	}
+}
+
 func TestTranscriptItemsMaskAndKeepToolIdentity(t *testing.T) {
 	data := `{"type":"message","id":"m1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","deliveryId":"1","content":[{"type":"text","text":"wake"}]}}
 {"type":"message","id":"m2","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"reason"},{"type":"text","text":"answer"},{"type":"toolCall","id":"call1","name":"bash","arguments":{"command":"token=secretvalue"}}]}}
