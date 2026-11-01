@@ -36,7 +36,7 @@
 {#if failure}<span class="failed">{failure}</span>{/if}
 
 <style>
-  .menu { display: inline-block; position: relative; }
+  .menu { display: inline-block; position: relative; margin-left: 8px; }
   .move { padding: 0; border: 0; border-radius: 4px; background: none; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; }
   .move:hover:not(:disabled), .move[aria-expanded="true"] { color: var(--text); text-decoration: underline; }
   .move:disabled { opacity: 0.6; cursor: default; }
