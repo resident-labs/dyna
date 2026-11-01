@@ -157,9 +157,6 @@ func countedCallers(counted map[string]int) string {
 		}
 		return rows[i].name < rows[j].name
 	})
-	if len(rows) > 6 {
-		rows = rows[:6]
-	}
 	var parts []string
 	for _, r := range rows {
 		parts = append(parts, fmt.Sprintf("%s %d", r.name, r.count))
@@ -194,15 +191,39 @@ func ghQuotaCaller(path string) string {
 	endpoint, query, _ := strings.Cut(path, "?")
 	rest, ok := strings.CutPrefix(endpoint, "repos/")
 	if !ok {
-		return "other"
-	}
-	// Drop the owner and repository, which name the same callers everywhere.
-	if _, after, found := strings.Cut(rest, "/"); found {
-		if _, tail, found := strings.Cut(after, "/"); found {
-			rest = tail
+		switch {
+		case endpoint == "user" || strings.HasPrefix(endpoint, "user/"):
+			return "user"
+		case strings.HasPrefix(endpoint, "users/"):
+			return "users"
+		case strings.HasPrefix(endpoint, "orgs/"):
+			return "orgs"
+		case strings.HasPrefix(endpoint, "search/"):
+			return "search"
+		case endpoint == "rate_limit":
+			return "rate-limit"
+		case endpoint == "notifications" || strings.HasPrefix(endpoint, "notifications/"):
+			return "notifications"
+		default:
+			return "rest-other"
 		}
 	}
+	// Drop the owner and repository before choosing a fixed label.
+	_, after, found := strings.Cut(rest, "/")
+	if !found {
+		return "repo-other"
+	}
+	_, rest, found = strings.Cut(after, "/")
+	if !found {
+		return "repository"
+	}
 	switch {
+	case rest == "git/refs" || strings.HasPrefix(rest, "git/refs/") || strings.HasPrefix(rest, "git/ref/"):
+		return "git-refs"
+	case rest == "releases" || strings.HasPrefix(rest, "releases/"):
+		return "releases"
+	case rest == "actions/secrets" || strings.HasPrefix(rest, "actions/secrets/"):
+		return "actions-secrets"
 	case strings.HasPrefix(rest, "commits/"):
 		if strings.HasSuffix(rest, "/check-runs") {
 			return "check-runs"
@@ -264,5 +285,5 @@ func ghQuotaCaller(path string) string {
 		}
 		return "pull"
 	}
-	return "other"
+	return "repo-other"
 }
