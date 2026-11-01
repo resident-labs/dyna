@@ -5,6 +5,7 @@
   let compactText = $state((profile.compactTokens ?? 0).toLocaleString(undefined, { numberingSystem: "latn" }));
   let selected = $derived(providers.find(p => p.id === draft.provider));
   let billing = $derived(draft.billing || (selected?.flows?.some(flow => flow !== "key") ? "plan" : "key"));
+  let incompatible = $derived(!!selected && !!draft.model.trim() && !(selected.models ?? []).some(model => model.id === draft.model.trim() && model.billing?.includes(billing)));
   const ratings = [
     { key: "taste", name: "Taste", help: "choosing the solution" },
     { key: "diagnostics", name: "Diagnostics", help: "finding what is wrong, with few false positives" },
@@ -41,8 +42,9 @@
   <label class="field"><span>Notes</span><textarea bind:value={draft.description} rows="3"></textarea></label>
   <label class="field"><span>Calls per run</span><div><input class="numeric" type="number" min="0" bind:value={draft.maxCallsPerRun} /> <span class="help">a run fails past this many calls; 0 means no limit</span></div></label>
   <label class="field"><span>Compact at</span><div><input class="numeric" inputmode="numeric" value={compactText} oninput={(event) => { compactText = event.currentTarget.value; draft.compactTokens = Number(compactText.replace(/[^0-9]/g, "")); }} onblur={() => compactText = (draft.compactTokens ?? 0).toLocaleString(undefined, { numberingSystem: "latn" })} /> <span class="help">tokens of context; 0 means Pi's default</span></div></label>
+  {#if incompatible}<p role="alert" class="help">This model is not available for the selected provider and billing.</p>{/if}
   {#if error}<p role="alert" class="help">{error}</p>{/if}
-  <div class="actions"><button class="btn fill save" type="button" disabled={busy || !draft.name.trim() || !draft.model.trim()} onclick={() => save(draft)}>Save</button><button class="btn" type="button" disabled={busy} onclick={cancel}>Cancel</button>{#if !isNew}{#if profile.inUse > 0}<span class="in-use">In use by {profile.inUse} {profile.inUse === 1 ? "session" : "sessions"}, so it cannot be removed.</span>{:else}<button class="btn danger remove" type="button" disabled={busy} onclick={remove}>Remove</button>{/if}{/if}</div>
+  <div class="actions"><button class="btn fill save" type="button" disabled={busy || incompatible || !draft.name.trim() || !draft.model.trim()} onclick={() => save(draft)}>Save</button><button class="btn" type="button" disabled={busy} onclick={cancel}>Cancel</button>{#if !isNew}{#if profile.inUse > 0}<span class="in-use">In use by {profile.inUse} {profile.inUse === 1 ? "session" : "sessions"}, so it cannot be removed.</span>{:else}<button class="btn danger remove" type="button" disabled={busy} onclick={remove}>Remove</button>{/if}{/if}</div></div>
 </div></div>
 
 <style>
