@@ -65,11 +65,12 @@ type responsesCitation struct {
 // responsesStream is what one answer stream said: its text, its citations, the
 // sources of its search call, and the failure it reported, if any.
 type responsesStream struct {
-	answer  strings.Builder
-	texts   []string
-	cites   []responsesCitation
-	sources []responsesSource
-	failure error
+	answer    strings.Builder
+	texts     []string
+	cites     []responsesCitation
+	sources   []responsesSource
+	failure   error
+	completed bool
 }
 
 // readResponsesStream reads the answer stream to its end.
@@ -101,6 +102,9 @@ func readResponsesStream(r io.Reader, provider string) (*responsesStream, error)
 
 // add records one event's text, citations and sources.
 func (s *responsesStream) add(event responsesEvent, provider string) {
+	if event.Type == "response.completed" {
+		s.completed = true
+	}
 	if event.Type == "error" {
 		s.failure = fmt.Errorf("%s reported an error: %s", provider, text(redact(event.Message)))
 		return
