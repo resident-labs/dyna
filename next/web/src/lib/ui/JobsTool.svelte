@@ -12,8 +12,7 @@
   // it, or a sheet on a phone, with the jobs grouped by session; a job opens as a dock tab (onopen), or on a phone as
   // a full-height sheet. The lists watch each session's jobs only while they are open and the page is visible.
   type JobSession = { id: string; name: string; root: boolean; running: number };
-  let { sessions, allSessions, failures, allFailures, phone, compact = false, onopen, onseen }: {
-    compact?: boolean;
+  let { sessions, allSessions, failures, allFailures, phone, onopen, onseen }: {
     sessions: JobSession[]; allSessions: JobSession[]; failures: string[]; allFailures: string[]; phone: boolean;
     onopen: (session: JobSession, job: ShellJob) => void; onseen: (key: string) => void;
   } = $props();
@@ -90,7 +89,6 @@
   <button type="button" class="open" class:live={running || failures.length} class:phone bind:this={button} aria-haspopup="dialog" aria-expanded={open}
     aria-label={`Jobs, ${summary}`} title={summary} onclick={() => { if (open) void close(); else void show(); }}>
     <Icon name="prompt" />{#if phone}{#if failures.length}<span class="corner"><StatusPill tone="failed" dot label="Failed" /></span>{/if}
-    {:else if compact}{#if failures.length}<StatusPill tone="failed" dot label="Failed" />{/if}
     {:else}<span>Jobs</span>
       {#if running}<span class="n">{running}</span>{/if}
       {#if failures.length}<StatusPill tone="failed" label={`${failures.length} failed`} />{/if}
@@ -128,7 +126,7 @@
   .open.live { color: var(--text); }
   .open:hover, .open[aria-expanded="true"] { background: var(--selected); color: var(--text); }
   .open:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
-  .open.phone { position: relative; justify-content: center; width: 40px; height: 40px; padding: 0; }
+  .open.phone { position: relative; justify-content: center; width: 44px; height: 44px; padding: 0; }
   .corner { position: absolute; top: 4px; right: 2px; }
   .n { font-variant-numeric: tabular-nums; }
   .open > :global(svg:last-child) { color: var(--muted); }
