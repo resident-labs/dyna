@@ -69,6 +69,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(computerCommand("/run/dyna/agent.sock"))
 	root.AddCommand(proxyCommand())
 	root.AddCommand(ciEgressCommand())
+	root.AddCommand(shareCommand())
 	addEngine(root)
 	for _, a := range tools.Actions() {
 		for _, binding := range a.CLI {

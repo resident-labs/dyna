@@ -110,6 +110,10 @@ func (b *backupLoop) copy(ctx context.Context, path string) error {
 			if walkErr != nil {
 				return walkErr
 			}
+			// A room's shared folder has no backup: it can hold files any size, under IDs this user cannot read.
+			if entry.IsDir() && b.layout.IsShared(path) {
+				return filepath.SkipDir
+			}
 			if entry.IsDir() || !entry.Type().IsRegular() {
 				return nil
 			}

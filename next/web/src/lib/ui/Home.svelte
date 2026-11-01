@@ -179,12 +179,12 @@
   let unreachable = $derived(hosts?.filter(h => !h.reachable).length ?? 0);
   let low = $derived(hosts?.filter(h => h.diskLow) ?? []);
   let lowDisk = $derived(low.length === 1 ? `${hostLabel(low[0].name)} is low on disk` : `${low.length} machines are low on disk`);
-  // A large shared folder never changes the sentence; the muted line names the largest, its room and its host.
+  // A large shared folder never changes the sentence; the muted line names the largest and its room.
   const roomName = (room: string) => attention.rooms.get(room)?.name ?? "a closed room";
-  let shared = $derived((hosts ?? []).flatMap(h => largeShared(h).map(folder => ({ ...folder, host: h.name }))).sort((a, b) => b.bytes - a.bytes));
+  let shared = $derived((hosts ?? []).flatMap(largeShared).sort((a, b) => b.bytes - a.bytes));
   let summary = $derived([
     low.length && lowDisk,
-    shared.length && `Shared folder of ${roomName(shared[0].room)} holds ${sharedSize(shared[0].bytes)} on ${shared[0].host === "control-plane" ? "this computer" : shared[0].host}`
+    shared.length && `Shared folder of ${roomName(shared[0].room)} holds ${sharedSize(shared[0].bytes)}`
       + (shared.length > 1 ? `, and ${shared.length - 1} more ${shared.length === 2 ? "is" : "are"} large` : ""),
     !active.length && "No room is working",
     hosts?.length && count(hosts.length, "machine") + (unreachable ? `, ${unreachable} unreachable` : ""),

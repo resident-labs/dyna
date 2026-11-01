@@ -163,14 +163,13 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 				r.wg.Add(1)
 				go func(name contract.HostName) {
 					defer r.wg.Done()
-					sizes, err := r.boxes.MaintainHost(ctx, name)
-					if err != nil {
+					if err := r.boxes.MaintainHost(ctx, name); err != nil {
 						if ctx.Err() == nil {
 							log.Printf("host %s: maintenance: %v", name, err)
 						}
 						return
 					}
-					if err := r.store.FinishHostMaintenance(ctx, name, sizes, r.now()); err != nil && ctx.Err() == nil {
+					if err := r.store.FinishHostMaintenance(ctx, name, r.now()); err != nil && ctx.Err() == nil {
 						log.Printf("host %s: record maintenance: %v", name, err)
 					}
 				}(host.Name)

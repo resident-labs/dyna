@@ -38,7 +38,7 @@ func TestCreateContainerCreatesWritableMount(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd := r.calls[1][len(r.calls[1])-1]
-	if !strings.Contains(cmd, `mkdir -p -m 0700 -- "$1"`) || !strings.HasSuffix(cmd, "'dyna' '/cache'") {
+	if !strings.Contains(cmd, `mkdir -p -m 0700 -- "$1"`) || !strings.HasSuffix(cmd, "'dyna' '/cache' ''") {
 		t.Fatal(cmd)
 	}
 }

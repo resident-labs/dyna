@@ -11,6 +11,7 @@ import (
 	"regexp"
 	goruntime "runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/resident-labs/dyna/box"
@@ -149,7 +150,7 @@ func TestRoomRemovalRefusesAnEmptyRoom(t *testing.T) {
 
 func TestInstructionMountsAreRoomScoped(t *testing.T) {
 	b := &Boxes{Layout: box.Layout{HostData: "/host"}}
-	_, spec := b.container(lifecycle.BoxSpec{Room: "room"}, "image")
+	_, spec := b.container(lifecycle.BoxSpec{Room: "room"}, "image", box.Mount{})
 	found := map[string]box.Mount{}
 	for _, mount := range spec.Mounts {
 		found[mount.BoxPath] = mount
@@ -264,13 +265,19 @@ func TestAddHostCopiesPreviouslySavedInstructions(t *testing.T) {
 	}
 }
 
-// delayedInstructionStore holds the background publish before it can reach a host.
+// delayedInstructionStore holds the background publish, which asks first, before it can reach a host.
 type delayedInstructionStore struct {
 	instructionStore
 	entered, release chan struct{}
+	once             *sync.Once
 }
 
 func (s delayedInstructionStore) Hosts(context.Context) ([]box.Host, error) {
+	first := false
+	s.once.Do(func() { first = true })
+	if !first {
+		return engineHosts("host"), nil
+	}
 	close(s.entered)
 	<-s.release
 	return nil, nil
@@ -291,7 +298,7 @@ func TestSaveThenResumeRepairsBeforeDelayedPublish(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delayed := delayedInstructionStore{entered: make(chan struct{}), release: make(chan struct{})}
+	delayed := delayedInstructionStore{entered: make(chan struct{}), release: make(chan struct{}), once: &sync.Once{}}
 	defer close(delayed.release)
 	b := &Boxes{Store: delayed, Layout: box.Layout{Data: data, HostData: remote}, hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}}
 	if err := b.syncInstructions(ctx, host); err != nil {

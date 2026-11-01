@@ -36,7 +36,6 @@ type Subscription struct {
 	Failures  int
 	LastAt    time.Time
 	Last      contract.HookResult
-	LastHost  contract.HostName
 	LastSeq   int64 // the last hook.due event of a scheduled Wake
 	Running   bool
 	Held      bool // its room or its target's room is paused or going away
@@ -156,7 +155,7 @@ func wakeTarget(sub contract.Subscription) contract.SessionID {
 	return sub.Wake.Session
 }
 
-const subscriptionSelect = `SELECT s.id,s.scope,COALESCE(s.room,''),COALESCE(s.session,''),s.every_ms,s.wake_kind,s.wake_id,s.run_image,s.run_size,s.enabled,s.due_at,s.hold_until,s.failures,s.last_at,s.last_result,s.last_host,s.last_seq,
+const subscriptionSelect = `SELECT s.id,s.scope,COALESCE(s.room,''),COALESCE(s.session,''),s.every_ms,s.wake_kind,s.wake_id,s.run_image,s.run_size,s.enabled,s.due_at,s.hold_until,s.failures,s.last_at,s.last_result,s.last_seq,
 EXISTS(SELECT 1 FROM subscription_runs u WHERE u.sub=s.id),
 EXISTS(SELECT 1 FROM rooms r WHERE (r.paused_at IS NOT NULL OR r.state!='open') AND r.id IN (s.room,(SELECT t.room FROM sessions t WHERE t.id=s.wake_id)))
 FROM subscriptions s `
@@ -175,7 +174,7 @@ func loadSubscriptions(ctx context.Context, q sqlQuery, where string, args ...an
 		var size contract.BoxSizeName
 		var enabled bool
 		var due, hold, last int64
-		if err := rows.Scan(&sub.ID, &sub.Scope, &sub.Room, &sub.Session, &sub.Every, &wakeKind, &wakeID, &image, &size, &enabled, &due, &hold, &sub.Failures, &last, &sub.Last, &sub.LastHost, &sub.LastSeq, &sub.Running, &sub.Held); err != nil {
+		if err := rows.Scan(&sub.ID, &sub.Scope, &sub.Room, &sub.Session, &sub.Every, &wakeKind, &wakeID, &image, &size, &enabled, &due, &hold, &sub.Failures, &last, &sub.Last, &sub.LastSeq, &sub.Running, &sub.Held); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -464,7 +463,7 @@ func (s *Store) BeginRun(ctx context.Context, sub Subscription, run HookRun) (bo
 	begun := false
 	err := s.Write(ctx, func(tx *sql.Tx) error {
 		begun = false
-		result, err := tx.ExecContext(ctx, "UPDATE subscriptions SET due_at=?,last_host=? WHERE id=? AND enabled=1 AND due_at=?", nextDue(sub, run.StartedAt), run.Host, sub.ID, millis(sub.DueAt))
+		result, err := tx.ExecContext(ctx, "UPDATE subscriptions SET due_at=? WHERE id=? AND enabled=1 AND due_at=?", nextDue(sub, run.StartedAt), sub.ID, millis(sub.DueAt))
 		if err != nil {
 			return err
 		}
@@ -530,16 +529,6 @@ func (s *Store) FinishRun(ctx context.Context, run HookRun, outcome HookOutcome,
 		}
 		return nil
 	})
-}
-
-// RootBoxHost names the host of a room's root box, whose /box/shared the room already uses. It is empty before placement.
-func (s *Store) RootBoxHost(ctx context.Context, id contract.RoomID) (contract.HostName, error) {
-	var host contract.HostName
-	err := s.Read().QueryRowContext(ctx, "SELECT COALESCE(b.host,'') FROM boxes b JOIN sessions t ON t.id=b.session WHERE t.room=? AND t.parent IS NULL", id).Scan(&host)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	return host, err
 }
 
 // RoomLimits reads a room's limits. Zero means no limit.

@@ -35,6 +35,7 @@ import (
 type boxStore interface {
 	Hosts(context.Context) ([]box.Host, error)
 	AddHost(context.Context, box.Host) error
+	SetRoomShared(context.Context, []contract.RoomShared, time.Time) error
 	SetEngineHost(context.Context, contract.HostName, bool) error
 	Session(context.Context, contract.SessionID) (store.Session, error)
 	Box(context.Context, contract.BoxID) (box.Box, error)
@@ -70,8 +71,9 @@ type Boxes struct {
 	Proc              string // Proc is the folder with stat and meminfo; empty means /proc.
 	mu                sync.Mutex
 	hosts             map[contract.HostName]*podman.Host
-	restored          map[contract.HostName]bool // forwards back in this process
-	installed         map[contract.HostName]bool // binary current in this process
+	restored          map[contract.HostName]bool   // forwards back in this process
+	installed         map[contract.HostName]bool   // binary current in this process
+	shareProblems     map[contract.HostName]string // the last reason each host's mount could not come up
 	recoveries        map[contract.HostName]*recovery
 	recovering        sync.WaitGroup
 	retryDelay        time.Duration // retryDelay is the first wait between recovery tries; zero means restoreRetryMin.
@@ -173,7 +175,7 @@ func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
 	ticker := time.NewTicker(10 * time.Second)
 	go func() {
 		defer ticker.Stop()
-		h.Heartbeat(b.Context, ticker.C, b.Layout.HostData, func(ok bool, load podman.Load) {
+		h.Heartbeat(b.Context, ticker.C, b.Layout, func(ok bool, load podman.Load) {
 			now := time.Now()
 			if ok {
 				if err := b.syncInstructions(b.Context, h); err != nil {
@@ -182,6 +184,9 @@ func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
 			}
 			b.record(name, ok, load, now)
 			b.reportHeartbeat(b.Context, name, ok, load, now)
+			if ok && !load.ShareUp && b.recovered(name) {
+				b.repairShare(b.Context, name)
+			}
 		}, b.pressure(name))
 	}()
 }
@@ -358,10 +363,10 @@ func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host,
 	return nil, fmt.Errorf("host %q: %w", name, store.ErrNotFound)
 }
 
-func (b *Boxes) MaintainHost(ctx context.Context, name contract.HostName) ([]contract.RoomShared, error) {
+func (b *Boxes) MaintainHost(ctx context.Context, name contract.HostName) error {
 	h, err := b.host(ctx, name)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	b.prepareImages(ctx, h, name)
 	b.sweepRuns(ctx, name, h)
@@ -532,7 +537,11 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool,
 	if err != nil {
 		return false, err
 	}
-	check := h.Check(ctx, podman.CheckOptions{Layout: b.Layout, Runtime: b.Runtime, AdminOnly: req.OwnerOnlyAdmin})
+	same, err := b.engineHost(ctx, h)
+	if err != nil {
+		return false, err
+	}
+	check := h.Check(ctx, podman.CheckOptions{Layout: b.Layout, Runtime: b.Runtime, AdminOnly: req.OwnerOnlyAdmin, EngineHost: same})
 	if !check.Ready() {
 		for _, item := range check.Items {
 			if !item.OK {
@@ -548,10 +557,6 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool,
 		return false, err
 	}
 	if err := b.syncInstructions(ctx, h); err != nil {
-		return false, err
-	}
-	same, err := b.engineHost(ctx, h)
-	if err != nil {
 		return false, err
 	}
 	record := box.Host{Rooms: req.Rooms, EngineHost: &same, Name: req.Name, SSH: req.SSH, State: box.HostReady, CPUs: check.CPUs, MemBytes: check.MemBytes, DiskBytes: check.DiskBytes, CheckedAt: time.Now()}
@@ -616,13 +621,18 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 		return "", err
 	}
 	steps.Done("binary")
+	shared, err := b.sharedMount(ctx, spec.Host, spec.Room)
+	if err != nil {
+		return "", err
+	}
+	steps.Done("shared folder")
 	image, err := b.CurrentImage(ctx, spec.Session, spec.Host)
 	if err != nil {
 		return "", err
 	}
 	steps.Done("image")
 	spec.Needs, spec.Stack = image.Needs, image.Stack
-	slice, c := b.container(spec, image.Tag)
+	slice, c := b.container(spec, image.Tag, shared)
 	if err = h.EnsureSlice(ctx, slice); err != nil {
 		return "", err
 	}
@@ -795,6 +805,22 @@ func (b *Boxes) restoring(name contract.HostName) bool {
 	return state != nil && time.Now().Before(state.hold)
 }
 
+// recovered reports whether a host's recovery has ended, if it has one.
+func (b *Boxes) recovered(name contract.HostName) bool {
+	b.mu.Lock()
+	state := b.recoveries[name]
+	b.mu.Unlock()
+	if state == nil {
+		return true
+	}
+	select {
+	case <-state.done:
+		return true
+	default:
+		return false
+	}
+}
+
 // waitRecovered waits for a host's recovery, if it has one, and reports false when ctx ended first.
 func (b *Boxes) waitRecovered(ctx context.Context, name contract.HostName) bool {
 	b.mu.Lock()
@@ -824,8 +850,8 @@ func (b *Boxes) identify(ctx context.Context, name contract.HostName) error {
 	return b.Store.SetEngineHost(ctx, name, same)
 }
 
-// restoreHost adds the forward of each box on a host. A box that fails does not stop the rest. It needs no binary: a running
-// box keeps its agent until it next starts.
+// restoreHost adds the forward of each box on a host and of its shared mount, which outlives the engine and only waits for its
+// socket. A box that fails does not stop the rest. It needs no binary: a running box keeps its agent until it next starts.
 func (b *Boxes) restoreHost(ctx context.Context, name contract.HostName) error {
 	b.mu.Lock()
 	restored := b.restored[name]
@@ -841,7 +867,16 @@ func (b *Boxes) restoreHost(ctx context.Context, name contract.HostName) error {
 	if err != nil {
 		return err
 	}
+	engineHost, err := b.onEngineHost(ctx, name)
+	if err != nil {
+		return err
+	}
 	var failed []error
+	if !engineHost {
+		if err := host.AddForward(ctx, b.shareForward()); err != nil {
+			failed = append(failed, fmt.Errorf("shared folder: %w", err))
+		}
+	}
 	for _, record := range records {
 		if record.Host != name || record.State == contract.BoxDeleted || record.State == contract.BoxFailed {
 			continue
@@ -940,10 +975,15 @@ func (b *Boxes) Start(ctx context.Context, id contract.BoxID) error {
 	if err != nil {
 		return err
 	}
-	// A closing box starts only to archive, so a broken sidecar cannot hold up its close.
-	if session.Compose != "" && record.State != contract.BoxClosing {
-		if err := host.StartSidecars(ctx, id); err != nil {
+	// A closing box starts only to archive, so neither a host's mount nor a broken sidecar can hold up its close.
+	if record.State != contract.BoxClosing {
+		if _, err := b.shareReady(ctx, record.Host); err != nil {
 			return err
+		}
+		if session.Compose != "" {
+			if err := host.StartSidecars(ctx, id); err != nil {
+				return err
+			}
 		}
 	}
 	return host.StartContainer(ctx, id)
@@ -1178,6 +1218,11 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, _ s
 		return err
 	}
 	steps.Done("instructions")
+	shared, err := b.sharedMount(ctx, spec.Host, spec.Room)
+	if err != nil {
+		return err
+	}
+	steps.Done("shared folder")
 	if err := h.StopContainer(ctx, spec.Box); err != nil {
 		return err
 	}
@@ -1191,7 +1236,7 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, _ s
 		}
 	}
 	steps.Done("remove old container")
-	slice, c := b.container(spec, image)
+	slice, c := b.container(spec, image, shared)
 	if err := h.EnsureSlice(ctx, slice); err != nil {
 		return err
 	}
@@ -1224,14 +1269,14 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, _ s
 	return nil
 }
 
-func (b *Boxes) container(spec lifecycle.BoxSpec, image string) (box.Slice, box.ContainerSpec) {
+func (b *Boxes) container(spec lifecycle.BoxSpec, image string, shared box.Mount) (box.Slice, box.ContainerSpec) {
 	size := spec.Size
 	slice := box.Slice{Name: spec.Slice, CPUs: size.CPUs, MemHigh: size.MemBytes, MemMax: size.MemBytes * 3 / 2, Pids: size.Pids}
 	c := box.ContainerSpec{Box: spec.Box, Image: image, Slice: spec.Slice, Needs: spec.Needs, Labels: []box.Label{{Key: "dyna.layout", Value: box.ContainerLayout}}, Mounts: []box.Mount{
 		{HostPath: b.Layout.HostSocketFolder(spec.Box), BoxPath: "/run/dyna/engine", ReadOnly: true},
 		{HostPath: b.Layout.HostBin(), BoxPath: "/opt/dyna/bin", ReadOnly: true},
 		{HostPath: b.Layout.HostCache(), BoxPath: "/box/cache"},
-		{HostPath: b.Layout.HostShared(spec.Room), BoxPath: "/box/shared"},
+		shared,
 		{HostPath: filepath.Dir(b.Layout.HostInstructions("")), BoxPath: "/run/dyna/instructions/global", ReadOnly: true, MakeDir: true},
 		{HostPath: filepath.Dir(b.Layout.HostInstructions(spec.Room)), BoxPath: "/run/dyna/instructions/room", ReadOnly: true, MakeDir: true},
 	}, Env: []box.EnvVar{{Name: "GOMODCACHE", Value: "/box/cache/gomod"}, {Name: "GOCACHE", Value: "/box/cache/gocache"}, {Name: "CARGO_HOME", Value: "/box/cache/cargo"}, {Name: "npm_config_store_dir", Value: "/box/cache/pnpm"}}}

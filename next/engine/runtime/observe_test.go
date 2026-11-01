@@ -93,7 +93,7 @@ func TestHostLoadJudgesControlPlaneDisk(t *testing.T) {
 type offlineRestoreStore struct{ boxStore }
 
 func (offlineRestoreStore) Hosts(context.Context) ([]box.Host, error) {
-	return []box.Host{{Name: "h", State: box.HostReady}}, nil
+	return engineHosts("h"), nil
 }
 func (offlineRestoreStore) SetEngineHost(context.Context, contract.HostName, bool) error { return nil }
 func (offlineRestoreStore) Boxes(context.Context) ([]box.Box, error) {

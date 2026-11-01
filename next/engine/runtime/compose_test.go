@@ -28,7 +28,7 @@ func stackSpec(stack *box.Stack) lifecycle.BoxSpec {
 
 func TestABoxWithNoStackIsUnchanged(t *testing.T) {
 	b := &Boxes{Layout: box.Layout{Data: "/data", HostData: "/host"}}
-	_, plain := b.container(stackSpec(nil), "image")
+	_, plain := b.container(stackSpec(nil), "image", box.Mount{})
 	if plain.Pod != "" || plain.Volumes != nil || len(plain.Labels) != 1 {
 		t.Fatalf("%+v", plain)
 	}
@@ -38,14 +38,14 @@ func TestABoxJoinsItsPodOnlyForSidecars(t *testing.T) {
 	b := &Boxes{Layout: box.Layout{Data: "/data", HostData: "/host"}}
 	env := []box.EnvVar{{Name: "DATABASE_URL", Value: "postgres://db"}}
 	volumes := []box.Volume{{Name: "shared", Target: "/shared"}}
-	_, alone := b.container(stackSpec(&box.Stack{Hash: "abc", Env: env, Volumes: volumes}), "image")
+	_, alone := b.container(stackSpec(&box.Stack{Hash: "abc", Env: env, Volumes: volumes}), "image", box.Mount{})
 	if alone.Pod != "" || !reflect.DeepEqual(alone.Volumes, volumes) || alone.Env[len(alone.Env)-1] != env[0] {
 		t.Fatalf("%+v", alone)
 	}
 	if !slices.Contains(alone.Labels, box.Label{Key: podman.StackHashLabel, Value: "abc"}) {
 		t.Fatalf("labels %+v", alone.Labels)
 	}
-	_, joined := b.container(stackSpec(&box.Stack{Hash: "abc", Sidecars: []box.Sidecar{{Name: "db"}}}), "image")
+	_, joined := b.container(stackSpec(&box.Stack{Hash: "abc", Sidecars: []box.Sidecar{{Name: "db"}}}), "image", box.Mount{})
 	if joined.Pod != "dyna-pod-box_1" {
 		t.Fatalf("%+v", joined)
 	}
@@ -54,7 +54,7 @@ func TestABoxJoinsItsPodOnlyForSidecars(t *testing.T) {
 // A compose file comes after Dyna's own variables, so the file must not be able to name one.
 func TestEveryVariableDynaSetsIsReserved(t *testing.T) {
 	b := &Boxes{Layout: box.Layout{Data: "/data", HostData: "/host"}}
-	_, c := b.container(stackSpec(nil), "image")
+	_, c := b.container(stackSpec(nil), "image", box.Mount{})
 	names := []string{"HOME", "PI_CODING_AGENT_DIR"} // from CreateContainer
 	for _, e := range c.Env {
 		names = append(names, e.Name)
@@ -131,6 +131,7 @@ type composeStore struct {
 func (composeStore) PinWorkflowImage(context.Context, contract.SessionID, string) (string, error) {
 	return "", nil
 }
+func (composeStore) Hosts(context.Context) ([]box.Host, error) { return engineHosts("host"), nil }
 
 func (composeStore) Box(_ context.Context, id contract.BoxID) (box.Box, error) {
 	size, _ := box.Size(contract.BoxSizeAgent)
@@ -229,6 +230,7 @@ type closingStore struct {
 func (closingStore) PinWorkflowImage(context.Context, contract.SessionID, string) (string, error) {
 	return "", nil
 }
+func (closingStore) Hosts(context.Context) ([]box.Host, error) { return engineHosts("host"), nil }
 
 func (s closingStore) Box(_ context.Context, id contract.BoxID) (box.Box, error) {
 	return box.Box{ID: id, Session: "ses", Host: "host", State: s.state}, nil

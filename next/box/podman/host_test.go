@@ -525,7 +525,7 @@ func TestHeartbeatThreeMisses(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		h.Heartbeat(ctx, ticks, "/data", func(ok bool, _ Load) { reports <- ok }, func(string, contract.PressureKind) {})
+		h.Heartbeat(ctx, ticks, box.Layout{HostData: "/data"}, func(ok bool, _ Load) { reports <- ok }, func(string, contract.PressureKind) {})
 	}()
 	for i := 0; i < 3; i++ {
 		ticks <- time.Time{}

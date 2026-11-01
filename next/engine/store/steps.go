@@ -6,11 +6,18 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 68
+const schemaVersion = 69
 
 // LEGACY(v1-transfer): steps 42 to 63, which only upgrade stores older than schema 64. Remove after the transfer.
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	68: {
+		// A room's shared folder is now one central copy. The per-host sizes describe folders that are going away, and the next measure fills this.
+		`DROP TABLE IF EXISTS room_shared`,
+		`CREATE TABLE room_shared (room TEXT PRIMARY KEY, bytes INTEGER NOT NULL, measured_at INTEGER NOT NULL)`,
+		// A Run no longer stays on a host for its files.
+		`ALTER TABLE subscriptions DROP COLUMN last_host`,
+	},
 	67: {
 		// An empty meta means no poll has read it, so a PR tracked before this step reports none of what it already shows.
 		`ALTER TABLE pr_owners ADD COLUMN meta TEXT NOT NULL DEFAULT ''`,
