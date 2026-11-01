@@ -13,7 +13,8 @@
   import Markdown from "./Markdown.svelte";
   import PostAttachments from "./PostAttachments.svelte";
   import MediaViewer from "./MediaViewer.svelte";
-  import { conversationMedia, type MediaItem, type MediaRow } from "../media.ts";
+  import { conversationMedia, readMedia, type MediaItem, type MediaRow } from "../media.ts";
+  import { titleOf } from "../steps.ts";
   import TranscriptWorkRow from "./TranscriptWorkRow.svelte";
   import TimelineMinimap from "./TimelineMinimap.svelte";
   import PostTarget from "./PostTarget.svelte";
@@ -238,6 +239,7 @@
   });
   let mediaRows: MediaRow[] = $derived(turns.flatMap(turn => [
     ...(turn.inputs ?? []).map(input => ({ key: input.id, event: input.id, room: input.room, from: input.from, at: input.at, attachments: input.attachments ?? [] })),
+    ...(turn.items ?? []).flatMap(item => item.image ? [readMedia(session, turn.id, item.at, titleOf(item).full, item.image)] : []),
     ...(turn.items ?? []).flatMap(item => [item, ...(item.posts ?? [])]).map(item => ({ key: item.id, event: item.event ?? item.id, room: item.room ?? store.room, from: item.from ?? { kind: "engine" as const }, at: item.at, attachments: item.attachments ?? [] })),
   ]).concat(queuedPosts.map(post => ({ key: post.id, event: post.id, room: post.room ?? store.room, from: post.from, at: post.at, attachments: post.body.attachments ?? [] })))
     .concat(pendingPosts.map(post => ({ key: pendingKey(post.id), event: pendingKey(post.id), room: store.room, from: { kind: "owner" as const }, at: post.at, attachments: post.request.attachments ?? [] }))));
@@ -350,7 +352,7 @@
           {#each deriveTimelineGroups(segment.items) as group (group.id)}
             {#if group.kind === "work"}
               {#if !turn.ended || expandedTurns[segment.id]}
-              <TranscriptWorkRow items={group.items} ended={!!turn.ended || stalled} started={turn.started} {now} {chunks}
+              <TranscriptWorkRow items={group.items} ended={!!turn.ended || stalled} started={turn.started} {now} {chunks} {session} onmedia={key => openMedia(key, 0)}
                 onopen={() => { if (turn.olderItems) void readContinuation(turn, "older"); }}
                 onload={async (item, part) => { if (!await fetchPart(turn.id, item.id, part)) throw new Error("Part did not load"); }} />
               {/if}
