@@ -23,12 +23,13 @@ type fakeJournal struct {
 	mu    sync.Mutex
 	steps map[string]contract.WorkflowStepEndRequest
 	names map[string]string
+	files map[string]string // what each running worker reported
 	posts []contract.PostRequest
 	pin   string
 }
 
 func newFakeJournal() *fakeJournal {
-	return &fakeJournal{steps: map[string]contract.WorkflowStepEndRequest{}, names: map[string]string{}}
+	return &fakeJournal{steps: map[string]contract.WorkflowStepEndRequest{}, names: map[string]string{}, files: map[string]string{}}
 }
 
 func (j *fakeJournal) WorkflowPin(_ context.Context, commit string) error {
@@ -54,6 +55,13 @@ func (j *fakeJournal) WorkflowStepEnd(_ context.Context, req contract.WorkflowSt
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.steps[req.Key] = req
+	return nil
+}
+
+func (j *fakeJournal) WorkflowStepTranscript(_ context.Context, req contract.WorkflowStepTranscriptRequest) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.files[req.Key] = req.Transcript
 	return nil
 }
 
@@ -526,4 +534,62 @@ func TestAChildThatThrowsNothingStillFails(t *testing.T) {
 	if failed != 1 {
 		t.Fatalf("journal %+v", h.journal.steps)
 	}
+}
+
+// A worker names its file as it starts, so the run page can open it while it runs.
+func TestAWorkerNamesItsFileBeforeItEnds(t *testing.T) {
+	h := newCrewHarness(t)
+	var reported []string
+	h.reply = func(prompt, _ string) (contract.TurnEnded, error) {
+		h.journal.mu.Lock()
+		defer h.journal.mu.Unlock()
+		for _, file := range h.journal.files {
+			reported = append(reported, file)
+		}
+		return contract.TurnEnded{Final: prompt}, nil
+	}
+	h.run(crewMeta + `return await agent('one')`)
+	if len(reported) != 1 || reported[0] != "w1.jsonl" {
+		t.Fatalf("while it ran, the journal knew %v", reported)
+	}
+	for key, end := range h.journal.steps {
+		if end.Transcript != "w1.jsonl" {
+			t.Fatalf("step %s ended naming %q", key, end.Transcript)
+		}
+	}
+}
+
+// A new box takes over a turn whose input an earlier box took, so its workers learn the delivery from the turn itself.
+func TestARecoveredCrewFilesItsWorkersUnderItsTurn(t *testing.T) {
+	h := newCrewHarness(t)
+	sessions := t.TempDir()
+	var delivery contract.DeliverySeq
+	crew, err := NewCrew(CrewConfig{Workflow: contract.BoxWorkflow{Script: crewMeta + `return await agent('one')`, Profiles: []contract.WorkflowProfile{{Name: "fast"}}, Workers: 1}, Engine: h.journal, Transcript: NewTranscript(&transcriptEngine{}, sessions), Workdir: h.workdir, Sessions: sessions, State: t.TempDir(),
+		Open: func(context.Context, contract.WorkflowProfile, string, string) (crewWorker, error) {
+			return recordingWorker{fakeWorker: &fakeWorker{reply: h.reply, file: filepath.Join(sessions, "w.jsonl")}, delivery: &delivery}, nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, settled, err := crew.Recover("turn_1", []contract.TurnInput{{Delivery: 9}}); settled || err != nil {
+		t.Fatalf("settled %v, %v", settled, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := crew.Continue(ctx, "turn_1", func() {}); err != nil {
+		t.Fatal(err)
+	}
+	if delivery != 9 {
+		t.Fatalf("the worker carried delivery %d", delivery)
+	}
+}
+
+type recordingWorker struct {
+	*fakeWorker
+	delivery *contract.DeliverySeq
+}
+
+func (w recordingWorker) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, started func()) (contract.TurnEnded, error) {
+	*w.delivery = inputs[0].Delivery
+	return w.fakeWorker.Start(ctx, id, inputs, started)
 }

@@ -125,6 +125,9 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 	}
 	crew := err == nil && endsWorkflow(req)
 	result := req.Final
+	if req.Outcome == contract.TurnFailed {
+		result = req.Error // A run that threw has no value, and the journal must say why once its box is gone.
+	}
 	var summary contract.WorkflowEnded
 	if crew {
 		if summary, err = s.workflowOutput(ctx, run, &req); err != nil {
