@@ -10,15 +10,17 @@ type shellWatch struct {
 	watchers   map[chan contract.ShellJobOutput]struct{}
 }
 
-func (s *Service) clearShellLocked(id contract.SessionID) {
+func (s *Service) clearShellLocked(id contract.SessionID) []chan contract.ShellJobOutput {
+	var watchers []chan contract.ShellJobOutput
 	if state := s.sessionLocked(id); state.watch != nil {
 		w := state.watch
 		for ch := range w.watchers {
-			close(ch)
+			watchers = append(watchers, ch)
 			delete(w.watchers, ch)
 		}
 		state.watch = nil
 	}
+	return watchers
 }
 
 func (s *Service) ShellWatch(ctx context.Context, id contract.SessionID) (<-chan contract.ShellJobOutput, *contract.Error) {
@@ -31,9 +33,13 @@ func (s *Service) ShellWatch(ctx context.Context, id contract.SessionID) (<-chan
 		return nil, failure(err)
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	state := s.sessionLocked(id)
+	s.mu.Unlock()
+	state.computerLock.Lock()
+	defer state.computerLock.Unlock()
+	s.mu.Lock()
 	if b.State != contract.BoxReady || state.channel == nil {
+		s.mu.Unlock()
 		return nil, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
 	}
 	channel := state.channel
@@ -46,17 +52,22 @@ func (s *Service) ShellWatch(ctx context.Context, id contract.SessionID) (<-chan
 	w.generation = s.shellGeneration
 	ch := make(chan contract.ShellJobOutput, 128)
 	w.watchers[ch] = struct{}{}
+	s.mu.Unlock()
 	wakeChannel(channel)
 	go func() {
 		<-ctx.Done()
+		state.computerLock.Lock()
+		defer state.computerLock.Unlock()
 		s.mu.Lock()
-		defer s.mu.Unlock()
 		if _, ok := w.watchers[ch]; !ok {
+			s.mu.Unlock()
 			return
 		}
 		delete(w.watchers, ch)
+		wake := len(w.watchers) == 0 && state.channel == channel
+		s.mu.Unlock()
 		close(ch)
-		if len(w.watchers) == 0 && state.channel == channel {
+		if wake {
 			wakeChannel(channel)
 		}
 	}()
@@ -68,22 +79,43 @@ func (s *Service) ShellOutput(_ context.Context, caller contract.Principal, req 
 		return contract.ShellOutputResponse{}, forbidden()
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if state := s.sessionLocked(caller.Session); state.watch != nil && state.watch.generation == req.Generation {
-		w := state.watch
-		for _, job := range req.Jobs {
-			for ch := range w.watchers {
-				select {
-				case ch <- job:
-				default:
-					close(ch)
-					delete(w.watchers, ch)
-				}
+	state := s.sessionLocked(caller.Session)
+	s.mu.Unlock()
+	state.computerLock.Lock()
+	defer state.computerLock.Unlock()
+	s.mu.Lock()
+	w := state.watch
+	if w == nil || w.generation != req.Generation {
+		s.mu.Unlock()
+		return contract.ShellOutputResponse{}, nil
+	}
+	var watchers []chan contract.ShellJobOutput
+	for ch := range w.watchers {
+		watchers = append(watchers, ch)
+	}
+	s.mu.Unlock()
+	for _, job := range req.Jobs {
+		for i, ch := range watchers {
+			if ch == nil {
+				continue
+			}
+			select {
+			case ch <- job:
+			default:
+				s.mu.Lock()
+				delete(w.watchers, ch)
+				s.mu.Unlock()
+				close(ch)
+				watchers[i] = nil
 			}
 		}
-		if len(w.watchers) == 0 && state.channel != nil {
-			wakeChannel(state.channel)
-		}
+	}
+	s.mu.Lock()
+	channel := state.channel
+	wake := len(w.watchers) == 0 && channel != nil
+	s.mu.Unlock()
+	if wake {
+		wakeChannel(channel)
 	}
 	return contract.ShellOutputResponse{}, nil
 }

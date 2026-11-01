@@ -127,13 +127,21 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 	previous := state.channel
 	var roomID contract.RoomID
 	var stopped bool
+	var computerWatchers []chan []byte
+	var shellWatchers []chan contract.ShellJobOutput
 	if previous != nil {
-		roomID, stopped = s.clearComputerLocked(session.ID)
-		s.clearShellLocked(session.ID)
+		roomID, stopped, computerWatchers = s.clearComputerLocked(session.ID)
+		shellWatchers = s.clearShellLocked(session.ID)
 	}
 	channel := &boxChannel{stop: stop, wake: make(chan struct{}, 1), input: computerInputHandle{queue: make(chan contract.ComputerInputBatch, 64), done: ctx.Done()}}
 	state.channel = channel
 	s.mu.Unlock()
+	for _, ch := range computerWatchers {
+		close(ch)
+	}
+	for _, ch := range shellWatchers {
+		close(ch)
+	}
 	if previous != nil {
 		previous.stop()
 	}
@@ -150,12 +158,20 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			s.mu.Lock()
 			var roomID contract.RoomID
 			var stopped bool
+			var computerWatchers []chan []byte
+			var shellWatchers []chan contract.ShellJobOutput
 			if state.channel == channel {
 				state.channel = nil
-				roomID, stopped = s.clearComputerLocked(session.ID)
-				s.clearShellLocked(session.ID)
+				roomID, stopped, computerWatchers = s.clearComputerLocked(session.ID)
+				shellWatchers = s.clearShellLocked(session.ID)
 			}
 			s.mu.Unlock()
+			for _, ch := range computerWatchers {
+				close(ch)
+			}
+			for _, ch := range shellWatchers {
+				close(ch)
+			}
 			if stopped {
 				_ = s.computerEvent(context.Background(), session.ID, roomID, contract.ComputerStopped)
 			}

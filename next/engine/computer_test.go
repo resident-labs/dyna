@@ -236,8 +236,11 @@ func TestComputerChannelCloseEndsWatch(t *testing.T) {
 	s.mu.Unlock()
 	state.computerLock.Lock()
 	s.mu.Lock()
-	stopRoom, stopped := s.clearComputerLocked(id)
+	stopRoom, stopped, watchers := s.clearComputerLocked(id)
 	s.mu.Unlock()
+	for _, ch := range watchers {
+		close(ch)
+	}
 	if stopped {
 		if err := s.computerEvent(ctx, id, stopRoom, contract.ComputerStopped); err != nil {
 			t.Fatal(err)
