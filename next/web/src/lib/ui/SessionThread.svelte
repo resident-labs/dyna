@@ -93,8 +93,11 @@
   }
   let chunks: Record<string, string> = $state({});
   let chunkFailed: Record<string, boolean> = $state({});
+  const fetching = new Set<string>();
   async function fetchPart(turn: string, item: string, part: TranscriptPart) {
     const key = item + "/" + part;
+    if (fetching.has(key)) return;
+    fetching.add(key);
     let offset: number | undefined = 0, value = "";
     try {
       do {
@@ -105,7 +108,18 @@
       chunks[key] = value;
       chunkFailed[key] = false;
     } catch { chunkFailed[key] = true; }
+    finally { fetching.delete(key); }
   }
+  // Dyna: Text can exceed the page budget; load its full content without a disclosure.
+  $effect(() => {
+    for (const turn of turns) for (const item of turn.items ?? []) {
+      const messages = item.kind === "text" || item.kind === "post" ? [item] : item.posts ?? [];
+      for (const message of messages) {
+        const key = message.id + "/text";
+        if (message.more && chunks[key] === undefined && !chunkFailed[key]) void fetchPart(turn.id, message.id, "text");
+      }
+    }
+  });
   const icons: Record<StepKind, IconName> = { read: "file", edit: "edit", write: "write", search: "search", list: "list", run: "terminal", fetch: "globe", tool: "tool" };
   const kinds = (items: TranscriptItem[]) => [...new Set(items.map(item => titleOf(item).kind))];
   const sender = (kind: string, id?: string) => kind === "owner" ? "You" : id ? store.names.get(id) ?? "Session" : "Dyna";
@@ -113,7 +127,7 @@
 </script>
 
 {#snippet postItem(turn: TranscriptTurn, item: TranscriptItem)}
-  <div class="message"><Markdown text={chunks[item.id + "/text"] ?? item.text} /></div>{#if item.more && chunks[item.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Show all</button>{/if}
+  <div class="message"><Markdown text={chunks[item.id + "/text"] ?? item.text} /></div>{#if chunkFailed[item.id + "/text"]}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Text did not load. Try again</button>{/if}
 {/snippet}
 
 <div class="thread" bind:this={scroller} onscroll={() => { atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; if (loaded && before && !loading && scroller.scrollTop < 100) void load(true); }}>
