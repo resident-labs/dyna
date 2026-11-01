@@ -111,6 +111,42 @@ func (s *Service) SetRepositories(repos Repositories) {
 
 func (s *Service) Reconciler() *lifecycle.Reconciler { return s.reconciler }
 
+// SessionClosed retires live and legacy session state after the close commits.
+func (s *Service) SessionClosed(id contract.SessionID) {
+	s.live.CloseSession(id)
+	s.mu.Lock()
+	state := s.sessions[id]
+	s.mu.Unlock()
+	if state == nil {
+		return
+	}
+	state.computerLock.Lock()
+	defer state.computerLock.Unlock()
+	s.mu.Lock()
+	if s.sessions[id] != state {
+		s.mu.Unlock()
+		return
+	}
+	channel := state.channel
+	state.channel = nil
+	room, stopped, computerWatchers := s.clearComputerLocked(id)
+	shellWatchers := s.clearShellLocked(id)
+	delete(s.sessions, id)
+	s.mu.Unlock()
+	for _, ch := range computerWatchers {
+		close(ch)
+	}
+	for _, ch := range shellWatchers {
+		close(ch)
+	}
+	if channel != nil {
+		channel.stop()
+	}
+	if stopped {
+		_ = s.computerEvent(context.Background(), id, room, contract.ComputerStopped)
+	}
+}
+
 func (s *Service) OpenTerminal(id contract.SessionID) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
