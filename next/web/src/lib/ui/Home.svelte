@@ -4,10 +4,11 @@
   import { APIError, call } from "../client.ts";
   import { failedRooms, type RoomLine } from "../active.ts";
   import type { Attention } from "../attention.svelte.ts";
-  import type { AccountUsage, Card, HostSummary, Principal, SessionListResponse } from "../contract.gen.ts";
+  import { accountPath, reconnectPath } from "../accounts.ts";
+  import type { AccountUsage, AccountsListResponse, Card, HostSummary, Principal, SessionListResponse } from "../contract.gen.ts";
   import { clause, fromNow, requestLine } from "../feed.ts";
   import { hostLabel, hostMeters, largeShared, sharedSize, watchHosts } from "../hosts.ts";
-  import { busiestWindow } from "../usage.ts";
+  import { accountAlerts, busiestWindow, usageRows } from "../usage.ts";
   import { distinctInitials, initials as letters } from "../identity.ts";
   import Avatar from "./Avatar.svelte";
   import HostCard from "./HostCard.svelte";
@@ -127,16 +128,23 @@
   let machines: HTMLElement | undefined = $state();
   $effect(() => { if (machines && location.hash === "#machines") machines.scrollIntoView({ block: "start" }); });
   // Model usage loads once when Home opens: the engine caches it for 5 min. Reset times count from that answer.
+  // accounts.list names each account's provider. Without it the cards still show their labels.
   let accounts: AccountUsage[] | undefined = $state();
+  let catalog: AccountsListResponse | undefined = $state();
   let accountsFailed = $state(false);
   let loadedAt = $state(0);
   $effect(() => {
-    void call("accounts.quota", {}).then(list => { accounts = list.accounts ?? []; loadedAt = Date.now(); }, () => { accountsFailed = true; });
+    void Promise.allSettled([call("accounts.quota", {}), call("accounts.list", {})]).then(([quota, list]) => {
+      if (list.status === "fulfilled") catalog = list.value;
+      if (quota.status === "fulfilled") { accounts = quota.value.accounts ?? []; loadedAt = Date.now(); } else accountsFailed = true;
+    });
   });
+  let usage = $derived(usageRows(accounts ?? [], catalog));
+  let alerts = $derived(accountAlerts(accounts ?? [], catalog));
   // One sentence says what needs the owner: the same items as the Needs you card. Under it, a muted line sums low disk,
   // a large shared folder, machines and the busiest usage window; a part with nothing to say is left out.
   let asks = $derived(total(attention.waiting));
-  let needs = $derived(asks + failures.length + hostless.length);
+  let needs = $derived(asks + failures.length + hostless.length + alerts.length);
   let unreachable = $derived(hosts?.filter(h => !h.reachable).length ?? 0);
   let low = $derived(hosts?.filter(h => h.diskLow) ?? []);
   let lowDisk = $derived(low.length === 1 ? `${hostLabel(low[0].name)} is low on disk` : `${low.length} machines are low on disk`);
@@ -149,13 +157,13 @@
       + (shared.length > 1 ? `, and ${shared.length - 1} more ${shared.length === 2 ? "is" : "are"} large` : ""),
     !active.length && "No room is working",
     hosts?.length && count(hosts.length, "machine") + (unreachable ? `, ${unreachable} unreachable` : ""),
-    accounts && busiestWindow(accounts),
+    busiestWindow(usage),
   ].filter(Boolean).join(" · "));
 </script>
 
 <div class="home" data-page-ready={loaded && (!!hosts || hostsFailed) && (!!accounts || accountsFailed)}>
-  <!-- Until room.list answers, the sentence is a skeleton of the same height: Home never claims nothing waits before it knows. -->
-  {#if !loaded}<p class="hero skeleton" aria-hidden="true"><i></i><i></i></p>
+  <!-- Until room.list answers, and usage too if nothing else needs the owner, the sentence is a skeleton of the same height: Home never claims nothing waits before it knows. -->
+  {#if !loaded || (!needs && !accounts && !accountsFailed)}<p class="hero skeleton" aria-hidden="true"><i></i><i></i></p>
   {:else}<p class="hero">{needs ? `${count(needs, "thing")} need${needs === 1 ? "s" : ""} you.` : "Nothing needs you."}{#if summary}<span>{summary}</span>{/if}</p>{/if}
   <!-- Needs you shows while anything does, as one card with one column of rows. -->
   {#if needs || decided.size}<div class="top"><section class="card"><h2 tabindex="-1" bind:this={needsHeading}>Needs you{#if needs}<span>{needs}</span>{/if}</h2>
@@ -179,6 +187,10 @@
         <span class="lines"><span class="title">{waits === 1 ? "1 session waits" : `${waits} sessions wait`} for a host that takes {room.name}</span>
           <span class="line"><StatusPill tone="warning" label="No host takes this room" /></span></span>
         <span class="acts"><a class="open" href={roomHref(room.id)} onclick={navigate}>Open</a></span></div>{/each}
+      {#each alerts as { id, title, provider, reconnect }, i (i)}{@const signIn = reconnect && attention.can("admin")}<div class="item account"><Avatar kind="room" name={title} size={28} />
+        <span class="lines"><span class="title">{title}</span>
+          <span class="line"><StatusPill tone="warning" label="Sign-in expired" />{#if provider}{" · "}{provider}{/if}</span></span>
+        <span class="acts"><a class="open" class:sign-in={signIn} href={signIn ? reconnectPath(id) : accountPath(id)} onclick={navigate}>{signIn ? "Sign in again" : "Open"}</a></span></div>{/each}
       {#each [...decided] as [id, line] (id)}<p class="decided">{line}</p>{/each}</div>
     </section></div>{/if}
   <!-- Under Needs you, never above it, so Approve stays high. It stands for the column below the column's breakpoint. -->
@@ -188,9 +200,9 @@
   {#if hosts?.length || hostsFailed}<h2 id="machines" bind:this={machines}>Machines{#if hosts?.length}<span>{hosts.length}</span>{/if}</h2>{/if}
   {#if !hosts && hostsFailed}<p class="failed">Machines could not load.</p>{/if}
   {#if hosts?.length}<div class="cards">{#each hosts as host (host.name)}<HostCard {host} now={hostsAt} {roomName} />{/each}</div>{/if}
-  {#if accounts?.length || accountsFailed}<h2>Usage{#if accounts?.length}<span>{accounts.length}</span>{/if}</h2>{/if}
+  {#if usage.length || accountsFailed}<h2>Usage{#if usage.length}<span>{usage.length}</span>{/if}</h2>{/if}
   {#if accountsFailed}<p class="failed">Model usage could not load.</p>{/if}
-  {#if accounts?.length}<div class="cards">{#each accounts as account, i (i)}<UsageCard {account} now={loadedAt} />{/each}</div>{/if}
+  {#if usage.length}<div class="cards">{#each usage as row, i (i)}<UsageCard {row} now={loadedAt} />{/each}</div>{/if}
 </div>
 
 <style>
@@ -220,12 +232,13 @@
   /* The owner approves from this line, so it wraps rather than cutting off who gets access or for how long. */
   .request .line { white-space: normal; }
   /* The owner acts on a failure's reason, so it wraps as well. */
-  .failure .line, .hostless .line { white-space: normal; }
-  /* The sentence names the room, so it wraps on a phone instead of cutting the room's name. */
+  .failure .line, .hostless .line, .account .line { white-space: normal; }
+  /* The sentence names the room, so it wraps on a phone instead of cutting the room's name. An account's name wraps too. */
   .hostless .title { white-space: normal; }
-  .failure .line :global(.status), .hostless .line :global(.status) { display: inline; white-space: normal; }
-  .failure .line :global(.status i), .hostless .line :global(.status i) { display: inline-block; margin: 0 5px 1px 0; }
-  .failure .acts, .hostless .acts { width: auto; margin-left: auto; }
+  .account .title { white-space: normal; overflow-wrap: anywhere; }
+  .failure .line :global(.status), .hostless .line :global(.status), .account .line :global(.status) { display: inline; white-space: normal; }
+  .failure .line :global(.status i), .hostless .line :global(.status i), .account .line :global(.status i) { display: inline-block; margin: 0 5px 1px 0; }
+  .failure .acts, .hostless .acts, .account .acts { width: auto; margin-left: auto; }
   /* On Home every name is in the text color; the hue stays on the avatar. */
   .who { font-weight: 500; }
   /* Only the host is mono, as it is a name the owner may type. */
@@ -238,6 +251,7 @@
   .acts .approve { background: var(--focus); color: var(--bg); border-color: var(--focus); }
   .acts .approve:hover:not(:disabled) { background: var(--focus); filter: brightness(1.08); }
   .open { border-color: transparent; color: var(--muted); }
+  .open.sign-in { border-color: var(--line); color: var(--text); white-space: nowrap; }
   /* The ring sits outside a filled button, so it shows on the fill's own color. */
   .acts button:focus-visible, .open:focus-visible { outline-offset: 2px; }
   .acts :disabled { opacity: 0.6; cursor: default; }

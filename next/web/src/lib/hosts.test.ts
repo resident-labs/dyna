@@ -1,10 +1,35 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { backupProblem, hostLabel, hostLoads, hostMeters, largeShared, lastSeen } from "./hosts.ts";
+import { backupProblem, hostLabel, hostLoads, hostMeters, largeShared, lastSeen, machines } from "./hosts.ts";
 
 test("labels the Dyna host without implying that it runs this browser", () => {
   assert.equal(hostLabel("control-plane"), "Dyna host");
   assert.equal(hostLabel("build-server"), "build-server");
+});
+
+test("one machine reported as the control plane and a registered host is one card, named for the host, with whole-machine figures", () => {
+  const gib = 2 ** 30;
+  const plane = { name: "control-plane", reachable: true, boxes: 0, cpus: 20, memBytes: 31 * gib, cpuUsed: 0.2, memUsed: 4 * gib, diskBytes: 1900 * gib, diskUsed: 1192 * gib,
+    diskLow: false, shared: [], history: null, backupCopyEnabled: true, lastSeen: "2026-10-31T00:00:00Z" };
+  const lab = { name: "lab", reachable: true, boxes: 3, cpus: 19, memBytes: 27 * gib, cpuUsed: 0, memUsed: 0, diskBytes: 1900 * gib, diskUsed: 1192 * gib,
+    diskLow: false, shared: [{ room: "r", bytes: gib }], history: null, lastSeen: "2026-10-31T00:00:05Z", engineHost: true };
+  const other = { ...lab, name: "gpu-box", engineHost: undefined, boxes: 1 };
+  const [one, ...rest] = machines([plane, lab, other]);
+  assert.deepEqual(rest, [other]);
+  assert.deepEqual([one.name, one.boxes, one.shared], ["lab", 3, lab.shared]);
+  assert.deepEqual(hostMeters(one).map(m => m.text), hostMeters(plane).map(m => m.text));
+  assert.equal(one.backupCopyEnabled, true);
+  assert.equal(hostLabel(one.name), "lab");
+  // Either side's low disk shows, and a host the engine cannot reach still says so.
+  assert.equal(machines([{ ...plane, diskLow: true }, lab])[0].diskLow, true);
+  assert.equal(machines([plane, { ...lab, diskLow: true }])[0].diskLow, true);
+  assert.equal(machines([plane, { ...lab, reachable: false }])[0].reachable, false);
+  // With no registered host on the engine's machine, or none yet compared, both stay.
+  assert.deepEqual(machines([plane, { ...lab, engineHost: false }]).map(h => h.name), ["control-plane", "lab"]);
+  assert.deepEqual(machines([plane, other]).map(h => h.name), ["control-plane", "gpu-box"]);
+  assert.deepEqual(machines([lab]), [lab]);
+  // Before the control plane's first sample there are no whole-machine figures to show.
+  assert.deepEqual(machines([{ ...plane, memBytes: 0 }, lab]).map(h => h.name), ["control-plane", "lab"]);
 });
 
 test("words a host's load, marks meters at 90% of their limit as busy, and has none without capacity", () => {

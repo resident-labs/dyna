@@ -18,7 +18,6 @@
   import SessionThread from "./lib/ui/SessionThread.svelte";
   import StatusPill from "./lib/ui/StatusPill.svelte";
   import Composer from "./lib/ui/Composer.svelte";
-  import WorkingLine from "./lib/ui/WorkingLine.svelte";
   import SessionRow from "./lib/ui/SessionRow.svelte";
   import SessionActions from "./lib/ui/SessionActions.svelte";
   import AboutPanel from "./lib/ui/AboutPanel.svelte";
@@ -29,6 +28,7 @@
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
   import { boxReason, count, quoted, turnReason, waits, type Quote } from "./lib/feed.ts";
   import { sessionActions, sessionTree, type TreeRow } from "./lib/session-tree.ts";
+  import { activityLabel } from "./lib/steps.ts";
   import { FileDraft } from "./lib/attach.svelte.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
   import type { Size } from "./lib/computerInput.ts";
@@ -446,7 +446,7 @@
     const broken = store?.boxFailures.get(id), cause = store?.causes.get(id), reason = store?.pendingReasons.get(id);
     switch (store?.status(id)) {
       case "waiting": return reason === "room-host" ? waits[reason] : "Waiting for your approval";
-      case "working": { const label = store?.activity.get(id); return label ? `Working · ${label}` : "Working"; }
+      case "working": { const label = store?.activity.get(id); return label ? `Working · ${activityLabel(label)}` : "Working"; }
       case "failed": return broken ? boxReason(broken) : turnReason(cause);
       default: return reason ? waits[reason] : starting(id) ? "Starting" : "";
     }
@@ -710,11 +710,9 @@
       {:else}<p class="empty">This room is not available. <button type="button" class="retry" onclick={reopen}>Try again</button></p>{/if}
     </div>
     {#if room && !unavailable && !closed}
-      <!-- A paused room's line takes the working line's place, so the composer never moves; the header still says who works. -->
       {#if deleting}<p class="paused" role="status"><span>This room is being deleted.</span></p>
       {:else if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
-        {#if attention.can("operate")}<button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button>{/if}</p>
-      {:else if store && !session}<WorkingLine {store} {home} {navigate} />{/if}
+        {#if attention.can("operate")}<button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button>{/if}</p>{/if}
       {#if attention.can("operate")}<Composer bind:this={composerBox} bind:element={composer} bind:value={() => savedDrafts.draft(key, drafts[key]),text => { drafts[key] = text; savedDrafts.save(key, text); clearReplacement(); }} onsend={send} thread={!!session} placeholder={"Message " + title}
         quote={quotes[key]} replacement={replaced[key]} onundo={() => { quotes[key] = undoForward({ quote: quotes[key], previous: replaced[key] }).quote; clearReplacement(); }} onunquote={() => { quotes[key] = undefined; clearReplacement(); }} sessions={mentions} files={files(key)} {stop} />
       {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
@@ -809,7 +807,7 @@
   main.session-main { container: session-header / inline-size; }
   .terminal-holder:not([hidden]) { display: contents; }
   :where(main.header-tight) .tool { justify-content: center; width: 28px; padding: 0; }
-  /* One quiet line of the working line's size and edge; only its Resume acts. */
+  /* One quiet line above the composer; only its Resume acts. */
   .paused { flex: none; display: flex; gap: 6px; height: 20px; margin: 0 0 4px; padding: 0 16px 0 30px; color: var(--muted); font-size: 12.5px; line-height: 20px; white-space: nowrap; }
   .paused span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .paused button { flex: none; }
