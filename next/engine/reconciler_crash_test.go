@@ -19,6 +19,7 @@ func (crashView) SessionClosed(contract.SessionID)       {}
 func (crashView) CompactBeforeStop(context.Context, contract.SessionID) bool {
 	return false
 }
+func (crashView) Stale(contract.SessionID) bool { return false }
 
 func TestRepeatedExitedBoxesFailAndCompletedTurnResets(t *testing.T) {
 	s, room, sid, ctx := setup(t)

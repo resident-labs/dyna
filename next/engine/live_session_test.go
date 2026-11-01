@@ -68,7 +68,7 @@ func TestClosedSessionRejectsStaleReadAndHandle(t *testing.T) {
 		handle.Unlock()
 		t.Fatal("stale channel handle remained usable")
 	}
-	if _, problem := s.BoxChannel(ctx, caller); problem == nil || problem.Code != contract.ErrNotFound {
+	if _, problem := s.BoxChannel(ctx, caller, ""); problem == nil || problem.Code != contract.ErrNotFound {
 		t.Fatalf("closed channel: %v", problem)
 	}
 	body := contract.TurnActivity{Session: id, Label: "stale"}

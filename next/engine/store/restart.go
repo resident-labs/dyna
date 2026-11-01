@@ -9,9 +9,16 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-// SendSessionNotice stores a notice for its session, which reads it with its next turn.
+// SendSessionNotice stores a notice for its session, which reads it with its next turn. A notice with a client ID goes once,
+// and a restart does not change that.
 func (s *Store) SendSessionNotice(ctx context.Context, notice contract.Event, id contract.SessionID) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		if body, ok := notice.Body.(contract.SessionNotice); ok && body.ClientID != "" {
+			var sent bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events WHERE room=? AND from_kind=? AND from_id='' AND client_id=?)`, notice.Room, notice.From.Kind, body.ClientID).Scan(&sent); err != nil || sent {
+				return err
+			}
+		}
 		seq, err := s.AppendEvent(tx, notice)
 		if err != nil {
 			return err
