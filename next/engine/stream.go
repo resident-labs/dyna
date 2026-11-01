@@ -396,6 +396,9 @@ func (s *Service) queueWakes(ids []contract.SessionID, events []contract.Event) 
 		}
 	}
 	s.live.Wake(ids, events)
+	if len(events) > 0 {
+		s.pokeSubscriptions()
+	}
 }
 
 func (s *Service) deliverWakes(pending map[contract.SessionID]bool) {

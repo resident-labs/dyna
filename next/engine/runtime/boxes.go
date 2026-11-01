@@ -41,6 +41,7 @@ type boxStore interface {
 	Boxes(context.Context) ([]box.Box, error)
 	OpenRooms(context.Context) ([]contract.RoomID, error)
 	RoomRepos(context.Context, contract.RoomID) ([]contract.RoomRepo, error)
+	ActiveRuns(context.Context) ([]store.HookRun, error)
 }
 
 type heartbeatStore interface {
@@ -345,6 +346,7 @@ func (b *Boxes) MaintainHost(ctx context.Context, name contract.HostName) ([]con
 		return nil, err
 	}
 	b.prepareImages(ctx, h, name)
+	b.sweepRuns(ctx, name, h)
 	return h.Maintain(ctx, b.Layout)
 }
 

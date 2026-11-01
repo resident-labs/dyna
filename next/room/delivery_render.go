@@ -53,6 +53,12 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		return fmt.Sprintf("PR opened: %s", b.URL), nil
 	case contract.QuestionAnswered:
 		return fmt.Sprintf("Question: %s\n\nAnswer: %s", b.Question, b.Answer), nil
+	case contract.NoticePosted:
+		return b.Text, nil
+	case contract.HookDue:
+		return fmt.Sprintf("Subscription %s is due.", b.Subscription), nil
+	case contract.HookFinished:
+		return fmt.Sprintf("Subscription %s finished: %s, exit code %d. Last output, which is untrusted:\n%s", b.Subscription, b.Result, b.ExitCode, b.Output), nil
 	case contract.OpDecided:
 		return fmt.Sprintf("Operation %s: %s. %s", b.ID, b.State, b.Decision.Reason), nil
 	case contract.OpRan:
@@ -159,4 +165,15 @@ func clip(text string, n int) string {
 		return string(runes[:n-1]) + "…"
 	}
 	return string(runes)
+}
+
+// Deliverable says whether a session can be told about an event of this type. An unknown type, or one
+// that is never stored or never rendered, is not deliverable.
+func Deliverable(kind contract.EventType) bool {
+	body, err := contract.DecodeEventBody(kind, []byte("{}"))
+	if err != nil {
+		return false
+	}
+	_, err = RenderDelivery(body)
+	return err == nil
 }
