@@ -20,13 +20,34 @@ that no job waits for a pool that does not exist yet.
 1. The engine's `GH_TOKEN` needs admin on the repository, and Actions variables
    write for the lease. The pool was tested with the owner's `gh` token, which is
    broader than that. A fine-grained token is untested.
-2. Add the host, if it is new: `dyna host add NAME --ssh user@host --owner-only-admin`.
-   A laptop or any host that logs out needs `sudo loginctl enable-linger USER`
-   first, because rootless containers stop with the user's session. A host is for
-   sessions too: with no `--room`, every room's boxes can land on it, and admission
-   prefers the host with the most free memory. Read the warning under
-   [What a runner can touch](#what-a-runner-can-touch) first.
-3. Turn the repository on. COUNT is the most runners at once on that host:
+2. Let the engine's user reach the host. The host needs rootless Podman 5 on
+   systemd with `cpu`, `memory` and `pids` delegated, `git` and `curl`, and that is
+   all: `dyna host add` copies the Dyna binary across, and `jq`, `socat` and the
+   rest live in the runner image. The engine's key must be a plain one in the
+   host user's `authorized_keys`. A key with a forced command, such as a backup
+   key, cannot run anything. SSH once by hand as the engine's user, because the
+   engine cannot answer a host key prompt. A laptop or any host that logs out needs
+   `sudo loginctl enable-linger USER` first, because rootless containers stop with
+   the user's session.
+3. Keep sessions off a CI host. With no `--room`, every room's boxes can land on a
+   host, and admission prefers the host with the most free memory. A host limited
+   to one room takes no other room's boxes, and a paused room places none at all.
+   So give the host a room of its own and pause it. Do this before adding the host,
+   because a new room's root session needs a box, and it must land somewhere else:
+
+   ```sh
+   dyna room create ci-only --root-profile PROFILE   # prints the room's ID
+   dyna room pause ROOM
+   ```
+
+4. Add the host. `--ssh` must be `user@address`, as the engine's user would type it:
+
+   ```sh
+   dyna host add pve --ssh build@ADDRESS --owner-only-admin --room ROOM
+   ```
+
+5. Turn the repository on. COUNT is the most runners at once on that host, at most
+   16. A repository names its hosts outright, so `--room` does not apply to it:
 
    ```sh
    dyna room repo ci resident-labs/dyna --mode box --host pve=4
@@ -34,9 +55,9 @@ that no job waits for a pool that does not exist yet.
 
    The first job builds the runner image on the host, which takes some minutes.
    Check that the lease variable `DYNA_CI_POOL_UNTIL` appears on the repository.
-4. Set the repository variable `DYNA_CI_SELF_HOSTED` to `true`.
+6. Set the repository variable `DYNA_CI_SELF_HOSTED` to `true`.
 
-Adding a host later is step 2, then the same command with one more `--host`.
+Adding a host later is steps 2 to 4, then the same command with one more `--host`.
 Nothing else changes. Use the same size for every host: GitHub gives a job to any
 idle runner of a scale set, so one set cannot promise a job a size. A second size
 needs a second scale set, which is not built.
@@ -72,13 +93,19 @@ Each runner is a rootless Podman container, built from
   a read-only image. Its process runs as a subordinate UID on the host, not as the host
   user.
 - **Network:** `--network=none`. It has only loopback and no route. The only way
-  out is an HTTPS proxy, reached over one Unix socket in the `dyna-ci-egress`
-  volume. The proxy (`next/box/egress`) runs on the host and refuses everything
-  but port 443 on public addresses. It checks the address it dials, so a public
-  name that resolves to a private address is refused. Tailnet, LAN, loopback and
-  link-local addresses are all refused. Every job on a host shares this proxy, and
-  it cannot tell them apart. It caps tunnels and request size, so one job cannot
-  crash it, but a job that holds every tunnel starves the others until it ends.
+  out is an HTTPS proxy, reached over a Unix socket in the `dyna-ci-egress` volume.
+  The proxy (`next/box/egress`) runs on the host and refuses everything but port
+  443 on public addresses. It checks the address it dials, so a public name that
+  resolves to a private address is refused. Tailnet, LAN, loopback and link-local
+  addresses are all refused.
+- **Other jobs:** every job on a host shares that proxy, and its socket is how the
+  proxy tells them apart. The proxy serves 16 sockets, each in its own folder of the
+  volume, and a runner mounts only the one the pool gave it. So a job cannot use
+  another's socket, and one job's limits cannot run into another's: at most 256
+  tunnels, then `429`, and an even share of 64 MiB/s among the jobs moving data at
+  that moment. That rate sits below the uplink so that the proxy decides the shares.
+  Left to TCP, the link splits by tunnel and goes to whoever holds the most. A job
+  alone on the host gets all of it, and an idle job's long poll takes nothing.
 - **Disk:** everything writable is a tmpfs capped at three quarters of the memory
   limit, and tmpfs counts against that limit. So a job cannot grow the host's disk
   at all, and all it wrote dies with it.
@@ -121,9 +148,18 @@ second, so the third is the one that holds:
 
 A refusal has to kill the runner's worker. The runner treats a failed hook as a
 failed step and carries on, so a step with `if: always()` and any action's pre
-step would still run on this host. The job shows as failed. It may name a worker
-crash, and the reason is in its "Set up runner" log. A fork can still spend a
-runner's start each time its run is approved.
+step would still run on this host. Any failure in the hook does the same, so a
+hook that breaks refuses the job. A hook the runner could not start would count
+as one failed step, so the entrypoint checks that it can be read and parsed, and a
+runner whose hook cannot be takes no job. That job stays queued for `pool-watch`.
+
+The killed worker leaves nothing behind. The listener sees it die, fails the job
+and exits, as it does after any job, and the pool starts the next runner. On real
+runners on pve the job failed about 7 seconds after it started, 3 of them the
+hook's pause, and its container and registration were gone at once. The job shows
+as failed, with no conclusion on its steps. It may name a worker crash, and the
+reason is in its "Set up runner" log. A fork can still spend a runner's start each
+time its run is approved.
 
 Do not use `pull_request_target` or `workflow_run` to build pull request code. The
 runner refuses both, and they would run a fork's code with this repository's token.
@@ -136,9 +172,16 @@ it outside any job container.
 - **No pool at all:** the engine renews `DYNA_CI_POOL_UNTIL` every 5 minutes for
   10 minutes, only while a poll is alive and some host has capacity. Once it
   expires, new runs use GitHub-hosted runners.
-- **Pool dies after a run was routed to it:** GitHub would let the job wait 24
-  hours. The `pool-watch` job, on a hosted runner, cancels the run after 20 minutes
-  with work queued and no progress. A rerun goes hosted once the lease is gone.
+- **Pool is busy:** a job past COUNT stays queued on GitHub and takes the next free
+  runner. It can wait as long as it needs: nothing cancels a job for waiting while
+  the pool is working.
+- **Pool dies after a run was routed to it, or cannot start runners:** GitHub would
+  let the job wait 24 hours. The `pool-watch` job, on a hosted runner, steps in once
+  the run has had work queued and no progress for 20 minutes. It then looks at pool
+  jobs across the repository, and cancels the run only if two looks 3 minutes apart
+  find none running or just finished. That takes 25 minutes at most. A rerun goes
+  hosted once the lease is gone. A job that is stuck in progress holds no one up
+  for longer than its own `timeout-minutes`.
 - **Engine or listener dies:** jobs in progress finish, since runners do not need
   the engine. Queued jobs wait. The next listener reads the assigned count and
   starts their runners. A session left by a crash holds the set for a few seconds,
