@@ -259,7 +259,6 @@ func (profiles) List() []contract.ProfileSummary {
 		{Name: "deep", Provider: contract.ModelProviderAnthropic, Model: "claude-opus-5-5", Thinking: contract.ThinkingXHigh},
 		{Name: "quick", Provider: contract.ModelProviderOpenAI, Model: "gpt-6.1-mini", Thinking: contract.ThinkingOff}}
 }
-func (profiles) Surface(contract.ProfileName) contract.AgentSurface { return contract.AgentSurfaceOff }
 
 func (profiles) CompactionTokens(contract.ProfileName) int { return 0 }
 

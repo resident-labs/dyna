@@ -14,9 +14,6 @@ type snapshotProfiles struct {
 	name string
 }
 
-func (p *snapshotProfiles) Surface(contract.ProfileName) contract.AgentSurface {
-	return contract.AgentSurfaceCaller
-}
 func (p *snapshotProfiles) List() []contract.ProfileSummary {
 	return []contract.ProfileSummary{{Name: contract.ProfileName(p.name)}}
 }
@@ -30,7 +27,7 @@ func TestSnapshotReplayAndCap(t *testing.T) {
 	if problem != nil {
 		t.Fatal(problem)
 	}
-	if hello.AgentSurface != contract.AgentSurfaceCaller || strings.Contains(hello.Instructions, "Use dyna post") || !strings.Contains(hello.Instructions, "context_update") {
+	if strings.Contains(hello.Instructions, "Use dyna post") || !strings.Contains(hello.Instructions, "context_update") {
 		t.Fatalf("enabled profile hello has the wrong guidance: %+v", hello)
 	}
 	for _, key := range []contract.ContextSectionKey{"dyna_goal", "dyna_usage", "invalid"} {
