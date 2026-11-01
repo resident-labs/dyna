@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -178,9 +179,21 @@ func fetchCmd() *cobra.Command {
 			if err := os.MkdirAll(to, 0o755); err != nil {
 				return err
 			}
-			// cp keeps file modes, so a built binary stays executable, and a
-			// second fetch into the same folder replaces the first.
-			if out, err := exec.CommandContext(c.Context(), "cp", "-pR", dir+"/.", to).CombinedOutput(); err != nil {
+			// Copy entries, not the artifact root, to preserve the destination's
+			// permissions while keeping executable artifact modes.
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				return err
+			}
+			if len(entries) == 0 {
+				return nil
+			}
+			cpArgs := []string{"-pR", "--"}
+			for _, entry := range entries {
+				cpArgs = append(cpArgs, filepath.Join(dir, entry.Name()))
+			}
+			cpArgs = append(cpArgs, to)
+			if out, err := exec.CommandContext(c.Context(), "cp", cpArgs...).CombinedOutput(); err != nil {
 				return fmt.Errorf("copy the artifacts of job %s: %w: %s", job.ID, err, out)
 			}
 			_, err := fmt.Fprintf(c.OutOrStdout(), "copied the artifacts of job %s to %s\n", job.ID, to)
