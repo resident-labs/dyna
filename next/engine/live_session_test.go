@@ -26,8 +26,11 @@ func TestClosedSessionRejectsStaleReadAndHandle(t *testing.T) {
 	handle.SetChannel(live.NewChannel(func() { close(stopped) }, stopped))
 	handle.SetComputer(row.Room, contract.ComputerRunning)
 	watch := handle.WatchComputer()
-	shell := handle.WatchShell()
 	handle.Unlock()
+	shell, problem := handle.WatchShell(true)
+	if problem != nil {
+		t.Fatal(problem)
+	}
 	if _, problem := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: id, Discard: true}); problem != nil {
 		t.Fatal(problem)
 	}
