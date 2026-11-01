@@ -24,7 +24,7 @@ func filledGlobalBundle() GlobalBundle {
 		},
 		Profiles: []ProfileBundle{{
 			Name: "terra", Description: "builder", Model: "gpt-5.5", Thinking: ThinkingXHigh, Models: []string{"gpt-5.5"}, Fallback: "kimi-max",
-			Taste: 7, Intelligence: 9, Cost: 9, Diagnostics: 10, CompactTokens: 200000, MaxConcurrent: 4, MaxCallsPerRun: 8, Default: true,
+			Taste: 7, Intelligence: 9, Cost: 9, Diagnostics: 10, CompactTokens: 200000, MaxConcurrent: 4, Default: true,
 		}},
 		Hosts:    []HostBundle{{Name: "hermeslab", SSH: "pip@hermeslab", Labels: []string{"gpu"}, Rooms: []RoomName{"dyna"}}},
 		Accounts: []AccountLabel{{Provider: ProviderAnthropic, Label: "max-1", Repos: []RepoName{"resident-labs/dyna"}, Rooms: []RoomName{"dyna"}}},

@@ -13,7 +13,7 @@ export function profileForSave(draft: ProfileSummary) {
   const { inUse: _inUse, ...profile } = draft;
   const model = profile.model.trim();
   return { ...profile, name: draft.name.trim(), model, allowedModels: Array.from(new Set([...(draft.allowedModels ?? []), model])),
-    compactTokens: draft.compactTokens ?? 0, maxConcurrent: draft.maxConcurrent ?? 0, maxCallsPerRun: draft.maxCallsPerRun ?? 0 };
+    compactTokens: draft.compactTokens ?? 0, maxConcurrent: draft.maxConcurrent ?? 0 };
 }
 
 // "gpt-6.1-sol" is "GPT 6.1 Sol". Neighboring numbers are one version: "claude-opus-5-5" is "Claude Opus 5.5".
