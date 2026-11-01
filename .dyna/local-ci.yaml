@@ -200,7 +200,10 @@ checks:
 
   - id: next-pi
     image: node:22
+    cpus: 4
     command: bash scripts/ci.sh next-pi
+    env:
+      PI_TEST_WORKERS: '4'
     caches: [npm]
     reports: junit
 
