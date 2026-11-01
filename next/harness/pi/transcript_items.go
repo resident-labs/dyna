@@ -196,8 +196,11 @@ func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contrac
 			}
 			item.Output, item.Failed = harness.Mask(strings.Join(text, "\n")), m.IsError
 			if item.Tool == "codemode" {
+				// Bound JSON bytes, including escaped control characters, for older-item pages.
+				callBytes := 0
 				for i, call := range m.Details.Calls {
 					if i == 256 {
+						item.CallsOmitted += len(m.Details.Calls) - i
 						break
 					}
 					status := contract.TranscriptCallStatus(call.Status)
@@ -216,7 +219,14 @@ func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contrac
 					if len(callError) > 1024 {
 						callError = strings.ToValidUTF8(callError[:1024], "")
 					}
-					item.Calls = append(item.Calls, contract.TranscriptCall{Tool: tool, Target: target, Status: status, DurationMs: call.DurationMs, Error: callError})
+					preview := contract.TranscriptCall{Tool: tool, Target: target, Status: status, DurationMs: call.DurationMs, Error: callError}
+					encoded, _ := json.Marshal(preview)
+					if callBytes+len(encoded)+1 > 16<<10 {
+						item.CallsOmitted += len(m.Details.Calls) - i
+						break
+					}
+					callBytes += len(encoded) + 1
+					item.Calls = append(item.Calls, preview)
 				}
 			}
 			// Pi records applied edit details separately from the result text.
