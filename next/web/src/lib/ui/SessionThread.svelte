@@ -113,45 +113,49 @@
     return () => { destroyed = true; cancelAnimationFrame(positionFrame); stop(); document.removeEventListener("visibilitychange", markRead); };
   });
   const paging = new Set<string>();
-  async function readContinuation(turn: TranscriptTurn, kind: "items" | "posts" | "older") {
+  type PageKind = "items" | "posts" | "older";
+  const pageCursors: Record<PageKind, { cursor: (turn: TranscriptTurn) => number; more: (turn: TranscriptTurn) => boolean; patch: (turn: TranscriptTurn) => Partial<TranscriptTurn> }> = {
+    items: { cursor: turn => turn.nextMandatory ?? 0, more: turn => !!turn.mandatoryItems, patch: turn => ({ mandatoryItems: turn.mandatoryItems, nextMandatory: turn.nextMandatory }) },
+    posts: { cursor: turn => turn.nextMandatoryPost ?? 0, more: turn => !!turn.mandatoryPosts, patch: turn => ({ mandatoryPosts: turn.mandatoryPosts, nextMandatoryPost: turn.nextMandatoryPost }) },
+    older: { cursor: turn => turn.nextItem ?? 0, more: turn => !!turn.olderItems, patch: turn => ({ olderItems: turn.olderItems, nextItem: turn.nextItem }) },
+  };
+  function readContinuation(turn: TranscriptTurn, kind: PageKind) {
     const key = turn.id + "/" + kind;
     if (paging.has(key)) return;
     paging.add(key);
-    let cursor = kind === "items" ? turn.nextMandatory ?? 0 : kind === "posts" ? turn.nextMandatoryPost ?? 0 : turn.nextItem ?? 0;
-    try {
+    const pageKind = pageCursors[kind];
+    void (async () => {
+      let cursor = pageKind.cursor(turn);
       for (;;) {
         const request = kind === "items" ? { mandatoryItems: true, mandatoryIndex: cursor } : kind === "posts" ? { mandatoryPosts: true, mandatoryPost: cursor } : { olderItems: true, itemIndex: cursor };
         const page = await call("transcript.read", { session, turn: turn.id, ...request });
         const next = page.turns?.[0];
         if (!next) throw new Error("Missing transcript page");
-        turns = turns.map(item => item.id === turn.id ? { ...item, items: mergeTimelineItems(item.items ?? [], next.items ?? []), ...(kind === "older" ? { olderItems: next.olderItems, nextItem: next.nextItem } : kind === "items" ? { mandatoryItems: next.mandatoryItems, nextMandatory: next.nextMandatory } : { mandatoryPosts: next.mandatoryPosts, nextMandatoryPost: next.nextMandatoryPost }) } : item);
-        const more = kind === "items" ? next.mandatoryItems : kind === "posts" ? next.mandatoryPosts : next.olderItems;
-        if (!more) break;
-        const nextCursor = kind === "items" ? next.nextMandatory ?? 0 : kind === "posts" ? next.nextMandatoryPost ?? 0 : next.nextItem ?? 0;
+        turns = turns.map(item => item.id === turn.id ? { ...item, items: mergeTimelineItems(item.items ?? [], next.items ?? []), ...pageKind.patch(next) } : item);
+        if (!pageKind.more(next)) break;
+        const nextCursor = pageKind.cursor(next);
         if (nextCursor === cursor) throw new Error("Transcript cursor did not advance");
         cursor = nextCursor;
       }
-    } catch { failed = true; }
-    finally { paging.delete(key); }
+    })().catch(() => { failed = true; }).finally(() => { paging.delete(key); });
   }
-  async function readInputs(turn: TranscriptTurn) {
+  function readInputs(turn: TranscriptTurn) {
     const key = turn.id + "/inputs";
     if (paging.has(key)) return;
     paging.add(key);
-    let after = turn.after;
-    try {
+    void (async () => {
+      let after = turn.after;
       while (after) {
         const page = await call("transcript.read", { session, turn: turn.id, afterItem: after });
         const next = page.turns?.[0];
         if (!next || next.after === after) throw new Error("Transcript input cursor did not advance");
         turns = turns.map(item => item.id === turn.id ? { ...item, ...next, after: next.after, inputs: mergeTimelineInputs(item.inputs ?? [], next.inputs ?? []), items: mergeTimelineItems(item.items ?? [], next.items ?? []),
-          ...(paging.has(turn.id + "/items") ? { mandatoryItems: item.mandatoryItems, nextMandatory: item.nextMandatory } : {}),
-          ...(paging.has(turn.id + "/posts") ? { mandatoryPosts: item.mandatoryPosts, nextMandatoryPost: item.nextMandatoryPost } : {}),
-          ...(paging.has(turn.id + "/older") ? { olderItems: item.olderItems, nextItem: item.nextItem } : {}) } : item);
+          ...(paging.has(turn.id + "/items") ? pageCursors.items.patch(item) : {}),
+          ...(paging.has(turn.id + "/posts") ? pageCursors.posts.patch(item) : {}),
+          ...(paging.has(turn.id + "/older") ? pageCursors.older.patch(item) : {}) } : item);
         after = next.after;
       }
-    } catch { failed = true; }
-    finally { paging.delete(key); }
+    })().catch(() => { failed = true; }).finally(() => { paging.delete(key); });
   }
   // Dyna: Mandatory overflow pages load immediately; older tool pages load on disclosure.
   $effect(() => {
@@ -188,11 +192,11 @@
         if (input.more && chunks[key] === undefined && !chunkFailed[key]) void fetchPart(turn.id, "input:" + input.id, "text");
       }
       for (const item of turn.items ?? []) {
-      const messages = item.kind === "text" || item.kind === "post" ? [item] : item.posts ?? [];
-      for (const message of messages) {
-        const key = message.id + "/text";
-        if (message.more && chunks[key] === undefined && !chunkFailed[key]) void fetchPart(turn.id, message.id, "text");
-      }
+        const messages = item.kind === "text" || item.kind === "post" ? [item] : item.posts ?? [];
+        for (const message of messages) {
+          const key = message.id + "/text";
+          if (message.more && chunks[key] === undefined && !chunkFailed[key]) void fetchPart(turn.id, message.id, "text");
+        }
       }
     }
   });

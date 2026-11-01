@@ -186,5 +186,4 @@
   strong.owner { color: var(--focus); }
   strong.engine { color: var(--text); }
   time, .to { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-
 </style>
