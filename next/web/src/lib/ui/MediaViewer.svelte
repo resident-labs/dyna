@@ -6,9 +6,9 @@
   import type { Point, Size, View } from "../zoom.ts";
   import type { MediaItem } from "../media.ts";
 
-  let { items, initial, name, root, onclose, onjump }: {
+  let { items, initial, name, root, room, onclose, onjump }: {
     items: MediaItem[]; initial: number; name: (session: string) => string;
-    root: (session?: string) => boolean; onclose: () => void; onjump: (key: string) => void;
+    root: (session?: string) => boolean; room: string; onclose: () => void; onjump: (key: string) => void;
   } = $props();
   let index = $state(initial), view = $state<View>(FIT), menu = $state(false);
   let dialog: HTMLDialogElement, stage: HTMLDivElement, img: HTMLImageElement;
@@ -28,11 +28,12 @@
     if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); move(e.key === "ArrowLeft" ? -1 : 1); }
   }
   function wheel(node: HTMLElement) {
-    const handler = (e: WheelEvent) => { e.preventDefault(); zoom(wheelFactor(e.deltaY, e.ctrlKey), local(e.clientX, e.clientY)); };
+    const handler = (e: WheelEvent) => { if (!item.file.media.startsWith("image/")) return; e.preventDefault(); zoom(wheelFactor(e.deltaY, e.ctrlKey), local(e.clientX, e.clientY)); };
     node.addEventListener("wheel", handler, { passive: false });
     return { destroy: () => node.removeEventListener("wheel", handler) };
   }
   function down(e: PointerEvent) {
+    if (e.target instanceof HTMLVideoElement) return;
     stage.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 1) { start = { x: e.clientX, y: e.clientY }; moved = 0; }
     if (pointers.size === 2) { const [a, b] = [...pointers.values()]; distance = Math.hypot(a.x-b.x, a.y-b.y); }
@@ -75,7 +76,7 @@
   <header>
     <button class="round phone" aria-label="Close" onclick={() => dialog.close()}>×</button>
     <Avatar kind={item.from.kind} name={author} root={root(item.from.session)} size={32} />
-    <div class="identity"><strong>{author}</strong><span class="desktop"><time datetime={item.at}>{formatTime(item.at)}</time></span><span class="phone">{#if items.length > 1}{index + 1} of {items.length}{/if}</span></div>
+    <div class="identity">{#if item.from.session}<a class="sender" href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.from.session)}`}><strong>{author}</strong></a>{:else}<strong>{author}</strong>{/if}<span class="desktop"><time datetime={item.at}>{formatTime(item.at)}</time></span><span class="phone">{#if items.length > 1}{index + 1} of {items.length}{/if}</span></div>
     <button class="jump desktop" onclick={() => { onjump(item.key); dialog.close(); }}>Jump to post</button>
     <div class="spacer"></div>
     {#if item.file.media.startsWith("image/")}
@@ -90,7 +91,7 @@
       {#if menu}<div class="menu"><a href={src} target="_blank" rel="noopener">Open original</a><button onclick={() => { onjump(item.key); dialog.close(); }}>Jump to post</button></div>{/if}
     </div>
   </header>
-  <div class="stage" bind:this={stage} use:wheel onpointerdown={down} onpointermove={drag} onpointerup={up} onpointercancel={up} role="presentation">
+  <div class="stage" bind:this={stage} use:wheel onpointerdown={down} onpointermove={drag} onpointerup={up} onpointercancel={up} onclick={e => { if (e.target === stage && moved < 8) dialog.close(); }} role="presentation">
     {#if item.file.media.startsWith("video/")}
       {#key src}<video {src} controls preload="metadata" autoplay></video>{/key}
     {:else}
@@ -108,6 +109,7 @@
   dialog::backdrop { background: var(--scrim); }
   header { position: absolute; z-index: 2; inset: 0 0 auto; height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; background: var(--screen-chip); }
   .identity { display: flex; align-items: baseline; gap: 10px; min-width: 0; font-size: 13px; }
+  .sender { color: inherit; text-decoration: none; } .sender:hover { text-decoration: underline; }
   .identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   time, footer, .identity span { color: var(--screen-muted); }
   .spacer { flex: 1; }

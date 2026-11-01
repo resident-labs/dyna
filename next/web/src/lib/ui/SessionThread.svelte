@@ -14,6 +14,9 @@
   import StatusPill from "./StatusPill.svelte";
   import Markdown from "./Markdown.svelte";
   import PostAttachments from "./PostAttachments.svelte";
+  import MediaViewer from "./MediaViewer.svelte";
+  import { conversationMedia, type MediaRow } from "../media.ts";
+  import type { Attachment } from "../contract.gen.ts";
   import TranscriptWorkRow from "./TranscriptWorkRow.svelte";
   import TimelineMinimap from "./TimelineMinimap.svelte";
   import { deriveTimelineGroups, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems } from "../timeline.ts";
@@ -199,6 +202,15 @@
       }
     }
   });
+  let mediaRows: MediaRow[] = $derived(turns.flatMap(turn => [
+    ...(turn.inputs ?? []).map(input => ({ kind: "post" as const, key: input.id, from: input.from, at: input.at, attachments: input.attachments ?? [] })),
+    ...(turn.items ?? []).flatMap(item => [item, ...(item.posts ?? [])]).map(item => ({ kind: "post" as const, key: item.id, from: item.from ?? { kind: "engine" as const }, at: item.at, attachments: item.attachments ?? [] })),
+  ]).concat(queuedPosts.map(post => ({ kind: "post" as const, key: post.id, from: post.from, at: post.at, attachments: post.body.attachments ?? [] }))));
+  let media = $derived(conversationMedia(mediaRows));
+  let mediaIndex: number | undefined = $state();
+  function openMedia(key: string, file: Attachment) { const index = media.findIndex(item => item.key === key && item.file === file); if (index >= 0) mediaIndex = index; }
+  const mediaName = (id: string) => store.names.get(id) ?? "Session";
+  const mediaRoot = (id?: string) => { const entry = id ? store.sessions.get(id) : undefined; return !!entry && !entry.parent; };
   let newest = $derived(new Map(turns.flatMap(turn => (turn.items ?? []).flatMap(item => [item, ...(item.posts ?? [])]).flatMap(item => (item.attachments ?? []).flatMap(file => file.visual ? [[file.visual.id, file.visual] as const] : [])))));
   async function openVisual(visual: VisualCard, room: string, eventId: string) {
     const page = await call("events.list", { room, event: eventId, afterSeq: 0, limit: 1 });
@@ -210,15 +222,17 @@
 </script>
 
 {#snippet inputAttachments(input: TranscriptInput)}
-  <PostAttachments attachments={input.attachments ?? []} {newest} event={input.id} at={input.at} onvisual={visual => void openVisual(visual, input.room, input.id)} />
+  <div data-media-key={input.id}><PostAttachments onmedia={file => openMedia(input.id, file)} attachments={input.attachments ?? []} {newest} event={input.id} at={input.at} onvisual={visual => void openVisual(visual, input.room, input.id)} /></div>
 {/snippet}
 
 {#snippet postItem(turn: TranscriptTurn, item: TranscriptItem)}
   {@const room = item.room}
   {@const seq = item.seq}
   {@const from = item.from}
-  <div class:agent-input={item.kind === "post"} class:message={item.kind !== "post"}>{#if item.kind === "post"}<Avatar kind={from?.kind ?? "engine"} name={sender(from?.kind ?? "engine", from?.session)} size={32} />{/if}<div class="agent-body">{#if item.kind === "post"}<div class="agent-sender">{#if from?.session}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(from.session)}`} onclick={navigate} style:--hue={hue(sender(from.kind, from.session))}>{sender(from.kind, from.session)}</a>{:else}<strong>{sender(from?.kind ?? "engine")}</strong>{/if}<time datetime={item.at}>{formatTime(item.at)}</time></div><div class="post-destination">{#if room && seq}<button onclick={() => onpostlocation(room, seq)}>{item.home?.kind === "feed" ? (item.room === store.room ? `Posted in #${roomName}` : "Posted in another room") : item.home?.kind === "dm" ? (item.home.session === session ? "Posted in this DM" : `Posted to ${sender("session", item.home.session)}`) : "Posted"}</button>{:else}Posted{/if}</div>{/if}<Markdown text={chunks[item.id + "/text"] ?? item.text} /><PostAttachments attachments={item.attachments ?? []} {newest} event={item.event ?? item.id} at={item.at} onvisual={visual => void openVisual(visual, item.room ?? store.room, item.event ?? item.id)} /></div></div>{#if chunkFailed[item.id + "/text"]}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Text did not load. Try again</button>{/if}
+  <div data-media-key={item.id} class:agent-input={item.kind === "post"} class:message={item.kind !== "post"}>{#if item.kind === "post"}<Avatar kind={from?.kind ?? "engine"} name={sender(from?.kind ?? "engine", from?.session)} size={32} />{/if}<div class="agent-body">{#if item.kind === "post"}<div class="agent-sender">{#if from?.session}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(from.session)}`} onclick={navigate} style:--hue={hue(sender(from.kind, from.session))}>{sender(from.kind, from.session)}</a>{:else}<strong>{sender(from?.kind ?? "engine")}</strong>{/if}<time datetime={item.at}>{formatTime(item.at)}</time></div><div class="post-destination">{#if room && seq}<button onclick={() => onpostlocation(room, seq)}>{item.home?.kind === "feed" ? (item.room === store.room ? `Posted in #${roomName}` : "Posted in another room") : item.home?.kind === "dm" ? (item.home.session === session ? "Posted in this DM" : `Posted to ${sender("session", item.home.session)}`) : "Posted"}</button>{:else}Posted{/if}</div>{/if}<Markdown text={chunks[item.id + "/text"] ?? item.text} /><PostAttachments onmedia={file => openMedia(item.id, file)} attachments={item.attachments ?? []} {newest} event={item.event ?? item.id} at={item.at} onvisual={visual => void openVisual(visual, item.room ?? store.room, item.event ?? item.id)} /></div></div>{#if chunkFailed[item.id + "/text"]}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Text did not load. Try again</button>{/if}
 {/snippet}
+
+{#if mediaIndex !== undefined}<MediaViewer room={store.room} items={media} initial={mediaIndex} name={mediaName} root={mediaRoot} onclose={() => mediaIndex = undefined} onjump={key => scroller.querySelector<HTMLElement>(`[data-media-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "center" })} />{/if}
 
 <div class="thread-frame" bind:clientWidth={frameWidth}>
 {#if frameWidth >= 880}<TimelineMinimap turns={minimapTurns} current={currentTurn} onselect={(id) => scroller.querySelector<HTMLElement>(`article[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" })} />{/if}
@@ -259,10 +273,10 @@
       </article>
     {:else}{#if !loading && !failed}<p class="muted">The conversation will appear here.</p>{/if}{/each}
     {#each queuedPosts as post (post.id)}
-      <div class="input"><div class="who"><Avatar kind={post.from.kind} name={sender(post.from.kind, post.from.session)} size={22} /><strong>{sender(post.from.kind, post.from.session)}</strong></div><Markdown text={post.body.text} /><PostAttachments attachments={post.body.attachments ?? []} {newest} event={post.id} at={post.at} onvisual={visual => void openVisual(visual, post.room ?? store.room, post.id)} /></div>
+      <div class="input" data-media-key={post.id}><div class="who"><Avatar kind={post.from.kind} name={sender(post.from.kind, post.from.session)} size={22} /><strong>{sender(post.from.kind, post.from.session)}</strong></div><Markdown text={post.body.text} /><PostAttachments onmedia={file => openMedia(post.id, file)} attachments={post.body.attachments ?? []} {newest} event={post.id} at={post.at} onvisual={visual => void openVisual(visual, post.room ?? store.room, post.id)} /></div>
     {/each}
     {#each [...view.pendingPosts.values()] as post (post.id)}
-      <div class="input" class:pending={!post.failed}><strong>You</strong><Markdown text={post.request.text} /><PostAttachments attachments={post.request.attachments ?? []} {newest} onvisual={() => {}} />{#if post.failed}<StatusPill tone="failed" label="Not sent" word /> <button onclick={() => void view.retry(post.id)}>Retry</button> <button onclick={() => view.discard(post.id)}>Discard</button>{/if}</div>
+      <div class="input" class:pending={!post.failed}><strong>You</strong><Markdown text={post.request.text} /><PostAttachments onmedia={() => {}} attachments={post.request.attachments ?? []} {newest} onvisual={() => {}} />{#if post.failed}<StatusPill tone="failed" label="Not sent" word /> <button onclick={() => void view.retry(post.id)}>Retry</button> <button onclick={() => view.discard(post.id)}>Discard</button>{/if}</div>
     {/each}
     {#if failed}<p class="muted" role="alert">The conversation did not load. <button onclick={() => void load()}>Try again</button></p>{/if}
   </div>
