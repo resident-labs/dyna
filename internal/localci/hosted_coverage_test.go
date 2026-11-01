@@ -45,7 +45,7 @@ func TestHostedJobsHaveLocalCoverage(t *testing.T) {
 	}{
 		"pi": {"pi", "pi"}, "next-pi": {"next-pi", "next-pi"}, "relay": {"relay", "relay"},
 		"go-shard": {"go", "go-test-shard (0)"}, "go-static": {"go", "go-static"}, "desktop": {"go", "desktop"},
-		"next": {"next", "next"}, "test": {"go", "go-test"}, "frontend-build": {"go", "frontend"},
+		"next": {"next", "next"}, "next-web-width": {"next-web", "next-web-width"}, "test": {"go", "go-test"}, "frontend-build": {"go", "frontend"},
 		"frontend-shard": {"go", "frontend test (0)"}, "frontend": {"go", "frontend"},
 		"frontend-check": {"go", "frontend-check"}, "computer-smoke": {"computer-smoke", "computer-smoke"},
 	}
