@@ -17,7 +17,7 @@ type Channel struct {
 	archiveRetry  bool
 }
 
-// Lock is transitional. B2b-2b-3 removes it when computer and shell state move into live.
+// Lock is transitional while channel coordination and terminal state remain in engine.
 // It returns false for a removed session without retaining the lock.
 func (s *Session) Lock() bool {
 	s.mu.Lock()
@@ -59,12 +59,8 @@ func (c *Channel) Wake() {
 	}
 }
 
-// Close completes one detached channel's teardown under the session lock.
-// A nil channel still closes the detached watchers.
-func (c *Channel) Close(shell []chan contract.ShellJobOutput) {
-	for _, ch := range shell {
-		close(ch)
-	}
+// Close stops a detached channel under the session lock. It accepts a nil channel.
+func (c *Channel) Close() {
 	if c != nil {
 		c.stop()
 	}
