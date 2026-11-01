@@ -3,6 +3,7 @@ package live
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -16,7 +17,7 @@ type Live struct {
 	sessions           map[contract.SessionID]*Session
 	closed             map[contract.SessionID]struct{}
 	activityCount      uint64
-	computerGeneration uint64
+	computerGeneration atomic.Uint64
 	subscribers        map[*Subscription]contract.RoomID
 	wakeMu             sync.Mutex
 	wakePending        map[contract.SessionID]bool
