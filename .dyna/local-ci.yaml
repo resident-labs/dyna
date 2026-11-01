@@ -220,6 +220,7 @@ checks:
       dir=$(mktemp -d); trap 'rm -rf "$dir"' EXIT;
       if [ -x "$HOME/.local/opt/dyna-next/node/bin/node" ]; then export PATH="$HOME/.local/opt/dyna-next/node/bin:$PATH"; fi;
       export DYNA_WEBDEV_BIN="$dir/dyna-webdev";
+      export PLAYWRIGHT_BROWSERS_PATH="$(getent passwd "$(id -u)" | cut -d: -f6)/.cache/ms-playwright";
       bash scripts/ci.sh next-web-width-build && bash scripts/ci.sh next-web-width
     caches: [go-build, go-mod, npm]
     reports: none
@@ -457,7 +458,7 @@ suites:
     checks: [next-pi]
 
   - id: next-web
-    files: ['^next/web/', '^next/cmd/dyna-webdev/', '^scripts/ci\.sh$']
+    files: ['^next/web/|^next/cmd/dyna-webdev/|^scripts/ci-changes\.sh$|^scripts/ci\.sh$|^\.github/']
     checks: [next-web, next-web-width]
 
   - id: cross
