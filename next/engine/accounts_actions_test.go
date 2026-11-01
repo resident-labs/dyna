@@ -75,7 +75,7 @@ func TestAccountActionKeepsSecretOutOfAudit(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		_, _ = w.Write([]byte("{}"))
+		_, _ = w.Write([]byte(`{"model":"invented"}`))
 	})}
 	go func() { _ = server.Serve(proxy.Listener) }()
 	defer server.Close()

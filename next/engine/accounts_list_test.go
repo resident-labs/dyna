@@ -31,7 +31,7 @@ func TestAccountList(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"credentials":[{"id":"invented-private-proxy-id","auth_index":"invented-index","provider":"claude","state":"sign_in_expired"}]}`))
+		_, _ = w.Write([]byte(`{"credentials":[{"id":"invented-private-proxy-id","auth_index":"invented-index","provider":"claude","state":"sign_in_expired","models":["invented-model"]},{"id":"custom","auth_index":"custom","provider":"openai-compatible-custom-acme","state":"unknown","display_name":"Acme"}]}`))
 	})}
 	go func() { _ = server.Serve(proxy.Listener) }()
 	defer server.Close()
@@ -44,6 +44,7 @@ func TestAccountList(t *testing.T) {
 		contract.ProviderAnthropic: contract.ConnectFlowCallback, contract.ProviderOpenAI: contract.ConnectFlowCallback,
 		contract.ProviderKimi: contract.ConnectFlowDevice, contract.ProviderXAI: contract.ConnectFlowDevice, contract.ProviderMeta: contract.ConnectFlowDevice,
 		contract.ProviderZAI: contract.ConnectFlowKey, contract.ProviderOpencodeGo: contract.ConnectFlowKey, contract.ProviderDeepSeek: contract.ConnectFlowKey,
+		"custom-acme": contract.ConnectFlowKey,
 	}
 	for _, provider := range response.Providers {
 		if provider.ConnectFlow != flows[provider.ID] {
@@ -54,7 +55,7 @@ func TestAccountList(t *testing.T) {
 		}
 	}
 	data, err := json.Marshal(response)
-	if err != nil || problem != nil || len(response.Accounts) != 1 || len(response.Providers) != 8 || response.Accounts[0].State != contract.AccountSignInExpired || strings.Contains(string(data), "invented-private-proxy-id") {
+	if err != nil || problem != nil || len(response.Accounts) != 1 || len(response.Providers) != 9 || len(response.Accounts[0].Models) != 1 || response.Accounts[0].State != contract.AccountSignInExpired || strings.Contains(string(data), "invented-private-proxy-id") {
 		t.Fatal("unsafe or incomplete account list")
 	}
 }

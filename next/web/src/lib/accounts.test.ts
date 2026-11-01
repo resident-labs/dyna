@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountPath, accountRows, accountState, labelRefusal, providerGroup, reconnectPath, removalPrompt, canReconnect, reconnectUnavailable } from "./accounts.ts";
+import { accountPath, accountRows, accountState, addProviderError, labelRefusal, parseModelIDs, providerGroup, reconnectPath, removalPrompt, canReconnect, reconnectUnavailable } from "./accounts.ts";
 import { APIError } from "./client.ts";
-import type { Account, AccountProviderInfo } from "./contract.gen.ts";
+import type { Account, AccountProviderInfo, ErrorCode } from "./contract.gen.ts";
 
 test("search unfolds matching API key providers", () => {
   const providers: AccountProviderInfo[] = Array.from({ length: 12 }, (_, i) => ({ id: "anthropic", displayName: `Provider ${i}`, connectMethod: "key", connectFlow: "key" }));
@@ -46,4 +46,16 @@ test("unknown is muted and expired accounts sort first", () => {
 test("an account's links carry its ID as one path segment", () => {
   assert.equal(accountPath("a/b"), "/settings/accounts/account/a%2Fb");
   assert.equal(reconnectPath("a/b"), "/settings/accounts/reconnect/a%2Fb");
+});
+
+test("reads model IDs from lines or commas, once each", () => {
+  assert.deepEqual(parseModelIDs("one, two\n three,one\n"), ["one", "two", "three"]);
+  assert.deepEqual(parseModelIDs("  "), []);
+});
+
+test("says what to fix when a new provider is refused", () => {
+  const refusal = (code: ErrorCode) => new APIError({ code, message: "" });
+  assert.match(addProviderError(refusal("models_unavailable")), /model IDs/);
+  assert.match(addProviderError(refusal("invalid")), /name and address/);
+  assert.match(addProviderError(new Error("network")), /Try again/);
 });
