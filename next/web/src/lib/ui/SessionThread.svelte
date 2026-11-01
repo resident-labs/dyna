@@ -8,7 +8,6 @@
   import type { PostRequest, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn, TranscriptInput, TranscriptPage } from "../contract.gen.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import Icon from "./Icon.svelte";
-  import { elapsed } from "../steps.ts";
   import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
   import Markdown from "./Markdown.svelte";
@@ -272,7 +271,7 @@
           {:else if group.item.kind === "too_large"}<p class="muted">This item is too large to show.</p>{/if}
         {/each}
         {#if turn.outcome === "failed"}<div class="failure"><Icon name="warning" size={16} /><div><strong>{turn.cause ? causes[turn.cause] : "The turn failed"}</strong></div></div>{/if}
-        {#if !turn.ended && !(turn.items ?? []).some(item => timelineItemRunning(item, false))}<p class="muted"><span class="spinner" aria-hidden="true"></span> Working for {elapsed(turn.started, now)}</p>{/if}
+        {#if !turn.ended && !(turn.items ?? []).some(item => timelineItemRunning(item, false))}<p class="muted working"><span class="spinner" aria-hidden="true"></span>Working for {formatTimelineDuration(now - Date.parse(turn.started))}</p>{/if}
       </article>
     {:else}{#if !loading && !failed && !pendingBrief}<p class="muted">The conversation will appear here.</p>{/if}{/each}
     {#each queuedPosts as post (post.id)}
@@ -295,6 +294,8 @@
   .failure { display: flex; gap: 10px; color: var(--muted); margin: 12px 0; }
   .failure strong { color: var(--text); }
   .spinner { display: inline-block; width: 12px; height: 12px; border: 1.5px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
+  /* The spinner sits in the work rows' 24 px icon slot, so the words line up with theirs. */
+  .working .spinner { margin: 0 12px 0 6px; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
   .agent-input { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; margin: 14px 0; }
