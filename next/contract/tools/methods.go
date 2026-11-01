@@ -97,6 +97,7 @@ var methodTable = []MethodEntry{
 	method(contract.MethodRoomRepos, contract.ScopeRead, UserAccess,
 		act("room", "repos", typ[contract.RoomReposRequest](), "List repositories in room.", "room repo list"),
 	),
+	method(contract.MethodRepoCISet, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodRoomSetLimits, contract.ScopeAdmin, OwnerAccess,
 		act("room", "limit", typ[contract.RoomSetLimitsRequest](), "Set room limits", "room limit"),
 	),

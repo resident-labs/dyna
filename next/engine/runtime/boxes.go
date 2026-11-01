@@ -22,6 +22,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/api"
+	"github.com/resident-labs/dyna/engine/ci"
 	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/hostexec"
 	engineimages "github.com/resident-labs/dyna/engine/images"
@@ -90,6 +91,28 @@ func (b *Boxes) installBinary(ctx context.Context, h *podman.Host) error {
 		return b.binErr
 	}
 	return h.InstallBinary(ctx, b.Layout.HostData, b.Version, b.binSum, readExecutable)
+}
+
+// ciHost gives the CI pool a host's runner operations.
+type ciHost struct {
+	*podman.Host
+	boxes *Boxes
+}
+
+// EnsureEgress installs the engine binary first, because the proxy is that binary.
+func (h ciHost) EnsureEgress(ctx context.Context, image string) error {
+	if err := h.boxes.installBinary(ctx, h.Host); err != nil {
+		return err
+	}
+	return h.Host.EnsureEgress(ctx, image, h.boxes.Layout.HostData)
+}
+
+func (b *Boxes) ciDriver(ctx context.Context, name contract.HostName) (ci.Driver, error) {
+	h, err := b.host(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	return ciHost{Host: h, boxes: b}, nil
 }
 
 func executableSum() (string, error) {
