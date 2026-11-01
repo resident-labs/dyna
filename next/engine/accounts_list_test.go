@@ -26,7 +26,7 @@ func TestAccountList(t *testing.T) {
 	if err := st.BindAccount(ctx, "account", "invented-private-proxy-id", contract.ProviderAnthropic, "Invented"); err != nil {
 		t.Fatal(err)
 	}
-	proxy, err := model.NewProxy(t.TempDir(), "invented-management-key")
+	proxy, err := model.NewProxy(t.TempDir(), t.TempDir(), "invented-management-key")
 	if err != nil {
 		t.Fatal(err)
 	}

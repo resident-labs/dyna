@@ -64,7 +64,8 @@ func (r CheckResult) Ready() bool {
 // Check performs the registration probes. AdminOnly is the owner's assertion,
 // not a claim that SSH can verify.
 type CheckOptions struct {
-	HostData, Runtime      string
+	Layout                 box.Layout
+	Runtime                string
 	AdminOnly              bool
 	MemoryFloor, DiskFloor int64
 }
@@ -89,7 +90,7 @@ func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
 	} else {
 		add(CheckAdmin, nil)
 	}
-	if !filepath.IsAbs(o.HostData) || !filepath.IsAbs(o.Runtime) {
+	if !filepath.IsAbs(o.Layout.HostData) || !filepath.IsAbs(o.Runtime) {
 		add(CheckPaths, fmt.Errorf("host data and runtime paths must be absolute"))
 		return result
 	}
@@ -122,7 +123,7 @@ func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
 
 // capacity creates the host data directory before reading its free space.
 func (h *Host) capacity(ctx context.Context, o CheckOptions) (int, int64, int64, error) {
-	output, err := h.run(ctx, "bash", "-c", `set -e -o pipefail; mkdir -p -m 0700 -- "$1"; getconf _NPROCESSORS_ONLN; awk '/MemTotal:|MemAvailable:/ {printf "%.0f\n", $2*1024}' /proc/meminfo; df -PB1 -- "$1" | awk 'NR==2 {print $4}'`, "probe", o.HostData)
+	output, err := h.run(ctx, "bash", "-c", `set -e -o pipefail; mkdir -p -m 0700 -- "$1"; getconf _NPROCESSORS_ONLN; awk '/MemTotal:|MemAvailable:/ {printf "%.0f\n", $2*1024}' /proc/meminfo; df -PB1 -- "$1" | awk 'NR==2 {print $4}'`, "probe", o.Layout.HostData)
 	if err != nil {
 		return 0, 0, 0, err
 	}
@@ -195,7 +196,7 @@ func (h *Host) checkForward(ctx context.Context, o CheckOptions) error {
 	})}
 	go server.Serve(listener)
 	defer server.Close()
-	remote := filepath.Join(o.HostData, "sock", "probe-"+token+".sock")
+	remote := o.Layout.HostProbeSocket(token)
 	if _, err = h.run(ctx, "mkdir", "-p", filepath.Dir(remote)); err != nil {
 		return err
 	}
