@@ -144,7 +144,16 @@ func FirstCheckDemand(definition *Definition, suites []Suite, node Node, room st
 		}
 	}
 	resources := clampCheckResources(first, node)
+	resources.MemoryMiB = first.reservationMiB(resources)
 	return jobs.Demand{Node: node.Name, Room: room, Ahead: ahead, Heavy: first.heavy, CPUs: resources.CPUs, MemoryMiB: resources.MemoryMiB}, nil
+}
+
+// reservationMiB keeps default reservations below the hard check limit.
+func (check nodeCheck) reservationMiB(resources checkResources) int64 {
+	if check.memoryMiB == 0 {
+		return min(resources.MemoryMiB, 1024)
+	}
+	return resources.MemoryMiB
 }
 
 func nodeCacheNames(checks []nodeCheck) []string {
@@ -613,7 +622,8 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				queue := r.queue()
 				source := req.Source
 				source.Head = sha[:7]
-				demand := jobs.Demand{Node: node.Name, ID: runID + "-" + string(check.id), Room: req.RoomID, Heavy: check.heavy, CPUs: check.resources.CPUs, MemoryMiB: check.resources.MemoryMiB, Timeout: req.Timeout, Ahead: req.Ahead, Check: string(check.name), Source: source}
+				reservationMiB := check.reservationMiB(check.resources)
+				demand := jobs.Demand{Node: node.Name, ID: runID + "-" + string(check.id), Room: req.RoomID, Heavy: check.heavy, CPUs: check.resources.CPUs, MemoryMiB: reservationMiB, Timeout: req.Timeout, Ahead: req.Ahead, Check: string(check.name), Source: source}
 				runErr := recordCheck(check)
 				port := 0
 				if runErr != nil {
