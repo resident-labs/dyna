@@ -76,14 +76,16 @@
   .markdown :global(:is(h1, h2, h3, h4, h5, h6):first-child) { margin-top: 0; }
   /* A code block uses the thread's pre look and wraps, so it never scrolls sideways. */
   .markdown :global(pre) { padding: 8px 12px; border-radius: 6px; background: var(--sidebar); white-space: pre-wrap; overflow-wrap: anywhere; font: 12.5px/1.45 var(--mono); }
-  /* The copy row sits above the code and takes its own space, so the button never covers a line of code. */
-  .markdown :global(.code-head) { display: flex; justify-content: flex-end; padding: 2px 4px 0; background: var(--sidebar); border-radius: 6px 6px 0 0; }
-  .markdown :global(.code-block > pre) { border-radius: 0 0 6px 6px; }
-  .markdown :global(.code-copy) { height: 24px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; }
+  /* Keep the copy control over the block without covering code or changing its height. */
+  .markdown :global(.code-block) { position: relative; }
+  .markdown :global(.code-head) { position: absolute; top: 4px; right: 4px; }
+  .markdown :global(.code-block > pre) { padding-right: 96px; }
+  .markdown :global(.code-copy) { height: 24px; padding: 0 8px; border: 0; border-radius: 6px; background: var(--sidebar); color: var(--muted); font: inherit; font-size: 12.5px; opacity: 0; }
+  .markdown :global(.code-block:hover .code-copy), .markdown :global(.code-copy:focus-visible) { opacity: 1; }
   .markdown :global(.code-copy:hover) { color: var(--text); background: var(--hover); }
   .markdown :global(.code-copy:focus-visible) { outline: 2px solid var(--focus); outline-offset: 0; }
   @media (hover: none) {
-    .markdown :global(.code-copy) { height: 40px; padding: 0 12px; }
+    .markdown :global(.code-copy) { height: 40px; padding: 0 12px; opacity: 1; }
   }
   /* A table is capped at the text width. Its cells wrap, and only a table that still cannot fit scrolls in its own block. */
   .markdown :global(table) { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
