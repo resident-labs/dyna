@@ -71,6 +71,7 @@ type dynaUsageSource struct {
 var dynaUsageSources = map[string]dynaUsageSource{
 	"codex": {request: requestCodexUsage, parse: parseCodexUsage},
 	"kimi":  {request: requestKimiUsage, parse: parseKimiUsage},
+	"xai":   {request: requestXAIUsage, parse: parseXAIUsage},
 }
 
 // dynaUsageTransport is a variable so tests never reach a provider.
