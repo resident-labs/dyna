@@ -20,14 +20,11 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 		}
 	}
 	sub, cancel := s.store.Subscribe()
-	live := make(chan contract.Event, 16)
-	s.mu.Lock()
-	s.live[live] = room
-	s.mu.Unlock()
+	subscription, liveEvents := s.live.Subscribe(room, 16)
 	out := make(chan contract.Event)
 	go func() {
 		defer close(out)
-		defer func() { s.mu.Lock(); delete(s.live, live); s.mu.Unlock() }()
+		defer s.live.Unsubscribe(subscription)
 		defer func() { cancel() }()
 		for {
 			var events []contract.Event
@@ -52,7 +49,7 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 				continue
 			}
 			select {
-			case event, ok := <-live:
+			case event, ok := <-liveEvents:
 				if !ok {
 					return
 				}
@@ -396,49 +393,20 @@ func (s *Service) queueWakes(ids []contract.SessionID, events []contract.Event) 
 			s.reconciler.Kick()
 		}
 	}
-	s.wakeMu.Lock()
-	defer s.wakeMu.Unlock()
-	for _, id := range ids {
-		if _, ok := s.wakePending[id]; !ok {
-			s.wakePending[id] = false
-		}
-	}
-	for _, event := range events {
-		switch body := event.Body.(type) {
-		case contract.TurnEnded:
-			if _, ok := s.wakePending[body.Session]; !ok {
-				s.wakePending[body.Session] = false
-			}
-		case contract.BoxChanged:
-			s.wakePending[body.Session] = s.wakePending[body.Session] || (body.To == contract.BoxClosing && body.Reason != "")
-		}
-	}
-	if len(s.wakePending) != 0 {
-		select {
-		case s.wakeSignal <- struct{}{}:
-		default:
-		}
-	}
+	s.live.Wake(ids, events)
 }
 
-func (s *Service) wakeSessions(done <-chan struct{}) {
-	for {
-		select {
-		case <-done:
-			return
-		case <-s.wakeSignal:
+func (s *Service) deliverWakes(pending map[contract.SessionID]bool) {
+	var channels []*boxChannel
+	s.mu.Lock()
+	for id, retry := range pending {
+		if state := s.sessions[id]; state != nil && state.channel != nil {
+			state.channel.archiveRetry = state.channel.archiveRetry || retry
+			channels = append(channels, state.channel)
 		}
-		s.wakeMu.Lock()
-		pending := s.wakePending
-		s.wakePending = make(map[contract.SessionID]bool)
-		s.wakeMu.Unlock()
-		s.mu.Lock()
-		for id, retry := range pending {
-			if state := s.sessions[id]; state != nil && state.channel != nil {
-				state.channel.archiveRetry = state.channel.archiveRetry || retry
-				wakeChannel(state.channel)
-			}
-		}
-		s.mu.Unlock()
+	}
+	s.mu.Unlock()
+	for _, channel := range channels {
+		wakeChannel(channel)
 	}
 }

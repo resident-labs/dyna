@@ -16,7 +16,7 @@
   let current = $derived(routes.find(route => route === location.origin));
   function routeLabel(route: string) {
     const host = new URL(route).hostname;
-    return host === "localhost" || host.endsWith(".localhost") || host === "127.0.0.1" || host === "[::1]" ? "This computer" : host.endsWith(".ts.net") ? "Tailscale HTTPS" : "Your HTTPS address";
+    return host === "localhost" || host.endsWith(".localhost") || host === "127.0.0.1" || host === "[::1]" ? "Local address" : host.endsWith(".ts.net") ? "Tailscale HTTPS" : "Your HTTPS address";
   }
   function approvalURL(value: string | undefined): string | undefined {
     if (!value) return;
@@ -46,27 +46,27 @@
   }
 </script>
 {#snippet sectionBar(title: string, count?: number, action?: Snippet)}
-  <header class="section-head"><strong>{title}</strong>{#if count !== undefined}<span>{count}</span>{/if}{#if title === "Ways in"}<span>Browsers try them in order and check that each one is this machine.</span>{/if}{@render action?.()}</header>
+  <header class="section-head"><strong>{title}</strong>{#if count !== undefined}<span>{count}</span>{/if}{#if title === "Ways in"}<span>Browsers try them in order and check that each one reaches the Dyna host.</span>{/if}{@render action?.()}</header>
 {/snippet}
 {@render bar("Sharing & access", undefined, undefined)}
 <div class="scroll" data-page-ready={(!!status || problem) && (!!devices || failed)}>
   <section class="ways">
     {@render sectionBar("Ways in")}
     <div class="ways-body">
-    {#if current || status?.connectorMissing}<p class="summary">{#if current}This browser uses {current === tunnel ? "the Connect tunnel" : routeLabel(current).replace(/^./, letter => letter.toLowerCase())}.{/if}{#if status?.connectorMissing}{#if current}{" "}{/if}The Connect connector is not running.{/if}</p>{/if}
+    {#if current || status?.connectorMissing}<p class="summary">{#if current}This browser uses {current === tunnel ? "the Connect tunnel" : routeLabel(current) === "Local address" ? "the local address" : routeLabel(current).replace(/^./, letter => letter.toLowerCase())}.{/if}{#if status?.connectorMissing}{#if current}{" "}{/if}The Connect connector is not running.{/if}</p>{/if}
     <div class="route-card">
-    {#each localRoutes as route, index (route)}<div class="row"><span class="route-icon"><Icon name={routeLabel(route) === "This computer" ? "laptop" : "globe"} size={20} /></span><span class="number">{index + 1}</span><div><strong>{routeLabel(route)}</strong><p><code>{route}</code></p>{#if route === location.origin}<p>In use by this browser</p>{:else if routeLabel(route) !== "This computer"}<p>Set in this machine’s configuration</p>{/if}</div></div>{/each}
+    {#each localRoutes as route, index (route)}<div class="row"><span class="route-icon"><Icon name={routeLabel(route) === "Local address" ? "laptop" : "globe"} size={20} /></span><span class="number">{index + 1}</span><div><strong>{routeLabel(route)}</strong><p><code>{route}</code></p>{#if route === location.origin}<p>This browser uses it</p>{:else if routeLabel(route) !== "Local address"}<p>Set in the Dyna host’s configuration</p>{/if}</div></div>{/each}
     <div class="row"><span class="route-icon"><Icon name="globe" size={20} /></span><span class="number">{status?.linked ? localRoutes.length + 1 : ""}</span><div class="detail"><strong>Resident Labs Connect</strong>
       {#if !status}<p>{problem ? "Connect status did not load." : "Loading Connect…"}</p>
       {:else if status.attempt.state === "starting" || status.attempt.state === "unlinking"}
-        <p>{status.attempt.state === "starting" ? "Starting the link…" : "Unlinking this machine…"}</p>
+        <p>{status.attempt.state === "starting" ? "Turning on Connect…" : "Turning off Connect…"}</p>
       {:else if status.linked}
-        <p>Linked to this machine. {#if status.connectorMissing}<StatusPill tone="warning" label="Connector stopped" />{/if}</p>
-        {#if tunnel === location.origin}<p>In use by this browser</p>{/if}
+        <p>Connect is on. {#if status.connectorMissing}<StatusPill tone="warning" label="Connector stopped" />{/if}</p>
+        {#if tunnel === location.origin}<p>This browser uses it</p>{/if}
         <dl class="key-values">{#if tunnel}<dt>Address</dt><dd><code>{tunnel}</code></dd>{/if}{#if status.relay}<dt>Sign-in service</dt><dd><code>{status.relay}</code></dd>{/if}<dt>Machine key</dt><dd><code>{status.fingerprint}</code></dd></dl>
         {#if status.connectorMissing}<p>The Connect connector is not running.</p>{/if}
-        {#if confirm}<p>Unlink this machine? Connect sign-ins end. Paired devices stay.</p><div class="actions"><button disabled={busy} onclick={() => void act("connect.unlink")}>Unlink</button><button disabled={busy} onclick={() => { confirm = false; }}>Cancel</button></div>
-        {:else}<button class="unlink" onclick={() => { confirm = true; }}>Unlink this machine…</button>{/if}
+        {#if confirm}<p>Turn off Connect? Connect sign-ins end. Paired devices stay.</p><div class="actions"><button disabled={busy} onclick={() => void act("connect.unlink")}>Turn off</button><button disabled={busy} onclick={() => { confirm = false; }}>Cancel</button></div>
+        {:else}<button class="unlink" onclick={() => { confirm = true; }}>Turn off Connect…</button>{/if}
       {:else if status.attempt.state === "pending"}
         <p>Waiting for your approval.</p><p>Code <code>{status.code}</code></p><p>Key fingerprint <code>{status.fingerprint}</code></p>
         <p>Check the code and fingerprint on the approval page, then approve with your passkey.</p>
@@ -75,7 +75,7 @@
       {:else}
         {#if status.attempt.state === "failed"}<p role="alert">Connect could not finish. Try again.</p>{/if}
         <p>Open Dyna from anywhere, signed in with your passkey. Dyna adds a private tunnel.</p>
-        <button disabled={busy} onclick={() => void start()}>Link this machine</button>
+        <button disabled={busy} onclick={() => void start()}>Turn on Connect</button>
       {/if}
       {#if problem}<p role="alert">Connect could not finish. Try again.</p>{/if}
     </div></div>

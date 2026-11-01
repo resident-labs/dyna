@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"mime"
 	"os"
@@ -80,8 +79,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 					return contract.PostResponse{}, invalid("visual file not found")
 				}
 				if caller.Kind != contract.PrincipalOwner {
-					var ok bool
-					err := s.store.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM uploads WHERE sha256=?1 AND room=?2) OR EXISTS(SELECT 1 FROM event_files f JOIN events e ON e.seq=f.seq WHERE f.sha256=?1 AND e.room=?2)", ref, req.Room).Scan(&ok)
+					ok, err := s.store.FileInRoom(ctx, ref, req.Room)
 					if err != nil {
 						return contract.PostResponse{}, failure(err)
 					}
@@ -100,8 +98,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 			return contract.PostResponse{}, invalid("attachment not found")
 		}
 		if caller.Kind != contract.PrincipalOwner {
-			var ok bool
-			err = s.store.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM uploads WHERE sha256=?1 AND room=?2) OR EXISTS(SELECT 1 FROM event_files f JOIN events e ON e.seq=f.seq WHERE f.sha256=?1 AND e.room=?2)", file.SHA256, req.Room).Scan(&ok)
+			ok, err := s.store.FileInRoom(ctx, file.SHA256, req.Room)
 			if err != nil {
 				return contract.PostResponse{}, failure(err)
 			}
@@ -157,7 +154,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 			targetRoom := req.Room
 			if address.Room != "" {
 				targetRoom, err = s.store.RoomByName(ctx, address.Room)
-				if errors.Is(err, sql.ErrNoRows) {
+				if errors.Is(err, store.ErrNotFound) {
 					return contract.PostResponse{}, invalid("unknown room")
 				}
 				if err != nil {
@@ -165,7 +162,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 				}
 			}
 			session, err := s.store.SessionByName(ctx, targetRoom, address.Name)
-			if errors.Is(err, sql.ErrNoRows) {
+			if errors.Is(err, store.ErrNotFound) {
 				return contract.PostResponse{}, invalid("unknown session @" + address.Name)
 			}
 			if err != nil {
@@ -201,7 +198,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if errors.Is(err, store.ErrVisualForbidden) {
 		return contract.PostResponse{}, forbidden()
 	}
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, store.ErrNotFound) {
 		return contract.PostResponse{}, invalid("visual not found")
 	}
 	if err != nil {
@@ -237,7 +234,7 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 		event, err = s.store.EventInRoom(ctx, req.Room, req.Event)
 		if err == nil {
 			events = append(events, event)
-		} else if errors.Is(err, sql.ErrNoRows) {
+		} else if errors.Is(err, store.ErrNotFound) {
 			err = nil
 		}
 	} else {
@@ -274,28 +271,13 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 		}
 	}
 	delete(named, "")
-	var ids []any
+	ids := make([]contract.SessionID, 0, len(named))
 	for id := range named {
 		ids = append(ids, id)
 	}
-	names := map[contract.SessionID]string{}
-	if len(ids) > 0 {
-		rows, err := s.store.Read().QueryContext(ctx, "SELECT id,name FROM sessions WHERE id IN (?"+strings.Repeat(",?", len(ids)-1)+")", ids...)
-		if err != nil {
-			return contract.EventsListResponse{}, failure(err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var id contract.SessionID
-			var name string
-			if err := rows.Scan(&id, &name); err != nil {
-				return contract.EventsListResponse{}, failure(err)
-			}
-			names[id] = name
-		}
-		if err := rows.Err(); err != nil {
-			return contract.EventsListResponse{}, failure(err)
-		}
+	names, err := s.store.SessionNames(ctx, ids)
+	if err != nil {
+		return contract.EventsListResponse{}, failure(err)
 	}
 	return contract.EventsListResponse{Events: events, Next: next, Names: names}, nil
 }
