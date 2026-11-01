@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/harness"
 	"github.com/resident-labs/dyna/harness/fakeharness"
 )
 
@@ -36,7 +37,9 @@ func (h *harnessFake) Start(_ context.Context, id contract.TurnID, inputs []cont
 	<-h.release
 	return contract.TurnEnded{Turn: id, Outcome: contract.TurnOutcome("completed")}, nil
 }
-func (h *harnessFake) SetModel(context.Context, contract.ModelChoice) error               { return nil }
+func (h *harnessFake) TransferModel(context.Context, contract.TurnID, contract.ModelChoice, int) (harness.ModelTransfer, error) {
+	return harness.ModelTransfer{Path: "switched"}, nil
+}
 func (h *harnessFake) SetPromptSections(context.Context, []contract.ContextSection) error { return nil }
 func (h *harnessFake) Continue(context.Context, contract.TurnID, func()) (contract.TurnEnded, error) {
 	panic("unexpected continuation")
@@ -256,21 +259,223 @@ func TestRunnerSkipsReplayedSteer(t *testing.T) {
 	}
 }
 
-func TestRunnerAppliesModelOnlyWhenItChanges(t *testing.T) {
-	anthropic := contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "a", Thinking: contract.ThinkingLow}
-	openai := contract.ModelChoice{Provider: contract.ModelProviderOpenAI, ID: "b", Thinking: contract.ThinkingLow}
+func turnStart(i int, model contract.ModelChoice, compactTokens int) contract.BoxMessage {
+	return contract.BoxMessage{Body: contract.TurnStart{Turn: contract.TurnID(fmt.Sprint("turn_", i)), Inputs: []contract.TurnInput{{Delivery: contract.DeliverySeq(i + 1)}}, Model: model, CompactTokens: compactTokens}}
+}
+
+var (
+	modelA = contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "a", Thinking: contract.ThinkingLow}
+	modelB = contract.ModelChoice{Provider: contract.ModelProviderOpenAI, ID: "b", Thinking: contract.ThinkingLow}
+)
+
+// The first turn of a Pi process always transfers: box.hello started Pi on this model, but the session file may hold
+// a conversation from another one, or more than this model takes.
+func TestRunnerTransfersOnFirstTurnAndOnEachChange(t *testing.T) {
 	completed := fakeharness.Turn{Result: contract.TurnEnded{Outcome: "completed"}}
-	h := &fakeharness.Harness{Turns: []fakeharness.Turn{completed, completed, completed}}
+	h := &fakeharness.Harness{Turns: []fakeharness.Turn{completed, completed, completed, completed}}
 	sink := &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 1)}
-	runner := &Runner{Harness: h, Sink: sink, Model: anthropic}
-	for i, model := range []contract.ModelChoice{anthropic, openai, openai} {
-		start := contract.TurnStart{Turn: contract.TurnID(fmt.Sprint("turn_", i)), Inputs: []contract.TurnInput{{Delivery: contract.DeliverySeq(i + 1)}}, Model: model}
-		if err := runner.Handle(context.Background(), contract.BoxMessage{Body: start}); err != nil {
+	runner := &Runner{Harness: h, Sink: sink}
+	turns := []struct {
+		model  contract.ModelChoice
+		tokens int
+	}{{modelA, 0}, {modelB, 0}, {modelB, 0}, {modelB, 150000}}
+	for i, turn := range turns {
+		if err := runner.Handle(context.Background(), turnStart(i, turn.model, turn.tokens)); err != nil {
 			t.Fatal(err)
 		}
 		<-sink.done
 	}
-	if len(h.Models) != 1 || h.Models[0] != openai {
-		t.Fatalf("SetModel calls: %+v", h.Models)
+	if want := []contract.ModelChoice{modelA, modelB, modelB}; !reflect.DeepEqual(h.Models, want) {
+		t.Fatalf("transfers: %+v", h.Models)
 	}
+	if want := []int{0, 0, 150000}; !reflect.DeepEqual(h.Triggers, want) {
+		t.Fatalf("triggers: %+v", h.Triggers)
+	}
+}
+
+func TestRunnerOnlyARefusedModelFailsTheTurn(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		reply   harness.ModelTransfer
+		err     error
+		outcome contract.TurnOutcome
+		cause   contract.FailureCause
+	}{
+		{"compacted", harness.ModelTransfer{Path: "compacted"}, nil, "completed", ""},
+		{"boundary", harness.ModelTransfer{Path: "boundary", Reason: "quota exhausted"}, nil, "completed", ""},
+		{"refused", harness.ModelTransfer{}, fmt.Errorf("Model not found: %w", harness.ErrRefused), "failed", contract.CauseSetModelFailed},
+		{"pi stopped", harness.ModelTransfer{}, errors.New("pi RPC stream closed"), "failed", contract.CauseHarnessFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &fakeharness.Harness{Turns: []fakeharness.Turn{{Result: contract.TurnEnded{Outcome: "completed"}}, {Result: contract.TurnEnded{Outcome: "completed"}}}}
+			h.Transfer = func(context.Context) (harness.ModelTransfer, error) { return tc.reply, tc.err }
+			sink := &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 1)}
+			runner := &Runner{Harness: h, Sink: sink}
+			if err := runner.Handle(context.Background(), turnStart(0, modelB, 0)); err != nil {
+				t.Fatal(err)
+			}
+			if got := <-sink.done; got.Outcome != tc.outcome || got.Cause != tc.cause {
+				t.Fatalf("turn: %+v", got)
+			}
+			// A transfer that failed stays pending: the next turn tries again.
+			if err := runner.Handle(context.Background(), turnStart(1, modelB, 0)); err != nil {
+				t.Fatal(err)
+			}
+			<-sink.done
+			if want := map[bool]int{true: 2, false: 1}[tc.err != nil]; len(h.Models) != want {
+				t.Fatalf("transfers: %d, want %d", len(h.Models), want)
+			}
+		})
+	}
+}
+
+// transferHarness holds a transfer open until Abort or release, and records what reached Pi in order.
+type transferHarness struct {
+	fakeharness.Harness
+	mu      sync.Mutex
+	calls   []string
+	entered chan struct{}
+	release chan harness.ModelTransfer
+	aborted chan struct{}
+}
+
+func newTransferHarness() *transferHarness {
+	h := &transferHarness{entered: make(chan struct{}), release: make(chan harness.ModelTransfer, 1), aborted: make(chan struct{}, 1)}
+	h.Harness.Transfer = func(ctx context.Context) (harness.ModelTransfer, error) {
+		close(h.entered)
+		select {
+		case reply := <-h.release:
+			return reply, nil
+		case <-h.aborted:
+			return harness.ModelTransfer{Path: harness.TransferAborted}, nil
+		}
+	}
+	return h
+}
+
+func (h *transferHarness) record(call string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.calls = append(h.calls, call)
+}
+func (h *transferHarness) Abort(context.Context) error {
+	h.record("abort")
+	h.aborted <- struct{}{}
+	return nil
+}
+func (h *transferHarness) Steer(_ context.Context, input contract.TurnInput) error {
+	h.record(input.Text)
+	return nil
+}
+func (h *transferHarness) Delivered(context.Context, contract.DeliverySeq) (bool, error) {
+	return false, nil
+}
+func (h *transferHarness) Start(_ context.Context, id contract.TurnID, _ []contract.TurnInput, started func()) (contract.TurnEnded, error) {
+	h.record("prompt")
+	started()
+	return contract.TurnEnded{Turn: id, Outcome: "completed"}, nil
+}
+
+// A compaction takes minutes, so the channel must keep reading: a stop has to reach it, and a steer must not reach Pi
+// before the prompt does.
+func TestRunnerReadsTheChannelDuringATransfer(t *testing.T) {
+	h := newTransferHarness()
+	sink := &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 1)}
+	runner := &Runner{Harness: h, Sink: sink}
+	ctx := context.Background()
+	if err := runner.Handle(ctx, turnStart(0, modelB, 0)); err != nil {
+		t.Fatal(err)
+	}
+	<-h.entered
+	for _, delivery := range []contract.DeliverySeq{2, 3, 4} {
+		steer := contract.TurnSteer{Queue: contract.QueueSteer, Input: contract.TurnInput{Delivery: delivery, Text: fmt.Sprint("steer ", delivery)}}
+		if err := runner.Handle(ctx, contract.BoxMessage{Body: steer}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.mu.Lock()
+	early := len(h.calls)
+	h.mu.Unlock()
+	if early != 0 {
+		t.Fatalf("Pi saw %d calls during the transfer", early)
+	}
+	h.release <- harness.ModelTransfer{Path: "compacted"}
+	<-sink.done
+	if want := []string{"prompt", "steer 2", "steer 3", "steer 4"}; !reflect.DeepEqual(h.calls, want) {
+		t.Fatalf("calls: %v", h.calls)
+	}
+}
+
+func TestRunnerStopCancelsATransfer(t *testing.T) {
+	h := newTransferHarness()
+	sink := &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 1)}
+	runner := &Runner{Harness: h, Sink: sink}
+	ctx := context.Background()
+	if err := runner.Handle(ctx, turnStart(0, modelB, 0)); err != nil {
+		t.Fatal(err)
+	}
+	<-h.entered
+	if err := runner.Handle(ctx, contract.BoxMessage{Body: contract.TurnSteer{Queue: contract.QueueSteer, Input: contract.TurnInput{Delivery: 2, Text: "steer"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Handle(ctx, contract.BoxMessage{Body: contract.TurnStop{Turn: "turn_0"}}); err != nil {
+		t.Fatal(err)
+	}
+	got := <-sink.done
+	if got.Outcome != "stopped" || got.Cause != contract.CauseNotStarted {
+		t.Fatalf("turn: %+v", got)
+	}
+	if want := []string{"abort"}; !reflect.DeepEqual(h.calls, want) {
+		t.Fatalf("Pi saw inputs of a stopped turn: %v", h.calls)
+	}
+	// Pi stayed on its model, so the next turn transfers again.
+	h.entered = make(chan struct{})
+	h.release <- harness.ModelTransfer{Path: "switched"}
+	if err := runner.Handle(ctx, turnStart(1, modelB, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-sink.done; got.Outcome != "completed" {
+		t.Fatalf("turn: %+v", got)
+	}
+	if len(h.Models) != 2 {
+		t.Fatalf("transfers: %d", len(h.Models))
+	}
+}
+
+// A stop can land after Pi finished the transfer, when Abort finds nothing to cancel.
+func TestRunnerStopAfterTheTransferStillStopsTheTurn(t *testing.T) {
+	sections := make(chan struct{})
+	entered := make(chan struct{})
+	h := &stopLateHarness{transferHarness: newTransferHarness(), sections: sections, entered: entered}
+	h.aborted = make(chan struct{}, 8)
+	sink := &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 1)}
+	runner := &Runner{Harness: h, Sink: sink}
+	ctx := context.Background()
+	h.release <- harness.ModelTransfer{Path: "switched"}
+	if err := runner.Handle(ctx, turnStart(0, modelB, 0)); err != nil {
+		t.Fatal(err)
+	}
+	<-entered
+	if err := runner.Handle(ctx, contract.BoxMessage{Body: contract.TurnStop{Turn: "turn_0"}}); err != nil {
+		t.Fatal(err)
+	}
+	close(sections)
+	if got := <-sink.done; got.Outcome != "stopped" || got.Cause != contract.CauseNotStarted {
+		t.Fatalf("turn: %+v", got)
+	}
+	if want := []string{"abort"}; !reflect.DeepEqual(h.calls, want) {
+		t.Fatalf("calls: %v", h.calls)
+	}
+}
+
+type stopLateHarness struct {
+	*transferHarness
+	sections chan struct{}
+	entered  chan struct{}
+}
+
+func (h *stopLateHarness) SetPromptSections(context.Context, []contract.ContextSection) error {
+	close(h.entered)
+	<-h.sections
+	return nil
 }

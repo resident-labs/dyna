@@ -6,10 +6,11 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 58
+const schemaVersion = 59
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	58: {`ALTER TABLE turns ADD COLUMN dispatched_model TEXT NOT NULL DEFAULT ''`},
 	57: {
 		`ALTER TABLE rooms ADD COLUMN state TEXT NOT NULL DEFAULT 'open'`,
 		`ALTER TABLE rooms ADD COLUMN reason TEXT NOT NULL DEFAULT ''`,
