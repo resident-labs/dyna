@@ -35,7 +35,7 @@ func (s *fakeBackupStore) AlertDisk(_ context.Context, host contract.HostName, f
 	return nil
 }
 
-func plentyFree(context.Context) int64 { return 1 << 62 }
+func plentyFree(context.Context) (int64, bool) { return 1 << 62, true }
 
 func (s *fakeBackupStore) Backup(_ context.Context, _ time.Time) (string, error) {
 	s.calls++
@@ -94,7 +94,7 @@ func TestBackupWaitsForRoomAndClearsPartials(t *testing.T) {
 	need := 2*1024 + 20*box.GiB
 	free := need - 1
 	st := &fakeBackupStore{dir: dir}
-	b := backupLoop{store: st, dir: dir, recipient: identity.Recipient(), free: func(context.Context) int64 { return free }, now: time.Now, run: func(context.Context, string, int64, *os.File) error { return nil }}
+	b := backupLoop{store: st, dir: dir, recipient: identity.Recipient(), free: func(context.Context) (int64, bool) { return free, true }, now: time.Now, run: func(context.Context, string, int64, *os.File) error { return nil }}
 	b.backup(context.Background())
 	if st.calls != 0 || st.alerts != 1 || st.free != need-1 || st.need != need || st.failure != "low disk" {
 		t.Fatalf("low disk: %+v", st)
@@ -107,6 +107,20 @@ func TestBackupWaitsForRoomAndClearsPartials(t *testing.T) {
 	b.backup(context.Background())
 	if st.calls != 1 || st.alerts != 1 || st.failure != "" {
 		t.Fatalf("with room: %+v", st)
+	}
+}
+
+// A broken probe reads as zero free. It must not stop backups for good, nor claim the disk is full.
+func TestBackupRunsWhenDiskCannotBeMeasured(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "backups")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	st := &fakeBackupStore{dir: dir}
+	b := backupLoop{store: st, dir: dir, free: func(context.Context) (int64, bool) { return 0, false }, now: time.Now}
+	b.backup(context.Background())
+	if st.calls != 1 || st.alerts != 0 {
+		t.Fatalf("calls %d alerts %d", st.calls, st.alerts)
 	}
 }
 

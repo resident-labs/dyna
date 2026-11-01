@@ -2,7 +2,7 @@
 
 The engine keeps the newest 3 daily copies of `store.db` in `<data>/backups`. When the owner sets the two backup flags, it also sends each day's archive, encrypted, to a second machine. That machine keeps at least the newest 14 archives. It removes older copies only after 14 days. This guide shows how to set that up and how to restore an archive.
 
-Each backup first removes any `.partial` file a crash left in `<data>/backups`. The engine skips the backup and alerts each room's root when free space is under twice the size of `store.db` plus 20 GiB. A skip also records a failed off-host copy.
+Each backup first removes any `.partial` file a crash left in `<data>/backups`. The engine skips the backup and alerts each room's root when free space is under twice the size of `store.db` plus 20 GiB. A skip also records a failed off-host copy. A disk the engine cannot measure does not stop the backup.
 
 ## What the second machine can do
 

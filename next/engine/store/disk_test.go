@@ -74,7 +74,7 @@ func TestDiskWarnWakesRoomRootsOncePerSpell(t *testing.T) {
 		{165 * box.GiB, 1},
 		{149 * box.GiB, 2},
 	} {
-		if err := s.RecordHostHeartbeat(ctx, "h", true, &step.free, total, time.Unix(int64(i), 0)); err != nil {
+		if err := s.RecordHostHeartbeat(ctx, "h", true, &step.free, total, time.Unix(int64(i)*3600, 0)); err != nil {
 			t.Fatal(err)
 		}
 		events, wakes := diskAlerts(t, s)
@@ -141,5 +141,85 @@ func TestHeartbeatRecordsFloorFromDiskSize(t *testing.T) {
 	}
 	if got := floor(); got != 100*box.GiB {
 		t.Fatalf("a failed disk probe moved the floor: %d", got)
+	}
+}
+
+// The btrfs metadata rule moves free space to zero and back, past any free-space hysteresis, so only time can hold the alert.
+func TestDiskAlertHoldsThroughMetadataFlap(t *testing.T) {
+	ctx := context.Background()
+	s := diskStore(t)
+	const total = 1000 * box.GiB
+	alerts := func() int {
+		t.Helper()
+		events, _ := diskAlerts(t, s)
+		return events["r1"]
+	}
+	at := time.Unix(1000, 0)
+	for range 180 {
+		free := int64(0)
+		if at.Unix()%20 == 0 {
+			free = 500 * box.GiB
+		}
+		if err := s.RecordHostHeartbeat(ctx, "h", true, &free, total, at); err != nil {
+			t.Fatal(err)
+		}
+		at = at.Add(10 * time.Second)
+	}
+	if got := alerts(); got != 1 {
+		t.Fatalf("half an hour of flapping sent %d alerts", got)
+	}
+	for range 2 {
+		free := 500 * box.GiB
+		at = at.Add(time.Hour)
+		if err := s.RecordHostHeartbeat(ctx, "h", true, &free, total, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	free := int64(0)
+	if err := s.RecordHostHeartbeat(ctx, "h", true, &free, total, at); err != nil {
+		t.Fatal(err)
+	}
+	if got := alerts(); got != 2 {
+		t.Fatalf("a new spell after the gap: %d alerts", got)
+	}
+}
+
+func TestDiskLowSinceNeedsAnUnbrokenRun(t *testing.T) {
+	ctx := context.Background()
+	s := diskStore(t)
+	const total = 1000 * box.GiB
+	low, fine := 50*box.GiB, 500*box.GiB
+	since := func() (at int64) {
+		t.Helper()
+		if err := s.Read().QueryRow("SELECT disk_low_since FROM hosts WHERE name='h'").Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+	sample := func(reachable bool, free *int64, sec int64) {
+		t.Helper()
+		if err := s.RecordHostHeartbeat(ctx, "h", reachable, free, total, time.Unix(sec, 0)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, breakRun := range map[string]func(){
+		"good sample":  func() { sample(true, &fine, 30) },
+		"failed probe": func() { sample(true, nil, 30) },
+		"miss":         func() { sample(false, nil, 30) },
+		"restart": func() {
+			if err := s.ResetEngineHosts(ctx); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		sample(true, &low, 10)
+		sample(true, &low, 20)
+		if since() != 10000 {
+			t.Fatalf("%s: run started at %d", name, since())
+		}
+		breakRun()
+		if since() != 0 {
+			t.Fatalf("%s left the run standing at %d", name, since())
+		}
 	}
 }
