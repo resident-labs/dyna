@@ -49,7 +49,7 @@ var expectedChecks = map[localci.Suite][]localci.CheckName{
 	},
 	localci.SuiteComputerSmoke: {"computer-smoke"},
 	localci.Suite("next"):      {"next", "next-ssh"},
-	localci.Suite("next-web"):  {"next-web"},
+	localci.Suite("next-web"):  {"next-web", "next-web-width"},
 	localci.Suite("next-pi"):   {"next-pi"},
 	localci.SuiteGo: {
 		"frontend test (0)", "frontend test (1)", "frontend test (2)", "frontend test (3)", "frontend test (4)", "frontend test (5)", "frontend",
