@@ -1,14 +1,17 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import Avatar from "./Avatar.svelte";
+  import VisualCardMedia from "./VisualCardMedia.svelte";
+  import type { VisualVersion } from "../visual.ts";
+  import { call } from "../client.ts";
   import { formatTime } from "../feed.ts";
   import { FIT, actualScale, clampView, toggleZoom, wheelFactor, zoomAt } from "../zoom.ts";
   import type { Point, Size, View } from "../zoom.ts";
   import type { MediaItem } from "../media.ts";
 
-  let { items, initial, name, root, room, onclose, onjump }: {
+  let { items, initial, name, root, room, loadVisual, onclose, onjump }: {
     items: MediaItem[]; initial: number; name: (session: string) => string;
-    root: (session?: string) => boolean; room: string; onclose: () => void; onjump: (key: string) => void;
+    root: (session?: string) => boolean; room: string; loadVisual: (item: MediaItem) => Promise<VisualVersion[]>; onclose: () => void; onjump: (key: string) => void;
   } = $props();
   let selected = $state(items[initial]), view = $state<View>(FIT), menu = $state(false);
   let dialog: HTMLDialogElement, stage: HTMLDivElement;
@@ -17,7 +20,16 @@
   let index = $derived(Math.max(0, found));
   let item = $derived(found >= 0 ? items[found] : selected);
   let author = $derived(item.from.kind === "owner" ? "You" : item.from.session ? name(item.from.session) : "Dyna");
+  let versions = $state<VisualVersion[]>([]), visualFailed = $state(false), visualAttempt = $state(0);
+  $effect(() => {
+    const selected = item; visualAttempt;
+    if (!selected.file.visual) { versions = []; return; }
+    let active = true; versions = []; visualFailed = false;
+    void loadVisual(selected).then(result => { if (active) { versions = result; visualFailed = !result.length; } }, () => { if (active) visualFailed = true; });
+    return () => { active = false; };
+  });
   let src = $derived(`/v1/files/${encodeURIComponent(item.file.sha256)}`);
+  let original = $derived(item.file.visual ? undefined : src);
   let fit = $derived(natural.width && natural.height ? Math.min(1, box.width / natural.width, box.height / natural.height) : 1);
   let content = $derived({ width: natural.width * fit, height: natural.height * fit });
   const pointers = new Map<number, Point>();
@@ -26,7 +38,7 @@
   function zoom(factor: number, at: Point = { x: 0, y: 0 }) { view = zoomAt(view, factor, at, box, content); }
   function move(n: number) { background = false; if (!items.length) return; selected = items[found < 0 ? (n > 0 ? 0 : items.length - 1) : (found + n + items.length) % items.length]; view = FIT; natural = { width: 0, height: 0 }; menu = false; }
   function key(e: KeyboardEvent) {
-    if (e.target instanceof HTMLVideoElement || items.length < 2) return;
+    if (e.target instanceof HTMLVideoElement || e.target instanceof HTMLIFrameElement || items.length < 2) return;
     if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); move(e.key === "ArrowLeft" ? -1 : 1); }
   }
   function wheel(node: HTMLElement) {
@@ -36,7 +48,7 @@
   }
   function down(e: PointerEvent) {
     background = false;
-    if (e.target instanceof HTMLVideoElement) return;
+    if (item.file.visual || e.target instanceof HTMLVideoElement) return;
     background = e.target === stage;
     stage.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 1) { start = { x: e.clientX, y: e.clientY }; moved = 0; }
@@ -89,6 +101,7 @@
     {:else}<div class="sender">{@render identity()}</div>{/if}
     <button class="jump desktop" onclick={() => { onjump(item.key); dialog.close(); }}>Jump to post</button>
     <div class="spacer"></div>
+    {#if !item.file.visual}
     {#if item.file.media.startsWith("image/")}
       <div class="zoom desktop" role="group" aria-label="Image zoom">
         <button aria-label="Zoom out" onclick={() => zoom(1/1.5)}>−</button><button disabled={view.scale === 1} onclick={() => view = FIT}>Fit</button><button aria-label="Zoom in" onclick={() => zoom(1.5)}>+</button>
@@ -96,13 +109,17 @@
     {/if}
     <a class="round" href={src} download={item.file.name} aria-label="Download" title="Download">↓</a>
     <a class="round desktop" href={src} target="_blank" rel="noopener" aria-label="Open original" title="Open original">↗</a>
+    {/if}
     <button class="round desktop" aria-label="Close" onclick={() => dialog.close()}>×</button>
     <div class="more phone"><button class="round" aria-label="More options" aria-expanded={menu} onclick={() => menu = !menu}>⋯</button>
-      {#if menu}<div class="menu"><a href={src} target="_blank" rel="noopener">Open original</a><button onclick={() => { onjump(item.key); dialog.close(); }}>Jump to post</button></div>{/if}
+      {#if menu}<div class="menu">{#if original}<a href={original} target="_blank" rel="noopener">Open original</a>{/if}<button onclick={() => { onjump(item.key); dialog.close(); }}>Jump to post</button></div>{/if}
     </div>
   </header>
-  <div class="stage" bind:this={stage} use:wheel onpointerdown={down} onpointermove={drag} onpointerup={up} onpointercancel={up} onclick={e => { if (background && e.target === stage && moved < 8) dialog.close(); }} role="presentation">
-    {#if item.file.media.startsWith("video/")}
+  <div class="stage" class:media-gesture={!item.file.visual} bind:this={stage} use:wheel onpointerdown={down} onpointermove={drag} onpointerup={up} onpointercancel={up} onclick={e => { if (background && e.target === stage && moved < 8) dialog.close(); }} role="presentation">
+    {#if item.file.visual}
+      <div class="visual-stage">{#if visualFailed}<div class="visual-error">The card did not load. <button onclick={() => visualAttempt++}>Retry</button></div>
+      {:else if versions.length}{#key item.key + ":" + item.file.visual.version}<VisualCardMedia {versions} selected={item.file.visual.version} room={item.room ?? room} send={async (text, event) => { await call("post", { room: item.room ?? room, text, visualReply: event }); }} />{/key}{/if}</div>
+    {:else if item.file.media.startsWith("video/")}
       {#key src}<video {src} controls preload="metadata" autoplay></video>{/key}
     {:else}
       <img {src} alt={item.file.name} draggable="false" onload={event => { if (event.currentTarget instanceof HTMLImageElement) natural = { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }; }}
@@ -111,7 +128,8 @@
     {/if}
   </div>
   {#if items.length > 1}<button class="round prev desktop" aria-label="Previous media" onclick={() => move(-1)}>‹</button><button class="round next desktop" aria-label="Next media" onclick={() => move(1)}>›</button>{/if}
-  <footer>{item.file.name}{#if items.length > 1}<span>{" · "}{index + 1} of {items.length}</span>{/if}</footer>
+  {#if item.file.visual && items.length > 1}<button class="round phone visual-nav previous" aria-label="Previous media" onclick={() => move(-1)}>‹</button><button class="round phone visual-nav following" aria-label="Next media" onclick={() => move(1)}>›</button>{/if}
+  <footer>{#if !item.file.visual}{item.file.name}{/if}{#if items.length > 1}<span>{#if !item.file.visual}{" · "}{/if}{index + 1} of {items.length}</span>{/if}</footer>
 </dialog>
 
 <style>
@@ -132,9 +150,12 @@
   .zoom { display: flex; align-items: center; background: var(--screen-chip); border: 1px solid var(--screen-line); border-radius: 20px; }
   .zoom button { min-width: 36px; height: 36px; }
   button:disabled { opacity: .45; }
-  .stage { position: absolute; inset: 56px 4vw 72px; display: grid; place-items: center; overflow: hidden; touch-action: none; user-select: none; }
+  .stage { position: absolute; inset: 56px 4vw 72px; display: grid; place-items: center; overflow: hidden; }
+  .stage.media-gesture { touch-action: none; user-select: none; }
   img, video { display: block; max-width: 92vw; max-height: calc(100dvh - 128px); object-fit: contain; }
   img { max-width: none; max-height: none; transform-origin: center; }
+  .visual-stage { width: 100%; height: 100%; overflow: hidden; }
+  .visual-error { color: var(--screen-muted); padding: 24px; }
   .prev, .next { position: absolute; top: 50%; transform: translateY(-50%); }
   .prev { left: 16px; } .next { right: 16px; }
   footer { position: absolute; bottom: 20px; width: 100%; text-align: center; font-size: 12px; pointer-events: none; }
@@ -146,6 +167,8 @@
     .identity { display: grid; gap: 1px; } .identity time { font-size: 11px; }
     .more { position: relative; } .menu { position: absolute; right: 0; top: 44px; min-width: 150px; padding: 4px; background: var(--screen-chip); border: 1px solid var(--screen-line); border-radius: 8px; }
     .menu a, .menu button { display: block; width: 100%; box-sizing: border-box; padding: 12px; text-align: left; text-decoration: none; font-size: 13px; }
+    .visual-nav { position: absolute; bottom: calc(4px + env(safe-area-inset-bottom)); }
+    .previous { left: 16px; } .following { right: 16px; }
     footer { bottom: calc(16px + env(safe-area-inset-bottom)); }
   }
 </style>

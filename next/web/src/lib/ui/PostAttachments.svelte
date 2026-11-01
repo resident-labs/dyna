@@ -2,7 +2,7 @@
   import VisualBanner from "./VisualBanner.svelte";
   import { fileSize, isImage, isThumb } from "../feed.ts";
   import type { Attachment, EventID, VisualCard } from "../contract.gen.ts";
-  let { attachments, newest, onvisual, event, at, onmedia }: { attachments: Attachment[]; newest: Map<string, VisualCard>; onvisual: (visual: VisualCard) => void; event?: EventID; at?: string; onmedia: (position: number) => void } = $props();
+  let { attachments, newest, event, at, onmedia }: { attachments: Attachment[]; newest: Map<string, VisualCard>; event?: EventID; at?: string; onmedia: (position: number) => void } = $props();
   // The engine serves each file sandboxed; the owner's cookie covers the request.
   const url = (file: Attachment) => `/v1/files/${encodeURIComponent(file.sha256)}`;
   // The type badge on a file card, such as "TXT", as in v1.
@@ -19,7 +19,7 @@
 </script>
 {#each attachments as file, i (i)}
   {@const visual = file.visual}
-  {#if visual && event && at}<div><VisualBanner {visual} newest={newest.get(visual.id) ?? visual} {event} {at} onopen={() => onvisual(visual)} /></div>{/if}
+  {#if visual && event && at}<div><VisualBanner {visual} newest={newest.get(visual.id) ?? visual} {event} {at} onopen={() => onmedia(i)} /></div>{/if}
 {/each}
   <!-- As in v1, images come first as thumbnails, then a card per other file. Each opens the file in a new tab. -->
   {#if images.length}<div class="images" class:many={images.length > 1}>{#each images as { file, position } (position)}
