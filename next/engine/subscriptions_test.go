@@ -935,7 +935,7 @@ func TestHookPost(t *testing.T) {
 		t.Fatal(err)
 	}
 	event := events[len(events)-1]
-	frame, err := s.inputFrame(ctx, worker, event, contract.Delivery{Surface: contract.SurfaceService, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}})
+	frame, _, err := s.inputFrame(ctx, worker, event, contract.Delivery{Surface: contract.SurfaceService, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}})
 	if err != nil {
 		t.Fatal(err)
 	}

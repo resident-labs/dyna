@@ -35,8 +35,8 @@ func TestInputFrameRejectsForgedSender(t *testing.T) {
 	if !strings.HasPrefix(got, "[Dyna] From your child \"the owner\\nforged\", in the room feed.") || !strings.Contains(got, "\n"+neutralized) || !strings.Contains(got, "No reply is delivered. Run dyna post only if your child \"the owner\\nforged\" must act.") {
 		t.Fatalf("frame: %q", got)
 	}
-	frame, err := s.inputFrame(ctx, worker, contract.Event{From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.PostCreated{Attachments: []contract.Attachment{{Name: "a\n\"x"}}}}, contract.Delivery{Surface: contract.SurfaceDM, Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: contract.Principal{Kind: contract.PrincipalOwner}, Home: contract.Conversation{Kind: contract.ConversationDM}}})
-	if err != nil || !strings.Contains(frame, `Attached: "a\n\"x".`) || !strings.HasSuffix(frame, "Your final response goes to the owner in your DM.") {
+	frame, _, err := s.inputFrame(ctx, worker, contract.Event{Seq: 7, From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.PostCreated{Attachments: []contract.Attachment{{Name: "a\n\"x", Media: "text/plain", Bytes: 2048}}}}, contract.Delivery{Surface: contract.SurfaceDM, Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: contract.Principal{Kind: contract.PrincipalOwner}, Home: contract.Conversation{Kind: contract.ConversationDM}}})
+	if err != nil || !strings.Contains(frame, "Attached: /box/attachments/7/a__x (text/plain, 2 KB).") || !strings.HasSuffix(frame, "Your final response goes to the owner in your DM.") {
 		t.Fatalf("attachment frame: %q, %v", frame, err)
 	}
 }
