@@ -130,7 +130,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 		return nil, failure(err)
 	}
 	ctx, stop := context.WithCancel(ctx)
-	handle, _, ok := s.lockSession(session.ID)
+	handle, ok := s.lockSession(session.ID)
 	if !ok {
 		stop()
 		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
