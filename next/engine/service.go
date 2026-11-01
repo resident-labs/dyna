@@ -14,6 +14,7 @@ import (
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/live"
+	"github.com/resident-labs/dyna/engine/model"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -35,6 +36,11 @@ type Service struct {
 	gitName, gitEmail string
 	maxDepth          int
 	store             *store.Store
+	searchBraveURL    string
+	searchProxy       *model.Proxy
+	searchQuota       *model.Quotas
+	searchMu          sync.Mutex
+	searchFailures    map[string]time.Time
 	dispatch          func(context.Context, contract.SessionID, contract.TurnID, contract.Event, bool) (contract.TurnID, []store.FeedInput, error)
 	boxes             lifecycle.BoxAdapter
 	reconciler        *lifecycle.Reconciler
@@ -54,13 +60,37 @@ type Service struct {
 	publishInstructions func(context.Context)
 }
 
-// lockSession creates a handle only for a session the caller read as open.
-func (s *Service) lockSession(id contract.SessionID) (*live.Session, bool) {
-	handle, ok := s.live.CreateSession(id)
-	if !ok || !handle.Lock() {
-		return nil, false
+// createSession publishes before checking the store, so close can retire the handle.
+func (s *Service) createSession(ctx context.Context, id contract.SessionID) (*live.Session, *contract.Error) {
+	handle, _ := s.live.CreateSession(id)
+	check, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	_, open, err := s.store.OpenSession(check, id)
+	cancel()
+	if err != nil {
+		// A failed store read after close can leave an empty handle.
+		return nil, failure(err)
 	}
-	return handle, true
+	if !open {
+		s.retireSession(s.live.RetireHandle(handle), id)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, failure(err)
+	}
+	if !open {
+		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+	}
+	return handle, nil
+}
+
+func (s *Service) lockSession(ctx context.Context, id contract.SessionID) (*live.Session, *contract.Error) {
+	handle, problem := s.createSession(ctx, id)
+	if problem != nil {
+		return nil, problem
+	}
+	if !handle.Lock() {
+		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+	}
+	return handle, nil
 }
 
 // lookupSession reads existing session state without creating it.
@@ -97,7 +127,10 @@ func (s *Service) Reconciler() *lifecycle.Reconciler { return s.reconciler }
 
 // SessionClosed retires live session state after the close commits.
 func (s *Service) SessionClosed(id contract.SessionID) {
-	handle := s.live.RetireSession(id)
+	s.retireSession(s.live.RetireSession(id), id)
+}
+
+func (s *Service) retireSession(handle *live.Session, id contract.SessionID) {
 	if handle == nil {
 		return
 	}

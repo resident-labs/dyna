@@ -13,8 +13,8 @@ import (
 
 func attachTestChannel(t *testing.T, s *Service, id contract.SessionID) *live.Channel {
 	t.Helper()
-	handle, ok := s.lockSession(id)
-	if !ok {
+	handle, problem := s.lockSession(context.Background(), id)
+	if problem != nil {
 		t.Fatal("session closed")
 	}
 	channel := live.NewChannel(func() {}, make(chan struct{}))

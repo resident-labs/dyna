@@ -6,7 +6,7 @@ type GrantKind string
 
 const (
 	GrantHostExec GrantKind = "hostexec"  // run commands on hosts (section 6)
-	GrantAskOwner GrantKind = "ask-owner" // open owner questions and terminal requests
+	GrantAskOwner GrantKind = "ask-owner" // open owner questions and show_pty requests
 )
 
 type Grant struct {
