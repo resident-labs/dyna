@@ -2,6 +2,7 @@
   import DOMPurify from "dompurify";
   import { parse } from "../markdown.ts";
   import { withCopyButtons } from "../codeCopy.ts";
+  import { highlight } from "../highlight.ts";
   // Links in posts open in a new tab without access to this page.
   DOMPurify.addHook("afterSanitizeAttributes", node => {
     if (node instanceof HTMLAnchorElement) {
@@ -48,9 +49,21 @@
 <script lang="ts">
   let { text }: { text: string } = $props();
   let html = $derived(render(text));
+  let container: HTMLDivElement;
+  $effect(() => {
+    html;
+    const blocks = container.querySelectorAll<HTMLElement>("pre code[class*='language-']");
+    for (const block of blocks) {
+      const language = [...block.classList].find(name => name.startsWith("language-"))?.slice(9) ?? "";
+      const source = block.textContent ?? "";
+      void highlight(source, language).then(result => {
+        if (block.isConnected && block.textContent === source) block.innerHTML = DOMPurify.sanitize(result);
+      });
+    }
+  });
 </script>
 
-<div class="markdown" use:copyCodeBlocks>{@html html}</div>
+<div class="markdown" bind:this={container} use:copyCodeBlocks>{@html html}</div>
 
 <style>
   .markdown { overflow-wrap: anywhere; line-height: 1.45; }
