@@ -153,6 +153,18 @@ func (b *browser) inspect(ctx context.Context, doc []byte, csp string, allowNet 
 			return Result{}, err
 		}
 	}
+	for _, setting := range []struct {
+		method string
+		params params
+	}{
+		{"Emulation.setScrollbarsHidden", params{Hidden: true}},
+		{"Emulation.setEmulatedMedia", params{Features: []mediaFeature{{Name: "prefers-color-scheme", Value: "dark"}}}},
+		{"Emulation.setDefaultBackgroundColorOverride", params{Color: &color{}}},
+	} {
+		if err = c.call(ctx, setting.method, setting.params, nil); err != nil {
+			return Result{}, err
+		}
+	}
 	if err = c.call(ctx, "Runtime.addBinding", params{Name: policyBinding}, nil); err != nil {
 		return Result{}, err
 	}
