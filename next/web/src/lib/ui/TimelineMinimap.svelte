@@ -1,6 +1,4 @@
-<!-- Dyna: Original Svelte presentation informed by T3 Code's TimelineMinimap
-     (pingdotgg/t3code, 575579d68ac4bae09f8426a345d4a3eac1e90c67, MIT).
-     No upstream source code is copied. -->
+<!-- Ported from T3 Code (apps/web/src/components/chat/TimelineMinimap.tsx), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE. -->
 <script lang="ts" module>
   export type MinimapTurn = { id: string; userText: string | null; assistantText: string | null; visible?: boolean };
 </script>
