@@ -25,7 +25,7 @@ test("hides a model-specific window that repeats the account's own, and keeps on
 
 const windowAt = (usedPercent: number): UsageWindow => ({ name: "week", kind: "weekly", usedPercent, seconds: 604800, resetsAt: "" });
 const usageOf = (accountId: string, label: string, provider: string, windows: UsageWindow[] | null = [windowAt(10)], cause: AccountUsage["cause"] = ""): AccountUsage =>
-  ({ accountId, provider, label, windows, cause });
+  ({ accountId, provider, label, active: true, windows, cause });
 const catalog: AccountsListResponse = {
   providers: [
     { id: "anthropic", displayName: "Claude", connectMethod: "oauth", connectFlow: "callback" },
@@ -168,8 +168,8 @@ test("words a usage window by its span, percent used, percent left and time to r
 test("names the busiest usage window of any shown account by its title", () => {
   const w = (usedPercent: number, seconds: number): UsageWindow => ({ name: "", kind: seconds === 18000 ? "five_hour" : "weekly", usedPercent, seconds, resetsAt: "" });
   assert.equal(busiestWindow(usageRows([
-    { accountId: "a", provider: "claude", label: "pipsqueak.tasks", cause: "", windows: [w(61.6, 18000), w(40, 604800)] },
-    { accountId: "b", provider: "codex", label: "team", cause: "sign_in_expired", windows: [w(99, 604800)] },
-    { accountId: "c", provider: "kimi", label: "spare", cause: "", windows: null }])), "pipsqueak.tasks · 5-hour 62% used");
+    { accountId: "a", provider: "claude", label: "pipsqueak.tasks", active: true, cause: "", windows: [w(61.6, 18000), w(40, 604800)] },
+    { accountId: "b", provider: "codex", label: "team", active: true, cause: "sign_in_expired", windows: [w(99, 604800)] },
+    { accountId: "c", provider: "kimi", label: "spare", active: true, cause: "", windows: null }])), "pipsqueak.tasks · 5-hour 62% used");
   assert.equal(busiestWindow([]), undefined);
 });
