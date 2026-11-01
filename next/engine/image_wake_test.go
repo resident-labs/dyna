@@ -35,6 +35,7 @@ func (h *imageWakeHost) Recreate(_ context.Context, spec BoxSpec, image, oldSlic
 	return nil
 }
 
+// LEGACY(v1-transfer): this test, a box on an old nested parent slice. Remove after the transfer.
 func TestWakeFlattensLegacySlice(t *testing.T) {
 	s, _, room, sid, ctx := quietSession(t, 0)
 	h := &imageWakeHost{image: "image"}

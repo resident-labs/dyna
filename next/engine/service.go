@@ -16,6 +16,7 @@ import (
 	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/live"
 	"github.com/resident-labs/dyna/engine/model"
+	"github.com/resident-labs/dyna/engine/prs"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -58,6 +59,8 @@ type Service struct {
 	compose           *compose.Files
 	imageSize         func(context.Context, contract.RepoName, string) (contract.BoxSizeName, error)
 	approvals         *approve.Service
+	pulls             *prs.Client
+	prPoll            *prs.Poller
 	hostexec          HostexecRunner
 	hostexecTimeout   func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 	hooks             HookRunner
@@ -220,7 +223,7 @@ func failure(err error) *contract.Error {
 		code = contract.ErrSessionClosing
 	} else if errors.Is(err, store.ErrParentClosing) {
 		code = contract.ErrParentClosing
-	} else if errors.Is(err, store.ErrTurnConflict) || errors.Is(err, store.ErrRoomDeleting) || errors.Is(err, store.ErrQuestionNotWaiting) {
+	} else if errors.Is(err, store.ErrTurnConflict) || errors.Is(err, store.ErrRoomDeleting) || errors.Is(err, store.ErrQuestionNotWaiting) || errors.Is(err, store.ErrPRTracked) {
 		code = contract.ErrConflict
 	} else if errors.Is(err, store.ErrNoAskGrant) {
 		code = contract.ErrNoGrant

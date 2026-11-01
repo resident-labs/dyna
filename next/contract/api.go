@@ -102,6 +102,7 @@ const (
 	ErrParentClosing        ErrorCode = "parent_closing"
 	ErrSessionClosing       ErrorCode = "session_closing"
 	ErrStale                ErrorCode = "stale"
+	ErrGitHubQuota          ErrorCode = "github_quota" // the message names the reset time
 	ErrVisualSuperseded     ErrorCode = "visual_superseded"
 	ErrUnavailable          ErrorCode = "unavailable"
 	ErrReconnectUnavailable ErrorCode = "reconnect_unavailable"
@@ -656,6 +657,7 @@ const (
 	TranscriptTool     TranscriptItemKind = "tool"
 	TranscriptPost     TranscriptItemKind = "post"
 	TranscriptTooLarge TranscriptItemKind = "too_large"
+	TranscriptSteer    TranscriptItemKind = "steer" // a message a running turn read, at the place it read it
 )
 
 type TranscriptCallStatus string
@@ -682,6 +684,7 @@ type TranscriptItem struct {
 	Kind         TranscriptItemKind      `json:"kind"`
 	At           time.Time               `json:"at"`
 	Ended        *time.Time              `json:"ended,omitempty"`
+	Type         EventType               `json:"type,omitempty"` // a steer's event; Text is its body as for a TranscriptInput
 	Text         string                  `json:"text,omitempty"`
 	Tool         string                  `json:"tool,omitempty"`
 	Arguments    string                  `json:"arguments,omitempty"`

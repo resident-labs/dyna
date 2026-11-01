@@ -237,6 +237,10 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodSessionRestart, c, a.service.SessionRestart)
 	call(mux, contract.MethodSessionSearch, c, a.service.SessionSearch)
 	call(mux, contract.MethodPostSearch, c, a.service.PostSearch)
+	call(mux, contract.MethodPrList, c, a.service.PrList)
+	call(mux, contract.MethodPrStatus, c, a.service.PrStatus)
+	call(mux, contract.MethodPrTrack, c, a.service.PrTrack)
+	call(mux, contract.MethodPrUntrack, c, a.service.PrUntrack)
 	call(mux, contract.MethodPost, c, func(ctx context.Context, p contract.Principal, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
 		c := requestCaller(ctx, c)
 		if box(c) {
