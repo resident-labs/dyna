@@ -19,6 +19,8 @@ const (
 	StopContainer   Call = "stop-container"
 	RemoveContainer Call = "remove-container"
 	RemoveVolume    Call = "remove-volume"
+	RemovePod       Call = "remove-pod"
+	RemoveStack     Call = "remove-stack-volumes"
 	ListContainers  Call = "list-containers"
 	AddForward      Call = "add-forward"
 	RemoveForward   Call = "remove-forward"
@@ -102,6 +104,10 @@ func (h *Host) RemoveVolume(_ context.Context, id contract.BoxID) error {
 	}
 	delete(h.Volumes, id)
 	return nil
+}
+func (h *Host) RemovePod(context.Context, contract.BoxID) error { return h.call(RemovePod) }
+func (h *Host) RemoveStackVolumes(context.Context, contract.BoxID) error {
+	return h.call(RemoveStack)
 }
 func (h *Host) ListContainers(_ context.Context) ([]box.ContainerStatus, error) {
 	if err := h.call(ListContainers); err != nil {

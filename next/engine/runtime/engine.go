@@ -26,6 +26,7 @@ import (
 	"github.com/resident-labs/dyna/engine/api"
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/ci"
+	"github.com/resident-labs/dyna/engine/compose"
 	"github.com/resident-labs/dyna/engine/connect"
 	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/images"
@@ -194,6 +195,8 @@ func Run(ctx context.Context, cfg Config) error {
 	service.SetInstructionsPublisher(boxes.PublishInstructions)
 	mirror := &enginegit.Mirror{Layout: layout, Token: token, Runner: enginegit.GitRunner{}}
 	service.SetRepositories(&enginegit.Repositories{Rooms: st, Hosts: boxes, Mirror: mirror})
+	boxes.Compose = &compose.Files{Layout: layout, Repo: mirror}
+	service.SetCompose(boxes.Compose, mirror.ImageSize)
 	if err := st.RecoverHostexec(ctx, time.Now()); err != nil {
 		return fmt.Errorf("recover hostexec runs: %w", err)
 	}

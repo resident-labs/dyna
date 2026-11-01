@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -14,6 +16,7 @@ import (
 	"github.com/resident-labs/dyna/box/images"
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/compose"
 	enginegit "github.com/resident-labs/dyna/engine/git"
 	engineimages "github.com/resident-labs/dyna/engine/images"
 	"github.com/resident-labs/dyna/engine/store"
@@ -130,6 +133,38 @@ func TestBuildAheadBuildsBaseAndEachRepositoryImageThenPrunes(t *testing.T) {
 	}
 	if last := r.commands[len(r.commands)-1]; !strings.Contains(last, "'podman' 'images'") {
 		t.Fatalf("prune ran before the builds ended: %s", last)
+	}
+}
+
+func TestBuildAheadCoversComposeImages(t *testing.T) {
+	r := &aheadHost{}
+	b := newAheadBoxes(t, r, []box.Host{{Name: "one", State: box.HostReady}}, map[contract.RoomID][]contract.RepoName{"room_1": {"owner/repo"}})
+	path, err := b.Mirror.Layout.Git("owner/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	b.Compose = &compose.Files{Layout: b.Mirror.Layout, Repo: b.Mirror}
+	dir := b.Compose.Layout.Compose("room_1")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string]string{
+		"good":   "services:\n  agent: {}\n  db:\n    image: postgres:16\n",
+		"broken": "services:\n  agent: {}\n  db:\n    image: a\n    privileged: true\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name+".yaml"), []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b.BuildAhead(context.Background())
+	if r.count("podman pull") == 0 || r.count("podman create --replace") == 0 {
+		t.Fatalf("the sidecar image was not pulled and warmed: %v", r.commands)
+	}
+	if last := r.commands[len(r.commands)-1]; !strings.Contains(last, "'podman' 'images'") {
+		t.Fatalf("a broken file stopped the pass: %s", last)
 	}
 }
 

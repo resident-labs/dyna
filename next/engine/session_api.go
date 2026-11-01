@@ -8,6 +8,7 @@ import (
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/compose"
 	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/room"
 )
@@ -90,7 +91,15 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
 	}
-	session := store.Session{ID: contract.SessionID(sid), Room: req.Room, Name: req.Name, Repo: repo, Profile: req.Profile, Box: contract.BoxID(bid), NewRoomName: roomName}
+	var composeName string
+	var composeFile *compose.File
+	if roomName == "" {
+		var problem *contract.Error
+		if composeName, composeFile, problem = s.startCompose(ctx, req, repo); problem != nil {
+			return contract.SessionStartResponse{}, problem
+		}
+	}
+	session := store.Session{ID: contract.SessionID(sid), Room: req.Room, Name: req.Name, Repo: repo, Profile: req.Profile, Box: contract.BoxID(bid), NewRoomName: roomName, Compose: composeName}
 	event, err := s.event(req.Room, caller, contract.SessionStarted{Session: session.ID, Name: req.Name, Parent: parent, Profile: req.Profile, Goal: req.Goal, Brief: req.Brief})
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
@@ -102,7 +111,13 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	if req.Size != "" {
 		sizeName = req.Size
 	} else if repo != "" && s.repos != nil {
-		size, err := s.repos.Size(ctx, repo)
+		var size contract.BoxSizeName
+		var err error
+		if composeFile != nil && composeFile.Agent.Build != "" {
+			size, err = s.imageSize(ctx, repo, composeFile.Agent.Build)
+		} else {
+			size, err = s.repos.Size(ctx, repo)
+		}
 		if err != nil {
 			return contract.SessionStartResponse{}, failure(err)
 		}
@@ -111,6 +126,12 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		}
 		if size != "" {
 			sizeName = size
+		}
+	}
+	if composeFile != nil {
+		size, _ := box.Size(sizeName)
+		if err := composeFile.CheckLimits(size); err != nil {
+			return contract.SessionStartResponse{}, composeProblem(err)
 		}
 	}
 	initial, err := s.event(req.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Box: session.Box, Session: session.ID, To: contract.BoxPending})
@@ -135,6 +156,61 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	})
 	if problem != nil {
 		return contract.SessionStartResponse{}, problem
+	}
+	return response, nil
+}
+
+// startCompose chooses a new session's compose file. Only a child takes one: a room's root starts plain.
+func (s *Service) startCompose(ctx context.Context, req contract.SessionStartRequest, repo contract.RepoName) (string, *compose.File, *contract.Error) {
+	if s.compose == nil {
+		if req.Compose != "" {
+			return "", nil, invalid("compose files are not available here")
+		}
+		return "", nil, nil
+	}
+	name, file, err := s.compose.Start(ctx, req.Room, repo, req.Compose)
+	if err != nil {
+		return "", nil, composeProblem(err)
+	}
+	return name, file, nil
+}
+
+// composeProblem makes a refused file the caller's to fix, and anything else the engine's.
+func composeProblem(err error) *contract.Error {
+	var refused box.StackError
+	if errors.As(err, &refused) {
+		return invalid(refused.Error())
+	}
+	return failure(err)
+}
+
+// ComposeList lists the compose files a child session could start with.
+func (s *Service) ComposeList(ctx context.Context, caller contract.Principal, req contract.ComposeListRequest) (contract.ComposeListResponse, *contract.Error) {
+	if e := s.roomAccess(ctx, caller, req.Room); e != nil {
+		return contract.ComposeListResponse{}, e
+	}
+	repos, err := s.store.RoomRepos(ctx, req.Room)
+	if err != nil {
+		return contract.ComposeListResponse{}, failure(err)
+	}
+	var own contract.RepoName
+	if caller.Kind == contract.PrincipalSession {
+		session, err := s.store.Session(ctx, caller.Session)
+		if err != nil {
+			return contract.ComposeListResponse{}, failure(err)
+		}
+		own = session.Repo
+	}
+	repo, err := room.RepoForSession(repos, req.Repo, own)
+	if err != nil {
+		return contract.ComposeListResponse{}, invalid(err.Error())
+	}
+	response := contract.ComposeListResponse{Files: []contract.ComposeFile{}}
+	if s.compose == nil {
+		return response, nil
+	}
+	if response.Files, err = s.compose.List(ctx, req.Room, repo); err != nil {
+		return contract.ComposeListResponse{}, failure(err)
 	}
 	return response, nil
 }
