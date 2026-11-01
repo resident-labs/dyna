@@ -26,17 +26,18 @@ func (s *Service) computerEvent(ctx context.Context, session contract.SessionID,
 
 // clearComputerLocked removes the current computer. The caller holds s.mu and
 // the session's computerLock, and writes the returned stop event after unlocking s.mu.
-func (s *Service) clearComputerLocked(id contract.SessionID) (contract.RoomID, bool) {
+func (s *Service) clearComputerLocked(id contract.SessionID) (contract.RoomID, bool, []chan []byte) {
 	c := s.sessionLocked(id).computer
 	if c == nil {
-		return "", false
+		return "", false, nil
 	}
 	s.sessionLocked(id).computer = nil
+	var watchers []chan []byte
 	for ch := range c.watchers {
-		close(ch)
+		watchers = append(watchers, ch)
 		delete(c.watchers, ch)
 	}
-	return c.room, c.state == contract.ComputerRunning
+	return c.room, c.state == contract.ComputerRunning, watchers
 }
 
 func (s *Service) ComputerChanged(ctx context.Context, caller contract.Principal, req contract.ComputerChangedRequest) (contract.ComputerChangedResponse, *contract.Error) {
@@ -74,15 +75,23 @@ func (s *Service) ComputerChanged(ctx context.Context, caller contract.Principal
 		return contract.ComputerChangedResponse{}, failure(err)
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	c.state = req.To
+	var watchers []chan []byte
+	var channel *boxChannel
 	if req.To == contract.ComputerStopped {
 		c.lastFrame = nil
-		wakeChannel(state.channel)
+		channel = state.channel
 		for ch := range c.watchers {
-			close(ch)
+			watchers = append(watchers, ch)
 			delete(c.watchers, ch)
 		}
+	}
+	s.mu.Unlock()
+	if channel != nil {
+		wakeChannel(channel)
+	}
+	for _, ch := range watchers {
+		close(ch)
 	}
 	return contract.ComputerChangedResponse{}, nil
 }
@@ -104,36 +113,52 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 		return nil, failure(err)
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	state := s.sessionLocked(id)
+	s.mu.Unlock()
+	state.computerLock.Lock()
+	defer state.computerLock.Unlock()
+	s.mu.Lock()
 	if box.State != contract.BoxReady || state.channel == nil {
+		s.mu.Unlock()
 		return nil, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
 	}
 	channel := state.channel
 	c := state.computer
 	if c == nil || c.state != contract.ComputerRunning {
+		s.mu.Unlock()
 		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "computer is not running"}
 	}
 	ch := make(chan []byte, 1)
-	if len(c.watchers) == 0 {
+	first := len(c.watchers) == 0
+	var frame []byte
+	if first {
 		s.computerGeneration++
 		c.generation = s.computerGeneration
 		c.lastFrame = nil
-		wakeChannel(channel)
-	} else if c.lastFrame != nil {
-		ch <- c.lastFrame
+	} else {
+		frame = c.lastFrame
 	}
 	c.watchers[ch] = struct{}{}
+	s.mu.Unlock()
+	if first {
+		wakeChannel(channel)
+	} else if frame != nil {
+		ch <- frame
+	}
 	go func() {
 		<-ctx.Done()
+		state.computerLock.Lock()
+		defer state.computerLock.Unlock()
 		s.mu.Lock()
-		defer s.mu.Unlock()
 		if _, ok := c.watchers[ch]; !ok {
+			s.mu.Unlock()
 			return
 		}
 		delete(c.watchers, ch)
+		wake := len(c.watchers) == 0 && state.channel == channel
+		s.mu.Unlock()
 		close(ch)
-		if len(c.watchers) == 0 && state.channel == channel {
+		if wake {
 			wakeChannel(channel)
 		}
 	}()
@@ -197,17 +222,24 @@ func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal,
 	channel, computer := state.channel, state.computer
 	s.mu.Unlock()
 	defer func() {
+		state.computerLock.Lock()
+		defer state.computerLock.Unlock()
 		s.mu.Lock()
-		defer s.mu.Unlock()
 		if computer == nil || channel == nil || state.computer != computer || state.channel != channel || computer.generation != generation {
+			s.mu.Unlock()
 			return
 		}
 		computer.lastFrame = nil
+		var watchers []chan []byte
 		for ch := range computer.watchers {
-			close(ch)
+			watchers = append(watchers, ch)
 			delete(computer.watchers, ch)
 		}
 		channel.watching = 0
+		s.mu.Unlock()
+		for _, ch := range watchers {
+			close(ch)
+		}
 		wakeChannel(channel)
 	}()
 	for {
@@ -222,18 +254,24 @@ func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal,
 		if _, err := io.ReadFull(r, frame); err != nil {
 			return nil
 		}
+		state.computerLock.Lock()
 		s.mu.Lock()
+		var watchers []chan []byte
 		if c := state.computer; c != nil && c.state == contract.ComputerRunning && c.generation == generation {
 			c.lastFrame = frame
 			for ch := range c.watchers {
-				select {
-				case <-ch:
-				default:
-				}
-				ch <- frame
+				watchers = append(watchers, ch)
 			}
 		}
 		s.mu.Unlock()
+		for _, ch := range watchers {
+			select {
+			case <-ch:
+			default:
+			}
+			ch <- frame
+		}
+		state.computerLock.Unlock()
 		if ctx.Err() != nil {
 			return nil
 		}
