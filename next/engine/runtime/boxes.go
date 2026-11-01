@@ -69,9 +69,14 @@ type Boxes struct {
 	Proc              string // Proc is the folder with stat and meminfo; empty means /proc.
 	mu                sync.Mutex
 	hosts             map[contract.HostName]*podman.Host
-	restored          map[contract.HostName]bool
+	restored          map[contract.HostName]bool // forwards back in this process
+	installed         map[contract.HostName]bool // binary current in this process
+	recoveries        map[contract.HostName]*recovery
+	recovering        sync.WaitGroup
+	retryDelay        time.Duration // retryDelay is the first wait between recovery tries; zero means restoreRetryMin.
 	loads             map[contract.HostName]hostLoad
 	cpuPrev           *cpuTimes // cpuPrev is the last /proc/stat sample of this machine, nil before the first.
+	installs          map[*podman.Host]chan struct{}
 	binOnce           sync.Once
 	binSum            string
 	binErr            error
@@ -90,10 +95,28 @@ type cpuTimes struct {
 }
 
 // installBinary installs the engine on a host. It hashes the executable once and reads its bytes only if the host differs.
+// One runs at a time on a host, so boxes that race after a deploy send the bytes once: three copies at once over a relay took
+// minutes where one takes 40 seconds.
 func (b *Boxes) installBinary(ctx context.Context, h *podman.Host) error {
 	b.binOnce.Do(func() { b.binSum, b.binErr = executableSum() })
 	if b.binErr != nil {
 		return b.binErr
+	}
+	b.mu.Lock()
+	if b.installs == nil {
+		b.installs = make(map[*podman.Host]chan struct{})
+	}
+	gate := b.installs[h]
+	if gate == nil {
+		gate = make(chan struct{}, 1)
+		b.installs[h] = gate
+	}
+	b.mu.Unlock()
+	select {
+	case gate <- struct{}{}:
+		defer func() { <-gate }()
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 	return h.InstallBinary(ctx, b.Layout.HostBin(), b.Version, b.binSum, readExecutable)
 }
@@ -312,15 +335,9 @@ func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host,
 	}
 	for _, record := range hosts {
 		if record.Name == name {
+			// Nothing here touches the network: a slow host must not hold up a caller that wants another one.
 			h, err := podman.New(record.SSH, b.Runtime, string(name), nil)
 			if err != nil {
-				return nil, err
-			}
-			same, err := b.engineHost(ctx, h)
-			if err != nil {
-				return nil, err
-			}
-			if err := b.Store.SetEngineHost(ctx, name, same); err != nil {
 				return nil, err
 			}
 			b.mu.Lock()
@@ -380,6 +397,10 @@ func (b *Boxes) BuildAhead(ctx context.Context) {
 // prepareImages builds the images that boxes on this host would use now, then prunes older ones. A failure is only
 // logged: the next box that needs the image builds it and reports the failure in its room.
 func (b *Boxes) prepareImages(ctx context.Context, h *podman.Host, name contract.HostName) {
+	// Running boxes come first: until a host is back, image work would only compete with them for its link.
+	if !b.waitRecovered(ctx, name) {
+		return
+	}
 	steps := box.NewStepLog("host " + string(name))
 	repos, rooms, err := b.hostRepos(ctx, name)
 	if err != nil {
@@ -642,13 +663,35 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	return image.Tag, nil
 }
 
-// Restore creates local sockets first and attempts each host independently.
+// recovery is one host's way back after the engine starts.
+type recovery struct {
+	done chan struct{} // closes when the host has its forwards and this binary, or the engine stops.
+	hold time.Time     // Until then the reconciler does not count a box's silence against it. mu guards it.
+}
+
+const (
+	// restoreTry bounds one pass over a host's forwards, so a stuck ssh cannot end recovery. Each forward stays in the driver,
+	// so the next pass carries on from there and even a very slow host gets there.
+	restoreTry = 2 * time.Minute
+	// restoreHold ends the wait on a host that answers but keeps refusing its forwards: its boxes show as lost, and the
+	// retries go on.
+	restoreHold = 10 * time.Minute
+	// reconnectGrace covers a box agent's reconnect once its socket is back. Its backoff tops out at 10 seconds.
+	reconnectGrace = 20 * time.Second
+
+	restoreRetryMin = time.Second
+	restoreRetryMax = 30 * time.Second
+)
+
+// Restore opens each box's local socket and returns. A deploy can send a host a binary that takes minutes on a relayed link,
+// and a host can be down, so each host then comes back by itself in the background, trying until it answers: first the
+// forwards that running boxes reconnect through, then this binary, which only a box that starts needs. Nothing a restart
+// stops is lost, because the next engine does the same work from the store.
 func (b *Boxes) Restore(ctx context.Context) error {
 	records, err := b.Store.Boxes(ctx)
 	if err != nil {
 		return err
 	}
-	hosts := make(map[contract.HostName]bool)
 	for _, record := range records {
 		if record.Host == "" || record.State == contract.BoxDeleted || record.State == contract.BoxFailed {
 			continue
@@ -660,24 +703,128 @@ func (b *Boxes) Restore(ctx context.Context) error {
 		if err := b.Sockets.AddBox(record.ID, record.Session, session.Room); err != nil {
 			return err
 		}
-		hosts[record.Host] = true
 	}
-	var wg sync.WaitGroup
-	for name := range hosts {
-		wg.Add(1)
+	hosts, err := b.Store.Hosts(ctx)
+	if err != nil {
+		return err
+	}
+	hosts = slices.DeleteFunc(hosts, func(host box.Host) bool { return host.State == box.HostRemoved })
+	b.mu.Lock()
+	if b.recoveries == nil {
+		b.recoveries = make(map[contract.HostName]*recovery)
+	}
+	for _, host := range hosts {
+		b.recoveries[host.Name] = &recovery{done: make(chan struct{}), hold: time.Now().Add(restoreHold)}
+	}
+	b.mu.Unlock()
+	for _, host := range hosts {
+		b.recovering.Add(2)
 		go func() {
-			defer wg.Done()
-			hostCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			defer cancel()
-			if err := b.restoreHost(hostCtx, name); err != nil {
-				log.Printf("host %s: restore: %v", name, err)
-			}
+			defer b.recovering.Done()
+			b.recoverHost(ctx, host.Name)
+		}()
+		go func() {
+			defer b.recovering.Done()
+			b.keepTrying(ctx, host.Name, "identify", func(ctx context.Context) error { return b.identify(ctx, host.Name) })
 		}()
 	}
-	wg.Wait()
 	return ctx.Err()
 }
 
+// WaitRecovered waits for the recovery work to end, which it does when Restore's context does.
+func (b *Boxes) WaitRecovered() { b.recovering.Wait() }
+
+func (b *Boxes) recoverHost(ctx context.Context, name contract.HostName) {
+	b.mu.Lock()
+	state := b.recoveries[name]
+	b.mu.Unlock()
+	defer close(state.done)
+	steps := box.NewStepLog("host " + string(name))
+	restored := b.keepTrying(ctx, name, "restore", func(ctx context.Context) error {
+		ctx, cancel := context.WithTimeout(ctx, restoreTry)
+		defer cancel()
+		return b.restoreHost(ctx, name)
+	})
+	if !restored {
+		return
+	}
+	steps.Done("restore forwards")
+	b.mu.Lock()
+	state.hold = time.Now().Add(reconnectGrace)
+	b.mu.Unlock()
+	if b.keepTrying(ctx, name, "install binary", func(ctx context.Context) error { return b.installHost(ctx, name) }) {
+		steps.Done("install binary")
+	}
+}
+
+// keepTrying runs step until it works or ctx ends, and reports which. It logs an error only when it changes, as a host can
+// stay down for days.
+func (b *Boxes) keepTrying(ctx context.Context, name contract.HostName, what string, step func(context.Context) error) bool {
+	delay := b.retryDelay
+	if delay == 0 {
+		delay = restoreRetryMin
+	}
+	last := ""
+	for {
+		err := step(ctx)
+		if err == nil {
+			return true
+		}
+		if ctx.Err() != nil {
+			return false
+		}
+		if err.Error() != last {
+			last = err.Error()
+			log.Printf("host %s: %s: %v; retrying", name, what, err)
+		}
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return false
+		}
+		delay = min(delay*2, restoreRetryMax)
+	}
+}
+
+// restoring reports whether a host's boxes cannot have reconnected yet because the engine has not put their sockets back.
+func (b *Boxes) restoring(name contract.HostName) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	state := b.recoveries[name]
+	return state != nil && time.Now().Before(state.hold)
+}
+
+// waitRecovered waits for a host's recovery, if it has one, and reports false when ctx ended first.
+func (b *Boxes) waitRecovered(ctx context.Context, name contract.HostName) bool {
+	b.mu.Lock()
+	state := b.recoveries[name]
+	b.mu.Unlock()
+	if state == nil {
+		return true
+	}
+	select {
+	case <-state.done:
+		return ctx.Err() == nil
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// identify records whether a host is the machine the engine runs on.
+func (b *Boxes) identify(ctx context.Context, name contract.HostName) error {
+	h, err := b.host(ctx, name)
+	if err != nil {
+		return err
+	}
+	same, err := b.engineHost(ctx, h)
+	if err != nil {
+		return err
+	}
+	return b.Store.SetEngineHost(ctx, name, same)
+}
+
+// restoreHost adds the forward of each box on a host. A box that fails does not stop the rest. It needs no binary: a running
+// box keeps its agent until it next starts.
 func (b *Boxes) restoreHost(ctx context.Context, name contract.HostName) error {
 	b.mu.Lock()
 	restored := b.restored[name]
@@ -689,27 +836,54 @@ func (b *Boxes) restoreHost(ctx context.Context, name contract.HostName) error {
 	if err != nil {
 		return err
 	}
-	if err := b.installBinary(ctx, host); err != nil {
-		return err
-	}
 	records, err := b.Store.Boxes(ctx)
 	if err != nil {
 		return err
 	}
+	var failed []error
 	for _, record := range records {
 		if record.Host != name || record.State == contract.BoxDeleted || record.State == contract.BoxFailed {
 			continue
 		}
-		forward := b.forward(record.ID)
-		if err := host.AddForward(ctx, forward); err != nil {
-			return err
+		if err := host.AddForward(ctx, b.forward(record.ID)); err != nil {
+			failed = append(failed, fmt.Errorf("box %s: %w", record.ID, err))
+			if ctx.Err() != nil {
+				break
+			}
 		}
+	}
+	if len(failed) > 0 {
+		return errors.Join(failed...)
 	}
 	b.mu.Lock()
 	if b.restored == nil {
 		b.restored = make(map[contract.HostName]bool)
 	}
 	b.restored[name] = true
+	b.mu.Unlock()
+	return nil
+}
+
+// installHost puts this engine's binary on a host once per engine run, for a box about to start.
+func (b *Boxes) installHost(ctx context.Context, name contract.HostName) error {
+	b.mu.Lock()
+	installed := b.installed[name]
+	b.mu.Unlock()
+	if installed {
+		return nil
+	}
+	host, err := b.host(ctx, name)
+	if err != nil {
+		return err
+	}
+	if err := b.installBinary(ctx, host); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	if b.installed == nil {
+		b.installed = make(map[contract.HostName]bool)
+	}
+	b.installed[name] = true
 	b.mu.Unlock()
 	return nil
 }
@@ -756,6 +930,9 @@ func (b *Boxes) Start(ctx context.Context, id contract.BoxID) error {
 	}
 	record, err := b.Store.Box(ctx, id)
 	if err != nil {
+		return err
+	}
+	if err := b.installHost(ctx, record.Host); err != nil {
 		return err
 	}
 	session, err := b.Store.Session(ctx, record.Session)
@@ -974,6 +1151,9 @@ func (b *Boxes) StopHostexec(ctx context.Context, host contract.HostName, scope 
 func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, _ string) error {
 	steps := box.NewStepLog("box " + string(spec.Box))
 	if err := b.restoreHost(ctx, spec.Host); err != nil {
+		return err
+	}
+	if err := b.installHost(ctx, spec.Host); err != nil {
 		return err
 	}
 	h, err := b.host(ctx, spec.Host)
