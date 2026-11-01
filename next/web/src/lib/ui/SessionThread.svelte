@@ -29,6 +29,8 @@
   });
   onDestroy(() => store.leave(view));
   export async function send(request: PostRequest) { await view.post(request); }
+  // A closed session can have a transcript with no DM events, so the thread is empty only when neither has anything.
+  export const empty = () => view.ready && !view.ordered.length && !loading && !turns.length;
   let turns: TranscriptTurn[] = $state([]);
   let pendingBrief = $derived(pendingStartBrief(startingBrief, turns));
   let expandedTurns: Record<string, boolean> = $state({});

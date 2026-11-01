@@ -141,15 +141,6 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 		},
 	}
 }
-func (s *Service) HostexecRevoke(ctx context.Context, who contract.Principal, req contract.HostexecRevokeRequest) (contract.HostexecRevokeResponse, *contract.Error) {
-	if err := s.store.RevokeGrant(ctx, req.Grant, s.now()); err != nil {
-		return contract.HostexecRevokeResponse{}, failure(err)
-	}
-	if err := s.StopHostexecs(ctx); err != nil {
-		return contract.HostexecRevokeResponse{}, failure(err)
-	}
-	return contract.HostexecRevokeResponse{}, nil
-}
 func (s *Service) StopHostexecs(ctx context.Context) error {
 	runs, err := s.store.HostexecStops(ctx, s.now())
 	if err != nil {
