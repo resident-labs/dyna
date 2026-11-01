@@ -3,6 +3,7 @@ package contract
 type WebSearchProvider string
 
 const (
+	WebSearchNone    WebSearchProvider = ""
 	WebSearchChatGPT WebSearchProvider = "chatgpt"
 	WebSearchClaude  WebSearchProvider = "claude"
 	WebSearchMuse    WebSearchProvider = "muse"
