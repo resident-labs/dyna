@@ -1,6 +1,7 @@
 package ghquota
 
 import (
+	"slices"
 	"testing"
 
 	"dyna-agent/internal/database"
@@ -23,7 +24,8 @@ func TestStorePersistsEndpointAndSourceCounts(t *testing.T) {
 	Record("repos/private/repo/pulls/123", false)
 	Record("repos/private/repo/pulls/123", true)
 	RecordCaller("access-check", false)
-	rows, err := db.Query("SELECT kind,label,counted,free FROM ghquota_counts ORDER BY kind")
+	RecordRunPhase("repositories/987/actions/runs?head_sha=private", RunMergeTrial, false)
+	rows, err := db.Query("SELECT kind,label,counted,free FROM ghquota_counts ORDER BY kind,label")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +45,8 @@ func TestStorePersistsEndpointAndSourceCounts(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0] != (row{"endpoint", "pull", 1, 1}) || got[1] != (row{"source", "access-check", 1, 0}) {
-		t.Fatalf("counts = %+v", got)
+	want := []row{{"endpoint", "pull", 1, 1}, {"endpoint", "repository-id-runs-head-sha", 1, 0}, {"endpoint-phase", "pull/other", 1, 1}, {"endpoint-phase", "repository-id-runs-head-sha/merge-trial", 1, 0}, {"source", "access-check", 1, 0}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("counts = %+v, want %+v", got, want)
 	}
 }
