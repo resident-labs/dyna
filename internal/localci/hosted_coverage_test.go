@@ -56,7 +56,8 @@ func TestHostedJobsHaveLocalCoverage(t *testing.T) {
 	}
 	condition := regexp.MustCompile(`needs\.changes\.outputs\.(\w+)`)
 	for job, spec := range doc.Jobs {
-		if job == "changes" || job == "cache-warm" {
+		// pool-watch runs no tests. It only ends a run stuck waiting for a runner.
+		if job == "changes" || job == "cache-warm" || job == "pool-watch" {
 			continue
 		}
 		local, ok := jobs[job]

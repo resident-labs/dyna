@@ -51,6 +51,16 @@ needs a second scale set, which is not built.
   can be removed by hand. A JIT config is good for one job on one runner, so there
   is no long-lived runner credential to revoke.
 
+## What runs here
+
+`ci.yml` sends `pi`, `next-pi`, `next`, `go-static`, `desktop` and the frontend jobs
+to the pool. Some jobs stay on GitHub-hosted runners: `changes`, `pool-watch` and
+the aggregates decide things while the pool may be down, `relay` needs a container
+runtime, `computer-smoke` needs a desktop session, and `cache-warm` serves hosted
+jobs. v1's `go-shard` stays hosted because two of its tests fail in the image: one
+needs a newer Git than Ubuntu 24.04 ships, and one races coarse tmpfs timestamps.
+v1's tests leave at cutover.
+
 ## What a runner can touch
 
 Each runner is a rootless Podman container, built from
