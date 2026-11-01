@@ -102,6 +102,9 @@ func setupRepo(ctx context.Context, root, stateRoot string, repo contract.BoxRep
 	base := "refs/remotes/origin/" + repo.Branch
 	if _, err := git(ctx, dir, "", "show-ref", "--verify", "--quiet", base); err != nil {
 		base = "refs/remotes/origin/" + repo.Base
+		if repo.Commit != "" {
+			base = repo.Commit
+		}
 	}
 	if _, err := git(ctx, dir, "", "checkout", "-b", repo.Branch, base); err != nil {
 		return err

@@ -61,6 +61,9 @@ func (t *Transcript) Sync(ctx context.Context, file string) error {
 	}
 	defer f.Close()
 	offset := t.offsets[path]
+	if info, err := f.Stat(); err == nil && info.Size() == offset {
+		return nil // A crew asks after every worker it ever ran on each tick, and most have nothing new.
+	}
 	buf := make([]byte, transcriptChunk)
 	for {
 		n, err := f.ReadAt(buf, offset)
@@ -79,12 +82,12 @@ func (t *Transcript) Sync(ctx context.Context, file string) error {
 	}
 }
 
-// Run syncs file on each tick until ctx ends. A failed sync is logged and retried on the next tick.
-func (t *Transcript) Run(ctx context.Context, ticks <-chan time.Time, file func() string) {
+// Run syncs files on each tick until ctx ends. A failed sync is logged and retried on the next tick.
+func (t *Transcript) Run(ctx context.Context, ticks <-chan time.Time, files func() []string) {
 	for {
 		select {
 		case <-ticks:
-			t.syncLogged(ctx, file())
+			t.syncLogged(ctx, files()...)
 		case <-ctx.Done():
 			return
 		}
@@ -92,9 +95,11 @@ func (t *Transcript) Run(ctx context.Context, ticks <-chan time.Time, file func(
 }
 
 // syncLogged keeps transcript errors away from the box and the turn. The next sync resumes from the last acknowledged offset.
-func (t *Transcript) syncLogged(ctx context.Context, file string) {
-	if err := t.Sync(ctx, file); err != nil {
-		log.Printf("transcript sync %s: %v", file, err)
+func (t *Transcript) syncLogged(ctx context.Context, files ...string) {
+	for _, file := range files {
+		if err := t.Sync(ctx, file); err != nil {
+			log.Printf("transcript sync %s: %v", file, err)
+		}
 	}
 }
 
@@ -102,21 +107,29 @@ func (t *Transcript) syncLogged(ctx context.Context, file string) {
 type endedSink struct {
 	turnSink
 	transcript *Transcript
-	file       func() string
+	files      func() []string
 }
 
 func (s endedSink) TurnOutput(ctx context.Context, result contract.TurnEnded) error {
 	err := s.turnSink.TurnOutput(ctx, result)
-	s.transcript.syncLogged(ctx, s.file())
+	s.transcript.syncLogged(ctx, s.files()...)
 	return err
 }
 
 // closeBox stops Pi and sends the rest of the transcript. It retries a failed sync with backoff, then reports the box archived, so the engine cannot delete the box with unsent bytes.
-func closeBox(ctx context.Context, h io.Closer, transcript *Transcript, file string, after func(time.Duration) <-chan time.Time, archived func(context.Context) error) error {
+func closeBox(ctx context.Context, h io.Closer, transcript *Transcript, files func() []string, after func(time.Duration) <-chan time.Time, archived func(context.Context) error) error {
 	if err := h.Close(); err != nil {
 		return err
 	}
-	if err := retryClose(ctx, after, func(ctx context.Context) error { return transcript.Sync(ctx, file) }); err != nil {
+	send := func(ctx context.Context) error {
+		for _, file := range files() {
+			if err := transcript.Sync(ctx, file); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := retryClose(ctx, after, send); err != nil {
 		return err
 	}
 	return retryClose(ctx, after, archived)

@@ -26,7 +26,7 @@ const card = object({
   command: optional(nullable(array(string))),
 });
 const state = oneOf("pending", "approved", "denied", "expired", "withdrawn", "done", "failed");
-const cause = optional(oneOf("run_timeout", "create_failed", "start_failed", "no_hello", "engine_restarted", "remove_failed", "archive_failed", "grant_inactive", "host_lost", "host_busy", "github_failed", "stale", "interrupted", "internal", "setup_failed", "model_failed", "output_limit", "harness_failed", "set_model_failed", "not_started", "nested_device_missing", "kvm_device_missing"));
+const cause = optional(oneOf("run_timeout", "create_failed", "start_failed", "no_hello", "engine_restarted", "remove_failed", "archive_failed", "grant_inactive", "host_lost", "host_busy", "github_failed", "stale", "interrupted", "internal", "setup_failed", "model_failed", "output_limit", "harness_failed", "set_model_failed", "not_started", "workflow_failed", "nested_device_missing", "kvm_device_missing"));
 // How a shell job ended (the end field is new, so it may be missing).
 const jobEnd = optional(nullable(object({ kind: oneOf("exit", "signal", "stopped"), code: optional(number), signal: optional(string) })));
 const boxState = oneOf("pending", "creating", "starting", "ready", "stopped", "closing", "deleted", "failed", "lost");
@@ -86,6 +86,7 @@ const bodies: Record<string, Check> = {
   "goal.set": object({ goal: string, session: optional(string), text: string, doneWhen: optional(string) }),
   "goal.item_changed": object({ goal: string, item: number, text: string, state: oneOf("open", "done", "dropped") }),
   "goal.ended": object({ goal: string, session: optional(string), state: oneOf("active", "done", "dropped"), summary: string }),
+  "workflow.ended": object({ run: string, session: string, name: string, state: oneOf("running", "done", "failed", "stopped"), failed: number, failedSteps: optional(nullable(array(string))), usage }),
   "checkin.due": object({ session: string, children: nullable(array(object({ session: string, name: string, parent: optional(string), state: oneOf("idle", "stopped", "blocked"), reason: optional(string),
     idle: number, silent: optional(boolean), asking: optional(boolean), goal: string, text: string, open: number }))) }),
   "image.built": object({ host: string, repo: string, name: string, tag: string, seconds: number }),
