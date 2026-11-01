@@ -153,6 +153,8 @@ export class RoomStore {
     const list = await call("session.list", { room: this.room });
     // op.list reads after the seq, so an operation it misses arrives as a live event.
     const listed = await call("op.list", { room: this.room });
+    // The feed position must be known before failed jobs are classified against it.
+    await this.readFeed();
     this.head = list.seq;
     for (const session of list.sessions ?? []) {
       this.sessions.set(session.id, {

@@ -91,7 +91,7 @@ test("the waiting count holds pending owner-class operations from op.list and op
     state: "pending", created: "", expires: "" } as const;
   const requested = (seq: number, id: string, level: "auto" | "owner") => event(seq, { type: "op.requested", body: { id, kind: "pr.open", by: listed.by, class: level, card, expires: "" } });
   const original = globalThis.fetch;
-  globalThis.fetch = async input => new Response(JSON.stringify(String(input).endsWith("op.list") ? { operations: [listed] } : { sessions: [], seq: 10 }));
+  globalThis.fetch = async input => new Response(JSON.stringify(String(input).endsWith("op.list") ? { operations: [listed] } : { rooms: [], sessions: [], seq: 10 }));
   try {
     const room = new RoomStore("r", () => () => {});
     await room.open();
@@ -404,7 +404,7 @@ test("a pending box's reason comes from session.list, follows a pending to pendi
   const changed = (seq: number, from: BoxState, to: BoxState, reason?: string) => event(seq, { type: "box.changed", body: { box: "b", session: "s", from, to, reason } });
   globalThis.fetch = async input => {
     if (String(input).endsWith("session.list")) return new Response(JSON.stringify({ sessions: [session], seq: 2 }));
-    return new Response("{}");
+    return new Response(JSON.stringify({ rooms: [] }));
   };
   try {
     const room = new RoomStore("r", () => () => {});
@@ -432,7 +432,7 @@ test("a failed job counts after a fresh load until the owner reads past its end,
   globalThis.fetch = async input => {
     if (String(input).endsWith("session.list")) return new Response(JSON.stringify({ sessions: [session], seq: 4 }));
     if (String(input).endsWith("events.list")) return new Promise<Response>(done => { answer = done; });
-    return new Response("{}");
+    return new Response(JSON.stringify({ rooms: [] }));
   };
   try {
     const room = new RoomStore("r", () => () => {});
