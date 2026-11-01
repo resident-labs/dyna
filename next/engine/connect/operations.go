@@ -213,7 +213,7 @@ func (o *Operations) signal() {
 	default:
 	}
 }
-func (o *Operations) Wake() <-chan struct{} { return o.wake }
+func (o *Operations) Wake() chan struct{} { return o.wake }
 
 func (o *Operations) stop() {
 	if o.cancel != nil {
