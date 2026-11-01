@@ -2,13 +2,16 @@
   import Icon, { type IconName } from "./Icon.svelte";
   import StatusPill from "./StatusPill.svelte";
   import { count } from "../feed.ts";
+  import ReadThumb from "./ReadThumb.svelte";
   import { stepTime, stepTitle, type StepKind } from "../steps.ts";
+  import { readMedia, type MediaRow } from "../media.ts";
   import type { TranscriptStep } from "../contract.gen.ts";
   // A past turn's steps, as in v1's timeline: an icon for what each step did, its target and time, and its output on
   // expand. A failed step opens by itself. Long lists show the last steps first, and the earlier ones open in place.
   // A toggled step differs from its default, so `opened` keeps one set of keys however a step starts.
-  let { steps, truncated, id, opened, ontoggle }: {
+  let { steps, truncated, id, opened, ontoggle, session, onmedia }: {
     steps: TranscriptStep[]; truncated: boolean; id: string; opened: ReadonlySet<string>; ontoggle: (key: string) => void;
+    session: string; onmedia: (row: MediaRow) => void;
   } = $props();
   const shown = 8;
   const icons: Record<StepKind, IconName> = { read: "file", edit: "edit", write: "write", search: "search", list: "list", run: "terminal", fetch: "globe", tool: "tool" };
@@ -37,13 +40,18 @@
           {#if step.failed}<StatusPill tone="failed" label="Failed" word />{/if}
         </span>
       {/snippet}
+      {@const media = step.image && readMedia(session, step.turn, step.started, title.full, step.image)}
       <li class:open>
-        {#if step.preview}
-          <button type="button" class="step" aria-expanded={open} onclick={() => ontoggle(key)}>
-            {@render line()}<span class="chevron"><Icon name="chevron" size={14} /></span>
-          </button>
-          {#if open}<pre>{#if title.full}<span class="target">{title.kind === "run" ? "$ " : ""}{title.full}</span>{"\n"}{/if}{step.preview}</pre>{/if}
-        {:else}<div class="step">{@render line()}<span class="chevron"></span></div>{/if}
+        <!-- A button cannot hold the thumbnail's button, so the two sit side by side. -->
+        <div class="row">
+          {#if step.preview}
+            <button type="button" class="step" aria-expanded={open} onclick={() => ontoggle(key)}>
+              {@render line()}<span class="chevron"><Icon name="chevron" size={14} /></span>
+            </button>
+          {:else}<div class="step">{@render line()}<span class="chevron"></span></div>{/if}
+          {#if media}<ReadThumb src={media.src} name={media.attachments[0].name} onopen={() => onmedia(media)} />{/if}
+        </div>
+        {#if step.preview && open}<pre>{#if title.full}<span class="target">{title.kind === "run" ? "$ " : ""}{title.full}</span>{"\n"}{/if}{step.preview}</pre>{/if}
       </li>
     {/if}
   {/each}
@@ -58,6 +66,8 @@
   button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   /* The wash reaches 4 px past the text, so the text keeps its edge. */
   .earlier, .step { display: flex; align-items: center; gap: 8px; min-width: 0; width: calc(100% + 8px); min-height: 28px; margin: 0 -4px; padding: 0 4px; }
+  .row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .row > .step { flex: 1; width: auto; }
   .what { flex: 1; display: flex; align-items: baseline; gap: 8px; min-width: 0; }
   .verb { flex: none; }
   code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12.5px; }

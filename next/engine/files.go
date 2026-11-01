@@ -148,6 +148,18 @@ func (s *Service) Files(caller contract.Principal, room contract.RoomID) http.Ha
 			http.NotFound(w, r)
 			return
 		}
+		if hash == "transcript" {
+			query := r.URL.Query()
+			media, data, problem := s.TranscriptImage(r.Context(), caller, contract.SessionID(query.Get("session")), contract.TurnID(query.Get("turn")), query.Get("item"))
+			if problem != nil {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", media)
+			w.Header().Set("Cache-Control", "private, max-age=86400")
+			_, _ = w.Write(data)
+			return
+		}
 		if !validHash(hash) {
 			http.NotFound(w, r)
 			return

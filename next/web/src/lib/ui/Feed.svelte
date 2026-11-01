@@ -5,7 +5,7 @@
   import VirtualList from "./VirtualList.svelte";
   import PostRow from "./PostRow.svelte";
   import MediaViewer from "./MediaViewer.svelte";
-  import { conversationMedia, type MediaItem } from "../media.ts";
+  import { conversationMedia, type MediaItem, type MediaRow } from "../media.ts";
   import BoxRestart from "./BoxRestart.svelte";
   import FailedTurnRow from "./FailedTurnRow.svelte";
   import WorkRow from "./WorkRow.svelte";
@@ -86,9 +86,12 @@
     return row.kind === "post" && (next?.kind !== "post" || next.first) ? [row.key] : [];
   })));
   let belowNew = $derived(rows.find((_, index) => rows[index - 1]?.kind === "new")?.key);
-  let media = $derived(conversationMedia(rows.filter(row => row.kind === "post").map(row => ({ ...row, event: visualEvents.get(row.key) }))));
+  // A step's image joins the media when it opens, as a feed loads a row's steps only when that row opens.
+  let stepMedia: MediaRow[] = $state([]);
+  let media = $derived(conversationMedia([...rows.filter(row => row.kind === "post").map(row => ({ ...row, event: visualEvents.get(row.key) })), ...stepMedia].sort((a, b) => Date.parse(a.at) - Date.parse(b.at))));
   let mediaIndex: number | undefined = $state();
   function openMedia(key: string, position: number) { const index = media.findIndex(item => item.key === key && item.position === position); if (index >= 0) mediaIndex = index; }
+  function openStep(row: MediaRow) { if (!stepMedia.some(entry => entry.key === row.key)) stepMedia = [...stepMedia, row]; openMedia(row.key, 0); }
   let newestBoxRows = $derived.by(() => {
     const latest = new Map<string, string>();
     for (const row of rows) {
@@ -234,7 +237,7 @@
         shows as waiting that the store lacks was decided outside the window, so it gets no buttons. -->
       {:else if item.kind === "request"}{@const live = store.requests.get(item.request.id)}
         <RequestCard {admin} request={live ?? item.request} gone={!live && item.request.state === "pending"} {store} {now} feed />
-      {:else if item.kind === "work"}<WorkRow row={item} {name} {opened} ontoggle={toggle} {transcripts} {transcriptOf} {onjobs} prs={store.prs} />
+      {:else if item.kind === "work"}<WorkRow row={item} {name} {opened} ontoggle={toggle} {transcripts} {transcriptOf} {onjobs} prs={store.prs} onmedia={openStep} />
       {:else if item.kind === "new"}<p class="new"><span>New</span></p>
       {:else if item.kind === "day"}<p class="day"><span>{dayLabel(item.at, Date.now())}</span></p>
       {:else if item.kind === "steps"}<ul class="steps" aria-label="Finished steps">

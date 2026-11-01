@@ -119,6 +119,17 @@ func fixtureTurns() []contract.TranscriptTurn {
 			}
 			turn.Items = append(turn.Items, item)
 		}
+		// One read of an image the transcript still has, and one it has lost, which reads as a plain row.
+		if i == 1 {
+			for j, path := range []string{"/workspace/shots/mod-api-overview-dark.png", "/workspace/shots/gone.png"} {
+				at := start.Add(time.Duration(j+6) * 10 * time.Second)
+				done := at.Add(time.Second)
+				args, _ := json.Marshal(map[string]string{"path": path})
+				itemID := fmt.Sprintf("%s-image-%s", id, []string{"kept", "gone"}[j])
+				turn.Items = append(turn.Items, contract.TranscriptItem{ID: itemID, Turn: id, Kind: contract.TranscriptTool, At: at, Ended: &done, Tool: "read", Arguments: string(args), Output: "Read image file [image/png]",
+					Image: &contract.TranscriptImage{Item: itemID, Media: "image/png", Bytes: 2048}})
+			}
+		}
 		if i == 0 {
 			turn.Items = turn.Items[:1]
 			for j := range 3 {
