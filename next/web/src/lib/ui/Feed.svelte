@@ -128,7 +128,7 @@
   }
   // svelte-ignore state_referenced_locally
   const name = (session: string) => store.names.get(session) ?? closedSession;
-  const author = (from: Principal) => from.kind === "owner" ? "You" : from.session ? name(from.session) : "Dyna";
+  const author = (from: Principal) => from.kind === "owner" ? "you" : from.session ? name(from.session) : "Dyna";
   // The root session is the open session with no parent.
   const root = (session?: string) => { const open = session ? store.sessions.get(session) : undefined; return open !== undefined && !open.parent; };
   // Request expiry times refresh each half minute; this reads nothing from the engine.
