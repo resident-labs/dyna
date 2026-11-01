@@ -18,9 +18,9 @@ func (s *Service) ShellWatch(ctx context.Context, id contract.SessionID) (<-chan
 	if err != nil {
 		return nil, failure(err)
 	}
-	handle, ok := s.lockSession(id)
-	if !ok {
-		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+	handle, problem := s.lockSession(ctx, id)
+	if problem != nil {
+		return nil, problem
 	}
 	defer handle.Unlock()
 	if b.State != contract.BoxReady || handle.Channel() == nil {

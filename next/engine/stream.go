@@ -130,10 +130,10 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 		return nil, failure(err)
 	}
 	ctx, stop := context.WithCancel(ctx)
-	handle, ok := s.lockSession(session.ID)
-	if !ok {
+	handle, problem := s.lockSession(ctx, session.ID)
+	if problem != nil {
 		stop()
-		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+		return nil, problem
 	}
 	previous := handle.Channel()
 	var roomID contract.RoomID
