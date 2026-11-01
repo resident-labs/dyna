@@ -16,9 +16,15 @@ type ShellWatch struct {
 
 func (w *ShellWatch) Events() <-chan contract.ShellJobOutput { return w.ch }
 
-// WatchShell adds a watcher. The caller holds the session lock and checks
-// channel readiness; s.channel must be non-nil.
-func (s *Session) WatchShell() *ShellWatch {
+// WatchShell checks readiness and adds a watcher under the session lock.
+func (s *Session) WatchShell(ready bool) (*ShellWatch, *contract.Error) {
+	if !s.Lock() {
+		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+	}
+	defer s.Unlock()
+	if !ready || s.channel == nil {
+		return nil, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
+	}
 	if s.shell == nil {
 		s.shell = &shellWatch{watchers: make(map[chan contract.ShellJobOutput]struct{})}
 	}
@@ -26,11 +32,15 @@ func (s *Session) WatchShell() *ShellWatch {
 	s.shell.generation = s.live.shellGeneration.Add(1)
 	s.shell.watchers[w.ch] = struct{}{}
 	s.channel.Wake()
-	return w
+	return w, nil
 }
 
 // RemoveShellWatch closes an active watcher.
 func (s *Session) RemoveShellWatch(w *ShellWatch) {
+	if !s.Lock() {
+		return
+	}
+	defer s.Unlock()
 	if _, ok := w.state.watchers[w.ch]; !ok {
 		return
 	}
@@ -63,6 +73,10 @@ func (s *Session) ShellWatchGeneration() uint64 {
 
 // ShellOutput delivers matching output and closes any watcher that falls behind.
 func (s *Session) ShellOutput(generation uint64, jobs []contract.ShellJobOutput) {
+	if !s.Lock() {
+		return
+	}
+	defer s.Unlock()
 	w := s.shell
 	if w == nil || w.generation != generation {
 		return

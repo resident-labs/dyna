@@ -5,6 +5,11 @@ const key = "dyna.theme";
 function apply(next: Theme) {
   const root = document.documentElement;
   for (const [name, value] of Object.entries(next.tokens)) root.style.setProperty(name, value);
+  for (const [name, value] of Object.entries({
+    "--code-keyword": next.terminal.ansi[5], "--code-string": next.terminal.ansi[2],
+    "--code-number": next.terminal.ansi[3], "--code-title": next.terminal.ansi[4],
+    "--code-comment": next.tokens["--muted"],
+  })) root.style.setProperty(name, value);
   root.style.colorScheme = next.mode;
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", next.tokens["--bg"]);
 }

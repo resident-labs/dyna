@@ -41,6 +41,8 @@
   import RoomMenu from "./lib/ui/RoomMenu.svelte";
   import RequestsPanel from "./lib/ui/RequestsPanel.svelte";
   import Instructions from "./lib/ui/Instructions.svelte";
+  import NewSession from "./lib/ui/NewSession.svelte";
+  import NewRoom from "./lib/ui/NewRoom.svelte";
   import ActiveNow from "./lib/ui/ActiveNow.svelte";
   import { activeRooms } from "./lib/active.ts";
   import { Attention } from "./lib/attention.svelte.ts";
@@ -112,7 +114,8 @@
   // room.list failing blocks the whole page: the owner is signed out, or the engine is not reachable.
   let blocked: BlockedState | undefined = $state();
   let roomsLoaded = $state(false);
-  const connect = retrying(() => attention.open().then(() => { blocked = undefined; roomsLoaded = true; return undefined; },
+  let firstRoom = $state(false);
+  const connect = retrying(() => attention.open().then(() => { blocked = undefined; roomsLoaded = true; if (!attention.rooms.size) firstRoom = true; return undefined; },
     (error: unknown) => (blocked = blockedBy(error) ?? "unreachable"))).run;
   connect();
   let path = $state(window.location.pathname);
@@ -125,26 +128,32 @@
     const nextRoom = window.location.pathname.match(/^\/r\/([^/]+)/)?.[1];
     if (nextRoom && nextRoom !== previousRoom) { routeNotice = ""; sessionStorage.removeItem("dyna-connect-move"); }
     path = window.location.pathname;
+    if (/^\/r\/[^/]+/.test(path)) firstRoom = false;
     if (inSettings) return;
     behind = path;
-    section = /\/instructions\/?$/.test(path) ? "instructions" : undefined;
+    section = /\/instructions\/?$/.test(path) ? "instructions" : /\/r\/[^/]+\/new\/?$/.test(path) ? "new-session" : /^\/rooms\/new\/?$/.test(path) ? "new-room" : undefined;
   }
   window.addEventListener("popstate", follow);
   function dismissRequests(event: MouseEvent) {
     if (section === "requests" && event.target instanceof Node && !page?.contains(event.target) && !requestsButton?.contains(event.target)) section = undefined;
   }
   // The requests view shows in place of the conversation until Back, Escape or the control that opened it.
-  let section: "requests" | "instructions" | undefined = $state(/\/instructions\/?$/.test(behind) ? "instructions" : undefined);
+  let section: "requests" | "instructions" | "new-session" | "new-room" | undefined = $state(/\/instructions\/?$/.test(behind) ? "instructions" : /\/r\/[^/]+\/new\/?$/.test(behind) ? "new-session" : /^\/rooms\/new\/?$/.test(behind) ? "new-room" : undefined);
   let requestsButton: HTMLButtonElement | undefined = $state();
   function openInstructions() {
     history.pushState({ instructionsBack: behind }, "", `/r/${encodeURIComponent(room!)}/instructions`);
     panel = false;
     follow();
   }
+  function openNew(kind: "session" | "room") {
+    history.pushState({ instructionsBack: behind }, "", kind === "room" ? "/rooms/new" : `/r/${encodeURIComponent(room!)}/new`);
+    panel = false;
+    follow();
+  }
   async function closeSection(tapped = false) {
-    if (section === "instructions") {
+    if (section === "instructions" || section === "new-session" || section === "new-room") {
       if (history.state?.instructionsBack) history.back();
-      else { history.replaceState(null, "", `/r/${encodeURIComponent(room!)}`); follow(); }
+      else { history.replaceState(null, "", room ? `/r/${encodeURIComponent(room)}` : "/"); follow(); }
       return;
     }
     section = undefined;
@@ -154,10 +163,10 @@
   // A link to a room the engine does not list, or to a path the app has no page for, shows a load error in Home's
   // place. Until the room list loads, a room link is trusted, so a known room opens without a flash.
   // Room, session and instructions paths are routes; other paths show no page.
-  const route = $derived(/^\/r\/([^/]+)(?:\/s\/([^/]+)|\/instructions)?\/?$/.exec(behind));
+  const route = $derived(/^\/r\/([^/]+)(?:\/s\/([^/]+)|\/instructions|\/new)?\/?$/.exec(behind));
   const asked = $derived(route?.[1] && decodeURIComponent(route[1]));
   let room = $derived(asked && (!roomsLoaded || attention.rooms.has(asked)) ? asked : undefined);
-  let lost: "room" | "page" | undefined = $derived(room || behind === "/" ? undefined : asked ? "room" : "page");
+  let lost: "room" | "page" | undefined = $derived(room || behind === "/" || section === "new-room" ? undefined : asked ? "room" : "page");
   let session = $derived(room && route?.[2] ? decodeURIComponent(route[2]) : undefined);
   $effect(() => {
     if (!room) return;
@@ -280,6 +289,25 @@
   let feed: HTMLDivElement | undefined = $state();
   let page: HTMLElement | undefined = $state();
   let composer: HTMLTextAreaElement | undefined = $state();
+  let composerBox: Composer | undefined = $state();
+  // Files dragged over the center column show a muted outline. A drop adds them to the open draft while the composer shows.
+  let dropping = $state(false);
+  const hasFiles = (event: DragEvent) => !!event.dataTransfer?.types.includes("Files");
+  function dragOver(event: DragEvent) {
+    if (!composerBox || !hasFiles(event)) return;
+    event.preventDefault();
+    dropping = true;
+  }
+  function dragLeave(event: DragEvent & { currentTarget: HTMLElement }) {
+    if (!event.currentTarget.contains(event.relatedTarget instanceof Node ? event.relatedTarget : null)) dropping = false;
+  }
+  function drop(event: DragEvent) {
+    dropping = false;
+    if (!composerBox || !hasFiles(event)) return;
+    event.preventDefault();
+    composerBox.addFiles(event.dataTransfer?.files ?? []);
+    composer?.focus();
+  }
   let members: HTMLElement | undefined = $state();
   let computer: HTMLElement | undefined = $state();
   let terminals: TermDock | undefined = $state();
@@ -291,6 +319,7 @@
   let palette = $state(false);
   let paletteOpener: HTMLElement | undefined;
   let jumpSeq: number | undefined = $state();
+  let startingBriefs: Record<string, string> = $state({});
   const searchPosts: SearchCall = request => call("post.search", request);
   function closePalette() {
     palette = false;
@@ -300,7 +329,9 @@
     closePalette();
     if (item.kind === "more") return;
     if (item.kind === "action") {
-      if (item.action.id === "pause") pause();
+      if (item.action.id === "new-session") openNew("session");
+      else if (item.action.id === "new-room") openNew("room");
+      else if (item.action.id === "pause") pause();
       else if (item.action.id === "requests") { if (inSettings) { history.pushState(null, "", behind); follow(); } section = "requests"; }
       else { history.pushState(null, "", item.action.id === "theme" ? "/settings/appearance" : "/settings"); follow(); }
       return;
@@ -547,7 +578,8 @@
   });
   // The tab names the page only. Counts stay out: a count in the title would act as an unread badge (spec 5.13).
   // An open Instructions or Requests section names the tab too. Settings names its own open pane, so this effect leaves Settings alone.
-  let tabTitle = $derived(section === "instructions" ? `${title} · Instructions` : section === "requests" ? `${title} · Requests` : title);
+  const sectionNames: Record<string, string> = { instructions: "Instructions", requests: "Requests", "new-session": "New session", "new-room": "New room" };
+  let tabTitle = $derived(sectionNames[section ?? ""] ? `${title} · ${sectionNames[section ?? ""]}` : title);
   $effect(() => { if (!inSettings) document.title = `${tabTitle} · Dyna`; });
 </script>
 
@@ -585,7 +617,7 @@
       <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id && !inSettings ? "page" : undefined}
         aria-label={[item.name, failing && `${count(failing, "session")} failed`, waiting && `${count(waiting, "request")} waiting`, hostless && `${count(hostless, "session")} waiting for a host`].filter(Boolean).join(", ")} title={item.name}>
         <Avatar kind="room" name={item.name} label={initials.get(item.name)} size={40} />{#if failing}<StatusPill tone="failed" label="Failed" dot />{:else if waiting || hostless}<StatusPill tone="warning" label="Waiting" dot />{/if}</a>
-    {/each}</nav>
+    {/each}<button type="button" class="tool" title="Create a room" aria-label="Create a room" onclick={() => openNew("room")}><Icon name="plus" /></button></nav>
     <footer><a class="gear" href="/settings" onclick={navigate} aria-current={inSettings ? "page" : undefined} aria-label="Settings" title="Settings"><Icon name="gear" size={20} /></a></footer>
     <!-- The drawer's second column: the open room's pages, or on Home every room by name. Counts are muted; only Requests
          uses the warning tone. -->
@@ -608,8 +640,11 @@
   </aside>
   {#if drawer || (panel && phone.current)}<button type="button" class="scrim" tabindex="-1" aria-label={drawer ? "Close the menu" : room ? "Close the sessions" : "Close the active rooms"}
     onclick={() => void (drawer ? showDrawer(false, true, true) : showPanel(false, true))}></button>{/if}
-  <main bind:clientWidth={mainWidth} class:header-tight={mainWidth <= 1000} class:header-narrow={mainWidth <= 600} inert={drawer || (panel && phone.current) || covered || inSettings}>
-    {#if section === "instructions" && room && store && !unavailable}<Instructions {room} {roomName} rooms={rooms.length} sessions={store.sessions.size} onclose={() => void closeSection()} />
+  <main class:session-main={!!session} bind:clientWidth={mainWidth} class:header-tight={mainWidth <= 1000} class:header-narrow={mainWidth <= 600} class:dropping ondragover={dragOver} ondragleave={dragLeave} ondrop={drop} inert={drawer || (panel && phone.current) || covered || inSettings}>
+    {#if dropping}<p class="drop-label">Drop files to attach</p>{/if}
+    {#if (section === "new-room" || firstRoom)}<NewRoom {rooms} first={firstRoom} onclose={() => void closeSection()} oncreated={id => { void attention.created(id).then(() => { firstRoom = false; openLocation(id); }); }} />
+    {:else if section === "new-session" && room && store && store.ready}<NewSession {room} {roomName} sessions={[...store.sessions.values()]} onclose={() => void closeSection()} onstarted={(id, brief) => { startingBriefs[id] = brief; openLocation(room!, id); }} />
+    {:else if section === "instructions" && room && store && !unavailable}<Instructions {room} {roomName} rooms={rooms.length} sessions={store.sessions.size} onclose={() => void closeSection()} />
     {:else}
     <header class="bar" class:session-bar={!!session}>{#if room && session && phone.current}<a class="menu-toggle" href={"/r/" + encodeURIComponent(room)} aria-label={`Back to ${roomName}`} title={`Back to ${roomName}`}
         onclick={event => { const tapped = event.detail > 0; navigate(event); void tick().then(() => menuButton?.focus({ focusVisible: !tapped })); }}><Icon name="back" /></a>
@@ -618,7 +653,7 @@
       {#if room && session}<a class="crumb" href={"/r/" + encodeURIComponent(room)} onclick={navigate}>{roomName}</a><span class="count">/</span>
       {:else if room}<span class="hash"><Icon name="room" /></span>{/if}
       {#if session && !closed}<Avatar kind="session" name={title} root={!store?.sessions.get(session)?.parent} size={24} />{/if}
-      <span class="heading"><strong>{title}</strong>
+      <span class="heading"><strong title={title}>{title}</strong>
         {#if closed && !missing}<span class="count">closed</span>{:else if !session && word && !missing}<span class="count word">{word}</span>{/if}
         {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session")}</span>{/if}</span>
       {#if store && !unavailable}
@@ -627,7 +662,7 @@
         {#if session && attention.can("computers") && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /></button>{/if}
         {#key session}<HeaderActions {store} {session} {attention} {closed} phone={phone.current} {paused} panelShown={panelShown} requestsOpen={section === "requests"}
           bind:jobsTool bind:roomMenu bind:requestsButton bind:toggle
-          onopen={(item, job) => terminals?.openJob(item, job)} onpause={pause} oninstructions={openInstructions} onrequests={() => { section = section === "requests" ? undefined : "requests"; }} onpanel={tapped => void showPanel(!panelShown, tapped)}
+          onopen={(item, job) => terminals?.openJob(item, job)} onpause={pause} oninstructions={openInstructions} onnewsession={() => openNew("session")} onrequests={() => { section = section === "requests" ? undefined : "requests"; }} onpanel={tapped => void showPanel(!panelShown, tapped)}
           onterminal={() => terminals?.shell(session!, title, !store?.sessions.get(session!)?.parent)}
           oncomputer={() => watch(session!)} />{/key}
       {/if}</header>
@@ -637,14 +672,13 @@
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} {session} admin={attention.can("admin")} onclose={() => void closeSection()} />{/if}
     <div class="feed">
       {#if blocked}<Blocked kind="unreachable" onretry={connect} />
-      {:else if !room && roomsLoaded && !rooms.length}<Blocked kind="no-rooms" />
       {:else if lost === "room"}<Blocked kind="no-room" back={{ href: "/", label: "Go to Home" }} {navigate} />
       {:else if lost === "page"}<Blocked kind="no-page" back={{ href: "/", label: "Go to Home" }} {navigate} />
       {:else if !room}<Home {attention} {initials} loaded={roomsLoaded} {navigate} onrequests={() => { section = "requests"; }} active={activity.active}
         onactive={event => { toggle = event.currentTarget; void showPanel(true, event.detail > 0); }} />
       {:else if unavailable === "unreachable"}<Blocked kind="unreachable" onretry={reopen} />
       {:else if store && !unavailable}
-        {#if session}{#key session}<SessionThread bind:this={thread} {store} {session} {roomName} {navigate} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{/key}{:else}{#key key}<Feed bind:this={view} {store} {home} admin={attention.can("admin")} operate={attention.can("operate") && !closed} waiting={quotes[key]} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
+        {#if session}{#key session}<SessionThread bind:this={thread} {store} {session} {roomName} {navigate} startingBrief={startingBriefs[session]} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{/key}{:else}{#key key}<Feed bind:this={view} {store} {home} admin={attention.can("admin")} operate={attention.can("operate") && !closed} waiting={quotes[key]} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
           onforward={forward} onclosed={() => composer?.focus()} onjobs={item => void jobsTool?.show(item)}
           />{/key}{/if}
         <!-- The empty feed stays mounted behind the error, as it is how the page learns the session has no history. -->
@@ -656,7 +690,7 @@
       {#if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
         {#if attention.can("operate")}<button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button>{/if}</p>
       {:else if store && !session}<WorkingLine {store} {home} />{/if}
-      {#if attention.can("operate")}<Composer bind:element={composer} bind:value={() => savedDrafts.draft(key, drafts[key]),text => { drafts[key] = text; savedDrafts.save(key, text); clearReplacement(); }} onsend={send} thread={!!session} placeholder={"Message " + title}
+      {#if attention.can("operate")}<Composer bind:this={composerBox} bind:element={composer} bind:value={() => savedDrafts.draft(key, drafts[key]),text => { drafts[key] = text; savedDrafts.save(key, text); clearReplacement(); }} onsend={send} thread={!!session} placeholder={"Message " + title}
         quote={quotes[key]} replacement={replaced[key]} onundo={() => { quotes[key] = undoForward({ quote: quotes[key], previous: replaced[key] }).quote; clearReplacement(); }} onunquote={() => { quotes[key] = undefined; clearReplacement(); }} sessions={mentions} files={files(key)} {stop} />
       {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
     {/if}
@@ -674,9 +708,9 @@
       {#if session && !closed}<header class="bar tabs">
         <button type="button" aria-pressed={!about} onclick={() => tabs.set(key, "sessions")}>Sessions</button>
         <button type="button" aria-pressed={about} onclick={() => tabs.set(key, "about")}>About</button></header>
-      {:else}<header class="bar"><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}</header>{/if}
+      {:else}<header class="bar"><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}{#if attention.can("operate")}<button type="button" class="tool" title="New session" aria-label="New session" onclick={() => openNew("session")}><Icon name="plus" /></button>{/if}</header>{/if}
       <!-- A long tree renders only its visible rows, through the feed's shared list (spec: long lists are virtual). -->
-      {#if about && session && store}<AboutPanel {store} room={room} {session} switchable={attention.can("operate")} navigate={openSession} onjobs={async event => { if (!wide.current) await showPanel(false, event.detail > 0); void jobsTool?.show(session); }} />
+      {#if about && session && store}<AboutPanel {store} room={room} {session} switchable={attention.can("operate")} navigate={openSession} onclosed={() => openLocation(room!)} onjobs={async event => { if (!wide.current) await showPanel(false, event.detail > 0); void jobsTool?.show(session); }} />
       {:else if tree.length}<div class="tree"><VirtualList bind:this={sessionList} items={tree} key={treeKey}
         label="Session list" role="group" align="top" estimate={48}>
         {#snippet row(entry: TreeRow)}
@@ -740,6 +774,10 @@
   @media (max-width: 760px) { .crumb, .crumb + .count { display: none; } }
   @media (max-width: 760px) { main .tool { justify-content: center; width: 40px; height: 40px; padding: 0; border: 0; } }
   main { position: relative; }
+  /* A dashed accent outline marks the column that takes a dropped file; a muted label names the action. */
+  main.dropping { outline: 2px dashed var(--focus); outline-offset: -8px; border-radius: 8px; }
+  .drop-label { position: absolute; inset: 8px; z-index: 1; display: grid; place-items: center; margin: 0; border-radius: 8px; background: color-mix(in srgb, var(--bg) 85%, transparent); color: var(--muted); font-size: 14px; pointer-events: none; }
+  main.session-main { container: session-header / inline-size; }
   .terminal-holder:not([hidden]) { display: contents; }
   :where(main.header-tight) .tool { justify-content: center; width: 28px; padding: 0; }
   /* One quiet line of the working line's size and edge; only its Resume acts. */
@@ -756,9 +794,13 @@
   .heading { display: contents; }
   /* The header has one line, and a failed session's word is a sentence, so the word gives way and the title stays whole. */
   .word { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .heading strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  @media (min-width: 641px) { .word { flex: 1 1 0; } }
+  .heading strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (min-width: 641px) {
+    .word { flex: 1 1 0; }
+    .session-bar .heading strong { min-width: min(8rem, 100%); }
+  }
   .crumb { flex: none; max-width: 25%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @container session-header (max-width: 500px) { .session-bar .crumb, .session-bar .crumb + .count { display: none; } }
   .hash { display: inline-flex; align-items: center; }
   /* A phone's header: the menu button, the title over its muted counts, Requests only while something waits (40 px
      targets), and the Sessions button with its count. The room menu's one action, Terminal, moves into the drawer. */
