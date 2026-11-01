@@ -70,6 +70,7 @@ CREATE TABLE connect_sessions (id TEXT PRIMARY KEY, relay_device TEXT NOT NULL R
 CREATE TABLE pairing_codes (id INTEGER PRIMARY KEY CHECK(id=1), code_hash BLOB NOT NULL, scopes BLOB NOT NULL, expires_at INTEGER NOT NULL, tries INTEGER NOT NULL);
 
 CREATE TABLE proxy_auths (id TEXT PRIMARY KEY, provider TEXT NOT NULL, record BLOB NOT NULL, updated_at INTEGER NOT NULL);
+CREATE TABLE search_keys (provider TEXT PRIMARY KEY, key TEXT NOT NULL);
 CREATE TABLE accounts (id TEXT PRIMARY KEY, proxy_id TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, label TEXT NOT NULL);
 CREATE TABLE account_rooms (account TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, room TEXT NOT NULL REFERENCES rooms(id), PRIMARY KEY(account, room));
 CREATE TABLE account_alerts (account TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, window TEXT NOT NULL, kind TEXT NOT NULL, active INTEGER NOT NULL, PRIMARY KEY(account, window, kind));

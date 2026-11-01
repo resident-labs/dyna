@@ -97,6 +97,38 @@ func TestMachineEditSetsLabels(t *testing.T) {
 
 // The owner sets a node's ssh connect timeout with edit and reads it back
 // with show; zero restores the default, and a value ssh cannot read is refused.
+func TestMachineEditClearsWakeCommandAcrossTransport(t *testing.T) {
+	storetest.DataDir(t)
+	stubSaveNode(t, func(ctx context.Context, ref string, patch websvc.MachinePatch) (websvc.MachineDetail, error) {
+		data, err := json.Marshal(patch)
+		if err != nil {
+			return websvc.MachineDetail{}, err
+		}
+		var decoded websvc.MachinePatch
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			return websvc.MachineDetail{}, err
+		}
+		return (websvc.MachineAPI{Store: machines.Store{}}).SaveNode(ctx, ref, decoded)
+	})
+	if _, err := run(t, "add", "build", "--ssh", "user@build"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "edit", "build", "--wake-command", "/usr/bin/true"); err != nil {
+		t.Fatal(err)
+	}
+	m, err := (machines.Store{}).Get(context.Background(), "build")
+	if err != nil || len(m.WakeCommand) != 1 {
+		t.Fatalf("configured command = %v, %v", m.WakeCommand, err)
+	}
+	if _, err := run(t, "edit", "build", "--wake-command", ""); err != nil {
+		t.Fatal(err)
+	}
+	m, err = (machines.Store{}).Get(context.Background(), "build")
+	if err != nil || len(m.WakeCommand) != 0 {
+		t.Fatalf("cleared command = %v, %v", m.WakeCommand, err)
+	}
+}
+
 func TestMachineEditSetsSSHConnectTimeout(t *testing.T) {
 	storetest.DataDir(t)
 	stubEngine(t)
