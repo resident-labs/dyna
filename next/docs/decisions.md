@@ -1565,7 +1565,7 @@ The owner chose this design on 2026-10-30. Workflows are ported before the cutov
 - **Command steps.** `run()` runs its command in the run's box. Detached steps (`job()`) run on a host through host exec (section 6), under the run's grants.
 - **Progress is saved as store events.** Each step's start and result is an event. A run therefore continues after an engine restart or update, or after its box starts again. The runner runs the script again from the start, and each step that already has a result returns it without running again. Scripts must stay deterministic, as in v1.
 - **Admission bounds fan-out.** Each step has its own box with its own size (5.4), and the room limit bounds the whole tree. A step that does not fit waits in `pending`.
-- **Profile concurrency limit** (owner, 2026-10-31). `maxConcurrent` holds an agent step while that many steps of its profile run in this run. Zero means no limit. The owner removed the per-run call limit from v2, replacing the earlier root decision. The export drops it; v2 has no shim.
+- **Profile concurrency limit** (owner, 2026-10-31). `maxConcurrent` holds an agent step while that many steps of its profile run in this run. Zero means no limit. The owner said “remove the calls per run feature/limitations entirely for now”, replacing the earlier root decision. Root decided that strict config decoding stays and there is no legacy reader because it would be a shim. v2 has not shipped. The trial profile config was backed up and edited by hand; the v1 migration drops the field.
 - **Budget:** about 1,000 to 1,500 product lines.
 - **Open for the M3 design check:** the script runtime. It is Node from `dyna-base`, or an interpreter in `dyna box-agent` as v1 embeds goja.
 
