@@ -9,6 +9,7 @@ import (
 	"github.com/resident-labs/dyna/engine/model"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 )
@@ -85,7 +86,13 @@ func TestWebSearchFallsBackFromChatGPTWithoutCitations(t *testing.T) {
 	s, _, worker, ctx := setup(t)
 	now := time.Unix(1000, 0)
 	s.now = func() time.Time { return now }
-	proxy, err := model.NewProxy(t.TempDir(), "management")
+	// Unix socket paths have a short system limit, even when TMPDIR is long.
+	dir, err := os.MkdirTemp("/tmp", "dyna-ws-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	proxy, err := model.NewProxy(dir, "management")
 	if err != nil {
 		t.Fatal(err)
 	}

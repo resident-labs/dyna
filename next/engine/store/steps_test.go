@@ -17,7 +17,7 @@ func TestUpgradeConnectSessionsFrom48(t *testing.T) {
 	defer db.Close()
 	var old []string
 	for _, line := range strings.Split(schema, "\n") {
-		if strings.HasPrefix(line, "CREATE INDEX turns_session_started_at ") || strings.HasPrefix(line, "CREATE TABLE client_replays ") || strings.HasPrefix(line, "CREATE TABLE connect_devices ") || strings.HasPrefix(line, "CREATE TABLE connect_sessions ") || strings.HasPrefix(line, "CREATE TABLE connect_revocations ") || strings.HasPrefix(line, "CREATE TABLE transcript_turns ") || strings.HasPrefix(line, "CREATE UNIQUE INDEX transcript_turns_path_start ") || strings.HasPrefix(line, "CREATE INDEX pr_owners_session ") || strings.HasPrefix(line, "CREATE INDEX operations_pending_caller ") {
+		if strings.HasPrefix(line, "CREATE TABLE search_keys ") || strings.HasPrefix(line, "CREATE INDEX turns_session_started_at ") || strings.HasPrefix(line, "CREATE TABLE client_replays ") || strings.HasPrefix(line, "CREATE TABLE connect_devices ") || strings.HasPrefix(line, "CREATE TABLE connect_sessions ") || strings.HasPrefix(line, "CREATE TABLE connect_revocations ") || strings.HasPrefix(line, "CREATE TABLE transcript_turns ") || strings.HasPrefix(line, "CREATE UNIQUE INDEX transcript_turns_path_start ") || strings.HasPrefix(line, "CREATE INDEX pr_owners_session ") || strings.HasPrefix(line, "CREATE INDEX operations_pending_caller ") {
 			continue
 		}
 		line = strings.Replace(line, ", generation INTEGER NOT NULL DEFAULT 0", "", 1)
