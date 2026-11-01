@@ -185,6 +185,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `accounts` |
 | `account_rooms` |
 | `account_alerts` |
+| `session_accounts` | the account the owner chose for a session; no row means Automatic |
 | `search_keys` |
 | `proxy_auths` |
 
@@ -331,6 +332,8 @@ Shell commands run in boxes. Node jobs are not ported; GitHub Actions runs CI on
 ### 5.12 Accounts page (M3)
 
 The owner manages accounts and room limits in the web app. The engine alone calls CLIProxyAPI's management API. Connect uses the proxy's OAuth or device flow; key entry passes the key to the proxy without displaying it again. The owner can add any OpenAI-compatible provider with a name, address and key, and the proxy reports each account's models, which is the list profiles choose from. Usage for every provider comes through the proxy's `auth-files/quota` readers without exposing model tokens to the engine. Typed `account.quota_low` and `account.failed` alerts are the only colored account chips. Account changes are owner-class.
+
+New work goes to the account whose quota expires first (`routing.strategy: soonest-reset`). Session affinity keeps a session on its account, so the order steers new sessions and failover. The proxy computes the order and publishes it, and `accounts.quota` marks each provider's next account active from that order, so Home and routing cannot disagree. The owner can choose an account for a session, by session and never through the box, on the session's About panel. A chosen account outranks affinity. When it cannot serve a request the request runs on Automatic and the row says so.
 
 ### 5.13 Web design
 

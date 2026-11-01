@@ -24,9 +24,11 @@ type RouteError struct {
 }
 
 // Handler returns a route bound to one session and its allowed models.
-// socket is the proxy listener; clientKey never leaves the engine.
-func Handler(socket string, clientKey, sessionID string, allowedModels, eligibleIDs []string) http.Handler {
-	return handler(unixClient(socket), clientKey, sessionID, allowedModels, eligibleIDs)
+// socket is the proxy listener; clientKey never leaves the engine. pinnedID is the
+// credential the owner chose for this session, or empty for Automatic. It comes from the
+// store, never from the request.
+func Handler(socket string, clientKey, sessionID string, allowedModels, eligibleIDs []string, pinnedID string) http.Handler {
+	return handler(unixClient(socket), clientKey, sessionID, allowedModels, eligibleIDs, pinnedID)
 }
 
 func unixClient(socket string) *http.Client {
@@ -35,7 +37,7 @@ func unixClient(socket string) *http.Client {
 	}}, Timeout: 30 * time.Second}
 }
 
-func handler(client *http.Client, clientKey, sessionID string, allowedModels, eligibleIDs []string) http.Handler {
+func handler(client *http.Client, clientKey, sessionID string, allowedModels, eligibleIDs []string, pinnedID string) http.Handler {
 	allowed := make(map[string]struct{}, len(allowedModels))
 	for _, name := range allowedModels {
 		allowed[name] = struct{}{}
@@ -119,7 +121,7 @@ func handler(client *http.Client, clientKey, sessionID string, allowedModels, el
 		// Drop Connection before adding the policy: ReverseProxy removes headers
 		// named by Connection, which otherwise lets a box strip the policy.
 		// Do not forward box-controlled credentials or affinity headers.
-		for _, name := range []string{"Authorization", "X-Api-Key", "Proxy-Authorization", "X-Goog-Api-Key", "Api-Key", "X-Auth-Token", "X-Claude-Code-Session-Id", "Session-Id", "Session_id", "X-Session-Id", "X-Session-Affinity", "X-Client-Request-Id", "X-Dyna-Eligible-Auth", "Connection"} {
+		for _, name := range []string{"Authorization", "X-Api-Key", "Proxy-Authorization", "X-Goog-Api-Key", "Api-Key", "X-Auth-Token", "X-Claude-Code-Session-Id", "Session-Id", "Session_id", "X-Session-Id", "X-Session-Affinity", "X-Client-Request-Id", "X-Dyna-Eligible-Auth", "X-Dyna-Pinned-Auth", "Connection"} {
 			r.Header.Del(name)
 		}
 		encodedIDs := make([]string, len(eligibleIDs))
@@ -127,6 +129,9 @@ func handler(client *http.Client, clientKey, sessionID string, allowedModels, el
 			encodedIDs[i] = base64.RawURLEncoding.EncodeToString([]byte(id))
 		}
 		r.Header.Set("X-Dyna-Eligible-Auth", strings.Join(encodedIDs, ","))
+		if pinnedID != "" {
+			r.Header.Set("X-Dyna-Pinned-Auth", base64.RawURLEncoding.EncodeToString([]byte(pinnedID)))
+		}
 		r.Header.Set("Authorization", "Bearer "+clientKey)
 		r.Header.Set("X-Api-Key", clientKey)
 		r.Header.Set("X-Claude-Code-Session-Id", sessionID)

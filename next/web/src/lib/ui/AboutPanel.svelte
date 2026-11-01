@@ -1,5 +1,6 @@
 <script lang="ts">
   import { SvelteMap } from "svelte/reactivity";
+  import AccountMenu from "./AccountMenu.svelte";
   import ProfileMenu from "./ProfileMenu.svelte";
   import StatusPill from "./StatusPill.svelte";
   import { boxReason, count, fromNow, fullTime, waits } from "../feed.ts";
@@ -8,7 +9,7 @@
   import { closeNote, descendants } from "../session-tree.ts";
   import { watchShell, type ShellJob } from "../shell.ts";
   import type { RoomStore } from "../room.svelte.ts";
-  import type { BoxState } from "../contract.gen.ts";
+  import type { BoxState, SessionAccountResponse } from "../contract.gen.ts";
   // What a DM's session is, as design A's About tab: its goal, then one label and value per fact the engine reports.
   // A row without a value does not show. Jobs opens the dock's list on this session, and stays while the box is ready so a
   // finished job can be reached. It counts the jobs the engine lists, as that list does, because session.list's count can
@@ -40,6 +41,13 @@
   let failures = $derived([...listed.values()].filter(failed).length);
   // Closing ends this session and every session under it. The engine archives their work first, deepest child first.
   let archiveNote = $derived(closeNote(descendants([...store.sessions.values()], session).map(id => store.names.get(id) ?? id)));
+  // Only the owner gets an answer, so anyone else sees no Account row. A profile change can drop the choice.
+  let account: SessionAccountResponse | undefined = $state();
+  function loadAccount(): void {
+    const asked = session;
+    void call("session.account", { session: asked }).then(answer => { if (asked === session) account = answer; }, () => { if (asked === session) account = undefined; });
+  }
+  $effect(() => { void open?.profile; loadAccount(); });
   let closing = $state(false);
   let closeFailed = $state(false);
   function close(): void {
@@ -57,6 +65,7 @@
       {#if store.stopFailed.has(session)}<span class="failed">The stop did not reach the engine.</span>{/if}</dd>{/if}
     {#if parent && open?.parent}<dt>Parent</dt><dd><a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(open.parent)}`} onclick={navigate}>{parent}</a></dd>{/if}
     {#if open?.profile}<dt>Profile</dt><dd><ProfileMenu {session} profile={open.profile} {switchable} /></dd>{/if}
+    {#if account}<dt>Account</dt><dd><AccountMenu {session} {account} {switchable} onchanged={loadAccount} /></dd>{/if}
     {#if box}<dt>Box</dt><dd>{#if failure}<StatusPill tone="failed" word label="Failed" /> · {boxReason(failure)}{:else if reason === "room-host"}<StatusPill tone="warning" word label={waits[reason]} />{:else}{reason ? waits[reason] : boxes[box]}{/if}</dd>{/if}
     {#if hasJobs}<dt>Jobs</dt><dd><button type="button" onclick={onjobs}>{running ? `${count(running, "job")} running` : "Jobs"}</button>{#if failures}{" · "}<StatusPill tone="failed" label="{failures} failed" word />{/if}</dd>{/if}
     {#if open?.startedAt}<dt>Started</dt><dd class="muted"><time datetime={open.startedAt} title={fullTime(open.startedAt)}>{fromNow(open.startedAt, Math.max(now, Date.parse(open.startedAt)))}</time></dd>{/if}
