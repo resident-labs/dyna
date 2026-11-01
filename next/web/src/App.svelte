@@ -2,6 +2,7 @@
   import { watchHello, watchStreamState } from "./lib/stream.ts";
   import { watchConnect } from "./lib/connect-watch.ts";
   import { FormDrafts } from "./lib/form-drafts.ts";
+  import { ComposerDrafts } from "./lib/composer-drafts.ts";
   import { tick, untrack } from "svelte";
   import { RoomStore } from "./lib/room.svelte.ts";
   import { ForwardExpiry } from "./lib/forward-clock.ts";
@@ -219,6 +220,8 @@
   // Drafts and failed sends belong to one conversation, keyed by room and session. A failed send shows in its
   // feed with Retry, also after the owner leaves and comes back; raw keeps each request's identity for onsettled.
   let drafts: Record<string, string> = $state({});
+  // A draft that is not in memory yet comes from localStorage, so a reload keeps the text.
+  const savedDrafts = new ComposerDrafts(localStorage);
   let unsent: Record<string, PostRequest[]> = $state.raw({});
   const keyOf = (request: PostRequest) => `${request.room}/${request.home?.session ?? ""}`;
   const keep = (request: PostRequest) => { unsent = { ...unsent, [keyOf(request)]: [...unsent[keyOf(request)] ?? [], request] }; };
@@ -264,6 +267,7 @@
     if (draft.busy || (!text.trim() && !quote && !draft.items.length)) return;
     const attachments = [...quote?.attachments ?? [], ...draft.take()];
     drafts[key] = "";
+    savedDrafts.clear(key);
     quotes[key] = undefined;
     clearReplacement();
     // The engine refuses mentions on a DM post; in the feed, @names of open sessions become mentions.
@@ -562,7 +566,7 @@
     onclose={tapped => void stopWatching(tapped)} ondock={event => { docked = !docked; dockChosen = true; if (docked && !panelShown) void showPanel(true, event.detail > 0); }} />{/key}
 {/snippet}
 
-<svelte:window onkeydown={cycle} onclickcapture={dismissRequests} onfocusin={formEvent} oninput={formEvent} />
+<svelte:window onkeydown={cycle} onclickcapture={dismissRequests} onfocusin={formEvent} oninput={formEvent} onpagehide={() => savedDrafts.flush()} />
 {#if palette}<Palette {rooms} {room} search={searchPosts} onclose={closePalette} onopen={paletteOpen} />{/if}
 {#snippet sheetHandle(of: string)}
   <button type="button" class="handle" aria-label={sheetFull ? `Shrink the ${of} sheet` : `Expand the ${of} sheet`}
@@ -651,7 +655,7 @@
       {#if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
         {#if attention.can("operate")}<button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button>{/if}</p>
       {:else if store && !session}<WorkingLine {store} {home} />{/if}
-      {#if attention.can("operate")}<Composer bind:element={composer} bind:value={() => drafts[key] ?? "", text => { drafts[key] = text; clearReplacement(); }} onsend={send} thread={!!session} placeholder={"Message " + title}
+      {#if attention.can("operate")}<Composer bind:element={composer} bind:value={() => drafts[key] ?? savedDrafts.load(key), text => { drafts[key] = text; savedDrafts.save(key, text); clearReplacement(); }} onsend={send} thread={!!session} placeholder={"Message " + title}
         quote={quotes[key]} replacement={replaced[key]} onundo={() => { quotes[key] = undoForward({ quote: quotes[key], previous: replaced[key] }).quote; clearReplacement(); }} onunquote={() => { quotes[key] = undefined; clearReplacement(); }} sessions={mentions} files={files(key)} {stop} />
       {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
     {/if}
