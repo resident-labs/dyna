@@ -186,6 +186,10 @@ func (p *Pool) Tick(ctx context.Context, group *sync.WaitGroup) error {
 	if len(settings) == 0 && p.clean {
 		return errors.Join(failures...)
 	}
+	// The lock is held across SSH, and --mode github acts here. A host that hangs
+	// must not leave a repository that cannot be turned off.
+	ctx, cancel := context.WithTimeout(ctx, scaleLimit)
+	defer cancel()
 	view, err := p.survey(ctx)
 	if err != nil {
 		return err
@@ -226,7 +230,8 @@ func (p *Pool) steer(ctx context.Context, wanted map[contract.RepoName]bool, gro
 		case !finished && !wanted[repo]:
 			l.cancel()
 			l.leaving = true
-		case finished && l.leaving:
+		case finished && (l.leaving || !wanted[repo]):
+			// A listener that failed just as its repository left still owes the delete.
 			if err := p.Sets.Delete(ctx, repo); err != nil {
 				failures = append(failures, fmt.Errorf("repository %s: delete scale set: %w", repo, err))
 				continue
