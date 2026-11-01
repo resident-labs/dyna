@@ -20,6 +20,7 @@ try {
     server.once("error", reject);
   })));
   const failures: string[] = [];
+  let known = 0;
   await Promise.all(fixtures.map(async (fixture, index) => {
     const context = await browser.newContext();
     const login = await context.newPage();
@@ -77,7 +78,7 @@ try {
         const baselineRoute = roomMatch ? (roomMatch[2] ? "/r/:room/s/:session" : "/r/:room") : route.replace(/^\/settings\/accounts\/account\/[^/]+$/, "/settings/accounts/account/:account");
         for (const issue of issues) {
           const line = `${fixture} ${route} ${width}px: ${issue}`;
-          if (knownWidthFailures[baselineRoute]?.includes(width)) console.warn(`Known: ${line}`);
+          if (knownWidthFailures[baselineRoute]?.includes(width)) { known++; console.warn(`Known: ${line}`); }
           else failures.push(line);
         }
       } catch (error: unknown) {
@@ -90,7 +91,7 @@ try {
     await context.close();
   }));
   if (failures.length) { console.error(failures.sort().join("\n")); process.exitCode = 1; }
-  else console.log("All routes fit at all four widths in both fixtures.");
+  else console.log(`Width check passed with ${known} known failures.`);
 } finally {
   await browser.close();
   for (const server of servers) server.kill("SIGTERM");
