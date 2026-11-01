@@ -2,7 +2,7 @@
   import VisualBanner from "./VisualBanner.svelte";
   import { fileSize, isImage, isThumb } from "../feed.ts";
   import type { Attachment, EventID, VisualCard } from "../contract.gen.ts";
-  let { attachments, newest, onvisual, event, at, onmedia }: { attachments: Attachment[]; newest: Map<string, VisualCard>; onvisual: (visual: VisualCard) => void; event?: EventID; at?: string; onmedia: (file: Attachment) => void } = $props();
+  let { attachments, newest, onvisual, event, at, onmedia }: { attachments: Attachment[]; newest: Map<string, VisualCard>; onvisual: (visual: VisualCard) => void; event?: EventID; at?: string; onmedia: (position: number) => void } = $props();
   // The engine serves each file sandboxed; the owner's cookie covers the request.
   const url = (file: Attachment) => `/v1/files/${encodeURIComponent(file.sha256)}`;
   // The type badge on a file card, such as "TXT", as in v1.
@@ -12,8 +12,8 @@
   // Images already retried once; a second failure leaves the card without Retry.
   let retried: string[] = $state([]);
   const retry = (file: Attachment) => { retried = [...retried, file.sha256]; failed = failed.filter(sha => sha !== file.sha256); };
-  let images = $derived(attachments.filter(file => !file.visual && isThumb(file, failed)));
-  let videos = $derived(attachments.filter(file => !file.visual && file.media.startsWith("video/")));
+  let images = $derived(attachments.map((file, position) => ({ file, position })).filter(({ file }) => !file.visual && isThumb(file, failed)));
+  let videos = $derived(attachments.map((file, position) => ({ file, position })).filter(({ file }) => !file.visual && file.media.startsWith("video/")));
   let others = $derived(attachments.filter(file => !file.visual && !isThumb(file, failed) && !file.media.startsWith("video/")));
   let durations: Record<string, string> = $state({});
 </script>
@@ -22,10 +22,10 @@
   {#if visual && event && at}<div><VisualBanner {visual} newest={newest.get(visual.id) ?? visual} {event} {at} onopen={() => onvisual(visual)} /></div>{/if}
 {/each}
   <!-- As in v1, images come first as thumbnails, then a card per other file. Each opens the file in a new tab. -->
-  {#if images.length}<div class="images" class:many={images.length > 1}>{#each images as file, i (i)}
-    <button class="thumb" onclick={() => onmedia(file)} title={`${file.name} · ${fileSize(file.bytes)}`}>
+  {#if images.length}<div class="images" class:many={images.length > 1}>{#each images as { file, position } (position)}
+    <button class="thumb" onclick={() => onmedia(position)} title={`${file.name} · ${fileSize(file.bytes)}`}>
       <img src={url(file)} alt={file.name} loading="lazy" onerror={() => { failed = [...failed, file.sha256]; }} /></button>{/each}</div>{/if}
-  {#each videos as file}<button class="video" onclick={() => onmedia(file)} aria-label={`Open ${file.name}`}><video src={url(file)} preload="metadata" muted onloadedmetadata={e => { const seconds = Math.floor(e.currentTarget.duration); if (Number.isFinite(seconds)) durations[file.sha256] = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`; }}></video><span class="play">▶</span>{#if durations[file.sha256]}<span class="duration">{durations[file.sha256]}</span>{/if}</button>{/each}
+  {#each videos as { file, position } (position)}<button class="video" onclick={() => onmedia(position)} aria-label={`Open ${file.name}`}><video src={url(file)} preload="metadata" muted onloadedmetadata={e => { const seconds = Math.floor(e.currentTarget.duration); if (Number.isFinite(seconds)) durations[file.sha256] = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`; }}></video><span class="play">▶</span>{#if durations[file.sha256]}<span class="duration">{durations[file.sha256]}</span>{/if}</button>{/each}
   {#each others as file, i (i)}{@const dead = failed.includes(file.sha256)}
     <svelte:element this={dead ? "span" : "a"} class="file" class:dead href={dead ? undefined : url(file)} target={dead ? undefined : "_blank"} rel={dead ? undefined : "noopener"}
       title={dead ? `${file.name} did not load` : `Open ${file.name}`}>
