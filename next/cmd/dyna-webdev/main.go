@@ -49,6 +49,29 @@ func (devService) HostAdd(context.Context, contract.Principal, contract.HostAddR
 	return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "webdev uses only " + host}
 }
 
+// Connect is read-only in webdev. Its status uses invented values for layout checks.
+type devConnect struct{ empty bool }
+
+func (d devConnect) Status(context.Context) (contract.ConnectStatusResponse, error) {
+	if d.empty {
+		return contract.ConnectStatusResponse{Attempt: contract.ConnectAttempt{State: contract.ConnectAttemptIdle}}, nil
+	}
+	return contract.ConnectStatusResponse{
+		Attempt: contract.ConnectAttempt{State: contract.ConnectAttemptLinked}, Linked: true,
+		Relay: "https://connect.example.test", Fingerprint: "SHA256:invented-machine-key",
+	}, nil
+}
+
+func (devConnect) Start(context.Context, contract.ConnectStartRequest) error {
+	return fmt.Errorf("Connect actions are disabled in webdev")
+}
+func (devConnect) Cancel(context.Context) error {
+	return fmt.Errorf("Connect actions are disabled in webdev")
+}
+func (devConnect) Unlink(context.Context) error {
+	return fmt.Errorf("Connect actions are disabled in webdev")
+}
+
 // Account actions are disabled in the fake-model development engine.
 func (d devService) AccountsList(context.Context, contract.Principal, contract.AccountsListRequest) (contract.AccountsListResponse, *contract.Error) {
 	accounts := []contract.Account{}
@@ -458,6 +481,7 @@ func main() {
 	svc.SetFilesDir(filepath.Join(data, "files"))
 	svc.SetTranscriptDir(filepath.Join(data, "transcripts"))
 	a := api.New(devService{Service: svc, empty: *fixture == "empty"}, nil)
+	a.SetConnectOperations(devConnect{empty: *fixture == "empty"})
 	a.SetFilesRoute(func(c api.Caller) http.Handler { return svc.Files(c.Principal, c.Room) })
 	app, err := fs.Sub(web.Dist, "dist")
 	fatal(err)
