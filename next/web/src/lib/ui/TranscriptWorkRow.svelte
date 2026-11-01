@@ -3,6 +3,7 @@
   import type { TranscriptItem, TranscriptPart } from "../contract.gen.ts";
   import { activeVerb, elapsed, stepTime, titleOf, workSummary, type StepKind } from "../steps.ts";
   import Icon, { type IconName } from "./Icon.svelte";
+  import TranscriptIcon from "./TranscriptIcon.svelte";
   import Markdown from "./Markdown.svelte";
   import StatusPill from "./StatusPill.svelte";
 
@@ -40,7 +41,7 @@
   {@const running = !ended && !item.ended}
   <details class="entry" ontoggle={(event) => { if (event.currentTarget.open) { onopen(); if (item.more) { if (item.kind === "thinking") void load(item, "text"); else { void load(item, "arguments"); void load(item, "output"); if (item.diff) void load(item, "diff"); } } } }}>
     <summary>
-      <span class="slot">{#if running}<span class="spinner" aria-label="Working" role="img"></span>{:else}<Icon name={item.kind === "thinking" ? "chat" : icons[title.kind]} size={16} />{/if}</span>
+      <span class="slot">{#if running}<span class="spinner" aria-label="Working" role="img"></span>{:else}{#if item.kind === "thinking" || ["run", "search", "read", "edit", "write"].includes(title.kind)}<TranscriptIcon kind={item.kind === "thinking" ? "thinking" : title.kind} />{:else}<Icon name={icons[title.kind]} size={16} />{/if}{/if}</span>
       <span>{item.kind === "thinking" ? "Thought" : running ? activeVerb(title.kind, title.verb) : title.verb}</span>
       {#if item.kind === "tool" && title.target}<code title={title.full}>{title.target}</code>{/if}
       <span class="time">{running ? elapsed(item.at, now) : stepTime({ started: item.at, ended: item.ended })}</span>
@@ -70,7 +71,7 @@
   {@render entry(items[0])}
 {:else if items.length > 1}
   <details class="group" ontoggle={(event) => { if (event.currentTarget.open) onopen(); }}>
-    <summary><span class="slot"><Icon name="chevron" size={16} /></span><span>{summary}</span></summary>
+    <summary><span class="slot"><TranscriptIcon kind="chevron" /></span><span>{summary}</span></summary>
     <div class="entries" role="region" aria-label="Work details">
       {#each items as item (item.id)}{@render entry(item)}{/each}
     </div>
@@ -85,7 +86,7 @@
   summary:focus-visible, button:focus-visible { outline: 2px solid var(--focus); }
   .slot { width: 24px; display: inline-flex; justify-content: center; align-items: center; flex: none; }
   .group > summary .slot { transition: transform 150ms; }
-  .group:not([open]) > summary .slot { transform: rotate(-90deg); }
+  .group[open] > summary .slot { transform: rotate(90deg); }
   .entries { max-height: min(18rem, 50dvh); overflow: auto; overscroll-behavior: contain; }
   .content { margin-left: 28px; padding: 4px 0; max-height: 384px; overflow: auto; }
   code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); }
