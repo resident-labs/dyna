@@ -129,7 +129,7 @@ func (b *browser) close(ctx context.Context) {
 // inspect renders one page in a fresh tab. ctx bounds this inspection only.
 func (b *browser) inspect(ctx context.Context, doc []byte, csp string, allowNet bool) (Result, error) {
 	c := b.c
-	c.doc, c.csp, c.allowNet = ColorScheme(doc), csp, allowNet
+	c.doc, c.csp, c.allowNet = ColorScheme(doc, Default), csp, allowNet
 	c.session, c.loaded, c.documentServed, c.blockedNetwork = "", false, false, false
 	c.hosts, c.console = map[string]bool{}, nil
 	var err error
