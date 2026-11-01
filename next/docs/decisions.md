@@ -982,7 +982,7 @@ Table: `hostexec_runs` (`op` PK, `grant`, `host`, `scope`, `started_at`, `timeou
 
 ### 6.4 Control-plane safety and accepted risks
 
-Host exec on the control plane runs as the owner and can use the owner socket. A control-plane grant gives full owner power (owner, 2026-10-31, msg_462f3f1d210856c2). Named scopes remain for timeouts, revocation and lost-run cleanup. Use `show_pty` (`dyna show-pty`) only to show the owner a live terminal, never to obtain permission or a sign-in the agent can use itself.
+Host exec on the control plane runs as the owner and can use the owner socket. A control-plane grant gives full owner power (owner, 2026-10-31, msg_462f3f1d210856c2). Named scopes remain for timeouts, revocation and lost-run cleanup. The planned `show_pty` tool (`dyna show-pty`) requests a live terminal for the owner to see.
 
 Accepted risks (owner, 2026-10-30):
 
