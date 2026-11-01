@@ -100,7 +100,19 @@ func recordCheckpoint(d time.Duration, c Checkpointed, err error) {
 // Measurements returns cumulative metrics since process start. Concurrent updates
 // can appear in adjacent snapshots; this is not a transactional snapshot.
 func Measurements() Metrics {
+	var pool PoolMetrics
+	handles.Lock()
+	for _, db := range handles.byFolder {
+		stats := db.Stats()
+		pool.Open += stats.OpenConnections
+		pool.InUse += stats.InUse
+		pool.Idle += stats.Idle
+		pool.WaitCount += stats.WaitCount
+		pool.WaitDuration += stats.WaitDuration
+	}
+	handles.Unlock()
 	return Metrics{
+		Pool:      pool,
 		WriteHold: writeHold.snapshot(), Commit: commitDuration.snapshot(),
 		CheckpointDuration: checkpointDuration.snapshot(),
 		CheckpointFrames:   checkpointFrames.Load(), CheckpointMoved: checkpointMoved.Load(),
