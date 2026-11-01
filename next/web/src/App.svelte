@@ -128,6 +128,7 @@
     const nextRoom = window.location.pathname.match(/^\/r\/([^/]+)/)?.[1];
     if (nextRoom && nextRoom !== previousRoom) { routeNotice = ""; sessionStorage.removeItem("dyna-connect-move"); }
     path = window.location.pathname;
+    if (/^\/r\/[^/]+/.test(path)) firstRoom = false;
     if (inSettings) return;
     behind = path;
     section = /\/instructions\/?$/.test(path) ? "instructions" : /\/r\/[^/]+\/new\/?$/.test(path) ? "new-session" : /^\/rooms\/new\/?$/.test(path) ? "new-room" : undefined;
