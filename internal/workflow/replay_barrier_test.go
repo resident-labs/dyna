@@ -63,7 +63,7 @@ func TestWorkflowReplaysCallsWithoutEffects(t *testing.T) {
 	workDir := t.TempDir()
 	commands := newFakeCommands()
 	commands.next = func(CommandSpec) (CommandExit, string) { return CommandExit{}, "output" }
-	engine := &enginefake.Engine{Profiles: mockWorkflowStore(0, 0)}
+	engine := &enginefake.Engine{Profiles: mockWorkflowStore(0)}
 	posts := 0
 	poster := func(context.Context, string, string, []string, string) (PostResult, error) {
 		posts++
@@ -76,7 +76,7 @@ func TestWorkflowReplaysCallsWithoutEffects(t *testing.T) {
 	if err := runstore.BeginWorkflowManifest(t.Context(), first.Meta.ID); err != nil {
 		t.Fatal(err)
 	}
-	opts := Options{Store: mockWorkflowStore(0, 0), Run: first, WorkDir: workDir, Engine: engine, Commands: commands, Poster: poster, RecordManifest: true, JobNamespace: first.Meta.ID}
+	opts := Options{Store: mockWorkflowStore(0), Run: first, WorkDir: workDir, Engine: engine, Commands: commands, Poster: poster, RecordManifest: true, JobNamespace: first.Meta.ID}
 	want, err := executeWorkflowTest(t, script, opts)
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +121,7 @@ func TestWorkflowReplayRejectsChangedCommandTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	commands := newFakeCommands()
-	opts := Options{Store: mockWorkflowStore(0, 0), Run: run, WorkDir: dir, Commands: commands, RecordManifest: true}
+	opts := Options{Store: mockWorkflowStore(0), Run: run, WorkDir: dir, Commands: commands, RecordManifest: true}
 	if _, err := executeWorkflowTest(t, `return await run('true', {timeout: 1});`, opts); err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestConcurrentCommandRaceCannotBeAutomaticallyReplayed(t *testing.T) {
 	}
 	commands := &reversedRaceCommands{fakeCommands: newFakeCommands(), commands: map[string]string{}, release: make(chan struct{})}
 	commands.next = func(spec CommandSpec) (CommandExit, string) { return CommandExit{}, spec.Argv[2] }
-	result, err := executeWorkflowTest(t, script, Options{Store: mockWorkflowStore(0, 0), Run: run, WorkDir: t.TempDir(), Commands: commands, RecordManifest: true})
+	result, err := executeWorkflowTest(t, script, Options{Store: mockWorkflowStore(0), Run: run, WorkDir: t.TempDir(), Commands: commands, RecordManifest: true})
 	if err != nil || result != `"second"` {
 		t.Fatalf("race = %s, %v", result, err)
 	}
@@ -249,7 +249,7 @@ func TestConcurrentAgentAndCommandCannotBeAutomaticallyReplayed(t *testing.T) {
 	if err := runstore.BeginWorkflowManifest(t.Context(), run.Meta.ID); err != nil {
 		t.Fatal(err)
 	}
-	_, err = executeWorkflowTest(t, script, Options{Store: mockWorkflowStore(0, 0), Run: run, WorkDir: t.TempDir(), Commands: newFakeCommands(), Engine: immediateAgentEngine{}, RecordManifest: true})
+	_, err = executeWorkflowTest(t, script, Options{Store: mockWorkflowStore(0), Run: run, WorkDir: t.TempDir(), Commands: newFakeCommands(), Engine: immediateAgentEngine{}, RecordManifest: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestReplayRejectsNewOverlapBeforeStartingEffects(t *testing.T) {
 		t.Fatal(err)
 	}
 	commands := newFakeCommands()
-	opts := Options{Store: mockWorkflowStore(0, 0), Run: run, WorkDir: t.TempDir(), Commands: commands, RecordManifest: true}
+	opts := Options{Store: mockWorkflowStore(0), Run: run, WorkDir: t.TempDir(), Commands: commands, RecordManifest: true}
 	if _, err := executeWorkflowTest(t, `await run('first'); await run('second');`, opts); err != nil {
 		t.Fatal(err)
 	}

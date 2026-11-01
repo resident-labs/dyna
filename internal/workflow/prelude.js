@@ -109,18 +109,6 @@ globalThis.__planPipeline = async function (planGroupId, items, ...stages) {
   }
 };
 
-// remaining is a live, read-only per-run budget. Unlimited profiles report
-// null; completed calls remain consumed because maxCallsPerRun is a lifetime
-// cap rather than a concurrency limit.
-for (const profile of profiles) {
-  const name = profile.name;
-  Object.defineProperty(profile, "remaining", {
-    enumerable: true,
-    configurable: false,
-    get: function () { return __profileRemaining(name); },
-  });
-}
-
 // agent(prompt, opts?) -> Promise<string | object>
 // opts: { profile, label, phase, lane, stage, schema, cwd, timeout,
 //         isolation: { type: "worktree", retention?: "changed" | "all" | "none" } }

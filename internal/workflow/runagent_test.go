@@ -81,8 +81,8 @@ func TestAgentCallAsksTheEngineForOneLeafSessionAndTheRunEndClosesIt(t *testing.
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { run.Finish("ok", "", nil) })
-	engine := &enginefake.Engine{Profiles: mockWorkflowStore(0, 0)}
-	got, err := executeWorkflowTest(t, script, Options{Store: mockWorkflowStore(0, 0), Run: run, Args: map[string]string{"dir": dir}, Engine: engine, WorkDir: dir})
+	engine := &enginefake.Engine{Profiles: mockWorkflowStore(0)}
+	got, err := executeWorkflowTest(t, script, Options{Store: mockWorkflowStore(0), Run: run, Args: map[string]string{"dir": dir}, Engine: engine, WorkDir: dir})
 	if err != nil || got != `"fine"` {
 		t.Fatalf("result = %s, %v", got, err)
 	}
@@ -191,8 +191,8 @@ func TestNestedWorkflowAsksAgainWhenTheStopCallIsCutOff(t *testing.T) {
 	for i := range cutOff {
 		cutOff[i] = &engineclient.RemoteError{Status: 503, Message: "engine is stopping"}
 	}
-	engine := &enginefake.Engine{Profiles: mockWorkflowStore(0, 0), CloseErrs: cutOff}
-	got, err := executeWorkflowTest(t, `return await workflow("child");`, Options{Store: mockWorkflowStore(0, 0), Run: run, Engine: engine, WorkDir: dir, WorkflowDir: dir})
+	engine := &enginefake.Engine{Profiles: mockWorkflowStore(0), CloseErrs: cutOff}
+	got, err := executeWorkflowTest(t, `return await workflow("child");`, Options{Store: mockWorkflowStore(0), Run: run, Engine: engine, WorkDir: dir, WorkflowDir: dir})
 	if err != nil || got != `"child done"` {
 		t.Fatalf("result = %s, %v", got, err)
 	}
@@ -210,8 +210,8 @@ func TestNestedWorkflowThatEndsWithARunningAgentStopsItFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { run.Finish("ok", "", nil) })
-	engine := &enginefake.Engine{Profiles: mockWorkflowStore(0, 0)}
-	got, err := executeWorkflowTest(t, `return await workflow("child");`, Options{Store: mockWorkflowStore(0, 0), Run: run, Engine: engine, WorkDir: dir, WorkflowDir: dir})
+	engine := &enginefake.Engine{Profiles: mockWorkflowStore(0)}
+	got, err := executeWorkflowTest(t, `return await workflow("child");`, Options{Store: mockWorkflowStore(0), Run: run, Engine: engine, WorkDir: dir, WorkflowDir: dir})
 	if err != nil || got != `"child done"` {
 		t.Fatalf("result = %s, %v", got, err)
 	}

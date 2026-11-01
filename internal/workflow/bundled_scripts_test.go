@@ -21,7 +21,7 @@ func TestBundledScriptsRejectMissingArgsAndPlan(t *testing.T) {
 			if p.Status == plan.StatusUnavailable {
 				t.Fatalf("plan unavailable: %+v", p.Diagnostics)
 			}
-			_, err = executeWorkflowTest(t, string(src), Options{Store: mockWorkflowStore(0, 0), WorkDir: t.TempDir()})
+			_, err = executeWorkflowTest(t, string(src), Options{Store: mockWorkflowStore(0), WorkDir: t.TempDir()})
 			if err == nil || !strings.Contains(err.Error(), "required") {
 				t.Fatalf("missing arguments: %v", err)
 			}
@@ -69,7 +69,7 @@ func TestBundledSingleInputAcceptsString(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = executeWorkflowTest(t, string(src), Options{Args: "example", Store: mockWorkflowStore(0, 0), WorkDir: t.TempDir()})
+			_, err = executeWorkflowTest(t, string(src), Options{Args: "example", Store: mockWorkflowStore(0), WorkDir: t.TempDir()})
 			if err == nil || (!strings.Contains(err.Error(), "requires") && !strings.Contains(err.Error(), "cannot run commands")) {
 				t.Fatalf("expected profile validation after accepting string, got %v", err)
 			}

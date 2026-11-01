@@ -180,7 +180,7 @@ func (m *Manager) profileInstructions(meta Meta) instructions.Section {
 	// The strongest profiles come first, so a capped list still shows them.
 	slices.SortFunc(shown, compareProfileRank)
 	for _, p := range shown[:min(len(shown), maxProfileItems)] {
-		section.Items = append(section.Items, fmt.Sprintf("- %s | taste: %d/10 | diagnostics: %d/10 | intelligence: %d/10 | cost-efficiency: %d/10 | max-concurrent: %d | max-calls-per-run: %d | uses: %s", p.Name, p.Taste, p.EffectiveDiagnostics(), p.Intelligence, p.Cost, p.MaxConcurrent, p.MaxCallsPerRun, strings.Join(p.EffectiveUses(), ",")))
+		section.Items = append(section.Items, fmt.Sprintf("- %s | taste: %d/10 | diagnostics: %d/10 | intelligence: %d/10 | cost-efficiency: %d/10 | max-concurrent: %d | uses: %s", p.Name, p.Taste, p.EffectiveDiagnostics(), p.Intelligence, p.Cost, p.MaxConcurrent, strings.Join(p.EffectiveUses(), ",")))
 	}
 	if more := len(shown) - maxProfileItems; more > 0 {
 		section.Items = append(section.Items, fmt.Sprintf("- %d more enabled profiles: run `dyna profiles list` for all.", more))

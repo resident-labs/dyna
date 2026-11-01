@@ -118,9 +118,6 @@ func NewCommand() *cobra.Command {
 				if p.MaxConcurrent > 0 {
 					limits += fmt.Sprintf("  max-concurrent: %d", p.MaxConcurrent)
 				}
-				if p.MaxCallsPerRun > 0 {
-					limits += fmt.Sprintf("  max-calls/run: %d", p.MaxCallsPerRun)
-				}
 				if models := p.EffectiveModels(); len(models) > 1 {
 					limits += "  models: " + strings.Join(models, " -> ")
 				}
@@ -218,7 +215,6 @@ func NewCommand() *cobra.Command {
 	f.BoolVar(&p.SafeMode, "safe-mode", false, "keep the harness's own permission prompts/sandbox (default: bypassed)")
 	f.StringSliceVar(&p.Uses, "use", nil, useHelp)
 	f.IntVar(&p.MaxConcurrent, "limit-concurrent", 0, "max simultaneous workers of this profile per run (0 = unlimited)")
-	f.IntVar(&p.MaxCallsPerRun, "limit-calls", 0, "max total calls to this profile per run (0 = unlimited)")
 	add.MarkFlagRequired("name")
 
 	rm := &cobra.Command{
@@ -276,7 +272,7 @@ func NewCommand() *cobra.Command {
 	edit := &cobra.Command{
 		Use:   "edit <name> <field> <value>",
 		Short: "Change one profile field and keep the rest, including env",
-		Long:  "Change one profile field and keep every other field, including env. Fields: description, fallback, compact (tokens), taste, intelligence, cost, diagnostics, timeout, limit-concurrent, limit-calls.",
+		Long:  "Change one profile field and keep every other field, including env. Fields: description, fallback, compact (tokens), taste, intelligence, cost, diagnostics, timeout, limit-concurrent.",
 		Args:  cobra.ExactArgs(3),
 		RunE: func(c *cobra.Command, a []string) error {
 			if err := engineClient().Call(c.Context(), "EditProfileField", []any{a[0], a[1], a[2]}, nil); err != nil {

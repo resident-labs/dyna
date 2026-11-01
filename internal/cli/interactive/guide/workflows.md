@@ -20,7 +20,7 @@ Run `dyna workflow run check.js` in the foreground to join the results. Handle `
 
 Run `dyna profiles list --json` before choosing profiles. Higher ratings are better: `taste` measures solution choice, `diagnostics` finding faults, `intelligence` execution, and `cost` cost efficiency. Only enabled profiles with the `workflows` use are available. Omit `profile` to use the default workflow profile, or the first eligible profile.
 
-`maxConcurrent` queues excess calls. `maxCallsPerRun` caps logical calls for the run, including resume. Defaults are `max(2, min(16, CPU cores - 2))` concurrent workers and 1000 calls. Set `--max-concurrent` and `--max-agents` before launch. Run `dyna profiles check` for installed binaries and output capabilities.
+`maxConcurrent` queues excess calls. Defaults are `max(2, min(16, CPU cores - 2))` concurrent workers and 1000 calls. Set `--max-concurrent` and `--max-agents` before launch. Run `dyna profiles check` for installed binaries and output capabilities.
 
 ## Running workflows
 

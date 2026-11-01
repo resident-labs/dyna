@@ -30,12 +30,12 @@ func TestWorkflowManifestCapturesCallResults(t *testing.T) {
 	}
 	commands := newFakeCommands()
 	commands.next = func(CommandSpec) (CommandExit, string) { return CommandExit{}, "command output" }
-	engine := &enginefake.Engine{Profiles: mockWorkflowStore(0, 0)}
+	engine := &enginefake.Engine{Profiles: mockWorkflowStore(0)}
 	poster := func(context.Context, string, string, []string, string) (PostResult, error) {
 		return PostResult{ID: "msg_1"}, nil
 	}
 	script := `await run('true'); await agent('RESPOND: fine'); post('@room', 'hello');`
-	_, err = executeWorkflowTest(t, script, Options{Store: mockWorkflowStore(0, 0), Run: run, Engine: engine, Commands: commands, Poster: poster, WorkDir: t.TempDir(), RecordManifest: true})
+	_, err = executeWorkflowTest(t, script, Options{Store: mockWorkflowStore(0), Run: run, Engine: engine, Commands: commands, Poster: poster, WorkDir: t.TempDir(), RecordManifest: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,9 +104,9 @@ func TestManifestIncludesAcceptedQueuedCalls(t *testing.T) {
 	if err := runstore.BeginWorkflowManifest(t.Context(), run.Meta.ID); err != nil {
 		t.Fatal(err)
 	}
-	engine := &enginefake.Engine{Profiles: mockWorkflowStore(0, 0)}
+	engine := &enginefake.Engine{Profiles: mockWorkflowStore(0)}
 	script := `run('true'); agent('RESPOND: never started'); return 'done';`
-	_, err = executeWorkflowTest(t, script, Options{Store: mockWorkflowStore(0, 0), Run: run, Engine: engine, Commands: newFakeCommands(), WorkDir: t.TempDir(), RecordManifest: true, Paused: func() bool { return true }})
+	_, err = executeWorkflowTest(t, script, Options{Store: mockWorkflowStore(0), Run: run, Engine: engine, Commands: newFakeCommands(), WorkDir: t.TempDir(), RecordManifest: true, Paused: func() bool { return true }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestManifestDoesNotCompleteUncertainCommand(t *testing.T) {
 	if err := runstore.BeginWorkflowManifest(t.Context(), run.Meta.ID); err != nil {
 		t.Fatal(err)
 	}
-	_, err = executeWorkflowTest(t, `try { await run('true'); } catch (_) {} return 'done';`, Options{Store: mockWorkflowStore(0, 0), Run: run, Commands: uncertainCommands{newFakeCommands()}, WorkDir: t.TempDir(), RecordManifest: true})
+	_, err = executeWorkflowTest(t, `try { await run('true'); } catch (_) {} return 'done';`, Options{Store: mockWorkflowStore(0), Run: run, Commands: uncertainCommands{newFakeCommands()}, WorkDir: t.TempDir(), RecordManifest: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestManifestRejectsUncapturedNestedSource(t *testing.T) {
 	if err := runstore.BeginWorkflowManifest(t.Context(), run.Meta.ID); err != nil {
 		t.Fatal(err)
 	}
-	_, err = executeWorkflowTest(t, `const child = workflow; return await child('./child.js');`, Options{Store: mockWorkflowStore(0, 0), Run: run, WorkDir: dir, RecordManifest: true, CheckReplaySources: true, ReplaySources: map[string]string{}})
+	_, err = executeWorkflowTest(t, `const child = workflow; return await child('./child.js');`, Options{Store: mockWorkflowStore(0), Run: run, WorkDir: dir, RecordManifest: true, CheckReplaySources: true, ReplaySources: map[string]string{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestManifestRejectsUncapturedWorkingDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := fmt.Sprintf(`await run('true', {cwd: %q});`, t.TempDir())
-	_, err = executeWorkflowTest(t, script, Options{Store: mockWorkflowStore(0, 0), Run: run, WorkDir: t.TempDir(), Commands: newFakeCommands(), RecordManifest: true, CheckReplaySources: true})
+	_, err = executeWorkflowTest(t, script, Options{Store: mockWorkflowStore(0), Run: run, WorkDir: t.TempDir(), Commands: newFakeCommands(), RecordManifest: true, CheckReplaySources: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestManifestRejectsIncompletePostRouting(t *testing.T) {
 	poster := func(context.Context, string, string, []string, string) (PostResult, error) {
 		return PostResult{ID: "msg_saved"}, errors.New("routing incomplete")
 	}
-	_, err = executeWorkflowTest(t, `post('@room', 'hello'); return 'done';`, Options{Store: mockWorkflowStore(0, 0), Run: run, WorkDir: t.TempDir(), RecordManifest: true, Poster: poster})
+	_, err = executeWorkflowTest(t, `post('@room', 'hello'); return 'done';`, Options{Store: mockWorkflowStore(0), Run: run, WorkDir: t.TempDir(), RecordManifest: true, Poster: poster})
 	if err != nil {
 		t.Fatal(err)
 	}

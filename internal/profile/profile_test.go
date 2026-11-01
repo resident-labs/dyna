@@ -231,7 +231,6 @@ func TestValidateRejectsNegativeExecutionLimits(t *testing.T) {
 	}{
 		{name: "timeout", set: func(p *Profile) { p.TimeoutSec = -1 }},
 		{name: "concurrency", set: func(p *Profile) { p.MaxConcurrent = -1 }},
-		{name: "call cap", set: func(p *Profile) { p.MaxCallsPerRun = -1 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := Profile{Name: "valid", Harness: HarnessMock, Taste: 5, Intelligence: 5, Cost: 5}

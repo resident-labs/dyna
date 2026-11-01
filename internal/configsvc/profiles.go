@@ -35,7 +35,7 @@ func view(p profile.Profile) ProfileView {
 		Name:           p.Name, Description: p.Description, Harness: p.Harness, Model: p.Model, Models: p.EffectiveModels(),
 		Fallback: p.Fallback,
 		Taste:    p.Taste, Diagnostics: p.EffectiveDiagnostics(), Intelligence: p.Intelligence, Cost: p.Cost,
-		TimeoutSec: p.TimeoutSec, MaxConcurrent: p.MaxConcurrent, MaxCallsPerRun: p.MaxCallsPerRun,
+		TimeoutSec: p.TimeoutSec, MaxConcurrent: p.MaxConcurrent,
 		Default: p.Default, Disabled: p.Disabled, Uses: p.EffectiveUses(), SafeMode: p.SafeMode,
 		ExtraArgs: append([]string{}, p.ExtraArgs...), Compact: p.Compact, EnvKeys: []string{},
 	}
@@ -136,7 +136,7 @@ func (s *Service) SaveProfile(ctx context.Context, e ProfileEdit) (ProfileView, 
 	p.Fallback = strings.TrimSpace(in.Fallback)
 	p.Taste, p.Intelligence, p.Cost = in.Taste, in.Intelligence, in.Cost
 	p.Diagnostics = in.Diagnostics
-	p.TimeoutSec, p.MaxConcurrent, p.MaxCallsPerRun = in.TimeoutSec, in.MaxConcurrent, in.MaxCallsPerRun
+	p.TimeoutSec, p.MaxConcurrent = in.TimeoutSec, in.MaxConcurrent
 	p.Default, p.Disabled, p.Uses, p.SafeMode = in.Default, in.Disabled, in.Uses, in.SafeMode
 	p.ExtraArgs, p.Compact = clean(in.ExtraArgs), in.Compact
 	env := map[string]string{}
@@ -279,7 +279,7 @@ func (s *Service) EditProfileField(ctx context.Context, name, field, value strin
 	return update(ctx, s.Sessions, name, func(p *profile.Profile) error {
 		ints := map[string]*int{
 			"taste": &p.Taste, "intelligence": &p.Intelligence, "cost": &p.Cost, "diagnostics": &p.Diagnostics,
-			"timeout": &p.TimeoutSec, "limit-concurrent": &p.MaxConcurrent, "limit-calls": &p.MaxCallsPerRun,
+			"timeout": &p.TimeoutSec, "limit-concurrent": &p.MaxConcurrent,
 		}
 		switch field {
 		case "description":

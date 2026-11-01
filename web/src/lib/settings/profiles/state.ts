@@ -54,7 +54,7 @@ export type ProfileDraft = Omit<ProfileView, 'runtimeVersion' | 'fallback' | 'su
 }
 export function blankProfile(harness = 'claude-code', model = '', models: readonly unknown[] | undefined = undefined): ProfileDraft {
   const chain = normalizeModels(model, models)
-  return { name: '', description: '', harness, model: chain[0] ?? '', models: chain, taste: 5, diagnostics: 5, intelligence: 5, cost: 5, timeoutSec: 0, maxConcurrent: 0, maxCallsPerRun: 0, default: false, disabled: false, uses: USES.map(([u]) => u), safeMode: false, extraArgs: [], compact: harness === 'pi' || harness === 'claude-code' ? { tokens: 200000 } : null, envKeys: [] }
+  return { name: '', description: '', harness, model: chain[0] ?? '', models: chain, taste: 5, diagnostics: 5, intelligence: 5, cost: 5, timeoutSec: 0, maxConcurrent: 0, default: false, disabled: false, uses: USES.map(([u]) => u), safeMode: false, extraArgs: [], compact: harness === 'pi' || harness === 'claude-code' ? { tokens: 200000 } : null, envKeys: [] }
 }
 // A catalog effort carries the exact extraArgs that select it on its harness.
 const indexOfArgs = (args: readonly string[], part: readonly string[]): number => part.length ? args.findIndex((_, i) => part.every((x, j) => args[i + j] === x)) : -1

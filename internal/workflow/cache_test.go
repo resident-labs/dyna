@@ -360,7 +360,6 @@ func TestExecutionConfigDigestUsesEffectiveSettings(t *testing.T) {
 	p.Cost = 9
 	p.Default = true
 	p.MaxConcurrent = 2
-	p.MaxCallsPerRun = 10
 	if executionConfigDigest(p, time.Minute) != base {
 		t.Fatal("equivalent effective settings have different digests")
 	}

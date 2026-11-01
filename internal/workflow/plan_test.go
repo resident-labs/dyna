@@ -24,7 +24,7 @@ return found
 	}
 	rec := &workflowEventRecorder{}
 	result, err := executeWorkflowTest(t, src, Options{
-		Store: mockWorkflowStore(0, 0), Run: run, OnEvent: rec.append,
+		Store: mockWorkflowStore(0), Run: run, OnEvent: rec.append,
 	})
 	run.Finish("ok", result, err)
 	if err != nil {
@@ -68,7 +68,7 @@ func TestExecuteUnavailablePlanStillRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := executeWorkflowTest(t, src, Options{
-		Store: mockWorkflowStore(0, 0), Run: run,
+		Store: mockWorkflowStore(0), Run: run,
 	})
 	run.Finish("ok", result, err)
 	if err != nil {
@@ -90,7 +90,7 @@ func TestCachedAgentEndKeepsPlanNodeID(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := executeWorkflowTest(t, src, Options{
-		Store: mockWorkflowStore(0, 0), Run: first, WorkDir: dir,
+		Store: mockWorkflowStore(0), Run: first, WorkDir: dir,
 	})
 	first.Finish("ok", result, err)
 	if err != nil {
@@ -107,7 +107,7 @@ func TestCachedAgentEndKeepsPlanNodeID(t *testing.T) {
 	}
 	rec := &workflowEventRecorder{}
 	result, err = executeWorkflowTest(t, src, Options{
-		Store: mockWorkflowStore(0, 0), Run: second, WorkDir: dir, Cache: NewCache(entries), OnEvent: rec.append,
+		Store: mockWorkflowStore(0), Run: second, WorkDir: dir, Cache: NewCache(entries), OnEvent: rec.append,
 	})
 	second.Finish("ok", result, err)
 	if err != nil {
@@ -143,7 +143,7 @@ func TestNestedChildGetsOwnPlanFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := executeWorkflowTest(t, root, Options{
-		Store: mockWorkflowStore(0, 0), Run: run, WorkDir: dir, WorkflowDir: registry,
+		Store: mockWorkflowStore(0), Run: run, WorkDir: dir, WorkflowDir: registry,
 	})
 	run.Finish("ok", result, err)
 	if err != nil {
@@ -184,7 +184,7 @@ func TestNestedChildEmitsParentPlanIDs(t *testing.T) {
 	}
 	rec := &workflowEventRecorder{}
 	result, err := executeWorkflowTest(t, root, Options{
-		Store: mockWorkflowStore(0, 0), Run: run, WorkDir: dir, WorkflowDir: registry, OnEvent: rec.append,
+		Store: mockWorkflowStore(0), Run: run, WorkDir: dir, WorkflowDir: registry, OnEvent: rec.append,
 	})
 	run.Finish("ok", result, err)
 	if err != nil {
@@ -224,7 +224,7 @@ func TestPipelineConcurrentItemsKeepStageItem(t *testing.T) {
 	}
 	rec := &workflowEventRecorder{}
 	result, err := executeWorkflowTest(t, src, Options{
-		Store: mockWorkflowStore(0, 0), Run: run, OnEvent: rec.append,
+		Store: mockWorkflowStore(0), Run: run, OnEvent: rec.append,
 	})
 	run.Finish("ok", result, err)
 	if err != nil {
@@ -265,7 +265,7 @@ func TestPipelineStartsItemsConcurrently(t *testing.T) {
 	}
 	rec := &workflowEventRecorder{}
 	result, err := executeWorkflowTest(t, src, Options{
-		Store: mockWorkflowStore(0, 0), Run: run, OnEvent: rec.append,
+		Store: mockWorkflowStore(0), Run: run, OnEvent: rec.append,
 	})
 	run.Finish("ok", result, err)
 	if err != nil {
@@ -303,7 +303,7 @@ return await pipeline(['slow','fast'],
 	}
 	rec := &workflowEventRecorder{}
 	result, err := executeWorkflowTest(t, src, Options{
-		Store: mockWorkflowStore(0, 0), Run: run, OnEvent: rec.append,
+		Store: mockWorkflowStore(0), Run: run, OnEvent: rec.append,
 	})
 	run.Finish("ok", result, err)
 	if err != nil {
@@ -343,7 +343,7 @@ func TestPipelineNestedParallelAgentsKeepItemContext(t *testing.T) {
 	}
 	rec := &workflowEventRecorder{}
 	result, err := executeWorkflowTest(t, src, Options{
-		Store: mockWorkflowStore(0, 0), Run: run, OnEvent: rec.append,
+		Store: mockWorkflowStore(0), Run: run, OnEvent: rec.append,
 	})
 	run.Finish("ok", result, err)
 	if err != nil {
@@ -385,7 +385,7 @@ return await Promise.all([
 		t.Fatal(err)
 	}
 	result, err := executeWorkflowTest(t, src, Options{
-		Store: mockWorkflowStore(0, 0), Run: run,
+		Store: mockWorkflowStore(0), Run: run,
 	})
 	run.Finish("ok", result, err)
 	if err != nil {
@@ -412,7 +412,7 @@ func TestPipelineRestStageCallbackKeepsPublicArgsAndContext(t *testing.T) {
 	}
 	rec := &workflowEventRecorder{}
 	result, err := executeWorkflowTest(t, src, Options{
-		Store: mockWorkflowStore(0, 0), Run: run, OnEvent: rec.append,
+		Store: mockWorkflowStore(0), Run: run, OnEvent: rec.append,
 	})
 	run.Finish("ok", result, err)
 	if err != nil {
@@ -494,7 +494,7 @@ func TestPipelineResolvedStageValueExpressionsKeepLexicalContext(t *testing.T) {
 			}
 			rec := &workflowEventRecorder{}
 			result, err := executeWorkflowTest(t, tt.src, Options{
-				Store: mockWorkflowStore(0, 0), Run: run, OnEvent: rec.append,
+				Store: mockWorkflowStore(0), Run: run, OnEvent: rec.append,
 			})
 			run.Finish("ok", result, err)
 			if err != nil {
@@ -554,7 +554,7 @@ return await pipeline(['item'], async value => {
 			}
 			rec := &workflowEventRecorder{}
 			result, err := executeWorkflowTest(t, tt.src, Options{
-				Store: mockWorkflowStore(0, 0), Run: run, OnEvent: rec.append,
+				Store: mockWorkflowStore(0), Run: run, OnEvent: rec.append,
 			})
 			run.Finish("ok", result, err)
 			if err != nil {
@@ -595,7 +595,7 @@ func TestPipelineAgentCallCommentSeparatorKeepsLexicalContext(t *testing.T) {
 	}
 	rec := &workflowEventRecorder{}
 	result, err := executeWorkflowTest(t, src, Options{
-		Store: mockWorkflowStore(0, 0), Run: run, OnEvent: rec.append,
+		Store: mockWorkflowStore(0), Run: run, OnEvent: rec.append,
 	})
 	run.Finish("ok", result, err)
 	if err != nil {
@@ -634,7 +634,7 @@ return {same: seen[0] === seen[1], calls: seen[0].calls, result}`
 		t.Fatal(err)
 	}
 	result, err := executeWorkflowTest(t, src, Options{
-		Store: mockWorkflowStore(0, 0), Run: run,
+		Store: mockWorkflowStore(0), Run: run,
 	})
 	run.Finish("ok", result, err)
 	if err != nil {
@@ -665,7 +665,7 @@ return {name: captured.name, calls: captured.calls, result}`
 	}
 	rec := &workflowEventRecorder{}
 	result, err := executeWorkflowTest(t, src, Options{
-		Store: mockWorkflowStore(0, 0), Run: run, OnEvent: rec.append,
+		Store: mockWorkflowStore(0), Run: run, OnEvent: rec.append,
 	})
 	run.Finish("ok", result, err)
 	if err != nil {
@@ -739,7 +739,7 @@ return await run()`,
 			}
 			rec := &workflowEventRecorder{}
 			result, err := executeWorkflowTest(t, tt.src, Options{
-				Store: mockWorkflowStore(0, 0), Run: run, OnEvent: rec.append,
+				Store: mockWorkflowStore(0), Run: run, OnEvent: rec.append,
 			})
 			run.Finish("ok", result, err)
 			if err != nil {
@@ -781,7 +781,7 @@ func TestPlannedPipelineDropsOnlyFailingItem(t *testing.T) {
 	}
 	rec := &workflowEventRecorder{}
 	result, err := executeWorkflowTest(t, src, Options{
-		Store: mockWorkflowStore(0, 0), Run: run, OnEvent: rec.append,
+		Store: mockWorkflowStore(0), Run: run, OnEvent: rec.append,
 	})
 	run.Finish("ok", result, err)
 	if err != nil {

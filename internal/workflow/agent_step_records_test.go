@@ -67,7 +67,7 @@ func TestAgentStartStepRecords(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			engine := &recordingAgentEngine{Engine: &enginefake.Engine{Profiles: mockWorkflowStore(0, 0)}}
+			engine := &recordingAgentEngine{Engine: &enginefake.Engine{Profiles: mockWorkflowStore(0)}}
 			if tc.refuse {
 				engine.startErr = errors.New("start refused")
 			}
@@ -83,7 +83,7 @@ func TestAgentStartStepRecords(t *testing.T) {
 					t.Errorf("before start: state %q, error %v", state, err)
 				}
 			}
-			_, err = executeWorkflowTest(t, `return await agent("RESPOND: fine")`, Options{Store: mockWorkflowStore(0, 0), Run: run, Engine: engine, WorkDir: t.TempDir()})
+			_, err = executeWorkflowTest(t, `return await agent("RESPOND: fine")`, Options{Store: mockWorkflowStore(0), Run: run, Engine: engine, WorkDir: t.TempDir()})
 			if tc.wantError == "" && err != nil || tc.wantError != "" && (err == nil || !strings.Contains(err.Error(), tc.wantError)) {
 				t.Fatalf("error = %v, want %q", err, tc.wantError)
 			}

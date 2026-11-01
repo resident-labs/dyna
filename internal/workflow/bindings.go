@@ -80,10 +80,10 @@ func (e *engine) bind(vm *goja.Runtime) error {
 		e.emitLog(runstore.LogProvenanceSystem, msg)
 	})
 	vm.Set("__finish", func(resultJSON string) {
-		e.finish(outcome{resultJSON: resultJSON})
+		e.settle(outcome{resultJSON: resultJSON})
 	})
 	vm.Set("__fail", func(msg string) {
-		e.finish(outcome{err: fmt.Errorf("workflow failed: %s", msg)})
+		e.settle(outcome{err: fmt.Errorf("workflow failed: %s", msg)})
 	})
 	vm.Set("__spawn", e.spawn)
 	vm.Set("__exec", e.exec)
@@ -91,19 +91,6 @@ func (e *engine) bind(vm *goja.Runtime) error {
 	vm.Set("__workflow", e.workflow)
 	vm.Set("__post", e.post)
 	vm.Set("__worktrees", e.scriptWorktrees)
-	vm.Set("__profileRemaining", func(name string) any {
-		p, ok := e.opts.Store.Get(name)
-		if !ok || p.MaxCallsPerRun <= 0 {
-			return nil
-		}
-		e.shared.mu.Lock()
-		remaining := p.MaxCallsPerRun - e.shared.profCalls[name]
-		e.shared.mu.Unlock()
-		if remaining < 0 {
-			remaining = 0
-		}
-		return remaining
-	})
 
 	argsV := goja.Undefined()
 	if e.opts.Args != nil {
@@ -129,7 +116,7 @@ func (e *engine) bind(vm *goja.Runtime) error {
 			"model": p.Model, "models": p.EffectiveModels(), "taste": p.Taste, "intelligence": p.Intelligence,
 			"cost": p.Cost, "diagnostics": p.EffectiveDiagnostics(), "default": p.Default,
 			"uses":          p.EffectiveUses(),
-			"maxConcurrent": p.MaxConcurrent, "maxCallsPerRun": p.MaxCallsPerRun,
+			"maxConcurrent": p.MaxConcurrent,
 		}
 		obj := vm.NewObject()
 		for name, value := range fields {

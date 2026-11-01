@@ -1,7 +1,7 @@
 export const meta = { name: 'migrate', description: 'Transform matching files in isolated worktrees and verify each result', args: [{ name: 'instruction', required: true, description: 'Migration instruction' }, { name: 'glob', required: true, description: 'Glob matching files to migrate' }] }
 if (!args || typeof args.instruction !== 'string' || !args.instruction.trim()) throw new Error('instruction is required')
 if (typeof args.glob !== 'string' || !args.glob.trim()) throw new Error('glob is required')
-const ranked = [...profiles].filter(p => p.remaining !== 0).sort((a, b) => b.intelligence - a.intelligence)
+const ranked = [...profiles].sort((a, b) => b.intelligence - a.intelligence)
 if (ranked.length < 2) throw new Error('migrate requires two enabled profiles')
 const expanded = await run(['python3', '-c', 'import glob,json,sys; print(json.dumps(sorted(p for p in glob.glob(sys.argv[1], recursive=True) if __import__("os").path.isfile(p))))', args.glob], { parse: 'json', label: 'expand' })
 const files = expanded.json
