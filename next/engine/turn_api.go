@@ -127,10 +127,6 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 	if !open {
 		return contract.TurnActivityResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 	}
-	return s.publishActivity(session, caller, req)
-}
-
-func (s *Service) publishActivity(session store.Session, caller contract.Principal, req contract.TurnActivityRequest) (contract.TurnActivityResponse, *contract.Error) {
 	body := contract.TurnActivity{Session: caller.Session, Turn: req.Turn, Label: req.Label}
 	event, err := s.event(session.Room, caller, body)
 	if err != nil {
