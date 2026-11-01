@@ -65,8 +65,17 @@ export interface CallerCount {
 export type DurationCounts = number /* uint64 */[];
 /**
  * Metrics reports process-local transaction and scheduled checkpoint measurements.
+ * PoolMetrics sums current connections and cumulative pool waits across open databases.
  */
+export interface PoolMetrics {
+  open: number /* int */;
+  inUse: number /* int */;
+  idle: number /* int */;
+  waitCount: number /* int64 */;
+  waitDuration: number;
+}
 export interface Metrics {
+  pool: PoolMetrics;
   writeHold: DurationCounts;
   commit: DurationCounts;
   checkpointDuration: DurationCounts;
