@@ -1,4 +1,5 @@
 # Migration gate design
+<!-- LEGACY(v1-transfer): this whole guide, the v1 export and the bundle check. Remove after the transfer. -->
 
 This gate helps every owner moving from v1. It checks a frozen v1 backup before
 the irreversible cutover. This is a counts-only rehearsal, not the M3 store

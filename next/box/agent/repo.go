@@ -80,6 +80,7 @@ func setupRepo(ctx context.Context, root, stateRoot string, repo contract.BoxRep
 		if err != nil && !os.IsNotExist(err) {
 			return err
 		}
+		// LEGACY(v1-transfer): keeping a checkout that has files but no state file, from boxes older than setup state. Remove after the transfer.
 		if len(entries) > 0 {
 			return writeSetupState(state, setupDone)
 		}

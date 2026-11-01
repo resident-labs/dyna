@@ -958,6 +958,7 @@ func TestHookPost(t *testing.T) {
 	}
 }
 
+// LEGACY(v1-transfer): this test, which pins step 63. Remove after the transfer.
 func TestMigrationGivesExistingRootsTheDefault(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(dir)
