@@ -141,7 +141,7 @@ func (s *Store) StartWorkflowStep(ctx context.Context, run contract.WorkflowRunI
 		}
 		stored = contract.WorkflowStepStartResponse{}
 		_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(run,key,parent,kind,name,phase,profile,detail,state,started_at) VALUES(?,?,?,?,?,?,?,?,?,?)
-			ON CONFLICT(run,key) DO UPDATE SET state=excluded.state,started_at=excluded.started_at`, run, req.Key, req.Parent, req.Kind, req.Name, req.Phase, req.Profile, req.Detail, contract.WorkflowStepRunning, at.UnixMilli())
+			ON CONFLICT(run,key) DO UPDATE SET state=excluded.state,reason='',transcript='',started_at=excluded.started_at,ended_at=0`, run, req.Key, req.Parent, req.Kind, req.Name, req.Phase, req.Profile, req.Detail, contract.WorkflowStepRunning, at.UnixMilli())
 		return err
 	})
 	return stored, err
@@ -164,27 +164,93 @@ func (s *Store) EndWorkflowStep(ctx context.Context, run contract.WorkflowRunID,
 	})
 }
 
+// SetWorkflowStepTranscript names the file of a worker that is running. Its end names it again, so a late report changes nothing.
+func (s *Store) SetWorkflowStepTranscript(ctx context.Context, run contract.WorkflowRunID, key, path string) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE workflow_steps SET transcript=? WHERE run=? AND key=? AND state=?", path, run, key, contract.WorkflowStepRunning)
+		return err
+	})
+}
+
+const workflowStepColumns = "key,parent,kind,name,phase,profile,state,reason,transcript,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_at,ended_at"
+
+func scanWorkflowStep(row interface{ Scan(...any) error }, extra ...any) (contract.WorkflowStep, error) {
+	var step contract.WorkflowStep
+	var started, ended int64
+	if err := row.Scan(append([]any{&step.Key, &step.Parent, &step.Kind, &step.Name, &step.Phase, &step.Profile, &step.State, &step.Reason, &step.Transcript, &step.Usage.InputTokens, &step.Usage.OutputTokens, &step.Usage.CacheReadTokens, &step.Usage.CacheWriteTokens, &started, &ended}, extra...)...); err != nil {
+		return step, err
+	}
+	step.Started = time.UnixMilli(started).UTC()
+	if ended != 0 {
+		step.Ended = time.UnixMilli(ended).UTC()
+	}
+	return step, nil
+}
+
 // WorkflowSteps lists a run's journal in start order.
 func (s *Store) WorkflowSteps(ctx context.Context, run contract.WorkflowRunID) ([]contract.WorkflowStep, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT key,parent,kind,name,phase,profile,state,reason,transcript,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_at,ended_at FROM workflow_steps WHERE run=? ORDER BY started_at,rowid", run)
+	rows, err := s.Read().QueryContext(ctx, "SELECT "+workflowStepColumns+" FROM workflow_steps WHERE run=? ORDER BY started_at,rowid", run)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	steps := []contract.WorkflowStep{}
 	for rows.Next() {
-		var step contract.WorkflowStep
-		var started, ended int64
-		if err := rows.Scan(&step.Key, &step.Parent, &step.Kind, &step.Name, &step.Phase, &step.Profile, &step.State, &step.Reason, &step.Transcript, &step.Usage.InputTokens, &step.Usage.OutputTokens, &step.Usage.CacheReadTokens, &step.Usage.CacheWriteTokens, &started, &ended); err != nil {
+		step, err := scanWorkflowStep(rows)
+		if err != nil {
 			return nil, err
-		}
-		step.Started = time.UnixMilli(started).UTC()
-		if ended != 0 {
-			step.Ended = time.UnixMilli(ended).UTC()
 		}
 		steps = append(steps, step)
 	}
 	return steps, rows.Err()
+}
+
+// WorkflowStep reads one journal row.
+func (s *Store) WorkflowStep(ctx context.Context, run contract.WorkflowRunID, key string) (contract.WorkflowStep, error) {
+	return scanWorkflowStep(s.Read().QueryRowContext(ctx, "SELECT "+workflowStepColumns+" FROM workflow_steps WHERE run=? AND key=?", run, key))
+}
+
+// WorkerTranscript is where one worker's transcript lies. Session is the crew that ran it: a resumed run keeps a finished step's
+// row, but the file stays with the run that wrote it. Turn is empty until the file's first user record reaches the engine.
+type WorkerTranscript struct {
+	Step    contract.WorkflowStep
+	Prompt  string
+	Session contract.SessionID
+	Turn    contract.TurnID
+}
+
+// WorkflowWorker finds a crew's step and the transcript it names. A session with no such step is ErrNotFound.
+func (s *Store) WorkflowWorker(ctx context.Context, session contract.SessionID, key string) (WorkerTranscript, error) {
+	worker := WorkerTranscript{Session: session}
+	var err error
+	worker.Step, err = scanWorkflowStep(s.Read().QueryRowContext(ctx, "SELECT "+workflowStepColumns+",detail FROM workflow_steps WHERE key=? AND run=(SELECT id FROM workflow_runs WHERE session=?)", key, session), &worker.Prompt)
+	if err != nil || worker.Step.Transcript == "" {
+		return worker, err
+	}
+	err = s.Read().QueryRowContext(ctx, `SELECT r.session FROM workflow_runs r JOIN workflow_steps t ON t.run=r.id AND t.key=?
+		WHERE r.room=(SELECT room FROM workflow_runs WHERE session=?) AND t.transcript=? ORDER BY r.started_at LIMIT 1`, key, session, worker.Step.Transcript).Scan(&worker.Session)
+	if err != nil {
+		return worker, err
+	}
+	err = s.Read().QueryRowContext(ctx, "SELECT turn FROM transcript_turns WHERE session=? AND path=? ORDER BY start DESC LIMIT 1", worker.Session, worker.Step.Transcript).Scan(&worker.Turn)
+	if errors.Is(err, ErrNotFound) {
+		return worker, nil
+	}
+	return worker, err
+}
+
+// WorkflowMerge reads the newest merge() result of a run. A merge is a run step, and only its result holds conflicts.
+func (s *Store) WorkflowMerge(ctx context.Context, run contract.WorkflowRunID) (*contract.WorkflowMerge, error) {
+	var data string
+	err := s.Read().QueryRowContext(ctx, `SELECT result FROM workflow_steps WHERE run=? AND kind=? AND state=? AND CASE WHEN json_valid(result) THEN json_type(result,'$.conflicts') END='array' ORDER BY started_at DESC,rowid DESC LIMIT 1`, run, contract.WorkflowStepCommand, contract.WorkflowStepDone).Scan(&data)
+	if errors.Is(err, ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var merge contract.WorkflowMerge
+	return &merge, json.Unmarshal([]byte(data), &merge)
 }
 
 // WorkflowSummary totals a run's journal: its failed steps, and the usage of every step, which is the crew's usage.

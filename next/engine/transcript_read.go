@@ -31,6 +31,17 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 	if req.Session == "" || req.Limit < 0 || req.Limit > 20 || req.Offset < 0 || req.Cursor < 0 || req.PostIndex < 0 || (req.Page == "" && req.Cursor != 0) || (req.Page != "" && (req.Turn == "" || req.Item != "" || req.AfterItem != "" || req.Tail || req.PostIndex != 0)) || (req.Turn != "" && req.Before != "") || ((req.Item != "" || req.AfterItem != "" || req.Tail || req.PostIndex != 0) && req.Turn == "") {
 		return response, invalid("invalid transcript request")
 	}
+	var worker store.WorkerTranscript
+	if req.Step != "" {
+		var err error
+		if worker, err = s.store.WorkflowWorker(ctx, req.Session, req.Step); err != nil {
+			return response, failure(err)
+		}
+		if worker.Turn == "" {
+			return response, nil // It has not started, or nothing of it has reached the engine.
+		}
+		req.Session = worker.Session
+	}
 	roomID, err := s.store.TranscriptRoom(ctx, req.Session)
 	if errors.Is(err, store.ErrNotFound) {
 		return response, &contract.Error{Code: contract.ErrNotFound, Message: "session not found"}
@@ -81,7 +92,11 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 	if limit == 0 {
 		limit = 6
 	}
-	work, err := s.store.TranscriptTurnMetadata(ctx, req.Session, req.Before, req.Turn, limit+1)
+	exact := req.Turn
+	if req.Step != "" {
+		exact = worker.Turn
+	}
+	work, err := s.store.TranscriptTurnMetadata(ctx, req.Session, req.Before, exact, limit+1)
 	if errors.Is(err, store.ErrInvalidWorkCursor) {
 		return response, invalid("invalid turn cursor")
 	}
@@ -100,6 +115,10 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			t.DurationMS = w.Ended.Time.Sub(w.Started.Time).Milliseconds()
 			end := w.Ended.Body.(contract.TurnEnded)
 			t.Outcome, t.Cause = end.Outcome, end.Cause
+		}
+		if req.Step != "" {
+			w.Inputs = nil
+			applyWorkerTurn(&t, worker, w.Started)
 		}
 		after := req.AfterItem == ""
 		for _, input := range w.Inputs {
@@ -141,6 +160,9 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			ranges, err := s.store.TranscriptTurnRanges(ctx, req.Session, t.ID)
 			if err != nil {
 				return response, failure(err)
+			}
+			if req.Step != "" {
+				ranges = slices.DeleteFunc(ranges, func(r store.TranscriptTurnRange) bool { return r.Path != worker.Step.Transcript })
 			}
 			skip := req.Cursor
 			if !req.Tail && req.Page != contract.TranscriptPageMandatoryPosts {
@@ -292,7 +314,8 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			// Scan a bounded newest-first page, separately from Pi items.
 			var posts []contract.Event
 			const postPageSize = 8
-			if req.Page != contract.TranscriptPageMandatoryItems && req.Page != contract.TranscriptPageOlderItems {
+			// The crew's posts have no worker to belong to.
+			if req.Step == "" && req.Page != contract.TranscriptPageMandatoryItems && req.Page != contract.TranscriptPageOlderItems {
 				posts, err = s.store.TranscriptSentPostsNewest(ctx, req.Session, t.ID, postPageSize, req.Cursor)
 				if err != nil {
 					return response, failure(err)
@@ -361,6 +384,17 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 		response.Before = response.Turns[len(response.Turns)-1].ID
 	}
 	return response, nil
+}
+
+// applyWorkerTurn makes a crew's turn read as one worker: its times, and its prompt as what it read. The crew's turn is the
+// script's, so its outcome says nothing about this worker. The run page shows the step's own.
+func applyWorkerTurn(t *contract.TranscriptTurn, worker store.WorkerTranscript, started contract.Event) {
+	step := worker.Step
+	t.Started, t.Ended, t.DurationMS, t.Outcome, t.Cause = step.Started, nil, 0, "", ""
+	if !step.Ended.IsZero() {
+		t.Ended, t.DurationMS = &step.Ended, step.Ended.Sub(step.Started).Milliseconds()
+	}
+	t.Inputs = []contract.TranscriptInput{{ID: contract.EventID("step:" + step.Key), At: step.Started, Room: started.Room, Type: contract.PostCreated{}.EventType(), From: contract.Principal{Kind: contract.PrincipalSession, Session: worker.Session}, Text: harness.Mask(worker.Prompt)}}
 }
 
 func transcriptChunk(response contract.TranscriptReadResponse, value string, offset int) (contract.TranscriptReadResponse, *contract.Error) {

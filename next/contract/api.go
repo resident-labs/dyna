@@ -619,8 +619,11 @@ type SessionWorkResponse struct {
 	Total int               `json:"total"`
 }
 
+// TranscriptReadRequest reads a session's turns. Step reads one crew worker instead, by its journal key: the one turn its
+// file belongs to, with the prompt as the input and the step's own times.
 type TranscriptReadRequest struct {
 	Session   SessionID      `json:"session"`
+	Step      string         `json:"step,omitempty"`
 	Turn      TurnID         `json:"turn,omitempty"`
 	Before    TurnID         `json:"before,omitempty"`
 	Limit     int            `json:"limit,omitempty"`

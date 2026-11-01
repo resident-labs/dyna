@@ -33,3 +33,29 @@ func TestLongFixture(t *testing.T) {
 		t.Fatalf("turns=%d tools=%d posts=%d steers=%d failed=%d running=%d long final=%v", len(turns), tools, posts, steers, failed, running, longFinal)
 	}
 }
+
+func TestRunFixtures(t *testing.T) {
+	audit := auditSteps("ses_1")
+	phases, failed := map[string]int{}, 0
+	for _, step := range audit {
+		phases[step.phase]++
+		if step.reason != "" {
+			failed++
+		}
+	}
+	if len(audit) != 149 || phases["Review pages"] != 120 || failed < 3 {
+		t.Fatalf("audit %d steps, phases %v, %d failed", len(audit), phases, failed)
+	}
+	running, waiting := 0, 0
+	for _, step := range triageSteps() {
+		if step.took == 0 {
+			running++
+		}
+		if step.waiting {
+			waiting++
+		}
+	}
+	if running != 3 || waiting != 1 {
+		t.Fatalf("triage has %d running, %d waiting", running, waiting)
+	}
+}

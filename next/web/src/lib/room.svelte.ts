@@ -5,7 +5,7 @@ import { EventWindow } from "./window.svelte.ts";
 import { pendingReason, type PendingReason } from "./event.ts";
 import { boxFailures, countOf, failedJobs, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
 import { prKey } from "./feed.ts";
-import type { BoxState, Conversation, FailureCause, Decision, Event, Goal, OpRequested, OpResult, OpState, PrSummary, Question, SessionStarted } from "./contract.gen.ts";
+import type { BoxState, Conversation, FailureCause, Decision, Event, Goal, OpRequested, OpResult, OpState, PrSummary, Question, SessionStarted, WorkflowInfo, WorkflowStep } from "./contract.gen.ts";
 import { failed } from "./jobs.ts";
 
 
@@ -62,6 +62,11 @@ export class RoomStore {
   readonly questions = new SvelteMap<string, Question>();
   // Tracked PRs by prKey: pr.list once, then pr.changed. A room opens without them if that read fails.
   readonly prs = new SvelteMap<string, PrSummary>();
+  // Workflow runs by crew session. They outlive the session, which closes as its run ends.
+  readonly workflows = new SvelteMap<string, WorkflowInfo>();
+  // The open run page, which takes each step row. With no row, it has lost track and reads again.
+  private readonly runPages = new Map<string, (step?: WorkflowStep) => void>();
+  private readonly runsAsked = new Set<string>();
   // Names outlive closed sessions, so old posts still show who wrote them.
   readonly names = new SvelteMap<string, string>();
   private readonly windows = new Set<EventWindow>();
@@ -179,6 +184,8 @@ export class RoomStore {
     this.stopStream = this.connect(this.room, () => this.head, event => this.apply(event), undefined, undefined, () => {
       // A conversation.read is not replayed. A read made after load() or during a dropped stream is missed, so each hello rereads.
       this.rereading = this.rereadPositions().catch(() => {});
+      void this.readWorkflows();
+      for (const page of this.runPages.values()) page();
     });
   }
 
@@ -213,6 +220,8 @@ export class RoomStore {
     await this.readFeed();
     this.head = list.seq;
     void this.readGoals();
+    // Before the room is ready, so a crew's page opens as a run from the start.
+    await this.readWorkflows();
     for (const session of list.sessions ?? []) {
       this.sessions.set(session.id, {
         session: session.id, name: session.name, parent: session.parent || undefined,
@@ -242,6 +251,29 @@ export class RoomStore {
       this.requests.set(id, { id, kind, by, class: level, card, expires, state });
     }
     for (const question of asked.questions ?? []) this.questions.set(question.id, question);
+  }
+
+  private noteRun(run: WorkflowInfo): void {
+    this.workflows.set(run.session, run);
+    if (!this.names.has(run.session)) this.names.set(run.session, run.name);
+  }
+
+  private async readWorkflows(): Promise<void> {
+    const list = await call("workflow.list", { room: this.room }).catch(() => undefined);
+    for (const run of list?.runs ?? []) this.noteRun(run);
+  }
+
+  // workflow.list holds a room's newest runs, so a closed session asks for itself once. Most sessions have no run.
+  async readWorkflow(session: string): Promise<void> {
+    if (this.runsAsked.has(session)) return;
+    this.runsAsked.add(session);
+    const status = await call("workflow.status", { session }).catch(() => undefined);
+    if (status) this.noteRun(status.run);
+  }
+
+  watchRun(session: string, page: (step?: WorkflowStep) => void): () => void {
+    this.runPages.set(session, page);
+    return () => { this.runPages.delete(session); };
   }
 
   private async readGoals(): Promise<void> {
@@ -285,6 +317,8 @@ export class RoomStore {
       }
       return;
     }
+    // A step row has seq 0 too and reaches only an open run page, never a window.
+    if (event.type === "workflow.step_changed") { this.runPages.get(event.body.session)?.(event.body.step); return; }
     if (event.seq <= this.head) return;
     this.head = event.seq;
     this.step(event);
@@ -299,6 +333,7 @@ export class RoomStore {
         this.sessions.set(event.body.session, { ...event.body, startedAt: event.at });
         this.names.set(event.body.session, event.body.name);
         if (event.body.goal) void this.readGoals();
+        void this.readWorkflows(); // The event does not say which sessions are crews.
         break;
       case "session.closed":
         this.sessions.delete(event.body.session);
@@ -309,6 +344,12 @@ export class RoomStore {
       case "goal.set": case "goal.item_changed": case "goal.ended":
         void this.readGoals();
         break;
+      case "workflow.ended": {
+        const { session, state, failed, failedSteps, usage } = event.body, run = this.workflows.get(session);
+        if (run) this.workflows.set(session, { ...run, state, failed, failedSteps, usage });
+        this.runPages.get(session)?.();
+        break;
+      }
       case "session.profile_changed": {
         const changed = this.sessions.get(event.body.session);
         if (changed) this.sessions.set(event.body.session, { ...changed, profile: event.body.profile });

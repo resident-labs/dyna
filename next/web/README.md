@@ -5,4 +5,4 @@ After the Web QA device is revoked, delete `~/.config/dyna-next/web-qa.cookie` o
 
 ## Fixtures
 
-Run `dyna-webdev -fixture full` for invented accounts, rated profiles and posts. Run `dyna-webdev -fixture empty` for one room, no posts, no accounts and unrated profiles. Build the web app before the server, so the server embeds the current assets.
+Run `dyna-webdev -fixture full` for invented accounts, rated profiles, posts and workflow runs, one of which moves by itself. Run `dyna-webdev -fixture empty` for one room, no posts, no accounts and unrated profiles. Build the web app before the server, so the server embeds the current assets.

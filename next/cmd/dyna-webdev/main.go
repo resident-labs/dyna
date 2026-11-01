@@ -269,6 +269,10 @@ var seeded = map[string]string{
 	"Exercise the failed turn view":                 "[fail]",
 	"Start the dev server and run the engine tests": "[jobs]",
 	"Then tidy the room menu":                       "[wait]",
+	"Run workflow site-audit.":                      "[wait]",
+	"Run workflow nightly-build.":                   "[wait]",
+	"Run workflow triage.":                          "[wait]",
+	"Run workflow docs-check.":                      "[lost]",
 }
 
 func marked(text, marker string) bool {
@@ -344,6 +348,9 @@ var devSteps = []struct {
 // TranscriptRead keeps the real checks, then answers with devSteps. Each turn picks a run of them from its ID, so turns
 // differ in length, and the longest say that their record is cut.
 func (d devService) TranscriptRead(ctx context.Context, p contract.Principal, req contract.TranscriptReadRequest) (contract.TranscriptReadResponse, *contract.Error) {
+	if req.Step != "" && p.Kind == contract.PrincipalOwner {
+		return fixtureWorker(ctx, d, p, req)
+	}
 	if req.Session == fixtureSession && fixtureSession != "" && req.Turn == "" && req.Before == "" && p.Kind == contract.PrincipalOwner {
 		return contract.TranscriptReadResponse{Turns: fixtureTurns()}, nil
 	}
@@ -572,7 +579,9 @@ func (b *boxes) run(ctx context.Context, id contract.BoxID) {
 		b.mu.Unlock()
 		cancel()
 	}
-	runner := &agent.Runner{Harness: &scripted{box: c, lose: lose}, Sink: c}
+	// The fake harness reads no files, so a turn with an attachment has nothing to fetch.
+	attach := func(_ context.Context, input contract.TurnInput) (contract.TurnInput, error) { return input, nil }
+	runner := &agent.Runner{Harness: &scripted{box: c, lose: lose}, Sink: c, Attach: attach}
 	if err := c.Channel(ctx, func(m contract.BoxMessage) error { return runner.Handle(ctx, m) }, func(bool) {}); err != nil && ctx.Err() == nil {
 		log.Printf("box channel: %v", err)
 	}
@@ -804,6 +813,7 @@ body{font:15px system-ui;margin:0;padding:24px;color:#e8e9eb;background:#0d0f13}
 			Body: contract.PostCreated{Text: text, Home: contract.Conversation{Kind: contract.ConversationFeed}, Mentions: []contract.Principal{owner}}}, nil)
 		fatal(err)
 	}
+	seedRuns(ctx, s, st, room.Room)
 	seedAgents(ctx, s, agents)
 	for i := range posts {
 		text := fmt.Sprintf("Long-list post %d of %d.", i+1, posts)

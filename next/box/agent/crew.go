@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,6 +45,7 @@ type crewEngine interface {
 	WorkflowPin(context.Context, string) error
 	WorkflowStepStart(context.Context, contract.WorkflowStepStartRequest) (contract.WorkflowStepStartResponse, error)
 	WorkflowStepEnd(context.Context, contract.WorkflowStepEndRequest) error
+	WorkflowStepTranscript(context.Context, contract.WorkflowStepTranscriptRequest) error
 	WorkflowPost(context.Context, contract.PostRequest) (contract.PostResponse, error)
 }
 
@@ -156,7 +158,13 @@ func (c *Crew) Delivered(_ context.Context, id contract.DeliverySeq) (bool, erro
 	return c.taken[id], nil
 }
 
-func (c *Crew) Recover(contract.TurnID, []contract.TurnInput) (contract.TurnEnded, bool, error) {
+// Recover keeps the delivery of a turn a new box takes over, so the workers it starts are filed under that turn too.
+func (c *Crew) Recover(_ contract.TurnID, inputs []contract.TurnInput) (contract.TurnEnded, bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, input := range inputs {
+		c.delivery = input.Delivery
+	}
 	return contract.TurnEnded{}, false, nil
 }
 
@@ -545,6 +553,10 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 	}
 	file := worker.SessionFile()
 	out.transcript, _ = filepath.Rel(c.config.Sessions, file)
+	// Only the run page needs this, so a worker runs on without it.
+	if err := c.config.Engine.WorkflowStepTranscript(ctx, contract.WorkflowStepTranscriptRequest{Key: key, Transcript: out.transcript}); err != nil {
+		log.Printf("workflow step %s transcript: %v", key[:12], err)
+	}
 	defer func() {
 		_ = worker.Close()
 		c.config.Transcript.syncLogged(context.WithoutCancel(ctx), file)
