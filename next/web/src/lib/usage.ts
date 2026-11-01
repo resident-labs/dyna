@@ -31,20 +31,27 @@ function named(account: AccountUsage, catalog?: AccountsListResponse) {
   return { title: account.label || name || "Model account", provider: name && account.label && addsToLabel(account.label, name) ? name : undefined, info };
 }
 
-export type UsageRow = { title: string; provider?: string; windows: UsageWindow[]; balances: UsageBalance[] };
+// Whether a sign-in is in use. An account accounts.list does not know yet gets the benefit of the doubt.
+function active(account: AccountUsage, catalog?: AccountsListResponse): boolean {
+  const state = catalog?.accounts?.find(a => a.id === account.accountId)?.state;
+  return !state || state === "connected" || state === "quota_low";
+}
+
+export type UsageRow = { id: string; title: string; provider?: string; windows: UsageWindow[]; balances: UsageBalance[] };
 
 // The accounts that report usage, highest figure first, then by name, so the order holds between loads.
 // An expired sign-in is an alert instead. Any other account without windows or a balance says nothing, so it is left
-// out, whatever its cause: rate limits and failed readings pass by themselves.
+// out, whatever its cause: rate limits and failed readings pass by themselves. So is a sign-in that accounts.list does
+// not call active.
 export function usageRows(accounts: AccountUsage[], catalog?: AccountsListResponse): UsageRow[] {
   const peak = (row: UsageRow) => Math.max(-1, ...row.windows.map(usedOf));
   return accounts.flatMap(account => {
     const expired = account.cause === "sign_in_expired";
     const windows = expired ? [] : visibleWindows(account.windows ?? []);
     const balances = expired ? [] : account.balances ?? [];
-    if (!windows.length && !balances.length) return [];
+    if ((!windows.length && !balances.length) || !active(account, catalog)) return [];
     const { title, provider } = named(account, catalog);
-    return [{ title, provider, windows, balances }];
+    return [{ id: account.accountId ?? "", title, provider, windows, balances }];
   }).sort((a, b) => peak(b) - peak(a) || a.title.localeCompare(b.title));
 }
 
@@ -106,6 +113,9 @@ export function limitReached(w: UsageWindow, now: number): boolean {
 export function outOfLimit(row: Pick<UsageRow, "windows" | "balances">, now: number): boolean {
   return row.windows.some(w => limitReached(w, now)) || (row.balances.length > 0 && row.balances.every(b => Number(b.amount) <= 0));
 }
+
+// What the owner waits for after hiding a spent account, which comes back by itself once it is no longer out of limit.
+export const hideLabel = (row: Pick<UsageRow, "windows">, now: number) => row.windows.some(w => limitReached(w, now)) ? "Hide until it resets" : "Hide until topped up";
 
 // A usage window as a meter: a label, percent used, and time to reset; a spent window says when it comes back.
 // It is busy at 90% used or more.

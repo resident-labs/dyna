@@ -708,7 +708,7 @@
     {#if routeNotice}<div class="route-notice"><Icon name="globe" size={18} /><span><strong>Moved to {routeNotice}</strong>{moveData.has("old") ? `: ${moveData.get("old")} stopped answering for 20 seconds.` : `, a nearer route to ${moveData.get("name") || "this machine"}. Same session, same room.`}</span><button type="button" aria-label="Dismiss route notice" onclick={() => { routeNotice = ""; sessionStorage.removeItem("dyna-connect-move"); }}>✕</button></div>{/if}
     {#if reloadPending}<p class="reload-notice" role="status">Dyna updated. Reload to use the new version. <button type="button" onclick={() => location.reload()}>Reload</button></p>{/if}
     {#if reconnecting}<p class="reconnect-notice" role="status">Reconnecting to Dyna…</p>{/if}
-    {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} {session} admin={attention.can("admin")} onclose={() => void closeSection()} />{/if}
+    {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} {session} admin={attention.can("admin")} anchor={requestsButton} onclose={() => void closeSection()} />{/if}
     <div class="feed">
       {#if blocked}<Blocked kind="unreachable" onretry={connect} />
       {:else if lost === "room"}<Blocked kind="no-room" back={{ href: "/", label: "Go to Home" }} {navigate} />
