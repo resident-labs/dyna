@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -32,7 +33,14 @@ func proxySearchRoutes(router *gin.Engine, service **cliproxy.Service) {
 		}
 		results, err := (*service).DynaSearch(c.Request.Context(), req.Provider, req.Query, req.Limit, values)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, struct {
+			status := http.StatusBadGateway
+			var refusal interface{ StatusCode() int }
+			if errors.Is(err, cliproxy.ErrNotSignedIn) {
+				status = http.StatusUnauthorized
+			} else if errors.As(err, &refusal) && (refusal.StatusCode() == http.StatusUnauthorized || refusal.StatusCode() == http.StatusForbidden) {
+				status = refusal.StatusCode()
+			}
+			c.JSON(status, struct {
 				Error string `json:"error"`
 			}{err.Error()})
 			return

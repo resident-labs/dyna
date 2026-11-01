@@ -85,6 +85,10 @@ func TestDynaSearchRefusal(t *testing.T) {
 	if err == nil || err.Error() != "kimi answered HTTP 403: Plan unavailable for [redacted]. Try another plan." {
 		t.Fatalf("unexpected refusal: %v", err)
 	}
+	refusal, ok := err.(searchRefusal)
+	if !ok || refusal.StatusCode() != http.StatusForbidden {
+		t.Fatal("lost refusal status")
+	}
 }
 
 func TestDynaSearchEligibilityAndRedaction(t *testing.T) {
