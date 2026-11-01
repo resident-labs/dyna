@@ -185,6 +185,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `accounts` |
 | `account_rooms` |
 | `account_alerts` |
+| `session_accounts` | the account the owner chose for a session; no row means Automatic |
 | `search_keys` |
 | `proxy_auths` |
 

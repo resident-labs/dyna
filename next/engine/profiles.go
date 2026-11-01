@@ -210,7 +210,7 @@ func (p *ProfileConfig) updateLocked(name contract.ProfileName, value *profile, 
 	return nil
 }
 
-func (s *Service) ProfileSet(_ context.Context, who contract.Principal, req contract.ProfileSetRequest) (contract.ProfileSetResponse, *contract.Error) {
+func (s *Service) ProfileSet(ctx context.Context, who contract.Principal, req contract.ProfileSetRequest) (contract.ProfileSetResponse, *contract.Error) {
 	if who.Kind != contract.PrincipalOwner {
 		return contract.ProfileSetResponse{}, forbidden()
 	}
@@ -220,6 +220,12 @@ func (s *Service) ProfileSet(_ context.Context, who contract.Principal, req cont
 	}
 	v := req.Profile
 	err := p.update(v.Name, &profile{Description: v.Description, Taste: v.Taste, Diagnostics: v.Diagnostics, Intelligence: v.Intelligence, Cost: v.Cost, Provider: v.Provider, Model: v.Model, AllowedModels: slices.Clone(v.AllowedModels), Thinking: v.Thinking, CompactTokens: v.CompactTokens, MaxConcurrent: v.MaxConcurrent}, req.Create)
+	if err == nil && !req.Create {
+		// An edit can move every session on the profile to another model at its next turn.
+		if sessions, readErr := s.store.SessionsOnProfile(ctx, v.Name); readErr == nil {
+			s.sessionsMoved(ctx, sessions, v.Name)
+		}
+	}
 	return contract.ProfileSetResponse{}, err
 }
 
@@ -284,7 +290,8 @@ func (s *Service) ProfileRemove(ctx context.Context, who contract.Principal, req
 		return contract.ProfileRemoveResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "profile configuration is read-only"}
 	}
 	if req.Replacement != "" {
-		return contract.ProfileRemoveResponse{}, p.Replace(req.Name, req.Replacement, func() error {
+		var moved []store.Session
+		problem := p.Replace(req.Name, req.Replacement, func() error {
 			sessions, err := s.store.SessionsOnProfile(ctx, req.Name)
 			if err != nil {
 				return err
@@ -297,8 +304,15 @@ func (s *Service) ProfileRemove(ctx context.Context, who contract.Principal, req
 				}
 				moves = append(moves, store.ProfileMove{Session: session.ID, Event: event})
 			}
-			return s.store.MoveProfile(ctx, req.Replacement, moves)
+			if err := s.store.MoveProfile(ctx, req.Replacement, moves); err != nil {
+				return err
+			}
+			moved = sessions
+			return nil
 		})
+		// Replace holds the profile lock while it moves, and this takes that lock and reads the proxy.
+		s.sessionsMoved(ctx, moved, req.Replacement)
+		return contract.ProfileRemoveResponse{}, problem
 	}
 	return contract.ProfileRemoveResponse{}, p.Remove(req.Name, func() (bool, error) {
 		return s.store.ProfileInUse(ctx, req.Name)

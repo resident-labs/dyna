@@ -236,7 +236,7 @@ func TestRouteAllowsACustomProviderModel(t *testing.T) {
 	seen := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { seen = r.URL.Path }))
 	defer server.Close()
-	route := handler(&http.Client{Transport: quotaTestTransport{server.URL, http.DefaultTransport}}, "secret", "session", []string{"custom-acme/one"}, []string{"credential"})
+	route := handler(&http.Client{Transport: quotaTestTransport{server.URL, http.DefaultTransport}}, "secret", "session", []string{"custom-acme/one"}, []string{"credential"}, "")
 	response := httptest.NewRecorder()
 	route.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/model/v1/responses", strings.NewReader(`{"model":"custom-acme/one"}`)))
 	if response.Code != http.StatusOK || seen != "/v1/responses" {

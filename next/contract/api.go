@@ -64,6 +64,8 @@ const (
 	MethodSessionClose            Method = "session.close"
 	MethodSessionStop             Method = "session.stop"
 	MethodSessionSetProfile       Method = "session.set_profile"
+	MethodSessionAccount          Method = "session.account"
+	MethodSessionSetAccount       Method = "session.set_account"
 	MethodSessionRestart          Method = "session.restart"
 	MethodSessionMove             Method = "session.move"
 	MethodPost                    Method = "post"

@@ -29,9 +29,60 @@ func TestRouteSwapsKeyAndSetsAffinity(t *testing.T) {
 	req.Header.Set("X-Api-Key", "box")
 	req.Header.Set("Authorization", "Bearer box")
 	w := httptest.NewRecorder()
-	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}).ServeHTTP(w, req)
+	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}, "").ServeHTTP(w, req)
 	if w.Code != 204 {
 		t.Fatalf("status %d", w.Code)
+	}
+}
+
+func pinnedRoute(t *testing.T, pinned string, headers map[string]string) string {
+	t.Helper()
+	var got string
+	var present bool
+	up := unixServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		values, ok := r.Header["X-Dyna-Pinned-Auth"]
+		present = ok
+		got = strings.Join(values, "|")
+		w.WriteHeader(204)
+	}))
+	defer up.Close()
+	req := httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed"}`))
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
+	w := httptest.NewRecorder()
+	Handler(up.Listener.Addr().String(), "secret", "session", []string{"allowed"}, []string{"credential"}, pinned).ServeHTTP(w, req)
+	if w.Code != 204 {
+		t.Fatalf("status %d", w.Code)
+	}
+	if pinned == "" && present {
+		t.Fatalf("a pin reached the proxy on Automatic: %q", got)
+	}
+	return got
+}
+
+func TestRouteSendsTheStoredPin(t *testing.T) {
+	if got := pinnedRoute(t, "credential", nil); got != "Y3JlZGVudGlhbA" {
+		t.Fatalf("pin = %q", got)
+	}
+}
+
+// A box can only send headers, so each way of sending one must lose to the store.
+func TestBoxCannotSetOrOverrideThePin(t *testing.T) {
+	spoof := "c3Bvb2Y" // "spoof"
+	for name, headers := range map[string]map[string]string{
+		"plain":      {"X-Dyna-Pinned-Auth": spoof},
+		"lower case": {"x-dyna-pinned-auth": spoof},
+		"connection": {"X-Dyna-Pinned-Auth": spoof, "Connection": "X-Dyna-Pinned-Auth"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := pinnedRoute(t, "", headers); got != "" {
+				t.Fatalf("Automatic carried %q", got)
+			}
+			if got := pinnedRoute(t, "credential", headers); got != "Y3JlZGVudGlhbA" {
+				t.Fatalf("pin = %q", got)
+			}
+		})
 	}
 }
 
@@ -41,7 +92,7 @@ func TestRouteRefusesForbiddenModel(t *testing.T) {
 	defer up.Close()
 	target := up.Listener.Addr().String()
 	w := httptest.NewRecorder()
-	Handler(target, "secret", "session", nil, nil).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"other"}`)))
+	Handler(target, "secret", "session", nil, nil, "").ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"other"}`)))
 	if w.Code != 403 || called {
 		t.Fatalf("status %d, called %v", w.Code, called)
 	}
@@ -60,7 +111,7 @@ func TestRouteStreamsAndDoesNotRetry(t *testing.T) {
 	defer up.Close()
 	target := up.Listener.Addr().String()
 	w := httptest.NewRecorder()
-	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed"}`)))
+	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}, "").ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed"}`)))
 	if calls != 1 || w.Code != 503 || w.Body.String() != "data: one\n\ndata: two\n\n" || !w.Flushed {
 		t.Fatalf("calls %d status %d body %q flushed %v", calls, w.Code, w.Body.String(), w.Flushed)
 	}
@@ -72,7 +123,7 @@ func TestRouteRejectsURLSelectedModel(t *testing.T) {
 	defer up.Close()
 	target := up.Listener.Addr().String()
 	w := httptest.NewRecorder()
-	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1beta/models/forbidden:generateContent", strings.NewReader(`{"model":"allowed"}`)))
+	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}, "").ServeHTTP(w, httptest.NewRequest("POST", "/model/v1beta/models/forbidden:generateContent", strings.NewReader(`{"model":"allowed"}`)))
 	if w.Code != http.StatusNotFound || called {
 		t.Fatalf("status %d, called %v", w.Code, called)
 	}
@@ -81,7 +132,7 @@ func TestRouteRejectsURLSelectedModel(t *testing.T) {
 func TestRouteRejectsAmbiguousModel(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "unused.sock")
 	w := httptest.NewRecorder()
-	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed","model":"other"}`)))
+	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}, "").ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed","model":"other"}`)))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status %d", w.Code)
 	}
