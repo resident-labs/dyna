@@ -12,7 +12,7 @@ import (
 )
 
 // Recover reads only messages from the first delivery of the interrupted turn.
-// A final assistant message proves that the turn finished before reporting.
+// A final assistant message, or a tool batch that ended the turn, proves that the turn finished before reporting.
 func (h *Harness) Recover(id contract.TurnID, inputs []contract.TurnInput) (contract.TurnEnded, bool, error) {
 	result := contract.TurnEnded{Turn: id}
 	if len(inputs) == 0 {
@@ -32,6 +32,7 @@ func (h *Harness) Recover(id contract.TurnID, inputs []contract.TurnInput) (cont
 	scanner.Split(completeLines)
 	found := false
 	settled := false
+	var batch endBatch
 	for scanner.Scan() {
 		var entry struct {
 			Type    string `json:"type"`
@@ -41,6 +42,8 @@ func (h *Harness) Recover(id contract.TurnID, inputs []contract.TurnInput) (cont
 				Model         string        `json:"model"`
 				ResponseModel string        `json:"responseModel"`
 				StopReason    string        `json:"stopReason"`
+				IsError       bool          `json:"isError"`
+				Details       resultDetails `json:"details"`
 				Content       contentBlocks `json:"content"`
 				Usage         struct {
 					Input      int64 `json:"input"`
@@ -66,9 +69,16 @@ func (h *Harness) Recover(id contract.TurnID, inputs []contract.TurnInput) (cont
 		if m.Role == "user" || m.Role == "toolResult" {
 			settled = false
 		}
+		if m.Role == "user" {
+			batch = endBatch{}
+		}
+		if m.Role == "toolResult" {
+			batch.toolResult(m.Details, m.IsError)
+		}
 		if m.Role != "assistant" {
 			continue
 		}
+		batch.assistant(m.Content)
 		result.Usage.InputTokens += m.Usage.Input
 		result.Usage.OutputTokens += m.Usage.Output
 		result.Usage.CacheReadTokens += m.Usage.CacheRead
@@ -93,6 +103,9 @@ func (h *Harness) Recover(id contract.TurnID, inputs []contract.TurnInput) (cont
 	}
 	if err := scanner.Err(); err != nil {
 		return result, false, err
+	}
+	if batch.apply(&result) {
+		settled = true
 	}
 	if settled {
 		result.Outcome = contract.TurnOutcome("completed")

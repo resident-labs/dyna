@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -42,10 +44,12 @@ func (f *fakeClient) ContextSnapshot(context.Context, contract.ContextSnapshotRe
 
 type fakeClient struct {
 	host         contract.HostAddRequest
+	hostLimit    *contract.HostSetLimitsRequest
 	hostNoSwap   bool
 	room         contract.RoomCreateRequest
 	limits       contract.RoomSetLimitsRequest
 	repoAdd      contract.RoomRepoAddRequest
+	repoCI       contract.RepoCISetRequest
 	repoList     contract.RoomReposRequest
 	start        contract.SessionStartRequest
 	close        contract.SessionCloseRequest
@@ -66,6 +70,9 @@ type fakeClient struct {
 	deviceRevoke contract.DeviceRevokeRequest
 	deviceScopes contract.DeviceSetScopesRequest
 	hosts        []contract.HostSummary
+
+	roomDelete    contract.RoomDeleteRequest
+	roomDeleteErr error
 }
 
 func (f *fakeClient) DevicePair(_ context.Context, q contract.DevicePairRequest) (contract.DevicePairResponse, error) {
@@ -88,7 +95,7 @@ func (f *fakeClient) HostexecRun(context.Context, contract.HostexecRunRequest) (
 	return f.hostexecResp, nil
 }
 func (f *fakeClient) File(context.Context, string, io.Writer) error { return nil }
-func (f *fakeClient) Upload(_ context.Context, path string) (contract.Attachment, error) {
+func (f *fakeClient) Upload(_ context.Context, _ contract.RoomID, path string) (contract.Attachment, error) {
 	f.uploads = append(f.uploads, path)
 	return contract.Attachment{Name: path}, nil
 }
@@ -99,9 +106,21 @@ func (f *fakeClient) HostAdd(_ context.Context, q contract.HostAddRequest) (cont
 	f.host = q
 	return contract.HostAddResponse{NoSwap: f.hostNoSwap}, nil
 }
+func (f *fakeClient) HostSetLimits(_ context.Context, q contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, error) {
+	f.hostLimit = &q
+	return contract.HostSetLimitsResponse{}, nil
+}
 func (f *fakeClient) RoomCreate(_ context.Context, q contract.RoomCreateRequest) (contract.RoomCreateResponse, error) {
 	f.room = q
 	return contract.RoomCreateResponse{Room: "room_1"}, nil
+}
+func (f *fakeClient) RoomDelete(_ context.Context, q contract.RoomDeleteRequest) (contract.RoomDeleteResponse, error) {
+	f.roomDelete = q
+	return contract.RoomDeleteResponse{}, f.roomDeleteErr
+}
+func (f *fakeClient) RepoCISet(_ context.Context, q contract.RepoCISetRequest) (contract.RepoCISetResponse, error) {
+	f.repoCI = q
+	return contract.RepoCISetResponse{}, nil
 }
 func (f *fakeClient) RoomRepoAdd(_ context.Context, q contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, error) {
 	f.repoAdd = q
@@ -176,6 +195,25 @@ func TestHostAddMapsFlags(t *testing.T) {
 		t.Fatalf("%+v", f.host)
 	}
 }
+func TestHostLimitMapsFlags(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "host", "limit", "h", "--room", "room_a", "--room", "room_b")
+	if f.hostLimit == nil || f.hostLimit.Host != "h" || !slices.Equal(f.hostLimit.Rooms, []contract.RoomID{"room_a", "room_b"}) {
+		t.Fatalf("%+v", f.hostLimit)
+	}
+	runCLI(t, f, "host", "limit", "h", "--all")
+	if len(f.hostLimit.Rooms) != 0 {
+		t.Fatalf("%+v", f.hostLimit)
+	}
+}
+func TestHostLimitAsksForAnExplicitChoice(t *testing.T) {
+	for _, args := range [][]string{{"host", "limit", "h"}, {"host", "limit", "h", "--all", "--room", "room_a"}} {
+		f := &fakeClient{}
+		if _, err := execCLI(f, args...); err == nil || f.hostLimit != nil {
+			t.Fatalf("%v: err=%v sent=%+v", args, err, f.hostLimit)
+		}
+	}
+}
 func TestHostAddWarnsWithoutSwap(t *testing.T) {
 	out := runCLI(t, &fakeClient{hostNoSwap: true}, "host", "add", "h", "--ssh", "u@h", "--owner-only-admin")
 	if !strings.Contains(out, "host has no swap") {
@@ -187,6 +225,20 @@ func TestRoomCreateMapsName(t *testing.T) {
 	runCLI(t, f, "room", "create", "work", "--root-profile", "p")
 	if f.room.Name != "work" || f.room.RootProfile != "p" {
 		t.Fatalf("%+v", f.room)
+	}
+}
+func TestRoomDeleteNeedsDiscard(t *testing.T) {
+	f := &fakeClient{}
+	if _, err := execCLI(f, "room", "delete", "r"); err == nil || !strings.Contains(err.Error(), "--discard") || f.roomDelete.Room != "" {
+		t.Fatalf("err=%v request=%+v", err, f.roomDelete)
+	}
+	runCLI(t, f, "room", "delete", "r", "--discard")
+	if f.roomDelete.Room != "r" || !f.roomDelete.Discard {
+		t.Fatalf("%+v", f.roomDelete)
+	}
+	f.roomDeleteErr = errors.New("room_limited: this is the only open room of account acct, host h; change those limits first")
+	if _, err := execCLI(f, "room", "delete", "r", "--discard"); err == nil || !strings.Contains(err.Error(), "account acct, host h") {
+		t.Fatalf("refusal: %v", err)
 	}
 }
 func TestRoomRepos(t *testing.T) {
@@ -414,5 +466,22 @@ func TestRoomLimitCommand(t *testing.T) {
 	runCLI(t, f, "room", "limit", "room_1", "--cpus", "2", "--mem", "8GiB")
 	if f.limits != (contract.RoomSetLimitsRequest{Room: "room_1", CPUs: 2, MemBytes: 8 << 30}) {
 		t.Fatal(f.limits)
+	}
+}
+
+func TestRepoCICommand(t *testing.T) {
+	f := &fakeClient{}
+	root := &cobra.Command{Use: "dyna"}
+	addCLI(root, func() client { return f })
+	root.SetArgs([]string{"room", "repo", "ci", "a/b", "--mode", "box", "--host", "pve=4", "--host", "laptop=2", "--size", "medium"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if f.repoCI.Repo != "a/b" || f.repoCI.Mode != contract.CIBox || len(f.repoCI.Hosts) != 2 || f.repoCI.Hosts[1] != (contract.RepoCIHost{Repo: "a/b", Host: "laptop", Runners: 2, Size: contract.BoxSizeMedium}) {
+		t.Fatalf("%+v", f.repoCI)
+	}
+	root.SetArgs([]string{"room", "repo", "ci", "a/b", "--mode", "box", "--host", "pve"})
+	if err := root.Execute(); err == nil {
+		t.Fatal("accepted a host with no count")
 	}
 }
