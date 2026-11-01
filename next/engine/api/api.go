@@ -130,6 +130,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodRoomList, c, a.service.RoomList)
 	call(mux, contract.MethodSessionList, c, a.service.SessionList)
 	call(mux, contract.MethodHostexecRun, c, a.service.HostexecRun)
+	call(mux, contract.MethodHostexecList, c, a.service.HostexecList)
 	call(mux, contract.MethodHostexecRevoke, c, a.service.HostexecRevoke)
 	call(mux, contract.MethodOpSubmit, c, func(ctx context.Context, p contract.Principal, req contract.OpSubmitRequest) (contract.OpSubmitResponse, *contract.Error) {
 		c := requestCaller(ctx, c)
@@ -174,6 +175,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodAccountsConnectCallback, c, a.service.AccountsConnectCallback)
 	call(mux, contract.MethodAccountsConnectStatus, c, a.service.AccountsConnectStatus)
 	call(mux, contract.MethodAccountsSetKey, c, a.service.AccountsSetKey)
+	call(mux, contract.MethodAccountsImportOAuth, c, a.service.AccountsImportOAuth)
 	call(mux, contract.MethodAccountsQuota, c, a.service.AccountsQuota)
 	call(mux, contract.MethodRoomCreate, c, a.service.RoomCreate)
 	call(mux, contract.MethodRoomRepoAdd, c, a.service.RoomRepoAdd)

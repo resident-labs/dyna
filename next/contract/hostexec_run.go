@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	MethodHostexecList   Method    = "hostexec.list"
 	MethodHostexecRun    Method    = "hostexec.run"
 	MethodHostexecRevoke Method    = "hostexec.revoke"
 	ErrNoGrant           ErrorCode = "no_grant"
@@ -23,6 +24,11 @@ type HostexecRunRequest struct {
 type HostexecRunResponse struct {
 	Operation Operation `json:"operation"`
 }
+type HostexecListRequest struct{}
+type HostexecListResponse struct {
+	Grants []Grant `json:"grants"`
+}
+
 type HostexecRevokeRequest struct {
 	Grant GrantID `json:"grant"`
 }

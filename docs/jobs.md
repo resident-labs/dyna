@@ -5,6 +5,22 @@ of the command that submitted it, an SSH drop, and an engine restart. Jobs use
 the detached node executor that local CI uses (`internal/jobs`), join the
 node's queue, and store their log and exit code.
 
+## Wake a remote node
+
+The owner can configure a trusted wake executable and fixed arguments for a
+remote node. For example, use `dyna node edit build --wake-command /usr/local/bin/resume-node --wake-command build`.
+Use `--wake-command ''` to clear it. Dyna runs the executable directly, not
+through a shell. It requests a wake only for queued, permitted work, even if
+SSH already answers. The command must succeed, then a fresh SSH probe must
+confirm readiness before work starts. Make the command idempotent.
+
+Never put credentials in arguments. The command can use a provider credential
+file or workload identity under the engine's account. Use a least-privilege,
+expiring credential. Keep the executable and scripts trusted and outside the
+repository. Agents and the engine share the owner's Unix account; file modes
+do not isolate credentials or executables from agents running as that account.
+The command's output is discarded.
+
 ## Run a job
 
 `dyna job run [--node N | --label L]... [--commit REF] [--cpus N] [--memory 16g] [--io heavy|light] [--resource NAME]... [--workspace] [--timeout 2h] [--idle 20m] [--image IMG] [--network none] [--mount NAME:PATH[:ro|rw]]... [--device PATH]... [--artifact PATH]... -- CMD`
