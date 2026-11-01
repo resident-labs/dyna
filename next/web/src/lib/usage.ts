@@ -31,27 +31,28 @@ function named(account: AccountUsage, catalog?: AccountsListResponse) {
   return { title: account.label || name || "Model account", provider: name && account.label && addsToLabel(account.label, name) ? name : undefined, info };
 }
 
-// Whether a sign-in is in use. An account accounts.list does not know yet gets the benefit of the doubt.
+// Whether a sign-in is in use: routing would pick it next, or a session chose it, and accounts.list does not say it is
+// signed out or failing. An account accounts.list does not know yet gets the benefit of the doubt.
 function active(account: AccountUsage, catalog?: AccountsListResponse): boolean {
   const state = catalog?.accounts?.find(a => a.id === account.accountId)?.state;
-  return !state || state === "connected" || state === "quota_low";
+  return account.active && (!state || state === "connected" || state === "quota_low");
 }
 
-export type UsageRow = { id: string; title: string; provider?: string; windows: UsageWindow[]; balances: UsageBalance[] };
+export type UsageRow = { id: string; title: string; provider?: string; active: boolean; windows: UsageWindow[]; balances: UsageBalance[] };
 
 // The accounts that report usage, highest figure first, then by name, so the order holds between loads.
 // An expired sign-in is an alert instead. Any other account without windows or a balance says nothing, so it is left
-// out, whatever its cause: rate limits and failed readings pass by themselves. So is a sign-in that accounts.list does
-// not call active.
+// out, whatever its cause: rate limits and failed readings pass by themselves. An inactive account still reports, and
+// Home keeps it in Hidden.
 export function usageRows(accounts: AccountUsage[], catalog?: AccountsListResponse): UsageRow[] {
   const peak = (row: UsageRow) => Math.max(-1, ...row.windows.map(usedOf));
   return accounts.flatMap(account => {
     const expired = account.cause === "sign_in_expired";
     const windows = expired ? [] : visibleWindows(account.windows ?? []);
     const balances = expired ? [] : account.balances ?? [];
-    if ((!windows.length && !balances.length) || !active(account, catalog)) return [];
+    if (!windows.length && !balances.length) return [];
     const { title, provider } = named(account, catalog);
-    return [{ id: account.accountId ?? "", title, provider, windows, balances }];
+    return [{ id: account.accountId ?? "", title, provider, active: active(account, catalog), windows, balances }];
   }).sort((a, b) => peak(b) - peak(a) || a.title.localeCompare(b.title));
 }
 
@@ -115,8 +116,9 @@ export function outOfLimit(row: Pick<UsageRow, "windows" | "balances">, now: num
 }
 
 // What an account the owner hid waits for: the reset of its busiest window, or a balance above today's. Without
-// either, it stays hidden until the owner shows it.
-export type UsageHold = { until?: string; balances?: Record<string, number> };
+// either, it stays hidden until the owner shows it. shown is the opposite choice, for an inactive account the owner
+// wants on Home; it lives with the holds so one saved record says where each card goes.
+export type UsageHold = { until?: string; balances?: Record<string, number>; shown?: boolean };
 
 export function holdFor(row: Pick<UsageRow, "windows" | "balances">, now: number): UsageHold {
   const [next] = row.windows.filter(w => Date.parse(w.resetsAt) > now).sort((a, b) => usedOf(b) - usedOf(a));
@@ -128,6 +130,14 @@ export function holding(row: Pick<UsageRow, "balances">, hold: UsageHold, now: n
   if (hold.until) return Date.parse(hold.until) > now;
   const { balances } = hold;
   return !balances || row.balances.every(b => Number(b.amount) <= (balances[b.currency] ?? Infinity));
+}
+
+// Whether a card waits in Hidden. A spent account does, whatever the owner chose, since it takes no work. A hold by hand
+// beats active until its reset or balance rise releases it. Otherwise only an active account shows, or one the owner chose.
+export function tucked(row: Pick<UsageRow, "active" | "windows" | "balances">, hold: UsageHold | undefined, now: number): boolean {
+  if (outOfLimit(row, now)) return true;
+  if (hold?.shown) return false;
+  return (hold !== undefined && holding(row, hold, now)) || !row.active;
 }
 
 export const hideLabel = (hold: UsageHold) => hold.until ? "Hide until it resets" : hold.balances ? "Hide until topped up" : "Hide";
