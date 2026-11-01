@@ -386,8 +386,8 @@ func (s *Service) finishRun(ctx context.Context, run store.HookRun, sub store.Su
 	return s.store.FinishRun(ctx, run, outcome, events...)
 }
 
-// HookPost posts in a Run's room. It takes text and mentions, and with no mention it goes to root. A Run has no
-// other way to act on the room, so a script cannot use it to reach anything a post cannot.
+// HookPost posts in a Run's room. It takes text and mentions, and with no mention it goes to root. Apart from
+// HookTrack, a Run has no other way to act on the room, so a script cannot use it to reach anything a post cannot.
 func (s *Service) HookPost(ctx context.Context, sub contract.SubscriptionID, id contract.RoomID, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
 	if id == "" {
 		return contract.PostResponse{}, invalid("a machine run has no room to post in")
