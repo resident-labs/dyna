@@ -78,7 +78,7 @@
   {#if failure}<p class="error" role="alert">{failure}</p>{/if}
   {#if attempted && !profile && loaded}<p class="error" role="alert">Choose a profile.</p>{/if}
   <div class="actions">
-    <button class="primary" type="submit" disabled={busy || !loaded || !!problem || !profile}>{busy ? "Starting…" : "Start session"} <kbd>Ctrl Enter</kbd></button>
+    <button class="primary" type="submit" aria-keyshortcuts="Control+Enter Meta+Enter" disabled={busy || !loaded || !!problem || !profile}>{busy ? "Starting…" : "Start session"}</button>
     {#if problem}<span class="muted">Fix the name to start.</span>{:else if !profile}<span class="muted">Pick a profile to start.</span>{/if}
     <button type="button" onclick={onclose} disabled={busy}>Cancel</button>
   </div>
@@ -108,8 +108,6 @@
   .actions button { padding: 9px 14px; border-radius: 6px; }
   .actions button:not(.primary):hover { background: var(--hover); }
   .primary { background: var(--focus); color: var(--bg); font-weight: 600; }
-  kbd { margin-left: 6px; padding: 1px 4px; border: 1px solid currentColor; border-radius: 3px; font-size: 11px; font-weight: 400; }
-  @media (pointer: coarse) { kbd { display: none; } }
   @media (max-width: 640px) {
     .pagebar { display: none; }
     .back span { display: none; }
