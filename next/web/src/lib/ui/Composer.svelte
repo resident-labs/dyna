@@ -240,6 +240,7 @@
     .quote, .tray, .file-summary, .note, .mentions { grid-column: 1 / -1; }
     .note.over { grid-row: 5; margin: 4px 0 0; }
     .inputline { display: flex; align-items: center; gap: 6px; min-width: 0; grid-column: 2; grid-row: 4; }
+    textarea::placeholder { white-space: nowrap; text-overflow: ellipsis; }
     textarea { min-width: 0; flex: 1; min-height: 40px; max-height: 30vh; padding: 8px 0; }
     .actions { display: contents; }
     .actions .attach { grid-column: 1; grid-row: 4; }
@@ -251,7 +252,7 @@
   .remove { width: 24px; height: 24px; border-radius: 6px; }
   .attach:hover, .remove:hover { background: var(--hover); color: var(--text); }
   @media (hover: none) { .attach { width: 40px; height: 40px; } }
-  @media (pointer: coarse) { .remove { width: 44px; height: 44px; } .retry { min-height: 44px; display: inline-flex; align-items: center; } }
+  @media (pointer: coarse) { .remove { width: 44px; height: 44px; } .retry { min-height: 44px; margin-block: -14px; display: inline-flex; align-items: center; } }
   .send { background: var(--focus); color: var(--bg); }
   .send:disabled { background: var(--selected); color: var(--muted); cursor: default; }
   .stop { background: var(--text); }
