@@ -13,7 +13,6 @@
   let loaded = $state(false), failed = $state(false), busy = $state(false);
   let query = $state(""), expanded = $state(false), label = $state(""), secret = $state(""), redirect = $state("");
   let keyFlow = $state(false);
-  let flow = $derived(keyFlow ? "key" : selected?.flows?.[0]);
   let attempt: AccountsConnectResponse | undefined = $state();
   let connectState: "idle" | "pending" | "failed" | "expired" = $state("idle");
   let reconnectId: string | undefined = $state(), error = $state(""), copied = $state(false), opened = $state(false), now = $state(Date.now());
@@ -22,6 +21,7 @@
   let adding = $derived(path === base + "/add" || path.startsWith(base + "/add/"));
   let providerId = $derived(path.startsWith(base + "/add/") ? decodeURIComponent(path.slice((base + "/add/").length)) : "");
   let selected = $derived(providers.find(p => p.id === providerId) ?? (!phone && adding && !providerId ? providers[0] : undefined));
+  let flow = $derived(keyFlow ? "key" : selected?.flows?.[0]);
   let accountId = $derived(path.startsWith(base + "/account/") ? decodeURIComponent(path.slice((base + "/account/").length)) : "");
   let account = $derived(accounts.find(a => a.id === accountId));
   let accountProviders = $derived([...providers, ...accounts.filter(a => !providers.some(p => p.id === a.provider)).filter((a, i, all) => all.findIndex(b => b.provider === a.provider) === i).map(a => ({ id: a.provider, displayName: a.provider, flows: [a.flow], models: [], connectFlow: a.flow, connectMethod: a.flow === "key" ? "key" as const : "oauth" as const }))]);
