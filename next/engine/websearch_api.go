@@ -176,7 +176,9 @@ func (s *Service) WebSearch(ctx context.Context, caller contract.Principal, req 
 		message := websearch.SafeMessage(err)
 		if errors.Is(err, websearch.ErrNotSignedIn) {
 			reason, message = contract.WebSearchNotSignedIn, ""
-		} else if !websearch.AuthFailure(err) {
+		} else if websearch.AuthFailure(err) {
+			reason = contract.WebSearchNotSignedIn
+		} else {
 			s.searchMu.Lock()
 			if s.searchFailures == nil {
 				s.searchFailures = make(map[string]time.Time)
