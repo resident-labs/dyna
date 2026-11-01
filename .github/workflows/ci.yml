@@ -135,7 +135,7 @@ jobs:
     name: next-pi
     needs: [changes]
     if: needs.changes.outputs.next_pi == 'true'
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       NODE_OPTIONS: --experimental-strip-types
