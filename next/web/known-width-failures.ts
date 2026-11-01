@@ -17,14 +17,12 @@ export function staleWidthFailures(baseline: readonly WidthFailure[], seen: Read
 }
 
 // Temporary baseline. Sweep PRs remove each issue when they fix it.
-const profileElement = "div.table.svelte-1a3prwa";
-const emptyProfile = "TasteDiagnosticsIntelligenceThriftLimits fakeClaude Sonnet 5.5 · medium thinking Not rated  –––– No ";
-const fullProfile = "TasteDiagnosticsIntelligenceThriftLimits fakeClaude Sonnet 5.5 · medium thinking Taste 8 · Diagnosti";
 export const knownWidthFailures: readonly WidthFailure[] = [
-  { fixture: "empty", route: "/settings/profiles", width: 768, element: profileElement, text: emptyProfile },
-  { fixture: "empty", route: "/settings/profiles", width: 920, element: profileElement, text: emptyProfile },
-  { fixture: "full", route: "/settings/profiles", width: 768, element: profileElement, text: fullProfile },
-  { fixture: "full", route: "/settings/profiles", width: 920, element: profileElement, text: fullProfile },
+  { fixture: "empty", route: "/r/:room/s/:session", width: 768, element: "strong.svelte-1n46o8q", text: "root" },
+  { fixture: "full", route: "/r/:room/s/:session", width: 768, element: "strong.svelte-1n46o8q", text: "root" },
+  { fixture: "full", route: "/r/:room/s/:session", width: 768, element: "strong.svelte-1n46o8q", text: "lead-web" },
+  { fixture: "full", route: "/r/:room/s/:session", width: 768, element: "strong.svelte-1n46o8q", text: "builder-feed" },
+  { fixture: "full", route: "/r/:room/s/:session", width: 768, element: "strong.svelte-1n46o8q", text: "sync-review" },
   { fixture: "full", route: "/settings/devices", width: 390, element: "span.line.svelte-11q8u0f", text: "Expires in 2 days · Seen 28 days ago · Read, operate" },
   { fixture: "full", route: "/r/:room", width: 768, element: "span.title.svelte-1cx619", text: "asks for host access", occurrences: 2 },
 ];
