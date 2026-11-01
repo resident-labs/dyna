@@ -289,6 +289,25 @@
   let feed: HTMLDivElement | undefined = $state();
   let page: HTMLElement | undefined = $state();
   let composer: HTMLTextAreaElement | undefined = $state();
+  let composerBox: Composer | undefined = $state();
+  // Files dragged over the center column show a muted outline. A drop adds them to the open draft while the composer shows.
+  let dropping = $state(false);
+  const hasFiles = (event: DragEvent) => !!event.dataTransfer?.types.includes("Files");
+  function dragOver(event: DragEvent) {
+    if (!composerBox || !hasFiles(event)) return;
+    event.preventDefault();
+    dropping = true;
+  }
+  function dragLeave(event: DragEvent & { currentTarget: HTMLElement }) {
+    if (!event.currentTarget.contains(event.relatedTarget instanceof Node ? event.relatedTarget : null)) dropping = false;
+  }
+  function drop(event: DragEvent) {
+    dropping = false;
+    if (!composerBox || !hasFiles(event)) return;
+    event.preventDefault();
+    composerBox.addFiles(event.dataTransfer?.files ?? []);
+    composer?.focus();
+  }
   let members: HTMLElement | undefined = $state();
   let computer: HTMLElement | undefined = $state();
   let terminals: TermDock | undefined = $state();
@@ -621,7 +640,7 @@
   </aside>
   {#if drawer || (panel && phone.current)}<button type="button" class="scrim" tabindex="-1" aria-label={drawer ? "Close the menu" : room ? "Close the sessions" : "Close the active rooms"}
     onclick={() => void (drawer ? showDrawer(false, true, true) : showPanel(false, true))}></button>{/if}
-  <main bind:clientWidth={mainWidth} class:header-tight={mainWidth <= 1000} class:header-narrow={mainWidth <= 600} inert={drawer || (panel && phone.current) || covered || inSettings}>
+  <main bind:clientWidth={mainWidth} class:header-tight={mainWidth <= 1000} class:header-narrow={mainWidth <= 600} class:dropping ondragover={dragOver} ondragleave={dragLeave} ondrop={drop} inert={drawer || (panel && phone.current) || covered || inSettings}>
     {#if (section === "new-room" || firstRoom)}<NewRoom {rooms} first={firstRoom} onclose={() => void closeSection()} oncreated={id => { void attention.created(id).then(() => { firstRoom = false; openLocation(id); }); }} />
     {:else if section === "new-session" && room && store && store.ready}<NewSession {room} {roomName} sessions={[...store.sessions.values()]} onclose={() => void closeSection()} onstarted={(id, brief) => { startingBriefs[id] = brief; openLocation(room!, id); }} />
     {:else if section === "instructions" && room && store && !unavailable}<Instructions {room} {roomName} rooms={rooms.length} sessions={store.sessions.size} onclose={() => void closeSection()} />
@@ -670,7 +689,7 @@
       {#if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
         {#if attention.can("operate")}<button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button>{/if}</p>
       {:else if store && !session}<WorkingLine {store} {home} />{/if}
-      {#if attention.can("operate")}<Composer bind:element={composer} bind:value={() => savedDrafts.draft(key, drafts[key]),text => { drafts[key] = text; savedDrafts.save(key, text); clearReplacement(); }} onsend={send} thread={!!session} placeholder={"Message " + title}
+      {#if attention.can("operate")}<Composer bind:this={composerBox} bind:element={composer} bind:value={() => savedDrafts.draft(key, drafts[key]),text => { drafts[key] = text; savedDrafts.save(key, text); clearReplacement(); }} onsend={send} thread={!!session} placeholder={"Message " + title}
         quote={quotes[key]} replacement={replaced[key]} onundo={() => { quotes[key] = undoForward({ quote: quotes[key], previous: replaced[key] }).quote; clearReplacement(); }} onunquote={() => { quotes[key] = undefined; clearReplacement(); }} sessions={mentions} files={files(key)} {stop} />
       {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
     {/if}
@@ -754,6 +773,8 @@
   @media (max-width: 760px) { .crumb, .crumb + .count { display: none; } }
   @media (max-width: 760px) { main .tool { justify-content: center; width: 40px; height: 40px; padding: 0; border: 0; } }
   main { position: relative; }
+  /* A muted dashed outline marks the column that takes a dropped file; it sits inside the column's edge. */
+  main.dropping { outline: 1px dashed var(--line); outline-offset: -8px; border-radius: 8px; }
   .terminal-holder:not([hidden]) { display: contents; }
   :where(main.header-tight) .tool { justify-content: center; width: 28px; padding: 0; }
   /* One quiet line of the working line's size and edge; only its Resume acts. */
