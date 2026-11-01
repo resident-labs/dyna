@@ -159,7 +159,7 @@ func TestOAuthImportRejectsSession(t *testing.T) {
 }
 
 func TestOAuthImportProviders(t *testing.T) {
-	for _, provider := range []contract.AccountProvider{contract.ProviderAnthropic, contract.ProviderOpenAI, contract.ProviderKimi, contract.ProviderXAI} {
+	for _, provider := range []contract.AccountProvider{contract.ProviderAnthropic, contract.ProviderOpenAI, contract.ProviderKimi, contract.ProviderXAI, contract.ProviderMeta} {
 		if _, ok := model.OAuthProxyProvider(provider); !ok {
 			t.Fatalf("%s has no proxy provider", provider)
 		}

@@ -139,6 +139,7 @@ const (
 	ProviderZAI        AccountProvider = "zai"
 	ProviderOpencodeGo AccountProvider = "opencode-go"
 	ProviderDeepSeek   AccountProvider = "deepseek"
+	ProviderMeta       AccountProvider = "meta"
 )
 
 // AccountLabel holds no credential; the owner signs in again in CLIProxyAPI.

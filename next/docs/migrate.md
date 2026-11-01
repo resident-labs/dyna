@@ -193,14 +193,15 @@ The exporter report must identify any remaining gap for a lead decision.
 | opus-rewrite | `opus` | `claude-opus-5-5` |
 | sonnet | `sonnet` | `claude-sonnet-5-5` |
 | terra | `openai-codex/gpt-6.1-terra` | `gpt-6.1-terra` |
-| wonder-full | `meta/muse-wonder-full-1.0` | dropped: Muse is unsupported |
+| wonder-full | `meta/muse-wonder-full-1.0` | `muse-wonder-full-1.0` |
 
 The exporter carries the thinking level, including `xhigh` for opus-rewrite.
 The real import maps `ProfileBundle` fields `description`, `taste`, `diagnostics`, `intelligence` and `cost` to the matching atomic profile config fields.
 The real import must check each profile model ID against the supervised proxy's live model list, without reading its config, and refuse each missing model by name. The offline dry run lists mapped IDs as checked at import.
 The six skipped profiles (deepseek, fable, grok, kimi-max, mimo and sol)
-were disabled in the captured catalog. The unsupported Muse profile is a
-report and handoff line, not a cutover blocker.
+were disabled in the captured catalog. v2 routes Muse through a connected Meta
+account since 2026-11-01. The rehearsal below predates that and still reports
+the Muse profile as unsupported.
 
 Subscription source count is zero by policy: no v1 shell hook maps to a typed
 subscription. The five unsupported hooks remain handoff records. The verifier
