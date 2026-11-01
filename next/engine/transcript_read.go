@@ -51,6 +51,9 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 	if err != nil {
 		return response, failure(err)
 	}
+	if reader.Steers, err = s.store.TranscriptSteers(ctx, req.Session); err != nil {
+		return response, failure(err)
+	}
 	// Backfill pre-index files once, under the same lock as appends.
 	s.transcriptMu.Lock()
 	for _, f := range files {
@@ -105,25 +108,10 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			if req.Item != "" && req.Item != "input:"+string(input.ID) {
 				continue
 			}
-			data, err := json.Marshal(input.Body)
+			value, home, attachments, err := transcriptInputBody(input)
 			if err != nil {
 				return response, failure(err)
 			}
-			value := string(data)
-			var home *contract.Conversation
-			var attachments []contract.Attachment
-			if body, ok := input.Body.(contract.PostCreated); ok {
-				value = body.Text
-				home = &body.Home
-				attachments = sanitizeTranscriptAttachments(body.Attachments)
-			}
-			if body, ok := input.Body.(contract.QuestionAnswered); ok {
-				if value, err = room.RenderDelivery(body); err != nil {
-					return response, failure(err)
-				}
-				home = &contract.Conversation{Kind: contract.ConversationDM, Session: body.Session}
-			}
-			value = harness.Mask(value)
 			if req.Item != "" {
 				return transcriptChunk(response, value, req.Offset)
 			}
@@ -208,6 +196,19 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 						t.OlderItems, t.NextItem = true, req.Cursor+len(pageItems)
 					} else {
 						t.MandatoryItems, t.OlderItems = true, true
+					}
+				}
+
+				for i := range pageItems {
+					if pageItems[i].Delivery == 0 {
+						continue
+					}
+					event, err := s.store.Event(ctx, int64(pageItems[i].Delivery))
+					if err != nil {
+						return response, failure(err)
+					}
+					if err := applyTranscriptSteer(&pageItems[i], event, req.Item != ""); err != nil {
+						return response, failure(err)
 					}
 				}
 
@@ -393,6 +394,44 @@ func applyTranscriptPost(item *contract.TranscriptItem, event contract.Event) {
 	home := post.Home
 	item.Home = &home
 	item.Attachments = sanitizeTranscriptAttachments(post.Attachments)
+}
+
+// transcriptInputBody returns the masked text of an event a session read, with where it was sent and what it carried.
+func transcriptInputBody(input contract.Event) (string, *contract.Conversation, []contract.Attachment, error) {
+	data, err := json.Marshal(input.Body)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	value := string(data)
+	var home *contract.Conversation
+	var attachments []contract.Attachment
+	if body, ok := input.Body.(contract.PostCreated); ok {
+		value = body.Text
+		home = &body.Home
+		attachments = sanitizeTranscriptAttachments(body.Attachments)
+	}
+	if body, ok := input.Body.(contract.QuestionAnswered); ok {
+		if value, err = room.RenderDelivery(body); err != nil {
+			return "", nil, nil, err
+		}
+		home = &contract.Conversation{Kind: contract.ConversationDM, Session: body.Session}
+	}
+	return harness.Mask(value), home, attachments, nil
+}
+
+// applyTranscriptSteer fills a steer from its event. Pi's record holds the frame the session read, not what the owner wrote.
+func applyTranscriptSteer(item *pi.TranscriptItem, event contract.Event, full bool) error {
+	value, home, attachments, err := transcriptInputBody(event)
+	if err != nil {
+		return err
+	}
+	from := event.From
+	item.Event, item.Type, item.Room, item.Seq, item.At, item.From, item.Home, item.Attachments = event.ID, event.Body.EventType(), event.Room, event.Seq, event.Time, &from, home, attachments
+	item.Text, item.More = value, false
+	if !full {
+		item.Text, item.More = clipTranscript(value, 4096), len(value) > 4096
+	}
+	return nil
 }
 
 func sanitizeTranscriptAttachments(attachments []contract.Attachment) []contract.Attachment {

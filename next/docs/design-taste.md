@@ -134,6 +134,9 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 ### Feed and messages
 
 - Lay out posts as Discord does: no bubbles and no borders, left-aligned, with one name line per run of posts from one sender. [spec 5.13] [Discord]
+- In a DM, show another session's message as a left bubble that mirrors the owner's right one: same radius, padding and raised background, with its small avatar, linked name and muted time inside at the top. The session's own text has no bubble. Fold a long message after a few lines with a quiet "Show more". [owner, 2026-11-01] [T3 `CollapsibleUserMessageBody`]
+- In a DM, show an engine notice as one muted line with a small icon, never a bubble: check-ins, failures, PR wakes, hook results. A type this build does not know states its type. Nothing claims "Started work" unless a session started. [owner, 2026-11-01] [T3 `notification` rows]
+- Place a message a running turn read where it read it, between the work it split. The top row keeps the whole turn's time, and the work after it folds under its own "Continued for" row. "Queued" shows until the transcript holds it. [owner, 2026-11-01] [T3 `steerSegments`]
 - Show a hover bar on the hovered or keyboard-focused post, with Forward and Copy only. [owner]
 - Float a slim hover bar over the top-right corner of the post, straddling its top edge: 28 px high, a 6 px radius, a hairline and almost no shadow. Under the New line it stays inside the post. Showing it never moves the post. [v1 PostActions] [Discord] [owner, 2026-11-01]
 - Run a post's hover and mention washes across the whole feed pane, and keep the gap above a run inside the row, so that washes on neighboring rows meet with no band. [owner, 2026-11-01] [Discord]
