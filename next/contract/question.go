@@ -27,11 +27,19 @@ type Question struct {
 	Answer   string        `json:"answer,omitempty"`
 	Asked    time.Time     `json:"asked"`
 	Answered time.Time     `json:"answered,omitzero"`
+	// Meanwhile is what the session does while it waits, or with Blocked, why it can do nothing. A question from before
+	// it was required has none.
+	Meanwhile string `json:"meanwhile,omitempty"`
+	Blocked   bool   `json:"blocked,omitempty"`
 }
 
+// QuestionAskRequest needs Meanwhile: a question never becomes a stop. Blocked says nothing safe is left to do until the
+// answer, and Meanwhile then says why.
 type QuestionAskRequest struct {
-	Text     string `json:"text"`
-	ClientID string `json:"clientId,omitempty"`
+	Text      string `json:"text"`
+	Meanwhile string `json:"meanwhile"`
+	Blocked   bool   `json:"blocked,omitempty"`
+	ClientID  string `json:"clientId,omitempty"`
 }
 type QuestionAskResponse struct {
 	Question Question `json:"question"`
@@ -53,9 +61,11 @@ type QuestionListResponse struct {
 }
 
 type QuestionAsked struct {
-	ID      QuestionID `json:"id"`
-	Session SessionID  `json:"session"`
-	Text    string     `json:"text"`
+	ID        QuestionID `json:"id"`
+	Session   SessionID  `json:"session"`
+	Text      string     `json:"text"`
+	Meanwhile string     `json:"meanwhile,omitempty"`
+	Blocked   bool       `json:"blocked,omitempty"`
 }
 
 // QuestionAnswered carries the question too, so the delivery reads alone.

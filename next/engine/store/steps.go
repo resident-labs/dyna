@@ -6,11 +6,12 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 65
+const schemaVersion = 66
 
 // LEGACY(v1-transfer): steps 42 to 63, which only upgrade stores older than schema 64. Remove after the transfer.
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	65: {`ALTER TABLE questions ADD COLUMN meanwhile TEXT NOT NULL DEFAULT ''`, `ALTER TABLE questions ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0`},
 	64: {
 		// A tracked PR may sit on a repository no room lists, so pr_owners drops that key. Rows from before tracking start
 		// as a baseline: the first poll records them without a wake, however long ago they merged.

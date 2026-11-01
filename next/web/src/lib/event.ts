@@ -58,7 +58,7 @@ const bodies: Record<string, Check> = {
   "op.requested": object({ id: string, kind: string, by: principal, class: oneOf("auto", "owner"), card, expires: string }),
   "op.decided": object({ id: string, state, decision: object({ by: principal, approved: boolean, reason: optional(string), at: string }) }),
   "op.ran": object({ id: string, state, result: object({ exitCode: number, cause, error: optional(string), output: optional(string), outputFile: optional(string) }) }),
-  "question.asked": object({ id: string, session: string, text: string }),
+  "question.asked": object({ id: string, session: string, text: string, meanwhile: optional(string), blocked: optional(boolean) }),
   "question.answered": object({ id: string, session: string, question: string, answer: string }),
   "question.withdrawn": object({ id: string, session: string }),
   "shell.job.ended": object({ session: string, job: string, exitCode: number, tail: string, description: optional(string), end: jobEnd }),
@@ -87,7 +87,7 @@ const bodies: Record<string, Check> = {
   "goal.item_changed": object({ goal: string, item: number, text: string, state: oneOf("open", "done", "dropped") }),
   "goal.ended": object({ goal: string, session: optional(string), state: oneOf("active", "done", "dropped"), summary: string }),
   "checkin.due": object({ session: string, children: nullable(array(object({ session: string, name: string, parent: optional(string), state: oneOf("idle", "stopped", "blocked"), reason: optional(string),
-    idle: number, silent: optional(boolean), goal: string, text: string, open: number }))) }),
+    idle: number, silent: optional(boolean), asking: optional(boolean), goal: string, text: string, open: number }))) }),
   "image.built": object({ host: string, repo: string, name: string, tag: string, seconds: number }),
   "image.failed": object({ host: string, repo: string, name: string, tag: string, reason: string, logTail: string }),
 };

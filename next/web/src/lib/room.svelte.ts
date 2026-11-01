@@ -370,7 +370,7 @@ export class RoomStore {
         if (failed(event.body)) this.failJob(event.body.session, event.body.job, event.seq);
         break;
       case "op.requested": this.requests.set(event.body.id, { ...event.body, state: "pending" }); break;
-      case "question.asked": this.questions.set(event.body.id, { id: event.body.id, room: event.room ?? this.room, session: event.body.session, text: event.body.text, state: "pending", asked: event.at }); break;
+      case "question.asked": this.questions.set(event.body.id, { id: event.body.id, room: event.room ?? this.room, session: event.body.session, text: event.body.text, meanwhile: event.body.meanwhile, blocked: event.body.blocked, state: "pending", asked: event.at }); break;
       case "question.answered": this.questions.set(event.body.id, { id: event.body.id, room: event.room ?? this.room, session: event.body.session, text: event.body.question, state: "answered", answer: event.body.answer, asked: this.questions.get(event.body.id)?.asked ?? event.at, answered: event.at }); break;
       case "question.withdrawn": {
         const known = this.questions.get(event.body.id);

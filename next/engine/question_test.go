@@ -29,7 +29,7 @@ func grantAsk(t *testing.T, s *Service, ctx context.Context, room contract.RoomI
 
 func ask(t *testing.T, s *Service, ctx context.Context, id contract.SessionID, text string) contract.Question {
 	t.Helper()
-	asked, problem := s.QuestionAsk(ctx, asSession(id), contract.QuestionAskRequest{Text: text})
+	asked, problem := s.QuestionAsk(ctx, asSession(id), contract.QuestionAskRequest{Text: text, Meanwhile: "the next item"})
 	if problem != nil {
 		t.Fatal(problem)
 	}
@@ -113,7 +113,7 @@ func TestRootAsksAndTheAnswerWakesIt(t *testing.T) {
 
 func TestAskNeedsTheGrant(t *testing.T) {
 	s, room, worker, ctx := setup(t)
-	if _, problem := s.QuestionAsk(ctx, asSession(worker), contract.QuestionAskRequest{Text: "may I?"}); problem == nil || problem.Code != contract.ErrNoGrant {
+	if _, problem := s.QuestionAsk(ctx, asSession(worker), contract.QuestionAskRequest{Text: "may I?", Meanwhile: "the next item"}); problem == nil || problem.Code != contract.ErrNoGrant {
 		t.Fatalf("no grant: %v", problem)
 	}
 	if got := pendingQuestions(t, s, ctx, room); len(got) != 0 {
@@ -121,7 +121,7 @@ func TestAskNeedsTheGrant(t *testing.T) {
 	}
 	grantAsk(t, s, ctx, room, worker)
 	ask(t, s, ctx, worker, "may I?")
-	if _, problem := s.QuestionAsk(ctx, questionOwner, contract.QuestionAskRequest{Text: "owner"}); problem == nil || problem.Code != contract.ErrForbidden {
+	if _, problem := s.QuestionAsk(ctx, questionOwner, contract.QuestionAskRequest{Text: "owner", Meanwhile: "the next item"}); problem == nil || problem.Code != contract.ErrForbidden {
 		t.Fatalf("owner asked: %v", problem)
 	}
 	if _, problem := s.QuestionAnswer(ctx, asSession(worker), contract.QuestionAnswerRequest{ID: "q_x", Text: "self"}); problem == nil || problem.Code != contract.ErrForbidden {
@@ -132,19 +132,57 @@ func TestAskNeedsTheGrant(t *testing.T) {
 func TestAskRefusesEmptyAndOversizedText(t *testing.T) {
 	s, _, root, ctx := setupRoot(t)
 	for _, text := range []string{"  ", strings.Repeat("x", maxQuestionChars+1)} {
-		if _, problem := s.QuestionAsk(ctx, asSession(root), contract.QuestionAskRequest{Text: text}); problem == nil || problem.Code != contract.ErrInvalid {
+		if _, problem := s.QuestionAsk(ctx, asSession(root), contract.QuestionAskRequest{Text: text, Meanwhile: "the next item"}); problem == nil || problem.Code != contract.ErrInvalid {
 			t.Fatalf("text of %d: %v", len(text), problem)
 		}
 	}
 }
 
-func TestAskRetryReturnsTheFirstQuestion(t *testing.T) {
+func TestAskRefusesABlankOrOversizedMeanwhile(t *testing.T) {
 	s, room, root, ctx := setupRoot(t)
-	first, problem := s.QuestionAsk(ctx, asSession(root), contract.QuestionAskRequest{Text: "once", ClientID: "key"})
+	for _, blocked := range []bool{false, true} {
+		for _, meanwhile := range []string{"", " \n\t ", strings.Repeat("x", maxQuestionChars+1)} {
+			_, problem := s.QuestionAsk(ctx, asSession(root), contract.QuestionAskRequest{Text: "Which?", Meanwhile: meanwhile, Blocked: blocked})
+			if problem == nil || problem.Code != contract.ErrInvalid || !strings.Contains(problem.Message, "meanwhile") {
+				t.Fatalf("meanwhile of %d, blocked %v: %v", len(meanwhile), blocked, problem)
+			}
+		}
+	}
+	if got := pendingQuestions(t, s, ctx, room); len(got) != 0 {
+		t.Fatalf("refused question stored: %+v", got)
+	}
+}
+
+func TestAskKeepsMeanwhileAndBlocked(t *testing.T) {
+	s, room, root, ctx := setupRoot(t)
+	asked, problem := s.QuestionAsk(ctx, asSession(root), contract.QuestionAskRequest{Text: "Which key?", Meanwhile: "  every step needs the key  ", Blocked: true})
 	if problem != nil {
 		t.Fatal(problem)
 	}
-	second, problem := s.QuestionAsk(ctx, asSession(root), contract.QuestionAskRequest{Text: "once", ClientID: "key"})
+	if q := asked.Question; q.Meanwhile != "every step needs the key" || !q.Blocked {
+		t.Fatalf("question: %+v", q)
+	}
+	got := pendingQuestions(t, s, ctx, room)
+	if len(got) != 1 || got[0].Meanwhile != "every step needs the key" || !got[0].Blocked {
+		t.Fatalf("listed: %+v", got)
+	}
+	dm := contract.Conversation{Kind: contract.ConversationDM, Session: root}
+	page, problem := s.EventsList(ctx, questionOwner, contract.EventsListRequest{Room: room, Home: &dm})
+	if problem != nil || len(page.Events) != 1 {
+		t.Fatalf("DM events: %+v %v", page, problem)
+	}
+	if body, ok := page.Events[0].Body.(contract.QuestionAsked); !ok || body.Meanwhile != "every step needs the key" || !body.Blocked {
+		t.Fatalf("event: %+v", page.Events[0])
+	}
+}
+
+func TestAskRetryReturnsTheFirstQuestion(t *testing.T) {
+	s, room, root, ctx := setupRoot(t)
+	first, problem := s.QuestionAsk(ctx, asSession(root), contract.QuestionAskRequest{Text: "once", Meanwhile: "the next item", ClientID: "key"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	second, problem := s.QuestionAsk(ctx, asSession(root), contract.QuestionAskRequest{Text: "once", Meanwhile: "the next item", ClientID: "key"})
 	if problem != nil || second.Question.ID != first.Question.ID {
 		t.Fatalf("retry: %+v %v", second, problem)
 	}
@@ -189,7 +227,7 @@ func TestQuestionSurvivesAnEngineRestart(t *testing.T) {
 	after := New(st, fakeBoxes{}, fakeProfiles{}, now)
 	resetLifecycle(after)
 	got := pendingQuestions(t, after, ctx, created.Room)
-	if len(got) != 1 || got[0].ID != q.ID || got[0].Text != "still there?" {
+	if len(got) != 1 || got[0].ID != q.ID || got[0].Text != "still there?" || got[0].Meanwhile != "the next item" {
 		t.Fatalf("after restart: %+v", got)
 	}
 	answer(t, after, ctx, q.ID, "yes")
@@ -228,7 +266,7 @@ func TestClosingASessionWithdrawsItsQuestion(t *testing.T) {
 			t.Fatalf("answer after close: %v", problem)
 		}
 	}
-	if _, problem := s.QuestionAsk(ctx, asSession(worker), contract.QuestionAskRequest{Text: "more"}); problem == nil || problem.Code != contract.ErrSessionClosing {
+	if _, problem := s.QuestionAsk(ctx, asSession(worker), contract.QuestionAskRequest{Text: "more", Meanwhile: "the next item"}); problem == nil || problem.Code != contract.ErrSessionClosing {
 		t.Fatalf("ask while closing: %v", problem)
 	}
 }

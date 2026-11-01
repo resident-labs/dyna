@@ -172,6 +172,9 @@ func renderCheckin(b contract.CheckinDue) string {
 		if child.Silent {
 			line += ", last turn ended with no reply"
 		}
+		if child.Asking {
+			line += ", has an open question for the owner"
+		}
 		line += fmt.Sprintf(". %s %q", child.Goal, clip(child.Text, 100))
 		if child.Open > 0 {
 			line += fmt.Sprintf(", %d open items", child.Open)
