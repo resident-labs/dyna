@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountAlerts, balancesText, busiestWindow, hideLabel, holdFor, holding, limitReached, outOfLimit, usageRows, visibleWindows, windowLabel, windowMeter } from "./usage.ts";
+import { accountAlerts, balancesText, busiestWindow, hideLabel, holdFor, holding, limitReached, outOfLimit, tucked, usageRows, visibleWindows, windowLabel, windowMeter } from "./usage.ts";
 import type { AccountUsage, AccountsListResponse, UsageWindow } from "./contract.gen.ts";
 
 test("labels each window and hides only unused model-specific windows", () => {
@@ -25,7 +25,7 @@ test("hides a model-specific window that repeats the account's own, and keeps on
 
 const windowAt = (usedPercent: number): UsageWindow => ({ name: "week", kind: "weekly", usedPercent, seconds: 604800, resetsAt: "" });
 const usageOf = (accountId: string, label: string, provider: string, windows: UsageWindow[] | null = [windowAt(10)], cause: AccountUsage["cause"] = ""): AccountUsage =>
-  ({ accountId, provider, label, windows, cause });
+  ({ accountId, provider, label, active: true, windows, cause });
 const catalog: AccountsListResponse = {
   providers: [
     { id: "anthropic", displayName: "Claude", connectMethod: "oauth", connectFlow: "callback" },
@@ -96,10 +96,30 @@ test("An account is out of limit with a spent window or no credit in any balance
   assert.equal(out([]), false);
 });
 
-test("Usage shows only active sign-ins, and an account the list does not know", () => {
+test("Usage keeps every account that reports, and active needs both routing and a good sign-in", () => {
   const list: AccountsListResponse = { providers: [], accounts: (["connected", "quota_low", "unknown", "failed"] as const).map(state => ({ id: state, provider: "anthropic", label: "", rooms: null, state })) };
   const rows = usageRows(["connected", "quota_low", "unknown", "failed", "new"].map(id => usageOf(id, id, "claude")), list);
-  assert.deepEqual(rows.map(row => row.id).sort(), ["connected", "new", "quota_low"]);
+  assert.deepEqual(rows.map(row => row.id).sort(), ["connected", "failed", "new", "quota_low", "unknown"]);
+  assert.deepEqual(rows.filter(row => row.active).map(row => row.id).sort(), ["connected", "new", "quota_low"]);
+  const waiting = usageRows([{ ...usageOf("connected", "connected", "claude"), active: false }], list);
+  assert.equal(waiting[0].active, false);
+});
+
+test("Only active accounts show, unless the owner chose otherwise", () => {
+  const now = Date.parse("2026-10-31T00:00:00Z");
+  const row = (active: boolean, usedPercent = 10) => ({ active, windows: [{ ...windowAt(usedPercent), resetsAt: "2026-11-02T00:00:00Z" }], balances: [] });
+  const later = { until: "2026-11-02T00:00:00Z" }, past = { until: "2026-10-30T00:00:00Z" };
+  assert.equal(tucked(row(true), undefined, now), false);
+  assert.equal(tucked(row(false), undefined, now), true);
+  // The eye on an inactive card shows it, and the choice lasts.
+  assert.equal(tucked(row(false), { shown: true }, now), false);
+  // A hold by hand beats active until it is released.
+  assert.equal(tucked(row(true), later, now), true);
+  assert.equal(tucked(row(true), past, now), false);
+  assert.equal(tucked(row(false), past, now), true);
+  // Spent wins over everything, so a spent card never takes an eye.
+  assert.equal(tucked(row(true, 100), undefined, now), true);
+  assert.equal(tucked(row(false, 100), { shown: true }, now), true);
 });
 
 test("A hidden account waits for its busiest window's reset, or a higher balance", () => {
@@ -168,8 +188,8 @@ test("words a usage window by its span, percent used, percent left and time to r
 test("names the busiest usage window of any shown account by its title", () => {
   const w = (usedPercent: number, seconds: number): UsageWindow => ({ name: "", kind: seconds === 18000 ? "five_hour" : "weekly", usedPercent, seconds, resetsAt: "" });
   assert.equal(busiestWindow(usageRows([
-    { accountId: "a", provider: "claude", label: "pipsqueak.tasks", cause: "", windows: [w(61.6, 18000), w(40, 604800)] },
-    { accountId: "b", provider: "codex", label: "team", cause: "sign_in_expired", windows: [w(99, 604800)] },
-    { accountId: "c", provider: "kimi", label: "spare", cause: "", windows: null }])), "pipsqueak.tasks · 5-hour 62% used");
+    { accountId: "a", provider: "claude", label: "pipsqueak.tasks", active: true, cause: "", windows: [w(61.6, 18000), w(40, 604800)] },
+    { accountId: "b", provider: "codex", label: "team", active: true, cause: "sign_in_expired", windows: [w(99, 604800)] },
+    { accountId: "c", provider: "kimi", label: "spare", active: true, cause: "", windows: null }])), "pipsqueak.tasks · 5-hour 62% used");
   assert.equal(busiestWindow([]), undefined);
 });

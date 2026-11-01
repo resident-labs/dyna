@@ -33,7 +33,9 @@ type AccountActions struct {
 }
 
 func NewAccountActions(service *Service, connections *model.Connections, quotas *model.Quotas) *AccountActions {
-	return &AccountActions{service: service, connections: connections, quotas: quotas}
+	actions := &AccountActions{service: service, connections: connections, quotas: quotas}
+	service.profileMoved = actions.dropUnservedPins
+	return actions
 }
 
 func (a *AccountActions) Entry() approve.Entry {

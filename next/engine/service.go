@@ -33,6 +33,8 @@ type Repositories interface {
 }
 
 type Service struct {
+	// profileMoved runs after sessions change model, so their account choices can follow.
+	profileMoved      func(context.Context, []store.Session, contract.ProfileName)
 	gitName, gitEmail string
 	maxDepth          int
 	store             *store.Store

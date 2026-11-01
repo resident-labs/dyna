@@ -147,11 +147,7 @@ func (h *Handler) GetAuthFileQuota(c *gin.Context) {
 			defer wg.Done()
 			slots <- struct{}{}
 			defer func() { <-slots }()
-			if source, ok := dynaUsageSourceFor(auth); ok {
-				entries[i] = h.readDynaUsage(c.Request.Context(), source, auth)
-				return
-			}
-			entries[i] = fetchClaudeOAuthQuota(c.Request.Context(), cfg, auth)
+			entries[i] = h.sharedQuota(c.Request.Context(), cfg, manager, auth)
 		}()
 	}
 	wg.Wait()

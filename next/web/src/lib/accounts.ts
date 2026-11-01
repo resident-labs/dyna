@@ -1,4 +1,4 @@
-import type { Account, AccountProviderInfo, ConnectFlow, ConnectMethod } from "./contract.gen.ts";
+import type { Account, AccountProviderInfo, ConnectFlow, ConnectMethod, SessionAccountIssue, SessionAccountResponse } from "./contract.gen.ts";
 import { APIError } from "./client.ts";
 
 // Search always unfolds the key group, so a matching provider stays reachable.
@@ -24,6 +24,16 @@ export const refused = (error: unknown) => error instanceof APIError && error.de
 
 // The engine alone decides what a label may be, so the page only words its answer.
 export const labelRefusal = (error: unknown) => error instanceof APIError && error.detail.code === "invalid" ? "Use 1 to 128 characters, without @." : "The label was not saved. Try again.";
+
+// A session's Account row. A removed account has no label left to show.
+export const accountChoiceName = (account: SessionAccountResponse) => !account.account ? "Automatic" : account.label || "Removed account";
+
+const issueNotes: Record<SessionAccountIssue, string> = {
+  removed: "Removed. Using Automatic.", signed_out: "Signed out. Using Automatic.",
+  spent: "Limit reached. Using Automatic.", unavailable: "Unavailable right now. Using Automatic.",
+};
+
+export const accountChoiceNote = (issue?: SessionAccountIssue) => issue ? issueNotes[issue] : "";
 
 // Problems come first; unknown accounts remain in label order with connected accounts.
 export function accountRows(accounts: readonly Account[]): Account[] {
