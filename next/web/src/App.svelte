@@ -124,7 +124,7 @@
     path = window.location.pathname;
     if (inSettings) return;
     behind = path;
-    section = undefined;
+    section = /\/instructions\/?$/.test(path) ? "instructions" : undefined;
     visual = undefined;
   }
   window.addEventListener("popstate", follow);
@@ -132,19 +132,29 @@
     if (section === "requests" && event.target instanceof Node && !page?.contains(event.target) && !requestsButton?.contains(event.target)) section = undefined;
   }
   // The requests view shows in place of the conversation until Back, Escape or the control that opened it.
-  let section: "requests" | "instructions" | undefined = $state();
+  let section: "requests" | "instructions" | undefined = $state(/\/instructions\/?$/.test(behind) ? "instructions" : undefined);
   let visual: { versions: VisualVersion[]; selected: number; send: (text: string, event: string) => Promise<void> } | undefined = $state();
   let visualTrigger: HTMLElement | undefined;
   let requestsButton: HTMLButtonElement | undefined = $state();
+  function openInstructions() {
+    history.pushState({ instructionsBack: behind }, "", `/r/${encodeURIComponent(room!)}/instructions`);
+    panel = false;
+    follow();
+  }
   async function closeSection(tapped = false) {
+    if (section === "instructions") {
+      if (history.state?.instructionsBack) history.back();
+      else { history.replaceState(null, "", `/r/${encodeURIComponent(room!)}`); follow(); }
+      return;
+    }
     section = undefined;
     await tick();
     requestsButton?.focus({ focusVisible: !tapped });
   }
   // A link to a room the engine does not list, or to a path the app has no page for, shows a load error in Home's
   // place. Until the room list loads, a room link is trusted, so a known room opens without a flash.
-  // Only /r/<room> and /r/<room>/s/<session> are routes; any other path, a typo after a room included, is no page.
-  const route = $derived(/^\/r\/([^/]+)(?:\/s\/([^/]+))?\/?$/.exec(behind));
+  // Room, session and instructions paths are routes; other paths show no page.
+  const route = $derived(/^\/r\/([^/]+)(?:\/s\/([^/]+)|\/instructions)?\/?$/.exec(behind));
   const asked = $derived(route?.[1] && decodeURIComponent(route[1]));
   let room = $derived(asked && (!roomsLoaded || attention.rooms.has(asked)) ? asked : undefined);
   let lost: "room" | "page" | undefined = $derived(room || behind === "/" ? undefined : asked ? "room" : "page");
@@ -505,7 +515,7 @@
   // close (Escape) shows the ring; a tap open focuses the dialog itself, and no ring follows a tap either way.
   const phone = new MediaQuery("max-width: 640px");
   // On a phone the full-screen computer covers everything else, so nothing behind it takes focus.
-  let covered = $derived(phone.current && !!watching && !docked && !inSettings);
+  let covered = $derived(phone.current && !!watching && !docked && !inSettings && section !== "instructions");
   let drawer = $state(false);
   let menuButton: HTMLButtonElement | undefined = $state();
   async function showDrawer(open: boolean, refocus = true, tapped = false) {
@@ -622,6 +632,7 @@
           <button type="button" aria-pressed={section === "requests"} onclick={() => { section = "requests"; }}><Icon name="inbox" />Requests
             {#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
           <button type="button" onclick={event => void showPanel(true, event.detail > 0)}><Icon name="people" />Sessions<span class="count">{store.sessions.size}</span></button>
+          {#if attention.can("admin")}<button type="button" aria-pressed={section === "instructions"} onclick={openInstructions}><Icon name="file" />Instructions</button>{/if}
           {#if attention.can("operate")}<button type="button" onclick={pause}><Icon name="pause" />{paused ? "Resume room" : "Pause room"}</button>{/if}
         {/if}
       {:else}
@@ -634,6 +645,8 @@
   {#if drawer || (panel && phone.current)}<button type="button" class="scrim" tabindex="-1" aria-label={drawer ? "Close the menu" : room ? "Close the sessions" : "Close the active rooms"}
     onclick={() => void (drawer ? showDrawer(false, true, true) : showPanel(false, true))}></button>{/if}
   <main bind:clientWidth={mainWidth} class:header-tight={mainWidth <= 1000} class:header-narrow={mainWidth <= 600} inert={drawer || (panel && phone.current) || covered || inSettings}>
+    {#if section === "instructions" && room && store && !unavailable}<Instructions {room} {roomName} rooms={rooms.length} sessions={store.sessions.size} onclose={() => void closeSection()} />
+    {:else}
     <header class="bar" class:session-bar={!!session}>{#if room && session && phone.current}<a class="menu-toggle" href={"/r/" + encodeURIComponent(room)} aria-label={`Back to ${roomName}`} title={`Back to ${roomName}`}
         onclick={event => { const tapped = event.detail > 0; navigate(event); void tick().then(() => menuButton?.focus({ focusVisible: !tapped })); }}><Icon name="back" /></a>
       {:else}<button type="button" class="menu-toggle" bind:this={menuButton} aria-label="Rooms and pages" title="Rooms and pages" aria-expanded={drawer}
@@ -652,7 +665,7 @@
         <!-- One click to the session's shell and computer; neither shows when the session has none. -->
         {#if session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title={terminals?.hasShell(session) ? "Show this session's terminal" : "Open a terminal in this session's box"} aria-pressed={terminals?.hasShell(session) ?? false} onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /></button>{/if}
         {#if session && attention.can("computers") && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /></button>{/if}
-        <span class="room-menu"><RoomMenu bind:this={roomMenu} {paused} onsessions={session ? () => void showPanel(!panelShown, true) : undefined} jobFailed={!!session && toolFailures.length > 0} onjobs={session ? () => void jobsTool?.show() : undefined} waiting={phone.current && session ? store.waiting : 0} operate={attention.can("operate")} admin={attention.can("admin")} onpause={pause} oninstructions={() => { section = "instructions"; }}
+        <span class="room-menu"><RoomMenu bind:this={roomMenu} {paused} onsessions={session ? () => void showPanel(!panelShown, true) : undefined} jobFailed={!!session && toolFailures.length > 0} onjobs={session ? () => void jobsTool?.show() : undefined} waiting={phone.current && session ? store.waiting : 0} operate={attention.can("operate")} admin={attention.can("admin")} onpause={pause} oninstructions={openInstructions}
           onrequests={phone.current && session ? () => { section = "requests"; } : undefined}
           onterminal={phone.current && session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready" ? () => terminals?.shell(session!, title, !store?.sessions.get(session!)?.parent) : undefined}
           oncomputer={phone.current && session && attention.can("computers") && store.computers.has(session) ? () => watch(session!) : undefined} /></span>
@@ -667,7 +680,6 @@
         {#if store?.counts.failed && !panelShown}<span class="attention"></span>{/if}</button>{/if}</header>
     {#if routeNotice}<div class="route-notice"><Icon name="globe" size={18} /><span><strong>Moved to {routeNotice}</strong>{moveData.has("old") ? `: ${moveData.get("old")} stopped answering for 20 seconds.` : `, a nearer route to ${moveData.get("name") || "this machine"}. Same session, same room.`}</span><button type="button" aria-label="Dismiss route notice" onclick={() => { routeNotice = ""; sessionStorage.removeItem("dyna-connect-move"); }}>✕</button></div>{/if}
     {#if reloadPending}<p class="reload-notice" role="status">Dyna updated. Reload to use the new version. <button type="button" onclick={() => location.reload()}>Reload</button></p>{/if}
-    {#if section === "instructions" && room && store && !unavailable}<Instructions {room} {roomName} rooms={rooms.length} sessions={store.sessions.size} onclose={() => void closeSection()} />{/if}
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} admin={attention.can("admin")} onclose={() => void closeSection()} />{/if}
     <div class="feed">
       {#if blocked}<Blocked kind="unreachable" onretry={connect} />
@@ -694,8 +706,11 @@
         quote={quotes[key]} replacement={replaced[key]} onundo={() => { quotes[key] = undoForward({ quote: quotes[key], previous: replaced[key] }).quote; clearReplacement(); }} onunquote={() => { quotes[key] = undefined; clearReplacement(); }} sessions={mentions} files={files(key)} {stop} />
       {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
     {/if}
-    <TermDock bind:this={terminals} terminal={attention.can("terminal")} bind:element={dock} onempty={() => composer?.focus()} phone={phone.current} strip={!!room && !session && !unavailable}
-      sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
+    {/if}
+    <div class="terminal-holder" hidden={section === "instructions"}>
+      <TermDock bind:this={terminals} terminal={attention.can("terminal")} bind:element={dock} onempty={() => composer?.focus()} phone={phone.current} strip={!!room && !session && !unavailable}
+        sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
+    </div>
   </main>
   {#if visual && store && !inSettings}<aside class="visual-pane"><VisualView {...visual} room={store.room} onclose={() => { visual = undefined; void tick().then(() => visualTrigger?.focus()); }} /></aside>
   {:else if room}
@@ -734,7 +749,7 @@
       <!-- The foot polls hosts, so it mounts only while the panel shows; a phone's closed panel polls nothing. -->
       {#if panelShown}<HostFoot {navigate} />{/if}
     </aside>
-    {#if watching && !docked && !inSettings}{@render computerView(watching)}{/if}
+    {#if watching && !docked && !inSettings && section !== "instructions"}{@render computerView(watching)}{/if}
   {:else if activity.active.length}
     <aside class="members" id="active" class:shown={panel} class:full={sheetFull} aria-label="Active now" tabindex="-1" role={panel && phone.current ? "dialog" : undefined} aria-modal={(panel && phone.current) || undefined} bind:this={members} inert={drawer || inSettings}>
       {#if phone.current}{@render sheetHandle("active rooms")}{/if}
@@ -784,6 +799,7 @@
   .requests:hover, .requests[aria-pressed="true"] { background: var(--hover); color: var(--text); }
   @media (min-width: 761px) { .requests.waiting { margin-right: 4px; } }
   main { position: relative; }
+  .terminal-holder:not([hidden]) { display: contents; }
   :where(main.header-tight) .tool { justify-content: center; width: 28px; padding: 0; }
   :where(main.header-tight) .tool span { display: none; }
   main.header-narrow .desktop-tabs { display: none; }
