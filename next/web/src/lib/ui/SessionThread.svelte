@@ -16,9 +16,10 @@
   import TranscriptWorkRow from "./TranscriptWorkRow.svelte";
   import TimelineMinimap from "./TimelineMinimap.svelte";
   import PostTarget from "./PostTarget.svelte";
+  import QuestionCard from "./QuestionCard.svelte";
   import { deriveTimelineGroups, finalTimelineItem, ownPost, postDestination, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, timelineInputText, timelineItemRunning, pendingStartBrief } from "../timeline.ts";
 
-  let { session, roomName, store, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { startingBrief?: string; session: string; roomName: string; store: RoomStore; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
+  let { session, roomName, store, operate, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { startingBrief?: string; session: string; roomName: string; store: RoomStore; operate: boolean; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
   const view = untrack(() => store.window({ kind: "dm", session }));
   view.onunsent = request => onunsent(request);
   view.onsettled = request => onsettled(request);
@@ -31,6 +32,7 @@
   export async function send(request: PostRequest) { atBottom = true; await view.post(request); }
   // A closed session can have a transcript with no DM events, so the thread is empty only when neither has anything.
   export const empty = () => view.ready && !view.ordered.length && !loading && !turns.length;
+  let asking = $derived(store.pendingQuestions(session));
   let turns: TranscriptTurn[] = $state([]);
   let pendingBrief = $derived(pendingStartBrief(startingBrief, turns));
   let expandedTurns: Record<string, boolean> = $state({});
@@ -82,7 +84,7 @@
   let destroyed = false;
   let queuedPosts = $derived(queuedTimelinePosts(view.posts(), turns));
   let pendingPosts = $derived([...view.pendingPosts.values()]);
-  let quiet = $derived(!turns.length && !queuedPosts.length && !pendingPosts.length && !pendingBrief);
+  let quiet = $derived(!turns.length && !queuedPosts.length && !pendingPosts.length && !pendingBrief && !asking.length);
   // The first message after a turn may start a new day. It waits outside any turn, so its day mark is here too.
   let waitingSince = $derived(queuedPosts[0]?.at ?? pendingPosts[0]?.at);
 
@@ -351,6 +353,8 @@
         {#if !turn.ended && !stalled && !(turn.items ?? []).some(item => timelineItemRunning(item, false))}<p class="muted turn-note"><span class="slot"><span class="spinner" aria-hidden="true"></span></span>Working for {formatTimelineDuration(now - Date.parse(turn.started))}</p>{/if}
       </article>
     {/each}
+    <!-- A question waits at the end of the thread. Once answered, it is part of the input that answer becomes. -->
+    {#each asking as question (question.id)}<div class="question"><QuestionCard {question} name={sender("session", session)} root={!store.sessions.get(session)?.parent} {operate} /></div>{/each}
     {#if waitingSince}{@render dayMark(waitingSince, turns.at(-1)?.started)}{/if}
     {#each queuedPosts as post (post.id)}
       {#snippet body()}{@render message(post.id, post.body.text, post.body.attachments, post.id, post.at)}{/snippet}
@@ -379,6 +383,7 @@
   article { display: flex; flex-direction: column; gap: 12px; min-width: 0; scroll-margin-top: 16px; }
   /* The only line in the thread: the end of a turn, once something follows it. */
   article.ended:not(:last-child) { margin-bottom: 12px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+  .question { margin: 0 -16px; }
   .day { margin: 0; color: var(--muted); font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: center; }
   .owner-message { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
   .bubble { max-width: 80%; min-width: 0; padding: 12px 16px; background: var(--raised); border-radius: 12px; }

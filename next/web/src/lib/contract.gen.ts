@@ -41,7 +41,7 @@ export type InstructionsGetRequest = { room?: RoomID; };
 export type InstructionsGetResponse = { text: string; hash: string; savedAt?: string | null; };
 export type InstructionsSetRequest = { room?: RoomID; text: string; base: string; };
 export type InstructionsSetResponse = { hash: string; };
-export type Method = "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "hostexec.list" | "hostexec.run" | "op.submit" | "op.decide" | "op.withdraw" | "op.list";
+export type Method = "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "hostexec.list" | "hostexec.run" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "question.ask" | "question.answer" | "question.list";
 export type ErrorCode = "podman_required" | "invalid" | "unknown_action" | "not_found" | "forbidden" | "conflict" | "room_limited" | "profile_exists" | "move_busy" | "has_children" | "parent_closing" | "session_closing" | "stale" | "visual_superseded" | "unavailable" | "reconnect_unavailable" | "models_unavailable" | "store_from_v1" | "store_too_old" | "no_grant";
 export type Error = { code: ErrorCode; message: string; visual?: VisualSuperseded | null; limited?: RoomLimited | null; };
 export type VisualSuperseded = { event: EventID; version: number; seq: number; };
@@ -58,7 +58,7 @@ export type RoomPauseResponse = { };
 export type SessionStopRequest = { session: SessionID; };
 export type SessionStopResponse = { stopping: boolean; };
 export type RoomListRequest = { };
-export type RoomSummary = { id: RoomID; name: string; paused: boolean; created: string; lastRead: number; waiting: Array<OpID> | null; working: Array<SessionID> | null; failed: number; hostless: number; deleting?: boolean; deleteReason?: string; latest?: RoomActivity | null; };
+export type RoomSummary = { id: RoomID; name: string; paused: boolean; created: string; lastRead: number; waiting: Array<OpID> | null; questions?: Array<QuestionID> | null; working: Array<SessionID> | null; failed: number; hostless: number; deleting?: boolean; deleteReason?: string; latest?: RoomActivity | null; };
 export type RoomActivity = { session: SessionID; name: string; label: string; };
 export type RoomListResponse = { rooms: Array<RoomSummary> | null; seq: number; };
 export type SessionListRequest = { room: RoomID; };
@@ -244,7 +244,7 @@ export type ConnectUnlinkResponse = { };
 export type ConnectConnector = { missing: boolean; };
 export type ConnectAttemptState = "idle" | "starting" | "pending" | "linked" | "unlinking" | "canceled" | "failed";
 export type ConnectAttempt = { state: ConnectAttemptState; expires: number; };
-export type ContextSectionKey = "dyna_children" | "dyna_requests" | "dyna_prs" | "dyna_profiles";
+export type ContextSectionKey = "dyna_children" | "dyna_requests" | "dyna_prs" | "dyna_profiles" | "dyna_usage";
 export type ContextSnapshotRequest = { section?: ContextSectionKey; };
 export type ContextSnapshotResponse = { sections: Array<ContextSection> | null; };
 export type ContextSection = { key: ContextSectionKey; text: string; };
@@ -321,6 +321,7 @@ export type SessionID = string;
 export type BoxID = string;
 export type EventID = string;
 export type OpID = string;
+export type QuestionID = string;
 export type ShellJobID = string;
 export type GrantID = string;
 export type TurnID = string;
@@ -358,6 +359,17 @@ export type OpListResponse = { operations: Array<Operation> | null; };
 export type OpRequested = { id: OpID; kind: OpKind; by: Principal; class: Class; card: Card; expires: string; };
 export type OpDecided = { id: OpID; state: OpState; decision: Decision; };
 export type OpRan = { id: OpID; state: OpState; result: OpResult; };
+export type QuestionState = "pending" | "answered" | "withdrawn";
+export type Question = { id: QuestionID; room: RoomID; session: SessionID; text: string; state: QuestionState; answer?: string; asked: string; answered?: string; };
+export type QuestionAskRequest = { text: string; clientId?: string; };
+export type QuestionAskResponse = { question: Question; };
+export type QuestionAnswerRequest = { id: QuestionID; text: string; };
+export type QuestionAnswerResponse = { };
+export type QuestionListRequest = { room?: RoomID; };
+export type QuestionListResponse = { questions: Array<Question> | null; };
+export type QuestionAsked = { id: QuestionID; session: SessionID; text: string; };
+export type QuestionAnswered = { id: QuestionID; session: SessionID; question: string; answer: string; };
+export type QuestionWithdrawn = { id: QuestionID; session: SessionID; };
 export type Scope = "read" | "operate" | "files" | "terminal" | "computers" | "admin";
 export type SessionAccountRequest = { session: SessionID; };
 export type SessionAccountIssue = "removed" | "signed_out" | "spent" | "unavailable";
@@ -392,6 +404,9 @@ export type EventBody =
   | { type: "op.requested"; body: OpRequested }
   | { type: "post.created"; body: PostCreated }
   | { type: "pr.opened"; body: PrOpened }
+  | { type: "question.answered"; body: QuestionAnswered }
+  | { type: "question.asked"; body: QuestionAsked }
+  | { type: "question.withdrawn"; body: QuestionWithdrawn }
   | { type: "room.deleted"; body: RoomDeleted }
   | { type: "room.deleting"; body: RoomDeleting }
   | { type: "room.limits_changed"; body: RoomLimitsChanged }
@@ -496,4 +511,7 @@ export interface MethodMap {
   "op.decide": { request: OpDecideRequest; response: OpDecideResponse };
   "op.withdraw": { request: OpWithdrawRequest; response: OpWithdrawResponse };
   "op.list": { request: OpListRequest; response: OpListResponse };
+  "question.ask": { request: QuestionAskRequest; response: QuestionAskResponse };
+  "question.answer": { request: QuestionAnswerRequest; response: QuestionAnswerResponse };
+  "question.list": { request: QuestionListRequest; response: QuestionListResponse };
 }

@@ -18,6 +18,12 @@ import (
 // quotaReads bounds concurrent usage reads across all callers.
 const quotaReads = 4
 
+// quotaAge is how long a reading stands before the next caller reads again.
+const quotaAge = 5 * time.Minute
+
+// quotaRefreshTimeout bounds a refresh no caller waits for.
+const quotaRefreshTimeout = 30 * time.Second
+
 type quotaEntry struct {
 	at    time.Time
 	usage contract.AccountUsage
@@ -35,6 +41,9 @@ type Quotas struct {
 	mu         sync.Mutex
 	cache      map[string]quotaEntry
 	generation uint64
+	// latest is the last whole Read, and latestAt when it finished or was last asked for.
+	latest   []contract.AccountUsage
+	latestAt time.Time
 }
 
 func (p *Proxy) Quotas(key string, st AccountStore, now func() time.Time) *Quotas {
@@ -54,7 +63,7 @@ func (q *Quotas) ObservedState(index string) CredentialState {
 	q.mu.Lock()
 	entry, ok := q.cache[index]
 	q.mu.Unlock()
-	if !ok || entry.passive || q.now().Sub(entry.at) >= 5*time.Minute {
+	if !ok || entry.passive || q.now().Sub(entry.at) >= quotaAge {
 		return CredentialUnknown
 	}
 	if entry.usage.Cause == contract.UsageSignInExpired {
@@ -71,7 +80,7 @@ func (q *Quotas) CachedUsage(id contract.AccountID) (contract.AccountUsage, bool
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	for _, entry := range q.cache {
-		if entry.usage.AccountID == id && q.now().Sub(entry.at) < 5*time.Minute {
+		if entry.usage.AccountID == id && q.now().Sub(entry.at) < quotaAge {
 			return entry.usage, true
 		}
 	}
@@ -111,7 +120,27 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 	}
 	reads.Wait()
 	q.markActive(ctx, bound, result.Accounts)
+	q.mu.Lock()
+	q.latest, q.latestAt = result.Accounts, q.now()
+	q.mu.Unlock()
 	return result, nil
+}
+
+// Latest returns the last whole reading at once, for the context snapshot of a turn being dispatched. Once that reading
+// is past quotaAge, the first caller starts one Read in the background, which shares the cache, the bounded slots and
+// each account's read with every other caller, and the next snapshot gets it. A failed Read waits quotaAge to try again.
+func (q *Quotas) Latest() []contract.AccountUsage {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if now := q.now(); now.Sub(q.latestAt) >= quotaAge {
+		q.latestAt = now
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), quotaRefreshTimeout)
+			defer cancel()
+			_, _ = q.Read(ctx)
+		}()
+	}
+	return q.latest
 }
 
 // RoutingPlace is one credential in the proxy's routing order. Rank 1 takes new work,
@@ -201,7 +230,7 @@ func (q *Quotas) cached(index string) (quotaEntry, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	entry, ok := q.cache[index]
-	return entry, ok && q.now().Sub(entry.at) < 5*time.Minute
+	return entry, ok && q.now().Sub(entry.at) < quotaAge
 }
 
 type quotaWindow struct {

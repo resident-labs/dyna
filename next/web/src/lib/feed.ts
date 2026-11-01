@@ -154,8 +154,8 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     }
   }
   for (const event of events) {
-    // Account alerts are owner-only and never belong to a room feed.
-    if (event.type === "account.failed" || event.type === "account.quota_low" || event.type === "host.disk_low") continue;
+    // Account alerts are owner-only and never belong to a room feed. Questions show in Needs you, Requests and the session's DM.
+    if (event.type === "account.failed" || event.type === "account.quota_low" || event.type === "host.disk_low" || event.type === "question.asked" || event.type === "question.answered" || event.type === "question.withdrawn") continue;
     const firstAt = work[0]?.at ?? (deferred[0]?.kind === "notice" ? deferred[0].event.at : deferred[0]?.kind === "failed" || deferred[0]?.kind === "request" || deferred[0]?.kind === "restarted" ? deferred[0].at : undefined);
     if (firstAt && new Date(firstAt).toDateString() !== new Date(event.at).toDateString()) flush();
     if (event.type === "post.created") {
@@ -274,6 +274,7 @@ export const eventGroups: Record<Event["type"], string> = {
   "computer.changed": "computer changes", "box.changed": "box changes", "box.pressure": "memory warnings",
   "room.paused": "pauses", "room.resumed": "resumes", "room.limits_changed": "room limits changed", "room.deleting": "room deletions", "room.deleted": "room deletions",
   "op.requested": "requests", "op.decided": "requests decided", "op.ran": "requests run",
+  "question.asked": "questions", "question.answered": "questions answered", "question.withdrawn": "questions withdrawn",
   "image.built": "images built", "image.failed": "image builds failed", "pr.opened": "pull requests opened",
   "shell.job.ended": "jobs finished", "grant.expired": "host grants expired",
   "host.disk_low": "disk warnings", "conversation.read": "read positions",
@@ -447,7 +448,7 @@ export function describe(event: Event, name: Name): string {
     }
     case "op.decided": return `${event.body.decision.by.session ? name(event.body.decision.by.session) : "You"} ${event.body.decision.approved ? "approved" : "denied"} a request`;
     case "op.requested": return `${event.body.by.kind === "owner" ? "You" : event.body.by.session ? name(event.body.by.session) : "Dyna"} ${event.body.by.kind === "owner" ? event.body.card.title.replace(/^asks\b/, "ask") : event.body.card.title}${event.body.card.target.name ? ` · ${event.body.card.target.name}` : ""}`;
-    case "op.ran": return "";
+    case "op.ran": case "question.asked": case "question.answered": case "question.withdrawn": return "";
     case "image.built": return `Image for ${event.body.repo} built in ${buildTime(event.body.seconds)}`;
     // The reason is raw build output (r8); the build log holds it.
     case "image.failed": return `Image for ${event.body.repo} failed`;

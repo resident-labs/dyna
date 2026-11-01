@@ -169,6 +169,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `room_leftovers` |
 | `pr_owners` |
 | `grants` |
+| `questions` |
 | `hostexec_runs` |
 | `conversation_reads` |
 | `backup_copy_status` |
@@ -275,7 +276,7 @@ The owner accepts a kernel kill when RAM and swap fill, or at a box's own limit.
 
 New boxes choose the ready host with most free memory; existing boxes stay on their host. Children can run while their parent is dormant. `sameHost` pins a child to its parent's host. Default maximum depth is 3; zero removes the limit. Room limits count placed requests across hosts; zero means unlimited. There is no subtree cap. M1 uses hermeslab.
 
-Once every sample from a ready host has been at or below its floor for a minute, the engine closes its oldest idle leaves, stopped or failed, without the 7-day wait or the PR exemption. A sample above the floor, a failed probe, a missed heartbeat or an engine restart starts that minute again, so one bad reading closes nothing. It takes four per read, every 10 seconds. It skips a host with four closes running, or with eight stuck on a failed start or archive, so a failure common to every box stops eviction instead of starting the whole host without admission. It never closes a root, a session with an open child, a running turn, shell jobs, a pending delivery, or a pending, approved or running operation, and it leaves paused rooms alone. The normal sweep runs hourly, takes 200 leaves that passed 7 days, and keeps the PR exemption.
+Once every sample from a ready host has been at or below its floor for a minute, the engine closes its oldest idle leaves, stopped or failed, without the 7-day wait or the PR exemption. A sample above the floor, a failed probe, a missed heartbeat or an engine restart starts that minute again, so one bad reading closes nothing. It takes four per read, every 10 seconds. It skips a host with four closes running, or with eight stuck on a failed start or archive, so a failure common to every box stops eviction instead of starting the whole host without admission. It never closes a root, a session with an open child, a running turn, shell jobs, a pending delivery, a waiting question, or a pending, approved or running operation, and it leaves paused rooms alone. The normal sweep runs hourly, takes 200 leaves that passed 7 days, and keeps the PR exemption.
 
 Disk work that is designed but not built:
 
@@ -479,6 +480,7 @@ The engine derives surface and reply channel from the input, including for root.
 | Card submit | card | final to owner in feed, replying to card |
 | Child result | session | post to child if action is needed |
 | Sibling or other-room post | feed | post to sender if action is needed |
+| Owner answer to a question | dm | final to owner in that DM; parent does not wake |
 | Group-only mention | feed | none |
 | Check-in, engine notice, service event, shell or job end | engine or service | none |
 | Voice dispatch, after port | voice | final to owner in call, or feed if call ended |
@@ -533,7 +535,7 @@ For speed, stat context files and the skills folder first; read only changed fil
 
 #### Tools
 
-Each `contract/tools/` toolkit registers one area tool with a flat `action` enum, title, MCP hints, action help and typed `Access` (`OwnerAccess`, `UserAccess`, `BoxAccess`, `OwnerLocalAccess`). Tree and grant checks stay in the services. CLI help uses the same registry. The server omits owner entries. Refusals return `isError` and shared typed `{code, message}` with a fix. Creating actions accept optional `client_id`; the same caller's retry returns the first result. This covers post, session start, hostexec request_grant, goal set and issue file. Posts deduplicate on `events.client_id`; only non-event creations use `client_replays`. Archive maintenance removes replay keys older than the 24-hour retry window.
+Each `contract/tools/` toolkit registers one area tool with a flat `action` enum, title, MCP hints, action help and typed `Access` (`OwnerAccess`, `UserAccess`, `BoxAccess`, `OwnerLocalAccess`). Tree and grant checks stay in the services. CLI help uses the same registry. The server omits owner entries. Refusals return `isError` and shared typed `{code, message}` with a fix. Creating actions accept optional `client_id`; the same caller's retry returns the first result. This covers post, session start, hostexec request_grant, question ask, goal set and issue file. Posts deduplicate on `events.client_id`; only non-event creations use `client_replays`. Archive maintenance removes replay keys older than the 24-hour retry window.
 
 | Tool | Actions | Methods | Phase |
 |---|---|---|---|
@@ -548,7 +550,7 @@ Each `contract/tools/` toolkit registers one area tool with a flat `action` enum
 | `context` | show | `context.snapshot` (one section in full, past its cap) | 1 |
 | `goal` | set, list, item, done, journal | `goal.*` | 2 |
 | `issue` | file, list, show, close | `issue.*` | 2 |
-| `question` | ask, list | `question.*`; ask needs the `ask-owner` grant | 2 |
+| `question` | ask, list | `question.*`; ask needs the `ask-owner` grant (7.10) | 2 |
 | `workflow` | run, status, list | `workflow.*` | 2 |
 | `subscription` | list, add, remove | `subscription.*` | 2 |
 
@@ -563,13 +565,17 @@ At dispatch, the engine renders ordered `Sections []ContextSection{Key, Text}` i
 | Section key | Contents | Cap (tokens) |
 |---|---|---|
 | `dyna_goal` (phase 2) | own goal, its done condition and open items | 200 |
-| `dyna_children` | open children, stalest first: profile, state, current item, PR state; at most 8 rows | 250 |
+| `dyna_children` | open children, stalest first: profile, state, current item, PR state, and whether it waits for the owner's answer; at most 8 rows | 250 |
 | `dyna_requests` | operations and questions waiting on this session, and its own that wait on others | 150 |
 | `dyna_prs` | tracked PRs: approval, CI, merge state | 150 |
 | `dyna_profiles` | ratings and limits; only for a session that may start children | 300 |
-| `dyna_usage` (phase 2) | each account window in 10% steps, with pace: ahead, on or under | 80 |
+| `dyna_usage` | each account window in 10% steps, with pace: ahead, on or under | 80 |
 
-Usage names accounts by provider and number, not identity-bearing labels. Pace compares usage share to elapsed window share: over 10 points above is ahead, over 10 below is under, otherwise on. No section contains timestamps or durations.
+Usage names accounts by provider and number, not identity-bearing labels. Numbers count all of a provider's accounts, so a room limit renames none. Pace compares usage share to elapsed window share: over 10 points above is ahead, over 10 below is under, otherwise on. A window with no reset time, or one already past, has no pace. No section contains timestamps or durations.
+
+`dyna_usage` lists the accounts the session's room may use, one line each, rounded down to a step, so only a spent window reads 100%. Accounts that routing would use come first, so past the cap "N more" counts idle ones, which are marked; `context show` lists all. A model's own window shows when it adds something, as on Home, and an account with no readable window has no line.
+
+The section never reads a provider. It takes the last whole `accounts.quota` reading, and a dispatch that finds that reading past the 5-minute cache age starts one `accounts.quota` read in the background, for the next dispatch. A turn therefore adds no reads to the shared path and never waits for one. The first dispatch after a start has no section.
 
 #### Skills and room MCP servers
 
@@ -581,7 +587,17 @@ After the M2 trial parts, phase 1 ships the registry, ten phase-1 toolkits, MCP 
 
 The owner shipped this without the evaluation gate (q68).
 
-Phase 2 in M3 adds `goal`, `issue`, `question`, `workflow`, `subscription`, PR approval and status, `dyna_goal`, `dyna_usage`, and skills with their features.
+Phase 2 in M3 adds `goal`, `issue`, `workflow`, `subscription`, PR approval and status, `dyna_goal`, and skills with their features. `question` and `dyna_usage` have shipped.
+
+### 7.10 Questions
+
+A session with the `ask-owner` grant asks the owner a question with `question.ask`. Root has the grant from room creation. A session without it gets `no_grant`; no action gives it to another session yet. A question is text of at most 4,000 characters, and it does not end the turn.
+
+A question waits until the owner answers or the session closes, with no expiry, and it survives restarts. It shows in Needs you, Requests and the session's DM, not in the room feed. Only the owner answers, with `operate` scope, since an answer is a message to the session. The answer is one delivery in the DM channel (7.5): it wakes the session, starting its box if it stopped, and carries the question and the answer. The session's reply goes to the owner in the DM.
+
+A close withdraws its sessions' waiting questions in the transaction that starts it, as does a room delete, so nothing waits on a session that can no longer use an answer. `question.asked`, `question.answered` and `question.withdrawn` record each step and have the session's DM as their home. `question.list` gives a room's waiting questions and its 20 newest answered ones; a session may read its own room's.
+
+A waiting question means the session is not finished. It keeps the session from dormant close, disk eviction and idle check-ins, and `dyna_children` says so to the parent. Its box may still stop while quiet.
 
 ## 8. Migration bundle and cutover
 
@@ -633,7 +649,7 @@ Before cutover, horizon's root confirms whether upstream-watch needs desktop sta
 All M1–M3 features below are cutover gates. Imported data is not the same as a working feature.
 
 - **M1 and M2:** The thin slice and trial features are in section 11.
-- **M3:** goals, check-ins, questions, issues, thin PR approval and GitHub merges, the Actions runner pool, typed subscriptions, settings, accounts, backups, remote access, Connect and device scopes, web push, desktop, skills, install guard, manual update, command palette and workflows. Add arch, lt-24-005, Boat and pve only after each passes the host check and real-box QA. The relay remains unchanged. Remote access precedes workflows. Daily maintenance includes backups, archive-ref expiry, host pruning and closing eligible boxes stopped for seven days; root and sessions with open PRs, goals, children or pending input are excluded.
+- **M3:** goals, check-ins, questions, issues, thin PR approval and GitHub merges, the Actions runner pool, typed subscriptions, settings, accounts, backups, remote access, Connect and device scopes, web push, desktop, skills, install guard, manual update, command palette and workflows. Add arch, lt-24-005, Boat and pve only after each passes the host check and real-box QA. The relay remains unchanged. Remote access precedes workflows. Daily maintenance includes backups, archive-ref expiry, host pruning and closing eligible boxes stopped for seven days; root and sessions with open PRs, goals, children, questions or pending input are excluded.
 - **Web search:** The direct MCP web tool searches through eligible providers. CLIProxyAPI holds model credentials; the engine holds search-only keys, including the Muse search key. The owner requested this port before cutover on 2026-10-31.
 - **After cutover:** voice returns as the existing Go service and persona without redesign; issue watches, room MCP, computer reminders, idle compaction, settings panes, release pipeline, WSL and branch QA follow. Issue-watch and room-MCP data are not imported. Manual update ships in M3; hourly auto-update follows.
 - **Dropped:** reviewer service and workspace, Dyna merge trials, comment-trust holds, CI budget service, conflict radar, room PR views, jobs, worktrees, load doctor, test slots, harness settings, Claude Code and session-format conversion. Session profile changes remain. The library is cut for now; its map stays in the frozen v1 backup. External members and placement by device needs are absent. GitHub supplies PR state; outside text is wrapped, with the accepted risks in decision 13.

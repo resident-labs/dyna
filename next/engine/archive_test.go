@@ -466,7 +466,7 @@ func TestRestoreFinishesSessionAfterBoxDeleted(t *testing.T) {
 	if _, err = s.transition(ctx, record.Room, current, contract.BoxDeleted, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.MarkClosing(ctx, session, false); err != nil {
+	if err := s.store.MarkClosing(ctx, session, false, time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
 	restarted := New(s.store, fakeBoxes{}, fakeProfiles{}, s.now)
@@ -495,7 +495,7 @@ func TestRestoreStartsMarkedLeaf(t *testing.T) {
 	if _, err := s.transition(ctx, room, current, contract.BoxClosing, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.MarkClosing(ctx, parent, false); err != nil {
+	if err := s.store.MarkClosing(ctx, parent, false, time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
 	restarted := New(s.store, fakeBoxes{}, fakeProfiles{}, s.now)
@@ -536,7 +536,7 @@ func TestRestoreWaitsForArchiveAckWithoutRepositories(t *testing.T) {
 	if _, err := s.transition(ctx, record.Room, current, contract.BoxClosing, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.MarkClosing(ctx, session, false); err != nil {
+	if err := s.store.MarkClosing(ctx, session, false, time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
 	restarted := New(s.store, fakeBoxes{}, fakeProfiles{}, s.now)
