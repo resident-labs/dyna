@@ -683,11 +683,6 @@ func TestConfigSynthesizer_OpenAICompat(t *testing.T) {
 		wantLen int
 	}{
 		{
-			name:    "Dyna catalog creates no keyless credential",
-			compat:  []config.OpenAICompatibility{{Name: "example", BaseURL: "https://example.invalid", DynaCatalogOnly: true}},
-			wantLen: 0,
-		},
-		{
 			name: "with APIKeyEntries",
 			compat: []config.OpenAICompatibility{
 				{
