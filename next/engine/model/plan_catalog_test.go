@@ -97,6 +97,16 @@ func TestPinnedPlanCatalogDrift(t *testing.T) {
 	}
 	for _, provider := range oauthProviders {
 		id := provider.info.ID
+		defaultID := ""
+		for _, piProvider := range catalog.Providers {
+			if piProvider.ID == string(id) {
+				defaultID = piProvider.DefaultModel
+				break
+			}
+		}
+		if defaultID == "" {
+			t.Errorf("%s has no packed Pi default", id)
+		}
 		if len(p.planModels[id]) == 0 {
 			t.Errorf("no pinned plan models for %s; skipped=%v", id, skipped)
 			continue
@@ -110,8 +120,15 @@ func TestPinnedPlanCatalogDrift(t *testing.T) {
 				t.Errorf("%s/%s has no compiled proxy model", id, model.ID)
 			}
 		}
-		if p.planDefaults[id] == "" {
-			t.Errorf("%s has no activation model", id)
+		expected := p.planModels[id][0].ID
+		for _, model := range p.planModels[id] {
+			if model.ID == defaultID {
+				expected = defaultID
+				break
+			}
+		}
+		if p.planDefaults[id] != expected {
+			t.Errorf("%s activation model = %q, want %q", id, p.planDefaults[id], expected)
 		}
 	}
 }
