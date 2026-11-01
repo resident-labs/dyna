@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"time"
 )
 
 type CredentialState string
@@ -17,24 +16,11 @@ const (
 	CredentialUnknown   CredentialState = "unknown"
 )
 
-type CredentialQuotaWindow struct {
-	UsedPercent       *float64 `json:"used_percent,omitempty"`
-	WindowMinutes     *int32   `json:"window_minutes,omitempty"`
-	ResetAt           *int64   `json:"reset_at,omitempty"`
-	ResetAfterSeconds *int32   `json:"reset_after_seconds,omitempty"`
-}
-type CredentialQuota struct {
-	ObservedAt *time.Time            `json:"observed_at,omitempty"`
-	Primary    CredentialQuotaWindow `json:"primary"`
-	Secondary  CredentialQuotaWindow `json:"secondary"`
-}
-
 type Credential struct {
 	ID       string          `json:"id"`
 	Index    string          `json:"auth_index"`
 	Provider string          `json:"provider"`
 	State    CredentialState `json:"state"`
-	Quota    CredentialQuota `json:"quota"`
 }
 
 func (m managementClient) credentials(ctx context.Context) ([]Credential, error) {

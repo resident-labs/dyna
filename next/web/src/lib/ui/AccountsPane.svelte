@@ -2,7 +2,7 @@
   import { onMount, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
   import { accountPath, accountRows, accountState, providerGroup, reconnectPath, refused, reconnectUnavailable } from "../accounts.ts";
-  import { visibleWindows } from "../usage.ts";
+  import { balancesText, visibleWindows } from "../usage.ts";
   import type { Account, AccountProviderInfo, AccountUsage, AccountsConnectResponse, RoomSummary } from "../contract.gen.ts";
   import StatusPill from "./StatusPill.svelte";
   import Icon from "./Icon.svelte";
@@ -165,7 +165,8 @@
       <h1><span class="initial">{accountProvider.displayName.slice(0, 1)}</span>{account.label}</h1>
       <p class="muted">{accountProvider.displayName}{#if accountUsage?.observedAt}{" · "}usage at {new Date(accountUsage.observedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}{/if}</p>
       <h2>Usage</h2>
-      {#if accountUsage && visibleWindows(accountUsage.windows ?? []).length}<div class="meters">{#each visibleWindows(accountUsage.windows ?? []) as window (window.name)}<AccountMeter {window} now={Date.now()} />{/each}</div>{:else}<p class="muted">No usage limits reported.</p>{/if}
+      {#if accountUsage && visibleWindows(accountUsage.windows ?? []).length}<div class="meters">{#each visibleWindows(accountUsage.windows ?? []) as window (window.name)}<AccountMeter {window} now={Date.now()} />{/each}</div>{:else if !accountUsage?.balances?.length}<p class="muted">No usage limits reported.</p>{/if}
+      {#if accountUsage?.balances?.length}<p class="muted">Balance {balancesText(accountUsage.balances)}</p>{/if}
       <h2>Rooms</h2>
       <p><label><input type="radio" name="room-scope" checked={!account.rooms?.length} disabled={busy} onchange={() => void setRooms(account, [])} /> Every room</label> <label><input type="radio" name="room-scope" checked={!!account.rooms?.length} disabled={busy || !rooms.length} onchange={() => void setRooms(account, [rooms[0].id])} /> Only these rooms</label></p>
       {#if account.rooms?.length}{#each rooms as room (room.id)}<label><input type="checkbox" checked={account.rooms.includes(room.id)} disabled={busy || (account.rooms.length === 1 && account.rooms.includes(room.id))} onchange={(e) => void setRooms(account, e.currentTarget.checked ? [...(account.rooms ?? []), room.id] : (account.rooms ?? []).filter(id => id !== room.id))} /> {room.name}</label>{/each}{/if}
@@ -183,7 +184,7 @@
       <div class="list">{#each group as item, index (item.id)}
         {@const status = accountState(item)}
         {@const rowUsage = usage.find(u => u.accountId === item.id)}
-        <div class="account-row"><a class="row" href={accountPath(item.id)} onclick={navigate}><div><strong>{item.label || `${provider.displayName} account ${index + 1}`}</strong>{#if status.pill}{" "}<StatusPill tone={status.pill.tone} label={status.pill.label} />{/if}<div class="muted">{item.rooms?.length ? `${item.rooms.length} rooms` : "Every room"}{#if status.line}{" · "}{status.line}{/if}{#if rowUsage?.observedAt}{" · "}usage at {new Date(rowUsage.observedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}{/if}</div></div>{#if rowUsage && !rowUsage.cause && visibleWindows(rowUsage.windows ?? []).length}<div class="row-meters">{#each visibleWindows(rowUsage.windows ?? []) as window (window.name)}<AccountMeter {window} now={Date.now()} />{/each}</div>{:else if item.state !== "sign_in_expired"}<span class="muted no-usage">No usage data for this provider yet.</span>{/if}</a>{#if item.state === "sign_in_expired" && provider.connectMethod === "oauth"}<div class="retry"><a class="btn fill" href={reconnectPath(item.id)} onclick={navigate}>Sign in again</a><span class="muted">Its limits show once it is signed in.</span></div>{/if}<a class="chevron" href={accountPath(item.id)} onclick={navigate} aria-label={`View ${item.label}`}>›</a></div>
+        <div class="account-row"><a class="row" href={accountPath(item.id)} onclick={navigate}><div><strong>{item.label || `${provider.displayName} account ${index + 1}`}</strong>{#if status.pill}{" "}<StatusPill tone={status.pill.tone} label={status.pill.label} />{/if}<div class="muted">{item.rooms?.length ? `${item.rooms.length} rooms` : "Every room"}{#if status.line}{" · "}{status.line}{/if}{#if rowUsage?.observedAt}{" · "}usage at {new Date(rowUsage.observedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}{/if}</div></div>{#if rowUsage && !rowUsage.cause && visibleWindows(rowUsage.windows ?? []).length}<div class="row-meters">{#each visibleWindows(rowUsage.windows ?? []) as window (window.name)}<AccountMeter {window} now={Date.now()} />{/each}</div>{:else if rowUsage?.balances?.length}<span class="muted no-usage">{balancesText(rowUsage.balances)}</span>{:else if item.state !== "sign_in_expired"}<span class="muted no-usage">No usage data for this provider yet.</span>{/if}</a>{#if item.state === "sign_in_expired" && provider.connectMethod === "oauth"}<div class="retry"><a class="btn fill" href={reconnectPath(item.id)} onclick={navigate}>Sign in again</a><span class="muted">Its limits show once it is signed in.</span></div>{/if}<a class="chevron" href={accountPath(item.id)} onclick={navigate} aria-label={`View ${item.label}`}>›</a></div>
       {/each}</div>
     </section>
   {/each}

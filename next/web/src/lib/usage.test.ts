@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountAlerts, busiestWindow, limitReached, usageRows, visibleWindows, windowLabel, windowMeter } from "./usage.ts";
+import { accountAlerts, balancesText, busiestWindow, limitReached, usageRows, visibleWindows, windowLabel, windowMeter } from "./usage.ts";
 import type { AccountUsage, AccountsListResponse, UsageWindow } from "./contract.gen.ts";
 
 test("labels each window and hides only unused model-specific windows", () => {
@@ -60,6 +60,22 @@ test("Usage keeps only accounts with reported windows, highest usage first, then
     usageOf("k", "lost-empty", "claude", null, "unreachable"),
   ]);
   assert.deepEqual(rows.map(row => row.title), ["rounds-up", "spent", "alpha", "beta", "limited"]);
+});
+
+test("A balance keeps an account in Usage, as text after every account with windows", () => {
+  const balance = { currency: "USD", amount: "3.50" };
+  const rows = usageRows([
+    { ...usageOf("a", "deepseek", "openai-compatible-deepseek", []), balances: [{ currency: "CNY", amount: "110.00" }, balance] },
+    { ...usageOf("b", "unused", "claude", [windowAt(0)]) },
+    { ...usageOf("c", "expired", "kimi", [], "sign_in_expired"), balances: [balance] },
+  ]);
+  assert.deepEqual(rows.map(row => row.title), ["unused", "deepseek"]);
+  assert.equal(balancesText(rows[1].balances), "110.00 CNY · 3.50 USD");
+  assert.deepEqual(rows[0].balances, []);
+});
+
+test("Names a monthly window", () => {
+  assert.equal(windowLabel({ ...windowAt(5), kind: "monthly", seconds: 2592000 }), "Monthly");
 });
 
 test("Needs you lists only expired sign-ins, by name, and reconnects only those with OAuth", () => {
