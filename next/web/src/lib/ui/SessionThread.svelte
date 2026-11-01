@@ -253,7 +253,7 @@
     }));
     return versions.filter(entry => entry !== undefined).reverse();
   }
-  const sender = (kind: string, id?: string) => kind === "owner" ? "You" : id ? store.names.get(id) ?? "Session" : "Dyna";
+  const sender = (kind: string, id?: string) => kind === "owner" ? "you" : id ? store.names.get(id) ?? "Session" : "Dyna";
   const sameDay = (a: string, b: string) => new Date(a).toDateString() === new Date(b).toDateString();
   const pendingKey = (id: number) => `pending:${id}`;
 </script>

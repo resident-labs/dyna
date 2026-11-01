@@ -13,7 +13,7 @@
   let { request, store, now, admin, feed = false, gone = false, folded = false, current = false, onopen }: {
     request: Request; store: RoomStore; now: number; admin: boolean; feed?: boolean; gone?: boolean; folded?: boolean; current?: boolean; onopen?: () => void;
   } = $props();
-  const name = (who: Principal) => who.kind === "owner" ? "You" : who.session ? store.names.get(who.session) ?? "A closed session" : "Dyna";
+  const name = (who: Principal) => who.kind === "owner" ? "you" : who.session ? store.names.get(who.session) ?? "A closed session" : "Dyna";
   const outcome: Record<OpState, string> = {
     pending: "", approved: "approved", running: "approved", denied: "denied", expired: "expired", withdrawn: "withdrawn", done: "approved", failed: "approved",
   };
