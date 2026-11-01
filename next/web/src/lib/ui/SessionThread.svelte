@@ -92,12 +92,42 @@
     void load();
     return () => { destroyed = true; stop(); document.removeEventListener("visibilitychange", markRead); };
   });
-  async function moreItems(turn: TranscriptTurn) {
-    const page = await call("transcript.read", { session, turn: turn.id, afterItem: turn.after, itemIndex: turn.nextItem, tail: turn.tail, postIndex: turn.nextPost }).catch(() => undefined);
-    const next = page?.turns?.[0];
-    if (!next) { failed = true; return; }
-    turns = turns.map(item => item.id === turn.id ? { ...item, inputs: [...item.inputs ?? [], ...next.inputs ?? []], items: [...next.items ?? [], ...(item.items ?? []).filter(existing => !(next.items ?? []).some(incoming => incoming.id === existing.id))], more: next.more, after: next.after, nextItem: next.nextItem, tail: next.tail, nextPost: next.nextPost } : item);
+  const paging = new Set<string>();
+  function mergeItems(existing: TranscriptItem[], incoming: TranscriptItem[]): TranscriptItem[] {
+    const byId = new Map(existing.map(item => [item.id, item]));
+    for (const item of incoming) byId.set(item.id, item);
+    const items = [...byId.values()];
+    const nested = new Set(items.flatMap(item => (item.posts ?? []).map(post => post.event || post.id)));
+    return items.filter(item => item.kind !== "post" || !nested.has(item.event || item.id)).sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
   }
+  async function readContinuation(turn: TranscriptTurn, kind: "items" | "posts" | "older") {
+    const key = turn.id + "/" + kind;
+    if (paging.has(key)) return;
+    paging.add(key);
+    let cursor = kind === "items" ? turn.nextMandatory ?? 0 : kind === "posts" ? turn.nextMandatoryPost ?? 0 : turn.nextItem ?? 0;
+    try {
+      for (;;) {
+        const request = kind === "items" ? { mandatoryItems: true, mandatoryIndex: cursor } : kind === "posts" ? { mandatoryPosts: true, mandatoryPost: cursor } : { olderItems: true, itemIndex: cursor };
+        const page = await call("transcript.read", { session, turn: turn.id, ...request });
+        const next = page.turns?.[0];
+        if (!next) throw new Error("Missing transcript page");
+        turns = turns.map(item => item.id === turn.id ? { ...item, items: mergeItems(item.items ?? [], next.items ?? []), ...(kind === "older" ? { olderItems: next.olderItems, nextItem: next.nextItem } : kind === "items" ? { mandatoryItems: next.mandatoryItems, nextMandatory: next.nextMandatory } : { mandatoryPosts: next.mandatoryPosts, nextMandatoryPost: next.nextMandatoryPost }) } : item);
+        const more = kind === "items" ? next.mandatoryItems : kind === "posts" ? next.mandatoryPosts : next.olderItems;
+        if (!more) break;
+        const nextCursor = kind === "items" ? next.nextMandatory ?? 0 : kind === "posts" ? next.nextMandatoryPost ?? 0 : next.nextItem ?? 0;
+        if (nextCursor === cursor) throw new Error("Transcript cursor did not advance");
+        cursor = nextCursor;
+      }
+    } catch { failed = true; }
+    finally { paging.delete(key); }
+  }
+  // Dyna: Mandatory overflow pages load immediately; older tool pages load on disclosure.
+  $effect(() => {
+    for (const turn of turns) {
+      if (turn.mandatoryItems) void readContinuation(turn, "items");
+      if (turn.mandatoryPosts) void readContinuation(turn, "posts");
+    }
+  });
   let chunks: Record<string, string> = $state({});
   let chunkFailed: Record<string, boolean> = $state({});
   const fetching = new Set<string>();
@@ -145,13 +175,13 @@
         {/each}
         <!-- Dyna: The work fold excludes message text and posts, which must remain visible. -->
         {#if turn.ended && (turn.items ?? []).some(item => item.kind === "tool" || item.kind === "thinking")}
-          <button class="work-header" aria-expanded={!!expandedTurns[turn.id]} onclick={() => { expandedTurns[turn.id] = !expandedTurns[turn.id]; if (expandedTurns[turn.id] && turn.more) void moreItems(turn); }}>Worked for {elapsed(turn.started, Date.parse(turn.ended))}<span class:open={expandedTurns[turn.id]}><Icon name="chevron" size={14} /></span></button>
+          <button class="work-header" aria-expanded={!!expandedTurns[turn.id]} onclick={() => { expandedTurns[turn.id] = !expandedTurns[turn.id]; if (expandedTurns[turn.id] && turn.olderItems) void readContinuation(turn, "older"); }}>Worked for {elapsed(turn.started, Date.parse(turn.ended))}<span class:open={expandedTurns[turn.id]}><Icon name="chevron" size={14} /></span></button>
         {/if}
         {#each deriveTimelineGroups(turn.items ?? []) as group (group.id)}
           {#if group.kind === "work"}
             {#if !turn.ended || expandedTurns[turn.id]}
             <TranscriptWorkRow items={group.items} ended={!!turn.ended} started={turn.started} {now}
-              onopen={() => { if (turn.more) void moreItems(turn); }}
+              onopen={() => { if (turn.olderItems) void readContinuation(turn, "older"); }}
               onload={async (item, part) => { await fetchPart(turn.id, item.id, part); const value = chunks[item.id + "/" + part]; if (value === undefined) throw new Error("Part did not load"); return value; }} />
             {/if}
           {:else if group.kind === "posts"}
