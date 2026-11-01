@@ -177,6 +177,7 @@ type Manager struct {
 	pendingCooldownStateStore CooldownStateStore
 	executors                 map[string]ProviderExecutor
 	selector                  Selector
+	quotaBoard                quotaResetBoard
 	hook                      Hook
 	resultPolicy              atomic.Pointer[resultPolicyHolder]
 	mu                        sync.RWMutex
