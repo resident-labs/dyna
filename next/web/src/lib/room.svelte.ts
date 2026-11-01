@@ -127,13 +127,31 @@ export class RoomStore {
     if (this.hadJobs.size) void failedJobs(this.room, this.head + 1).then(ends => {
       for (const { session, job, seq } of ends) if (seq > Math.max(this.readAt({ kind: "feed" }), this.readAt({ kind: "dm", session }))) this.failedJobs.add(`${session}/${job}`);
     });
-    this.stopStream = this.connect(this.room, () => this.head, event => this.apply(event));
+    this.stopStream = this.connect(this.room, () => this.head, event => this.apply(event), undefined, undefined, () => {
+      // A dropped conversation.read is not replayed, so the stream's reconnect rereads the positions.
+      void this.rereadPositions().catch(() => {});
+    });
+  }
+
+  // room.list gives the feed's read position.
+  private async readFeed(): Promise<void> {
+    const rooms = await call("room.list", {});
+    const own = rooms.rooms.find(summary => summary.id === this.room);
+    if (own) this.noteRead({ kind: "feed" }, own.lastRead);
+  }
+
+  // Rereads every read position: room.list for the feed, session.list for each DM.
+  async rereadPositions(): Promise<void> {
+    await this.readFeed();
+    const list = await call("session.list", { room: this.room });
+    for (const session of list.sessions ?? []) this.noteRead({ kind: "dm", session: session.id }, session.lastRead);
   }
 
   private async load(): Promise<void> {
     const list = await call("session.list", { room: this.room });
     // op.list reads after the seq, so an operation it misses arrives as a live event.
     const listed = await call("op.list", { room: this.room });
+    await this.readFeed();
     this.head = list.seq;
     for (const session of list.sessions ?? []) {
       this.sessions.set(session.id, {

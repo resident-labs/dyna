@@ -29,14 +29,19 @@ export function stream(
     const id = setTimeout(callback, delay);
     return () => clearTimeout(id);
   },
+  reopened: () => void = () => {},
 ): () => void {
   let source: EventConnection;
   let cancel = () => {};
   let closed = false;
   let delay = 500;
+  let connected = false;
   function connect() {
     source = factory(`/v1/events?${new URLSearchParams({ ...(room && { room }), after: String(after()) })}`);
     source.addEventListener("hello", message => {
+      // Each connection after the first may have missed events the server dropped, such as read positions.
+      if (connected) reopened();
+      connected = true;
       const value: unknown = JSON.parse(message.data);
       if (typeof value === "object" && value !== null && "build" in value && typeof value.build === "string") {
         const hello: StreamHello = { build: value.build };

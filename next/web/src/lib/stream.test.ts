@@ -46,6 +46,25 @@ test("notifies transcript watchers on owner reconnect and changes", () => {
   stop();
 });
 
+test("reopened runs on each connection after the first", () => {
+  const hellos: ((event: MessageEvent<string>) => void)[] = [];
+  const sources: EventConnection[] = [];
+  let reconnect = () => {};
+  let reopens = 0;
+  const stop = stream("room", () => 0, () => {}, () => {
+    const source: EventConnection = { onmessage: null, onerror: null, addEventListener(_type, cb) { hellos.push(cb); }, close() {} };
+    sources.push(source);
+    return source;
+  }, cb => { reconnect = cb; return () => {}; }, () => { reopens++; });
+  hellos[0](new MessageEvent("hello", { data: '{"build":"b"}' }));
+  assert.equal(reopens, 0);
+  sources[0].onerror?.(new Event("error"));
+  reconnect();
+  hellos[1](new MessageEvent("hello", { data: '{"build":"b"}' }));
+  assert.equal(reopens, 1);
+  stop();
+});
+
 test("reconnects after the last applied event", () => {
   const urls: string[] = [];
   const connections: EventConnection[] = [];
