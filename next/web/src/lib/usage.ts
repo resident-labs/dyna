@@ -114,8 +114,23 @@ export function outOfLimit(row: Pick<UsageRow, "windows" | "balances">, now: num
   return row.windows.some(w => limitReached(w, now)) || (row.balances.length > 0 && row.balances.every(b => Number(b.amount) <= 0));
 }
 
-// What the owner waits for after hiding a spent account, which comes back by itself once it is no longer out of limit.
-export const hideLabel = (row: Pick<UsageRow, "windows">, now: number) => row.windows.some(w => limitReached(w, now)) ? "Hide until it resets" : "Hide until topped up";
+// What an account the owner hid waits for: the reset of its busiest window, or a balance above today's. Without
+// either, it stays hidden until the owner shows it.
+export type UsageHold = { until?: string; balances?: Record<string, number> };
+
+export function holdFor(row: Pick<UsageRow, "windows" | "balances">, now: number): UsageHold {
+  const [next] = row.windows.filter(w => Date.parse(w.resetsAt) > now).sort((a, b) => usedOf(b) - usedOf(a));
+  if (next) return { until: next.resetsAt };
+  return row.balances.length ? { balances: Object.fromEntries(row.balances.map(b => [b.currency, Number(b.amount)])) } : {};
+}
+
+export function holding(row: Pick<UsageRow, "balances">, hold: UsageHold, now: number): boolean {
+  if (hold.until) return Date.parse(hold.until) > now;
+  const { balances } = hold;
+  return !balances || row.balances.every(b => Number(b.amount) <= (balances[b.currency] ?? Infinity));
+}
+
+export const hideLabel = (hold: UsageHold) => hold.until ? "Hide until it resets" : hold.balances ? "Hide until topped up" : "Hide";
 
 // A usage window as a meter: a label, percent used, and time to reset; a spent window says when it comes back.
 // It is busy at 90% used or more.
