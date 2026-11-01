@@ -24,6 +24,7 @@ export function nextAction(row: Row, merge: MergeItem | null = null): NextAction
   if (merge?.state === 'returned') blockers.push({ label: 'Returned to author', tone: 'warning' })
   if (merge?.state === 'stopped' || row.reviewState === 'blocked') blockers.push({ label: 'Review blocked', tone: 'warning' })
   if (merge?.state === 'read-only') blockers.push({ label: 'Read-only room', tone: 'warning' })
+  if (merge?.state === 'unmanaged-base') blockers.push({ label: 'Merge on GitHub', tone: 'warning' })
   const first = blockers[0]
   if (first) return { ...first, kind: first.kind ?? 'other', others: blockers.slice(1).map((b) => b.label) }
   if (row.isDraft) return { kind: 'other', label: 'Draft', others: [] }
