@@ -72,7 +72,7 @@ var methodTable = []MethodEntry{
 		act("op", "withdraw", typ[contract.OpWithdrawRequest](), "Withdraw your pending operation by id.", "op withdraw"),
 	),
 	method(contract.MethodPost, contract.ScopeOperate, UserAccess,
-		act("post", "send", typ[PostInput](), "Send or update a post. paths holds attachment paths; html names a visual file. Set visualUpdate to update a visual.", "post"),
+		act("post", "send", typ[PostInput](), "Send or update a post. paths holds attachment paths; html names a visual file. Set visualUpdate to update a visual. end_turn ends the turn on this post, and the post is the turn's reply. The turn ends when the post succeeds and every tool call in the same message also ends it; a queued input continues it. In a codemode script the post sends, the turn continues, and the result carries turnContinues.", "post"),
 	),
 	method(contract.MethodPostSearch, contract.ScopeRead, OwnerAccess),
 	method(contract.MethodProfileList, contract.ScopeRead, OwnerAccess),

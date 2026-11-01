@@ -75,6 +75,7 @@ type PostInput struct {
 	Paths        []string              `json:"paths,omitempty"`
 	HTML         string                `json:"html,omitempty"`
 	AllowNet     bool                  `json:"allowNet,omitempty"`
+	EndTurn      bool                  `json:"end_turn,omitempty"` // read by the box's Pi extension, which alone can end a turn
 }
 
 type FileRequest struct {

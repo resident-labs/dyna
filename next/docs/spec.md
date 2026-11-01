@@ -358,7 +358,7 @@ Root cannot close. After box failure the owner may replace its box with the same
 
 ### 7.5 Reply channels (D-579)
 
-The engine derives surface and reply channel from the input, including for root. Each input starts with `[Dyna] From <sender>, <surface>. <attachments> <reply sentence>`, then the sender's text. Only that first line is an engine frame. `box.hello` supplies stable identity and the trust rule for this frame and Pi's engine-authored `context_update`; it contains no tools, commands or state.
+The engine derives surface and reply channel from the input, including for root. Each input starts with `[Dyna] From <sender>, <surface>. <attachments> <reply sentence>`, then the sender's text. Only that first line is an engine frame. `box.hello` supplies stable identity, the trust rule for this frame and Pi's engine-authored `context_update`, and how to reply; it contains no commands or state.
 
 | Input | Surface | Channel and target |
 |---|---|---|
@@ -374,6 +374,12 @@ The engine derives surface and reply channel from the input, including for root.
 | Voice dispatch, after port | voice | final to owner in call, or feed if call ended |
 
 A final response is delivered to its target and home; if the turn already posted to that target, delivery is quiet and links that post. A `post` channel sends nothing automatically. A `none` response stays in the transcript; the frame asks for one line. Multiple inputs require one reply per distinct final target and home.
+
+To answer, a session ends the turn with text; that text is the reply. A post with `end_turn` replaces that text when the reply needs attachments or mentions, or goes elsewhere. A plain post is a mid-turn update. `box.hello` states this rule.
+
+`end_turn` ends the turn with no further model call and makes the post the turn's reply. The turn has no final text, and `turn.output` names the post in `endPosts`. Every final channel of the turn links that post in `turn.ended.replies`; no event or table records `end_turn`. A session target that the post mentioned already has it. Any other session target receives the post itself as a waking delivery. A `post` or `none` channel owes nothing.
+
+Pi stops only when every tool call in the message ends the turn and no steering is queued. So a post that fails, a post beside another tool call and a turn that takes steering all continue, and the turn ends on text as usual. A post from a codemode script sends and the turn continues, because nested results never reach the agent loop; its result carries `turnContinues: true`. Recovery treats an end batch as settled and makes no model call. `end_turn` exists only on the MCP tool; `dyna post` has no turn to end.
 
 ### 7.6 Rooms and repositories
 
@@ -397,7 +403,7 @@ Connect keeps its wire protocol and relay paths. `engine/connect` ports link, mi
 
 ### 7.9 Agent surface: MCP tools and the context snapshot
 
-Pi is the only harness. The box agent serves one `dyna` MCP server at `127.0.0.1:7781/dyna/`, beside `/shell/`; each call routes to `POST /v1/<method>` on the box socket. The CLI uses the same methods and principal. The engine alone authorizes and renders `context.snapshot`. Pi owns MCP, search, codemode, skills, keyed sections, compaction and context updates. The box agent configures Pi and passes state; it has no authority or credentials. Dyna ships no Pi extension. Cherry-pick upstream Pi fixes #11625 and #11632 and record them and the core change in `third_party/pi/DYNA.md`.
+Pi is the only harness. The box agent serves one `dyna` MCP server at `127.0.0.1:7781/dyna/`, beside `/shell/`; each call routes to `POST /v1/<method>` on the box socket. The CLI uses the same methods and principal. The engine alone authorizes and renders `context.snapshot`. Pi owns MCP, search, codemode, skills, keyed sections, compaction and context updates. The box agent configures Pi and passes state; it has no authority or credentials. Dyna's one Pi extension, `box/agent/extension.js`, links nested calls to their outer call and registers `mcp__dyna__post` in place of Pi's MCP tool, because only a tool's own result carries `terminate`: MCP results and the `tool_result` hook drop it. It adds no authority; the post still goes through the `dyna` MCP server. Cherry-pick upstream Pi fixes #11625 and #11632 and record them and the core change in `third_party/pi/DYNA.md`.
 
 #### Pi core change: context updates
 
