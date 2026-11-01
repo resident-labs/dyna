@@ -60,6 +60,28 @@ func TestAdmissionUsesAvailableMemoryAndDefaultReservation(t *testing.T) {
 	}
 }
 
+func TestAdmissionDoesNotDoubleCountSampledChecks(t *testing.T) {
+	probe := time.Unix(100, 0)
+	machine := machines.Machine{LastProbe: probe, Capabilities: machines.Capabilities{CPUs: 32, MemTotal: 32 << 30}, Load: machines.Load{MemTotal: 32 << 30, MemAvailable: 24 << 30}}
+	q := nodeQueue{heldRows: []admissionRow{{Demand: Demand{CPUs: 2, MemoryMiB: 20 * 1024}, Created: probe.Add(-time.Second)}}, queued: []Job{{ID: "deploy", Host: true, MemoryMiB: 3 * 1024}}}
+	admitted, reasons := map[string]bool{}, map[string]string{}
+	needsWrite := false
+	if err := passNode(context.Background(), nil, probe, "node", machine, nil, q, nil, admitted, reasons, &needsWrite); err != nil {
+		t.Fatal(err)
+	}
+	if !admitted["deploy"] {
+		t.Fatalf("sampled check blocked deploy: %v", reasons)
+	}
+	q.heldRows[0].Created = probe
+	admitted, reasons = map[string]bool{}, map[string]string{}
+	if err := passNode(context.Background(), nil, probe, "node", machine, nil, q, nil, admitted, reasons, &needsWrite); err != nil {
+		t.Fatal(err)
+	}
+	if admitted["deploy"] {
+		t.Fatal("check admitted after the sample must still reserve memory")
+	}
+}
+
 func TestAdmissionAllowsSmallNodesAndLargeRequests(t *testing.T) {
 	for _, tc := range []struct {
 		name             string
