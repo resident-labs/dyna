@@ -32,6 +32,9 @@ func (instructionStore) Hosts(context.Context) ([]box.Host, error) {
 func (instructionStore) Boxes(context.Context) ([]box.Box, error) {
 	return []box.Box{{Session: "session"}}, nil
 }
+func (instructionStore) OpenRooms(context.Context) ([]contract.RoomID, error) {
+	return []contract.RoomID{"room"}, nil
+}
 func (instructionStore) Session(context.Context, contract.SessionID) (store.Session, error) {
 	return store.Session{Room: "room"}, nil
 }
@@ -77,7 +80,7 @@ func TestInstructionsRepairAfterOfflineSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := &Boxes{Store: instructionStore{}, InstructionsDir: data, HostData: hostData, hosts: map[contract.HostName]*podman.Host{"host": host}}
+	b := &Boxes{Store: instructionStore{}, Layout: box.Layout{Data: data, HostData: hostData}, hosts: map[contract.HostName]*podman.Host{"host": host}}
 	heartbeat := func(ok bool) {
 		if ok {
 			_ = b.syncInstructions(ctx, host)
@@ -97,14 +100,55 @@ func TestInstructionsRepairAfterOfflineSave(t *testing.T) {
 	heartbeat(true) // Failed repair stays pending.
 	transport.offline = false
 	heartbeat(true) // The next healthy heartbeat retries.
-	got, err := os.ReadFile(filepath.Join(hostData, "instructions", "rooms", "room", "AGENTS.md"))
+	got, err := os.ReadFile(filepath.Join(hostData, "rooms", "room", "instructions", "AGENTS.md"))
 	if err != nil || string(got) != "new" {
 		t.Fatalf("got %q: %v", got, err)
 	}
 }
 
+type noRoomsStore struct{ instructionStore }
+
+func (noRoomsStore) OpenRooms(context.Context) ([]contract.RoomID, error) { return nil, nil }
+
+// A heartbeat copy must not bring back a folder that a room's deletion removes.
+func TestInstructionsSkipARoomBeingDeleted(t *testing.T) {
+	ctx := context.Background()
+	layout := box.Layout{Data: t.TempDir(), HostData: t.TempDir()}
+	source := layout.Instructions("room")
+	if err := os.MkdirAll(filepath.Dir(source), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("room"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(layout.Instructions(""), []byte("global"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	host, err := podman.New("user@host", t.TempDir(), "host", &instructionTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &Boxes{Store: noRoomsStore{}, Layout: layout, hosts: map[contract.HostName]*podman.Host{"host": host}}
+	if err := b.syncInstructions(ctx, host); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Dir(layout.HostInstructions("room"))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("room copy: %v", err)
+	}
+	if got, err := os.ReadFile(layout.HostInstructions("")); err != nil || string(got) != "global" {
+		t.Fatalf("global copy %q: %v", got, err)
+	}
+}
+
+func TestRoomRemovalRefusesAnEmptyRoom(t *testing.T) {
+	b := &Boxes{Layout: box.Layout{HostData: "/host"}}
+	if err := b.RemoveRoom(context.Background(), "host", ""); err == nil {
+		t.Fatal("an empty room would name every room")
+	}
+}
+
 func TestInstructionMountsAreRoomScoped(t *testing.T) {
-	b := &Boxes{HostData: "/host"}
+	b := &Boxes{Layout: box.Layout{HostData: "/host"}}
 	_, spec := b.container(lifecycle.BoxSpec{Room: "room"}, "image")
 	found := map[string]box.Mount{}
 	for _, mount := range spec.Mounts {
@@ -112,7 +156,7 @@ func TestInstructionMountsAreRoomScoped(t *testing.T) {
 	}
 	for path, source := range map[string]string{
 		"/run/dyna/instructions/global": "/host/instructions/global",
-		"/run/dyna/instructions/room":   "/host/instructions/rooms/room",
+		"/run/dyna/instructions/room":   "/host/rooms/room/instructions",
 	} {
 		mount := found[path]
 		if mount.HostPath != source || !mount.ReadOnly || !mount.MakeDir {
@@ -136,7 +180,7 @@ func TestResumeRepairsInstructionsBeforeStarting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := &Boxes{Store: instructionStore{}, InstructionsDir: data, HostData: remote, hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}}
+	b := &Boxes{Store: instructionStore{}, Layout: box.Layout{Data: data, HostData: remote}, hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}}
 	if err := b.Start(ctx, "box"); err == nil {
 		t.Fatal("started with offline host")
 	}
@@ -144,7 +188,7 @@ func TestResumeRepairsInstructionsBeforeStarting(t *testing.T) {
 	if err := b.Start(ctx, "box"); err != nil {
 		t.Fatal(err)
 	}
-	got, err := os.ReadFile(filepath.Join(remote, "instructions", "rooms", "room", "AGENTS.md"))
+	got, err := os.ReadFile(filepath.Join(remote, "rooms", "room", "instructions", "AGENTS.md"))
 	if err != nil || string(got) != "saved" {
 		t.Fatalf("got %q: %v", got, err)
 	}
@@ -209,12 +253,12 @@ func TestAddHostCopiesPreviouslySavedInstructions(t *testing.T) {
 	if err := os.WriteFile(machineID, []byte("0123456789abcdef0123456789abcdef"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	b := &Boxes{Store: addHostStore{}, Runtime: t.TempDir(), HostData: remote, InstructionsDir: data, Version: "dev", Context: ctx, hostRunner: admissionTransport{}, machineIDFile: machineID}
+	b := &Boxes{Store: addHostStore{}, Runtime: t.TempDir(), Layout: box.Layout{Data: data, HostData: remote}, Version: "dev", Context: ctx, hostRunner: admissionTransport{}, machineIDFile: machineID}
 	b.binOnce.Do(func() { b.binSum = "test-sum" })
 	if _, err := b.AddHost(ctx, contract.HostAddRequest{Name: "host", SSH: "user@host", OwnerOnlyAdmin: true}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := os.ReadFile(filepath.Join(remote, "instructions", "rooms", "room", "AGENTS.md"))
+	got, err := os.ReadFile(filepath.Join(remote, "rooms", "room", "instructions", "AGENTS.md"))
 	if err != nil || string(got) != "saved before host" {
 		t.Fatalf("got %q: %v", got, err)
 	}
@@ -235,7 +279,7 @@ func (s delayedInstructionStore) Hosts(context.Context) ([]box.Host, error) {
 func TestSaveThenResumeRepairsBeforeDelayedPublish(t *testing.T) {
 	ctx := context.Background()
 	data, remote := t.TempDir(), t.TempDir()
-	path := filepath.Join(data, "instructions", "global", "AGENTS.md")
+	path := filepath.Join(data, "AGENTS.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +293,7 @@ func TestSaveThenResumeRepairsBeforeDelayedPublish(t *testing.T) {
 	}
 	delayed := delayedInstructionStore{entered: make(chan struct{}), release: make(chan struct{})}
 	defer close(delayed.release)
-	b := &Boxes{Store: delayed, InstructionsDir: filepath.Join(data, "instructions"), HostData: remote, hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}}
+	b := &Boxes{Store: delayed, Layout: box.Layout{Data: data, HostData: remote}, hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}}
 	if err := b.syncInstructions(ctx, host); err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +303,7 @@ func TestSaveThenResumeRepairsBeforeDelayedPublish(t *testing.T) {
 	}
 	defer st.Close()
 	service := engine.New(st, nil, nil, nil)
-	service.SetFilesDir(data)
+	service.SetLayout(box.Layout{Data: data})
 	service.SetInstructionsPublisher(b.PublishInstructions)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	before, problem := service.InstructionsGet(ctx, owner, contract.InstructionsGetRequest{})

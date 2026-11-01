@@ -66,6 +66,9 @@ func sessionReplay(ctx context.Context, q sqlQuery, caller contract.Principal, c
 func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, size contract.BoxSizeName, goal string, event, boxEvent contract.Event, reason string, sameHost bool, clientID string, maxDepth int) (contract.SessionStartResponse, error) {
 	response := contract.SessionStartResponse{Session: session.ID, Box: session.Box}
 	err := s.Write(ctx, func(tx *sql.Tx) error {
+		if err := refuseNewWork(ctx, tx, session.Room); err != nil {
+			return err
+		}
 		if clientID != "" {
 			previous, err := sessionReplay(ctx, tx, event.From, clientID)
 			if err == nil {
@@ -330,7 +333,7 @@ func (s *Store) Session(ctx context.Context, id contract.SessionID) (Session, er
 
 func (s *Store) RoomByName(ctx context.Context, name contract.RoomName) (contract.RoomID, error) {
 	var id contract.RoomID
-	err := s.Read().QueryRowContext(ctx, "SELECT id FROM rooms WHERE name=?", name).Scan(&id)
+	err := s.Read().QueryRowContext(ctx, "SELECT id FROM rooms WHERE name=? AND state='open'", name).Scan(&id)
 	return id, err
 }
 
@@ -398,6 +401,9 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 			if !errors.Is(err, sql.ErrNoRows) {
 				return err
 			}
+		}
+		if err := refuseNewWork(ctx, tx, event.Room); err != nil {
+			return err
 		}
 		if visualReply != "" {
 			var visualID contract.EventID

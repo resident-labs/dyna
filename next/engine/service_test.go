@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -21,6 +20,7 @@ import (
 
 func resetLifecycle(s *Service) {
 	s.reconciler = lifecycle.New(s.store, s.boxes, s, s.repos, s.event, func() time.Time { return s.now() })
+	s.reconciler.SetRoomData(s)
 }
 
 func passLifecycle(t *testing.T, s *Service, ctx context.Context) {
@@ -1304,7 +1304,7 @@ func TestShellJobEndWakesOnceAndSteersARunningTurn(t *testing.T) {
 
 func TestPostRejectsMissingAttachment(t *testing.T) {
 	s, room, _, ctx := setup(t)
-	s.SetFilesDir(t.TempDir())
+	s.SetLayout(box.Layout{Data: t.TempDir()})
 	_, e := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{
 		Room: room, Text: "hello", Attachments: []contract.Attachment{{Name: "missing", Media: "text/plain", SHA256: "0000000000000000000000000000000000000000000000000000000000000000"}},
 	})
@@ -1315,10 +1315,12 @@ func TestPostRejectsMissingAttachment(t *testing.T) {
 
 func TestPostNeedsTextOrFile(t *testing.T) {
 	s, room, _, ctx := setup(t)
-	dir := t.TempDir()
-	s.SetFilesDir(dir)
+	s.SetLayout(box.Layout{Data: t.TempDir()})
 	hash := "0000000000000000000000000000000000000000000000000000000000000000"
-	if err := os.WriteFile(filepath.Join(dir, hash), []byte("notes"), 0o600); err != nil {
+	if err := os.MkdirAll(s.layout.Files(room), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(s.layout.File(room, hash), []byte("notes"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	owner := contract.Principal{Kind: contract.PrincipalOwner}

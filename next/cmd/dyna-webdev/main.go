@@ -567,8 +567,7 @@ func main() {
 	b := &boxes{ctx: ctx, st: st, dir: runtime, cancel: map[contract.BoxID]context.CancelFunc{}}
 	svc := engine.New(st, b, profiles{empty: *fixture == "empty"}, time.Now)
 	fatal(svc.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.grant": svc.HostexecGrant()}, time.Hour))
-	svc.SetFilesDir(filepath.Join(data, "files"))
-	svc.SetTranscriptDir(filepath.Join(data, "transcripts"))
+	svc.SetLayout(box.Layout{Data: data})
 	a := api.New(devService{Service: svc, empty: *fixture == "empty", renames: &devRenames{labels: map[contract.AccountID]string{}}}, nil)
 	a.SetConnectOperations(devConnect{empty: *fixture == "empty"})
 	a.SetFilesRoute(func(c api.Caller) http.Handler { return svc.Files(c.Principal, c.Room) })
