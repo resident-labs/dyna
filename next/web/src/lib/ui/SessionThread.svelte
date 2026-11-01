@@ -4,7 +4,7 @@
   import { causes, formatTime } from "../feed.ts";
   import { hue } from "../identity.ts";
   import { watchTranscripts } from "../stream.ts";
-  import type { PostRequest, TranscriptInput, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn } from "../contract.gen.ts";
+  import type { PostRequest, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn } from "../contract.gen.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import Icon from "./Icon.svelte";
   import { elapsed } from "../steps.ts";
@@ -13,7 +13,7 @@
   import Markdown from "./Markdown.svelte";
   import TranscriptWorkRow from "./TranscriptWorkRow.svelte";
   import TimelineMinimap from "./TimelineMinimap.svelte";
-  import { deriveTimelineGroups, mergeTimelineItems } from "../timeline.ts";
+  import { deriveTimelineGroups, mergeTimelineInputs, mergeTimelineItems } from "../timeline.ts";
 
   let { session, roomName, store, unsent, onunsent, onsettled, onpostlocation, clock = Date.now }: { session: string; roomName: string; store: RoomStore; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; clock?: () => number } = $props();
   const view = untrack(() => store.window({ kind: "dm", session }));
@@ -53,9 +53,6 @@
   let lastSeq = $derived(Math.max(0, ...turns.flatMap(turn => [...(turn.inputs ?? []).map(input => input.seq), ...(turn.items ?? []).flatMap(item => [item.seq ?? 0, ...(item.posts ?? []).map(post => post.seq ?? 0)])])));
   let queuedPosts = $derived(view.posts().filter(post => post.seq > lastSeq));
 
-  function mergeInputs(existing: TranscriptInput[], incoming: TranscriptInput[]) {
-    return [...new Map([...existing, ...incoming].map(input => [input.id, input])).values()].sort((a, b) => a.seq - b.seq);
-  }
   async function load(older = false) {
     if (loading) { if (!older) pending = true; return; }
     loading = true;
@@ -76,7 +73,7 @@
         const old = new Map(turns.map(turn => [turn.id, turn]));
         turns = [...retained, ...incoming.reverse().map(turn => {
           const previous = old.get(turn.id);
-          return previous ? { ...turn, inputs: mergeInputs(previous.inputs ?? [], turn.inputs ?? []), items: mergeTimelineItems(previous.items ?? [], turn.items ?? []), olderItems: previous.olderItems && turn.olderItems, nextItem: previous.olderItems ? previous.nextItem : turn.nextItem } : turn;
+          return previous ? { ...turn, inputs: mergeTimelineInputs(previous.inputs ?? [], turn.inputs ?? []), items: mergeTimelineItems(previous.items ?? [], turn.items ?? []), olderItems: previous.olderItems && turn.olderItems, nextItem: previous.olderItems ? previous.nextItem : turn.nextItem } : turn;
         })];
         if (!retained.length) before = page.before;
         if (loaded && atBottom) { await tick(); scroller.scrollTop = scroller.scrollHeight; }
@@ -131,7 +128,7 @@
         const page = await call("transcript.read", { session, turn: turn.id, afterItem: after });
         const next = page.turns?.[0];
         if (!next || next.after === after) throw new Error("Transcript input cursor did not advance");
-        turns = turns.map(item => item.id === turn.id ? { ...item, ...next, after: next.after, inputs: mergeInputs(item.inputs ?? [], next.inputs ?? []), items: mergeTimelineItems(item.items ?? [], next.items ?? []) } : item);
+        turns = turns.map(item => item.id === turn.id ? { ...item, ...next, after: next.after, inputs: mergeTimelineInputs(item.inputs ?? [], next.inputs ?? []), items: mergeTimelineItems(item.items ?? [], next.items ?? []) } : item);
         after = next.after;
       }
     } catch { failed = true; }
