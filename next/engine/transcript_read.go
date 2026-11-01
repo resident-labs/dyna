@@ -209,6 +209,8 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 					value = item.Text
 				case contract.TranscriptPartArguments:
 					value = item.Arguments
+				case contract.TranscriptPartDiff:
+					value = item.Diff
 				default:
 					return response, invalid("invalid transcript item part")
 				}
