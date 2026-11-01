@@ -92,7 +92,7 @@ func TestNoticeFrameLeavesWorkRunning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(frame, "Carry on with any work you have") {
+	if !strings.HasSuffix(frame, "No reply is expected.") {
 		t.Fatalf("frame %q", frame)
 	}
 }
