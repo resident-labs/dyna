@@ -666,7 +666,7 @@
         sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
     </div>
   </main>
-  {:else if room}
+  {#if room}
     <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} class:watching={watching && docked} aria-label="Sessions" tabindex="-1" role={panel && phone.current && !covered ? "dialog" : undefined} aria-modal={(panel && phone.current && !covered) || undefined} bind:this={members} inert={drawer || covered || inSettings}>
       <!-- Docked, the computer sits above the session list. -->
       {#if watching && docked && panelShown}{@render computerView(watching)}{/if}
