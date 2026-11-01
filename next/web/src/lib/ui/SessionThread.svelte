@@ -163,14 +163,11 @@
   .thread { height: 100%; min-height: 0; overflow-y: auto; }
   .body { max-width: 736px; margin: auto; padding: 16px 24px; }
   article { margin: 0 0 24px; }
-  .rule { display: flex; gap: 12px; align-items: center; margin: 16px 0; color: var(--muted); font-size: 12.5px; }
-  .rule strong { color: var(--text); font-weight: 600; }
   .failure { display: flex; gap: 10px; color: var(--muted); margin: 12px 0; }
   .failure strong { color: var(--text); }
   .spinner { display: inline-block; width: 12px; height: 12px; border: 1.5px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
-  .rule i { flex: 1; height: 1px; background: var(--line); }
   .input { background: var(--raised); padding: 12px 16px; border-radius: 14px; margin: 12px 0; }
   p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
   .who { display: flex; align-items: center; gap: 8px; }
@@ -180,22 +177,11 @@
   .input :global(.markdown) { margin: 4px 0 0; }
   .pending { opacity: 0.5; }
   .message { margin: 12px 0; }
-  .muted, details { color: var(--muted); }
-  details { margin: 4px 0; font-size: 14px; }
-  summary { cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: 24px; list-style: none; border-radius: 6px; }
-  summary:hover { background: var(--hover); color: var(--text); }
-  summary::-webkit-details-marker { display: none; }
-  .chevron { display: inline-flex; flex: none; transition: transform 150ms; }
-  details:not([open]) > summary .chevron { transform: rotate(-90deg); }
-  details > .thought { margin-left: 20px; }
-  .steps { max-height: min(18rem, 50dvh); overflow-y: auto; }
-  .time { margin-left: auto; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
-  code { min-width: 0; overflow-wrap: anywhere; font: 12.5px var(--mono); }
-  pre { margin: 4px 0 8px 20px; padding: 8px 12px; background: var(--sidebar); border-radius: 6px; overflow-wrap: anywhere; white-space: pre-wrap; font: 12.5px/1.45 var(--mono); }
+  .muted { color: var(--muted); }
   button { padding: 0; border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
   button:hover { color: var(--text); }
-  button:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); }
+  button:focus-visible { outline: 2px solid var(--focus); }
   .latest { position: absolute; right: 24px; bottom: 16px; background: var(--sidebar); padding: 8px 12px; border-radius: 6px; }
   @media (max-width: 600px) { .body { padding: 12px 16px; } }
-  @media (pointer: coarse) { summary, button { min-height: 40px; } }
+  @media (pointer: coarse) { button { min-height: 40px; } }
 </style>
