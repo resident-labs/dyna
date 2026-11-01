@@ -640,7 +640,7 @@
   </aside>
   {#if drawer || (panel && phone.current)}<button type="button" class="scrim" tabindex="-1" aria-label={drawer ? "Close the menu" : room ? "Close the sessions" : "Close the active rooms"}
     onclick={() => void (drawer ? showDrawer(false, true, true) : showPanel(false, true))}></button>{/if}
-  <main bind:clientWidth={mainWidth} class:header-tight={mainWidth <= 1000} class:header-narrow={mainWidth <= 600} class:dropping ondragover={dragOver} ondragleave={dragLeave} ondrop={drop} inert={drawer || (panel && phone.current) || covered || inSettings}>
+  <main class:session-main={!!session} bind:clientWidth={mainWidth} class:header-tight={mainWidth <= 1000} class:header-narrow={mainWidth <= 600} class:dropping ondragover={dragOver} ondragleave={dragLeave} ondrop={drop} inert={drawer || (panel && phone.current) || covered || inSettings}>
     {#if dropping}<p class="drop-label">Drop files to attach</p>{/if}
     {#if (section === "new-room" || firstRoom)}<NewRoom {rooms} first={firstRoom} onclose={() => void closeSection()} oncreated={id => { void attention.created(id).then(() => { firstRoom = false; openLocation(id); }); }} />
     {:else if section === "new-session" && room && store && store.ready}<NewSession {room} {roomName} sessions={[...store.sessions.values()]} onclose={() => void closeSection()} onstarted={(id, brief) => { startingBriefs[id] = brief; openLocation(room!, id); }} />
@@ -777,6 +777,7 @@
   /* A dashed accent outline marks the column that takes a dropped file; a muted label names the action. */
   main.dropping { outline: 2px dashed var(--focus); outline-offset: -8px; border-radius: 8px; }
   .drop-label { position: absolute; inset: 8px; z-index: 1; display: grid; place-items: center; margin: 0; border-radius: 8px; background: color-mix(in srgb, var(--bg) 85%, transparent); color: var(--muted); font-size: 14px; pointer-events: none; }
+  main.session-main { container: session-header / inline-size; }
   .terminal-holder:not([hidden]) { display: contents; }
   :where(main.header-tight) .tool { justify-content: center; width: 28px; padding: 0; }
   /* One quiet line of the working line's size and edge; only its Resume acts. */
@@ -794,7 +795,10 @@
   /* The header has one line, and a failed session's word is a sentence, so the word gives way and the title stays whole. */
   .word { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .heading strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  @media (min-width: 641px) { .word { flex: 1 1 0; } }
+  @media (min-width: 641px) {
+    .word { flex: 1 1 0; }
+    .session-bar .heading strong { min-width: min(8rem, 100%); }
+  }
   .crumb { flex: none; max-width: 25%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hash { display: inline-flex; align-items: center; }
   /* A phone's header: the menu button, the title over its muted counts, Requests only while something waits (40 px
