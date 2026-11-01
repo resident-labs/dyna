@@ -74,7 +74,7 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 - Make Carbon, a neutral dark, the default theme, and open dark even when the OS asks for light. Name every theme, and build it from the one token set. Use a pure black page only in the OLED theme, and pure white as the page in no theme. [owner, 2026-10-31]
 - Build surfaces from three levels: sidebar (sunk), page, and raised (card or popover). [v1] [T3 `--sidebar`, `--background`, `--card`]
 - Draw borders as low-alpha lines (about 8%; 13% in the OLED theme, because its page is black). Use a firmer line (about 14%) only for inputs. [v1 `--border`] [T3 dark `--border` white 8%]
-- Draw hover and selection as washes of the text color (about 4% and 8%; 7% and 12% on OLED), so that they work on every surface. [v1] [T3 `--accent` white 4%]
+- Draw hover and selection as washes of the text color (about 4% and 8%; 7% and 12% on OLED), so that they work on every surface. A feed post's hover is the fainter post wash (about 2.5%; 4.5% on OLED), because it is a band across the pane. [v1] [T3 `--accent` white 4%] [owner, 2026-11-01] [Discord]
 - Use one accent (`--focus`) for focus rings, selection and links. Do not use it for data. [v1 `--iris`] [T3 `--ring`]
 - Use the tones success, warning, danger, info and neutral. Each tone has a dot or bar color, a text color, a wash (about 14%) and an edge (about 28%). [v1 `tone.ts`] [T3 badge `bg-warning/8`]
 - Show nothing for a healthy, online or idle state: no green dot, no "OK" and no "Idle" mark. [root, 2026-10-31, owner found the pills and green dots ugly] [T3 `Sidebar.logic.ts` `resolveThreadStatusPill` returns null]
@@ -124,7 +124,7 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 ### Rows and hover
 
 - Give a hover state only to things that link or act. A card that opens nothing has no hover. [root]
-- Draw a row's hover as the hover wash, its selection as the select wash, and keep the text color the same or lighter. [v1 MachineRow] [T3 `--sidebar-row-hover`]
+- Draw a row's hover as the hover wash, or the post wash in the feed, its selection as the select wash, and keep the text color the same or lighter. [v1 MachineRow] [T3 `--sidebar-row-hover`]
 - Show row icons (jobs, computer) only on hover, keyboard focus, or while their view is open. [root, #1448]
 - Show a row name in full. Truncate the muted second line first. [root, #1448]
 - Give a session row an avatar, its name, and one muted line that says what it is doing. [lead, polish pass] [v1]
@@ -135,7 +135,11 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 
 - Lay out posts as Discord does: no bubbles and no borders, left-aligned, with one name line per run of posts from one sender. [spec 5.13] [Discord]
 - Show a hover bar on the hovered or keyboard-focused post, with Forward and Copy only. [owner]
-- Float the hover bar over the top-right corner of the post. Showing it never moves the post. [v1 PostActions] [Discord]
+- Float a slim hover bar over the top-right corner of the post, straddling its top edge: 28 px high, a 6 px radius, a hairline and almost no shadow. Under the New line it stays inside the post. Showing it never moves the post. [v1 PostActions] [Discord] [owner, 2026-11-01]
+- Run a post's hover and mention washes across the whole feed pane, and keep the gap above a run inside the row, so that washes on neighboring rows meet with no band. [owner, 2026-11-01] [Discord]
+- Fit a visual card's preview to its content, up to the capture's height, and fade it only when content was cut. [owner, 2026-11-01]
+- Open media in a centred modal, with the app dimmed and softly blurred behind it, still recognizable. [owner, 2026-11-01]
+- Show a single item of work with no group row. A thought that fits its line has no chevron, a longer one opens once in place, and a thought in a group shows whole, so any thought takes one click at most. [owner, 2026-11-01]
 - Confirm Copy in place for 2 seconds ("Copied"). Never use a toast. [v1 PostActions]
 - Dim a pending post (about 50% opacity) until the engine confirms it. [owner, #1458]
 - Show a failed send as "Not sent" in the danger color at full contrast, with Retry and Discard. [owner, #1458]
