@@ -58,15 +58,12 @@ type Service struct {
 	publishInstructions func(context.Context)
 }
 
-// sessionState is the engine's in-memory state for one session. s.mu guards its fields.
-// computerLock serializes computer transitions, channel replacement and watcher delivery.
-// Take computerLock before s.mu, never the reverse.
+// sessionState retains computer, shell and terminal state until their move to live.
+// Take the live session lock before s.mu, never the reverse.
 type sessionState struct {
-	computerLock sync.Mutex
-	channel      *boxChannel
-	computer     *computerState
-	terminals    int
-	watch        *shellWatch
+	computer  *computerState
+	terminals int
+	watch     *shellWatch
 }
 
 // sessionLocked creates the entry if needed. Callers hold s.mu and pass the id of a session that exists or is being started.
@@ -79,13 +76,28 @@ func (s *Service) sessionLocked(id contract.SessionID) *sessionState {
 	return state
 }
 
-// lockSession returns the session with its computer lock held.
-func (s *Service) lockSession(id contract.SessionID) *sessionState {
+// lockSession creates a handle only for a session the caller read as open.
+func (s *Service) lockSession(id contract.SessionID) (*live.Session, *sessionState, bool) {
+	handle, ok := s.live.CreateSession(id)
+	if !ok || !handle.Lock() {
+		return nil, nil, false
+	}
 	s.mu.Lock()
 	state := s.sessionLocked(id)
 	s.mu.Unlock()
-	state.computerLock.Lock()
-	return state
+	return handle, state, true
+}
+
+// lookupSession reads existing session state without creating it.
+func (s *Service) lookupSession(id contract.SessionID) (*live.Session, *sessionState, bool) {
+	handle, ok := s.live.LookupSession(id)
+	if !ok || !handle.Lock() {
+		return nil, nil, false
+	}
+	s.mu.Lock()
+	state := s.sessions[id]
+	s.mu.Unlock()
+	return handle, state, true
 }
 
 func New(st *store.Store, boxes lifecycle.BoxAdapter, profiles Profiles, now func() time.Time) *Service {
@@ -113,35 +125,19 @@ func (s *Service) Reconciler() *lifecycle.Reconciler { return s.reconciler }
 
 // SessionClosed retires live and legacy session state after the close commits.
 func (s *Service) SessionClosed(id contract.SessionID) {
-	s.live.CloseSession(id)
-	s.mu.Lock()
-	state := s.sessions[id]
-	s.mu.Unlock()
-	if state == nil {
+	handle := s.live.RetireSession(id)
+	if handle == nil {
 		return
 	}
-	state.computerLock.Lock()
-	defer state.computerLock.Unlock()
+	defer handle.Unlock()
 	s.mu.Lock()
-	if s.sessions[id] != state {
-		s.mu.Unlock()
-		return
-	}
-	channel := state.channel
-	state.channel = nil
+	channel := handle.Channel()
+	handle.SetChannel(nil)
 	room, stopped, computerWatchers := s.clearComputerLocked(id)
 	shellWatchers := s.clearShellLocked(id)
 	delete(s.sessions, id)
 	s.mu.Unlock()
-	for _, ch := range computerWatchers {
-		close(ch)
-	}
-	for _, ch := range shellWatchers {
-		close(ch)
-	}
-	if channel != nil {
-		channel.stop()
-	}
+	handle.CloseChannel(computerWatchers, shellWatchers, channel)
 	if stopped {
 		_ = s.computerEvent(context.Background(), id, room, contract.ComputerStopped)
 	}
