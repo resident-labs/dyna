@@ -5,7 +5,7 @@
   import VirtualList from "./VirtualList.svelte";
   import PostRow from "./PostRow.svelte";
   import MediaViewer from "./MediaViewer.svelte";
-  import { conversationMedia } from "../media.ts";
+  import { conversationMedia, type MediaItem } from "../media.ts";
   import BoxRestart from "./BoxRestart.svelte";
   import FailedTurnRow from "./FailedTurnRow.svelte";
   import WorkRow from "./WorkRow.svelte";
@@ -15,13 +15,12 @@
   import { TurnTranscripts } from "../transcripts.svelte.ts";
   import { boxRow, closedSession, describe, formatTime, shortPaths, dayLabel, feedRows, timeSpan, type Quote, type Row } from "../feed.ts";
   import type { RoomStore } from "../room.svelte.ts";
-  import type { Conversation, PostRequest, Principal, VisualCard } from "../contract.gen.ts";
-  import type { VisualVersion } from "../visual.ts";
+  import type { Conversation, PostRequest, Principal } from "../contract.gen.ts";
 
   // unsent holds the app's failed sends of this conversation; see EventWindow.onunsent.
-  let { store, home, admin, operate, intro, unsent, onunsent, onsettled, onforward, waiting, onclosed, onjobs, onvisual, target, ontarget, element = $bindable() }: {
+  let { store, home, admin, operate, intro, unsent, onunsent, onsettled, onforward, waiting, onclosed, onjobs, target, ontarget, element = $bindable() }: {
     store: RoomStore; home: Conversation; admin: boolean; operate: boolean; intro: Snippet<[boolean]>; unsent: PostRequest[];
-    onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onforward: (quote: Quote) => void; waiting?: Quote; onclosed: () => void; onjobs: (session: string) => void; onvisual: (versions: VisualVersion[], selected: number, send: (text: string, event: string) => Promise<void>) => void; target?: number; ontarget: () => void; element?: HTMLDivElement;
+    onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onforward: (quote: Quote) => void; waiting?: Quote; onclosed: () => void; onjobs: (session: string) => void; target?: number; ontarget: () => void; element?: HTMLDivElement;
   } = $props();
 
   // The view is keyed by its conversation, so its window lives as long as the view.
@@ -73,7 +72,7 @@
   const retainedRequests = new SvelteSet<string>();
   $effect(() => { for (const request of store.requests.values()) retainedRequests.add(request.id); });
   let rows = $derived(feedRows(view.ordered, home, pending, since, retainedRequests));
-  let media = $derived(conversationMedia(rows.filter(row => row.kind === "post")));
+  let media = $derived(conversationMedia(rows.filter(row => row.kind === "post").map(row => ({ ...row, event: visualEvents.get(row.key) }))));
   let mediaIndex: number | undefined = $state();
   function openMedia(key: string, position: number) { const index = media.findIndex(item => item.key === key && item.position === position); if (index >= 0) mediaIndex = index; }
   let newestBoxRows = $derived.by(() => {
@@ -92,16 +91,8 @@
   let visualPosts = $derived(view.posts().flatMap(event => (event.body.attachments ?? []).flatMap(file => file.visual ? [{ event, visual: file.visual }] : [])));
   let newest = $derived(new Map(visualPosts.map(({ visual }) => [visual.id, visual])));
   let visualEvents = $derived(new Map(visualPosts.map(({ event }) => [`p${event.seq}`, event.id])));
-  function openVisual(visual: VisualCard) {
-    const versions = visualPosts.filter(item => item.visual.id === visual.id).reverse();
-    const target = versions[0];
-    if (!target) return;
-    if (target.visual.version > visual.version) {
-      const index = items.findIndex(item => item.key === `p${target.event.seq}`);
-      if (index >= 0) void list?.reveal(index);
-      return;
-    }
-    onvisual(versions, visual.version, async (text, event) => { await call("post", { room: store.room, text, visualReply: event }); });
+  async function loadVisual(item: MediaItem) {
+    return visualPosts.filter(entry => entry.visual.id === item.file.visual?.id).reverse();
   }
   let failure = $derived(home.kind === "dm" && home.session && view.atPresent ? store.boxFailures.get(home.session) : undefined);
   let steps = $derived(home.kind === "dm" && home.session && view.atPresent ? (store.steps.get(home.session) ?? []).slice(0, failure ? undefined : -1) : []);
@@ -190,7 +181,7 @@
   }
 </script>
 
-{#if mediaIndex !== undefined}<MediaViewer room={store.room} items={media} initial={mediaIndex} {name} {root} onclose={() => mediaIndex = undefined} onjump={key => { const index = items.findIndex(item => item.key === key); if (index >= 0) void list?.reveal(index); }} />{/if}
+{#if mediaIndex !== undefined}<MediaViewer room={store.room} {loadVisual} items={media} initial={mediaIndex} {name} {root} onclose={() => mediaIndex = undefined} onjump={key => { const index = items.findIndex(item => item.key === key); if (index >= 0) void list?.reveal(index); }} />{/if}
 
 {#if short && view.hasOlder}
   <button type="button" class="jump" onclick={older}>Show older posts</button>
@@ -199,7 +190,7 @@
   <VirtualList bind:this={list} {items} key={item => item.key} label="Feed" {estimate} follow={view.atPresent} bind:element
     onstart={() => void view.loadOlder(() => list?.scrollSettled() ?? Promise.resolve())} onend={() => void view.loadNewer()} onbottom={shown => { if (shown) markRead(); }}>
     {#snippet row(item: Item)}
-      {#if item.kind === "post"}<div class:ring={item.key === `p${ring}`}><PostRow onmedia={position => openMedia(item.key, position)} row={item} {newest} visualEvent={visualEvents.get(item.key)} onvisual={openVisual} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
+      {#if item.kind === "post"}<div class:ring={item.key === `p${ring}`}><PostRow onmedia={position => openMedia(item.key, position)} row={item} {newest} visualEvent={visualEvents.get(item.key)} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
         onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} swipeDisabled={waiting?.at === item.at && waiting.author === author(item.from)} onforward={operate ? () => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments }) : undefined} /></div>
       {:else if item.kind === "notice"}<p class="divider"><span>{describe(item.event, name)}{#if item.resumedAt}{" "}for {Math.round((Date.parse(item.resumedAt) - Date.parse(item.event.at)) / 60_000) < 1 ? "under a minute" : `${Math.round((Date.parse(item.resumedAt) - Date.parse(item.event.at)) / 60_000)} min`}{/if} · <time datetime={item.event.at}>{formatTime(item.event.at)}</time></span></p>
       {:else if item.kind === "restarted"}<div class="restart-warning"><span class="restart-mark"><StatusPill tone="warning" label="Box replaced" dot triangle /></span><p>{name(item.session)}'s box was replaced. Unpushed work in the old volume is gone. <time datetime={item.at}>{formatTime(item.at)}</time></p></div>
