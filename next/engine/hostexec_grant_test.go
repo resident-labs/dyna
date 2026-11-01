@@ -101,3 +101,29 @@ func TestGrantCardEngineHost(t *testing.T) {
 		t.Fatal(card.Body)
 	}
 }
+
+func TestHostexecList(t *testing.T) {
+	s, room, root, ctx := setupRoot(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	target := contract.Principal{Kind: contract.PrincipalSession, Session: root}
+	now := s.now()
+	for _, g := range []contract.Grant{
+		{ID: "active", Kind: contract.GrantHostExec, Room: room, To: target, By: owner, Created: now.Add(time.Second), Hosts: []contract.HostName{"host"}, Expires: now.Add(time.Hour)},
+		{ID: "expired", Kind: contract.GrantHostExec, Room: room, To: target, By: owner, Created: now, Expires: now.Add(-time.Second)},
+		{ID: "revoked", Kind: contract.GrantHostExec, Room: room, To: target, By: owner, Created: now},
+	} {
+		if err := s.store.CreateGrant(ctx, g); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.store.RevokeGrant(ctx, "revoked", now); err != nil {
+		t.Fatal(err)
+	}
+	got, problem := s.HostexecList(ctx, owner, contract.HostexecListRequest{})
+	if problem != nil || len(got.Grants) != 2 || got.Grants[0].ID != "active" || got.Grants[1].To != target || got.Grants[1].Hosts[0] != contract.AllHosts || !got.Grants[1].Expires.IsZero() {
+		t.Fatalf("grants: %+v, %v", got, problem)
+	}
+	if _, problem = s.HostexecList(ctx, target, contract.HostexecListRequest{}); problem == nil || problem.Code != contract.ErrForbidden {
+		t.Fatalf("session: %v", problem)
+	}
+}
