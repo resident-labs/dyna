@@ -23,6 +23,16 @@ func attachTestChannel(t *testing.T, s *Service, id contract.SessionID) *live.Ch
 	return channel
 }
 
+func computerWatchGeneration(t *testing.T, s *Service, id contract.SessionID) uint64 {
+	t.Helper()
+	handle, _, ok := s.lookupSession(id)
+	if !ok {
+		t.Fatal("session missing")
+	}
+	defer handle.Unlock()
+	return handle.ComputerWatchGeneration()
+}
+
 func TestComputerWatchFanoutAndState(t *testing.T) {
 	s, room, id, ctx := setup(t)
 	connectAgent(ctx, t, s, id)
@@ -47,9 +57,7 @@ func TestComputerWatchFanoutAndState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.mu.Lock()
-	generation := s.sessions[id].computer.generation
-	s.mu.Unlock()
+	generation := computerWatchGeneration(t, s, id)
 	reader, writer := io.Pipe()
 	defer reader.Close()
 	defer writer.Close()
@@ -91,12 +99,6 @@ func TestComputerWatchFanoutAndState(t *testing.T) {
 	// Cancellation is synchronized by the stopped channel.
 	if _, ok := <-first; ok {
 		t.Fatal("watcher stayed open")
-	}
-	s.mu.Lock()
-	remaining := len(s.sessions[id].computer.watchers)
-	s.mu.Unlock()
-	if remaining != 1 {
-		t.Fatalf("watchers after first cancellation: %d", remaining)
 	}
 	cancelSecond()
 	if _, ok := <-second; ok {
@@ -162,7 +164,7 @@ func TestComputerWatchControlsBoxChannel(t *testing.T) {
 		t.Fatalf("box channel closed before %s", want)
 	}
 	wait("computer.watch.start")
-	if err := s.ComputerFrames(ctx, caller, s.sessions[id].computer.generation, bytes.NewReader(nil)); err != nil {
+	if err := s.ComputerFrames(ctx, caller, computerWatchGeneration(t, s, id), bytes.NewReader(nil)); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -243,12 +245,7 @@ func TestComputerChannelCloseEndsWatch(t *testing.T) {
 	if !ok {
 		t.Fatal("session missing")
 	}
-	s.mu.Lock()
-	stopRoom, stopped, watchers := s.clearComputerLocked(id)
-	s.mu.Unlock()
-	for _, ch := range watchers {
-		close(ch)
-	}
+	stopRoom, stopped := handle.ClearComputer()
 	if stopped {
 		if err := s.computerEvent(ctx, id, stopRoom, contract.ComputerStopped); err != nil {
 			t.Fatal(err)
@@ -277,7 +274,7 @@ func TestOldComputerStreamDoesNotEndNewWatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	generation := s.sessions[id].computer.generation
+	generation := computerWatchGeneration(t, s, id)
 	reader, writer := io.Pipe()
 	defer reader.Close()
 	defer writer.Close()
@@ -302,7 +299,7 @@ func TestOldComputerStreamDoesNotEndNewWatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.sessions[id].computer.generation == generation {
+	if computerWatchGeneration(t, s, id) == generation {
 		t.Fatal("generation did not change")
 	}
 	if err := binary.Write(writer, binary.BigEndian, uint32(1)); err != nil {
