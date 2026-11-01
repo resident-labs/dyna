@@ -3,6 +3,8 @@ package watch
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os/exec"
 	"reflect"
 	"strings"
 	"sync"
@@ -66,6 +68,49 @@ func TestMergeControlWaitsForPublisherAndKeepsAutomaticTickNonblocking(t *testin
 		t.Fatalf("completed control retained the publisher lock: %v", err)
 	}
 	unlock()
+}
+
+func TestAutomaticRecoveryRefreshesOnlyPendingSuccessInItsRoom(t *testing.T) {
+	e, fixtures, merged := mergeEnv(t, 1, 2, 3, 4)
+	other, err := e.s.Notify.Rooms.Create(room.CreateInput{Name: "other-recovery-room"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.Store.update(func(st *State) error {
+		for _, r := range st.Records {
+			r.Verdict = ""
+		}
+		st.Records["github.com/owner/repo#1"].CI = state.CIPending
+		st.Records["github.com/owner/repo#4"].RoomID = other.ID
+		st.Records["github.com/owner/repo#4"].CI = state.CIPending
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	run := e.s.GH.run
+	e.s.GH.run = func(ctx context.Context, cmd *exec.Cmd) error {
+		args := strings.Join(cmd.Args, " ")
+		for _, endpoint := range []string{"/actions/runs?head_sha=", "/check-runs?", "/statuses?"} {
+			if strings.Contains(args, endpoint) {
+				for n, f := range fixtures {
+					if strings.Contains(args, f.Pull.Head.SHA) {
+						counts[fmt.Sprint(n)+endpoint]++
+					}
+				}
+			}
+		}
+		return run(ctx, cmd)
+	}
+	ctx := context.WithValue(t.Context(), automaticMergeRoom{}, true)
+	if _, err := e.s.mergeTickLocked(ctx, e.author.RoomID, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, endpoint := range []string{"/actions/runs?head_sha=", "/check-runs?", "/statuses?"} {
+		if counts["1"+endpoint] != 1 || counts["2"+endpoint] != 0 || counts["3"+endpoint] != 0 || counts["4"+endpoint] != 0 || len(*merged) != 0 {
+			t.Fatalf("CI reads=%v merged=%v", counts, *merged)
+		}
+	}
 }
 
 func TestRoomPassDoesNotLandWhileAnotherRoomHasTrial(t *testing.T) {

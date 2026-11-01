@@ -513,7 +513,7 @@ Pi replaces Claude Code, including its model-specific prompt and tools. Web sear
 
 ### 9.2 Workflows (M3)
 
-Port v1 plain-JavaScript scripts before cutover for fl-rea. A run is a child session with a small box; scripts never run in the engine. Agent steps are child sessions in separate boxes, closed once their results are stored. All steps use `sameHost` and share `/box/shared`; a step that cannot fit waits. `run()` executes in the run box; `job()` uses host exec under the run's grants. Store step starts and results as events. On restart, replay deterministic scripts and return stored results without repeating steps. Admission bounds fan-out; profile `maxConcurrent` and `maxCallsPerRun` bound calls, with zero unlimited, and import preserves them. Budget 1,000–1,500 product lines. The M3 design check chooses Node in `dyna-base` or an interpreter in `dyna box-agent`.
+Port v1 plain-JavaScript scripts before cutover for fl-rea. A run is a child session with a small box; scripts never run in the engine. Agent steps are child sessions in separate boxes, closed once their results are stored. All steps use `sameHost` and share `/box/shared`; a step that cannot fit waits. `run()` executes in the run box; `job()` uses host exec under the run's grants. Store step starts and results as events. On restart, replay deterministic scripts and return stored results without repeating steps. Admission bounds fan-out; profile `maxConcurrent` bounds concurrent calls, with zero unlimited, and import preserves it. The owner removed the per-run call limit; v2 does not import or enforce it. Budget 1,000–1,500 product lines. The M3 design check chooses Node in `dyna-base` or an interpreter in `dyna box-agent`.
 
 ## 10. Test strategy
 

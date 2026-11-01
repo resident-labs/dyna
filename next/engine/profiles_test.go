@@ -59,7 +59,7 @@ func TestProfilesReturnModelChoice(t *testing.T) {
 }
 
 func TestProfilesRejectNegativeLimits(t *testing.T) {
-	for _, field := range []string{"maxConcurrent", "maxCallsPerRun"} {
+	for _, field := range []string{"maxConcurrent"} {
 		t.Run(field, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "profiles.json")
 			data := `{"p":{"provider":"anthropic","model":"a","allowedModels":["a"],"thinking":"low","` + field + `":-1}}`

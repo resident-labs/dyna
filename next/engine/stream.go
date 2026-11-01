@@ -7,6 +7,8 @@ import (
 	"regexp"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/live"
+	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/room"
 )
 
@@ -26,27 +28,31 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 		defer close(out)
 		defer s.live.Unsubscribe(subscription)
 		defer func() { cancel() }()
+		replay := true
 		for {
-			var events []contract.Event
-			var err error
-			if room == "" {
-				events, err = s.store.OwnerEvents(ctx, after, 256)
-			} else {
-				events, err = s.store.Events(ctx, room, after, 256, nil)
-			}
-			if err != nil {
-				return
-			}
-			for _, event := range events {
-				select {
-				case out <- event:
-					after = event.Seq
-				case <-ctx.Done():
+			if replay {
+				var events []contract.Event
+				var err error
+				if room == "" {
+					events, err = s.store.OwnerEvents(ctx, after, 256)
+				} else {
+					events, err = s.store.Events(ctx, room, after, 256, nil)
+				}
+				if err != nil {
 					return
 				}
-			}
-			if len(events) == 256 {
-				continue
+				for _, event := range events {
+					select {
+					case out <- event:
+						after = event.Seq
+					case <-ctx.Done():
+						return
+					}
+				}
+				if len(events) == 256 {
+					continue
+				}
+				replay = false
 			}
 			select {
 			case event, ok := <-liveEvents:
@@ -58,13 +64,24 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 				case <-ctx.Done():
 					return
 				}
-			case _, ok := <-sub:
+			case event, ok := <-sub:
 				if !ok {
 					if ctx.Err() != nil {
 						return
 					}
 					cancel()
 					sub, cancel = s.store.Subscribe()
+					replay = true
+					continue
+				}
+				if event.Seq <= after || !store.StreamMatches(event, room) {
+					continue
+				}
+				select {
+				case out <- event:
+					after = event.Seq
+				case <-ctx.Done():
+					return
 				}
 			case <-ctx.Done():
 				return
@@ -98,88 +115,73 @@ const (
 
 var quotedDynaMarker = regexp.MustCompile(`(?im)^([ \t]*)\[[ \t]*dyna[ \t]*\]`)
 
-type boxChannel struct {
-	stop          context.CancelFunc
-	wake          chan struct{}
-	watching      uint64
-	shellWatching uint64
-	archiveRetry  bool
-	input         computerInputHandle // owner input stays separate from the turn loop
-}
-
 func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-chan contract.BoxMessage, *contract.Error) {
 	if caller.Kind != contract.PrincipalSession {
 		return nil, forbidden()
 	}
-	session, err := s.store.Session(ctx, caller.Session)
+	session, open, err := s.store.OpenSession(ctx, caller.Session)
 	if err != nil {
 		return nil, failure(err)
+	}
+	if !open {
+		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 	}
 	if err := s.store.WakeLostInventory(ctx, session.Box); err != nil {
 		return nil, failure(err)
 	}
 	ctx, stop := context.WithCancel(ctx)
-	state := s.lockSession(session.ID)
-	s.mu.Lock()
-	previous := state.channel
+	handle, state, ok := s.lockSession(session.ID)
+	if !ok {
+		stop()
+		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+	}
+	previous := handle.Channel()
 	var roomID contract.RoomID
 	var stopped bool
-	var computerWatchers []chan []byte
 	var shellWatchers []chan contract.ShellJobOutput
 	if previous != nil {
-		roomID, stopped, computerWatchers = s.clearComputerLocked(session.ID)
+		roomID, stopped = handle.ClearComputer()
+		s.mu.Lock()
 		shellWatchers = s.clearShellLocked(session.ID)
+		s.mu.Unlock()
 	}
-	channel := &boxChannel{stop: stop, wake: make(chan struct{}, 1), input: computerInputHandle{queue: make(chan contract.ComputerInputBatch, 64), done: ctx.Done()}}
-	state.channel = channel
-	s.mu.Unlock()
-	for _, ch := range computerWatchers {
-		close(ch)
-	}
-	for _, ch := range shellWatchers {
-		close(ch)
-	}
-	if previous != nil {
-		previous.stop()
-	}
+	channel := live.NewChannel(stop, ctx.Done())
+	handle.SetChannel(channel)
+	previous.Close(shellWatchers)
 	if stopped {
 		_ = s.computerEvent(context.Background(), session.ID, roomID, contract.ComputerStopped)
 	}
-	state.computerLock.Unlock()
+	handle.Unlock()
 	s.reconciler.Connected(session.Box)
 	out := make(chan contract.BoxMessage)
 	go func() {
 		defer func() {
-			state.computerLock.Lock()
-			stop()
-			s.mu.Lock()
+			if !handle.Lock() {
+				stop()
+				return
+			}
 			var roomID contract.RoomID
 			var stopped bool
-			var computerWatchers []chan []byte
 			var shellWatchers []chan contract.ShellJobOutput
-			if state.channel == channel {
-				state.channel = nil
-				roomID, stopped, computerWatchers = s.clearComputerLocked(session.ID)
+			if handle.Channel() == channel {
+				handle.SetChannel(nil)
+				roomID, stopped = handle.ClearComputer()
+				s.mu.Lock()
 				shellWatchers = s.clearShellLocked(session.ID)
+				s.mu.Unlock()
 			}
-			s.mu.Unlock()
-			for _, ch := range computerWatchers {
-				close(ch)
-			}
-			for _, ch := range shellWatchers {
-				close(ch)
-			}
+			channel.Close(shellWatchers)
 			if stopped {
 				_ = s.computerEvent(context.Background(), session.ID, roomID, contract.ComputerStopped)
 			}
-			state.computerLock.Unlock()
+			handle.Unlock()
 		}()
 		pumpDone := make(chan struct{})
 		go func() {
 			defer close(pumpDone)
 			for {
 				select {
-				case batch := <-channel.input.queue:
+				case batch := <-channel.Inputs():
 					select {
 					case out <- contract.BoxMessage{Body: batch}:
 					case <-ctx.Done():
@@ -202,23 +204,23 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 		archiveSent := false
 		var stopSent contract.TurnID
 		for {
-			s.mu.Lock()
-			if channel.archiveRetry {
+			if !handle.Lock() {
+				return
+			}
+			if channel.TakeArchiveRetry() {
 				archiveSent = false
-				channel.archiveRetry = false
 			}
-			c := state.computer
-			var desired uint64
-			if c != nil && len(c.watchers) != 0 {
-				desired = c.generation
-			}
+			desired := handle.ComputerWatchGeneration()
+			s.mu.Lock()
 			var shellDesired uint64
 			if w := state.watch; w != nil && len(w.watchers) > 0 {
 				shellDesired = w.generation
 			}
 			s.mu.Unlock()
-			if !s.sendWatch(ctx, out, desired, &channel.watching, contract.ComputerWatchStart{Generation: desired}, contract.ComputerWatchStop{}) ||
-				!s.sendWatch(ctx, out, shellDesired, &channel.shellWatching, contract.ShellWatchStart{Generation: shellDesired}, contract.ShellWatchStop{}) {
+			computerChanged, shellChanged := channel.WatchChanges(desired, shellDesired)
+			handle.Unlock()
+			if !sendWatch(ctx, out, computerChanged, desired, contract.ComputerWatchStart{Generation: desired}, contract.ComputerWatchStop{}) ||
+				!sendWatch(ctx, out, shellChanged, shellDesired, contract.ShellWatchStart{Generation: shellDesired}, contract.ShellWatchStop{}) {
 				reason, cause = streamWatchStopped, ctx.Err()
 				return
 			}
@@ -245,7 +247,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 					}
 				}
 				select {
-				case <-channel.wake:
+				case <-channel.WakeSignal():
 					continue
 				case <-ctx.Done():
 					reason, cause = streamCanceled, ctx.Err()
@@ -259,7 +261,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			}
 			if !allowed {
 				select {
-				case <-channel.wake:
+				case <-channel.WakeSignal():
 					continue
 				case <-ctx.Done():
 					reason, cause = streamCanceled, ctx.Err()
@@ -361,7 +363,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				}
 			}
 			select {
-			case <-channel.wake:
+			case <-channel.WakeSignal():
 				continue
 			case <-ctx.Done():
 				reason, cause = streamCanceled, ctx.Err()
@@ -372,11 +374,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 	return out, nil
 }
 
-func (s *Service) sendWatch(ctx context.Context, out chan<- contract.BoxMessage, desired uint64, sent *uint64, start, stop contract.BoxMessageBody) bool {
-	s.mu.Lock()
-	changed := desired != *sent
-	*sent = desired
-	s.mu.Unlock()
+func sendWatch(ctx context.Context, out chan<- contract.BoxMessage, changed bool, desired uint64, start, stop contract.BoxMessageBody) bool {
 	if !changed {
 		return true
 	}
@@ -407,16 +405,17 @@ func (s *Service) queueWakes(ids []contract.SessionID, events []contract.Event) 
 }
 
 func (s *Service) deliverWakes(pending map[contract.SessionID]bool) {
-	var channels []*boxChannel
-	s.mu.Lock()
 	for id, retry := range pending {
-		if state := s.sessions[id]; state != nil && state.channel != nil {
-			state.channel.archiveRetry = state.channel.archiveRetry || retry
-			channels = append(channels, state.channel)
+		handle, ok := s.live.LookupSession(id)
+		if !ok || !handle.Lock() {
+			continue
 		}
-	}
-	s.mu.Unlock()
-	for _, channel := range channels {
-		wakeChannel(channel)
+		if channel := handle.Channel(); channel != nil {
+			if retry {
+				channel.RetryArchive()
+			}
+			channel.Wake()
+		}
+		handle.Unlock()
 	}
 }
