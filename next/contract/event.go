@@ -71,6 +71,8 @@ type PostCreated struct {
 	Attachments []Attachment `json:"attachments,omitempty"`
 	ClientID    string       `json:"clientId,omitempty"` // the sender's PostRequest.ClientID, so a pending row is replaced exactly
 	ToolCallID  string       `json:"toolCallId,omitempty"`
+	// Hook names the subscription whose Run wrote this post. The engine sends it, but the text is the script's.
+	Hook SubscriptionID `json:"hook,omitempty"`
 }
 
 type Attachment struct {
@@ -275,6 +277,7 @@ const (
 	CauseHarnessFailed       FailureCause = "harness_failed"        // the agent program stopped or could not run the turn
 	CauseSetModelFailed      FailureCause = "set_model_failed"      // the agent program refused the session's new model
 	CauseNotStarted          FailureCause = "not_started"           // on a stopped turn: it stopped before Pi took its inputs, so they stay pending
+	CauseRunTimeout          FailureCause = "run_timeout"           // a subscription's Run reached its time limit
 )
 
 // PressureKind is "high" for memory throttling that lasts 60 s, or "max" for a
