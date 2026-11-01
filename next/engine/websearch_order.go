@@ -4,34 +4,34 @@ import (
 	"slices"
 
 	"github.com/resident-labs/dyna/contract"
-	"github.com/resident-labs/dyna/engine/model"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
-// searchAccounts keeps only usable room-eligible credentials and finds the best
-// known headroom. Unknown quota sorts behind known headroom.
-func searchAccounts(credentials []model.Credential, eligible []string, provider string) ([]string, float64, contract.WebSearchAttemptReason) {
+// searchAccounts keeps usable room-eligible credentials and finds the best
+// cached headroom. Missing cache entries remain usable.
+func searchAccounts(accounts []store.AccountBinding, eligible []string, provider contract.AccountProvider, cached func(contract.AccountID) (contract.AccountUsage, bool)) ([]string, float64, contract.WebSearchAttemptReason) {
 	ids := []string{}
 	best := -1.0
 	exhausted := false
-	for _, c := range credentials {
-		if c.Provider != provider || !slices.Contains(eligible, c.ID) || c.State == model.CredentialExpired || c.State == model.CredentialFailed {
+	for _, binding := range accounts {
+		if binding.Account.Provider != provider || !slices.Contains(eligible, binding.ProxyID) {
+			continue
+		}
+		usage, ok := cached(binding.Account.ID)
+		if ok && usage.Cause == contract.UsageSignInExpired {
 			continue
 		}
 		worst := 0.0
-		known := false
-		for _, window := range []model.CredentialQuotaWindow{c.Quota.Primary, c.Quota.Secondary} {
-			if window.UsedPercent != nil {
-				known = true
-				worst = max(worst, *window.UsedPercent)
-			}
+		for _, window := range usage.Windows {
+			worst = max(worst, window.UsedPercent)
 		}
-		if known && worst >= 100 {
+		if ok && (usage.Cause == contract.UsageRateLimited || worst >= 100) {
 			exhausted = true
 			continue
 		}
-		ids = append(ids, c.ID)
+		ids = append(ids, binding.ProxyID)
 		headroom := -1.0
-		if known {
+		if ok && len(usage.Windows) != 0 {
 			headroom = 100 - worst
 		}
 		best = max(best, headroom)

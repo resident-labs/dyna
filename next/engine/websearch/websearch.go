@@ -89,9 +89,7 @@ func (c Chain) Search(ctx context.Context, q Query) ([]Result, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		try, cancel := attemptContext(ctx)
-		results, err := provider.Search(try, q)
-		cancel()
+		results, err := Attempt(ctx, provider, q)
 		if err == nil {
 			return results, nil
 		}
@@ -104,10 +102,20 @@ func (c Chain) Search(ctx context.Context, q Query) ([]Result, error) {
 			reasons = append(reasons, provider.Name()+" is not signed in")
 			continue
 		}
-		reasons = append(reasons, provider.Name()+" failed: "+redactTokens(oneLine(err)))
+		reasons = append(reasons, provider.Name()+" failed: "+SafeMessage(err))
 	}
 	return nil, errors.New("web search found no provider: " + strings.Join(reasons, "; "))
 }
+
+// Attempt gives one provider its share of the remaining request budget.
+func Attempt(ctx context.Context, provider Provider, q Query) ([]Result, error) {
+	attempt, cancel := attemptContext(ctx)
+	defer cancel()
+	return provider.Search(attempt, q)
+}
+
+// SafeMessage folds and redacts a provider failure before it reaches a caller.
+func SafeMessage(err error) string { return clip(redactTokens(oneLine(err))) }
 
 // attemptContext bounds one provider's attempt to attemptBudget of the time the
 // caller left. Without a caller deadline a provider is bounded by its own
@@ -173,6 +181,20 @@ func clip(s string) string {
 	return s
 }
 
+// StatusError retains the HTTP status for failure scheduling.
+type StatusError struct {
+	Status  int
+	message string
+}
+
+func (e *StatusError) Error() string { return e.message }
+
+// AuthFailure reports an authentication refusal.
+func AuthFailure(err error) bool {
+	var status *StatusError
+	return errors.As(err, &status) && (status.Status == 401 || status.Status == 403)
+}
+
 // statusError is the failure of a provider request that answered. The body is
 // the backend's own explanation of why it refused, and the only way to see a
 // cause such as a model the account cannot use, so the error keeps it. It is
@@ -184,9 +206,9 @@ func statusError(provider string, status int, body io.Reader, secrets ...string)
 	// replacement or pattern matches.
 	reason := clip(redact(fold(errorReason(body)), secrets...))
 	if reason == "" {
-		return fmt.Errorf("%s answered HTTP %d", provider, status)
+		return &StatusError{Status: status, message: fmt.Sprintf("%s answered HTTP %d", provider, status)}
 	}
-	return fmt.Errorf("%s answered HTTP %d: %s", provider, status, reason)
+	return &StatusError{Status: status, message: fmt.Sprintf("%s answered HTTP %d: %s", provider, status, reason)}
 }
 
 // redact clears every supplied secret and every credential shape from s.
