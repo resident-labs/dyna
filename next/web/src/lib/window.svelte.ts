@@ -15,7 +15,7 @@ export const WINDOW = 1000;
 
 // The session whose DM holds an event, as the engine's events.list home filter reads it.
 export function dmOf(event: Event): string | undefined {
-  if (event.type === "session.restarted" || event.type === "question.asked" || event.type === "question.answered" || event.type === "question.withdrawn") return event.body.session;
+  if (event.type === "notice.posted" || event.type === "session.restarted" || event.type === "question.asked" || event.type === "question.answered" || event.type === "question.withdrawn") return event.body.session;
   if (event.type === "post.created") return event.body.home.kind === "dm" ? event.body.home.session : undefined;
   if (event.type === "turn.ended") return event.body.replies?.find(({ reply }) => reply.home?.kind === "dm")?.reply.home?.session
     ?? (event.body.outcome === "stopped" ? event.body.session : undefined);

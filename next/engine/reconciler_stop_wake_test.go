@@ -94,6 +94,7 @@ type openTerminalView struct{}
 
 func (openTerminalView) OpenTerminal(contract.SessionID) bool { return true }
 func (openTerminalView) SessionClosed(contract.SessionID)     {}
+func (openTerminalView) Stale(contract.SessionID) bool        { return false }
 func (openTerminalView) Connected(contract.SessionID) bool    { return false }
 
 type stopCountingHost struct {

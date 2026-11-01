@@ -15,6 +15,7 @@ type retryTestView struct{}
 func (retryTestView) OpenTerminal(contract.SessionID) bool { return true }
 func (retryTestView) Connected(contract.SessionID) bool    { return true }
 func (retryTestView) SessionClosed(contract.SessionID)     {}
+func (retryTestView) Stale(contract.SessionID) bool        { return false }
 
 func TestPassWakesModelRetryWithoutEvent(t *testing.T) {
 	ctx := context.Background()

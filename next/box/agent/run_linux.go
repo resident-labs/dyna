@@ -273,8 +273,12 @@ func Run(ctx context.Context) error {
 			stopShellWatch = nil
 		}
 	}
+	binary, err := runningSum()
+	if err != nil {
+		log.Printf("binary checksum: %v", err)
+	}
 	go func() {
-		errs <- client.Channel(ctx, func(message contract.BoxMessage) error {
+		errs <- client.Channel(ctx, binary, func(message contract.BoxMessage) error {
 			switch body := message.Body.(type) {
 			case contract.ShellWatchStart:
 				stopShell()

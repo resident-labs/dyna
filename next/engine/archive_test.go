@@ -127,7 +127,7 @@ func TestCloseBlocksDispatchBeforeArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-h.started
-	channel, problem := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid})
+	channel, problem := s.BoxChannel(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid}, "")
 	if problem != nil {
 		t.Fatal(problem)
 	}
@@ -177,7 +177,7 @@ func TestCloseStartsStoppedBoxForArchive(t *testing.T) {
 	if _, problem = s.BoxHello(ctx, caller, contract.BoxHelloRequest{}); problem != nil {
 		t.Fatal(problem)
 	}
-	reconnected, problem := s.BoxChannel(ctx, caller)
+	reconnected, problem := s.BoxChannel(ctx, caller, "")
 	if problem != nil {
 		t.Fatal(problem)
 	}

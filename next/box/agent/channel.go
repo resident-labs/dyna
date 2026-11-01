@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,16 +11,34 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
 
-// Channel reads typed messages and reconnects after a broken socket.
-func (c *Client) Channel(ctx context.Context, handle func(contract.BoxMessage) error, connected func(bool)) error {
+// runningSum hashes the binary this process runs, which stays readable after a deploy replaces the file. The engine compares it
+// with its own. A container's environment could not carry it: a stopped box starts again with the environment it was made with.
+func runningSum() (string, error) {
+	file, err := os.Open("/proc/self/exe")
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+// Channel reads typed messages and reconnects after a broken socket. Each connection reports binary, which is how an engine
+// that restarted learns it, since a running box does not say hello again.
+func (c *Client) Channel(ctx context.Context, binary string, handle func(contract.BoxMessage) error, connected func(bool)) error {
 	delay := 500 * time.Millisecond
 	for {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://dyna/v1/box/channel", nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://dyna/v1/box/channel?binary="+url.QueryEscape(binary), nil)
 		if err != nil {
 			return err
 		}

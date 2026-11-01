@@ -47,6 +47,13 @@ func (s *Store) AppendEvent(tx *sql.Tx, event contract.Event) (int64, error) {
 	switch body := event.Body.(type) {
 	case contract.SessionRestarted:
 		home = &body.Session
+	case contract.NoticePosted:
+		if body.Session != "" {
+			home = &body.Session
+		}
+		if body.ClientID != "" {
+			clientID = &body.ClientID
+		}
 	case contract.QuestionAsked:
 		home = &body.Session
 	case contract.QuestionAnswered:

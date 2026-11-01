@@ -218,7 +218,7 @@ func TestOwnerRejectsDifferentUID(t *testing.T) {
 
 type channelService struct{ Service }
 
-func (channelService) BoxChannel(_ context.Context, c contract.Principal) (<-chan contract.BoxMessage, *contract.Error) {
+func (channelService) BoxChannel(_ context.Context, c contract.Principal, _ string) (<-chan contract.BoxMessage, *contract.Error) {
 	ch := make(chan contract.BoxMessage, 2)
 	ch <- contract.BoxMessage{Body: contract.TurnStart{Turn: "turn-a"}}
 	ch <- contract.BoxMessage{Body: contract.TurnStop{Turn: "turn-a"}}

@@ -82,9 +82,12 @@ type HookDue struct {
 	Subscription SubscriptionID `json:"subscription"`
 }
 
-// NoticePosted is an engine notice to a room. The default subscription wakes root on it.
+// NoticePosted is an engine notice to a room. The default subscription wakes root on it. Session makes it that session's own
+// instead: it is held in the session's DM, where no subscription sees it. ClientID sends it once.
 type NoticePosted struct {
-	Text string `json:"text"`
+	Text     string    `json:"text"`
+	Session  SessionID `json:"session,omitempty"`
+	ClientID string    `json:"clientId,omitempty"`
 }
 
 func (HookFinished) EventType() EventType { return "hook.finished" }

@@ -116,7 +116,11 @@ const (
 
 var quotedDynaMarker = regexp.MustCompile(`(?im)^([ \t]*)\[[ \t]*dyna[ \t]*\]`)
 
-func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-chan contract.BoxMessage, *contract.Error) {
+// boxUpdateNotice is what a session on an old box agent is told, once per box per binary.
+const boxUpdateNotice = "An update is ready for your box. It applies when your current turn ends, unless a background job or an open terminal is running. Your files and conversation are kept."
+
+// BoxChannel connects a box. binary is the checksum of the running box agent, empty from one too old to report it.
+func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, binary string) (<-chan contract.BoxMessage, *contract.Error) {
 	if caller.Kind != contract.PrincipalSession {
 		return nil, forbidden()
 	}
@@ -145,11 +149,22 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 	}
 	channel := live.NewChannel(stop, ctx.Done())
 	handle.SetChannel(channel)
+	stale := binary != "" && s.binary != "" && binary != s.binary
+	handle.SetStale(stale)
 	previous.Close()
 	if stopped {
 		_ = s.computerEvent(context.Background(), session.ID, roomID, contract.ComputerStopped)
 	}
 	handle.Unlock()
+	if stale {
+		notice, err := s.event(session.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.NoticePosted{Text: boxUpdateNotice, Session: session.ID, ClientID: "box-update:" + string(session.Box) + ":" + s.binary})
+		if err == nil {
+			err = s.store.PostBoxNotice(ctx, notice)
+		}
+		if err != nil {
+			slog.Warn("box update notice", "session", session.ID, "err", err)
+		}
+	}
 	s.reconciler.Connected(session.Box)
 	out := make(chan contract.BoxMessage)
 	go func() {
@@ -242,6 +257,17 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				case <-ctx.Done():
 					reason, cause = streamCanceled, ctx.Err()
 					return
+				}
+			}
+			// This comes before dispatch, or a waiting delivery would start the next turn each time and a busy box would never update.
+			if stale && !s.OpenTerminal(session.ID) {
+				stopping, err := s.store.StopStale(ctx, []contract.SessionID{session.ID})
+				if err != nil {
+					reason, cause = streamAdmissionFailed, err
+					return
+				}
+				if len(stopping) > 0 {
+					s.reconciler.Kick()
 				}
 			}
 			allowed, err := s.store.CanDispatch(ctx, session.ID)

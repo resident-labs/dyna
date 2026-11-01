@@ -152,7 +152,7 @@ func TestComputerWatchControlsBoxChannel(t *testing.T) {
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
 	boxCtx, stopBox := context.WithCancel(ctx)
 	defer stopBox()
-	messages, err := s.BoxChannel(boxCtx, caller)
+	messages, err := s.BoxChannel(boxCtx, caller, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestComputerInputReachesBoxAndRefusesSessions(t *testing.T) {
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
 	boxCtx, stopBox := context.WithCancel(ctx)
 	defer stopBox()
-	messages, err := s.BoxChannel(boxCtx, caller)
+	messages, err := s.BoxChannel(boxCtx, caller, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +338,7 @@ func TestShellWatchGenerationAndStop(t *testing.T) {
 	connectAgent(ctx, t, s, id)
 	channelCtx, cancelChannel := context.WithCancel(ctx)
 	defer cancelChannel()
-	messages, problem := s.BoxChannel(channelCtx, contract.Principal{Kind: contract.PrincipalSession, Session: id})
+	messages, problem := s.BoxChannel(channelCtx, contract.Principal{Kind: contract.PrincipalSession, Session: id}, "")
 	if problem != nil {
 		t.Fatal(problem)
 	}

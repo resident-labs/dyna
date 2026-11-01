@@ -54,6 +54,7 @@ type Service struct {
 	dispatch          func(context.Context, contract.SessionID, contract.TurnID, contract.Event, bool) (contract.TurnID, []store.FeedInput, error)
 	boxes             lifecycle.BoxAdapter
 	reconciler        *lifecycle.Reconciler
+	binary            string
 	profiles          Profiles
 	repos             Repositories
 	compose           *compose.Files
@@ -176,6 +177,9 @@ func (s *Service) OpenTerminal(id contract.SessionID) bool {
 	handle, ok := s.live.LookupSession(id)
 	return ok && handle.HasTerminal()
 }
+
+// SetBinary sets the checksum of the box agent new boxes get, before the service starts. Empty turns off the stale check.
+func (s *Service) SetBinary(sum string) { s.binary = sum }
 
 // SetLayout sets where room data is kept, before the service starts.
 func (s *Service) SetLayout(layout box.Layout) { s.layout = layout }
