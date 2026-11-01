@@ -6,10 +6,10 @@ import { join } from "node:path";
 const [prefix, tmp] = process.argv.slice(2);
 const packageDir = join(prefix, "lib/node_modules/@earendil-works/pi-coding-agent");
 const catalog = JSON.parse(readFileSync(join(packageDir, "dyna-catalog.json"), "utf8"));
-if (catalog.version !== 1 || !Array.isArray(catalog.providers) || !catalog.providers.length) {
+if (catalog.version !== 1 || !Array.isArray(catalog.plans) || !catalog.plans.length || !Array.isArray(catalog.keys) || !catalog.keys.length) {
   throw new Error("packed catalog is empty or invalid");
 }
-const model = catalog.providers.find((provider) => provider.id === "deepseek")?.models.find((model) => model.api === "openai-completions")?.id;
+const model = catalog.keys.find((provider) => provider.provider === "deepseek")?.models[0]?.id;
 if (!model) throw new Error("catalog has no DeepSeek completions model");
 const home = join(tmp, "catalog-home");
 mkdirSync(home);
