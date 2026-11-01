@@ -6,7 +6,7 @@ Code and docs that exist only for v1, the v1-to-v2 transfer, or older v2 data ca
 LEGACY(v1-transfer): <what it is>. Remove after the transfer.
 ```
 
-`git grep -n 'LEGACY(v1-transfer)'` finds all 40 sites, in 39 files, and this file. Each is listed below, with paths
+`git grep -n 'LEGACY(v1-transfer)'` finds all 41 sites, in 40 files, and this file. Each is listed below, with paths
 relative to `next/`, apart from `install.sh`, `README.md` and `ci.yml`. Removal starts when the owner says the transfer
 finished smoothly, and not before. Live numbers are from 2026-11-01; check them again.
 
@@ -106,6 +106,7 @@ Only if the owner confirms that no archive is wanted, and `<data>/archive/` is a
 | Marked at | What | When |
 |---|---|---|
 | `docs/horizon-watchers.md` | the watcher move | after order step 3 |
+| `docs/shared-folder-move.md` | the move of Horizon's folders to the central copy | once the owner has confirmed it and the old folders are gone |
 | `docs/oauth-import.md` | v1 sign-in mapping, closing warning | when no v1 sign-in is left to move |
 | `docs/m1-run.md` | v1 job runner hook | any time after the transfer |
 
@@ -118,6 +119,7 @@ Checked 2026-11-01, except where noted.
 | hermeslab `dyna-horizon-watch.timer` | active, runs `run-all.sh` every 15 minutes | Disable after `docs/horizon-watchers.md`. It stays for the fork mirror until that has a home. |
 | hermeslab `~/.local/share/dyna-next-watch` | present, with `bin/`, `state/`, `horizon.git` | Delete once the timer is gone and state lives in `/box/shared/watch`. |
 | `fork-sync.sh` | not written yet; the runbook creates it, and the mirror is still in `upstream-watch.sh` | Goes when the fork mirror moves off the host, which needs a decision. |
+| Each host's `rooms/<room>/shared.before-move` | none yet; `docs/shared-folder-move.md` makes them | Owner's OK, once the central copy has proved good. |
 | `/home/pip` host data path | present on arch and pve; `lt-24-005` not checked, because the login was refused | Goes when host data can differ per host. Hosts still need the same path today. |
 | Desktop `~/.cache/dyna-port/` | present: `tools/`, and `v1-snapshot/` with a private v1 copy | Owner's OK: it holds v1 data. |
 | hermeslab `~/port-bundle` | present; a bundle holds device token hashes | Owner's OK. |

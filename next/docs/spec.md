@@ -211,8 +211,8 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 <data>/rooms/<room>/compose/<name>.yaml         room compose files
 <data>/rooms/<room>/files/<sha256>              attachments and large outputs
 <data>/rooms/<room>/transcripts/<session>/      transcript copies
+<data>/rooms/<room>/shared/                     /box/shared, the one copy
 <hostdata>/rooms/<room>/instructions/AGENTS.md  the room copy a box mounts
-<hostdata>/rooms/<room>/shared/                 /box/shared
 ```
 
 Everything else belongs to no single room:
@@ -230,6 +230,9 @@ Everything else belongs to no single room:
 <hostdata>/git/<owner>/<repo>.git               repository caches
 <hostdata>/bin/<version>/dyna                   engine binaries, with a current link
 <hostdata>/cache/                               dependency caches
+<hostdata>/share/rooms/<room>/shared/           /box/shared on any other host, through its one mount
+<hostdata>/share/cache/                         that mount's local cache
+<hostdata>/sock/share.sock                      the forwarded socket that mount reads through
 <hostdata>/sock/<box>/engine.sock               a box's forwarded socket
 ```
 
@@ -243,7 +246,7 @@ Blobs are per room. A blob's name is its hash and its bytes never change, so eac
 
 The control plane runs on an always-on host. That machine may also be a capacity host, reached over SSH like any other host (decision 14). The engine runs no boxes. One Dyna-owned SSH ControlMaster per host carries framed requests; a missing or invalid reply trailer is a transport failure.
 
-The owner registers hosts with `dyna host add <name> --ssh user@addr`, optionally restricting rooms; `dyna host limit <name>` (`host.set_limits`) later replaces that list, like `accounts.set_limits` for an account, and boxes already on the host stay there. A host becomes ready after checks for delegated cgroup v2 controllers, rootless Podman 5 or later, SSH StreamLocalForwarding, curl, git, free disk and memory, and owner-only administration. Podman is required: the installer installs it and registration reports a typed error when it is absent (owner, q60). Schedulable memory excludes the host floor; CPUs exclude one, with a minimum of one.
+The owner registers hosts with `dyna host add <name> --ssh user@addr`, optionally restricting rooms; `dyna host limit <name>` (`host.set_limits`) later replaces that list, like `accounts.set_limits` for an account, and boxes already on the host stay there. A host becomes ready after checks for delegated cgroup v2 controllers, rootless Podman 5 or later, SSH StreamLocalForwarding, curl, git, FUSE with `user_allow_other` on any host but the engine's (5.6), free disk and memory, and owner-only administration. Podman is required: the installer installs it and registration reports a typed error when it is absent (owner, q60). Schedulable memory excludes the host floor; CPUs exclude one, with a minimum of one.
 
 Admission serializes placement. Each placed box counts one quarter of its CPU and memory size until stopped, failed or deleted; lost boxes count. A stopped box counts only disk. A host must fit requests, remain below 80% measured memory and retain its disk floor after new requests. An ineligible room waits with `room-host`; other waits report their reason. `--git.name` and `--git.email` set box Git identity only when nonempty (owner, q61).
 
@@ -304,7 +307,22 @@ Disk work that is designed but not built:
 
 M1 boxes have no repository. From M2, the control plane fetches GitHub into its mirror and pushes a bare cache to each host. Starts of one repository that overlap share a fetch, and a push per host. A start only takes work that began after it asked, so it never gets older refs than it would alone. Repositories do not wait for each other, and nothing waits to read a mirror. Hosts hold no GitHub credentials. Boxes clone against a read-only cache and keep new objects in their own volumes. Git uses the engine route (5.7).
 
-Dependency caches are shared read-write per host; cross-box cache poisoning is an accepted risk. Each room also has a per-host read-write folder at `/box/shared`. Use `sameHost` to share it with a child. It survives box close but has no backup or hard quota; a lost host loses its copy. The engine measures usage and warns on high disk use.
+Dependency caches are shared read-write per host; cross-box cache poisoning is an accepted risk. A Run gets `/box/cache` as well.
+
+Each room has one read-write folder at `/box/shared`, the same on every host. Its one copy is on the engine host at `<data>/rooms/<room>/shared/`, so deleting the room removes it. It survives box close. It has no backup and no hard quota, and losing the engine host loses it. The engine measures each folder daily into `room_shared`, and Home warns when one passes a quarter of the engine host's disk.
+
+The engine host's boxes bind the folder directly. Every other host reaches it through rclone, built into `dyna` as the hidden commands `dyna share serve` and `dyna share mount`, so a host gets it with the normal binary and installs nothing else. A user service on the engine host serves `<data>/rooms` over WebDAV on a Unix socket. Each other host gets that socket as a reverse forward over the SSH connection the engine already holds, so there is no new login and no inbound access to the engine host. A user service on the host keeps one mount at `<hostdata>/share/rooms`, with a local cache of up to 10 GiB. A box binds only its own room's folder, never the mount. A host other than the engine's needs `fusermount3` and `user_allow_other` in `/etc/fuse.conf`. The host check reports what is missing, and the engine edits no host system file.
+
+The rules of the folder:
+
+- Last write wins. Nothing merges or reports a conflict.
+- File locks work on one host, not across hosts.
+- Another host can take about 5 seconds to see a change.
+- A dying host can lose its last 2 seconds of writes, because a host sends a closed file 2 seconds later.
+- Heavy files that can be rebuilt belong in `/box/cache`.
+- On a host other than the engine's, there are no symlinks or hard links, and every file reads as executable. A file made there lands on the engine host as not executable. A symlink on the engine host is left out for the other hosts: it is never followed.
+
+The server and every mount outlive the engine, so an engine restart stops neither. It drops the forward, and host restore puts that back with the box forwards. Meanwhile a call that needs the server waits about 5 minutes for it, as a model call does (5.7). Past that it gets an I/O error, and the mount carries on either way. The heartbeat brings back a mount it finds down. A box bound to a mount that died loses `/box/shared` until it restarts, because a bind cannot move to a new mount. Under a mount that is down lies an empty local folder. A host makes no folder there, and a box cannot start on one that is not there, so its start fails with the reason and retries.
 
 ### 5.7 Box socket, model route and git
 

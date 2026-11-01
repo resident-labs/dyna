@@ -3,7 +3,9 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
@@ -65,7 +67,15 @@ func (s *Service) RemoveRoomData(room contract.RoomID) error {
 	}
 	s.roomData.Lock()
 	defer s.roomData.Unlock()
-	return os.RemoveAll(dir)
+	err = os.RemoveAll(dir)
+	if err == nil {
+		return nil
+	}
+	// A box can leave read-only folders and files under a subordinate ID in its shared folder. Only the user namespace can remove those.
+	if out, unshareErr := exec.Command("podman", "unshare", "rm", "-rf", "--", dir).CombinedOutput(); unshareErr != nil {
+		return fmt.Errorf("%w: %v: %s", err, unshareErr, out)
+	}
+	return nil
 }
 
 // RoomDeleted tells the owner's stream that the room is gone. No row can hold this event, so it goes out live.

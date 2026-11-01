@@ -34,8 +34,9 @@ if disk=$(df -B1 --output=size,avail "$1" 2>/dev/null); then
 fi
 `
 
-// heartbeatScript prints memory.events.local under dyna.slice. grep exits 1 when nothing matches, which is not a failure.
-const heartbeatScript = diskScript + `cg=$(systemctl --user show dyna.slice -p ControlGroup --value) || exit 1; [ -n "$cg" ] || { echo dyna-load 0 0; exit 0; }; dir="/sys/fs/cgroup$cg"; mem=$(awk '$1 == "anon" || $1 == "shmem" {sum += $2; n++} END {if (n != 2) exit 1; printf "%.0f", sum}' "$dir/memory.stat") || exit 1; swap=$(cat "$dir/memory.swap.current") || exit 1; mem=$((mem + swap)); cpu=$(awk '$1 == "usage_usec" {print $2}' "$dir/cpu.stat") || exit 1; [ -n "$cpu" ] || exit 1; echo "dyna-load $mem $cpu"; grep -r --include=memory.events.local . "$dir" || [ $? = 1 ]`
+// heartbeatScript says whether the mount at $2 is up, and prints memory.events.local under dyna.slice. grep exits 1 when nothing
+// matches, which is not a failure.
+const heartbeatScript = diskScript + `if mountpoint -q -- "$2" 2>/dev/null; then echo ` + shareUpLine + `; fi; cg=$(systemctl --user show dyna.slice -p ControlGroup --value) || exit 1; [ -n "$cg" ] || { echo dyna-load 0 0; exit 0; }; dir="/sys/fs/cgroup$cg"; mem=$(awk '$1 == "anon" || $1 == "shmem" {sum += $2; n++} END {if (n != 2) exit 1; printf "%.0f", sum}' "$dir/memory.stat") || exit 1; swap=$(cat "$dir/memory.swap.current") || exit 1; mem=$((mem + swap)); cpu=$(awk '$1 == "usage_usec" {print $2}' "$dir/cpu.stat") || exit 1; [ -n "$cpu" ] || exit 1; echo "dyna-load $mem $cpu"; grep -r --include=memory.events.local . "$dir" || [ $? = 1 ]`
 
 type slicePressure struct {
 	prev      map[string]int64

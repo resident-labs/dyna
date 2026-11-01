@@ -224,10 +224,6 @@ func TestSubscriptionShapeRefusals(t *testing.T) {
 
 func TestSubscriptionAuthority(t *testing.T) {
 	s, room, worker, ctx := setup(t)
-	root, err := s.store.RootBoxHost(ctx, room)
-	if err != nil || root == "" {
-		t.Fatalf("root box host: %q %v", root, err)
-	}
 	var rootID contract.SessionID
 	if err := s.store.Read().QueryRowContext(ctx, "SELECT parent FROM sessions WHERE id=?", worker).Scan(&rootID); err != nil {
 		t.Fatal(err)
@@ -818,7 +814,7 @@ func TestLostHostEndsARun(t *testing.T) {
 	}
 }
 
-func TestPlacementFollowsTheSharedFolder(t *testing.T) {
+func TestARunGoesWhereAdmissionPlacesIt(t *testing.T) {
 	s, room, _, ctx := setup(t)
 	runs, c := withRuns(t, s)
 	if err := s.store.AddHost(ctx, box.Host{Name: "bigger", State: box.HostReady, CPUs: 64, MemBytes: 256 * box.GiB, DiskBytes: 400 * box.GiB, CheckedAt: s.now()}); err != nil {
@@ -827,8 +823,8 @@ func TestPlacementFollowsTheSharedFolder(t *testing.T) {
 	addSubscription(t, s, ctx, runRequest(room))
 	c.add(30 * time.Minute)
 	pass(t, s, ctx)
-	if runs.count() != 1 || runs.last().Host != "host" {
-		t.Fatalf("a Run left the host of the room's root: %+v", runs.started)
+	if runs.count() != 1 || runs.last().Host != "bigger" {
+		t.Fatalf("a Run stayed on the host of the room's root: %+v", runs.started)
 	}
 }
 

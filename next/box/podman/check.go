@@ -28,6 +28,7 @@ const (
 	CheckCapacity  CheckName = "capacity"
 	CheckHostSlice CheckName = "host slice"
 	CheckForward   CheckName = "stream-local forwarding"
+	CheckShare     CheckName = "FUSE for the shared folder"
 )
 
 // RequiredError reports a missing or unsupported rootless Podman installation.
@@ -67,6 +68,7 @@ type CheckOptions struct {
 	Layout                 box.Layout
 	Runtime                string
 	AdminOnly              bool
+	EngineHost             bool // The engine host's boxes bind the shared folders directly, so it needs no FUSE.
 	MemoryFloor, DiskFloor int64
 }
 
@@ -118,6 +120,9 @@ func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
 		add(CheckHostSlice, err)
 	}
 	add(CheckForward, h.checkForward(ctx, o))
+	if !o.EngineHost {
+		add(CheckShare, h.checkShare(ctx))
+	}
 	return result
 }
 

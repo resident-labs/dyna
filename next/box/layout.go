@@ -19,8 +19,8 @@ import (
 //	<Data>/rooms/<room>/compose/<name>.yaml         room compose files
 //	<Data>/rooms/<room>/files/<sha256>              attachments and large outputs
 //	<Data>/rooms/<room>/transcripts/<session>/      transcript copies
+//	<Data>/rooms/<room>/shared/                     /box/shared, the one copy, which the engine host's boxes bind directly
 //	<HostData>/rooms/<room>/instructions/AGENTS.md  the room copy a box mounts
-//	<HostData>/rooms/<room>/shared/                 /box/shared
 //
 // Everything else belongs to no single room:
 //
@@ -36,6 +36,9 @@ import (
 //	<HostData>/git/<owner>/<repo>.git               repository caches, which rooms share
 //	<HostData>/bin/<version>/dyna                   engine binaries, with a current link
 //	<HostData>/cache/                               dependency caches, which boxes share
+//	<HostData>/share/rooms/<room>/shared/           /box/shared on another host, through its one mount of <Data>/rooms
+//	<HostData>/share/cache/                         that mount's local cache
+//	<HostData>/sock/share.sock                      the forwarded socket that mount reads through
 //	<HostData>/sock/<box>/engine.sock               a box's forwarded socket, gone with the box
 //	<HostData>/runs/<run>/                          a subscription Run's files, gone with the Run
 //
@@ -50,8 +53,7 @@ var AttachmentFolder = "/box/attachments"
 const (
 	instructionsFile = "AGENTS.md"
 	composeFolder    = "compose"
-	// SharedFolder is the name of a room's shared folder, for a host script that visits every room.
-	SharedFolder = "shared"
+	sharedFolder     = "shared"
 	// EngineSocket is the name of a box's socket in its host folder.
 	EngineSocket = "engine.sock"
 )
@@ -121,6 +123,16 @@ func (l Layout) Room(room contract.RoomID) (string, error) { return roomFolder(l
 
 func (l Layout) room(room contract.RoomID) string {
 	return filepath.Join(l.Rooms(), string(room))
+}
+
+// Shared is a room's shared folder, the one copy that the boxes of every host see at /box/shared.
+func (l Layout) Shared(room contract.RoomID) string {
+	return filepath.Join(l.room(room), sharedFolder)
+}
+
+// IsShared says whether path is a room's shared folder.
+func (l Layout) IsShared(path string) bool {
+	return filepath.Base(path) == sharedFolder && filepath.Dir(filepath.Dir(path)) == l.Rooms()
 }
 
 // Instructions is the instructions file of a room, or the global one for no room.
@@ -222,6 +234,9 @@ func (l Layout) HostGit(repo contract.RepoName) (string, error) {
 // HostBin is the folder of engine binaries on a host.
 func (l Layout) HostBin() string { return filepath.Join(l.HostData, "bin") }
 
+// HostBinary is the engine binary a host runs, which the current link names.
+func (l Layout) HostBinary() string { return filepath.Join(l.HostBin(), "current", "dyna") }
+
 // HostCache is the dependency cache folder of a host.
 func (l Layout) HostCache() string { return filepath.Join(l.HostData, "cache") }
 
@@ -265,7 +280,16 @@ func (l Layout) HostInstructions(room contract.RoomID) string {
 	return filepath.Join(l.hostRoom(room), "instructions", instructionsFile)
 }
 
-// HostShared is the folder that every box of the room mounts at /box/shared.
+// HostShareMount is where a host other than the engine's mounts <Data>/rooms.
+func (l Layout) HostShareMount() string { return filepath.Join(l.HostData, "share", "rooms") }
+
+// HostShareCache is that mount's local cache.
+func (l Layout) HostShareCache() string { return filepath.Join(l.HostData, "share", "cache") }
+
+// HostShareSocket is the forwarded socket that mount reads through.
+func (l Layout) HostShareSocket() string { return filepath.Join(l.HostData, "sock", "share.sock") }
+
+// HostShared is a room's shared folder as a host other than the engine's sees it. A box binds this one folder at /box/shared.
 func (l Layout) HostShared(room contract.RoomID) string {
-	return filepath.Join(l.hostRoom(room), SharedFolder)
+	return filepath.Join(l.HostShareMount(), string(room), sharedFolder)
 }

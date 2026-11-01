@@ -339,8 +339,8 @@ type HostSession struct {
 }
 
 type HostSummary struct {
-	Sessions          []HostSession     `json:"sessions,omitempty"` // in rooms the caller can read
-	Shared            []RoomShared      `json:"shared"`
+	Sessions          []HostSession     `json:"sessions,omitempty"`  // in rooms the caller can read
+	Shared            []RoomShared      `json:"shared"`              // Every room's folder is on the control plane, so only its summary lists any.
 	Leftovers         int               `json:"leftovers,omitempty"` // boxes and room folders of deleted rooms that this host still holds, removed when it returns
 	Name              HostName          `json:"name"`
 	Reachable         bool              `json:"reachable"`

@@ -30,6 +30,12 @@ func (b *Boxes) StartRun(ctx context.Context, spec box.RunSpec) error {
 
 // boot gives a Run its socket, its files and its box. A failure leaves nothing behind.
 func (b *Boxes) boot(ctx context.Context, h *podman.Host, spec box.RunSpec, image string) (err error) {
+	var shared box.Mount
+	if spec.Room != "" {
+		if shared, err = b.sharedMount(ctx, spec.Host, spec.Room); err != nil {
+			return err
+		}
+	}
 	if err := b.Sockets.AddRun(spec.ID, spec.Subscription, spec.Room); err != nil {
 		return err
 	}
@@ -53,7 +59,7 @@ func (b *Boxes) boot(ctx context.Context, h *podman.Host, spec box.RunSpec, imag
 		{HostPath: folder, BoxPath: podman.RunFolder, ReadOnly: true},
 	}
 	if spec.Room != "" {
-		mounts = append(mounts, box.Mount{HostPath: b.Layout.HostShared(spec.Room), BoxPath: "/box/shared"})
+		mounts = append(mounts, shared, box.Mount{HostPath: b.Layout.HostCache(), BoxPath: "/box/cache"})
 	}
 	return h.StartRun(ctx, box.RunContainer{ID: string(spec.ID), Image: image, Size: spec.Size, Command: spec.Command, Mounts: mounts})
 }

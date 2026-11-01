@@ -25,14 +25,14 @@ export type Meter = { label: string; text: string; percent: number; busy: boolea
 
 // One card per machine. When the engine runs on a registered host, host.list reports that machine twice: the control
 // plane with whole-machine figures, and the registered host with only dyna.slice's use of its allowance (cores less
-// one, memory less the floor). They merge under the host's name with the whole-machine figures, the host's workspaces,
-// sessions and shared folders, and whether the engine can reach it. Until the control plane's first sample, the host stands alone.
+// one, memory less the floor). They merge under the host's name with the whole-machine figures, the host's workspaces
+// and sessions, and whether the engine can reach it. Until the control plane's first sample, the host stands alone.
 export function machines(hosts: HostSummary[]): HostSummary[] {
   const plane = hosts.find(h => h.name === "control-plane");
   const same = hosts.find(h => h.engineHost);
   if (!plane || !same || !hostMeters(plane).length) return hosts;
   const merged = { ...plane, name: same.name, reachable: same.reachable, lastSeen: same.lastSeen, boxes: plane.boxes + same.boxes,
-    diskLow: plane.diskLow || same.diskLow, sessions: [...plane.sessions ?? [], ...same.sessions ?? []], shared: [...plane.shared ?? [], ...same.shared ?? []], engineHost: true };
+    diskLow: plane.diskLow || same.diskLow, sessions: [...plane.sessions ?? [], ...same.sessions ?? []], engineHost: true };
   return hosts.filter(h => h !== same).map(h => h === plane ? merged : h);
 }
 
@@ -60,8 +60,9 @@ export function lastSeen(h: HostSummary, now: number): string | undefined {
   return "Last seen " + (minutes < 1 ? "just now" : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`);
 }
 
-// The rooms whose shared folder holds more than a quarter of the host's disk, largest first (spec 5.6). The folder has
-// no hard limit, so Home names the room and the size for the owner to clean up. The engine sends null for no folders.
+// The rooms whose shared folder holds more than a quarter of the machine's disk, largest first (spec 5.6). Each has one
+// copy, on the engine's machine, and no hard limit, so Home names the room and the size for the owner to clean up. The
+// engine sends null for no folders.
 export const largeShared = (h: HostSummary): RoomShared[] =>
   h.diskBytes ? (h.shared ?? []).filter(folder => folder.bytes > h.diskBytes / 4).sort((a, b) => b.bytes - a.bytes) : [];
 

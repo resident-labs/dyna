@@ -186,6 +186,8 @@ func Run(ctx context.Context, cfg Config) error {
 	service.SetHookRunner(boxes, boxes.hostMemory)
 	boxes.Pressure = service
 	go boxes.controlPlane(cfg.Data)
+	go boxes.measureShared(boxCtx)
+	go boxes.serveShare(boxCtx, executable)
 	hosts, err := st.Hosts(ctx)
 	if err != nil {
 		return fmt.Errorf("list hosts: %w", err)

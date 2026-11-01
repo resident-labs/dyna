@@ -18,7 +18,7 @@ The scripts change in five ways, and each change is below:
 - `gh pr view` is GraphQL, which a `Run` cannot use, so `author-watch` reads the REST API.
 - `author-watch` and `sample-repo-watch` track a new PR through the Run's socket, for the session they tell about it.
   The room must list the PR's repository, so `horizon-rust/horizon` joins Horizon's list.
-- State moves to `/box/shared/watch`, which is `rooms/<room>/shared/watch` in the host folder.
+- State moves to `/box/shared/watch`, which is `rooms/<room>/shared/watch` in the data folder.
 - `gh` joins the state folder as a binary, because the Horizon image has `jq`, `python3`, `curl` and `git` but no `gh`.
   Adding `gh` to the image on the `dyna-images` branch is the tidier end state, but it rebuilds the image.
 
@@ -30,8 +30,8 @@ sock=$XDG_RUNTIME_DIR/dyna-next/owner.sock
 dyna() { ~/.local/opt/dyna-next/bin/dyna --socket "$sock" "$@"; }
 w=~/.local/share/dyna-next-watch
 room=$(curl -sS --unix-socket "$sock" -H 'Content-Type: application/json' -d '{}' http://localhost/v1/room.list | jq -r '.rooms[] | select(.name == "horizon") | .id')
-shared=~/.local/share/dyna-next-host/rooms/$room/shared
-ls "$shared/horizon-setup.sh"   # must exist: a Run uses the shared folder of the host where the room's root is
+shared=~/.local/share/dyna-next/rooms/$room/shared
+ls "$shared/horizon-setup.sh"   # must exist: docs/shared-folder-move.md has moved it here
 ```
 
 ## 2. Write the Run scripts
@@ -47,9 +47,10 @@ cat > "$w/run/env.sh" <<'EOF'
 WATCH_HOME=/box/shared/watch
 export PATH="$WATCH_HOME/bin:$PATH"
 state_dir=$WATCH_HOME/state
-repo_dir=$WATCH_HOME/horizon.git
+repo_dir=/box/cache/horizon-watch.git
 mkdir -p "$state_dir" /tmp/gh
-# One watcher at a time, as run-all.sh did.
+[ -d "$repo_dir" ] || { git init -q --bare "$repo_dir" && git -C "$repo_dir" remote add upstream https://github.com/horizon-rust/horizon.git; }
+# One watcher at a time on a host, as run-all.sh did. A lock does not reach another host.
 exec 9>"$state_dir/run.lock"
 flock -w 900 9
 printf 'http_unix_socket: %s\n' "$DYNA_SOCKET" > /tmp/gh/config.yml
@@ -152,7 +153,6 @@ grep '^one ' "$w/bin/run-all.sh"   # prints fork-sync alone
 
 mkdir -p "$shared/watch/bin"       # watch/state must not exist yet, or cp nests the copy inside it
 cp -a "$w/state" "$shared/watch/state"
-cp -a "$w/horizon.git" "$shared/watch/horizon.git"
 install -m 0755 "$(command -v gh)" "$shared/watch/bin/gh"
 
 reviewer=$(curl -sS --unix-socket "$sock" -H 'Content-Type: application/json' -d "{\"room\":\"$room\"}" http://localhost/v1/session.list | jq -r '.sessions[] | select(.name == "review-lead") | .id')

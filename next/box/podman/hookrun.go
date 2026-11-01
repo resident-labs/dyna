@@ -80,10 +80,8 @@ func (h *Host) StartRun(ctx context.Context, c box.RunContainer) error {
 		return errors.New("invalid run")
 	}
 	for _, m := range c.Mounts {
-		if !m.ReadOnly || m.MakeDir {
-			if _, err := h.run(ctx, "bash", "-c", `if [ ! -e "$1" ]; then mkdir -p -m 0700 -- "$1"; fi`, "dyna", m.HostPath); err != nil {
-				return err
-			}
+		if err := h.makeMountFolder(ctx, m); err != nil {
+			return err
 		}
 	}
 	out, err := h.run(ctx, runArgs(c)...)

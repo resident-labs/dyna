@@ -545,8 +545,8 @@ func (b *boxes) Stop(_ context.Context, id contract.BoxID) error {
 	b.mu.Unlock()
 	return nil
 }
-func (b *boxes) MaintainHost(context.Context, contract.HostName) ([]contract.RoomShared, error) {
-	return nil, nil
+func (b *boxes) MaintainHost(context.Context, contract.HostName) error {
+	return nil
 }
 
 func (b *boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, _, _ string) error {
