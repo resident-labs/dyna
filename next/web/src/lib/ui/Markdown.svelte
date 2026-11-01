@@ -29,7 +29,7 @@
   const resets = new WeakMap<HTMLButtonElement, ReturnType<typeof setTimeout>>();
   function flash(button: HTMLButtonElement, copied: boolean) {
     clearTimeout(resets.get(button));
-    button.querySelector("path")?.setAttribute("d", copied ? paths.check : paths.copy);
+    button.querySelector("path")?.setAttribute("d", copied ? paths.check : paths.warning);
     button.setAttribute("aria-label", copied ? "Copied" : "Could not copy");
     resets.set(button, setTimeout(() => {
       button.querySelector("path")?.setAttribute("d", paths.copy);
