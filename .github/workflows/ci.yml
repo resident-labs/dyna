@@ -398,11 +398,30 @@ jobs:
         working-directory: next
         run: DYNA_REQUIRE_SSHD=1 go test -count=1 -tags integration ./box/podman -run '^TestRealSSHForwardReconnect$' -v
 
+  # The vendored CLIProxyAPI test and the dyna-export tool run beside next, not in it.
+  # Both are separate Go modules, so this job uses their go.sum files for its cache.
+  next-extras:
+    name: next-extras
+    needs: [changes]
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: cmd/dyna-export/go.mod
+          cache-dependency-path: |
+            cmd/dyna-export/go.sum
+            next/third_party/cliproxyapi/go.sum
+      - name: Vet and test the CLIProxyAPI management handler and dyna-export
+        run: bash scripts/ci.sh next-extras
+
   # The single check name that Dyna and branch protection wait on. It passes
   # only when every shard and static job passed.
   test:
     name: go-test
-    needs: [changes, go-shard, go-static, desktop, frontend, frontend-check, next]
+    needs: [changes, go-shard, go-static, desktop, frontend, frontend-check, next, next-extras]
     if: ${{ always() && needs.changes.outputs.go == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -410,7 +429,7 @@ jobs:
       - name: Require every Go job
         env:
           WEB: ${{ needs.changes.outputs.web }}
-          RESULTS: ${{ needs.go-shard.result }} ${{ needs.go-static.result }} ${{ needs.desktop.result }} ${{ needs.next.result }} ${{ needs.frontend.result }} ${{ needs.frontend-check.result }}
+          RESULTS: ${{ needs.go-shard.result }} ${{ needs.go-static.result }} ${{ needs.desktop.result }} ${{ needs.next.result }} ${{ needs.next-extras.result }} ${{ needs.frontend.result }} ${{ needs.frontend-check.result }}
           FRONTEND_CHECK: ${{ needs.frontend-check.result }}
         run: |
           echo "Results: $RESULTS"
