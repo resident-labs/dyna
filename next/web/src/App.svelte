@@ -356,6 +356,11 @@
       return;
     }
     if (palette) return;
+    if (room && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "b") {
+      event.preventDefault();
+      void showPanel(!panelShown);
+      return;
+    }
     if ((event.ctrlKey || event.metaKey) && event.key === ",") {
       event.preventDefault();
       history.pushState(null, "", "/settings");
