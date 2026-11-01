@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -47,7 +48,9 @@ type Service struct {
 	live              *live.Live
 	readMu            sync.Mutex // preserves commit and live broadcast order
 	// transcriptMu serializes appends, so each offset check and write runs alone.
-	transcriptMu        sync.Mutex
+	transcriptMu                                    sync.Mutex
+	transcriptWait, transcriptSync, transcriptCount atomic.Uint64
+
 	transcriptDir       string
 	filesDir            string
 	instructionsMu      sync.Mutex

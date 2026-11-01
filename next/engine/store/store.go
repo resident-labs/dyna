@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -48,7 +49,13 @@ type request struct {
 	fn   func(*sql.Tx) error
 	done chan error
 }
+
+// WriterTiming contains cumulative writer timings in nanoseconds.
+type WriterTiming struct{ WaitNS, HoldNS, Count uint64 }
+
 type Store struct {
+	writerWait, writerHold, writerCount atomic.Uint64
+
 	backupMu      sync.Mutex
 	lock          *os.File
 	writer        *sql.DB
@@ -257,6 +264,7 @@ func compareSchema(db *sql.DB) error {
 
 // Write submits one atomic transaction to the single writer.
 func (s *Store) Write(ctx context.Context, fn func(*sql.Tx) error) error {
+	start := time.Now()
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -265,6 +273,7 @@ func (s *Store) Write(ctx context.Context, fn func(*sql.Tx) error) error {
 	r := request{ctx: ctx, fn: fn, done: make(chan error, 1)}
 	select {
 	case s.requests <- r:
+		s.writerWait.Add(uint64(time.Since(start)))
 		s.mu.Unlock()
 	case <-ctx.Done():
 		s.mu.Unlock()
@@ -275,6 +284,7 @@ func (s *Store) Write(ctx context.Context, fn func(*sql.Tx) error) error {
 func (s *Store) writeLoop() {
 	defer close(s.done)
 	for r := range s.requests {
+		start := time.Now()
 		tx, err := s.writer.BeginTx(r.ctx, nil)
 		writerErr := err
 		if err == nil {
@@ -311,9 +321,17 @@ func (s *Store) writeLoop() {
 			}
 			s.errMu.Unlock()
 		}
+		s.writerHold.Add(uint64(time.Since(start)))
+		s.writerCount.Add(1)
 		r.done <- err
 	}
 }
+
+// WriterTiming returns cumulative nanoseconds spent waiting for and using the writer.
+func (s *Store) WriterTiming() WriterTiming {
+	return WriterTiming{s.writerWait.Load(), s.writerHold.Load(), s.writerCount.Load()}
+}
+
 func (s *Store) Read() *sql.DB { return s.read }
 func (s *Store) Close() error {
 	s.mu.Lock()
