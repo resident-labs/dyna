@@ -111,10 +111,7 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 		return nil, failure(err)
 	}
 	handle, state, ok := s.lookupSession(id)
-	if !ok || state == nil {
-		if ok {
-			handle.Unlock()
-		}
+	if !ok {
 		return nil, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
 	}
 	defer handle.Unlock()
@@ -177,10 +174,7 @@ func (s *Service) ComputerInput(ctx context.Context, caller contract.Principal, 
 		return contract.ComputerInputResponse{}, failure(err)
 	}
 	handle, state, ok := s.lookupSession(req.Session)
-	if !ok || state == nil {
-		if ok {
-			handle.Unlock()
-		}
+	if !ok {
 		return contract.ComputerInputResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
 	}
 	defer handle.Unlock()
@@ -203,10 +197,7 @@ func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal,
 		return forbidden()
 	}
 	handle, state, ok := s.lookupSession(caller.Session)
-	if !ok || state == nil {
-		if ok {
-			handle.Unlock()
-		}
+	if !ok {
 		return &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 	}
 	s.mu.Lock()
