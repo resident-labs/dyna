@@ -72,7 +72,7 @@
             <span class="unrated">Not rated · <button type="button" aria-label={`Rate ${profile.name}`} onclick={() => { close(); editing = profile.name; }}>Rate</button></span>
           {:else}
             {#each ([["Taste", profile.taste], ["Diagnostics", profile.diagnostics], ["Intelligence", profile.intelligence], ["Thrift", profile.cost]] as const) as [label, value]}
-              <span class="number"><span class="rating-label">{label} </span>{rating(value)}</span>
+              <span class="number" class:missing={!value}><span class="rating-label">{label} </span>{rating(value)}</span>
             {/each}
           {/if}
           <span class="limits">{#if profile.maxConcurrent}At most {profile.maxConcurrent} at once{#if profile.maxCallsPerRun} · {/if}{/if}{#if profile.maxCallsPerRun}{profile.maxCallsPerRun} calls per run{:else if !profile.maxConcurrent}No limits{/if}</span>
@@ -110,7 +110,8 @@
     .row { position: relative; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; padding: 14px; }
     .identity { grid-column: 1 / -1; padding-right: 48px; }
     .edit { position: absolute; right: 14px; top: 10px; }
-    .number { grid-column: span 1; }
+    .number { grid-column: span 1; color: var(--text); }
+    .number.missing, .rating-label { color: var(--muted); }
     .rating-label { display: inline; margin-right: 4px; }
     .unrated, .limits { grid-column: 1 / -1; }
   }
