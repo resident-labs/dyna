@@ -3,14 +3,14 @@
   import Icon from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
   import PostAttachments from "./PostAttachments.svelte";
-  import { formatTime, type Row } from "../feed.ts";
+  import { clock, formatTime, type Row } from "../feed.ts";
   import type { Attachment, EventID, VisualCard } from "../contract.gen.ts";
   import { hue } from "../identity.ts";
   import { beginSwipe, moveSwipe, releaseSwipe, ignoredSwipeTarget, type Swipe } from "../swipe.ts";
   import { canForwardPost } from "../forward-state.ts";
   import { SwipeForward } from "../swipe-forward.ts";
-  let { row, author, to, root, onretry, ondiscard, onforward, swipeDisabled = false, newest, visualEvent, onmedia }: {
-    row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; newest: Map<string, VisualCard>; visualEvent: EventID | undefined; onmedia: (position: number) => void;
+  let { row, author, to, root, room, navigate, onretry, ondiscard, onforward, swipeDisabled = false, newest, visualEvent, onmedia }: {
+    room: string; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; newest: Map<string, VisualCard>; visualEvent: EventID | undefined; onmedia: (position: number) => void;
   } = $props();
   let distance = $state(0), dragging = $state(false), ready = $state(false);
   function swipe(node: HTMLElement) {
@@ -115,7 +115,7 @@
 <!-- A long press opens the action sheet; a right swipe forwards on release. -->
 <div class="swipe" use:swipe>
   {#if dragging && !row.pending}<div class="cue" class:ready class:first={row.first} aria-hidden="true"><Icon name="forward" /></div>{/if}
-<article style:transform="translateX({distance}px)" class:dragging class="post" class:first={row.first} class:pending={row.pending} aria-busy={row.pending && !row.pending.failed} tabindex="-1"
+<article style:transform="translateX({distance}px)" class:dragging class="post" class:first={row.first} class:pending={row.pending} class:mention={row.from.kind !== "owner" && row.to.some(target => target.kind === "owner")} aria-busy={row.pending && !row.pending.failed} tabindex="-1"
   style:--lift="{lift}px" onpointerenter={event => raise(event, event.currentTarget)} onpointerdown={press} onpointermove={drift} onpointerup={release} onpointercancel={release}
   oncontextmenu={event => { if (sheet) event.preventDefault(); }}>
   {#if !row.pending}<div class="bar"><span class="status" role="status">{copied}</span>
@@ -126,9 +126,11 @@
     {#if onforward}<button type="button" onclick={event => { event.currentTarget.closest("dialog")?.close(); onforward(); }}><Icon name="forward" />Forward</button>{/if}
     <button type="button" onclick={event => { event.currentTarget.closest("dialog")?.close(); copy(); }}><Icon name="copy" />Copy text</button></dialog>{/if}
   {#if row.first}
-    <Avatar kind={row.from.kind} name={author} {root} />
-    <p class="name"><strong class={row.from.kind} style:--hue={hue(author)}>{author}</strong>
+    <Avatar kind={row.from.kind} name={author} {root} size={40} />
+    <p class="name">{#if row.from.session}<a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(row.from.session)}`} onclick={navigate} style:--hue={hue(author)}>{author}</a>{:else}<strong class={row.from.kind} style:--hue={hue(author)}>{author}</strong>{/if}
       <time datetime={row.at}>{formatTime(row.at)}</time>{#if to}<span class="to">→ {to}</span>{/if}</p>
+  {:else}
+    <time class="follow-time" datetime={row.at}>{clock(row.at)}</time>
   {/if}
   <Markdown text={row.text} />
   <PostAttachments {onmedia} attachments={row.attachments} {newest} event={visualEvent} at={row.at} />
@@ -139,6 +141,7 @@
 
 <style>
   .swipe { position: relative; }
+  .swipe:has(.post.first) { margin-top: 16px; }
   @media (pointer: coarse) { .swipe { overflow-x: clip; } }
   .cue { position: absolute; left: 12px; top: 29px; z-index: 1; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--selected); color: var(--muted); opacity: .4; transform: scale(.8); }
   .cue:not(.first) { top: 15px; }
@@ -146,10 +149,16 @@
   .post { transition: transform 150ms ease; }
   .post.dragging { transition: none; }
   @media (prefers-reduced-motion: reduce) { .post { transition: none; } }
-  /* The avatar sits in a 32 px gutter; later posts of a run align under the first one's text. */
-  .post { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: 12px; padding: 1px 16px; }
+  /* The avatar sits in a 40 px gutter; later posts of a run align under the first one's text. */
+  .post { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr); column-gap: 16px; padding: 1px 16px; font-size: 15px; }
   /* The wash follows the pointer only; a tap or a closed menu leaves none behind. */
   @media (hover: hover) { .post:hover { background: var(--hover); } }
+  .mention { padding-top: 4px; padding-bottom: 4px; background: linear-gradient(var(--mention-bg), var(--mention-bg)), var(--bg); }
+  .mention::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 2px; background: var(--mention-bar); }
+  @media (hover: hover) { .post.mention:hover { background: linear-gradient(var(--hover), var(--hover)), linear-gradient(var(--mention-bg), var(--mention-bg)), var(--bg); } }
+  .post .follow-time { grid-column: 1; grid-row: 1; align-self: start; text-align: center; font-size: 11px; visibility: hidden; }
+  @media (hover: hover) { .post:hover .follow-time { visibility: visible; } }
+  @media (max-width: 640px) { .post { column-gap: 8px; } }
   .post:focus { outline: none; }
   .post > :global(*) { grid-column: 2; }
   /* v1's bar: it floats over the row's top right and is laid out while hidden, so showing it never moves the row. */
@@ -170,7 +179,7 @@
   .status { color: var(--muted); font-size: 12px; }
   .status:not(:empty) { padding: 0 6px; }
   .post > :global(.avatar) { grid-column: 1; grid-row: 1 / span 3; margin-top: 2px; }
-  .post.first { padding-top: 14px; }
+
   /* A post the engine has not confirmed is dimmed; its Not sent line keeps full contrast in the danger color, because the owner must act. */
   .pending > :global(:not(.unsent, .sheet)) { opacity: 0.5; }
   .unsent { margin: 2px 0 0; display: flex; align-items: baseline; gap: 12px; color: var(--danger); font-size: 12px; }
@@ -179,7 +188,10 @@
   .unsent button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   /* The name line stays one line: a long name or recipient list truncates and the time stays whole. */
   .name { margin: 0; display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
-  strong { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; color: oklch(var(--id-name) var(--hue)); }
+  strong, .name a { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; color: oklch(var(--id-name) var(--hue)); }
+  .name a { text-decoration: none; font-weight: 600; }
+  .name a:hover { text-decoration: underline; }
+  .name a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   time { flex: none; }
   /* A name stays whole up to 60% of the line, so "You" never truncates; the recipient list takes the rest. */
   .to { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

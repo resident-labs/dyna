@@ -58,6 +58,9 @@ func requestCaller(ctx context.Context, fallback Caller) Caller {
 
 func (a *API) handler(c Caller) http.Handler {
 	mux := http.NewServeMux()
+	call(mux, contract.MethodWebSearch, c, a.service.WebSearch)
+	call(mux, contract.MethodWebsearchSetKey, c, a.service.WebsearchSetKey)
+	call(mux, contract.MethodWebsearchRemoveKey, c, a.service.WebsearchRemoveKey)
 	call(mux, contract.MethodConnectStart, c, func(ctx context.Context, _ contract.Principal, req contract.ConnectStartRequest) (contract.ConnectStartResponse, *contract.Error) {
 		if a.connect == nil {
 			return contract.ConnectStartResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Connect unavailable"}
@@ -128,7 +131,6 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodSessionList, c, a.service.SessionList)
 	call(mux, contract.MethodHostexecRun, c, a.service.HostexecRun)
 	call(mux, contract.MethodHostexecList, c, a.service.HostexecList)
-	call(mux, contract.MethodHostexecRevoke, c, a.service.HostexecRevoke)
 	call(mux, contract.MethodOpSubmit, c, func(ctx context.Context, p contract.Principal, req contract.OpSubmitRequest) (contract.OpSubmitResponse, *contract.Error) {
 		c := requestCaller(ctx, c)
 		if c.Web {
@@ -571,7 +573,7 @@ func writeError(w http.ResponseWriter, err *contract.Error) {
 	switch err.Code {
 	case contract.ErrInvalid:
 		status = http.StatusBadRequest
-	case contract.ErrForbidden, contract.ErrHostexecScope, contract.ErrNoGrant:
+	case contract.ErrForbidden, contract.ErrNoGrant:
 		status = http.StatusForbidden
 	case contract.ErrNotFound:
 		status = http.StatusNotFound

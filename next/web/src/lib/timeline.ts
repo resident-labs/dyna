@@ -35,6 +35,12 @@ export function deriveTimelineGroups(items: TranscriptItem[]): TimelineGroup[] {
   return result;
 }
 
+// Dyna: The transcript holds complete harness records, so a thought is finished once it appears. Only a tool call has
+// a separate end: its result, which sets ended.
+export function timelineItemRunning(item: TranscriptItem, turnEnded: boolean): boolean {
+  return !turnEnded && item.kind === "tool" && !item.ended;
+}
+
 // Dyna: Text can fold only when a work disclosure is present.
 export function visibleTimelineText(id: string, final: string | undefined, completed: boolean, hasWork: boolean, expanded: boolean): boolean {
   return !completed || !hasWork || id === final || expanded;
