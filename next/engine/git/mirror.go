@@ -50,8 +50,10 @@ func (m *Mirror) Prepare(ctx context.Context, host CacheHost, repo contract.Repo
 	if fetch && m.Token == "" {
 		return contract.BoxRepo{}, MissingTokenError{}
 	}
+	steps := box.NewStepLog("repo " + string(repo))
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	steps.Done("mirror wait")
 	path, err := m.Layout.Git(repo)
 	if err != nil {
 		return contract.BoxRepo{}, err
@@ -90,9 +92,11 @@ func (m *Mirror) Prepare(ctx context.Context, host CacheHost, repo contract.Repo
 		if err != nil {
 			return contract.BoxRepo{}, err
 		}
+		steps.Done("fetch")
 		if err := host.PushCache(ctx, path, cache, []string{"+refs/heads/*:refs/heads/*"}); err != nil {
 			return contract.BoxRepo{}, err
 		}
+		steps.Done("cache push")
 	}
 	out, err := m.Runner.Run(ctx, nil, "--git-dir", path, "symbolic-ref", "--short", "HEAD")
 	if err != nil {
