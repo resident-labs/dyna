@@ -153,7 +153,7 @@
   ].filter(Boolean).join(" · "));
 </script>
 
-<div class="home">
+<div class="home" data-page-ready={loaded && (!!hosts || hostsFailed) && (!!accounts || accountsFailed)}>
   <!-- Until room.list answers, the sentence is a skeleton of the same height: Home never claims nothing waits before it knows. -->
   {#if !loaded}<p class="hero skeleton" aria-hidden="true"><i></i><i></i></p>
   {:else}<p class="hero">{needs ? `${count(needs, "thing")} need${needs === 1 ? "s" : ""} you.` : "Nothing needs you."}{#if summary}<span>{summary}</span>{/if}</p>{/if}

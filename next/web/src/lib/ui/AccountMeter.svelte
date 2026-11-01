@@ -17,6 +17,7 @@
 <style>
   .meter { min-width: 0; display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .line { display: flex; justify-content: space-between; gap: 8px; }
+  .line span { white-space: nowrap; }
   strong { color: var(--text); }
   .track { position: relative; height: 6px; border-radius: 3px; background: var(--track); }
   .fill { height: 100%; border-radius: inherit; background: var(--muted); }

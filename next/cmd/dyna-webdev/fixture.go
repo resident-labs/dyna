@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -98,6 +99,27 @@ func fixtureTurns() []contract.TranscriptTurn {
 				item.Posts = post("The docs are up to date. The retry hint is described in the sync guide.", contract.Conversation{Kind: contract.ConversationFeed})
 			}
 			turn.Items = append(turn.Items, item)
+		}
+		if i == 0 {
+			turn.Items = turn.Items[:1]
+			for j := range 3 {
+				at := start.Add(time.Duration(j+1) * 10 * time.Second)
+				done := at.Add(time.Second)
+				script := "const result = await tools.read({ path: \"src/sync/status.ts\" });\ntext(result);"
+				if j == 2 {
+					script = strings.Repeat("const step = await tools.read({ path: \"src/sync/status.ts\" });\n", 16) + "text(step);"
+				}
+				calls := []contract.TranscriptCall{
+					{Tool: "read", Target: "src/sync/status.ts", Status: contract.TranscriptCallOK},
+					{Tool: "read", Target: "src/ui/SyncBanner.tsx", Status: contract.TranscriptCallOK},
+					{Tool: "mcp__shell__shell", Target: "npm test", Status: contract.TranscriptCallOK},
+				}
+				if j == 2 {
+					calls[0].Status, calls[0].Error = contract.TranscriptCallError, "The file was not found."
+				}
+				turn.Items = append(turn.Items, contract.TranscriptItem{ID: fmt.Sprintf("%s-script-%d", id, j), Turn: id, Kind: contract.TranscriptTool, At: at, Ended: &done, Tool: "codemode", Script: script, Calls: calls, Output: "Test Files  1 passed\nTests  3 passed\nDuration  0.4 s"})
+			}
+			turn.Items = append(turn.Items, contract.TranscriptItem{ID: "fixture-own-post", Turn: id, Kind: contract.TranscriptPost, At: end, From: &contract.Principal{Kind: contract.PrincipalSession, Session: fixtureSession}, Text: "The retry hint is ready for review.", Home: &contract.Conversation{Kind: contract.ConversationFeed}, Room: "fixture", Seq: 1})
 		}
 		if i == 10 {
 			turn.Outcome, turn.Cause = contract.TurnFailed, contract.CauseModelFailed
