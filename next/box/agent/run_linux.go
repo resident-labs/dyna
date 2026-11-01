@@ -196,7 +196,7 @@ func Run(ctx context.Context) error {
 	ticks := time.NewTicker(transcriptInterval)
 	defer ticks.Stop()
 	go transcript.Run(ctx, ticks.C, h.SessionFile)
-	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, file: h.SessionFile}, Setup: setup, setupErr: setupErr, Model: hello.Model}
+	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, file: h.SessionFile}, Setup: setup, setupErr: setupErr}
 	var closing atomic.Bool
 	ownerInput := computer.NewInput(computer.URL)
 	go ownerInput.Run(ctx)

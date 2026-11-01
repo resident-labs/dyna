@@ -19,6 +19,7 @@ import type {
 	ExtensionWidgetOptions,
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.ts";
+import { resolveCliModel } from "../../core/model-resolver.ts";
 import {
 	flushRawStdout,
 	takeOverStdout,
@@ -530,6 +531,23 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				}
 				await session.setModel(model);
 				return success(id, "set_model", model);
+			}
+
+			case "transfer_model": {
+				// The same lookup as --provider and --model, so a model reachable after a restart is reachable here.
+				const { model, error: problem } = resolveCliModel({
+					cliProvider: command.provider,
+					cliModel: command.modelId,
+					modelRuntime: session.modelRuntime,
+				});
+				if (!model) {
+					return error(id, "transfer_model", problem ?? `Model not found: ${command.provider}/${command.modelId}`);
+				}
+				const result = await session.transferModel(model, {
+					thinkingLevel: command.thinkingLevel,
+					compactionTriggerTokens: command.compactionTriggerTokens,
+				});
+				return success(id, "transfer_model", result);
 			}
 
 			case "cycle_model": {

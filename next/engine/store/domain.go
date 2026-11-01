@@ -300,7 +300,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 		if err != nil {
 			return err
 		}
-		if output.Outcome == contract.TurnFailed && output.Cause != contract.CauseOutputLimit {
+		if (output.Outcome == contract.TurnFailed && output.Cause != contract.CauseOutputLimit) || output.Cause == contract.CauseNotStarted {
 			if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='pending',turn=NULL,queue=NULL,wake=0 WHERE to_kind=? AND to_id=? AND turn=? AND state IN ('taken','read')", contract.PrincipalSession, session, output.Turn); err != nil {
 				return err
 			}

@@ -35,6 +35,9 @@ type command struct {
 	ModelID    string                     `json:"modelId,omitempty"`
 	Level      string                     `json:"level,omitempty"`
 	Sections   *[]contract.ContextSection `json:"sections,omitempty"`
+	// transfer_model
+	ThinkingLevel           string `json:"thinkingLevel,omitempty"`
+	CompactionTriggerTokens int    `json:"compactionTriggerTokens,omitempty"`
 }
 
 type contentBlock struct {
@@ -111,7 +114,11 @@ type event struct {
 	Error    string          `json:"error"`
 	Aborted  bool            `json:"aborted"`
 	Data     struct {
-		SessionFile string `json:"sessionFile"`
+		SessionFile  string `json:"sessionFile"`
+		Path         string `json:"path"`
+		Reason       string `json:"reason"`
+		TokensBefore int64  `json:"tokensBefore"`
+		TokensAfter  int64  `json:"tokensAfter"`
 	} `json:"data"`
 	Message struct {
 		Role          string        `json:"role"`
@@ -248,7 +255,7 @@ func (h *Harness) requestCommand(ctx context.Context, c command) (event, error) 
 	select {
 	case result := <-ch:
 		if !result.Success {
-			return event{}, fmt.Errorf("pi %s: %s", typ, result.Error)
+			return event{}, fmt.Errorf("pi %s: %s: %w", typ, result.Error, harness.ErrRefused)
 		}
 		return result, nil
 	case <-h.done:
@@ -350,13 +357,17 @@ func (h *Harness) FollowUp(ctx context.Context, input contract.TurnInput) error 
 	return h.send(ctx, "follow_up", &input, nil)
 }
 
-// SetModel sends Pi's set_model and then set_thinking_level.
-func (h *Harness) SetModel(ctx context.Context, model contract.ModelChoice) error {
-	if _, err := h.requestCommand(ctx, command{Type: "set_model", Provider: string(model.Provider), ModelID: model.ID}); err != nil {
-		return err
+// TransferModel sends Pi's transfer_model. Pi decides whether the conversation fits, and compacts first if it does not.
+func (h *Harness) TransferModel(ctx context.Context, id contract.TurnID, model contract.ModelChoice, compactTokens int) (harness.ModelTransfer, error) {
+	if h.Activity != nil {
+		h.Activity(id, "changing model")
 	}
-	_, err := h.requestCommand(ctx, command{Type: "set_thinking_level", Level: string(model.Thinking)})
-	return err
+	reply, err := h.requestCommand(ctx, command{Type: "transfer_model", Provider: string(model.Provider), ModelID: model.ID, ThinkingLevel: string(model.Thinking), CompactionTriggerTokens: compactTokens})
+	if err != nil {
+		return harness.ModelTransfer{}, err
+	}
+	d := reply.Data
+	return harness.ModelTransfer{Path: d.Path, Reason: d.Reason, TokensBefore: d.TokensBefore, TokensAfter: d.TokensAfter}, nil
 }
 
 // SetPromptSections sends the ordered turn context before the next prompt or continuation.

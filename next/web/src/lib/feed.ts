@@ -67,6 +67,7 @@ export const causes: Record<FailureCause, string> = {
   output_limit: "The reply reached the model's output limit",
   harness_failed: "The agent program stopped unexpectedly",
   set_model_failed: "The session could not switch to its new model",
+  not_started: "It stopped before it began",
 };
 
 const sameHome = (a: Conversation, b: Conversation) => a.kind === b.kind && (a.session ?? "") === (b.session ?? "");
@@ -204,7 +205,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       continue;
     }
     if (event.type === "session.restarted") {
-      deferred.push({ kind: "restarted", key: `restart${event.seq}`, session: event.body.session, at: event.at });
+      if (!event.body.imageUpdated) deferred.push({ kind: "restarted", key: `restart${event.seq}`, session: event.body.session, at: event.at });
       continue;
     }
     // Box lifecycle stays out of the feed; only a failed or lost box, or a close that failed to archive,
@@ -422,7 +423,7 @@ export function workIsBare(events: Event[], name: Name, until?: string): boolean
 // One plain line for an event inside an opened work row.
 export function describe(event: Event, name: Name): string {
   switch (event.type) {
-    case "session.restarted": return `${name(event.body.session)}'s box was replaced. Unpushed work in the old volume is gone.`;
+    case "session.restarted": return event.body.imageUpdated ? `${name(event.body.session)}'s box image was updated.` : `${name(event.body.session)}'s box was replaced. Unpushed work in the old volume is gone.`;
     case "session.started": return `${name(event.body.session)} started`;
     case "session.closed": return `${name(event.body.session)} closed${event.body.reason ? ` ${closeReasons[event.body.reason]}` : ""}`;
     case "session.moved": return `${name(event.body.session)} moved under ${name(event.body.newParent)}`;

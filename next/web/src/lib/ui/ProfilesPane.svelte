@@ -15,7 +15,7 @@
   function showError(reason: unknown, action: "save" | "remove") {
     if (reason instanceof SignedOut) signedout();
     else if (reason instanceof APIError && reason.detail.code === "profile_exists") error = "A profile with this name already exists.";
-    else if (reason instanceof APIError && action === "remove" && reason.detail.code === "conflict") error = "This profile is in use and cannot be removed.";
+    else if (reason instanceof APIError && action === "remove" && reason.detail.code === "conflict") { error = "Sessions started using this profile. Remove it again to move them."; reload(); }
     else error = `Could not ${action} this profile. Try again.`;
   }
   async function save(draft: ProfileSummary) {
@@ -25,10 +25,10 @@
     await call("profile.set", { create: creating, profile }).then(() => { close(); reload(); }, (reason: unknown) => showError(reason, "save"));
     busy = false;
   }
-  async function remove(name: string) {
+  async function remove(name: string, replacement?: string) {
     if (busy) return;
     busy = true; error = "";
-    await call("profile.remove", { name }).then(() => { close(); reload(); }, (reason: unknown) => showError(reason, "remove"));
+    await call("profile.remove", { name, replacement }).then(() => { close(); reload(); }, (reason: unknown) => showError(reason, "remove"));
     busy = false;
   }
   const thinking: Record<ThinkingLevel, string> = {
@@ -53,17 +53,17 @@
 {/if}
 <div class="content" data-page-ready={loaded}>
   {#if phone && creating}
-    <ProfileEditor profile={blank} {models} isNew={true} {busy} {error} {save} cancel={close} remove={() => {}} />
+    <ProfileEditor profile={blank} {profiles} {models} isNew={true} {busy} {error} {save} cancel={close} remove={() => {}} />
   {:else if phone && editing}
     {#each profiles.filter(profile => profile.name === editing) as profile (profile.name)}
       <p class="summary">{slugName(profile.model)} · {thinking[profile.thinking]}</p>
-      <ProfileEditor {profile} {models} isNew={false} {busy} {error} {save} cancel={close} remove={() => void remove(profile.name)} />
+      <ProfileEditor {profile} {profiles} {models} isNew={false} {busy} {error} {save} cancel={close} remove={replacement => void remove(profile.name, replacement)} />
     {/each}
   {:else}
   {#if failed}<p role="alert">The profiles did not load. <button type="button" onclick={reload}>Try again</button></p>
   {:else if !loaded}<p class="muted">Loading profiles…</p>
   {:else}
-    {#if creating}<div class="table"><ProfileEditor profile={blank} {models} isNew={true} {busy} {error} {save} cancel={close} remove={() => {}} /></div>{/if}
+    {#if creating}<div class="table"><ProfileEditor profile={blank} {profiles} {models} isNew={true} {busy} {error} {save} cancel={close} remove={() => {}} /></div>{/if}
     <p class="summary">{profiles.length} {profiles.length === 1 ? "profile" : "profiles"} · {profiles.filter(unrated).length} not rated</p>
     {#if !profiles.length}<p class="muted">No profiles yet.</p>
     {:else}<div class="table">
@@ -81,7 +81,7 @@
           <span class="limits">{#if profile.maxConcurrent}At most {profile.maxConcurrent} at once{:else}No limit{/if}</span>
           <button type="button" class="edit" onclick={() => { const name = editing === profile.name ? undefined : profile.name; close(); editing = name; }} aria-label={`Edit ${profile.name}`}>{#if phone}<Icon name="forwardChevron" />{:else}Edit{/if}</button>
         </div>
-        {#if !phone && editing === profile.name}<ProfileEditor {profile} {models} isNew={false} {busy} {error} {save} cancel={close} remove={() => void remove(profile.name)} />{/if}
+        {#if !phone && editing === profile.name}<ProfileEditor {profile} {profiles} {models} isNew={false} {busy} {error} {save} cancel={close} remove={replacement => void remove(profile.name, replacement)} />{/if}
       {/each}
     </div>{/if}
   {/if}
