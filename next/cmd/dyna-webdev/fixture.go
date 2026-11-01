@@ -83,8 +83,19 @@ func fixtureTurns() []contract.TranscriptTurn {
 				item.Output = "Checking sync banner…"
 				item.Ended = nil
 			}
-			if i >= 1 && i <= 3 && j == 1 {
-				item.Posts = []contract.TranscriptItem{{ID: fmt.Sprintf("%s-post", id), Turn: id, Kind: contract.TranscriptPost, At: at, Text: []string{"I found the sync status and its banner.", "The retry wording is ready for review.", "I am checking the narrow layout."}[i-1]}}
+			post := func(text string, home contract.Conversation) []contract.TranscriptItem {
+				from := contract.Principal{Kind: contract.PrincipalSession, Session: fixtureSession}
+				return []contract.TranscriptItem{{ID: fmt.Sprintf("%s-post", id), Turn: id, Kind: contract.TranscriptPost, At: at, Text: text, From: &from, Home: &home, Room: fixtureRoom, Seq: 1}}
+			}
+			if i >= 1 && i <= 2 && j == 1 {
+				item.Posts = post([]string{"I found the sync status and its banner.", "The retry wording is ready for review."}[i-1], contract.Conversation{Kind: contract.ConversationDM, Session: fixtureSession})
+			}
+			if i == 3 && j == 1 {
+				item.Posts = post("I am checking the narrow layout.", contract.Conversation{Kind: contract.ConversationFeed})
+			}
+			// A turn that ends on a post: it has no final text, and its working text folds.
+			if i == 9 && j == len(turnTools)-1 {
+				item.Posts = post("The docs are up to date. The retry hint is described in the sync guide.", contract.Conversation{Kind: contract.ConversationFeed})
 			}
 			turn.Items = append(turn.Items, item)
 		}
@@ -92,7 +103,7 @@ func fixtureTurns() []contract.TranscriptTurn {
 			turn.Outcome, turn.Cause = contract.TurnFailed, contract.CauseModelFailed
 		} else if i == 11 {
 			turn.Ended, turn.Outcome, turn.DurationMS = nil, "", 0
-		} else {
+		} else if i != 9 {
 			final := "Updated the hint to say that it is safe to try again. The focused tests pass."
 			if i == 0 {
 				final = "## Done\n\nThe sync banner now tells people what to do when a sync fails. It asks them to check their connection and try again. The success message stays the same.\n\n### Changes\n\n- Updated `src/ui/SyncBanner.tsx` to show the retry hint only for a failed sync.\n- Added a focused failure case in `test/sync-status.test.ts`.\n- Kept the existing sync client and retry behavior unchanged.\n\n### Verification\n\n`npm test -- sync-status.test.ts` passed all three tests.\n\nThe hint is plain text, so it remains available to assistive technology. No account data or network request is included in the test."

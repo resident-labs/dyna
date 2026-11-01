@@ -302,8 +302,16 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 				return err
 			}
 		}
+		ended, err := s.endPosts(ctx, tx, event.Room, session, output)
+		if err != nil {
+			return err
+		}
+		endIDs := make([]contract.EventID, len(ended))
+		for i, post := range ended {
+			endIDs[i] = post.ID
+		}
 		body := event.Body.(contract.TurnEnded)
-		body.Replies = room.FinalReplies(inputs, room.PostsForReplies(inputs, posts, session))
+		body.Replies = room.FinalReplies(inputs, room.PostsForReplies(inputs, posts, session), endIDs)
 		event.Body = body
 		seq, err := s.AppendEvent(tx, event)
 		if err != nil {
@@ -314,6 +322,12 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 				continue
 			}
 			d := contract.Delivery{To: reply.Reply.Target, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyPost, Target: event.From, Home: reply.Reply.Home}, Wake: reply.Posted == ""}
+			if len(ended) > 0 {
+				if err := s.deliverEndPost(ctx, tx, ended, reply.Posted, d); err != nil {
+					return err
+				}
+				continue
+			}
 			if err := s.InsertDelivery(ctx, tx, seq, event.Body, d); err != nil {
 				return err
 			}
