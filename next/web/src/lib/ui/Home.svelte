@@ -187,9 +187,9 @@
         <span class="lines"><span class="title">{waits === 1 ? "1 session waits" : `${waits} sessions wait`} for a host that takes {room.name}</span>
           <span class="line"><StatusPill tone="warning" label="No host takes this room" /></span></span>
         <span class="acts"><a class="open" href={roomHref(room.id)} onclick={navigate}>Open</a></span></div>{/each}
-      {#each alerts as { id, title, provider, cause, reconnect }, i (i)}{@const signIn = reconnect && attention.can("admin")}<div class="item account"><Avatar kind="room" name={title} size={28} />
+      {#each alerts as { id, title, provider, reconnect }, i (i)}{@const signIn = reconnect && attention.can("admin")}<div class="item account"><Avatar kind="room" name={title} size={28} />
         <span class="lines"><span class="title">{title}</span>
-          <span class="line">{#if cause.tone}<StatusPill tone={cause.tone} label={cause.pill} />{:else}{cause.pill}{/if}{#if provider}{" · "}{provider}{/if}{#if cause.line}{" · "}{cause.line}{/if}</span></span>
+          <span class="line"><StatusPill tone="warning" label="Sign-in expired" />{#if provider}{" · "}{provider}{/if}</span></span>
         <span class="acts"><a class="open" class:sign-in={signIn} href={signIn ? reconnectPath(id) : accountPath(id)} onclick={navigate}>{signIn ? "Sign in again" : "Open"}</a></span></div>{/each}
       {#each [...decided] as [id, line] (id)}<p class="decided">{line}</p>{/each}</div>
     </section></div>{/if}
