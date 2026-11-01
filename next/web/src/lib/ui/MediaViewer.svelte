@@ -81,8 +81,12 @@
 <dialog bind:this={dialog} aria-label="Media viewer" onclose={onclose} onclick={e => { if (e.target === dialog) dialog.close(); }}>
   <header>
     <button class="round phone" aria-label="Close" onclick={() => dialog.close()}>×</button>
-    <Avatar kind={item.from.kind} name={author} root={root(item.from.session)} size={32} />
-    <div class="identity">{#if item.from.session}<a class="sender" href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.from.session)}`}><strong>{author}</strong></a>{:else}<strong>{author}</strong>{/if}<span class="desktop"><time datetime={item.at}>{formatTime(item.at)}</time></span><span class="phone">{#if items.length > 1}{index + 1} of {items.length}{/if}</span></div>
+    {#snippet identity()}
+      <Avatar kind={item.from.kind} name={author} root={root(item.from.session)} size={32} />
+      <span class="identity"><strong>{author}</strong><time datetime={item.at}>{formatTime(item.at)}</time></span>
+    {/snippet}
+    {#if item.from.session}<a class="sender" href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.from.session)}`}>{@render identity()}</a>
+    {:else}<div class="sender">{@render identity()}</div>{/if}
     <button class="jump desktop" onclick={() => { onjump(item.key); dialog.close(); }}>Jump to post</button>
     <div class="spacer"></div>
     {#if item.file.media.startsWith("image/")}
@@ -115,9 +119,9 @@
   dialog::backdrop { background: var(--scrim); }
   header { position: absolute; z-index: 2; inset: 0 0 auto; height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; background: var(--screen-chip); }
   .identity { display: flex; align-items: baseline; gap: 10px; min-width: 0; font-size: 13px; }
-  .sender { color: inherit; text-decoration: none; } .sender:hover { text-decoration: underline; }
+  .sender { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 44px; color: inherit; text-decoration: none; } a.sender:hover { text-decoration: underline; }
   .identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  time, footer, .identity span { color: var(--screen-muted); }
+  time, footer { color: var(--screen-muted); }
   .spacer { flex: 1; }
   button, a { color: inherit; font: inherit; cursor: pointer; }
   button { border: 0; background: none; }
@@ -139,7 +143,7 @@
     .stage { top: calc(56px + env(safe-area-inset-top)); }
     header { padding: env(safe-area-inset-top) 8px 0; height: calc(56px + env(safe-area-inset-top)); gap: 4px; }
     .desktop { display: none; } .phone { display: block; } .round.phone { display: grid; } .round { width: 44px; height: 44px; }
-    .identity { display: grid; gap: 1px; } .sender { min-height: 44px; display: flex; align-items: center; } .identity span { font-size: 11px; }
+    .identity { display: grid; gap: 1px; } .identity time { font-size: 11px; }
     .more { position: relative; } .menu { position: absolute; right: 0; top: 44px; min-width: 150px; padding: 4px; background: var(--screen-chip); border: 1px solid var(--screen-line); border-radius: 8px; }
     .menu a, .menu button { display: block; width: 100%; box-sizing: border-box; padding: 12px; text-align: left; text-decoration: none; font-size: 13px; }
     footer { bottom: calc(16px + env(safe-area-inset-bottom)); }
