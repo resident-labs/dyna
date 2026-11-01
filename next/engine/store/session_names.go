@@ -33,3 +33,10 @@ func (s *Store) SessionNames(ctx context.Context, ids []contract.SessionID) (map
 	}
 	return names, rows.Err()
 }
+
+// SessionContextNames returns a session's room and parent names.
+func (s *Store) SessionContextNames(ctx context.Context, session contract.SessionID) (string, string, error) {
+	var room, parent string
+	err := s.Read().QueryRowContext(ctx, "SELECT r.name,COALESCE(p.name,'') FROM sessions s JOIN rooms r ON r.id=s.room LEFT JOIN sessions p ON p.id=s.parent WHERE s.id=?", session).Scan(&room, &parent)
+	return room, parent, err
+}
