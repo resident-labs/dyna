@@ -140,8 +140,15 @@
   const toggle = (key: string) => { list?.hold(); if (!opened.delete(key)) opened.add(key); };
   let list: VirtualList<Item> | undefined = $state();
   // Measured row heights keep the deferred correction small when new rows first enter the view.
+  // Rows above the reader are measured as they arrive, so a close estimate keeps the view from jumping. A reading-width
+  // line holds about 95 characters. Visual cards and images are the tall rows.
+  const postHeight = (item: Extract<Item, { kind: "post" }>): number => {
+    const lines = item.text.split("\n").reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 95)), 0);
+    const media = item.attachments.reduce((sum, file) => sum + (file.visual ? 340 : file.media.startsWith("image/") ? 240 : 44), 0);
+    return (item.first ? 48 : 24) + 25 * lines + media;
+  };
   const estimate = (item: Item): number => {
-    if (item.kind === "post") return 40 + 20 * Math.max(1, item.text.split("\n").length);
+    if (item.kind === "post") return postHeight(item);
     if (item.kind === "day" || item.kind === "new" || item.kind === "notice" || item.kind === "restarted") return 28;
     return 59;
   };
