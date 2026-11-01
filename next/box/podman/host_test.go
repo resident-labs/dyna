@@ -231,7 +231,7 @@ func TestForwardRestoredAfterMasterDies(t *testing.T) {
 			}
 		}
 	}
-	if !reflect.DeepEqual(ops, []string{"check", "forward", "check", "cancel"}) {
+	if !reflect.DeepEqual(ops, []string{"check", "cancel", "forward", "check", "cancel"}) {
 		t.Fatalf("operations %v", ops)
 	}
 	for _, args := range r.calls {
@@ -275,7 +275,132 @@ func TestForwardRemovesStaleHostSocketFirst(t *testing.T) {
 	if err := h.StartContainer(ctx, "a"); err != nil {
 		t.Fatal(err)
 	}
-	removedBeforeForward("restore", "'rm' '-f' '--' '/remote/sock/a/engine.sock'")
+	removedBeforeForward("restore", `rm -f -- "$2"' 'dyna' '/remote/sock/a' '/remote/sock/a/engine.sock'`)
+}
+
+func forwardOps(r *runner) []string {
+	var ops []string
+	for _, args := range r.calls {
+		if i := slices.Index(args, "-O"); i >= 0 && args[i+1] != "check" {
+			ops = append(ops, args[i+1])
+		}
+		if strings.Contains(args[len(args)-1], "'rm' '-f'") || strings.Contains(args[len(args)-1], `rm -f -- "$2"`) {
+			ops = append(ops, "rm")
+		}
+	}
+	return ops
+}
+
+// A master answers ok to a forward it already holds. A try killed after the master took the forward, before ssh could say so,
+// leaves one, and a retry that only removed the socket and asked again would have no socket and no error, for good.
+func TestRetriedForwardCancelsBeforeRemovingTheSocket(t *testing.T) {
+	r := &runner{}
+	h := newTestHost(t, r)
+	f := box.Forward{Box: "a", HostPath: "/remote/sock/a/engine.sock", EnginePath: "/local/s"}
+	if err := h.AddForward(context.Background(), f); err != nil {
+		t.Fatal(err)
+	}
+	if got := forwardOps(r); !reflect.DeepEqual(got, []string{"cancel", "rm", "forward"}) {
+		t.Fatalf("operations %v", got)
+	}
+}
+
+// A check killed with its caller says nothing about the master. Treating it as a dead master would remove the socket of every
+// box on the host, and the master, which holds those forwards, would make no new ones.
+func TestCancelledCheckLeavesForwardsAlone(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	r := &cancelledCheck{}
+	h, err := New("user@host", t.TempDir(), "host", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := box.Forward{Box: "a", HostPath: "/remote/sock/a/engine.sock", EnginePath: "/local/s"}
+	if err := h.AddForward(context.Background(), f); err != nil {
+		t.Fatal(err)
+	}
+	r.calls = nil
+	r.cancel = cancel
+	if err := h.StartContainer(ctx, "a"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
+	}
+	r.cancel = nil
+	if err := h.StartContainer(context.Background(), "a"); err != nil {
+		t.Fatal(err)
+	}
+	if got := forwardOps(&r.runner); len(got) != 0 {
+		t.Fatalf("a cancelled check touched the forwards: %v", got)
+	}
+}
+
+// cancelledCheck dies with its caller while the master is checked.
+type cancelledCheck struct {
+	runner
+	cancel context.CancelFunc
+}
+
+func (r *cancelledCheck) Run(ctx context.Context, in []byte, args ...string) ([]byte, error) {
+	if r.cancel != nil && slices.Contains(args, "check") {
+		r.cancel()
+		return nil, errors.New("signal: killed")
+	}
+	return r.runner.Run(ctx, in, args...)
+}
+
+// failingForward refuses forwards on one path, as a heartbeat's deadline ending the restore loop partway.
+type failingForward struct {
+	runner
+	failing string
+}
+
+func (r *failingForward) Run(ctx context.Context, in []byte, args ...string) ([]byte, error) {
+	if slices.Contains(args, "forward") && r.failing != "" && strings.Contains(strings.Join(args, " "), r.failing) {
+		return nil, errors.New("deadline")
+	}
+	return r.runner.Run(ctx, in, args...)
+}
+
+// A host with many boxes on a slow link may need many tries to get its forwards back. Each try must keep what the last one
+// did, and leave those boxes connected, or a short deadline never gets to the end of the list.
+func TestRestoreKeepsForwardsAcrossTries(t *testing.T) {
+	r := &failingForward{}
+	h, err := New("user@host", t.TempDir(), "host", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	forwards := []box.Forward{
+		{Box: "a", HostPath: "/remote/sock/a/engine.sock", EnginePath: "/local/a"},
+		{Box: "b", HostPath: "/remote/sock/b/engine.sock", EnginePath: "/local/b"},
+	}
+	for _, f := range forwards {
+		if err := h.AddForward(ctx, f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	generation := h.Generation()
+	r.calls = nil
+	r.dead = true
+	r.failing = "/local/b"
+	if err := h.StartContainer(ctx, "a"); err == nil {
+		t.Fatal("restore passed with a forward missing")
+	}
+	if h.Generation() != generation {
+		t.Fatal("a partial restore counted as a restore")
+	}
+	if got := forwardOps(&r.runner); !reflect.DeepEqual(got, []string{"cancel", "rm", "forward", "cancel", "rm"}) {
+		t.Fatalf("first try %v", got)
+	}
+	r.calls = nil
+	r.failing = ""
+	if err := h.StartContainer(ctx, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if got := forwardOps(&r.runner); !reflect.DeepEqual(got, []string{"cancel", "rm", "forward"}) {
+		t.Fatalf("second try redid a done forward: %v", got)
+	}
+	if h.Generation() == generation {
+		t.Fatal("the finished restore was not counted")
+	}
 }
 
 // A master killed with SIGKILL leaves its control socket. Each heartbeat then started one more
