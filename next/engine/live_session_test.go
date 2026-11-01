@@ -23,6 +23,8 @@ func TestClosedSessionRejectsStaleReadAndHandle(t *testing.T) {
 		t.Fatal("open handle refused")
 	}
 	handle.SetChannel(live.NewChannel(func() { close(stopped) }, stopped))
+	handle.SetComputer(row.Room, contract.ComputerRunning)
+	watch := handle.WatchComputer()
 	handle.Unlock()
 	if _, problem := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: id, Discard: true}); problem != nil {
 		t.Fatal(problem)
@@ -33,6 +35,14 @@ func TestClosedSessionRejectsStaleReadAndHandle(t *testing.T) {
 	case <-stopped:
 	default:
 		t.Fatal("close did not stop the box channel")
+	}
+	select {
+	case _, ok := <-watch.Events():
+		if ok {
+			t.Fatal("closed computer watcher delivered a frame")
+		}
+	default:
+		t.Fatal("close did not close the computer watcher")
 	}
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
 	if _, problem := s.TurnActivity(ctx, caller, contract.TurnActivityRequest{Label: "stale"}); problem == nil || problem.Code != contract.ErrNotFound {

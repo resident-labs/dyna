@@ -61,10 +61,7 @@ func (c *Channel) Wake() {
 
 // Close completes one detached channel's teardown under the session lock.
 // A nil channel still closes the detached watchers.
-func (c *Channel) Close(computer []chan []byte, shell []chan contract.ShellJobOutput) {
-	for _, ch := range computer {
-		close(ch)
-	}
+func (c *Channel) Close(shell []chan contract.ShellJobOutput) {
 	for _, ch := range shell {
 		close(ch)
 	}
