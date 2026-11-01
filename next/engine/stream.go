@@ -287,12 +287,12 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 					reason, cause = streamDeliveryRenderFailed, err
 					return
 				}
-				frame, err := s.inputFrame(ctx, session.ID, event, contract.Delivery{Surface: delivery.Surface, Reply: delivery.Reply, HandoffFrom: delivery.HandoffFrom})
+				frame, files, err := s.inputFrame(ctx, session.ID, event, contract.Delivery{Surface: delivery.Surface, Reply: delivery.Reply, HandoffFrom: delivery.HandoffFrom})
 				if err != nil {
 					reason, cause = streamFrameFailed, err
 					return
 				}
-				input := contract.TurnInput{Delivery: delivery.Seq, Surface: delivery.Surface, Reply: delivery.Reply, Text: frame + "\n" + quotedDynaMarker.ReplaceAllString(text, "${1}[quoted]")}
+				input := contract.TurnInput{Delivery: delivery.Seq, Surface: delivery.Surface, Reply: delivery.Reply, Text: frame + "\n" + quotedDynaMarker.ReplaceAllString(text, "${1}[quoted]"), Files: files}
 				if delivery.Queue == nil {
 					start = append(start, input)
 				} else {
