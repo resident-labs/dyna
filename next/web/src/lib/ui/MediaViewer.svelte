@@ -123,7 +123,7 @@
   .zoom { display: flex; align-items: center; background: var(--screen-chip); border: 1px solid var(--screen-line); border-radius: 20px; }
   .zoom button { min-width: 36px; height: 36px; }
   button:disabled { opacity: .45; }
-  .stage { position: absolute; inset: 56px 0 72px; display: grid; place-items: center; overflow: hidden; touch-action: none; user-select: none; }
+  .stage { position: absolute; inset: 56px 4vw 72px; display: grid; place-items: center; overflow: hidden; touch-action: none; user-select: none; }
   img, video { display: block; max-width: 92vw; max-height: calc(100dvh - 128px); object-fit: contain; }
   img { max-width: none; max-height: none; transform-origin: center; }
   .prev, .next { position: absolute; top: 50%; transform: translateY(-50%); }
