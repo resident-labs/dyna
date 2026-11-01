@@ -53,7 +53,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.self_hosted == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # A run may sit behind a busy pool for a long time. GitHub's own limit is 6 hours.
+    timeout-minutes: 360
     permissions:
       actions: write
       contents: read
@@ -61,7 +62,7 @@ jobs:
       - uses: actions/checkout@v6
       - env:
           GH_TOKEN: ${{ github.token }}
-        run: bash next/scripts/ci-pool-watch.sh
+        run: python3 next/scripts/ci-pool-watch.py
 
   # next/ is the v2 Go module. Its Go version comes from next/go.mod.
   next:
@@ -92,6 +93,7 @@ jobs:
       - name: Test the CI filter and the deploy script
         run: |
           python3 next/scripts/ci-changes-test.py
+          python3 next/scripts/ci-pool-watch-test.py
           bash next/scripts/deploy-trial_test.sh
       - name: Require install.sh to refuse
         # main has no installer yet. A stub that exits 0 would look like an install.

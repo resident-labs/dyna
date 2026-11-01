@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -66,6 +67,9 @@ func (s *Service) RepoCISet(ctx context.Context, caller contract.Principal, req 
 		exists := slices.ContainsFunc(known, func(h box.Host) bool { return h.Name == host.Host && h.State != box.HostRemoved })
 		if _, sized := box.Size(host.Size); !exists || !sized || seen[host.Host] || host.Repo != req.Repo || host.Runners < 1 {
 			return contract.RepoCISetResponse{}, invalid("each host needs a known name, a size, and at least one runner, once")
+		}
+		if host.Runners > box.RunnerSlots {
+			return contract.RepoCISetResponse{}, invalid(fmt.Sprintf("a host runs at most %d runners", box.RunnerSlots))
 		}
 		// GitHub gives a job to any idle runner of a scale set, so mixed sizes would be a lottery.
 		if host.Size != req.Hosts[0].Size {
