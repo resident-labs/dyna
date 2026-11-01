@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/lifecycle"
@@ -82,8 +83,8 @@ func TestRecreateMovesAStoppedBoxToANewImageAndKeepsItsVolume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := &Boxes{hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}}
-	b.Layout.HostData = data
+	b := &Boxes{Store: restoreStore{hosts: engineHosts("host")}, hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}}
+	b.Layout.Data, b.Layout.HostData = data, data
 	slice := "dyna-swap-test-" + strings.TrimPrefix(string(id), "box_swap_test_") + ".slice"
 	spec := lifecycle.BoxSpec{Box: id, Room: "room", Host: "host", Slice: slice, Size: contract.BoxSize{CPUs: 1, MemBytes: 1 << 30, Pids: 512}}
 	t.Cleanup(func() {
@@ -91,7 +92,7 @@ func TestRecreateMovesAStoppedBoxToANewImageAndKeepsItsVolume(t *testing.T) {
 		_ = exec.Command("podman", "volume", "rm", "-f", "dyna-box-"+string(id)).Run()
 		_ = host.RemoveSlice(context.Background(), slice)
 	})
-	sliceSpec, container := b.container(spec, oldImage)
+	sliceSpec, container := b.container(spec, oldImage, box.Mount{HostPath: b.Layout.Shared(spec.Room), BoxPath: "/box/shared"})
 	if err := host.EnsureSlice(ctx, sliceSpec); err != nil {
 		t.Fatal(err)
 	}

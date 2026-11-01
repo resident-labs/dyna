@@ -125,6 +125,15 @@ func (s *Service) SubscriptionAdd(ctx context.Context, caller contract.Principal
 	if problem := checkSubscriptionShape(req); problem != nil {
 		return contract.SubscriptionAddResponse{}, problem
 	}
+	if req.Run != nil && req.Run.Host != "" {
+		hosts, err := s.store.Hosts(ctx)
+		if err != nil {
+			return contract.SubscriptionAddResponse{}, failure(err)
+		}
+		if !slices.ContainsFunc(hosts, func(h box.Host) bool { return h.Name == req.Run.Host && h.State != box.HostRemoved }) {
+			return contract.SubscriptionAddResponse{}, invalid("unknown host")
+		}
+	}
 	sub := contract.Subscription{Scope: req.Scope, Room: req.Room, Session: req.Session, On: req.On, Every: req.Every, Wake: req.Wake, Run: req.Run}
 	switch req.Scope {
 	case contract.ScopeMachine:
