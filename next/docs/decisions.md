@@ -1142,7 +1142,7 @@ Owner, 2026-10-31 (decision 15). Agents reach Dyna through one MCP server that t
 | Box agent | The `dyna` MCP server at `127.0.0.1:7781/dyna/`, beside `/shell/`. Each `tools/call` becomes one `POST /v1/<method>` on the box socket. It writes Pi's `mcp.json` entry for `dyna`, sends the snapshot sections with `set_prompt_sections`, and writes skill and room MCP changes for `reload_resources` (below). It holds no authority and no credential. |
 | Engine | The only authority. A tool call and a CLI command reach the same method, through the same box socket, as the same principal, under the same checks (3.7, 7.1). It renders the snapshot with `context.snapshot`. |
 
-Dyna ships no Pi extension (owner, 2026-10-31: this changes how Pi's base systems work). Pi owns the timing as general features; Dyna owns only the content.
+Pi owns the timing as general features; Dyna owns only the content. Dyna's one Pi extension, `box/agent/extension.js`, stays small and changes none of Pi's base systems: it links tool calls and lets a post end the turn (owner, 2026-11-01: extend Dyna's extension rather than fork Pi for `terminate`). This corrects the earlier line that Dyna ships no Pi extension (owner, 2026-10-31), which was already out of date when `call_id.ts` shipped.
 
 **Pi work.** Cherry-pick two merged upstream tool-search ranking fixes, earendil-works/pi#11625 (names weigh above descriptions) and #11632 (more matched terms rank first), and make the core change below. `third_party/pi/DYNA.md` names the cherry-picks and the core change (r26).
 
