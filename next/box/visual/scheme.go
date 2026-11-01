@@ -7,8 +7,16 @@ import (
 	"golang.org/x/net/html"
 )
 
+type Mode string
+
+const (
+	Default Mode = ""
+	Light   Mode = "light"
+	Dark    Mode = "dark"
+)
+
 // ColorScheme supplies a default only when the document has no color-scheme meta.
-func ColorScheme(doc []byte) []byte {
+func ColorScheme(doc []byte, mode Mode) []byte {
 	z := html.NewTokenizer(bytes.NewReader(doc))
 	offset, insert := 0, 0
 	head := false
@@ -38,7 +46,10 @@ func ColorScheme(doc []byte) []byte {
 			}
 		}
 	}
-	const meta = `<meta name="color-scheme" content="light dark">`
+	meta := `<meta name="color-scheme" content="light dark">`
+	if mode != Default {
+		meta += `<style>html{color-scheme:` + string(mode) + `;background:transparent}</style>`
+	}
 	out := make([]byte, 0, len(doc)+len(meta))
 	out = append(out, doc[:insert]...)
 	out = append(out, meta...)

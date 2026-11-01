@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { EventID, VisualCard } from "../contract.gen.ts";
   import { fromNow } from "../feed.ts";
+  import { theme } from "../theme.svelte.ts";
   import { acquirePreview } from "../visual-preview.ts";
   let { visual, newest, event, at, onopen }: { visual: VisualCard; newest: VisualCard; event: EventID; at: string; onopen: () => void } = $props();
   let older = $derived(visual.version < newest.version);
@@ -27,7 +28,7 @@
   {:else}
     <span class="art" class:ready use:observe bind:clientWidth={width}>
       {#if visual.banner && !failed}<img src={"/v1/files/" + encodeURIComponent(visual.banner)} alt="" loading="lazy" onload={() => ready = true} onerror={() => failed = true} />
-      {:else if mounted}<iframe src={"/v1/files/visual/" + encodeURIComponent(event)} title="" sandbox="allow-scripts" tabindex="-1" aria-hidden="true" style:transform={"scale(" + width / 960 + ")"} onload={() => { ready = true; releasePreview?.(); }}></iframe>{/if}
+      {:else if mounted}<iframe src={"/v1/files/visual/" + encodeURIComponent(event) + "?theme=" + theme().mode} title="" sandbox="allow-scripts" tabindex="-1" aria-hidden="true" style:transform={"scale(" + width / 960 + ")"} onload={() => { ready = true; releasePreview?.(); }}></iframe>{/if}
     </span>
     <span class="row"><strong>{visual.title}</strong><span class="pill">v{visual.version}</span><time datetime={at}>updated {fromNow(at, Date.now())}</time></span>
   {/if}
