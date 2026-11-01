@@ -1,6 +1,6 @@
 # Dyna's CLIProxyAPI vendor
 
-Dyna vendors this source for the v2 engine. The upstream repository is `https://github.com/router-for-me/CLIProxyAPI`. This subtree starts at tag `v8.0.48`, commit `dbb706215a3afd2f0ea3c96482d4233856466caa`. The module path is `github.com/router-for-me/CLIProxyAPI/v8`. The upstream MIT license and all upstream notices remain unchanged.
+Dyna vendors this source for the v2 engine. The upstream repository is `https://github.com/router-for-me/CLIProxyAPI`. This subtree started at tag `v8.0.48` and now sits at tag `v8.0.49`, commit `250d598175db61a4e99ac38b9164ed04745754e5`. The module path is `github.com/router-for-me/CLIProxyAPI/v8`. The upstream MIT license and all upstream notices remain unchanged.
 
 ## Dyna changes
 
@@ -33,6 +33,10 @@ Each later patch to this folder must be its own commit. Each patch must add an e
 
 - Private fixed-upstream Kimi and z.ai search: the proxy authenticates with its request access manager and selects only active credentials in the request's encoded allowlist. It retains secrets in the proxy and returns bounded, sanitized refusal reasons. The 2026-10-31 upstream search found no matching search endpoint; issue #5236 is unrelated. Dyna uses the v1 provider protocols and disables redirects.
 
+## Pulls
+
+- `v8.0.49` (2026-11-01): `git subtree pull` merged with no conflicts. Every patch above still applies, and none is obsolete: PR #5434 stays open and unmerged, PR #5833 was closed unmerged. The release changes plugin login, Gemini sanitizing and Codex commentary through Claude clients. The commentary option defaults to off, so `engine/model` sees no change in routing, management paths or credential handling. `TestResponsesInterruptStopsHTTPUpstream` and `TestCodexClientModelsApplyPatchRouting` are flaky on `v8.0.48` with Dyna's patches too, so this pull did not cause them; CI does not run them.
+
 ## Update
 
 Run this command from the Dyna repository root, replacing `<tag>` with the new upstream tag:
@@ -48,7 +52,7 @@ Keep the subtree commits in the Dyna history. Do not rebase or squash them away.
 The vendored files must equal the upstream tag, except for `DYNA.md` and any patches listed above. Run this from the Dyna repository root to compare the trees:
 
 ```sh
-d=$(mktemp -d) && mkdir "$d/upstream" "$d/vendored" && git archive dbb706215a3afd2f0ea3c96482d4233856466caa | tar -x -C "$d/upstream" && git archive HEAD:next/third_party/cliproxyapi | tar -x -C "$d/vendored" && diff -r -x DYNA.md "$d/upstream" "$d/vendored"; rm -rf "$d"
+d=$(mktemp -d) && mkdir "$d/upstream" "$d/vendored" && git archive 250d598175db61a4e99ac38b9164ed04745754e5 | tar -x -C "$d/upstream" && git archive HEAD:next/third_party/cliproxyapi | tar -x -C "$d/vendored" && diff -r -x DYNA.md "$d/upstream" "$d/vendored"; rm -rf "$d"
 ```
 
 The subtree squash commit that `git subtree add` created names the upstream commit in its message. Its tree equals the upstream commit's tree.
