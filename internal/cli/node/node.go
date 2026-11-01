@@ -381,7 +381,7 @@ func editCommand() *cobra.Command {
 			changed := false
 			if c.Flags().Changed("wake-command") {
 				if len(wakeCommand) == 1 && wakeCommand[0] == "" {
-					wakeCommand = nil
+					wakeCommand = []string{}
 				}
 				patch.WakeCommand, changed = &wakeCommand, true
 			}
