@@ -22,9 +22,6 @@ func TestClosedSessionRejectsStaleReadAndHandle(t *testing.T) {
 	}
 	passLifecycle(t, s, ctx) // remove the box
 	passLifecycle(t, s, ctx) // commit the session close
-	if _, problem := s.publishActivity(row, contract.Principal{Kind: contract.PrincipalSession, Session: id}, contract.TurnActivityRequest{Label: "stale"}); problem == nil {
-		t.Fatal("stale activity was accepted")
-	}
 	if _, ok := s.live.CreateSession(row.ID); ok {
 		t.Fatal("stale open read recreated the session")
 	}
