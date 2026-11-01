@@ -22,15 +22,20 @@ func searchAccounts(accounts []store.AccountBinding, eligible []string, provider
 		if ok && usage.Cause == contract.UsageSignInExpired {
 			continue
 		}
-		if ok && usage.Cause == contract.UsageUnreachable {
+		// Other providers' usage endpoints differ from their model and search paths, so a
+		// failed read there leaves the account usable with unknown headroom.
+		if ok && provider == contract.ProviderAnthropic && usage.Cause == contract.UsageUnreachable {
 			failed = true
 			continue
 		}
 		worst := 0.0
 		for _, window := range usage.Windows {
-			worst = max(worst, window.UsedPercent)
+			// A limit on one model does not limit search on another.
+			if window.Model == "" || provider == contract.ProviderAnthropic {
+				worst = max(worst, window.UsedPercent)
+			}
 		}
-		if ok && (usage.Cause == contract.UsageRateLimited || worst >= 100) {
+		if ok && worst >= 100 {
 			exhausted = true
 			continue
 		}

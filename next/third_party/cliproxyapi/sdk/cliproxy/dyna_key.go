@@ -3,9 +3,6 @@ package cliproxy
 import (
 	"context"
 	"errors"
-	"math"
-	"strconv"
-	"time"
 
 	sdkauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
@@ -65,38 +62,6 @@ type DynaCredential struct {
 	Index    string        `json:"auth_index"`
 	Provider string        `json:"provider"`
 	State    DynaAuthState `json:"state"`
-	Quota    DynaQuota     `json:"quota"`
-}
-
-type DynaQuotaWindow struct {
-	UsedPercent       *float64 `json:"used_percent,omitempty"`
-	WindowMinutes     *int32   `json:"window_minutes,omitempty"`
-	ResetAt           *int64   `json:"reset_at,omitempty"`
-	ResetAfterSeconds *int32   `json:"reset_after_seconds,omitempty"`
-}
-type DynaQuota struct {
-	ObservedAt *time.Time      `json:"observed_at,omitempty"`
-	Primary    DynaQuotaWindow `json:"primary"`
-	Secondary  DynaQuotaWindow `json:"secondary"`
-}
-
-func dynaQuotaWindow(signals map[string]string, prefix string) DynaQuotaWindow {
-	var out DynaQuotaWindow
-	if value, err := strconv.ParseFloat(signals[prefix+"Used-Percent"], 64); err == nil && !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 && value <= 100 {
-		out.UsedPercent = &value
-	}
-	if value, err := strconv.ParseInt(signals[prefix+"Window-Minutes"], 10, 32); err == nil && value > 0 {
-		n := int32(value)
-		out.WindowMinutes = &n
-	}
-	if value, err := strconv.ParseInt(signals[prefix+"Reset-At"], 10, 64); err == nil && value > 0 {
-		out.ResetAt = &value
-	}
-	if value, err := strconv.ParseInt(signals[prefix+"Reset-After-Seconds"], 10, 32); err == nil && value >= 0 {
-		n := int32(value)
-		out.ResetAfterSeconds = &n
-	}
-	return out
 }
 
 // DynaCredentials lists runtime credentials, including durable pathless records.
@@ -105,12 +70,7 @@ func (s *Service) DynaCredentials() []DynaCredential {
 	out := make([]DynaCredential, 0, len(auths))
 	for _, auth := range auths {
 		auth.EnsureIndex()
-		quota := DynaQuota{Primary: dynaQuotaWindow(auth.Quota.Signals, "X-Codex-Primary-"), Secondary: dynaQuotaWindow(auth.Quota.Signals, "X-Codex-Secondary-")}
-		if !auth.Quota.ObservedAt.IsZero() {
-			observed := auth.Quota.ObservedAt
-			quota.ObservedAt = &observed
-		}
-		out = append(out, DynaCredential{ID: auth.ID, Index: auth.Index, Provider: auth.Provider, State: dynaCredentialState(auth), Quota: quota})
+		out = append(out, DynaCredential{ID: auth.ID, Index: auth.Index, Provider: auth.Provider, State: dynaCredentialState(auth)})
 	}
 	return out
 }
