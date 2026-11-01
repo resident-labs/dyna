@@ -619,7 +619,7 @@ body{font:15px system-ui;margin:0;padding:24px;color:#e8e9eb;background:#0d0f13}
 	// Two addressed posts make the first and follow-up mention treatments easy to inspect.
 	for i, text := range []string{"The feed is ready for review.", "The spacing now matches the design."} {
 		_, err := st.Post(ctx, contract.Event{ID: contract.EventID(fmt.Sprintf("seed-mention-%d", i)), Room: room.Room, Time: time.Now(), From: by,
-			Body: contract.PostCreated{Text: text, Mentions: []contract.Principal{owner}}}, nil)
+			Body: contract.PostCreated{Text: text, Home: contract.Conversation{Kind: contract.ConversationFeed}, Mentions: []contract.Principal{owner}}}, nil)
 		fatal(err)
 	}
 	seedAgents(ctx, s, agents)
