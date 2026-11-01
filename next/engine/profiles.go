@@ -14,18 +14,17 @@ import (
 )
 
 type profile struct {
-	Description    string                 `json:"description"`
-	Taste          int                    `json:"taste"`
-	Diagnostics    int                    `json:"diagnostics"`
-	Intelligence   int                    `json:"intelligence"`
-	Cost           int                    `json:"cost"`
-	Provider       contract.ModelProvider `json:"provider"`
-	Model          string                 `json:"model"`
-	AllowedModels  []string               `json:"allowedModels"`
-	Thinking       contract.ThinkingLevel `json:"thinking"`
-	CompactTokens  int                    `json:"compactTokens,omitempty"`
-	MaxConcurrent  int                    `json:"maxConcurrent,omitempty"`
-	MaxCallsPerRun int                    `json:"maxCallsPerRun,omitempty"`
+	Description   string                 `json:"description"`
+	Taste         int                    `json:"taste"`
+	Diagnostics   int                    `json:"diagnostics"`
+	Intelligence  int                    `json:"intelligence"`
+	Cost          int                    `json:"cost"`
+	Provider      contract.ModelProvider `json:"provider"`
+	Model         string                 `json:"model"`
+	AllowedModels []string               `json:"allowedModels"`
+	Thinking      contract.ThinkingLevel `json:"thinking"`
+	CompactTokens int                    `json:"compactTokens,omitempty"`
+	MaxConcurrent int                    `json:"maxConcurrent,omitempty"`
 }
 
 // Profile operations take the profile lock, then the store transaction. The post-commit
@@ -74,7 +73,7 @@ func validateProfiles(profiles map[contract.ProfileName]profile) error {
 				return fmt.Errorf("profile %q: ratings must be 0..10", name)
 			}
 		}
-		if p.MaxConcurrent < 0 || p.MaxCallsPerRun < 0 {
+		if p.MaxConcurrent < 0 {
 			return fmt.Errorf("profile %q: limits must be non-negative", name)
 		}
 		if p.CompactTokens < 0 {
@@ -102,7 +101,7 @@ func (p *ProfileConfig) List() []contract.ProfileSummary {
 	defer p.mu.RUnlock()
 	result := make([]contract.ProfileSummary, 0, len(p.entries))
 	for name, profile := range p.entries {
-		result = append(result, contract.ProfileSummary{Name: name, Provider: profile.Provider, Model: profile.Model, Thinking: profile.Thinking, Description: profile.Description, Taste: profile.Taste, Diagnostics: profile.Diagnostics, Intelligence: profile.Intelligence, Cost: profile.Cost, AllowedModels: slices.Clone(profile.AllowedModels), CompactTokens: profile.CompactTokens, MaxConcurrent: profile.MaxConcurrent, MaxCallsPerRun: profile.MaxCallsPerRun})
+		result = append(result, contract.ProfileSummary{Name: name, Provider: profile.Provider, Model: profile.Model, Thinking: profile.Thinking, Description: profile.Description, Taste: profile.Taste, Diagnostics: profile.Diagnostics, Intelligence: profile.Intelligence, Cost: profile.Cost, AllowedModels: slices.Clone(profile.AllowedModels), CompactTokens: profile.CompactTokens, MaxConcurrent: profile.MaxConcurrent})
 	}
 	slices.SortFunc(result, func(a, b contract.ProfileSummary) int { return strings.Compare(string(a.Name), string(b.Name)) })
 	return result
@@ -204,7 +203,7 @@ func (s *Service) ProfileSet(_ context.Context, who contract.Principal, req cont
 		return contract.ProfileSetResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "profile configuration is read-only"}
 	}
 	v := req.Profile
-	err := p.update(v.Name, &profile{Description: v.Description, Taste: v.Taste, Diagnostics: v.Diagnostics, Intelligence: v.Intelligence, Cost: v.Cost, Provider: v.Provider, Model: v.Model, AllowedModels: slices.Clone(v.AllowedModels), Thinking: v.Thinking, CompactTokens: v.CompactTokens, MaxConcurrent: v.MaxConcurrent, MaxCallsPerRun: v.MaxCallsPerRun}, req.Create)
+	err := p.update(v.Name, &profile{Description: v.Description, Taste: v.Taste, Diagnostics: v.Diagnostics, Intelligence: v.Intelligence, Cost: v.Cost, Provider: v.Provider, Model: v.Model, AllowedModels: slices.Clone(v.AllowedModels), Thinking: v.Thinking, CompactTokens: v.CompactTokens, MaxConcurrent: v.MaxConcurrent}, req.Create)
 	return contract.ProfileSetResponse{}, err
 }
 

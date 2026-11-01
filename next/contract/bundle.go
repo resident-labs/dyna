@@ -105,20 +105,19 @@ type SettingsBundle struct {
 }
 
 type ProfileBundle struct {
-	Name           ProfileName   `json:"name"`
-	Description    string        `json:"description"`
-	Model          string        `json:"model"` // a model ID that CLIProxyAPI serves
-	Thinking       ThinkingLevel `json:"thinking,omitempty"`
-	Models         []string      `json:"models,omitempty"`
-	Fallback       ProfileName   `json:"fallback,omitempty"`
-	Taste          int           `json:"taste"`
-	Intelligence   int           `json:"intelligence"`
-	Cost           int           `json:"cost"`
-	Diagnostics    int           `json:"diagnostics"`
-	CompactTokens  int           `json:"compactTokens,omitempty"` // 0: Pi's default
-	MaxConcurrent  int           `json:"maxConcurrent,omitempty"`
-	MaxCallsPerRun int           `json:"maxCallsPerRun,omitempty"`
-	Default        bool          `json:"default,omitempty"`
+	Name          ProfileName   `json:"name"`
+	Description   string        `json:"description"`
+	Model         string        `json:"model"` // a model ID that CLIProxyAPI serves
+	Thinking      ThinkingLevel `json:"thinking,omitempty"`
+	Models        []string      `json:"models,omitempty"`
+	Fallback      ProfileName   `json:"fallback,omitempty"`
+	Taste         int           `json:"taste"`
+	Intelligence  int           `json:"intelligence"`
+	Cost          int           `json:"cost"`
+	Diagnostics   int           `json:"diagnostics"`
+	CompactTokens int           `json:"compactTokens,omitempty"` // 0: Pi's default
+	MaxConcurrent int           `json:"maxConcurrent,omitempty"`
+	Default       bool          `json:"default,omitempty"`
 }
 
 // HostBundle comes from the v1 machines table. The host check measures
