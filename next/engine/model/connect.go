@@ -105,17 +105,11 @@ func (c *Connections) start(ctx context.Context, req contract.AccountsConnectReq
 		return contract.AccountsConnectResponse{}, errConnect
 	}
 	c.mu.Unlock()
-	var provider string
-	var flow contract.ConnectFlow
-	for _, option := range oauthProviders {
-		if option.info.ID == req.Provider && len(c.proxy.planModels[req.Provider]) > 0 {
-			provider, flow = option.proxy, option.info.Flows[0]
-			break
-		}
-	}
-	if provider == "" {
+	entry, ok := c.proxy.pools["plan_"+string(req.Provider)]
+	if !ok {
 		return contract.AccountsConnectResponse{}, errConnect
 	}
+	provider, flow := entry.proxy, entry.info.Flows[0]
 	var id [16]byte
 	if _, err := rand.Read(id[:]); err != nil {
 		return contract.AccountsConnectResponse{}, errConnect

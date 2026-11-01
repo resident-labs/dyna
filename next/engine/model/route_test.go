@@ -97,7 +97,7 @@ func TestProxyConfig(t *testing.T) {
 	if err := os.WriteFile(oldFile, []byte("{}"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	proxy, err := NewProxy(dir, "management-key")
+	proxy, err := NewProxy(dir, "management-key", Catalog{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestProxyPreservesNonSocket(t *testing.T) {
 	if err := os.WriteFile(path, []byte("keep"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if proxy, err := NewProxy(dir, "key"); err == nil {
+	if proxy, err := NewProxy(dir, "key", Catalog{}); err == nil {
 		proxy.Listener.Close()
 		t.Fatal("accepted non-socket")
 	}

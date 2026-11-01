@@ -30,7 +30,7 @@ func TestReconnectRequiresRawMatchingIdentity(t *testing.T) {
 		_, _ = w.Write([]byte(`{"url":"https://provider.example/login","state":"state"}`))
 	}))
 	defer server.Close()
-	p := &Proxy{planModels: testPlanModels(), client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
+	p := &Proxy{pools: testPools(), client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
 	c := p.Connections("key", st, time.Now)
 	a, err := c.Reconnect(ctx, "account", old.ID, contract.ProviderXAI)
 	if err != nil {
@@ -98,7 +98,7 @@ func TestReconnectPreventsConcurrentReplacement(t *testing.T) {
 		_, _ = w.Write([]byte(`{"url":"https://provider.example/login","state":"state"}`))
 	}))
 	defer server.Close()
-	p := &Proxy{planModels: testPlanModels(), client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
+	p := &Proxy{pools: testPools(), client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
 	paused := pausedReconnectStore{Store: st, entered: make(chan struct{}), release: make(chan struct{})}
 	c := p.Connections("key", paused, time.Now)
 	a, err := c.Reconnect(ctx, "account", old.ID, contract.ProviderAnthropic)
@@ -151,7 +151,7 @@ func TestStatusDoesNotBlockReconnectSave(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":"wait"}`))
 	}))
 	defer server.Close()
-	p := &Proxy{planModels: testPlanModels(), client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
+	p := &Proxy{pools: testPools(), client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
 	c := p.Connections("key", st, time.Now)
 	a, err := c.Reconnect(ctx, "account", old.ID, contract.ProviderAnthropic)
 	if err != nil {
@@ -191,7 +191,7 @@ func TestRemoveCancelsUnsavedReconnect(t *testing.T) {
 		_, _ = w.Write([]byte(`{"url":"https://provider.example/login","state":"state"}`))
 	}))
 	defer server.Close()
-	p := &Proxy{planModels: testPlanModels(), client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
+	p := &Proxy{pools: testPools(), client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
 	c := p.Connections("key", st, time.Now)
 	a, err := c.Reconnect(ctx, "account", old.ID, contract.ProviderAnthropic)
 	if err != nil {
@@ -260,7 +260,7 @@ func TestReconnectSaveAttributionAndExpiry(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	p := &Proxy{planModels: testPlanModels(), client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
+	p := &Proxy{pools: testPools(), client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
 	c := p.Connections("key", st, func() time.Time { return now })
 	a, err := c.Reconnect(ctx, "account", "bound", contract.ProviderAnthropic)
 	if err != nil {

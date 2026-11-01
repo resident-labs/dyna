@@ -10,34 +10,43 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 )
 
-func testPlanModels() map[contract.AccountProvider][]contract.CatalogModel {
-	out := make(map[contract.AccountProvider][]contract.CatalogModel)
-	for _, entry := range oauthProviders {
-		out[entry.info.ID] = []contract.CatalogModel{{ID: "model"}}
+func testPools() map[string]pool {
+	out := make(map[string]pool)
+	for _, option := range oauthProviders {
+		info := option.info
+		info.Models = []contract.CatalogModel{{ID: "model"}}
+		out["plan_"+string(info.ID)] = makePool(info, option.proxy, "model")
+	}
+	return out
+}
+func testKeyPools() map[string]pool {
+	out := make(map[string]pool)
+	for _, key := range testKeyProviders {
+		out[string(key.Provider)] = makePool(contract.AccountProviderInfo{ID: key.Provider, Models: key.Models}, "", key.DefaultModel)
 	}
 	return out
 }
 
 func TestPlanCatalogUsesDefaultAndExactAliases(t *testing.T) {
 	p := &Proxy{}
-	catalog := Catalog{Providers: []CatalogProvider{
-		{ID: "anthropic", DefaultModel: "claude-opus-4-6", Models: []CatalogModel{{ID: "not-served"}, {ID: "claude-sonnet-4-6"}, {ID: "claude-opus-4-6"}}},
-		{ID: "kimi-coding", DefaultModel: "kimi-for-coding", Models: []CatalogModel{{ID: "k3"}, {ID: "kimi-for-coding"}}},
-		{ID: "openai", DefaultModel: "gpt-5.6-sol", Models: []CatalogModel{{ID: "gpt-5.6-sol"}, {ID: "gpt-5.6-luna"}}},
+	catalog := Catalog{Plans: []PlanProvider{
+		{ID: "anthropic", DefaultModel: "claude-opus-4-6", Models: []contract.CatalogModel{{ID: "not-served"}, {ID: "claude-sonnet-4-6"}, {ID: "claude-opus-4-6"}}},
+		{ID: "kimi-coding", DefaultModel: "kimi-for-coding", Models: []contract.CatalogModel{{ID: "k3"}, {ID: "kimi-for-coding"}}},
+		{ID: "openai", DefaultModel: "gpt-5.6-sol", Models: []contract.CatalogModel{{ID: "gpt-5.6-sol"}, {ID: "gpt-5.6-luna"}}},
 	}}
-	if err := p.SetPlanModels(catalog); err != nil {
+	if err := p.initPools(catalog); err != nil {
 		t.Fatal(err)
 	}
-	if len(p.planModels[contract.ProviderAnthropic]) != 2 || p.planDefaults[contract.ProviderAnthropic] != "claude-opus-4-6" {
+	if len(p.pools["plan_anthropic"].info.Models) != 2 || p.pools["plan_anthropic"].defaultModel != "claude-opus-4-6" {
 		t.Fatal("wrong Claude plan models or default")
 	}
-	if len(p.planModels[contract.ProviderKimiCoding]) != 2 || p.planDefaults[contract.ProviderKimiCoding] != "kimi-for-coding" || planProxyModel(contract.ProviderKimiCoding, "kimi-for-coding") != "kimi-k2.8-code" {
+	if len(p.pools["plan_kimi-coding"].info.Models) != 2 || p.pools["plan_kimi-coding"].defaultModel != "kimi-for-coding" || planProxyModel(contract.ProviderKimiCoding, "kimi-for-coding") != "kimi-k2.8-code" {
 		t.Fatal("wrong Kimi plan models or aliases")
 	}
-	if len(p.planModels[contract.ProviderOpenAI]) != 2 || p.planDefaults[contract.ProviderOpenAI] != "gpt-5.6-luna" {
+	if len(p.pools["plan_openai"].info.Models) != 2 || p.pools["plan_openai"].defaultModel != "gpt-5.6-luna" {
 		t.Fatal("paid-only model was hidden or selected for activation")
 	}
-	if len(p.planModels[contract.ProviderXAI]) != 0 {
+	if len(p.pools["plan_xai"].info.Models) != 0 {
 		t.Fatal("offered provider without models")
 	}
 }
@@ -52,13 +61,13 @@ func TestPinnedPlanCatalogDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	catalog, skipped, err := LoadCatalog(data)
+	catalog, err := LoadCatalog(data)
 	t.Logf("pinned catalog load: %s", time.Since(start))
 	if err != nil {
 		t.Fatal(err)
 	}
-	keys := catalog.KeyProviders()
-	p, err := NewProxy(t.TempDir(), "fixture", keys...)
+	keys := catalog.Keys
+	p, err := NewProxy(t.TempDir(), "fixture", catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,22 +97,19 @@ func TestPinnedPlanCatalogDrift(t *testing.T) {
 			}
 		}
 	}
-	if err := p.SetPlanModels(catalog); err != nil {
-		t.Fatal(err)
-	}
 	pinned, err := cliproxy.DynaPinnedModels()
 	if err != nil {
 		t.Fatal(err)
 	}
 	ids := map[contract.AccountProvider][]string{
-		contract.ProviderAnthropic: pinned.Claude, contract.ProviderOpenAI: pinned.Codex,
+		contract.ProviderAnthropic: pinned.Claude, contract.ProviderOpenAI: append(append(append(append([]string{}, pinned.CodexFree...), pinned.CodexTeam...), pinned.CodexPlus...), pinned.CodexPro...),
 		contract.ProviderKimiCoding: pinned.Kimi, contract.ProviderXAI: pinned.XAI,
 	}
 	for _, provider := range oauthProviders {
 		id := provider.info.ID
 		defaultID := ""
-		for _, piProvider := range catalog.Providers {
-			if piProvider.ID == string(id) {
+		for _, piProvider := range catalog.Plans {
+			if piProvider.ID == id {
 				defaultID = piProvider.DefaultModel
 				break
 			}
@@ -111,15 +117,15 @@ func TestPinnedPlanCatalogDrift(t *testing.T) {
 		if defaultID == "" {
 			t.Errorf("%s has no packed Pi default", id)
 		}
-		if len(p.planModels[id]) == 0 {
-			t.Errorf("no pinned plan models for %s; skipped=%v", id, skipped)
+		if len(p.pools["plan_"+string(id)].info.Models) == 0 {
+			t.Errorf("no pinned plan models for %s", id)
 			continue
 		}
 		set := make(map[string]bool)
 		for _, name := range ids[id] {
 			set[name] = true
 		}
-		for _, model := range p.planModels[id] {
+		for _, model := range p.pools["plan_"+string(id)].info.Models {
 			if !set[planProxyModel(id, model.ID)] {
 				t.Errorf("%s/%s has no compiled proxy model", id, model.ID)
 			}
@@ -127,18 +133,29 @@ func TestPinnedPlanCatalogDrift(t *testing.T) {
 		common := set
 		if id == contract.ProviderOpenAI {
 			common = make(map[string]bool)
-			for _, name := range pinned.CodexCommon {
+			for _, name := range pinned.CodexFree {
 				common[name] = true
+			}
+			for _, tier := range [][]string{pinned.CodexTeam, pinned.CodexPlus, pinned.CodexPro} {
+				set := map[string]bool{}
+				for _, name := range tier {
+					set[name] = true
+				}
+				for name := range common {
+					if !set[name] {
+						delete(common, name)
+					}
+				}
 			}
 		}
 		expected := ""
-		for _, model := range p.planModels[id] {
+		for _, model := range p.pools["plan_"+string(id)].info.Models {
 			if common[planProxyModel(id, model.ID)] && (expected == "" || model.ID == defaultID) {
 				expected = model.ID
 			}
 		}
-		if p.planDefaults[id] != expected {
-			t.Errorf("%s activation model = %q, want %q", id, p.planDefaults[id], expected)
+		if p.pools["plan_"+string(id)].defaultModel != expected {
+			t.Errorf("%s activation model = %q, want %q", id, p.pools["plan_"+string(id)].defaultModel, expected)
 		}
 	}
 }

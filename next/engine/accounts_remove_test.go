@@ -27,11 +27,10 @@ func TestAdoptionRecovery(t *testing.T) {
 	if err := st.BindAccount(ctx, "account", record.ID, contract.ProviderAnthropic, "label"); err != nil {
 		t.Fatal(err)
 	}
-	proxy, err := model.NewProxy(t.TempDir(), "key")
+	proxy, err := model.NewProxy(t.TempDir(), "key", testAccountCatalog())
 	if err != nil {
 		t.Fatal(err)
 	}
-	setupTestPlanCatalog(t, proxy)
 	calls := 0
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -102,7 +101,7 @@ func TestRemoveFencesNewLogin(t *testing.T) {
 	if err := st.BindAccount(ctx, "old-account", "invented", contract.ProviderAnthropic, "Invented"); err != nil {
 		t.Fatal(err)
 	}
-	proxy, err := model.NewProxy(t.TempDir(), "invented-key")
+	proxy, err := model.NewProxy(t.TempDir(), "invented-key", testAccountCatalog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +155,7 @@ func TestAccountRemoveRetry(t *testing.T) {
 	if err := st.DeleteProxyAuth(ctx, "invented"); err != nil {
 		t.Fatal(err)
 	} // Simulate a crash before the row was deleted.
-	proxy, err := model.NewProxy(t.TempDir(), "invented-key")
+	proxy, err := model.NewProxy(t.TempDir(), "invented-key", testAccountCatalog())
 	if err != nil {
 		t.Fatal(err)
 	}

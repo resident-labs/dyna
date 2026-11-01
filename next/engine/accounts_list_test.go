@@ -13,17 +13,13 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
-func setupTestPlanCatalog(t *testing.T, proxy *model.Proxy) {
-	t.Helper()
-	catalog := model.Catalog{Providers: []model.CatalogProvider{
-		{ID: "anthropic", Models: []model.CatalogModel{{ID: "claude-sonnet-4-6"}}},
-		{ID: "openai", Models: []model.CatalogModel{{ID: "gpt-5.6-luna"}}},
-		{ID: "kimi-coding", Models: []model.CatalogModel{{ID: "k3"}}},
-		{ID: "xai", Models: []model.CatalogModel{{ID: "grok-4.3"}}},
-	}}
-	if err := proxy.SetPlanModels(catalog); err != nil {
-		t.Fatal(err)
-	}
+func testAccountCatalog() model.Catalog {
+	return model.Catalog{Plans: []model.PlanProvider{
+		{ID: "anthropic", Models: []contract.CatalogModel{{ID: "claude-sonnet-4-6"}}},
+		{ID: "openai", Models: []contract.CatalogModel{{ID: "gpt-5.6-luna"}}},
+		{ID: "kimi-coding", Models: []contract.CatalogModel{{ID: "k3"}}},
+		{ID: "xai", Models: []contract.CatalogModel{{ID: "grok-4.3"}}},
+	}, Keys: []model.KeyProvider{{Provider: "zai", DisplayName: "z.ai", KeyName: "ZAI_API_KEY", DefaultModel: "model", URL: "https://example.com/v1", Models: []contract.CatalogModel{{ID: "model"}}}}}
 }
 
 func TestAccountList(t *testing.T) {
@@ -39,11 +35,10 @@ func TestAccountList(t *testing.T) {
 	if err := st.BindAccount(ctx, "account", "invented-private-proxy-id", contract.ProviderAnthropic, "Invented"); err != nil {
 		t.Fatal(err)
 	}
-	proxy, err := model.NewProxy(t.TempDir(), "invented-management-key", model.KeyProvider{Provider: "zai", DisplayName: "z.ai", KeyName: "ZAI_API_KEY", URL: "https://example.com/v1", Models: []contract.CatalogModel{{ID: "model"}}})
+	proxy, err := model.NewProxy(t.TempDir(), "invented-management-key", testAccountCatalog())
 	if err != nil {
 		t.Fatal(err)
 	}
-	setupTestPlanCatalog(t, proxy)
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"credentials":[{"id":"invented-private-proxy-id","auth_index":"invented-index","provider":"claude","state":"sign_in_expired"}]}`))
 	})}

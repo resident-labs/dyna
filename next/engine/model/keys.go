@@ -12,16 +12,7 @@ import (
 )
 
 func (c *Connections) SetKey(ctx context.Context, req contract.AccountsSetKeyRequest) (contract.AccountsSetKeyResponse, error) {
-	var model string
-	for _, provider := range c.proxy.keyProviders {
-		if provider.Provider == req.Provider {
-			model = provider.DefaultModel
-			if model == "" && len(provider.Models) > 0 {
-				model = provider.Models[0].ID
-			}
-			break
-		}
-	}
+	model := c.proxy.pools[string(req.Provider)].defaultModel
 	if model == "" || strings.TrimSpace(req.Key) == "" || len(req.Key) > 4096 {
 		return contract.AccountsSetKeyResponse{}, errConnect
 	}
