@@ -1,5 +1,6 @@
 <!-- Ported from T3 Code (apps/web/src/components/chat/WorkLog.tsx), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE. -->
 <script lang="ts">
+  import { onMount } from "svelte";
   import type { TranscriptItem, TranscriptPart } from "../contract.gen.ts";
   import { activeVerb, elapsed, stepTime, titleOf, type StepKind } from "../steps.ts";
   import { formatTimelineDuration, summarizeWork, timelineItemRunning } from "../timeline.ts";
@@ -40,20 +41,23 @@
   let summary = $derived(active ? `Working for ${formatTimelineDuration(now - Date.parse(started))}` : summarizeWork(items));
   let thoughts = $derived(items.filter(item => item.kind === "thinking"));
   let tools = $derived(items.filter(item => item.kind !== "thinking"));
-  let failedCount = $derived(tools.reduce((count, item) => count + Number(!!item.failed) + (item.calls ?? []).filter(call => call.status === "error").length, 0));
+  // A failed call usually fails its script too, and that is one failure.
+  let failedCount = $derived(tools.reduce((count, item) => count + Math.max(Number(!!item.failed), (item.calls ?? []).filter(call => call.status === "error").length), 0));
   let showThoughts = $state(false);
+  // A live turn shows its work without a click, so its older items load now.
+  onMount(() => { if (!ended) onopen(); });
 </script>
 
 {#snippet entry(item: TranscriptItem)}
   {@const title = titleOf(item)}
   {@const running = timelineItemRunning(item, ended)}
   {#if item.tool === "codemode"}
-    <CodemodeScript {item} {ended} {chunks} {onload} />
+    <CodemodeScript {item} {ended} {chunks} {onload} {onopen} />
   {:else}
   <details class="entry" ontoggle={(event) => { if (event.currentTarget.open) { onopen(); if (item.more) { if (item.kind === "thinking") void load(item, "text"); else { void load(item, "arguments"); void load(item, "output"); if (item.diff) void load(item, "diff"); } } } }}>
     <summary>
       <span class="slot">{#if running}<span class="spinner" aria-label="Working" role="img"></span>{:else}{#if item.kind === "thinking" || ["run", "search", "read", "edit", "write"].includes(title.kind)}<TranscriptIcon kind={item.kind === "thinking" ? "thinking" : title.kind} />{:else}<Icon name={icons[title.kind]} size={16} />{/if}{/if}</span>
-      {#if item.kind === "thinking"}<span>Thought</span>{:else if running}<span class="target" title={title.full}>{activeVerb(title.kind, title.verb)} {title.target}</span>{:else if title.kind === "run" || title.kind === "edit" || title.kind === "write"}<span class="target" title={title.full}>{title.target || title.verb}</span>{:else}<span class="target" title={title.full}>{title.verb} {title.target}</span>{/if}
+      {#if item.kind === "thinking"}<span class="target">{(item.text ?? "").split("\n")[0] || "Thought"}</span>{:else if running}<span class="target" title={title.full}>{activeVerb(title.kind, title.verb)} {title.target}</span>{:else if title.kind === "run" || title.kind === "edit" || title.kind === "write"}<span class="target" title={title.full}>{title.target || title.verb}</span>{:else}<span class="target" title={title.full}>{title.verb} {title.target}</span>{/if}
       <span class="time">{running ? elapsed(item.at, now) : stepTime({ started: item.at, ended: item.ended })}</span>
       {#if item.failed}<StatusPill tone="failed" label="Failed" word />{/if}
       <span class="entry-chevron"><TranscriptIcon kind="chevron" /></span>
@@ -95,7 +99,7 @@
       {#if failedCount}<StatusPill tone="failed" label={`${failedCount} failed`} word />{/if}
       {#if thoughts.length}<button class="thought-toggle" aria-expanded={showThoughts} onclick={() => showThoughts = !showThoughts}>{thoughts.length} {thoughts.length === 1 ? "thought" : "thoughts"} <TranscriptIcon kind="chevron" /></button>{/if}
     </div>
-    {#if showThoughts}{#each thoughts as thought (thought.id)}<div class="thought">{(thought.text ?? "").split("\n")[0]}</div>{/each}{/if}
+    {#if showThoughts}{#each thoughts as thought (thought.id)}{@render entry(thought)}{/each}{/if}
     <div class="entries" role="region" aria-label="Work details">
       {#each tools as item (item.id)}{@render entry(item)}{/each}
     </div>
@@ -107,7 +111,6 @@
   .group { margin-left: 16px; padding-left: 8px; border-left: 1px solid var(--line); }
   .group-heading { display: flex; align-items: center; gap: 6px; }
   .thought-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-  .thought { margin-left: 28px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @media (max-width: 600px) { .group { margin-left: 8px; } }
   summary { display: flex; align-items: center; min-height: 24px; gap: 6px; cursor: pointer; list-style: none; border-radius: 6px; }
   summary::-webkit-details-marker { display: none; }
