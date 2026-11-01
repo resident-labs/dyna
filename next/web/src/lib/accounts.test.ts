@@ -1,8 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountPath, accountRows, accountState, addProviderError, labelRefusal, parseModelIDs, providerGroup, reconnectPath, removalPrompt, canReconnect, reconnectUnavailable } from "./accounts.ts";
+import { accountChoiceName, accountChoiceNote, accountPath, accountRows, accountState, addProviderError, labelRefusal, parseModelIDs, providerGroup, reconnectPath, removalPrompt, canReconnect, reconnectUnavailable } from "./accounts.ts";
 import { APIError } from "./client.ts";
 import type { Account, AccountProviderInfo, ErrorCode } from "./contract.gen.ts";
+
+test("a session's Account row says what is chosen and when it fell back", () => {
+  assert.equal(accountChoiceName({ choices: [] }), "Automatic");
+  assert.equal(accountChoiceName({ account: "a", label: "pipsqueak.tasks", choices: [] }), "pipsqueak.tasks");
+  assert.equal(accountChoiceName({ account: "gone", issue: "removed", choices: [] }), "Removed account");
+  assert.equal(accountChoiceNote(), "");
+  assert.equal(accountChoiceNote("spent"), "Limit reached. Using Automatic.");
+  assert.equal(accountChoiceNote("signed_out"), "Signed out. Using Automatic.");
+  assert.equal(accountChoiceNote("removed"), "Removed. Using Automatic.");
+  assert.equal(accountChoiceNote("unavailable"), "Unavailable right now. Using Automatic.");
+});
 
 test("search unfolds matching API key providers", () => {
   const providers: AccountProviderInfo[] = Array.from({ length: 12 }, (_, i) => ({ id: "anthropic", displayName: `Provider ${i}`, connectMethod: "key", connectFlow: "key" }));

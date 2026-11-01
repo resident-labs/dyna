@@ -66,13 +66,17 @@ import type { CacheWarmer, CacheWarmingStatus } from "./cache-warmer.ts";
 import {
 	type CompactionPreparation,
 	type CompactionResult,
+	type CompactionSettings,
 	calculateContextTokens,
 	collectEntriesForBranchSummary,
 	compact,
+	computeFileLists,
 	estimateContextTokens,
 	estimateProjectedContextTokens,
 	estimateTokens,
+	formatFileOperations,
 	generateBranchSummary,
+	modelTransferBoundary,
 	prepareCompaction,
 	shouldCompact,
 	withCompactionTriggerOverride,
@@ -336,6 +340,51 @@ export interface PromptOptions {
 export interface ModelMutationOptions {
 	/** Persist the new value to global defaults. Defaults to session-only. */
 	persist?: boolean;
+}
+
+/** Longest a model transfer waits for its summary before it uses a boundary instead. */
+const MODEL_TRANSFER_SUMMARY_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * A new model starts with a cold prompt cache. Above this size a transfer compacts on the old model,
+ * which still has its cache, even when the conversation would fit, so the new model is not billed
+ * for the whole conversation uncached.
+ */
+const MODEL_TRANSFER_COMPACT_ABOVE_TOKENS = 100_000;
+
+/**
+ * How transferModel() ended:
+ * unchanged, the model stayed and the conversation fits;
+ * switched, the conversation moved whole, because it fits the new model;
+ * compacted, a summary replaced the older part of the conversation;
+ * boundary, it did not fit and no summary did, so the new model was told to read the session file;
+ * aborted, the transfer was cancelled and the model did not change.
+ */
+export type ModelTransferPath = "unchanged" | "switched" | "compacted" | "boundary" | "aborted";
+
+/** Options for transferModel(). */
+export interface ModelTransferOptions {
+	thinkingLevel: ThinkingLevel;
+	/** The target's absolute compaction trigger. It replaces the process one; undefined clears it. */
+	compactionTriggerTokens?: number;
+}
+
+/** Result from transferModel() */
+export interface ModelTransferResult {
+	path: ModelTransferPath;
+	tokensBefore: number;
+	tokensAfter: number;
+	/** Why a compaction this transfer wanted did not happen or was not enough. */
+	reason?: string;
+}
+
+/** A compaction that transferModel() asks for, and how it went. */
+interface TransferCompaction {
+	model: Model<any> | undefined;
+	settings: CompactionSettings;
+	compacted: boolean;
+	aborted: boolean;
+	error?: string;
 }
 
 /** Result from cycleModel() */
@@ -2675,6 +2724,155 @@ export class AgentSession {
 		await this._emitModelSelect(model, previousModel, "set");
 	}
 
+	/**
+	 * Move the conversation to `target`. A conversation that fits and is small switches at once.
+	 * Otherwise it is compacted first, on the model that last held it, because that model can read
+	 * all of it and still has its prompt cache. If compaction fails or leaves too much, the session
+	 * switches anyway: a conversation that fits stays whole, and one that does not leaves `target` a
+	 * boundary that names the session file. The session file keeps every entry on all paths.
+	 *
+	 * Runs between turns. abort() cancels it before the switch.
+	 * @throws Error if no auth is configured for `target`
+	 */
+	async transferModel(target: Model<any>, options: ModelTransferOptions): Promise<ModelTransferResult> {
+		if (!(await this._modelRuntime.checkAuth(target.provider))) {
+			throw new Error(`No API key for ${target.provider}/${target.id}`);
+		}
+		await this.waitForIdle();
+
+		// A process that restarted on `target` still has the conversation of the recorded model.
+		const getModel = (provider: string, modelId: string) => this._modelRuntime.getModel(provider, modelId);
+		const recorded = getBranchSelection(this.sessionManager.getBranch(), getModel);
+		const source = (recorded && getModel(recorded.provider, recorded.modelId)) ?? this.model;
+		const settings: CompactionSettings = {
+			...withCompactionTriggerOverride(
+				this.settingsManager.getCompactionSettings(target),
+				options.compactionTriggerTokens,
+			),
+			enabled: true,
+		};
+		const contextTokens = () =>
+			estimateProjectedContextTokens(this.sessionManager.buildSessionProjection(), this.sessionManager.getBranch())
+				.tokens;
+		// A virtual selection is checked in prepareRequest, against the model the request is routed to.
+		const exceeds = (limits: CompactionSettings) =>
+			!isVirtualModel(target) &&
+			target.contextWindow > 0 &&
+			shouldCompact(contextTokens(), target.contextWindow, limits);
+		const applyTarget = async () => {
+			this._compactionTriggerTokens = options.compactionTriggerTokens;
+			if (!modelsAreEqual(source, target) || !modelsAreEqual(this.model, target)) await this.setModel(target);
+			this.setThinkingLevel(options.thinkingLevel);
+		};
+
+		const tokensBefore = contextTokens();
+		const changesModel = !modelsAreEqual(source, target);
+		if (!exceeds(settings) && !(changesModel && tokensBefore > MODEL_TRANSFER_COMPACT_ABOVE_TOKENS)) {
+			await applyTarget();
+			return { path: changesModel ? "switched" : "unchanged", tokensBefore, tokensAfter: tokensBefore };
+		}
+
+		const hardLimit = target.contextWindow - settings.reserveTokens;
+		const limit = Math.min(settings.triggerTokens ?? hardLimit, hardLimit);
+		const keepRecentTokens = Math.max(1, Math.min(settings.keepRecentTokens, Math.floor(limit / 2)));
+		const run: TransferCompaction = {
+			model: source,
+			settings: { ...settings, keepRecentTokens },
+			compacted: false,
+			aborted: false,
+		};
+		let timedOut = false;
+		const timeout = setTimeout(() => {
+			timedOut = true;
+			this._autoCompactionAbortController?.abort();
+		}, MODEL_TRANSFER_SUMMARY_TIMEOUT_MS);
+		try {
+			await this._runAutoCompaction("threshold", false, run);
+		} finally {
+			clearTimeout(timeout);
+		}
+		if (run.aborted && !timedOut) return { path: "aborted", tokensBefore, tokensAfter: contextTokens() };
+
+		const reason = timedOut
+			? "the summary timed out"
+			: run.compacted
+				? "the summary left too much context"
+				: (run.error ?? "there was nothing to summarize");
+		// Only the hard limit forces a boundary: over the trigger alone, the conversation still works.
+		const fits = !exceeds({ ...settings, triggerTokens: undefined });
+		await applyTarget();
+		if (fits) {
+			const tokensAfter = contextTokens();
+			if (run.compacted) return { path: "compacted", tokensBefore, tokensAfter };
+			return { path: changesModel ? "switched" : "unchanged", tokensBefore, tokensAfter, reason };
+		}
+		await this._appendTransferBoundary(reason, settings, limit, keepRecentTokens);
+		return { path: "boundary", tokensBefore, tokensAfter: contextTokens(), reason };
+	}
+
+	/**
+	 * Compact without a model. The summary tells the new model where the session file is, and the
+	 * retained tail is what Pi's cut point keeps within `limit`. Older entries stay in the file.
+	 */
+	private async _appendTransferBoundary(
+		reason: string,
+		settings: CompactionSettings,
+		limit: number,
+		keepRecentTokens: number,
+	): Promise<void> {
+		const branch = this.sessionManager.getBranch();
+		const projection = this.sessionManager.buildSessionProjection();
+		const tokensBefore = estimateProjectedContextTokens(projection, branch).tokens;
+		const preparation = prepareCompaction(branch, { ...settings, keepRecentTokens });
+		const previousSummary = getLatestCompactionEntry(branch)?.summary;
+		const { readFiles, modifiedFiles } = preparation
+			? computeFileLists(preparation.fileOps)
+			: { readFiles: [], modifiedFiles: [] };
+		const summary =
+			modelTransferBoundary(
+				this.sessionManager.getSessionFile(),
+				reason.slice(0, 300),
+				previousSummary && previousSummary.length / 4 <= keepRecentTokens ? previousSummary : undefined,
+			) + formatFileOperations(readFiles, modifiedFiles);
+
+		// One oversized tool result can exceed the limit alone, and a cut cannot split it. Keep no tail then.
+		const firstKept = projection.entries.findIndex((entry) => entry.sourceEntry.id === preparation?.firstKeptEntryId);
+		const tailTokens = projection.entries
+			.slice(firstKept)
+			.flatMap((entry) => entry.messages)
+			.reduce((sum, message) => sum + estimateTokens(message), 0);
+		const keepTail = firstKept >= 0 && tailTokens + summary.length / 4 <= limit;
+		const details = { readFiles, modifiedFiles };
+
+		this._emit({ type: "compaction_start", reason: "threshold" });
+		const entryId = this.sessionManager.appendCompaction(
+			summary,
+			keepTail ? (preparation?.firstKeptEntryId ?? null) : null,
+			tokensBefore,
+			details,
+			false,
+			undefined,
+			buildSystemPromptSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions),
+		);
+		this._refreshFinalizedContext();
+		const entry = this.sessionManager.getEntry(entryId) as CompactionEntry;
+		await this._extensionRunner.emit({
+			type: "session_compact",
+			compactionEntry: entry,
+			fromExtension: false,
+			reason: "threshold",
+			willRetry: false,
+		});
+		const result: CompactionResult = {
+			summary,
+			firstKeptEntryId: entry.firstKeptEntryId,
+			tokensBefore,
+			estimatedTokensAfter: estimateMessagesTokens(this.sessionManager.buildSessionProjection().messages),
+			details,
+		};
+		this._emit({ type: "compaction_end", reason: "threshold", result, aborted: false, willRetry: false });
+	}
+
 	private _addPersistedDefaultToNonEmptyScope(model: Model<any>): void {
 		if (this._scopedModels.length === 0) return;
 		if (this._scopedModels.some((scoped) => modelsAreEqual(scoped.model, model))) return;
@@ -3276,12 +3474,17 @@ export class AgentSession {
 	 *
 	 * @param reason Automatic trigger selected by `_checkCompaction()`
 	 * @param willRetry Whether to continue the interrupted turn after overflow compaction
+	 * @param transfer A model transfer's model and limits; receives the outcome
 	 * @returns Whether the post-run loop should call `agent.continue()`
 	 */
-	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
+	private async _runAutoCompaction(
+		reason: "overflow" | "threshold",
+		willRetry: boolean,
+		transfer?: TransferCompaction,
+	): Promise<boolean> {
 		await this._refreshPromptResources();
-		const model = this.model;
-		const settings = this._compactionSettings(model);
+		const model = transfer ? transfer.model : this.model;
+		const settings = transfer?.settings ?? this._compactionSettings(model);
 		let abortController: AbortController | undefined;
 		let started = false;
 		let fromExtension = false;
@@ -3368,6 +3571,7 @@ export class AgentSession {
 				usage,
 				buildSystemPromptSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions),
 			);
+			if (transfer) transfer.compacted = true;
 			const newEntries = this.sessionManager.getEntries();
 			this._refreshFinalizedContext();
 			const estimatedTokensAfter = estimateMessagesTokens(this.sessionManager.buildSessionProjection().messages);
@@ -3405,6 +3609,10 @@ export class AgentSession {
 		} catch (error) {
 			const message = error instanceof Error ? error.message : "compaction failed";
 			const aborted = abortController?.signal.aborted === true || cancelledByExtension;
+			if (transfer) {
+				transfer.aborted = abortController?.signal.aborted === true;
+				transfer.error = message;
+			}
 			if (started) {
 				const errorMessage = aborted
 					? undefined

@@ -225,6 +225,28 @@ Response contains the full [Model](#model-object) object:
 }
 ```
 
+### transfer_model
+
+Move the conversation to a model and thinking level between runs. `compactionTriggerTokens` replaces the `--compaction-trigger-tokens` value; leaving it out clears it.
+
+```json
+{"type": "transfer_model", "provider": "anthropic", "modelId": "claude-sonnet-4-20250514", "thinkingLevel": "high", "compactionTriggerTokens": 150000}
+```
+
+If the context fits the target's limit and is at most 100,000 tokens, Pi switches. If it is over the limit, or the model changes and it is over 100,000 tokens, Pi first compacts on the model that last held the conversation, with the usual `compaction_start` and `compaction_end` events. That model can read all of it and still has its prompt cache, and the target would start with a cold cache. If the compaction fails or leaves too much, Pi switches anyway. A context that fits stays whole. One that does not is compacted without a model: the summary tells the target to read the session file, and the recent messages that fit stay in context. `abort` cancels a running compaction and leaves the model unchanged.
+
+Response:
+```json
+{
+  "type": "response",
+  "command": "transfer_model",
+  "success": true,
+  "data": {"path": "compacted", "tokensBefore": 180000, "tokensAfter": 24000}
+}
+```
+
+`path` is `unchanged`, `switched`, `compacted`, `boundary` or `aborted`. `reason` says why a compaction Pi wanted did not happen or was not enough.
+
 ### cycle_model
 
 Cycle to the next available model. Returns `null` data if only one model available.

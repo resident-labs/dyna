@@ -8,7 +8,7 @@
   import type { AccountUsage, AccountsListResponse, Card, HostSummary, Principal, SessionListResponse } from "../contract.gen.ts";
   import { clause, fromNow, requestLine } from "../feed.ts";
   import { hostLabel, hostMeters, largeShared, sharedSize, watchHosts } from "../hosts.ts";
-  import { accountAlerts, busiestWindow, holdFor, holding, outOfLimit, usageRows, type UsageHold, type UsageRow } from "../usage.ts";
+  import { accountAlerts, busiestWindow, holdFor, holding, outOfLimit, tucked, usageRows, type UsageHold, type UsageRow } from "../usage.ts";
   import { distinctInitials, initials as letters } from "../identity.ts";
   import Avatar from "./Avatar.svelte";
   import HostCard from "./HostCard.svelte";
@@ -145,14 +145,14 @@
   });
   const holdsKey = "dyna.usage.holds";
   let usage = $derived(usageRows(accounts ?? [], catalog));
-  // Hidden is a closed section under the cards. A spent account goes there by itself, since it takes no work until it
-  // resets or its balance rises, and the owner can send any other there until the same happens. Those holds stay in
-  // this browser.
+  // Hidden is a closed section under the cards. Only active accounts show by default: an inactive one waits there, next
+  // to spent ones, which take no work until they reset or their balance rises. The owner can show an inactive account,
+  // or hide any other until the same happens. Those choices stay in this browser.
   let holds = $state<Record<string, UsageHold>>(savedHolds());
-  const held = (row: UsageRow) => row.id in holds && holding(row, holds[row.id], loadedAt);
-  const tucked = (row: UsageRow) => outOfLimit(row, loadedAt) || held(row);
-  let shown = $derived(usage.filter(row => !tucked(row)));
-  let hiddenRows = $derived(usage.filter(tucked));
+  const held = (row: UsageRow) => row.id in holds && !holds[row.id].shown && holding(row, holds[row.id], loadedAt);
+  const inHidden = (row: UsageRow) => tucked(row, holds[row.id], loadedAt);
+  let shown = $derived(usage.filter(row => !inHidden(row)));
+  let hiddenRows = $derived(usage.filter(inHidden));
   function savedHolds(): Record<string, UsageHold> {
     try { return JSON.parse(localStorage.getItem(holdsKey) ?? "{}"); } catch { return {}; }
   }
@@ -161,7 +161,9 @@
     try { localStorage.setItem(holdsKey, JSON.stringify(next)); } catch { /* Storage is blocked: the choice lasts until the page closes. */ }
   }
   const release = (id: string) => setHolds(Object.fromEntries(Object.entries(holds).filter(([key]) => key !== id)));
-  $effect(() => { for (const row of usage) if (row.id in holds && !held(row)) release(row.id); });
+  $effect(() => { for (const row of usage) if (row.id in holds && !holds[row.id].shown && !held(row)) release(row.id); });
+  const hide = (row: UsageRow) => row.active ? setHolds({ ...holds, [row.id]: holdFor(row, loadedAt) }) : release(row.id);
+  const show = (row: UsageRow) => row.active ? release(row.id) : setHolds({ ...holds, [row.id]: { shown: true } });
   let alerts = $derived(accountAlerts(accounts ?? [], catalog));
   // One sentence says what needs the owner: the same items as the Needs you card. Under it, a muted line sums low disk,
   // a large shared folder, machines and the busiest usage window; a part with nothing to say is left out.
@@ -224,9 +226,9 @@
   {#if hosts?.length}<div class="cards">{#each hosts as host (host.name)}<HostCard {host} now={hostsAt} {roomName} />{/each}</div>{/if}
   {#if usage.length || accountsFailed}<h2>Usage{#if shown.length}<span>{shown.length}</span>{/if}</h2>{/if}
   {#if accountsFailed}<p class="failed">Model usage could not load.</p>{/if}
-  {#if shown.length}<div class="cards">{#each shown as row, i (i)}<UsageCard {row} now={loadedAt} onhide={() => setHolds({ ...holds, [row.id]: holdFor(row, loadedAt) })} />{/each}</div>{/if}
+  {#if shown.length}<div class="cards">{#each shown as row, i (i)}<UsageCard {row} now={loadedAt} onhide={() => hide(row)} />{/each}</div>{/if}
   {#if hiddenRows.length}<details class="tucked"><summary>Hidden<span>{hiddenRows.length}</span><i><Icon name="chevron" /></i></summary>
-    <div class="cards">{#each hiddenRows as row, i (i)}<UsageCard {row} now={loadedAt} onshow={held(row) && !outOfLimit(row, loadedAt) ? () => release(row.id) : undefined} />{/each}</div></details>{/if}
+    <div class="cards">{#each hiddenRows as row, i (i)}<UsageCard {row} now={loadedAt} onshow={outOfLimit(row, loadedAt) ? undefined : () => show(row)} />{/each}</div></details>{/if}
 </div>
 
 <style>

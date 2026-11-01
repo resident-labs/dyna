@@ -120,6 +120,33 @@ func (s *Store) SavedTurnSections(ctx context.Context, turn contract.TurnID) ([]
 	return sections, true, err
 }
 
+// DispatchTurnModel records the model the engine dispatched a turn on. A replay keeps the first one.
+func (s *Store) DispatchTurnModel(ctx context.Context, turn contract.TurnID, model string) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE turns SET dispatched_model=? WHERE id=? AND dispatched_model=''", model, turn)
+		return err
+	})
+}
+
+// RecentTurnModels returns the models of a session's last two dispatched turns: the running one and the one before it.
+// The engine wrote these values, so a box cannot name a model of its own here.
+func (s *Store) RecentTurnModels(ctx context.Context, session contract.SessionID) ([]string, error) {
+	rows, err := s.Read().QueryContext(ctx, "SELECT dispatched_model FROM turns WHERE session=? AND dispatched_model<>'' ORDER BY started_at DESC, started_seq DESC LIMIT 2", session)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var models []string
+	for rows.Next() {
+		var model string
+		if err := rows.Scan(&model); err != nil {
+			return nil, err
+		}
+		models = append(models, model)
+	}
+	return models, rows.Err()
+}
+
 // TurnSections saves the first rendered snapshot and returns it on every replay.
 func (s *Store) TurnSections(ctx context.Context, turn contract.TurnID, sections []contract.ContextSection) ([]contract.ContextSection, error) {
 	data, err := json.Marshal(sections)

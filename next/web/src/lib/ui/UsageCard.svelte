@@ -9,7 +9,8 @@
   // again from Hidden.
   let { row, now, onhide, onshow }: { row: UsageRow; now: number; onhide?: () => void; onshow?: () => void } = $props();
   let spent = $derived(outOfLimit(row, now));
-  let hideText = $derived(hideLabel(holdFor(row, now)));
+  // An inactive card the owner chose to show just goes back; only an active one waits for a reset.
+  let hideText = $derived(row.active ? hideLabel(holdFor(row, now)) : "Hide");
 </script>
 
 <section class="card" aria-label={row.title}>

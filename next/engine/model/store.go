@@ -13,6 +13,7 @@ type AccountStore interface {
 	Accounts(context.Context) ([]private.AccountBinding, error)
 	BindAccount(context.Context, contract.AccountID, string, contract.AccountProvider, string) error
 	RemoveAccount(context.Context, contract.AccountID) error
+	PinnedAccounts(context.Context) ([]contract.AccountID, error)
 }
 
 // AuthStore stores proxy-owned opaque records without interpreting them.

@@ -74,6 +74,8 @@ type Service interface {
 	SessionMove(context.Context, contract.Principal, contract.SessionMoveRequest) (contract.SessionMoveResponse, *contract.Error)
 	SessionClose(context.Context, contract.Principal, contract.SessionCloseRequest) (contract.SessionCloseResponse, *contract.Error)
 	SessionSetProfile(context.Context, contract.Principal, contract.SessionSetProfileRequest) (contract.SessionSetProfileResponse, *contract.Error)
+	SessionAccount(context.Context, contract.Principal, contract.SessionAccountRequest) (contract.SessionAccountResponse, *contract.Error)
+	SessionSetAccount(context.Context, contract.Principal, contract.SessionSetAccountRequest) (contract.SessionSetAccountResponse, *contract.Error)
 	SessionRestart(context.Context, contract.Principal, contract.SessionRestartRequest) (contract.SessionRestartResponse, *contract.Error)
 	SessionSearch(context.Context, contract.Principal, contract.SessionSearchRequest) (contract.SessionSearchResponse, *contract.Error)
 	PostSearch(context.Context, contract.Principal, contract.PostSearchRequest) (contract.PostSearchResponse, *contract.Error)

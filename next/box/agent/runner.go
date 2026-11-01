@@ -4,13 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness"
 )
 
-var errTurnSettling = errors.New("turn is settling")
+var (
+	errTurnSettling = errors.New("turn is settling")
+	errStopped      = errors.New("stopped before Pi took the turn")
+)
 
 type turnSink interface {
 	DeliveryDone(context.Context, contract.DeliverySeq) error
@@ -22,13 +26,22 @@ type Runner struct {
 	Harness  harness.Harness
 	Sink     turnSink
 	Setup    func(context.Context) error
-	Model    contract.ModelChoice // the model Pi last applied; the box.hello model at first
 	setupErr error
-	mu       sync.Mutex
-	active   contract.TurnID
-	settling bool
-	sent     map[contract.DeliverySeq]struct{}
-	errors   chan error
+	// What the last transfer applied. Both start empty, so a new Pi process runs its transfer on the first turn:
+	// box.hello started Pi on the session's profile, and only Pi knows whether the conversation fits that model.
+	model         contract.ModelChoice
+	compactTokens int
+	mu            sync.Mutex
+	active        contract.TurnID
+	settling      bool
+	sent          map[contract.DeliverySeq]struct{}
+	errors        chan error
+	// A transfer can take minutes, and a stop must reach it, so the channel keeps reading while it runs.
+	ready        chan struct{}        // closes when Pi accepts the active turn
+	transferring bool                 // Pi is preparing the turn and has not taken its inputs
+	stopped      bool                 // a stop arrived while transferring
+	holding      bool                 // steers wait in held until Pi accepts the turn
+	held         []contract.TurnSteer // in arrival order
 }
 
 func (r *Runner) Errors() <-chan error {
@@ -54,12 +67,23 @@ func (r *Runner) Handle(ctx context.Context, message contract.BoxMessage) error 
 		return r.steer(ctx, m)
 	case contract.TurnStop:
 		r.mu.Lock()
-		active := r.active == m.Turn
-		r.mu.Unlock()
-		if active {
-			return r.Harness.Abort(ctx)
+		active, transferring, ready := r.active == m.Turn, r.transferring, r.ready
+		if active && transferring {
+			r.stopped = true
 		}
-		return nil
+		r.mu.Unlock()
+		if !active {
+			return nil
+		}
+		if !transferring {
+			// Pi can only stop a turn it has accepted.
+			select {
+			case <-ready:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return r.Harness.Abort(ctx)
 	default:
 		return fmt.Errorf("unsupported box message")
 	}
@@ -96,14 +120,16 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 	if active != "" {
 		return nil
 	}
+	ready := make(chan struct{})
 	r.mu.Lock()
 	r.active = start.Turn
+	r.ready = ready
 	r.sent = make(map[contract.DeliverySeq]struct{}, len(pending))
 	for _, input := range pending {
 		r.sent[input.Delivery] = struct{}{}
 	}
 	r.mu.Unlock()
-	ready := make(chan struct{})
+	transferring := make(chan struct{})
 	var readyOnce sync.Once
 	started := func() { readyOnce.Do(func() { close(ready) }) }
 	go func() {
@@ -111,39 +137,67 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 		var result contract.TurnEnded
 		var err error
 		cause := contract.CauseHarnessFailed
-		// A running turn keeps its model, and a plain reconnect changes nothing. The next turn applies a changed model.
-		// A turn that resumes after a box restart runs on the session's current profile, because box.hello starts Pi on it.
-		applyModel := func() error {
-			if start.Model.ID == "" || start.Model == r.Model {
+		// A running turn keeps its model, and a plain reconnect changes nothing. The next turn applies a change, and a
+		// compaction trigger is part of one because Pi took the old one as a process argument.
+		transfer := func() error {
+			if start.Model.ID == "" || (start.Model == r.model && start.CompactTokens == r.compactTokens) {
 				return nil
 			}
-			if err := r.Harness.SetModel(ctx, start.Model); err != nil {
+			r.mu.Lock()
+			r.transferring, r.holding = true, true
+			r.mu.Unlock()
+			close(transferring)
+			moved, err := r.Harness.TransferModel(ctx, start.Turn, start.Model, start.CompactTokens)
+			if errors.Is(err, harness.ErrRefused) {
 				cause = contract.CauseSetModelFailed
+			}
+			if err != nil {
 				return err
 			}
-			r.Model = start.Model
+			log.Printf("model transfer to %s: %s, %d to %d tokens. %s", start.Model.ID, moved.Path, moved.TokensBefore, moved.TokensAfter, moved.Reason)
+			if moved.Path != harness.TransferAborted {
+				r.model, r.compactTokens = start.Model, start.CompactTokens
+			}
 			return nil
 		}
 		prepare := func() error {
-			if err := applyModel(); err != nil {
+			if err := transfer(); err != nil {
 				return err
 			}
-			return r.Harness.SetPromptSections(ctx, start.Sections)
+			if err := r.Harness.SetPromptSections(ctx, start.Sections); err != nil {
+				return err
+			}
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			r.transferring = false
+			if r.stopped {
+				return errStopped
+			}
+			return nil
+		}
+		var flushing sync.WaitGroup
+		accepted := func() {
+			started()
+			flushing.Go(func() { r.flushHeld(ctx) })
 		}
 		if len(pending) > 0 {
 			if err = prepare(); err == nil {
-				result, err = r.Harness.Start(ctx, start.Turn, pending, started)
+				result, err = r.Harness.Start(ctx, start.Turn, pending, accepted)
 			}
 		} else {
 			var settled bool
 			result, settled, err = r.Harness.Recover(start.Turn, start.Inputs)
 			if err == nil && !settled {
 				if err = prepare(); err == nil {
-					result, err = r.Harness.Continue(ctx, start.Turn, started)
+					result, err = r.Harness.Continue(ctx, start.Turn, accepted)
 				}
 			}
 		}
-		if err != nil {
+		flushing.Wait()
+		if errors.Is(err, errStopped) {
+			// Pi never saw the inputs, so they wait for the next turn instead of counting as read.
+			result = contract.TurnEnded{Turn: start.Turn, Outcome: contract.TurnOutcome("stopped"), Cause: contract.CauseNotStarted}
+		} else if err != nil {
 			result = contract.TurnEnded{Turn: start.Turn, Outcome: contract.TurnOutcome("failed"), Error: err.Error(), Cause: cause}
 		}
 		r.mu.Lock()
@@ -159,8 +213,31 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 	select {
 	case <-ready:
 		return nil
+	case <-transferring:
+		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+// flushHeld sends the steers that waited for Pi to accept the turn, in order, and then stops holding.
+func (r *Runner) flushHeld(ctx context.Context) {
+	for {
+		r.mu.Lock()
+		if len(r.held) == 0 {
+			r.holding = false
+			r.mu.Unlock()
+			return
+		}
+		next := r.held[0]
+		r.held = r.held[1:]
+		r.mu.Unlock()
+		if err := r.forward(ctx, next); err != nil {
+			select {
+			case r.errors <- err:
+			default:
+			}
+		}
 	}
 }
 
@@ -182,7 +259,17 @@ func (r *Runner) steer(ctx context.Context, input contract.TurnSteer) error {
 		return nil
 	}
 	r.sent[input.Input.Delivery] = struct{}{}
+	if r.holding {
+		r.held = append(r.held, input)
+		r.mu.Unlock()
+		return nil
+	}
 	r.mu.Unlock()
+	return r.forward(ctx, input)
+}
+
+func (r *Runner) forward(ctx context.Context, input contract.TurnSteer) error {
+	var err error
 	switch input.Queue {
 	case contract.QueueSteer:
 		err = r.Harness.Steer(ctx, input.Input)
@@ -224,6 +311,7 @@ func (r *Runner) finish(ctx context.Context, result contract.TurnEnded) error {
 	r.active = ""
 	r.settling = false
 	r.sent = nil
+	r.transferring, r.stopped, r.holding, r.held = false, false, false, nil
 	r.mu.Unlock()
 	return nil
 }
