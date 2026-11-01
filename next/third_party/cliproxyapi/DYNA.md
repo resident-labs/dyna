@@ -23,7 +23,7 @@ Each later patch to this folder must be its own commit. Each patch must add an e
 - Shared OAuth/key staging hook: 7 product lines added, 1 removed. Both creation paths use the same disabled staging boundary; the upstream search for staged OAuth activation remains the same as above.
 - Non-Codex completion adoption: 18 product lines added, 5 removed. It verifies the disabled runtime grant before the completion notification. The 2026-10-31 upstream OAuth adoption search found PR #4734 for Codex recovery, not this private handoff. A build-tagged test bridge joins the real management status and Dyna RPC paths without entering production builds.
 - OAuth completion notification: 11 product lines added. A private hook tells the engine when a saved OAuth session completes, so unpolled attempts cannot leave a routable orphan. The 2026-10-31 upstream searches found no fitting completion hook; PR #6715 adds a Codex login route rather than a store handoff.
-- Private credential discovery and typed runtime status: 83 product lines added. The SDK exposes pathless credentials and bounded numeric quota signals to the local adapter. `RequiresSignIn` is runtime-only, so an unverified credential stays unknown. Upstream issue #4585 confirms file-path listing gaps; #6201 remains open, and no checked upstream patch covers this adapter.
+- Private credential discovery and typed runtime status: 83 product lines added. The SDK exposes pathless credentials to the local adapter. `RequiresSignIn` is runtime-only, so an unverified credential stays unknown. Upstream issue #4585 confirms file-path listing gaps; #6201 remains open, and no checked upstream patch covers this adapter.
 
 - Atomic OAuth grant replacement for existing credentials: 69 product lines added and 4 removed, plus regression tests. It uses the existing per-auth mutation gate and registration epoch to discard refreshes from an older grant, while preserving upstream partition merges. The existing request-info seam carries raw new-grant identity captured before upstream merges old metadata, so Dyna can reject a missing or different identity without skipping that merge. `engine/model` uses it for safe account reconnect. The upstream search on 2026-10-31 found issue #6288 on retry and #4945 on relogin metadata, but no matching atomic refresh-versus-login patch; upstream #4734 addresses targeted Codex recovery.
 
@@ -52,6 +52,8 @@ Each later patch to this folder must be its own commit. Each patch must add an e
 - OpenCode Go usage reader: 50 product lines added, 5 removed, plus 54 test lines. It serves `engine/model` from `/zen/go/v1/usage` with no workspace header. `rate-limited` counts as 100%, and a 403 means no Go subscription, so it reads as unknown and not as a bad key.
 
 - Meta usage reader: 33 product lines added, plus 52 test lines. It serves `engine/model` from the signals the #6467 patch records, with no request, because Meta has no usage endpoint. An account stays unknown until it serves a request. A window past its reset is stale, so it drops out rather than reading 0.
+
+- Removal of the passive Codex quota signals from `DynaCredentials`: 40 product lines and a test removed from the patch above. `engine/model` now reads every provider through `auth-files/quota`, so nothing reads them.
 
 ## Pulls
 
