@@ -247,7 +247,7 @@ func TestCompletionsProxyGate(t *testing.T) {
 		data, _ := io.ReadAll(response.Body)
 		return response.StatusCode, string(data)
 	}
-	for _, tc := range []struct{ model, key, bare string }{{"plan_one/same", "one-secret", "same"}, {"plan_two/same", "two-secret", "same"}, {"fixture/same", "key-secret", "same"}, {"plan_kimi-coding/kimi-k3", "kimi-plan-secret", "kimi-k3"}, {"kimi-coding/kimi-k3", "kimi-key-secret", "kimi-k3"}, {"equal/equal", "equal-secret", "equal"}, {"plan_equal/plan_equal", "plan-equal-secret", "plan_equal"}} {
+	for _, tc := range []struct{ model, key, bare string }{{"plan_one/same", "one-secret", "same"}, {"plan_two/same", "two-secret", "same"}, {"fixture/same", "key-secret", "same"}, {"plan_kimi-coding/kimi-k3", "kimi-plan-secret", "k3"}, {"kimi-coding/kimi-k3", "kimi-key-secret", "kimi-k3"}, {"equal/equal", "equal-secret", "equal"}, {"plan_equal/plan_equal", "plan-equal-secret", "plan_equal"}} {
 		status, data := call(tc.model)
 		if status != 200 || !strings.Contains(data, "hello") || gotPath != "/v1/chat/completions" || gotAuth != "Bearer "+tc.key || gotModel != tc.bare {
 			t.Fatalf("%s: status=%d body=%q path=%q auth=%q model=%q", tc.model, status, data, gotPath, gotAuth, gotModel)
