@@ -267,7 +267,7 @@ func TestRenderFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"worker: its box is lost and its turn is not running", "deep (under lead, which cannot take this): its box failed; session restart replaces it (start_failed)", "writer: its turn failed", "(model_failed)"} {
+	for _, want := range []string{"worker: its box is lost and its turn is not running", "deep (under lead, which cannot take this): its box failed; session restart discards unpushed work (start_failed)", "writer: its turn failed", "(model_failed)"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in %s", want, text)
 		}
