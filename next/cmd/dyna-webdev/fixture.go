@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -25,7 +26,7 @@ func fixtureTurns() []contract.TranscriptTurn {
 		"Check whether the hint wraps on narrow screens.",
 	}
 	tools := []struct{ name, input, output string }{
-		{"bash", "rg -n 'syncStatus|SyncStatus' src test", "src/sync/status.ts:18:export function syncStatus\nsrc/ui/SyncBanner.tsx:24: const status = syncStatus(result)"},
+		{"grep", "syncStatus|SyncStatus", "src/sync/status.ts:18:export function syncStatus\nsrc/ui/SyncBanner.tsx:24: const status = syncStatus(result)"},
 		{"read", "src/sync/status.ts", "return result.ok ? 'ready' : 'failed';"},
 		{"edit", "src/ui/SyncBanner.tsx", "- Sync failed\n+ Sync failed. Check your connection. It is safe to try again."},
 		{"bash", "npm test -- sync-status.test.ts", "Test Files  1 passed (1)\nTests       3 passed (3)"},
@@ -42,13 +43,23 @@ func fixtureTurns() []contract.TranscriptTurn {
 		for j, tool := range tools {
 			at := start.Add(time.Duration(j+1) * 10 * time.Second)
 			done := at.Add(time.Second)
-			item := contract.TranscriptItem{ID: fmt.Sprintf("%s-tool-%d", id, j), Turn: id, Kind: contract.TranscriptTool, At: at, Ended: &done, Tool: tool.name, Arguments: tool.input, Output: tool.output}
+			key := "path"
+			if tool.name == "bash" {
+				key = "command"
+			} else if tool.name == "grep" {
+				key = "pattern"
+			}
+			args, _ := json.Marshal(map[string]string{key: tool.input})
+			item := contract.TranscriptItem{ID: fmt.Sprintf("%s-tool-%d", id, j), Turn: id, Kind: contract.TranscriptTool, At: at, Ended: &done, Tool: tool.name, Arguments: string(args), Output: tool.output}
+			if tool.name == "edit" {
+				item.Diff = tool.output
+			}
 			if i == 10 && j == 3 {
 				item.Failed = true
 				item.Output = "Layout check failed: the test browser could not start."
 			}
 			if i == 11 && j == 3 {
-				item.Arguments = "npm run test:layout -- --width 320"
+				item.Arguments = `{"command":"npm run test:layout -- --width 320"}`
 				item.Output = "Checking sync banner…"
 				item.Ended = nil
 			}
