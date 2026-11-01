@@ -25,13 +25,6 @@ var sqlCallNames = map[string]bool{
 	"Exec":            true,
 }
 
-// sqlAllowlist holds today's SQL calls per file, outside engine/store. Each
-// entry counts calls, not lines, so edits nearby do not break it. A count
-// lowers as M3 moves calls into the store; a count never rises.
-var sqlAllowlist = map[string]int{
-	"engine/turn_api.go": 4,
-}
-
 // sqlCall is one SQL call found in a file.
 type sqlCall struct {
 	file string
@@ -39,30 +32,14 @@ type sqlCall struct {
 	name string
 }
 
-// TestSQLCallsStayInStore keeps raw SQL calls inside next/engine/store. A new
-// SQL call outside the store fails the test, and so does a file whose count
-// drops without its allowlist entry going down.
+// TestSQLCallsStayInStore keeps raw SQL and database/sql imports inside engine/store.
 func TestSQLCallsStayInStore(t *testing.T) {
 	calls, err := sqlCallsOutsideStore(".")
 	if err != nil {
 		t.Fatal(err)
 	}
-	byFile := map[string][]sqlCall{}
 	for _, c := range calls {
-		byFile[c.file] = append(byFile[c.file], c)
-	}
-	for file, found := range byFile {
-		allowed := sqlAllowlist[file]
-		if len(found) > allowed {
-			for _, c := range found {
-				t.Errorf("%s:%d: %s call; the allowlist allows %d in this file. Add a store method in next/engine/store instead.", c.file, c.line, c.name, allowed)
-			}
-		}
-	}
-	for file, allowed := range sqlAllowlist {
-		if n := len(byFile[file]); n < allowed {
-			t.Errorf("%s has %d SQL calls; lower its sqlAllowlist entry from %d to %d.", file, n, allowed, n)
-		}
+		t.Errorf("%s:%d: %s outside engine/store", c.file, c.line, c.name)
 	}
 }
 

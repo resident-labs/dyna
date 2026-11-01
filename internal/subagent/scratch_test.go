@@ -64,7 +64,7 @@ func TestSessionTurnTemporaryFolderIsOnDisk(t *testing.T) {
 	}
 }
 
-func TestSessionTurnStartsWithScratchUnavailable(t *testing.T) {
+func TestSessionTurnReportsScratchUnavailable(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("DYNA_SCRATCH", "/stale/parent")
 	p := fakeworker.InstallClaude(t, `if [ "${DYNA_SCRATCH+x}" = x ]; then printf stale; else printf done; fi`)
@@ -82,7 +82,7 @@ func TestSessionTurnStartsWithScratchUnavailable(t *testing.T) {
 	e.joinRunners()
 	info, turn := e.start("scratch is unavailable")
 	_, done := e.wait(info.ID, turn.N)
-	if done.Error != "" || done.Result != "done" {
-		t.Fatalf("turn did not run without scratch: %+v", done)
+	if !strings.Contains(done.Error, "prepare session scratch: scratch root must be a real directory") {
+		t.Fatalf("turn did not report the scratch failure: %+v", done)
 	}
 }

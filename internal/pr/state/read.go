@@ -130,6 +130,13 @@ CREATE INDEX IF NOT EXISTS pr_rows_reviewer_session ON pr_rows(room, json_extrac
 CREATE INDEX IF NOT EXISTS pr_rows_reviewer_override ON pr_rows(room, json_extract(body,'$.record.reviewerOverride'));`)
 		return err
 	})
+	if err != nil {
+		return db, err
+	}
+	err = database.Migrate(db, "pr.open-index", 1, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(context.Background(), "CREATE INDEX IF NOT EXISTS pr_rows_open ON pr_rows(closed) WHERE closed=0")
+		return err
+	})
 	return db, err
 }
 
@@ -793,6 +800,8 @@ func normalizeState(st *State) {
 // OpenTrackedCheckout reports whether an open tracked change uses a path
 // inside the worktree. An unreadable record keeps the tree rather than losing
 // the checkout that the change needs.
+const openTrackedCheckoutQuery = "SELECT body FROM pr_rows WHERE closed=0"
+
 func OpenTrackedCheckout(ctx context.Context, root, tree string) (bool, error) {
 	db, err := open(root)
 	if err != nil {
@@ -800,7 +809,7 @@ func OpenTrackedCheckout(ctx context.Context, root, tree string) (bool, error) {
 	}
 	found := false
 	err = appstate.For(db).Read(ctx, func(r appstate.Reader) error {
-		rows, err := r.QueryContext(ctx, "SELECT body FROM pr_rows WHERE closed=0")
+		rows, err := r.QueryContext(ctx, openTrackedCheckoutQuery)
 		if err != nil {
 			return err
 		}

@@ -908,6 +908,23 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 	if machineErr == nil {
 		diskBlock = machine.DiskBlock()
 	}
+	// Available memory already reflects work running at the probe. Account for
+	// later launches separately until the next probe sees their memory use.
+	availableMiB := int64(machine.Load.MemAvailable / (1 << 20))
+	availableKnown := machineErr == nil && machine.Load.MemTotal > 0
+	if availableKnown {
+		// On small nodes, leave at most one quarter for the node itself.
+		availableMiB -= min(int64(2048), int64(machine.Load.MemTotal/(1<<20))/4)
+		for _, job := range q.running {
+			if !job.Started.Before(machine.LastProbe) && job.Lane != LaneQuick {
+				availableMiB -= jobDemand(job, machine).MemoryMiB
+			}
+		}
+		// Check rows do not record admission time, so reserve them until release.
+		for _, row := range q.heldRows {
+			availableMiB -= row.MemoryMiB
+		}
+	}
 	var writes []rowWrite
 	for index, unit := range ordered {
 		d := unit.demand
@@ -972,6 +989,8 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 			why = fmt.Sprintf("asks %d CPUs, %d free", d.CPUs, max(freeCPUs, 0))
 		case unit.lane != LaneQuick && memoryKnown && d.MemoryMiB > freeMemMiB:
 			why = fmt.Sprintf("asks %s, %s free", MemoryLabel(d.MemoryMiB), MemoryLabel(max(freeMemMiB, 0)))
+		case unit.lane != LaneQuick && availableKnown && min(d.MemoryMiB, max(1, int64(machine.Load.MemTotal/(1<<20))/2)) > availableMiB:
+			why = fmt.Sprintf("asks %s, %s available after node headroom", MemoryLabel(d.MemoryMiB), MemoryLabel(max(availableMiB, 0)))
 		case !unit.isJob && port < 0:
 			why = "all check ports in use"
 		}
@@ -981,6 +1000,7 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 			} else {
 				held.cpus += d.CPUs
 				held.memMiB += d.MemoryMiB
+				availableMiB -= d.MemoryMiB
 			}
 			if d.Heavy {
 				held.heavy++
@@ -1060,6 +1080,9 @@ func waitingText(why string, position, total int) string {
 // job's own request, so an unprobed node still takes work.
 func jobDemand(job Job, machine machines.Machine) Demand {
 	resources := ClampResources(job.Host, job.CPUs, job.MemoryMiB, MachineFacts(machine))
+	if job.Host && job.MemoryMiB == 0 {
+		resources.MemoryMiB = min(resources.MemoryMiB, 1024)
+	}
 	return Demand{Node: job.Node, ID: job.ID, Room: job.RoomID, Heavy: job.Heavy, CPUs: resources.CPUs, MemoryMiB: resources.MemoryMiB}
 }
 

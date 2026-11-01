@@ -42,11 +42,14 @@ func TestRunPhasesPreserveTotalsAndHideRequestValues(t *testing.T) {
 	q.recordPhase(caller, RunWatchSnapshot, false)
 	q.recordPhase(caller, RunCancellation, false)
 	q.recordPhase(caller, RunOther, true)
+	q.recordPhase(caller, RunMainRecheck, false)
+	q.recordPhase(caller, RunMergeTrial, true)
 	now = now.Add(window)
 	q.recordPhase("graphql", RunOther, false)
-	if len(lines) != 2 || !strings.Contains(lines[0], "runs-head-sha 2") ||
+	if len(lines) != 3 || !strings.Contains(lines[0], "runs-head-sha 3") ||
 		!strings.Contains(lines[1], "snapshot 1 counted 0 free; cancellation 1 counted 0 free") ||
 		!strings.Contains(lines[1], "other 0 counted 1 free") ||
+		!strings.Contains(lines[2], "main-recheck 1 counted 0 free; merge-trial 0 counted 1 free") ||
 		strings.Contains(strings.Join(lines, " "), "secret") || strings.Contains(strings.Join(lines, " "), "private") {
 		t.Fatalf("unexpected quota summaries: %v", lines)
 	}
@@ -77,11 +80,46 @@ func TestGHQuotaCallerLabelsKnownEndpointsNotOther(t *testing.T) {
 		"repos/owner/repo/issues/12/comments?since=x":    "issue-comments",
 		"repos/owner/repo/compare/aaaa1111...bbbb2222":   "compare",
 		"repos/owner/repo/actions/artifacts/4242/zip":    "artifact-zip",
-		"repos/owner/repo/git/refs/heads/feature":        "other",
+		"repos/owner/repo/git/refs/heads/feature":        "git-refs",
 	}
 	for path, want := range cases {
 		if got := ghQuotaCaller(path); got != want {
 			t.Errorf("ghQuotaCaller(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+// Rankings include every recorded class and never expose path values.
+func TestQuotaRanksAllSafeEndpointClasses(t *testing.T) {
+	paths := map[string]string{
+		"repos/private/hidden":                       "repository",
+		"repos/private/hidden/releases/tags/token":   "releases",
+		"repos/private/hidden/actions/secrets/token": "actions-secrets",
+		"repos/private/hidden/git/refs/heads/token":  "git-refs",
+		"repos/private/hidden/mystery/token":         "repo-other",
+		"orgs/private/members/token":                 "orgs",
+		"users/private/repos":                        "users",
+		"user":                                       "user",
+		"search/issues?q=token":                      "search",
+		"unknown/private/token":                      "rest-other",
+	}
+	counted := map[string]int{}
+	for path, want := range paths {
+		got := ghQuotaCaller(path)
+		if got != want {
+			t.Errorf("class for %q = %q, want %q", path, got, want)
+		}
+		counted[got]++
+	}
+	summary := countedCallers(counted)
+	for _, label := range paths {
+		if !strings.Contains(summary, label+" 1") {
+			t.Errorf("missing %s in %s", label, summary)
+		}
+	}
+	for _, secret := range []string{"private", "hidden", "token"} {
+		if strings.Contains(summary, secret) {
+			t.Errorf("unsafe summary: %s", summary)
 		}
 	}
 }

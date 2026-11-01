@@ -81,8 +81,7 @@ func (s *Store) deliveryRooms() *room.Store {
 	return &room.Store{Root: filepath.Join(filepath.Dir(s.root()), "rooms")}
 }
 
-// sessionClaims reads every delivery row of one session in its room, which is
-// what the whole queue blob held before.
+// sessionClaims reads the delivery rows that contribute to claim state.
 func sessionClaims(rooms *room.Store, meta Meta) (deliveryClaims, error) {
 	return claimsRows(rooms, meta.RoomID, meta.ID, meta.Address())
 }
@@ -93,7 +92,7 @@ func claimsRows(rooms *room.Store, roomID, sessionID, addr string) (deliveryClai
 	if rooms == nil {
 		return claimsFromList(nil), nil
 	}
-	rows, err := rooms.SessionDeliveryRows(roomID, room.DeliveryKeys(sessionID, addr))
+	rows, err := rooms.SessionClaimRows(roomID, room.DeliveryKeys(sessionID, addr))
 	if err != nil {
 		return deliveryClaims{}, err
 	}

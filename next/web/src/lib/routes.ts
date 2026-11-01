@@ -4,5 +4,5 @@ export const settingsPanes = [
   { id: "accounts", label: "Accounts", icon: "plug", admin: true },
   { id: "profiles", label: "Profiles", icon: "tool", admin: true },
 ] as const;
-export const roomRoute = /^\/r\/([^/]+)(?:\/s\/([^/]+))?\/?$/;
+export const roomRoute = /^\/r\/([^/]+)(?:\/s\/([^/]+)|\/instructions)?\/?$/;
 export const settingsRoute = /^\/settings(\/|$)/;

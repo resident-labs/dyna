@@ -140,7 +140,7 @@ case "$suite" in
         if (!path) throw new Error(`Unable to provision ${tool}`);
       }
     '
-    npm test --workspace=@earendil-works/pi-coding-agent -- --maxWorkers=2 --reporter=default --reporter=junit --outputFile="${JUNIT_REPORT_PATH:-$RUNNER_TEMP/next-pi-test.xml}"
+    npm test --workspace=@earendil-works/pi-coding-agent -- --maxWorkers="${PI_TEST_WORKERS:-2}" --reporter=default --reporter=junit --outputFile="${JUNIT_REPORT_PATH:-$RUNNER_TEMP/next-pi-test.xml}"
     npm --prefix packages/ai test -- anthropic-mid-conversation-effort.test.ts
     PI_PACK_SKIP_BUILD=1 bash scripts/pi-pack.sh "$RUNNER_TEMP/next-pi-fork.tgz"
     ;;

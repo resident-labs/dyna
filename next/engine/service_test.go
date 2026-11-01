@@ -85,9 +85,6 @@ func testChannel(t *testing.T, s *Service, ctx context.Context, caller contract.
 type fakeProfiles struct{}
 
 func (fakeProfiles) List() []contract.ProfileSummary { return nil }
-func (fakeProfiles) Surface(contract.ProfileName) contract.AgentSurface {
-	return contract.AgentSurfaceOff
-}
 
 func (fakeProfiles) CompactionTokens(contract.ProfileName) int { return 0 }
 
