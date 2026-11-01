@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -316,9 +317,9 @@ func (r *deleteRig) fillRoom(t *testing.T, ctx context.Context, room contract.Ro
 			`INSERT INTO client_replays(method,caller_kind,caller_id,client_id,ref,created_at) VALUES('session.start','owner','','key1',?2,0)`,
 			`INSERT INTO client_replays(method,caller_kind,caller_id,client_id,ref,created_at) VALUES('op.submit','session',?2,'key2','op_delete',0)`,
 			`INSERT INTO room_shared(room,host,bytes,measured_at) VALUES(?1,'host',1,0)`,
-			`INSERT INTO host_rooms(host,room) VALUES('host',?1)`,
+			`INSERT INTO host_rooms(host,room) VALUES('host',?1),('host',?3)`,
 		} {
-			if _, err := tx.ExecContext(ctx, statement, room, worker); err != nil {
+			if _, err := tx.ExecContext(ctx, statement, room, worker, other); err != nil {
 				return fmt.Errorf("%s: %w", statement, err)
 			}
 		}
@@ -336,8 +337,8 @@ func TestRoomDeleteRemovesEveryRowAndFolder(t *testing.T) {
 	r.fillRoom(t, ctx, room, worker, other)
 	err := r.st.Write(ctx, func(tx *sql.Tx) error {
 		for _, statement := range []string{
-			`INSERT INTO accounts(id,proxy_id,provider,label) VALUES('only','p1','claude','only'),('both','p2','claude','both')`,
-			`INSERT INTO account_rooms(account,room) VALUES('only',?1),('both',?1),('both',?2)`,
+			`INSERT INTO accounts(id,proxy_id,provider,label) VALUES('open','p1','claude','open'),('both','p2','claude','both')`,
+			`INSERT INTO account_rooms(account,room) VALUES('both',?1),('both',?2)`,
 		} {
 			if _, err := tx.ExecContext(ctx, statement, room, other); err != nil {
 				return err
@@ -353,10 +354,7 @@ func TestRoomDeleteRemovesEveryRowAndFolder(t *testing.T) {
 	}
 	sessions := r.count(t, ctx, "SELECT count(*) FROM session_search")
 	crossed := r.count(t, ctx, "SELECT count(*) FROM deliveries WHERE to_id=?", otherWorker)
-	response := r.delete(t, ctx, room)
-	if strings.Join([]string{string(response.OpenedAccounts[0]), string(response.OpenedHosts[0])}, " ") != "only host" || len(response.OpenedAccounts) != 1 {
-		t.Fatalf("%+v", response)
-	}
+	r.delete(t, ctx, room)
 	r.settle(t, ctx, room)
 	r.assertGone(t, ctx, room, root, worker)
 
@@ -371,6 +369,9 @@ func TestRoomDeleteRemovesEveryRowAndFolder(t *testing.T) {
 	}
 	if n := r.count(t, ctx, "SELECT count(*) FROM account_rooms WHERE account='both' AND room=?", other); n != 1 {
 		t.Errorf("the other room's link: %d", n)
+	}
+	if n := r.count(t, ctx, "SELECT count(*) FROM host_rooms WHERE host='host' AND room=?", other); n != 1 {
+		t.Errorf("the host's other room: %d", n)
 	}
 	var defaultRoom contract.RoomID
 	if err := r.st.Read().QueryRowContext(ctx, "SELECT default_room FROM repos WHERE repo='owner/both'").Scan(&defaultRoom); err != nil || defaultRoom != other {
@@ -391,6 +392,197 @@ func TestRoomDeleteRemovesEveryRowAndFolder(t *testing.T) {
 	if _, e := r.s.RoomList(ctx, deleteOwner, contract.RoomListRequest{}); e != nil {
 		t.Fatal(e)
 	}
+}
+
+// limitRoom adds an account and a host whose limits hold exactly these rooms.
+func (r *deleteRig) limitRoom(t *testing.T, ctx context.Context, name string, rooms ...contract.RoomID) {
+	t.Helper()
+	if err := r.st.AddHost(ctx, box.Host{Name: contract.HostName(name), State: box.HostReady, CheckedAt: time.Unix(1000, 0), Rooms: rooms}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.st.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT INTO accounts(id,proxy_id,provider,label) VALUES(?1,?1,'claude',?1)", name)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.st.SetAccountRooms(ctx, contract.AccountID(name), rooms); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (r *deleteRig) refused(t *testing.T, ctx context.Context, room contract.RoomID, accounts []contract.AccountID, hosts []contract.HostName, names ...string) {
+	t.Helper()
+	_, e := r.s.RoomDelete(ctx, deleteOwner, contract.RoomDeleteRequest{Room: room, Discard: true})
+	if e == nil || e.Code != contract.ErrRoomLimited || e.Limited == nil {
+		t.Fatalf("got %+v", e)
+	}
+	if !slices.Equal(e.Limited.Accounts, accounts) || !slices.Equal(e.Limited.Hosts, hosts) {
+		t.Fatalf("limited: %+v", e.Limited)
+	}
+	for _, name := range names {
+		if !strings.Contains(e.Message, name) {
+			t.Fatalf("%q does not name %s", e.Message, name)
+		}
+	}
+}
+
+func TestRoomDeleteRefusesToWidenALimit(t *testing.T) {
+	account := []contract.AccountID{"limited"}
+	host := []contract.HostName{"limited"}
+	for _, tc := range []struct {
+		name     string
+		accounts []contract.AccountID
+		hosts    []contract.HostName
+	}{{"account only", account, nil}, {"host only", nil, host}, {"both", account, host}} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, ctx := newDeleteRig(t)
+			room, _, worker := r.room(t, ctx, "room")
+			other, _, _ := r.room(t, ctx, "other")
+			r.limitRoom(t, ctx, "limited", room, other)
+			// Each limit starts safe; the case narrows one or both to this room alone.
+			if tc.accounts != nil {
+				if err := r.st.SetAccountRooms(ctx, "limited", []contract.RoomID{room}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.hosts != nil {
+				if err := r.st.Write(ctx, func(tx *sql.Tx) error {
+					_, err := tx.ExecContext(ctx, "DELETE FROM host_rooms WHERE host='limited' AND room=?", other)
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var names []string
+			if tc.accounts != nil {
+				names = append(names, "account limited")
+			}
+			if tc.hosts != nil {
+				names = append(names, "host limited")
+			}
+			events := r.count(t, ctx, "SELECT count(*) FROM events WHERE room=?", room)
+			r.refused(t, ctx, room, tc.accounts, tc.hosts, names...)
+			if n := r.count(t, ctx, "SELECT count(*) FROM rooms WHERE id=? AND state='open'", room); n != 1 {
+				t.Fatal("a refused delete changed the room")
+			}
+			if n := r.count(t, ctx, "SELECT count(*) FROM events WHERE room=?", room); n != events {
+				t.Fatal("a refused delete left an event")
+			}
+			if n := r.count(t, ctx, "SELECT count(*) FROM boxes WHERE session=? AND want='discard'", worker); n != 0 {
+				t.Fatal("a refused delete closed a session")
+			}
+			// After the owner changes the limit, the delete runs and the limit keeps its other room.
+			if err := r.st.SetAccountRooms(ctx, "limited", []contract.RoomID{other}); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.st.Write(ctx, func(tx *sql.Tx) error {
+				_, err := tx.ExecContext(ctx, "UPDATE OR IGNORE host_rooms SET room=?1 WHERE host='limited'", other)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			r.delete(t, ctx, room)
+			r.settle(t, ctx, room)
+			if n := r.count(t, ctx, "SELECT count(*) FROM account_rooms WHERE account='limited' AND room=?", other); n != 1 {
+				t.Fatalf("account limit: %d", n)
+			}
+			if n := r.count(t, ctx, "SELECT count(*) FROM host_rooms WHERE host='limited' AND room=?", other); n != 1 {
+				t.Fatalf("host limit: %d", n)
+			}
+		})
+	}
+}
+
+func TestRoomDeleteDropsThisRoomFromASharedLimit(t *testing.T) {
+	r, ctx := newDeleteRig(t)
+	room, _, _ := r.room(t, ctx, "room")
+	other, _, _ := r.room(t, ctx, "other")
+	r.limitRoom(t, ctx, "shared", room, other)
+	r.delete(t, ctx, room)
+	r.settle(t, ctx, room)
+	for table, query := range map[string]string{
+		"account_rooms": "SELECT count(*) FROM account_rooms WHERE account='shared'",
+		"host_rooms":    "SELECT count(*) FROM host_rooms WHERE host='shared'",
+	} {
+		if n := r.count(t, ctx, query); n != 1 {
+			t.Errorf("%s: %d rows, want the other room's", table, n)
+		}
+	}
+	if n := r.count(t, ctx, "SELECT count(*) FROM account_rooms WHERE room=?1", room); n != 0 {
+		t.Errorf("links kept: %d", n)
+	}
+}
+
+// A deleting room still has its links, so counting them would let two deletes empty one limit.
+func TestRoomDeleteDoesNotCountADeletingRoomAsCover(t *testing.T) {
+	r, ctx := newDeleteRig(t)
+	roomA, _, _ := r.room(t, ctx, "a")
+	roomB, _, _ := r.room(t, ctx, "b")
+	r.limitRoom(t, ctx, "shared", roomA, roomB)
+	r.hosts.err = errors.New("hold the room")
+	r.delete(t, ctx, roomA)
+	r.refused(t, ctx, roomB, []contract.AccountID{"shared"}, []contract.HostName{"shared"})
+	r.hosts.err = nil
+	r.settle(t, ctx, roomA)
+	r.refused(t, ctx, roomB, []contract.AccountID{"shared"}, []contract.HostName{"shared"})
+}
+
+// The check runs in the write that sets deleting. This limit commits while the delete waits for the writer, after any read the
+// delete could have made outside its transaction, so only a check inside it sees the limit.
+func TestRoomDeleteRechecksLimitsInItsTransaction(t *testing.T) {
+	r, ctx := newDeleteRig(t)
+	room, _, _ := r.room(t, ctx, "room")
+	if err := r.st.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT INTO accounts(id,proxy_id,provider,label) VALUES('late','late','claude','late')")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan *contract.Error, 1)
+	err := r.st.Write(ctx, func(tx *sql.Tx) error {
+		go func() {
+			_, e := r.s.RoomDelete(ctx, deleteOwner, contract.RoomDeleteRequest{Room: room, Discard: true})
+			result <- e
+		}()
+		time.Sleep(100 * time.Millisecond)
+		_, err := tx.ExecContext(ctx, "INSERT INTO account_rooms(account,room) VALUES('late',?)", room)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := <-result
+	if e == nil || e.Code != contract.ErrRoomLimited || !strings.Contains(e.Message, "account late") {
+		t.Fatalf("got %+v", e)
+	}
+	if n := r.count(t, ctx, "SELECT count(*) FROM rooms WHERE id=? AND state='open'", room); n != 1 {
+		t.Fatal("the room went into deleting")
+	}
+}
+
+// The other order: once the room is deleting, no limit can come to depend on it.
+func TestLimitsRefuseARoomBeingDeleted(t *testing.T) {
+	r, ctx := newDeleteRig(t)
+	room, _, _ := r.room(t, ctx, "room")
+	other, _, _ := r.room(t, ctx, "other")
+	r.limitRoom(t, ctx, "shared", room, other)
+	r.hosts.err = errors.New("hold the room")
+	r.delete(t, ctx, room)
+	if err := r.st.SetAccountRooms(ctx, "shared", []contract.RoomID{room}); !errors.Is(err, store.ErrRoomDeleting) {
+		t.Fatalf("account: %v", err)
+	}
+	if n := r.count(t, ctx, "SELECT count(*) FROM account_rooms WHERE account='shared'"); n != 2 {
+		t.Fatalf("a refused change lost links: %d", n)
+	}
+	if err := r.st.AddHost(ctx, box.Host{Name: "new", State: box.HostReady, CheckedAt: time.Unix(1000, 0), Rooms: []contract.RoomID{room}}); !errors.Is(err, store.ErrRoomDeleting) {
+		t.Fatalf("host: %v", err)
+	}
+	if n := r.count(t, ctx, "SELECT count(*) FROM hosts WHERE name='new'"); n != 0 {
+		t.Fatal("a refused host stayed")
+	}
+	r.hosts.err = nil
+	r.settle(t, ctx, room)
 }
 
 func TestRoomDeleteKeepsABlobAnotherRoomUses(t *testing.T) {

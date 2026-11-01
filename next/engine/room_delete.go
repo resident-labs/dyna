@@ -2,9 +2,11 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"os"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 // RoomDelete records the intent; the reconciler does the rest and resumes it after a restart (5.9).
@@ -19,13 +21,17 @@ func (s *Service) RoomDelete(ctx context.Context, caller contract.Principal, req
 	if err != nil {
 		return contract.RoomDeleteResponse{}, failure(err)
 	}
-	response, err := s.store.MarkRoomDeleting(ctx, req.Room, event)
+	var limited *store.RoomLimitedError
+	err = s.store.MarkRoomDeleting(ctx, req.Room, event)
+	if errors.As(err, &limited) {
+		return contract.RoomDeleteResponse{}, &contract.Error{Code: contract.ErrRoomLimited, Message: limited.Error(), Limited: &limited.Limited}
+	}
 	if err != nil {
 		return contract.RoomDeleteResponse{}, failure(err)
 	}
 	_ = s.StopHostexecs(ctx) // The intent is durable, and the engine's sweep retries a stop that fails here.
 	s.reconciler.Kick()
-	return response, nil
+	return contract.RoomDeleteResponse{}, nil
 }
 
 // roomWrite runs a write to the room's folder while no deletion can remove it, and refuses a room that is going or gone.

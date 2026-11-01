@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
@@ -72,14 +73,46 @@ func (s *Store) RoomsReadyToDelete(ctx context.Context) ([]contract.RoomID, erro
 		ORDER BY r.id`)
 }
 
+// RoomLimitedError refuses a deletion that would widen a limit. An empty limit means every room, so a limit
+// must keep an open room when this one goes. A room being deleted does not count, or two deletions could empty one limit.
+type RoomLimitedError struct{ Limited contract.RoomLimited }
+
+func (e *RoomLimitedError) Error() string {
+	var names []string
+	for _, account := range e.Limited.Accounts {
+		names = append(names, "account "+string(account))
+	}
+	for _, host := range e.Limited.Hosts {
+		names = append(names, "host "+string(host))
+	}
+	return "this is the only open room of " + strings.Join(names, ", ") + "; change those limits first"
+}
+
+func onlyRoomOf(ctx context.Context, tx *sql.Tx, room contract.RoomID) (contract.RoomLimited, error) {
+	var limited contract.RoomLimited
+	var err error
+	limited.Accounts, err = listIDs[contract.AccountID](ctx, tx, "SELECT l.account FROM account_rooms l WHERE l.room=?1 AND NOT EXISTS (SELECT 1 FROM account_rooms o JOIN rooms r ON r.id=o.room WHERE o.account=l.account AND o.room!=?1 AND r.state='open') ORDER BY l.account", room)
+	if err != nil {
+		return limited, err
+	}
+	limited.Hosts, err = listIDs[contract.HostName](ctx, tx, "SELECT l.host FROM host_rooms l WHERE l.room=?1 AND NOT EXISTS (SELECT 1 FROM host_rooms o JOIN rooms r ON r.id=o.room WHERE o.host=l.host AND o.room!=?1 AND r.state='open') ORDER BY l.host", room)
+	return limited, err
+}
+
 // MarkRoomDeleting records the intent and puts every open session on the close path with discard, in one write.
-// Pending operations and archive refs fall due at once, so their own sweeps end them. Those sweeps retry without the room,
-// so an outage cannot hold it. The response names the accounts and hosts that lose their only limit when the room's links go.
-func (s *Store) MarkRoomDeleting(ctx context.Context, room contract.RoomID, event contract.Event) (contract.RoomDeleteResponse, error) {
-	var response contract.RoomDeleteResponse
-	err := s.Write(ctx, func(tx *sql.Tx) error {
+// The limit check runs in this write, and SetAccountRooms and AddHost refuse a deleting room, so no limit can come to depend on the room afterwards.
+// Pending operations and archive refs fall due at once, so their own sweeps end them. Those sweeps retry without the room, so an outage cannot hold it.
+func (s *Store) MarkRoomDeleting(ctx context.Context, room contract.RoomID, event contract.Event) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
 		if err := roomOpen(ctx, tx, room); err != nil {
 			return err
+		}
+		limited, err := onlyRoomOf(ctx, tx, room)
+		if err != nil {
+			return err
+		}
+		if len(limited.Accounts)+len(limited.Hosts) > 0 {
+			return &RoomLimitedError{Limited: limited}
 		}
 		now := event.Time.UnixMilli()
 		for _, step := range []string{
@@ -94,18 +127,9 @@ func (s *Store) MarkRoomDeleting(ctx context.Context, room contract.RoomID, even
 				return err
 			}
 		}
-		if _, err := s.AppendEvent(tx, event); err != nil {
-			return err
-		}
-		var err error
-		response.OpenedAccounts, err = listIDs[contract.AccountID](ctx, tx, "SELECT account FROM account_rooms a WHERE room=?1 AND NOT EXISTS (SELECT 1 FROM account_rooms o WHERE o.account=a.account AND o.room!=?1) ORDER BY account", room)
-		if err != nil {
-			return err
-		}
-		response.OpenedHosts, err = listIDs[contract.HostName](ctx, tx, "SELECT host FROM host_rooms h WHERE room=?1 AND NOT EXISTS (SELECT 1 FROM host_rooms o WHERE o.host=h.host AND o.room!=?1) ORDER BY host", room)
+		_, err = s.AppendEvent(tx, event)
 		return err
 	})
-	return response, err
 }
 
 // SetRoomDeleteReason shows why a deletion is held.
