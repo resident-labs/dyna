@@ -1,9 +1,8 @@
 package engine
 
 import (
+	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,8 +11,6 @@ import (
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/hostexec"
 	"github.com/resident-labs/dyna/engine/store"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -125,12 +122,8 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 			}
 			if len(out) > 64<<10 {
 				rest := out[64<<10:]
-				sum := sha256.Sum256(rest)
-				name := hex.EncodeToString(sum[:])
-				if e := os.MkdirAll(s.filesDir, 0700); e != nil {
-					return contract.OpResult{Cause: contract.CauseInternal, Error: e.Error()}
-				}
-				if e := os.WriteFile(filepath.Join(s.filesDir, name), rest, 0600); e != nil {
+				name, _, e := s.saveFile(ctx, a.Room, bytes.NewReader(rest), int64(len(rest)))
+				if e != nil {
 					return contract.OpResult{Cause: contract.CauseInternal, Error: e.Error()}
 				}
 				result.OutputFile = name

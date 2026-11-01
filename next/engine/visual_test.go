@@ -6,16 +6,16 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
 
 func TestVisualReplyRequiresCurrentVersion(t *testing.T) {
 	s, room, session, ctx := setup(t)
-	s.SetFilesDir(filepath.Join(t.TempDir(), "files"))
+	s.SetLayout(box.Layout{Data: t.TempDir()})
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	author := contract.Principal{Kind: contract.PrincipalSession, Session: session}
 	req := httptest.NewRequest("POST", "/v1/files?name=card.html", bytes.NewBufferString("<title>Card</title>"))
@@ -50,7 +50,7 @@ func TestVisualReplyRequiresCurrentVersion(t *testing.T) {
 func visualReplyFixture(t *testing.T) (*Service, contract.RoomID, contract.SessionID, contract.PostResponse, context.Context) {
 	t.Helper()
 	s, roomID, root, ctx := setup(t)
-	s.SetFilesDir(filepath.Join(t.TempDir(), "files"))
+	s.SetLayout(box.Layout{Data: t.TempDir()})
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	child, problem := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: roomID, Parent: root, Name: "author", Profile: "test", Goal: "test"})
 	if problem != nil {
@@ -121,7 +121,7 @@ func TestVisualOriginalAuthorLookup(t *testing.T) {
 
 func TestVisualVersionsAndServing(t *testing.T) {
 	s, room, session, ctx := setup(t)
-	s.SetFilesDir(filepath.Join(t.TempDir(), "files"))
+	s.SetLayout(box.Layout{Data: t.TempDir()})
 	author := contract.Principal{Kind: contract.PrincipalSession, Session: session}
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	req := httptest.NewRequest("POST", "/v1/files?name=card.html", bytes.NewBufferString("<title>Card</title>"))

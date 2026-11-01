@@ -258,9 +258,9 @@ func (s *Store) TranscriptDeliveries(ctx context.Context, session contract.Sessi
 	return result, rows.Err()
 }
 
-// TranscriptSessionExists includes closed sessions in transcript history.
-func (s *Store) TranscriptSessionExists(ctx context.Context, session contract.SessionID) (bool, error) {
-	var exists bool
-	err := s.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?)", session).Scan(&exists)
-	return exists, err
+// TranscriptRoom finds a session's room, including a closed session in transcript history.
+func (s *Store) TranscriptRoom(ctx context.Context, session contract.SessionID) (contract.RoomID, error) {
+	var room contract.RoomID
+	err := s.Read().QueryRowContext(ctx, "SELECT room FROM sessions WHERE id=?", session).Scan(&room)
+	return room, err
 }
