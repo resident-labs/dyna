@@ -44,10 +44,17 @@ func (p importTestTransportProvider) RoundTripperFor(*coreauth.Auth) http.RoundT
 	return importTestTransport{p.seen}
 }
 
+func routesConfig(t *testing.T) *config.Config {
+	t.Helper()
+	cfg := &config.Config{AuthDir: t.TempDir()}
+	cfg.ForceModelPrefix = true
+	return cfg
+}
+
 func importTestRoutes(t *testing.T) (*coreauth.Manager, *cliproxy.Service, *gin.Engine) {
 	t.Helper()
 	manager := coreauth.NewManager(importTestStore{}, nil, nil)
-	service, err := cliproxy.NewBuilder().WithCoreAuthManager(manager).WithConfig(&config.Config{AuthDir: t.TempDir()}).WithConfigPath(filepath.Join(t.TempDir(), "config.yaml")).Build()
+	service, err := cliproxy.NewBuilder().WithCoreAuthManager(manager).WithConfig(routesConfig(t)).WithConfigPath(filepath.Join(t.TempDir(), "config.yaml")).Build()
 	if err != nil {
 		t.Fatal(err)
 	}

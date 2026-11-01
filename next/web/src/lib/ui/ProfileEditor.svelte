@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ModelProvider, ProfileSummary, ThinkingLevel } from "../contract.gen.ts";
-  let { profile, isNew, busy, error, save, cancel, remove }: { profile: ProfileSummary; isNew: boolean; busy: boolean; error: string; save: (profile: ProfileSummary) => void; cancel: () => void; remove: () => void } = $props();
+  import type { ProfileModel } from "../profiles.ts";
+  let { profile, models, isNew, busy, error, save, cancel, remove }: { profile: ProfileSummary; models: ProfileModel[]; isNew: boolean; busy: boolean; error: string; save: (profile: ProfileSummary) => void; cancel: () => void; remove: () => void } = $props();
   let draft = $state({ ...profile });
   let compactText = $state((profile.compactTokens ?? 0).toLocaleString(undefined, { numberingSystem: "latn" }));
   const providers: Record<ModelProvider, string> = { anthropic: "Anthropic", openai: "OpenAI-compatible" };
@@ -19,7 +20,8 @@
 <div class="editor-container"><div class="editor">
   {#if isNew}<label class="field"><span>Name</span><input bind:value={draft.name} autocomplete="off" /></label>{/if}
   <label class="field"><span>Provider</span><select bind:value={draft.provider}>{#each Object.entries(providers) as [value, label]}<option {value}>{label}</option>{/each}</select></label>
-  <label class="field"><span>Model ID</span><input bind:value={draft.model} autocomplete="off" /></label>
+  <label class="field"><span>Model ID</span><input list="profile-models" bind:value={draft.model} autocomplete="off" oninput={() => { const known = models.find(m => m.id === draft.model.trim()); if (known) draft.provider = known.provider; }} /></label>
+  <datalist id="profile-models">{#each models as model (model.id)}<option value={model.id}></option>{/each}</datalist>
   <label class="field"><span>Thinking</span><select bind:value={draft.thinking}>{#each levels as level}<option value={level.value}>{level.label}</option>{/each}</select></label>
   <div class="field ratings"><span>Ratings</span><div>
     {#each ratings as item}

@@ -313,7 +313,7 @@ Shell commands run in boxes. Node jobs are not ported; GitHub Actions runs CI on
 
 ### 5.12 Accounts page (M3)
 
-The owner manages accounts and room limits in the web app. The engine alone calls CLIProxyAPI's management API. Connect uses the proxy's OAuth or device flow; key entry passes the key to the proxy without displaying it again. Usage for every provider comes through the proxy's `auth-files/quota` readers without exposing model tokens to the engine. Typed `account.quota_low` and `account.failed` alerts are the only colored account chips. Account changes are owner-class.
+The owner manages accounts and room limits in the web app. The engine alone calls CLIProxyAPI's management API. Connect uses the proxy's OAuth or device flow; key entry passes the key to the proxy without displaying it again. The owner can add any OpenAI-compatible provider with a name, address and key, and the proxy reports each account's models, which is the list profiles choose from. Usage for every provider comes through the proxy's `auth-files/quota` readers without exposing model tokens to the engine. Typed `account.quota_low` and `account.failed` alerts are the only colored account chips. Account changes are owner-class.
 
 ### 5.13 Web design
 

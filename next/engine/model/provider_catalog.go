@@ -33,14 +33,14 @@ func OAuthProxyProvider(id contract.AccountProvider) (string, bool) {
 	return "", false
 }
 
-// AccountProviders describes the same catalog used by the connection handlers.
-func AccountProviders() []contract.AccountProviderInfo {
-	providers := make([]contract.AccountProviderInfo, 0, len(oauthProviders)+len(KeyProviders()))
+// AccountProviders describes the built-in catalog and the providers saved credentials add.
+func AccountProviders(credentials []Credential) []contract.AccountProviderInfo {
+	providers := make([]contract.AccountProviderInfo, 0, len(oauthProviders)+len(KeyPresets()))
 	for _, provider := range oauthProviders {
 		providers = append(providers, provider.info)
 	}
-	for _, provider := range KeyProviders() {
-		providers = append(providers, contract.AccountProviderInfo{ID: provider.Provider, DisplayName: provider.DisplayName, ConnectMethod: contract.ConnectKey, ConnectFlow: contract.ConnectFlowKey})
+	for _, preset := range KeyPresets() {
+		providers = append(providers, contract.AccountProviderInfo{ID: preset.Provider, DisplayName: preset.DisplayName, ConnectMethod: contract.ConnectKey, ConnectFlow: contract.ConnectFlowKey})
 	}
-	return providers
+	return append(providers, customProviders(credentials)...)
 }

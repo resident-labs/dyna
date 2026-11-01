@@ -100,6 +100,9 @@ func (s *AccountActions) runAccountAction(ctx context.Context, caller contract.P
 			if errors.Is(result.err, model.ErrReconnectUnavailable) {
 				return accountActionResult{}, &contract.Error{Code: contract.ErrReconnectUnavailable, Message: "reconnect unavailable"}
 			}
+			if errors.Is(result.err, model.ErrModelsUnavailable) {
+				return accountActionResult{}, &contract.Error{Code: contract.ErrModelsUnavailable, Message: "provider lists no models"}
+			}
 			if errors.Is(result.err, store.ErrRoomDeleting) {
 				return accountActionResult{}, failure(result.err)
 			}
@@ -132,15 +135,18 @@ func (s *AccountActions) AccountsList(ctx context.Context, caller contract.Princ
 	accounts := make([]contract.Account, len(bindings))
 	credentials, err := s.connections.Credentials(ctx)
 	states := make(map[string]model.CredentialState, len(credentials))
+	models := make(map[string][]string, len(credentials))
 	for _, credential := range credentials {
 		state := credential.State
 		if state == model.CredentialUnknown {
 			state = s.quotas.ObservedState(credential.Index)
 		}
 		states[credential.ID] = state
+		models[credential.ID] = credential.Models
 	}
 	for i, binding := range bindings {
 		accounts[i] = binding.Account
+		accounts[i].Models = models[binding.ProxyID]
 		if err == nil {
 			switch states[binding.ProxyID] {
 			case model.CredentialConnected:
@@ -154,7 +160,7 @@ func (s *AccountActions) AccountsList(ctx context.Context, caller contract.Princ
 			}
 		}
 	}
-	return contract.AccountsListResponse{Accounts: accounts, Providers: model.AccountProviders()}, nil
+	return contract.AccountsListResponse{Accounts: accounts, Providers: model.AccountProviders(credentials)}, nil
 }
 
 func (s *AccountActions) AccountsConnect(ctx context.Context, caller contract.Principal, req contract.AccountsConnectRequest) (contract.AccountsConnectResponse, *contract.Error) {
@@ -213,6 +219,9 @@ func (s *AccountActions) AccountsSetKey(ctx context.Context, caller contract.Pri
 		return contract.AccountsSetKeyResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "invalid account input"}
 	}
 	req.Label = label
+	if req.Provider == "" && !model.ValidNewProvider(req.DisplayName, req.BaseURL) {
+		return contract.AccountsSetKeyResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "invalid provider"}
+	}
 	result, problem := s.runAccountAction(ctx, caller, contract.AccountActionSetKey, "", func(ctx context.Context) accountActionResult {
 		out, err := s.connections.SetKey(ctx, req)
 		return accountActionResult{key: out, err: err}

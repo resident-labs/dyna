@@ -272,6 +272,9 @@ func (s *Service) registerModelsForAuthWithConfigAndCache(ctx context.Context, c
 				}
 				return true
 			}
+			if catalog := dynaCredentialCatalog(a, compatName); catalog != nil && registerCompat(catalog) {
+				return published
+			}
 			if compatCache != nil && compatCache.cfg == cfg {
 				if cached, ok := compatCache.lookup(a, compatName); ok {
 					isCompatAuth = true

@@ -10,8 +10,6 @@ Dyna modified this vendored source. The upstream repository is `https://github.c
 
 ## Dyna changes
 
-The packed catalog scripts export Pi's built-in provider registry into `dyna-catalog.json` and verify the installed package and a local model request. This enables removal of `next/engine/model/key_catalog.go`. Upstream issue and PR searches found no fitting packed catalog export; the fork uses Pi's existing registry without changing upstream behavior.
-
 P0 adds this documentation and changes no upstream Pi file. It changes no Pi behavior and removes no Dyna code. `scripts/pi-pack.sh` stages the built packages outside this tree, sets every internal fork package to `1.4.0-dyna.1`, and adds `dynaFork: 1` and bundled dependencies to the staged metadata. The upstream files stay unchanged.
 
 Tool search ranking ports upstream fixes [#11625](https://github.com/earendil-works/pi/pull/11625) (`cc44fa216959c0ace2ff131eac918b911d8c9cde`) and [#11632](https://github.com/earendil-works/pi/pull/11632) (`e033f255f0f560cf5e825f312c75c45baadc3cb4`), adapted to the v1.4.0 subtree. Names weigh above descriptions, and a result matching more query terms ranks first. This removes no Dyna code.

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
-  import { accountPath, accountRows, accountState, labelRefusal, providerGroup, reconnectPath, refused, reconnectUnavailable } from "../accounts.ts";
+  import { accountPath, accountRows, accountState, addProviderError, labelRefusal, parseModelIDs, providerGroup, reconnectPath, refused, reconnectUnavailable } from "../accounts.ts";
   import { balancesText, visibleWindows } from "../usage.ts";
   import type { Account, AccountProviderInfo, AccountUsage, AccountsConnectResponse, RoomSummary } from "../contract.gen.ts";
   import StatusPill from "./StatusPill.svelte";
@@ -12,6 +12,7 @@
   let providers: AccountProviderInfo[] = $state([]), accounts: Account[] = $state([]), rooms: RoomSummary[] = $state([]), usage: AccountUsage[] = $state([]);
   let loaded = $state(false), quotaLoaded = $state(false), failed = $state(false), busy = $state(false);
   let query = $state(""), expanded = $state(false), label = $state(""), secret = $state(""), redirect = $state(""), useKey = $state(false);
+  let providerName = $state(""), providerAddress = $state(""), modelText = $state("");
   let attempt: AccountsConnectResponse | undefined = $state();
   let connectState: "idle" | "pending" | "failed" | "expired" = $state("idle");
   let error = $state(""), copied = $state(false), opened = $state(false), now = $state(Date.now());
@@ -25,6 +26,7 @@
   let providerId = $derived(reconnecting?.provider ?? (path.startsWith(base + "/add/") ? decodeURIComponent(path.slice((base + "/add/").length)) : ""));
   let selected = $derived(providers.find(p => p.id === providerId) ?? (!phone && adding && !providerId ? providers[0] : undefined));
   let flow = $derived(useKey ? "key" : selected?.connectFlow);
+  let addingProvider = $derived(path === base + "/add/new");
   // A reconnect link for an account that is gone lands on the account view's "not found".
   let accountId = $derived(path.startsWith(accountPath("")) ? decodeURIComponent(path.slice(accountPath("").length)) : reconnecting ? "" : reconnectRoute);
   $effect(() => { if (reconnecting) label = reconnecting.label; });
@@ -79,6 +81,15 @@
     }
     busy = false;
   }
+  async function addProvider() {
+    if (busy) return;
+    busy = true; error = "";
+    const displayName = providerName.trim();
+    await call("accounts.set_key", { displayName, baseUrl: providerAddress.trim(), label: label.trim() || displayName, key: secret, models: parseModelIDs(modelText) }).then(() => {
+      providerName = ""; providerAddress = ""; modelText = ""; reset(); reload(); document.getElementById("accounts-back")?.click();
+    }, (e: unknown) => { if (e instanceof SignedOut) signedout(); else error = addProviderError(e); });
+    busy = false;
+  }
   async function finish() {
     if (!attempt || busy || !redirect.trim()) return;
     const ticket = generation, url = redirect; redirect = ""; busy = true;
@@ -127,7 +138,7 @@
 {#if failed}<p>Accounts did not load. <button class="btn" type="button" onclick={reload}>Try again</button></p>
 {:else if !loaded}<p class="muted">Loading accounts…</p>
 {:else if adding}
-  <a id="picker-back" href={base + "/add"} onclick={navigate} hidden>Back to providers</a><div class="add-layout" class:has-provider={!!providerId && !!selected}>
+  <a id="picker-back" href={base + "/add"} onclick={navigate} hidden>Back to providers</a><div class="add-layout" class:has-provider={addingProvider || (!!providerId && !!selected)}>
       <section class="picker">
         <div class="search"><Icon name="search" size={18} /><input aria-label="Search providers" placeholder={`Search ${providers.length} providers`} bind:value={query} /></div>
         {#each groups as group}
@@ -140,8 +151,25 @@
             {#if matches.remaining}<button class="btn ghost" type="button" onclick={() => expanded = true}>Show {matches.remaining} more</button>{/if}
           {/if}
         {/each}
+        <a class:chosen={addingProvider} href={providerPath("new")} onclick={(e) => { reset(); label = ""; navigate(e); }}><span class="initial">+</span><strong>Add provider</strong></a>
       </section>
-    {#if selected}
+    {#if addingProvider}
+      <div class="details">
+        {#if !phone}<a class="all-providers" href={base + "/add"} onclick={navigate}>← All providers</a>{/if}
+        <section class="card connect">
+          <h2>Add provider</h2>
+          <p><strong>Any OpenAI-compatible service.</strong> Dyna sends model requests to the address you enter, and keeps the key where Dyna runs.</p>
+          <label class="label-field">Name <input bind:value={providerName} placeholder="Acme" autocomplete="off" disabled={busy} /></label>
+          <label class="label-field">Address <input bind:value={providerAddress} placeholder="https://api.example.com/v1" autocomplete="off" inputmode="url" disabled={busy} /></label>
+          <label class="label-field">Label <input bind:value={label} placeholder="Work, Personal, …" disabled={busy} /></label>
+          <label class="label-field">API key <input type="password" bind:value={secret} autocomplete="off" disabled={busy} /></label>
+          <label class="label-field">Models <textarea bind:value={modelText} rows="3" disabled={busy}></textarea></label>
+          <p class="muted">Leave models empty to read them from the provider, or enter one model ID per line.</p>
+          <div class="start-actions"><button class="btn fill" type="button" disabled={busy || !providerName.trim() || !providerAddress.trim() || !secret.trim()} onclick={() => void addProvider()}>Add provider</button><a class="btn" href={base + "/add"} onclick={navigate}>Cancel</a></div>
+          {#if error}<p role="alert">{error}</p>{/if}
+        </section>
+      </div>
+    {:else if selected}
       <div class="details">
         {#if !phone}<a class="all-providers" href={base + "/add"} onclick={navigate}>← All providers</a>{/if}
         <section class="card connect">
@@ -190,6 +218,8 @@
       <h2>Usage</h2>
       {#if accountUsage && visibleWindows(accountUsage.windows ?? []).length}<div class="meters">{#each visibleWindows(accountUsage.windows ?? []) as window (window.name)}<AccountMeter {window} now={Date.now()} />{/each}</div>{:else if !accountUsage?.balances?.length}<p class="muted">No usage limits reported.</p>{/if}
       {#if accountUsage?.balances?.length}<p class="muted">Balance {balancesText(accountUsage.balances)}</p>{/if}
+      {#if account.models?.length}<h2>Models</h2>
+      <p class="muted">{account.models.join(" · ")}</p>{/if}
       <h2>Rooms</h2>
       <p><label><input type="radio" name="room-scope" checked={!account.rooms?.length} disabled={busy} onchange={() => void setRooms(account, [])} /> Every room</label> <label><input type="radio" name="room-scope" checked={!!account.rooms?.length} disabled={busy || !rooms.length} onchange={() => void setRooms(account, [rooms[0].id])} /> Only these rooms</label></p>
       {#if account.rooms?.length}{#each rooms as room (room.id)}<label><input type="checkbox" checked={account.rooms.includes(room.id)} disabled={busy || (account.rooms.length === 1 && account.rooms.includes(room.id))} onchange={(e) => void setRooms(account, e.currentTarget.checked ? [...(account.rooms ?? []), room.id] : (account.rooms ?? []).filter(id => id !== room.id))} /> {room.name}</label>{/each}{/if}
@@ -228,7 +258,7 @@
   .list, .card, .picker { border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
   .account-row { display: flex; align-items: center; } .account-row + .account-row { border-top: 1px solid var(--line); } .row { flex: 1; min-width: 0; min-height: 58px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; color: var(--text); text-decoration: none; } .row:hover, .picker a:hover { background: var(--hover); } .row > div:first-child { min-width: 0; overflow-wrap: anywhere; } .row .muted { margin-top: 4px; } .row-meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; flex: 1 1 420px; min-width: 0; max-width: 700px; margin-left: auto; }
   .add-layout { display: grid; grid-template-columns: minmax(280px, 300px) minmax(420px, 1fr); gap: 20px; align-items: start; } .body { container: accounts / inline-size; } .all-providers { display: none; } .picker { padding: 8px; } .search { display: flex; align-items: center; gap: 8px; padding-left: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--muted); } .picker .search input { border: 0; } .picker a { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; padding: 8px; border-radius: 6px; } .picker a .muted { margin-left: auto; } .picker a.chosen { background: var(--selected); }
-  .details { display: grid; gap: 16px; min-width: 0; container: account-detail / inline-size; } .card { padding: 20px; } .connect { display: grid; justify-items: start; gap: 16px; } .connect h2 .muted { font-weight: 400; } .connect label, form { display: grid; gap: 8px; width: 100%; } .connect .label-field { grid-template-columns: 64px minmax(0, 320px); align-items: center; color: var(--muted); } .connect input, .picker input { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; } .step-row { display: flex; align-items: flex-start; gap: 10px; width: 100%; } .step-badge { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--selected); color: var(--muted); font-size: 12px; } .step-badge.checked { background: transparent; border: 1px solid var(--line); box-sizing: border-box; } .callback-entry { display: flex; gap: 8px; width: 100%; } .callback-entry input { flex: 1; min-width: 0; } .actions, .start-actions { display: flex; gap: 8px; align-items: center; } .retry { display: flex; align-items: center; gap: 12px; padding: 8px; text-decoration: none; } .retry .btn { text-decoration: none; } .chevron { padding: 12px 14px; color: var(--muted); text-decoration: none; } .no-usage { margin-left: auto; } .btn:not(.fill):not(.danger) { color: var(--text); } .code { display: flex; gap: 12px; align-items: center; font-family: var(--mono); font-size: 20px; }
+  .details { display: grid; gap: 16px; min-width: 0; container: account-detail / inline-size; } .card { padding: 20px; } .connect { display: grid; justify-items: start; gap: 16px; } .connect h2 .muted { font-weight: 400; } .connect label, form { display: grid; gap: 8px; width: 100%; } .connect .label-field { grid-template-columns: 64px minmax(0, 320px); align-items: center; color: var(--muted); } .connect input, .connect textarea, .picker input { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; } .step-row { display: flex; align-items: flex-start; gap: 10px; width: 100%; } .step-badge { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--selected); color: var(--muted); font-size: 12px; } .step-badge.checked { background: transparent; border: 1px solid var(--line); box-sizing: border-box; } .callback-entry { display: flex; gap: 8px; width: 100%; } .callback-entry input { flex: 1; min-width: 0; } .actions, .start-actions { display: flex; gap: 8px; align-items: center; } .retry { display: flex; align-items: center; gap: 12px; padding: 8px; text-decoration: none; } .retry .btn { text-decoration: none; } .chevron { padding: 12px 14px; color: var(--muted); text-decoration: none; } .no-usage { margin-left: auto; } .btn:not(.fill):not(.danger) { color: var(--text); } .code { display: flex; gap: 12px; align-items: center; font-family: var(--mono); font-size: 20px; }
   .legend { display: grid; gap: 16px; } .legend .after strong { color: var(--text); } .legend p:not(.after) { display: grid; grid-template-columns: 180px 1fr; gap: 16px; } .account-view { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; gap: 12px; max-width: 900px; overflow-wrap: anywhere; } .account-view h1 { width: 100%; } .account-view h2 { margin-top: 28px; }
   /* The name and its field share a box, so the text stays put when one replaces the other. */
   .label-name, .label-input { box-sizing: border-box; min-width: 0; margin-left: -9px; padding: 2px 8px; border: 1px solid transparent; border-radius: 6px; color: var(--text); font: inherit; line-height: 1.25; } .label-name { display: inline-flex; align-items: center; gap: 8px; background: none; text-align: left; cursor: pointer; } .label-name:hover { background: var(--hover); } .label-name :global(svg) { flex: none; color: var(--muted); opacity: 0; } .label-name:hover :global(svg), .label-name:focus-visible :global(svg) { opacity: 1; } .label-input { flex: 0 1 420px; border-color: var(--firm); background: var(--bg); }
