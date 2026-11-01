@@ -34,6 +34,18 @@ func (s *Service) RoomDelete(ctx context.Context, caller contract.Principal, req
 	return contract.RoomDeleteResponse{}, nil
 }
 
+// HostSetLimits replaces a host's room limit, which is how the owner clears a room_limited refusal for a host.
+func (s *Service) HostSetLimits(ctx context.Context, caller contract.Principal, req contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalOwner {
+		return contract.HostSetLimitsResponse{}, forbidden()
+	}
+	if err := s.store.SetHostRooms(ctx, req.Host, req.Rooms); err != nil {
+		return contract.HostSetLimitsResponse{}, failure(err)
+	}
+	s.reconciler.Kick()
+	return contract.HostSetLimitsResponse{}, nil
+}
+
 // roomWrite runs a write to the room's folder while no deletion can remove it, and refuses a room that is going or gone.
 // So nothing recreates a folder after the deletion removed it.
 func (s *Service) roomWrite(ctx context.Context, room contract.RoomID, write func() error) error {

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"strconv"
@@ -37,11 +38,19 @@ func (s *Service) TranscriptAppend(ctx context.Context, caller contract.Principa
 	if req.Offset > acked {
 		return contract.TranscriptAppendResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "transcript chunk starts past the acknowledged offset"}
 	}
+	name := filepath.Join(s.layout.Transcripts(room, caller.Session), req.Path)
+	// A copy shorter than its acknowledgment is gone, as for a session open across the move to room folders. Writing at the
+	// offset would leave a hole that reads as a transcript, so the answer rewinds the box, which still has the whole file.
+	if info, err := os.Stat(name); acked > 0 && (errors.Is(err, os.ErrNotExist) || err == nil && info.Size() < acked) {
+		if err := s.store.ResetTranscriptOffset(ctx, caller.Session, req.Path); err != nil {
+			return contract.TranscriptAppendResponse{}, failure(err)
+		}
+		return contract.TranscriptAppendResponse{}, nil
+	}
 	end := req.Offset + int64(len(req.Bytes))
 	if end <= acked {
 		return contract.TranscriptAppendResponse{AckedOffset: acked}, nil
 	}
-	name := filepath.Join(s.layout.Transcripts(room, caller.Session), req.Path)
 	var file *os.File
 	err = s.roomWrite(ctx, room, func() error {
 		if err := os.MkdirAll(filepath.Dir(name), 0700); err != nil {

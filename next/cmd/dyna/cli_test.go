@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +44,7 @@ func (f *fakeClient) ContextSnapshot(context.Context, contract.ContextSnapshotRe
 
 type fakeClient struct {
 	host         contract.HostAddRequest
+	hostLimit    *contract.HostSetLimitsRequest
 	hostNoSwap   bool
 	room         contract.RoomCreateRequest
 	limits       contract.RoomSetLimitsRequest
@@ -102,6 +104,10 @@ func (f *fakeClient) HostList(context.Context, contract.HostListRequest) (contra
 func (f *fakeClient) HostAdd(_ context.Context, q contract.HostAddRequest) (contract.HostAddResponse, error) {
 	f.host = q
 	return contract.HostAddResponse{NoSwap: f.hostNoSwap}, nil
+}
+func (f *fakeClient) HostSetLimits(_ context.Context, q contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, error) {
+	f.hostLimit = &q
+	return contract.HostSetLimitsResponse{}, nil
 }
 func (f *fakeClient) RoomCreate(_ context.Context, q contract.RoomCreateRequest) (contract.RoomCreateResponse, error) {
 	f.room = q
@@ -182,6 +188,25 @@ func TestHostAddMapsFlags(t *testing.T) {
 	runCLI(t, f, "host", "add", "h", "--ssh", "u@h", "--owner-only-admin")
 	if f.host.Name != "h" || f.host.SSH != "u@h" || !f.host.OwnerOnlyAdmin {
 		t.Fatalf("%+v", f.host)
+	}
+}
+func TestHostLimitMapsFlags(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "host", "limit", "h", "--room", "room_a", "--room", "room_b")
+	if f.hostLimit == nil || f.hostLimit.Host != "h" || !slices.Equal(f.hostLimit.Rooms, []contract.RoomID{"room_a", "room_b"}) {
+		t.Fatalf("%+v", f.hostLimit)
+	}
+	runCLI(t, f, "host", "limit", "h", "--all")
+	if len(f.hostLimit.Rooms) != 0 {
+		t.Fatalf("%+v", f.hostLimit)
+	}
+}
+func TestHostLimitAsksForAnExplicitChoice(t *testing.T) {
+	for _, args := range [][]string{{"host", "limit", "h"}, {"host", "limit", "h", "--all", "--room", "room_a"}} {
+		f := &fakeClient{}
+		if _, err := execCLI(f, args...); err == nil || f.hostLimit != nil {
+			t.Fatalf("%v: err=%v sent=%+v", args, err, f.hostLimit)
+		}
 	}
 }
 func TestHostAddWarnsWithoutSwap(t *testing.T) {

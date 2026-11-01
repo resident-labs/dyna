@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -119,6 +120,11 @@ func (r *Reconciler) closeStep(ctx context.Context, row store.LifecycleBox) erro
 	}
 	if retryErr := r.store.SetArchiveRetry(ctx, row.ID, row.Want, r.now().Add(retry), reason, event); retryErr != nil {
 		return retryErr
+	}
+	if row.Deleting && reason != "" {
+		if reasonErr := r.store.SetRoomDeleteReason(ctx, row.Room, fmt.Sprintf("delete room %s: box %s: %s", row.Room, row.ID, reason)); reasonErr != nil {
+			return reasonErr
+		}
 	}
 	return err
 }

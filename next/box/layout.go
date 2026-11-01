@@ -27,10 +27,13 @@ func roomFolder(root string, room contract.RoomID) (string, error) {
 	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
 		return "", fmt.Errorf("invalid room id %q", room)
 	}
+	if !filepath.IsAbs(root) {
+		return "", fmt.Errorf("room data folder %q is not absolute", root)
+	}
 	return filepath.Join(root, "rooms", name), nil
 }
 
-// Room is the room's whole folder on the control plane. It checks the ID because callers remove this path, and an empty ID would name every room.
+// Room is the room's whole folder on the control plane. It checks the ID and the root because callers remove this path: an empty ID would name every room, and an unset root would name a folder under the working directory.
 func (l Layout) Room(room contract.RoomID) (string, error) { return roomFolder(l.Data, room) }
 
 // HostRoom is the room's whole folder on a host, with the same check.

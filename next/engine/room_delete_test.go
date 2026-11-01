@@ -28,8 +28,28 @@ var errCrash = errors.New("crash")
 type fakeRoomHosts struct {
 	mu         sync.Mutex
 	err, crash error
+	boxErr     error
 	removed    []string
 	forgotten  []contract.BoxID
+}
+
+// failBoxes sets the failure of a box removal.
+func (h *fakeRoomHosts) failBoxes(err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.boxErr = err
+}
+
+// deleteBoxes removes boxes unless the test made that fail.
+type deleteBoxes struct {
+	fakeBoxes
+	hosts *fakeRoomHosts
+}
+
+func (b deleteBoxes) Remove(context.Context, contract.BoxID) error {
+	b.hosts.mu.Lock()
+	defer b.hosts.mu.Unlock()
+	return b.hosts.boxErr
 }
 
 func (h *fakeRoomHosts) record(name string) error {
@@ -107,7 +127,7 @@ func (r *deleteRig) open(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.st = st
-	r.s = New(st, fakeBoxes{}, fakeProfiles{}, func() time.Time { return time.Unix(1000, 0) })
+	r.s = New(st, deleteBoxes{hosts: r.hosts}, fakeProfiles{}, func() time.Time { return time.Unix(1000, 0) })
 	resetLifecycle(r.s)
 	r.s.SetLayout(box.Layout{Data: r.dir, HostData: "/host"})
 	r.s.reconciler.SetRoomHosts(r.hosts)
@@ -762,6 +782,64 @@ func TestRoomDeleteShowsWhatHoldsIt(t *testing.T) {
 	r.settle(t, ctx, room)
 }
 
+// A box that a ready host cannot remove holds the room as a folder would, and says so in the same place.
+func TestRoomDeleteShowsABoxThatHoldsIt(t *testing.T) {
+	r, ctx := newDeleteRig(t)
+	room, _, _ := r.room(t, ctx, "room")
+	r.hosts.failBoxes(errors.New("container in use"))
+	r.delete(t, ctx, room)
+	for range 6 {
+		passLifecycle(t, r.s, ctx)
+	}
+	list, e := r.s.RoomList(ctx, deleteOwner, contract.RoomListRequest{})
+	if e != nil || len(list.Rooms) != 1 || !strings.Contains(list.Rooms[0].DeleteReason, "container in use") {
+		t.Fatalf("%+v %v", list, e)
+	}
+	r.hosts.failBoxes(nil)
+	if err := r.st.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE boxes SET due_at=0")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r.settle(t, ctx, room)
+}
+
+func TestHostLimitClearsARoomLimitedRefusal(t *testing.T) {
+	r, ctx := newDeleteRig(t)
+	room, _, worker := r.room(t, ctx, "room")
+	other, _, _ := r.room(t, ctx, "other")
+	if err := r.st.AddHost(ctx, box.Host{Name: "limited", State: box.HostReady, CheckedAt: time.Unix(1000, 0), Rooms: []contract.RoomID{room}}); err != nil {
+		t.Fatal(err)
+	}
+	r.refused(t, ctx, room, nil, []contract.HostName{"limited"}, "host limited")
+	session := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
+	if _, e := r.s.HostSetLimits(ctx, session, contract.HostSetLimitsRequest{Host: "limited", Rooms: []contract.RoomID{other}}); e == nil || e.Code != contract.ErrForbidden {
+		t.Fatalf("a session changed a host limit: %v", e)
+	}
+	if _, e := r.s.HostSetLimits(ctx, deleteOwner, contract.HostSetLimitsRequest{Host: "missing", Rooms: []contract.RoomID{other}}); e == nil || e.Code != contract.ErrNotFound {
+		t.Fatalf("unknown host: %v", e)
+	}
+	if _, e := r.s.HostSetLimits(ctx, deleteOwner, contract.HostSetLimitsRequest{Host: "limited", Rooms: []contract.RoomID{other}}); e != nil {
+		t.Fatal(e)
+	}
+	r.delete(t, ctx, room)
+	// A room on its way out cannot come back into a limit, and the refused write leaves the old limit whole.
+	if _, e := r.s.HostSetLimits(ctx, deleteOwner, contract.HostSetLimitsRequest{Host: "limited", Rooms: []contract.RoomID{room}}); e == nil || e.Code != contract.ErrConflict {
+		t.Fatalf("limit to a deleting room: %v", e)
+	}
+	if n := r.count(t, ctx, "SELECT count(*) FROM host_rooms WHERE host='limited' AND room=?", other); n != 1 {
+		t.Fatalf("limit lost its room: %d", n)
+	}
+	r.settle(t, ctx, room)
+	if _, e := r.s.HostSetLimits(ctx, deleteOwner, contract.HostSetLimitsRequest{Host: "limited"}); e != nil {
+		t.Fatal(e)
+	}
+	if n := r.count(t, ctx, "SELECT count(*) FROM host_rooms WHERE host='limited'"); n != 0 {
+		t.Fatalf("no rooms means every room: %d rows", n)
+	}
+}
+
 func TestDeletingRoomRefusesNewWork(t *testing.T) {
 	r, ctx := newDeleteRig(t)
 	room, root, worker := r.room(t, ctx, "room")
@@ -800,6 +878,8 @@ func TestDeletingRoomRefusesNewWork(t *testing.T) {
 	conflict("session", e)
 	_, e = r.s.Post(ctx, deleteOwner, contract.PostRequest{Room: room, Text: "late"})
 	conflict("owner post", e)
+	_, e = r.s.RoomRepoAdd(ctx, deleteOwner, contract.RoomRepoAddRequest{Room: room, Repo: "owner/late"})
+	conflict("repository", e)
 	_, e = r.s.Post(ctx, session, contract.PostRequest{Room: room, Text: "late"})
 	conflict("session post", e)
 	_, e = r.s.Post(ctx, deleteOwner, contract.PostRequest{Room: other, Text: "late", Attachments: []contract.Attachment{before}})

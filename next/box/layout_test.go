@@ -36,6 +36,12 @@ func TestLayoutRefusesARoomThatNamesMoreThanOneFolder(t *testing.T) {
 			t.Errorf("host room %q: %s", room, dir)
 		}
 	}
+	if dir, err := (box.Layout{}).Room("room_1"); err == nil {
+		t.Errorf("an unset root named %s", dir)
+	}
+	if dir, err := (box.Layout{HostData: "host"}).HostRoom("room_1"); err == nil {
+		t.Errorf("a relative root named %s", dir)
+	}
 	if dir, err := l.Room("room_1"); err != nil || dir != "/data/rooms/room_1" {
 		t.Fatalf("%s: %v", dir, err)
 	}

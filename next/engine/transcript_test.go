@@ -117,6 +117,40 @@ func TestTranscriptFetchAcknowledged(t *testing.T) {
 	}
 }
 
+// A session open across the move to room folders has an acknowledged offset and no copy. Writing at the offset would leave
+// a hole of zero bytes, which then reads as the session's history, so the box goes back to the start of its own file.
+func TestTranscriptAppendRewindsABoxWhoseCopyIsGone(t *testing.T) {
+	for name, lose := range map[string]func(string) error{
+		"missing": os.Remove,
+		"short":   func(path string) error { return os.Truncate(path, 1) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, ctx, caller := transcriptCaller(t)
+			if resp, e := appendTranscript(s, ctx, caller, "a.jsonl", 0, "abc"); e != nil || resp.AckedOffset != 3 {
+				t.Fatalf("first chunk = %+v, %v", resp, e)
+			}
+			path := filepath.Join(transcripts(t, s, ctx, caller), "a.jsonl")
+			if err := lose(path); err != nil {
+				t.Fatal(err)
+			}
+			if resp, e := appendTranscript(s, ctx, caller, "a.jsonl", 3, "def"); e != nil || resp.AckedOffset != 0 {
+				t.Fatalf("append past the lost copy = %+v, %v; want a rewind", resp, e)
+			}
+			if resp, e := appendTranscript(s, ctx, caller, "a.jsonl", 0, "abcdef"); e != nil || resp.AckedOffset != 6 {
+				t.Fatalf("resend = %+v, %v", resp, e)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil || string(got) != "abcdef" {
+				t.Fatalf("copy = %q, %v", got, err)
+			}
+			fetched, e := s.TranscriptFetch(ctx, caller, contract.TranscriptFetchRequest{Path: "a.jsonl"})
+			if e != nil || string(fetched.Bytes) != "abcdef" {
+				t.Fatalf("fetch = %q, %v", fetched.Bytes, e)
+			}
+		})
+	}
+}
+
 func TestTranscriptFetchBoundaries(t *testing.T) {
 	s, ctx, caller := transcriptCaller(t)
 	data := make([]byte, (1<<20)+1)

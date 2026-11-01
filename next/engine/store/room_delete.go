@@ -100,7 +100,7 @@ func onlyRoomOf(ctx context.Context, tx *sql.Tx, room contract.RoomID) (contract
 }
 
 // MarkRoomDeleting records the intent and puts every open session on the close path with discard, in one write.
-// The limit check runs in this write, and SetAccountRooms and AddHost refuse a deleting room, so no limit can come to depend on the room afterwards.
+// The limit check runs in this write, and SetAccountRooms, SetHostRooms and AddHost refuse a deleting room, so no limit can come to depend on the room afterwards.
 // Pending operations and archive refs fall due at once, so their own sweeps end them. Those sweeps retry without the room, so an outage cannot hold it.
 func (s *Store) MarkRoomDeleting(ctx context.Context, room contract.RoomID, event contract.Event) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {

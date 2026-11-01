@@ -46,6 +46,9 @@ func (s *Store) AddRoomRepo(ctx context.Context, id contract.RoomID, name contra
 			}
 			return err
 		}
+		if err := refuseNewWork(ctx, tx, id); err != nil {
+			return err
+		}
 		rows, err := tx.QueryContext(ctx, "SELECT repo,is_default FROM room_repos WHERE room=? ORDER BY repo", id)
 		if err != nil {
 			return err
