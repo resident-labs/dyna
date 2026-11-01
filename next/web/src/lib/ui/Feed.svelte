@@ -42,8 +42,9 @@
   let pending = $derived([...view.pendingPosts.values()].map(({ id, request, at, failed }) => ({
     id, at, failed, text: request.text, attachments: request.attachments ?? [], to: mentioned(request.mentions ?? []),
   })));
-  // The owner's read position when the conversation opened, as in Discord: the New line stays where it was while the
-  // owner reads on, and moves only when the conversation opens again. It is taken once the room and the window load.
+  // The owner's read position when the conversation opened, as in Discord: the New line marks what arrived while the
+  // owner was away. It is taken once the room and the window load. Sending, Escape, or watching an event arrive at the
+  // bottom of the conversation clears it, so the line never marks what the owner just saw.
   let since: number | undefined = $state();
   $effect(() => { if (since === undefined && store.ready && view.ready) since = untrack(() => store.readAt(home)); });
   // The owner has read the conversation up to its newest event once the bottom of the window is on screen while the
@@ -53,10 +54,17 @@
   // The observation resolves a frame later; by then the owner may have switched tab or conversation.
   let gone = false;
   onDestroy(() => { gone = true; });
+  const clearNew = () => { since = view.newest; };
+  let watched: number | undefined;
   function markRead() {
     if (since === undefined || !view.atPresent || document.visibilityState !== "visible") return;
     const newest = view.newest;
-    void list?.atBottom().then(shown => { if (shown && !gone && view.atPresent && document.visibilityState === "visible") store.see(home, newest); });
+    void list?.atBottom().then(shown => {
+      if (!shown || gone || !view.atPresent || document.visibilityState !== "visible") return;
+      store.see(home, newest);
+      if (watched !== undefined && newest > watched) since = newest;
+      watched = newest;
+    });
   }
   $effect(markRead);
   $effect(() => {
@@ -156,6 +164,7 @@
   // The owner's own post and a jump always land on the newest row, even from inside the present window.
   // It never rejects: a failed send stays in the feed as a row with Retry.
   export async function send(request: PostRequest): Promise<void> {
+    clearNew();
     const sending = view.post(request);
     void list?.toEnd();
     await sending;
@@ -188,6 +197,8 @@
     await grow();
   }
 </script>
+
+<svelte:window onkeydown={event => { if (event.key === "Escape" && !event.defaultPrevented) clearNew(); }} />
 
 {#if mediaIndex !== undefined}<MediaViewer room={store.room} {loadVisual} items={media} initial={mediaIndex} {name} {root} onclose={() => mediaIndex = undefined} onjump={key => { const index = items.findIndex(item => item.key === key); if (index >= 0) void list?.reveal(index); }} />{/if}
 
