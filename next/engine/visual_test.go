@@ -132,7 +132,7 @@ func TestVisualVersionsAndServing(t *testing.T) {
 	if rec.Code != 200 || json.NewDecoder(rec.Body).Decode(&file) != nil {
 		t.Fatal(rec.Code)
 	}
-	file.Visual = &contract.VisualCard{ID: "spoof", Version: 99, AllowNet: true, Height: 120}
+	file.Visual = &contract.VisualCard{ID: "spoof", Version: 99, Height: 120}
 	for _, height := range []int{0, 119, 1201} {
 		file.Visual.Height = height
 		if _, problem := s.Post(ctx, author, contract.PostRequest{Room: room, Text: "summary", Attachments: []contract.Attachment{file}}); problem == nil || problem.Code != contract.ErrInvalid {
@@ -156,6 +156,7 @@ func TestVisualVersionsAndServing(t *testing.T) {
 		t.Fatalf("other author: %v", problem)
 	}
 	file.Visual.Height = 1200
+	file.Visual.AllowNet = true
 	second, problem := s.Post(ctx, owner, contract.PostRequest{Room: room, Text: "summary", VisualUpdate: first.Event, Attachments: []contract.Attachment{file}})
 	if problem != nil {
 		t.Fatal(problem)
@@ -171,7 +172,8 @@ func TestVisualVersionsAndServing(t *testing.T) {
 		}
 		rec := httptest.NewRecorder()
 		s.Files(author, room).ServeHTTP(rec, httptest.NewRequest("GET", "/v1/files/visual/"+string(result.Event), nil))
-		if rec.Code != http.StatusOK || !strings.Contains(rec.Header().Get("Content-Security-Policy"), "script-src 'unsafe-inline' https:; connect-src https: data: blob:;") || !strings.Contains(rec.Header().Get("Content-Security-Policy"), "style-src 'unsafe-inline' https: data: blob:;") {
+		csp := rec.Header().Get("Content-Security-Policy")
+		if rec.Code != http.StatusOK || !strings.Contains(csp, "frame-ancestors 'self'") || !strings.Contains(csp, "sandbox allow-scripts") || strings.Contains(csp, "https:") != (i == 1) || (i == 1 && (!strings.Contains(csp, "script-src 'unsafe-inline' https:; connect-src https: data: blob:;") || !strings.Contains(csp, "style-src 'unsafe-inline' https: data: blob:;"))) {
 			t.Fatalf("response: %d %v", rec.Code, rec.Header())
 		}
 	}
