@@ -179,11 +179,17 @@
   }
   // Dyna: Text can exceed the page budget; load its full content without a disclosure.
   $effect(() => {
-    for (const turn of turns) for (const item of turn.items ?? []) {
+    for (const turn of turns) {
+      for (const input of turn.inputs ?? []) {
+        const key = "input:" + input.id + "/text";
+        if (input.from.kind === "owner" && input.more && chunks[key] === undefined && !chunkFailed[key]) void fetchPart(turn.id, "input:" + input.id, "text");
+      }
+      for (const item of turn.items ?? []) {
       const messages = item.kind === "text" || item.kind === "post" ? [item] : item.posts ?? [];
       for (const message of messages) {
         const key = message.id + "/text";
         if (message.more && chunks[key] === undefined && !chunkFailed[key]) void fetchPart(turn.id, message.id, "text");
+      }
       }
     }
   });
@@ -202,7 +208,11 @@
       {@const finalText = turn.ended ? (turn.items ?? []).findLast(item => item.kind === "text")?.id : undefined}
       <article data-turn={turn.id}>
         {#each turn.inputs ?? [] as input (input.id)}
-          <div class="input"><div class="who"><Avatar kind={input.from.kind} name={sender(input.from.kind, input.from.session)} size={22} />{#if input.from.kind === "owner"}<strong>You</strong>{:else}<strong class:identity={input.from.kind === "session"} style:--hue={hue(sender(input.from.kind, input.from.session))}>{sender(input.from.kind, input.from.session)}</strong>{/if}{#if input.home}<span class="muted">{input.home.kind === "feed" ? `in ${roomName}` : input.home.session === session ? "in your DM" : "in a DM"}</span>{/if}<time datetime={input.at}>{formatTime(input.at)}</time></div><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{#if input.more && input.type === "post.created" && chunks["input:" + input.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Show all</button>{/if}</div>
+          {#if input.from.kind === "owner"}
+            <div class="owner-message" title={formatTime(input.at)}><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{#if chunkFailed["input:" + input.id + "/text"]}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Text did not load. Try again</button>{/if}</div>
+          {:else}
+            <div class="input"><div class="who"><Avatar kind={input.from.kind} name={sender(input.from.kind, input.from.session)} size={22} /><strong class:identity={input.from.kind === "session"} style:--hue={hue(sender(input.from.kind, input.from.session))}>{sender(input.from.kind, input.from.session)}</strong>{#if input.home}<span class="muted">{input.home.kind === "feed" ? `in ${roomName}` : input.home.session === session ? "in your DM" : "in a DM"}</span>{/if}<time datetime={input.at}>{formatTime(input.at)}</time></div><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{#if input.more && input.type === "post.created" && chunks["input:" + input.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Show all</button>{/if}</div>
+          {/if}
         {/each}
         <!-- Dyna: Posts and the final answer remain visible outside the work fold. -->
         {#if turn.ended && (turn.olderItems || (turn.items ?? []).some(item => item.kind === "tool" || item.kind === "thinking"))}
@@ -250,6 +260,7 @@
   .spinner { display: inline-block; width: 12px; height: 12px; border: 1.5px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+  .owner-message { width: fit-content; max-width: 75%; margin: 12px 0 12px auto; padding: 12px 16px; background: var(--raised); border-radius: 14px; }
   .input { background: var(--raised); padding: 12px 16px; border-radius: 14px; margin: 12px 0; }
   p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
   .who { display: flex; align-items: center; gap: 8px; }
