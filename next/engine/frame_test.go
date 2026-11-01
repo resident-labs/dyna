@@ -80,3 +80,19 @@ func TestHelloOmitsOwnerOnlyCommands(t *testing.T) {
 }
 
 func inputBody(text string) string { _, body, _ := strings.Cut(text, "\n"); return body }
+
+// A notice can land mid-turn, as a background job's end does, so it must not read as an order to stop.
+func TestNoticeFrameLeavesWorkRunning(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	event, err := s.event(room, engineSender, contract.NoticePosted{Text: "job ended"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, _, err := s.inputFrame(ctx, worker, event, contract.Delivery{Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(frame, "Carry on with any work you have") {
+		t.Fatalf("frame %q", frame)
+	}
+}
