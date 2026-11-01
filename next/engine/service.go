@@ -79,6 +79,15 @@ func (s *Service) sessionLocked(id contract.SessionID) *sessionState {
 	return state
 }
 
+// lockSession returns the session with its computer lock held.
+func (s *Service) lockSession(id contract.SessionID) *sessionState {
+	s.mu.Lock()
+	state := s.sessionLocked(id)
+	s.mu.Unlock()
+	state.computerLock.Lock()
+	return state
+}
+
 func New(st *store.Store, boxes lifecycle.BoxAdapter, profiles Profiles, now func() time.Time) *Service {
 	s := &Service{sessions: make(map[contract.SessionID]*sessionState), hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now}
 	s.reconciler = lifecycle.New(st, boxes, s, nil, s.event, now)

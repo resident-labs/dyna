@@ -119,10 +119,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 		return nil, failure(err)
 	}
 	ctx, stop := context.WithCancel(ctx)
-	s.mu.Lock()
-	state := s.sessionLocked(session.ID)
-	s.mu.Unlock()
-	state.computerLock.Lock()
+	state := s.lockSession(session.ID)
 	s.mu.Lock()
 	previous := state.channel
 	var roomID contract.RoomID

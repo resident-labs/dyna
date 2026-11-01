@@ -32,10 +32,7 @@ func (s *Service) ShellWatch(ctx context.Context, id contract.SessionID) (<-chan
 	if err != nil {
 		return nil, failure(err)
 	}
-	s.mu.Lock()
-	state := s.sessionLocked(id)
-	s.mu.Unlock()
-	state.computerLock.Lock()
+	state := s.lockSession(id)
 	defer state.computerLock.Unlock()
 	s.mu.Lock()
 	if b.State != contract.BoxReady || state.channel == nil {
@@ -78,10 +75,7 @@ func (s *Service) ShellOutput(_ context.Context, caller contract.Principal, req 
 	if caller.Kind != contract.PrincipalSession {
 		return contract.ShellOutputResponse{}, forbidden()
 	}
-	s.mu.Lock()
-	state := s.sessionLocked(caller.Session)
-	s.mu.Unlock()
-	state.computerLock.Lock()
+	state := s.lockSession(caller.Session)
 	defer state.computerLock.Unlock()
 	s.mu.Lock()
 	w := state.watch
@@ -94,26 +88,28 @@ func (s *Service) ShellOutput(_ context.Context, caller contract.Principal, req 
 		watchers = append(watchers, ch)
 	}
 	s.mu.Unlock()
-	for _, job := range req.Jobs {
-		for i, ch := range watchers {
-			if ch == nil {
-				continue
-			}
+	var dropped []chan contract.ShellJobOutput
+watcher:
+	for _, ch := range watchers {
+		for _, job := range req.Jobs {
 			select {
 			case ch <- job:
 			default:
-				s.mu.Lock()
-				delete(w.watchers, ch)
-				s.mu.Unlock()
-				close(ch)
-				watchers[i] = nil
+				dropped = append(dropped, ch)
+				continue watcher
 			}
 		}
 	}
 	s.mu.Lock()
+	for _, ch := range dropped {
+		delete(w.watchers, ch)
+	}
 	channel := state.channel
 	wake := len(w.watchers) == 0 && channel != nil
 	s.mu.Unlock()
+	for _, ch := range dropped {
+		close(ch)
+	}
 	if wake {
 		wakeChannel(channel)
 	}
