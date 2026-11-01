@@ -81,6 +81,9 @@ func (s *serviceWithHosts) HostAdd(ctx context.Context, caller contract.Principa
 		if errors.As(err, &required) {
 			return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrPodmanRequired, Message: err.Error()}
 		}
+		if errors.Is(err, store.ErrRoomDeleting) {
+			return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrConflict, Message: err.Error()}
+		}
 		return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: err.Error()}
 	}
 	return contract.HostAddResponse{NoSwap: noSwap}, nil

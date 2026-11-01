@@ -10,6 +10,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/model"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 var errAccountAction = errors.New("account action unavailable")
@@ -93,6 +94,9 @@ func (s *AccountActions) runAccountAction(ctx context.Context, caller contract.P
 		case result := <-resultCh:
 			if errors.Is(result.err, model.ErrReconnectUnavailable) {
 				return accountActionResult{}, &contract.Error{Code: contract.ErrReconnectUnavailable, Message: "reconnect unavailable"}
+			}
+			if errors.Is(result.err, store.ErrRoomDeleting) {
+				return accountActionResult{}, failure(result.err)
 			}
 		default:
 		}
