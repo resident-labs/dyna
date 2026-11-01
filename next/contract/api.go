@@ -118,20 +118,19 @@ type ConversationReadResponse struct{}
 
 type ProfileListRequest struct{}
 type ProfileSummary struct {
-	InUse          int           `json:"inUse"`
-	Description    string        `json:"description"`
-	Taste          int           `json:"taste"`
-	Diagnostics    int           `json:"diagnostics"`
-	Intelligence   int           `json:"intelligence"`
-	Cost           int           `json:"cost"`
-	Name           ProfileName   `json:"name"`
-	Provider       ModelProvider `json:"provider"`
-	Model          string        `json:"model"`
-	Thinking       ThinkingLevel `json:"thinking"`
-	AllowedModels  []string      `json:"allowedModels,omitempty"`
-	CompactTokens  int           `json:"compactTokens,omitempty"`
-	MaxConcurrent  int           `json:"maxConcurrent,omitempty"`
-	MaxCallsPerRun int           `json:"maxCallsPerRun,omitempty"`
+	InUse         int           `json:"inUse"`
+	Description   string        `json:"description"`
+	Taste         int           `json:"taste"`
+	Diagnostics   int           `json:"diagnostics"`
+	Intelligence  int           `json:"intelligence"`
+	Cost          int           `json:"cost"`
+	Name          ProfileName   `json:"name"`
+	Provider      ModelProvider `json:"provider"`
+	Model         string        `json:"model"`
+	Thinking      ThinkingLevel `json:"thinking"`
+	AllowedModels []string      `json:"allowedModels,omitempty"`
+	CompactTokens int           `json:"compactTokens,omitempty"`
+	MaxConcurrent int           `json:"maxConcurrent,omitempty"`
 }
 type ProfileListResponse struct {
 	Profiles []ProfileSummary `json:"profiles"`

@@ -75,7 +75,7 @@
               <span class="number" class:missing={!value}><span class="rating-label">{label} </span>{rating(value)}</span>
             {/each}
           {/if}
-          <span class="limits">{#if profile.maxConcurrent}At most {profile.maxConcurrent} at once{#if profile.maxCallsPerRun} · {/if}{/if}{#if profile.maxCallsPerRun}{profile.maxCallsPerRun} calls per run{:else if !profile.maxConcurrent}No limits{/if}</span>
+          <span class="limits">{#if profile.maxConcurrent}At most {profile.maxConcurrent} at once{:else}No limit{/if}</span>
           <button type="button" class="edit" onclick={() => { const name = editing === profile.name ? undefined : profile.name; close(); editing = name; }} aria-label={`Edit ${profile.name}`}>{#if phone}<Icon name="forwardChevron" />{:else}Edit{/if}</button>
         </div>
         {#if !phone && editing === profile.name}<ProfileEditor {profile} isNew={false} {busy} {error} {save} cancel={close} remove={() => void remove(profile.name)} />{/if}

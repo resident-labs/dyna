@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { ModelProvider, ProfileSummary, ThinkingLevel } from "../contract.gen.ts";
   let { profile, isNew, busy, error, save, cancel, remove }: { profile: ProfileSummary; isNew: boolean; busy: boolean; error: string; save: (profile: ProfileSummary) => void; cancel: () => void; remove: () => void } = $props();
-  let draft = $state({ ...profile, maxCallsPerRun: profile.maxCallsPerRun ?? 0 });
+  let draft = $state({ ...profile });
   let compactText = $state((profile.compactTokens ?? 0).toLocaleString(undefined, { numberingSystem: "latn" }));
   const providers: Record<ModelProvider, string> = { anthropic: "Anthropic", openai: "OpenAI-compatible" };
   const ratings = [
@@ -37,7 +37,6 @@
     <p class="help">1 to 10, higher is better. Agents read the ratings and the notes when they choose a profile.</p>
   </div></div>
   <label class="field"><span>Notes</span><textarea bind:value={draft.description} rows="3"></textarea></label>
-  <label class="field"><span>Calls per run</span><div><input class="numeric" type="number" min="0" bind:value={draft.maxCallsPerRun} /> <span class="help">a run fails past this many calls; 0 means no limit</span></div></label>
   <label class="field"><span>Compact at</span><div><input class="numeric" inputmode="numeric" value={compactText} oninput={(event) => { compactText = event.currentTarget.value; draft.compactTokens = Number(compactText.replace(/[^0-9]/g, "")); }} onblur={() => compactText = (draft.compactTokens ?? 0).toLocaleString(undefined, { numberingSystem: "latn" })} /> <span class="help">tokens of context; 0 means Pi's default</span></div></label>
   {#if error}<p role="alert" class="help">{error}</p>{/if}
   <div class="actions"><button class="btn fill save" type="button" disabled={busy || !draft.name.trim() || !draft.model.trim()} onclick={() => save(draft)}>Save</button><button class="btn" type="button" disabled={busy} onclick={cancel}>Cancel</button>{#if !isNew}{#if profile.inUse > 0}<span class="in-use">In use by {profile.inUse} {profile.inUse === 1 ? "session" : "sessions"}, so it cannot be removed.</span>{:else}<button class="btn danger remove" type="button" disabled={busy} onclick={remove}>Remove</button>{/if}{/if}</div>
