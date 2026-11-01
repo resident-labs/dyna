@@ -3,7 +3,7 @@
   import Icon from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
   import PostAttachments from "./PostAttachments.svelte";
-  import { clock, formatTime, type Row } from "../feed.ts";
+  import { clock, formatTime, fullTime, type Row } from "../feed.ts";
   import type { Attachment, EventID, VisualCard } from "../contract.gen.ts";
   import { hue } from "../identity.ts";
   import { beginSwipe, moveSwipe, releaseSwipe, ignoredSwipeTarget, type Swipe } from "../swipe.ts";
@@ -128,9 +128,9 @@
   {#if row.first}
     <Avatar kind={row.from.kind} name={author} {root} size={40} />
     <p class="name">{#if row.from.session}<a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(row.from.session)}`} onclick={navigate} style:--hue={hue(author)}>{author}</a>{:else}<strong class={row.from.kind} style:--hue={hue(author)}>{author}</strong>{/if}
-      <time datetime={row.at}>{formatTime(row.at)}</time>{#if to}<span class="to">→ {to}</span>{/if}</p>
+      <time datetime={row.at} title={fullTime(row.at)}>{formatTime(row.at)}</time>{#if to}<span class="to">→ {to}</span>{/if}</p>
   {:else}
-    <time class="follow-time" datetime={row.at}>{clock(row.at)}</time>
+    <time class="follow-time" datetime={row.at} title={fullTime(row.at)}>{clock(row.at)}</time>
   {/if}
   <Markdown text={row.text} />
   <PostAttachments {onmedia} attachments={row.attachments} {newest} event={visualEvent} at={row.at} />

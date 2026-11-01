@@ -271,6 +271,8 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 					value = item.Text
 				case contract.TranscriptPartArguments:
 					value = item.Arguments
+				case contract.TranscriptPartScript:
+					value = item.Script
 				case contract.TranscriptPartDiff:
 					value = item.Diff
 				default:

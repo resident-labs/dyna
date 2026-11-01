@@ -1,8 +1,17 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deriveTimelineGroups, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning } from "./timeline.ts";
+import { summarizeWork, deriveTimelineGroups, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning } from "./timeline.ts";
 import type { TranscriptInput, TranscriptItem } from "./contract.gen.ts";
+
+test("summarizes nested actions rather than their script", () => {
+  const items: TranscriptItem[] = [{ id: "c", turn: "t", at: "", kind: "tool", tool: "codemode", calls: [
+    { tool: "mcp__shell__shell", status: "ok" }, { tool: "read", status: "ok" }, { tool: "read", status: "error" }, { tool: "write", status: "ok" },
+  ] }];
+  assert.equal(summarizeWork(items), "Ran 1 command, read 2 files, and wrote 1 file");
+  assert.equal(summarizeWork([{ id: "l", turn: "t", at: "", kind: "tool", tool: "ls" }, { id: "s", turn: "t", at: "", kind: "tool", tool: "codemode" }]), "Used 1 tool and ran 1 script");
+  assert.equal(summarizeWork([{ id: "l", turn: "t", at: "", kind: "tool", tool: "ls" }, { id: "f", turn: "t", at: "", kind: "tool", tool: "web_fetch" }]), "Used 2 tools");
+});
 
 // Dyna: Transcript items embed posts on their tool call.
 test("work stays together until a visible message separates it", () => {

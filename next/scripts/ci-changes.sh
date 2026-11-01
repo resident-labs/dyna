@@ -25,5 +25,6 @@ ci='^\.github/|^next/scripts/ci(-changes)?\.sh$'
 echo "relay=$(has "^relay/|^testdata/connect/|$ci")"
 # Go tests read testdata/connect and .dyna/images. The next job also checks install.sh.
 echo "next=$(has "^next/|^testdata/connect/|^\.dyna/images/|^install\.sh$|$ci")"
-echo "web=$(has "^next/web/|$ci")"
+# The width check in the web suite runs the app on dyna-webdev.
+echo "web=$(has "^next/web/|^next/cmd/dyna-webdev/|$ci")"
 echo "next_pi=$(has "^next/third_party/pi/|$ci")"
