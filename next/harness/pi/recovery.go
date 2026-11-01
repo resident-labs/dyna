@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -33,6 +32,7 @@ func (h *Harness) Recover(id contract.TurnID, inputs []contract.TurnInput) (cont
 	found := false
 	settled := false
 	var batch endBatch
+	var reply replyText
 	for scanner.Scan() {
 		var entry struct {
 			Type    string `json:"type"`
@@ -71,6 +71,7 @@ func (h *Harness) Recover(id contract.TurnID, inputs []contract.TurnInput) (cont
 		}
 		if m.Role == "user" {
 			batch = endBatch{}
+			reply.steered()
 		}
 		if m.Role == "toolResult" {
 			batch.toolResult(m.Details, m.IsError)
@@ -87,13 +88,7 @@ func (h *Harness) Recover(id contract.TurnID, inputs []contract.TurnInput) (cont
 		if m.ResponseModel != "" {
 			result.Usage.Model = m.ResponseModel
 		}
-		var text []string
-		for _, block := range m.Content {
-			if block.Type == "text" {
-				text = append(text, block.Text)
-			}
-		}
-		result.Final = strings.Join(text, "\n")
+		result.Final = reply.assistant(m.Content)
 		settled = m.StopReason == "stop" || m.StopReason == "end_turn"
 		for _, block := range m.Content {
 			if block.Type == "toolCall" {

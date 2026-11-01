@@ -96,6 +96,44 @@ func (b *endBatch) apply(result *contract.TurnEnded) bool {
 	return true
 }
 
+// replyText builds a turn's final text. Pi reads a steer as soon as the agent stops, inside the same turn, so the next
+// message must not replace what already answered an earlier input.
+type replyText struct {
+	kept, closing string
+}
+
+// assistant returns the final text so far. Only a message with no tool call can close an answer.
+func (r *replyText) assistant(content contentBlocks) string {
+	var text []string
+	r.closing = ""
+	working := false
+	for _, block := range content {
+		switch block.Type {
+		case "text":
+			text = append(text, block.Text)
+		case "toolCall":
+			working = true
+		}
+	}
+	current := strings.Join(text, "\n")
+	if !working {
+		r.closing = current
+	}
+	return joinReply(r.kept, current)
+}
+
+// steered keeps the answer a new input landed after.
+func (r *replyText) steered() {
+	r.kept, r.closing = joinReply(r.kept, r.closing), ""
+}
+
+func joinReply(kept, text string) string {
+	if kept == "" || text == "" {
+		return kept + text
+	}
+	return kept + "\n\n" + text
+}
+
 func (c *contentBlocks) UnmarshalJSON(data []byte) error {
 	// User messages may carry a plain string; only assistant blocks supply final text.
 	if len(data) > 0 && data[0] == '"' {
@@ -287,6 +325,7 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, typ string, input
 	}
 	started()
 	var batch endBatch
+	var reply replyText
 	for {
 		select {
 		case e := <-h.events:
@@ -300,6 +339,7 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, typ string, input
 				switch m.Role {
 				case "user":
 					batch = endBatch{}
+					reply.steered()
 					continue
 				case "toolResult":
 					batch.toolResult(m.Details, m.IsError)
@@ -309,13 +349,7 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, typ string, input
 				default:
 					continue
 				}
-				var text []string
-				for _, block := range m.Content {
-					if block.Type == "text" {
-						text = append(text, block.Text)
-					}
-				}
-				result.Final = strings.Join(text, "\n")
+				result.Final = reply.assistant(m.Content)
 				result.Usage.Model = m.Model
 				if m.ResponseModel != "" {
 					result.Usage.Model = m.ResponseModel
