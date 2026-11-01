@@ -322,10 +322,10 @@ func TestEventsReconnectUsesLastEventID(t *testing.T) {
 	}
 }
 
-func TestOwnerSocketRejectsHostexecScope(t *testing.T) {
+func TestOwnerSocketAcceptsHostexecCaller(t *testing.T) {
 	dir := t.TempDir()
-	sockets := NewSockets(New(&fakeService{}, nil), dir, 1, func(net.Conn) (uint32, error) { return 1, nil })
-	sockets.scope = func(net.Conn) bool { return true }
+	f := &fakeService{}
+	sockets := NewSockets(New(f, nil), dir, uint32(os.Getuid()), nil)
 	t.Cleanup(func() { _ = sockets.Close() })
 	if err := sockets.OpenOwner(); err != nil {
 		t.Fatal(err)
@@ -339,12 +339,8 @@ func TestOwnerSocketRejectsHostexecScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	var e contract.Error
-	if err = json.NewDecoder(resp.Body).Decode(&e); err != nil {
-		t.Fatal(err)
-	}
-	if resp.StatusCode != http.StatusForbidden || e.Code != contract.ErrHostexecScope {
-		t.Fatalf("status %d, error %+v", resp.StatusCode, e)
+	if resp.StatusCode != http.StatusOK || f.caller.Kind != contract.PrincipalOwner {
+		t.Fatalf("status %d caller %+v", resp.StatusCode, f.caller)
 	}
 }
 

@@ -39,7 +39,7 @@ and its files 0600. The archive is outside this counts-only rehearsal.
 | Goals and items | `goals`, `goal_items`, `internal/goals/sqlite.go` | open goals and all their items; no holder |
 | Issues and next number | `room_issues`, `room_issue_numbers`, room JSONL feed; `internal/room/issues.go` | open and goal-linked; retain number, body and notes |
 | PRs | `pr_records` and record parts, `internal/pr/state` | open tracked PRs; branch and ownership only |
-| Questions | `questions`, `internal/questions` | unanswered and not withdrawn; include pending terminal requests |
+| Questions | `questions`, `internal/questions` | unanswered and not withdrawn; include pending terminal requests, mapped to show_pty |
 | Handoff | session store, `internal/subagent/store.go`, room feed and Git refs | open sessions only; resolve parent and goal labels; last post capped at 2,000 characters |
 
 The contract does not count profiles, repositories or skills. Their lengths
@@ -51,7 +51,7 @@ The lead approved the following additive bundle fields and mapping decisions. Do
 
 * `GlobalBundle.Rooms` is the room manifest. The importer rejects missing,
   extra, duplicate or name-mismatched room files.
-* A terminal request has `Argv`, `Cwd`, `Reason`, `Stage` and `Holder`,
+* A v1 terminal request maps to `show_pty`. It has `Argv`, `Cwd`, `Reason`, `Stage` and `Holder`,
   and `Command` alone loses argv boundaries and cwd. The bundle carries argv,
   cwd and reason; unanswered requests go to root.
 * Hook `Command`, `Cwd`, `Timeout`, `OnFail` and script dependencies do

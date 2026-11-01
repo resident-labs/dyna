@@ -568,7 +568,7 @@ func writeError(w http.ResponseWriter, err *contract.Error) {
 	switch err.Code {
 	case contract.ErrInvalid:
 		status = http.StatusBadRequest
-	case contract.ErrForbidden, contract.ErrHostexecScope, contract.ErrNoGrant:
+	case contract.ErrForbidden, contract.ErrNoGrant:
 		status = http.StatusForbidden
 	case contract.ErrNotFound:
 		status = http.StatusNotFound
