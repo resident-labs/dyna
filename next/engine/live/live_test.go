@@ -25,6 +25,23 @@ func TestConcurrentPublishClosesFullOwnerStream(t *testing.T) {
 	}
 }
 
+// A full room stream closes when it drops a read position, so the client reconnects and reads the stored position.
+func TestPublishClosesFullRoomStreamOnDroppedRead(t *testing.T) {
+	l := New(func(map[contract.SessionID]bool) {})
+	_, events := l.Subscribe("r", 1)
+	events <- contract.Event{}
+	l.Publish("r", contract.Event{Body: contract.ConversationRead{Room: "r", Seq: 10}}, false)
+	<-events
+	select {
+	case _, ok := <-events:
+		if ok {
+			t.Fatal("full room stream delivered a dropped event")
+		}
+	default:
+		t.Fatal("full room stream stayed open after dropping a read position")
+	}
+}
+
 // Concurrent updates reach streams in the same order that room lists use.
 func TestActivityPublicationOrder(t *testing.T) {
 	l := New(func(map[contract.SessionID]bool) {})
