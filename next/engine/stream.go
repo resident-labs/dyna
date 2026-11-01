@@ -130,7 +130,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 		return nil, failure(err)
 	}
 	ctx, stop := context.WithCancel(ctx)
-	handle, state, ok := s.lockSession(session.ID)
+	handle, _, ok := s.lockSession(session.ID)
 	if !ok {
 		stop()
 		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
@@ -138,16 +138,13 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 	previous := handle.Channel()
 	var roomID contract.RoomID
 	var stopped bool
-	var shellWatchers []chan contract.ShellJobOutput
 	if previous != nil {
 		roomID, stopped = handle.ClearComputer()
-		s.mu.Lock()
-		shellWatchers = s.clearShellLocked(session.ID)
-		s.mu.Unlock()
+		handle.ClearShell()
 	}
 	channel := live.NewChannel(stop, ctx.Done())
 	handle.SetChannel(channel)
-	previous.Close(shellWatchers)
+	previous.Close()
 	if stopped {
 		_ = s.computerEvent(context.Background(), session.ID, roomID, contract.ComputerStopped)
 	}
@@ -162,15 +159,12 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			}
 			var roomID contract.RoomID
 			var stopped bool
-			var shellWatchers []chan contract.ShellJobOutput
 			if handle.Channel() == channel {
 				handle.SetChannel(nil)
 				roomID, stopped = handle.ClearComputer()
-				s.mu.Lock()
-				shellWatchers = s.clearShellLocked(session.ID)
-				s.mu.Unlock()
+				handle.ClearShell()
 			}
-			channel.Close(shellWatchers)
+			channel.Close()
 			if stopped {
 				_ = s.computerEvent(context.Background(), session.ID, roomID, contract.ComputerStopped)
 			}
@@ -211,12 +205,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				archiveSent = false
 			}
 			desired := handle.ComputerWatchGeneration()
-			s.mu.Lock()
-			var shellDesired uint64
-			if w := state.watch; w != nil && len(w.watchers) > 0 {
-				shellDesired = w.generation
-			}
-			s.mu.Unlock()
+			shellDesired := handle.ShellWatchGeneration()
 			computerChanged, shellChanged := channel.WatchChanges(desired, shellDesired)
 			handle.Unlock()
 			if !sendWatch(ctx, out, computerChanged, desired, contract.ComputerWatchStart{Generation: desired}, contract.ComputerWatchStop{}) ||
