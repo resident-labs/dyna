@@ -1,15 +1,14 @@
 <script lang="ts">
-  import { onDestroy, onMount, tick, untrack } from "svelte";
+  import { onDestroy, onMount, tick, untrack, type Snippet } from "svelte";
   import { call } from "../client.ts";
   import { decodeEvent } from "../event.ts";
   import { hue } from "../identity.ts";
-  import { causes, formatTime } from "../feed.ts";
+  import { causes, dayLabel, formatTime } from "../feed.ts";
   import { watchTranscripts } from "../stream.ts";
-  import type { PostRequest, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn, TranscriptInput, TranscriptPage } from "../contract.gen.ts";
+  import type { Attachment, Principal, PostRequest, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn, TranscriptPage } from "../contract.gen.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import Icon from "./Icon.svelte";
   import Avatar from "./Avatar.svelte";
-  import StatusPill from "./StatusPill.svelte";
   import Markdown from "./Markdown.svelte";
   import PostAttachments from "./PostAttachments.svelte";
   import MediaViewer from "./MediaViewer.svelte";
@@ -17,7 +16,7 @@
   import TranscriptWorkRow from "./TranscriptWorkRow.svelte";
   import TimelineMinimap from "./TimelineMinimap.svelte";
   import PostTarget from "./PostTarget.svelte";
-  import { deriveTimelineGroups, finalTimelineItem, ownPost, postDestination, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineInputText, timelineItemRunning, pendingStartBrief } from "../timeline.ts";
+  import { deriveTimelineGroups, finalTimelineItem, ownPost, postDestination, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, timelineInputText, timelineItemRunning, pendingStartBrief } from "../timeline.ts";
 
   let { session, roomName, store, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { startingBrief?: string; session: string; roomName: string; store: RoomStore; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
   const view = untrack(() => store.window({ kind: "dm", session }));
@@ -28,7 +27,8 @@
     for (const request of unsent) if (!shown.has(request)) view.unsent(request);
   });
   onDestroy(() => store.leave(view));
-  export async function send(request: PostRequest) { await view.post(request); }
+  // A sent message shows at the end, so the thread goes there with it.
+  export async function send(request: PostRequest) { atBottom = true; await view.post(request); }
   // A closed session can have a transcript with no DM events, so the thread is empty only when neither has anything.
   export const empty = () => view.ready && !view.ordered.length && !loading && !turns.length;
   let turns: TranscriptTurn[] = $state([]);
@@ -36,18 +36,21 @@
   let expandedTurns: Record<string, boolean> = $state({});
   let before: string | undefined = $state();
   let now = $state(clock());
+  // An open turn of a closed session or a failed box never ends, so it does not count as running.
+  let closed = $derived(store.ready && !store.sessions.has(session));
+  let stalled = $derived(closed || store.boxFailures.has(session));
   $effect(() => {
-    if (!turns.some(turn => !turn.ended)) return;
+    if (stalled || !turns.some(turn => !turn.ended)) return;
     now = clock();
     const timer = setInterval(() => { now = clock(); }, 1000);
     return () => clearInterval(timer);
   });
   let loading = $state(false), failed = $state(false);
   let pending = false;
-  let scroller: HTMLDivElement;
+  let scroller: HTMLDivElement, content: HTMLDivElement;
   let frameWidth = $state(0), currentTurn = $state<string | null>(null);
   let visibleTurns: string[] = $state([]);
-  let minimapTurns = $derived(turns.map(turn => ({ id: turn.id, userText: turn.inputs?.[0]?.text ?? null, assistantText: finalTimelineItem(turn.items ?? [], session)?.text ?? null, visible: visibleTurns.includes(turn.id) })));
+  let minimapTurns = $derived(turns.map(turn => ({ id: turn.id, userText: turn.inputs?.[0] ? timelineInputText(turn.inputs[0], chunks["input:" + turn.inputs[0].id + "/text"]) : null, assistantText: finalTimelineItem(turn.items ?? [], session)?.text ?? null, visible: visibleTurns.includes(turn.id) })));
   let positionFrame = 0;
   function updatePosition() {
     if (positionFrame) return;
@@ -60,10 +63,28 @@
     });
   }
   let atBottom = $state(true);
+  let lastTop = 0, clicked = -Infinity;
+  const gap = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+  // Scrolling up leaves the end at once, so new content never pulls the owner back; coming near it again follows it.
+  function scrolled() {
+    atBottom = gap() < (scroller.scrollTop < lastTop ? 2 : 80);
+    lastTop = scroller.scrollTop;
+    updatePosition();
+    if (loaded && before && !loading && scroller.scrollTop < 100) void load(true);
+  }
+  // The thread stays at its end as it grows or the composer resizes. A fold the owner opens stays where it was clicked.
+  function resized() {
+    if (atBottom && performance.now() - clicked > 200) scroller.scrollTop = scroller.scrollHeight;
+    else if (atBottom) atBottom = gap() < 80;
+    updatePosition();
+  }
   let loaded = $state(false);
   let destroyed = false;
-  let lastSeq = $derived(Math.max(0, ...turns.flatMap(turn => [...(turn.inputs ?? []).map(input => input.seq), ...(turn.items ?? []).flatMap(item => [item.seq ?? 0, ...(item.posts ?? []).map(post => post.seq ?? 0)])])));
-  let queuedPosts = $derived(view.posts().filter(post => post.seq > lastSeq));
+  let queuedPosts = $derived(queuedTimelinePosts(view.posts(), turns));
+  let pendingPosts = $derived([...view.pendingPosts.values()]);
+  let quiet = $derived(!turns.length && !queuedPosts.length && !pendingPosts.length && !pendingBrief);
+  // The first message after a turn may start a new day. It waits outside any turn, so its day mark is here too.
+  let waitingSince = $derived(queuedPosts[0]?.at ?? pendingPosts[0]?.at);
 
   async function load(older = false) {
     if (loading) { if (!older) pending = true; return; }
@@ -73,11 +94,12 @@
       if (destroyed) return;
       const incoming = page.turns ?? [];
       if (older) {
-        const height = scroller.scrollHeight;
+        // Measured from the end, so this holds with or without the browser's own scroll anchoring.
+        const end = scroller.scrollHeight - scroller.scrollTop;
         turns = [...incoming.reverse(), ...turns];
         before = page.before;
         await tick();
-        scroller.scrollTop += scroller.scrollHeight - height;
+        scroller.scrollTop = scroller.scrollHeight - end;
       } else {
         const ids = new Set(incoming.map(turn => turn.id));
         const overlaps = turns.some(turn => ids.has(turn.id));
@@ -92,10 +114,9 @@
             ...(paging.has(turn.id + "/older") ? { olderItems: previous.olderItems, nextItem: previous.nextItem } : {}) } : turn;
         })];
         if (!retained.length) before = page.before;
-        if (loaded && atBottom) { await tick(); scroller.scrollTop = scroller.scrollHeight; }
       }
       failed = false;
-      if (!loaded) { loaded = true; requestAnimationFrame(() => { if (scroller) scroller.scrollTop = scroller.scrollHeight; }); }
+      loaded = true;
     } catch { failed = true; }
     finally {
       loading = false;
@@ -113,8 +134,11 @@
   onMount(() => {
     document.addEventListener("visibilitychange", markRead);
     const stop = watchTranscripts(id => { if (!id || id === session) void load(); });
+    const sizes = new ResizeObserver(resized);
+    sizes.observe(scroller);
+    sizes.observe(content);
     void load();
-    return () => { destroyed = true; cancelAnimationFrame(positionFrame); stop(); document.removeEventListener("visibilitychange", markRead); };
+    return () => { destroyed = true; cancelAnimationFrame(positionFrame); stop(); sizes.disconnect(); document.removeEventListener("visibilitychange", markRead); };
   });
   const paging = new Set<string>();
   type PageKind = "items" | "posts" | "older";
@@ -212,7 +236,8 @@
   let mediaRows: MediaRow[] = $derived(turns.flatMap(turn => [
     ...(turn.inputs ?? []).map(input => ({ key: input.id, event: input.id, room: input.room, from: input.from, at: input.at, attachments: input.attachments ?? [] })),
     ...(turn.items ?? []).flatMap(item => [item, ...(item.posts ?? [])]).map(item => ({ key: item.id, event: item.event ?? item.id, room: item.room ?? store.room, from: item.from ?? { kind: "engine" as const }, at: item.at, attachments: item.attachments ?? [] })),
-  ]).concat(queuedPosts.map(post => ({ key: post.id, event: post.id, room: post.room ?? store.room, from: post.from, at: post.at, attachments: post.body.attachments ?? [] }))));
+  ]).concat(queuedPosts.map(post => ({ key: post.id, event: post.id, room: post.room ?? store.room, from: post.from, at: post.at, attachments: post.body.attachments ?? [] })))
+    .concat(pendingPosts.map(post => ({ key: pendingKey(post.id), event: pendingKey(post.id), room: store.room, from: { kind: "owner" as const }, at: post.at, attachments: post.request.attachments ?? [] }))));
   let media = $derived(conversationMedia([...mediaRows].sort((a, b) => a.at.localeCompare(b.at))));
   let mediaIndex: number | undefined = $state();
   function openMedia(key: string, position: number) { const index = media.findIndex(item => item.key === key && item.position === position); if (index >= 0) mediaIndex = index; }
@@ -229,39 +254,78 @@
     return versions.filter(entry => entry !== undefined).reverse();
   }
   const sender = (kind: string, id?: string) => kind === "owner" ? "you" : id ? store.names.get(id) ?? "Session" : "Dyna";
+  const sameDay = (a: string, b: string) => new Date(a).toDateString() === new Date(b).toDateString();
+  const pendingKey = (id: number) => `pending:${id}`;
 </script>
 
-{#snippet inputAttachments(input: TranscriptInput)}
-  <div data-media-key={input.id}><PostAttachments onmedia={position => openMedia(input.id, position)} attachments={input.attachments ?? []} {newest} event={input.id} at={input.at} /></div>
+{#snippet message(key: string, text: string, attachments: Attachment[] | null | undefined, event?: string, at?: string)}
+  <Markdown rhythm="thread" {text} />
+  {#if attachments?.length}<PostAttachments onmedia={position => openMedia(key, position)} {attachments} {newest} {event} {at} />{/if}
 {/snippet}
 
-{#snippet postItem(turn: TranscriptTurn, item: TranscriptItem)}
-  {@const room = item.room}
-  {@const seq = item.seq}
-  {@const from = item.from}
-  {@const inbound = item.kind === "post" && !ownPost(item, session)}
+{#snippet textRetry(turn: TranscriptTurn, item: string)}
+  {#if chunkFailed[item + "/text"]}<button class="retry" onclick={() => void fetchPart(turn.id, item, "text")}>Text did not load. Try again</button>{/if}
+{/snippet}
+
+<!-- One layout from send to delivered: the states show around the bubble and never move it. -->
+{#snippet ownerMessage(key: string, at: string | undefined, sending: boolean, body: Snippet, note?: Snippet)}
+  <div class="owner-message" data-media-key={key}>
+    <div class="bubble" class:sending title={at && formatTime(at)}>{@render body()}</div>
+    {@render note?.()}
+  </div>
+{/snippet}
+
+{#snippet inbound(key: string, from: Principal, at: string, body: Snippet)}
+  {@const name = sender(from.kind, from.session)}
+  <div class="agent-input" data-media-key={key}>
+    <Avatar kind={from.kind} {name} size={32} />
+    <div class="agent-body">
+      <div class="agent-sender">{#if from.session}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(from.session)}`} onclick={navigate} style:--hue={hue(name)}>{name}</a>{:else}<strong>{name}</strong>{/if}<time datetime={at}>{formatTime(at)}</time></div>
+      {@render body()}
+    </div>
+  </div>
+{/snippet}
+
+{#snippet postItem(turn: TranscriptTurn, item: TranscriptItem, working = false)}
   {@const to = item.kind === "post" ? postDestination(item, session, store.room, roomName, id => sender("session", id)) : undefined}
-  <div data-media-key={item.id} class:agent-input={inbound} class:message={!inbound}>{#if inbound}<Avatar kind={from?.kind ?? "engine"} name={sender(from?.kind ?? "engine", from?.session)} size={32} />{/if}<div class="agent-body">{#if inbound}<div class="agent-sender">{#if from?.session}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(from.session)}`} onclick={navigate} style:--hue={hue(sender(from.kind, from.session))}>{sender(from.kind, from.session)}</a>{:else}<strong>{sender(from?.kind ?? "engine")}</strong>{/if}<time datetime={item.at}>{formatTime(item.at)}</time></div>{/if}{#if to}<div class="post-destination"><PostTarget {to} onjump={room && seq ? () => onpostlocation(room, seq) : undefined} /></div>{/if}<Markdown rhythm="thread" text={chunks[item.id + "/text"] ?? item.text} /><PostAttachments onmedia={position => openMedia(item.id, position)} attachments={item.attachments ?? []} {newest} event={item.event ?? item.id} at={item.at} /></div></div>
-  {#if chunkFailed[item.id + "/text"]}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Text did not load. Try again</button>{/if}
+  {#snippet body()}
+    {#if to}<div class="post-destination"><PostTarget {to} onjump={item.room && item.seq ? () => onpostlocation(item.room!, item.seq!) : undefined} /></div>{/if}
+    {@render message(item.id, chunks[item.id + "/text"] ?? item.text ?? "", item.attachments, item.event ?? item.id, item.at)}
+    {@render textRetry(turn, item.id)}
+  {/snippet}
+  {#if item.kind === "post" && !ownPost(item, session)}{@render inbound(item.id, item.from ?? { kind: "engine" }, item.at, body)}
+  {:else}<div class="agent-message" class:working data-media-key={item.id}>{@render body()}</div>{/if}
+{/snippet}
+
+{#snippet dayMark(at: string, before?: string)}
+  {#if !before || !sameDay(before, at)}<p class="day">{dayLabel(at, clock())}</p>{/if}
 {/snippet}
 
 {#if mediaIndex !== undefined}<MediaViewer room={store.room} {loadVisual} items={media} initial={mediaIndex} name={mediaName} root={mediaRoot} onclose={() => mediaIndex = undefined} onjump={key => scroller.querySelector<HTMLElement>(`[data-media-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "center" })} />{/if}
 
 <div class="thread-frame" bind:clientWidth={frameWidth}>
 {#if frameWidth >= 880}<TimelineMinimap turns={minimapTurns} current={currentTurn} onselect={(id) => scroller.querySelector<HTMLElement>(`article[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" })} />{/if}
-<div class="thread" bind:this={scroller} onscroll={() => { atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; updatePosition(); if (loaded && before && !loading && scroller.scrollTop < 100) void load(true); }}>
-  <div class="body">
-    {#if pendingBrief}<div class="owner-message"><Markdown rhythm="thread" text={pendingBrief} /></div>{/if}
-    {#each turns as turn (turn.id)}
+<div class="thread" bind:this={scroller} onscroll={scrolled}>
+  <div class="body" bind:this={content} onclickcapture={() => { clicked = performance.now(); }}>
+    {#if before && loaded}<div class="skeleton" aria-hidden="true"><i></i></div>{/if}
+    {#if !loaded && !failed && !pendingBrief}<div class="skeleton first" aria-hidden="true"><i></i><i></i><i></i></div>{/if}
+    {#if pendingBrief}
+      {@render dayMark(new Date(now).toISOString())}
+      {#snippet brief()}<Markdown rhythm="thread" text={pendingBrief ?? ""} />{/snippet}
+      {@render ownerMessage("brief", undefined, false, brief)}
+    {/if}
+    {#each turns as turn, index (turn.id)}
       {@const hasWork = !!turn.olderItems || (turn.items ?? []).some(item => item.kind === "tool" || item.kind === "thinking")}
       {@const finalText = turn.ended ? finalTimelineItem(turn.items ?? [], session)?.id : undefined}
-      <article data-turn={turn.id}>
+      {@render dayMark(turn.started, turns[index - 1]?.started)}
+      <article data-turn={turn.id} class:ended={turn.ended || stalled}>
         {#each turn.inputs ?? [] as input (input.id)}
-          {#if input.from.kind === "owner"}
-            <div class="owner-message" title={formatTime(input.at)}><Markdown text={timelineInputText(input, chunks["input:" + input.id + "/text"])} />{@render inputAttachments(input)}{#if chunkFailed["input:" + input.id + "/text"]}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Text did not load. Try again</button>{/if}</div>
-          {:else}
-            <div class="agent-input"><Avatar kind={input.from.kind} name={sender(input.from.kind, input.from.session)} size={32} /><div class="agent-body"><div class="agent-sender">{#if input.from.session}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(input.from.session)}`} onclick={navigate} style:--hue={hue(sender(input.from.kind, input.from.session))}>{sender(input.from.kind, input.from.session)}</a>{:else}<strong>{sender(input.from.kind, input.from.session)}</strong>{/if}<time datetime={input.at}>{formatTime(input.at)}</time></div><Markdown text={timelineInputText(input, chunks["input:" + input.id + "/text"])} />{@render inputAttachments(input)}{#if chunkFailed["input:" + input.id + "/text"]}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Text did not load. Try again</button>{/if}</div></div>
-          {/if}
+          {#snippet body()}
+            {@render message(input.id, timelineInputText(input, chunks["input:" + input.id + "/text"]), input.attachments, input.id, input.at)}
+            {@render textRetry(turn, "input:" + input.id)}
+          {/snippet}
+          {#if input.from.kind === "owner"}{@render ownerMessage(input.id, input.at, false, body)}
+          {:else}{@render inbound(input.id, input.from, input.at, body)}{/if}
         {/each}
         <!-- Dyna: Posts and the final answer remain visible outside the work fold. -->
         {#if turn.ended && hasWork}
@@ -270,7 +334,7 @@
         {#each deriveTimelineGroups(turn.items ?? []) as group (group.id)}
           {#if group.kind === "work"}
             {#if !turn.ended || expandedTurns[turn.id]}
-            <TranscriptWorkRow items={group.items} ended={!!turn.ended} started={turn.started} {now} {chunks}
+            <TranscriptWorkRow items={group.items} ended={!!turn.ended || stalled} started={turn.started} {now} {chunks}
               onopen={() => { if (turn.olderItems) void readContinuation(turn, "older"); }}
               onload={async (item, part) => { if (!await fetchPart(turn.id, item.id, part)) throw new Error("Part did not load"); }} />
             {/if}
@@ -279,64 +343,92 @@
               {@render postItem(turn, post)}
             {/each}
           {:else if group.item.kind === "text" || group.item.kind === "post"}
-            {#if group.item.kind === "post" || visibleTimelineText(group.item.id, finalText, !!turn.ended, hasWork, !!expandedTurns[turn.id])}{@render postItem(turn, group.item)}{/if}
+            {#if group.item.kind === "post" || visibleTimelineText(group.item.id, finalText, !!turn.ended, hasWork, !!expandedTurns[turn.id])}{@render postItem(turn, group.item, !!turn.ended && hasWork && group.item.kind === "text" && group.item.id !== finalText)}{/if}
           {:else if group.item.kind === "too_large"}<p class="muted">This item is too large to show.</p>{/if}
         {/each}
-        {#if turn.outcome === "failed"}<div class="failure"><Icon name="warning" size={16} /><div><strong>{turn.cause ? causes[turn.cause] : "The turn failed"}</strong></div></div>{/if}
-        {#if !turn.ended && !(turn.items ?? []).some(item => timelineItemRunning(item, false))}<p class="muted working"><span class="spinner" aria-hidden="true"></span>Working for {formatTimelineDuration(now - Date.parse(turn.started))}</p>{/if}
+        {#if turn.outcome === "failed"}<div class="failure"><span class="slot"><Icon name="warning" size={16} /></span>{turn.cause ? causes[turn.cause] : "The turn failed"}</div>
+        {:else if turn.outcome === "stopped"}<p class="muted turn-note">Stopped</p>{/if}
+        {#if !turn.ended && !stalled && !(turn.items ?? []).some(item => timelineItemRunning(item, false))}<p class="muted turn-note"><span class="slot"><span class="spinner" aria-hidden="true"></span></span>Working for {formatTimelineDuration(now - Date.parse(turn.started))}</p>{/if}
       </article>
-    {:else}{#if !loading && !failed && !pendingBrief}<p class="muted">The conversation will appear here.</p>{/if}{/each}
+    {/each}
+    {#if waitingSince}{@render dayMark(waitingSince, turns.at(-1)?.started)}{/if}
     {#each queuedPosts as post (post.id)}
-      {@const own = post.from.kind === "session" && post.from.session === session}
-      <div class:input={!own} class:message={own} data-media-key={post.id}>{#if !own}<div class="who"><Avatar kind={post.from.kind} name={sender(post.from.kind, post.from.session)} size={22} /><strong>{sender(post.from.kind, post.from.session)}</strong></div>{/if}<Markdown rhythm="thread" text={post.body.text} /><PostAttachments onmedia={position => openMedia(post.id, position)} attachments={post.body.attachments ?? []} {newest} event={post.id} at={post.at} /></div>
+      {#snippet body()}{@render message(post.id, post.body.text, post.body.attachments, post.id, post.at)}{/snippet}
+      {#snippet queued()}<p class="owner-note queued">Queued</p>{/snippet}
+      {#if post.from.kind === "owner"}{@render ownerMessage(post.id, post.at, false, body, closed ? undefined : queued)}
+      {:else if post.from.kind === "session" && post.from.session === session}<div class="agent-message" data-media-key={post.id}>{@render body()}</div>
+      {:else}{@render inbound(post.id, post.from, post.at, body)}{/if}
     {/each}
-    {#each [...view.pendingPosts.values()] as post (post.id)}
-      <div class="input" class:pending={!post.failed}><strong>you</strong><Markdown rhythm="thread" text={post.request.text} /><PostAttachments onmedia={() => {}} attachments={post.request.attachments ?? []} {newest} />{#if post.failed}<StatusPill tone="failed" label="Not sent" word /> <button onclick={() => void view.retry(post.id)}>Retry</button> <button onclick={() => view.discard(post.id)}>Discard</button>{/if}</div>
+    {#each pendingPosts as post (post.id)}
+      {#snippet body()}{@render message(pendingKey(post.id), post.request.text, post.request.attachments)}{/snippet}
+      {#snippet unsent()}<p class="owner-note unsent" role="alert">Not sent<button class="retry" onclick={() => void view.retry(post.id)}>Retry</button><button class="retry" onclick={() => view.discard(post.id)}>Discard</button></p>{/snippet}
+      {@render ownerMessage(pendingKey(post.id), undefined, !post.failed, body, post.failed ? unsent : undefined)}
     {/each}
-    {#if failed}<p class="muted" role="alert">The conversation did not load. <button onclick={() => void load()}>Try again</button></p>{/if}
+    {#if loaded && !failed && quiet}<p class="muted empty">The conversation will appear here.</p>{/if}
+    {#if failed}<p class="muted" role="alert">The conversation did not load. <button class="retry" onclick={() => void load()}>Try again</button></p>{/if}
   </div>
+  {#if !atBottom}<div class="latest-bar"><button class="latest" onclick={() => scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" })}>Jump to latest</button></div>{/if}
 </div>
-{#if !atBottom}<div class="latest-bar"><button class="latest" onclick={() => scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" })}>Jump to latest</button></div>{/if}
 </div>
 
 <style>
   .thread-frame { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; }
-  .thread { flex: 1; min-height: 0; overflow-y: auto; }
-  .body { max-width: 784px; margin: auto; padding: 16px 24px; }
-  article { padding-bottom: 20px; margin-bottom: 20px; border-bottom: 1px solid var(--line); }
-  .failure { display: flex; gap: 10px; color: var(--muted); margin: 12px 0; }
-  .failure strong { color: var(--text); }
-  .spinner { display: inline-block; width: 12px; height: 12px; border: 1.5px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
-  /* The spinner sits in the work rows' 24 px icon slot, so the words line up with theirs. */
-  .working .spinner { margin: 0 12px 0 6px; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
-  .agent-input { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; margin: 14px 0; }
+  /* The gutter on both edges keeps the column centered over the composer, with or without a classic scrollbar. */
+  .thread { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable both-edges; }
+  .body { display: flex; flex-direction: column; gap: 12px; max-width: 784px; margin: auto; padding: 16px 24px; }
+  article { display: flex; flex-direction: column; gap: 12px; min-width: 0; scroll-margin-top: 16px; }
+  /* The only line in the thread: the end of a turn, once something follows it. */
+  article.ended:not(:last-child) { margin-bottom: 12px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+  .day { margin: 0; color: var(--muted); font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: center; }
+  .owner-message { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .bubble { max-width: 80%; min-width: 0; padding: 12px 16px; background: var(--raised); border-radius: 12px; }
+  .bubble.sending { opacity: 0.5; }
+  .owner-note { display: flex; gap: 12px; margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.25; }
+  /* Most messages leave the queue at once. The note opens only for one that stays, so a normal send moves nothing. */
+  .queued { overflow: hidden; animation: open-note 150ms ease 1s backwards; }
+  @keyframes open-note { from { height: 0; opacity: 0; } to { height: 1.25em; opacity: 1; } }
+  .unsent { color: var(--danger); }
+  .unsent .retry { color: inherit; }
+  .agent-message { min-width: 0; }
+  .agent-message.working { color: var(--muted); }
+  .post-destination { display: flex; min-width: 0; margin-bottom: 4px; }
+  .agent-input { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; }
   .agent-body { min-width: 0; }
-  .agent-sender { display: flex; align-items: baseline; gap: 8px; }
-  .agent-sender a { color: oklch(var(--id-name) var(--hue)); font-weight: 600; text-decoration: none; }
+  .agent-sender { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .agent-sender :is(a, strong) { min-width: 0; overflow: hidden; color: oklch(var(--id-name) var(--hue)); font-size: 14px; font-weight: 600; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+  .agent-sender strong { color: var(--text); }
   .agent-sender a:hover { text-decoration: underline; }
-  .owner-message { width: fit-content; max-width: 75%; margin: 12px 0 12px auto; padding: 12px 16px; background: var(--raised); border-radius: 14px; }
-  .input { background: var(--raised); padding: 12px 16px; border-radius: 14px; margin: 12px 0; }
-  p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
-  .who { display: flex; align-items: center; gap: 8px; }
-  .who strong, .who .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .who .identity { flex-shrink: 0; max-width: 60%; color: oklch(var(--id-name) var(--hue)); }
-  .who time { flex: none; margin-left: auto; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .input :global(.markdown) { margin: 4px 0 0; }
-  .pending { opacity: 0.5; }
-  .message { margin: 20px 0 12px; }
-  .post-destination { display: flex; min-width: 0; margin-bottom: 6px; }
-  .work-header { display: flex; align-items: center; gap: 4px; width: 100%; color: var(--muted); font-size: 14px; margin-top: 40px; padding: 8px 4px 12px; border-bottom: 1px solid var(--line); }
+  .agent-sender time { flex: none; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  /* These rows share the work rows' grid: a 24 px icon slot and a 6 px gap, at their size. */
+  .work-header, .turn-note, .failure { min-height: 24px; font-size: 14px; }
+  .work-header { display: flex; align-items: center; align-self: flex-start; gap: 4px; color: var(--muted); }
   .work-header span { display: inline-flex; transform: rotate(-90deg); }
   .work-header span.open { transform: none; }
+  .turn-note { display: flex; align-items: center; gap: 6px; margin: 0; }
+  .failure { display: flex; gap: 6px; line-height: 24px; overflow-wrap: anywhere; }
+  .failure .slot { color: var(--danger); }
+  .slot { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; height: 24px; }
+  .spinner { width: 12px; height: 12px; border: 1.5px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .muted { color: var(--muted); }
+  .empty { margin: 0; text-align: center; }
+  p { overflow-wrap: anywhere; line-height: 1.45; }
+  /* A fast load shows nothing; a slow one shows the shape of the thread. */
+  .skeleton { display: grid; gap: 12px; animation: appear 1ms 200ms backwards; }
+  @keyframes appear { from { visibility: hidden; } }
+  .skeleton i { width: 60%; height: 16px; border-radius: 6px; background: var(--hover); }
+  .skeleton.first i:first-child { justify-self: end; width: 40%; height: 44px; border-radius: 12px; }
+  .skeleton.first i:last-child { width: 40%; }
   button { padding: 0; border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
   button:hover { color: var(--text); }
   button:focus-visible { outline: 2px solid var(--focus); }
-  .latest-bar { position: absolute; inset: auto 0 8px; display: flex; justify-content: center; pointer-events: none; }
-  .latest-bar button { pointer-events: auto; }
-  .latest { background: var(--raised); padding: 8px 12px; border-radius: 6px; }
-  @media (max-width: 600px) { .body { padding: 12px 16px; } }
-  @media (pointer: coarse) { button { min-height: 40px; } }
+  /* Sticky inside the scroller and without height, so it centers on the column and changes no scroll length. */
+  .latest-bar { position: sticky; bottom: 8px; display: flex; justify-content: center; height: 0; }
+  .latest { flex: none; height: 28px; padding: 0 12px; transform: translateY(-100%); border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--text); font-size: 13px; font-weight: 500; }
+  @media (max-width: 600px) { .thread { scrollbar-gutter: stable; } .body { padding: 12px 16px; } }
+  @media (pointer: coarse) { button { min-height: 40px; } .latest { height: 40px; } }
+  @media (prefers-reduced-motion: reduce) {
+    .spinner { animation: none; }
+    .queued { animation-duration: 1ms; }
+  }
 </style>

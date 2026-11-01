@@ -84,17 +84,16 @@
 </div>
 
 <style>
-  .script-group { border-left: 1px solid var(--line); border-radius: 6px; margin: 10px 0 10px 4px; padding-left: 8px; }
-  .call-line, summary { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+  .call-line, summary { display: flex; align-items: center; gap: 6px; min-height: 24px; }
   summary { cursor: pointer; list-style: none; }
   summary::-webkit-details-marker { display: none; }
   summary:hover { color: var(--text); background: var(--hover); }
-  .slot { display: inline-flex; flex: none; width: 16px; justify-content: center; }
+  .slot { display: inline-flex; flex: none; width: 24px; justify-content: center; }
   .target { font-family: var(--mono); color: var(--text); overflow-wrap: anywhere; }
   .time, .chevron { margin-left: auto; white-space: nowrap; }
   .time { font-size: 11px; font-variant-numeric: tabular-nums; }
-  .error { margin-left: 24px; color: var(--danger); overflow-wrap: anywhere; }
-  .body { margin-left: 24px; }
+  .error { margin-left: 30px; color: var(--danger); overflow-wrap: anywhere; }
+  .body { margin-left: 30px; }
   .heading { display: flex; align-items: center; margin: 8px 0; }
   .copy { margin-left: auto; width: 24px; height: 24px; display: grid; place-items: center; }
   pre { margin: 0; padding: 10px; background: var(--sidebar); border: 1px solid var(--line); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); font: 12.5px/1.5 var(--mono); }
@@ -102,5 +101,5 @@
   button { border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
   button:hover { color: var(--text); }
   button:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); }
-  .more { margin-left: 24px; }
+  .more { margin-left: 30px; }
 </style>
