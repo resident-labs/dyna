@@ -25,8 +25,8 @@ func TestQuotaSummaryNamesTheCallersThatSpendQuota(t *testing.T) {
 	}
 	now = now.Add(window)
 	q.record(ghQuotaCaller("graphql"), true)
-	if len(lines) != 1 {
-		t.Fatalf("summaries = %v, want one", lines)
+	if len(lines) != 2 {
+		t.Fatalf("summaries = %v, want totals and phases", lines)
 	}
 	want := "3 counted and 2 free (304) requests in 10m0s; counted by caller: comments 1, graphql 1, run-jobs 1"
 	if !strings.Contains(lines[0], want) {
@@ -46,10 +46,11 @@ func TestRunPhasesPreserveTotalsAndHideRequestValues(t *testing.T) {
 	q.recordPhase(caller, RunMergeTrial, true)
 	now = now.Add(window)
 	q.recordPhase("graphql", RunOther, false)
-	if len(lines) != 3 || !strings.Contains(lines[0], "runs-head-sha 3") ||
-		!strings.Contains(lines[1], "snapshot 1 counted 0 free; cancellation 1 counted 0 free") ||
-		!strings.Contains(lines[1], "other 0 counted 1 free") ||
-		!strings.Contains(lines[2], "main-recheck 1 counted 0 free; merge-trial 0 counted 1 free") ||
+	if len(lines) != 4 || !strings.Contains(lines[0], "runs-head-sha 3") ||
+		!strings.Contains(lines[1], "runs-head-sha/main-recheck 1") ||
+		!strings.Contains(lines[2], "snapshot 1 counted 0 free; cancellation 1 counted 0 free") ||
+		!strings.Contains(lines[2], "other 0 counted 1 free") ||
+		!strings.Contains(lines[3], "main-recheck 1 counted 0 free; merge-trial 0 counted 1 free") ||
 		strings.Contains(strings.Join(lines, " "), "secret") || strings.Contains(strings.Join(lines, " "), "private") {
 		t.Fatalf("unexpected quota summaries: %v", lines)
 	}
@@ -133,9 +134,9 @@ func TestQuotaSummaryCountsANamedCaller(t *testing.T) {
 		now:  func() time.Time { return now },
 		logf: func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) },
 	}
-	q.record("access-check", false)
+	q.recordPhaseKind("access-check", RunOther, false, "source")
 	now = now.Add(window)
-	q.record("access-check", false)
+	q.recordPhaseKind("access-check", RunOther, false, "source")
 	if len(lines) != 1 || !strings.Contains(lines[0], "counted by caller: access-check 2") {
 		t.Fatalf("summaries = %v, want the named caller counted", lines)
 	}
