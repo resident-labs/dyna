@@ -1,14 +1,13 @@
 <script lang="ts">
-  import { SvelteMap } from "svelte/reactivity";
   import Icon from "./Icon.svelte";
   import StepList from "./StepList.svelte";
   import { clock, commandLine, describe, eventGroups, formatTime, subject, timeSpan, workSummary, type Row } from "../feed.ts";
   import type { Event } from "../contract.gen.ts";
-  import { TurnTranscripts } from "../transcripts.svelte.ts";
+  import type { TurnTranscripts } from "../transcripts.svelte.ts";
 
-  let { row, name, opened, ontoggle, onjobs }: {
+  let { row, name, opened, ontoggle, transcripts, transcriptOf, onjobs }: {
     row: Extract<Row, { kind: "work" }>; name: (session: string) => string; opened: ReadonlySet<string>; ontoggle: (key: string) => void;
-    onjobs: (session: string) => void;
+    transcripts: ReadonlyMap<string, TurnTranscripts>; transcriptOf: (session: string) => TurnTranscripts; onjobs: (session: string) => void;
   } = $props();
   let open = $derived(opened.has(row.key));
   let workers = $derived([...new Set(row.events.flatMap(event => event.type === "turn.started" || event.type === "turn.ended" ? [event.body.session] : []))].sort((a, b) => Number(row.failedSessions.includes(b)) - Number(row.failedSessions.includes(a))));
@@ -16,17 +15,15 @@
   let other = $derived(events.filter(event => event.type !== "turn.started" && event.type !== "turn.ended" && event.type !== "turn.activity" && event.type !== "computer.changed"));
   let groups = $derived([...other.reduce((groups, event) => groups.set(event.type, [...groups.get(event.type) ?? [], event]), new Map<Event["type"], Event[]>()).values()]);
   let computerSessions = $derived([...new Set(events.flatMap(event => event.type === "computer.changed" ? [event.body.session] : []))]);
-  const sessionTranscripts = new SvelteMap<string, TurnTranscripts>();
-  function transcriptOf(session: string): TurnTranscripts {
-    let transcript = sessionTranscripts.get(session);
-    if (!transcript) { transcript = new TurnTranscripts(session); sessionTranscripts.set(session, transcript); }
-    return transcript;
+  function toggleWork() {
+    if (!open && workers.length === 1) transcriptOf(workers[0]).read(events.filter(event => subject(event) === workers[0]));
+    ontoggle(row.key);
   }
-  $effect(() => {
-    for (const session of workers) transcriptOf(session).read(row.events.filter(event => subject(event) === session));
-  });
-  let reads = $derived(workers.map(session => sessionTranscripts.get(session)?.of(row.events.filter(event => subject(event) === session))));
-  let expandable = $derived(computerSessions.length > 0 || groups.some(group => !!describe(group[0], name)) || reads.some(read => read === undefined || read === "loading" || read === "failed" || (typeof read === "object" && (read.steps.length > 0 || read.truncated))));
+  function toggleSession(session: string, own: Event[]) {
+    const key = `${row.key}-${session}`;
+    if (!opened.has(key)) transcriptOf(session).read(own);
+    ontoggle(key);
+  }
   function computerUsage(session: string): string {
     let start: number | undefined, total = 0, uses = 0;
     for (const event of events) {
@@ -50,28 +47,27 @@
 <div class="work">
   <span class="glyph" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 3 8l9 5 9-5zM3 13l9 5 9-5" /></svg></span>
   <div class="body">
-    <svelte:element this={expandable ? "button" : "div"} type={expandable ? "button" : undefined} class="fold" class:inert={!expandable} aria-expanded={expandable ? open : undefined} onclick={expandable ? () => ontoggle(row.key) : undefined}>
+    <button type="button" class="fold" aria-expanded={open} onclick={toggleWork}>
       <span class="summary">{workSummary(row.events, name, row.until)} <time datetime={row.events[0].at}>{row.events.length > 1 || row.until ? timeSpan(row.events[0].at, row.until ?? row.events.at(-1)?.at ?? row.events[0].at) : clock(row.events[0].at)}</time></span>
-      {#if expandable}<span class="chevron" class:open><Icon name="chevron" size={14} /></span>{/if}
-    </svelte:element>
-    {#if open && expandable}<div class="opened">
+      <span class="chevron" class:open><Icon name="chevron" size={14} /></span>
+    </button>
+    {#if open}<div class="opened">
       {#if workers.length === 1}
         {@const session = workers[0]}
         {@const own = events.filter(event => subject(event) === session)}
-        {@const transcript = sessionTranscripts.get(session)?.of(own)}
+        {@const transcript = transcripts.get(session)?.of(own)}
         {#if transcript === "loading" || !transcript}<p>Loading steps…</p>
         {:else if transcript === "failed"}<p>The steps did not load. <button type="button" class="retry" onclick={() => transcriptOf(session).read(own, true)}>Retry</button></p>
-        {:else if transcript.steps.length || transcript.truncated}<StepList steps={transcript.steps} truncated={transcript.truncated} id={row.key} {opened} {ontoggle} />{/if}
+        {:else if transcript.steps.length || transcript.truncated}<StepList steps={transcript.steps} truncated={transcript.truncated} id={row.key} {opened} {ontoggle} />{:else}<p>No steps were recorded.</p>{/if}
       {:else if workers.length > 1}
         <ul class="workers">{#each workers.slice(0, allWorkers ? undefined : 6) as session (session)}
           {@const own = events.filter(event => subject(event) === session)}
-          {@const transcript = sessionTranscripts.get(session)?.of(own)}
-          {@const available = !transcript || transcript === "loading" || transcript === "failed" || (typeof transcript === "object" && (transcript.steps.length > 0 || transcript.truncated))}
-          <li>{#if available}<button class="detail" type="button" aria-expanded={opened.has(`${row.key}-${session}`)} onclick={() => ontoggle(`${row.key}-${session}`)}>{workSummary(own, name)} <Icon name="chevron" size={14} /></button>{:else}<span>{workSummary(own, name)}</span>{/if}</li>
-          {#if available && opened.has(`${row.key}-${session}`)}
+          {@const transcript = transcripts.get(session)?.of(own)}
+          <li><button class="detail" type="button" aria-expanded={opened.has(`${row.key}-${session}`)} onclick={() => toggleSession(session, own)}>{workSummary(own, name)} <Icon name="chevron" size={14} /></button></li>
+          {#if opened.has(`${row.key}-${session}`)}
             {#if transcript === "loading" || !transcript}<li class="step">Loading steps…</li>
             {:else if transcript === "failed"}<li class="step">The steps did not load. <button class="retry" type="button" onclick={() => transcriptOf(session).read(own, true)}>Retry</button></li>
-            {:else}<li class="step step-list"><StepList steps={transcript.steps} truncated={transcript.truncated} id={`${row.key}-${session}`} {opened} {ontoggle} /></li>{/if}
+            {:else if transcript.steps.length || transcript.truncated}<li class="step step-list"><StepList steps={transcript.steps} truncated={transcript.truncated} id={`${row.key}-${session}`} {opened} {ontoggle} /></li>{:else}<li class="step">No steps were recorded.</li>{/if}
           {/if}
         {/each}{#if !allWorkers && workers.length > 6}<li><button class="detail" type="button" onclick={() => ontoggle(`${row.key}-all`)}>Show {workers.length - 6} more sessions</button></li>{/if}</ul>
       {/if}
@@ -86,8 +82,7 @@
   @media (max-width: 640px) { .work { gap: 8px; } }
   .body { min-width: 0; }
   .fold { all: unset; display: flex; align-items: flex-start; gap: 8px; width: 100%; min-height: 24px; cursor: pointer; border-radius: 6px; }
-  .fold.inert { cursor: default; }
-  .fold:not(.inert):hover, .retry:hover { color: var(--text); }
+  .fold:hover, .retry:hover { color: var(--text); }
   .fold:focus-visible, .retry:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .summary { flex: 1; min-width: 0; padding-top: 3px; overflow-wrap: anywhere; }
   time { color: var(--muted); opacity: .8; white-space: nowrap; }
