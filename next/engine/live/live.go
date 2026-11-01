@@ -15,9 +15,9 @@ type Live struct {
 	mu                 sync.Mutex
 	activityMu         sync.Mutex
 	sessions           map[contract.SessionID]*Session
-	closed             map[contract.SessionID]struct{}
 	activityCount      uint64
 	computerGeneration atomic.Uint64
+	shellGeneration    atomic.Uint64
 	subscribers        map[*Subscription]contract.RoomID
 	wakeMu             sync.Mutex
 	wakePending        map[contract.SessionID]bool
@@ -35,6 +35,8 @@ type Session struct {
 	activityOrder uint64
 	channel       *Channel
 	computer      *computerState
+	shell         *shellWatch
+	terminals     int
 }
 
 // Subscription uses mu to serialize sends with close.
@@ -45,7 +47,7 @@ type Subscription struct {
 }
 
 func New(deliver func(map[contract.SessionID]bool)) *Live {
-	return &Live{sessions: make(map[contract.SessionID]*Session), closed: make(map[contract.SessionID]struct{}), subscribers: make(map[*Subscription]contract.RoomID), wakePending: make(map[contract.SessionID]bool), wakeSignal: make(chan struct{}, 1), deliver: deliver}
+	return &Live{sessions: make(map[contract.SessionID]*Session), subscribers: make(map[*Subscription]contract.RoomID), wakePending: make(map[contract.SessionID]bool), wakeSignal: make(chan struct{}, 1), deliver: deliver}
 }
 
 func (l *Live) Subscribe(room contract.RoomID, capacity int) (*Subscription, chan contract.Event) {
@@ -91,13 +93,10 @@ func (l *Live) Publish(room contract.RoomID, event contract.Event, ownerOnly boo
 	}
 }
 
-// CreateSession accepts only an ID read from an open session by the caller.
+// CreateSession publishes a handle; the caller must validate it against the store.
 func (l *Live) CreateSession(id contract.SessionID) (*Session, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if _, closed := l.closed[id]; closed {
-		return nil, false
-	}
 	s := l.sessions[id]
 	if s == nil {
 		s = &Session{live: l, id: id}
@@ -114,25 +113,25 @@ func (l *Live) LookupSession(id contract.SessionID) (*Session, bool) {
 	return s, ok
 }
 
-// RetireSession closes the creation gate and returns the removed handle locked.
-// The caller completes teardown and unlocks the returned handle.
+// RetireSession retires the current handle, if any.
 func (l *Live) RetireSession(id contract.SessionID) *Session {
-	l.mu.Lock()
-	s := l.sessions[id]
-	if s == nil {
-		l.closed[id] = struct{}{}
-		l.mu.Unlock()
+	s, ok := l.LookupSession(id)
+	if !ok {
 		return nil
 	}
-	l.mu.Unlock()
+	return l.RetireHandle(s)
+}
+
+// RetireHandle removes only this handle and returns it locked for teardown.
+func (l *Live) RetireHandle(s *Session) *Session {
 	s.mu.Lock()
-	if s.removed {
+	l.mu.Lock()
+	if s.removed || l.sessions[s.id] != s {
+		l.mu.Unlock()
 		s.mu.Unlock()
 		return nil
 	}
-	l.mu.Lock()
-	delete(l.sessions, id)
-	l.closed[id] = struct{}{}
+	delete(l.sessions, s.id)
 	s.removed = true
 	l.mu.Unlock()
 	return s

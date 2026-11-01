@@ -1,6 +1,6 @@
 import { sha256 } from "./crypto";
 
-// Wire fields shared with internal/connect. Fixed vectors live in testdata/connect.
+// Wire fields shared with next/engine/connect. Fixed vectors live in testdata/connect.
 export interface MachineInfo {
   id: string;
   name: string;
