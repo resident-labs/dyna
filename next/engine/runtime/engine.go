@@ -177,9 +177,13 @@ func Run(ctx context.Context, cfg Config) error {
 	boxes := &Boxes{Store: st, HeartbeatStore: st, Runtime: cfg.Runtime, HostData: cfg.HostData, InstructionsDir: filepath.Join(cfg.Data, "files", "instructions"), Version: cfg.Version, PiTarball: pi, Context: boxCtx}
 	go boxes.controlPlane(cfg.Data)
 	service := engine.New(st, boxes, profiles, time.Now)
-	routes := map[contract.ModelProvider]string{"anthropic": "", "openai": "/v1", "kimi-coding": "/v1", "xai": "/v1"}
-	for _, provider := range keyProviders {
-		routes[contract.ModelProvider(provider.Provider)] = "/v1"
+	routes := make(map[contract.ModelProvider]string)
+	for _, provider := range proxy.AccountProviders() {
+		suffix := "/v1"
+		if provider.ID == contract.ProviderAnthropic {
+			suffix = ""
+		}
+		routes[contract.ModelProvider(provider.ID)] = suffix
 	}
 	service.SetModelRoutes(routes)
 	service.SetModelNamespace(proxy.Namespace)

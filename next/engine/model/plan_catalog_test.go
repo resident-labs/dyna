@@ -18,6 +18,26 @@ func testPlanModels() map[contract.AccountProvider][]contract.CatalogModel {
 	return out
 }
 
+func TestPlanCatalogUsesDefaultAndExactAliases(t *testing.T) {
+	p := &Proxy{}
+	catalog := Catalog{Providers: []CatalogProvider{
+		{ID: "anthropic", DefaultModel: "claude-opus-4-6", Models: []CatalogModel{{ID: "not-served"}, {ID: "claude-sonnet-4-6"}, {ID: "claude-opus-4-6"}}},
+		{ID: "kimi-coding", DefaultModel: "kimi-for-coding", Models: []CatalogModel{{ID: "k3"}, {ID: "kimi-for-coding"}}},
+	}}
+	if err := p.SetPlanModels(catalog); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.planModels[contract.ProviderAnthropic]) != 2 || p.planDefaults[contract.ProviderAnthropic] != "claude-opus-4-6" {
+		t.Fatal("wrong Claude plan models or default")
+	}
+	if len(p.planModels[contract.ProviderKimiCoding]) != 2 || p.planDefaults[contract.ProviderKimiCoding] != "kimi-for-coding" || planProxyModel(contract.ProviderKimiCoding, "kimi-for-coding") != "kimi-k2.8-code" {
+		t.Fatal("wrong Kimi plan models or aliases")
+	}
+	if len(p.planModels[contract.ProviderOpenAI]) != 0 {
+		t.Fatal("offered provider without models")
+	}
+}
+
 func TestPinnedPlanCatalogDrift(t *testing.T) {
 	path := os.Getenv("DYNA_PI_TARBALL")
 	if path == "" {
