@@ -47,7 +47,7 @@ const checkinFacts = `SELECT s.id,COALESCE(s.parent,''),s.name,s.state='closing'
 	COALESCE((SELECT MIN(o.created_at) FROM operations o WHERE o.by_kind='session' AND o.by_id=s.id AND o.state='pending'),0),
 	COALESCE(c.silent_turn,''),COALESCE(c.progress,0),COALESCE(c.told,0),COALESCE(c.told_at,0),COALESCE(c.reported_at,0),
 	EXISTS (SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=s.id AND d.seq=c.report_seq AND d.state IN ('pending','taken')),
-	` + failureKey + `,COALESCE(c.failure,''),b.reason,NOT ` + noOpenQuestion + `
+	` + failureKey + `,COALESCE(c.failure,''),b.reason,NOT ` + noOpenQuestion + `,` + blockedOnQuestion + `
 	FROM sessions s JOIN boxes b ON b.session=s.id
 	LEFT JOIN turns t ON t.id=(SELECT id FROM turns WHERE session=s.id ORDER BY started_at DESC, rowid DESC LIMIT 1)
 	LEFT JOIN checkins c ON c.session=s.id
@@ -76,7 +76,7 @@ func readCheckinRoom(ctx context.Context, tx *sql.Tx, id contract.RoomID) ([]roo
 		var created, boxChanged, started, ended, waiting, progress, told, reported int64
 		var turn, silent, outcome string
 		if err := rows.Scan(&s.ID, &s.Parent, &s.Name, &s.Closing, &created, &s.Jobs, &s.Retrying, &s.Box, &boxChanged,
-			&turn, &started, &ended, &outcome, &s.Pending, &waiting, &silent, &progress, &s.Told, &told, &reported, &s.Unread, &s.Failure, &s.FailureTold, &s.Reason, &s.Asking); err != nil {
+			&turn, &started, &ended, &outcome, &s.Pending, &waiting, &silent, &progress, &s.Told, &told, &reported, &s.Unread, &s.Failure, &s.FailureTold, &s.Reason, &s.Asking, &s.Blocked); err != nil {
 			return nil, nil, err
 		}
 		s.BoxChanged, s.Waiting, s.ToldAt, s.Reported = millis(boxChanged), millis(waiting), millis(told), millis(reported)

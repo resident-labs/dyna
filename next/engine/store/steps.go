@@ -6,10 +6,11 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 63
+const schemaVersion = 64
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	63: {`ALTER TABLE questions ADD COLUMN meanwhile TEXT NOT NULL DEFAULT ''`, `ALTER TABLE questions ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0`},
 	62: {
 		`CREATE TABLE goals (room TEXT NOT NULL REFERENCES rooms(id), number INTEGER NOT NULL, session TEXT REFERENCES sessions(id), text TEXT NOT NULL, done_when TEXT NOT NULL, state TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(room, number))`,
 		`CREATE INDEX goals_holder ON goals(session) WHERE state='active'`,

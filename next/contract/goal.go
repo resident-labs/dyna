@@ -154,6 +154,7 @@ type CheckinChild struct {
 	Reason  string       `json:"reason,omitempty"`
 	Idle    DurationMS   `json:"idle"`
 	Silent  bool         `json:"silent,omitempty"` // its last turn ended with no reply to anyone
+	Asking  bool         `json:"asking,omitempty"` // it has an open question for the owner
 	Goal    GoalID       `json:"goal"`
 	Text    string       `json:"text"`
 	Open    int          `json:"open"` // the goal's open items
