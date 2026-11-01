@@ -588,6 +588,8 @@ type TurnOutputRequest struct {
 	EndPosts  []EventID    `json:"endPosts,omitempty"` // the posts that ended the turn; a completed turn with these has no final text
 	Model     string       `json:"model"`
 	Usage     Usage        `json:"usage"`
+	// Unread names inputs the turn ended without giving to Pi, because their files were still on the way. The next turn takes them.
+	Unread []DeliverySeq `json:"unread,omitempty"`
 }
 type TurnOutputResponse struct{}
 
@@ -806,6 +808,14 @@ type TurnInput struct {
 	Surface  Surface      `json:"surface"`
 	Reply    ReplyChannel `json:"reply"`
 	Text     string       `json:"text"`
+	Files    []TurnFile   `json:"files,omitempty"` // the attachments the frame names
+}
+
+// TurnFile is one attachment of an input. The box fetches it by hash and stores it at Path before Pi reads the input.
+type TurnFile struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+	Bytes  int64  `json:"bytes"`
 }
 type TurnStart struct {
 	Sections []ContextSection `json:"sections"`
