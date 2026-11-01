@@ -143,6 +143,7 @@ function engine(count: number, sessions: SessionSummary[] = []) {
       return reply({ seq: posts.length, event: String(posts.length) });
     }
     if (method === "session.list") return reply({ sessions, seq: posts.length });
+    if (method === "room.list") return reply({ rooms: [], seq: posts.length });
     if (method !== "events.list") return reply({});
     if (state.down) return reply({ code: "internal", message: "down" }, 500);
     const request: EventsListRequest = JSON.parse(String(init?.body));
@@ -328,6 +329,26 @@ test("a failed turn marks its session until the owner reads past it in the feed 
   assert.equal(room.unseen("s"), true);
   room.apply(read(feed, 2));
   assert.equal(room.unseen("s"), false);
+});
+
+test("rereading gives the feed and each DM their newest read positions", async () => {
+  const listed = { lastRead: 2, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "", startedAt: "", hadJobs: false } as const;
+  const sessions: SessionSummary[] = [{ id: "s", ...listed }];
+  const server = engine(0, sessions);
+  const engineFetch = globalThis.fetch;
+  let feedRead = 5;
+  globalThis.fetch = (input, init) => String(input) === "/v1/room.list"
+    ? Promise.resolve(new Response(JSON.stringify({ rooms: [{ id: "r", lastRead: feedRead }], seq: 0 })))
+    : engineFetch(input, init);
+  try {
+    const room = new RoomStore("r", () => () => {});
+    await room.open();
+    assert.deepEqual([room.readAt(feed), room.readAt(dm)], [5, 2]);
+    feedRead = 8;
+    sessions[0] = { ...sessions[0], lastRead: 4 };
+    await room.rereadPositions();
+    assert.deepEqual([room.readAt(feed), room.readAt(dm)], [8, 4]);
+  } finally { globalThis.fetch = engineFetch; server.restore(); }
 });
 
 test("session.list and later events set and clear the running computers", async () => {
