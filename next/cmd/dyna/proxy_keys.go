@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -17,9 +20,56 @@ import (
 )
 
 type proxyKeyRequest struct {
-	ID       string                   `json:"id"`
-	Provider contract.AccountProvider `json:"provider"`
-	Key      string                   `json:"key"`
+	ID          string                   `json:"id"`
+	Provider    contract.AccountProvider `json:"provider"`
+	Key         string                   `json:"key"`
+	DisplayName string                   `json:"displayName"`
+	BaseURL     string                   `json:"baseUrl"`
+	Models      []string                 `json:"models"`
+	Discover    bool                     `json:"discover"`
+}
+
+// modelDiscovery is a variable so tests never reach a provider. A failed list leaves the
+// owner to enter model IDs by hand, so its error, which can hold the URL, stays here.
+var modelDiscovery = &http.Client{Timeout: 10 * time.Second}
+
+// discoverModels reads a provider's OpenAI-style model list with the key being saved.
+func discoverModels(ctx context.Context, baseURL, key string) []string {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/models", nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Accept", "application/json")
+	res, err := modelDiscovery.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer res.Body.Close()
+	var list struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if res.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(res.Body, 4<<20)).Decode(&list) != nil {
+		return nil
+	}
+	models := make([]string, 0, len(list.Data))
+	for _, entry := range list.Data {
+		models = append(models, entry.ID)
+	}
+	return models
+}
+
+// mergeModels keeps seeded IDs first, so the proxy's activation check does not depend on the list.
+func mergeModels(seed, discovered []string) []string {
+	merged := slices.Clone(seed)
+	for _, id := range discovered {
+		if id != "" && !strings.ContainsAny(id, ", \t\r\n") && !slices.Contains(merged, id) {
+			merged = append(merged, id)
+		}
+	}
+	return merged
 }
 
 func validProxyKeyID(id string) bool {
@@ -70,45 +120,41 @@ func proxyKeyRoutes(router *gin.Engine, service **cliproxy.Service, credentials 
 	})
 	dyna.POST("/keys", func(c *gin.Context) {
 		var req proxyKeyRequest
-		if err := c.ShouldBindJSON(&req); err != nil || !validProxyKeyID(req.ID) || strings.TrimSpace(req.Key) == "" || len(req.Key) > 4096 {
+		if err := c.ShouldBindJSON(&req); err != nil || !validProxyKeyID(req.ID) || req.Provider == "" || strings.TrimSpace(req.Key) == "" || len(req.Key) > 4096 {
 			c.Status(http.StatusBadRequest)
 			return
 		}
-		register := func(auth *coreauth.Auth) {
-			if err := (*service).RegisterDynaCredential(c.Request.Context(), auth); err != nil {
-				c.Status(http.StatusServiceUnavailable)
+		auth := &coreauth.Auth{ID: req.ID, Status: coreauth.StatusActive, Label: string(req.Provider)}
+		first := model.MetaKeyModel
+		if req.Provider == contract.ProviderMeta {
+			auth.Provider = "meta"
+			auth.Attributes = map[string]string{"api_key": req.Key, "auth_kind": "apikey"}
+			auth.Metadata = map[string]any{"type": "meta"}
+		} else {
+			models := req.Models
+			if req.Discover {
+				models = mergeModels(models, discoverModels(c.Request.Context(), req.BaseURL, req.Key))
+			}
+			if len(models) == 0 || req.BaseURL == "" {
+				c.Status(http.StatusUnprocessableEntity)
 				return
 			}
-			c.JSON(http.StatusOK, gin.H{"status": "ok"})
-		}
-		if req.Provider == contract.ProviderMeta {
-			register(&coreauth.Auth{
-				ID:         req.ID,
-				Provider:   "meta",
-				Label:      "meta",
-				Status:     coreauth.StatusActive,
-				Attributes: map[string]string{"api_key": req.Key, "auth_kind": "apikey"},
-				Metadata:   map[string]any{"type": "meta"},
-			})
-			return
-		}
-		for _, provider := range model.KeyProviders() {
-			if provider.Provider != req.Provider {
-				continue
+			name := string(req.Provider)
+			auth.Provider = "openai-compatible-" + name
+			auth.Attributes = map[string]string{"api_key": req.Key, "auth_kind": "apikey", "base_url": req.BaseURL, "compat_name": name, "provider_key": auth.Provider, cliproxy.DynaModelsAttribute: strings.Join(models, ",")}
+			auth.Metadata = map[string]any{"type": "openai-compatibility"}
+			first = models[0]
+			if model.IsCustomProxyProvider(auth.Provider) {
+				auth.Attributes[cliproxy.DynaDisplayNameAttribute] = req.DisplayName
+				auth.Prefix = name
+				first = name + "/" + first
 			}
-			name := string(provider.Provider)
-			// The proxy SDK defines provider metadata as map[string]any.
-			register(&coreauth.Auth{
-				ID:         req.ID,
-				Provider:   "openai-compatible-" + name,
-				Label:      name,
-				Status:     coreauth.StatusActive,
-				Attributes: map[string]string{"api_key": req.Key, "auth_kind": "apikey", "base_url": provider.URL, "compat_name": name, "provider_key": "openai-compatible-" + name},
-				Metadata:   map[string]any{"type": "openai-compatibility"},
-			})
+		}
+		if (*service).RegisterDynaCredential(c.Request.Context(), auth) != nil {
+			c.Status(http.StatusServiceUnavailable)
 			return
 		}
-		c.Status(http.StatusBadRequest)
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "model": first})
 	})
 
 	dyna.POST("/oauth/import", func(c *gin.Context) {

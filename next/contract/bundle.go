@@ -129,6 +129,7 @@ type HostBundle struct {
 	Rooms  []RoomName `json:"rooms,omitempty"` // empty: every room
 }
 
+// AccountProvider is one of these or, for a provider the owner added, "custom-<name>".
 type AccountProvider string
 
 const (

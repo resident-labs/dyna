@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -21,7 +22,7 @@ func (f failingAccountCleanup) RemoveAccount(context.Context, contract.AccountID
 
 // The general endpoint spends account balance instead of Coding Plan quota.
 func TestZAIUsesCodingEndpoint(t *testing.T) {
-	for _, provider := range KeyProviders() {
+	for _, provider := range KeyPresets() {
 		if provider.Provider == contract.ProviderZAI {
 			if provider.URL != "https://api.z.ai/api/coding/paas/v4" {
 				t.Fatalf("z.ai URL = %s", provider.URL)
@@ -51,7 +52,7 @@ func TestKeyActivationFailureRollbackIsRecoverable(t *testing.T) {
 			if err := st.SaveProxyAuth(context.Background(), store.ProxyAuth{ID: input.ID, Provider: "zai", Record: []byte("{}")}, true); err != nil {
 				t.Error(err)
 			}
-			_, _ = w.Write([]byte("{}"))
+			_, _ = w.Write([]byte(`{"model":"invented"}`))
 		case "/dyna/credentials/activate":
 			w.WriteHeader(http.StatusServiceUnavailable)
 		case "/dyna/credentials/remove":
@@ -104,7 +105,7 @@ func TestKeyActivationFailureRollsBack(t *testing.T) {
 			if err := st.SaveProxyAuth(context.Background(), store.ProxyAuth{ID: input.ID, Provider: "zai", Record: []byte("{}")}, true); err != nil {
 				t.Error(err)
 			}
-			_, _ = w.Write([]byte("{}"))
+			_, _ = w.Write([]byte(`{"model":"invented"}`))
 		case "/dyna/credentials/activate":
 			w.WriteHeader(http.StatusServiceUnavailable)
 		case "/dyna/credentials/remove":
@@ -175,13 +176,17 @@ func TestKeyProvidersBindOnlyDurableCredentials(t *testing.T) {
 		if err := st.SaveProxyAuth(ctx, store.ProxyAuth{ID: input.ID, Provider: string(input.Provider), Record: []byte("{}")}, true); err != nil {
 			t.Error(err)
 		}
-		_, _ = w.Write([]byte(`{}`))
+		model := "invented"
+		if input.Provider == contract.ProviderMeta {
+			model = MetaKeyModel
+		}
+		fmt.Fprintf(w, `{"model":%q}`, model)
 	}))
 	defer server.Close()
 	p := &Proxy{client: &http.Client{Transport: quotaTestTransport{url: server.URL, base: http.DefaultTransport}}}
 	c := p.Connections("invented-management-key", st, time.Now)
 	providers := []contract.AccountProvider{contract.ProviderMeta}
-	for _, provider := range KeyProviders() {
+	for _, provider := range KeyPresets() {
 		providers = append(providers, provider.Provider)
 	}
 	for _, provider := range providers {
