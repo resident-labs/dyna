@@ -24,18 +24,26 @@ import (
 )
 
 type Web struct {
-	mu      sync.Mutex
-	host    string
-	routes  map[string]string
-	address string
-	handler http.Handler
-	now     func() time.Time
-	ticks   func() (<-chan time.Time, func())
-	tokens  map[[32]byte]time.Time
-	devices DeviceStore
-	connect ConnectSessions
-	app     fs.FS
-	api     *API
+	mu          sync.Mutex
+	host        string
+	routes      map[string]string
+	discovered  string
+	discovery   func(context.Context, int) (string, error)
+	port        int
+	routeWake   func()
+	discoveryAt time.Time
+	discoverMu  sync.Mutex
+	address     string
+	handler     http.Handler
+	muxOnce     sync.Once
+	mux         http.Handler
+	now         func() time.Time
+	ticks       func() (<-chan time.Time, func())
+	tokens      map[[32]byte]time.Time
+	devices     DeviceStore
+	connect     ConnectSessions
+	app         fs.FS
+	api         *API
 }
 
 type DeviceStore interface {
@@ -72,6 +80,8 @@ func (w *Web) SetConnect(s ConnectSessions) { w.connect = s }
 
 // SetRoutes adds the public origins served by the loopback listener.
 func (w *Web) SetRoutes(routes []string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	for _, route := range routes {
 		u, err := url.Parse(route)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || (route != u.Scheme+"://"+u.Host && route != u.Scheme+"://"+u.Host+"/") || strings.ContainsAny(route, "*; \t\r\n") {
@@ -87,8 +97,49 @@ func (w *Web) SetRoutes(routes []string) error {
 	return nil
 }
 
+// SetDiscovery installs bounded route discovery.
+func (w *Web) SetDiscovery(discover func(context.Context, int) (string, error), wake func()) {
+	w.discoverMu.Lock()
+	defer w.discoverMu.Unlock()
+	w.discovery, w.routeWake = discover, wake
+}
+
+func (w *Web) discover(ctx context.Context, wake bool) {
+	w.discoverMu.Lock()
+	defer w.discoverMu.Unlock()
+	if w.discovery == nil || (!w.discoveryAt.IsZero() && w.now().Before(w.discoveryAt.Add(30*time.Second))) {
+		return
+	}
+	w.discoveryAt = w.now()
+	route, err := w.discovery(context.WithoutCancel(ctx), w.port)
+	if err != nil {
+		return
+	}
+	old := w.discovered
+	host := strings.ToLower(strings.TrimPrefix(route, "https://"))
+	w.mu.Lock()
+	delete(w.routes, old)
+	_, configured := w.routes[host]
+	w.mu.Unlock()
+	w.discovered = ""
+	if route != "" && w.SetRoutes([]string{route}) == nil && !configured {
+		w.discovered = host
+	}
+	if wake && old != w.discovered && w.routeWake != nil {
+		w.routeWake()
+	}
+}
+
+// RefreshRoutes refreshes discovered routes for a tunnel report.
+func (w *Web) RefreshRoutes(ctx context.Context) []string {
+	w.discover(ctx, false)
+	return w.PublicRoutes()
+}
+
 // PublicRoutes lists the origins set with SetRoutes, without the loopback one.
 func (w *Web) PublicRoutes() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	out := []string{}
 	for host, origin := range w.routes {
 		if host != w.host {
@@ -100,10 +151,12 @@ func (w *Web) PublicRoutes() []string {
 }
 
 func (w *Web) routeOrigins(ctx context.Context) ([]string, string) {
+	w.mu.Lock()
 	var routes []string
 	for _, route := range w.routes {
 		routes = append(routes, route)
 	}
+	w.mu.Unlock()
 	var managed string
 	if w.connect != nil {
 		managed = w.connect.ManagedOrigin(ctx)
@@ -146,11 +199,20 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 		http.Error(out, "forbidden", http.StatusForbidden)
 		return
 	}
-	origin, known := w.routes[strings.ToLower(r.Host)]
+	host := strings.ToLower(r.Host)
+	w.mu.Lock()
+	origin, known := w.routes[host]
+	w.mu.Unlock()
 	if !known && w.connect != nil {
 		if u, err := url.Parse(managed); err == nil && strings.EqualFold(u.Host, r.Host) && (u.Scheme == "https" || u.Scheme == "http") {
 			origin, known = managed, true
 		}
+	}
+	if !known {
+		w.discover(r.Context(), true)
+		w.mu.Lock()
+		origin, known = w.routes[host]
+		w.mu.Unlock()
 	}
 	if !known {
 		http.Error(out, "unknown host", http.StatusMisdirectedRequest)
@@ -292,36 +354,45 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 		case "/v1/shell/watch":
 			streamScope = contract.ScopeTerminal
 		}
-		ctx, cancel := context.WithCancel(r.Context())
-		defer cancel()
-		ticks, stop := w.ticks()
-		defer stop()
-		go func() {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticks:
-					var scopes []contract.Scope
-					var alive bool
-					var err error
-					if session.ID != "" {
-						scopes, alive, err = w.connect.StreamScopes(ctx, session.ID)
-					} else {
-						var current store.Device
-						current, alive, err = w.devices.AuthenticateDevice(ctx, sha256.Sum256([]byte(cookie.Value)), w.now())
-						scopes = current.Scopes
-					}
-					if err != nil || !alive || (streamScope != "" && !hasScope(Caller{Web: true, Scopes: scopes}, streamScope)) {
-						cancel()
+		ctx := r.Context()
+		if streamScope != "" {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithCancel(ctx)
+			defer cancel()
+			ticks, stop := w.ticks()
+			defer stop()
+			// ctx is a parameter because the request path reassigns the outer one below.
+			go func(ctx context.Context) {
+				for {
+					select {
+					case <-ctx.Done():
 						return
+					case <-ticks:
+						var scopes []contract.Scope
+						var alive bool
+						var err error
+						if session.ID != "" {
+							scopes, alive, err = w.connect.StreamScopes(ctx, session.ID)
+						} else {
+							var current store.Device
+							current, alive, err = w.devices.AuthenticateDevice(ctx, sha256.Sum256([]byte(cookie.Value)), w.now())
+							scopes = current.Scopes
+						}
+						if err != nil || !alive || (streamScope != "" && !hasScope(Caller{Web: true, Scopes: scopes}, streamScope)) {
+							cancel()
+							return
+						}
 					}
 				}
-			}
-		}()
+			}(ctx)
+		}
+		ctx = context.WithValue(ctx, callerKey{}, Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner, Device: contract.DeviceID(device.ID)}, Device: device.ID, Scopes: device.Scopes, Web: true})
 		handler := w.handler
 		if handler == nil {
-			handler = w.api.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner, Device: contract.DeviceID(device.ID)}, Device: device.ID, Scopes: device.Scopes, Web: true})
+			w.muxOnce.Do(func() {
+				w.mux = w.api.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true})
+			})
+			handler = w.mux
 		}
 		handler.ServeHTTP(out, r.WithContext(ctx))
 		return
@@ -350,6 +421,7 @@ func (w *Web) Listen() (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
+	w.port = l.Addr().(*net.TCPAddr).Port
 	server := &http.Server{Handler: w, ReadHeaderTimeout: 10 * time.Second}
 	go server.Serve(l)
 	return l, nil

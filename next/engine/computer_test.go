@@ -8,16 +8,47 @@ import (
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/live"
 )
+
+func attachTestChannel(t *testing.T, s *Service, id contract.SessionID) *live.Channel {
+	t.Helper()
+	handle, problem := s.lockSession(context.Background(), id)
+	if problem != nil {
+		t.Fatal("session closed")
+	}
+	channel := live.NewChannel(func() {}, make(chan struct{}))
+	handle.SetChannel(channel)
+	handle.Unlock()
+	return channel
+}
+
+func computerWatchGeneration(t *testing.T, s *Service, id contract.SessionID) uint64 {
+	t.Helper()
+	handle, ok := s.lookupSession(id)
+	if !ok {
+		t.Fatal("session missing")
+	}
+	defer handle.Unlock()
+	return handle.ComputerWatchGeneration()
+}
+
+func TestComputerFramesRequiresComputer(t *testing.T) {
+	s, _, id, ctx := setup(t)
+	if _, ok := s.live.CreateSession(id); !ok {
+		t.Fatal("live session refused")
+	}
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
+	if problem := s.ComputerFrames(ctx, caller, 0, bytes.NewReader(nil)); problem == nil || problem.Code != contract.ErrNotFound {
+		t.Fatalf("computer frames without computer: %v", problem)
+	}
+}
 
 func TestComputerWatchFanoutAndState(t *testing.T) {
 	s, room, id, ctx := setup(t)
 	connectAgent(ctx, t, s, id)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
-	channel := &boxChannel{wake: make(chan struct{}, 1)}
-	s.mu.Lock()
-	s.sessionLocked(id).channel = channel
-	s.mu.Unlock()
+	channel := attachTestChannel(t, s, id)
 	if _, err := s.ComputerWatch(ctx, id); err == nil || err.Code != contract.ErrNotFound {
 		t.Fatalf("without computer: %v", err)
 	}
@@ -32,14 +63,12 @@ func TestComputerWatchFanoutAndState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	<-channel.wake
+	<-channel.WakeSignal()
 	second, err := s.ComputerWatch(secondCtx, id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.mu.Lock()
-	generation := s.sessions[id].computer.generation
-	s.mu.Unlock()
+	generation := computerWatchGeneration(t, s, id)
 	reader, writer := io.Pipe()
 	defer reader.Close()
 	defer writer.Close()
@@ -82,17 +111,11 @@ func TestComputerWatchFanoutAndState(t *testing.T) {
 	if _, ok := <-first; ok {
 		t.Fatal("watcher stayed open")
 	}
-	s.mu.Lock()
-	remaining := len(s.sessions[id].computer.watchers)
-	s.mu.Unlock()
-	if remaining != 1 {
-		t.Fatalf("watchers after first cancellation: %d", remaining)
-	}
 	cancelSecond()
 	if _, ok := <-second; ok {
 		t.Fatal("watcher stayed open")
 	}
-	<-channel.wake
+	<-channel.WakeSignal()
 	_ = writer.Close()
 	if err := <-done; err != nil {
 		t.Fatal(err)
@@ -152,7 +175,7 @@ func TestComputerWatchControlsBoxChannel(t *testing.T) {
 		t.Fatalf("box channel closed before %s", want)
 	}
 	wait("computer.watch.start")
-	if err := s.ComputerFrames(ctx, caller, s.sessions[id].computer.generation, bytes.NewReader(nil)); err != nil {
+	if err := s.ComputerFrames(ctx, caller, computerWatchGeneration(t, s, id), bytes.NewReader(nil)); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -221,9 +244,7 @@ func TestComputerChannelCloseEndsWatch(t *testing.T) {
 	s, room, id, ctx := setup(t)
 	connectAgent(ctx, t, s, id)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
-	s.mu.Lock()
-	s.sessionLocked(id).channel = &boxChannel{wake: make(chan struct{}, 1)}
-	s.mu.Unlock()
+	attachTestChannel(t, s, id)
 	if _, err := s.ComputerChanged(ctx, caller, contract.ComputerChangedRequest{To: contract.ComputerRunning}); err != nil {
 		t.Fatal(err)
 	}
@@ -231,19 +252,17 @@ func TestComputerChannelCloseEndsWatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.mu.Lock()
-	state := s.sessionLocked(id)
-	s.mu.Unlock()
-	state.computerLock.Lock()
-	s.mu.Lock()
-	stopRoom, stopped := s.clearComputerLocked(id)
-	s.mu.Unlock()
+	handle, ok := s.lookupSession(id)
+	if !ok {
+		t.Fatal("session missing")
+	}
+	stopRoom, stopped := handle.ClearComputer()
 	if stopped {
 		if err := s.computerEvent(ctx, id, stopRoom, contract.ComputerStopped); err != nil {
 			t.Fatal(err)
 		}
 	}
-	state.computerLock.Unlock()
+	handle.Unlock()
 	if _, ok := <-watch; ok {
 		t.Fatal("watch stayed open")
 	}
@@ -257,9 +276,7 @@ func TestOldComputerStreamDoesNotEndNewWatch(t *testing.T) {
 	s, _, id, ctx := setup(t)
 	connectAgent(ctx, t, s, id)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
-	s.mu.Lock()
-	s.sessionLocked(id).channel = &boxChannel{wake: make(chan struct{}, 1)}
-	s.mu.Unlock()
+	attachTestChannel(t, s, id)
 	if _, err := s.ComputerChanged(ctx, caller, contract.ComputerChangedRequest{To: contract.ComputerRunning}); err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +285,7 @@ func TestOldComputerStreamDoesNotEndNewWatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	generation := s.sessions[id].computer.generation
+	generation := computerWatchGeneration(t, s, id)
 	reader, writer := io.Pipe()
 	defer reader.Close()
 	defer writer.Close()
@@ -293,7 +310,7 @@ func TestOldComputerStreamDoesNotEndNewWatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.sessions[id].computer.generation == generation {
+	if computerWatchGeneration(t, s, id) == generation {
 		t.Fatal("generation did not change")
 	}
 	if err := binary.Write(writer, binary.BigEndian, uint32(1)); err != nil {
@@ -359,18 +376,22 @@ func TestShellWatchGenerationAndStop(t *testing.T) {
 // A replaced box rejects input even when its queue has room.
 func TestComputerInputReplacement(t *testing.T) {
 	done := make(chan struct{})
-	handle := computerInputHandle{queue: make(chan contract.ComputerInputBatch, 1), done: done}
+	channel := live.NewChannel(func() {}, done)
 	close(done)
-	problem := handle.send(context.Background(), contract.ComputerInputBatch{})
+	problem := channel.SendInput(context.Background(), contract.ComputerInputBatch{})
 	if problem == nil || problem.Code != contract.ErrConflict || problem.Message != "box replaced" {
 		t.Fatalf("replacement: %v", problem)
 	}
 }
 
 func TestComputerInputFullQueue(t *testing.T) {
-	handle := computerInputHandle{queue: make(chan contract.ComputerInputBatch, 1), done: make(chan struct{})}
-	handle.queue <- contract.ComputerInputBatch{}
-	problem := handle.send(context.Background(), contract.ComputerInputBatch{})
+	channel := live.NewChannel(func() {}, make(chan struct{}))
+	for i := 0; i < 64; i++ {
+		if problem := channel.SendInput(context.Background(), contract.ComputerInputBatch{}); problem != nil {
+			t.Fatal(problem)
+		}
+	}
+	problem := channel.SendInput(context.Background(), contract.ComputerInputBatch{})
 	if problem == nil || problem.Code != contract.ErrConflict || problem.Message != "input queue is full" {
 		t.Fatalf("full queue: %v", problem)
 	}

@@ -24,7 +24,8 @@ CREATE INDEX events_room_home ON events(room, home, seq) WHERE home IS NOT NULL;
 CREATE INDEX events_type_seq ON events(type, seq);
 CREATE TABLE deliveries (to_kind TEXT NOT NULL, to_id TEXT NOT NULL, seq INTEGER NOT NULL REFERENCES events(seq), surface TEXT NOT NULL, reply_kind TEXT NOT NULL, reply_target_kind TEXT NOT NULL, reply_target_id TEXT NOT NULL, reply_home TEXT NOT NULL, reply_to TEXT NOT NULL, wake INTEGER NOT NULL, state TEXT NOT NULL, turn TEXT, queue TEXT, handoff_from TEXT, PRIMARY KEY(to_kind, to_id, seq));
 CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT NOT NULL REFERENCES sessions(id), started_at INTEGER NOT NULL, ended_at INTEGER, outcome TEXT NOT NULL, model TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL, cache_write_tokens INTEGER NOT NULL, shell_jobs INTEGER NOT NULL DEFAULT -1, started_seq INTEGER, stop_requested_at INTEGER, sections BLOB);
-CREATE TABLE hosts (name TEXT PRIMARY KEY, ssh TEXT NOT NULL, state TEXT NOT NULL, cpus INTEGER NOT NULL, mem_bytes INTEGER NOT NULL, disk_bytes INTEGER NOT NULL, checked_at INTEGER NOT NULL, maintained_at INTEGER NOT NULL DEFAULT 0, engine_host INTEGER);
+CREATE TABLE hosts (name TEXT PRIMARY KEY, ssh TEXT NOT NULL, state TEXT NOT NULL, cpus INTEGER NOT NULL, mem_bytes INTEGER NOT NULL, disk_bytes INTEGER NOT NULL, checked_at INTEGER NOT NULL, maintained_at INTEGER NOT NULL DEFAULT 0, engine_host INTEGER, disk_floor INTEGER NOT NULL DEFAULT 21474836480, disk_low_since INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE disk_warnings (host TEXT PRIMARY KEY, at INTEGER NOT NULL);
 CREATE TABLE room_shared (room TEXT NOT NULL, host TEXT NOT NULL REFERENCES hosts(name), bytes INTEGER NOT NULL, measured_at INTEGER NOT NULL, PRIMARY KEY(room, host));
 CREATE TABLE host_rooms (host TEXT NOT NULL REFERENCES hosts(name), room TEXT NOT NULL REFERENCES rooms(id), PRIMARY KEY(host, room));
 CREATE TABLE host_labels (host TEXT NOT NULL REFERENCES hosts(name), label TEXT NOT NULL, PRIMARY KEY(host, label));
@@ -70,6 +71,7 @@ CREATE TABLE connect_sessions (id TEXT PRIMARY KEY, relay_device TEXT NOT NULL R
 CREATE TABLE pairing_codes (id INTEGER PRIMARY KEY CHECK(id=1), code_hash BLOB NOT NULL, scopes BLOB NOT NULL, expires_at INTEGER NOT NULL, tries INTEGER NOT NULL);
 
 CREATE TABLE proxy_auths (id TEXT PRIMARY KEY, provider TEXT NOT NULL, record BLOB NOT NULL, updated_at INTEGER NOT NULL);
+CREATE TABLE search_keys (provider TEXT PRIMARY KEY, key TEXT NOT NULL);
 CREATE TABLE accounts (id TEXT PRIMARY KEY, proxy_id TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, label TEXT NOT NULL);
 CREATE TABLE account_rooms (account TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, room TEXT NOT NULL REFERENCES rooms(id), PRIMARY KEY(account, room));
 CREATE TABLE account_alerts (account TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, window TEXT NOT NULL, kind TEXT NOT NULL, active INTEGER NOT NULL, PRIMARY KEY(account, window, kind));
