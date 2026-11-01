@@ -1,5 +1,5 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
-import type { TranscriptItem } from "./contract.gen.ts";
+import type { TranscriptInput, TranscriptItem } from "./contract.gen.ts";
 import { titleOf, type StepKind } from "./steps.ts";
 
 // Dyna: Transcript items already arrive in timeline order, and posts can belong to a tool.
@@ -53,4 +53,9 @@ export function mergeTimelineItems(existing: TranscriptItem[], incoming: Transcr
   const items = [...byId.values()];
   const nested = new Set(items.flatMap(item => (item.posts ?? []).map(post => post.event || post.id)));
   return items.filter(item => item.kind !== "post" || !nested.has(item.event || item.id)).sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+}
+
+// Dyna: A refresh can race an in-flight input continuation.
+export function mergeTimelineInputs(existing: TranscriptInput[], incoming: TranscriptInput[]): TranscriptInput[] {
+  return [...new Map([...existing, ...incoming].map(input => [input.id, input])).values()].sort((a, b) => a.seq - b.seq);
 }
