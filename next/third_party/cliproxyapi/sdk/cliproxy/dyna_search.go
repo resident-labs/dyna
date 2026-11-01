@@ -79,19 +79,28 @@ func statusError(provider string, status int, body io.Reader, secrets ...string)
 	reason := ""
 	if err == nil && len(raw) <= 64<<10 {
 		var refusal struct {
-			Detail  string `json:"detail"`
-			Message string `json:"message"`
-			Error   *struct {
-				Message string `json:"message"`
-			} `json:"error"`
+			Detail  string          `json:"detail"`
+			Message string          `json:"message"`
+			Error   json.RawMessage `json:"error"`
 		}
 		if json.Unmarshal(raw, &refusal) == nil {
 			reason = strings.TrimSpace(refusal.Detail)
 			if reason == "" {
 				reason = strings.TrimSpace(refusal.Message)
 			}
-			if reason == "" && refusal.Error != nil {
-				reason = strings.TrimSpace(refusal.Error.Message)
+			if reason == "" {
+				var message string
+				if json.Unmarshal(refusal.Error, &message) == nil {
+					reason = strings.TrimSpace(message)
+				}
+				if reason == "" {
+					var nested struct {
+						Message string `json:"message"`
+					}
+					if json.Unmarshal(refusal.Error, &nested) == nil {
+						reason = strings.TrimSpace(nested.Message)
+					}
+				}
 			}
 		}
 	}
