@@ -68,7 +68,7 @@
             </span>
           {/each}
         </span>
-        {:else}<span class="unrated">Not rated</span>{/if}
+        {/if}
       </button>
     {/each}
   </div>
@@ -101,7 +101,6 @@
   strong { font-size: 14px; font-weight: 600; }
   small, .description { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bars { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-  .unrated { color: var(--muted); font-size: 12.5px; }
   .rating { display: grid; gap: 4px; color: var(--muted); font-size: 11px; }
   .track { display: block; height: 3px; background: var(--track); border-radius: 3px; overflow: hidden; }
   .track span { display: block; height: 100%; background: var(--muted); }
@@ -113,6 +112,6 @@
   }
   @container (max-width: 900px) {
     .list button { grid-template-columns: 18px minmax(0, 1fr); }
-    .bars, .unrated { grid-column: 2; }
+    .bars { grid-column: 2; }
   }
 </style>
