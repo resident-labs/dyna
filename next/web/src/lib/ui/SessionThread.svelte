@@ -12,6 +12,7 @@
   import StatusPill from "./StatusPill.svelte";
   import Markdown from "./Markdown.svelte";
   import TranscriptWorkRow from "./TranscriptWorkRow.svelte";
+  import TimelineMinimap from "./TimelineMinimap.svelte";
   import { deriveTimelineGroups } from "../timeline.ts";
 
   let { session, roomName, store, unsent, onunsent, onsettled, onpostlocation, clock = Date.now }: { session: string; roomName: string; store: RoomStore; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; clock?: () => number } = $props();
@@ -36,6 +37,15 @@
   let loading = $state(false), failed = $state(false);
   let pending = false;
   let scroller: HTMLDivElement;
+  let frameWidth = $state(0), currentTurn = $state<string | null>(null);
+  let visibleTurns: string[] = $state([]);
+  let minimapTurns = $derived(turns.map(turn => ({ id: turn.id, userText: turn.inputs?.[0]?.text ?? null, assistantText: turn.items?.findLast(item => item.kind === "text")?.text ?? null, visible: visibleTurns.includes(turn.id) })));
+  function updatePosition() {
+    const bounds = scroller.getBoundingClientRect();
+    const visible = [...scroller.querySelectorAll<HTMLElement>("article[data-turn]")].filter(el => { const rect = el.getBoundingClientRect(); return rect.bottom > bounds.top && rect.top < bounds.bottom; });
+    visibleTurns = visible.map(el => el.dataset.turn!);
+    currentTurn = visibleTurns[0] ?? null;
+  }
   let atBottom = $state(true);
   let loaded = $state(false);
   let destroyed = false;
@@ -123,10 +133,12 @@
   <div class="message"><Markdown text={chunks[item.id + "/text"] ?? item.text} /></div>{#if chunkFailed[item.id + "/text"]}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Text did not load. Try again</button>{/if}
 {/snippet}
 
-<div class="thread" bind:this={scroller} onscroll={() => { atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; if (loaded && before && !loading && scroller.scrollTop < 100) void load(true); }}>
+<div class="thread-frame" bind:clientWidth={frameWidth}>
+<TimelineMinimap turns={minimapTurns} current={currentTurn} persistent={frameWidth >= 950} onselect={(id) => scroller.querySelector<HTMLElement>(`article[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" })} />
+<div class="thread" bind:this={scroller} onscroll={() => { atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; updatePosition(); if (loaded && before && !loading && scroller.scrollTop < 100) void load(true); }}>
   <div class="body">
     {#each turns as turn (turn.id)}
-      <article>
+      <article data-turn={turn.id}>
         {#each turn.inputs ?? [] as input (input.id)}
           <div class="input"><div class="who"><Avatar kind={input.from.kind} name={sender(input.from.kind, input.from.session)} size={22} />{#if input.from.kind === "owner"}<strong>You</strong>{:else}<strong class:identity={input.from.kind === "session"} style:--hue={hue(sender(input.from.kind, input.from.session))}>{sender(input.from.kind, input.from.session)}</strong>{/if}{#if input.home}<span class="muted">{input.home.kind === "feed" ? `in ${roomName}` : input.home.session === session ? "in your DM" : "in a DM"}</span>{/if}<time datetime={input.at}>{formatTime(input.at)}</time></div><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{#if input.more && input.type === "post.created" && chunks["input:" + input.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Show all</button>{/if}</div>
         {/each}
@@ -160,8 +172,10 @@
   </div>
   {#if !atBottom}<button class="latest" onclick={() => scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" })}>Jump to latest</button>{/if}
 </div>
+</div>
 
 <style>
+  .thread-frame { position: relative; height: 100%; min-height: 0; }
   .thread { height: 100%; min-height: 0; overflow-y: auto; }
   .body { max-width: 784px; margin: auto; padding: 16px 24px; }
   article { margin: 0 0 24px; }
