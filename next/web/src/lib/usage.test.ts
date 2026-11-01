@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountAlerts, balancesText, busiestWindow, hideLabel, limitReached, outOfLimit, usageRows, visibleWindows, windowLabel, windowMeter } from "./usage.ts";
+import { accountAlerts, balancesText, busiestWindow, hideLabel, holdFor, holding, limitReached, outOfLimit, usageRows, visibleWindows, windowLabel, windowMeter } from "./usage.ts";
 import type { AccountUsage, AccountsListResponse, UsageWindow } from "./contract.gen.ts";
 
 test("labels each window and hides only unused model-specific windows", () => {
@@ -102,10 +102,25 @@ test("Usage shows only active sign-ins, and an account the list does not know", 
   assert.deepEqual(rows.map(row => row.id).sort(), ["connected", "new", "quota_low"]);
 });
 
-test("Hiding a spent account waits for what brings it back", () => {
+test("A hidden account waits for its busiest window's reset, or a higher balance", () => {
   const now = Date.parse("2026-10-31T00:00:00Z");
-  assert.equal(hideLabel({ windows: [windowAt(100)] }, now), "Hide until it resets");
-  assert.equal(hideLabel({ windows: [] }, now), "Hide until topped up");
+  const quiet = { ...windowAt(5), resetsAt: "2026-10-31T02:00:00Z" }, busy = { ...windowAt(60), resetsAt: "2026-11-02T00:00:00Z" };
+  const spend = (amount: string) => ({ windows: [], balances: [{ currency: "USD", amount }] });
+  const reset = holdFor({ windows: [quiet, busy], balances: [] }, now);
+  assert.deepEqual(reset, { until: busy.resetsAt });
+  assert.equal(hideLabel(reset), "Hide until it resets");
+  assert.equal(holding({ balances: [] }, reset, now), true);
+  assert.equal(holding({ balances: [] }, reset, Date.parse(busy.resetsAt)), false);
+  const credit = holdFor(spend("3.50"), now);
+  assert.equal(hideLabel(credit), "Hide until topped up");
+  assert.equal(holding(spend("2.00"), credit, now), true);
+  assert.equal(holding(spend("3.50"), credit, now), true);
+  assert.equal(holding(spend("4.00"), credit, now), false);
+  // Go's zero time says nothing, so there is nothing to wait for: only the owner shows it again.
+  const none = holdFor({ windows: [{ ...windowAt(0), resetsAt: "0001-01-01T00:00:00Z" }], balances: [] }, now);
+  assert.deepEqual(none, {});
+  assert.equal(hideLabel(none), "Hide");
+  assert.equal(holding({ balances: [] }, none, now), true);
 });
 
 test("Names a monthly window", () => {
