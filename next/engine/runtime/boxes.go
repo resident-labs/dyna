@@ -369,6 +369,10 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool,
 	return check.NoSwap, nil
 }
 
+func (b *Boxes) forward(id contract.BoxID) box.Forward {
+	return box.Forward{Box: id, HostPath: filepath.Join(b.HostData, "sock", string(id), "engine.sock"), EnginePath: filepath.Join(b.Runtime, "boxes", string(id)+".sock")}
+}
+
 func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, error) {
 	h, err := b.host(ctx, spec.Host)
 	if err != nil {
@@ -386,7 +390,7 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	}
 	ok := false
 	var forwarded, sliced, created bool
-	forward := box.Forward{Box: spec.Box, HostPath: filepath.Join(b.HostData, "sock", string(spec.Box), "engine.sock"), EnginePath: filepath.Join(b.Runtime, "boxes", string(spec.Box)+".sock")}
+	forward := b.forward(spec.Box)
 	defer func() {
 		if ok {
 			return
@@ -494,7 +498,7 @@ func (b *Boxes) restoreHost(ctx context.Context, name contract.HostName) error {
 		if record.Host != name || record.State == contract.BoxDeleted || record.State == contract.BoxFailed {
 			continue
 		}
-		forward := box.Forward{Box: record.ID, HostPath: filepath.Join(b.HostData, "sock", string(record.ID), "engine.sock"), EnginePath: filepath.Join(b.Runtime, "boxes", string(record.ID)+".sock")}
+		forward := b.forward(record.ID)
 		if err := host.AddForward(ctx, forward); err != nil {
 			return err
 		}
@@ -571,7 +575,7 @@ func (b *Boxes) Remove(ctx context.Context, id contract.BoxID) error {
 	if err != nil {
 		return err
 	}
-	forward := box.Forward{Box: id, HostPath: filepath.Join(b.HostData, "sock", string(id), "engine.sock"), EnginePath: filepath.Join(b.Runtime, "boxes", string(id)+".sock")}
+	forward := b.forward(id)
 	if err := removeHostBox(ctx, h, record, forward); err != nil {
 		return err
 	}
