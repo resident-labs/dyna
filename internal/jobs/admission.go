@@ -166,10 +166,19 @@ func (a Admission) db() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := database.Migrate(db, "admissions.version", 3, func(conn *sql.Conn, old int) error {
+	if err := database.Migrate(db, "admissions.version", 4, func(conn *sql.Conn, old int) error {
 		if old == 0 {
-			_, err := conn.ExecContext(context.Background(), admissionSchema)
-			return err
+			if _, err := conn.ExecContext(context.Background(), admissionSchema); err != nil {
+				return err
+			}
+		}
+		if old < 4 {
+			if _, err := conn.ExecContext(context.Background(), `CREATE TABLE node_wake_leases (node_id TEXT PRIMARY KEY, lease_until INTEGER NOT NULL, next_wake INTEGER NOT NULL, ready_ms INTEGER NOT NULL)`); err != nil {
+				return err
+			}
+		}
+		if old == 0 || old == 3 {
+			return nil
 		}
 		if old == 1 {
 			if _, err := conn.ExecContext(context.Background(), "ALTER TABLE admissions ADD COLUMN ahead INTEGER NOT NULL DEFAULT 0"); err != nil {
@@ -771,7 +780,25 @@ func (a Admission) Pass(ctx context.Context, candidates []Job) (map[string]bool,
 				queued = append(queued, job)
 			}
 			q := nodeQueue{waitingRows: waiting[node], heldRows: held[node], running: running[node], queued: queued}
-			if err := passNode(ctx, writer, a.now(), node, facts[node], factErrors[node], q, a.RoomName, admitted, reasons, &needsWrite); err != nil {
+			machine := facts[node]
+			if len(machine.WakeCommand) > 0 {
+				var ready int64
+				err := conn.QueryRowContext(ctx, `SELECT ready_ms FROM node_wake_leases WHERE node_id=?`, machine.ID).Scan(&ready)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return false, err
+				}
+				machine.WakeReady = ready > 0 && ready >= machine.Updated.UnixMilli() && machine.LastProbe.UnixMilli() >= ready
+				if machine.WakeReady {
+					oldest := time.Time{}
+					for _, unit := range q.waiters(machine) {
+						if machine.AllowsRoom(unit.demand.Room) && (oldest.IsZero() || unit.created.Before(oldest)) {
+							oldest = unit.created
+						}
+					}
+					machine.WakeReady = !oldest.IsZero() && ready >= oldest.UnixMilli()
+				}
+			}
+			if err := passNode(ctx, writer, a.now(), node, machine, factErrors[node], q, a.RoomName, admitted, reasons, &needsWrite); err != nil {
 				return false, err
 			}
 		}
@@ -977,6 +1004,12 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 		switch {
 		case machineErr != nil:
 			why = "node " + node + " is not registered"
+		case len(machine.WakeCommand) > 0 && !machine.Enabled:
+			why = "node is disabled"
+		case len(machine.WakeCommand) > 0 && !machine.AllowsRoom(d.Room):
+			why = "node does not serve this room"
+		case len(machine.WakeCommand) > 0 && (!machine.WakeReady || machine.Health != machines.HealthOnline || machine.LastProbe.IsZero() || now.Sub(machine.LastProbe) > 30*time.Second):
+			why = "waiting for a fresh node health probe"
 		case diskBlock != "":
 			why = diskBlock
 		case resourceBlock != "":

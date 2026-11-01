@@ -355,6 +355,7 @@ func addCommand() *cobra.Command {
 
 func editCommand() *cobra.Command {
 	var rename, ssh string
+	var wakeCommand []string
 	var maxIOHeavy, maxDiskPercent, quickSlots int
 	var resourceEdits, labels, unlabels, mountEdits, deviceEdits, unmountEdits, undeviceEdits []string
 	var registrationRoom string
@@ -378,6 +379,12 @@ func editCommand() *cobra.Command {
 			}
 			patch := websvc.MachinePatch{}
 			changed := false
+			if c.Flags().Changed("wake-command") {
+				if len(wakeCommand) == 1 && wakeCommand[0] == "" {
+					wakeCommand = []string{}
+				}
+				patch.WakeCommand, changed = &wakeCommand, true
+			}
 			if c.Flags().Changed("rename") {
 				patch.Name, changed = &rename, true
 			}
@@ -521,6 +528,7 @@ func editCommand() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringArrayVar(&wakeCommand, "wake-command", nil, "wake executable and fixed arguments, repeated in order (empty clears)")
 	cmd.Flags().StringVar(&rename, "rename", "", "new name for the node")
 	cmd.Flags().StringVar(&ssh, "ssh", "", "SSH destination as host or user@host")
 	cmd.Flags().BoolVar(&enable, "enable", false, "allow work on the node")
