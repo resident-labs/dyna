@@ -128,6 +128,7 @@
     {/if}
   </div>
   {#if items.length > 1}<button class="round prev desktop" aria-label="Previous media" onclick={() => move(-1)}>‹</button><button class="round next desktop" aria-label="Next media" onclick={() => move(1)}>›</button>{/if}
+  {#if item.file.visual && items.length > 1}<button class="round phone visual-nav previous" aria-label="Previous media" onclick={() => move(-1)}>‹</button><button class="round phone visual-nav following" aria-label="Next media" onclick={() => move(1)}>›</button>{/if}
   <footer>{#if !item.file.visual}{item.file.name}{/if}{#if items.length > 1}<span>{#if !item.file.visual}{" · "}{/if}{index + 1} of {items.length}</span>{/if}</footer>
 </dialog>
 
@@ -166,6 +167,8 @@
     .identity { display: grid; gap: 1px; } .identity time { font-size: 11px; }
     .more { position: relative; } .menu { position: absolute; right: 0; top: 44px; min-width: 150px; padding: 4px; background: var(--screen-chip); border: 1px solid var(--screen-line); border-radius: 8px; }
     .menu a, .menu button { display: block; width: 100%; box-sizing: border-box; padding: 12px; text-align: left; text-decoration: none; font-size: 13px; }
+    .visual-nav { position: absolute; bottom: calc(4px + env(safe-area-inset-bottom)); }
+    .previous { left: 16px; } .following { right: 16px; }
     footer { bottom: calc(16px + env(safe-area-inset-bottom)); }
   }
 </style>
