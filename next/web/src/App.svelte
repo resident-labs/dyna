@@ -455,15 +455,15 @@
   let roomName = $derived(attention.rooms.get(room ?? "")?.name ?? "Room");
   // A session's line says what it does, from its one status (status.ts). A waiting one names what the owner must do;
   // a box no host takes for its room comes first, since its requests show in the feed and Requests too. A failed
-  // session's line is the reason after "Failed", which the row draws; an idle one says why its pending box waits, or
-  // Starting while its box starts, else nothing. Its profile is the row's hover title.
+  // session's line is the reason after "Failed", which the row draws; an idle one says why its pending box waits,
+  // Starting while its box starts, Asleep while its box is stopped, else nothing. Its profile is the row's hover title.
   const status = (id: string) => {
     const broken = store?.boxFailures.get(id), cause = store?.causes.get(id), reason = store?.pendingReasons.get(id);
     switch (store?.status(id)) {
       case "waiting": return reason === "room-host" ? waits[reason] : "Waiting for your approval";
       case "working": { const label = store?.activity.get(id); return label ? `Working · ${activityLabel(label)}` : "Working"; }
       case "failed": return broken ? boxReason(broken) : turnReason(cause);
-      default: return reason ? waits[reason] : starting(id) ? "Starting" : "";
+      default: return reason ? waits[reason] : starting(id) ? "Starting" : store?.boxes.get(id) === "stopped" ? "Asleep" : "";
     }
   };
   // A DM's header says only the status word; the live line and About say what the session does. A failed session has
@@ -693,7 +693,7 @@
       {:else if room}<span class="hash"><Icon name="room" /></span>{/if}
       {#if session && !closed}<Avatar kind="session" name={title} root={!store?.sessions.get(session)?.parent} size={24} />{/if}
       <span class="heading"><strong title={title}>{title}</strong>
-        {#if closed && !missing}<span class="count">closed</span>{:else if !session && word && !missing}<span class="count word">{word}</span>{/if}
+        {#if closed && !missing}<span class="count">closed</span>{:else if shown === "idle" && word && !missing}<span class="count word" title={word === "Asleep" ? "Wakes on your next message" : word}>{word}</span>{/if}
         {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session")}</span>{/if}</span>
       {#if store && !unavailable}
         {#if session}<span class="session-spacer"></span>{/if}

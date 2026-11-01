@@ -1,8 +1,16 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout } from "./timeline.ts";
-import type { TranscriptInput, TranscriptItem } from "./contract.gen.ts";
+import { summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout } from "./timeline.ts";
+import type { TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
+
+test("a post stays queued until the transcript holds it, even after an agent's later post", () => {
+  const input = { id: "in", seq: 5, at: "", room: "r", type: "post.created", from: { kind: "owner" }, text: "" } as TranscriptInput;
+  const nested: TranscriptItem = { id: "out", event: "out", seq: 7, turn: "t", at: "", kind: "post" };
+  const turn: TranscriptTurn = { id: "t", started: "", inputs: [input], items: [{ id: "tool", turn: "t", at: "", kind: "tool", tool: "post", posts: [nested] }], more: false };
+  const queued = queuedTimelinePosts([{ id: "old", seq: 3 }, { id: "in", seq: 5 }, { id: "waiting", seq: 6 }, { id: "out", seq: 7 }, { id: "new", seq: 8 }], [turn]);
+  assert.deepEqual(queued.map(post => post.id), ["waiting", "new"]);
+});
 
 test("one item of work has no heading to open first, and a script keeps the heading that counts its actions", () => {
   const thought: TranscriptItem = { id: "a", turn: "t", at: "", kind: "thinking", text: "Plan" };

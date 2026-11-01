@@ -1,6 +1,6 @@
 <!-- Ported from T3 Code (apps/web/src/components/chat/WorkLog.tsx), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE. -->
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import type { TranscriptItem, TranscriptPart } from "../contract.gen.ts";
   import { activeVerb, elapsed, stepTime, titleOf, type StepKind } from "../steps.ts";
   import { formatTimelineDuration, summarizeWork, timelineItemRunning, workLayout } from "../timeline.ts";
@@ -24,7 +24,6 @@
   const parts = ["arguments", "output"] as const;
   let failures: Record<string, boolean> = $state({});
   let loading: Record<string, boolean> = $state({});
-  let openDiff: Record<string, boolean> = $state({});
   let expandedContent: Record<string, boolean> = $state({});
   const key = (item: TranscriptItem, part: TranscriptPart) => item.id + "/" + part;
   async function load(item: TranscriptItem, part: TranscriptPart) {
@@ -44,8 +43,9 @@
   // A failed call usually fails its script too, and that is one failure.
   let failedCount = $derived(tools.reduce((count, item) => count + Math.max(Number(!!item.failed), (item.calls ?? []).filter(call => call.status === "error").length), 0));
   let layout = $derived(workLayout(items));
-  // One click reads any thought: the folded group opens with each thought whole.
-  let showThoughts = $state(false);
+  // One click reads any thought. An ended turn's fold was that click, so its thoughts open whole; a live group opens with one.
+  let showThoughts = $state(untrack(() => ended));
+  $effect(() => { if (ended) for (const thought of thoughts) if (thought.more) untrack(() => void load(thought, "text")); });
   function toggleThoughts() {
     showThoughts = !showThoughts;
     if (!showThoughts) return;
@@ -105,9 +105,9 @@
           {@const diff = chunks[key(item, "diff")] ?? item.diff}
           {@const lines = diff.split("\n")}
           {#if !item.failed}
-            <div class="diff-summary"><span class="diff-path">{title.target}</span><span class="add">+{lines.filter(line => line.startsWith("+") && !line.startsWith("+++")).length}</span><span class="remove">−{lines.filter(line => line.startsWith("-") && !line.startsWith("---")).length}</span><button onclick={() => { openDiff[item.id] = !openDiff[item.id]; }}>{openDiff[item.id] ? "Close diff" : "Open diff"}</button></div>
+            <div class="diff-summary"><span class="add">+{lines.filter(line => line.startsWith("+") && !line.startsWith("+++")).length}</span><span class="remove">−{lines.filter(line => line.startsWith("-") && !line.startsWith("---")).length}</span></div>
           {/if}
-          {#if item.failed || openDiff[item.id]}<pre class="diff">{#each (expandedContent[item.id + "/diff"] ? lines : lines.slice(0, 12)) as line}<span class:add={line.startsWith("+")} class:remove={line.startsWith("-")}>{line}&#10;</span>{/each}</pre>{#if lines.length > 12 && !expandedContent[item.id + "/diff"]}<button onclick={() => expandedContent[item.id + "/diff"] = true}>Show all</button>{/if}{/if}
+          <pre class="diff">{#each (expandedContent[item.id + "/diff"] ? lines : lines.slice(0, 12)) as line}<span class:add={line.startsWith("+")} class:remove={line.startsWith("-")}>{line}&#10;</span>{/each}</pre>{#if lines.length > 12 && !expandedContent[item.id + "/diff"]}<button onclick={() => expandedContent[item.id + "/diff"] = true}>Show all</button>{/if}
         {/if}
         {#if !item.diff || item.failed}
         {#each parts as name}
@@ -123,7 +123,7 @@
 {/snippet}
 
 {#if layout === "single" && items[0].kind === "thinking"}
-  <div class="group">{@render thought(items[0], false)}</div>
+  <div class="group">{@render thought(items[0], ended)}</div>
 {:else if layout === "single"}
   <div class="group">{@render entry(items[0])}</div>
 {:else if layout === "thoughts"}
@@ -147,7 +147,6 @@
 
 <style>
   .group, .entry { color: var(--muted); font-size: 14px; line-height: 1.625; }
-  .group { margin-left: 16px; padding-left: 8px; border-left: 1px solid var(--line); }
   .group-heading { display: flex; align-items: center; gap: 6px; }
   .thought-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
   .group-heading.thoughts { width: 100%; min-height: 24px; border-radius: 6px; text-align: left; }
@@ -166,7 +165,6 @@
   .thought.folds:not(.open) .thought-fold::after { content: ""; position: absolute; inset: 0; }
   .thought.folds:not(.open):hover { color: var(--text); background: var(--hover); }
   @media (hover: none) { .thought-fold { width: 40px; height: 40px; margin: -8px; } }
-  @media (max-width: 600px) { .group { margin-left: 8px; } }
   summary { display: flex; align-items: center; min-height: 24px; gap: 6px; cursor: pointer; list-style: none; border-radius: 6px; }
   summary::-webkit-details-marker { display: none; }
   summary:hover { color: var(--text); background: var(--hover); }
@@ -176,11 +174,9 @@
   details[open] > summary .entry-chevron { transform: rotate(90deg); margin-left: 0; }
   details:not([open]) > summary .time { display: none; }
   .target { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .content { margin-left: 28px; padding: 4px 0; }
+  .content { margin-left: 30px; padding: 4px 0; }
   pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.625 var(--mono); }
   .diff-summary { display: flex; gap: 6px; align-items: center; font: inherit; }
-  .diff-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .diff-summary button { border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
   .add, .diff .add { color: var(--success); }
   .remove, .diff .remove { color: var(--danger); }
   .time { margin-left: auto; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
