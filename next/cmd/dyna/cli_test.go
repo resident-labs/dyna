@@ -96,6 +96,10 @@ type fakeClient struct {
 	prStatus     contract.PrStatusRequest
 	prTrack      contract.PrTrackRequest
 	prUntrack    contract.PrUntrackRequest
+	issueList    contract.IssueListRequest
+	issueStatus  contract.IssueStatusRequest
+	issueTrack   contract.IssueTrackRequest
+	issueUntrack contract.IssueUntrackRequest
 	hosts        []contract.HostSummary
 
 	roomDelete    contract.RoomDeleteRequest
@@ -128,6 +132,22 @@ func (f *fakeClient) PrTrack(_ context.Context, q contract.PrTrackRequest) (cont
 func (f *fakeClient) PrUntrack(_ context.Context, q contract.PrUntrackRequest) (contract.PrUntrackResponse, error) {
 	f.prUntrack = q
 	return contract.PrUntrackResponse{}, nil
+}
+func (f *fakeClient) IssueList(_ context.Context, q contract.IssueListRequest) (contract.IssueListResponse, error) {
+	f.issueList = q
+	return contract.IssueListResponse{Issues: []contract.IssueSummary{{Repo: "owner/repo", Number: 7, State: contract.IssueOpen, Labels: []string{"bug"}, URL: "https://github.com/owner/repo/issues/7"}}}, nil
+}
+func (f *fakeClient) IssueStatus(_ context.Context, q contract.IssueStatusRequest) (contract.IssueStatusResponse, error) {
+	f.issueStatus = q
+	return contract.IssueStatusResponse{Issue: contract.IssueSummary{Repo: q.Repo, Number: q.Number, State: contract.IssueClosed}}, nil
+}
+func (f *fakeClient) IssueTrack(_ context.Context, q contract.IssueTrackRequest) (contract.IssueTrackResponse, error) {
+	f.issueTrack = q
+	return contract.IssueTrackResponse{Issue: contract.IssueSummary{Repo: q.Repo, Number: q.Number}}, nil
+}
+func (f *fakeClient) IssueUntrack(_ context.Context, q contract.IssueUntrackRequest) (contract.IssueUntrackResponse, error) {
+	f.issueUntrack = q
+	return contract.IssueUntrackResponse{}, nil
 }
 func (f *fakeClient) DeviceSetScopes(_ context.Context, q contract.DeviceSetScopesRequest) (contract.DeviceSetScopesResponse, error) {
 	f.deviceScopes = q
@@ -558,6 +578,33 @@ func TestRepoCICommand(t *testing.T) {
 	root.SetArgs([]string{"room", "repo", "ci", "a/b", "--mode", "box", "--host", "pve"})
 	if err := root.Execute(); err == nil {
 		t.Fatal("accepted a host with no count")
+	}
+}
+
+func TestIssueTrackingCommands(t *testing.T) {
+	f := &fakeClient{}
+	out := runCLI(t, f, "issue", "list", "--all", "--room", "room_a")
+	if !f.issueList.All || f.issueList.Room != "room_a" || !strings.Contains(out, "owner/repo#7") || !strings.Contains(out, "labels=bug") {
+		t.Fatalf("list %+v printed %q", f.issueList, out)
+	}
+	runCLI(t, f, "issue", "status", "12", "--repo", "owner/repo")
+	if f.issueStatus.Repo != "owner/repo" || f.issueStatus.Number != 12 {
+		t.Fatalf("status %+v", f.issueStatus)
+	}
+	runCLI(t, f, "issue", "track", "12", "--repo", "upstream/repo", "--session", "ses_a")
+	if f.issueTrack.Repo != "upstream/repo" || f.issueTrack.Number != 12 || f.issueTrack.Session != "ses_a" {
+		t.Fatalf("track %+v", f.issueTrack)
+	}
+	runCLI(t, f, "issue", "track", "12", "--repo", "upstream/repo", "--room", "room_a")
+	if f.issueTrack.Room != "room_a" {
+		t.Fatalf("track %+v", f.issueTrack)
+	}
+	runCLI(t, f, "issue", "untrack", "12", "--repo", "upstream/repo")
+	if f.issueUntrack.Repo != "upstream/repo" || f.issueUntrack.Number != 12 {
+		t.Fatalf("untrack %+v", f.issueUntrack)
+	}
+	if _, err := execCLI(f, "issue", "track", "twelve"); err == nil {
+		t.Fatal("a number that is not one was accepted")
 	}
 }
 
