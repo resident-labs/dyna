@@ -1,8 +1,16 @@
 <script lang="ts">
   import type { ModelProvider, ProfileSummary, ThinkingLevel } from "../contract.gen.ts";
-  import type { ProfileModel } from "../profiles.ts";
-  let { profile, models, isNew, busy, error, save, cancel, remove }: { profile: ProfileSummary; models: ProfileModel[]; isNew: boolean; busy: boolean; error: string; save: (profile: ProfileSummary) => void; cancel: () => void; remove: () => void } = $props();
+  import { replacements, sessionCount, type ProfileModel } from "../profiles.ts";
+  let { profile, profiles, models, isNew, busy, error, save, cancel, remove }: { profile: ProfileSummary; profiles: ProfileSummary[]; models: ProfileModel[]; isNew: boolean; busy: boolean; error: string; save: (profile: ProfileSummary) => void; cancel: () => void; remove: (replacement?: string) => void } = $props();
   let draft = $state({ ...profile });
+  // Removing a profile in use first asks where its sessions go.
+  let moving = $state(false), target = $state("");
+  let others = $derived(replacements(profiles, profile.name));
+  function askToRemove() {
+    if (profile.inUse === 0) { remove(); return; }
+    target = others[0]?.name ?? "";
+    moving = true;
+  }
   let compactText = $state((profile.compactTokens ?? 0).toLocaleString(undefined, { numberingSystem: "latn" }));
   const providers: Record<ModelProvider, string> = { anthropic: "Anthropic", openai: "OpenAI-compatible" };
   const ratings = [
@@ -41,7 +49,18 @@
   <label class="field"><span>Notes</span><textarea bind:value={draft.description} rows="3"></textarea></label>
   <label class="field"><span>Compact at</span><div><input class="numeric" inputmode="numeric" value={compactText} oninput={(event) => { compactText = event.currentTarget.value; draft.compactTokens = Number(compactText.replace(/[^0-9]/g, "")); }} onblur={() => compactText = (draft.compactTokens ?? 0).toLocaleString(undefined, { numberingSystem: "latn" })} /> <span class="help">tokens of context; 0 means Pi's default</span></div></label>
   {#if error}<p role="alert" class="help">{error}</p>{/if}
-  <div class="actions"><button class="btn fill save" type="button" disabled={busy || !draft.name.trim() || !draft.model.trim()} onclick={() => save(draft)}>Save</button><button class="btn" type="button" disabled={busy} onclick={cancel}>Cancel</button>{#if !isNew}{#if profile.inUse > 0}<span class="in-use">In use by {profile.inUse} {profile.inUse === 1 ? "session" : "sessions"}, so it cannot be removed.</span>{:else}<button class="btn danger remove" type="button" disabled={busy} onclick={remove}>Remove</button>{/if}{/if}</div>
+  <div class="actions"><button class="btn fill save" type="button" disabled={busy || !draft.name.trim() || !draft.model.trim()} onclick={() => save(draft)}>Save</button><button class="btn" type="button" disabled={busy} onclick={cancel}>Cancel</button>{#if !isNew && !moving}<button class="btn danger remove" type="button" disabled={busy} onclick={askToRemove}>Remove</button>{/if}</div>
+  {#if moving}
+    <div class="replace" role="group" aria-label="Move sessions before removing">
+      {#if others.length}
+        <label class="field"><span>Move {sessionCount(profile.inUse)} to</span><select bind:value={target}>{#each others as other (other.name)}<option value={other.name}>{other.label}</option>{/each}</select></label>
+        <div class="actions"><button class="btn danger" type="button" disabled={busy || !target} onclick={() => remove(target)}>Move and remove</button><button class="btn" type="button" disabled={busy} onclick={() => moving = false}>Keep profile</button></div>
+      {:else}
+        <p class="help">{sessionCount(profile.inUse)} use this profile, and there is no other profile to move them to.</p>
+        <div class="actions"><button class="btn" type="button" onclick={() => moving = false}>Keep profile</button></div>
+      {/if}
+    </div>
+  {/if}
 </div></div>
 
 <style>
@@ -60,8 +79,8 @@
   .help { color: var(--muted); font-size: 12.5px; }
   p.help { margin: 8px 0 0; }
   .actions { display: flex; gap: 12px; }
-  .actions button.remove, .in-use { margin-left: auto; }
-  .in-use { align-self: center; color: var(--muted); font-size: 12.5px; }
+  .actions button.remove { margin-left: auto; }
+  .replace { display: grid; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
   .actions button:disabled { opacity: .45; }
   @container (max-width: 479px) {
     .numeric + .help { display: block; margin-top: 6px; }
@@ -77,7 +96,7 @@
   @container (max-width: 640px) {
     .editor { padding: 16px 12px; }
     .actions { flex-wrap: wrap; }
-    .actions button.remove, .in-use { flex-basis: 100%; }
+    .actions button.remove { flex-basis: 100%; }
     .field { grid-template-columns: minmax(0, 1fr); gap: 8px; }
     input:not(.numeric), select, textarea { max-width: 100%; }
   }

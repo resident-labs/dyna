@@ -135,6 +135,8 @@ type SessionStarted struct {
 
 type SessionRestarted struct {
 	Session SessionID `json:"session"`
+	// ImageUpdated marks a new container on the same volume, as opposed to a box restarted from nothing.
+	ImageUpdated bool `json:"imageUpdated,omitempty"`
 }
 
 type SessionMoved struct {
@@ -271,6 +273,7 @@ const (
 	CauseOutputLimit         FailureCause = "output_limit"          // the reply reached the model's output limit
 	CauseHarnessFailed       FailureCause = "harness_failed"        // the agent program stopped or could not run the turn
 	CauseSetModelFailed      FailureCause = "set_model_failed"      // the agent program refused the session's new model
+	CauseNotStarted          FailureCause = "not_started"           // on a stopped turn: it stopped before Pi took its inputs, so they stay pending
 )
 
 // PressureKind is "high" for memory throttling that lasts 60 s, or "max" for a

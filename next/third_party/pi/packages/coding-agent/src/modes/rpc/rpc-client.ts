@@ -7,7 +7,12 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ImageContent } from "@earendil-works/pi-ai";
-import type { PromptDisposition, QueuedInputDisposition, SessionStats } from "../../core/agent-session.ts";
+import type {
+	ModelTransferResult,
+	PromptDisposition,
+	QueuedInputDisposition,
+	SessionStats,
+} from "../../core/agent-session.ts";
 import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
 import type { SessionEntry, SessionTreeNode } from "../../core/session-manager.ts";
@@ -258,6 +263,25 @@ export class RpcClient {
 	 */
 	async setModel(provider: string, modelId: string): Promise<{ provider: string; id: string }> {
 		const response = await this.send({ type: "set_model", provider, modelId });
+		return this.getData(response);
+	}
+
+	/**
+	 * Move the conversation to a model, compacting first when it does not fit.
+	 */
+	async transferModel(
+		provider: string,
+		modelId: string,
+		thinkingLevel: ThinkingLevel,
+		compactionTriggerTokens?: number,
+	): Promise<ModelTransferResult> {
+		const response = await this.send({
+			type: "transfer_model",
+			provider,
+			modelId,
+			thinkingLevel,
+			compactionTriggerTokens,
+		});
 		return this.getData(response);
 	}
 

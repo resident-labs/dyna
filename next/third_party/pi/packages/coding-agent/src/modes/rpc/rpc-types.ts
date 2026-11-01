@@ -7,7 +7,12 @@
 
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ImageContent, Model } from "@earendil-works/pi-ai";
-import type { PromptDisposition, QueuedInputDisposition, SessionStats } from "../../core/agent-session.ts";
+import type {
+	ModelTransferResult,
+	PromptDisposition,
+	QueuedInputDisposition,
+	SessionStats,
+} from "../../core/agent-session.ts";
 import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
 import type { SessionEntry, SessionTreeNode } from "../../core/session-manager.ts";
@@ -42,6 +47,14 @@ export type RpcCommand =
 
 	// Model
 	| { id?: string; type: "set_model"; provider: string; modelId: string }
+	| {
+			id?: string;
+			type: "transfer_model";
+			provider: string;
+			modelId: string;
+			thinkingLevel: ThinkingLevel;
+			compactionTriggerTokens?: number;
+	  }
 	| { id?: string; type: "cycle_model" }
 	| { id?: string; type: "get_available_models" }
 
@@ -158,6 +171,13 @@ export type RpcResponse =
 			command: "set_model";
 			success: true;
 			data: Model<any>;
+	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "transfer_model";
+			success: true;
+			data: ModelTransferResult;
 	  }
 	| {
 			id?: string;
