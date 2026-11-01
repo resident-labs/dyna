@@ -85,7 +85,7 @@
 </form>
 
 <style>
-  form { display: grid; gap: 24px; width: min(100%, 800px); margin: 0 auto; padding: 32px 24px 48px; color: var(--text); }
+  form { display: grid; align-content: start; flex: 1; min-height: 0; overflow-y: auto; gap: 24px; width: min(100%, 800px); margin: 0 auto; padding: 32px 24px 48px; color: var(--text); }
   header { display: flex; align-items: center; gap: 18px; }
   h1 { margin: 0; font-size: 21px; line-height: 28px; }
   button { border: 0; background: none; color: var(--text); font: inherit; cursor: pointer; }
