@@ -1,11 +1,11 @@
 <script lang="ts">
   import { SvelteMap } from "svelte/reactivity";
   import ProfileMenu from "./ProfileMenu.svelte";
-  import ParentMenu from "./ParentMenu.svelte";
   import StatusPill from "./StatusPill.svelte";
   import { boxReason, count, fromNow, fullTime, waits } from "../feed.ts";
   import { call } from "../client.ts";
   import { failed } from "../jobs.ts";
+  import { closeNote, descendants } from "../session-tree.ts";
   import { watchShell, type ShellJob } from "../shell.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { BoxState } from "../contract.gen.ts";
@@ -39,24 +39,7 @@
   let running = $derived([...listed.values()].filter(job => job.running && !store.endedJobs.has(`${session}/${job.job}`)).length);
   let failures = $derived([...listed.values()].filter(failed).length);
   // Closing ends this session and every session under it. The engine archives their work first, deepest child first.
-  let descendants = $derived.by(() => {
-    const children = new Map<string, string[]>();
-    for (const child of store.sessions.values()) {
-      if (child.parent) children.set(child.parent, [...(children.get(child.parent) ?? []), child.session]);
-    }
-    const found = [...(children.get(session) ?? [])];
-    for (let i = 0; i < found.length; i++) found.push(...(children.get(found[i]) ?? []));
-    return found;
-  });
-  // A session may move under any session in its room except itself and its descendants. The engine checks the same rule.
-  let parents = $derived([...store.sessions.values()].filter(item => item.session !== session && !descendants.includes(item.session)));
-  let archiveNote = $derived.by(() => {
-    if (!descendants.length) return "Its work is archived first.";
-    const names = descendants.map(id => store.names.get(id) ?? id);
-    const shown = names.slice(0, 2);
-    const rest = names.length - shown.length;
-    return `Also closes ${rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.join(" and ")}. Their work is archived first.`;
-  });
+  let archiveNote = $derived(closeNote(descendants([...store.sessions.values()], session).map(id => store.names.get(id) ?? id)));
   let closing = $state(false);
   let closeFailed = $state(false);
   function close(): void {
@@ -72,7 +55,7 @@
   <dl>
     {#if store.turns.has(session)}<dt>Turn</dt><dd>{#if store.stopping.has(session)}Stopping{:else}Running · <button type="button" onclick={() => store.stop(session)}>Stop</button>{/if}
       {#if store.stopFailed.has(session)}<span class="failed">The stop did not reach the engine.</span>{/if}</dd>{/if}
-    {#if parent && open?.parent}<dt>Parent</dt><dd><a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(open.parent)}`} onclick={navigate}>{parent}</a>{#if switchable} <ParentMenu {session} parent={open.parent} candidates={parents} />{/if}</dd>{/if}
+    {#if parent && open?.parent}<dt>Parent</dt><dd><a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(open.parent)}`} onclick={navigate}>{parent}</a></dd>{/if}
     {#if open?.profile}<dt>Profile</dt><dd><ProfileMenu {session} profile={open.profile} {switchable} /></dd>{/if}
     {#if box}<dt>Box</dt><dd>{#if failure}<StatusPill tone="failed" word label="Failed" /> · {boxReason(failure)}{:else if reason === "room-host"}<StatusPill tone="warning" word label={waits[reason]} />{:else}{reason ? waits[reason] : boxes[box]}{/if}</dd>{/if}
     {#if hasJobs}<dt>Jobs</dt><dd><button type="button" onclick={onjobs}>{running ? `${count(running, "job")} running` : "Jobs"}</button>{#if failures}{" · "}<StatusPill tone="failed" label="{failures} failed" word />{/if}</dd>{/if}
