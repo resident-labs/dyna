@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/resident-labs/dyna/engine/store"
 	"path/filepath"
@@ -24,7 +25,10 @@ func (s *Service) TranscriptAppend(ctx context.Context, caller contract.Principa
 	if !filepath.IsLocal(req.Path) || req.Offset < 0 {
 		return contract.TranscriptAppendResponse{}, invalid("transcript path must be local and offset must not be negative")
 	}
+	start := time.Now()
 	s.transcriptMu.Lock()
+	s.transcriptWait.Add(uint64(time.Since(start)))
+	s.transcriptCount.Add(1)
 	defer s.transcriptMu.Unlock()
 	acked, err := s.store.TranscriptOffset(ctx, caller.Session, req.Path)
 	if err != nil {
@@ -50,7 +54,10 @@ func (s *Service) TranscriptAppend(ctx context.Context, caller contract.Principa
 	if _, err := file.WriteAt(tail, acked); err != nil {
 		return contract.TranscriptAppendResponse{}, failure(err)
 	}
-	if err := file.Sync(); err != nil {
+	start = time.Now()
+	err = file.Sync()
+	s.transcriptSync.Add(uint64(time.Since(start)))
+	if err != nil {
 		return contract.TranscriptAppendResponse{}, failure(err)
 	}
 
@@ -187,4 +194,12 @@ func (s *Service) indexTranscript(ctx context.Context, session contract.SessionI
 			starts = append(starts, store.TranscriptTurnStart{Turn: turn, Start: recordStart})
 		}
 	}
+}
+
+// TranscriptTiming contains cumulative append timings in nanoseconds.
+type TranscriptTiming struct{ WaitNS, SyncNS, Count uint64 }
+
+// TranscriptTiming returns cumulative append lock wait and file sync nanoseconds.
+func (s *Service) TranscriptTiming() TranscriptTiming {
+	return TranscriptTiming{s.transcriptWait.Load(), s.transcriptSync.Load(), s.transcriptCount.Load()}
 }
