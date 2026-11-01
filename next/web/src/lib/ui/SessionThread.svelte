@@ -38,7 +38,7 @@
   let loading = $state(false), failed = $state(false);
   let pending = false;
   let scroller: HTMLDivElement;
-  let frameWidth = $state(0), currentTurn = $state<string | null>(null);
+  let currentTurn = $state<string | null>(null);
   let visibleTurns: string[] = $state([]);
   let minimapTurns = $derived(turns.map(turn => ({ id: turn.id, userText: turn.inputs?.[0]?.text ?? null, assistantText: turn.items?.findLast(item => item.kind === "text")?.text ?? null, visible: visibleTurns.includes(turn.id) })));
   function updatePosition() {
@@ -185,7 +185,7 @@
   <div class="message"><Markdown text={chunks[item.id + "/text"] ?? item.text} /></div>{#if chunkFailed[item.id + "/text"]}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Text did not load. Try again</button>{/if}
 {/snippet}
 
-<div class="thread-frame" bind:clientWidth={frameWidth}>
+<div class="thread-frame">
 <TimelineMinimap turns={minimapTurns} current={currentTurn} persistent={true} onselect={(id) => scroller.querySelector<HTMLElement>(`article[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" })} />
 <div class="thread" bind:this={scroller} onscroll={() => { atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; updatePosition(); if (loaded && before && !loading && scroller.scrollTop < 100) void load(true); }}>
   <div class="body">
