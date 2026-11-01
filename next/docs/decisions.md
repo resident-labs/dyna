@@ -866,7 +866,7 @@ The owner manages every model account on one page of the v2 web app. It has the 
 - **Providers.** One row per provider and account, with its label, state and room limits. A provider with a sign-in has a "Connect" button, which starts CLIProxyAPI's own OAuth or device-code flow. The page shows the link or code, and the token goes straight to CLIProxyAPI. A provider with a key has a key field. The engine passes the key to CLIProxyAPI and never shows it again; only the proxy's token store keeps it.
 - **Quota.** For each account and each provider: the usage against each limit window and the time of the next reset. On request, the engine reads provider usage endpoints through CLIProxyAPI's management `api-call` with `$TOKEN$`, so the engine never holds a model token. It caches each account's result for five minutes. Anthropic supplies the five-hour and weekly windows; other providers have no windows until their readers are added.
 - **Alerts.** The events `account.quota_low` (below 10% of a window, or an owner-set floor) and `account.failed` (sign-in rejected or refresh failed) are typed and carry the account and the reason. Only these two states get a colored chip, through the shared `StatusPill` (r8, r16). Every other value is muted text.
-- **Methods.** `accounts.list`, `accounts.connect`, `accounts.set_key`, `accounts.remove` and `accounts.set_limits` are owner-class operations (3.5). The quota view reads `accounts.quota`.
+- **Methods.** `accounts.list`, `accounts.connect`, `accounts.set_key`, `accounts.remove`, `accounts.rename` and `accounts.set_limits` are owner-class operations (3.5). The quota view reads `accounts.quota`.
 
 ### 5.13 Web design
 

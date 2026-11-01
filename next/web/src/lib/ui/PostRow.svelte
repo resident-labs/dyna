@@ -10,8 +10,8 @@
   import { beginSwipe, moveSwipe, releaseSwipe, ignoredSwipeTarget, type Swipe } from "../swipe.ts";
   import { canForwardPost } from "../forward-state.ts";
   import { SwipeForward } from "../swipe-forward.ts";
-  let { row, author, to, root, room, navigate, onretry, ondiscard, onforward, swipeDisabled = false, belowNew = false, newest, visualEvent, onmedia }: {
-    room: string; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; belowNew?: boolean; newest: Map<string, VisualCard>; visualEvent: EventID | undefined; onmedia: (position: number) => void;
+  let { row, last = false, author, to, root, room, navigate, onretry, ondiscard, onforward, swipeDisabled = false, belowNew = false, newest, visualEvent, onmedia }: {
+    room: string; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; row: Extract<Row, { kind: "post" }>; last?: boolean; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; belowNew?: boolean; newest: Map<string, VisualCard>; visualEvent: EventID | undefined; onmedia: (position: number) => void;
   } = $props();
   let distance = $state(0), dragging = $state(false), ready = $state(false);
   function swipe(node: HTMLElement) {
@@ -120,7 +120,7 @@
 <!-- A long press opens the action sheet; a right swipe forwards on release. -->
 <div class="swipe" class:mention={row.from.kind !== "owner" && row.to.some(target => target.kind === "owner")} use:swipe>
   {#if dragging && !row.pending}<div class="cue" class:ready class:first={row.first} aria-hidden="true"><Icon name="forward" /></div>{/if}
-<article style:transform="translateX({distance}px)" class:dragging class="post" class:first={row.first} class:tucked={belowNew} class:pending={row.pending} aria-busy={row.pending && !row.pending.failed} tabindex="-1"
+<article style:transform="translateX({distance}px)" class:dragging class="post" class:first={row.first} class:last class:tucked={belowNew} class:pending={row.pending} aria-busy={row.pending && !row.pending.failed} tabindex="-1"
   style:--lift="{lift}px" onpointerdown={press} onpointermove={drift} onpointerup={release} onpointercancel={release}
   oncontextmenu={event => { if (sheet) event.preventDefault(); }}>
   {#if !row.pending}<div class="bar"><span class="status" role="status">{copied}</span>
@@ -148,7 +148,7 @@
   /* The post stays in the feed's capped column, and the row around it reaches the pane's edges, so a hover or mention wash runs edge to edge. */
   .swipe { --bleed: max(0px, (100cqw - var(--feed-reading-width)) / 2); position: relative; margin-inline: calc(-1 * var(--bleed)); padding-inline: var(--bleed); }
   @media (pointer: coarse) { .swipe { overflow-x: clip; } }
-  .cue { position: absolute; left: calc(var(--bleed) + 12px); top: 22px; z-index: 1; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--selected); color: var(--muted); opacity: .4; transform: scale(.8); }
+  .cue { position: absolute; left: calc(var(--bleed) + 12px); top: 14px; z-index: 1; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--selected); color: var(--muted); opacity: .4; transform: scale(.8); }
   .cue:not(.first) { top: 15px; }
   .cue.ready { background: var(--focus); color: var(--bg); opacity: 1; transform: scale(1.15); }
   .post { transition: transform 150ms ease; }
@@ -157,12 +157,15 @@
   /* The avatar sits in a 40 px gutter; later posts of a run align under the first one's text. */
   .post { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr); column-gap: 16px; padding: 1px 16px; font-size: 15px; }
   /* The gap above a run is inside the row, so washes on neighboring rows meet with no band between them. */
-  .post.first { padding-top: 17px; }
+  /* A run's gap sits half above and half below it, so a hover or tint is even and tinted rows still meet. */
+  .post.first { padding-top: 9px; }
+  .post.last { padding-bottom: 8px; }
   /* The wash follows the pointer only; a tap or a closed menu leaves none behind. */
   @media (hover: hover) { .swipe:hover { background: var(--post-hover); } }
   .mention { background: var(--mention-bg); }
   .mention .post { padding-top: 4px; padding-bottom: 4px; }
-  .mention .post.first { padding-top: 20px; }
+  .mention .post.first { padding-top: 9px; }
+  .mention .post.last { padding-bottom: 8px; }
   .mention::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 2px; background: var(--mention-bar); }
   @media (hover: hover) { .swipe.mention:hover { background: linear-gradient(var(--post-hover) 0 0), var(--mention-bg); } }
   .post .follow-time { grid-column: 1; grid-row: 1; align-self: start; text-align: center; font-size: 11px; visibility: hidden; }
