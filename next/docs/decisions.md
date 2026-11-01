@@ -2,6 +2,10 @@
 
 This is the unabridged spec before the split, from `738c66c6ac620d7e8aca4d78f8498ff4276d0de6` (2026-10-31). It preserves the original section numbers, sources, dates, rationale, risks and milestone evidence. The current design and settled decisions are in [spec.md](spec.md); this history is not current authority.
 
+## Connect size cap (2026-10-31)
+
+Root approved a one-time increase of the Connect cap to 2,565 Go product lines. On-demand discovery and retaining the last good route avoid 421 errors until a restart. This is the final increase. Later Connect growth must be offset in `next/engine/connect`. Do not cut authentication or session code to meet the count.
+
 # Dyna v2 specification
 
 Status: draft for owner approval. Lead: dyna:lead-rewrite. Co-authors: dyna:node-shell (sections 5 and 6) and dyna:code-architectural (sections 7, 8 and 9).

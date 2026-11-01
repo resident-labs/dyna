@@ -15,6 +15,8 @@ import (
 	"github.com/resident-labs/dyna/harness/pi"
 )
 
+const maxTranscriptCallPosts = 8
+
 // TranscriptRead reads the acknowledged prefix without holding the writer or service lock.
 func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal, req contract.TranscriptReadRequest) (contract.TranscriptReadResponse, *contract.Error) {
 	response := contract.TranscriptReadResponse{Steps: []contract.TranscriptStep{}, Turns: []contract.TranscriptTurn{}}
@@ -137,34 +139,51 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			}
 			skip := req.ItemIndex
 			if !req.Tail {
+				var pageItems []pi.TranscriptItem
 				for _, r := range ranges {
-					items, seen, more, err := reader.Read(r.Path, r.Start, r.End, deliveries, req.Item, skip, max(0, 6-len(t.Items)))
+					items, seen, more, err := reader.Read(r.Path, r.Start, r.End, deliveries, req.Item, skip, max(0, 6-len(pageItems)))
 					if err != nil {
 						return response, failure(err)
-					}
-					for i := range items {
-						item := &items[i]
-						if item.Kind != contract.TranscriptTool || item.Tool != "bash" {
-							continue
-						}
-						id := contract.EventID(strings.TrimSpace(item.Output))
-						event, found, err := s.store.TranscriptTurnPost(ctx, req.Session, t.ID, id)
-						if err != nil {
-							return response, failure(err)
-						}
-						if !found {
-							continue
-						}
-						applyTranscriptPost(item, event)
-
 					}
 					if skip > seen {
 						skip -= seen
 					} else {
 						skip = 0
 					}
-					t.Items = append(t.Items, items...)
+					pageItems = append(pageItems, items...)
 					t.More = t.More || more
+				}
+				callIDs := make([]string, 0, len(pageItems))
+				for _, item := range pageItems {
+					if item.Kind == contract.TranscriptTool && item.CallID != "" {
+						callIDs = append(callIDs, item.CallID)
+					}
+				}
+				postPages, err := s.store.TranscriptCallPosts(ctx, req.Session, t.ID, callIDs)
+				if err != nil {
+					return response, failure(err)
+				}
+				for _, item := range pageItems {
+					page := postPages[item.CallID]
+					for _, event := range page.Posts {
+						if len(item.Posts) == maxTranscriptCallPosts {
+							break
+						}
+						post := contract.TranscriptItem{ID: string(event.ID), Turn: t.ID, At: event.Time}
+						applyTranscriptPost(&post, event)
+						item.Posts = append(item.Posts, post)
+						encoded, _ := json.Marshal(item.TranscriptItem)
+						if len(encoded) > 80<<10 {
+							item.Posts = item.Posts[:len(item.Posts)-1]
+							break
+						}
+					}
+					item.PostsOmitted = page.Total - len(item.Posts)
+					if item.PostsOmitted > 0 {
+						next := page.Posts[len(item.Posts)]
+						item.PostsNext = &contract.TranscriptPostLocation{Room: next.Room, Seq: next.Seq}
+					}
+					t.Items = append(t.Items, item.TranscriptItem)
 				}
 			}
 			if req.Item != "" {
@@ -211,37 +230,39 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			if t.More {
 				t.NextItem = req.ItemIndex + len(t.Items)
 			} else {
-				// Posts with no matching Pi tool result remain visible in a bounded tail.
+				// Posts with no matching acknowledged Pi call remain visible in a bounded tail.
 				offset := req.PostIndex
-				for len(t.Items) < 6 {
-					posts, err := s.store.TranscriptSentPosts(ctx, req.Session, t.ID, 1, offset)
-					if err != nil {
-						return response, failure(err)
+				posts, err := s.store.TranscriptSentPosts(ctx, req.Session, t.ID, 64, offset)
+				if err != nil {
+					return response, failure(err)
+				}
+				ids := make(map[string]bool, len(posts))
+				for _, post := range posts {
+					if id := post.Body.(contract.PostCreated).ToolCallID; id != "" {
+						ids[id] = false
 					}
-					if len(posts) == 0 {
+				}
+				for _, r := range ranges {
+					if len(ids) == 0 {
 						break
 					}
-					post := posts[0]
-					offset++
-					claimed := false
-					for _, r := range ranges {
-						found, err := reader.HasPost(r.Path, r.Start, r.End, post.ID)
-						if err != nil {
-							return response, failure(err)
-						}
-						if found {
-							claimed = true
-							break
-						}
+					if err := reader.FindCalls(r.Path, r.Start, r.End, ids); err != nil {
+						return response, failure(err)
 					}
-					if claimed {
+				}
+				for _, post := range posts {
+					if len(t.Items) == 6 {
+						break
+					}
+					offset++
+					if ids[post.Body.(contract.PostCreated).ToolCallID] {
 						continue
 					}
 					item := contract.TranscriptItem{ID: string(post.ID), Turn: t.ID, At: post.Time}
 					applyTranscriptPost(&item, post)
 					t.Items = append(t.Items, item)
 				}
-				if len(t.Items) == 6 {
+				if len(t.Items) == 6 || offset-req.PostIndex == 64 {
 					t.More = true
 					t.Tail = true
 					t.NextPost = offset
