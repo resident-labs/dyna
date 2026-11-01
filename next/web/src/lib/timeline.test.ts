@@ -1,7 +1,7 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { summarizeWork, deriveTimelineGroups, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout } from "./timeline.ts";
+import { summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout } from "./timeline.ts";
 import type { TranscriptInput, TranscriptItem } from "./contract.gen.ts";
 
 test("one item of work has no heading to open first, and a script keeps the heading that counts its actions", () => {
@@ -78,4 +78,41 @@ test("completed text-only turns show every message without a disclosure", () => 
   assert.equal(visibleTimelineText("first", "final", true, false, false), true);
   assert.equal(visibleTimelineText("final", "final", true, false, false), true);
   assert.equal(visibleTimelineText("first", "final", true, true, false), false);
+});
+
+const ownedPost = (id: string, at: string): TranscriptItem => ({ id, turn: "t", at, kind: "post", from: { kind: "session", session: "s" }, home: { kind: "feed" }, room: "r" });
+const message = (id: string, at: string): TranscriptItem => ({ id, turn: "t", at, kind: "text", text: id });
+
+test("a post that ends the turn is its final message, so earlier text folds", () => {
+  const tool: TranscriptItem = { id: "tool", turn: "t", at: "2026-11-01T00:00:01Z", kind: "tool", posts: [ownedPost("post", "2026-11-01T00:00:02Z")] };
+  const items = [message("narration", "2026-11-01T00:00:01Z"), tool];
+  const final = finalTimelineItem(items, "s")?.id;
+  assert.equal(final, "post");
+  assert.equal(visibleTimelineText("narration", final, true, true, false), false);
+  assert.equal(visibleTimelineText("narration", final, true, true, true), true);
+});
+
+test("text after a mid-turn post stays the final message, also when a shell post sorts last", () => {
+  const tool: TranscriptItem = { id: "tool", turn: "t", at: "2026-11-01T00:00:01Z", kind: "tool", posts: [ownedPost("nested", "2026-11-01T00:00:01Z")] };
+  assert.equal(finalTimelineItem([tool, message("answer", "2026-11-01T00:00:03Z")], "s")?.id, "answer");
+  assert.equal(finalTimelineItem([message("answer", "2026-11-01T00:00:03Z"), ownedPost("shell", "2026-11-01T00:00:02Z")], "s")?.id, "answer");
+});
+
+test("another session's post is never a turn's final message", () => {
+  const other: TranscriptItem = { ...ownedPost("other", "2026-11-01T00:00:02Z"), from: { kind: "session", session: "other" } };
+  assert.equal(finalTimelineItem([message("answer", "2026-11-01T00:00:01Z"), other], "s")?.id, "answer");
+  assert.equal(finalTimelineItem([{ id: "tool", turn: "t", at: "", kind: "tool" }], "s"), undefined);
+  // A slow box clock can date the final text before the post that came first, and the order still decides.
+  const earlier: TranscriptItem = { id: "tool", turn: "t", at: "2026-11-01T00:00:01Z", kind: "tool", posts: [ownedPost("nested", "2026-11-01T00:00:09Z")] };
+  assert.equal(finalTimelineItem([earlier, message("answer", "2026-11-01T00:00:05Z")], "s")?.id, "answer");
+});
+
+test("a post names its destination only when it left this DM", () => {
+  const name = (id: string) => `@${id}`;
+  const dm = (session: string): TranscriptItem => ({ ...ownedPost("p", ""), home: { kind: "dm", session } });
+  assert.equal(postDestination(dm("s"), "s", "r", "general", name), undefined);
+  assert.equal(postDestination(dm("other"), "s", "r", "general", name), "@other");
+  assert.equal(postDestination(ownedPost("p", ""), "s", "r", "general", name), "#general");
+  assert.equal(postDestination({ ...ownedPost("p", ""), room: "elsewhere" }, "s", "r", "general", name), "another room");
+  assert.equal(postDestination({ ...ownedPost("p", ""), home: undefined }, "s", "r", "general", name), undefined);
 });
