@@ -3,18 +3,18 @@
   import { requestDecision } from "../request-decision.ts";
   import { hue } from "../identity.ts";
   import { closedSession, fromNow } from "../feed.ts";
-  import { requestGroups, requestOrder } from "../request-groups.ts";
+  import { requestGroups, requestOrder, requestsFor } from "../request-groups.ts";
   import type { Request, RoomStore } from "../room.svelte.ts";
   import Avatar from "./Avatar.svelte";
   import RequestCard from "./RequestCard.svelte";
   import RequestRow from "./RequestRow.svelte";
-  let { store, admin, onclose, element = $bindable() }: { store: RoomStore; admin: boolean; onclose: () => void; element?: HTMLElement } = $props();
+  let { store, session, admin, onclose, element = $bindable() }: { store: RoomStore; session?: string; admin: boolean; onclose: () => void; element?: HTMLElement } = $props();
   const groupThreshold = 12, initialGroups = 3;
   let now = $state(Date.now()), all = $state(false), moreGroups = $state(false), chosen = $state("");
   let expanded = $state<string[]>([]), denying = $state(""), reason = $state(""), failure = $state("");
   let touchStart = 0;
   let rows: Record<string, ReturnType<typeof RequestRow>> = $state({});
-  let requests = $derived([...store.requests.values()]);
+  let requests = $derived(requestsFor(store.requests.values(), session));
   let waiting = $derived(requests.filter(item => item.state === "pending" && item.class === "owner")
     .sort((a, b) => Date.parse(a.expires) - Date.parse(b.expires)));
   let shared = $derived(requests.filter(item => item.state === "pending" && item.class !== "owner")
