@@ -38,7 +38,7 @@
   let loading = $state(false), failed = $state(false);
   let pending = false;
   let scroller: HTMLDivElement;
-  let currentTurn = $state<string | null>(null);
+  let frameWidth = $state(0), currentTurn = $state<string | null>(null);
   let visibleTurns: string[] = $state([]);
   let minimapTurns = $derived(turns.map(turn => ({ id: turn.id, userText: turn.inputs?.[0]?.text ?? null, assistantText: turn.items?.findLast(item => item.kind === "text")?.text ?? null, visible: visibleTurns.includes(turn.id) })));
   function updatePosition() {
@@ -185,8 +185,8 @@
   <div class="message"><Markdown text={chunks[item.id + "/text"] ?? item.text} /></div>{#if chunkFailed[item.id + "/text"]}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Text did not load. Try again</button>{/if}
 {/snippet}
 
-<div class="thread-frame">
-<TimelineMinimap turns={minimapTurns} current={currentTurn} persistent={true} onselect={(id) => scroller.querySelector<HTMLElement>(`article[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" })} />
+<div class="thread-frame" bind:clientWidth={frameWidth}>
+{#if frameWidth >= 880}<TimelineMinimap turns={minimapTurns} current={currentTurn} persistent={true} onselect={(id) => scroller.querySelector<HTMLElement>(`article[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" })} />{/if}
 <div class="thread" bind:this={scroller} onscroll={() => { atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; updatePosition(); if (loaded && before && !loading && scroller.scrollTop < 100) void load(true); }}>
   <div class="body">
     {#each turns as turn (turn.id)}
@@ -227,13 +227,13 @@
     {/each}
     {#if failed}<p class="muted" role="alert">The conversation did not load. <button onclick={() => void load()}>Try again</button></p>{/if}
   </div>
-  {#if !atBottom}<button class="latest" onclick={() => scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" })}>Jump to latest</button>{/if}
 </div>
+{#if !atBottom}<div class="latest-bar"><button class="latest" onclick={() => scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" })}>Jump to latest</button></div>{/if}
 </div>
 
 <style>
-  .thread-frame { position: relative; height: 100%; min-height: 0; }
-  .thread { height: 100%; min-height: 0; overflow-y: auto; }
+  .thread-frame { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .thread { flex: 1; min-height: 0; overflow-y: auto; }
   .body { max-width: 784px; margin: auto; padding: 16px 24px; }
   article { margin: 0 0 24px; }
   .failure { display: flex; gap: 10px; color: var(--muted); margin: 12px 0; }
@@ -260,7 +260,8 @@
   button { padding: 0; border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
   button:hover { color: var(--text); }
   button:focus-visible { outline: 2px solid var(--focus); }
-  .latest { position: absolute; right: 24px; bottom: 16px; background: var(--sidebar); padding: 8px 12px; border-radius: 6px; }
+  .latest-bar { flex: none; display: flex; justify-content: center; padding: 4px 12px; background: var(--sidebar); }
+  .latest { background: var(--raised); padding: 8px 12px; border-radius: 6px; }
   @media (max-width: 600px) { .body { padding: 12px 16px; } }
   @media (pointer: coarse) { button { min-height: 40px; } }
 </style>
