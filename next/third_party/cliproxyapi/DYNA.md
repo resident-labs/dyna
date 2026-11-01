@@ -47,6 +47,8 @@ Each later patch to this folder must be its own commit. Each patch must add an e
 
 - z.ai usage reader: 60 product lines added, 3 removed, plus 77 test lines. It serves `engine/model` with the raw key on a fixed host, as z.ai's plugin and cc-switch do. It classifies limits by `unit`, reads `CREDIT_LIMIT`, skips `TIME_LIMIT`, omits impossible reset times and checks the envelope, because a pay-as-you-go key answers HTTP 200 with `success` false.
 
+- DeepSeek balance reader: 36 product lines added, 4 removed, plus 38 test lines. It serves `engine/model` and the Home balance from the documented `/user/balance`, one balance per currency. DeepSeek has no limit windows, and `is_available` false is a low balance, not a bad key.
+
 ## Pulls
 
 - `v8.0.49` (2026-11-01): `git subtree pull` merged with no conflicts. Every patch above still applies, and none is obsolete: PR #5434 stays open and unmerged, PR #5833 was closed unmerged. The release changes plugin login, Gemini sanitizing and Codex commentary through Claude clients. The commentary option defaults to off, so `engine/model` sees no change in routing, management paths or credential handling. `TestResponsesInterruptStopsHTTPUpstream` and `TestCodexClientModelsApplyPatchRouting` are flaky on `v8.0.48` with Dyna's patches too, so this pull did not cause them; CI does not run them.
