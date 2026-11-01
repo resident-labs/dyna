@@ -1,7 +1,8 @@
 <!-- Ported from T3 Code (apps/web/src/components/chat/WorkLog.tsx), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE. -->
 <script lang="ts">
   import type { TranscriptItem, TranscriptPart } from "../contract.gen.ts";
-  import { activeVerb, elapsed, stepTime, titleOf, workSummary, type StepKind } from "../steps.ts";
+  import { activeVerb, elapsed, stepTime, titleOf, type StepKind } from "../steps.ts";
+  import { summarizeWork } from "../timeline.ts";
   import Icon, { type IconName } from "./Icon.svelte";
   import TranscriptIcon from "./TranscriptIcon.svelte";
   import Markdown from "./Markdown.svelte";
@@ -34,7 +35,7 @@
   // Dyna keeps thoughts and tools in transcript order. The caller splits at posts and other boundaries.
   let active = $derived(!ended && items.some(item => !item.ended));
   let tools = $derived(items.filter(item => item.kind === "tool"));
-  let summary = $derived(active ? `Working for ${elapsed(started, now)}` : tools.length ? workSummary(tools) : `${items.length} thoughts`);
+  let summary = $derived(active ? `Working for ${elapsed(started, now)}` : tools.length ? summarizeWork(items) : summarizeWork(items));
 </script>
 
 {#snippet entry(item: TranscriptItem)}
