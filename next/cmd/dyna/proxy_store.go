@@ -34,6 +34,15 @@ func (s *proxyStore) bound(id string) (bool, error) {
 	return false, nil
 }
 
+func keyProviderURL(proxyProvider string) (string, bool) {
+	for _, provider := range model.KeyProviders() {
+		if proxyProvider == "openai-compatible-"+string(provider.Provider) {
+			return provider.URL, true
+		}
+	}
+	return "", false
+}
+
 func (s *proxyStore) List(context.Context) ([]*proxyauth.Auth, error) {
 	var records []store.ProxyAuth
 	if err := s.client.Call("Auth.List", struct{}{}, &records); err != nil {
@@ -49,6 +58,11 @@ func (s *proxyStore) List(context.Context) ([]*proxyauth.Auth, error) {
 		var auth proxyauth.Auth
 		if err := json.Unmarshal(record.Record, &auth); err != nil {
 			return nil, errors.New("proxy store record invalid")
+		}
+		// A key record keeps the URL it was created with, and the executor sends to
+		// that URL. The catalog decides, so a corrected endpoint reaches old accounts.
+		if url, ok := keyProviderURL(record.Provider); ok && auth.Attributes != nil {
+			auth.Attributes["base_url"] = url
 		}
 		// Only bound credentials may be enabled after proxy restart.
 		auth.Disabled = !record.Bound
