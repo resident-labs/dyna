@@ -1102,6 +1102,9 @@ func scan(row scanner) (Machine, error) {
 	if err := json.Unmarshal([]byte(wakeCommand), &m.WakeCommand); err != nil {
 		return Machine{}, fmt.Errorf("node %s wake command: %w", m.Name, err)
 	}
+	if len(m.WakeCommand) == 0 {
+		m.WakeCommand = nil
+	}
 	m.SSHConnectTimeout = time.Duration(connectMs) * time.Millisecond
 	if err := json.Unmarshal([]byte(resources), &m.Resources); err != nil {
 		return Machine{}, fmt.Errorf("node %s resources: %w", m.Name, err)
