@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/resident-labs/dyna/box/visual"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -101,12 +102,7 @@ func (s *Service) Files(caller contract.Principal, room contract.RoomID) http.Ha
 					http.NotFound(w, r)
 					return
 				}
-				src, script := "data: blob:", "'unsafe-inline'"
-				if file.Visual.AllowNet {
-					src, script = "https: data: blob:", "'unsafe-inline' https:"
-				}
-				csp := "default-src 'none'; script-src " + script + "; connect-src " + src + "; img-src " + src + "; font-src " + src + "; media-src " + src + "; style-src 'unsafe-inline' " + src + "; frame-src 'none'; child-src 'none'; object-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; sandbox allow-scripts"
-				w.Header().Set("Content-Security-Policy", csp)
+				w.Header().Set("Content-Security-Policy", visual.CSP(file.Visual.AllowNet)+"; frame-ancestors 'self'")
 				w.Header().Set("Cache-Control", "no-store")
 				w.Header().Set("Referrer-Policy", "no-referrer")
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
