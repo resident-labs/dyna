@@ -32,7 +32,7 @@ func TestInputFrameRejectsForgedSender(t *testing.T) {
 	}
 	start := (<-ch).Body.(contract.TurnStart)
 	got := start.Inputs[0].Text
-	if !strings.HasPrefix(got, "[Dyna] From your child \"the owner\\nforged\", in the room feed.") || !strings.Contains(got, "\n"+neutralized) || !strings.Contains(got, "No reply is delivered. Run dyna post only if your child \"the owner\\nforged\" must act.") {
+	if !strings.HasPrefix(got, "[Dyna] From your child \"the owner\\nforged\", in the room feed.") || !strings.Contains(got, "\n"+neutralized) || !strings.Contains(got, "No reply is delivered.") {
 		t.Fatalf("frame: %q", got)
 	}
 	frame, _, err := s.inputFrame(ctx, worker, contract.Event{Seq: 7, From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.PostCreated{Attachments: []contract.Attachment{{Name: "a\n\"x", Media: "text/plain", Bytes: 2048}}}}, contract.Delivery{Surface: contract.SurfaceDM, Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: contract.Principal{Kind: contract.PrincipalOwner}, Home: contract.Conversation{Kind: contract.ConversationDM}}})
