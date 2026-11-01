@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -105,9 +106,11 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			}
 			value := string(data)
 			var home *contract.Conversation
+			var attachments []contract.Attachment
 			if body, ok := input.Body.(contract.PostCreated); ok {
 				value = body.Text
 				home = &body.Home
+				attachments = sanitizeTranscriptAttachments(body.Attachments)
 			}
 			value = harness.Mask(value)
 			if req.Item != "" {
@@ -123,7 +126,14 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 				t.More = true
 				break
 			}
-			t.Inputs = append(t.Inputs, contract.TranscriptInput{Home: home, At: input.Time, ID: input.ID, Seq: input.Seq, Room: input.Room, Type: input.Body.EventType(), From: input.From, Text: clipTranscript(value, 512), More: len(value) > 512})
+			t.Inputs = append(t.Inputs, contract.TranscriptInput{Home: home, At: input.Time, ID: input.ID, Seq: input.Seq, Room: input.Room, Type: input.Body.EventType(), From: input.From, Text: clipTranscript(value, 512), More: len(value) > 512, Attachments: attachments})
+			// Reserve room for turn metadata and cursor fields before adding items.
+			encoded, _ := json.Marshal(t)
+			if len(encoded) > 170<<10 && len(t.Inputs) > 1 {
+				t.Inputs = t.Inputs[:len(t.Inputs)-1]
+				t.More = true
+				break
+			}
 			t.After = "input:" + string(input.ID)
 		}
 		if !t.More {
@@ -370,18 +380,26 @@ func applyTranscriptPost(item *contract.TranscriptItem, event contract.Event) {
 	item.More = item.More || len(text) > 4096
 	home := post.Home
 	item.Home = &home
-	item.Attachments = post.Attachments
-	for i := range item.Attachments {
-		a := &item.Attachments[i]
+	item.Attachments = sanitizeTranscriptAttachments(post.Attachments)
+}
+
+func sanitizeTranscriptAttachments(attachments []contract.Attachment) []contract.Attachment {
+	attachments = slices.Clone(attachments)
+	for i := range attachments {
+		a := &attachments[i]
 		a.Name = clipTranscript(harness.Mask(a.Name), 128)
 		a.Media = clipTranscript(harness.Mask(a.Media), 128)
 		if a.Visual != nil {
+			visual := *a.Visual
+			visual.Checks = slices.Clone(visual.Checks)
+			a.Visual = &visual
 			a.Visual.Title = clipTranscript(harness.Mask(a.Visual.Title), 128)
 			for j := range a.Visual.Checks {
 				a.Visual.Checks[j].Detail = clipTranscript(harness.Mask(a.Visual.Checks[j].Detail), 128)
 			}
 		}
 	}
+	return attachments
 }
 
 // budgetTranscriptTurn retains the final text, then the newest mandatory items,
