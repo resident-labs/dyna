@@ -49,7 +49,7 @@
   <header class="section-head"><strong>{title}</strong>{#if count !== undefined}<span>{count}</span>{/if}{#if title === "Ways in"}<span>Browsers try them in order and check that each one reaches the Dyna host.</span>{/if}{@render action?.()}</header>
 {/snippet}
 {@render bar("Sharing & access", undefined, undefined)}
-<div class="scroll">
+<div class="scroll" data-page-ready={(!!status || !!problem) && (!!devices || failed)}>
   <section class="ways">
     {@render sectionBar("Ways in")}
     <div class="ways-body">
@@ -96,7 +96,7 @@
   .row:last-child { border-bottom: 0; }
   .route-icon { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: 10px; background: var(--hover); color: var(--muted); }
   .number { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .detail { display: grid; gap: 8px; min-width: 0; }
+  .detail { display: grid; gap: 8px; min-width: 0; flex: 1; container: detail / inline-size; }
   .key-values { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; margin: 0; font-size: 13px; }
   dt { color: var(--muted); } dd { margin: 0; min-width: 0; }
   button.unlink { justify-self: start; min-height: 32px; padding: 0; border: 0; color: var(--danger); }
@@ -104,7 +104,7 @@
   button, a { min-height: 32px; padding: 4px 10px; border: 1px solid var(--firm); border-radius: 6px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
   a { display: inline-flex; align-items: center; text-decoration: none; }
   .actions { display: flex; gap: 8px; }
-  @media (max-width: 480px) { .key-values { grid-template-columns: minmax(0, 1fr); gap: 4px; } .key-values dd + dt { margin-top: 4px; } }
+  @container detail (max-width: 500px) { .key-values { grid-template-columns: minmax(0, 1fr); gap: 4px; } .key-values dd + dt { margin-top: 8px; } }
   @media (hover: none) { button, a { min-height: 44px; } }
   @media (max-width: 640px) { .ways-body { padding: 12px 16px; } .section-head { flex-wrap: wrap; padding: 12px 16px; } .section-head span:not(:first-child) { flex-basis: auto; } }
 </style>
