@@ -50,9 +50,10 @@ func TestKimiCompletionBindsAcrossProxyNotification(t *testing.T) {
 	var connections *Connections
 	serverConn, clientConn := net.Pipe()
 	rpcServer := rpc.NewServer()
-	if err := rpcServer.RegisterName("Auth", &AuthRPC{Store: st, Complete: func(ctx context.Context, done OAuthCompletion) error {
+	authRPC := &AuthRPC{Store: st, Complete: func(ctx context.Context, done OAuthCompletion) error {
 		return connections.Complete(ctx, done, func(fn func() error) error { return fn() })
-	}}); err != nil {
+	}}
+	if err := rpcServer.RegisterName("Auth", authRPC); err != nil {
 		t.Fatal(err)
 	}
 	go rpcServer.ServeConn(serverConn)
@@ -71,6 +72,7 @@ func TestKimiCompletionBindsAcrossProxyNotification(t *testing.T) {
 	defer server.Close()
 	p := &Proxy{pools: testPools(), client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
 	connections = p.Connections("invented-key", st, time.Now)
+	authRPC.Connections = connections
 	if _, err := connections.Start(ctx, contract.AccountsConnectRequest{Provider: contract.ProviderKimiCoding, Label: "Invented"}); err != nil {
 		t.Fatal(err)
 	}
