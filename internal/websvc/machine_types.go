@@ -198,6 +198,7 @@ type MachineLoad struct {
 // store checks the result before it writes. Create adds the machine that the
 // reference names when the registry has none.
 type MachinePatch struct {
+	WakeCommand     *[]string `json:"wakeCommand,omitempty"`
 	Name            *string   `json:"name,omitempty"`
 	Enabled         *bool     `json:"enabled"`
 	AllowHostChecks *bool     `json:"allowHostChecks"`
