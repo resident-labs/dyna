@@ -15,6 +15,16 @@ export function profileForSave(draft: ProfileSummary) {
     compactTokens: draft.compactTokens ?? 0, maxConcurrent: draft.maxConcurrent ?? 0 };
 }
 
+// Where a profile's sessions can go when it is removed, named as the session picker names them.
+export function replacements(profiles: readonly ProfileSummary[], name: string): { name: string; label: string }[] {
+  return profiles.filter(profile => profile.name !== name).map(profile => {
+    const shown = profileLabel(profile);
+    return { name: profile.name, label: `${shown.name} · ${shown.detail}` };
+  });
+}
+
+export const sessionCount = (count: number) => `${count} ${count === 1 ? "session" : "sessions"}`;
+
 export type ProfileModel = { id: string; provider: ModelProvider };
 
 // The models the proxy routes for connected accounts. Only Claude speaks Anthropic's API; everything else goes through

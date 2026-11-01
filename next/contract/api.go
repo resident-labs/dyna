@@ -758,6 +758,8 @@ type TurnStart struct {
 	Turn     TurnID           `json:"turn"`
 	Inputs   []TurnInput      `json:"inputs"`
 	Model    ModelChoice      `json:"model"` // the session profile's model when the turn was dispatched
+	// CompactTokens is the profile's compaction trigger, which applies with Model. 0: Pi's default.
+	CompactTokens int `json:"compactTokens,omitempty"`
 }
 type TurnQueue string
 

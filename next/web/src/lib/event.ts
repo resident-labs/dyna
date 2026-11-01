@@ -26,7 +26,7 @@ const card = object({
   command: optional(nullable(array(string))),
 });
 const state = oneOf("pending", "approved", "denied", "expired", "withdrawn", "done", "failed");
-const cause = optional(oneOf("create_failed", "start_failed", "no_hello", "engine_restarted", "remove_failed", "archive_failed", "grant_inactive", "host_lost", "host_busy", "github_failed", "stale", "interrupted", "internal", "setup_failed", "model_failed", "output_limit", "harness_failed", "set_model_failed", "nested_device_missing", "kvm_device_missing"));
+const cause = optional(oneOf("create_failed", "start_failed", "no_hello", "engine_restarted", "remove_failed", "archive_failed", "grant_inactive", "host_lost", "host_busy", "github_failed", "stale", "interrupted", "internal", "setup_failed", "model_failed", "output_limit", "harness_failed", "set_model_failed", "not_started", "nested_device_missing", "kvm_device_missing"));
 // How a shell job ended (the end field is new, so it may be missing).
 const jobEnd = optional(nullable(object({ kind: oneOf("exit", "signal", "stopped"), code: optional(number), signal: optional(string) })));
 const boxState = oneOf("pending", "creating", "starting", "ready", "stopped", "closing", "deleted", "failed", "lost");
@@ -40,7 +40,7 @@ const bodies: Record<string, Check> = {
   "account.quota_low": object({ accountId: string, window: string, remainingPercent: number, floor: number }),
   "post.created": object({ text: string, home: conversation, turn: optional(string), mentions: optional(nullable(array(principal))), replyTo: optional(string), clientId: optional(string),
     attachments: optional(nullable(array(object({ name: string, media: string, bytes: number, sha256: string, visual: optional(nullable(visual)) })))) }),
-  "session.restarted": object({ session: string }),
+  "session.restarted": object({ session: string, imageUpdated: optional(boolean) }),
   "session.started": object({ session: string, name: string, parent: optional(string), profile: string, goal: optional(string), brief: optional(string) }),
   "session.moved": object({ session: string, newParent: string }),
   "session.closed": object({ session: string, reason: optional(oneOf("dormant", "disk")), archive: optional(string), unheld: optional(nullable(array(string))) }),

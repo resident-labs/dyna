@@ -250,6 +250,12 @@ test("a restart warning remains visible beside other work in a session DM", () =
   assert.deepEqual(feedRows([started, notice], { kind: "dm", session: "l" }, [], 1).map(row => row.kind), ["restarted"]);
 });
 
+test("an image update keeps the volume, so it shows no restart warning", () => {
+  const notice = decodeEvent(event(2, { type: "session.restarted", body: { session: "l", imageUpdated: true } }));
+  assert.ok(notice);
+  assert.deepEqual(feedRows([notice], { kind: "dm", session: "l" }, [], 1), []);
+});
+
 test("an image that failed to load becomes a file card, and the others stay thumbnails", () => {
   const image = (sha256: string) => ({ name: `${sha256}.png`, media: "image/png", bytes: 10, sha256 });
   const files = [image("a"), image("b"), { name: "notes.txt", media: "text/plain", bytes: 10, sha256: "c" }];

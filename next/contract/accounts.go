@@ -191,6 +191,8 @@ type ProfileSetRequest struct {
 type ProfileSetResponse struct{}
 type ProfileRemoveRequest struct {
 	Name ProfileName `json:"name"`
+	// Replacement receives every open session on Name. Without it, a profile in use is not removed.
+	Replacement ProfileName `json:"replacement,omitempty"`
 }
 type ProfileRemoveResponse struct{}
 type AccountFailureReason string

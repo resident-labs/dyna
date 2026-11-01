@@ -15,6 +15,9 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 	case contract.PostCreated:
 		return b.Text, nil
 	case contract.SessionRestarted:
+		if b.ImageUpdated {
+			return "Your box image was updated. Your files and conversation are kept. Anything installed outside /box is gone.", nil
+		}
 		return "Your box was replaced. Your conversation is restored. Unpushed work in the old volume is gone.", nil
 	case contract.SessionStarted:
 		var parts []string

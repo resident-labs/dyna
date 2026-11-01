@@ -154,12 +154,12 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		status, found, inspectErr := r.boxes.Inspect(ctx, b.ID)
 		image, imageErr := r.boxes.CurrentImage(ctx, b.Session, b.Host)
 		if imageErr != nil {
-			image.Tag = b.Image
 			next.Reason = imageErr.Error()
 		}
 		if inspectErr != nil {
 			workErr = inspectErr
-		} else if imageErr != nil && (slice != b.Slice || !found || status.StaleLayout) {
+		} else if imageErr != nil {
+			// A box must not start on an old image: its Pi may not match the box agent, which comes from the host.
 			workErr = imageErr
 		} else if slice != b.Slice || image.Tag != b.Image || !found || status.StaleLayout {
 			r.mu.Lock()
@@ -173,8 +173,16 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 				workErr = r.boxes.Recreate(ctx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: slice, Size: b.Size, Repos: sources, Needs: image.Needs}, image.Tag, b.Slice)
 			}
 			if workErr == nil {
-				workErr = r.store.SetRecreated(ctx, b.ID, slice, image.Tag)
-				next.Image, next.Slice = image.Tag, slice
+				var notice *contract.Event
+				if image.Tag != b.Image {
+					var event contract.Event
+					event, workErr = r.event(b.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionRestarted{Session: b.Session, ImageUpdated: true})
+					notice = &event
+				}
+				if workErr == nil {
+					workErr = r.store.SetRecreated(ctx, b.ID, slice, image.Tag, notice)
+					next.Image, next.Slice = image.Tag, slice
+				}
 			}
 		} else {
 			workErr = r.boxes.Start(ctx, b.ID)
