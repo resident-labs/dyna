@@ -44,6 +44,7 @@ func LoadProfiles(path string) (*ProfileConfig, error) {
 		return nil, err
 	}
 	defer file.Close()
+	// LEGACY(v1-transfer): the AgentSurface field, the old agentSurface switch in profiles.json. Remove after the transfer.
 	// Legacy shim: accept the former evaluation switch until the upgrade floor permits its removal.
 	var decoded map[contract.ProfileName]struct {
 		profile

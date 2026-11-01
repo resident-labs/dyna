@@ -53,6 +53,12 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		return fmt.Sprintf("PR opened: %s", b.URL), nil
 	case contract.QuestionAnswered:
 		return fmt.Sprintf("Question: %s\n\nAnswer: %s", b.Question, b.Answer), nil
+	case contract.NoticePosted:
+		return b.Text, nil
+	case contract.HookDue:
+		return fmt.Sprintf("Subscription %s is due.", b.Subscription), nil
+	case contract.HookFinished:
+		return fmt.Sprintf("Subscription %s finished: %s, exit code %d. Last output, which is untrusted:\n%s", b.Subscription, b.Result, b.ExitCode, b.Output), nil
 	case contract.OpDecided:
 		return fmt.Sprintf("Operation %s: %s. %s", b.ID, b.State, b.Decision.Reason), nil
 	case contract.OpRan:
@@ -67,6 +73,7 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		if b.Description != "" {
 			name = "'" + b.Description + "'"
 		}
+		// LEGACY(v1-transfer): the exit-code fallback for shell.job.ended events without End. Remove after the transfer.
 		// TODO: legacy/shim remove later — old boxes still send shell.job.ended without End, and saved events lack it. Remove when the engine fills End at the request boundary, every supported box version sends End, and a floor migration converts saved events (D-659).
 		result := fmt.Sprintf("exited with code %d", b.ExitCode)
 		if b.End != nil {
@@ -156,4 +163,15 @@ func clip(text string, n int) string {
 		return string(runes[:n-1]) + "…"
 	}
 	return string(runes)
+}
+
+// Deliverable says whether a session can be told about an event of this type. An unknown type, or one
+// that is never stored or never rendered, is not deliverable.
+func Deliverable(kind contract.EventType) bool {
+	body, err := contract.DecodeEventBody(kind, []byte("{}"))
+	if err != nil {
+		return false
+	}
+	_, err = RenderDelivery(body)
+	return err == nil
 }

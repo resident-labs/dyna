@@ -132,6 +132,31 @@ func (s *Sockets) AddBox(id contract.BoxID, session contract.SessionID, room con
 	return nil
 }
 
+// AddRun binds a Run's box to its subscription. A Run is no session and holds no principal: its socket
+// serves what runHandler lists and nothing else.
+func (s *Sockets) AddRun(id contract.BoxID, sub contract.SubscriptionID, room contract.RoomID) error {
+	if id == "" || sub == "" || string(id) == "." || string(id) == ".." || strings.ContainsAny(string(id), "/\\") {
+		return fmt.Errorf("invalid run binding")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.boxes[id]; ok {
+		return fmt.Errorf("run socket already open")
+	}
+	if err := s.acquire(); err != nil {
+		return err
+	}
+	path := filepath.Join(s.runtime, "boxes", string(id)+".sock")
+	l, err := listen(path)
+	if err != nil {
+		return err
+	}
+	server := &http.Server{Handler: s.api.runHandler(sub, room)}
+	s.boxes[id] = &socket{server: server, listener: l, path: path}
+	go server.Serve(l)
+	return nil
+}
+
 // acquire serializes socket cleanup across engine processes. The lock file is
 // never unlinked, so a second process cannot lock a replacement inode.
 func (s *Sockets) acquire() error {

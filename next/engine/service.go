@@ -60,6 +60,10 @@ type Service struct {
 	approvals         *approve.Service
 	hostexec          HostexecRunner
 	hostexecTimeout   func(context.Context, time.Duration) (context.Context, context.CancelFunc)
+	hooks             HookRunner
+	hookMemory        func(contract.HostName) int64
+	hookPoke          chan struct{}
+	hookStarts        hookStarts
 	now               func() time.Time
 	live              *live.Live
 	readMu            sync.Mutex // preserves commit and live broadcast order
@@ -114,7 +118,7 @@ func (s *Service) lookupSession(id contract.SessionID) (*live.Session, bool) {
 }
 
 func New(st *store.Store, boxes lifecycle.BoxAdapter, profiles Profiles, now func() time.Time) *Service {
-	s := &Service{hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now}
+	s := &Service{hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now, hookPoke: make(chan struct{}, 1)}
 	s.reconciler = lifecycle.New(st, boxes, s, nil, s.event, now)
 	s.reconciler.SetRoomData(s)
 	s.live = live.New(s.deliverWakes)
