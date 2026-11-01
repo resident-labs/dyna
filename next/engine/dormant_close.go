@@ -8,6 +8,9 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+// diskLowWait is how long a host must stay at its floor before eviction starts. Closing cannot be undone and one sample can be wrong.
+const diskLowWait = time.Minute
+
 // CloseDormant closes at most 200 eligible leaves. The store rechecks each one.
 func (s *Service) CloseDormant(ctx context.Context) error {
 	ids, err := s.store.DormantCloseCandidates(ctx, s.now().Add(-7*24*time.Hour))
@@ -19,7 +22,7 @@ func (s *Service) CloseDormant(ctx context.Context) error {
 
 // EvictDisk closes the oldest idle leaves of hosts at their disk floor. Close archives first, so work stays in refs.
 func (s *Service) EvictDisk(ctx context.Context) error {
-	ids, err := s.store.DiskEvictCandidates(ctx)
+	ids, err := s.store.DiskEvictCandidates(ctx, s.now().Add(-diskLowWait))
 	if err != nil {
 		return err
 	}

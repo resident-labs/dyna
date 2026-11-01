@@ -21,7 +21,7 @@ func TestUpgradeConnectSessionsFrom48(t *testing.T) {
 			continue
 		}
 		line = strings.Replace(line, ", generation INTEGER NOT NULL DEFAULT 0", "", 1)
-		line = strings.Replace(line, ", disk_floor INTEGER NOT NULL DEFAULT 21474836480", "", 1)
+		line = strings.Replace(line, ", disk_floor INTEGER NOT NULL DEFAULT 21474836480, disk_low_since INTEGER NOT NULL DEFAULT 0", "", 1)
 		old = append(old, strings.Replace(line, ", sections BLOB", "", 1))
 	}
 	if _, err = db.Exec(strings.Join(old, "\n")); err != nil {
@@ -156,7 +156,8 @@ func TestPermanentHostexecGrantMigration(t *testing.T) {
  CREATE TABLE grants(id TEXT,kind TEXT,expires_at INTEGER,revoked_at INTEGER,expired_at INTEGER);
  INSERT INTO grants VALUES('active','hostexec',4102444800000,NULL,NULL),('past','hostexec',1,NULL,NULL),('revoked','hostexec',4102444800000,1,NULL);
  CREATE TABLE operations(kind TEXT,state TEXT,args BLOB);
- INSERT INTO operations VALUES('hostexec.grant','pending','{"expires":"future","never":false,"reason":"x"}');`)
+ INSERT INTO operations VALUES('hostexec.grant','pending','{"expires":"future","never":false,"reason":"x"}');
+ CREATE TABLE hosts(name TEXT);`)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -64,7 +64,7 @@ type backupLoop struct {
 	recipient age.Recipient
 	now       func() time.Time
 	run       backupRunner
-	free      func(context.Context) int64
+	free      func(context.Context) (int64, bool)
 }
 
 func (b *backupLoop) copy(ctx context.Context, path string) error {
@@ -167,6 +167,7 @@ func (b *backupLoop) copy(ctx context.Context, path string) error {
 }
 
 // roomy removes what a crashed backup left, then checks that a copy would leave the disk its 20 GiB.
+// A disk it cannot measure does not stop the backup: a broken probe must not end backups for good.
 func (b *backupLoop) roomy(ctx context.Context, now time.Time) bool {
 	partials, err := filepath.Glob(filepath.Join(b.dir, "*.partial"))
 	if err != nil {
@@ -181,7 +182,12 @@ func (b *backupLoop) roomy(ctx context.Context, now time.Time) bool {
 	if info, err := os.Stat(filepath.Join(filepath.Dir(b.dir), "store.db")); err == nil {
 		size = info.Size()
 	}
-	free, need := b.free(ctx), 2*size+20*box.GiB
+	need := 2*size + 20*box.GiB
+	free, measured := b.free(ctx)
+	if !measured {
+		log.Printf("backup disk check failed, backing up anyway")
+		return true
+	}
 	if free >= need {
 		return true
 	}
