@@ -13,6 +13,19 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
+func setupTestPlanCatalog(t *testing.T, proxy *model.Proxy) {
+	t.Helper()
+	catalog := model.Catalog{Providers: []model.CatalogProvider{
+		{ID: "anthropic", Models: []model.CatalogModel{{ID: "claude-sonnet-4-6"}}},
+		{ID: "openai", Models: []model.CatalogModel{{ID: "gpt-5.6-luna"}}},
+		{ID: "kimi-coding", Models: []model.CatalogModel{{ID: "k3"}}},
+		{ID: "xai", Models: []model.CatalogModel{{ID: "grok-4.3"}}},
+	}}
+	if err := proxy.SetPlanModels(catalog); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAccountList(t *testing.T) {
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -30,6 +43,7 @@ func TestAccountList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	setupTestPlanCatalog(t, proxy)
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"credentials":[{"id":"invented-private-proxy-id","auth_index":"invented-index","provider":"claude","state":"sign_in_expired"}]}`))
 	})}

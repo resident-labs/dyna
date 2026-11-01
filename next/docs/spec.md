@@ -242,7 +242,7 @@ Each box receives only its own forwarded Unix socket. The engine derives session
 
 Pi sends model calls to its loopback box agent with a placeholder key. The engine checks the profile, substitutes the CLIProxyAPI client key and streams through the proxy's Unix socket. Pi alone retries model calls. Failed turns retry pending inputs with bounded backoff; paused rooms wait for resume. Before M3 enables a second sign-in, account affinity must survive proxy restarts.
 
-The catalog rejects a provider when a static header value starts with `$`; the proxy would otherwise treat it as a client header reference. The vendored proxy keeps its upstream catalog and xAI version updaters; Dyna's catalog uses only pinned Pi data. Plan models are the pinned Pi models served by the proxy's compiled-in catalog, with exact aliases where IDs differ.
+The catalog rejects a provider when a static header value starts with `$`; the proxy would otherwise treat it as a client header reference. The vendored proxy keeps its upstream catalog and xAI version updaters; Dyna's catalog uses only pinned Pi data. Plan models are the pinned Pi models served by the proxy's compiled-in catalog, with exact aliases where IDs differ. A provider's models are every pinned Pi model that some plan serves; activation picks one that every plan serves.
 
 CLIProxyAPI is a pinned vendored fork supervised as a separate child. Its patch ledger is `next/third_party/cliproxyapi/DYNA.md`. Strict cloak mode stays off. Claude sign-ins use cloaking, with the accepted account risk in decision 4. M1 stores proxy sign-ins in its protected file store; M3 moves them into its SQLite token store. Only the engine holds its management key. Shutdown drains admitted model calls before stopping the proxy.
 

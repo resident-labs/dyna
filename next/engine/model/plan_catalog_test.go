@@ -23,6 +23,7 @@ func TestPlanCatalogUsesDefaultAndExactAliases(t *testing.T) {
 	catalog := Catalog{Providers: []CatalogProvider{
 		{ID: "anthropic", DefaultModel: "claude-opus-4-6", Models: []CatalogModel{{ID: "not-served"}, {ID: "claude-sonnet-4-6"}, {ID: "claude-opus-4-6"}}},
 		{ID: "kimi-coding", DefaultModel: "kimi-for-coding", Models: []CatalogModel{{ID: "k3"}, {ID: "kimi-for-coding"}}},
+		{ID: "openai", DefaultModel: "gpt-5.6-sol", Models: []CatalogModel{{ID: "gpt-5.6-sol"}, {ID: "gpt-5.6-luna"}}},
 	}}
 	if err := p.SetPlanModels(catalog); err != nil {
 		t.Fatal(err)
@@ -33,7 +34,10 @@ func TestPlanCatalogUsesDefaultAndExactAliases(t *testing.T) {
 	if len(p.planModels[contract.ProviderKimiCoding]) != 2 || p.planDefaults[contract.ProviderKimiCoding] != "kimi-for-coding" || planProxyModel(contract.ProviderKimiCoding, "kimi-for-coding") != "kimi-k2.8-code" {
 		t.Fatal("wrong Kimi plan models or aliases")
 	}
-	if len(p.planModels[contract.ProviderOpenAI]) != 0 {
+	if len(p.planModels[contract.ProviderOpenAI]) != 2 || p.planDefaults[contract.ProviderOpenAI] != "gpt-5.6-luna" {
+		t.Fatal("paid-only model was hidden or selected for activation")
+	}
+	if len(p.planModels[contract.ProviderXAI]) != 0 {
 		t.Fatal("offered provider without models")
 	}
 }
@@ -120,11 +124,17 @@ func TestPinnedPlanCatalogDrift(t *testing.T) {
 				t.Errorf("%s/%s has no compiled proxy model", id, model.ID)
 			}
 		}
-		expected := p.planModels[id][0].ID
+		common := set
+		if id == contract.ProviderOpenAI {
+			common = make(map[string]bool)
+			for _, name := range pinned.CodexCommon {
+				common[name] = true
+			}
+		}
+		expected := ""
 		for _, model := range p.planModels[id] {
-			if model.ID == defaultID {
-				expected = defaultID
-				break
+			if common[planProxyModel(id, model.ID)] && (expected == "" || model.ID == defaultID) {
+				expected = model.ID
 			}
 		}
 		if p.planDefaults[id] != expected {
