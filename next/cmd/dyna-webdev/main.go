@@ -198,6 +198,8 @@ func (d devService) AccountsQuota(context.Context, contract.Principal, contract.
 	response := contract.AccountsQuotaResponse{Accounts: []contract.AccountUsage{}}
 	if !d.empty {
 		for _, a := range d.accounts(time.Now()) {
+			// The account each provider's routing would pick next; the rest wait in Hidden.
+			a.usage.Active = slices.Contains([]contract.AccountID{"single", "team", "meta", "deepseek"}, a.usage.AccountID)
 			response.Accounts = append(response.Accounts, a.usage)
 		}
 	}

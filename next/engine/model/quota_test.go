@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -63,6 +64,8 @@ func TestQuotaNormalizedWindowsAndCache(t *testing.T) {
 						t.Error("wrong account filter")
 					}
 					fmt.Fprintf(w, `{"files":[{"auth_index":"invented","observed_at":"2026-01-01T00:00:00Z","status_code":200,"windows":%s}]}`, tc.windows)
+				case "/v8/management/routing/status":
+					fmt.Fprint(w, `{}`)
 				default:
 					t.Error("unexpected request")
 				}
@@ -108,6 +111,8 @@ func TestQuotaCacheKeepsNoOldLabel(t *testing.T) {
 		case "/v0/management/auth-files/quota":
 			calls++
 			fmt.Fprint(w, `{"files":[{"auth_index":"invented","observed_at":"2026-01-01T00:00:00Z","status_code":200,"windows":[{"kind":"weekly_all","utilization":42}]}]}`)
+		case "/v8/management/routing/status":
+			fmt.Fprint(w, `{}`)
 		default:
 			t.Error("unexpected request")
 		}
@@ -174,6 +179,9 @@ func TestQuotaReadsEveryProviderThroughOneEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/dyna/credentials" {
 			fmt.Fprint(w, `{"credentials":[{"id":"invented","auth_index":"index","provider":"kimi","state":"unknown"}]}`)
+			return
+		}
+		if r.URL.Path == "/v8/management/routing/status" {
 			return
 		}
 		calls++
@@ -268,6 +276,9 @@ func TestQuotaBoundsConcurrentReadsAndSharesThem(t *testing.T) {
 			fmt.Fprintf(w, `{"credentials":[%s]}`, list.String())
 			return
 		}
+		if r.URL.Path == "/v8/management/routing/status" {
+			return
+		}
 		reads.Add(1)
 		now := active.Add(1)
 		defer active.Add(-1)
@@ -329,5 +340,90 @@ func TestQuotaCanceledCallerDoesNotCacheAFailure(t *testing.T) {
 	<-done
 	if cached, ok := q.CachedUsage("account-invented"); !ok || cached.Cause != contract.UsageOK || len(cached.Windows) != 1 {
 		t.Fatalf("cached = %#v", cached)
+	}
+}
+
+func activeQuotas(t *testing.T, status string, pins ...contract.AccountID) []contract.AccountUsage {
+	t.Helper()
+	st := quotaStore(t)
+	ctx := context.Background()
+	if err := st.SaveProxyAuth(ctx, store.ProxyAuth{ID: "second", Provider: "claude", Record: []byte("{}")}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindAccount(ctx, "second", "second", contract.ProviderAnthropic, "Second"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Write(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('room','room',0,0,0)"); err != nil {
+			return err
+		}
+		for i, pin := range pins {
+			id := fmt.Sprintf("session-%d", i)
+			if _, err := tx.ExecContext(ctx, "INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES(?,'room',?,'test','active','',0)", id, id); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO session_accounts(session,account) VALUES(?,?)", id, pin); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/dyna/credentials":
+			fmt.Fprint(w, `{"credentials":[{"id":"invented","auth_index":"one","provider":"claude","state":"unknown"},{"id":"second","auth_index":"two","provider":"claude","state":"unknown"}]}`)
+		case "/v0/management/auth-files/quota":
+			fmt.Fprintf(w, `{"files":[{"auth_index":%q,"observed_at":"2026-01-01T00:00:00Z","status_code":200,"windows":[{"kind":"weekly_all","utilization":42}]}]}`, r.URL.Query().Get("auth_index"))
+		case "/v8/management/routing/status":
+			fmt.Fprint(w, status)
+		default:
+			t.Error("unexpected request")
+		}
+	}))
+	defer server.Close()
+	q := (&Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}).Quotas("key", st, time.Now)
+	got, err := q.Read(ctx)
+	if err != nil || len(got.Accounts) != 2 {
+		t.Fatalf("read = %+v, %v", got, err)
+	}
+	return got.Accounts
+}
+
+func TestAccountsQuotaMarksTheAccountRoutingWouldPick(t *testing.T) {
+	usage := activeQuotas(t, `{"providers":{"claude":[{"auth_index":"two","rank":1},{"auth_index":"one","rank":2}]}}`)
+	if usage[0].Active || !usage[1].Active {
+		t.Fatalf("usage = %+v", usage)
+	}
+}
+
+func TestAccountsQuotaMarksPinnedAccounts(t *testing.T) {
+	usage := activeQuotas(t, `{"providers":{"claude":[{"auth_index":"two","rank":1},{"auth_index":"one","rank":2}]}}`, "account")
+	if !usage[0].Active || !usage[1].Active {
+		t.Fatalf("usage = %+v", usage)
+	}
+}
+
+func TestAccountsQuotaAllSpentHasNoActiveAccount(t *testing.T) {
+	usage := activeQuotas(t, `{"providers":{"claude":[{"auth_index":"two","rank":1,"spent":true},{"auth_index":"one","rank":2,"spent":true}]}}`, "account")
+	if usage[0].Active || usage[1].Active {
+		t.Fatalf("usage = %+v", usage)
+	}
+}
+
+func TestAccountsQuotaSharedRankIsActive(t *testing.T) {
+	usage := activeQuotas(t, `{"providers":{"claude":[{"auth_index":"two","rank":1,"shared":true},{"auth_index":"one","rank":1,"shared":true}]}}`)
+	if !usage[0].Active || !usage[1].Active {
+		t.Fatalf("usage = %+v", usage)
+	}
+}
+
+func TestAccountsQuotaHidesNothingWithoutAnOrder(t *testing.T) {
+	for _, status := range []string{`{}`, `not json`} {
+		usage := activeQuotas(t, status)
+		if !usage[0].Active || !usage[1].Active {
+			t.Fatalf("%s: usage = %+v", status, usage)
+		}
 	}
 }
