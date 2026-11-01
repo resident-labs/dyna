@@ -14,9 +14,9 @@ type RoomRepositories interface {
 	OwnsPRBranch(context.Context, contract.RepoName, contract.SessionID, string) (bool, error)
 }
 
-// Hosts supplies the cache connection and its host data folder.
+// Hosts supplies the cache connection.
 type Hosts interface {
-	CacheHost(context.Context, contract.HostName) (CacheHost, string, error)
+	CacheHost(context.Context, contract.HostName) (CacheHost, error)
 }
 
 type Repositories struct {
@@ -45,11 +45,11 @@ func (r *Repositories) Get(ctx context.Context, session contract.SessionID, host
 	if selected.Repo == "" {
 		return nil, nil
 	}
-	cache, hostData, err := r.Hosts.CacheHost(ctx, host)
+	cache, err := r.Hosts.CacheHost(ctx, host)
 	if err != nil {
 		return nil, err
 	}
-	item, err := r.Mirror.Prepare(ctx, cache, hostData, selected.Repo, session, fetch)
+	item, err := r.Mirror.Prepare(ctx, cache, selected.Repo, session, fetch)
 	if err != nil {
 		return nil, err
 	}

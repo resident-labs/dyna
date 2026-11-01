@@ -11,13 +11,13 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 
 	_ "modernc.org/sqlite"
@@ -81,7 +81,8 @@ func open(dir string, floor int, commit string, checkpointRun func() error) (*St
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
-	lock, err := os.OpenFile(filepath.Join(dir, "store.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	layout := box.Layout{Data: dir}
+	lock, err := os.OpenFile(layout.StoreLock(), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err
 	}
@@ -97,14 +98,14 @@ func open(dir string, floor int, commit string, checkpointRun func() error) (*St
 		}
 		return nil, err
 	}
-	path := filepath.Join(dir, "store.db")
+	path := layout.Store()
 	_, err = os.Stat(path)
 	fresh := errors.Is(err, os.ErrNotExist)
 	if err != nil && !fresh {
 		return nil, err
 	}
 	if fresh {
-		old := filepath.Join(dir, "dyna.db")
+		old := layout.V1Store()
 		if _, err := os.Stat(old); err == nil {
 			return nil, &Error{Code: StoreFromV1, Message: fmt.Sprintf("This folder holds a Dyna v1 store (%s). Dyna v2 cannot open it, and there is no way back to v1 after you import. The main branch has no v1 code. To move your data: (1) stop the v1 engine and capture a backup; (2) build the exporter from tag `v1-final`: `git clone --branch v1-final https://github.com/resident-labs/dyna && cd dyna/cmd/dyna-export && go build -o dyna-export .`; (3) run `./dyna-export` with the flags in its README.md; (4) run `dyna import` on the bundle. See docs/migrate.md.", old)}
 		} else if !errors.Is(err, os.ErrNotExist) {

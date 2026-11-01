@@ -25,8 +25,8 @@ type Proxy struct {
 	generation atomic.Uint64
 }
 
-// NewProxy creates a private proxy configuration. managementKey is held by the engine.
-func NewProxy(dataDir, managementKey string) (*Proxy, error) {
+// NewProxy creates a private proxy configuration in dir, with its sign-in folder at authDir. managementKey is held by the engine.
+func NewProxy(dir, authDir, managementKey string) (*Proxy, error) {
 	if managementKey == "" {
 		return nil, fmt.Errorf("model: management key is required")
 	}
@@ -39,7 +39,6 @@ func NewProxy(dataDir, managementKey string) (*Proxy, error) {
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(dataDir, "cliproxy")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
@@ -47,7 +46,6 @@ func NewProxy(dataDir, managementKey string) (*Proxy, error) {
 		return nil, err
 	}
 	// M1 file credentials are not imported; the owner reconnects accounts.
-	authDir := filepath.Join(dir, "auth-v2")
 	if err := os.MkdirAll(authDir, 0700); err != nil {
 		return nil, err
 	}

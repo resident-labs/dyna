@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/resident-labs/dyna/box"
 )
 
 type maintenanceRunner struct{ command string }
@@ -38,10 +40,10 @@ func TestMaintenanceCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Maintain(context.Background(), "/data"); err != nil {
+	if _, err := h.Maintain(context.Background(), box.Layout{HostData: "/data"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"podman image prune -f", "git -C", "gc --no-prune", "/data", "/rooms/*/shared"} {
+	for _, expected := range []string{"podman image prune -f", "git -C", "gc --no-prune", "'/data/git' '/data/rooms' 'shared'"} {
 		if !strings.Contains(r.command, expected) {
 			t.Fatalf("missing %q in %s", expected, r.command)
 		}

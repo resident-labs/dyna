@@ -138,11 +138,12 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	defer st.Close()
+	layout := box.Layout{Data: cfg.Data, HostData: cfg.HostData}
 	backupCtx, stopBackup := context.WithCancel(ctx)
 	backupDone := make(chan struct{})
 	go func() {
 		defer close(backupDone)
-		(&backupLoop{store: st, dir: filepath.Join(cfg.Data, "backups"), dest: cfg.BackupDest, recipient: recipient, now: time.Now, run: sshBackup, free: func(ctx context.Context) (int64, bool) {
+		(&backupLoop{store: st, layout: layout, dest: cfg.BackupDest, recipient: recipient, now: time.Now, run: sshBackup, free: func(ctx context.Context) (int64, bool) {
 			total, used := podman.LocalDisk(ctx, cfg.Data)
 			return total - used, total > 0
 		}}).start(backupCtx)
@@ -160,7 +161,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	managementKey := hex.EncodeToString(key[:])
-	proxy, err := model.NewProxy(cfg.Data, managementKey)
+	proxy, err := model.NewProxy(layout.Proxy(), layout.ProxyAuth(), managementKey)
 	if err != nil {
 		return err
 	}
@@ -171,7 +172,6 @@ func Run(ctx context.Context, cfg Config) error {
 	drain := model.NewDrain()
 	boxCtx, stopBoxes := context.WithCancel(ctx)
 	defer stopBoxes()
-	layout := box.Layout{Data: cfg.Data, HostData: cfg.HostData}
 	boxes := &Boxes{Store: st, HeartbeatStore: st, Runtime: cfg.Runtime, Layout: layout, Version: cfg.Version, PiTarball: pi, Context: boxCtx}
 	service := engine.New(st, boxes, profiles, time.Now)
 	service.SetLayout(layout)
@@ -192,7 +192,7 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 	}
 	service.SetInstructionsPublisher(boxes.PublishInstructions)
-	mirror := &enginegit.Mirror{Data: cfg.Data, Token: token, Runner: enginegit.GitRunner{}}
+	mirror := &enginegit.Mirror{Layout: layout, Token: token, Runner: enginegit.GitRunner{}}
 	service.SetRepositories(&enginegit.Repositories{Rooms: st, Hosts: boxes, Mirror: mirror})
 	if err := st.RecoverHostexec(ctx, time.Now()); err != nil {
 		return fmt.Errorf("recover hostexec runs: %w", err)

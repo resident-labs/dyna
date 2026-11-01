@@ -59,7 +59,7 @@ var errBackupNoSpace = errors.New(store.BackupCopyNoSpace)
 
 type backupLoop struct {
 	store     backupStore
-	dir       string
+	layout    box.Layout
 	dest      string
 	recipient age.Recipient
 	now       func() time.Time
@@ -73,7 +73,7 @@ func (b *backupLoop) copy(ctx context.Context, path string) error {
 		return err
 	}
 	defer src.Close()
-	tmp, err := os.CreateTemp(b.dir, ".encrypted-*.partial")
+	tmp, err := os.CreateTemp(b.layout.Backups(), ".encrypted-*.partial")
 	if err != nil {
 		return err
 	}
@@ -89,20 +89,19 @@ func (b *backupLoop) copy(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	if err = tarWriter.WriteHeader(&tar.Header{Name: "store.db", Mode: 0600, Size: info.Size()}); err != nil {
+	if err = tarWriter.WriteHeader(&tar.Header{Name: filepath.Base(b.layout.Store()), Mode: 0600, Size: info.Size()}); err != nil {
 		return err
 	}
 	if _, err = io.CopyN(tarWriter, backupReader{ctx, src}, info.Size()); err != nil {
 		return err
 	}
-	dataDir := filepath.Dir(b.dir)
+	dataDir := b.layout.Data
 	rootDir, err := os.OpenRoot(dataDir)
 	if err != nil {
 		return err
 	}
 	defer rootDir.Close()
-	for _, name := range []string{"AGENTS.md", "rooms", "archive", "connect", "cliproxy/auth"} {
-		root := filepath.Join(dataDir, name)
+	for _, root := range []string{b.layout.Instructions(""), b.layout.Rooms(), b.layout.Archive(), b.layout.Connect(), b.layout.ProxyAuth()} {
 		err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 			if errors.Is(walkErr, os.ErrNotExist) {
 				return nil
@@ -169,7 +168,7 @@ func (b *backupLoop) copy(ctx context.Context, path string) error {
 // roomy removes what a crashed backup left, then checks that a copy would leave the disk its 20 GiB.
 // A disk it cannot measure does not stop the backup: a broken probe must not end backups for good.
 func (b *backupLoop) roomy(ctx context.Context, now time.Time) bool {
-	partials, err := filepath.Glob(filepath.Join(b.dir, "*.partial"))
+	partials, err := filepath.Glob(filepath.Join(b.layout.Backups(), "*.partial"))
 	if err != nil {
 		log.Printf("list partial backups: %v", err)
 	}
@@ -179,7 +178,7 @@ func (b *backupLoop) roomy(ctx context.Context, now time.Time) bool {
 		}
 	}
 	var size int64
-	if info, err := os.Stat(filepath.Join(filepath.Dir(b.dir), "store.db")); err == nil {
+	if info, err := os.Stat(b.layout.Store()); err == nil {
 		size = info.Size()
 	}
 	need := 2*size + 20*box.GiB
@@ -228,7 +227,7 @@ func (b *backupLoop) backup(ctx context.Context) {
 }
 
 func (b *backupLoop) start(ctx context.Context) {
-	names, err := filepath.Glob(filepath.Join(b.dir, "store-*.db"))
+	names, err := filepath.Glob(filepath.Join(b.layout.Backups(), "store-*.db"))
 	if err != nil {
 		log.Printf("list backups: %v", err)
 	}

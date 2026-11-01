@@ -40,17 +40,17 @@ func TestInstallBinarySkipsBytesWhenHostHasSum(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := h.InstallBinary(context.Background(), "/data", "v1", "abc", read); err != nil {
+			if err := h.InstallBinary(context.Background(), "/data/bin", "v1", "abc", read); err != nil {
 				t.Fatal(err)
 			}
 			command := r.args[len(r.args)-1]
 			if tc.sentBytes {
-				if !strings.Contains(command, "'dyna-install' '/data' 'v1'") || string(r.input) != "DYNA-IN 00000000000000000006\nbinary" {
+				if !strings.Contains(command, "'dyna-install' '/data/bin' 'v1'") || string(r.input) != "DYNA-IN 00000000000000000006\nbinary" {
 					t.Fatalf("command %q input %q", command, r.input)
 				}
 				return
 			}
-			if !strings.Contains(command, "'dyna-link' '/data' 'v1'") || string(r.input) != "DYNA-IN 00000000000000000000\n" {
+			if !strings.Contains(command, "'dyna-link' '/data/bin' 'v1'") || string(r.input) != "DYNA-IN 00000000000000000000\n" {
 				t.Fatalf("command %q input %q", command, r.input)
 			}
 		})
@@ -59,7 +59,7 @@ func TestInstallBinarySkipsBytesWhenHostHasSum(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.InstallBinary(context.Background(), "/data", "../escape", "abc", read); err == nil {
+	if err := h.InstallBinary(context.Background(), "/data/bin", "../escape", "abc", read); err == nil {
 		t.Fatal("accepted invalid version")
 	}
 }
@@ -93,7 +93,7 @@ func TestConcurrentInstallsUsePrivateTemporaryLinks(t *testing.T) {
 	done := make(chan error, 2)
 	read := func() ([]byte, error) { return []byte("binary"), nil }
 	for _, version := range []string{"v1", "v2"} {
-		go func() { done <- h.InstallBinary(context.Background(), "/data", version, "abc", read) }()
+		go func() { done <- h.InstallBinary(context.Background(), "/data/bin", version, "abc", read) }()
 	}
 	for range 2 {
 		command := <-r.commands
