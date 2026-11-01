@@ -49,3 +49,22 @@ func TestContextRejectsAmbiguousImage(t *testing.T) {
 		t.Fatalf("error %v", err)
 	}
 }
+
+func TestContextFallsBackToImageBranch(t *testing.T) {
+	r := &fakeRunner{results: [][]byte{nil, []byte("branchcommit\n"), []byte("040000 tree root\t.dyna/images\n"), []byte("040000 tree treeid\ttoolchain\n"), nil, []byte("tar")}}
+	name, tree, _, _, err := Context(context.Background(), r, "/mirror")
+	if err != nil || name != "toolchain" || tree != "treeid" {
+		t.Fatalf("name %q tree %q err %v", name, tree, err)
+	}
+	if got := r.calls[2][3]; got != "branchcommit" {
+		t.Fatalf("listed images of %q", got)
+	}
+}
+
+func TestContextWithoutImageBranchHasNoImage(t *testing.T) {
+	r := &fakeRunner{results: [][]byte{nil, nil}}
+	name, _, _, _, err := Context(context.Background(), r, "/mirror")
+	if err != nil || name != "" {
+		t.Fatalf("name %q err %v", name, err)
+	}
+}
