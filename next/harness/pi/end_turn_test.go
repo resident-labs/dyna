@@ -22,6 +22,17 @@ const (
 
 func lines(entries ...string) string { return strings.Join(entries, "\n") + "\n" }
 
+// A steer that lands once the agent stopped runs in the same turn, and the owner's answer must survive it.
+func TestAnswerBeforeASteerStaysInTheFinalText(t *testing.T) {
+	next := strings.Replace(assistantText, "answer", "noted", 1)
+	if got := replayTurn(t, lines(assistantText, steered, next, settledEvent)); got.Final != "answer\n\nnoted" {
+		t.Fatalf("result %+v", got)
+	}
+	if got := replayTurn(t, lines(narratedPost, plainResult, steered, assistantText, settledEvent)); got.Final != "answer" {
+		t.Fatalf("working text was kept: %+v", got)
+	}
+}
+
 func TestEndPostEndsTheTurnWithoutFinalText(t *testing.T) {
 	got := replayTurn(t, lines(narratedPost, endResult, settledEvent))
 	if got.Outcome != contract.TurnCompleted || got.Final != "" || !reflect.DeepEqual(got.EndPosts, []contract.EventID{"post_a"}) {

@@ -19,7 +19,7 @@
   import TimelineMinimap from "./TimelineMinimap.svelte";
   import PostTarget from "./PostTarget.svelte";
   import QuestionCard from "./QuestionCard.svelte";
-  import { deriveTimelineGroups, finalTimelineItem, ownPost, postDestination, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief } from "../timeline.ts";
+  import { deriveTimelineGroups, finalTimelineItem, ownPost, postDestination, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, steerInput, timelineAnswers, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief } from "../timeline.ts";
 
   let { session, roomName, store, operate, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { startingBrief?: string; session: string; roomName: string; store: RoomStore; operate: boolean; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
   const view = untrack(() => store.window({ kind: "dm", session }));
@@ -338,7 +338,7 @@
     {/if}
     {#each turns as turn, index (turn.id)}
       {@const segments = timelineSegments(turn.id, turn.items ?? [])}
-      {@const finalText = turn.ended ? finalTimelineItem(turn.items ?? [], session)?.id : undefined}
+      {@const answers = timelineAnswers(segments, session)}
       {@render dayMark(turn.started, turns[index - 1]?.started)}
       <article data-turn={turn.id} class:ended={turn.ended || stalled}>
         {#each turn.inputs ?? [] as input (input.id)}{@render inputRow(turn, input.id, "input:" + input.id, input)}{/each}
@@ -361,7 +361,7 @@
                 {@render postItem(turn, post)}
               {/each}
             {:else if group.item.kind === "text" || group.item.kind === "post"}
-              {#if group.item.kind === "post" || visibleTimelineText(group.item.id, finalText, !!turn.ended, hasWork, !!expandedTurns[segment.id])}{@render postItem(turn, group.item, !!turn.ended && hasWork && group.item.kind === "text" && group.item.id !== finalText)}{/if}
+              {#if group.item.kind === "post" || visibleTimelineText(group.item.id, answers, !!turn.ended, hasWork, !!expandedTurns[segment.id])}{@render postItem(turn, group.item, !!turn.ended && hasWork && group.item.kind === "text" && !answers.has(group.item.id))}{/if}
             {:else if group.item.kind === "too_large"}<p class="muted">This item is too large to show.</p>{/if}
           {/each}
         {/each}
