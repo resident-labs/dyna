@@ -53,6 +53,18 @@ func TestDynaSearchZai(t *testing.T) {
 	}
 }
 
+func TestSearchRefusalSanitizesTokensAndDropsRawBody(t *testing.T) {
+	body := `{"message":"Bearer abcdefghijk sk-abcdefghijk eyJabcdefghijklmnop"}`
+	err := statusError("kimi", http.StatusForbidden, strings.NewReader(body))
+	if got := err.Error(); got != "kimi answered HTTP 403: [redacted] [redacted] [redacted]" {
+		t.Fatalf("unexpected sanitized refusal: %q", got)
+	}
+	err = statusError("kimi", http.StatusForbidden, strings.NewReader("private upstream body"))
+	if got := err.Error(); got != "kimi answered HTTP 403" {
+		t.Fatalf("raw body leaked: %q", got)
+	}
+}
+
 func TestDynaSearchRefusal(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)

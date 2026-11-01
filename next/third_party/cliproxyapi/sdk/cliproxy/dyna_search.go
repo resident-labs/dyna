@@ -51,9 +51,9 @@ type searchRefusal string
 func (e searchRefusal) Error() string { return string(e) }
 
 var searchSecretPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)bearer\\s+[A-Za-z0-9._\\-]{8,}`),
-	regexp.MustCompile(`\\bsk-[A-Za-z0-9._\\-]{8,}`),
-	regexp.MustCompile(`\\beyJ[A-Za-z0-9._\\-]{16,}`),
+	regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._\-]{8,}`),
+	regexp.MustCompile(`\bsk-[A-Za-z0-9._\-]{8,}`),
+	regexp.MustCompile(`\beyJ[A-Za-z0-9._\-]{16,}`),
 }
 
 func searchRedact(s string, secrets ...string) string {
@@ -89,8 +89,6 @@ func statusError(provider string, status int, body io.Reader, secrets ...string)
 			if reason == "" && refusal.Error != nil {
 				reason = strings.TrimSpace(refusal.Error.Message)
 			}
-		} else {
-			reason = string(raw)
 		}
 	}
 	reason = text(searchRedact(reason, secrets...))
