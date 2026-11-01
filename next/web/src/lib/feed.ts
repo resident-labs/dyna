@@ -409,6 +409,13 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
   return parts.join(" · ") || events.map(event => describe(event, name)).find(Boolean) || "Activity";
 }
 
+// Whether a work row has nothing to open: one event, which its summary already says. A request opens to its details and
+// a PR to its link.
+export function workIsBare(events: Event[], name: Name, until?: string): boolean {
+  const [only] = events;
+  return events.length === 1 && only.type !== "op.requested" && only.type !== "pr.opened" && workSummary(events, name, until) === describe(only, name);
+}
+
 // One plain line for an event inside an opened work row.
 export function describe(event: Event, name: Name): string {
   switch (event.type) {
