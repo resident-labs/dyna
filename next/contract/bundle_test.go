@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// LEGACY(v1-transfer): this whole file, the tests of the v1 bundle types. Remove after the transfer.
 var bundleTime = time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
 
 func filledGlobalBundle() GlobalBundle {

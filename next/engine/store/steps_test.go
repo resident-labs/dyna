@@ -9,6 +9,7 @@ import (
 	"testing"
 )
 
+// LEGACY(v1-transfer): every test here but TestUpgradeRunsOneStep, which pin steps 42 to 63. Remove after the transfer.
 func TestUpgradeConnectSessionsFrom48(t *testing.T) {
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
 	if err != nil {

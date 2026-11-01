@@ -73,6 +73,7 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		if b.Description != "" {
 			name = "'" + b.Description + "'"
 		}
+		// LEGACY(v1-transfer): the exit-code fallback for shell.job.ended events without End. Remove after the transfer.
 		// TODO: legacy/shim remove later — old boxes still send shell.job.ended without End, and saved events lack it. Remove when the engine fills End at the request boundary, every supported box version sends End, and a floor migration converts saved events (D-659).
 		result := fmt.Sprintf("exited with code %d", b.ExitCode)
 		if b.End != nil {
