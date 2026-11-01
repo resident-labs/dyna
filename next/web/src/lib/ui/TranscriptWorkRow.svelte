@@ -20,6 +20,7 @@
   let chunks: Record<string, string> = $state({});
   let failures: Record<string, boolean> = $state({});
   let loading: Record<string, boolean> = $state({});
+  let openDiff: Record<string, boolean> = $state({});
   const key = (item: TranscriptItem, part: TranscriptPart) => item.id + "/" + part;
   async function load(item: TranscriptItem, part: TranscriptPart) {
     const id = key(item, part);
@@ -54,7 +55,14 @@
           <button disabled={loading[key(item, "text")]} onclick={() => void load(item, "text")}>{failures[key(item, "text")] ? "Could not load thought. Try again" : "Show all"}</button>
         {/if}
       {:else}
-        {#if item.diff}<pre class="diff">{#each (chunks[key(item, "diff")] ?? item.diff).split("\n") as line}<span class:add={line.startsWith("+")} class:remove={line.startsWith("-")}>{line}&#10;</span>{/each}</pre>{/if}
+        {#if item.diff}
+          {@const diff = chunks[key(item, "diff")] ?? item.diff}
+          {@const lines = diff.split("\n")}
+          {#if !item.failed}
+            <div class="diff-summary"><code>{title.target}</code><span class="add">+{lines.filter(line => line.startsWith("+") && !line.startsWith("+++")).length}</span><span class="remove">−{lines.filter(line => line.startsWith("-") && !line.startsWith("---")).length}</span><button onclick={() => { openDiff[item.id] = !openDiff[item.id]; }}>{openDiff[item.id] ? "Close diff" : "Open diff"}</button></div>
+          {/if}
+          {#if item.failed || openDiff[item.id]}<pre class="diff">{#each lines as line}<span class:add={line.startsWith("+")} class:remove={line.startsWith("-")}>{line}&#10;</span>{/each}</pre>{/if}
+        {/if}
         {#each ["arguments", "output"] as part}
           {@const name = part as "arguments" | "output"}
           {#if item[name] || chunks[key(item, name)] !== undefined}<pre>{chunks[key(item, name)] ?? item[name]}</pre>{/if}
@@ -91,8 +99,10 @@
   .content { margin-left: 28px; padding: 4px 0; max-height: 384px; overflow: auto; }
   code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); }
   pre { max-height: 256px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.625 var(--mono); }
-  .diff .add { color: var(--success, #65a972); }
-  .diff .remove { color: var(--danger, #d97b7b); }
+  .diff-summary { display: flex; gap: 8px; align-items: center; }
+  .diff-summary button { margin-left: auto; }
+  .add, .diff .add { color: var(--success, #65a972); }
+  .remove, .diff .remove { color: var(--danger, #d97b7b); }
   .time { margin-left: auto; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
   button { border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
   button:hover { color: var(--text); }
