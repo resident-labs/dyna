@@ -133,7 +133,10 @@ type SessionMoved struct {
 
 type SessionCloseReason string
 
-const SessionCloseDormant SessionCloseReason = "dormant"
+const (
+	SessionCloseDormant SessionCloseReason = "dormant"
+	SessionCloseDisk    SessionCloseReason = "disk"
+)
 
 type SessionClosed struct {
 	Reason  SessionCloseReason `json:"reason,omitempty"`

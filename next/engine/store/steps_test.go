@@ -17,10 +17,11 @@ func TestUpgradeConnectSessionsFrom48(t *testing.T) {
 	defer db.Close()
 	var old []string
 	for _, line := range strings.Split(schema, "\n") {
-		if strings.HasPrefix(line, "CREATE TABLE search_keys ") || strings.HasPrefix(line, "CREATE INDEX turns_session_started_at ") || strings.HasPrefix(line, "CREATE TABLE client_replays ") || strings.HasPrefix(line, "CREATE TABLE connect_devices ") || strings.HasPrefix(line, "CREATE TABLE connect_sessions ") || strings.HasPrefix(line, "CREATE TABLE connect_revocations ") || strings.HasPrefix(line, "CREATE TABLE transcript_turns ") || strings.HasPrefix(line, "CREATE UNIQUE INDEX transcript_turns_path_start ") || strings.HasPrefix(line, "CREATE INDEX pr_owners_session ") || strings.HasPrefix(line, "CREATE INDEX operations_pending_caller ") {
+		if strings.HasPrefix(line, "CREATE TABLE search_keys ") || strings.HasPrefix(line, "CREATE INDEX turns_session_started_at ") || strings.HasPrefix(line, "CREATE TABLE client_replays ") || strings.HasPrefix(line, "CREATE TABLE connect_devices ") || strings.HasPrefix(line, "CREATE TABLE connect_sessions ") || strings.HasPrefix(line, "CREATE TABLE connect_revocations ") || strings.HasPrefix(line, "CREATE TABLE transcript_turns ") || strings.HasPrefix(line, "CREATE UNIQUE INDEX transcript_turns_path_start ") || strings.HasPrefix(line, "CREATE INDEX pr_owners_session ") || strings.HasPrefix(line, "CREATE INDEX operations_pending_caller ") || strings.HasPrefix(line, "CREATE TABLE disk_warnings ") {
 			continue
 		}
 		line = strings.Replace(line, ", generation INTEGER NOT NULL DEFAULT 0", "", 1)
+		line = strings.Replace(line, ", disk_floor INTEGER NOT NULL DEFAULT 21474836480, disk_low_since INTEGER NOT NULL DEFAULT 0", "", 1)
 		old = append(old, strings.Replace(line, ", sections BLOB", "", 1))
 	}
 	if _, err = db.Exec(strings.Join(old, "\n")); err != nil {
@@ -46,6 +47,7 @@ func TestUpgradeSessionWorkFrom42(t *testing.T) {
 	for _, statement := range []string{
 		"CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
 		"CREATE TABLE rules (room TEXT, number INTEGER)",
+		"CREATE TABLE hosts (name TEXT)",
 		"CREATE TABLE deliveries (seq INTEGER)",
 		"CREATE TABLE event_files (seq INTEGER)",
 		"INSERT INTO meta VALUES ('schema_version','42')",
@@ -113,7 +115,7 @@ func TestUpgradeDropsRules(t *testing.T) {
 	if _, err := db.Exec(`PRAGMA foreign_keys=ON;
 		CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO meta VALUES ('schema_version','45');
 		CREATE TABLE rules (room TEXT, number INTEGER, PRIMARY KEY(room,number)); INSERT INTO rules VALUES ('room',1);
-		CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT, started_at INTEGER, ended_at INTEGER); CREATE TABLE pr_owners (session TEXT);
+		CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT, started_at INTEGER, ended_at INTEGER); CREATE TABLE pr_owners (session TEXT); CREATE TABLE hosts (name TEXT);
 		CREATE TABLE operations (id TEXT, kind TEXT, args BLOB, by_kind TEXT, by_id TEXT, created_at INTEGER, state TEXT);
 		CREATE TABLE grants (id TEXT, kind TEXT, expires_at INTEGER, revoked_at INTEGER, expired_at INTEGER);
 		CREATE TABLE events (seq INTEGER PRIMARY KEY, id TEXT, at INTEGER, room TEXT, type TEXT, from_kind TEXT, from_id TEXT, body BLOB);
@@ -154,7 +156,8 @@ func TestPermanentHostexecGrantMigration(t *testing.T) {
  CREATE TABLE grants(id TEXT,kind TEXT,expires_at INTEGER,revoked_at INTEGER,expired_at INTEGER);
  INSERT INTO grants VALUES('active','hostexec',4102444800000,NULL,NULL),('past','hostexec',1,NULL,NULL),('revoked','hostexec',4102444800000,1,NULL);
  CREATE TABLE operations(kind TEXT,state TEXT,args BLOB);
- INSERT INTO operations VALUES('hostexec.grant','pending','{"expires":"future","never":false,"reason":"x"}');`)
+ INSERT INTO operations VALUES('hostexec.grant','pending','{"expires":"future","never":false,"reason":"x"}');
+ CREATE TABLE hosts(name TEXT);`)
 	if err != nil {
 		t.Fatal(err)
 	}
