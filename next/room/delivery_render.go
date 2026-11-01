@@ -25,6 +25,8 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 			parts = append(parts, b.Brief)
 		}
 		return strings.Join(parts, "\n\n"), nil
+	case contract.HostDiskLow:
+		return fmt.Sprintf("Host %s is low on disk: %d GiB free, %d GiB wanted. Close sessions that are done. At the floor, new boxes wait and the oldest stopped boxes close.", b.Host, b.FreeBytes>>30, b.FloorBytes>>30), nil
 	case contract.PrOpened:
 		return fmt.Sprintf("PR opened: %s", b.URL), nil
 	case contract.OpDecided:

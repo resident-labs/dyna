@@ -65,7 +65,7 @@ func TestHostLossGuardsStaleResults(t *testing.T) {
 	if _, err := s.TransitionBox(ctx, old, contract.BoxReady, "", event); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("stale hello: %v", err)
 	}
-	if err := s.RecordHostHeartbeat(ctx, "h", true, nil, time.UnixMilli(50)); err != nil {
+	if err := s.RecordHostHeartbeat(ctx, "h", true, nil, 0, time.UnixMilli(50)); err != nil {
 		t.Fatal(err)
 	}
 	var state string
@@ -74,7 +74,7 @@ func TestHostLossGuardsStaleResults(t *testing.T) {
 		t.Fatalf("empty sample %s %d %d: %v", state, disk, checked, err)
 	}
 	sample := int64(42)
-	if err := s.RecordHostHeartbeat(ctx, "drain", true, &sample, time.UnixMilli(60)); err != nil {
+	if err := s.RecordHostHeartbeat(ctx, "drain", true, &sample, 0, time.UnixMilli(60)); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Read().QueryRow("SELECT state,disk_bytes,checked_at FROM hosts WHERE name='drain'").Scan(&state, &disk, &checked); err != nil || state != "draining" || disk != 42 || checked != 60 {

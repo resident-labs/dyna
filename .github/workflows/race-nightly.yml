@@ -1,8 +1,8 @@
 name: Race nightly
 
-# Runs every Go test with the race detector on main. It has no time budget and
-# is not a PR or push check, so Dyna's merge queue never waits on it. A failure
-# opens a GitHub issue labelled ci-race, or comments on the open one.
+# Runs every v2 Go test with the race detector on main. It has no time budget
+# and is not a PR or push check. A failure opens a GitHub issue labelled
+# ci-race, or comments on the open one.
 on:
   schedule:
     - cron: '23 5 * * *'
@@ -19,33 +19,19 @@ jobs:
   race:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    container:
-      image: golang:1.26.3
-    env:
-      GOCACHE: /root/.cache/go-build
-      GOMODCACHE: /go/pkg/mod
     steps:
       - uses: actions/checkout@v6
         with:
           ref: main
-      - name: Trust workspace
-        run: |
-          echo 'GIT_CONFIG_COUNT=1' >> "$GITHUB_ENV"
-          echo 'GIT_CONFIG_KEY_0=safe.directory' >> "$GITHUB_ENV"
-          echo "GIT_CONFIG_VALUE_0=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
-      - name: Restore Go caches
-        uses: actions/cache/restore@v4
+      - uses: actions/setup-go@v6
         with:
-          path: |
-            /root/.cache/go-build
-            /go/pkg/mod
-          key: go-build-race-${{ github.sha }}
-          restore-keys: go-build-
+          go-version-file: next/go.mod
+          cache-dependency-path: next/go.sum
       - name: Test with the race detector
         shell: bash
         run: |
           export HOME="$(mktemp -d)" XDG_DATA_HOME="$(mktemp -d)" XDG_CONFIG_HOME="$(mktemp -d)" XDG_CACHE_HOME="$(mktemp -d)"
-          bash scripts/ci.sh go race
+          bash next/scripts/ci.sh race
 
   report:
     needs: race
