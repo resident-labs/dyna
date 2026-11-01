@@ -9,6 +9,11 @@ export function providerGroup(providers: readonly AccountProviderInfo[], flow: C
   return { items, remaining: matches.length - items.length, count: matches.length };
 }
 
+export const accountPath = (id: string) => "/settings/accounts/account/" + encodeURIComponent(id);
+
+// Opens the sign-in for one account. Home links here, so an expired sign-in is a click from the sign-in button.
+export const reconnectPath = (id: string) => "/settings/accounts/reconnect/" + encodeURIComponent(id);
+
 export const reconnectUnavailable = (error: unknown) => error instanceof APIError && error.detail.code === "reconnect_unavailable";
 
 export const canReconnect = (account: Account, method: ConnectMethod) => account.state === "sign_in_expired" && method === "oauth";
