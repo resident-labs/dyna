@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { RoomStore } from "./room.svelte.ts";
+import { stream, type EventConnection } from "./stream.ts";
 import { EventWindow, PAGE, WINDOW, dmOf } from "./window.svelte.ts";
 import { feedRows as dayRows } from "./feed.ts";
 import type { BoxState, Conversation, Event, EventBody, EventsListRequest, PostRequest, SessionSummary } from "./contract.gen.ts";
@@ -131,7 +132,7 @@ test("a pending post is replaced by the event that echoes its clientId, before i
 // A fake engine with feed posts 1..count. It honors the events.list home filter and records each range.
 function engine(count: number, sessions: SessionSummary[] = []) {
   const requests: string[] = [];
-  const state = { down: false };
+  const state = { down: false, feedRead: 0 };
   const posts = Array.from({ length: count }, (_, i) => event(i + 1, { type: "post.created", body: { text: String(i + 1), home: feed } }));
   const original = globalThis.fetch;
   const reply = (body: object, status = 200) => new Response(JSON.stringify(body), { status });
@@ -143,7 +144,7 @@ function engine(count: number, sessions: SessionSummary[] = []) {
       return reply({ seq: posts.length, event: String(posts.length) });
     }
     if (method === "session.list") return reply({ sessions, seq: posts.length });
-    if (method === "room.list") return reply({ rooms: [], seq: posts.length });
+    if (method === "room.list") return reply({ rooms: [{ id: "r", lastRead: state.feedRead }], seq: posts.length });
     if (method !== "events.list") return reply({});
     if (state.down) return reply({ code: "internal", message: "down" }, 500);
     const request: EventsListRequest = JSON.parse(String(init?.body));
@@ -335,20 +336,48 @@ test("rereading gives the feed and each DM their newest read positions", async (
   const listed = { lastRead: 2, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "", startedAt: "", hadJobs: false } as const;
   const sessions: SessionSummary[] = [{ id: "s", ...listed }];
   const server = engine(0, sessions);
-  const engineFetch = globalThis.fetch;
-  let feedRead = 5;
-  globalThis.fetch = (input, init) => String(input) === "/v1/room.list"
-    ? Promise.resolve(new Response(JSON.stringify({ rooms: [{ id: "r", lastRead: feedRead }], seq: 0 })))
-    : engineFetch(input, init);
+  server.state.feedRead = 5;
   try {
     const room = new RoomStore("r", () => () => {});
     await room.open();
     assert.deepEqual([room.readAt(feed), room.readAt(dm)], [5, 2]);
-    feedRead = 8;
+    server.state.feedRead = 8;
     sessions[0] = { ...sessions[0], lastRead: 4 };
     await room.rereadPositions();
     assert.deepEqual([room.readAt(feed), room.readAt(dm)], [8, 4]);
-  } finally { globalThis.fetch = engineFetch; server.restore(); }
+  } finally { server.restore(); }
+});
+
+test("a read made before the first hello, or while the stream is down, reaches the store", async () => {
+  const listed = { lastRead: 2, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "", startedAt: "", hadJobs: false } as const;
+  const sessions: SessionSummary[] = [{ id: "s", ...listed }];
+  const server = engine(0, sessions);
+  const hellos: ((event: MessageEvent<string>) => void)[] = [];
+  const sources: EventConnection[] = [];
+  let reconnect = () => {};
+  const factory = (): EventConnection => {
+    const source: EventConnection = { onmessage: null, onerror: null, addEventListener(_type, cb) { hellos.push(cb); }, close() {} };
+    sources.push(source);
+    return source;
+  };
+  const connect: typeof stream = (room, after, apply, _factory, _schedule, opened) =>
+    stream(room, after, apply, factory, cb => { reconnect = cb; return () => {}; }, opened);
+  try {
+    const room = new RoomStore("r", connect);
+    await room.open();
+    assert.deepEqual([room.readAt(feed), room.readAt(dm)], [0, 2]);
+    server.state.feedRead = 5;
+    sessions[0] = { ...sessions[0], lastRead: 4 };
+    hellos[0](new MessageEvent("hello", { data: '{"build":"b"}' }));
+    await room.rereading;
+    assert.deepEqual([room.readAt(feed), room.readAt(dm)], [5, 4]);
+    server.state.feedRead = 9;
+    sources[0].onerror?.(new Event("error"));
+    reconnect();
+    hellos[1](new MessageEvent("hello", { data: '{"build":"b"}' }));
+    await room.rereading;
+    assert.deepEqual([room.readAt(feed), room.readAt(dm)], [9, 4]);
+  } finally { server.restore(); }
 });
 
 test("session.list and later events set and clear the running computers", async () => {

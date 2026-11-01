@@ -60,6 +60,8 @@ export class RoomStore {
   private loaded = false;
   private failure: unknown;
   private stopStream = () => {};
+  // Settles when the latest reread of read positions ends. Tests await it.
+  rereading: Promise<void> = Promise.resolve();
   private closed = false;
   private changed = () => {};
   private subscribe = createSubscriber(update => { this.changed = update; });
@@ -128,8 +130,8 @@ export class RoomStore {
       for (const { session, job, seq } of ends) if (seq > Math.max(this.readAt({ kind: "feed" }), this.readAt({ kind: "dm", session }))) this.failedJobs.add(`${session}/${job}`);
     });
     this.stopStream = this.connect(this.room, () => this.head, event => this.apply(event), undefined, undefined, () => {
-      // A dropped conversation.read is not replayed, so the stream's reconnect rereads the positions.
-      void this.rereadPositions().catch(() => {});
+      // A conversation.read is not replayed. A read made after load() or during a dropped stream is missed, so each hello rereads.
+      this.rereading = this.rereadPositions().catch(() => {});
     });
   }
 
