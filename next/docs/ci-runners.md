@@ -156,7 +156,7 @@ and each failed start leaves an offline registration until the hourly reap.
 
 The killed worker leaves nothing behind. The listener sees it die, fails the job
 and exits, as it does after any job, and the pool starts the next runner. On real
-runners on pve the job failed about 7 seconds after it started, 3 of them the
+runners on pve the job failed about 8 seconds after it started, 3 of them the
 hook's pause, and its container and registration were gone at once. The job shows
 as failed, with no conclusion on its steps. It may name a worker crash, and the
 reason is in its "Set up runner" log. A fork can still spend a runner's start each
