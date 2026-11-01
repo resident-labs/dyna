@@ -227,9 +227,8 @@ func dynaResetPossible(reset time.Time, seconds int64, now time.Time) bool {
 	return reset.Sub(now) <= longest
 }
 
-// dynaPercent reads a number that a provider may send as a string. A missing or
-// negative value is not a reading.
-func dynaPercent(value gjson.Result) (float64, bool) {
+// dynaNumber reads a finite number that a provider may send as a string.
+func dynaNumber(value gjson.Result) (float64, bool) {
 	parsed := value.Float()
 	switch value.Type {
 	case gjson.Number:
@@ -241,10 +240,13 @@ func dynaPercent(value gjson.Result) (float64, bool) {
 	default:
 		return 0, false
 	}
-	if math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed < 0 {
-		return 0, false
-	}
-	return parsed, true
+	return parsed, !math.IsNaN(parsed) && !math.IsInf(parsed, 0)
+}
+
+// dynaPercent reads a usage figure. A negative one is not a reading.
+func dynaPercent(value gjson.Result) (float64, bool) {
+	parsed, ok := dynaNumber(value)
+	return parsed, ok && parsed >= 0
 }
 
 // dynaTime reads an RFC 3339 string or a Unix time in seconds or milliseconds.
