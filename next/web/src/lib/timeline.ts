@@ -52,12 +52,15 @@ export function ownPost(item: TranscriptItem, session: string): boolean {
 }
 
 // Dyna: A turn's last message is its answer. It can be a post that ended the turn, so earlier text folds as working text.
-// A post from a shell sorts after every item, so the time decides; equal times keep item order.
+// Text and a tool's posts arrive in order. Their times come from different clocks, so only a post from a shell, which
+// sorts after every item, is placed by its time; equal times keep item order.
 export function finalTimelineItem(items: TranscriptItem[], session: string): TranscriptItem | undefined {
   let final: TranscriptItem | undefined;
-  for (const item of items.flatMap(item => [item, ...(item.posts ?? [])])) {
-    if (item.kind !== "text" && !ownPost(item, session)) continue;
-    if (!final || !(Date.parse(item.at) < Date.parse(final.at))) final = item;
+  for (const item of items) {
+    for (const candidate of [item, ...(item.posts ?? [])]) {
+      if (candidate.kind !== "text" && !ownPost(candidate, session)) continue;
+      if (item.kind !== "post" || !final || !(Date.parse(candidate.at) < Date.parse(final.at))) final = candidate;
+    }
   }
   return final;
 }

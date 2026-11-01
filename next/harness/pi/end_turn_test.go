@@ -36,6 +36,17 @@ func TestEveryPostOfAnEndBatchIsReported(t *testing.T) {
 	}
 }
 
+// Details belong to each tool, so a value of another shape must not stop the event stream.
+func TestToolDetailsOfAnyShapeKeepTheStreamReading(t *testing.T) {
+	for _, details := range []string{`"text"`, `[1,2]`, `7`, `{"endPost":7}`} {
+		result := `{"type":"message_end","message":{"role":"toolResult","toolCallId":"a","details":` + details + `}}`
+		got := replayTurn(t, lines(narratedPost, result, assistantText, settledEvent))
+		if got.Final != "answer" || got.EndPosts != nil {
+			t.Fatalf("details %s: result %+v", details, got)
+		}
+	}
+}
+
 // Pi keeps going after these batches, so the turn ends on text as usual.
 func TestTurnsThatContinuePastAnEndPost(t *testing.T) {
 	for name, stream := range map[string]string{
