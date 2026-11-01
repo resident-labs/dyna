@@ -24,6 +24,7 @@ type API struct {
 	Build   string
 	model   func(Caller) http.Handler
 	git     func(Caller) http.Handler
+	github  http.Handler
 	web     *Web
 	files   func(Caller) http.Handler
 	connect ConnectOperations
@@ -44,8 +45,39 @@ func New(service Service, model func(Caller) http.Handler) *API {
 
 func (a *API) SetFilesRoute(route func(Caller) http.Handler) { a.files = route }
 
+// SetGitHubRead configures the GitHub route of a Run's socket before opening sockets.
+func (a *API) SetGitHubRead(route http.Handler) { a.github = route }
+
 // SetGitRoute configures the per-box git route before opening sockets.
 func (a *API) SetGitRoute(route func(Caller) http.Handler) { a.git = route }
+
+// runHandler is all a Run's socket serves. POST /v1/post posts in the room. Every other path is GitHub's,
+// because gh sends its API paths unchanged over a Unix socket. The method table is not involved: no method
+// is open to a Run.
+func (a *API) runHandler(sub contract.SubscriptionID, room contract.RoomID) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/post", func(w http.ResponseWriter, r *http.Request) {
+		var req contract.PostRequest
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil {
+			writeError(w, invalid())
+			return
+		}
+		result, err := a.service.HookPost(r.Context(), sub, room, req)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(result)
+	})
+	mux.HandleFunc("/v1/", func(w http.ResponseWriter, _ *http.Request) { writeError(w, forbidden()) })
+	if a.github != nil {
+		mux.Handle("/", a.github)
+	}
+	return mux
+}
 
 type callerKey struct{}
 
@@ -109,6 +141,10 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodGoalItem, c, a.service.GoalItem)
 	call(mux, contract.MethodGoalDone, c, a.service.GoalDone)
 	call(mux, contract.MethodGoalJournal, c, a.service.GoalJournal)
+	call(mux, contract.MethodSubscriptionAdd, c, a.service.SubscriptionAdd)
+	call(mux, contract.MethodSubscriptionList, c, a.service.SubscriptionList)
+	call(mux, contract.MethodSubscriptionRemove, c, a.service.SubscriptionRemove)
+	call(mux, contract.MethodSubscriptionSetEnabled, c, a.service.SubscriptionSetEnabled)
 	call(mux, contract.MethodInstructionsGet, c, a.service.InstructionsGet)
 	call(mux, contract.MethodInstructionsSet, c, a.service.InstructionsSet)
 	call(mux, contract.MethodDevicePair, c, func(ctx context.Context, p contract.Principal, req contract.DevicePairRequest) (contract.DevicePairResponse, *contract.Error) {
