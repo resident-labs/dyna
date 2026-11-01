@@ -330,6 +330,7 @@ func (r *deleteRig) fillRoom(t *testing.T, ctx context.Context, room contract.Ro
 			`INSERT INTO transcript_turns(session,turn,path,start) VALUES(?2,'turn_delete','a.jsonl',0)`,
 			`INSERT INTO shell_jobs(session,job) VALUES(?2,'job_1')`,
 			`INSERT INTO pr_owners(repo,number,session,goal,approved_head) VALUES('owner/only',7,?2,'','')`,
+			`INSERT INTO issue_owners(repo,number,session,url,title,author,state) VALUES('owner/only',8,?2,'','','','open')`,
 			`INSERT INTO repo_ci_hosts(repo,host,runners,size) VALUES('owner/only','host',1,'large'),('owner/both','host',1,'large')`,
 			`INSERT INTO archives(session,repo,ref,commit_sha,created_at,expires_at) VALUES(?2,'owner/only','','',0,99999999)`,
 			`INSERT INTO operations(id,kind,room,by_kind,by_id,class,state,card,args,args_sha256,created_at,expires_at) VALUES('op_delete','hostexec.run',?1,'session',?2,'auto','done','{}','{}',x'01',0,0)`,
