@@ -71,6 +71,7 @@ test("A balance keeps an account in Usage, as text after every account with wind
   ]);
   assert.deepEqual(rows.map(row => row.title), ["unused", "deepseek"]);
   assert.equal(balancesText(rows[1].balances), "110.00 CNY · 3.50 USD");
+  assert.equal(balancesText([{ currency: "USD", amount: "-0.01" }]), "-0.01 USD");
   assert.deepEqual(rows[0].balances, []);
 });
 
