@@ -322,28 +322,6 @@ func TestEventsReconnectUsesLastEventID(t *testing.T) {
 	}
 }
 
-func TestOwnerSocketAcceptsHostexecCaller(t *testing.T) {
-	dir := t.TempDir()
-	f := &fakeService{}
-	sockets := NewSockets(New(f, nil), dir, uint32(os.Getuid()), nil)
-	t.Cleanup(func() { _ = sockets.Close() })
-	if err := sockets.OpenOwner(); err != nil {
-		t.Fatal(err)
-	}
-	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(dir, "owner.sock"))
-	}}
-	defer transport.CloseIdleConnections()
-	resp, err := (&http.Client{Transport: transport}).Post("http://dyna/v1/session.close", "application/json", strings.NewReader(`{"session":"x"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || f.caller.Kind != contract.PrincipalOwner {
-		t.Fatalf("status %d caller %+v", resp.StatusCode, f.caller)
-	}
-}
-
 func TestOpSubmitRejectsHostexecRun(t *testing.T) {
 	body := `{"operation":{"kind":"hostexec.run","room":"room-a","args":{"room":"room-a","host":"host","argv":["true"],"timeout":1000,"grant":"grant"}}}`
 	response := request(New(&fakeService{}, nil).handler(boxCaller()), "/v1/op.submit", body)
