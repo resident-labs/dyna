@@ -8,8 +8,8 @@
   import { decodeEvent } from "../event.ts";
   import type { VisualSuperseded } from "../contract.gen.ts";
 
-  let { versions, selected, room, names, send }: {
-    versions: VisualVersion[]; selected: number; room: string; names: Map<string, string>;
+  let { versions, selected, room, send }: {
+    versions: VisualVersion[]; selected: number; room: string;
     send: (text: string, event: string) => Promise<void>;
   } = $props();
   let version = $state(untrack(() => selected));
@@ -23,7 +23,6 @@
   let anchor: HTMLElement;
   function closeMenu() { menu = false; menuButton?.focus(); }
   function outside(event: PointerEvent) { if (menu && event.target instanceof Node && !anchor.contains(event.target)) closeMenu(); }
-  function author(item: VisualVersion) { return item.event.from.session ? names.get(item.event.from.session) ?? item.event.from.session : item.event.from.kind === "owner" ? "You" : "Dyna"; }
   let frame = $state<HTMLIFrameElement>();
   let pending = $state<string | null>(null);
   let loading = $state(true);
@@ -121,9 +120,8 @@
     <div class="anchor" bind:this={anchor}>
       {#if allVersions.length > 1}<button class="version" class:active={menu} bind:this={menuButton} type="button" aria-haspopup="menu" aria-expanded={menu} onclick={() => menu = !menu}>v{version} ⌄</button>
       {:else}<span class="version">v{version}</span>{/if}
-      {#if menu}<div class="popover versions" role="menu">{#each allVersions as item (item.event.id)}<button type="button" role="menuitem" aria-current={item.visual.version === version ? "true" : undefined} onclick={() => { pick(item.visual.version); menuButton?.focus(); }}><span class="pill">v{item.visual.version}</span><span class="version-meta">{author(item)} · {formatTime(item.event.at)}<small>{item.event.body.text.split(/\r?\n/)[0]}</small></span></button>{/each}</div>{/if}
+      {#if menu}<div class="popover versions" role="menu">{#each allVersions as item (item.event.id)}<button type="button" role="menuitem" aria-current={item.visual.version === version ? "true" : undefined} onclick={() => { pick(item.visual.version); menuButton?.focus(); }}><span class="pill">v{item.visual.version}</span><span class="version-meta">{formatTime(item.event.at)}<small>{item.event.body.text.split(/\r?\n/)[0]}</small></span></button>{/each}</div>{/if}
     </div>
-    <span class="byline">{author(current)} · {formatTime(current.event.at)}</span>
     <span class="spacer"></span>
     <a class="icon" href={url} target="_blank" rel="noopener noreferrer" title="Open in a new tab" aria-label="Open in a new tab"><Icon name="external" /></a>
   </header>
@@ -154,7 +152,6 @@
   button:hover, a:hover { background:var(--hover); color:var(--text); }
   .icon { display:grid; place-items:center; flex:none; width:32px; height:32px; padding:0; border-radius:6px; text-decoration:none; }
   .back { flex:none; white-space:nowrap; }
-  .byline { color:var(--muted); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .spacer { flex:1; }
   .anchor { position:relative; flex:none; }
   .version { color:var(--muted); font-size:12px; white-space:nowrap; }
@@ -180,5 +177,5 @@
   .confirm .send { border-color: var(--focus); background: var(--focus); color: var(--bg); font-weight: 600; }
   .confirm .send:hover:enabled { background: color-mix(in srgb, var(--focus) 88%, var(--text)); }
   .confirm button:disabled { opacity: .5; cursor: default; }
-  @media (max-width:640px) { .icon { width:44px; height:44px; } .back, button.version, .versions button { min-height:44px; } .byline { display:none; } .anchor { position:static; } .popover { top:52px; left:12px; right:12px; min-width:0; } }
+  @media (max-width:640px) { .icon { width:44px; height:44px; } .back, button.version, .versions button { min-height:44px; } .anchor { position:static; } .popover { top:52px; left:12px; right:12px; min-width:0; } }
 </style>
