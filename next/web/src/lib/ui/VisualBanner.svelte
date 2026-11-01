@@ -1,8 +1,8 @@
 <script lang="ts">
-  import type { VisualCard } from "../contract.gen.ts";
+  import type { EventID, VisualCard } from "../contract.gen.ts";
   import { fromNow } from "../feed.ts";
   import { acquirePreview } from "../visual-preview.ts";
-  let { visual, newest, event, at, onopen }: { visual: VisualCard; newest: VisualCard; event: string; at: string; onopen: () => void } = $props();
+  let { visual, newest, event, at, onopen }: { visual: VisualCard; newest: VisualCard; event: EventID; at: string; onopen: () => void } = $props();
   let older = $derived(visual.version < newest.version);
   let failed = $state(false), ready = $state(false), visible = $state(false), mounted = $state(false), width = $state(0);
   $effect(() => { visual.banner; visual.thumbnail; failed = false; ready = false; });
