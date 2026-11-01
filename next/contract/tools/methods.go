@@ -118,6 +118,8 @@ var methodTable = []MethodEntry{
 	method(contract.MethodSessionSetProfile, contract.ScopeOperate, UserAccess,
 		act("session", "set_profile", typ[contract.SessionSetProfileRequest](), "Set profile for session.", "session set-profile"),
 	),
+	method(contract.MethodSessionAccount, contract.ScopeRead, OwnerAccess),
+	method(contract.MethodSessionSetAccount, contract.ScopeOperate, OwnerAccess),
 	method(contract.MethodSessionStart, contract.ScopeOperate, UserAccess,
 		act("session", "start", typ[contract.SessionStartRequest](), "Start a child session. Give room, name and profile. Omit parent to use the caller; repo, goal, brief, size and sameHost are optional.", "session start"),
 	),

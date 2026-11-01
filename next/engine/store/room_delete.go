@@ -155,6 +155,7 @@ var deleteRoom = []string{
 	`DELETE FROM turns WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM transcript_offsets WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM transcript_turns WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
+	`DELETE FROM session_accounts WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM shell_jobs WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM pr_owners WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM boxes WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
