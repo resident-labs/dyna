@@ -6,7 +6,7 @@
   import type { VisualVersion } from "../visual.ts";
   import { causes, formatTime } from "../feed.ts";
   import { watchTranscripts } from "../stream.ts";
-  import type { PostRequest, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn, VisualCard } from "../contract.gen.ts";
+  import type { PostRequest, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn, TranscriptInput, VisualCard } from "../contract.gen.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import Icon from "./Icon.svelte";
   import { elapsed } from "../steps.ts";
@@ -206,6 +206,10 @@
   const sender = (kind: string, id?: string) => kind === "owner" ? "You" : id ? store.names.get(id) ?? "Session" : "Dyna";
 </script>
 
+{#snippet inputAttachments(input: TranscriptInput)}
+  <PostAttachments attachments={input.attachments ?? []} {newest} onvisual={visual => void openVisual(visual, input.room, input.id)} />
+{/snippet}
+
 {#snippet postItem(turn: TranscriptTurn, item: TranscriptItem)}
   {@const room = item.room}
   {@const seq = item.seq}
@@ -221,9 +225,9 @@
       <article data-turn={turn.id}>
         {#each turn.inputs ?? [] as input (input.id)}
           {#if input.from.kind === "owner"}
-            <div class="owner-message" title={formatTime(input.at)}><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{#if chunkFailed["input:" + input.id + "/text"]}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Text did not load. Try again</button>{/if}</div>
+            <div class="owner-message" title={formatTime(input.at)}><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{@render inputAttachments(input)}{#if chunkFailed["input:" + input.id + "/text"]}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Text did not load. Try again</button>{/if}</div>
           {:else}
-            <div class="agent-input"><Avatar kind={input.from.kind} name={sender(input.from.kind, input.from.session)} size={32} /><div class="agent-body"><div class="agent-sender">{#if input.from.session}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(input.from.session)}`} onclick={navigate} style:--hue={hue(sender(input.from.kind, input.from.session))}>{sender(input.from.kind, input.from.session)}</a>{:else}<strong>{sender(input.from.kind, input.from.session)}</strong>{/if}<time datetime={input.at}>{formatTime(input.at)}</time></div><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} /></div></div>
+            <div class="agent-input"><Avatar kind={input.from.kind} name={sender(input.from.kind, input.from.session)} size={32} /><div class="agent-body"><div class="agent-sender">{#if input.from.session}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(input.from.session)}`} onclick={navigate} style:--hue={hue(sender(input.from.kind, input.from.session))}>{sender(input.from.kind, input.from.session)}</a>{:else}<strong>{sender(input.from.kind, input.from.session)}</strong>{/if}<time datetime={input.at}>{formatTime(input.at)}</time></div><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{@render inputAttachments(input)}{#if chunkFailed["input:" + input.id + "/text"]}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Text did not load. Try again</button>{/if}</div></div>
           {/if}
         {/each}
         <!-- Dyna: Posts and the final answer remain visible outside the work fold. -->
@@ -253,7 +257,7 @@
       <div class="input"><div class="who"><Avatar kind={post.from.kind} name={sender(post.from.kind, post.from.session)} size={22} /><strong>{sender(post.from.kind, post.from.session)}</strong></div><Markdown text={post.body.text} /><PostAttachments attachments={post.body.attachments ?? []} {newest} onvisual={visual => void openVisual(visual, post.room ?? store.room, post.id)} /></div>
     {/each}
     {#each [...view.pendingPosts.values()] as post (post.id)}
-      <div class="input" class:pending={!post.failed}><strong>You</strong><Markdown text={post.request.text} />{#if post.failed}<StatusPill tone="failed" label="Not sent" word /> <button onclick={() => void view.retry(post.id)}>Retry</button> <button onclick={() => view.discard(post.id)}>Discard</button>{/if}</div>
+      <div class="input" class:pending={!post.failed}><strong>You</strong><Markdown text={post.request.text} /><PostAttachments attachments={post.request.attachments ?? []} {newest} onvisual={() => {}} />{#if post.failed}<StatusPill tone="failed" label="Not sent" word /> <button onclick={() => void view.retry(post.id)}>Retry</button> <button onclick={() => view.discard(post.id)}>Discard</button>{/if}</div>
     {/each}
     {#if failed}<p class="muted" role="alert">The conversation did not load. <button onclick={() => void load()}>Try again</button></p>{/if}
   </div>
