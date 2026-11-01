@@ -92,7 +92,7 @@ func proxyKeyRoutes(router *gin.Engine, service **cliproxy.Service, credentials 
 			return
 		}
 		// The proxy SDK uses provider-specific metadata maps for credentials.
-		auth := &coreauth.Auth{ID: req.ID, Provider: string(req.Provider), Label: string(req.Provider), Status: coreauth.StatusActive, Metadata: map[string]any{"type": string(req.Provider), "access_token": token.Access, "refresh_token": token.Refresh, "expired": req.ExpiresAt.UTC().Format(time.RFC3339Nano), "token_type": "Bearer"}}
+		auth := &coreauth.Auth{ID: req.ID, Provider: string(req.Provider), Label: string(req.Provider), Status: coreauth.StatusActive, Metadata: map[string]any{"type": string(req.Provider), "auth_kind": "oauth", "access_token": token.Access, "refresh_token": token.Refresh, "expired": req.ExpiresAt.UTC().Format(time.RFC3339Nano), "token_type": "Bearer"}}
 		if token.Domain != "" {
 			auth.Metadata["domain"] = token.Domain
 		}
