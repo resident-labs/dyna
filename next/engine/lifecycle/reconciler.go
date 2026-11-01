@@ -139,6 +139,9 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	if err := r.store.WakeModelRetries(ctx, r.now()); err != nil {
 		return err
 	}
+	if err := r.store.WakeStopped(ctx); err != nil {
+		return err
+	}
 	rows, err := r.store.LifecycleBoxes(ctx)
 	if err != nil {
 		return err
@@ -274,9 +277,14 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			}
 		}
 	}
-	var ready []contract.SessionID
+	var ready, outdated []contract.SessionID
 	for _, row := range rows {
-		if row.Want == store.WantRun && row.Box.State == contract.BoxReady {
+		if row.Want != store.WantRun || row.Box.State != contract.BoxReady {
+			continue
+		}
+		if r.view.Stale(row.Box.Session) {
+			outdated = append(outdated, row.Box.Session)
+		} else {
 			ready = append(ready, row.Box.Session)
 		}
 	}
@@ -284,6 +292,11 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	updating, err := r.store.StopStale(ctx, outdated)
+	if err != nil {
+		return err
+	}
+	stopped = append(stopped, updating...)
 	stoppedSet := make(map[contract.SessionID]bool, len(stopped))
 	for _, id := range stopped {
 		stoppedSet[id] = true

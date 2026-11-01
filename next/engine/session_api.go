@@ -227,6 +227,13 @@ func (s *Service) Connected(id contract.SessionID) bool {
 	return connected
 }
 
+// Stale reports whether a session's box runs an older box agent than the engine. Boxes report on every connection, so this
+// is rebuilt as they reconnect after an engine restart.
+func (s *Service) Stale(id contract.SessionID) bool {
+	handle, ok := s.live.LookupSession(id)
+	return ok && handle.Stale()
+}
+
 // managedSession loads a target and checks the caller's authority over it.
 func (s *Service) managedSession(ctx context.Context, caller contract.Principal, id contract.SessionID) (store.Session, *contract.Error) {
 	session, err := s.store.Session(ctx, id)

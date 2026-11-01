@@ -21,6 +21,9 @@ const (
 // while the stop should wait for the answer. Nothing here may block the stop for long: an unanswered ask runs out, and a
 // failed one is recorded so that it is not tried again.
 func (s *Service) CompactBeforeStop(ctx context.Context, id contract.SessionID) bool {
+	if s.Stale(id) {
+		return false // This stop is for an update and a wake may be waiting on it, and an older box agent would not answer.
+	}
 	turn, due, err := s.store.CompactionDue(ctx, id)
 	if err != nil {
 		log.Printf("session %s: compaction before stop: %v", id, err)
