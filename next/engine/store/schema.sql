@@ -4,7 +4,7 @@ CREATE TABLE connect_attempt (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT
 CREATE TABLE connect_link_state (id INTEGER PRIMARY KEY CHECK(id=1), epoch INTEGER NOT NULL CHECK(epoch>=0), linked INTEGER NOT NULL CHECK(linked IN (0,1)), generation INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE connect_nonces (nonce TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
 CREATE TABLE rooms (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, cpus INTEGER NOT NULL, mem_bytes INTEGER NOT NULL, paused_at INTEGER, state TEXT NOT NULL DEFAULT 'open', reason TEXT NOT NULL DEFAULT '');
-CREATE TABLE repos (repo TEXT PRIMARY KEY, default_room TEXT NOT NULL REFERENCES rooms(id));
+CREATE TABLE repos (repo TEXT PRIMARY KEY, default_room TEXT NOT NULL REFERENCES rooms(id), main_head TEXT NOT NULL DEFAULT '');
 CREATE TABLE room_repos (room TEXT NOT NULL REFERENCES rooms(id), repo TEXT NOT NULL REFERENCES repos(repo), is_default INTEGER NOT NULL, PRIMARY KEY(room, repo));
 CREATE UNIQUE INDEX room_repos_default ON room_repos(room) WHERE is_default = 1;
 CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT NOT NULL REFERENCES rooms(id), name TEXT NOT NULL, parent TEXT REFERENCES sessions(id), profile TEXT NOT NULL, state TEXT NOT NULL, goal TEXT NOT NULL, created_at INTEGER NOT NULL, closed_at INTEGER, repo TEXT NOT NULL DEFAULT '', shell_jobs INTEGER NOT NULL DEFAULT 0, model_retry_at INTEGER NOT NULL DEFAULT 0, model_retries INTEGER NOT NULL DEFAULT 0, close_reason TEXT NOT NULL DEFAULT '', compose TEXT NOT NULL DEFAULT '');
@@ -42,7 +42,7 @@ CREATE TABLE shell_jobs (session TEXT NOT NULL REFERENCES sessions(id), job TEXT
 CREATE TABLE event_files (seq INTEGER NOT NULL REFERENCES events(seq), sha256 TEXT NOT NULL, media TEXT NOT NULL, PRIMARY KEY(sha256, seq));
 CREATE TABLE visuals (id TEXT PRIMARY KEY, room TEXT NOT NULL, author_kind TEXT NOT NULL, author_id TEXT NOT NULL, version INTEGER NOT NULL);
 CREATE TABLE room_leftovers (host TEXT NOT NULL REFERENCES hosts(name), room TEXT NOT NULL, box TEXT NOT NULL, slice TEXT NOT NULL, PRIMARY KEY(host, room, box));
-CREATE TABLE pr_owners (repo TEXT NOT NULL REFERENCES repos(repo), number INTEGER NOT NULL, session TEXT NOT NULL REFERENCES sessions(id), goal TEXT NOT NULL, approved_head TEXT NOT NULL, branch TEXT NOT NULL DEFAULT '', PRIMARY KEY(repo, number));
+CREATE TABLE pr_owners (repo TEXT NOT NULL, number INTEGER NOT NULL, session TEXT NOT NULL REFERENCES sessions(id), goal TEXT NOT NULL, approved_head TEXT NOT NULL, branch TEXT NOT NULL DEFAULT '', head_repo TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '', title TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '', draft INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'open', head TEXT NOT NULL DEFAULT '', review TEXT NOT NULL DEFAULT '', ci TEXT NOT NULL DEFAULT '', merge TEXT NOT NULL DEFAULT '', ci_told TEXT NOT NULL DEFAULT '', seen_reviews INTEGER NOT NULL DEFAULT 0, seen_review_comments INTEGER NOT NULL DEFAULT 0, seen_comments INTEGER NOT NULL DEFAULT 0, own_wake_at INTEGER NOT NULL DEFAULT 0, baseline INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(repo, number));
 
 CREATE INDEX turns_session_ended ON turns(session, ended_at);
 CREATE INDEX turns_session_started ON turns(session, started_seq);
@@ -50,6 +50,7 @@ CREATE INDEX turns_session_started_at ON turns(session, started_at DESC);
 CREATE INDEX sessions_room_closed ON sessions(room, closed_at);
 CREATE INDEX sessions_parent ON sessions(parent);
 CREATE INDEX pr_owners_session ON pr_owners(session);
+CREATE INDEX pr_owners_state ON pr_owners(state);
 CREATE INDEX operations_state_expires ON operations(state, expires_at);
 CREATE INDEX operations_pending_caller ON operations(by_kind, by_id, created_at, id) WHERE state='pending';
 

@@ -102,6 +102,7 @@ const (
 	ErrParentClosing        ErrorCode = "parent_closing"
 	ErrSessionClosing       ErrorCode = "session_closing"
 	ErrStale                ErrorCode = "stale"
+	ErrGitHubQuota          ErrorCode = "github_quota" // the message names the reset time
 	ErrVisualSuperseded     ErrorCode = "visual_superseded"
 	ErrUnavailable          ErrorCode = "unavailable"
 	ErrReconnectUnavailable ErrorCode = "reconnect_unavailable"

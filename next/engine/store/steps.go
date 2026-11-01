@@ -6,11 +6,23 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 64
+const schemaVersion = 65
 
 // LEGACY(v1-transfer): steps 42 to 63, which only upgrade stores older than schema 64. Remove after the transfer.
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	64: {
+		// A tracked PR may sit on a repository no room lists, so pr_owners drops that key. Rows from before tracking start
+		// as a baseline: the first poll records them without a wake, however long ago they merged.
+		`CREATE TEMP TABLE pr_owners_backup AS SELECT * FROM pr_owners`,
+		`DROP TABLE pr_owners`,
+		`CREATE TABLE pr_owners (repo TEXT NOT NULL, number INTEGER NOT NULL, session TEXT NOT NULL REFERENCES sessions(id), goal TEXT NOT NULL, approved_head TEXT NOT NULL, branch TEXT NOT NULL DEFAULT '', head_repo TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '', title TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '', draft INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'open', head TEXT NOT NULL DEFAULT '', review TEXT NOT NULL DEFAULT '', ci TEXT NOT NULL DEFAULT '', merge TEXT NOT NULL DEFAULT '', ci_told TEXT NOT NULL DEFAULT '', seen_reviews INTEGER NOT NULL DEFAULT 0, seen_review_comments INTEGER NOT NULL DEFAULT 0, seen_comments INTEGER NOT NULL DEFAULT 0, own_wake_at INTEGER NOT NULL DEFAULT 0, baseline INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(repo, number))`,
+		`INSERT INTO pr_owners(repo,number,session,goal,approved_head,branch) SELECT repo,number,session,goal,approved_head,branch FROM pr_owners_backup`,
+		`DROP TABLE pr_owners_backup`,
+		`CREATE INDEX pr_owners_session ON pr_owners(session)`,
+		`CREATE INDEX pr_owners_state ON pr_owners(state)`,
+		`ALTER TABLE repos ADD COLUMN main_head TEXT NOT NULL DEFAULT ''`,
+	},
 	63: {
 		`CREATE TABLE subscriptions (id TEXT PRIMARY KEY, scope TEXT NOT NULL, room TEXT REFERENCES rooms(id), session TEXT REFERENCES sessions(id), every_ms INTEGER NOT NULL, wake_kind TEXT NOT NULL, wake_id TEXT NOT NULL, run_image TEXT NOT NULL, run_size TEXT NOT NULL, created_at INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, due_at INTEGER NOT NULL DEFAULT 0, hold_until INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0, last_at INTEGER NOT NULL DEFAULT 0, last_result TEXT NOT NULL DEFAULT '', last_host TEXT NOT NULL DEFAULT '', last_seq INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE INDEX subscriptions_room ON subscriptions(room)`,
