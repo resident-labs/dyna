@@ -105,7 +105,7 @@
   code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); }
   pre { max-height: 256px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.625 var(--mono); }
   .diff-summary { display: flex; gap: 8px; align-items: center; }
-  .diff-summary button { margin-left: auto; }
+  .diff-summary button { border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; }
   .add, .diff .add { color: var(--success, #65a972); }
   .remove, .diff .remove { color: var(--danger, #d97b7b); }
   .time { margin-left: auto; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
