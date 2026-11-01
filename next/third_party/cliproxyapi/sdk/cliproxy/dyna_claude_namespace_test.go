@@ -3,6 +3,7 @@ package cliproxy
 import (
 	"testing"
 
+	internalregistry "github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 )
@@ -28,7 +29,7 @@ func TestDynaClaudeNamespaceRegistryIsolation(t *testing.T) {
 	if !has(claude.ID, "plan_anthropic/"+model) || has(other.ID, "plan_anthropic/"+model) {
 		t.Fatal("plan namespace did not resolve exclusively to its Claude credential")
 	}
-	if has(claude.ID, model) || has(other.ID, model) || len(registry.GetModelProviders(model)) != 0 {
+	if has(claude.ID, model) || has(other.ID, model) || len(internalregistry.GetGlobalRegistry().GetModelProviders(model)) != 0 {
 		t.Fatal("bare Claude model remained routable")
 	}
 }
