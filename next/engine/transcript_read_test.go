@@ -80,7 +80,7 @@ func TestTranscriptTurnPageAndFullOutput(t *testing.T) {
 		t.Fatalf("post=%+v err=%v", event, err)
 	}
 	for i := 0; i < maxTranscriptCallPosts; i++ {
-		if _, problem := s.Post(ctx, caller, contract.PostRequest{Room: session.Room, Text: "another", ToolCallID: "post-call"}); problem != nil {
+		if _, problem := s.Post(ctx, caller, contract.PostRequest{Room: session.Room, Text: strings.Repeat("\x01", 2500), ToolCallID: "post-call"}); problem != nil {
 			t.Fatal(problem)
 		}
 	}
@@ -166,7 +166,7 @@ func TestTranscriptTurnPageAndFullOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if problem != nil || len(page.Turns) != 1 || len(page.Turns[0].Inputs) != 1 || !page.Turns[0].Inputs[0].At.Equal(inputEvent.Time) || page.Turns[0].Inputs[0].Home == nil || page.Turns[0].Inputs[0].Home.Kind != contract.ConversationDM || page.Turns[0].Inputs[0].Seq != delivery || len(page.Turns[0].Items) != 3 || len(page.Turns[0].Items[0].Posts) != 1 || page.Turns[0].Items[0].Posts[0].Event != other.Event || len(page.Turns[0].Items[1].Posts) != maxTranscriptCallPosts || page.Turns[0].Items[1].Posts[0].Event != post.Event || page.Turns[0].Items[1].PostsOmitted != 1 || page.Turns[0].Items[2].Event != unclaimed.Event || !page.Turns[0].Items[0].More || len(page.Turns[0].Items[0].Output) != 1024 {
+	if problem != nil || len(page.Turns) != 1 || len(page.Turns[0].Inputs) != 1 || !page.Turns[0].Inputs[0].At.Equal(inputEvent.Time) || page.Turns[0].Inputs[0].Home == nil || page.Turns[0].Inputs[0].Home.Kind != contract.ConversationDM || page.Turns[0].Inputs[0].Seq != delivery || len(page.Turns[0].Items) != 3 || len(page.Turns[0].Items[0].Posts) != 1 || page.Turns[0].Items[0].Posts[0].Event != other.Event || len(page.Turns[0].Items[1].Posts) != 6 || page.Turns[0].Items[1].Posts[0].Event != post.Event || page.Turns[0].Items[1].PostsOmitted != 3 || page.Turns[0].Items[2].Event != unclaimed.Event || !page.Turns[0].Items[0].More || len(page.Turns[0].Items[0].Output) != 1024 {
 		t.Fatalf("page=%+v error=%v", page, problem)
 	}
 	for i := 0; i < 64; i++ {
@@ -185,6 +185,21 @@ func TestTranscriptTurnPageAndFullOutput(t *testing.T) {
 	full, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: caller.Session, Turn: "turn_a", Item: "call1"})
 	if problem != nil || strings.Contains(full.Chunk, "secretvalue") || !strings.Contains(full.Chunk, "[masked]") {
 		t.Fatalf("full=%+v error=%v", full, problem)
+	}
+}
+
+func TestTranscriptChunkKeepsRuneBoundaries(t *testing.T) {
+	value := strings.Repeat("a", (64<<10)-1) + "世界"
+	first, problem := transcriptChunk(contract.TranscriptReadResponse{}, value, 0)
+	if problem != nil || first.Chunk != value[:(64<<10)-1] || first.NextOffset != (64<<10)-1 {
+		t.Fatalf("first chunk = %+v, %v", first, problem)
+	}
+	if _, problem := transcriptChunk(contract.TranscriptReadResponse{}, value, first.NextOffset+1); problem == nil {
+		t.Fatal("accepted offset inside a rune")
+	}
+	last, problem := transcriptChunk(contract.TranscriptReadResponse{}, value, first.NextOffset)
+	if problem != nil || last.Chunk != "世界" || last.NextOffset != 0 {
+		t.Fatalf("last chunk = %+v, %v", last, problem)
 	}
 }
 

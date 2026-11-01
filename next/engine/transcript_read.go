@@ -162,18 +162,24 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 				}
 				for _, item := range pageItems {
 					page := postPages[item.CallID]
+					encoded, _ := json.Marshal(item.TranscriptItem)
+					itemBytes := len(encoded)
 					for _, event := range page.Posts {
 						if len(item.Posts) == maxTranscriptCallPosts {
 							break
 						}
 						post := contract.TranscriptItem{ID: string(event.ID), Turn: t.ID, At: event.Time}
 						applyTranscriptPost(&post, event)
-						item.Posts = append(item.Posts, post)
-						encoded, _ := json.Marshal(item.TranscriptItem)
-						if len(encoded) > 80<<10 {
-							item.Posts = item.Posts[:len(item.Posts)-1]
+						encoded, _ := json.Marshal(post)
+						extra := len(encoded) + 1 // Comma, or the closing bracket for the first post.
+						if len(item.Posts) == 0 {
+							extra += len(`,"posts":[`)
+						}
+						if itemBytes+extra > 80<<10 {
 							break
 						}
+						itemBytes += extra
+						item.Posts = append(item.Posts, post)
 					}
 					item.PostsOmitted = page.Total - len(item.Posts)
 					if item.PostsOmitted > 0 {
@@ -216,13 +222,20 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 				}
 				return transcriptChunk(response, value, req.Offset)
 			}
-			for len(t.Items) > 0 {
-				data, _ := json.Marshal(t)
-				if len(data) <= 180<<10 {
-					break
+			data, _ := json.Marshal(t)
+			turnBytes := len(data)
+			for len(t.Items) > 0 && turnBytes > 180<<10 {
+				last := len(t.Items) - 1
+				data, _ := json.Marshal(t.Items[last])
+				turnBytes -= len(data)
+				if last > 0 {
+					turnBytes-- // Comma between items.
 				}
-				t.Items = t.Items[:len(t.Items)-1]
-				t.More = true
+				t.Items = t.Items[:last]
+				if !t.More {
+					turnBytes-- // true is one byte shorter than false.
+					t.More = true
+				}
 			}
 			if t.More {
 				t.NextItem = req.ItemIndex + len(t.Items)
@@ -295,7 +308,8 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 }
 
 func transcriptChunk(response contract.TranscriptReadResponse, value string, offset int) (contract.TranscriptReadResponse, *contract.Error) {
-	if offset > len(value) || !utf8.ValidString(value[:offset]) {
+	// Values come from JSON decoding or encoding, which produces valid UTF-8.
+	if offset > len(value) || (offset < len(value) && !utf8.RuneStart(value[offset])) {
 		return response, invalid("invalid transcript offset")
 	}
 	end := min(len(value), offset+(64<<10))
