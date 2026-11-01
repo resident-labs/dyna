@@ -37,6 +37,7 @@ type Session struct {
 	channel       *Channel
 	computer      *computerState
 	shell         *shellWatch
+	terminals     int
 }
 
 // Subscription uses mu to serialize sends with close.
