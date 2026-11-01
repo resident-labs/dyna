@@ -23,12 +23,6 @@ type RouteError struct {
 	Message string `json:"message"`
 }
 
-// Handler returns a route bound to one session and its allowed models.
-// socket is the proxy listener; clientKey never leaves the engine.
-func Handler(socket string, clientKey, sessionID, namespace string, allowedModels, eligibleIDs []string) http.Handler {
-	return handler(unixClient(socket), clientKey, sessionID, namespace, allowedModels, eligibleIDs, pool{})
-}
-
 func unixClient(socket string) *http.Client {
 	return &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
