@@ -4,7 +4,6 @@
   import Icon from "./Icon.svelte";
   import { theme } from "../theme.svelte.ts";
   import { formatTime } from "../feed.ts";
-  import { theme } from "../theme.svelte.ts";
   import { call } from "../client.ts";
   import { decodeEvent } from "../event.ts";
   import type { VisualSuperseded } from "../contract.gen.ts";
