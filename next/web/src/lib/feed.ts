@@ -137,15 +137,26 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       previous.to.length !== to.length || previous.to.some((target, i) => !sameAuthor(target, to[i]));
     rows.push({ kind: "post", key, from, at, text, attachments, first, to, ...pending && { pending } });
   };
+  // A post that carried a final reply goes to that reply's target too. The engine records this at the turn's end, later
+  // than the post, so the targets are gathered first.
+  const carried = new Map<string, Principal[]>();
+  for (const event of events) {
+    if (event.type !== "turn.ended") continue;
+    for (const { reply, posted } of event.body.replies ?? []) {
+      if (posted && reply.target) carried.set(posted, [...carried.get(posted) ?? [], reply.target]);
+    }
+  }
   for (const event of events) {
     // Account alerts are owner-only and never belong to a room feed.
     if (event.type === "account.failed" || event.type === "account.quota_low" || event.type === "host.disk_low") continue;
     const firstAt = work[0]?.at ?? (deferred[0]?.kind === "notice" ? deferred[0].event.at : deferred[0]?.kind === "failed" || deferred[0]?.kind === "request" || deferred[0]?.kind === "restarted" ? deferred[0].at : undefined);
     if (firstAt && new Date(firstAt).toDateString() !== new Date(event.at).toDateString()) flush();
     if (event.type === "post.created") {
+      const mentions = event.body.mentions ?? [];
+      const replied = (carried.get(event.id) ?? []).filter(target => !mentions.some(mention => sameAuthor(mention, target)));
       if (sameHome(event.body.home, home)) {
         for (const turn of turns.values()) if (turn.session === event.from.session) turn.posted = true;
-        post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, event.body.attachments ?? [], event.body.mentions ?? []);
+        post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, event.body.attachments ?? [], [...mentions, ...replied]);
       }
       continue;
     }
