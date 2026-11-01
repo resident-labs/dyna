@@ -641,6 +641,7 @@
   {#if drawer || (panel && phone.current)}<button type="button" class="scrim" tabindex="-1" aria-label={drawer ? "Close the menu" : room ? "Close the sessions" : "Close the active rooms"}
     onclick={() => void (drawer ? showDrawer(false, true, true) : showPanel(false, true))}></button>{/if}
   <main bind:clientWidth={mainWidth} class:header-tight={mainWidth <= 1000} class:header-narrow={mainWidth <= 600} class:dropping ondragover={dragOver} ondragleave={dragLeave} ondrop={drop} inert={drawer || (panel && phone.current) || covered || inSettings}>
+    {#if dropping}<p class="drop-label">Drop files to attach</p>{/if}
     {#if (section === "new-room" || firstRoom)}<NewRoom {rooms} first={firstRoom} onclose={() => void closeSection()} oncreated={id => { void attention.created(id).then(() => { firstRoom = false; openLocation(id); }); }} />
     {:else if section === "new-session" && room && store && store.ready}<NewSession {room} {roomName} sessions={[...store.sessions.values()]} onclose={() => void closeSection()} onstarted={(id, brief) => { startingBriefs[id] = brief; openLocation(room!, id); }} />
     {:else if section === "instructions" && room && store && !unavailable}<Instructions {room} {roomName} rooms={rooms.length} sessions={store.sessions.size} onclose={() => void closeSection()} />
@@ -773,8 +774,9 @@
   @media (max-width: 760px) { .crumb, .crumb + .count { display: none; } }
   @media (max-width: 760px) { main .tool { justify-content: center; width: 40px; height: 40px; padding: 0; border: 0; } }
   main { position: relative; }
-  /* A muted dashed outline marks the column that takes a dropped file; it sits inside the column's edge. */
-  main.dropping { outline: 1px dashed var(--line); outline-offset: -8px; border-radius: 8px; }
+  /* A dashed accent outline marks the column that takes a dropped file; a muted label names the action. */
+  main.dropping { outline: 2px dashed var(--focus); outline-offset: -8px; border-radius: 8px; }
+  .drop-label { position: absolute; inset: 8px; z-index: 1; display: grid; place-items: center; margin: 0; border-radius: 8px; background: color-mix(in srgb, var(--bg) 85%, transparent); color: var(--muted); font-size: 14px; pointer-events: none; }
   .terminal-holder:not([hidden]) { display: contents; }
   :where(main.header-tight) .tool { justify-content: center; width: 28px; padding: 0; }
   /* One quiet line of the working line's size and edge; only its Resume acts. */
