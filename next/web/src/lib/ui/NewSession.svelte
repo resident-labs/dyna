@@ -1,17 +1,17 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { call } from "../client.ts";
-  import type { ProfileSummary, RoomRepo, SessionSummary } from "../contract.gen.ts";
+  import type { ProfileSummary, RoomRepo, SessionStarted } from "../contract.gen.ts";
   import { nameProblem } from "../name-problem.ts";
   import ProfileSelector from "./ProfileSelector.svelte";
 
   let { room, roomName, sessions, onclose, onstarted }: {
-    room: string; roomName: string; sessions: SessionSummary[];
+    room: string; roomName: string; sessions: SessionStarted[];
     onclose: () => void; onstarted: (session: string) => void;
   } = $props();
 
   const clientId = crypto.randomUUID();
-  let name = $state(""), parent = $state(sessions.find(item => !item.parent)?.id ?? "");
+  let name = $state(""), parent = $state(sessions.find(item => !item.parent)?.session ?? "");
   let repo = $state(""), profile = $state(""), brief = $state(""), goal = $state("");
   let showGoal = $state(false), busy = $state(false), attempted = $state(false);
   let profiles: ProfileSummary[] = $state([]), repos: RoomRepo[] = $state([]);
@@ -59,7 +59,7 @@
     </label>
     <label>Under
       <select bind:value={parent}>
-        {#each sessions as session (session.id)}<option value={session.id}>{session.name}</option>{/each}
+        {#each sessions as session (session.session)}<option value={session.session}>{session.name}</option>{/each}
       </select>
     </label>
     {#if repos.length >= 2}
