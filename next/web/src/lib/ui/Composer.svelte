@@ -54,6 +54,21 @@
   }
   // The picker and a drop on the center column add files here, so the note names what did not fit.
   export const addFiles = (list: Iterable<File>) => { note = files.add(list, forwarded); };
+  let tray: HTMLUListElement;
+  let preview = $state<{ url: string; name: string } | undefined>();
+  let previewDialog: HTMLDialogElement;
+  let failedIds = new Set<number>();
+  $effect(() => {
+    const failed = files.items.filter(item => item.state === "failed");
+    const added = failed.find(item => !failedIds.has(item.id));
+    failedIds = new Set(failed.map(item => item.id));
+    if (added) void tick().then(() => tray?.querySelector(`[data-file-id="${added.id}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" }));
+  });
+  async function openPreview(url: string, name: string) {
+    preview = { url, name };
+    await tick();
+    previewDialog.showModal();
+  }
   const id = $props.id();
   const touch = new MediaQuery("pointer: coarse");
   let caret = $state(0);
@@ -115,20 +130,27 @@
     <div class="quoted"><Markdown text={quote.text} /></div>
     {#if quote.attachments.length}<p class="files">{count(quote.attachments.length, "file")}: {quote.attachments.map(file => file.name).join(", ")}</p>{/if}
     {#if replacement}<p class="replaced" aria-live="polite"><span>Replaced the post from {replacement.author}.</span><button type="button" onclick={onundo}><Icon name="undo" size={14} />Undo</button></p>{/if}</div>{/if}
-  {#snippet fileTray()}<ul class="tray" aria-label="Files">{#each files.items as item (item.id)}
-    <li class="chip" class:failed={item.state === "failed"}>
-      {#if item.preview}<img src={item.preview} alt="" />
-      {:else}<span class="ext" aria-hidden="true">{extension(item.file.name)}</span>{/if}
-      <span class="meta"><span class="file-name" title={item.file.name}>{item.file.name}</span>
-        <span class="sub">{item.state === "saving" ? "Saving…" : item.state === "failed" ? "Not saved" : fileSize(item.file.size)}</span></span>
-      {#if item.state === "failed"}<button type="button" class="retry" onclick={() => files.save(item.id)}>Retry</button>{/if}
-      <button type="button" class="remove" aria-label="Remove {item.file.name}" title="Remove {item.file.name}" onclick={() => files.remove(item.id)}><Icon name="close" size={14} /></button>
-    </li>{/each}</ul>{/snippet}
-  {#if files.items.length && !touch.current}{@render fileTray()}{/if}
+  {#if files.items.length}
+    {#if files.items.length >= 2}
+      {@const parts = filesSummary(files.items).split(" · ")}
+      <p class="file-summary">{#each parts as part, i}{#if i} · {/if}{#if part.endsWith("not saved")}<button type="button" onclick={() => tray.querySelector(".failed")?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" })}>{part}</button>{:else}{part}{/if}{/each}</p>
+    {/if}
+    <ul class="tray" aria-label="Files" bind:this={tray}>{#each files.items as item (item.id)}
+      <li class="chip" class:failed={item.state === "failed"} data-file-id={item.id}>
+        {#if item.preview}<button type="button" class="thumbnail" aria-label="Preview {item.file.name}" onclick={() => openPreview(item.preview!, item.file.name)}><img src={item.preview} alt="" /></button>
+        {:else}<span class="ext" aria-hidden="true">{extension(item.file.name)}</span>{/if}
+        <span class="meta"><span class="file-name" title={item.file.name} aria-label={item.file.name}><span>{item.file.name.length > 8 ? item.file.name.slice(0, -8) : item.file.name}</span>{#if item.file.name.length > 8}<span>{item.file.name.slice(-8)}</span>{/if}</span>
+          <span class="sub">{#if item.state === "failed"}Not saved · <button type="button" class="retry" onclick={() => files.save(item.id)}>Retry</button>{:else if item.state === "saving"}Saving…{:else}{fileSize(item.file.size)}{/if}</span></span>
+        <button type="button" class="remove" aria-label="Remove {item.file.name}" title="Remove {item.file.name}" onclick={() => files.remove(item.id)}><Icon name="close" size={14} /></button>
+      </li>{/each}</ul>
+  {/if}
+  {#if preview}<dialog class="preview-dialog" bind:this={previewDialog} aria-label="Preview {preview.name}" onclose={() => preview = undefined}>
+    <header><span>{preview.name}</span><button type="button" onclick={() => previewDialog.close()}>Close</button></header>
+    <img src={preview.url} alt={preview.name} />
+  </dialog>{/if}
   {#if note || over > 0}<p class="note" class:over={over > 0} role="status">{over > 0 ? `A post can carry ${maxFiles} files; remove ${over} to send.` : note}</p>{/if}
   {#if stop?.failed && empty}<p class="note" role="status">The stop did not reach the engine. Try again.</p>{/if}
   <div class="inputline">
-  {#if files.items.length && touch.current}<details class="files-toggle"><summary class:unsaved={files.items.some(item => item.state === "failed")}><Icon name="file" size={14} />{filesSummary(files.items)}</summary>{@render fileTray()}</details>{/if}
   <textarea rows="2" aria-label="Message" bind:this={element} bind:value onkeydown={keydown} onpaste={paste} {placeholder}
     oninput={() => { dismissed = -1; track(); }} onclick={track} onkeyup={track} onblur={() => { dismissed = token?.start ?? -1; }} onfocus={() => { dismissed = -1; }}
     role="combobox" aria-autocomplete="list" aria-expanded={matches.length > 0} aria-controls={matches.length ? `${id}-list` : undefined}
@@ -181,24 +203,33 @@
   /* A phone keeps most of its screen for the feed: the box grows to a quarter of the visible height, then scrolls; the file tray scrolls too. */
   @media (max-width: 640px) {
     textarea { max-height: calc(var(--app-height, 100dvh) * 0.25); }
-    .tray { max-height: 84px; overflow-y: auto; }
   }
   textarea:focus-visible { outline: none; }
   textarea::placeholder { color: var(--muted); }
   .actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
   .keys { flex: 1; }
-  /* v1's tray chip: a 28 px thumbnail or type badge, the name over a muted line, and a remove button. */
-  .tray { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; padding: 0; list-style: none; }
-  .chip { display: flex; align-items: center; gap: 8px; max-width: min(260px, 100%); padding: 4px 4px 4px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar); }
-  .chip img, .ext { flex: none; width: 28px; height: 28px; border-radius: 6px; object-fit: cover; }
+  .file-summary { margin: 0 0 6px; color: var(--muted); font-size: 12px; }
+  .file-summary button { all: unset; color: var(--danger); cursor: pointer; }
+  .tray { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; margin: 0 0 8px; padding: 0; list-style: none; }
+  .chip { box-sizing: border-box; display: flex; align-items: center; gap: 8px; flex: 0 0 min(280px, 100% - 40px); height: 56px; padding: 7px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar); scroll-snap-align: start; }
+  .thumbnail, .ext { flex: none; width: 40px; height: 40px; border-radius: 6px; }
+  .thumbnail { padding: 0; border: 0; cursor: pointer; overflow: hidden; }
+  .thumbnail img { display: block; width: 100%; height: 100%; object-fit: cover; }
   .ext { display: grid; place-items: center; background: var(--raised); color: var(--muted); font: 600 10.5px var(--mono); }
-  .meta { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
-  .file-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .sub { color: var(--muted); font-size: 12px; }
-  .failed { border-color: var(--danger); }
+  .meta { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.3; }
+  .file-name { display: flex; min-width: 0; font-size: 13px; white-space: nowrap; }
+  .file-name span:first-child { overflow: hidden; text-overflow: ellipsis; }
+  .file-name span:nth-child(2) { flex: none; }
+  .sub { color: var(--muted); font-size: 12px; white-space: nowrap; }
   .failed .sub { color: var(--danger); }
-  .retry { all: unset; cursor: pointer; color: var(--focus); font-size: 12px; border-radius: 3px; }
-  .retry:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .retry { all: unset; cursor: pointer; color: inherit; text-decoration: underline; border-radius: 3px; }
+  .retry:focus-visible, .file-summary button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .preview-dialog { width: min(1000px, 95vw); max-height: 90dvh; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); color: var(--text); }
+  .preview-dialog::backdrop { background: var(--scrim); }
+  .preview-dialog header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .preview-dialog header span { overflow-wrap: anywhere; }
+  .preview-dialog button { min-height: 44px; cursor: pointer; }
+  .preview-dialog img { display: block; max-width: 100%; max-height: 75dvh; margin: auto; object-fit: contain; }
   .note { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
   .note.over { color: var(--danger); }
   /* The key hint shows only while the empty message box has focus. */
@@ -206,14 +237,9 @@
   .composer:has(textarea:focus:placeholder-shown) .keys { visibility: visible; }
   @media (pointer: coarse) {
     .composer { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; align-items: center; padding: 8px 10px; }
-    .quote, .tray, .note, .mentions { grid-column: 1 / -1; }
+    .quote, .tray, .file-summary, .note, .mentions { grid-column: 1 / -1; }
     .note.over { grid-row: 5; margin: 4px 0 0; }
     .inputline { display: flex; align-items: center; gap: 6px; min-width: 0; grid-column: 2; grid-row: 4; }
-    .files-toggle { flex: none; z-index: 1; }
-    .files-toggle summary { display: flex; align-items: center; gap: 4px; padding: 6px; border-radius: 6px; background: var(--selected); color: var(--muted); font-size: 12px; cursor: pointer; list-style: none; white-space: nowrap; }
-    .files-toggle summary.unsaved { color: var(--danger); }
-    textarea::placeholder { white-space: nowrap; text-overflow: ellipsis; }
-    .files-toggle .tray { position: absolute; left: 0; right: 0; bottom: 100%; max-height: 180px; overflow-y: auto; padding: 8px; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; }
     textarea { min-width: 0; flex: 1; min-height: 40px; max-height: 30vh; padding: 8px 0; }
     .actions { display: contents; }
     .actions .attach { grid-column: 1; grid-row: 4; }
@@ -224,7 +250,8 @@
   .attach, .remove { background: none; color: var(--muted); }
   .remove { width: 24px; height: 24px; border-radius: 6px; }
   .attach:hover, .remove:hover { background: var(--hover); color: var(--text); }
-  @media (hover: none) { .attach, .remove { width: 40px; height: 40px; } }
+  @media (hover: none) { .attach { width: 40px; height: 40px; } }
+  @media (pointer: coarse) { .remove { width: 44px; height: 44px; } .retry { min-height: 44px; display: inline-flex; align-items: center; } }
   .send { background: var(--focus); color: var(--bg); }
   .send:disabled { background: var(--selected); color: var(--muted); cursor: default; }
   .stop { background: var(--text); }
