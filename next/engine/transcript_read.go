@@ -82,8 +82,6 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 		response.More = true
 		work = work[:limit]
 	}
-	base, _ := json.Marshal(response)
-	responseBytes := len(base)
 	for _, w := range work {
 		started := w.Started.Body.(contract.TurnStarted)
 		t := contract.TranscriptTurn{ID: started.Turn, Started: w.Started.Time, Inputs: []contract.TranscriptInput{}, Items: []contract.TranscriptItem{}}
@@ -274,16 +272,13 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			}
 			response.Truncated = t.More
 		}
-		data, _ := json.Marshal(t)
-		responseBytes += len(data)
-		if len(response.Turns) > 0 {
-			responseBytes++ // Comma between turns.
-		}
-		if responseBytes > 256<<10 && len(response.Turns) > 0 {
+		response.Turns = append(response.Turns, t)
+		data, _ := json.Marshal(response)
+		if len(data) > 256<<10 && len(response.Turns) > 1 {
+			response.Turns = response.Turns[:len(response.Turns)-1]
 			response.More = true
 			break
 		}
-		response.Turns = append(response.Turns, t)
 	}
 	if req.Item != "" {
 		return response, invalid("unknown transcript item")
