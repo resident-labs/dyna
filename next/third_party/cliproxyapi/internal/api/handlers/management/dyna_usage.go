@@ -75,6 +75,7 @@ var dynaUsageSources = map[string]dynaUsageSource{
 	"openai-compatible-zai":         {request: requestZAIUsage, parse: parseZAIUsage},
 	"openai-compatible-deepseek":    {request: requestDeepSeekUsage, parse: parseDeepSeekUsage},
 	"openai-compatible-opencode-go": {request: requestOpenCodeUsage, parse: parseOpenCodeUsage, absent: http.StatusForbidden},
+	"meta":                          {observed: observedMetaUsage},
 }
 
 // dynaUsageTransport is a variable so tests never reach a provider.

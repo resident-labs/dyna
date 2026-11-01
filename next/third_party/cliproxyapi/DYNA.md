@@ -51,6 +51,8 @@ Each later patch to this folder must be its own commit. Each patch must add an e
 
 - OpenCode Go usage reader: 50 product lines added, 5 removed, plus 54 test lines. It serves `engine/model` from `/zen/go/v1/usage` with no workspace header. `rate-limited` counts as 100%, and a 403 means no Go subscription, so it reads as unknown and not as a bad key.
 
+- Meta usage reader: 33 product lines added, plus 52 test lines. It serves `engine/model` from the signals the #6467 patch records, with no request, because Meta has no usage endpoint. An account stays unknown until it serves a request. A window past its reset is stale, so it drops out rather than reading 0.
+
 ## Pulls
 
 - `v8.0.49` (2026-11-01): `git subtree pull` merged with no conflicts. Every patch above still applies, and none is obsolete: PR #5434 stays open and unmerged, PR #5833 was closed unmerged. The release changes plugin login, Gemini sanitizing and Codex commentary through Claude clients. The commentary option defaults to off, so `engine/model` sees no change in routing, management paths or credential handling. `TestResponsesInterruptStopsHTTPUpstream` and `TestCodexClientModelsApplyPatchRouting` are flaky on `v8.0.48` with Dyna's patches too, so this pull did not cause them; CI does not run them.
