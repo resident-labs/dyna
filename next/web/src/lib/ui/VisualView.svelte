@@ -3,6 +3,7 @@
   import { cardMessage, visualReplyFailure, type VisualVersion } from "../visual.ts";
   import Icon from "./Icon.svelte";
   import { formatTime } from "../feed.ts";
+  import { theme } from "../theme.svelte.ts";
   import { call } from "../client.ts";
   import { decodeEvent } from "../event.ts";
   import type { VisualSuperseded } from "../contract.gen.ts";
@@ -37,7 +38,7 @@
   let attempt = $state(0);
   let loaded = 0;
   let lastSubmit = 0, lastOpen = 0;
-  let url = $derived(`/v1/files/visual/${encodeURIComponent(current.event.id)}`);
+  let url = $derived(`/v1/files/visual/${encodeURIComponent(current.event.id)}?theme=${theme().mode}`);
   let recipient = $state<string>();
   $effect(() => {
     const id = current.visual.id;
@@ -172,8 +173,7 @@
   .older { padding: 8px 16px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
   .older button { color: var(--focus); }
   .stage { flex: 1; min-height: 0; display: flex; overflow: hidden; background: var(--bg); }
-  /* A dark inherited scheme makes Chromium paint the iframe canvas white. */
-  iframe { display:block; width:100%; height:100%; border:0; color-scheme:normal; }
+  iframe { display:block; width:100%; height:100%; border:0; color-scheme:inherit; }
   .failure { margin: auto; color: var(--muted); font-size: 13px; }
   .failure button { text-decoration: underline; }
   .confirm { flex: none; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--raised); }
