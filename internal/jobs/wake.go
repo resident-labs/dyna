@@ -2,13 +2,16 @@ package jobs
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"os/exec"
 	"slices"
 	"syscall"
 	"time"
 
+	"dyna-agent/internal/hub"
 	"dyna-agent/internal/machines"
+	"dyna-agent/internal/state"
 )
 
 const wakeFreshness = 30 * time.Second
@@ -21,9 +24,18 @@ func (s *Service) wakeDemand(ctx context.Context, queued []Job) {
 	if err != nil {
 		return
 	}
-	_, err = db.ExecContext(ctx, `UPDATE node_wake_leases SET ready_ms=0 WHERE ready_ms<>0 AND NOT EXISTS (SELECT 1 FROM machines m WHERE m.id=node_wake_leases.node_id AND (EXISTS (SELECT 1 FROM jobs j WHERE j.node=m.name AND j.state='queued' AND j.cancel_requested=0) OR EXISTS (SELECT 1 FROM admissions a WHERE a.node=m.name AND a.state='waiting')))`)
-	if err != nil {
+	const idle = `ready_ms<>0 AND NOT EXISTS (SELECT 1 FROM machines m WHERE m.id=node_wake_leases.node_id AND (EXISTS (SELECT 1 FROM jobs j WHERE j.node=m.name AND j.state='queued' AND j.cancel_requested=0) OR EXISTS (SELECT 1 FROM admissions a WHERE a.node=m.name AND a.state='waiting')))`
+	var needsReset bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM node_wake_leases WHERE `+idle+`)`).Scan(&needsReset); err != nil {
 		return
+	}
+	if needsReset {
+		if err := state.For(db).Write(ctx, hub.Event{Topic: AdmissionTopic}, func(conn *sql.Conn) error {
+			_, err := conn.ExecContext(ctx, `UPDATE node_wake_leases SET ready_ms=0 WHERE `+idle)
+			return err
+		}); err != nil {
+			return
+		}
 	}
 	nodes, err := a.waitingNodes(ctx)
 	if err != nil {
@@ -92,17 +104,26 @@ func (s *Service) wakeNode(ctx context.Context, original machines.Machine) {
 		return
 	}
 	now := time.Now().UnixMilli()
-	result, err := db.ExecContext(ctx, `INSERT INTO node_wake_leases(node_id,lease_until,next_wake,ready_ms) VALUES(?,?,0,0)
-		ON CONFLICT(node_id) DO UPDATE SET lease_until=excluded.lease_until WHERE lease_until<=?`,
-		original.ID, now+90000, now)
-	if err != nil {
-		return
-	}
-	n, err := result.RowsAffected()
+	var n int64
+	err = state.For(db).Write(ctx, hub.Event{Topic: AdmissionTopic}, func(conn *sql.Conn) error {
+		result, err := conn.ExecContext(ctx, `INSERT INTO node_wake_leases(node_id,lease_until,next_wake,ready_ms) VALUES(?,?,0,0)
+			ON CONFLICT(node_id) DO UPDATE SET lease_until=excluded.lease_until WHERE lease_until<=?`, original.ID, now+90000, now)
+		if err != nil {
+			return err
+		}
+		n, err = result.RowsAffected()
+		return err
+	})
 	if err != nil || n != 1 {
 		return
 	}
-	defer db.ExecContext(context.Background(), `UPDATE node_wake_leases SET lease_until=0 WHERE node_id=? AND lease_until=?`, original.ID, now+90000)
+	defer func() {
+		cleanup := context.Background()
+		_ = state.For(db).Write(cleanup, hub.Event{Topic: AdmissionTopic}, func(conn *sql.Conn) error {
+			_, err := conn.ExecContext(cleanup, `UPDATE node_wake_leases SET lease_until=0 WHERE node_id=? AND lease_until=?`, original.ID, now+90000)
+			return err
+		})
+	}()
 
 	m, err := s.admission().machines().Get(ctx, original.Name)
 	if err != nil || m.ID != original.ID || !m.Enabled || !slices.Equal(m.WakeCommand, original.WakeCommand) || s.wakeDemandSince(ctx, m).IsZero() {
@@ -139,7 +160,10 @@ func (s *Service) wakeNode(ctx context.Context, original machines.Machine) {
 		}
 		stop()
 		if runErr != nil {
-			_, _ = db.ExecContext(ctx, `UPDATE node_wake_leases SET next_wake=? WHERE node_id=? AND lease_until=?`, time.Now().Add(time.Minute).UnixMilli(), m.ID, now+90000)
+			_ = state.For(db).Write(ctx, hub.Event{Topic: AdmissionTopic}, func(conn *sql.Conn) error {
+				_, err := conn.ExecContext(ctx, `UPDATE node_wake_leases SET next_wake=? WHERE node_id=? AND lease_until=?`, time.Now().Add(time.Minute).UnixMilli(), m.ID, now+90000)
+				return err
+			})
 			return
 		}
 		m, err = s.admission().machines().Get(ctx, original.Name)
@@ -147,7 +171,10 @@ func (s *Service) wakeNode(ctx context.Context, original machines.Machine) {
 			return
 		}
 		ready = time.Now().UnixMilli() + 1
-		if _, err := db.ExecContext(ctx, `UPDATE node_wake_leases SET ready_ms=?,next_wake=0 WHERE node_id=? AND lease_until=?`, ready, m.ID, now+90000); err != nil {
+		if err := state.For(db).Write(ctx, hub.Event{Topic: AdmissionTopic}, func(conn *sql.Conn) error {
+			_, err := conn.ExecContext(ctx, `UPDATE node_wake_leases SET ready_ms=?,next_wake=0 WHERE node_id=? AND lease_until=?`, ready, m.ID, now+90000)
+			return err
+		}); err != nil {
 			return
 		}
 	}
