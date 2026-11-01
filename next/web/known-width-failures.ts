@@ -1,10 +1,30 @@
-export function staleWidthFailures(baseline: Readonly<Record<string, readonly number[]>>, seen: ReadonlySet<string>): string[] {
-  return Object.entries(baseline).flatMap(([route, widths]) => widths.map(width => `${route} ${width}`).filter(key => !seen.has(key)));
+export interface WidthFailure {
+  fixture: "full" | "empty";
+  route: string;
+  width: number;
+  element: string;
+  text: string;
+  occurrences?: number;
 }
 
-// Temporary baseline. Sweep PRs remove routes and widths as they fix them.
-export const knownWidthFailures: Readonly<Record<string, readonly number[]>> = {
-  "/r/:room": [768],
-  "/settings/devices": [390],
-  "/settings/profiles": [768, 920],
-};
+export function matchKnownFailure(baseline: readonly WidthFailure[], issue: WidthFailure): number {
+  return baseline.findIndex(item => item.fixture === issue.fixture && item.route === issue.route && item.width === issue.width &&
+    item.element === issue.element && item.text === issue.text);
+}
+
+export function staleWidthFailures(baseline: readonly WidthFailure[], seen: ReadonlySet<number>): WidthFailure[] {
+  return baseline.filter((_, index) => !seen.has(index));
+}
+
+// Temporary baseline. Sweep PRs remove each issue when they fix it.
+const profileElement = "div.table.svelte-1a3prwa";
+const emptyProfile = "TasteDiagnosticsIntelligenceThriftLimits fakeClaude Sonnet 5.5 · medium thinking Not rated  –––– No ";
+const fullProfile = "TasteDiagnosticsIntelligenceThriftLimits fakeClaude Sonnet 5.5 · medium thinking Taste 8 · Diagnosti";
+export const knownWidthFailures: readonly WidthFailure[] = [
+  { fixture: "empty", route: "/settings/profiles", width: 768, element: profileElement, text: emptyProfile },
+  { fixture: "empty", route: "/settings/profiles", width: 920, element: profileElement, text: emptyProfile },
+  { fixture: "full", route: "/settings/profiles", width: 768, element: profileElement, text: fullProfile },
+  { fixture: "full", route: "/settings/profiles", width: 920, element: profileElement, text: fullProfile },
+  { fixture: "full", route: "/settings/devices", width: 390, element: "span.line.svelte-11q8u0f", text: "Expires in 2 days · Seen 28 days ago · Read, operate" },
+  { fixture: "full", route: "/r/:room", width: 768, element: "span.title.svelte-1cx619", text: "asks for host access", occurrences: 2 },
+];
