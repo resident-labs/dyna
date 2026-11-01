@@ -31,3 +31,20 @@ func TestQuotaClearFencesInflightRead(t *testing.T) {
 		t.Fatal("stale usage changed the new account state")
 	}
 }
+
+func TestPassiveQuotaLeavesAccountStateUnknown(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"credentials":[{"id":"invented","auth_index":"index","provider":"kimi","state":"unknown"}]}`))
+	}))
+	defer server.Close()
+	q := (&Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}).Quotas("key", quotaStore(t), time.Now)
+	if _, err := q.Read(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := q.CachedUsage("account"); !ok {
+		t.Fatal("search cannot read passive usage")
+	}
+	if state := q.ObservedState("index"); state != CredentialUnknown {
+		t.Fatalf("state = %s", state)
+	}
+}

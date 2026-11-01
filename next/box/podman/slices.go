@@ -11,8 +11,31 @@ import (
 
 const pressureWindow = 60 * time.Second
 
+// diskScript prints the size of the filesystem at $1 and its use, which is size minus available, so reserved space counts as used.
+// btrfs can run out of metadata with data space left, so under 2 GiB of metadata room nothing counts as available.
+// Metadata room is the free part of its chunks plus half of the unallocated space. Any unreadable file leaves the plain df figures.
+const diskScript = `addup() { cat "$@" 2>/dev/null | awk '{s += $1} END {printf "%.0f", s}'; return "${PIPESTATUS[0]}"; }
+if disk=$(df -B1 --output=size,avail "$1" 2>/dev/null); then
+  read -r size avail < <(echo "$disk" | awk 'NR == 2 {print $1, $2}')
+  if [ "$(findmnt -no FSTYPE --target "$1" 2>/dev/null | head -1)" = btrfs ]; then
+    sys=/sys/fs/btrfs/$(findmnt -no UUID --target "$1" 2>/dev/null | head -1)
+    if [ ! -r "$sys/allocation/metadata/total_bytes" ]; then
+      dev=$(readlink -f "$(findmnt -no SOURCE --target "$1" 2>/dev/null | head -1 | sed 's/\[.*//')")
+      for dir in /sys/fs/btrfs/*/devices/"${dev##*/}"; do [ -n "$dev" ] && sys=${dir%/devices/*}; done
+    fi
+    devs=("$sys"/devices/*)
+    if total=$(addup "$sys/allocation/metadata/total_bytes") && used=$(addup "$sys/allocation/metadata/bytes_used") && alloc=$(addup "$sys"/allocation/{data,metadata,system}/disk_total) && sectors=$(addup "${devs[@]/%//size}") && [ "$sectors" -gt 0 ]; then
+      unalloc=$((sectors * 512 - alloc))
+      [ "$unalloc" -gt 0 ] || unalloc=0
+      [ $((total - used + unalloc / 2)) -ge $((2 << 30)) ] || avail=0
+    fi
+  fi
+  [ -z "$size" ] || echo "dyna-disk $size $((size - avail))"
+fi
+`
+
 // heartbeatScript prints memory.events.local under dyna.slice. grep exits 1 when nothing matches, which is not a failure.
-const heartbeatScript = `disk=$(df -B1 --output=size,used "$1" 2>/dev/null) && echo "$disk" | awk 'NR == 2 {print "dyna-disk", $1, $2}'; cg=$(systemctl --user show dyna.slice -p ControlGroup --value) || exit 1; [ -n "$cg" ] || { echo dyna-load 0 0; exit 0; }; dir="/sys/fs/cgroup$cg"; mem=$(awk '$1 == "anon" || $1 == "shmem" {sum += $2; n++} END {if (n != 2) exit 1; printf "%.0f", sum}' "$dir/memory.stat") || exit 1; swap=$(cat "$dir/memory.swap.current") || exit 1; mem=$((mem + swap)); cpu=$(awk '$1 == "usage_usec" {print $2}' "$dir/cpu.stat") || exit 1; [ -n "$cpu" ] || exit 1; echo "dyna-load $mem $cpu"; grep -r --include=memory.events.local . "$dir" || [ $? = 1 ]`
+const heartbeatScript = diskScript + `cg=$(systemctl --user show dyna.slice -p ControlGroup --value) || exit 1; [ -n "$cg" ] || { echo dyna-load 0 0; exit 0; }; dir="/sys/fs/cgroup$cg"; mem=$(awk '$1 == "anon" || $1 == "shmem" {sum += $2; n++} END {if (n != 2) exit 1; printf "%.0f", sum}' "$dir/memory.stat") || exit 1; swap=$(cat "$dir/memory.swap.current") || exit 1; mem=$((mem + swap)); cpu=$(awk '$1 == "usage_usec" {print $2}' "$dir/cpu.stat") || exit 1; [ -n "$cpu" ] || exit 1; echo "dyna-load $mem $cpu"; grep -r --include=memory.events.local . "$dir" || [ $? = 1 ]`
 
 type slicePressure struct {
 	prev      map[string]int64
