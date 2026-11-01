@@ -72,6 +72,8 @@ type Service interface {
 	AccountsImportOAuth(context.Context, contract.Principal, contract.AccountsImportOAuthRequest) (contract.AccountsImportOAuthResponse, *contract.Error)
 	AccountsSetKey(context.Context, contract.Principal, contract.AccountsSetKeyRequest) (contract.AccountsSetKeyResponse, *contract.Error)
 	AccountsQuota(context.Context, contract.Principal, contract.AccountsQuotaRequest) (contract.AccountsQuotaResponse, *contract.Error)
+	ProxyKey(context.Context, contract.Principal, contract.ProxyKeyRequest) (contract.ProxyKeyResponse, *contract.Error)
+	ProxyUsage(context.Context, contract.Principal, contract.ProxyUsageRequest) (contract.ProxyUsageResponse, *contract.Error)
 	RoomCreate(context.Context, contract.Principal, contract.RoomCreateRequest) (contract.RoomCreateResponse, *contract.Error)
 	RoomDelete(context.Context, contract.Principal, contract.RoomDeleteRequest) (contract.RoomDeleteResponse, *contract.Error)
 	HostSetLimits(context.Context, contract.Principal, contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, *contract.Error)
