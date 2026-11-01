@@ -25,6 +25,9 @@ func (r *fakeRunner) Run(_ context.Context, _ []string, args ...string) ([]byte,
 			return nil, errors.New("git failed")
 		}
 	}
+	if args[0] == "clone" {
+		return nil, os.MkdirAll(args[len(args)-1], 0700)
+	}
 	if args[0] == "ls-remote" {
 		return []byte(r.remote), nil
 	}
