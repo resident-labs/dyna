@@ -69,7 +69,7 @@
         <div class="row">
           <div class="identity"><strong title={profile.name}>{profile.name}</strong><span>{slugName(profile.model)} · {thinking[profile.thinking]}</span></div>
           {#if unrated(profile)}
-            <span class="unrated">Not rated · <button type="button" onclick={() => { close(); editing = profile.name; }}>Rate</button></span>
+            <span class="unrated">Not rated · <button type="button" aria-label={`Rate ${profile.name}`} onclick={() => { close(); editing = profile.name; }}>Rate</button></span>
           {:else}
             {#each ([["Taste", profile.taste], ["Diagnostics", profile.diagnostics], ["Intelligence", profile.intelligence], ["Thrift", profile.cost]] as const) as [label, value]}
               <span class="number"><span class="rating-label">{label} </span>{rating(value)}</span>
