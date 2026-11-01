@@ -178,6 +178,7 @@ func Run(ctx context.Context, cfg Config) error {
 	service.SetLayout(layout)
 	service.SetMaxDepth(cfg.SessionMaxDepth)
 	service.Reconciler().SetHostMemory(boxes.hostMemory)
+	service.Reconciler().SetHostRestoring(boxes.restoring)
 	service.Reconciler().SetRoomHosts(boxes)
 	service.SetGitIdentity(cfg.GitName, cfg.GitEmail)
 	service.SetHostexecRunner(boxes)
@@ -325,6 +326,7 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := boxes.Restore(ctx); err != nil {
 		return err
 	}
+	defer boxes.WaitRecovered()
 
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()

@@ -180,7 +180,7 @@ func TestResumeRepairsInstructionsBeforeStarting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := &Boxes{Store: instructionStore{}, Layout: box.Layout{Data: data, HostData: remote}, hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}}
+	b := &Boxes{Store: instructionStore{}, Layout: box.Layout{Data: data, HostData: remote}, hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}}
 	if err := b.Start(ctx, "box"); err == nil {
 		t.Fatal("started with offline host")
 	}
@@ -293,7 +293,7 @@ func TestSaveThenResumeRepairsBeforeDelayedPublish(t *testing.T) {
 	}
 	delayed := delayedInstructionStore{entered: make(chan struct{}), release: make(chan struct{})}
 	defer close(delayed.release)
-	b := &Boxes{Store: delayed, Layout: box.Layout{Data: data, HostData: remote}, hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}}
+	b := &Boxes{Store: delayed, Layout: box.Layout{Data: data, HostData: remote}, hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}}
 	if err := b.syncInstructions(ctx, host); err != nil {
 		t.Fatal(err)
 	}
