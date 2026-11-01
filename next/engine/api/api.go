@@ -179,6 +179,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodRoomCreate, c, a.service.RoomCreate)
 	call(mux, contract.MethodRoomRepoAdd, c, a.service.RoomRepoAdd)
 	call(mux, contract.MethodRoomRepos, c, a.service.RoomRepos)
+	call(mux, contract.MethodRepoCISet, c, a.service.RepoCISet)
 	call(mux, contract.MethodSessionStart, c, a.service.SessionStart)
 	call(mux, contract.MethodSessionMove, c, a.service.SessionMove)
 	call(mux, contract.MethodSessionClose, c, a.service.SessionClose)
