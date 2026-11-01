@@ -333,6 +333,12 @@ func Run(ctx context.Context, cfg Config) error {
 		<-reconcilerDone
 		service.Reconciler().Wait()
 	}()
+	buildDone := make(chan struct{})
+	go func() {
+		defer close(buildDone)
+		boxes.BuildAhead(ctx)
+	}()
+	defer func() { <-buildDone }()
 	archiveDone := make(chan struct{})
 	go func() {
 		defer close(archiveDone)
