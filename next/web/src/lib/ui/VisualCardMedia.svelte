@@ -1,16 +1,16 @@
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { untrack } from "svelte";
   import { cardMessage, visualReplyFailure, type VisualVersion } from "../visual.ts";
   import Icon from "./Icon.svelte";
-  import { formatTime } from "../feed.ts";
   import { theme } from "../theme.svelte.ts";
+  import { formatTime } from "../feed.ts";
   import { call } from "../client.ts";
   import { decodeEvent } from "../event.ts";
   import type { VisualSuperseded } from "../contract.gen.ts";
 
-  let { versions, selected, room, roomName, overlay, names, send, onclose }: {
-    versions: VisualVersion[]; selected: number; room: string; roomName: string; overlay: boolean; names: Map<string, string>;
-    send: (text: string, event: string) => Promise<void>; onclose: () => void;
+  let { versions, selected, room, send }: {
+    versions: VisualVersion[]; selected: number; room: string;
+    send: (text: string, event: string) => Promise<void>;
   } = $props();
   let version = $state(untrack(() => selected));
   let extra = $state<VisualVersion[]>([]);
@@ -23,10 +23,7 @@
   let anchor: HTMLElement;
   function closeMenu() { menu = false; menuButton?.focus(); }
   function outside(event: PointerEvent) { if (menu && event.target instanceof Node && !anchor.contains(event.target)) closeMenu(); }
-  function author(item: VisualVersion) { return item.event.from.session ? names.get(item.event.from.session) ?? item.event.from.session : item.event.from.kind === "owner" ? "You" : "Dyna"; }
   let frame = $state<HTMLIFrameElement>();
-  let panel: HTMLElement;
-  onMount(() => panel.focus());
   let pending = $state<string | null>(null);
   let loading = $state(true);
   let failed = $state(false);
@@ -117,19 +114,16 @@
 </script>
 
 <svelte:window onmessage={message} onpointerdown={outside} onblur={() => { menu = false; }} />
-<section class="viewer" aria-label="Visual card" tabindex="-1" bind:this={panel} onkeydown={event => { if (event.key === "Escape") { if (menu) { event.stopPropagation(); closeMenu(); } else onclose(); } }}>
+<section class="viewer" aria-label="Visual card" onkeydown={event => { if (event.key === "Escape" && menu) { event.stopPropagation(); event.preventDefault(); closeMenu(); } }}>
   <header>
-    {#if overlay}<button class="back" type="button" onclick={onclose}>‹ {roomName}</button>{/if}
     <strong title={current.visual.title}>{current.visual.title}</strong>
     <div class="anchor" bind:this={anchor}>
       {#if allVersions.length > 1}<button class="version" class:active={menu} bind:this={menuButton} type="button" aria-haspopup="menu" aria-expanded={menu} onclick={() => menu = !menu}>v{version} ⌄</button>
       {:else}<span class="version">v{version}</span>{/if}
-      {#if menu}<div class="popover versions" role="menu">{#each allVersions as item (item.event.id)}<button type="button" role="menuitem" aria-current={item.visual.version === version ? "true" : undefined} onclick={() => { pick(item.visual.version); menuButton?.focus(); }}><span class="pill">v{item.visual.version}</span><span class="version-meta">{author(item)} · {formatTime(item.event.at)}<small>{item.event.body.text.split(/\r?\n/)[0]}</small></span></button>{/each}</div>{/if}
+      {#if menu}<div class="popover versions" role="menu">{#each allVersions as item (item.event.id)}<button type="button" role="menuitem" aria-current={item.visual.version === version ? "true" : undefined} onclick={() => { pick(item.visual.version); menuButton?.focus(); }}><span class="pill">v{item.visual.version}</span><span class="version-meta">{formatTime(item.event.at)}<small>{item.event.body.text.split(/\r?\n/)[0]}</small></span></button>{/each}</div>{/if}
     </div>
-    <span class="byline">{author(current)} · {formatTime(current.event.at)}</span>
     <span class="spacer"></span>
     <a class="icon" href={url} target="_blank" rel="noopener noreferrer" title="Open in a new tab" aria-label="Open in a new tab"><Icon name="external" /></a>
-    {#if !overlay}<button class="icon" type="button" title="Close" aria-label="Close" onclick={onclose}><Icon name="close" /></button>{/if}
   </header>
   {#if superseded}<div class="older" role="alert">This card has a newer version. <button type="button" onclick={openNew}>Open v{superseded.version}</button>{#if openFailed} The version did not open. Try again.{/if}</div>
   {:else if older}<div class="older">A newer loaded version is available. <button type="button" onclick={() => pick(latest.visual.version)}>Show v{latest.visual.version}</button></div>{/if}
@@ -158,7 +152,6 @@
   button:hover, a:hover { background:var(--hover); color:var(--text); }
   .icon { display:grid; place-items:center; flex:none; width:32px; height:32px; padding:0; border-radius:6px; text-decoration:none; }
   .back { flex:none; white-space:nowrap; }
-  .byline { color:var(--muted); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .spacer { flex:1; }
   .anchor { position:relative; flex:none; }
   .version { color:var(--muted); font-size:12px; white-space:nowrap; }
@@ -184,5 +177,5 @@
   .confirm .send { border-color: var(--focus); background: var(--focus); color: var(--bg); font-weight: 600; }
   .confirm .send:hover:enabled { background: color-mix(in srgb, var(--focus) 88%, var(--text)); }
   .confirm button:disabled { opacity: .5; cursor: default; }
-  @media (max-width:640px) { .icon { width:44px; height:44px; } .back, button.version, .versions button { min-height:44px; } .byline { display:none; } .anchor { position:static; } .popover { top:52px; left:12px; right:12px; min-width:0; } }
+  @media (max-width:640px) { .icon { width:44px; height:44px; } .back, button.version, .versions button { min-height:44px; } .anchor { position:static; } .popover { top:52px; left:12px; right:12px; min-width:0; } }
 </style>
