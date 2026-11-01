@@ -136,7 +136,7 @@ func (a *API) handler(c Caller) http.Handler {
 				return contract.OpSubmitResponse{}, forbidden()
 			}
 		}
-		if req.Operation.Kind == "hostexec.run" {
+		if req.Operation.Kind == (contract.HostexecRunArgs{}).OpKind() {
 			return contract.OpSubmitResponse{}, forbidden()
 		}
 		if box(c) {
