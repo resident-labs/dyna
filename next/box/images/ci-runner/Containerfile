@@ -1,0 +1,34 @@
+# One ephemeral GitHub Actions runner. See next/docs/ci-runners.md.
+# Ubuntu 24.04 matches ubuntu-latest, so a job behaves the same on either side.
+FROM docker.io/library/ubuntu:24.04@sha256:78d4744ead1f5b19b04d0df558ab182a5300903900755e515b2ca4d10eb2044d
+
+ARG RUNNER_VERSION=2.338.2
+ARG RUNNER_SHA256=baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40
+
+# apt's sandbox user needs GID 65534, which a host with a short subuid range does not map.
+RUN echo 'APT::Sandbox::User "root";' > /etc/apt/apt.conf.d/10dyna \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    bash build-essential ca-certificates curl file git git-lfs jq libicu74 libkrb5-3 liblttng-ust1t64 libssl3t64 \
+    openssh-client openssh-server procps python3 shellcheck socat tar tini unzip xz-utils zip zlib1g zstd \
+    && rm -rf /var/lib/apt/lists/*
+
+# A locked password, not an empty one: sshd in a job accepts keys only for an unlocked account.
+RUN groupadd -g 1001 runner && useradd -u 1001 -g 1001 -d /home/runner -M -p '*' -s /bin/bash runner \
+    && mkdir -p /home/runner /run/sshd /run/dyna-egress /opt/actions-runner \
+    && chown runner:runner /home/runner /run/dyna-egress \
+    && curl -fsSL -o /tmp/runner.tgz "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz" \
+    && echo "${RUNNER_SHA256}  /tmp/runner.tgz" | sha256sum -c - \
+    && tar -xzf /tmp/runner.tgz -C /opt/actions-runner --no-same-owner \
+    && rm /tmp/runner.tgz
+
+COPY entrypoint.sh job-started.sh /opt/dyna-ci/
+RUN chmod 0555 /opt/dyna-ci/entrypoint.sh /opt/dyna-ci/job-started.sh
+
+ENV HOME=/home/runner \
+    ACTIONS_RUNNER_HOOK_JOB_STARTED=/opt/dyna-ci/job-started.sh \
+    NODE_USE_ENV_PROXY=1 NODE_NO_WARNINGS=1 \
+    https_proxy=http://127.0.0.1:3128 HTTPS_PROXY=http://127.0.0.1:3128 \
+    no_proxy=localhost,127.0.0.1,::1 NO_PROXY=localhost,127.0.0.1,::1
+USER 1001:1001
+WORKDIR /home/runner
+ENTRYPOINT ["/usr/bin/tini", "--", "/opt/dyna-ci/entrypoint.sh"]

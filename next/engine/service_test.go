@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -21,6 +20,7 @@ import (
 
 func resetLifecycle(s *Service) {
 	s.reconciler = lifecycle.New(s.store, s.boxes, s, s.repos, s.event, func() time.Time { return s.now() })
+	s.reconciler.SetRoomData(s)
 }
 
 func passLifecycle(t *testing.T, s *Service, ctx context.Context) {
@@ -244,6 +244,52 @@ func TestParentCloseWaitsForChildSessionAfterBoxDeletion(t *testing.T) {
 		t.Fatalf("parent remains open: %v", err)
 	}
 }
+func TestRepoCISetValidates(t *testing.T) {
+	s, room, _, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	if _, e := s.RoomRepoAdd(ctx, owner, contract.RoomRepoAddRequest{Room: room, Repo: "a/b"}); e != nil {
+		t.Fatal(e)
+	}
+	if err := s.store.AddHost(ctx, box.Host{Name: "other", SSH: "user@other", State: box.HostReady}); err != nil {
+		t.Fatal(err)
+	}
+	hosts, err := s.store.Hosts(ctx)
+	if err != nil || len(hosts) < 2 {
+		t.Fatalf("%+v %v", hosts, err)
+	}
+	host := func(name contract.HostName, runners int, size contract.BoxSizeName) contract.RepoCIHost {
+		return contract.RepoCIHost{Repo: "a/b", Host: name, Runners: runners, Size: size}
+	}
+	for name, req := range map[string]contract.RepoCISetRequest{
+		"bad mode":       {Repo: "a/b", Mode: "cloud"},
+		"box, no hosts":  {Repo: "a/b", Mode: contract.CIBox},
+		"github, hosts":  {Repo: "a/b", Mode: contract.CIGitHub, Hosts: []contract.RepoCIHost{host("other", 1, contract.BoxSizeLarge)}},
+		"unknown host":   {Repo: "a/b", Mode: contract.CIBox, Hosts: []contract.RepoCIHost{host("nope", 1, contract.BoxSizeLarge)}},
+		"no runners":     {Repo: "a/b", Mode: contract.CIBox, Hosts: []contract.RepoCIHost{host("other", 0, contract.BoxSizeLarge)}},
+		"bad size":       {Repo: "a/b", Mode: contract.CIBox, Hosts: []contract.RepoCIHost{host("other", 1, "huge")}},
+		"host twice":     {Repo: "a/b", Mode: contract.CIBox, Hosts: []contract.RepoCIHost{host("other", 1, contract.BoxSizeLarge), host("other", 2, contract.BoxSizeLarge)}},
+		"two sizes":      {Repo: "a/b", Mode: contract.CIBox, Hosts: []contract.RepoCIHost{host("other", 1, contract.BoxSizeLarge), host(hosts[0].Name, 1, contract.BoxSizeSmall)}},
+		"unknown repo":   {Repo: "x/y", Mode: contract.CIBox, Hosts: []contract.RepoCIHost{{Repo: "x/y", Host: "other", Runners: 1, Size: contract.BoxSizeLarge}}},
+		"row of another": {Repo: "a/b", Mode: contract.CIBox, Hosts: []contract.RepoCIHost{{Repo: "x/y", Host: "other", Runners: 1, Size: contract.BoxSizeLarge}}},
+	} {
+		if _, e := s.RepoCISet(ctx, owner, req); e == nil || e.Code != contract.ErrInvalid {
+			t.Errorf("%s: %v", name, e)
+		}
+	}
+	if _, e := s.RepoCISet(ctx, owner, contract.RepoCISetRequest{Repo: "a/b", Mode: contract.CIBox, Hosts: []contract.RepoCIHost{host("other", 2, contract.BoxSizeLarge)}}); e != nil {
+		t.Fatal(e)
+	}
+	if rows, err := s.store.CIHosts(ctx); err != nil || len(rows) != 1 || rows[0].Room != room {
+		t.Fatalf("%+v %v", rows, err)
+	}
+	if _, e := s.RepoCISet(ctx, owner, contract.RepoCISetRequest{Repo: "a/b", Mode: contract.CIGitHub}); e != nil {
+		t.Fatal(e)
+	}
+	if rows, err := s.store.CIHosts(ctx); err != nil || len(rows) != 0 {
+		t.Fatalf("%+v %v", rows, err)
+	}
+}
+
 func TestRoomRepoAPI(t *testing.T) {
 	s, room, _, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
@@ -1258,7 +1304,7 @@ func TestShellJobEndWakesOnceAndSteersARunningTurn(t *testing.T) {
 
 func TestPostRejectsMissingAttachment(t *testing.T) {
 	s, room, _, ctx := setup(t)
-	s.SetFilesDir(t.TempDir())
+	s.SetLayout(box.Layout{Data: t.TempDir()})
 	_, e := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{
 		Room: room, Text: "hello", Attachments: []contract.Attachment{{Name: "missing", Media: "text/plain", SHA256: "0000000000000000000000000000000000000000000000000000000000000000"}},
 	})
@@ -1269,10 +1315,12 @@ func TestPostRejectsMissingAttachment(t *testing.T) {
 
 func TestPostNeedsTextOrFile(t *testing.T) {
 	s, room, _, ctx := setup(t)
-	dir := t.TempDir()
-	s.SetFilesDir(dir)
+	s.SetLayout(box.Layout{Data: t.TempDir()})
 	hash := "0000000000000000000000000000000000000000000000000000000000000000"
-	if err := os.WriteFile(filepath.Join(dir, hash), []byte("notes"), 0o600); err != nil {
+	if err := os.MkdirAll(s.layout.Files(room), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(s.layout.File(room, hash), []byte("notes"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	owner := contract.Principal{Kind: contract.PrincipalOwner}

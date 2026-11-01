@@ -169,6 +169,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodAccountsList, c, a.service.AccountsList)
 	call(mux, contract.MethodAccountsSetLimits, c, a.service.AccountsSetLimits)
 	call(mux, contract.MethodAccountsRemove, c, a.service.AccountsRemove)
+	call(mux, contract.MethodAccountsRename, c, a.service.AccountsRename)
 	call(mux, contract.MethodAccountsConnect, c, a.service.AccountsConnect)
 	call(mux, contract.MethodAccountsReconnect, c, a.service.AccountsReconnect)
 	call(mux, contract.MethodAccountsConnectCallback, c, a.service.AccountsConnectCallback)
@@ -177,8 +178,11 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodAccountsImportOAuth, c, a.service.AccountsImportOAuth)
 	call(mux, contract.MethodAccountsQuota, c, a.service.AccountsQuota)
 	call(mux, contract.MethodRoomCreate, c, a.service.RoomCreate)
+	call(mux, contract.MethodRoomDelete, c, a.service.RoomDelete)
+	call(mux, contract.MethodHostSetLimits, c, a.service.HostSetLimits)
 	call(mux, contract.MethodRoomRepoAdd, c, a.service.RoomRepoAdd)
 	call(mux, contract.MethodRoomRepos, c, a.service.RoomRepos)
+	call(mux, contract.MethodRepoCISet, c, a.service.RepoCISet)
 	call(mux, contract.MethodSessionStart, c, a.service.SessionStart)
 	call(mux, contract.MethodSessionMove, c, a.service.SessionMove)
 	call(mux, contract.MethodSessionClose, c, a.service.SessionClose)
@@ -576,7 +580,7 @@ func writeError(w http.ResponseWriter, err *contract.Error) {
 		status = http.StatusForbidden
 	case contract.ErrNotFound:
 		status = http.StatusNotFound
-	case contract.ErrConflict, contract.ErrProfileExists, contract.ErrStale, contract.ErrVisualSuperseded, contract.ErrMoveBusy, contract.ErrHasChildren, contract.ErrParentClosing, contract.ErrSessionClosing:
+	case contract.ErrConflict, contract.ErrRoomLimited, contract.ErrProfileExists, contract.ErrStale, contract.ErrVisualSuperseded, contract.ErrMoveBusy, contract.ErrHasChildren, contract.ErrParentClosing, contract.ErrSessionClosing:
 		status = http.StatusConflict
 	case contract.ErrUnavailable, contract.ErrReconnectUnavailable:
 		status = http.StatusServiceUnavailable
