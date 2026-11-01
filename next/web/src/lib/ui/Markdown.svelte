@@ -44,7 +44,7 @@
   .markdown :global(pre) { padding: 8px 12px; border-radius: 6px; background: var(--sidebar); white-space: pre-wrap; overflow-wrap: anywhere; font: 12.5px/1.45 var(--mono); }
   /* A table is capped at the text width. Its cells wrap, and only a table that still cannot fit scrolls in its own block. */
   .markdown :global(table) { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
-  .markdown :global(:is(th, td)) { padding: 6px 12px; text-align: left; overflow-wrap: anywhere; }
+  .markdown :global(:is(th, td)) { padding: 6px 12px; text-align: left; overflow-wrap: normal; }
   .markdown :global(th) { font-weight: 600; border-bottom: 1px solid var(--line); }
   .markdown :global(tr + tr > :is(th, td)) { border-top: 1px solid var(--line); }
   .markdown :global(code) { font: 13px var(--mono); font-variant-ligatures: none; }
