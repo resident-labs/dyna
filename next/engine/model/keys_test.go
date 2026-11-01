@@ -19,6 +19,19 @@ func (f failingAccountCleanup) RemoveAccount(context.Context, contract.AccountID
 	return errors.New("invented store failure")
 }
 
+// The general endpoint spends account balance instead of Coding Plan quota.
+func TestZAIUsesCodingEndpoint(t *testing.T) {
+	for _, provider := range KeyProviders() {
+		if provider.Provider == contract.ProviderZAI {
+			if provider.URL != "https://api.z.ai/api/coding/paas/v4" {
+				t.Fatalf("z.ai URL = %s", provider.URL)
+			}
+			return
+		}
+	}
+	t.Fatal("z.ai is not in the catalog")
+}
+
 func TestKeyActivationFailureRollbackIsRecoverable(t *testing.T) {
 	st, err := store.Open(t.TempDir())
 	if err != nil {

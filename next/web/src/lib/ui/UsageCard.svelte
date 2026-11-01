@@ -1,26 +1,26 @@
 <script lang="ts">
-  import type { AccountUsage } from "../contract.gen.ts";
-  import { causeText, providerName, visibleWindows, windowMeter } from "../usage.ts";
+  import { limitReached, windowMeter, type UsageRow } from "../usage.ts";
   import MeterTile from "./MeterTile.svelte";
   import StatusPill from "./StatusPill.svelte";
-  // One model account on Home, in the machine cards' style: the provider name (never the label, which can be an email), then a tile per usage window. A cause
-  // shows its pill and what to do; an account without windows says so.
-  let { account, now }: { account: AccountUsage; now: number } = $props();
-  let windows = $derived(visibleWindows(account.windows ?? []));
+  // One model account on Home, in the machine cards' style: its label, the provider's name when that adds to it, then a
+  // tile per usage window. A spent window marks the whole card, since the account takes no more work until it resets.
+  let { row, now }: { row: UsageRow; now: number } = $props();
+  let spent = $derived(row.windows.some(w => limitReached(w, now)));
 </script>
 
-<section class="card" aria-label={providerName(account.provider)}>
-  <h3>{providerName(account.provider)}</h3>
-  {#if account.cause}{#if causeText[account.cause].tone}<p><StatusPill tone="warning" label={causeText[account.cause].pill} /></p>{:else}<p class="aside">{causeText[account.cause].pill}</p>{/if}
-    <p class="aside">{causeText[account.cause].line}</p>
-  {:else if windows.length}<div class="tiles">{#each windows as w (w.name)}<MeterTile meter={windowMeter(w, now)} />{/each}</div>
-  {:else}<p class="aside">No usage limits reported.</p>{/if}
+<section class="card" aria-label={row.title}>
+  <h3><span class="name">{row.title}</span>
+    {#if row.provider}<span class="provider">{row.provider}</span>{/if}
+    {#if spent}<span class="aside"><StatusPill tone="warning" label="Limit reached" /></span>{/if}</h3>
+  <div class="tiles">{#each row.windows as w (w.name)}<MeterTile meter={windowMeter(w, now)} />{/each}</div>
 </section>
 
 <style>
-  /* Keep each reset time readable when a card has several model-specific windows. */
-  @container (max-width: 400px) {
-    .card .tiles { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .tiles :global(.tile:only-child) { grid-column: 1 / -1; }
-  }
+  /* A long label wraps, in full, and the provider and the pill take the next line. */
+  .card h3 { flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
+  .name { min-width: 0; overflow-wrap: anywhere; }
+  .provider { color: var(--muted); font-size: 12.5px; font-weight: 400; }
+  /* One column grid for every card, so a card of one window keeps a tile of the same width and bars compare across
+     cards. 150 px keeps a reset time readable; several model-specific windows wrap. */
+  .card .tiles { grid-auto-flow: row; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 </style>
