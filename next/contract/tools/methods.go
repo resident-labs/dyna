@@ -50,6 +50,7 @@ var methodTable = []MethodEntry{
 		act("host", "add", typ[contract.HostAddRequest](), "Add a host", "host add"),
 	),
 	method(contract.MethodHostList, contract.ScopeRead, OwnerAccess),
+	method(contract.MethodHostexecList, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodHostexecRevoke, contract.ScopeAdmin, OwnerAccess,
 		act("hostexec", "revoke", typ[contract.HostexecRevokeRequest](), "Revoke a host grant", "hostexec revoke"),
 	),
