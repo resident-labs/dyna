@@ -49,7 +49,7 @@
   <header class="section-head"><strong>{title}</strong>{#if count !== undefined}<span>{count}</span>{/if}{#if title === "Ways in"}<span>Browsers try them in order and check that each one reaches the Dyna host.</span>{/if}{@render action?.()}</header>
 {/snippet}
 {@render bar("Sharing & access", undefined, undefined)}
-<div class="scroll">
+<div class="scroll" data-page-ready={(!!status || !!problem) && (!!devices || failed)}>
   <section class="ways">
     {@render sectionBar("Ways in")}
     <div class="ways-body">
