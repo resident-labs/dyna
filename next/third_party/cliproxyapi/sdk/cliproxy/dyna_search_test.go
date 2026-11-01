@@ -53,6 +53,28 @@ func TestDynaSearchZai(t *testing.T) {
 	}
 }
 
+func TestDynaSearchRefusal(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"error":{"message":"Plan unavailable for secret-value.\nTry another plan."}}`)
+	}))
+	defer server.Close()
+	old := kimiClient
+	kimiClient = &http.Client{Transport: searchTransport{strings.TrimPrefix(server.URL, "http://")}}
+	defer func() { kimiClient = old }()
+	manager := coreauth.NewManager(nil, nil, nil)
+	// SDK credential metadata has an open provider-specific shape.
+	_, err := manager.Register(context.Background(), &coreauth.Auth{ID: "allowed", Provider: "kimi", Status: coreauth.StatusActive, Metadata: map[string]any{"access_token": "secret-value"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := &Service{coreManager: manager}
+	_, err = service.DynaSearch(context.Background(), "kimi", "query", 1, []string{base64.RawURLEncoding.EncodeToString([]byte("allowed"))})
+	if err == nil || err.Error() != "kimi answered HTTP 403: Plan unavailable for [redacted]. Try another plan." {
+		t.Fatalf("unexpected refusal: %v", err)
+	}
+}
+
 func TestDynaSearchEligibilityAndRedaction(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer secret-value" {

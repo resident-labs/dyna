@@ -34,7 +34,7 @@ func proxySearchRoutes(router *gin.Engine, service **cliproxy.Service) {
 		if err != nil {
 			c.JSON(http.StatusBadGateway, struct {
 				Error string `json:"error"`
-			}{"search provider unavailable"})
+			}{err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, struct {
