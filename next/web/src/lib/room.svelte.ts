@@ -5,7 +5,7 @@ import { EventWindow } from "./window.svelte.ts";
 import { pendingReason, type PendingReason } from "./event.ts";
 import { boxFailures, countOf, failedJobs, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
 import { prKey } from "./feed.ts";
-import type { BoxState, Conversation, FailureCause, Decision, Event, OpRequested, OpResult, OpState, PrSummary, Question, SessionStarted } from "./contract.gen.ts";
+import type { BoxState, Conversation, FailureCause, Decision, Event, Goal, OpRequested, OpResult, OpState, PrSummary, Question, SessionStarted } from "./contract.gen.ts";
 import { failed } from "./jobs.ts";
 
 
@@ -53,6 +53,9 @@ export class RoomStore {
   readonly endedJobs = new SvelteSet<string>();
   // Sessions with a job to reach: their box keeps a finished job's output.
   readonly hadJobs = new SvelteSet<string>();
+  // Each session's active goals, oldest last, as goal.list last gave them. Any goal event reads them again.
+  readonly goals = new SvelteMap<string, Goal[]>();
+  private goalRead = 0;
   // op.list gives the pending operations; decided ones stay for the time the room is open.
   readonly requests = new SvelteMap<string, Request>();
   // question.list gives the waiting ones and the latest answered ones; the stream keeps them current.
@@ -140,6 +143,11 @@ export class RoomStore {
 
   // Each session's one status (status.ts): a request it made or its box waits for the owner, its failure is unseen or
   // its box failed, or a turn runs. The header, the panel and the counts read only these.
+  // A failed or lost box keeps its open turn for a restart to resume, but nothing is running it.
+  running(id: string): boolean {
+    const box = this.boxes.get(id);
+    return this.turns.has(id) && box !== "failed" && box !== "lost";
+  }
   status(id: string): Status { return this.statusWith(id, this.asking()); }
   statuses(): Map<string, Status> {
     const asking = this.asking();
@@ -204,6 +212,7 @@ export class RoomStore {
     // The feed position must be known before failed jobs are classified against it.
     await this.readFeed();
     this.head = list.seq;
+    void this.readGoals();
     for (const session of list.sessions ?? []) {
       this.sessions.set(session.id, {
         session: session.id, name: session.name, parent: session.parent || undefined,
@@ -233,6 +242,21 @@ export class RoomStore {
       this.requests.set(id, { id, kind, by, class: level, card, expires, state });
     }
     for (const question of asked.questions ?? []) this.questions.set(question.id, question);
+  }
+
+  private async readGoals(): Promise<void> {
+    const asked = ++this.goalRead;
+    const list = await call("goal.list", { room: this.room }).catch(() => undefined);
+    if (!list || asked !== this.goalRead) return;
+    this.goals.clear();
+    for (const goal of list.goals ?? []) if (goal.session) this.goals.set(goal.session, [...this.goals.get(goal.session) ?? [], goal]);
+  }
+
+  // session.list leaves out the open turn of a broken box, so a box that comes back reads it again.
+  private async readTurns(): Promise<void> {
+    const list = await call("session.list", { room: this.room }).catch(() => undefined);
+    if (!list || list.seq < this.head) return;
+    for (const session of list.sessions ?? []) if (session.turn) this.turns.set(session.id, session.turn);
   }
 
   close(): void { this.closed = true; this.stopStream(); }
@@ -274,11 +298,16 @@ export class RoomStore {
       case "session.started":
         this.sessions.set(event.body.session, { ...event.body, startedAt: event.at });
         this.names.set(event.body.session, event.body.name);
+        if (event.body.goal) void this.readGoals();
         break;
       case "session.closed":
         this.sessions.delete(event.body.session);
         this.activity.delete(event.body.session);
         this.steps.delete(event.body.session);
+        void this.readGoals(); // Its goals moved to its parent.
+        break;
+      case "goal.set": case "goal.item_changed": case "goal.ended":
+        void this.readGoals();
         break;
       case "session.profile_changed": {
         const changed = this.sessions.get(event.body.session);
@@ -302,6 +331,7 @@ export class RoomStore {
         else this.pendingReasons.delete(session);
         // A computer runs only inside a ready box.
         if (to !== "ready") this.computers.delete(session);
+        if (to === "ready" && !this.turns.has(session)) void this.readTurns();
         break;
       }
       case "pr.changed":

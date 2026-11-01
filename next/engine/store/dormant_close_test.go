@@ -13,6 +13,7 @@ const (
 	addChild     = "INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at) VALUES('c','r','c','s','p','open','',0)"
 	addDelivery  = `INSERT INTO events(id,room,at,from_kind,from_id,type,body) VALUES('e','r',0,'engine','','post.created',x'7b7d'); INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state) VALUES('session','s',last_insert_rowid(),'session','none','','','','',0,'pending')`
 	addOperation = "INSERT INTO operations(id,kind,room,by_kind,by_id,class,state,card,args,args_sha256,created_at,expires_at) VALUES('o','x','r','session','s','owner','pending',x'00',x'00',x'00',0,1)"
+	addGoal      = "INSERT INTO goals(room,number,session,text,done_when,state,created_at,updated_at) VALUES('r',1,'s','x','y','active',0,0)"
 	lowFrom      = 1000 // Host h has been low since before this, in the hosts table's milliseconds.
 	addTurn      = "INSERT INTO turns(id,session,started_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES('t','s',0,'','m',0,0,0,0)"
 )
@@ -32,6 +33,8 @@ func TestDormantCloseEligibility(t *testing.T) {
 		{"recent", "UPDATE boxes SET updated_at=999999999 WHERE session='s'", false},
 		{"child", addChild, false},
 		{"pr", addPR, false},
+		{"goal", addGoal, false},
+		{"ended goal", addGoal + "; UPDATE goals SET state='done'", true},
 		{"delivery", addDelivery, false},
 		{"not stopped", "UPDATE boxes SET state='ready' WHERE session='s'", false},
 		{"operation", addOperation, false},

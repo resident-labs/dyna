@@ -30,7 +30,7 @@ func TestSnapshotReplayAndCap(t *testing.T) {
 	if strings.Contains(hello.Instructions, "Use dyna post") || !strings.Contains(hello.Instructions, "context_update") {
 		t.Fatalf("enabled profile hello has the wrong guidance: %+v", hello)
 	}
-	for _, key := range []contract.ContextSectionKey{"dyna_goal", "invalid"} {
+	for _, key := range []contract.ContextSectionKey{"invalid"} {
 		if _, problem := s.ContextSnapshot(ctx, caller, contract.ContextSnapshotRequest{Section: key}); problem == nil || problem.Code != contract.ErrInvalid {
 			t.Fatalf("unavailable section %q: %v", key, problem)
 		}
@@ -41,7 +41,7 @@ func TestSnapshotReplayAndCap(t *testing.T) {
 		t.Fatal(problem)
 	}
 	start := (<-ch).Body.(contract.TurnStart)
-	if len(start.Sections) != 1 || !strings.Contains(start.Sections[0].Text, "before") {
+	if len(start.Sections) != 2 || start.Sections[0].Key != contract.ContextGoal || !strings.Contains(start.Sections[1].Text, "before") {
 		t.Fatalf("snapshot: %+v", start.Sections)
 	}
 	profiles.name = "after"

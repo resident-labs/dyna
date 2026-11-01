@@ -539,9 +539,12 @@ func TestOpenPRHoldsAQuietSessionAndAMergedOneDoesNot(t *testing.T) {
 	r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) { p.State = "MERGED" })
 	r.clock.add(11 * time.Minute)
 	r.pass(t)
-	// The session takes the wake and goes quiet again.
+	// The session takes the wake, finishes its goal, which would hold it too, and goes quiet again.
 	if err := r.s.store.Write(r.ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(r.ctx, "UPDATE deliveries SET state='done' WHERE to_id=?", r.child); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(r.ctx, "UPDATE goals SET state='done' WHERE session=?", r.child); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(r.ctx, "UPDATE boxes SET state='stopped',want='stop',updated_at=1 WHERE session=?", r.child)

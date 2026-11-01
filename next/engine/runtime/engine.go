@@ -385,7 +385,7 @@ func Run(ctx context.Context, cfg Config) error {
 		prPoll.Run(ctx, ticks.C)
 	}()
 	defer func() { <-prDone }()
-	lastDormant := time.Now()
+	lastDormant, lastCheckins := time.Now(), time.Now()
 	for {
 		select {
 		case <-ctx.Done():
@@ -398,6 +398,15 @@ func Run(ctx context.Context, cfg Config) error {
 					log.Printf("dormant close sweep: %v", err)
 				}
 				lastDormant = now
+			}
+			if err := service.FailureNotices(ctx); err != nil {
+				log.Printf("failure notices: %v", err)
+			}
+			if !now.Before(lastCheckins.Add(time.Minute)) {
+				if err := service.Checkins(ctx); err != nil {
+					log.Printf("check-in pass: %v", err)
+				}
+				lastCheckins = now
 			}
 			if err := service.EvictDisk(ctx); err != nil {
 				log.Printf("disk eviction: %v", err)
