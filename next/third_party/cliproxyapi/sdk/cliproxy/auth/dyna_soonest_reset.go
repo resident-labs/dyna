@@ -544,6 +544,9 @@ func (s *SoonestResetSelector) Pick(ctx context.Context, provider, model string,
 		return nil, err
 	}
 	available = preferCodexWebsocketAuths(ctx, provider, available)
+	if pinned := dynaPinnedAuth(ctx, available, model, now); pinned != nil {
+		return pinned, nil
+	}
 	board := soonestResetBoardFrom(ctx)
 	board.requestRefresh(available, now)
 	policy := soonestResetGates

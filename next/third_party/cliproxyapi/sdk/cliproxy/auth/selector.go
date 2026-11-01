@@ -1161,6 +1161,9 @@ func (s *SessionAffinitySelector) Pick(ctx context.Context, provider, model stri
 		return nil, err
 	}
 	fallbackAuths := highestPriorityAuths(available)
+	if pinned := dynaPinnedAuth(ctx, available, model, now); pinned != nil {
+		return pinned, nil
+	}
 
 	modelKey := canonicalModelKey(model)
 	cacheKey := provider + "::" + primaryID + "::" + modelKey
