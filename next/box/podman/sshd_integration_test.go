@@ -46,7 +46,7 @@ func TestRealSSHForwardReconnect(t *testing.T) {
 		}
 		t.Skip("ssh-keygen is not installed")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	dir, err := os.MkdirTemp("", "dyna-sshd-")
 	if err != nil {
@@ -181,6 +181,21 @@ func TestRealSSHForwardReconnect(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := h.AddForward(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	exchange()
+	// The forward is on the master and the socket is gone, as when a try removed it and died before ssh could answer. The
+	// master still answers ok without binding a socket, which is why a retry cancels first.
+	if err := os.Remove(f.HostPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.control(ctx, "forward", "-R", f.HostPath+":"+f.EnginePath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(f.HostPath); !os.IsNotExist(err) {
+		t.Fatalf("the master bound a forward it already held: %v", err)
+	}
+	if err := h.bind(ctx, f); err != nil {
 		t.Fatal(err)
 	}
 	exchange()

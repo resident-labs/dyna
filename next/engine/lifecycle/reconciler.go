@@ -23,6 +23,7 @@ type activeStep struct {
 
 type Reconciler struct {
 	hostMemory   func(contract.HostName) int64
+	restoring    func(contract.HostName) bool
 	store        *store.Store
 	boxes        BoxAdapter
 	view         View
@@ -46,6 +47,14 @@ func New(st *store.Store, boxes BoxAdapter, view View, repos Repositories, event
 	return &Reconciler{store: st, boxes: boxes, view: view, repos: repos, event: event, now: now, kick: make(chan struct{}, 1), roomSteps: make(map[string]bool), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool), disconnected: make(map[contract.BoxID]time.Time)}
 }
 func (r *Reconciler) SetHostMemory(read func(contract.HostName) int64) { r.hostMemory = read }
+
+// SetHostRestoring tells the reconciler which hosts have not had their box sockets put back since the engine started. Their
+// boxes cannot reach the engine, so that silence says nothing about them. Heartbeats still report a host that is really gone.
+func (r *Reconciler) SetHostRestoring(read func(contract.HostName) bool) { r.restoring = read }
+
+func (r *Reconciler) hostRestoring(host contract.HostName) bool {
+	return r.restoring != nil && r.restoring(host)
+}
 
 // SetRoomData enables room deletion before the reconciler runs.
 func (r *Reconciler) SetRoomData(data RoomData) { r.roomData = data }
@@ -178,7 +187,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			delete(r.disconnected, b.ID)
 		} else {
 			lost := hostState[b.Host] == box.HostUnreachable
-			if r.view.Connected(b.Session) {
+			if r.view.Connected(b.Session) || r.hostRestoring(b.Host) {
 				delete(r.disconnected, b.ID)
 			} else {
 				since, ok := r.disconnected[b.ID]
@@ -293,6 +302,9 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 		if row.Want == store.WantRun && (row.Box.State == contract.BoxCreating || row.Box.State == contract.BoxStarting) || row.Want == store.WantStop && row.Box.State == contract.BoxReady {
 			if !row.DueAt.IsZero() && row.DueAt.After(r.now()) {
 				continue
+			}
+			if row.Box.State == contract.BoxStarting && !row.DueAt.IsZero() && r.hostRestoring(row.Host) {
+				continue // Its hello cannot arrive yet, so the hello deadline waits too.
 			}
 			r.launch(ctx, row)
 		}

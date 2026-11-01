@@ -147,7 +147,7 @@ func TestLegacyParentWakeKeepsRunningChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := &Boxes{hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}}
+	b := &Boxes{hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}}
 	spec := lifecycle.BoxSpec{Box: "parent", Host: "host", Slice: "dyna-box_parent.slice"}
 	if err := b.Recreate(context.Background(), spec, "new-image", "dyna-parent.slice"); err != nil {
 		t.Fatal(err)
