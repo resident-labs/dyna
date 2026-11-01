@@ -104,7 +104,7 @@ func (c Chain) Search(ctx context.Context, q Query) ([]Result, error) {
 			reasons = append(reasons, provider.Name()+" is not signed in")
 			continue
 		}
-		reasons = append(reasons, provider.Name()+" failed: "+oneLine(err))
+		reasons = append(reasons, provider.Name()+" failed: "+redactTokens(oneLine(err)))
 	}
 	return nil, errors.New("web search found no provider: " + strings.Join(reasons, "; "))
 }
