@@ -15,7 +15,7 @@
   let images = $derived(attachments.filter(file => !file.visual && isThumb(file, failed)));
   let others = $derived(attachments.filter(file => !file.visual && !isThumb(file, failed)));
 </script>
-{#each attachments as file (file.sha256)}
+{#each attachments as file, i (i)}
   {@const visual = file.visual}
   {#if visual && event && at}<div><VisualBanner {visual} newest={newest.get(visual.id) ?? visual} {event} {at} onopen={() => onvisual(visual)} /></div>{/if}
 {/each}
