@@ -240,6 +240,27 @@ func TestAHostKeptFromSessionsStillServesTheRepositoryThatNamesIt(t *testing.T) 
 	}
 }
 
+func TestATickRestoresTheProxyARunningJobNeeds(t *testing.T) {
+	f := newFixture(1)
+	defer f.stop()
+	f.scale(1)
+	d := f.drivers["pve"]
+	d.egress = false // stopped, or the host restarted, so the restart policy did nothing
+	f.tick(t)
+	if !d.egress {
+		t.Fatal("the running job was left with no proxy")
+	}
+}
+
+func TestAnIdleHostGetsNoProxyUntilAJobNeedsIt(t *testing.T) {
+	f := newFixture(1)
+	defer f.stop()
+	f.tick(t)
+	if d := f.drivers["pve"]; d.egress || d.builds != 0 {
+		t.Fatalf("an idle pool started a proxy: %+v", d)
+	}
+}
+
 func TestEachRunnerGetsItsOwnProxySlotAndAFinishedOneFreesIt(t *testing.T) {
 	f := newFixture(3)
 	f.scale(3)

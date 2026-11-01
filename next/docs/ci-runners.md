@@ -151,7 +151,8 @@ failed step and carries on, so a step with `if: always()` and any action's pre
 step would still run on this host. Any failure in the hook does the same, so a
 hook that breaks refuses the job. A hook the runner could not start would count
 as one failed step, so the entrypoint checks that it can be read and parsed, and a
-runner whose hook cannot be takes no job. That job stays queued for `pool-watch`.
+runner whose hook cannot be takes no job. That job stays queued for `pool-watch`,
+and each failed start leaves an offline registration until the hourly reap.
 
 The killed worker leaves nothing behind. The listener sees it die, fails the job
 and exits, as it does after any job, and the pool starts the next runner. On real
@@ -191,6 +192,9 @@ it outside any job container.
   and fails its job after about 10. A rerun picks another runner. The hourly reap
   deletes the registrations of idle runners on that host, and a runner whose
   registration is gone exits by itself within a minute of the host's return.
+- **Proxy dies:** a crash restarts it. If it was stopped, or the host restarted, the
+  pool's next tick starts it, within 30 seconds. Runners keep their sockets, and a
+  job loses only the tunnels it had open.
 - **Disk below the floor, or memory above 80%:** admission refuses the host, and
   capacity falls to what is already running.
 

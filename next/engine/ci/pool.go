@@ -275,6 +275,7 @@ func (p *Pool) sweep(ctx context.Context, host *surveyed, settings []contract.Re
 			wanted[setting.Repo] = true
 		}
 	}
+	serving := false
 	for _, runner := range host.runners {
 		if !wanted[runner.Repo] {
 			// Turning a repository off stops its runners now, including one mid-job.
@@ -296,9 +297,16 @@ func (p *Pool) sweep(ctx context.Context, host *surveyed, settings []contract.Re
 			alive[runner.Repo] = make(map[string]bool)
 		}
 		alive[runner.Repo][runner.Name] = true
+		serving = true
 	}
 	if len(wanted) == 0 && host.egress {
 		return host.driver.RemoveEgress(ctx)
+	}
+	// Its restart policy covers a crash, not a stop or a host restart, and a runner
+	// with no proxy loses its job.
+	if serving && !host.egress {
+		_, err := p.prepare(ctx, host)
+		return err
 	}
 	return nil
 }
@@ -465,22 +473,9 @@ func (p *Pool) place(ctx context.Context, repo contract.RepoName, assigned int, 
 
 // start prepares a host and starts one runner on it.
 func (p *Pool) start(ctx context.Context, repo contract.RepoName, host *surveyed, size contract.BoxSize) (string, error) {
-	image := p.images[host.host.Name]
-	if image == "" {
-		var err error
-		if image, err = host.driver.BuildRunnerImage(ctx); err != nil {
-			return "", err
-		}
-		if p.images == nil {
-			p.images = make(map[contract.HostName]string)
-		}
-		p.images[host.host.Name] = image
-	}
-	if !host.egress {
-		if err := host.driver.EnsureEgress(ctx, image); err != nil {
-			return "", err
-		}
-		host.egress = true
+	image, err := p.prepare(ctx, host)
+	if err != nil {
+		return "", err
 	}
 	slot, err := freeSlot(host.runners)
 	if err != nil {
@@ -503,6 +498,28 @@ func (p *Pool) start(ctx context.Context, repo contract.RepoName, host *surveyed
 	}
 	host.runners = append(host.runners, box.Runner{Name: name, Repo: repo, ID: id, Slot: slot, Running: true})
 	return name, nil
+}
+
+// prepare returns a host's runner image, with its proxy running.
+func (p *Pool) prepare(ctx context.Context, host *surveyed) (string, error) {
+	image := p.images[host.host.Name]
+	if image == "" {
+		var err error
+		if image, err = host.driver.BuildRunnerImage(ctx); err != nil {
+			return "", err
+		}
+		if p.images == nil {
+			p.images = make(map[contract.HostName]string)
+		}
+		p.images[host.host.Name] = image
+	}
+	if !host.egress {
+		if err := host.driver.EnsureEgress(ctx, image); err != nil {
+			return "", err
+		}
+		host.egress = true
+	}
+	return image, nil
 }
 
 // freeSlot picks the proxy socket for a new runner on a host. Every repository's
