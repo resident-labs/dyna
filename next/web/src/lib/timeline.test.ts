@@ -1,7 +1,7 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deriveTimelineGroups, mergeTimelineInputs, mergeTimelineItems } from "./timeline.ts";
+import { deriveTimelineGroups, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems } from "./timeline.ts";
 import type { TranscriptInput, TranscriptItem } from "./contract.gen.ts";
 
 // Dyna: Transcript items embed posts on their tool call.
@@ -30,4 +30,10 @@ test("refresh retains inputs while a later page is in flight", () => {
   const second = mergeTimelineInputs(first, [input(3), input(4)]);
   const refreshed = mergeTimelineInputs(second, first);
   assert.deepEqual(mergeTimelineInputs(refreshed, [input(5)]).map(item => item.seq), [1, 2, 3, 4, 5]);
+});
+
+test("T3 durations choose units after rounding", () => {
+  assert.equal(formatTimelineDuration(114_000), "1m 54s");
+  assert.equal(formatTimelineDuration(120_000), "2m");
+  assert.equal(formatTimelineDuration(59_500), "1m");
 });
