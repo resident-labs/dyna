@@ -231,7 +231,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       }
       continue;
     }
-    work.push(event);
+    if (event.type !== "session.profile_changed" && event.type !== "transcript.changed") work.push(event);
   }
   for (const sent of pending) post(`n${sent.id}`, 0, { kind: "owner" }, sent.at, sent.text, sent.attachments, sent.to, sent);
   flush();
@@ -395,7 +395,7 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
     closed && `${closed} closed`,
     memory && count(memory, "memory warning"),
   ].filter((part): part is string => typeof part === "string").slice(0, 4);
-  return parts.join(" · ") || (events.length === 1 && events[0].type !== "computer.changed" && !(events[0].type === "session.closed" && events[0].body.reason) ? describe(events[0], name) : "") || "Activity";
+  return parts.join(" · ") || events.map(event => describe(event, name)).find(Boolean) || "Activity";
 }
 
 // One plain line for an event inside an opened work row.
