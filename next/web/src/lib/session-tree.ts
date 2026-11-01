@@ -1,8 +1,34 @@
-import type { SessionStarted } from "./contract.gen.ts";
+import type { BoxState, SessionStarted } from "./contract.gen.ts";
 import { urgency, type Status } from "./status.ts";
 
 export type TreeRow = { kind: "session"; session: SessionStarted; depth: number; parent: boolean; hidden: number; state: Status; dot: Status; mark?: string }
   | { kind: "idle"; key: string; depth: number; count: number; open: boolean };
+
+// The sessions under id, nearest first. A close takes them along, and a move cannot go under them.
+export function descendants(sessions: SessionStarted[], id: string): string[] {
+  const children = new Map<string, string[]>();
+  for (const child of sessions) {
+    if (child.parent) children.set(child.parent, [...(children.get(child.parent) ?? []), child.session]);
+  }
+  const found = [...(children.get(id) ?? [])];
+  for (let i = 0; i < found.length; i++) found.push(...(children.get(found[i]) ?? []));
+  return found;
+}
+
+// What a close costs, naming up to two of the sessions it takes along.
+export function closeNote(names: string[]): string {
+  if (!names.length) return "Its work is archived first.";
+  const shown = names.slice(0, 2);
+  const rest = names.length - shown.length;
+  return `Also closes ${rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.join(" and ")}. Their work is archived first.`;
+}
+
+export type SessionAction = "move" | "stop" | "restart" | "close";
+
+// The actions the engine takes for a session now. Root has no parent, so it stays where it is and stays open.
+export function sessionActions(parent: string | undefined, stoppable: boolean, box?: BoxState): SessionAction[] {
+  return [...(parent ? ["move"] as const : []), ...(stoppable ? ["stop"] as const : []), ...(box === "failed" ? ["restart"] as const : []), ...(parent ? ["close"] as const : [])];
+}
 
 type Summary = { size: number; top: Status; quiet: boolean; inside: Status };
 

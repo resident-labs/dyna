@@ -252,3 +252,128 @@ func TestHeartbeatDiskFailureKeepsProbeAlive(t *testing.T) {
 		t.Fatalf("probe output %q, error %v", out, err)
 	}
 }
+
+const gib = int64(1) << 30
+
+// btrfsTree writes one filesystem under root: 1000 GiB allocated, metadata chunks with chunkFree left, and devices with unalloc more.
+func btrfsTree(t *testing.T, root string, chunkFree, unalloc int64) {
+	t.Helper()
+	write := func(name string, value int64) {
+		t.Helper()
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(fmt.Sprintf("%d\n", value)), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("allocation/metadata/total_bytes", 50*gib)
+	write("allocation/metadata/bytes_used", 50*gib-chunkFree)
+	write("allocation/metadata/disk_total", 50*gib)
+	write("allocation/data/disk_total", 949*gib)
+	write("allocation/system/disk_total", gib)
+	write("devices/vda1/size", (1000*gib+unalloc)/512)
+}
+
+// diskProbe runs the shared snippet with df reporting size 1000 and 600 available.
+func diskProbe(t *testing.T, sysfs, fstype, uuid, source string) string {
+	t.Helper()
+	shim := fmt.Sprintf(`df() { printf 'size avail\n1000 600\n'; }
+findmnt() { case "$*" in *FSTYPE*) echo %q ;; *UUID*) echo %q ;; *SOURCE*) echo %q ;; esac; }
+`, fstype, uuid, source)
+	out, err := exec.Command("bash", "-c", shim+strings.ReplaceAll(diskScript, "/sys/fs/btrfs", sysfs), "dyna", "/data").CombinedOutput()
+	if err != nil {
+		t.Fatalf("probe: %s: %v", out, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestDiskScript(t *testing.T) {
+	const plain, full = "dyna-disk 1000 400", "dyna-disk 1000 1000"
+	remove := func(name string) func(string) error {
+		return func(dir string) error { return os.Remove(filepath.Join(dir, name)) }
+	}
+	for _, tc := range []struct {
+		name               string
+		chunkFree, unalloc int64
+		fstype, uuid       string
+		source             string
+		change             func(string) error
+		want               string
+	}{
+		{name: "not btrfs ignores metadata", fstype: "ext4", want: plain},
+		{name: "half of unallocated counts", chunkFree: gib, unalloc: 4 * gib, want: plain},
+		{name: "two GiB left is enough", chunkFree: gib, unalloc: 2 * gib, want: plain},
+		{name: "under two GiB left", chunkFree: gib, unalloc: 2*gib - 1024, want: full},
+		{name: "no metadata room", want: full},
+		{name: "allocation past the devices counts no unallocated", chunkFree: 3 * gib, unalloc: -100 * gib, want: plain},
+		{name: "uuid lookup fails, device finds it", uuid: "none", want: full},
+		{name: "uuid and device lookups fail", uuid: "none", source: "none", want: plain},
+		{name: "metadata unreadable", change: remove("fsid/allocation/metadata/bytes_used"), want: plain},
+		{name: "allocation unreadable", change: remove("fsid/allocation/system/disk_total"), want: plain},
+		{name: "one device unreadable", change: func(dir string) error { return os.Mkdir(filepath.Join(dir, "fsid/devices/vdb1"), 0700) }, want: plain},
+		{name: "sysfs missing", change: func(dir string) error { return os.RemoveAll(filepath.Join(dir, "fsid")) }, want: plain},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			btrfsTree(t, filepath.Join(dir, "fsid"), tc.chunkFree, tc.unalloc)
+			if tc.change != nil {
+				if err := tc.change(dir); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fstype, uuid, source := "btrfs", "fsid", "/dev/vda1[/@]"
+			if tc.fstype != "" {
+				fstype = tc.fstype
+			}
+			if tc.uuid != "" {
+				uuid = ""
+			}
+			if tc.source != "" {
+				source = ""
+			}
+			if got := diskProbe(t, dir, fstype, uuid, source); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDiskScriptPicksTheRightFilesystemByDevice(t *testing.T) {
+	dir := t.TempDir()
+	btrfsTree(t, filepath.Join(dir, "aaa"), 10*gib, 0)
+	if err := os.Rename(filepath.Join(dir, "aaa/devices/vda1"), filepath.Join(dir, "aaa/devices/vdb1")); err != nil {
+		t.Fatal(err)
+	}
+	btrfsTree(t, filepath.Join(dir, "fsid"), 0, 0)
+	if got := diskProbe(t, dir, "btrfs", "", "/dev/vda1[/@]"); got != "dyna-disk 1000 1000" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestParseDisk(t *testing.T) {
+	for out, want := range map[string][2]int64{
+		"dyna-disk 1000 400\ndyna-load 1 2\n":                 {1000, 400},
+		"dyna-load 1 2\ndyna-disk 1000 1000\n/slice:high 3\n": {1000, 1000},
+		"dyna-load 1 2\n":        {0, 0},
+		"dyna-disk 1000\n":       {0, 0},
+		"dyna-disk size avail\n": {0, 0},
+		"":                       {0, 0},
+	} {
+		if total, used := parseDisk([]byte(out)); total != want[0] || used != want[1] {
+			t.Errorf("%q: got %d %d", out, total, used)
+		}
+	}
+}
+
+func TestLocalDisk(t *testing.T) {
+	dir := t.TempDir()
+	total, used := LocalDisk(context.Background(), dir)
+	if total <= 0 || used < 0 || used > total {
+		t.Fatalf("disk %d of %d", used, total)
+	}
+	if total, used := LocalDisk(context.Background(), filepath.Join(dir, "missing")); total != 0 || used != 0 {
+		t.Fatalf("missing path reported %d of %d", used, total)
+	}
+}

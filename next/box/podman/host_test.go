@@ -182,7 +182,7 @@ func TestRemoveContainerLeavesVolumeForMove(t *testing.T) {
 	if err := h.RemoveContainer(context.Background(), "a"); err != nil {
 		t.Fatal(err)
 	}
-	if len(r.calls) != 2 || !strings.HasSuffix(r.calls[1][len(r.calls[1])-1], "'podman' '--cgroup-manager=systemd' 'rm' '--ignore' 'a'") {
+	if len(r.calls) != 2 || !strings.HasSuffix(r.calls[1][len(r.calls[1])-1], "'podman' '--cgroup-manager=systemd' 'rm' '--ignore' '--volumes' 'a'") {
 		t.Fatalf("commands %v", r.calls)
 	}
 }

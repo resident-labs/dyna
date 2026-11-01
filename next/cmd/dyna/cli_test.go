@@ -65,6 +65,7 @@ type fakeClient struct {
 	devices      []contract.Device
 	deviceRevoke contract.DeviceRevokeRequest
 	deviceScopes contract.DeviceSetScopesRequest
+	hosts        []contract.HostSummary
 }
 
 func (f *fakeClient) DevicePair(_ context.Context, q contract.DevicePairRequest) (contract.DevicePairResponse, error) {
@@ -86,13 +87,13 @@ func (f *fakeClient) DeviceSetScopes(_ context.Context, q contract.DeviceSetScop
 func (f *fakeClient) HostexecRun(context.Context, contract.HostexecRunRequest) (contract.HostexecRunResponse, error) {
 	return f.hostexecResp, nil
 }
-func (f *fakeClient) HostexecRevoke(context.Context, contract.HostexecRevokeRequest) (contract.HostexecRevokeResponse, error) {
-	return contract.HostexecRevokeResponse{}, nil
-}
 func (f *fakeClient) File(context.Context, string, io.Writer) error { return nil }
 func (f *fakeClient) Upload(_ context.Context, path string) (contract.Attachment, error) {
 	f.uploads = append(f.uploads, path)
 	return contract.Attachment{Name: path}, nil
+}
+func (f *fakeClient) HostList(context.Context, contract.HostListRequest) (contract.HostListResponse, error) {
+	return contract.HostListResponse{Hosts: f.hosts}, nil
 }
 func (f *fakeClient) HostAdd(_ context.Context, q contract.HostAddRequest) (contract.HostAddResponse, error) {
 	f.host = q
@@ -365,6 +366,13 @@ func TestDeviceListPrintsDevices(t *testing.T) {
 		t.Fatalf("output=%q", out)
 	}
 }
+func TestHostListPrintsDiskState(t *testing.T) {
+	f := &fakeClient{hosts: []contract.HostSummary{{Name: contract.ControlPlane, DiskBytes: 100 << 30, DiskUsed: 40 << 30}, {Name: "worker", DiskBytes: 100 << 30, DiskUsed: 90 << 30, DiskLow: true}}}
+	out := runCLI(t, f, "host", "list")
+	if out != "control-plane\t40 GiB\t100 GiB\tok\nworker\t90 GiB\t100 GiB\tlow\n" {
+		t.Fatalf("output=%q", out)
+	}
+}
 func TestDeviceRevokeMapsID(t *testing.T) {
 	f := &fakeClient{}
 	runCLI(t, f, "device", "revoke", "dev_1")
@@ -385,8 +393,7 @@ func TestDeviceSetScopesRequiresScope(t *testing.T) {
 
 func TestHostexecGrantSubmitsOperation(t *testing.T) {
 	f := &fakeClient{submitResp: contract.OpSubmitResponse{Operation: contract.Operation{ID: "op_1"}}}
-	before := time.Now()
-	out := runCLI(t, f, "hostexec", "grant", "--host", "hermeslab", "--hours", "2", "--reason", "Inspect logs")
+	out := runCLI(t, f, "hostexec", "grant", "--host", "hermeslab", "--reason", "Inspect logs")
 	args, ok := f.submit.Operation.Args.(contract.HostexecGrantArgs)
 	if !ok || out != "op_1\n" || len(args.Hosts) != 1 || args.Hosts[0] != "hermeslab" || args.Reason != "Inspect logs" || args.To.Kind != "" {
 		t.Fatalf("%+v: %q", f.submit, out)
@@ -394,9 +401,7 @@ func TestHostexecGrantSubmitsOperation(t *testing.T) {
 	if _, err := json.Marshal(f.submit); err != nil {
 		t.Fatal(err)
 	}
-	if d := args.Expires.Sub(before); d < 2*time.Hour || d > 2*time.Hour+time.Minute {
-		t.Fatalf("expires in %v", d)
-	}
+
 	runCLI(t, f, "hostexec", "grant", "--host", "h", "--reason", "x", "--room", "room_1", "--to", "ses_1")
 	args = f.submit.Operation.Args.(contract.HostexecGrantArgs)
 	if args.To.Session != "ses_1" || args.Room != "room_1" || f.submit.Operation.Room != "room_1" {

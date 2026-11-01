@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"database/sql"
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
@@ -29,7 +30,7 @@ func TestGrantOperation(t *testing.T) {
 		t.Fatalf("result %+v %v", res, problem)
 	}
 	g, err := s.store.ListActiveGrants(ctx, room, target, s.now())
-	if err != nil || len(g) != 1 || !g[0].Expires.Equal(s.now().Add(24*time.Hour)) {
+	if err != nil || len(g) != 1 || !g[0].Expires.IsZero() {
 		t.Fatalf("grant %+v %v", g, err)
 	}
 }
@@ -41,20 +42,15 @@ func TestGrantCard(t *testing.T) {
 		t.Fatal(err)
 	}
 	card := s.HostexecGrant().Card(ctx, contract.HostexecGrantArgs{Room: room, To: to, Hosts: []contract.HostName{"host"}, Reason: "Inspect logs"}, to)
-	if card.Title != "asks for host access" || card.Target != (contract.Target{Kind: contract.TargetHost, Name: "host"}) || card.Body != "Run any command on host for 24 hours.\nReason: Inspect logs" {
+	if card.Title != "asks for host access" || card.Target != (contract.Target{Kind: contract.TargetHost, Name: "host"}) || card.Body != "Run any command on host until the session closes.\nReason: Inspect logs" {
 		t.Fatalf("card: %+v", card)
 	}
 	// The owner granting another session names it, and two hosts keep the room as the target.
 	card = s.HostexecGrant().Card(ctx, contract.HostexecGrantArgs{Room: room, To: to, Hosts: []contract.HostName{"a", "b"}, Reason: "Inspect logs"}, contract.Principal{Kind: contract.PrincipalOwner})
-	if card.Target.Kind != contract.TargetRoom || !strings.HasPrefix(card.Body, "Let ") || !strings.Contains(card.Body, " run any command on a, b for 24 hours.") {
+	if card.Target.Kind != contract.TargetRoom || !strings.HasPrefix(card.Body, "Let ") || !strings.Contains(card.Body, " run any command on a, b until the session closes.") {
 		t.Fatalf("card: %+v", card)
 	}
-	for expires, want := range map[time.Duration]string{time.Hour: "for up to 1 hour.", 2*time.Hour + time.Second: "for up to 3 hours."} {
-		card = s.HostexecGrant().Card(ctx, contract.HostexecGrantArgs{Room: room, To: contract.Principal{Kind: contract.PrincipalSession, Session: worker}, Hosts: []contract.HostName{"host"}, Reason: "x", Expires: s.now().Add(expires)}, contract.Principal{})
-		if !strings.Contains(card.Body, want) {
-			t.Fatalf("card: %q, want %q", card.Body, want)
-		}
-	}
+
 }
 
 func TestHostGrantAfterEngineMove(t *testing.T) {
@@ -71,6 +67,10 @@ func TestHostGrantAfterEngineMove(t *testing.T) {
 	result, problem := s.OpSubmit(ctx, to, contract.OpSubmitRequest{Operation: contract.Operation{Room: room, Kind: "hostexec.grant", Args: args}})
 	if problem != nil || result.Operation.State != contract.OpPending {
 		t.Fatalf("submit: %+v %v", result, problem)
+	}
+	grants, err := s.store.ListActiveGrants(ctx, room, to, s.now())
+	if err != nil || len(grants) != 0 {
+		t.Fatalf("unapproved grant: %+v %v", grants, err)
 	}
 	// Startup clears comparisons and expires cards made before the engine moved.
 	if err := s.store.ResetEngineHosts(ctx); err != nil {
@@ -97,7 +97,43 @@ func TestGrantCardEngineHost(t *testing.T) {
 	}
 	to := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
 	card := s.HostexecGrant().Card(ctx, contract.HostexecGrantArgs{Room: room, To: to, Hosts: []contract.HostName{"engine"}, Reason: "Inspect"}, to)
-	if !strings.Contains(card.Body, "This host also runs the engine and holds the model sign-ins.") {
+	if !strings.Contains(card.Body, "This host also runs the engine. This grant gives full owner power, including the model sign-ins.") {
 		t.Fatal(card.Body)
+	}
+}
+
+func TestHostexecList(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	var root contract.SessionID
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT parent FROM sessions WHERE id=?", worker).Scan(&root); err != nil {
+		t.Fatal(err)
+	}
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	target := contract.Principal{Kind: contract.PrincipalSession, Session: root}
+	now := s.now()
+	for _, g := range []contract.Grant{
+		{ID: "active", Kind: contract.GrantHostExec, Room: room, To: target, By: owner, Created: now.Add(time.Second), Hosts: []contract.HostName{"host"}},
+		{ID: "closed", Kind: contract.GrantHostExec, Room: room, To: contract.Principal{Kind: contract.PrincipalSession, Session: worker}, By: owner, Created: now},
+		{ID: "revoked", Kind: contract.GrantHostExec, Room: room, To: target, By: owner, Created: now},
+	} {
+		if err := s.store.CreateGrant(ctx, g); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE grants SET revoked_at=? WHERE id='revoked'", now.UnixMilli())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, problem := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: worker, Discard: true}); problem != nil {
+		t.Fatal(problem)
+	}
+	got, problem := s.HostexecList(ctx, owner, contract.HostexecListRequest{})
+	if problem != nil || len(got.Grants) != 2 || got.Grants[0].ID != "active" || got.Grants[1].To != target || got.Grants[1].Hosts[0] != contract.AllHosts || !got.Grants[1].Expires.IsZero() {
+		t.Fatalf("grants: %+v, %v", got, problem)
+	}
+	if _, problem = s.HostexecList(ctx, target, contract.HostexecListRequest{}); problem == nil || problem.Code != contract.ErrForbidden {
+		t.Fatalf("session: %v", problem)
 	}
 }

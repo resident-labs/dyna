@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -18,8 +17,7 @@ import (
 // PeerUID reads credentials from an accepted owner-socket connection.
 type PeerUID func(net.Conn) (uint32, error)
 
-// UnixPeerUID uses Linux SO_PEERCRED. This boundary is also where the
-// host-exec scope restriction can be added when host exec is implemented.
+// UnixPeerUID uses Linux SO_PEERCRED.
 func UnixPeerUID(conn net.Conn) (uint32, error) {
 	unix, ok := conn.(*net.UnixConn)
 	if !ok {
@@ -43,37 +41,10 @@ func UnixPeerUID(conn net.Conn) (uint32, error) {
 	return cred.Uid, nil
 }
 
-type scopeKey struct{}
-type checkedConn struct {
-	net.Conn
-	restricted bool
-}
-
-func hostexecScope(conn net.Conn) bool {
-	u, ok := conn.(*net.UnixConn)
-	if !ok {
-		return true
-	}
-	raw, err := u.SyscallConn()
-	if err != nil {
-		return true
-	}
-	var cred *syscall.Ucred
-	var peerErr error
-	if err = raw.Control(func(fd uintptr) {
-		cred, peerErr = syscall.GetsockoptUcred(int(fd), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
-	}); err != nil || peerErr != nil {
-		return true
-	}
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", cred.Pid))
-	return err != nil || strings.Contains(string(data), "dyna-hostexec-")
-}
-
 type checkedListener struct {
 	net.Listener
-	uid   uint32
-	peer  PeerUID
-	scope func(net.Conn) bool
+	uid  uint32
+	peer PeerUID
 }
 
 func (l *checkedListener) Accept() (net.Conn, error) {
@@ -84,7 +55,7 @@ func (l *checkedListener) Accept() (net.Conn, error) {
 		}
 		uid, err := l.peer(c)
 		if err == nil && uid == l.uid {
-			return &checkedConn{Conn: c, restricted: l.scope(c)}, nil
+			return c, nil
 		}
 		_ = c.Close()
 	}
@@ -103,19 +74,16 @@ type Sockets struct {
 	runtime string
 	uid     uint32
 	peer    PeerUID
-	scope   func(net.Conn) bool
 	owner   *socket
 	lock    *os.File
 	boxes   map[contract.BoxID]*socket
 }
 
 func NewSockets(api *API, runtime string, ownerUID uint32, peer PeerUID) *Sockets {
-	scope := func(net.Conn) bool { return false }
 	if peer == nil {
 		peer = UnixPeerUID
-		scope = hostexecScope
 	}
-	return &Sockets{api: api, runtime: runtime, uid: ownerUID, peer: peer, scope: scope, boxes: make(map[contract.BoxID]*socket)}
+	return &Sockets{api: api, runtime: runtime, uid: ownerUID, peer: peer, boxes: make(map[contract.BoxID]*socket)}
 }
 
 func (s *Sockets) OpenOwner() error {
@@ -132,17 +100,8 @@ func (s *Sockets) OpenOwner() error {
 	if err != nil {
 		return err
 	}
-	checked := &checkedListener{Listener: l, uid: s.uid, peer: s.peer, scope: s.scope}
-	handler := s.api.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}})
-	server := &http.Server{ConnContext: func(ctx context.Context, c net.Conn) context.Context {
-		return context.WithValue(ctx, scopeKey{}, c.(*checkedConn).restricted)
-	}, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Context().Value(scopeKey{}) == true {
-			writeError(w, &contract.Error{Code: contract.ErrHostexecScope, Message: "host commands cannot use the owner socket"})
-			return
-		}
-		handler.ServeHTTP(w, r)
-	})}
+	checked := &checkedListener{Listener: l, uid: s.uid, peer: s.peer}
+	server := &http.Server{Handler: s.api.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}})}
 	s.owner = &socket{server: server, listener: checked, path: path}
 	go server.Serve(checked)
 	return nil
