@@ -7,13 +7,14 @@ type AccountID string
 type AccountAction string
 
 const (
-	AccountActionConnect   AccountAction = "connect"
-	AccountActionReconnect AccountAction = "reconnect"
-	AccountActionCallback  AccountAction = "callback"
-	AccountActionSetKey    AccountAction = "set_key"
-	AccountActionComplete  AccountAction = "complete"
-	AccountActionRemove    AccountAction = "remove"
-	AccountActionSetLimits AccountAction = "set_limits"
+	AccountActionConnect     AccountAction = "connect"
+	AccountActionReconnect   AccountAction = "reconnect"
+	AccountActionCallback    AccountAction = "callback"
+	AccountActionSetKey      AccountAction = "set_key"
+	AccountActionImportOAuth AccountAction = "import_oauth"
+	AccountActionComplete    AccountAction = "complete"
+	AccountActionRemove      AccountAction = "remove"
+	AccountActionSetLimits   AccountAction = "set_limits"
 )
 
 // AccountsActionArgs contains only the action kind, never account secrets.
@@ -126,6 +127,19 @@ type AccountsSetKeyRequest struct {
 	Key      string          `json:"key"`
 }
 type AccountsSetKeyResponse struct {
+	AccountID AccountID `json:"accountId"`
+}
+
+// Credential is an opaque JSON object parsed only by the model proxy. It holds
+// access_token and refresh_token. Kimi may also supply domain and device_id.
+// ExpiresAt is the access token expiry. The proxy may refresh after activation.
+type AccountsImportOAuthRequest struct {
+	Provider   AccountProvider `json:"provider"`
+	Label      string          `json:"label"`
+	ExpiresAt  time.Time       `json:"expiresAt"`
+	Credential string          `json:"credential"`
+}
+type AccountsImportOAuthResponse struct {
 	AccountID AccountID `json:"accountId"`
 }
 type AccountsRemoveRequest struct {
