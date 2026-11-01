@@ -2,13 +2,13 @@ package engine
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req contract.BoxHelloRequest) (contract.BoxHelloResponse, *contract.Error) {
@@ -25,12 +25,12 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	}
 	if current.State == contract.BoxCreating || current.State == contract.BoxStarting || current.State == contract.BoxLost {
 		_, err = s.transition(ctx, session.Room, current, contract.BoxReady, "", "")
-		if errors.Is(err, sql.ErrNoRows) && current.State == contract.BoxCreating {
+		if errors.Is(err, store.ErrNotFound) && current.State == contract.BoxCreating {
 			current, err = s.store.Box(ctx, session.Box)
 			if err == nil && current.State == contract.BoxStarting {
 				_, err = s.transition(ctx, session.Room, current, contract.BoxReady, "", "")
 			} else if err == nil && current.State != contract.BoxReady {
-				err = sql.ErrNoRows
+				err = store.ErrNotFound
 			}
 		}
 		if err != nil {
@@ -58,8 +58,8 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	if err != nil {
 		return contract.BoxHelloResponse{}, failure(err)
 	}
-	var roomName, parentName string
-	if err := s.store.Read().QueryRowContext(ctx, "SELECT r.name,COALESCE(p.name,'') FROM sessions s JOIN rooms r ON r.id=s.room LEFT JOIN sessions p ON p.id=s.parent WHERE s.id=?", session.ID).Scan(&roomName, &parentName); err != nil {
+	roomName, parentName, err := s.store.SessionContextNames(ctx, session.ID)
+	if err != nil {
 		return contract.BoxHelloResponse{}, failure(err)
 	}
 	var instructions string
@@ -156,10 +156,7 @@ func (s *Service) ConversationRead(ctx context.Context, caller contract.Principa
 	}
 	s.readMu.Lock()
 	defer s.readMu.Unlock()
-	var seq int64
-	err := s.store.Write(ctx, func(tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, "INSERT INTO conversation_reads(room,conversation,seq) VALUES(?,?,?) ON CONFLICT(room,conversation) DO UPDATE SET seq=MAX(seq,excluded.seq) RETURNING seq", req.Room, home, req.Seq).Scan(&seq)
-	})
+	seq, err := s.store.SetConversationRead(ctx, req.Room, home, req.Seq)
 	if err != nil {
 		return contract.ConversationReadResponse{}, failure(err)
 	}
