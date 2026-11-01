@@ -121,6 +121,8 @@ var methodTable = []MethodEntry{
 	method(contract.MethodProfileList, contract.ScopeRead, OwnerAccess),
 	method(contract.MethodProfileRemove, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodProfileSet, contract.ScopeAdmin, OwnerAccess),
+	method(contract.MethodProxyKey, contract.ScopeAdmin, OwnerLocalAccess),
+	method(contract.MethodProxyUsage, contract.ScopeRead, OwnerAccess),
 	method(contract.MethodQuestionAnswer, contract.ScopeOperate, OwnerAccess,
 		act("question", "answer", typ[contract.QuestionAnswerRequest](), "Answer a waiting question. The answer wakes the session that asked.", "question answer"),
 	),

@@ -67,7 +67,7 @@ func newRootCmd() *cobra.Command {
 	// LEGACY(v1-transfer): registers dyna import. Remove after the transfer.
 	root.AddCommand(importCommand())
 	root.AddCommand(computerCommand("/run/dyna/agent.sock"))
-	root.AddCommand(proxyCommand())
+	root.AddCommand(proxyCommand(func() *socketClient { return newClient(socket) }))
 	root.AddCommand(ciEgressCommand())
 	addEngine(root)
 	for _, a := range tools.Actions() {

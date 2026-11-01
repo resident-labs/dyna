@@ -986,7 +986,7 @@ func TestMigrationGivesExistingRootsTheDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
-		"DROP TABLE issue_owners", "ALTER TABLE pr_owners DROP COLUMN meta_wake_at", "ALTER TABLE pr_owners DROP COLUMN meta", "DROP TABLE workflow_steps", "DROP TABLE workflow_runs", "DROP TABLE subscription_runs", "DROP TABLE subscription_files", "DROP TABLE subscription_args", "DROP TABLE subscription_events", "DROP TABLE subscriptions",
+		"DROP TABLE local_usage", "DROP TABLE issue_owners", "ALTER TABLE pr_owners DROP COLUMN meta_wake_at", "ALTER TABLE pr_owners DROP COLUMN meta", "DROP TABLE workflow_steps", "DROP TABLE workflow_runs", "DROP TABLE subscription_runs", "DROP TABLE subscription_files", "DROP TABLE subscription_args", "DROP TABLE subscription_events", "DROP TABLE subscriptions",
 		"ALTER TABLE repos DROP COLUMN main_head", "DELETE FROM meta WHERE key='subscription_seq'", "ALTER TABLE questions DROP COLUMN blocked", "ALTER TABLE questions DROP COLUMN meanwhile", "UPDATE meta SET value='63' WHERE key='schema_version'",
 	} {
 		if _, err := db.Exec(statement); err != nil {
