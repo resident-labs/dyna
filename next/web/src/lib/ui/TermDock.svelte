@@ -2,7 +2,7 @@
   import { tick } from "svelte";
   import { call } from "../client.ts";
   import type { HostSummary } from "../contract.gen.ts";
-  import { hostLabel } from "../hosts.ts";
+  import { hostLabel, machines } from "../hosts.ts";
   import type { TerminalTarget } from "../terminal.ts";
   import FloatWindow from "./FloatWindow.svelte";
   import Icon from "./Icon.svelte";
@@ -56,13 +56,19 @@
     void show(tabs[tabs.length - 1].key);
   }
 
-  // Opens the "+ Terminal" menu.
+  // Opens the "+ Terminal" menu, or the terminal itself when there is only one to choose. The machine running the
+  // engine counts once, as on Home.
   async function pick() {
-    picking = true;
     rest = false;
-    void call("host.list", {}).then(list => { hosts = list.hosts ?? []; }, () => { hosts = []; });
+    hosts = await call("host.list", {}).then(list => machines(list.hosts ?? []), () => []);
+    if (sessions.length + hosts.length === 1) {
+      if (hosts[0]) open2({ host: hosts[0].name }, hostLabel(hosts[0].name));
+      else open2({ box: sessions[0].id }, sessions[0].name, sessions[0].root);
+      return;
+    }
+    picking = true;
     await tick();
-    // With no item yet (no ready session, hosts still loading), the menu itself takes the keys.
+    // With no item (no ready session, no hosts), the menu itself takes the keys.
     (menu?.querySelector<HTMLElement>("[role=menuitem]") ?? menu)?.focus();
   }
   // Showing a tab opens its pane (on a phone, full screen) and moves focus into its pane.

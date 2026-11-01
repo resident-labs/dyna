@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"os/exec"
 	"syscall"
 	"time"
@@ -24,6 +25,8 @@ func terminal(w http.ResponseWriter, r *http.Request, argv []string, cols, rows 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGHUP) }
 	cmd.WaitDelay = 2 * time.Second
+	// The engine runs under systemd with no TERM of its own, and ssh hands this one to a host's shell.
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	file, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: cols, Rows: rows})
 	if err != nil {
 		_ = conn.Close(websocket.StatusInternalError, "terminal unavailable")
