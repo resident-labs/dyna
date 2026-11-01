@@ -41,7 +41,7 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		if b.Description != "" {
 			name = "'" + b.Description + "'"
 		}
-		// TODO: legacy/shim remove after the upgrade floor passes an old event migration (D-659).
+		// TODO: legacy/shim remove after old events migrate and supported boxes always supply End (D-659).
 		result := fmt.Sprintf("exited with code %d", b.ExitCode)
 		if b.End != nil {
 			switch b.End.Kind {
