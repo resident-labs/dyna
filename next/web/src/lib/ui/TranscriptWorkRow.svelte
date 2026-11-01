@@ -1,9 +1,7 @@
-<!-- Dyna: Original Svelte implementation informed by T3 Code's work-log presentation
-     (pingdotgg/t3code, 575579d68ac4bae09f8426a345d4a3eac1e90c67, MIT).
-     No upstream source code is copied. -->
+<!-- Ported from T3 Code (apps/web/src/components/chat/WorkLog.tsx), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE. -->
 <script lang="ts">
   import type { TranscriptItem, TranscriptPart } from "../contract.gen.ts";
-  import { activeVerb, elapsed, stepTime, titleOf, type StepKind } from "../steps.ts";
+  import { activeVerb, elapsed, stepTime, titleOf, workSummary, type StepKind } from "../steps.ts";
   import Icon, { type IconName } from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
   import StatusPill from "./StatusPill.svelte";
@@ -33,7 +31,7 @@
   // Dyna keeps thoughts and tools in transcript order. The caller splits at posts and other boundaries.
   let active = $derived(!ended && items.some(item => !item.ended));
   let tools = $derived(items.filter(item => item.kind === "tool"));
-  let summary = $derived(active ? `Working for ${elapsed(started, now)}` : tools.length ? `${tools.length} tool ${tools.length === 1 ? "call" : "calls"}${items.length > tools.length ? `, ${items.length - tools.length} thoughts` : ""}` : `${items.length} thoughts`);
+  let summary = $derived(active ? `Working for ${elapsed(started, now)}` : tools.length ? workSummary(tools) : `${items.length} thoughts`);
 </script>
 
 {#snippet entry(item: TranscriptItem)}
