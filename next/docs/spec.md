@@ -234,7 +234,7 @@ Admission serializes placement. Each placed box counts one quarter of its CPU an
 
 ### 5.2 Images
 
-`dyna-base` contains Debian, shell tools, git, Node, tini and pinned Pi; Pi holds no credentials. Versioned Dyna binaries mount read-only from the host, independently of the image. Repository toolchains live under `.dyna/images/<name>/Containerfile`; they start from `dyna-base` and finish as the non-root user.
+`dyna-base` contains Debian, shell tools, git, Node, tini and pinned Pi; Pi holds no credentials. Versioned Dyna binaries mount read-only from the host, independently of the image. Repository toolchains live under `.dyna/images/<name>/Containerfile`; they start from `dyna-base` and finish as the non-root user. A repository without that folder on its default branch may keep it on a `dyna-images` branch, so a fork that mirrors its upstream stays clean.
 
 Optional `box-needs` requests `nested-containers` or `kvm`; unknown needs fail loading. These grant additional devices or kernel access. Missing devices fail creation with a typed cause; admission does not select by device. Restrict rooms to suitable hosts. See [the container recipe](nested-containers.md). Image tags hash the base and image folder tree. Host builds are serial and reuse existing tags.
 
