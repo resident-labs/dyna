@@ -9,8 +9,8 @@
   import { beginSwipe, moveSwipe, releaseSwipe, ignoredSwipeTarget, type Swipe } from "../swipe.ts";
   import { canForwardPost } from "../forward-state.ts";
   import { SwipeForward } from "../swipe-forward.ts";
-  let { row, author, to, root, onretry, ondiscard, onforward, swipeDisabled = false, newest, onvisual }: {
-    row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; newest: Map<string, VisualCard>; onvisual: (visual: VisualCard) => void;
+  let { row, author, to, root, onretry, ondiscard, onforward, swipeDisabled = false, newest, visualEvents, onvisual }: {
+    row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; newest: Map<string, VisualCard>; visualEvents: Map<string, string>; onvisual: (visual: VisualCard) => void;
   } = $props();
   let distance = $state(0), dragging = $state(false), ready = $state(false);
   function swipe(node: HTMLElement) {
@@ -142,7 +142,7 @@
       <time datetime={row.at}>{formatTime(row.at)}</time>{#if to}<span class="to">→ {to}</span>{/if}</p>
   {/if}
   <Markdown text={row.text} />
-  {#each row.attachments as file}{@const visual = file.visual}{#if visual}<div><VisualBanner {visual} newest={newest.get(visual.id) ?? visual} onopen={() => onvisual(visual)} /></div>{/if}{/each}
+  {#each row.attachments as file}{@const visual = file.visual}{#if visual}<div><VisualBanner {visual} newest={newest.get(visual.id) ?? visual} event={visualEvents.get(row.key) ?? ""} at={row.at} onopen={() => onvisual(visual)} /></div>{/if}{/each}
   <!-- As in v1, images come first as thumbnails, then a card per other file. Each opens the file in a new tab. -->
   {#if images.length}<div class="images" class:many={images.length > 1}>{#each images as file, i (i)}
     <a class="thumb" href={url(file)} target="_blank" rel="noopener" title={`${file.name} · ${fileSize(file.bytes)}`}>

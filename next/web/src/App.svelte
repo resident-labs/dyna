@@ -135,6 +135,8 @@
   let section: "requests" | "instructions" | undefined = $state(/\/instructions\/?$/.test(behind) ? "instructions" : undefined);
   let visual: { versions: VisualVersion[]; selected: number; send: (text: string, event: string) => Promise<void> } | undefined = $state();
   let visualTrigger: HTMLElement | undefined;
+  let shellWidth = $state(0);
+  let visualOverlay = $derived(shellWidth - (shellWidth <= 640 ? 0 : 64) < 1200);
   let requestsButton: HTMLButtonElement | undefined = $state();
   function openInstructions() {
     history.pushState({ instructionsBack: behind }, "", `/r/${encodeURIComponent(room!)}/instructions`);
@@ -610,7 +612,7 @@
 {/snippet}
 
 {#if signedOut}<ConnectScreen code={pairCode} />
-{:else}<div class="shell" class:open={room || activity.active.length} class:drawer class:tucked={room && wide.current && tucked} class:settings={inSettings}>
+{:else}<div class="shell" bind:clientWidth={shellWidth} class:visual-overlay={visualOverlay} class:open={room || activity.active.length} class:drawer class:tucked={room && wide.current && tucked} class:settings={inSettings}>
   <aside class="rail" aria-label="Rooms" tabindex="-1" bind:this={rail} inert={phone.current && !drawer} role={drawer ? "dialog" : undefined} aria-modal={drawer || undefined}
     onclick={event => { if (drawer && event.target instanceof Element && event.target.closest("a, button")) void showDrawer(false, false); }}>
     <nav aria-label="Rooms"><a class="home" href="/" onclick={navigate} aria-current={room || inSettings ? undefined : "page"} aria-label="Home" title="Home"><Icon name="home" /></a>
@@ -712,7 +714,7 @@
         sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
     </div>
   </main>
-  {#if visual && store && !inSettings}<aside class="visual-pane"><VisualView {...visual} room={store.room} onclose={() => { visual = undefined; void tick().then(() => visualTrigger?.focus()); }} /></aside>
+  {#if visual && store && !inSettings}<aside class="visual-pane"><VisualView {...visual} room={store.room} {roomName} overlay={visualOverlay} names={store.names} onclose={() => { visual = undefined; void tick().then(() => visualTrigger?.focus()); }} /></aside>
   {:else if room}
     <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} class:watching={watching && docked} aria-label="Sessions" tabindex="-1" role={panel && phone.current && !covered ? "dialog" : undefined} aria-modal={(panel && phone.current && !covered) || undefined} bind:this={members} inert={drawer || covered || inSettings}>
       <!-- Docked, the computer sits above the session list. -->
@@ -764,10 +766,11 @@
   .route-notice { display: flex; align-items: center; gap: 10px; padding: 8px 16px; color: var(--muted); font-size: 12.5px; border-bottom: 1px solid var(--line); }
   .route-notice span { flex: 1; } .route-notice strong { color: var(--text); }
   .route-notice button { border: 0; background: none; color: inherit; cursor: pointer; }
-  :global(.shell.open:has(.visual-pane)) { grid-template-columns: 64px minmax(0, 1fr) min(660px, calc(100vw - 64px)); }
-  .visual-pane { min-width: 0; overflow: hidden; border-left: 1px solid var(--line); }
-  @media (max-width: 760px) { :global(.shell.open:has(.visual-pane)) { grid-template-columns: 64px minmax(0, 1fr); } .visual-pane { position: fixed; z-index: 4; inset: 0 0 0 auto; width: min(660px, 100vw); } }
-  @media (max-width: 640px) { :global(.shell.open:has(.visual-pane)) { grid-template-columns: minmax(0, 1fr); } .visual-pane { width: 100%; height: var(--app-height, 100dvh); } }
+  .shell.open.open:has(.visual-pane) { position:relative; grid-template-columns:64px minmax(0, 1fr) clamp(560px, calc((100% - 64px) * .45), 960px); }
+  .visual-pane { min-width:0; overflow:hidden; border-left:1px solid var(--line); }
+  .shell.open.open.visual-overlay:has(.visual-pane) { grid-template-columns:64px minmax(0, 1fr); }
+  .visual-overlay .visual-pane { position:absolute; z-index:4; inset:0 0 0 64px; }
+  @media (max-width:640px) { .shell.open.open.visual-overlay:has(.visual-pane) { grid-template-columns:minmax(0, 1fr); } .visual-overlay .visual-pane { left:0; } }
   .reload-notice { margin: 0; padding: 7px 16px; color: var(--muted); border-bottom: 1px solid var(--line); font-size: 13px; }
   .reload-notice button { margin-left: 4px; padding: 8px 4px; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
   /* Two-line rows around the 28 px avatar, as in the chosen mockup: the name, then what the session does. */
