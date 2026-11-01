@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountRows, accountState, providerGroup, removalPrompt, canReconnect, reconnectUnavailable } from "./accounts.ts";
+import { accountPath, accountRows, accountState, providerGroup, reconnectPath, removalPrompt, canReconnect, reconnectUnavailable } from "./accounts.ts";
 import { APIError } from "./client.ts";
 import type { Account, AccountProviderInfo } from "./contract.gen.ts";
 
@@ -35,4 +35,9 @@ test("unknown is muted and expired accounts sort first", () => {
   assert.deepEqual(accountState(unknown), { line: "Not checked yet" });
   assert.deepEqual(accountRows([unknown, expired]).map(a => a.id), ["z", "a"]);
   assert.equal(accountState(expired).pill?.tone, "error");
+});
+
+test("an account's links carry its ID as one path segment", () => {
+  assert.equal(accountPath("a/b"), "/settings/accounts/account/a%2Fb");
+  assert.equal(reconnectPath("a/b"), "/settings/accounts/reconnect/a%2Fb");
 });
