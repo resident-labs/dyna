@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 
 	"github.com/resident-labs/dyna/contract"
@@ -148,45 +147,36 @@ func (s *Store) TranscriptTurnPost(ctx context.Context, session contract.Session
 	return event, err == nil, err
 }
 
-// TranscriptCallPostPage contains the bounded posts and total for a call.
-type TranscriptCallPostPage struct {
-	Posts []contract.Event
-	Total int
-}
-
 // TranscriptCallPosts returns up to nine posts and the total for each requested call.
-func (s *Store) TranscriptCallPosts(ctx context.Context, session contract.SessionID, turn contract.TurnID, callIDs []string) (map[string]TranscriptCallPostPage, error) {
-	result := make(map[string]TranscriptCallPostPage, len(callIDs))
-	if len(callIDs) == 0 {
-		return result, nil
-	}
-	ids, err := json.Marshal(callIDs)
-	if err != nil {
-		return nil, err
-	}
-	query := `SELECT e.seq,e.id,e.at,e.room,e.type,e.from_kind,e.from_id,e.body,
- json_extract(CAST(e.body AS TEXT),'$.toolCallId') AS call_id` + transcriptPostsQuery
-	rows, err := s.Read().QueryContext(ctx, `SELECT seq,id,at,room,type,from_kind,from_id,body,call_id,total FROM (
- SELECT *, row_number() OVER (PARTITION BY call_id ORDER BY at,seq) AS rn,
- count(*) OVER (PARTITION BY call_id) AS total FROM (`+query+` AND json_extract(CAST(e.body AS TEXT),'$.toolCallId') IN (SELECT value FROM json_each(?)))
- ) WHERE rn<=9 ORDER BY call_id,at,seq`, session, turn, string(ids))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var callID string
+func (s *Store) TranscriptCallPosts(ctx context.Context, session contract.SessionID, turn contract.TurnID, callIDs []string, visit func(string, contract.Event, int)) error {
+	filter := transcriptPostsQuery + ` AND json_extract(CAST(e.body AS TEXT),'$.toolCallId')=?`
+	for _, callID := range callIDs {
 		var total int
-		event, err := scanEvent(rows, &callID, &total)
-		if err != nil {
-			return nil, err
+		if err := s.Read().QueryRowContext(ctx, `SELECT count(*)`+filter, session, turn, callID).Scan(&total); err != nil {
+			return err
 		}
-		page := result[callID]
-		page.Posts = append(page.Posts, event)
-		page.Total = total
-		result[callID] = page
+		if total == 0 {
+			continue
+		}
+		rows, err := s.Read().QueryContext(ctx, `SELECT e.seq,e.id,e.at,e.room,e.type,e.from_kind,e.from_id,e.body`+filter+` ORDER BY e.at,e.seq LIMIT 9`, session, turn, callID)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			event, err := scanEvent(rows)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			visit(callID, event, total)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
 	}
-	return result, rows.Err()
+	return nil
 }
 
 // TranscriptSentPosts returns a bounded page ordered by event time and sequence.
@@ -198,6 +188,25 @@ func (s *Store) TranscriptSentPosts(ctx context.Context, session contract.Sessio
 	}
 	defer rows.Close()
 	posts := []contract.Event{}
+	for rows.Next() {
+		event, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		posts = append(posts, event)
+	}
+	return posts, rows.Err()
+}
+
+// TranscriptSentPostsNewest returns a bounded newest-first page.
+func (s *Store) TranscriptSentPostsNewest(ctx context.Context, session contract.SessionID, turn contract.TurnID, limit, offset int) ([]contract.Event, error) {
+	query := `SELECT e.seq,e.id,e.at,e.room,e.type,e.from_kind,e.from_id,e.body` + transcriptPostsQuery
+	rows, err := s.Read().QueryContext(ctx, query+` AND (?=0 OR e.seq<=?) ORDER BY e.seq DESC LIMIT ?`, session, turn, offset, offset, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var posts []contract.Event
 	for rows.Next() {
 		event, err := scanEvent(rows)
 		if err != nil {
