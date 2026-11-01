@@ -69,6 +69,16 @@ const (
 // A transient unit survives the SSH session only when the user manager does, so
 // the script enables lingering first. Without a user manager, or without
 // lingering, the check starts under setsid and nohup and runs without a unit.
+const logCapScript = `# Unlike head, dd writes short pipe reads without waiting for another block.
+# The portable byte-at-a-time fallback keeps the exact cap on non-GNU nodes.
+# A forced kill can still lose the one read currently in flight.
+cap=${DYNA_CI_LOG_CAP:-134217728}
+if dd if=/dev/null of=/dev/null iflag=count_bytes count=0 2>/dev/null; then
+  dd bs=8192 iflag=count_bytes count="$cap" 2>/dev/null >> "$1/log"
+else
+  dd bs=1 count="$cap" 2>/dev/null >> "$1/log"
+fi`
+
 const StartScript = `set -eu
 d=$1; unit=$2; cpu=$3; mem=$4; tasks=$5; io=${6:-}
 umask 077
@@ -85,7 +95,7 @@ cat > "$d/wrap.sh" <<'WRAP'
 export DYNA_CI_TRAILER="$1/trailer"
 mkfifo "$1/out"
 setsid bash -c '
-head -c "${DYNA_CI_LOG_CAP:-134217728}" >> "$1/log"
+` + logCapScript + `
 if IFS= read -r -n 1 _; then
   printf "\n[... the rest of the output was discarded on the node ...]\n" >> "$1/log"
   touch "$1/activity"

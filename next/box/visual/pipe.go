@@ -31,28 +31,41 @@ type clip struct {
 	Height int     `json:"height"`
 	Scale  float64 `json:"scale"`
 }
+type mediaFeature struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+type color struct {
+	R int `json:"r"`
+	G int `json:"g"`
+	B int `json:"b"`
+	A int `json:"a"`
+}
 type params struct {
-	URL                   string   `json:"url,omitempty"`
-	TargetID              string   `json:"targetId,omitempty"`
-	Flatten               bool     `json:"flatten,omitempty"`
-	Name                  string   `json:"name,omitempty"`
-	Source                string   `json:"source,omitempty"`
-	Width                 int      `json:"width,omitempty"`
-	Height                int      `json:"height,omitempty"`
-	DeviceScaleFactor     int      `json:"deviceScaleFactor,omitempty"`
-	Mobile                *bool    `json:"mobile,omitempty"`
-	RequestID             string   `json:"requestId,omitempty"`
-	ResponseCode          int      `json:"responseCode,omitempty"`
-	ResponseHeaders       []header `json:"responseHeaders,omitempty"`
-	Body                  string   `json:"body,omitempty"`
-	ErrorReason           string   `json:"errorReason,omitempty"`
-	Expression            string   `json:"expression,omitempty"`
-	ReturnByValue         bool     `json:"returnByValue,omitempty"`
-	AwaitPromise          bool     `json:"awaitPromise,omitempty"`
-	Format                string   `json:"format,omitempty"`
-	Quality               int      `json:"quality,omitempty"`
-	CaptureBeyondViewport bool     `json:"captureBeyondViewport,omitempty"`
-	Clip                  *clip    `json:"clip,omitempty"`
+	URL                   string         `json:"url,omitempty"`
+	TargetID              string         `json:"targetId,omitempty"`
+	Flatten               bool           `json:"flatten,omitempty"`
+	Name                  string         `json:"name,omitempty"`
+	Source                string         `json:"source,omitempty"`
+	Width                 int            `json:"width,omitempty"`
+	Height                int            `json:"height,omitempty"`
+	DeviceScaleFactor     int            `json:"deviceScaleFactor,omitempty"`
+	Mobile                *bool          `json:"mobile,omitempty"`
+	RequestID             string         `json:"requestId,omitempty"`
+	ResponseCode          int            `json:"responseCode,omitempty"`
+	ResponseHeaders       []header       `json:"responseHeaders,omitempty"`
+	Body                  string         `json:"body,omitempty"`
+	ErrorReason           string         `json:"errorReason,omitempty"`
+	Expression            string         `json:"expression,omitempty"`
+	ReturnByValue         bool           `json:"returnByValue,omitempty"`
+	AwaitPromise          bool           `json:"awaitPromise,omitempty"`
+	Format                string         `json:"format,omitempty"`
+	Quality               int            `json:"quality,omitempty"`
+	CaptureBeyondViewport bool           `json:"captureBeyondViewport,omitempty"`
+	Clip                  *clip          `json:"clip,omitempty"`
+	Hidden                bool           `json:"hidden,omitempty"`
+	Features              []mediaFeature `json:"features,omitempty"`
+	Color                 *color         `json:"color,omitempty"`
 }
 
 type message struct {

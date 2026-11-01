@@ -193,7 +193,13 @@ func mergeQueue(st State, where LocalTrialRooms, upstreams RoomUpstreams) []Merg
 		case observation.Mergeable != nil && !*observation.Mergeable:
 			item.State, item.Reason = "conflict", "conflicts with "+observation.DefaultBranch+"; rebase"
 		case observation.DefaultBranch != "" && observation.Base != observation.DefaultBranch:
-			item.State, item.Reason = "waiting-base", "waiting for the base PR to merge and retarget"
+			item.State, item.Reason = "unmanaged-base", "the merge queue only manages the default branch; merge this PR on GitHub"
+			for _, parent := range st.Records {
+				if parent.Key != r.Key && parent.Watching && parent.State == state.PROpen && parent.Host == r.Host && strings.EqualFold(parent.Repo, r.Repo) && strings.EqualFold(parent.HeadRepo, r.Repo) && parent.Branch == observation.Base {
+					item.State, item.Reason = "waiting-base", "waiting for the base PR to merge and retarget"
+					break
+				}
+			}
 		case facts.Ready(*r, observation, st.Records) || facts.ReadyWithoutHeadCI(*r, observation, st.Records):
 			item.State, item.Reason = "ready", ""
 			if f := st.RepositoryFacts[defaultRepo(*r)]; f.CheckedAt.IsZero() {

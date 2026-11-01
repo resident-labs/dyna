@@ -93,6 +93,7 @@ func TestReconcilerWakeDuringStop(t *testing.T) {
 type openTerminalView struct{}
 
 func (openTerminalView) OpenTerminal(contract.SessionID) bool { return true }
+func (openTerminalView) SessionClosed(contract.SessionID)     {}
 func (openTerminalView) Connected(contract.SessionID) bool    { return false }
 
 type stopCountingHost struct {

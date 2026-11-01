@@ -2,14 +2,6 @@ package contract
 
 const MethodContextSnapshot Method = "context.snapshot"
 
-type AgentSurface string
-
-const (
-	AgentSurfaceOff      AgentSurface = "off"
-	AgentSurfaceCaller   AgentSurface = "caller"
-	AgentSurfaceDeclared AgentSurface = "declared"
-)
-
 type ContextSectionKey string
 
 const (

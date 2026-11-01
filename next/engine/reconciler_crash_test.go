@@ -14,6 +14,7 @@ type crashView struct{ session contract.SessionID }
 
 func (v crashView) Connected(id contract.SessionID) bool { return id != v.session }
 func (crashView) OpenTerminal(contract.SessionID) bool   { return true }
+func (crashView) SessionClosed(contract.SessionID)       {}
 
 func TestRepeatedExitedBoxesFailAndCompletedTurnResets(t *testing.T) {
 	s, room, sid, ctx := setup(t)

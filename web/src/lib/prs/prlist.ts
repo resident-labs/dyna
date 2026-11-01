@@ -100,6 +100,7 @@ const MERGE: Record<string, [string, string, string]> = {
   stopped: ['blocked', 'Review stopped', 'gold'],
   paused: ['blocked', 'Paused', 'gold'],
   'waiting-base': ['progress', 'Waiting for the base PR', 'gold'],
+  'unmanaged-base': ['blocked', 'Merge on GitHub', 'gold'],
   'waiting-dependency': ['progress', 'Waiting for dependency', 'gold'],
   review: ['progress', 'Needs review', 'quiet'],
   ci: ['progress', 'Waiting for CI', 'run'],

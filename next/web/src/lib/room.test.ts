@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { RoomStore } from "./room.svelte.ts";
+import { stream, type EventConnection } from "./stream.ts";
 import { EventWindow, PAGE, WINDOW, dmOf } from "./window.svelte.ts";
 import { feedRows as dayRows } from "./feed.ts";
 import type { BoxState, Conversation, Event, EventBody, EventsListRequest, PostRequest, SessionSummary } from "./contract.gen.ts";
@@ -90,7 +91,7 @@ test("the waiting count holds pending owner-class operations from op.list and op
     state: "pending", created: "", expires: "" } as const;
   const requested = (seq: number, id: string, level: "auto" | "owner") => event(seq, { type: "op.requested", body: { id, kind: "pr.open", by: listed.by, class: level, card, expires: "" } });
   const original = globalThis.fetch;
-  globalThis.fetch = async input => new Response(JSON.stringify(String(input).endsWith("op.list") ? { operations: [listed] } : { sessions: [], seq: 10 }));
+  globalThis.fetch = async input => new Response(JSON.stringify(String(input).endsWith("op.list") ? { operations: [listed] } : { rooms: [], sessions: [], seq: 10 }));
   try {
     const room = new RoomStore("r", () => () => {});
     await room.open();
@@ -131,7 +132,7 @@ test("a pending post is replaced by the event that echoes its clientId, before i
 // A fake engine with feed posts 1..count. It honors the events.list home filter and records each range.
 function engine(count: number, sessions: SessionSummary[] = []) {
   const requests: string[] = [];
-  const state = { down: false };
+  const state = { down: false, feedRead: 0 };
   const posts = Array.from({ length: count }, (_, i) => event(i + 1, { type: "post.created", body: { text: String(i + 1), home: feed } }));
   const original = globalThis.fetch;
   const reply = (body: object, status = 200) => new Response(JSON.stringify(body), { status });
@@ -143,6 +144,7 @@ function engine(count: number, sessions: SessionSummary[] = []) {
       return reply({ seq: posts.length, event: String(posts.length) });
     }
     if (method === "session.list") return reply({ sessions, seq: posts.length });
+    if (method === "room.list") return reply({ rooms: [{ id: "r", lastRead: state.feedRead }], seq: posts.length });
     if (method !== "events.list") return reply({});
     if (state.down) return reply({ code: "internal", message: "down" }, 500);
     const request: EventsListRequest = JSON.parse(String(init?.body));
@@ -330,6 +332,54 @@ test("a failed turn marks its session until the owner reads past it in the feed 
   assert.equal(room.unseen("s"), false);
 });
 
+test("rereading gives the feed and each DM their newest read positions", async () => {
+  const listed = { lastRead: 2, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "", startedAt: "", hadJobs: false } as const;
+  const sessions: SessionSummary[] = [{ id: "s", ...listed }];
+  const server = engine(0, sessions);
+  server.state.feedRead = 5;
+  try {
+    const room = new RoomStore("r", () => () => {});
+    await room.open();
+    assert.deepEqual([room.readAt(feed), room.readAt(dm)], [5, 2]);
+    server.state.feedRead = 8;
+    sessions[0] = { ...sessions[0], lastRead: 4 };
+    await room.rereadPositions();
+    assert.deepEqual([room.readAt(feed), room.readAt(dm)], [8, 4]);
+  } finally { server.restore(); }
+});
+
+test("a read made before the first hello, or while the stream is down, reaches the store", async () => {
+  const listed = { lastRead: 2, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "", startedAt: "", hadJobs: false } as const;
+  const sessions: SessionSummary[] = [{ id: "s", ...listed }];
+  const server = engine(0, sessions);
+  const hellos: ((event: MessageEvent<string>) => void)[] = [];
+  const sources: EventConnection[] = [];
+  let reconnect = () => {};
+  const factory = (): EventConnection => {
+    const source: EventConnection = { onmessage: null, onerror: null, addEventListener(_type, cb) { hellos.push(cb); }, close() {} };
+    sources.push(source);
+    return source;
+  };
+  const connect: typeof stream = (room, after, apply, _factory, _schedule, opened) =>
+    stream(room, after, apply, factory, cb => { reconnect = cb; return () => {}; }, opened);
+  try {
+    const room = new RoomStore("r", connect);
+    await room.open();
+    assert.deepEqual([room.readAt(feed), room.readAt(dm)], [0, 2]);
+    server.state.feedRead = 5;
+    sessions[0] = { ...sessions[0], lastRead: 4 };
+    hellos[0](new MessageEvent("hello", { data: '{"build":"b"}' }));
+    await room.rereading;
+    assert.deepEqual([room.readAt(feed), room.readAt(dm)], [5, 4]);
+    server.state.feedRead = 9;
+    sources[0].onerror?.(new Event("error"));
+    reconnect();
+    hellos[1](new MessageEvent("hello", { data: '{"build":"b"}' }));
+    await room.rereading;
+    assert.deepEqual([room.readAt(feed), room.readAt(dm)], [9, 4]);
+  } finally { server.restore(); }
+});
+
 test("session.list and later events set and clear the running computers", async () => {
   const listed = { lastRead: 0, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", goal: "", startedAt: "", hadJobs: false } as const;
   const server = engine(3, [{ id: "s", ...listed, computer: "running" }, { id: "x", ...listed, computer: "stopped" }]);
@@ -354,7 +404,7 @@ test("a pending box's reason comes from session.list, follows a pending to pendi
   const changed = (seq: number, from: BoxState, to: BoxState, reason?: string) => event(seq, { type: "box.changed", body: { box: "b", session: "s", from, to, reason } });
   globalThis.fetch = async input => {
     if (String(input).endsWith("session.list")) return new Response(JSON.stringify({ sessions: [session], seq: 2 }));
-    return new Response("{}");
+    return new Response(JSON.stringify({ rooms: [] }));
   };
   try {
     const room = new RoomStore("r", () => () => {});
@@ -382,7 +432,7 @@ test("a failed job counts after a fresh load until the owner reads past its end,
   globalThis.fetch = async input => {
     if (String(input).endsWith("session.list")) return new Response(JSON.stringify({ sessions: [session], seq: 4 }));
     if (String(input).endsWith("events.list")) return new Promise<Response>(done => { answer = done; });
-    return new Response("{}");
+    return new Response(JSON.stringify({ rooms: [] }));
   };
   try {
     const room = new RoomStore("r", () => () => {});
@@ -391,6 +441,31 @@ test("a failed job counts after a fresh load until the owner reads past its end,
     answer(new Response(JSON.stringify({ events: ends })));
     await new Promise(setImmediate);
     assert.deepEqual([...room.failedJobs], ["s/unread"]);
+  } finally { globalThis.fetch = original; }
+});
+
+test("a read that passes a counted failed job clears its mark, even when the read arrives later", async () => {
+  const original = globalThis.fetch;
+  let answer = (_: Response) => {};
+  const ends = [
+    event(3, { type: "shell.job.ended", body: { session: "s", job: "passed", exitCode: 0, tail: "" } }),
+    event(4, { type: "shell.job.ended", body: { session: "s", job: "unread", exitCode: 1, tail: "" } }),
+  ];
+  const session = { id: "s", lastRead: 2, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "", startedAt: "", hadJobs: true };
+  globalThis.fetch = async input => {
+    if (String(input).endsWith("session.list")) return new Response(JSON.stringify({ sessions: [session], seq: 4 }));
+    if (String(input).endsWith("room.list")) return new Response(JSON.stringify({ rooms: [], seq: 4 }));
+    if (String(input).endsWith("events.list")) return new Promise<Response>(done => { answer = done; });
+    return new Response(JSON.stringify({ rooms: [], sessions: [], operations: [], seq: 4 }));
+  };
+  try {
+    const room = new RoomStore("r", () => () => {});
+    await room.open();
+    answer(new Response(JSON.stringify({ events: ends })));
+    await new Promise(setImmediate);
+    assert.deepEqual([...room.failedJobs], ["s/unread"]);
+    room.apply(event(0, { type: "conversation.read", body: { room: "r", conversation: dm, seq: 4 } }));
+    assert.equal(room.failedJobs.size, 0);
   } finally { globalThis.fetch = original; }
 });
 
