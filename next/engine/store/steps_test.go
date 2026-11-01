@@ -9,6 +9,9 @@ import (
 	"testing"
 )
 
+// beforeWorkflows is the schema without the tables of step 66, which come last in the file.
+var beforeWorkflows = schema[:strings.Index(schema, "CREATE TABLE workflow_runs")]
+
 // LEGACY(v1-transfer): every test here but TestUpgradeRunsOneStep, which pin steps 42 to 63. Remove after the transfer.
 func TestUpgradeConnectSessionsFrom48(t *testing.T) {
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
@@ -17,7 +20,7 @@ func TestUpgradeConnectSessionsFrom48(t *testing.T) {
 	}
 	defer db.Close()
 	var old []string
-	for _, line := range strings.Split(schema, "\n") {
+	for _, line := range strings.Split(beforeWorkflows, "\n") {
 		line = strings.Replace(line, ", main_head TEXT NOT NULL DEFAULT ''", "", 1)
 		if strings.HasPrefix(line, "CREATE TABLE subscription") || strings.HasPrefix(line, "CREATE INDEX subscriptions_") || strings.HasPrefix(line, "CREATE TABLE repo_ci_hosts ") || strings.HasPrefix(line, "CREATE TABLE search_keys ") || strings.HasPrefix(line, "CREATE INDEX turns_session_started_at ") || strings.HasPrefix(line, "CREATE TABLE client_replays ") || strings.HasPrefix(line, "CREATE TABLE connect_devices ") || strings.HasPrefix(line, "CREATE TABLE connect_sessions ") || strings.HasPrefix(line, "CREATE TABLE connect_revocations ") || strings.HasPrefix(line, "CREATE TABLE transcript_turns ") || strings.HasPrefix(line, "CREATE UNIQUE INDEX transcript_turns_path_start ") || strings.HasPrefix(line, "CREATE INDEX pr_owners_session ") || strings.HasPrefix(line, "CREATE INDEX operations_pending_caller ") || strings.HasPrefix(line, "CREATE TABLE disk_warnings ") || strings.HasPrefix(line, "CREATE TABLE room_leftovers ") || strings.HasPrefix(line, "CREATE TABLE session_accounts ") || strings.HasPrefix(line, "CREATE TABLE questions ") || strings.HasPrefix(line, "CREATE INDEX questions_") || strings.HasPrefix(line, "CREATE TABLE goals ") || strings.HasPrefix(line, "CREATE INDEX goals_holder ") || strings.HasPrefix(line, "CREATE TABLE goal_items ") || strings.HasPrefix(line, "CREATE TABLE goal_journal ") || strings.HasPrefix(line, "CREATE TABLE checkins ") {
 			continue
@@ -232,7 +235,7 @@ func TestUpgradeLeavesOldQuestionsWithoutAPlan(t *testing.T) {
 	if !strings.Contains(schema, oldQuestions) {
 		t.Fatal("schema.sql lost the question columns")
 	}
-	if _, err = db.Exec(strings.Replace(schema, oldQuestions, "", 1)); err != nil {
+	if _, err = db.Exec(strings.Replace(beforeWorkflows, oldQuestions, "", 1)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = db.Exec(`INSERT INTO meta(key,value) VALUES ('schema_version','65');
@@ -261,7 +264,7 @@ func TestUpgradeMakesStartGoalsReal(t *testing.T) {
 	dir := t.TempDir()
 	db, err := sql.Open("sqlite", filepath.Join(dir, "store.db"))
 	var old []string
-	for _, line := range strings.Split(schema, "\n") {
+	for _, line := range strings.Split(beforeWorkflows, "\n") {
 		line = strings.Replace(line, ", main_head TEXT NOT NULL DEFAULT ''", "", 1)
 		if strings.HasPrefix(line, "CREATE TABLE subscription") || strings.HasPrefix(line, "CREATE INDEX subscriptions_") || strings.HasPrefix(line, "CREATE TABLE goals ") || strings.HasPrefix(line, "CREATE INDEX goals_holder ") || strings.HasPrefix(line, "CREATE TABLE goal_items ") || strings.HasPrefix(line, "CREATE TABLE goal_journal ") || strings.HasPrefix(line, "CREATE TABLE checkins ") {
 			continue
@@ -310,7 +313,7 @@ func TestUpgradeTrackedPRsFrom64(t *testing.T) {
 	}
 	defer db.Close()
 	var old []string
-	for _, line := range strings.Split(schema, "\n") {
+	for _, line := range strings.Split(beforeWorkflows, "\n") {
 		line = strings.Replace(strings.Replace(line, ", main_head TEXT NOT NULL DEFAULT ''", "", 1), oldQuestions, "", 1)
 		if strings.HasPrefix(line, "CREATE INDEX pr_owners_state ") {
 			continue

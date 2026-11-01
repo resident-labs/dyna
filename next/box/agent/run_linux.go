@@ -25,6 +25,7 @@ import (
 	"github.com/resident-labs/dyna/box/shell"
 	"github.com/resident-labs/dyna/box/visual"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/harness"
 	"github.com/resident-labs/dyna/harness/pi"
 )
 
@@ -67,7 +68,18 @@ func modelArgs(model contract.ModelChoice, compactTokens int) ([]string, error) 
 // exposure the servers use; "--exclude-tools bash" then removes bash only.
 func piArgs(args []string, extensionPath, instructions, modelsPath, sessions, mcpPath string) []string {
 	args = append(args, "--extension", extensionPath, "--append-system-prompt", instructions)
-	return append(args, "--mode", "rpc", "--models-file", modelsPath, "--session-dir", sessions, "--mcp-config", mcpPath, "--tools", "+codemode", "--exclude-tools", "bash", "--continue")
+	return append(args, "--mode", "rpc", "--models-file", modelsPath, "--session-dir", sessions, "--mcp-config", mcpPath, "--tools", "+codemode", "--exclude-tools", "bash")
+}
+
+// boxHarness is what runs a box's turns: the session's Pi, or a crew.
+type boxHarness interface {
+	harness.Harness
+	Done() <-chan struct{}
+}
+
+// crewInstructions follow a session's own instructions in each worker.
+func crewInstructions(name string) string {
+	return "You are one worker of workflow " + name + ", a process in your session's box, not a session of your own. A script started you and reads your final text as your result, so end with text and do not post it with endTurn. Other workers share this box and this working tree: stay within the work your prompt gives you.\n"
 }
 
 // Run connects the box, serves its model route, and runs the Pi session.
@@ -190,24 +202,45 @@ func Run(ctx context.Context) error {
 	if err = os.WriteFile(extensionPath, []byte(RenderExtension()), 0600); err != nil {
 		return err
 	}
-	args = piArgs(args, extensionPath, hello.Instructions, modelsPath, sessions, mcpPath)
-	h, err := pi.Open(ctx, "pi", args, "", workdir)
-	if err != nil {
-		return err
+	activity := &activity{}
+	transcript := NewTranscript(client, sessions)
+	var h boxHarness
+	var files func() []string // the session files to keep sending
+	if hello.Workflow != nil {
+		open := func(ctx context.Context, profile contract.WorkflowProfile, models string) (crewWorker, error) {
+			args, err := modelArgs(profile.Model, profile.CompactTokens)
+			if err != nil {
+				return nil, err
+			}
+			worker, err := pi.Open(ctx, "pi", piArgs(args, extensionPath, hello.Instructions+crewInstructions(hello.Workflow.Name), models, sessions, mcpPath), "", workdir)
+			if err != nil {
+				return nil, err
+			}
+			return worker, nil
+		}
+		crew, err := NewCrew(CrewConfig{Workflow: *hello.Workflow, Engine: client, Open: open, Transcript: transcript, Workdir: workdir, Sessions: sessions, State: piDir})
+		if err != nil {
+			return err
+		}
+		h, files = crew, crew.Files
+	} else {
+		session, err := pi.Open(ctx, "pi", append(piArgs(args, extensionPath, hello.Instructions, modelsPath, sessions, mcpPath), "--continue"), "", workdir)
+		if err != nil {
+			return err
+		}
+		session.Activity = activity.set
+		h, files = session, func() []string { return []string{session.SessionFile()} }
 	}
 	defer h.Close()
 	steps.Done("pi start")
-	activity := &activity{}
-	h.Activity = activity.set
 	activityTicks := time.NewTicker(time.Second)
 	defer activityTicks.Stop()
 	go activity.run(ctx, activityTicks.C, client.TurnActivity)
-	transcript := NewTranscript(client, sessions)
-	transcript.syncLogged(ctx, h.SessionFile())
+	transcript.syncLogged(ctx, files()...)
 	ticks := time.NewTicker(transcriptInterval)
 	defer ticks.Stop()
-	go transcript.Run(ctx, ticks.C, h.SessionFile)
-	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, file: h.SessionFile}, Setup: setup, Attach: client.Attach, setupErr: setupErr}
+	go transcript.Run(ctx, ticks.C, files)
+	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, files: files}, Setup: setup, Attach: client.Attach, setupErr: setupErr}
 	var closing atomic.Bool
 	ownerInput := computer.NewInput(computer.URL)
 	go ownerInput.Run(ctx)
@@ -260,7 +293,7 @@ func Run(ctx context.Context) error {
 			}
 			if _, ok := message.Body.(contract.Archive); ok {
 				closing.Store(true)
-				return closeBox(ctx, h, transcript, h.SessionFile(), time.After, func(ctx context.Context) error {
+				return closeBox(ctx, h, transcript, files, time.After, func(ctx context.Context) error {
 					return archiveAndReport(ctx, "/box/work", hello.Session, hello.Repos, runGit, time.After, client.ArchiveDone)
 				})
 			}

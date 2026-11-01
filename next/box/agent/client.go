@@ -239,6 +239,39 @@ func (c *Client) TurnOutput(ctx context.Context, result contract.TurnEnded) erro
 	return err
 }
 
+// request sends one typed call through the queue, so it waits out an engine restart.
+func request[Req, Res any](ctx context.Context, c *Client, method contract.Method, req Req) (Res, error) {
+	var result Res
+	body, err := json.Marshal(req)
+	if err != nil {
+		return result, err
+	}
+	data, err := c.call(ctx, method, body)
+	if err != nil {
+		return result, err
+	}
+	return result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) WorkflowPin(ctx context.Context, commit string) error {
+	_, err := request[contract.WorkflowPinRequest, contract.WorkflowPinResponse](ctx, c, contract.MethodWorkflowPin, contract.WorkflowPinRequest{Commit: commit})
+	return err
+}
+
+func (c *Client) WorkflowStepStart(ctx context.Context, req contract.WorkflowStepStartRequest) (contract.WorkflowStepStartResponse, error) {
+	return request[contract.WorkflowStepStartRequest, contract.WorkflowStepStartResponse](ctx, c, contract.MethodWorkflowStepStart, req)
+}
+
+func (c *Client) WorkflowStepEnd(ctx context.Context, req contract.WorkflowStepEndRequest) error {
+	_, err := request[contract.WorkflowStepEndRequest, contract.WorkflowStepEndResponse](ctx, c, contract.MethodWorkflowStepEnd, req)
+	return err
+}
+
+// WorkflowPost posts for a script. The step key is the client ID, so a retry or a rerun posts once.
+func (c *Client) WorkflowPost(ctx context.Context, req contract.PostRequest) (contract.PostResponse, error) {
+	return request[contract.PostRequest, contract.PostResponse](ctx, c, contract.MethodPost, req)
+}
+
 func (c *Client) TranscriptFetch(ctx context.Context, req contract.TranscriptFetchRequest) (contract.TranscriptFetchResponse, error) {
 	body, err := json.Marshal(req)
 	if err != nil {

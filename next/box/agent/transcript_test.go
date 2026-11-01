@@ -111,7 +111,7 @@ func TestTranscriptTurnOutputIgnoresSyncError(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "a.jsonl")
 	writeSession(t, file, "abc")
-	sink := endedSink{turnSink: recordingTurnSink{}, transcript: NewTranscript(&transcriptEngine{lose: true}, dir), file: func() string { return file }}
+	sink := endedSink{turnSink: recordingTurnSink{}, transcript: NewTranscript(&transcriptEngine{lose: true}, dir), files: func() []string { return []string{file} }}
 	if err := sink.TurnOutput(context.Background(), contract.TurnEnded{}); err != nil {
 		t.Fatalf("TurnOutput = %v, want nil after a failed sync", err)
 	}
@@ -131,7 +131,7 @@ func TestCloseBoxSendsUnsentBytesBeforeArchive(t *testing.T) {
 		t.Fatal("closeBox waited although the sync succeeded")
 		return nil
 	}
-	err := closeBox(context.Background(), fakeCloser{}, NewTranscript(engine, dir), file, noWait, func(context.Context) error {
+	err := closeBox(context.Background(), fakeCloser{}, NewTranscript(engine, dir), func() []string { return []string{file} }, noWait, func(context.Context) error {
 		archived = true
 		if len(engine.requests) != 1 || string(engine.requests[0].Bytes) != "abc" {
 			t.Fatalf("archived before the transcript reached the engine: %+v", engine.requests)
@@ -156,7 +156,7 @@ func TestCloseBoxRetriesFailedSyncBeforeArchive(t *testing.T) {
 		return ticked
 	}
 	archived := false
-	err := closeBox(context.Background(), fakeCloser{}, NewTranscript(engine, dir), file, fired, func(context.Context) error {
+	err := closeBox(context.Background(), fakeCloser{}, NewTranscript(engine, dir), func() []string { return []string{file} }, fired, func(context.Context) error {
 		archived = true
 		if len(engine.requests) != 2 || string(engine.requests[1].Bytes) != "abc" {
 			t.Fatalf("archived before the retry reached the engine: %+v", engine.requests)
@@ -183,7 +183,7 @@ func TestCloseRetriesFailedArchiveDone(t *testing.T) {
 		return ticked
 	}
 	calls := 0
-	err := closeBox(context.Background(), fakeCloser{}, NewTranscript(&transcriptEngine{}, dir), file, fired, func(context.Context) error {
+	err := closeBox(context.Background(), fakeCloser{}, NewTranscript(&transcriptEngine{}, dir), func() []string { return []string{file} }, fired, func(context.Context) error {
 		calls++
 		if calls == 1 {
 			return errors.New("engine unavailable")
@@ -232,7 +232,7 @@ func TestCloseKeepsRunAfterRunnerErrorAndRetriesSync(t *testing.T) {
 		return ticked
 	}
 	archived := false
-	err := closeBox(context.Background(), fakeCloser{}, NewTranscript(engine, dir), file, fired, func(context.Context) error {
+	err := closeBox(context.Background(), fakeCloser{}, NewTranscript(engine, dir), func() []string { return []string{file} }, fired, func(context.Context) error {
 		archived = true
 		if len(engine.requests) != 2 || string(engine.requests[1].Bytes) != "abc" {
 			t.Fatalf("archived before the retry reached the engine: %+v", engine.requests)
@@ -256,7 +256,7 @@ func TestTranscriptTickSendsNewBytes(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		NewTranscript(engine, dir).Run(ctx, ticks, func() string { return file })
+		NewTranscript(engine, dir).Run(ctx, ticks, func() []string { return []string{file} })
 		close(done)
 	}()
 	writeSession(t, file, "abc")

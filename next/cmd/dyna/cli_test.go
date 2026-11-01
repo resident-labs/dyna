@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -579,5 +581,42 @@ func TestPrTrackingCommands(t *testing.T) {
 	}
 	if _, err := execCLI(f, "pr", "track", "twelve"); err == nil {
 		t.Fatal("a number that is not one was accepted")
+	}
+}
+
+func TestWorkflowRunSendsTheFileItNames(t *testing.T) {
+	dir, err := os.MkdirTemp("", "dyna-cli-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	socket := filepath.Join(dir, "s")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got contract.WorkflowRunRequest
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/workflow.run" || json.NewDecoder(r.Body).Decode(&got) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(contract.WorkflowRunResponse{Run: "wf_1"})
+	})}
+	go server.Serve(listener)
+	defer server.Close()
+	script := filepath.Join(dir, "sweep.js")
+	if err := os.WriteFile(script, []byte("export const meta = {}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	command := workflowCommand(func() *socketClient { return newClient(socket) })
+	var out bytes.Buffer
+	command.SetOut(&out)
+	command.SetArgs([]string{"run", script, "--args", `{"n":1}`, "--resume", "wf_0"})
+	if err := command.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got.Script != "export const meta = {}" || got.Args != `{"n":1}` || got.Resume != "wf_0" || !strings.Contains(out.String(), "wf_1") {
+		t.Fatalf("sent %+v, printed %s", got, out.String())
 	}
 }
