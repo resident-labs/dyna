@@ -13,7 +13,7 @@ import (
 
 func attachTestChannel(t *testing.T, s *Service, id contract.SessionID) *live.Channel {
 	t.Helper()
-	handle, _, ok := s.lockSession(id)
+	handle, ok := s.lockSession(id)
 	if !ok {
 		t.Fatal("session closed")
 	}
@@ -25,7 +25,7 @@ func attachTestChannel(t *testing.T, s *Service, id contract.SessionID) *live.Ch
 
 func computerWatchGeneration(t *testing.T, s *Service, id contract.SessionID) uint64 {
 	t.Helper()
-	handle, _, ok := s.lookupSession(id)
+	handle, ok := s.lookupSession(id)
 	if !ok {
 		t.Fatal("session missing")
 	}
@@ -241,7 +241,7 @@ func TestComputerChannelCloseEndsWatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handle, _, ok := s.lookupSession(id)
+	handle, ok := s.lookupSession(id)
 	if !ok {
 		t.Fatal("session missing")
 	}
