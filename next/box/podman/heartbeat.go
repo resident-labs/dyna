@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -13,6 +14,29 @@ import (
 type Load struct {
 	CPUUsed                                float64
 	MemBytes, MemUsed, DiskBytes, DiskUsed int64
+}
+
+// LocalDisk reads the disk at path on this machine with the host probe. It returns zeros when the probe fails.
+func LocalDisk(ctx context.Context, path string) (bytes, used int64) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bash", "-c", diskScript, "dyna", path)
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, 0
+	}
+	return parseDisk(out)
+}
+
+// parseDisk reads the dyna-disk line of a probe. A probe without one reports zeros.
+func parseDisk(out []byte) (bytes, used int64) {
+	for _, line := range strings.Split(string(out), "\n") {
+		if n, _ := fmt.Sscanf(line, "dyna-disk %d %d", &bytes, &used); n == 2 {
+			return bytes, used
+		}
+	}
+	return 0, 0
 }
 
 // Heartbeat reports load on each good tick and reports unreachable after three misses.
@@ -39,7 +63,7 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, data strin
 				continue
 			}
 			misses = 0
-			load.DiskBytes, load.DiskUsed = 0, 0
+			load.DiskBytes, load.DiskUsed = parseDisk(out)
 			for _, line := range strings.Split(string(out), "\n") {
 				if strings.HasPrefix(line, "dyna-load ") {
 					var used, current int64
@@ -50,9 +74,6 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, data strin
 						}
 						prevTime, prevCPU, load.MemUsed = now, used, current
 					}
-				}
-				if strings.HasPrefix(line, "dyna-disk ") {
-					fmt.Sscanf(line, "dyna-disk %d %d", &load.DiskBytes, &load.DiskUsed)
 				}
 			}
 			report(true, load)

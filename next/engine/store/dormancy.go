@@ -47,17 +47,36 @@ func (s *Store) StopQuiet(ctx context.Context, ids []contract.SessionID, cutoff 
 	return stopped, err
 }
 
-// dormantClose is shared by the candidate read and the final write check.
-const dormantClose = `s.parent IS NOT NULL AND s.closed_at IS NULL AND s.state='open'
-AND s.shell_jobs=0 AND r.paused_at IS NULL AND b.want='stop' AND b.state='stopped' AND b.updated_at<=?
+// closable holds every rule an idle leaf must pass before the engine closes it unasked.
+const closable = `s.parent IS NOT NULL AND s.closed_at IS NULL AND s.state='open'
+AND s.shell_jobs=0 AND r.paused_at IS NULL AND (b.state='failed' OR (b.want='stop' AND b.state='stopped'))
 AND NOT EXISTS (SELECT 1 FROM sessions c WHERE c.parent=s.id AND c.closed_at IS NULL)
-AND NOT EXISTS (SELECT 1 FROM pr_owners p WHERE p.session=s.id)
 AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=s.id AND d.state='pending')
 AND NOT EXISTS (SELECT 1 FROM operations o WHERE o.by_kind='session' AND o.by_id=s.id AND o.state='pending')
 AND NOT EXISTS (SELECT 1 FROM turns t WHERE t.session=s.id AND t.ended_at IS NULL)`
 
+// aged is the normal wait. A host at its floor skips it, and the PR exemption with it.
+const aged = `b.updated_at<=? AND NOT EXISTS (SELECT 1 FROM pr_owners p WHERE p.session=s.id)`
+
+const atFloor = `h.state='ready' AND h.disk_bytes<=h.disk_floor`
+
+const hostAtFloor = `EXISTS (SELECT 1 FROM hosts h WHERE h.name=b.host AND ` + atFloor + `)`
+
+// dormantClose is the final write check, for both the sweep and disk eviction.
+const dormantClose = closable + ` AND ((` + aged + `) OR ` + hostAtFloor + `)`
+
 func (s *Store) DormantCloseCandidates(ctx context.Context, cutoff time.Time) ([]contract.SessionID, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT s.id FROM sessions s JOIN rooms r ON r.id=s.room JOIN boxes b ON b.session=s.id WHERE `+dormantClose+` ORDER BY b.updated_at,s.id LIMIT 50`, cutoff.UnixMilli())
+	return s.closeCandidates(ctx, `SELECT s.id FROM sessions s JOIN rooms r ON r.id=s.room JOIN boxes b ON b.session=s.id WHERE `+closable+` AND `+aged+` ORDER BY b.updated_at,s.id LIMIT 200`, cutoff.UnixMilli())
+}
+
+// DiskEvictCandidates lists the oldest idle leaves on hosts at their floor. Reading hosts first keeps it cheap when none is low.
+// It takes four at a time and skips a host with four closes running, since each close starts its box to archive.
+func (s *Store) DiskEvictCandidates(ctx context.Context) ([]contract.SessionID, error) {
+	return s.closeCandidates(ctx, `SELECT s.id FROM hosts h CROSS JOIN boxes b ON b.host=h.name JOIN sessions s ON s.id=b.session JOIN rooms r ON r.id=s.room WHERE `+atFloor+` AND `+closable+` AND (SELECT count(*) FROM boxes c WHERE c.host=b.host AND c.state='closing' AND c.reason='')<4 ORDER BY b.updated_at,s.id LIMIT 4`)
+}
+
+func (s *Store) closeCandidates(ctx context.Context, query string, args ...any) ([]contract.SessionID, error) {
+	rows, err := s.Read().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +96,7 @@ func (s *Store) DormantCloseCandidates(ctx context.Context, cutoff time.Time) ([
 func (s *Store) MarkDormantClosing(ctx context.Context, id contract.SessionID, cutoff time.Time) (bool, error) {
 	var changed bool
 	err := s.Write(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `UPDATE sessions AS s SET state='closing',close_reason='dormant' WHERE s.id=? AND EXISTS (SELECT 1 FROM rooms r JOIN boxes b ON b.session=s.id WHERE r.id=s.room AND `+dormantClose+`)`, id, cutoff.UnixMilli())
+		result, err := tx.ExecContext(ctx, `UPDATE sessions AS s SET state='closing',close_reason=(SELECT CASE WHEN `+hostAtFloor+` THEN 'disk' ELSE 'dormant' END FROM boxes b WHERE b.session=s.id) WHERE s.id=? AND EXISTS (SELECT 1 FROM rooms r JOIN boxes b ON b.session=s.id WHERE r.id=s.room AND `+dormantClose+`)`, id, cutoff.UnixMilli())
 		if err != nil {
 			return err
 		}

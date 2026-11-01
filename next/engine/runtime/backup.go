@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"filippo.io/age"
+	"github.com/resident-labs/dyna/box"
+	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -23,6 +25,7 @@ const backupStamp = "20060102T150405.000000000Z"
 type backupStore interface {
 	Backup(context.Context, time.Time) (string, error)
 	RecordBackupCopy(context.Context, time.Time, string) error
+	AlertDisk(context.Context, contract.HostName, int64, int64, time.Time) error
 }
 
 type backupRunner func(context.Context, string, int64, *os.File) error
@@ -61,6 +64,7 @@ type backupLoop struct {
 	recipient age.Recipient
 	now       func() time.Time
 	run       backupRunner
+	free      func(context.Context) int64
 }
 
 func (b *backupLoop) copy(ctx context.Context, path string) error {
@@ -162,8 +166,42 @@ func (b *backupLoop) copy(ctx context.Context, path string) error {
 	return b.run(ctx, b.dest, info.Size(), tmp)
 }
 
+// roomy removes what a crashed backup left, then checks that a copy would leave the disk its 20 GiB.
+func (b *backupLoop) roomy(ctx context.Context, now time.Time) bool {
+	partials, err := filepath.Glob(filepath.Join(b.dir, "*.partial"))
+	if err != nil {
+		log.Printf("list partial backups: %v", err)
+	}
+	for _, name := range partials {
+		if err := os.Remove(name); err != nil {
+			log.Printf("remove partial backup: %v", err)
+		}
+	}
+	var size int64
+	if info, err := os.Stat(filepath.Join(filepath.Dir(b.dir), "store.db")); err == nil {
+		size = info.Size()
+	}
+	free, need := b.free(ctx), 2*size+20*box.GiB
+	if free >= need {
+		return true
+	}
+	log.Printf("backup skipped: %d bytes free, %d needed", free, need)
+	if err := b.store.AlertDisk(ctx, contract.ControlPlane, free, need, now); err != nil {
+		log.Printf("backup alert: %v", err)
+	}
+	return false
+}
+
 func (b *backupLoop) backup(ctx context.Context) {
 	now := b.now().UTC()
+	if !b.roomy(ctx, now) {
+		if b.recipient != nil {
+			if err := b.store.RecordBackupCopy(ctx, now, "low disk"); err != nil {
+				log.Printf("record backup copy: %v", err)
+			}
+		}
+		return
+	}
 	path, err := b.store.Backup(ctx, now)
 	if err != nil {
 		log.Printf("backup: %v", err)
