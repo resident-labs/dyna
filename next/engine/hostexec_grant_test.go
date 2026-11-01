@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"database/sql"
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
@@ -96,7 +97,43 @@ func TestGrantCardEngineHost(t *testing.T) {
 	}
 	to := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
 	card := s.HostexecGrant().Card(ctx, contract.HostexecGrantArgs{Room: room, To: to, Hosts: []contract.HostName{"engine"}, Reason: "Inspect"}, to)
-	if !strings.Contains(card.Body, "This host also runs the engine and holds the model sign-ins.") {
+	if !strings.Contains(card.Body, "This host also runs the engine. This grant gives full owner power, including the model sign-ins.") {
 		t.Fatal(card.Body)
+	}
+}
+
+func TestHostexecList(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	var root contract.SessionID
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT parent FROM sessions WHERE id=?", worker).Scan(&root); err != nil {
+		t.Fatal(err)
+	}
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	target := contract.Principal{Kind: contract.PrincipalSession, Session: root}
+	now := s.now()
+	for _, g := range []contract.Grant{
+		{ID: "active", Kind: contract.GrantHostExec, Room: room, To: target, By: owner, Created: now.Add(time.Second), Hosts: []contract.HostName{"host"}},
+		{ID: "closed", Kind: contract.GrantHostExec, Room: room, To: contract.Principal{Kind: contract.PrincipalSession, Session: worker}, By: owner, Created: now},
+		{ID: "revoked", Kind: contract.GrantHostExec, Room: room, To: target, By: owner, Created: now},
+	} {
+		if err := s.store.CreateGrant(ctx, g); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE grants SET revoked_at=? WHERE id='revoked'", now.UnixMilli())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, problem := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: worker, Discard: true}); problem != nil {
+		t.Fatal(problem)
+	}
+	got, problem := s.HostexecList(ctx, owner, contract.HostexecListRequest{})
+	if problem != nil || len(got.Grants) != 2 || got.Grants[0].ID != "active" || got.Grants[1].To != target || got.Grants[1].Hosts[0] != contract.AllHosts || !got.Grants[1].Expires.IsZero() {
+		t.Fatalf("grants: %+v, %v", got, problem)
+	}
+	if _, problem = s.HostexecList(ctx, target, contract.HostexecListRequest{}); problem == nil || problem.Code != contract.ErrForbidden {
+		t.Fatalf("session: %v", problem)
 	}
 }
