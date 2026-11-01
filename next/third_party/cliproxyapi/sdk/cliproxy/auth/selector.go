@@ -1142,7 +1142,7 @@ func (s *SessionAffinitySelector) Pick(ctx context.Context, provider, model stri
 	}
 	now := time.Now()
 	availabilityCandidates := auths
-	if _, weighted := s.fallback.(*WeightedRoundRobinSelector); weighted {
+	if selectorUsesQuotaWeights(s.fallback) {
 		availabilityCandidates = positiveWeightAuths(auths)
 	}
 	if primaryID == "" {
@@ -1205,7 +1205,7 @@ func (s *SessionAffinitySelector) Pick(ctx context.Context, provider, model stri
 			}
 		}
 		// Cached auth not available, reselect via fallback selector for even distribution
-		auth, err := s.fallback.Pick(ctx, provider, model, opts, fallbackAuths)
+		auth, err := s.fallback.Pick(withSoonestResetFailover(ctx), provider, model, opts, fallbackAuths)
 		if err != nil {
 			return nil, err
 		}
@@ -1261,7 +1261,7 @@ func (s *SessionAffinitySelector) Pick(ctx context.Context, provider, model stri
 				}
 			}
 			if !isSubagent && !isFork && s.shouldPreserveBindingWhenUnavailable(ctx, availabilityCandidates, model, cachedAuthID, now) {
-				auth, err := s.fallback.Pick(ctx, provider, model, opts, fallbackAuths)
+				auth, err := s.fallback.Pick(withSoonestResetFailover(ctx), provider, model, opts, fallbackAuths)
 				if err != nil {
 					return nil, err
 				}
@@ -1315,7 +1315,7 @@ func (s *SessionAffinitySelector) pickLCP(ctx context.Context, provider, model s
 	}
 
 	availabilityCandidates := auths
-	if _, weighted := s.fallback.(*WeightedRoundRobinSelector); weighted {
+	if selectorUsesQuotaWeights(s.fallback) {
 		availabilityCandidates = positiveWeightAuths(auths)
 	}
 	now := time.Now()

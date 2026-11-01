@@ -38,6 +38,7 @@ const attemptMaxIdleTime = 2 * time.Hour
 
 // Handler aggregates config reference, persistence path and helpers.
 type Handler struct {
+	dynaUsage               dynaUsageShare
 	cfg                     *config.Config
 	configFilePath          string
 	mu                      sync.Mutex
@@ -86,6 +87,7 @@ func NewHandler(cfg *config.Config, configFilePath string, manager *coreauth.Man
 		envSecret:           envSecret,
 	}
 	h.startAttemptCleanup()
+	h.bindDynaRefresh(manager)
 	return h
 }
 
@@ -195,6 +197,7 @@ func (h *Handler) SetAuthManager(manager *coreauth.Manager) {
 		h.authManager = manager
 	}
 	h.mu.Unlock()
+	h.bindDynaRefresh(manager)
 }
 
 // SetPluginHost updates the plugin host used by plugin-backed management endpoints.

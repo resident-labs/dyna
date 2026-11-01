@@ -160,10 +160,17 @@ access:
 
 # Routing strategy for selecting credentials when multiple match.
 routing:
-  strategy: "round-robin" # round-robin (default), weighted-round-robin, fill-first
+  strategy: "round-robin" # round-robin (default), weighted-round-robin, fill-first, soonest-reset
   # weighted-round-robin uses each credential's integer weight (default 1, maximum 1,000,000).
   # Non-positive weights exclude the credential while this strategy is active.
   # For OAuth/file credentials, add a top-level numeric "weight" field to the auth JSON.
+  # soonest-reset sends cold picks to the available account whose long window (a day or more)
+  # resets first, so quota is spent before it is lost. An account takes no new session with
+  # 3% or less left on a long window, 10% or less on one resetting over a day away, or a
+  # 5-hour window at 90%, unless nobody else can. One on pace for 90% goes after the rest.
+  # Next come accounts whose long window has not started, then accounts with no current
+  # reading (round robin), then API keys and prepaid balances, then spent accounts.
+  # Readings stay in memory; a cold pick refreshes a stale provider at most every 10 minutes.
   # Enable universal session-sticky routing for all clients.
   # Explicit Claude Code, Codex, OpenCode, and pi session headers are preferred,
   # followed by prompt_cache_key, Responses conversation IDs, legacy body IDs,
