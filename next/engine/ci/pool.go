@@ -155,6 +155,9 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 		if p.Memory != nil {
 			host.MemUsed = p.Memory(host.Name)
 		}
+		// host_rooms places sessions. A repository names its CI hosts outright, so a
+		// host kept away from sessions can still serve it.
+		host.Rooms = nil
 		driver, err := p.Hosts(ctx, host.Name)
 		var runners []box.Runner
 		var egress bool
@@ -417,7 +420,7 @@ func (p *Pool) place(ctx context.Context, repo contract.RepoName, assigned int, 
 			}
 		}
 	}
-	request := box.Box{ID: "dyna-ci-request", Room: rows[0].Room, Size: size}
+	request := box.Box{ID: "dyna-ci-request", Size: size}
 	// open lists hosts with room for one more, and the rows that name them.
 	open := func() []box.Host {
 		var hosts []box.Host
@@ -479,6 +482,10 @@ func (p *Pool) start(ctx context.Context, repo contract.RepoName, host *surveyed
 		}
 		host.egress = true
 	}
+	slot, err := freeSlot(host.runners)
+	if err != nil {
+		return "", err
+	}
 	var raw [4]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "", err
@@ -488,11 +495,28 @@ func (p *Pool) start(ctx context.Context, repo contract.RepoName, host *surveyed
 	if err != nil {
 		return "", err
 	}
-	if err := host.driver.StartRunner(ctx, box.RunnerSpec{Name: name, Image: image, Config: config, Repo: repo, ID: id, Size: size}); err != nil {
+	if err := host.driver.StartRunner(ctx, box.RunnerSpec{Name: name, Image: image, Config: config, Repo: repo, ID: id, Slot: slot, Size: size}); err != nil {
 		// The next attempt checks the image again, in case a host lost it.
 		delete(p.images, host.host.Name)
 		// A runner that did start after an uncertain reply loses its registration and exits.
 		return "", errors.Join(err, p.GitHub.DeleteRunner(ctx, repo, id))
 	}
+	host.runners = append(host.runners, box.Runner{Name: name, Repo: repo, ID: id, Slot: slot, Running: true})
 	return name, nil
+}
+
+// freeSlot picks the proxy socket for a new runner on a host. Every repository's
+// runners count, because they share that host's proxy. A socket a dead runner used
+// is free: no tunnel outlives its container.
+func freeSlot(runners []box.Runner) (int, error) {
+	used := make(map[int]bool)
+	for _, runner := range runners {
+		used[runner.Slot] = used[runner.Slot] || runner.Running
+	}
+	for slot := range box.RunnerSlots {
+		if !used[slot] {
+			return slot, nil
+		}
+	}
+	return 0, errors.New("every proxy socket on this host is in use")
 }

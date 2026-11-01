@@ -21,7 +21,8 @@ const (
 	ciLabel         = "dyna.ci" // "runner" or "egress"
 	runnerRepoLabel = "dyna.ci.repo"
 	runnerIDLabel   = "dyna.ci.id"
-	// egressName names both the proxy container and the volume that carries its socket.
+	runnerSlotLabel = "dyna.ci.slot"
+	// egressName names both the proxy container and the volume that carries its sockets.
 	egressName  = "dyna-ci-egress"
 	egressMount = "/run/dyna-egress"
 	// runnerSlice sits under dyna.slice, so the heartbeat and the host's memory limit include runners.
@@ -71,7 +72,7 @@ func egressArgs(image, hostData string) []string {
 		"--cpus=4", "--memory=1g", "--memory-swap=1g", "--pids-limit=512",
 		"--volume", egressName + ":" + egressMount,
 		"--volume", filepath.Join(hostData, "bin") + ":/opt/dyna/bin:ro",
-		"--entrypoint", "/opt/dyna/bin/current/dyna", image, "ci-egress", "--socket", egressMount + "/egress.sock"}
+		"--entrypoint", "/opt/dyna/bin/current/dyna", image, "ci-egress", "--dir", egressMount}
 }
 
 // EnsureEgress starts the proxy that runners share on this host.
@@ -79,7 +80,12 @@ func (h *Host) EnsureEgress(ctx context.Context, image, hostData string) error {
 	if !filepath.IsAbs(hostData) {
 		return errors.New("invalid host data path")
 	}
-	_, err := h.run(ctx, egressArgs(image, hostData)...)
+	if _, err := h.run(ctx, egressArgs(image, hostData)...); err != nil {
+		return err
+	}
+	// A runner's mount needs its slot's directory, which the proxy makes as it starts.
+	_, err := h.run(ctx, "podman", "exec", egressName, "bash", "-c", `for _ in {1..100}; do [ -S "$1" ] && exit 0; sleep 0.1; done; exit 1`, "dyna-egress",
+		fmt.Sprintf("%s/%d/%s", egressMount, box.RunnerSlots-1, box.EgressSocket))
 	return err
 }
 
@@ -104,13 +110,15 @@ func runnerArgs(s box.RunnerSpec) []string {
 	disk := fmt.Sprintf("size=%d", s.Size.MemBytes/4*3)
 	return []string{"podman", "--cgroup-manager=systemd", "run", "--detach", "--rm", runnerLimit, "--name", s.Name,
 		"--label", ciLabel + "=runner", "--label", runnerRepoLabel + "=" + string(s.Repo), "--label", runnerIDLabel + "=" + strconv.FormatInt(s.ID, 10),
+		"--label", runnerSlotLabel + "=" + strconv.Itoa(s.Slot),
 		"--cgroup-parent=" + runnerSlice,
 		// A host's containers.conf can default to host networking, so this is always explicit.
 		"--network=none", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges", "--user", "1001:1001",
 		"--cpus=" + strconv.Itoa(s.Size.CPUs), "--memory=" + memory, "--memory-swap=" + memory, "--pids-limit=" + strconv.Itoa(s.Size.Pids),
 		"--tmpfs", "/home/runner:rw,exec,U,mode=0755," + disk,
 		"--tmpfs", "/tmp:rw,exec,mode=1777," + disk,
-		"--volume", egressName + ":" + egressMount + ":ro",
+		// Its slot alone: the proxy limits a job by socket, so a job must not reach another.
+		"--mount", fmt.Sprintf("type=volume,source=%s,destination=%s,subpath=%d,ro", egressName, egressMount, s.Slot),
 		"--log-driver=k8s-file", "--log-opt=max-size=1m",
 		"--env", "ACTIONS_RUNNER_INPUT_JITCONFIG", "--env", "DYNA_CI_REPO=" + string(s.Repo),
 		s.Image}
@@ -118,7 +126,7 @@ func runnerArgs(s box.RunnerSpec) []string {
 
 // StartRunner starts one ephemeral runner. It is gone when its job ends.
 func (h *Host) StartRunner(ctx context.Context, s box.RunnerSpec) error {
-	if s.Name == "" || strings.HasPrefix(s.Name, "-") || s.Repo == "" || s.Image == "" || s.Config == "" || strings.ContainsAny(s.Config, "\n\x00") {
+	if s.Name == "" || strings.HasPrefix(s.Name, "-") || s.Repo == "" || s.Image == "" || s.Config == "" || strings.ContainsAny(s.Config, "\n\x00") || s.Slot < 0 || s.Slot >= box.RunnerSlots {
 		return errors.New("invalid runner")
 	}
 	args := append([]string{"bash", "-c", `IFS= read -r ACTIONS_RUNNER_INPUT_JITCONFIG && export ACTIONS_RUNNER_INPUT_JITCONFIG && exec "$@"`, "dyna-runner"}, runnerArgs(s)...)
@@ -159,7 +167,11 @@ func (h *Host) ListRunners(ctx context.Context) ([]box.Runner, bool, error) {
 		if err != nil {
 			return nil, false, fmt.Errorf("runner %s: %w", r.Names[0], err)
 		}
-		runners = append(runners, box.Runner{Name: r.Names[0], Repo: contract.RepoName(r.Labels[runnerRepoLabel]), ID: id, Running: r.State == "running"})
+		slot, err := strconv.Atoi(r.Labels[runnerSlotLabel])
+		if err != nil {
+			return nil, false, fmt.Errorf("runner %s: %w", r.Names[0], err)
+		}
+		runners = append(runners, box.Runner{Name: r.Names[0], Repo: contract.RepoName(r.Labels[runnerRepoLabel]), ID: id, Slot: slot, Running: r.State == "running"})
 	}
 	return runners, egress, nil
 }
