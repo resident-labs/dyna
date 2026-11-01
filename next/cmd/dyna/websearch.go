@@ -33,11 +33,11 @@ func websearchKeyCommand(get func() *socketClient) *cobra.Command {
 		if len(data) > 65536 {
 			return fmt.Errorf("search key is too long")
 		}
-		_, err = call[contract.WebsearchSetKeyRequest, contract.WebsearchSetKeyResponse](cmd.Context(), get(), contract.MethodWebsearchSetKey, contract.WebsearchSetKeyRequest{Provider: args[0], Key: strings.TrimRight(string(data), "\r\n")})
+		_, err = call[contract.WebsearchSetKeyRequest, contract.WebsearchSetKeyResponse](cmd.Context(), get(), contract.MethodWebsearchSetKey, contract.WebsearchSetKeyRequest{Provider: contract.WebSearchProvider(args[0]), Key: strings.TrimRight(string(data), "\r\n")})
 		return err
 	}})
 	c.AddCommand(&cobra.Command{Use: "remove-key PROVIDER", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := call[contract.WebsearchRemoveKeyRequest, contract.WebsearchRemoveKeyResponse](cmd.Context(), get(), contract.MethodWebsearchRemoveKey, contract.WebsearchRemoveKeyRequest{Provider: args[0]})
+		_, err := call[contract.WebsearchRemoveKeyRequest, contract.WebsearchRemoveKeyResponse](cmd.Context(), get(), contract.MethodWebsearchRemoveKey, contract.WebsearchRemoveKeyRequest{Provider: contract.WebSearchProvider(args[0])})
 		return err
 	}})
 	return c
