@@ -24,6 +24,7 @@ type Host struct {
 	State               HostState
 	CPUs                int
 	MemBytes, DiskBytes int64
+	DiskFloor           int64
 	MemUsed             int64 // latest heartbeat; not stored
 	MaintainedAt        time.Time
 	Labels              []string

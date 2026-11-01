@@ -19,6 +19,9 @@ type Caller struct {
 // Service implements the engine operations. It must authorize resource targets
 // against the caller as well as applying the API's listener-level policy.
 type Service interface {
+	WebSearch(context.Context, contract.Principal, contract.WebSearchRequest) (contract.WebSearchResponse, *contract.Error)
+	WebsearchSetKey(context.Context, contract.Principal, contract.WebsearchSetKeyRequest) (contract.WebsearchSetKeyResponse, *contract.Error)
+	WebsearchRemoveKey(context.Context, contract.Principal, contract.WebsearchRemoveKeyRequest) (contract.WebsearchRemoveKeyResponse, *contract.Error)
 	ContextSnapshot(context.Context, contract.Principal, contract.ContextSnapshotRequest) (contract.ContextSnapshotResponse, *contract.Error)
 	DevicePair(context.Context, contract.Principal, contract.DevicePairRequest) (contract.DevicePairResponse, *contract.Error)
 	DeviceList(context.Context, contract.Principal, contract.DeviceListRequest) (contract.DeviceListResponse, *contract.Error)
@@ -41,7 +44,6 @@ type Service interface {
 	SessionList(context.Context, contract.Principal, contract.SessionListRequest) (contract.SessionListResponse, *contract.Error)
 	HostexecRun(context.Context, contract.Principal, contract.HostexecRunRequest) (contract.HostexecRunResponse, *contract.Error)
 	HostexecList(context.Context, contract.Principal, contract.HostexecListRequest) (contract.HostexecListResponse, *contract.Error)
-	HostexecRevoke(context.Context, contract.Principal, contract.HostexecRevokeRequest) (contract.HostexecRevokeResponse, *contract.Error)
 	OpSubmit(context.Context, contract.Principal, contract.OpSubmitRequest) (contract.OpSubmitResponse, *contract.Error)
 	OpDecide(context.Context, contract.Principal, contract.OpDecideRequest) (contract.OpDecideResponse, *contract.Error)
 	OpWithdraw(context.Context, contract.Principal, contract.OpWithdrawRequest) (contract.OpWithdrawResponse, *contract.Error)

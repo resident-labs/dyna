@@ -132,7 +132,9 @@ type AccountsSetKeyResponse struct {
 
 // Credential is an opaque JSON object parsed only by the model proxy. It holds
 // access_token and refresh_token. Kimi may also supply domain and device_id.
-// ExpiresAt is the access token expiry. The proxy may refresh after activation.
+// Anthropic may also supply email. OpenAI must supply account_id and may supply
+// email. ExpiresAt is the access token expiry. The proxy may refresh after
+// activation.
 type AccountsImportOAuthRequest struct {
 	Provider   AccountProvider `json:"provider"`
 	Label      string          `json:"label"`
