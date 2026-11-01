@@ -1,6 +1,7 @@
 <script lang="ts">
   import { watchHello, watchStreamState } from "./lib/stream.ts";
   import { watchConnect } from "./lib/connect-watch.ts";
+  import { reconnectNotice } from "./lib/reconnect.ts";
   import { FormDrafts } from "./lib/form-drafts.ts";
   import { tick, untrack } from "svelte";
   import { RoomStore } from "./lib/room.svelte.ts";
@@ -76,7 +77,9 @@
     if (hasWork) reloadPending = true; else location.reload();
   });
   let streamUp: boolean | undefined;
-  watchStreamState(up => { streamUp = up; });
+  let reconnecting = $state(false);
+  const reconnect = reconnectNotice(on => { reconnecting = on; });
+  watchStreamState(up => { streamUp = up; reconnect(up); });
   void watchConnect().then(watch => { if (watch) { watchStreamState(watch.stream); if (streamUp !== undefined) watch.stream(streamUp); } }, () => {});
   const attention = new Attention();
   let rooms = $derived([...attention.rooms.values()]);
@@ -629,6 +632,7 @@
       {/if}</header>
     {#if routeNotice}<div class="route-notice"><Icon name="globe" size={18} /><span><strong>Moved to {routeNotice}</strong>{moveData.has("old") ? `: ${moveData.get("old")} stopped answering for 20 seconds.` : `, a nearer route to ${moveData.get("name") || "this machine"}. Same session, same room.`}</span><button type="button" aria-label="Dismiss route notice" onclick={() => { routeNotice = ""; sessionStorage.removeItem("dyna-connect-move"); }}>✕</button></div>{/if}
     {#if reloadPending}<p class="reload-notice" role="status">Dyna updated. Reload to use the new version. <button type="button" onclick={() => location.reload()}>Reload</button></p>{/if}
+    {#if reconnecting}<p class="reconnect-notice" role="status">Reconnecting to Dyna…</p>{/if}
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} {session} admin={attention.can("admin")} onclose={() => void closeSection()} />{/if}
     <div class="feed">
       {#if blocked}<Blocked kind="unreachable" onretry={connect} />
@@ -713,6 +717,7 @@
   .route-notice { display: flex; align-items: center; gap: 10px; padding: 8px 16px; color: var(--muted); font-size: 12.5px; border-bottom: 1px solid var(--line); }
   .route-notice span { flex: 1; } .route-notice strong { color: var(--text); }
   .route-notice button { border: 0; background: none; color: inherit; cursor: pointer; }
+  .reconnect-notice { margin: 0; padding: 7px 16px; color: var(--muted); border-bottom: 1px solid var(--line); font-size: 13px; }
   .reload-notice { margin: 0; padding: 7px 16px; color: var(--muted); border-bottom: 1px solid var(--line); font-size: 13px; }
   .reload-notice button { margin-left: 4px; padding: 8px 4px; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
   /* Two-line rows around the 28 px avatar, as in the chosen mockup: the name, then what the session does. */
