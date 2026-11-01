@@ -52,8 +52,8 @@ func (l *Live) Unsubscribe(sub *Subscription) {
 	l.mu.Unlock()
 }
 
-// Publish copies subscribers under mu and sends outside it. Owner-only transcript
-// notifications close a full subscriber so it reconnects and catches up.
+// Publish copies subscribers under mu and sends outside it. A full subscriber closes
+// for every event it cannot take, so it reconnects and catches up from the store.
 func (l *Live) Publish(room contract.RoomID, event contract.Event, ownerOnly bool) {
 	l.mu.Lock()
 	var targets []*Subscription
@@ -69,10 +69,8 @@ func (l *Live) Publish(room contract.RoomID, event contract.Event, ownerOnly boo
 			select {
 			case sub.ch <- event:
 			default:
-				if ownerOnly {
-					close(sub.ch)
-					sub.closed = true
-				}
+				close(sub.ch)
+				sub.closed = true
 			}
 		}
 		closed := sub.closed
