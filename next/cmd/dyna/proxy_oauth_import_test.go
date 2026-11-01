@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/resident-labs/dyna/engine/model"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
@@ -160,6 +161,53 @@ func TestImportedOAuthRoutesBeforeRefresh(t *testing.T) {
 	}
 }
 
+// Both Meta forms must reach the model the owner's wonder-full profile uses.
+func TestMetaCredentialsRouteWonderFull(t *testing.T) {
+	const keyID = "dyna-key-0123456789abcdef0123456789abcdef"
+	for _, test := range []struct {
+		name, id, token string
+		post            func(*testing.T, *gin.Engine) *httptest.ResponseRecorder
+		kind            string
+	}{
+		{"import", importTestID, "invented-key", func(t *testing.T, router *gin.Engine) *httptest.ResponseRecorder {
+			return importTestPost(t, router, "meta", `{"access_token":"invented-key","refresh_token":"dca:invented","email":"owner@example.com"}`)
+		}, coreauth.AuthKindOAuth},
+		{"key", keyID, "invented-api-key", func(t *testing.T, router *gin.Engine) *httptest.ResponseRecorder {
+			req := httptest.NewRequest(http.MethodPost, "/dyna/keys", strings.NewReader(`{"id":"`+keyID+`","provider":"meta","key":"invented-api-key"}`))
+			req.Header.Set("Authorization", "Bearer invented")
+			req.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, req)
+			return response
+		}, coreauth.AuthKindAPIKey},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			manager, service, router := importTestRoutes(t)
+			var seen *http.Request
+			manager.SetRoundTripperProvider(importTestTransportProvider{&seen})
+			if response := test.post(t, router); response.Code != http.StatusOK {
+				t.Fatal("staging failed")
+			}
+			if err := service.ActivateDynaCredential(ctx, test.id, model.MetaKeyModel); err != nil {
+				t.Fatal("the model is not in the credential's catalog")
+			}
+			defer cliproxy.GlobalModelRegistry().UnregisterClient(test.id)
+			auth, ok := manager.GetByID(test.id)
+			if !ok || auth.Provider != "meta" || auth.AuthKind() != test.kind {
+				t.Fatal("credential does not match a native record")
+			}
+			if test.kind == coreauth.AuthKindOAuth && (auth.Metadata["dca_token"] != "dca:invented" || auth.Metadata["refresh_token"] != nil || auth.Metadata["expired"] != nil) {
+				t.Fatal("imported identity token is not stored for key minting")
+			}
+			_, _ = manager.Execute(ctx, []string{"meta"}, executor.Request{Model: model.MetaKeyModel, Payload: []byte(`{"model":"` + model.MetaKeyModel + `","input":"hello"}`)}, executor.Options{SourceFormat: translator.FormatOpenAIResponse})
+			if seen == nil || seen.URL.Host != "api.meta.ai" || seen.Header.Get("Authorization") != "Bearer "+test.token {
+				t.Fatal("request did not reach Meta with its credential")
+			}
+		})
+	}
+}
+
 func TestImportRejectsCredentialForWrongProvider(t *testing.T) {
 	for _, test := range []struct {
 		name       string
@@ -174,6 +222,8 @@ func TestImportRejectsCredentialForWrongProvider(t *testing.T) {
 		{"openai bad account id", "openai", `{"access_token":"invented","refresh_token":"invented","account_id":"invented\r\nx: y"}`},
 		{"kimi email", "kimi", `{"access_token":"invented","refresh_token":"invented","email":"owner@example.com"}`},
 		{"xai account id", "xai", `{"access_token":"invented","refresh_token":"invented","account_id":"invented"}`},
+		{"meta account id", "meta", `{"access_token":"invented","refresh_token":"invented","account_id":"invented"}`},
+		{"meta without identity token", "meta", `{"access_token":"invented"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, _, router := importTestRoutes(t)
