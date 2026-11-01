@@ -46,6 +46,7 @@ type fakeClient struct {
 	room         contract.RoomCreateRequest
 	limits       contract.RoomSetLimitsRequest
 	repoAdd      contract.RoomRepoAddRequest
+	repoCI       contract.RepoCISetRequest
 	repoList     contract.RoomReposRequest
 	start        contract.SessionStartRequest
 	close        contract.SessionCloseRequest
@@ -102,6 +103,10 @@ func (f *fakeClient) HostAdd(_ context.Context, q contract.HostAddRequest) (cont
 func (f *fakeClient) RoomCreate(_ context.Context, q contract.RoomCreateRequest) (contract.RoomCreateResponse, error) {
 	f.room = q
 	return contract.RoomCreateResponse{Room: "room_1"}, nil
+}
+func (f *fakeClient) RepoCISet(_ context.Context, q contract.RepoCISetRequest) (contract.RepoCISetResponse, error) {
+	f.repoCI = q
+	return contract.RepoCISetResponse{}, nil
 }
 func (f *fakeClient) RoomRepoAdd(_ context.Context, q contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, error) {
 	f.repoAdd = q
@@ -414,5 +419,22 @@ func TestRoomLimitCommand(t *testing.T) {
 	runCLI(t, f, "room", "limit", "room_1", "--cpus", "2", "--mem", "8GiB")
 	if f.limits != (contract.RoomSetLimitsRequest{Room: "room_1", CPUs: 2, MemBytes: 8 << 30}) {
 		t.Fatal(f.limits)
+	}
+}
+
+func TestRepoCICommand(t *testing.T) {
+	f := &fakeClient{}
+	root := &cobra.Command{Use: "dyna"}
+	addCLI(root, func() client { return f })
+	root.SetArgs([]string{"room", "repo", "ci", "a/b", "--mode", "box", "--host", "pve=4", "--host", "laptop=2", "--size", "medium"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if f.repoCI.Repo != "a/b" || f.repoCI.Mode != contract.CIBox || len(f.repoCI.Hosts) != 2 || f.repoCI.Hosts[1] != (contract.RepoCIHost{Repo: "a/b", Host: "laptop", Runners: 2, Size: contract.BoxSizeMedium}) {
+		t.Fatalf("%+v", f.repoCI)
+	}
+	root.SetArgs([]string{"room", "repo", "ci", "a/b", "--mode", "box", "--host", "pve"})
+	if err := root.Execute(); err == nil {
+		t.Fatal("accepted a host with no count")
 	}
 }

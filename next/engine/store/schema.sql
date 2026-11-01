@@ -29,6 +29,7 @@ CREATE TABLE disk_warnings (host TEXT PRIMARY KEY, at INTEGER NOT NULL);
 CREATE TABLE room_shared (room TEXT NOT NULL, host TEXT NOT NULL REFERENCES hosts(name), bytes INTEGER NOT NULL, measured_at INTEGER NOT NULL, PRIMARY KEY(room, host));
 CREATE TABLE host_rooms (host TEXT NOT NULL REFERENCES hosts(name), room TEXT NOT NULL REFERENCES rooms(id), PRIMARY KEY(host, room));
 CREATE TABLE host_labels (host TEXT NOT NULL REFERENCES hosts(name), label TEXT NOT NULL, PRIMARY KEY(host, label));
+CREATE TABLE repo_ci_hosts (repo TEXT NOT NULL REFERENCES repos(repo), host TEXT NOT NULL REFERENCES hosts(name), runners INTEGER NOT NULL, size TEXT NOT NULL, PRIMARY KEY(repo, host));
 CREATE TABLE boxes (id TEXT PRIMARY KEY, session TEXT NOT NULL UNIQUE REFERENCES sessions(id), host TEXT REFERENCES hosts(name), image TEXT NOT NULL, size TEXT NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL, slice TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, want TEXT NOT NULL DEFAULT 'run', due_at INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX boxes_host_state ON boxes(host, state);
 CREATE TABLE operations (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT REFERENCES rooms(id), by_kind TEXT NOT NULL, by_id TEXT NOT NULL, class TEXT NOT NULL, state TEXT NOT NULL, card BLOB NOT NULL, args BLOB NOT NULL, args_sha256 BLOB NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, decision BLOB, result BLOB);

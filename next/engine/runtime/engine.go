@@ -24,6 +24,7 @@ import (
 	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/api"
 	"github.com/resident-labs/dyna/engine/approve"
+	"github.com/resident-labs/dyna/engine/ci"
 	"github.com/resident-labs/dyna/engine/connect"
 	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/images"
@@ -342,6 +343,16 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 	}()
 	defer func() { <-archiveDone }()
+	ciDone := make(chan struct{})
+	go func() {
+		defer close(ciDone)
+		ticks := time.NewTicker(30 * time.Second)
+		defer ticks.Stop()
+		github := &ci.GitHub{Token: token, Endpoint: &url.URL{Scheme: "https", Host: "api.github.com"}, Transport: http.DefaultTransport, Now: time.Now}
+		pool := &ci.Pool{Store: st, Hosts: boxes.ciDriver, GitHub: github, Sets: &ci.Sets{Token: token, Name: ci.Name}, Memory: boxes.hostMemory, Now: time.Now}
+		pool.Run(ctx, ticks.C)
+	}()
+	defer func() { <-ciDone }()
 	lastDormant := time.Now()
 	for {
 		select {
