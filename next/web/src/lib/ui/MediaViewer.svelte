@@ -20,7 +20,7 @@
   let found = $derived(items.findIndex(entry => entry.key === selected.key && entry.position === selected.position));
   let index = $derived(Math.max(0, found));
   let item = $derived(found >= 0 ? items[found] : selected);
-  let author = $derived(item.from.kind === "owner" ? "You" : item.from.session ? name(item.from.session) : "Dyna");
+  let author = $derived(item.from.kind === "owner" ? "you" : item.from.session ? name(item.from.session) : "Dyna");
   let versions = $state<VisualVersion[]>([]), visualFailed = $state(false), visualAttempt = $state(0);
   $effect(() => {
     const selected = item; visualAttempt;

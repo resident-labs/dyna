@@ -63,7 +63,7 @@
   // A request shows once its requester is named, as in the Requests panel. One decided here stays out while its event comes.
   let waiting = $derived(rows(attention.waiting, requests).filter(row => !decided.has(row.id)).flatMap(row => {
     const { by } = row.value;
-    if (by.kind !== "session" || !by.session) return [{ ...row, who: by.kind === "owner" ? "You" : "Dyna", root: false }];
+    if (by.kind !== "session" || !by.session) return [{ ...row, who: by.kind === "owner" ? "you" : "Dyna", root: false }];
     const session = sessions.get(by.session);
     if (!session && !answered.has(by.session)) return [];
     return [{ ...row, who: session?.name ?? "A closed session", root: session?.root ?? false }];
