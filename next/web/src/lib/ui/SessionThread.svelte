@@ -127,9 +127,8 @@
   <div class="message"><Markdown text={chunks[item.id + "/text"] ?? item.text} /></div>{#if item.more && chunks[item.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Show all</button>{/if}
 {/snippet}
 
-<div class="thread" bind:this={scroller} onscroll={() => { atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; }}>
+<div class="thread" bind:this={scroller} onscroll={() => { atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; if (loaded && before && !loading && scroller.scrollTop < 100) void load(true); }}>
   <div class="body">
-    {#if before}<button class="older" disabled={loading} onclick={() => void load(true)}>Load earlier turns</button>{/if}
     {#each turns as turn, index (turn.id)}
       <article>
         <div class="rule"><span><strong>Turn {Math.max(1, total - turns.length + index + 1)}</strong>{#if turn.durationMs !== undefined}{" · "}{duration(turn.durationMs)}{:else if !turn.ended}{" · "}{elapsed(turn.started, now)}{/if}{#if !turn.ended}{" · running"}{:else if turn.outcome === "failed"}{" · "}<StatusPill tone="failed" label="failed" word />{/if}</span><i></i></div>
@@ -214,7 +213,6 @@
   button { padding: 0; border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
   button:hover { color: var(--text); }
   button:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); }
-  .older { display: block; margin: auto; padding: 8px; }
   .latest { position: absolute; right: 24px; bottom: 16px; background: var(--sidebar); padding: 8px 12px; border-radius: 6px; }
   @media (max-width: 600px) { .body { padding: 12px 16px; } }
   @media (pointer: coarse) { summary, button { min-height: 40px; } }
