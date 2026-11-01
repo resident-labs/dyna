@@ -37,7 +37,9 @@ func CgroupArgs(slice string) []string { return []string{"--cgroup-parent=" + sl
 func DiskFloor(total int64) int64 { return max(20*GiB, total/10) }
 
 // DiskWarn is the free space that warns: 85% used on a large disk, and always above the point where the largest box is refused.
-func DiskWarn(floor int64) int64 { return floor + max(floor/2, 40*GiB) }
+func DiskWarn(floor int64) int64 {
+	return floor + max(floor/2, diskRequest(contract.BoxSizeXLarge))
+}
 
 // Admit uses snapshots of hosts and existing allocations.
 func Admit(hosts []Host, boxes []Box, request Box) Placement {

@@ -42,6 +42,7 @@ type boxStore interface {
 	OpenRooms(context.Context) ([]contract.RoomID, error)
 	RoomRepos(context.Context, contract.RoomID) ([]contract.RoomRepo, error)
 	ActiveRuns(context.Context) ([]store.HookRun, error)
+	PinWorkflowImage(context.Context, contract.SessionID, string) (string, error)
 }
 
 type heartbeatStore interface {
@@ -1052,7 +1053,20 @@ func (b *Boxes) CurrentImage(ctx context.Context, sessionID contract.SessionID, 
 		}
 		size = record.Size
 	}
-	return b.image(ctx, h, host, session.Room, session.Repo, session.Compose, size)
+	image, err := b.image(ctx, h, host, session.Room, session.Repo, session.Compose, size)
+	pinned, pinErr := b.Store.PinWorkflowImage(ctx, sessionID, image.Tag)
+	if pinErr != nil {
+		return box.Image{}, pinErr
+	}
+	// A crew keeps the image it started on, even when the repository's own no longer builds. A host without that tag can only
+	// build what the repository holds now.
+	if pinned != "" && pinned != image.Tag {
+		if has, hasErr := h.HasImage(ctx, pinned); hasErr == nil && has {
+			image.Tag = pinned
+			return image, nil
+		}
+	}
+	return image, err
 }
 
 // image selects and builds what a box uses. Every box takes its image from here, whether new, swapped or built ahead. A

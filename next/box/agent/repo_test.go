@@ -395,3 +395,34 @@ func TestSetupGitIdentity(t *testing.T) {
 		}
 	}
 }
+
+func TestACrewStartsOnItsFixedCommitUnlessItPushedABranch(t *testing.T) {
+	for _, pushed := range []bool{false, true} {
+		root, stateRoot := t.TempDir(), t.TempDir()
+		repo := contract.BoxRepo{Name: "owner/repo", Cache: "/cache/repo", Branch: "v2/s", Base: "main", Commit: "abc123"}
+		var checkout []string
+		git := func(_ context.Context, _, _ string, args ...string) (string, error) {
+			switch args[0] {
+			case "clone":
+				return "", os.MkdirAll(args[len(args)-1], 0755)
+			case "show-ref":
+				if !pushed {
+					return "", errors.New("not found")
+				}
+			case "checkout":
+				checkout = args
+			}
+			return "", nil
+		}
+		if err := setupRepos(context.Background(), root, stateRoot, []contract.BoxRepo{repo}, "", "", git); err != nil {
+			t.Fatal(err)
+		}
+		want := "abc123"
+		if pushed {
+			want = "refs/remotes/origin/v2/s"
+		}
+		if checkout[len(checkout)-1] != want {
+			t.Fatalf("pushed %v: checkout %v", pushed, checkout)
+		}
+	}
+}

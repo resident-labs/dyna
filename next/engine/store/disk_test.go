@@ -58,21 +58,21 @@ func diskAlerts(t *testing.T, s *Store) (events map[contract.RoomID]int, wakes m
 func TestDiskWarnWakesRoomRootsOncePerSpell(t *testing.T) {
 	ctx := context.Background()
 	s := diskStore(t)
-	const total = 1000 * box.GiB // Floor 100 GiB, warn 150 GiB, spell ends at 165 GiB.
+	const total = 1000 * box.GiB // Floor 100 GiB, warn 180 GiB, spell ends at 198 GiB.
 	for i, step := range []struct {
 		free   int64
 		alerts int
 	}{
 		{500 * box.GiB, 0},
-		{150 * box.GiB, 0},
-		{149 * box.GiB, 1},
-		{148 * box.GiB, 1},
-		{151 * box.GiB, 1},
-		{149 * box.GiB, 1}, // Hovering at the warn level stays quiet.
-		{164 * box.GiB, 1},
-		{149 * box.GiB, 1},
-		{165 * box.GiB, 1},
-		{149 * box.GiB, 2},
+		{180 * box.GiB, 0},
+		{179 * box.GiB, 1},
+		{178 * box.GiB, 1},
+		{181 * box.GiB, 1},
+		{179 * box.GiB, 1}, // Hovering at the warn level stays quiet.
+		{197 * box.GiB, 1},
+		{179 * box.GiB, 1},
+		{198 * box.GiB, 1},
+		{179 * box.GiB, 2},
 	} {
 		if err := s.RecordHostHeartbeat(ctx, "h", true, &step.free, total, time.Unix(int64(i)*3600, 0)); err != nil {
 			t.Fatal(err)
@@ -87,7 +87,7 @@ func TestDiskWarnWakesRoomRootsOncePerSpell(t *testing.T) {
 		t.Fatal(err)
 	}
 	low, ok := list[0].Body.(contract.HostDiskLow)
-	if !ok || low.Host != "h" || low.FreeBytes != 149*box.GiB || low.FloorBytes != 100*box.GiB {
+	if !ok || low.Host != "h" || low.FreeBytes != 179*box.GiB || low.FloorBytes != 100*box.GiB {
 		t.Fatalf("event: %#v", list[0].Body)
 	}
 	var want string

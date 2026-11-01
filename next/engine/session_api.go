@@ -28,10 +28,10 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 		// room.ParseAddress reads these names as roles, so no one could mention the session by its name.
 		return contract.SessionStartResponse{}, invalid("session name " + req.Name + " is reserved for a mention role")
 	}
-	return s.startSession(ctx, caller, req, "")
+	return s.startSession(ctx, caller, req, "", nil)
 }
 
-func (s *Service) startSession(ctx context.Context, caller contract.Principal, req contract.SessionStartRequest, roomName string) (contract.SessionStartResponse, *contract.Error) {
+func (s *Service) startSession(ctx context.Context, caller contract.Principal, req contract.SessionStartRequest, roomName string, run *store.WorkflowRun) (contract.SessionStartResponse, *contract.Error) {
 	if roomName == "" {
 		if e := s.roomAccess(ctx, caller, req.Room); e != nil {
 			return contract.SessionStartResponse{}, e
@@ -102,7 +102,7 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 			return contract.SessionStartResponse{}, problem
 		}
 	}
-	session := store.Session{ID: contract.SessionID(sid), Room: req.Room, Name: req.Name, Repo: repo, Profile: req.Profile, Box: contract.BoxID(bid), NewRoomName: roomName, Compose: composeName}
+	session := store.Session{ID: contract.SessionID(sid), Room: req.Room, Name: req.Name, Repo: repo, Profile: req.Profile, Box: contract.BoxID(bid), NewRoomName: roomName, Compose: composeName, Workflow: run}
 	event, err := s.event(req.Room, caller, contract.SessionStarted{Session: session.ID, Name: req.Name, Parent: parent, Profile: req.Profile, Goal: req.Goal, DoneWhen: req.DoneWhen, Brief: req.Brief})
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
@@ -278,6 +278,9 @@ func (s *Service) closeSession(ctx context.Context, session store.Session, disca
 			return nil
 		}
 	} else if err := s.store.MarkClosing(ctx, session.ID, discard, s.now()); err != nil {
+		return failure(err)
+	}
+	if err := s.stopWorkflows(ctx, order); err != nil {
 		return failure(err)
 	}
 	if err := s.StopHostexecs(ctx); err != nil {
