@@ -11,14 +11,15 @@
   // it never answered. The control plane has no workspaces. A backup problem shows its pill; a healthy backup shows nothing.
   // A room's shared folder past a quarter of the disk is a muted line under the tiles: it needs cleaning, not a decision.
   // The workspace count opens the machine's sessions by room, as Jobs does: a popover, a sheet on a phone. Workspaces
-  // count running boxes and the list also holds asleep ones, so its rows can outnumber the count. With none it is plain text.
+  // count running boxes and the list also holds asleep ones, so its rows can outnumber the count, and "0 workspaces" can
+  // open a list of asleep sessions. A machine with no sessions keeps the count as plain text.
   // The list sits in the top layer: a card is a size container, and Home's scroll area would clip a popover in its first column.
   // That layer gives Escape, the click away and focus's return. Its backdrop lets taps through, so a phone's scrim is the popover itself.
   let { host, now, roomName, navigate }: { host: HostSummary; now: number; roomName: (room: string) => string; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void } = $props();
   let seen = $derived(host.reachable ? undefined : lastSeen(host, now));
   let backup = $derived(backupProblem(host, now));
   let groups = $derived(roomSessions(host, roomName));
-  let listed = $derived(host.reachable && host.boxes > 0 && groups.length > 0);
+  let listed = $derived(host.reachable && groups.length > 0);
   const phone = new MediaQuery("max-width: 640px");
   let button: HTMLButtonElement | undefined = $state();
   let open = $state(false);
