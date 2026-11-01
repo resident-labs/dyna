@@ -40,6 +40,8 @@ import (
 // host is the dev engine's one host, named as an owner's build machine might be, since the page shows it.
 const host = "build-server"
 
+var fixtureSession contract.SessionID
+
 type devService struct{ *engine.Service } // api.Service needs HostAdd; engine/runtime adds the real one.
 
 func (devService) HostAdd(context.Context, contract.Principal, contract.HostAddRequest) (contract.HostAddResponse, *contract.Error) {
@@ -186,6 +188,9 @@ var devSteps = []struct {
 // TranscriptRead keeps the real checks, then answers with devSteps. Each turn picks a run of them from its ID, so turns
 // differ in length, and the longest say that their record is cut.
 func (d devService) TranscriptRead(ctx context.Context, p contract.Principal, req contract.TranscriptReadRequest) (contract.TranscriptReadResponse, *contract.Error) {
+	if req.Session == fixtureSession && fixtureSession != "" && req.Turn == "" && req.Before == "" && p.Kind == contract.PrincipalOwner {
+		return contract.TranscriptReadResponse{Turns: fixtureTurns()}, nil
+	}
 	response, problem := d.Service.TranscriptRead(ctx, p, req)
 	if problem != nil {
 		return response, problem
@@ -200,6 +205,14 @@ func (d devService) TranscriptRead(ctx context.Context, p contract.Principal, re
 	}
 	response.Truncated = sum%4 == 0
 	return response, nil
+}
+
+func (d devService) SessionWork(ctx context.Context, p contract.Principal, req contract.SessionWorkRequest) (contract.SessionWorkResponse, *contract.Error) {
+	response, problem := d.Service.SessionWork(ctx, p, req)
+	if problem == nil && req.Session == fixtureSession && fixtureSession != "" {
+		response.Total = len(fixtureTurns())
+	}
+	return response, problem
 }
 
 // SessionList shows builder-feed's computer as running, so the computer view can be opened.
@@ -533,6 +546,11 @@ func seedRoom(ctx context.Context, s *engine.Service, posts, agents int) {
 			log.Fatal(e.Message)
 		}
 	}
+	fixture, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "sync-review", Profile: "fake", Goal: "Add retry hints to the sync status"})
+	if e != nil {
+		log.Fatal(e.Message)
+	}
+	fixtureSession = fixture.Session
 	post := func(p contract.Principal, r contract.PostRequest) {
 		r.Room = room.Room
 		if _, e := s.Post(ctx, p, r); e != nil {
