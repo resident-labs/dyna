@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import playwright from "../../internal/cli/computer/browserdeps/node_modules/playwright-core/index.js";
 const { chromium } = playwright;
 import { roomRoute, settingsPanes, settingsRoute } from "./src/lib/routes.ts";
-import { knownWidthFailures, staleWidthFailures } from "./known-width-failures.ts";
+import { knownWidthFailures, matchKnownFailure, staleWidthFailures } from "./known-width-failures.ts";
 
 const widths = [1280, 920, 768, 390];
 const fixtures = ["full", "empty"] as const;
@@ -22,7 +22,7 @@ try {
   })));
   const failures: string[] = [];
   let known = 0;
-  const seen = new Set<string>();
+  const seen = new Set<number>();
   await Promise.all(fixtures.map(async (fixture, index) => {
     const context = await browser.newContext();
     const login = await context.newPage();
@@ -64,8 +64,8 @@ try {
           if (process.env.DYNA_WIDTH_SHOTS && route === "/settings/profiles" && width === 920)
             await page.screenshot({ path: `${process.env.DYNA_WIDTH_SHOTS}/${fixture}-profiles-920.png` });
           const issues = await page.evaluate(() => {
-            const found: string[] = [];
-            if (document.documentElement.scrollWidth > document.documentElement.clientWidth) found.push("document");
+            const found: { element: string; text: string }[] = [];
+            if (document.documentElement.scrollWidth > document.documentElement.clientWidth) found.push({ element: "document", text: "" });
             for (const el of document.querySelectorAll<HTMLElement>("body *")) {
               const style = getComputedStyle(el);
               const text = el.textContent?.trim() ?? "";
@@ -73,15 +73,20 @@ try {
               const labelledBy = (el.getAttribute("aria-labelledby") ?? "").split(/\s+/).map(id => document.getElementById(id)?.textContent ?? "").join(" ").trim();
               const label = el.getAttribute("title") || el.getAttribute("aria-label") || labelledBy;
               if (style.textOverflow === "ellipsis" && label.includes(text)) continue;
-              found.push(`${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}${el.className && typeof el.className === "string" ? "." + el.className.trim().replace(/\s+/g, ".") : ""}: ${text.slice(0, 100)}`);
+              const element = `${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}${el.className && typeof el.className === "string" ? "." + el.className.trim().replace(/\s+/g, ".") : ""}`;
+              found.push({ element, text: text.slice(0, 100) });
             }
             return found;
           });
           const roomMatch = roomRoute.exec(route);
           const baselineRoute = roomMatch ? (roomMatch[2] ? "/r/:room/s/:session" : "/r/:room") : route.replace(/^\/settings\/accounts\/account\/[^/]+$/, "/settings/accounts/account/:account");
+          const occurrences = new Map<number, number>();
           for (const issue of issues) {
-            const line = `${fixture} ${route} ${width}px: ${issue}`;
-            if (knownWidthFailures[baselineRoute]?.includes(width)) { known++; seen.add(`${baselineRoute} ${width}`); console.warn(`Known: ${line}`); }
+            const line = `${fixture} ${route} ${width}px: ${issue.element}${issue.text ? `: ${issue.text}` : ""}`;
+            const index = matchKnownFailure(knownWidthFailures, { fixture, route: baselineRoute, width, ...issue });
+            const count = (occurrences.get(index) ?? 0) + 1;
+            occurrences.set(index, count);
+            if (index >= 0 && count <= (knownWidthFailures[index].occurrences ?? 1)) { known++; seen.add(index); console.warn(`Known: ${line}`); }
             else failures.push(line);
           }
         } catch (error: unknown) {
@@ -93,7 +98,7 @@ try {
     }));
     await context.close();
   }));
-  for (const stale of staleWidthFailures(knownWidthFailures, seen)) failures.push(`Remove fixed known width failure: ${stale}px`);
+  for (const stale of staleWidthFailures(knownWidthFailures, seen)) failures.push(`Remove fixed known width failure: ${stale.fixture} ${stale.route} ${stale.width}px: ${stale.element}: ${stale.text}`);
   if (failures.length) { console.error(failures.sort().join("\n")); process.exitCode = 1; }
   else console.log(`Width check passed with ${known} known failures.`);
 } finally {
