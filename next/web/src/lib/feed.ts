@@ -92,6 +92,8 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
   const rows: Row[] = [];
   let work: Event[] = [];
   let deferred: Row[] = [];
+  const turns = new Map<string, { start: Event; posted: boolean; significant: boolean; events: Event[] }>();
+  const turnRequests = new Map<string, string>();
   let today = "";
   const requests = new Map<string, Extract<Row, { kind: "request" }>>();
   const decided = new Set(events.flatMap(event => event.type === "op.decided" ? [event.body.id] : []));
@@ -141,17 +143,35 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     const firstAt = work[0]?.at ?? (deferred[0]?.kind === "notice" ? deferred[0].event.at : deferred[0]?.kind === "failed" || deferred[0]?.kind === "request" || deferred[0]?.kind === "restarted" ? deferred[0].at : undefined);
     if (firstAt && new Date(firstAt).toDateString() !== new Date(event.at).toDateString()) flush();
     if (event.type === "post.created") {
+      for (const turn of turns.values()) if (turn.start.type === "turn.started" && turn.start.body.session === event.from.session) turn.posted = true;
       if (sameHome(event.body.home, home)) post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, event.body.attachments ?? [], event.body.mentions ?? []);
       continue;
     }
     // A decision can come from a session outside a DM, so it updates the request's row before the DM filter.
     if (event.type === "op.decided" || event.type === "op.ran") {
+      const turn = turns.get(turnRequests.get(event.body.id) ?? "");
+      if (turn && event.type === "op.decided") { turn.events.push(event); continue; }
       const row = requests.get(event.body.id);
       if (row) row.request = { ...row.request, ...event.body };
       else if (event.type === "op.decided" && home.kind === "feed") work.push(event);
       continue;
     }
     const session = subject(event);
+    if (event.type === "turn.started") {
+      if (home.kind !== "dm" || session === home.session) turns.set(event.body.turn, { start: event, posted: false, significant: false, events: [] });
+      continue;
+    }
+    if (event.type === "shell.job.ended" || event.type === "op.requested") {
+      for (const [id, turn] of turns) if (turn.start.type === "turn.started" && turn.start.body.session === session) {
+        turn.significant = true;
+        if (event.type === "shell.job.ended" || (decided.has(event.body.id) && !retainedRequests.has(event.body.id))) {
+          turn.events.push(event);
+          if (event.type === "op.requested") turnRequests.set(event.body.id, id);
+          break;
+        }
+      }
+      if (event.type === "shell.job.ended" ? [...turns.values()].some(turn => turn.events.includes(event)) : turnRequests.has(event.body.id)) continue;
+    }
     if (home.kind === "dm" && session !== home.session) continue;
     if (event.type === "room.paused" || event.type === "room.resumed" || event.type === "room.limits_changed") {
       const previous = deferred.at(-1);
@@ -184,26 +204,25 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       // A final reply that no post of the session already carried is the session's answer here.
       const answer = event.body.final && (event.body.replies ?? []).find(({ reply, posted }) =>
         reply.kind === "final" && !posted && sameHome(reply.home ?? { kind: "feed" }, home));
-      // Only the end of a turn whose start the row holds ends the row's time.
-      const turn = event.body.turn;
-      if (event.body.final && answer) {
-        const until = work.some(e => e.type === "turn.started" && e.body.turn === turn) ? event.at : undefined;
-        // A reloaded DM window holds only posts and the turns that answered in it, so this end is the turn's only event.
-        // The work row keeps it, so the turn's steps can still open above its answer.
-        if (home.kind === "dm") work.push(event);
-        flush(until);
-      }
+      const turn = turns.get(event.body.turn);
+      turns.delete(event.body.turn);
       if (event.body.final && answer) {
         post(`a${event.seq}`, event.seq, { kind: "session", session: event.body.session }, event.at, event.body.final, [], answer.reply.target ? [answer.reply.target] : []);
       }
       // A failed turn always gets its own row, even after its answer; it never folds into a work row. Its error is the
       // harness's raw text (r8), so the row shows only the owner words for its typed cause.
       if (event.body.outcome === "failed") {
-        if (work.some(e => e.type === "turn.started" && e.body.turn === turn)) work.push(event);
+        if (turn?.events.length) work.push(turn.start, ...turn.events);
         const cause = event.body.cause;
         deferred.push({ kind: "failed", key: `f${event.seq}`, seq: event.seq, session: event.body.session, at: event.at, label: "Turn failed", cause: cause ? causes[cause] : "" });
       }
-      if (answer || event.body.outcome === "failed") continue;
+      const posted = turn?.posted || !!answer;
+      const duration = turn ? Date.parse(event.at) - Date.parse(turn.start.at) : NaN;
+      if (event.body.outcome !== "failed" && (!posted || turn?.significant || event.body.outcome === "stopped" || !(duration < 60_000))) {
+        if (turn) work.push(turn.start, ...turn.events);
+        work.push(event);
+      }
+      continue;
     }
     work.push(event);
   }
@@ -326,9 +345,9 @@ const closeReasons: Record<SessionCloseReason, string> = { dormant: "after 7 qui
 // "Worked for 20s"; without both ends the line says "lead-web worked · 2 turns". A DM's saved steps give the start
 // that a reloaded window lacks.
 export function workSummary(events: Event[], name: Name, until?: string, from?: string): string {
-  if (events.length === 1 && !until && events[0].type !== "computer.changed" && !(events[0].type === "session.closed" && events[0].body.reason)) return describe(events[0], name) || "Activity";
+  if (events.length === 1 && !until && events[0].type !== "turn.started" && events[0].type !== "turn.ended" && events[0].type !== "shell.job.ended" && events[0].type !== "computer.changed" && !(events[0].type === "session.closed" && events[0].body.reason)) return describe(events[0], name) || "Activity";
   const turns = new Set<string>();
-  let stopped = 0, images = 0, prs = 0, started = 0, closed = 0, memory = 0;
+  let stopped = 0, jobs = 0, images = 0, prs = 0, started = 0, closed = 0, memory = 0;
   const approvals = new Map<string, number>();
   let first = Infinity, last = -Infinity;
   for (const event of events) {
@@ -341,6 +360,7 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
         break;
       case "session.started": started++; break;
       case "session.closed": if (!event.body.reason) closed++; break;
+      case "shell.job.ended": jobs++; break;
       case "image.built": images++; break;
       case "pr.opened": prs++; break;
       case "box.pressure": memory++; break;
@@ -355,6 +375,7 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
   const parts = [
     sessions.length && `${sessions.length === 1 ? name(sessions[0]) : count(sessions.length, "session")} worked${sessions.length === 1 && last >= first ? ` for ${took}` : ""}`,
     stopped && `${count(stopped, "turn")} stopped`,
+    jobs && count(jobs, "job"),
     images && `${count(images, "image")} built`,
     prs && `${count(prs, "pull request")} opened`,
     ...[...approvals].map(([by, amount]) => `${count(amount, "approval")} by ${by}`),
@@ -374,8 +395,8 @@ export function describe(event: Event, name: Name): string {
     case "session.moved": return `${name(event.body.session)} moved under ${name(event.body.newParent)}`;
     case "computer.changed": return `${name(event.body.session)} ${event.body.to === "running" ? "opened" : "closed"} its computer`;
     case "box.changed": return ""; // feedRows keeps box changes out of work rows.
-    case "turn.started": return `${name(event.body.session)} started a turn`;
-    case "turn.ended": return event.body.outcome === "failed" ? "" : event.body.outcome === "stopped" ? `${name(event.body.session)}'s turn stopped` : `${name(event.body.session)} finished a turn`;
+    case "turn.started": return "";
+    case "turn.ended": return event.body.outcome === "stopped" ? `${name(event.body.session)}'s turn stopped` : "";
     // Live only: the room store keeps it out of every feed window.
     case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "host.disk_low": case "conversation.read": return "";
     case "turn.activity": return event.body.label;
