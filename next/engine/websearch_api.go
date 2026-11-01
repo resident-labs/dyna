@@ -62,6 +62,33 @@ func (s *Service) SetWebSearchProxy(proxy *model.Proxy, quota *model.Quotas) {
 	s.searchProxy, s.searchQuota = proxy, quota
 }
 
+func (s *Service) orderSearchCandidates(room contract.RoomID, candidates []searchCandidate, attempts []contract.WebSearchAttempt) []contract.WebSearchAttempt {
+	s.searchMu.Lock()
+	now := s.now()
+	for i := range candidates {
+		name := string(room) + "/" + candidates[i].provider.Name()
+		if until, ok := s.searchFailures[name]; ok {
+			if now.Before(until) {
+				candidates[i].recent = true
+				attempts = append(attempts, contract.WebSearchAttempt{Provider: candidates[i].provider.Name(), Reason: contract.WebSearchRecentFailure})
+			} else {
+				delete(s.searchFailures, name)
+			}
+		}
+	}
+	s.searchMu.Unlock()
+	slices.SortStableFunc(candidates, func(a, b searchCandidate) int {
+		if a.recent == b.recent {
+			return 0
+		}
+		if a.recent {
+			return 1
+		}
+		return -1
+	})
+	return attempts
+}
+
 func (s *Service) WebSearch(ctx context.Context, caller contract.Principal, req contract.WebSearchRequest) (contract.WebSearchResponse, *contract.Error) {
 	if strings.TrimSpace(req.Query) == "" || req.Limit < 0 || req.Limit > websearch.MaxLimit {
 		return contract.WebSearchResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "query is required and limit must be between 1 and 10"}
@@ -134,29 +161,7 @@ func (s *Service) WebSearch(ctx context.Context, caller contract.Principal, req 
 	for _, provider := range []websearch.Provider{websearch.Muse{Key: key("muse")}, websearch.Brave{BaseURL: s.searchBraveURL, Key: key("brave")}, websearch.Exa{Key: key("exa")}, websearch.Tavily{Key: key("tavily")}} {
 		candidates = append(candidates, searchCandidate{provider: provider})
 	}
-	s.searchMu.Lock()
-	now := s.now()
-	for i := range candidates {
-		name := string(room) + "/" + candidates[i].provider.Name()
-		if until, ok := s.searchFailures[name]; ok {
-			if now.Before(until) {
-				candidates[i].recent = true
-				out.Attempts = append(out.Attempts, contract.WebSearchAttempt{Provider: candidates[i].provider.Name(), Reason: contract.WebSearchRecentFailure})
-			} else {
-				delete(s.searchFailures, name)
-			}
-		}
-	}
-	s.searchMu.Unlock()
-	slices.SortStableFunc(candidates, func(a, b searchCandidate) int {
-		if a.recent == b.recent {
-			return 0
-		}
-		if a.recent {
-			return 1
-		}
-		return -1
-	})
+	out.Attempts = s.orderSearchCandidates(room, candidates, out.Attempts)
 	for _, candidate := range candidates {
 		results, err := websearch.Attempt(ctx, candidate.provider, websearch.Query{Text: req.Query, Limit: req.Limit})
 		if err == nil {
@@ -185,5 +190,5 @@ func (s *Service) WebSearch(ctx context.Context, caller contract.Principal, req 
 		}
 		out.Attempts = append(out.Attempts, contract.WebSearchAttempt{Provider: candidate.provider.Name(), Reason: reason, Message: message})
 	}
-	return out, &contract.Error{Code: contract.ErrUnavailable, Message: "no search provider succeeded"}
+	return out, nil
 }
