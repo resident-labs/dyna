@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -23,6 +24,35 @@ import (
 )
 
 var errCrash = errors.New("crash")
+
+// A box can leave a read-only folder in its room's shared folder, which the engine's own user cannot remove.
+func TestRemoveRoomDataClearsWhatABoxLockedUp(t *testing.T) {
+	tools := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tools, "podman"), []byte("#!/bin/sh\nchmod -R u+w \"$5\" && rm -rf \"$5\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", tools+":"+os.Getenv("PATH"))
+	layout := box.Layout{Data: t.TempDir()}
+	s := &Service{layout: layout}
+	locked := filepath.Join(layout.Shared("room_1"), "locked")
+	if err := os.MkdirAll(locked, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(locked, "file"), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0700) })
+	if err := s.RemoveRoomData("room_1"); err != nil {
+		t.Fatal(err)
+	}
+	dir, _ := layout.Room("room_1")
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the room's folder is still there: %v", err)
+	}
+}
 
 // fakeRoomHosts records removals in order. Err fails a removal; crash does the removal and then fails, as a crash after it would.
 type fakeRoomHosts struct {
@@ -340,7 +370,7 @@ func (r *deleteRig) fillRoom(t *testing.T, ctx context.Context, room contract.Ro
 			`INSERT INTO client_replays(method,caller_kind,caller_id,client_id,ref,created_at) VALUES('question.ask','owner','','key3','q_delete',0)`,
 			`INSERT INTO client_replays(method,caller_kind,caller_id,client_id,ref,created_at) VALUES('session.start','owner','','key1',?2,0)`,
 			`INSERT INTO client_replays(method,caller_kind,caller_id,client_id,ref,created_at) VALUES('op.submit','session',?2,'key2','op_delete',0)`,
-			`INSERT INTO room_shared(room,host,bytes,measured_at) VALUES(?1,'host',1,0)`,
+			`INSERT INTO room_shared(room,bytes,measured_at) VALUES(?1,1,0)`,
 			`INSERT INTO host_rooms(host,room) VALUES('host',?1),('host',?3)`,
 		} {
 			if _, err := tx.ExecContext(ctx, statement, room, worker, other); err != nil {

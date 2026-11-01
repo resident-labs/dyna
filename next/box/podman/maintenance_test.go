@@ -45,10 +45,10 @@ func TestMaintenanceCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Maintain(context.Background(), box.Layout{HostData: "/data"}); err != nil {
+	if err := h.Maintain(context.Background(), box.Layout{HostData: "/data"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"podman image prune -f", "git -C", "gc --no-prune", "'/data/git' '/data/rooms' 'shared'"} {
+	for _, expected := range []string{"podman image prune -f", "git -C", "gc --no-prune", "'dyna-maintain' '/data/git'"} {
 		if !strings.Contains(r.command, expected) {
 			t.Fatalf("missing %q in %s", expected, r.command)
 		}
@@ -71,8 +71,7 @@ func (r localShell) Run(ctx context.Context, input []byte, args ...string) ([]by
 	return c.Output()
 }
 
-// git gc prints "Nothing new to pack." to stdout on an empty cache, which must not become part of a room name.
-func TestMaintainOutputHoldsOnlyRoomSizes(t *testing.T) {
+func TestMaintainCompactsACache(t *testing.T) {
 	data := t.TempDir()
 	layout := box.Layout{HostData: data}
 	cache, err := layout.HostGit("owner/repo")
@@ -82,9 +81,6 @@ func TestMaintainOutputHoldsOnlyRoomSizes(t *testing.T) {
 	if out, err := exec.Command("git", "init", "--bare", cache).CombinedOutput(); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
-	if err := os.MkdirAll(layout.HostShared("room_1"), 0700); err != nil {
-		t.Fatal(err)
-	}
 	bin := t.TempDir()
 	if err := os.WriteFile(filepath.Join(bin, "podman"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
@@ -93,11 +89,7 @@ func TestMaintainOutputHoldsOnlyRoomSizes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sizes, err := h.Maintain(context.Background(), layout)
-	if err != nil {
+	if err := h.Maintain(context.Background(), layout); err != nil {
 		t.Fatal(err)
-	}
-	if len(sizes) != 1 || sizes[0].Room != "room_1" {
-		t.Fatalf("sizes %+v", sizes)
 	}
 }

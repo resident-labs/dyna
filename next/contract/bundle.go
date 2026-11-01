@@ -391,6 +391,7 @@ type RunSpec struct {
 	Command []string    `json:"command"`
 	Image   string      `json:"image"`
 	Size    BoxSizeName `json:"size"`
+	Host    HostName    `json:"host,omitempty"` // Every Run goes to this host and waits for it. File locks need this, as they stop at a host.
 	Files   []RunFile   `json:"files,omitempty"`
 }
 

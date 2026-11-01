@@ -49,13 +49,13 @@ test("a merged card keeps the sessions both sides report, and an unmerged host k
 test("one machine reported as the control plane and a registered host is one card, named for the host, with whole-machine figures", () => {
   const gib = 2 ** 30;
   const plane = { name: "control-plane", reachable: true, boxes: 0, cpus: 20, memBytes: 31 * gib, cpuUsed: 0.2, memUsed: 4 * gib, diskBytes: 1900 * gib, diskUsed: 1192 * gib,
-    diskLow: false, shared: [], history: null, backupCopyEnabled: true, lastSeen: "2026-10-31T00:00:00Z" };
+    diskLow: false, shared: [{ room: "r", bytes: gib }], history: null, backupCopyEnabled: true, lastSeen: "2026-10-31T00:00:00Z" };
   const lab = { name: "lab", reachable: true, boxes: 3, cpus: 19, memBytes: 27 * gib, cpuUsed: 0, memUsed: 0, diskBytes: 1900 * gib, diskUsed: 1192 * gib,
-    diskLow: false, shared: [{ room: "r", bytes: gib }], history: null, lastSeen: "2026-10-31T00:00:05Z", engineHost: true };
+    diskLow: false, shared: [], history: null, lastSeen: "2026-10-31T00:00:05Z", engineHost: true };
   const other = { ...lab, name: "gpu-box", engineHost: undefined, boxes: 1 };
   const [one, ...rest] = machines([plane, lab, other]);
   assert.deepEqual(rest, [other]);
-  assert.deepEqual([one.name, one.boxes, one.shared], ["lab", 3, lab.shared]);
+  assert.deepEqual([one.name, one.boxes, one.shared], ["lab", 3, plane.shared]);
   assert.deepEqual(hostMeters(one).map(m => m.text), hostMeters(plane).map(m => m.text));
   assert.equal(one.backupCopyEnabled, true);
   assert.equal(hostLabel(one.name), "lab");

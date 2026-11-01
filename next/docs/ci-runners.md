@@ -21,9 +21,10 @@ that no job waits for a pool that does not exist yet.
    write for the lease. The pool was tested with the owner's `gh` token, which is
    broader than that. A fine-grained token is untested.
 2. Let the engine's user reach the host. The host needs rootless Podman 5 on
-   systemd with `cpu`, `memory` and `pids` delegated, `git` and `curl`, and that is
-   all: `dyna host add` copies the Dyna binary across, and `jq`, `socat` and the
-   rest live in the runner image. The engine's key must be a plain one in the
+   systemd with `cpu`, `memory` and `pids` delegated, `git`, `curl`, and `fuse3`
+   with `user_allow_other` in `/etc/fuse.conf`, and that is all: `dyna host add`
+   copies the Dyna binary across, and `jq`, `socat` and the rest live in the
+   runner image. The engine's key must be a plain one in the
    host user's `authorized_keys`. A key with a forced command, such as a backup
    key, cannot run anything. SSH once by hand as the engine's user, because the
    engine cannot answer a host key prompt. A laptop or any host that logs out needs

@@ -52,6 +52,9 @@ func describeSubscription(info contract.SubscriptionInfo) string {
 	action := "wake"
 	if sub.Run != nil {
 		action = "run " + sub.Run.Image + ": " + strings.Join(sub.Run.Command, " ")
+		if sub.Run.Host != "" {
+			action = "run " + sub.Run.Image + " on " + string(sub.Run.Host) + ": " + strings.Join(sub.Run.Command, " ")
+		}
 	} else if sub.Wake != nil {
 		action = "wake " + string(sub.Wake.Session)
 	}
@@ -77,10 +80,10 @@ func describeSubscription(info contract.SubscriptionInfo) string {
 func subscriptionCommand(get func() *socketClient) *cobra.Command {
 	root := &cobra.Command{Use: "subscription", Short: "Typed subscriptions: wake a session or run a small box on events or on a schedule"}
 	var machine bool
-	var room, session, image, size, wake string
+	var room, session, image, size, host, wake string
 	var on, files []string
 	var every time.Duration
-	add := &cobra.Command{Use: "add (--machine | --room ROOM | --session SESSION) (--on TYPE | --every DURATION) (--wake SESSION | [--image NAME] [--size SIZE] [--file BOXPATH=LOCALPATH] -- COMMAND [ARG...])", Short: "Add a subscription", RunE: func(cmd *cobra.Command, args []string) error {
+	add := &cobra.Command{Use: "add (--machine | --room ROOM | --session SESSION) (--on TYPE | --every DURATION) (--wake SESSION | [--image NAME] [--size SIZE] [--host HOST] [--file BOXPATH=LOCALPATH] -- COMMAND [ARG...])", Short: "Add a subscription", RunE: func(cmd *cobra.Command, args []string) error {
 		scope, err := subscriptionScope(machine, room, session)
 		if err != nil {
 			return err
@@ -93,7 +96,7 @@ func subscriptionCommand(get func() *socketClient) *cobra.Command {
 			req.Wake = &contract.Principal{Kind: contract.PrincipalSession, Session: contract.SessionID(wake)}
 		}
 		if len(args) > 0 {
-			run := contract.RunSpec{Command: args, Image: image, Size: contract.BoxSizeName(size)}
+			run := contract.RunSpec{Command: args, Image: image, Size: contract.BoxSizeName(size), Host: contract.HostName(host)}
 			if run.Files, err = runFiles(files); err != nil {
 				return err
 			}
@@ -113,6 +116,7 @@ func subscriptionCommand(get func() *socketClient) *cobra.Command {
 	add.Flags().StringVar(&wake, "wake", "", "Session ID to wake")
 	add.Flags().StringVar(&image, "image", "base", "Run image: base, or an image folder of the room's default repository")
 	add.Flags().StringVar(&size, "size", string(contract.BoxSizeSmall), "Run box size: small or agent")
+	add.Flags().StringVar(&host, "host", "", "Run on this host only, for a script that needs file locks; any host by default")
 	add.Flags().StringArrayVar(&files, "file", nil, "Run file as BOXPATH=LOCALPATH (repeatable); the path is relative to the folder the command starts in")
 	var listRoom string
 	list := &cobra.Command{Use: "list", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {

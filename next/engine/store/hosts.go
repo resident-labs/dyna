@@ -156,35 +156,41 @@ func (s *Store) ClaimHostMaintenance(ctx context.Context, name contract.HostName
 	return claimed, err
 }
 
-func (s *Store) FinishHostMaintenance(ctx context.Context, name contract.HostName, sizes []contract.RoomShared, now time.Time) error {
+func (s *Store) FinishHostMaintenance(ctx context.Context, name contract.HostName, now time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, "DELETE FROM room_shared WHERE host=?", name); err != nil {
-			return err
-		}
-		for _, size := range sizes {
-			if _, err := tx.ExecContext(ctx, "INSERT INTO room_shared(room,host,bytes,measured_at) VALUES(?,?,?,?)", size.Room, name, size.Bytes, now.UnixMilli()); err != nil {
-				return err
-			}
-		}
 		_, err := tx.ExecContext(ctx, "UPDATE hosts SET maintained_at=? WHERE name=?", now.UnixMilli(), name)
 		return err
 	})
 }
 
-func (s *Store) RoomShared(ctx context.Context) (map[contract.HostName][]contract.RoomShared, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT host,room,bytes FROM room_shared ORDER BY host,room")
+// SetRoomShared replaces the measured size of every room's shared folder.
+func (s *Store) SetRoomShared(ctx context.Context, sizes []contract.RoomShared, now time.Time) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM room_shared"); err != nil {
+			return err
+		}
+		for _, size := range sizes {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO room_shared(room,bytes,measured_at) VALUES(?,?,?)", size.Room, size.Bytes, now.UnixMilli()); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Store) RoomShared(ctx context.Context) ([]contract.RoomShared, error) {
+	rows, err := s.Read().QueryContext(ctx, "SELECT room,bytes FROM room_shared ORDER BY room")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := make(map[contract.HostName][]contract.RoomShared)
+	out := []contract.RoomShared{}
 	for rows.Next() {
-		var host contract.HostName
 		var size contract.RoomShared
-		if err := rows.Scan(&host, &size.Room, &size.Bytes); err != nil {
+		if err := rows.Scan(&size.Room, &size.Bytes); err != nil {
 			return nil, err
 		}
-		out[host] = append(out[host], size)
+		out = append(out, size)
 	}
 	return out, rows.Err()
 }
