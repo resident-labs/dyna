@@ -4,9 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/model"
 	"github.com/resident-labs/dyna/engine/websearch"
 )
 
@@ -44,6 +47,21 @@ func (s *Service) WebsearchRemoveKey(ctx context.Context, caller contract.Princi
 	return contract.WebsearchRemoveKeyResponse{}, nil
 }
 
+type searchCandidate struct {
+	provider websearch.Provider
+	headroom float64
+	recent   bool
+}
+
+type proxyCredential struct{}
+
+func (proxyCredential) Token(context.Context) (string, string, error) { return "proxy", "proxy", nil }
+
+// SetWebSearchProxy configures proxy-backed search without reading model tokens.
+func (s *Service) SetWebSearchProxy(proxy *model.Proxy, quota *model.Quotas) {
+	s.searchProxy, s.searchQuota = proxy, quota
+}
+
 func (s *Service) WebSearch(ctx context.Context, caller contract.Principal, req contract.WebSearchRequest) (contract.WebSearchResponse, *contract.Error) {
 	if strings.TrimSpace(req.Query) == "" || req.Limit < 0 || req.Limit > websearch.MaxLimit {
 		return contract.WebSearchResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "query is required and limit must be between 1 and 10"}
@@ -57,14 +75,115 @@ func (s *Service) WebSearch(ctx context.Context, caller contract.Principal, req 
 			return value, err
 		}
 	}
-	chain := websearch.Chain{websearch.Muse{Key: key("muse")}, websearch.Brave{BaseURL: s.searchBraveURL, Key: key("brave")}, websearch.Exa{Key: key("exa")}, websearch.Tavily{Key: key("tavily")}}
-	results, err := chain.Search(ctx, websearch.Query{Text: req.Query, Limit: req.Limit})
-	if err != nil {
-		return contract.WebSearchResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: err.Error()}
+	// A bounded deadline also protects calls that arrive without one.
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	out := contract.WebSearchResponse{Results: []contract.WebSearchResult{}, Attempts: []contract.WebSearchAttempt{}}
+	candidates := make([]searchCandidate, 0, 9)
+	room := contract.RoomID("")
+	if caller.Kind == contract.PrincipalSession {
+		session, err := s.store.Session(ctx, caller.Session)
+		if err != nil {
+			return out, &contract.Error{Code: contract.ErrForbidden, Message: "search caller unavailable"}
+		}
+		room = session.Room
 	}
-	out := contract.WebSearchResponse{Results: make([]contract.WebSearchResult, 0, len(results))}
-	for _, r := range results {
-		out.Results = append(out.Results, contract.WebSearchResult{Title: r.Title, URL: r.URL, Snippet: r.Snippet, Provider: r.Provider})
+	if s.searchProxy != nil {
+		accounts, err := s.store.Accounts(ctx)
+		if err != nil {
+			return out, &contract.Error{Code: contract.ErrUnavailable, Message: "search accounts unavailable"}
+		}
+		eligible, err := s.store.EligibleAccountProxyIDs(ctx, room)
+		if err != nil {
+			return out, &contract.Error{Code: contract.ErrUnavailable, Message: "search accounts unavailable"}
+		}
+		specs := []struct {
+			name     string
+			provider contract.AccountProvider
+		}{
+			{"chatgpt", contract.ProviderOpenAI}, {"claude", contract.ProviderAnthropic}, {"xai", contract.ProviderXAI},
+		}
+		for _, spec := range specs {
+			ids, headroom, reason := searchAccounts(accounts, eligible, spec.provider, s.searchQuota.CachedUsage)
+			if reason != "" {
+				out.Attempts = append(out.Attempts, contract.WebSearchAttempt{Provider: spec.name, Reason: reason})
+				continue
+			}
+			client := s.searchProxy.SearchClient(ids)
+			var provider websearch.Provider
+			switch spec.name {
+			case "chatgpt":
+				provider = websearch.ChatGPT{BaseURL: "http://cliproxy/v1", Credential: proxyCredential{}, Client: client}
+			case "claude":
+				provider = websearch.Claude{BaseURL: "http://cliproxy", Token: func(context.Context) (string, error) { return "proxy", nil }, Client: client}
+			case "xai":
+				provider = websearch.XAI{BaseURL: "http://cliproxy/v1", Token: func(context.Context) (string, error) { return "proxy", nil }, Client: client}
+			}
+			candidates = append(candidates, searchCandidate{provider: provider, headroom: headroom})
+		}
+		slices.SortStableFunc(candidates, func(a, b searchCandidate) int {
+			if a.headroom > b.headroom {
+				return -1
+			}
+			if a.headroom < b.headroom {
+				return 1
+			}
+			return 0
+		})
 	}
-	return out, nil
+	for _, provider := range []websearch.Provider{websearch.Muse{Key: key("muse")}, websearch.Brave{BaseURL: s.searchBraveURL, Key: key("brave")}, websearch.Exa{Key: key("exa")}, websearch.Tavily{Key: key("tavily")}} {
+		candidates = append(candidates, searchCandidate{provider: provider})
+	}
+	s.searchMu.Lock()
+	now := s.now()
+	for i := range candidates {
+		name := string(room) + "/" + candidates[i].provider.Name()
+		if until, ok := s.searchFailures[name]; ok {
+			if now.Before(until) {
+				candidates[i].recent = true
+				out.Attempts = append(out.Attempts, contract.WebSearchAttempt{Provider: candidates[i].provider.Name(), Reason: contract.WebSearchRecentFailure})
+			} else {
+				delete(s.searchFailures, name)
+			}
+		}
+	}
+	s.searchMu.Unlock()
+	slices.SortStableFunc(candidates, func(a, b searchCandidate) int {
+		if a.recent == b.recent {
+			return 0
+		}
+		if a.recent {
+			return 1
+		}
+		return -1
+	})
+	for _, candidate := range candidates {
+		results, err := websearch.Attempt(ctx, candidate.provider, websearch.Query{Text: req.Query, Limit: req.Limit})
+		if err == nil {
+			out.Provider = candidate.provider.Name()
+			for _, r := range results {
+				out.Results = append(out.Results, contract.WebSearchResult{Title: r.Title, URL: r.URL, Snippet: r.Snippet, Provider: r.Provider})
+			}
+			return out, nil
+		}
+		if ctx.Err() != nil {
+			return out, &contract.Error{Code: contract.ErrUnavailable, Message: "search deadline reached"}
+		}
+		reason := contract.WebSearchFailed
+		message := websearch.SafeMessage(err)
+		if errors.Is(err, websearch.ErrNotSignedIn) {
+			reason, message = contract.WebSearchNotSignedIn, ""
+		} else if !websearch.AuthFailure(err) {
+			s.searchMu.Lock()
+			if s.searchFailures == nil {
+				s.searchFailures = make(map[string]time.Time)
+			} else if len(s.searchFailures) >= 256 {
+				clear(s.searchFailures)
+			}
+			s.searchFailures[string(room)+"/"+candidate.provider.Name()] = s.now().Add(5 * time.Minute)
+			s.searchMu.Unlock()
+		}
+		out.Attempts = append(out.Attempts, contract.WebSearchAttempt{Provider: candidate.provider.Name(), Reason: reason, Message: message})
+	}
+	return out, &contract.Error{Code: contract.ErrUnavailable, Message: "no search provider succeeded"}
 }
