@@ -36,12 +36,11 @@ var notPublic = []netip.Prefix{
 // down: an out-of-memory kill would cut every other job's tunnels.
 const maxRequest = 64 << 10 // bytes in a CONNECT request
 
-var (
-	// maxTunnels stays well inside the proxy's memory limit, at about 100 KiB each.
-	maxTunnels = 4096
+type limits struct {
+	tunnels int // stays well inside the proxy's memory limit, at about 100 KiB each
 	// closeWait is how long a far end may hold a tunnel after its job has left it.
-	closeWait = time.Minute
-)
+	closeWait time.Duration
+}
 
 // Public reports whether a job may reach addr.
 func Public(addr netip.Addr) bool {
@@ -80,9 +79,13 @@ func PublicDial() Dial {
 
 // Serve answers HTTP CONNECT on listener until ctx ends.
 func Serve(ctx context.Context, listener net.Listener, dial Dial) error {
+	return serve(ctx, listener, dial, limits{tunnels: 4096, closeWait: time.Minute})
+}
+
+func serve(ctx context.Context, listener net.Listener, dial Dial, bound limits) error {
 	stop := context.AfterFunc(ctx, func() { listener.Close() })
 	defer stop()
-	slots := make(chan struct{}, maxTunnels)
+	slots := make(chan struct{}, bound.tunnels)
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -95,7 +98,7 @@ func Serve(ctx context.Context, listener net.Listener, dial Dial) error {
 		case slots <- struct{}{}:
 			go func() {
 				defer func() { <-slots }()
-				handle(ctx, conn, dial)
+				handle(ctx, conn, dial, bound.closeWait)
 			}()
 		default:
 			conn.Close()
@@ -103,7 +106,7 @@ func Serve(ctx context.Context, listener net.Listener, dial Dial) error {
 	}
 }
 
-func handle(ctx context.Context, conn net.Conn, dial Dial) {
+func handle(ctx context.Context, conn net.Conn, dial Dial, closeWait time.Duration) {
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 	limited := &io.LimitedReader{R: conn, N: maxRequest}
