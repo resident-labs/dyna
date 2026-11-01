@@ -61,8 +61,11 @@ node's queue, and store their log and exit code.
   disk; a node runs only a few heavy units at once. A job that waits shows why
   in `dyna job show`. A host job without `--memory` reserves 1 GiB in the
   admission budget but keeps its 5 GiB execution limit. Admission also checks
-  the last probe's available memory, keeping 2 GiB of node headroom. This
-  sample cannot prevent jobs from growing after admission. With no systemd
+  the last probe's available memory, keeping up to 2 GiB of node headroom,
+  bounded to one quarter of node memory. The available-memory check requires
+  at most half the node's total memory for one request, so large requests can
+  start on an idle node. The full request still counts in the reservation budget.
+  This sample cannot prevent jobs from growing after admission. With no systemd
   user unit, the execution limit is not enforced.
 
 - `--quick` uses a separate, bounded quick lane for short commands. Its default timeout is 10 minutes. Systemd user units enforce its 1 CPU and 1 GiB limits. Without systemd user units, Dyna uses low CPU priority and idle IO priority when available, but cannot enforce those hard limits. The node's quick slots still bound the number of quick jobs. Dyna reserves up to 1 GiB per quick slot from the memory available to declared work, while leaving at least 5 GiB when the node has it. It clamps larger declared requests to the memory available after the reserve. On smaller nodes, quick jobs can overlap declared work in memory. By default, the slot count is the greater of 1 and the smaller of one eighth of probed memory in GiB and the greater of 4 and one quarter of probed CPUs. Without a memory probe, the CPU-based default applies. Set an explicit limit with `dyna node edit N --quick-slots K`. When memory is known, Dyna caps this setting to one slot per 2 GiB, with at least one slot.
