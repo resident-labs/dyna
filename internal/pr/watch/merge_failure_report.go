@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"dyna-agent/internal/ciexcerpt"
+	"dyna-agent/internal/ghquota"
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/pr/state"
 	"golang.org/x/mod/modfile"
@@ -176,6 +177,7 @@ func (s *Service) mergeFailureJobs(ctx context.Context, r Record, b state.MergeT
 		return
 	}
 	g := s.github(r.RoomID)
+	g.runPhase = ghquota.RunFailureReport
 	observed, err := g.readCommitRuns(ctx, refRecord(r), b.Head)
 	if err != nil {
 		return
