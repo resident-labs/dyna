@@ -14,13 +14,28 @@ import (
 	"time"
 
 	"filippo.io/age"
+	"github.com/resident-labs/dyna/box"
+	"github.com/resident-labs/dyna/contract"
 )
 
 type fakeBackupStore struct {
-	dir     string
-	calls   int
-	failure string
+	dir        string
+	calls      int
+	failure    string
+	alerts     int
+	free, need int64
 }
+
+func (s *fakeBackupStore) AlertDisk(_ context.Context, host contract.HostName, free, need int64, _ time.Time) error {
+	if host != contract.ControlPlane {
+		return errors.New("alert on the wrong host")
+	}
+	s.alerts++
+	s.free, s.need = free, need
+	return nil
+}
+
+func plentyFree(context.Context) (int64, bool) { return 1 << 62, true }
 
 func (s *fakeBackupStore) Backup(_ context.Context, _ time.Time) (string, error) {
 	s.calls++
@@ -49,13 +64,63 @@ func TestBackupStartAge(t *testing.T) {
 			t.Fatal(err)
 		}
 		st := &fakeBackupStore{dir: dir}
-		b := backupLoop{store: st, dir: dir, now: func() time.Time { return now }}
+		b := backupLoop{store: st, dir: dir, free: plentyFree, now: func() time.Time { return now }}
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		b.start(ctx)
 		if (st.calls == 1) != (age > 24*time.Hour) {
 			t.Fatalf("age %v: calls %d", age, st.calls)
 		}
+	}
+}
+
+func TestBackupWaitsForRoomAndClearsPartials(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "backups")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(dir), "store.db"), make([]byte, 1024), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"store-1.db.partial", ".encrypted-2.partial", "store-3.db"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	identity, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	need := 2*1024 + 20*box.GiB
+	free := need - 1
+	st := &fakeBackupStore{dir: dir}
+	b := backupLoop{store: st, dir: dir, recipient: identity.Recipient(), free: func(context.Context) (int64, bool) { return free, true }, now: time.Now, run: func(context.Context, string, int64, *os.File) error { return nil }}
+	b.backup(context.Background())
+	if st.calls != 0 || st.alerts != 1 || st.free != need-1 || st.need != need || st.failure != "low disk" {
+		t.Fatalf("low disk: %+v", st)
+	}
+	names, err := filepath.Glob(filepath.Join(dir, "*"))
+	if err != nil || len(names) != 1 || filepath.Base(names[0]) != "store-3.db" {
+		t.Fatalf("left in backups: %v, %v", names, err)
+	}
+	free = need
+	b.backup(context.Background())
+	if st.calls != 1 || st.alerts != 1 || st.failure != "" {
+		t.Fatalf("with room: %+v", st)
+	}
+}
+
+// A broken probe reads as zero free. It must not stop backups for good, nor claim the disk is full.
+func TestBackupRunsWhenDiskCannotBeMeasured(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "backups")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	st := &fakeBackupStore{dir: dir}
+	b := backupLoop{store: st, dir: dir, free: func(context.Context) (int64, bool) { return 0, false }, now: time.Now}
+	b.backup(context.Background())
+	if st.calls != 1 || st.alerts != 0 {
+		t.Fatalf("calls %d alerts %d", st.calls, st.alerts)
 	}
 }
 
@@ -80,7 +145,7 @@ func TestBackupCopyFailure(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	b := backupLoop{store: st, dir: dir, dest: "backup-host", recipient: identity.Recipient(), now: func() time.Time { return now }, run: func(_ context.Context, dest string, size int64, input *os.File) error {
+	b := backupLoop{store: st, dir: dir, dest: "backup-host", recipient: identity.Recipient(), free: plentyFree, now: func() time.Time { return now }, run: func(_ context.Context, dest string, size int64, input *os.File) error {
 		data, err := io.ReadAll(input)
 		if err != nil {
 			t.Fatal(err)

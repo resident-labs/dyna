@@ -223,7 +223,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 		if row.Limits.CPUs > 0 && cpus > 4*row.Limits.CPUs || row.Limits.MemBytes > 0 && memory > 4*row.Limits.MemBytes {
 			placement.Reason = box.PendingRoomLimit
 		} else {
-			placement = box.Admit(hosts, all, b, 20*box.GiB)
+			placement = box.Admit(hosts, all, b)
 		}
 		next := b
 		if placement.Reason != "" {
