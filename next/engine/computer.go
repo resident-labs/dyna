@@ -111,8 +111,11 @@ func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal,
 	if !ok {
 		return &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 	}
-	stream := handle.ComputerStream()
+	stream, attached := handle.ComputerStream()
 	handle.Unlock()
+	if !attached {
+		return &contract.Error{Code: contract.ErrNotFound, Message: "computer is not attached"}
+	}
 	defer func() {
 		if !handle.Lock() {
 			return

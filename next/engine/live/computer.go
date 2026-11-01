@@ -107,8 +107,11 @@ func (s *Session) ComputerWatchGeneration() uint64 {
 }
 
 // ComputerStream captures the state associated with a frame stream.
-func (s *Session) ComputerStream() ComputerStream {
-	return ComputerStream{computer: s.computer, channel: s.channel}
+func (s *Session) ComputerStream() (ComputerStream, bool) {
+	if s.computer == nil {
+		return ComputerStream{}, false
+	}
+	return ComputerStream{computer: s.computer, channel: s.channel}, true
 }
 
 // ComputerFrame publishes the latest frame to the current generation.
