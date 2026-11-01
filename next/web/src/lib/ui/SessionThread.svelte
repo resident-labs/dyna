@@ -11,6 +11,7 @@
   import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
   import Markdown from "./Markdown.svelte";
+  import { deriveTimelineGroups } from "../timeline.ts";
 
   let { session, roomName, store, unsent, onunsent, onsettled, onpostlocation, clock = Date.now }: { session: string; roomName: string; store: RoomStore; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; clock?: () => number } = $props();
   const view = untrack(() => store.window({ kind: "dm", session }));
@@ -88,19 +89,7 @@
     const page = await call("transcript.read", { session, turn: turn.id, afterItem: turn.after, itemIndex: turn.nextItem, tail: turn.tail, postIndex: turn.nextPost }).catch(() => undefined);
     const next = page?.turns?.[0];
     if (!next) { failed = true; return; }
-    turns = turns.map(item => item.id === turn.id ? { ...item, inputs: [...item.inputs ?? [], ...next.inputs ?? []], items: [...item.items ?? [], ...next.items ?? []], more: next.more, after: next.after, nextItem: next.nextItem, tail: next.tail, nextPost: next.nextPost } : item);
-  }
-  type Group = { kind: "work"; id: string; items: TranscriptItem[] } | { kind: "item" | "posts"; id: string; item: TranscriptItem };
-  function groups(items: TranscriptItem[]): Group[] {
-    const result: Group[] = [];
-    for (const item of items) {
-      const last = result.at(-1);
-      if (item.kind === "tool" && last?.kind === "work") last.items.push(item);
-      else if (item.kind === "tool") result.push({ kind: "work", id: item.id, items: [item] });
-      else result.push({ kind: "item", id: item.id, item });
-      if (item.kind === "tool" && ((item.posts?.length ?? 0) > 0 || item.postsOmitted)) result.push({ kind: "posts", id: "posts:" + item.id, item });
-    }
-    return result;
+    turns = turns.map(item => item.id === turn.id ? { ...item, inputs: [...item.inputs ?? [], ...next.inputs ?? []], items: [...next.items ?? [], ...(item.items ?? []).filter(existing => !(next.items ?? []).some(incoming => incoming.id === existing.id))], more: next.more, after: next.after, nextItem: next.nextItem, tail: next.tail, nextPost: next.nextPost } : item);
   }
   let chunks: Record<string, string> = $state({});
   let chunkFailed: Record<string, boolean> = $state({});
@@ -135,12 +124,15 @@
         {#each turn.inputs ?? [] as input (input.id)}
           <div class="input"><div class="who"><Avatar kind={input.from.kind} name={sender(input.from.kind, input.from.session)} size={22} />{#if input.from.kind === "owner"}<strong>You</strong>{:else}<strong class:identity={input.from.kind === "session"} style:--hue={hue(sender(input.from.kind, input.from.session))}>{sender(input.from.kind, input.from.session)}</strong>{/if}{#if input.home}<span class="muted">{input.home.kind === "feed" ? `in ${roomName}` : input.home.session === session ? "in your DM" : "in a DM"}</span>{/if}<time datetime={input.at}>{formatTime(input.at)}</time></div><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{#if input.more && input.type === "post.created" && chunks["input:" + input.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Show all</button>{/if}</div>
         {/each}
-        {#each groups(turn.items ?? []) as group (group.id)}
+        {#each deriveTimelineGroups(turn.items ?? []) as group (group.id)}
           {#if group.kind === "work"}
-            <details open={turn.outcome === "failed" || workingGroup(group.items, !!turn.ended)}>
+            <details open={group.items.length === 1 || turn.outcome === "failed" || workingGroup(group.items, !!turn.ended)} ontoggle={(event) => { if (event.currentTarget.open && turn.more) void moreItems(turn); }}>
               <summary><span class="chevron"><Icon name="chevron" size={14} /></span>{#if !workingGroup(group.items, !!turn.ended)}{#each kinds(group.items) as kind}<Icon name={icons[kind]} size={14} />{/each}<span>{workSummary(group.items)}</span><span class="time">{stepTime({ started: group.items[0].at, ended: group.items.at(-1)?.ended })}</span>{:else}<span>Working for {elapsed(turn.started, now)}</span>{/if}</summary>
               <div class="steps">{#each group.items as item (item.id)}
                 {@const title = titleOf(item)}
+                {#if item.kind === "thinking"}
+                  <details class="step"><summary><span class="chevron"><Icon name="chevron" size={14} /></span> Thought</summary><div class="thought"><Markdown text={chunks[item.id + "/text"] ?? item.text} /></div></details>
+                {:else}
                 <details class="step"><summary>{#if !item.ended && !turn.ended}<span class="spinner" role="img" aria-label="Working"></span>{:else}<Icon name={icons[title.kind]} size={14} />{/if} <span>{!item.ended && !turn.ended ? activeVerb(title.kind, title.verb) : title.verb}</span><code>{title.target}</code><span class="time">{!item.ended && !turn.ended ? elapsed(item.at, now) : stepTime({ started: item.at, ended: item.ended })}</span>{#if item.failed}<StatusPill tone="failed" label="Failed" word />{/if}</summary>
                   {#if item.arguments}<pre>{chunks[item.id + "/arguments"] ?? item.arguments}</pre>{/if}
                   {#if item.output}<pre>{chunks[item.id + "/output"] ?? item.output}</pre>{/if}
@@ -148,6 +140,7 @@
                   {#if item.more && chunks[item.id + "/output"] === undefined}<button onclick={() => void fetchPart(turn.id, item.id, "output")}>Show all output</button>{/if}
                   {#if chunkFailed[item.id + "/output"]}<button onclick={() => void fetchPart(turn.id, item.id, "output")}>Output did not load. Try again</button>{/if}
                 </details>
+                {/if}
               {/each}</div>
             </details>
           {:else if group.kind === "posts"}
@@ -162,7 +155,6 @@
           {:else if group.item.kind === "too_large"}<p class="muted">This item is too large to show.</p>{/if}
         {/each}
         {#if turn.outcome === "failed"}<div class="failure"><Icon name="warning" size={16} /><div><strong>{turn.cause ? causes[turn.cause] : "The turn failed"}</strong></div></div>{/if}
-        {#if turn.more}<button onclick={() => void moreItems(turn)}>Show more of this turn</button>{/if}
         {#if !turn.ended && !(turn.items ?? []).some(item => item.kind === "tool")}<p class="muted"><span class="spinner" aria-hidden="true"></span> Working for {elapsed(turn.started, now)}</p>{/if}
       </article>
     {:else}{#if !loading && !failed}<p class="muted">The conversation will appear here.</p>{/if}{/each}
@@ -179,7 +171,7 @@
 
 <style>
   .thread { height: 100%; min-height: 0; overflow-y: auto; }
-  .body { max-width: 920px; margin: auto; padding: 16px 24px; }
+  .body { max-width: 736px; margin: auto; padding: 16px 24px; }
   article { margin: 0 0 24px; }
   .rule { display: flex; gap: 12px; align-items: center; margin: 16px 0; color: var(--muted); font-size: 12.5px; }
   .rule strong { color: var(--text); font-weight: 600; }
@@ -199,14 +191,14 @@
   .pending { opacity: 0.5; }
   .message { margin: 12px 0; }
   .muted, details { color: var(--muted); }
-  details { margin: 8px 0; font-size: 13px; }
-  summary { cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: 28px; list-style: none; border-radius: 6px; }
+  details { margin: 4px 0; font-size: 14px; }
+  summary { cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: 24px; list-style: none; border-radius: 6px; }
   summary:hover { background: var(--hover); color: var(--text); }
   summary::-webkit-details-marker { display: none; }
   .chevron { display: inline-flex; flex: none; transition: transform 150ms; }
   details:not([open]) > summary .chevron { transform: rotate(-90deg); }
   details > .thought { margin-left: 20px; }
-  .steps { border-left: 1px solid var(--line); margin-left: 7px; padding-left: 12px; }
+  .steps { max-height: min(18rem, 50dvh); overflow-y: auto; }
   .time { margin-left: auto; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
   code { min-width: 0; overflow-wrap: anywhere; font: 12.5px var(--mono); }
   pre { margin: 4px 0 8px 20px; padding: 8px 12px; background: var(--sidebar); border-radius: 6px; overflow-wrap: anywhere; white-space: pre-wrap; font: 12.5px/1.45 var(--mono); }
