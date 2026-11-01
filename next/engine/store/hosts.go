@@ -26,36 +26,46 @@ func (s *Store) AddHost(ctx context.Context, h box.Host) error {
 	})
 }
 
+// diskAlertGap is the least time between alerts for one host. The btrfs metadata rule moves free space straight to zero and back,
+// so a host near that line leaves the warn band on every other sample, which free-space hysteresis alone would alert on each time.
+const diskAlertGap = time.Hour
+
 // RecordHostHeartbeat records reachability and a disk sample when available. diskTotal sets the floor that sample is held to.
+// A report that is not a sample at the floor, including a miss or a failed probe, restarts the wait before eviction.
 func (s *Store) RecordHostHeartbeat(ctx context.Context, name contract.HostName, reachable bool, freeDisk *int64, diskTotal int64, at time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		floor := box.DiskFloor(diskTotal)
+		var low int64
 		if reachable && freeDisk != nil {
 			if err := s.warnDisk(ctx, tx, name, *freeDisk, floor, at); err != nil {
 				return err
+			}
+			if *freeDisk <= floor {
+				low = at.UnixMilli()
 			}
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE hosts SET
 			state=CASE WHEN ? AND state='unreachable' THEN 'ready' WHEN NOT ? AND state='ready' THEN 'unreachable' ELSE state END,
 			disk_bytes=CASE WHEN ? AND ? IS NOT NULL THEN ? ELSE disk_bytes END,
 			disk_floor=CASE WHEN ? AND ? IS NOT NULL THEN ? ELSE disk_floor END,
+			disk_low_since=CASE WHEN ?=0 OR disk_low_since=0 THEN ? ELSE disk_low_since END,
 			checked_at=CASE WHEN ? AND ? IS NOT NULL THEN ? ELSE checked_at END
-			WHERE name=? AND state!='removed'`, reachable, reachable, reachable, freeDisk, freeDisk, reachable, freeDisk, floor, reachable, freeDisk, at.UnixMilli(), name)
+			WHERE name=? AND state!='removed'`, reachable, reachable, reachable, freeDisk, freeDisk, reachable, freeDisk, floor, low, low, reachable, freeDisk, at.UnixMilli(), name)
 		return err
 	})
 }
 
-// warnDisk alerts room roots once per low spell. A spell ends a tenth above the warn level, so a host that hovers there stays quiet.
+// warnDisk alerts room roots once per low spell. A spell ends a tenth above the warn level and diskAlertGap after its alert, so a host that hovers stays quiet.
 func (s *Store) warnDisk(ctx context.Context, tx *sql.Tx, name contract.HostName, free, floor int64, at time.Time) error {
 	warn := box.DiskWarn(floor)
 	if free >= warn+warn/10 {
-		_, err := tx.ExecContext(ctx, "DELETE FROM disk_warnings WHERE host=?", name)
+		_, err := tx.ExecContext(ctx, "DELETE FROM disk_warnings WHERE host=? AND at<=?", name, at.Add(-diskAlertGap).UnixMilli())
 		return err
 	}
 	if free >= warn {
 		return nil
 	}
-	result, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO disk_warnings(host) VALUES(?)", name)
+	result, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO disk_warnings(host,at) VALUES(?,?)", name, at.UnixMilli())
 	if err != nil {
 		return err
 	}
@@ -182,10 +192,10 @@ func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
 	return hosts, rows.Err()
 }
 
-// ResetEngineHosts discards comparisons made by a previous engine process.
+// ResetEngineHosts discards comparisons and low-disk spells from a previous engine process. Its samples may be long stale.
 func (s *Store) ResetEngineHosts(ctx context.Context) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "UPDATE hosts SET engine_host=NULL")
+		_, err := tx.ExecContext(ctx, "UPDATE hosts SET engine_host=NULL,disk_low_since=0")
 		return err
 	})
 }

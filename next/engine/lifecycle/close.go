@@ -11,6 +11,9 @@ import (
 // archiveRetry spaces out tries on a box whose archive failed, as a full disk makes it do.
 const archiveRetry = 10 * time.Minute
 
+// closeNotConnected marks a box that started for archive and never connected, so it shows as stuck rather than running.
+const closeNotConnected = "box did not connect to archive"
+
 func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox) error {
 	leaf, err := r.store.ClosingLeaf(ctx, row.Session)
 	if err != nil || !leaf {
@@ -40,6 +43,9 @@ func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox) erro
 			return err
 		}
 		row.Box, row.DueAt = next, time.Time{}
+	}
+	if row.Reason == closeNotConnected && r.view.Connected(row.Session) {
+		return r.retryArchive(ctx, row) // It was only slow.
 	}
 	if !row.DueAt.IsZero() && row.DueAt.After(r.now()) {
 		return nil
@@ -92,6 +98,12 @@ func (r *Reconciler) closeStep(ctx context.Context, row store.LifecycleBox) erro
 	reason := ""
 	if err != nil {
 		reason = err.Error()
+	} else if !row.DueAt.IsZero() && (row.Reason == "" || row.Reason == closeNotConnected) {
+		reason = closeNotConnected // An earlier start worked and the box still has not connected.
+	}
+	retry := 30 * time.Second
+	if reason != "" && row.Reason != "" {
+		retry = archiveRetry
 	}
 	session, eventErr := r.store.Session(ctx, row.Session)
 	if eventErr != nil {
@@ -101,7 +113,7 @@ func (r *Reconciler) closeStep(ctx context.Context, row store.LifecycleBox) erro
 	if eventErr != nil {
 		return eventErr
 	}
-	if retryErr := r.store.SetArchiveRetry(ctx, row.ID, row.Want, r.now().Add(30*time.Second), reason, event); retryErr != nil {
+	if retryErr := r.store.SetArchiveRetry(ctx, row.ID, row.Want, r.now().Add(retry), reason, event); retryErr != nil {
 		return retryErr
 	}
 	return err
