@@ -9,7 +9,7 @@ import (
 )
 
 func TestMainRecheckValidatesCachedPagesPerHeadAndAccount(t *testing.T) {
-	s := &Service{}
+	s := &Service{mainRecheckCache: &mainRecheckCache{}}
 	r := &Record{Key: "github.com/o/r#1", Host: "github.com", Repo: "o/r", RoomID: "room"}
 	var validators int
 	gh := GitHub{run: func(_ context.Context, cmd *exec.Cmd) error {
