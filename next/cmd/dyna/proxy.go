@@ -107,6 +107,7 @@ func proxyCommand() *cobra.Command {
 		gated := &readyListener{Listener: listener, ready: ready, done: ctx.Done()}
 		service, err = cliproxy.NewBuilder().WithPostAuthHook(cliproxy.StageDynaCredential).WithConfig(cfg).WithConfigPath(path).WithListener(gated).WithServerOptions(sdkapi.WithRouterConfigurator(func(router *gin.Engine, _ *handlers.BaseAPIHandler, _ *config.Config) {
 			proxyKeyRoutes(router, &service, credentials, cfg.RemoteManagement.SecretKey)
+			proxySearchRoutes(router, &service)
 		})).Build()
 		if err != nil {
 			return err
