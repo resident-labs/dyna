@@ -137,27 +137,25 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	for _, host := range hosts {
 		hostState[host.Name] = host.State
 		if host.State == box.HostReady && !host.MaintainedAt.After(r.now().Add(-24*time.Hour)) {
-			{
-				claimed, err := r.store.ClaimHostMaintenance(ctx, host.Name, r.now())
-				if err != nil {
-					return err
-				}
-				if claimed {
-					r.wg.Add(1)
-					go func(name contract.HostName) {
-						defer r.wg.Done()
-						sizes, err := r.boxes.MaintainHost(ctx, name)
-						if err != nil {
-							if ctx.Err() == nil {
-								log.Printf("host %s: maintenance: %v", name, err)
-							}
-							return
+			claimed, err := r.store.ClaimHostMaintenance(ctx, host.Name, r.now())
+			if err != nil {
+				return err
+			}
+			if claimed {
+				r.wg.Add(1)
+				go func(name contract.HostName) {
+					defer r.wg.Done()
+					sizes, err := r.boxes.MaintainHost(ctx, name)
+					if err != nil {
+						if ctx.Err() == nil {
+							log.Printf("host %s: maintenance: %v", name, err)
 						}
-						if err := r.store.FinishHostMaintenance(ctx, name, sizes, r.now()); err != nil && ctx.Err() == nil {
-							log.Printf("host %s: record maintenance: %v", name, err)
-						}
-					}(host.Name)
-				}
+						return
+					}
+					if err := r.store.FinishHostMaintenance(ctx, name, sizes, r.now()); err != nil && ctx.Err() == nil {
+						log.Printf("host %s: record maintenance: %v", name, err)
+					}
+				}(host.Name)
 			}
 		}
 	}
@@ -277,7 +275,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 		}
 	}
 	for _, row := range rows {
-		if row.State == contract.BoxLost && hostState[row.Host] == box.HostReady && row.Want != store.WantClose && row.Want != store.WantDiscard {
+		if row.Box.State == contract.BoxLost && hostState[row.Host] == box.HostReady && row.Want != store.WantClose && row.Want != store.WantDiscard {
 			if row.DueAt.IsZero() || !row.DueAt.After(r.now()) {
 				r.launch(ctx, row)
 			}

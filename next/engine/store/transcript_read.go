@@ -147,8 +147,8 @@ func (s *Store) TranscriptTurnPost(ctx context.Context, session contract.Session
 	return event, err == nil, err
 }
 
-// TranscriptCallPosts returns up to nine posts and the total for each requested call.
-func (s *Store) TranscriptCallPosts(ctx context.Context, session contract.SessionID, turn contract.TurnID, callIDs []string, visit func(string, contract.Event, int)) error {
+// TranscriptCallPosts returns up to limit posts and the total for each requested call.
+func (s *Store) TranscriptCallPosts(ctx context.Context, session contract.SessionID, turn contract.TurnID, callIDs []string, limit int, visit func(string, contract.Event, int)) error {
 	filter := transcriptPostsQuery + ` AND json_extract(CAST(e.body AS TEXT),'$.toolCallId')=?`
 	for _, callID := range callIDs {
 		var total int
@@ -158,7 +158,7 @@ func (s *Store) TranscriptCallPosts(ctx context.Context, session contract.Sessio
 		if total == 0 {
 			continue
 		}
-		rows, err := s.Read().QueryContext(ctx, `SELECT e.seq,e.id,e.at,e.room,e.type,e.from_kind,e.from_id,e.body`+filter+` ORDER BY e.at,e.seq LIMIT 9`, session, turn, callID)
+		rows, err := s.Read().QueryContext(ctx, `SELECT e.seq,e.id,e.at,e.room,e.type,e.from_kind,e.from_id,e.body`+filter+` ORDER BY e.at,e.seq LIMIT ?`, session, turn, callID, limit)
 		if err != nil {
 			return err
 		}
