@@ -63,6 +63,10 @@ type client interface {
 	DeviceList(context.Context, contract.DeviceListRequest) (contract.DeviceListResponse, error)
 	DeviceRevoke(context.Context, contract.DeviceRevokeRequest) (contract.DeviceRevokeResponse, error)
 	DeviceSetScopes(context.Context, contract.DeviceSetScopesRequest) (contract.DeviceSetScopesResponse, error)
+	PrList(context.Context, contract.PrListRequest) (contract.PrListResponse, error)
+	PrStatus(context.Context, contract.PrStatusRequest) (contract.PrStatusResponse, error)
+	PrTrack(context.Context, contract.PrTrackRequest) (contract.PrTrackResponse, error)
+	PrUntrack(context.Context, contract.PrUntrackRequest) (contract.PrUntrackResponse, error)
 	HostList(context.Context, contract.HostListRequest) (contract.HostListResponse, error)
 }
 
@@ -87,7 +91,7 @@ type requestType interface {
 		contract.SessionMoveRequest |
 		contract.SessionListRequest |
 		contract.GoalSetRequest | contract.GoalListRequest | contract.GoalItemRequest | contract.GoalDoneRequest | contract.GoalJournalRequest |
-		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostSetLimitsRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomDeleteRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.ComposeListRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest
+		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostSetLimitsRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomDeleteRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.ComposeListRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest | contract.PrListRequest | contract.PrStatusRequest | contract.PrTrackRequest | contract.PrUntrackRequest
 }
 type responseType interface {
 	contract.SubscriptionAddResponse | contract.SubscriptionListResponse | contract.SubscriptionRemoveResponse | contract.SubscriptionSetEnabledResponse |
@@ -98,7 +102,7 @@ type responseType interface {
 		contract.SessionMoveResponse |
 		contract.SessionListResponse |
 		contract.GoalSetResponse | contract.GoalListResponse | contract.GoalItemResponse | contract.GoalDoneResponse | contract.GoalJournalResponse |
-		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.HostSetLimitsResponse | contract.HostListResponse | contract.RoomCreateResponse | contract.RoomDeleteResponse | contract.RoomRepoAddResponse | contract.RepoCISetResponse | contract.RoomReposResponse | contract.ComposeListResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse
+		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.HostSetLimitsResponse | contract.HostListResponse | contract.RoomCreateResponse | contract.RoomDeleteResponse | contract.RoomRepoAddResponse | contract.RepoCISetResponse | contract.RoomReposResponse | contract.ComposeListResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse | contract.PrListResponse | contract.PrStatusResponse | contract.PrTrackResponse | contract.PrUntrackResponse
 }
 
 func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
@@ -265,6 +269,18 @@ func (c *socketClient) DeviceList(ctx context.Context, q contract.DeviceListRequ
 }
 func (c *socketClient) DeviceRevoke(ctx context.Context, q contract.DeviceRevokeRequest) (contract.DeviceRevokeResponse, error) {
 	return call[contract.DeviceRevokeRequest, contract.DeviceRevokeResponse](ctx, c, contract.MethodDeviceRevoke, q)
+}
+func (c *socketClient) PrList(ctx context.Context, q contract.PrListRequest) (contract.PrListResponse, error) {
+	return call[contract.PrListRequest, contract.PrListResponse](ctx, c, contract.MethodPrList, q)
+}
+func (c *socketClient) PrStatus(ctx context.Context, q contract.PrStatusRequest) (contract.PrStatusResponse, error) {
+	return call[contract.PrStatusRequest, contract.PrStatusResponse](ctx, c, contract.MethodPrStatus, q)
+}
+func (c *socketClient) PrTrack(ctx context.Context, q contract.PrTrackRequest) (contract.PrTrackResponse, error) {
+	return call[contract.PrTrackRequest, contract.PrTrackResponse](ctx, c, contract.MethodPrTrack, q)
+}
+func (c *socketClient) PrUntrack(ctx context.Context, q contract.PrUntrackRequest) (contract.PrUntrackResponse, error) {
+	return call[contract.PrUntrackRequest, contract.PrUntrackResponse](ctx, c, contract.MethodPrUntrack, q)
 }
 func (c *socketClient) DeviceSetScopes(ctx context.Context, q contract.DeviceSetScopesRequest) (contract.DeviceSetScopesResponse, error) {
 	return call[contract.DeviceSetScopesRequest, contract.DeviceSetScopesResponse](ctx, c, contract.MethodDeviceSetScopes, q)
@@ -843,7 +859,69 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	prOpen.Flags().StringVar(&prBase, "base", "main", "Base branch")
 	prOpen.Flags().BoolVar(&prDraft, "draft", false, "Open as a draft")
 	_ = prOpen.MarkFlagRequired("title") // fails only for an undefined flag, and "title" is defined above
-	pr.AddCommand(prOpen)
+	var prRepo, prRoom, prSession string
+	var prAll bool
+	prNumber := func(arg string) (int, error) {
+		number, err := strconv.Atoi(arg)
+		if err != nil || number <= 0 {
+			return 0, fmt.Errorf("%q is not a pull request number", arg)
+		}
+		return number, nil
+	}
+	printPR := func(cmd *cobra.Command, p contract.PrSummary) error {
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s#%d\t%s\tci=%s\treview=%s\tmerge=%s\t%s\n", p.Repo, p.Number, p.State, p.CI, p.Review, p.Merge, p.URL)
+		return err
+	}
+	prList := &cobra.Command{Use: "list", Args: cobra.NoArgs, Short: "List tracked pull requests", RunE: func(cmd *cobra.Command, _ []string) error {
+		r, err := getClient().PrList(cmd.Context(), contract.PrListRequest{Room: contract.RoomID(prRoom), All: prAll})
+		if err != nil {
+			return err
+		}
+		for _, p := range r.PRs {
+			if err := printPR(cmd, p); err != nil {
+				return err
+			}
+		}
+		return nil
+	}}
+	prList.Flags().StringVar(&prRoom, "room", "", "Room id (default: the session's room, or every room for the owner)")
+	prList.Flags().BoolVar(&prAll, "all", false, "Also list merged and closed pull requests")
+	prStatus := &cobra.Command{Use: "status NUMBER", Args: cobra.ExactArgs(1), Short: "Show a tracked pull request as of the last poll", RunE: func(cmd *cobra.Command, args []string) error {
+		number, err := prNumber(args[0])
+		if err != nil {
+			return err
+		}
+		r, err := getClient().PrStatus(cmd.Context(), contract.PrStatusRequest{Repo: contract.RepoName(prRepo), Number: number})
+		if err != nil {
+			return err
+		}
+		return printPR(cmd, r.PR)
+	}}
+	prTrack := &cobra.Command{Use: "track NUMBER", Args: cobra.ExactArgs(1), Short: "Track a pull request and wake its session when it changes", RunE: func(cmd *cobra.Command, args []string) error {
+		number, err := prNumber(args[0])
+		if err != nil {
+			return err
+		}
+		r, err := getClient().PrTrack(cmd.Context(), contract.PrTrackRequest{Repo: contract.RepoName(prRepo), Number: number, Room: contract.RoomID(prRoom), Session: contract.SessionID(prSession)})
+		if err != nil {
+			return err
+		}
+		return printPR(cmd, r.PR)
+	}}
+	prTrack.Flags().StringVar(&prRoom, "room", "", "Owner only: room whose root owns the pull request")
+	prTrack.Flags().StringVar(&prSession, "session", "", "Owner only: session id that owns the pull request")
+	prUntrack := &cobra.Command{Use: "untrack NUMBER", Args: cobra.ExactArgs(1), Short: "Stop tracking a pull request", RunE: func(cmd *cobra.Command, args []string) error {
+		number, err := prNumber(args[0])
+		if err != nil {
+			return err
+		}
+		_, err = getClient().PrUntrack(cmd.Context(), contract.PrUntrackRequest{Repo: contract.RepoName(prRepo), Number: number})
+		return err
+	}}
+	for _, command := range []*cobra.Command{prStatus, prTrack, prUntrack} {
+		command.Flags().StringVar(&prRepo, "repo", "", "Base repository as owner/name (default: the session's repository)")
+	}
+	pr.AddCommand(prOpen, prList, prStatus, prTrack, prUntrack)
 	root.AddCommand(pr)
 }
 

@@ -522,9 +522,17 @@ A room lists zero or more repositories, exactly one default if nonempty. Each re
 
 Merge policy (`queue` or `manual`), CI mode (`github` or `box`), and commit, PR and comment attribution belong to the repository; only owner-class `repo.settings.set` changes them. Store `room_repos`, `repos` and `repo_attribution`, plus `devices`, `device_scopes`, `pairing_codes` and `connect_sessions` (7.8).
 
+**Deferred (owner, 2026-11-01).** M3 ships PR status first. The approval flag (`pr.approve`), merges by Dyna, merge policy, `repo.settings.set` and `repo_attribution` are not built, and decision 13's approval and merge rules wait for them. Until then people merge on GitHub, nothing in a box can merge through Dyna, and a room keeps any disclosure lines it needs on GitHub text in its instructions, as Horizon does.
+
 ### 7.7 GitHub request budget (M3)
 
 Poll each repository with one batched GraphQL query for all tracked open PRs and the default branch head. Send the last ETag on every REST read. Start polling at 60 seconds; double to 10 minutes on no change, and reset on change, routed push or Dyna merge. Below 20% quota, wait at least 10 minutes and reject box `gh` calls with a typed error naming reset time. Target fewer than 300 REST requests and GraphQL queries combined per hour per repository with 20 open PRs. GitHub App webhooks through the relay replace polling later. The CI runner pool long-polls the Actions service, outside this budget; its REST use is one lease write every 5 minutes and one runner list an hour per repository ([CI runners](ci-runners.md)).
+
+**What is tracked.** Every PR a session opens through `pr.open`, plus any PR added with `pr.track`. A session tracks for itself, and either the PR's base or its head repository must be in its room, so a fork's PR on an upstream that no room lists counts. The owner tracks anything for a named session, or for a room's root. Tracking grants no push right. One session owns a PR; `pr.untrack` is for that session, its ancestors and the owner. Close hands PRs to the parent (7.4).
+
+**What is read.** `engine/prs` polls each repository a room lists, and each that a tracked open PR sits on. A repository with no tracked PR asks only for its head. The query carries the PR's state, head, draft flag, author, mergeability, check rollup, review decision and the latest reviews and comments, so no PR costs a REST call. Where no branch rule sets `reviewDecision`, the latest reviews from people with write access decide. `pr.track`'s one REST read is the only read that sends an ETag. A push through the git route resets the repository, and any upstream that a PR from it merges into, with the next poll at most a minute away, so pushes cannot outrun the budget. Below 20% quota, polls stay 10 minutes apart whatever resets them, and `pr.track` from a box fails with `github_quota`, naming the reset time. The box route for `gh` does not exist yet, so that is the only box call that spends quota.
+
+**What wakes.** `pr_owners` keeps the last state read, the last CI result told per head and the newest IDs seen. This is a cache of GitHub for telling each change once, not a review record, and it commits with its events, so a restart neither repeats nor loses a wake. A session hears of a failed or passed CI result, requested changes, approval, a conflict, a merge, a close without merging and new reviews or comments, with outside text wrapped (decision 13). A comment or review body by the token's own account may be a session's, so it cannot wake freely, and that account also speaks for the owner, so it is not ignored. Text from that account that starts with 🤖, after any quote marks, never wakes, which covers Horizon's two disclosure lines. Other text from it wakes at most once per PR in 10 minutes, as recorded in `pr_owners`, so a restart does not reopen the window. Text inside the window waits, along with anything later of the same kind, and arrives on the first poll after it, or when the PR closes. A session that answers each such wake without the marker therefore gets at most six wakes an hour per PR: the rule bounds that case and does not end it. One poll pass gives each session one `pr.changed` event and one engine-surface delivery. A PR that moved without news, such as CI starting, gets a `pr.changed` with no change kinds and no delivery, so the web stays current. Each change also states itself as a typed event, `pr.merged`, `pr.closed` or `ci.finished`, committed with the `pr.changed` it came from and so just as deduplicated. These carry no delivery. They name their owning session, so the default subscription leaves them alone, and a session that wants them subscribes. `repo.main_updated` has no owner: when a poll reads a new head on a listed repository, one event goes to the repository's default room, where the default subscription wakes root, and each other room that lists it gets one quiet delivery to its root (7.6). `repos.main_head` holds the last head, so a restart repeats nothing and a move during one is still told; the first head ever read is no move. An upstream no room lists has no one to tell, so its head only resets the back-off. A PR from `pr.open` starts with nothing known, so its first results are news. A tracked one, and every row from before tracking, starts from a baseline: its first poll records what it shows and wakes nobody. Merged and closed PRs leave the poll and the snapshot, and stop holding their session open for the 7-day sweep (5.5). `pr.track` takes a merged or closed row again.
 
 ### 7.8 Remote access (M3)
 
@@ -567,7 +575,7 @@ Each `contract/tools/` toolkit registers one area tool with a flat `action` enum
 | `room` | log, repos, pause | `events.list`, `room.repos`, `room.pause` | 1 |
 | `op` | withdraw | `op.withdraw` (own pending ones; they are in `dyna_requests`); deciding is the owner's (3.5 classes) | 1 |
 | `hostexec` | run, request_grant | `hostexec.run`, `op.submit` with `hostexec.grant` | 1 |
-| `pr` | open, approve, status | `pr.open`; `pr.approve` and status in M3 | 1, 2 |
+| `pr` | open, list, status, track, untrack | `pr.open`, `pr.list`, `pr.status`, `pr.track`, `pr.untrack`; approval is deferred (7.6) | 1, 2 |
 | `visual` | check | the visual checker in the box | 1 |
 | `computer` | open, click, type, text, screenshot | the box computer (5.14); screenshots return as image results | 1 |
 | `context` | show | `context.snapshot` (one section in full, past its cap) | 1 |
@@ -590,7 +598,7 @@ At dispatch, the engine renders ordered `Sections []ContextSection{Key, Text}` i
 | `dyna_goal` | own goal, its done condition and open items | 200 |
 | `dyna_children` | open children, stalest first: profile, state, current item, PR state, and whether it waits for the owner's answer; at most 8 rows | 250 |
 | `dyna_requests` | operations and questions waiting on this session, and its own that wait on others | 150 |
-| `dyna_prs` | tracked PRs: approval, CI, merge state | 150 |
+| `dyna_prs` | tracked open PRs: CI, GitHub review, merge state | 150 |
 | `dyna_profiles` | ratings and limits; only for a session that may start children | 300 |
 | `dyna_usage` | each account window in 10% steps, with pace: ahead, on or under | 80 |
 
@@ -610,7 +618,7 @@ After the M2 trial parts, phase 1 ships the registry, ten phase-1 toolkits, MCP 
 
 The owner shipped this without the evaluation gate (q68).
 
-Phase 2 in M3 adds `issue`, `workflow`, `subscription`, PR approval and status, and skills with their features. `goal`, `dyna_goal`, `question` and `dyna_usage` have shipped.
+Phase 2 in M3 adds `issue`, `workflow`, `subscription`, PR status, and skills with their features. PR approval is deferred (7.6). `goal`, `dyna_goal`, `question` and `dyna_usage` have shipped.
 
 ### 7.10 Questions
 

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import { decodeEvent } from "./event.ts";
 import { dmOf } from "./window.svelte.ts";
 import assert from "node:assert/strict";
-import { clause, commandLine, dayLabel, describe, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, isThumb, quoted, requestLine, shortPaths, subject, workIsBare, workSummary } from "./feed.ts";
+import { clause, commandLine, dayLabel, describe, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, isThumb, prWords, quoted, requestLine, shortPaths, subject, workIsBare, workSummary } from "./feed.ts";
 import type { BoxState, Event, EventBody, FailureCause, Principal } from "./contract.gen.ts";
 
 test("a forward quotes every line of the post under its label, then the owner's words", () => {
@@ -283,4 +283,42 @@ test("account alerts decode but never enter a room feed", () => {
     assert.ok(decoded);
     assert.deepEqual(dayRows([decoded], { kind: "feed" }), []);
   }
+});
+
+const summary = { repo: "o/r", number: 7, url: "https://github.com/o/r/pull/7", title: "t", author: "a", session: "builder", draft: false, state: "open", head: "h", review: "", ci: "", merge: "" } as const;
+
+test("a PR update with news is a work row that links its PR, and one without stays out of the feed", () => {
+  const news = decodeEvent(event(1, { type: "pr.changed", body: { session: "builder", changes: [{ pr: { ...summary, ci: "failure" }, kinds: ["ci_failed", "conflict"], outside: false }] } }));
+  const quiet = decodeEvent(event(2, { type: "pr.changed", body: { session: "builder", changes: [{ pr: { ...summary, ci: "pending" }, outside: false }] } }));
+  assert.ok(news && quiet);
+  assert.equal(describe(news, id => id), "o/r#7 CI failed, conflicts with its base");
+  assert.equal(workIsBare([news], id => id), false);
+  const rows = feedRows([news, quiet], { kind: "feed" }).filter(row => row.kind === "work");
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].kind === "work" && rows[0].events.map(item => item.seq), [1]);
+  assert.equal(feedRows([quiet], { kind: "feed" }).filter(row => row.kind === "work").length, 0);
+  assert.equal(workSummary([news, news], id => id), "2 pull request updates");
+});
+
+test("a malformed PR update is skipped", () => {
+  assert.equal(decodeEvent(event(1, { type: "pr.changed", body: { session: "builder", changes: [{ pr: { ...summary, ci: "green" }, outside: false }] } } as unknown as Parameters<typeof event>[1])), undefined);
+});
+
+test("a tracked PR's words mark only what needs someone", () => {
+  assert.deepEqual(prWords(summary), []);
+  assert.deepEqual(prWords({ ...summary, ci: "success", review: "approved" }), [{ label: "CI passed" }, { label: "Approved" }]);
+  assert.deepEqual(prWords({ ...summary, ci: "failure", review: "changes_requested", merge: "conflict" }),
+    [{ label: "CI failed", tone: "failed" }, { label: "Changes requested", tone: "warning" }, { label: "Conflict", tone: "failed" }]);
+  assert.deepEqual(prWords({ ...summary, ci: "failure", state: "merged" }), [{ label: "Merged" }]);
+  assert.deepEqual(prWords({ ...summary, state: "closed" }), [{ label: "Closed" }]);
+});
+
+test("the events for subscribers stay out of the feed, as the pr.changed beside them shows the news", () => {
+  const merged = decodeEvent(event(1, { type: "pr.merged", body: { repo: "o/r", number: 7, session: "builder", url: "u" } }));
+  const closed = decodeEvent(event(2, { type: "pr.closed", body: { repo: "o/r", number: 8, session: "builder", url: "u" } }));
+  const ci = decodeEvent(event(3, { type: "ci.finished", body: { repo: "o/r", number: 9, session: "builder", url: "u", head: "h", result: "failure" } }));
+  const main = decodeEvent(event(4, { type: "repo.main_updated", body: { repo: "o/r", head: "h" } }));
+  assert.ok(merged && closed && ci && main);
+  assert.equal(subject(main), undefined);
+  assert.equal(feedRows([merged, closed, ci, main], { kind: "feed" }).filter(row => row.kind === "work").length, 0);
 });
