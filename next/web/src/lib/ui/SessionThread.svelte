@@ -33,6 +33,16 @@
   let turns: TranscriptTurn[] = $state([]);
   let pendingBrief = $derived(pendingStartBrief(startingBrief, turns));
   let expandedTurns: Record<string, boolean> = $state({});
+  let expandedPosts: Record<string, boolean> = $state({});
+  let longPosts: Record<string, boolean> = $state({});
+  function measurePost(node: HTMLElement, id: string) {
+    const measure = () => { if (!expandedPosts[id]) longPosts[id] = node.scrollHeight > node.clientHeight + 1; };
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    measure();
+    return { destroy: () => observer.disconnect() };
+  }
+  const postedWhere = (item: TranscriptItem) => item.home?.kind === "feed" ? (item.room === store.room ? `Posted in #${roomName}` : "Posted in another room") : item.home?.kind === "dm" ? (item.home.session === session ? "Posted in this DM" : `Posted to ${sender("session", item.home.session)}`) : "Posted";
   let before: string | undefined = $state();
   let now = $state(clock());
   $effect(() => {
@@ -169,22 +179,28 @@
   });
   let chunks: Record<string, string> = $state({});
   let chunkFailed: Record<string, boolean> = $state({});
-  const fetching = new Set<string>();
-  async function fetchPart(turn: string, item: string, part: TranscriptPart) {
+  const fetching = new Map<string, Promise<boolean>>();
+  // Reports whether the part loaded. A caller that arrives during a read shares its result.
+  function fetchPart(turn: string, item: string, part: TranscriptPart): Promise<boolean> {
     const key = item + "/" + part;
-    if (fetching.has(key)) return;
-    fetching.add(key);
-    let offset: number | undefined = 0, value = "";
-    try {
-      do {
-        const page: TranscriptReadResponse = await call("transcript.read", { session, turn, item, part, offset });
-        value += page.chunk ?? "";
-        offset = page.nextOffset;
-      } while (offset !== undefined);
-      chunks[key] = value;
-      chunkFailed[key] = false;
-    } catch { chunkFailed[key] = true; }
-    finally { fetching.delete(key); }
+    const running = fetching.get(key);
+    if (running) return running;
+    const read = (async () => {
+      let offset: number | undefined = 0, value = "";
+      try {
+        do {
+          const page: TranscriptReadResponse = await call("transcript.read", { session, turn, item, part, offset });
+          value += page.chunk ?? "";
+          offset = page.nextOffset;
+        } while (offset !== undefined);
+        chunks[key] = value;
+        chunkFailed[key] = false;
+        return true;
+      } catch { chunkFailed[key] = true; return false; }
+      finally { fetching.delete(key); }
+    })();
+    fetching.set(key, read);
+    return read;
   }
   // Dyna: Text can exceed the page budget; load its full content without a disclosure.
   $effect(() => {
@@ -232,7 +248,21 @@
   {@const room = item.room}
   {@const seq = item.seq}
   {@const from = item.from}
-  <div data-media-key={item.id} class:agent-input={item.kind === "post"} class:message={item.kind !== "post"}>{#if item.kind === "post"}<Avatar kind={from?.kind ?? "engine"} name={sender(from?.kind ?? "engine", from?.session)} size={32} />{/if}<div class="agent-body">{#if item.kind === "post"}<div class="agent-sender">{#if from?.session}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(from.session)}`} onclick={navigate} style:--hue={hue(sender(from.kind, from.session))}>{sender(from.kind, from.session)}</a>{:else}<strong>{sender(from?.kind ?? "engine")}</strong>{/if}<time datetime={item.at}>{formatTime(item.at)}</time></div><div class="post-destination">{#if room && seq}<button onclick={() => onpostlocation(room, seq)}>{item.home?.kind === "feed" ? (item.room === store.room ? `Posted in #${roomName}` : "Posted in another room") : item.home?.kind === "dm" ? (item.home.session === session ? "Posted in this DM" : `Posted to ${sender("session", item.home.session)}`) : "Posted"}</button>{:else}Posted{/if}</div>{/if}<Markdown text={chunks[item.id + "/text"] ?? item.text} /><PostAttachments onmedia={position => openMedia(item.id, position)} attachments={item.attachments ?? []} {newest} event={item.event ?? item.id} at={item.at} /></div></div>{#if chunkFailed[item.id + "/text"]}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Text did not load. Try again</button>{/if}
+  {@const ownPost = item.kind === "post" && from?.session === session}
+  {#if ownPost}
+    <div class="own-post" data-media-key={item.id}>
+      <div class="post-heading"><Icon name="external" size={14} />
+        {#if room && seq}<button onclick={() => onpostlocation(room, seq)}>{postedWhere(item)}</button>{:else}Posted{/if}
+        <time datetime={item.at}>{formatTime(item.at)}</time>
+      </div>
+      <div class:clamped={!expandedPosts[item.id]} use:measurePost={item.id}><Markdown rhythm="thread" text={chunks[item.id + "/text"] ?? item.text} /></div>
+      {#if longPosts[item.id] && !expandedPosts[item.id]}<button onclick={() => expandedPosts[item.id] = true}>Show more</button>{/if}
+      <PostAttachments onmedia={position => openMedia(item.id, position)} attachments={item.attachments ?? []} {newest} event={item.event ?? item.id} at={item.at} />
+    </div>
+  {:else}
+    <div data-media-key={item.id} class:agent-input={item.kind === "post"} class:message={item.kind !== "post"}>{#if item.kind === "post"}<Avatar kind={from?.kind ?? "engine"} name={sender(from?.kind ?? "engine", from?.session)} size={32} />{/if}<div class="agent-body">{#if item.kind === "post"}<div class="agent-sender">{#if from?.session}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(from.session)}`} onclick={navigate} style:--hue={hue(sender(from.kind, from.session))}>{sender(from.kind, from.session)}</a>{:else}<strong>{sender(from?.kind ?? "engine")}</strong>{/if}<time datetime={item.at}>{formatTime(item.at)}</time></div><div class="post-destination">{#if room && seq}<button onclick={() => onpostlocation(room, seq)}>{postedWhere(item)}</button>{:else}Posted{/if}</div>{/if}<Markdown rhythm="thread" text={chunks[item.id + "/text"] ?? item.text} /><PostAttachments onmedia={position => openMedia(item.id, position)} attachments={item.attachments ?? []} {newest} event={item.event ?? item.id} at={item.at} /></div></div>
+  {/if}
+  {#if chunkFailed[item.id + "/text"]}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Text did not load. Try again</button>{/if}
 {/snippet}
 
 {#if mediaIndex !== undefined}<MediaViewer room={store.room} {loadVisual} items={media} initial={mediaIndex} name={mediaName} root={mediaRoot} onclose={() => mediaIndex = undefined} onjump={key => scroller.querySelector<HTMLElement>(`[data-media-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "center" })} />{/if}
@@ -241,7 +271,7 @@
 {#if frameWidth >= 880}<TimelineMinimap turns={minimapTurns} current={currentTurn} onselect={(id) => scroller.querySelector<HTMLElement>(`article[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" })} />{/if}
 <div class="thread" bind:this={scroller} onscroll={() => { atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; updatePosition(); if (loaded && before && !loading && scroller.scrollTop < 100) void load(true); }}>
   <div class="body">
-    {#if pendingBrief}<div class="owner-message"><Markdown text={pendingBrief} /></div>{/if}
+    {#if pendingBrief}<div class="owner-message"><Markdown rhythm="thread" text={pendingBrief} /></div>{/if}
     {#each turns as turn (turn.id)}
       {@const hasWork = !!turn.olderItems || (turn.items ?? []).some(item => item.kind === "tool" || item.kind === "thinking")}
       {@const finalText = turn.ended ? (turn.items ?? []).findLast(item => item.kind === "text")?.id : undefined}
@@ -262,7 +292,7 @@
             {#if !turn.ended || expandedTurns[turn.id]}
             <TranscriptWorkRow items={group.items} ended={!!turn.ended} started={turn.started} {now} {chunks}
               onopen={() => { if (turn.olderItems) void readContinuation(turn, "older"); }}
-              onload={async (item, part) => { await fetchPart(turn.id, item.id, part); const value = chunks[item.id + "/" + part]; if (value === undefined) throw new Error("Part did not load"); }} />
+              onload={async (item, part) => { if (!await fetchPart(turn.id, item.id, part)) throw new Error("Part did not load"); }} />
             {/if}
           {:else if group.kind === "posts"}
             {#each group.item.posts ?? [] as post (post.id)}
@@ -277,10 +307,10 @@
       </article>
     {:else}{#if !loading && !failed && !pendingBrief}<p class="muted">The conversation will appear here.</p>{/if}{/each}
     {#each queuedPosts as post (post.id)}
-      <div class="input" data-media-key={post.id}><div class="who"><Avatar kind={post.from.kind} name={sender(post.from.kind, post.from.session)} size={22} /><strong>{sender(post.from.kind, post.from.session)}</strong></div><Markdown text={post.body.text} /><PostAttachments onmedia={position => openMedia(post.id, position)} attachments={post.body.attachments ?? []} {newest} event={post.id} at={post.at} /></div>
+      <div class="input" data-media-key={post.id}><div class="who"><Avatar kind={post.from.kind} name={sender(post.from.kind, post.from.session)} size={22} /><strong>{sender(post.from.kind, post.from.session)}</strong></div><Markdown rhythm="thread" text={post.body.text} /><PostAttachments onmedia={position => openMedia(post.id, position)} attachments={post.body.attachments ?? []} {newest} event={post.id} at={post.at} /></div>
     {/each}
     {#each [...view.pendingPosts.values()] as post (post.id)}
-      <div class="input" class:pending={!post.failed}><strong>You</strong><Markdown text={post.request.text} /><PostAttachments onmedia={() => {}} attachments={post.request.attachments ?? []} {newest} />{#if post.failed}<StatusPill tone="failed" label="Not sent" word /> <button onclick={() => void view.retry(post.id)}>Retry</button> <button onclick={() => view.discard(post.id)}>Discard</button>{/if}</div>
+      <div class="input" class:pending={!post.failed}><strong>You</strong><Markdown rhythm="thread" text={post.request.text} /><PostAttachments onmedia={() => {}} attachments={post.request.attachments ?? []} {newest} />{#if post.failed}<StatusPill tone="failed" label="Not sent" word /> <button onclick={() => void view.retry(post.id)}>Retry</button> <button onclick={() => view.discard(post.id)}>Discard</button>{/if}</div>
     {/each}
     {#if failed}<p class="muted" role="alert">The conversation did not load. <button onclick={() => void load()}>Try again</button></p>{/if}
   </div>
@@ -292,7 +322,12 @@
   .thread-frame { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .thread { flex: 1; min-height: 0; overflow-y: auto; }
   .body { max-width: 784px; margin: auto; padding: 16px 24px; }
-  article { margin: 0 0 24px; }
+  article { padding-bottom: 20px; margin-bottom: 20px; border-bottom: 1px solid var(--line); }
+  .own-post { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px 12px; margin: 24px 0; }
+  .post-heading { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+  .post-heading time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .post-heading button:hover { text-decoration: underline; }
+  .clamped { max-height: calc(12 * 1.45em); overflow: hidden; }
   .failure { display: flex; gap: 10px; color: var(--muted); margin: 12px 0; }
   .failure strong { color: var(--text); }
   .spinner { display: inline-block; width: 12px; height: 12px; border: 1.5px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
@@ -318,9 +353,6 @@
   .post-destination button { all: unset; cursor: pointer; }
   .post-destination button:hover { text-decoration: underline; }
   .post-destination { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
-  .message :global(.markdown h2) { font-size: 20px; margin: 20px 0 8px; }
-  .message :global(.markdown h3) { font-size: 18px; margin: 20px 0 8px; }
-  .message :global(.markdown :is(h2, h3):first-child) { margin-top: 0; }
   .work-header { display: flex; align-items: center; gap: 4px; width: 100%; color: var(--muted); font-size: 14px; margin-top: 40px; padding: 8px 4px 12px; border-bottom: 1px solid var(--line); }
   .work-header span { display: inline-flex; transform: rotate(-90deg); }
   .work-header span.open { transform: none; }
