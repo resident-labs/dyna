@@ -298,11 +298,11 @@ Host exec runs one command outside boxes on a capacity host or the control plane
 
 ### 6.1 Grants
 
-A grant names hosts, reason and expiry, and permits any command until expiry or revocation. There are no command rules or per-run approvals. A missing grant returns `no_grant`. `hostexec.run` is class `auto`; every run is recorded and emits `op.ran`.
+A grant names hosts and reason, and permits any command until the session closes (owner, 2026-10-31, msg_64eccb5e3dff2300). There are no command rules or per-run approvals. A missing grant returns `no_grant`. `hostexec.run` is class `auto`; every run is recorded and emits `op.ran`.
 
-### 6.2 Default grant, owner grants, revoke and expiry
+### 6.2 Default grant, owner grants and session close
 
-Each room's root gets a revocable default grant for all hosts, including the control plane, with no expiry. Only the owner grants host exec. A request names hosts, reason and duration; the default is 24 hours, and `--expires never` must be explicit. Revocation prevents pending runs and stops running units, with retries and forced termination. Expiry prevents new runs but does not stop running commands. The engine emits `grant.expired`; the web lists active grants and revoke controls.
+Each room root gets a default grant for all hosts, including the control plane. Only the owner grants host exec. A request names hosts and reason. Grants have no expiry or revoke control. Closing the session ends its grants, prevents pending runs, and stops running units with retries and forced termination. A new non-root session needs a new grant. Root gets its default grant as before. The web lists active grants (owner, 2026-10-31, msg_64eccb5e3dff2300).
 
 The planned `show_pty` tool (`dyna show-pty`) requests a live terminal for the owner to see. Owner questions remain separate.
 
@@ -330,7 +330,7 @@ The engine derives identity from the connection (3.7), never from the caller. Th
 
 ### 7.2 Root is a position, not a role
 
-Root is the parentless session. Ancestors control descendants; room grants `ask-owner` and `hostexec` give powers the owner may revoke. A default subscription wakes root for engine notices and unowned repository events. Root holds no goals. It has a room-creation prompt template. v1's dual address, root seat, service flag, `NeedsRoot` routing and engine-as-root have no v2 equivalent.
+Root is the parentless session. Ancestors control descendants; room grants `ask-owner` and `hostexec` give extra powers. A default subscription wakes root for engine notices and unowned repository events. Root holds no goals. It has a room-creation prompt template. v1's dual address, root seat, service flag, `NeedsRoot` routing and engine-as-root have no v2 equivalent.
 
 ### 7.3 External members (dropped for now)
 

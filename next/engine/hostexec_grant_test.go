@@ -29,7 +29,7 @@ func TestGrantOperation(t *testing.T) {
 		t.Fatalf("result %+v %v", res, problem)
 	}
 	g, err := s.store.ListActiveGrants(ctx, room, target, s.now())
-	if err != nil || len(g) != 1 || !g[0].Expires.Equal(s.now().Add(24*time.Hour)) {
+	if err != nil || len(g) != 1 || !g[0].Expires.IsZero() {
 		t.Fatalf("grant %+v %v", g, err)
 	}
 }
@@ -41,20 +41,15 @@ func TestGrantCard(t *testing.T) {
 		t.Fatal(err)
 	}
 	card := s.HostexecGrant().Card(ctx, contract.HostexecGrantArgs{Room: room, To: to, Hosts: []contract.HostName{"host"}, Reason: "Inspect logs"}, to)
-	if card.Title != "asks for host access" || card.Target != (contract.Target{Kind: contract.TargetHost, Name: "host"}) || card.Body != "Run any command on host for 24 hours.\nReason: Inspect logs" {
+	if card.Title != "asks for host access" || card.Target != (contract.Target{Kind: contract.TargetHost, Name: "host"}) || card.Body != "Run any command on host until the session closes.\nReason: Inspect logs" {
 		t.Fatalf("card: %+v", card)
 	}
 	// The owner granting another session names it, and two hosts keep the room as the target.
 	card = s.HostexecGrant().Card(ctx, contract.HostexecGrantArgs{Room: room, To: to, Hosts: []contract.HostName{"a", "b"}, Reason: "Inspect logs"}, contract.Principal{Kind: contract.PrincipalOwner})
-	if card.Target.Kind != contract.TargetRoom || !strings.HasPrefix(card.Body, "Let ") || !strings.Contains(card.Body, " run any command on a, b for 24 hours.") {
+	if card.Target.Kind != contract.TargetRoom || !strings.HasPrefix(card.Body, "Let ") || !strings.Contains(card.Body, " run any command on a, b until the session closes.") {
 		t.Fatalf("card: %+v", card)
 	}
-	for expires, want := range map[time.Duration]string{time.Hour: "for up to 1 hour.", 2*time.Hour + time.Second: "for up to 3 hours."} {
-		card = s.HostexecGrant().Card(ctx, contract.HostexecGrantArgs{Room: room, To: contract.Principal{Kind: contract.PrincipalSession, Session: worker}, Hosts: []contract.HostName{"host"}, Reason: "x", Expires: s.now().Add(expires)}, contract.Principal{})
-		if !strings.Contains(card.Body, want) {
-			t.Fatalf("card: %q, want %q", card.Body, want)
-		}
-	}
+
 }
 
 func TestHostGrantAfterEngineMove(t *testing.T) {
