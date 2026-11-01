@@ -228,7 +228,7 @@
     }));
     return versions.filter(entry => entry !== undefined).reverse();
   }
-  const sender = (kind: string, id?: string) => kind === "owner" ? "You" : id ? store.names.get(id) ?? "Session" : "Dyna";
+  const sender = (kind: string, id?: string) => kind === "owner" ? "you" : id ? store.names.get(id) ?? "Session" : "Dyna";
 </script>
 
 {#snippet inputAttachments(input: TranscriptInput)}
@@ -291,7 +291,7 @@
       <div class:input={!own} class:message={own} data-media-key={post.id}>{#if !own}<div class="who"><Avatar kind={post.from.kind} name={sender(post.from.kind, post.from.session)} size={22} /><strong>{sender(post.from.kind, post.from.session)}</strong></div>{/if}<Markdown rhythm="thread" text={post.body.text} /><PostAttachments onmedia={position => openMedia(post.id, position)} attachments={post.body.attachments ?? []} {newest} event={post.id} at={post.at} /></div>
     {/each}
     {#each [...view.pendingPosts.values()] as post (post.id)}
-      <div class="input" class:pending={!post.failed}><strong>You</strong><Markdown rhythm="thread" text={post.request.text} /><PostAttachments onmedia={() => {}} attachments={post.request.attachments ?? []} {newest} />{#if post.failed}<StatusPill tone="failed" label="Not sent" word /> <button onclick={() => void view.retry(post.id)}>Retry</button> <button onclick={() => view.discard(post.id)}>Discard</button>{/if}</div>
+      <div class="input" class:pending={!post.failed}><strong>you</strong><Markdown rhythm="thread" text={post.request.text} /><PostAttachments onmedia={() => {}} attachments={post.request.attachments ?? []} {newest} />{#if post.failed}<StatusPill tone="failed" label="Not sent" word /> <button onclick={() => void view.retry(post.id)}>Retry</button> <button onclick={() => view.discard(post.id)}>Discard</button>{/if}</div>
     {/each}
     {#if failed}<p class="muted" role="alert">The conversation did not load. <button onclick={() => void load()}>Try again</button></p>{/if}
   </div>
