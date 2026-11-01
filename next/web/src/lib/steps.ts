@@ -17,7 +17,7 @@ const verbs: Record<Exclude<StepKind, "tool">, string> = {
 export function stepTitle({ tool, label }: Pick<TranscriptStep, "tool" | "label">): { kind: StepKind; verb: string; target: string; full: string } {
   const kind = kinds[tool] ?? "tool";
   const words = tool.split("__").at(-1)!.replace(/[_-]+/g, " ").trim();
-  const verb = kind === "tool" ? `Called ${words}` : verbs[kind];
+  const verb = kind === "tool" ? words.charAt(0).toUpperCase() + words.slice(1) : verbs[kind];
   const full = label.startsWith(tool) ? label.slice(tool.length).trim() : label;
   return { kind, verb, target: shortPaths(full), full };
 }

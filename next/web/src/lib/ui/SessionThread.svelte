@@ -42,6 +42,7 @@
     measure();
     return { destroy: () => observer.disconnect() };
   }
+  const postedWhere = (item: TranscriptItem) => item.home?.kind === "feed" ? (item.room === store.room ? `Posted in #${roomName}` : "Posted in another room") : item.home?.kind === "dm" ? (item.home.session === session ? "Posted in this DM" : `Posted to ${sender("session", item.home.session)}`) : "Posted";
   let before: string | undefined = $state();
   let now = $state(clock());
   $effect(() => {
@@ -178,22 +179,28 @@
   });
   let chunks: Record<string, string> = $state({});
   let chunkFailed: Record<string, boolean> = $state({});
-  const fetching = new Set<string>();
-  async function fetchPart(turn: string, item: string, part: TranscriptPart) {
+  const fetching = new Map<string, Promise<boolean>>();
+  // Reports whether the part loaded. A caller that arrives during a read shares its result.
+  function fetchPart(turn: string, item: string, part: TranscriptPart): Promise<boolean> {
     const key = item + "/" + part;
-    if (fetching.has(key)) return;
-    fetching.add(key);
-    let offset: number | undefined = 0, value = "";
-    try {
-      do {
-        const page: TranscriptReadResponse = await call("transcript.read", { session, turn, item, part, offset });
-        value += page.chunk ?? "";
-        offset = page.nextOffset;
-      } while (offset !== undefined);
-      chunks[key] = value;
-      chunkFailed[key] = false;
-    } catch { chunkFailed[key] = true; }
-    finally { fetching.delete(key); }
+    const running = fetching.get(key);
+    if (running) return running;
+    const read = (async () => {
+      let offset: number | undefined = 0, value = "";
+      try {
+        do {
+          const page: TranscriptReadResponse = await call("transcript.read", { session, turn, item, part, offset });
+          value += page.chunk ?? "";
+          offset = page.nextOffset;
+        } while (offset !== undefined);
+        chunks[key] = value;
+        chunkFailed[key] = false;
+        return true;
+      } catch { chunkFailed[key] = true; return false; }
+      finally { fetching.delete(key); }
+    })();
+    fetching.set(key, read);
+    return read;
   }
   // Dyna: Text can exceed the page budget; load its full content without a disclosure.
   $effect(() => {
@@ -245,7 +252,7 @@
   {#if ownPost}
     <div class="own-post" data-media-key={item.id}>
       <div class="post-heading"><Icon name="external" size={14} />
-        {#if room && seq}<button onclick={() => onpostlocation(room, seq)}>{item.home?.kind === "feed" ? (room === store.room ? `Posted in #${roomName}` : "Posted in another room") : item.home?.kind === "dm" ? (item.home.session === session ? "Posted in this DM" : `Posted to ${sender("session", item.home.session)}`) : "Posted"}</button>{:else}Posted{/if}
+        {#if room && seq}<button onclick={() => onpostlocation(room, seq)}>{postedWhere(item)}</button>{:else}Posted{/if}
         <time datetime={item.at}>{formatTime(item.at)}</time>
       </div>
       <div class:clamped={!expandedPosts[item.id]} use:measurePost={item.id}><Markdown rhythm="thread" text={chunks[item.id + "/text"] ?? item.text} /></div>
@@ -253,7 +260,7 @@
       <PostAttachments onmedia={position => openMedia(item.id, position)} attachments={item.attachments ?? []} {newest} event={item.event ?? item.id} at={item.at} />
     </div>
   {:else}
-    <div data-media-key={item.id} class:agent-input={item.kind === "post"} class:message={item.kind !== "post"}>{#if item.kind === "post"}<Avatar kind={from?.kind ?? "engine"} name={sender(from?.kind ?? "engine", from?.session)} size={32} />{/if}<div class="agent-body">{#if item.kind === "post"}<div class="agent-sender">{#if from?.session}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(from.session)}`} onclick={navigate} style:--hue={hue(sender(from.kind, from.session))}>{sender(from.kind, from.session)}</a>{:else}<strong>{sender(from?.kind ?? "engine")}</strong>{/if}<time datetime={item.at}>{formatTime(item.at)}</time></div><div class="post-destination">{#if room && seq}<button onclick={() => onpostlocation(room, seq)}>Posted</button>{:else}Posted{/if}</div>{/if}<Markdown rhythm="thread" text={chunks[item.id + "/text"] ?? item.text} /><PostAttachments onmedia={position => openMedia(item.id, position)} attachments={item.attachments ?? []} {newest} event={item.event ?? item.id} at={item.at} /></div></div>
+    <div data-media-key={item.id} class:agent-input={item.kind === "post"} class:message={item.kind !== "post"}>{#if item.kind === "post"}<Avatar kind={from?.kind ?? "engine"} name={sender(from?.kind ?? "engine", from?.session)} size={32} />{/if}<div class="agent-body">{#if item.kind === "post"}<div class="agent-sender">{#if from?.session}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(from.session)}`} onclick={navigate} style:--hue={hue(sender(from.kind, from.session))}>{sender(from.kind, from.session)}</a>{:else}<strong>{sender(from?.kind ?? "engine")}</strong>{/if}<time datetime={item.at}>{formatTime(item.at)}</time></div><div class="post-destination">{#if room && seq}<button onclick={() => onpostlocation(room, seq)}>{postedWhere(item)}</button>{:else}Posted{/if}</div>{/if}<Markdown rhythm="thread" text={chunks[item.id + "/text"] ?? item.text} /><PostAttachments onmedia={position => openMedia(item.id, position)} attachments={item.attachments ?? []} {newest} event={item.event ?? item.id} at={item.at} /></div></div>
   {/if}
   {#if chunkFailed[item.id + "/text"]}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Text did not load. Try again</button>{/if}
 {/snippet}
@@ -285,7 +292,7 @@
             {#if !turn.ended || expandedTurns[turn.id]}
             <TranscriptWorkRow items={group.items} ended={!!turn.ended} started={turn.started} {now} {chunks}
               onopen={() => { if (turn.olderItems) void readContinuation(turn, "older"); }}
-              onload={async (item, part) => { await fetchPart(turn.id, item.id, part); const value = chunks[item.id + "/" + part]; if (value === undefined) throw new Error("Part did not load"); }} />
+              onload={async (item, part) => { if (!await fetchPart(turn.id, item.id, part)) throw new Error("Part did not load"); }} />
             {/if}
           {:else if group.kind === "posts"}
             {#each group.item.posts ?? [] as post (post.id)}

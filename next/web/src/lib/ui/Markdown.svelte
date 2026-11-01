@@ -76,10 +76,10 @@
   .markdown :global(:is(p, ul, ol, table, pre, blockquote, .code-block):last-child) { margin-bottom: 0; }
   .thread :global(:is(p, ul, ol, table, pre, blockquote, .code-block)) { margin-bottom: 10px; }
   .thread :global(li + li) { margin-top: 4px; }
-  .thread :global(:is(h1, h2, h3, h4, h5, h6)) { margin: 20px 0 6px; }
   .thread :global(:is(p, ul, ol, table, pre, blockquote, .code-block):last-child) { margin-bottom: 0; }
   /* The type scale: post text is 15 px, a title 16 and a head 18. A heading is no larger than a section header. */
   .markdown :global(:is(h1, h2, h3, h4, h5, h6)) { margin: 8px 0 4px; font-size: 15px; font-weight: 600; line-height: 1.25; }
+  .thread :global(:is(h1, h2, h3, h4, h5, h6)) { margin: 20px 0 6px; }
   .markdown :global(h1) { font-size: 18px; }
   .markdown :global(h2) { font-size: 16px; }
   .markdown :global(:is(h1, h2, h3, h4, h5, h6):first-child) { margin-top: 0; }
