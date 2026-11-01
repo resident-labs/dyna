@@ -34,17 +34,44 @@ const (
 	RunFailureReport
 )
 
+// String returns a bounded phase label without request data.
+func (p RunPhase) String() string {
+	switch p {
+	case RunWatchSnapshot:
+		return "watch-snapshot"
+	case RunCancellation:
+		return "cancellation"
+	case RunBudgetRecovery:
+		return "budget-recovery"
+	case RunDirectSnapshot:
+		return "direct-snapshot"
+	case RunMainRecheck:
+		return "main-recheck"
+	case RunMergeTrial:
+		return "merge-trial"
+	case RunTrialSchedule:
+		return "trial-schedule"
+	case RunReviewContext:
+		return "review-context"
+	case RunFailureReport:
+		return "failure-report"
+	default:
+		return "other"
+	}
+}
+
 // quotaLog counts completed requests and writes a summary for each window.
 type quotaLog struct {
-	mu            sync.Mutex
-	since         time.Time
-	counted       map[string]int
-	free          map[string]int
-	runPhases     map[RunPhase]int
-	runPhasesFree map[RunPhase]int
-	now           func() time.Time
-	logf          func(format string, args ...any)
-	save          func(time.Time, string, string, bool)
+	mu             sync.Mutex
+	since          time.Time
+	counted        map[string]int
+	free           map[string]int
+	endpointPhases map[string]int
+	runPhases      map[RunPhase]int
+	runPhasesFree  map[RunPhase]int
+	now            func() time.Time
+	logf           func(format string, args ...any)
+	save           func(time.Time, string, string, string, bool)
 }
 
 // engineGHQuota is shared by every engine request. Tests replace it.
@@ -86,7 +113,11 @@ func (q *quotaLog) recordPhaseKind(caller string, phase RunPhase, notModified bo
 		now = q.now()
 	}
 	if q.save != nil {
-		q.save(now, kind, caller, notModified)
+		phaseLabel := ""
+		if kind == "endpoint" {
+			phaseLabel = caller + "/" + phase.String()
+		}
+		q.save(now, kind, caller, phaseLabel, notModified)
 	}
 	if q.since.IsZero() {
 		q.since = now
@@ -108,6 +139,12 @@ func (q *quotaLog) recordPhaseKind(caller string, phase RunPhase, notModified bo
 		q.free[caller]++
 	} else {
 		q.counted[caller]++
+		if kind == "endpoint" {
+			if q.endpointPhases == nil {
+				q.endpointPhases = map[string]int{}
+			}
+			q.endpointPhases[caller+"/"+phase.String()]++
+		}
 	}
 	if now.Sub(q.since) < window {
 		return
@@ -129,6 +166,9 @@ func (q *quotaLog) summary(now time.Time) {
 		logf = log.Printf
 	}
 	logf("GitHub quota: %d counted and %d free (304) requests in %s%s", counted, free, now.Sub(q.since).Round(time.Minute), countedCallers(q.counted))
+	if len(q.endpointPhases) > 0 {
+		logf("GitHub quota endpoint phases%s", countedCallers(q.endpointPhases))
+	}
 	if len(q.runPhases) > 0 || len(q.runPhasesFree) > 0 {
 		logf("GitHub exact-head run lists: snapshot %d counted %d free; cancellation %d counted %d free; budget-recovery %d counted %d free; other %d counted %d free",
 			q.runPhases[RunWatchSnapshot], q.runPhasesFree[RunWatchSnapshot], q.runPhases[RunCancellation], q.runPhasesFree[RunCancellation],
@@ -138,7 +178,7 @@ func (q *quotaLog) summary(now time.Time) {
 			q.runPhases[RunMergeTrial], q.runPhasesFree[RunMergeTrial], q.runPhases[RunTrialSchedule], q.runPhasesFree[RunTrialSchedule],
 			q.runPhases[RunReviewContext], q.runPhasesFree[RunReviewContext], q.runPhases[RunFailureReport], q.runPhasesFree[RunFailureReport])
 	}
-	q.counted, q.free, q.runPhases, q.runPhasesFree, q.since = map[string]int{}, map[string]int{}, nil, nil, now
+	q.counted, q.free, q.endpointPhases, q.runPhases, q.runPhasesFree, q.since = map[string]int{}, map[string]int{}, nil, nil, nil, now
 }
 
 // countedCallers names the callers that spend quota, largest first.
@@ -189,6 +229,14 @@ func ghQuotaCaller(path string) string {
 		return "graphql"
 	}
 	endpoint, query, _ := strings.Cut(path, "?")
+	// GitHub pagination may use a numeric repository ID instead of owner/name.
+	if idPath, ok := strings.CutPrefix(endpoint, "repositories/"); ok {
+		_, tail, found := strings.Cut(idPath, "/")
+		if found {
+			return "repository-id-" + ghQuotaCaller("repos/_/_/"+tail+"?"+query)
+		}
+		return "repository-id-detail"
+	}
 	rest, ok := strings.CutPrefix(endpoint, "repos/")
 	if !ok {
 		switch {
@@ -204,6 +252,12 @@ func ghQuotaCaller(path string) string {
 			return "rate-limit"
 		case endpoint == "notifications" || strings.HasPrefix(endpoint, "notifications/"):
 			return "notifications"
+		case strings.HasPrefix(endpoint, "/"):
+			return "rest-other-leading-slash"
+		case strings.Contains(endpoint, "://"):
+			return "rest-other-absolute-url"
+		case strings.HasPrefix(endpoint, "api/v3/"):
+			return "rest-other-api-v3"
 		default:
 			return "rest-other"
 		}
