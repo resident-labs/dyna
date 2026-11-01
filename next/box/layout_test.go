@@ -11,18 +11,83 @@ import (
 
 func TestLayoutKeepsARoomInOneFolder(t *testing.T) {
 	l := box.Layout{Data: "/data", HostData: "/host"}
+	room, err := l.Room("r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostRoom, err := l.HostRoom("r")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for got, want := range map[string]string{
-		l.Instructions(""):      "/data/AGENTS.md",
-		l.Instructions("r"):     "/data/rooms/r/AGENTS.md",
-		l.File("r", "abc"):      "/data/rooms/r/files/abc",
-		l.Transcripts("r", "s"): "/data/rooms/r/transcripts/s",
-		l.HostInstructions(""):  "/host/instructions/global/AGENTS.md",
-		l.HostInstructions("r"): "/host/rooms/r/instructions/AGENTS.md",
-		l.HostShared("r"):       "/host/rooms/r/shared",
+		l.Instructions("r"):     room + "/AGENTS.md",
+		l.File("r", "abc"):      room + "/files/abc",
+		l.Transcripts("r", "s"): room + "/transcripts/s",
+		l.HostInstructions("r"): hostRoom + "/instructions/AGENTS.md",
+		l.HostShared("r"):       hostRoom + "/shared",
 	} {
 		if got != want {
 			t.Errorf("got %s, want %s", got, want)
 		}
+	}
+	if room != "/data/rooms/r" || hostRoom != "/host/rooms/r" {
+		t.Errorf("rooms at %s and %s", room, hostRoom)
+	}
+}
+
+func TestLayoutNamesWhatNoRoomOwns(t *testing.T) {
+	l := box.Layout{Data: "/data", HostData: "/host"}
+	mirror, err := l.Git("owner/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, err := l.HostGit("owner/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for got, want := range map[string]string{
+		l.Instructions(""):      "/data/AGENTS.md",
+		l.Store():               "/data/store.db",
+		l.StoreLock():           "/data/store.lock",
+		l.V1Store():             "/data/dyna.db",
+		l.Backups():             "/data/backups",
+		l.Archive():             "/data/archive",
+		l.Connect():             "/data/connect",
+		l.Proxy():               "/data/cliproxy",
+		l.ProxyAuth():           "/data/cliproxy/auth-v2",
+		l.Rooms():               "/data/rooms",
+		mirror:                  "/data/git/owner/repo.git",
+		l.HostInstructions(""):  "/host/instructions/global/AGENTS.md",
+		l.HostGitRoot():         "/host/git",
+		cache:                   "/host/git/owner/repo.git",
+		l.HostBin():             "/host/bin",
+		l.HostCache():           "/host/cache",
+		l.HostSocketFolder("b"): "/host/sock/b",
+		l.HostSocket("b"):       "/host/sock/b/engine.sock",
+		l.HostProbeSocket("t"):  "/host/sock/probe-t.sock",
+		l.HostRooms():           "/host/rooms",
+	} {
+		if got != want {
+			t.Errorf("got %s, want %s", got, want)
+		}
+	}
+}
+
+func TestLayoutRefusesARepositoryThatLeavesTheGitFolder(t *testing.T) {
+	l := box.Layout{Data: "/data", HostData: "/host"}
+	for _, repo := range []contract.RepoName{"", "repo", "a/b/c", "../repo", "owner/..", "owner/.", "/repo", "owner/", "owner/re po", "owner/re:po"} {
+		if dir, err := l.Git(repo); err == nil {
+			t.Errorf("repo %q: %s", repo, dir)
+		}
+		if dir, err := l.HostGit(repo); err == nil {
+			t.Errorf("host repo %q: %s", repo, dir)
+		}
+	}
+	if dir, err := (box.Layout{}).Git("owner/repo"); err == nil {
+		t.Errorf("an unset root named %s", dir)
+	}
+	if dir, err := (box.Layout{HostData: "host"}).HostGit("owner/repo"); err == nil {
+		t.Errorf("a relative root named %s", dir)
 	}
 }
 

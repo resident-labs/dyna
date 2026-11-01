@@ -92,7 +92,7 @@ func TestWebSearchFallsBackFromChatGPTWithoutCitations(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	proxy, err := model.NewProxy(dir, "management")
+	proxy, err := model.NewProxy(dir, dir, "management")
 	if err != nil {
 		t.Fatal(err)
 	}

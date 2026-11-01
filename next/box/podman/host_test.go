@@ -89,7 +89,7 @@ func TestCapacityReservesFloorWithoutCountingBoxesTwice(t *testing.T) {
 func TestCapacityCreatesHostDataBeforeDiskProbe(t *testing.T) {
 	r := &runner{body: "8 16000 5000 90000"}
 	h := newTestHost(t, r)
-	_, _, _, err := h.capacity(context.Background(), CheckOptions{HostData: "/host/data", MemoryFloor: 4000, DiskFloor: 20000})
+	_, _, _, err := h.capacity(context.Background(), CheckOptions{Layout: box.Layout{HostData: "/host/data"}, MemoryFloor: 4000, DiskFloor: 20000})
 	if err != nil {
 		t.Fatal(err)
 	}

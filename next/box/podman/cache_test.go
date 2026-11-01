@@ -13,7 +13,7 @@ func TestPushCacheUsesMaster(t *testing.T) {
 	r := &runner{}
 	h := newTestHost(t, r)
 	for i := 0; i < 2; i++ {
-		if err := h.PushCache(context.Background(), "/mirror", "/data", "owner/repo", []string{"refs/heads/main"}); err != nil {
+		if err := h.PushCache(context.Background(), "/mirror", "/data/git/owner/repo.git", []string{"refs/heads/main"}); err != nil {
 			t.Fatal(err)
 		}
 		init := r.calls[i*3+1]
@@ -25,8 +25,8 @@ func TestPushCacheUsesMaster(t *testing.T) {
 			t.Fatalf("push: %v", r.calls[i*3+2])
 		}
 	}
-	if err := h.PushCache(context.Background(), "/mirror", "/data", "../repo", nil); err == nil {
-		t.Fatal("accepted invalid repository")
+	if err := h.PushCache(context.Background(), "/mirror", "/data:/repo.git", nil); err == nil {
+		t.Fatal("accepted a path that git would read as a host")
 	}
 }
 

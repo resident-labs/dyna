@@ -245,7 +245,7 @@ func TestRouteAllowsACustomProviderModel(t *testing.T) {
 }
 
 func TestProxyConfigHasNoProviderCatalog(t *testing.T) {
-	proxy, err := NewProxy(t.TempDir(), "invented-management-key")
+	proxy, err := NewProxy(t.TempDir(), t.TempDir(), "invented-management-key")
 	if err != nil {
 		t.Fatal(err)
 	}
