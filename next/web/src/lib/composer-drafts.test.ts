@@ -32,6 +32,17 @@ test("a typed draft writes its latest text once, after typing pauses, and surviv
   assert.equal(new ComposerDrafts(storage).load("room/"), "second");
 });
 
+test("a restored draft is the text send reads until the owner types again", () => {
+  const storage = new MemoryStorage();
+  const { timers, fire } = manualTimers();
+  const before = new ComposerDrafts(storage, timers);
+  before.save("room/", "kept");
+  fire();
+  const reloaded = new ComposerDrafts(storage, timers);
+  assert.equal(reloaded.draft("room/", undefined), "kept");
+  assert.equal(reloaded.draft("room/", ""), "");
+});
+
 test("sending a draft clears it and drops its pending write", () => {
   const storage = new MemoryStorage();
   const { timers, fire } = manualTimers();

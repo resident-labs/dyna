@@ -220,7 +220,7 @@
   // Drafts and failed sends belong to one conversation, keyed by room and session. A failed send shows in its
   // feed with Retry, also after the owner leaves and comes back; raw keeps each request's identity for onsettled.
   let drafts: Record<string, string> = $state({});
-  // A draft that is not in memory yet comes from localStorage, so a reload keeps the text.
+  // A draft that is not in memory yet comes from localStorage, so a reload keeps the text. Composer and send both read it this way.
   const savedDrafts = new ComposerDrafts(localStorage);
   let unsent: Record<string, PostRequest[]> = $state.raw({});
   const keyOf = (request: PostRequest) => `${request.room}/${request.home?.session ?? ""}`;
@@ -263,7 +263,7 @@
   });
   function send() {
     if (!store || !room) return;
-    const text = drafts[key] ?? "", quote = quotes[key], draft = files(key);
+    const text = savedDrafts.draft(key, drafts[key]), quote = quotes[key], draft = files(key);
     if (draft.busy || (!text.trim() && !quote && !draft.items.length)) return;
     const attachments = [...quote?.attachments ?? [], ...draft.take()];
     drafts[key] = "";
@@ -655,7 +655,7 @@
       {#if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
         {#if attention.can("operate")}<button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button>{/if}</p>
       {:else if store && !session}<WorkingLine {store} {home} />{/if}
-      {#if attention.can("operate")}<Composer bind:element={composer} bind:value={() => drafts[key] ?? savedDrafts.load(key), text => { drafts[key] = text; savedDrafts.save(key, text); clearReplacement(); }} onsend={send} thread={!!session} placeholder={"Message " + title}
+      {#if attention.can("operate")}<Composer bind:element={composer} bind:value={() => savedDrafts.draft(key, drafts[key]),text => { drafts[key] = text; savedDrafts.save(key, text); clearReplacement(); }} onsend={send} thread={!!session} placeholder={"Message " + title}
         quote={quotes[key]} replacement={replaced[key]} onundo={() => { quotes[key] = undoForward({ quote: quotes[key], previous: replaced[key] }).quote; clearReplacement(); }} onunquote={() => { quotes[key] = undefined; clearReplacement(); }} sessions={mentions} files={files(key)} {stop} />
       {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
     {/if}
