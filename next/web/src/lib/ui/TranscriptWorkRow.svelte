@@ -60,9 +60,8 @@
           {@const diff = chunks[key(item, "diff")] ?? item.diff}
           {@const lines = diff.split("\n")}
           {#if !item.failed}
-            <div class="diff-summary"><code>{title.target}</code><span class="add">+{lines.filter(line => line.startsWith("+") && !line.startsWith("+++")).length}</span><span class="remove">−{lines.filter(line => line.startsWith("-") && !line.startsWith("---")).length}</span><button onclick={() => { openDiff[item.id] = !openDiff[item.id]; }}>{openDiff[item.id] ? "Close diff" : "Open diff"}</button></div>
+            <div class="diff-summary"><span class="diff-path">{title.target}</span><span class="add">+{lines.filter(line => line.startsWith("+") && !line.startsWith("+++")).length}</span><span class="remove">−{lines.filter(line => line.startsWith("-") && !line.startsWith("---")).length}</span><button onclick={() => { openDiff[item.id] = !openDiff[item.id]; }}>{openDiff[item.id] ? "Close diff" : "Open diff"}</button></div>
           {/if}
-          {#if title.kind === "edit" && title.target}<div class="change-detail">modify {title.target}</div>{/if}
           {#if item.failed || openDiff[item.id]}<pre class="diff">{#each lines as line}<span class:add={line.startsWith("+")} class:remove={line.startsWith("-")}>{line}&#10;</span>{/each}</pre>{/if}
         {/if}
         {#if !item.diff || item.failed}
@@ -105,9 +104,9 @@
   .content { margin-left: 28px; padding: 4px 0; max-height: 384px; overflow: auto; }
   code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); }
   pre { max-height: 256px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.625 var(--mono); }
-  .diff-summary { display: flex; gap: 8px; align-items: center; }
+  .diff-summary { display: flex; gap: 6px; align-items: center; font: inherit; }
+  .diff-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .diff-summary button { border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
-  .change-detail { margin-top: 8px; font: 12px var(--mono); }
   .add, .diff .add { color: var(--success); }
   .remove, .diff .remove { color: var(--danger); }
   .time { margin-left: auto; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
