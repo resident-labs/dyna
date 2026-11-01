@@ -103,7 +103,7 @@ func (s *Store) SessionList(ctx context.Context, room contract.RoomID) (contract
 	if err := s.Read().QueryRowContext(ctx, "SELECT COALESCE(MAX(seq),0) FROM events WHERE room=?", room).Scan(&seq); err != nil {
 		return contract.SessionListResponse{}, err
 	}
-	rows, err := s.Read().QueryContext(ctx, `SELECT s.id,s.name,COALESCE(s.parent,''),s.profile,COALESCE(b.id,''),COALESCE(b.state,''),COALESCE(b.reason,''),s.goal,
+	rows, err := s.Read().QueryContext(ctx, `SELECT s.id,s.name,COALESCE(s.parent,''),s.profile,COALESCE(b.id,''),COALESCE(b.state,''),COALESCE(b.reason,''),CASE WHEN b.state='deleted' THEN '' ELSE COALESCE(b.host,'') END,s.goal,
 		COALESCE((SELECT id FROM turns WHERE session=s.id AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1),''),
 		COALESCE((SELECT outcome FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND outcome!='stopped' ORDER BY ended_at DESC LIMIT 1),''),
 		s.shell_jobs, COALESCE(c.seq,0), s.created_at,
@@ -119,7 +119,7 @@ func (s *Store) SessionList(ctx context.Context, room contract.RoomID) (contract
 		var session contract.SessionSummary
 		var started int64
 		var lastTurn sql.NullInt64
-		if err := rows.Scan(&session.ID, &session.Name, &session.Parent, &session.Profile, &session.Box, &session.BoxState, &session.BoxReason, &session.Goal, &session.Turn, &session.LastOutcome, &session.ShellJobs, &session.LastRead, &started, &lastTurn, &session.HadJobs); err != nil {
+		if err := rows.Scan(&session.ID, &session.Name, &session.Parent, &session.Profile, &session.Box, &session.BoxState, &session.BoxReason, &session.Host, &session.Goal, &session.Turn, &session.LastOutcome, &session.ShellJobs, &session.LastRead, &started, &lastTurn, &session.HadJobs); err != nil {
 			return contract.SessionListResponse{}, err
 		}
 		session.StartedAt = time.UnixMilli(started).UTC()

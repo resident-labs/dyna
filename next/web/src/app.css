@@ -64,6 +64,13 @@ aside.members { display: flex; flex-direction: column; border-right: 0; border-l
 .card p { margin: 0 0 6px; }
 .card .tiles { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 12px; }
 @container (max-width: 320px) { .card .tiles { gap: 8px; } }
+/* A popover under its button, a sheet on a phone: Jobs, and a machine's sessions. */
+.pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 5; width: min(460px, calc(100vw - 24px)); max-height: min(560px, 70vh); display: flex; flex-direction: column;
+  background: var(--raised); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px var(--shadow-lg); overflow: hidden; }
+.pop:focus { outline: none; }
+.pop.sheet { position: fixed; top: 13dvh; right: 0; bottom: 0; left: 0; width: auto; max-height: none; border-width: 1px 0 0; border-radius: 16px 16px 0 0;
+  padding-bottom: env(safe-area-inset-bottom); box-shadow: 0 -8px 32px var(--shadow-lg); }
+.pop .grab { flex: none; width: 36px; height: 4px; margin: 8px auto 4px; border-radius: 2px; background: var(--firm); }
 .member { padding: 5px 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .member:hover { background: var(--hover); }
 /* A pane's top bar: the room header, the side panels' headers and the docked terminals' tabs. A class, so a

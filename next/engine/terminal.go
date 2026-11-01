@@ -32,11 +32,42 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 	if err != nil {
 		return contract.HostListResponse{}, failure(err)
 	}
-	result := contract.HostListResponse{Hosts: []contract.HostSummary{{Name: contract.ControlPlane, Shared: []contract.RoomShared{}, BackupCopyAt: status.LastSuccess, BackupCopyFailure: copyFailure}}}
+	sessions, problem := s.readableHostSessions(ctx, who)
+	if problem != nil {
+		return contract.HostListResponse{}, problem
+	}
+	result := contract.HostListResponse{Hosts: []contract.HostSummary{{Name: contract.ControlPlane, Sessions: sessions[contract.ControlPlane], Shared: []contract.RoomShared{}, BackupCopyAt: status.LastSuccess, BackupCopyFailure: copyFailure}}}
 	for _, host := range hosts {
-		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, Shared: append([]contract.RoomShared{}, shared[host.Name]...), CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.CheckedAt.IsZero() && host.DiskBytes < box.DiskWarn(host.DiskFloor), EngineHost: host.EngineHost != nil && *host.EngineHost, Leftovers: leftovers[host.Name]})
+		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, Sessions: sessions[host.Name], Shared: append([]contract.RoomShared{}, shared[host.Name]...), CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.CheckedAt.IsZero() && host.DiskBytes < box.DiskWarn(host.DiskFloor), EngineHost: host.EngineHost != nil && *host.EngineHost, Leftovers: leftovers[host.Name]})
 	}
 	return result, nil
+}
+
+// readableHostSessions keeps each host's sessions in the rooms the caller can read, by the rule session.list applies.
+func (s *Service) readableHostSessions(ctx context.Context, who contract.Principal) (map[contract.HostName][]contract.HostSession, *contract.Error) {
+	all, err := s.store.HostSessions(ctx)
+	if err != nil {
+		return nil, failure(err)
+	}
+	readable := make(map[contract.RoomID]bool)
+	out := make(map[contract.HostName][]contract.HostSession)
+	for host, sessions := range all {
+		for _, session := range sessions {
+			can, checked := readable[session.Room]
+			if !checked {
+				problem := s.roomAccess(ctx, who, session.Room)
+				if problem != nil && problem.Code != contract.ErrForbidden {
+					return nil, problem
+				}
+				can = problem == nil
+				readable[session.Room] = can
+			}
+			if can {
+				out[host] = append(out[host], session)
+			}
+		}
+	}
+	return out, nil
 }
 
 // Terminal prepares a target and wakes its box.
