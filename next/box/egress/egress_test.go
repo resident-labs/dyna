@@ -129,8 +129,8 @@ func TestServeReportsAFailedDial(t *testing.T) {
 	}
 }
 
-// serve runs the proxy on a socket and returns a way to connect to it.
-func serve(t *testing.T, dial Dial) func() net.Conn {
+// start runs the proxy on a socket and returns a way to connect to it.
+func start(t *testing.T, dial Dial, bound limits) func() net.Conn {
 	t.Helper()
 	listener, err := net.Listen("unix", t.TempDir()+"/s")
 	if err != nil {
@@ -138,7 +138,7 @@ func serve(t *testing.T, dial Dial) func() net.Conn {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, listener, dial) }()
+	go func() { done <- serve(ctx, listener, dial, bound) }()
 	t.Cleanup(func() {
 		cancel()
 		if err := <-done; err != nil {
@@ -156,16 +156,14 @@ func serve(t *testing.T, dial Dial) func() net.Conn {
 }
 
 func TestOneJobCannotHoldEveryTunnelOrGrowTheProxy(t *testing.T) {
-	maxTunnels = 2
-	t.Cleanup(func() { maxTunnels = 4096 })
 	hold := make(chan struct{})
 	t.Cleanup(func() { close(hold) })
 	dialing := make(chan struct{}, 2)
-	connect := serve(t, func(context.Context, string, string) (net.Conn, error) {
+	connect := start(t, func(context.Context, string, string) (net.Conn, error) {
 		dialing <- struct{}{}
 		<-hold
 		return nil, io.ErrClosedPipe
-	})
+	}, limits{tunnels: 2, closeWait: time.Minute})
 	for range 2 {
 		if _, err := io.WriteString(connect(), "CONNECT github.com:443 HTTP/1.1\r\nHost: github.com:443\r\n\r\n"); err != nil {
 			t.Fatal(err)
@@ -180,10 +178,10 @@ func TestOneJobCannotHoldEveryTunnelOrGrowTheProxy(t *testing.T) {
 }
 
 func TestServeDropsAnOversizedRequest(t *testing.T) {
-	connect := serve(t, func(context.Context, string, string) (net.Conn, error) {
+	connect := start(t, func(context.Context, string, string) (net.Conn, error) {
 		t.Error("an oversized request reached the dialer")
 		return nil, io.ErrClosedPipe
-	})
+	}, limits{tunnels: 2, closeWait: time.Minute})
 	conn := connect()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 	go func() {
@@ -201,8 +199,6 @@ func TestServeDropsAnOversizedRequest(t *testing.T) {
 }
 
 func TestAFarEndThatNeverClosesCannotKeepATunnel(t *testing.T) {
-	closeWait = 10 * time.Millisecond
-	t.Cleanup(func() { closeWait = time.Minute })
 	far, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -216,10 +212,10 @@ func TestAFarEndThatNeverClosesCannotKeepATunnel(t *testing.T) {
 		}
 	}()
 	released := make(chan struct{})
-	connect := serve(t, func(ctx context.Context, network, _ string) (net.Conn, error) {
+	connect := start(t, func(ctx context.Context, network, _ string) (net.Conn, error) {
 		conn, err := (&net.Dialer{}).DialContext(ctx, network, far.Addr().String())
 		return watched{conn, released}, err
-	})
+	}, limits{tunnels: 2, closeWait: 10 * time.Millisecond})
 	conn := connect().(*net.UnixConn)
 	if _, err := io.WriteString(conn, "CONNECT github.com:443 HTTP/1.1\r\nHost: github.com:443\r\n\r\n"); err != nil {
 		t.Fatal(err)
