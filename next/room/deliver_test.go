@@ -72,7 +72,7 @@ func TestFinalReplies(t *testing.T) {
 	feed := contract.Conversation{Kind: contract.ConversationFeed}
 	dm := contract.Conversation{Kind: contract.ConversationDM, Session: "child"}
 	inputs := []contract.Delivery{{Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: owner, Home: feed}}, {Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: owner, Home: feed}}, {Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: owner, Home: dm}}, {Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: parent}}, {Reply: contract.ReplyChannel{Kind: contract.ReplyPost, Target: parent}}}
-	got := FinalReplies(inputs, map[Destination]contract.EventID{{Target: owner, Home: feed}: "post"})
+	got := FinalReplies(inputs, map[Destination]contract.EventID{{Target: owner, Home: feed}: "post"}, nil)
 	if len(got) != 3 || got[0].Posted != "post" || got[1].Reply.Home != dm || got[1].Posted != "" || got[2].Posted != "" {
 		t.Fatalf("got %+v", got)
 	}

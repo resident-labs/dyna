@@ -44,6 +44,55 @@ type contentBlock struct {
 
 type contentBlocks []contentBlock
 
+// resultDetails holds what the box's Pi extension records on a tool result.
+type resultDetails struct {
+	EndPost contract.EventID
+}
+
+// UnmarshalJSON reads only endPost. Details belong to each tool and message type and can be any JSON value,
+// and one that fails to decode here must not cost the whole event.
+func (d *resultDetails) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		EndPost contract.EventID `json:"endPost"`
+	}
+	if json.Unmarshal(data, &fields) == nil {
+		d.EndPost = fields.EndPost
+	}
+	return nil
+}
+
+// endBatch finds whether the latest tool batch ended the turn. Pi stops only when every call in
+// the batch ends it, so each call must have reported its post.
+type endBatch struct {
+	calls int
+	posts []contract.EventID
+}
+
+func (b *endBatch) assistant(content contentBlocks) {
+	*b = endBatch{}
+	for _, block := range content {
+		if block.Type == "toolCall" {
+			b.calls++
+		}
+	}
+}
+
+func (b *endBatch) toolResult(details resultDetails, failed bool) {
+	if details.EndPost != "" && !failed {
+		b.posts = append(b.posts, details.EndPost)
+	}
+}
+
+// apply makes the posts the turn's reply and reports whether the batch ended the turn. Text beside
+// the last tool call was working text, so the turn has no final response.
+func (b *endBatch) apply(result *contract.TurnEnded) bool {
+	if b.calls == 0 || len(b.posts) != b.calls {
+		return false
+	}
+	result.Final, result.EndPosts = "", b.posts
+	return true
+}
+
 func (c *contentBlocks) UnmarshalJSON(data []byte) error {
 	// User messages may carry a plain string; only assistant blocks supply final text.
 	if len(data) > 0 && data[0] == '"' {
@@ -70,6 +119,8 @@ type event struct {
 		ResponseModel string        `json:"responseModel"`
 		StopReason    string        `json:"stopReason"`
 		ErrorMessage  string        `json:"errorMessage"`
+		IsError       bool          `json:"isError"`
+		Details       resultDetails `json:"details"`
 		Content       contentBlocks `json:"content"`
 		Usage         struct {
 			Input      int64 `json:"input"`
@@ -228,6 +279,7 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, typ string, input
 		return result, err
 	}
 	started()
+	var batch endBatch
 	for {
 		select {
 		case e := <-h.events:
@@ -238,7 +290,16 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, typ string, input
 				}
 			case "message_end":
 				m := e.Message
-				if m.Role != "assistant" {
+				switch m.Role {
+				case "user":
+					batch = endBatch{}
+					continue
+				case "toolResult":
+					batch.toolResult(m.Details, m.IsError)
+					continue
+				case "assistant":
+					batch.assistant(m.Content)
+				default:
 					continue
 				}
 				var text []string
@@ -269,6 +330,8 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, typ string, input
 			case "agent_settled":
 				if e.Aborted {
 					result.Outcome, result.Error, result.Cause = contract.TurnOutcome("stopped"), "", ""
+				} else if result.Outcome == contract.TurnCompleted {
+					batch.apply(&result)
 				}
 				return result, nil
 			}
