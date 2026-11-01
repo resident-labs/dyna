@@ -80,6 +80,11 @@
   $effect(() => { for (const request of store.requests.values()) retainedRequests.add(request.id); });
   let rows = $derived(feedRows(view.ordered, home, pending, since, retainedRequests));
   // The post right under the New line; its bar stays inside the row, clear of the New label.
+  // The last post of a run takes half the gap to the next run, so a hover or tint sits evenly on the words.
+  let lastPosts = $derived(new Set(rows.flatMap((row, index) => {
+    const next = rows[index + 1];
+    return row.kind === "post" && (next?.kind !== "post" || next.first) ? [row.key] : [];
+  })));
   let belowNew = $derived(rows.find((_, index) => rows[index - 1]?.kind === "new")?.key);
   let media = $derived(conversationMedia(rows.filter(row => row.kind === "post").map(row => ({ ...row, event: visualEvents.get(row.key) }))));
   let mediaIndex: number | undefined = $state();
@@ -209,7 +214,7 @@
   <VirtualList bind:this={list} {items} key={item => item.key} label="Feed" {estimate} follow={view.atPresent} bind:element
     onstart={() => void view.loadOlder(() => list?.scrollSettled() ?? Promise.resolve())} onend={() => void view.loadNewer()} onbottom={shown => { if (shown) markRead(); }}>
     {#snippet row(item: Item)}
-      {#if item.kind === "post"}<div class:ring={item.key === `p${ring}`}><PostRow room={store.room} {navigate} onmedia={position => openMedia(item.key, position)} row={item} belowNew={item.key === belowNew} {newest} visualEvent={visualEvents.get(item.key)} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
+      {#if item.kind === "post"}<div class:ring={item.key === `p${ring}`}><PostRow last={lastPosts.has(item.key)} room={store.room} {navigate} onmedia={position => openMedia(item.key, position)} row={item} belowNew={item.key === belowNew} {newest} visualEvent={visualEvents.get(item.key)} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
         onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} swipeDisabled={waiting?.at === item.at && waiting.author === author(item.from)} onforward={operate ? () => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments }) : undefined} /></div>
       {:else if item.kind === "notice"}<p class="divider"><span>{describe(item.event, name)}{#if item.resumedAt}{" "}for {Math.round((Date.parse(item.resumedAt) - Date.parse(item.event.at)) / 60_000) < 1 ? "under a minute" : `${Math.round((Date.parse(item.resumedAt) - Date.parse(item.event.at)) / 60_000)} min`}{/if} · <time datetime={item.event.at}>{formatTime(item.event.at)}</time></span></p>
       {:else if item.kind === "restarted"}<div class="restart-warning"><span class="restart-mark"><StatusPill tone="warning" label="Box replaced" dot triangle /></span><p>{name(item.session)}'s box was replaced. Unpushed work in the old volume is gone. <time datetime={item.at}>{formatTime(item.at)}</time></p></div>
