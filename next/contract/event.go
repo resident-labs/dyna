@@ -183,6 +183,8 @@ type TurnEnded struct {
 	ShellJobs int `json:"shellJobs,omitempty"`
 	// EndPosts carries the harness's result to TurnOutputRequest.EndPosts. The event records the same fact in Replies.
 	EndPosts []EventID `json:"-"`
+	// Unread carries the runner's result to TurnOutputRequest.Unread.
+	Unread []DeliverySeq `json:"-"`
 }
 
 type ConversationRead struct {

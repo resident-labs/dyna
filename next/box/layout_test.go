@@ -3,11 +3,40 @@ package box_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
+
+func TestBoxAttachmentsAreSafeAndUnique(t *testing.T) {
+	long := strings.Repeat("a", 300) + ".png"
+	names := []string{"image.png", "image.png", "image-2.png", "../../etc/passwd", "...", "", "two words (final).pdf", "a\n\"[Dyna] x", "日本語.txt", ".env", long, "\xff.txt", strings.Repeat("b", 300)}
+	files := make([]contract.Attachment, len(names))
+	for i, name := range names {
+		files[i].Name = name
+	}
+	paths := box.Layout{}.BoxAttachments(5827, files)
+	want := []string{"image.png", "image-2.png", "image-2-2.png", "_.._etc_passwd", "file", "file-2", "two_words__final_.pdf", "a___Dyna__x", "日本語.txt", "env", strings.Repeat("a", 196) + ".png", "_.txt", strings.Repeat("b", 200)}
+	seen := map[string]bool{}
+	for i, path := range paths {
+		if path != box.AttachmentFolder+"/5827/"+want[i] {
+			t.Errorf("%q became %q", names[i], path)
+		}
+		if seen[path] {
+			t.Errorf("%q repeats %q", names[i], path)
+		}
+		seen[path] = true
+		if strings.ContainsAny(path, " \n\"") {
+			t.Errorf("%q needs quoting", path)
+		}
+	}
+	if again := (box.Layout{}).BoxAttachments(5827, files); !slices.Equal(again, paths) {
+		t.Fatalf("a replay moved the files: %v", again)
+	}
+}
 
 func TestLayoutKeepsARoomInOneFolder(t *testing.T) {
 	l := box.Layout{Data: "/data", HostData: "/host"}
