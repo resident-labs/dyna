@@ -182,7 +182,7 @@
 </script>
 
 {#snippet postItem(turn: TranscriptTurn, item: TranscriptItem)}
-  <div class="message"><Markdown text={chunks[item.id + "/text"] ?? item.text} /></div>{#if chunkFailed[item.id + "/text"]}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Text did not load. Try again</button>{/if}
+  <div class="message">{#if item.kind === "post"}<div class="post-destination">{item.home?.kind === "feed" ? (item.room === store.room ? `Posted in #${roomName}` : "Posted in another room") : item.home?.kind === "dm" ? (item.home.session === session ? "Posted in this DM" : `Posted to ${sender("session", item.home.session)}`) : "Posted"}</div>{/if}<Markdown text={chunks[item.id + "/text"] ?? item.text} /></div>{#if chunkFailed[item.id + "/text"]}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Text did not load. Try again</button>{/if}
 {/snippet}
 
 <div class="thread-frame" bind:clientWidth={frameWidth}>
@@ -249,7 +249,8 @@
   .who time { flex: none; margin-left: auto; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .input :global(.markdown) { margin: 4px 0 0; }
   .pending { opacity: 0.5; }
-  .message { margin: 12px 0; }
+  .message { margin: 20px 0 12px; }
+  .post-destination { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
   .message :global(.markdown h2) { font-size: 20px; margin: 20px 0 8px; }
   .message :global(.markdown h3) { font-size: 18px; margin: 20px 0 8px; }
   .message :global(.markdown :is(h2, h3):first-child) { margin-top: 0; }

@@ -66,7 +66,7 @@
 {/if}
 
 <style>
-  .minimap { position: absolute; inset: 0 auto 0 0; width: 72px; z-index: 10; pointer-events: none; }
+  .minimap { position: absolute; inset: 0 auto 0 max(0px, calc((100% - 784px) / 2 - 24px)); width: 72px; z-index: 10; pointer-events: none; }
   .transient { opacity: 0; transition: opacity 150ms; }
   .transient:hover, .transient:focus-within { opacity: 1; }
   .stack { position: absolute; top: 50%; left: 12px; transform: translateY(-50%); width: 32px; pointer-events: auto; }
