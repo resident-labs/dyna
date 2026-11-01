@@ -27,6 +27,11 @@ import (
 
 type client interface {
 	ContextSnapshot(context.Context, contract.ContextSnapshotRequest) (contract.ContextSnapshotResponse, error)
+	GoalSet(context.Context, contract.GoalSetRequest) (contract.GoalSetResponse, error)
+	GoalList(context.Context, contract.GoalListRequest) (contract.GoalListResponse, error)
+	GoalItem(context.Context, contract.GoalItemRequest) (contract.GoalItemResponse, error)
+	GoalDone(context.Context, contract.GoalDoneRequest) (contract.GoalDoneResponse, error)
+	GoalJournal(context.Context, contract.GoalJournalRequest) (contract.GoalJournalResponse, error)
 	OpWithdraw(context.Context, contract.OpWithdrawRequest) (contract.OpWithdrawResponse, error)
 	SessionMove(context.Context, contract.SessionMoveRequest) (contract.SessionMoveResponse, error)
 	SessionList(context.Context, contract.SessionListRequest) (contract.SessionListResponse, error)
@@ -84,6 +89,7 @@ type requestType interface {
 		contract.OpWithdrawRequest |
 		contract.SessionMoveRequest |
 		contract.SessionListRequest |
+		contract.GoalSetRequest | contract.GoalListRequest | contract.GoalItemRequest | contract.GoalDoneRequest | contract.GoalJournalRequest |
 		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostSetLimitsRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomDeleteRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.ComposeListRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest | contract.PrListRequest | contract.PrStatusRequest | contract.PrTrackRequest | contract.PrUntrackRequest
 }
 type responseType interface {
@@ -93,6 +99,7 @@ type responseType interface {
 		contract.OpWithdrawResponse |
 		contract.SessionMoveResponse |
 		contract.SessionListResponse |
+		contract.GoalSetResponse | contract.GoalListResponse | contract.GoalItemResponse | contract.GoalDoneResponse | contract.GoalJournalResponse |
 		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.HostSetLimitsResponse | contract.HostListResponse | contract.RoomCreateResponse | contract.RoomDeleteResponse | contract.RoomRepoAddResponse | contract.RepoCISetResponse | contract.RoomReposResponse | contract.ComposeListResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse | contract.PrListResponse | contract.PrStatusResponse | contract.PrTrackResponse | contract.PrUntrackResponse
 }
 
@@ -134,6 +141,22 @@ func (c *socketClient) ConnectCancel(ctx context.Context, q contract.ConnectCanc
 }
 func (c *socketClient) ConnectUnlink(ctx context.Context, q contract.ConnectUnlinkRequest) (contract.ConnectUnlinkResponse, error) {
 	return call[contract.ConnectUnlinkRequest, contract.ConnectUnlinkResponse](ctx, c, contract.MethodConnectUnlink, q)
+}
+
+func (c *socketClient) GoalSet(ctx context.Context, q contract.GoalSetRequest) (contract.GoalSetResponse, error) {
+	return call[contract.GoalSetRequest, contract.GoalSetResponse](ctx, c, contract.MethodGoalSet, q)
+}
+func (c *socketClient) GoalList(ctx context.Context, q contract.GoalListRequest) (contract.GoalListResponse, error) {
+	return call[contract.GoalListRequest, contract.GoalListResponse](ctx, c, contract.MethodGoalList, q)
+}
+func (c *socketClient) GoalItem(ctx context.Context, q contract.GoalItemRequest) (contract.GoalItemResponse, error) {
+	return call[contract.GoalItemRequest, contract.GoalItemResponse](ctx, c, contract.MethodGoalItem, q)
+}
+func (c *socketClient) GoalDone(ctx context.Context, q contract.GoalDoneRequest) (contract.GoalDoneResponse, error) {
+	return call[contract.GoalDoneRequest, contract.GoalDoneResponse](ctx, c, contract.MethodGoalDone, q)
+}
+func (c *socketClient) GoalJournal(ctx context.Context, q contract.GoalJournalRequest) (contract.GoalJournalResponse, error) {
+	return call[contract.GoalJournalRequest, contract.GoalJournalResponse](ctx, c, contract.MethodGoalJournal, q)
 }
 
 func (c *socketClient) SessionList(ctx context.Context, q contract.SessionListRequest) (contract.SessionListResponse, error) {
@@ -571,10 +594,10 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		}
 		return err
 	}})
-	var roomID, name, profile, goal, brief, sessionRepo, parent, size, composeName string
+	var roomID, name, profile, goal, doneWhen, brief, sessionRepo, parent, size, composeName string
 	var sameHost bool
 	start := &cobra.Command{Use: "start", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		r, err := getClient().SessionStart(cmd.Context(), contract.SessionStartRequest{Room: contract.RoomID(roomID), Name: name, Parent: contract.SessionID(parent), Repo: contract.RepoName(sessionRepo), Profile: contract.ProfileName(profile), Goal: goal, Brief: brief, Size: contract.BoxSizeName(size), SameHost: sameHost, Compose: composeName})
+		r, err := getClient().SessionStart(cmd.Context(), contract.SessionStartRequest{Room: contract.RoomID(roomID), Name: name, Parent: contract.SessionID(parent), Repo: contract.RepoName(sessionRepo), Profile: contract.ProfileName(profile), Goal: goal, DoneWhen: doneWhen, Brief: brief, Size: contract.BoxSizeName(size), SameHost: sameHost, Compose: composeName})
 		if err == nil {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), r.Session)
 		}
@@ -586,6 +609,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	start.Flags().StringVar(&sessionRepo, "repo", "", "Session repository")
 	start.Flags().StringVar(&parent, "parent", "", "Parent session ID")
 	start.Flags().StringVar(&goal, "goal", "", "Goal")
+	start.Flags().StringVar(&doneWhen, "done-when", "", "When the goal is done")
 	start.Flags().StringVar(&brief, "brief", "", "Brief")
 	start.Flags().StringVar(&size, "size", "", "Box size for a lead: agent, small, medium or large")
 	start.Flags().BoolVar(&sameHost, "same-host", false, "Place the box on its parent’s host")
@@ -662,6 +686,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	postCmd.Flags().StringVar(&postRoom, "room", "", "Room ID")
 	postCmd.Flags().StringSliceVar(&mentions, "mention", nil, "Session mentions")
 	root.AddCommand(postCmd, visualCommand())
+	root.AddCommand(goalCommand(getClient))
 	contextCmd := &cobra.Command{Use: "context"}
 	contextCmd.AddCommand(&cobra.Command{Use: "show SECTION", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		result, err := getClient().ContextSnapshot(cmd.Context(), contract.ContextSnapshotRequest{Section: contract.ContextSectionKey(args[0])})
@@ -896,4 +921,71 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	}
 	pr.AddCommand(prOpen, prList, prStatus, prTrack, prUntrack)
 	root.AddCommand(pr)
+}
+
+// goalCommand holds the goal commands. Inside a box --room may stay empty: the engine uses the caller's room.
+func goalCommand(getClient func() client) *cobra.Command {
+	goal := &cobra.Command{Use: "goal", Short: "Work on goals and their checklists"}
+	var roomID string
+	goal.PersistentFlags().StringVar(&roomID, "room", "", "Room ID")
+	printJSON := func(cmd *cobra.Command, value any) error {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(value)
+	}
+	var id, holder, text, doneWhen, clientID string
+	set := &cobra.Command{Use: "set", Short: "Create a goal, change one, or hand it to another session", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		r, err := getClient().GoalSet(cmd.Context(), contract.GoalSetRequest{ClientID: clientID, Room: contract.RoomID(roomID), Goal: contract.GoalID(id), Session: contract.SessionID(holder), Text: text, DoneWhen: doneWhen})
+		if err == nil {
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), r.Goal)
+		}
+		return err
+	}}
+	set.Flags().StringVar(&id, "goal", "", "Goal to change")
+	set.Flags().StringVar(&holder, "session", "", "Session that holds it")
+	set.Flags().StringVar(&text, "text", "", "What the goal is")
+	set.Flags().StringVar(&doneWhen, "done-when", "", "When it is done")
+	set.Flags().StringVar(&clientID, "client-id", "", "Retry key")
+	var all bool
+	var listHolder string
+	list := &cobra.Command{Use: "list", Short: "List a room's goals with their items", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		r, err := getClient().GoalList(cmd.Context(), contract.GoalListRequest{Room: contract.RoomID(roomID), Session: contract.SessionID(listHolder), All: all})
+		if err != nil {
+			return err
+		}
+		return printJSON(cmd, r.Goals)
+	}}
+	list.Flags().StringVar(&listHolder, "session", "", "Only this session's goals")
+	list.Flags().BoolVar(&all, "all", false, "Include ended goals")
+	var item int
+	var itemText, itemState string
+	itemCmd := &cobra.Command{Use: "item GOAL", Short: "Add a checklist item, or change one with --item", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		r, err := getClient().GoalItem(cmd.Context(), contract.GoalItemRequest{Room: contract.RoomID(roomID), Goal: contract.GoalID(args[0]), Item: item, Text: itemText, State: contract.GoalItemState(itemState)})
+		if err == nil {
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), r.Item)
+		}
+		return err
+	}}
+	itemCmd.Flags().IntVar(&item, "item", 0, "Item number to change")
+	itemCmd.Flags().StringVar(&itemText, "text", "", "Item text")
+	itemCmd.Flags().StringVar(&itemState, "state", "", "open, done or dropped")
+	var drop bool
+	done := &cobra.Command{Use: "done GOAL SUMMARY", Short: "End a goal", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := getClient().GoalDone(cmd.Context(), contract.GoalDoneRequest{Room: contract.RoomID(roomID), Goal: contract.GoalID(args[0]), Summary: args[1], Drop: drop})
+		return err
+	}}
+	done.Flags().BoolVar(&drop, "drop", false, "Give the goal up instead")
+	journal := &cobra.Command{Use: "journal GOAL [TEXT]", Short: "Add to a goal's journal and read its newest lines", Args: cobra.RangeArgs(1, 2), RunE: func(cmd *cobra.Command, args []string) error {
+		req := contract.GoalJournalRequest{Room: contract.RoomID(roomID), Goal: contract.GoalID(args[0])}
+		if len(args) == 2 {
+			req.Text = args[1]
+		}
+		r, err := getClient().GoalJournal(cmd.Context(), req)
+		if err != nil {
+			return err
+		}
+		return printJSON(cmd, r.Entries)
+	}}
+	goal.AddCommand(set, list, itemCmd, done, journal)
+	return goal
 }

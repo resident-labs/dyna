@@ -104,6 +104,11 @@ func (a *API) handler(c Caller) http.Handler {
 		return a.web.login(ctx, p, req)
 	})
 	call(mux, contract.MethodContextSnapshot, c, a.service.ContextSnapshot)
+	call(mux, contract.MethodGoalSet, c, a.service.GoalSet)
+	call(mux, contract.MethodGoalList, c, a.service.GoalList)
+	call(mux, contract.MethodGoalItem, c, a.service.GoalItem)
+	call(mux, contract.MethodGoalDone, c, a.service.GoalDone)
+	call(mux, contract.MethodGoalJournal, c, a.service.GoalJournal)
 	call(mux, contract.MethodInstructionsGet, c, a.service.InstructionsGet)
 	call(mux, contract.MethodInstructionsSet, c, a.service.InstructionsSet)
 	call(mux, contract.MethodDevicePair, c, func(ctx context.Context, p contract.Principal, req contract.DevicePairRequest) (contract.DevicePairResponse, *contract.Error) {

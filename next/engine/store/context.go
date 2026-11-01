@@ -9,6 +9,7 @@ import (
 )
 
 type ContextData struct {
+	Goals    []ContextGoal
 	Children []ContextChild
 	Requests []ContextRequest
 	PRs      []ContextPR
@@ -21,6 +22,9 @@ func (s *Store) ContextDataForSession(ctx context.Context, id contract.SessionID
 	var data ContextData
 	var err error
 	if _, err = s.Session(ctx, id); err != nil {
+		return data, err
+	}
+	if data.Goals, err = s.ContextGoals(ctx, id); err != nil {
 		return data, err
 	}
 	if data.Children, err = s.ContextChildren(ctx, id); err != nil {
@@ -39,11 +43,19 @@ func (s *Store) ContextDataForSession(ctx context.Context, id contract.SessionID
 	return data, err
 }
 
+// ContextGoal is a goal the session holds, with its open items.
+type ContextGoal struct {
+	ID       contract.GoalID
+	Text     string
+	DoneWhen string
+	Items    []string
+}
 type ContextChild struct {
 	Name    string
 	Profile contract.ProfileName
 	State   contract.BoxState
-	Asking  bool // it waits for the owner's answer, so it is not finished
+	Asking  bool   // it waits for the owner's answer, so it is not finished
+	Item    string // what it works on now: its oldest goal's first open item, or that goal
 }
 
 // ContextRequest is one of the session's operations, or a question with its text.
@@ -70,8 +82,33 @@ type ContextPR struct {
 	Merge  contract.PrMerge
 }
 
+func (s *Store) ContextGoals(ctx context.Context, id contract.SessionID) ([]ContextGoal, error) {
+	rows, err := s.Read().QueryContext(ctx, `SELECT g.number,g.text,g.done_when,i.text FROM goals g LEFT JOIN goal_items i ON i.room=g.room AND i.goal=g.number AND i.state='open' WHERE g.session=? AND g.state='active' ORDER BY g.number,i.number`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ContextGoal
+	for rows.Next() {
+		var number int64
+		var text, doneWhen string
+		var item sql.NullString
+		if err := rows.Scan(&number, &text, &doneWhen, &item); err != nil {
+			return nil, err
+		}
+		if n := len(out); n == 0 || out[n-1].ID != goalID(number) {
+			out = append(out, ContextGoal{ID: goalID(number), Text: text, DoneWhen: doneWhen})
+		}
+		if item.Valid {
+			last := &out[len(out)-1]
+			last.Items = append(last.Items, item.String)
+		}
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ContextChildren(ctx context.Context, id contract.SessionID) ([]ContextChild, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT s.name,s.profile,b.state,NOT `+noOpenQuestion+` FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.parent=? AND s.closed_at IS NULL ORDER BY COALESCE((SELECT t.started_at FROM turns t WHERE t.session=s.id ORDER BY t.started_at DESC LIMIT 1),s.created_at),s.id`, id)
+	rows, err := s.Read().QueryContext(ctx, `SELECT s.name,s.profile,b.state,COALESCE((SELECT COALESCE((SELECT i.text FROM goal_items i WHERE i.room=g.room AND i.goal=g.number AND i.state='open' ORDER BY i.number LIMIT 1),g.text) FROM goals g WHERE g.session=s.id AND g.state='active' ORDER BY g.number LIMIT 1),''),NOT `+noOpenQuestion+` FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.parent=? AND s.closed_at IS NULL ORDER BY COALESCE((SELECT t.started_at FROM turns t WHERE t.session=s.id ORDER BY t.started_at DESC LIMIT 1),s.created_at),s.id`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +116,7 @@ func (s *Store) ContextChildren(ctx context.Context, id contract.SessionID) ([]C
 	var out []ContextChild
 	for rows.Next() {
 		var c ContextChild
-		if err := rows.Scan(&c.Name, &c.Profile, &c.State, &c.Asking); err != nil {
+		if err := rows.Scan(&c.Name, &c.Profile, &c.State, &c.Item, &c.Asking); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

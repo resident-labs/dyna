@@ -82,12 +82,15 @@ const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.sessio
 // The session an event is about; events without one belong to the room feed only.
 export function subject(event: Event): string | undefined {
   switch (event.type) {
-    case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": return undefined;
+    case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return undefined;
     case "op.requested": return event.body.by.session;
     case "op.decided": case "op.ran": return event.from.session;
     default: return event.body.session;
   }
 }
+
+// Events with no row. Goals show in About and the session list; failures show on the box and turn events they report.
+const unshown = new Set<Event["type"]>(["session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due"]);
 
 // Builds the rows of one conversation. Posts and final answers become post rows, a
 // failed turn and a request are each their own row, and all other events between them fold into one work row.
@@ -251,7 +254,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     }
     // A PR that moved without news, such as CI starting, only updates its state on the rows that show it.
     if (event.type === "pr.changed" && !wakingChanges(event.body).length) continue;
-    if (event.type !== "session.profile_changed" && event.type !== "transcript.changed") work.push(event);
+    if (!unshown.has(event.type)) work.push(event);
   }
   for (const sent of pending) post(`n${sent.id}`, 0, { kind: "owner" }, sent.at, sent.text, sent.attachments, sent.to, sent);
   flush();
@@ -280,6 +283,7 @@ export const eventGroups: Record<Event["type"], string> = {
   "image.built": "images built", "image.failed": "image builds failed", "pr.opened": "pull requests opened", "pr.changed": "pull request updates",
   "shell.job.ended": "jobs finished", "grant.expired": "host grants expired",
   "host.disk_low": "disk warnings", "conversation.read": "read positions",
+  "session.failed": "failure notices", "goal.set": "goals set", "goal.item_changed": "goal items changed", "goal.ended": "goals ended", "checkin.due": "check-ins",
 };
 
 // A full moment for a title, such as "Oct 31, 2026, 4:48 AM".
@@ -498,7 +502,7 @@ export function describe(event: Event, name: Name): string {
       const mem = !memBytes ? "no memory limit" : gb < 1 ? `${Math.max(1, Math.round(memBytes / 2 ** 20))} MB` : `${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB`;
       return `You set the room limit to ${cpu} and ${mem}`;
     }
-    case "session.profile_changed": return ""; // feedRows shows no row for it.
+    case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return ""; // feedRows shows no row for them.
     case "box.pressure": return event.body.kind === "max" ? "A session reached its memory limit" : "A session is short of memory";
     case "post.created": return event.body.text;
   }

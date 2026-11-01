@@ -258,6 +258,9 @@ func sessionState(t *testing.T, s *Service, ctx context.Context, id contract.Ses
 
 func TestAWaitingQuestionKeepsADormantSessionOpen(t *testing.T) {
 	s, room, worker, ctx := setup(t)
+	if _, problem := s.GoalDone(ctx, questionOwner, contract.GoalDoneRequest{Room: room, Goal: "g1", Summary: "finished"}); problem != nil {
+		t.Fatal(problem) // An open goal would keep it open on its own.
+	}
 	grantAsk(t, s, ctx, room, worker)
 	q := ask(t, s, ctx, worker, "before you go?")
 	stopForGood(t, s, ctx, worker)
