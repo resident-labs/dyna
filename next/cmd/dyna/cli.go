@@ -41,6 +41,7 @@ type client interface {
 	RoomCreate(context.Context, contract.RoomCreateRequest) (contract.RoomCreateResponse, error)
 	RoomDelete(context.Context, contract.RoomDeleteRequest) (contract.RoomDeleteResponse, error)
 	RoomRepoAdd(context.Context, contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, error)
+	RepoCISet(context.Context, contract.RepoCISetRequest) (contract.RepoCISetResponse, error)
 	RoomRepos(context.Context, contract.RoomReposRequest) (contract.RoomReposResponse, error)
 	SessionStart(context.Context, contract.SessionStartRequest) (contract.SessionStartResponse, error)
 	SessionClose(context.Context, contract.SessionCloseRequest) (contract.SessionCloseResponse, error)
@@ -77,7 +78,7 @@ type requestType interface {
 		contract.OpWithdrawRequest |
 		contract.SessionMoveRequest |
 		contract.SessionListRequest |
-		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostSetLimitsRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomDeleteRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest
+		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostSetLimitsRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomDeleteRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest
 }
 type responseType interface {
 	contract.WebSearchResponse | contract.WebsearchSetKeyResponse | contract.WebsearchRemoveKeyResponse |
@@ -85,7 +86,7 @@ type responseType interface {
 		contract.OpWithdrawResponse |
 		contract.SessionMoveResponse |
 		contract.SessionListResponse |
-		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.HostSetLimitsResponse | contract.HostListResponse | contract.RoomCreateResponse | contract.RoomDeleteResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse
+		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.HostSetLimitsResponse | contract.HostListResponse | contract.RoomCreateResponse | contract.RoomDeleteResponse | contract.RoomRepoAddResponse | contract.RepoCISetResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse
 }
 
 func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
@@ -188,6 +189,9 @@ func (c *socketClient) HostSetLimits(ctx context.Context, q contract.HostSetLimi
 }
 func (c *socketClient) RoomDelete(ctx context.Context, q contract.RoomDeleteRequest) (contract.RoomDeleteResponse, error) {
 	return call[contract.RoomDeleteRequest, contract.RoomDeleteResponse](ctx, c, contract.MethodRoomDelete, q)
+}
+func (c *socketClient) RepoCISet(ctx context.Context, q contract.RepoCISetRequest) (contract.RepoCISetResponse, error) {
+	return call[contract.RepoCISetRequest, contract.RepoCISetResponse](ctx, c, contract.MethodRepoCISet, q)
 }
 func (c *socketClient) RoomRepoAdd(ctx context.Context, q contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, error) {
 	return call[contract.RoomRepoAddRequest, contract.RoomRepoAddResponse](ctx, c, contract.MethodRoomRepoAdd, q)
@@ -511,7 +515,26 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		}
 		return nil
 	}}
-	repo.AddCommand(addRepo, listRepos)
+	var ciMode, ciSize string
+	var ciHosts []string
+	repoCI := &cobra.Command{Use: "ci REPO", Short: "Set where CI runs for a repository", Long: "--mode box serves jobs from each --host NAME=COUNT, at most COUNT runners at once. --mode github removes them at once. See next/docs/ci-runners.md.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		request := contract.RepoCISetRequest{Repo: contract.RepoName(args[0]), Mode: contract.CIMode(ciMode)}
+		for _, host := range ciHosts {
+			name, count, ok := strings.Cut(host, "=")
+			runners, err := strconv.Atoi(count)
+			if !ok || err != nil {
+				return fmt.Errorf("--host needs NAME=COUNT, got %q", host)
+			}
+			request.Hosts = append(request.Hosts, contract.RepoCIHost{Repo: request.Repo, Host: contract.HostName(name), Runners: runners, Size: contract.BoxSizeName(ciSize)})
+		}
+		_, err := getClient().RepoCISet(cmd.Context(), request)
+		return err
+	}}
+	repoCI.Flags().StringVar(&ciMode, "mode", "", "github or box")
+	repoCI.Flags().StringSliceVar(&ciHosts, "host", nil, "Runner host as NAME=COUNT (repeatable)")
+	repoCI.Flags().StringVar(&ciSize, "size", string(contract.BoxSizeLarge), "Runner size: its CPUs, memory and disk cap")
+	_ = repoCI.MarkFlagRequired("mode") // fails only for an undefined flag
+	repo.AddCommand(addRepo, listRepos, repoCI)
 	room.AddCommand(create, deleteRoom, log, repo)
 	root.AddCommand(room)
 
