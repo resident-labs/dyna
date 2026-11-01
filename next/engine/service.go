@@ -32,24 +32,23 @@ type Repositories interface {
 }
 
 type Service struct {
-	gitName, gitEmail  string
-	maxDepth           int
-	store              *store.Store
-	dispatch           func(context.Context, contract.SessionID, contract.TurnID, contract.Event, bool) (contract.TurnID, []store.FeedInput, error)
-	boxes              lifecycle.BoxAdapter
-	reconciler         *lifecycle.Reconciler
-	profiles           Profiles
-	repos              Repositories
-	approvals          *approve.Service
-	hostexec           HostexecRunner
-	hostexecTimeout    func(context.Context, time.Duration) (context.Context, context.CancelFunc)
-	now                func() time.Time
-	mu                 sync.Mutex
-	live               *live.Live
-	sessions           map[contract.SessionID]*sessionState
-	computerGeneration uint64
-	shellGeneration    uint64
-	readMu             sync.Mutex // preserves commit and live broadcast order
+	gitName, gitEmail string
+	maxDepth          int
+	store             *store.Store
+	dispatch          func(context.Context, contract.SessionID, contract.TurnID, contract.Event, bool) (contract.TurnID, []store.FeedInput, error)
+	boxes             lifecycle.BoxAdapter
+	reconciler        *lifecycle.Reconciler
+	profiles          Profiles
+	repos             Repositories
+	approvals         *approve.Service
+	hostexec          HostexecRunner
+	hostexecTimeout   func(context.Context, time.Duration) (context.Context, context.CancelFunc)
+	now               func() time.Time
+	mu                sync.Mutex
+	live              *live.Live
+	sessions          map[contract.SessionID]*sessionState
+	shellGeneration   uint64
+	readMu            sync.Mutex // preserves commit and live broadcast order
 	// transcriptMu serializes appends, so each offset check and write runs alone.
 	transcriptMu        sync.Mutex
 	transcriptDir       string
@@ -58,10 +57,9 @@ type Service struct {
 	publishInstructions func(context.Context)
 }
 
-// sessionState retains computer, shell and terminal state until their move to live.
+// sessionState retains shell and terminal state until their move to live.
 // Take the live session lock before s.mu, never the reverse.
 type sessionState struct {
-	computer  *computerState
 	terminals int
 	watch     *shellWatch
 }
@@ -134,14 +132,14 @@ func (s *Service) SessionClosed(id contract.SessionID) {
 		return
 	}
 	defer handle.Unlock()
-	s.mu.Lock()
 	channel := handle.Channel()
 	handle.SetChannel(nil)
-	room, stopped, computerWatchers := s.clearComputerLocked(id)
+	room, stopped := handle.ClearComputer()
+	s.mu.Lock()
 	shellWatchers := s.clearShellLocked(id)
 	delete(s.sessions, id)
 	s.mu.Unlock()
-	channel.Close(computerWatchers, shellWatchers)
+	channel.Close(shellWatchers)
 	if stopped {
 		_ = s.computerEvent(context.Background(), id, room, contract.ComputerStopped)
 	}
