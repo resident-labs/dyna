@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/room"
@@ -34,12 +35,15 @@ func (s *Store) ClosingLeaf(ctx context.Context, id contract.SessionID) (bool, e
 }
 
 // MarkClosing blocks child starts across the subtree in one write.
-func (s *Store) MarkClosing(ctx context.Context, target contract.SessionID, discard bool) error {
+func (s *Store) MarkClosing(ctx context.Context, target contract.SessionID, discard bool, at time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `WITH RECURSIVE sub(id) AS (
 			SELECT ? UNION SELECT s.id FROM sessions s JOIN sub ON s.parent=sub.id WHERE s.closed_at IS NULL
 		) UPDATE sessions SET state='closing' WHERE id IN (SELECT id FROM sub) AND closed_at IS NULL`, target)
 		if err != nil {
+			return err
+		}
+		if err := s.withdrawQuestions(ctx, tx, at); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE hostexec_runs SET stopped='closed' WHERE ended_at IS NULL AND grant_id IN (SELECT g.id FROM grants g JOIN sessions s ON s.id=g.to_id WHERE g.to_kind='session' AND s.state='closing')`); err != nil {

@@ -154,7 +154,7 @@ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MarkClosing(ctx, "p", false); err != nil {
+	if err := s.MarkClosing(ctx, "p", false, time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Unix(1000, 0)
@@ -162,7 +162,7 @@ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at
 	if err := s.CompleteArchives(ctx, "c", []Archive{a}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MarkClosing(ctx, "p", false); err != nil {
+	if err := s.MarkClosing(ctx, "p", false, time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
 	var pw, cw, ps, cs, sha string

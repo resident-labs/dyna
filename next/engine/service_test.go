@@ -997,7 +997,7 @@ func TestResumeClosesPendingBoxWithoutArchiveAck(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A restart after the close intent is saved resumes the pending box close.
-	if err := st.MarkClosing(ctx, worker.Session, false); err != nil {
+	if err := st.MarkClosing(ctx, worker.Session, false, time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
 	restarted := New(st, fakeBoxes{}, fakeProfiles{}, now)

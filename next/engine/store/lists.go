@@ -11,6 +11,7 @@ import (
 type RoomListItem struct {
 	Room      contract.RoomID
 	Operation contract.OpID
+	Question  contract.QuestionID
 	Session   contract.SessionID
 	Name      string
 	Turn      contract.TurnID
@@ -69,6 +70,7 @@ func (s *Store) RoomList(ctx context.Context) (contract.RoomListResponse, []Room
 	for kind, query := range []string{
 		"SELECT room,id,'','' FROM operations WHERE state='pending' AND class='owner' ORDER BY created_at",
 		"SELECT s.room,s.id,s.name,t.id FROM sessions s JOIN turns t ON t.id=(SELECT id FROM turns WHERE session=s.id AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1) WHERE s.closed_at IS NULL ORDER BY s.created_at,s.id",
+		"SELECT room,id,'','' FROM questions WHERE state='pending' ORDER BY asked_at",
 	} {
 		items, err := s.Read().QueryContext(ctx, query)
 		if err != nil {
@@ -81,10 +83,13 @@ func (s *Store) RoomList(ctx context.Context) (contract.RoomListResponse, []Room
 				return contract.RoomListResponse{}, nil, err
 			}
 			item := RoomListItem{Room: contract.RoomID(room), Name: name, Turn: contract.TurnID(turn)}
-			if kind == 0 {
+			switch kind {
+			case 0:
 				item.Operation = contract.OpID(id)
-			} else {
+			case 1:
 				item.Session = contract.SessionID(id)
+			default:
+				item.Question = contract.QuestionID(id)
 			}
 			itemsOut = append(itemsOut, item)
 		}

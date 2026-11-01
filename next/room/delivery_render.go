@@ -32,6 +32,8 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		return fmt.Sprintf("Host %s is low on disk: %d GiB free, %d GiB wanted. Close sessions that are done. At the floor, new boxes wait and the oldest stopped boxes close.", b.Host, b.FreeBytes>>30, b.FloorBytes>>30), nil
 	case contract.PrOpened:
 		return fmt.Sprintf("PR opened: %s", b.URL), nil
+	case contract.QuestionAnswered:
+		return fmt.Sprintf("Question: %s\n\nAnswer: %s", b.Question, b.Answer), nil
 	case contract.OpDecided:
 		return fmt.Sprintf("Operation %s: %s. %s", b.ID, b.State, b.Decision.Reason), nil
 	case contract.OpRan:

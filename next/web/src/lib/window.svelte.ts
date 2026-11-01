@@ -1,18 +1,21 @@
 import { SvelteMap, createSubscriber } from "svelte/reactivity";
 import { call } from "./client.ts";
 import { decodeEvent } from "./event.ts";
-import type { Conversation, Event, PostRequest } from "./contract.gen.ts";
+import type { Conversation, Event, PostRequest, QuestionAnswered } from "./contract.gen.ts";
 
 // An owner's post the engine has not confirmed: seq is set once the post call returns, failed when it did not.
 export type PendingPost = { id: number; request: PostRequest; at: string; seq?: number; failed: boolean };
 export type PostEvent = Extract<Event, { type: "post.created" }>;
+
+// How an answer reads in the DM, in the engine's words for the session (room.RenderDelivery).
+export const questionAnswer = ({ question, answer }: QuestionAnswered) => `Question: ${question}\n\nAnswer: ${answer}`;
 
 export const PAGE = 200;
 export const WINDOW = 1000;
 
 // The session whose DM holds an event, as the engine's events.list home filter reads it.
 export function dmOf(event: Event): string | undefined {
-  if (event.type === "session.restarted") return event.body.session;
+  if (event.type === "session.restarted" || event.type === "question.asked" || event.type === "question.answered" || event.type === "question.withdrawn") return event.body.session;
   if (event.type === "post.created") return event.body.home.kind === "dm" ? event.body.home.session : undefined;
   if (event.type === "turn.ended") return event.body.replies?.find(({ reply }) => reply.home?.kind === "dm")?.reply.home?.session
     ?? (event.body.outcome === "stopped" ? event.body.session : undefined);
@@ -191,9 +194,12 @@ export class EventWindow {
     return true;
   }
 
+  // An answer reads as the owner's post in the DM until the transcript holds the turn that took it.
   posts(): PostEvent[] {
-    return this.ordered.filter((event): event is PostEvent => event.type === "post.created" &&
-      event.body.home.kind === this.home.kind && event.body.home.session === this.home.session);
+    return this.ordered.flatMap(event => {
+      if (event.type === "question.answered") return [{ ...event, type: "post.created" as const, body: { text: questionAnswer(event.body), home: this.home } }];
+      return event.type === "post.created" && event.body.home.kind === this.home.kind && event.body.home.session === this.home.session ? [event] : [];
+    });
   }
 
   // Shows a post that did not send; the app keeps such posts while the owner is in another conversation.

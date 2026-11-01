@@ -4,7 +4,7 @@ import { stream } from "./stream.ts";
 import { EventWindow } from "./window.svelte.ts";
 import { pendingReason, type PendingReason } from "./event.ts";
 import { boxFailures, countOf, failedJobs, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
-import type { BoxState, Conversation, FailureCause, Decision, Event, OpRequested, OpResult, OpState, SessionStarted } from "./contract.gen.ts";
+import type { BoxState, Conversation, FailureCause, Decision, Event, OpRequested, OpResult, OpState, Question, SessionStarted } from "./contract.gen.ts";
 import { failed } from "./jobs.ts";
 
 
@@ -54,6 +54,8 @@ export class RoomStore {
   readonly hadJobs = new SvelteSet<string>();
   // op.list gives the pending operations; decided ones stay for the time the room is open.
   readonly requests = new SvelteMap<string, Request>();
+  // question.list gives the waiting ones and the latest answered ones; the stream keeps them current.
+  readonly questions = new SvelteMap<string, Question>();
   // Names outlive closed sessions, so old posts still show who wrote them.
   readonly names = new SvelteMap<string, string>();
   private readonly windows = new Set<EventWindow>();
@@ -120,7 +122,12 @@ export class RoomStore {
   get ready(): boolean { this.subscribe(); return this.loaded; }
   get error(): unknown { this.subscribe(); return this.failure; }
   // Pending owner-class operations wait for the owner.
-  get waiting(): number { return [...this.requests.values()].filter(request => request.state === "pending" && request.class === "owner").length; }
+  get waiting(): number { return [...this.requests.values()].filter(request => request.state === "pending" && request.class === "owner").length + this.pendingQuestions().length; }
+  // The questions the owner has not answered, of one session or the room, oldest first.
+  pendingQuestions(session?: string): Question[] {
+    return [...this.questions.values()].filter(question => question.state === "pending" && (!session || question.session === session))
+      .sort((a, b) => a.asked.localeCompare(b.asked));
+  }
   // The turn may end before the answer comes, so only a turn still running counts as stopping.
   stop(id: string): void {
     this.stopFailed.delete(id);
@@ -142,10 +149,10 @@ export class RoomStore {
     const waiting = asking.has(id) || this.pendingReasons.get(id) === "room-host";
     return statusOf({ broken: box === "failed" || box === "lost", waiting, working: this.turns.has(id), failed: this.unseen(id) });
   }
-  // The sessions whose requests wait for the owner.
+  // The sessions whose requests or questions wait for the owner.
   private asking(): Set<string> {
-    return new Set([...this.requests.values()].filter(request => request.state === "pending" && request.class === "owner")
-      .flatMap(request => request.by.session ? [request.by.session] : []));
+    return new Set([...[...this.requests.values()].filter(request => request.state === "pending" && request.class === "owner")
+      .flatMap(request => request.by.session ? [request.by.session] : []), ...this.pendingQuestions().map(question => question.session)]);
   }
 
   async open(): Promise<void> {
@@ -181,6 +188,7 @@ export class RoomStore {
     const list = await call("session.list", { room: this.room });
     // op.list reads after the seq, so an operation it misses arrives as a live event.
     const listed = await call("op.list", { room: this.room });
+    const asked = await call("question.list", { room: this.room });
     // The feed position must be known before failed jobs are classified against it.
     await this.readFeed();
     this.head = list.seq;
@@ -212,6 +220,7 @@ export class RoomStore {
     for (const { id, kind, by, class: level, card, expires, state } of listed.operations ?? []) {
       this.requests.set(id, { id, kind, by, class: level, card, expires, state });
     }
+    for (const question of asked.questions ?? []) this.questions.set(question.id, question);
   }
 
   close(): void { this.closed = true; this.stopStream(); }
@@ -316,6 +325,13 @@ export class RoomStore {
         if (failed(event.body)) this.failJob(event.body.session, event.body.job, event.seq);
         break;
       case "op.requested": this.requests.set(event.body.id, { ...event.body, state: "pending" }); break;
+      case "question.asked": this.questions.set(event.body.id, { id: event.body.id, room: event.room ?? this.room, session: event.body.session, text: event.body.text, state: "pending", asked: event.at }); break;
+      case "question.answered": this.questions.set(event.body.id, { id: event.body.id, room: event.room ?? this.room, session: event.body.session, text: event.body.question, state: "answered", answer: event.body.answer, asked: this.questions.get(event.body.id)?.asked ?? event.at, answered: event.at }); break;
+      case "question.withdrawn": {
+        const known = this.questions.get(event.body.id);
+        if (known) this.questions.set(event.body.id, { ...known, state: "withdrawn" });
+        break;
+      }
       case "op.decided": case "op.ran": {
         const known = this.requests.get(event.body.id);
         if (known) this.requests.set(event.body.id, { ...known, ...event.body });

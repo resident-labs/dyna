@@ -33,6 +33,11 @@ type Repositories interface {
 	Size(context.Context, contract.RepoName) (contract.BoxSizeName, error)
 }
 
+// Usage gives the newest usage reading without waiting on a provider.
+type Usage interface {
+	Latest() []contract.AccountUsage
+}
+
 type Service struct {
 	// profileMoved runs after sessions change model, so their account choices can follow.
 	profileMoved      func(context.Context, []store.Session, contract.ProfileName)
@@ -42,6 +47,7 @@ type Service struct {
 	searchBraveURL    string
 	searchProxy       *model.Proxy
 	searchQuota       *model.Quotas
+	usage             Usage
 	searchMu          sync.Mutex
 	searchFailures    map[string]time.Time
 	dispatch          func(context.Context, contract.SessionID, contract.TurnID, contract.Event, bool) (contract.TurnID, []store.FeedInput, error)
@@ -119,6 +125,9 @@ func New(st *store.Store, boxes lifecycle.BoxAdapter, profiles Profiles, now fun
 
 // SetGitIdentity configures the commit identity sent to boxes.
 func (s *Service) SetGitIdentity(name, email string) { s.gitName, s.gitEmail = name, email }
+
+// SetUsage gives snapshots their usage readings, before the service starts.
+func (s *Service) SetUsage(usage Usage) { s.usage = usage }
 
 // SetMaxDepth sets the session depth limit before the service starts; zero disables it.
 func (s *Service) SetMaxDepth(depth int) { s.maxDepth = depth }
@@ -207,8 +216,10 @@ func failure(err error) *contract.Error {
 		code = contract.ErrSessionClosing
 	} else if errors.Is(err, store.ErrParentClosing) {
 		code = contract.ErrParentClosing
-	} else if errors.Is(err, store.ErrTurnConflict) || errors.Is(err, store.ErrRoomDeleting) {
+	} else if errors.Is(err, store.ErrTurnConflict) || errors.Is(err, store.ErrRoomDeleting) || errors.Is(err, store.ErrQuestionNotWaiting) {
 		code = contract.ErrConflict
+	} else if errors.Is(err, store.ErrNoAskGrant) {
+		code = contract.ErrNoGrant
 	}
 	return &contract.Error{Code: code, Message: err.Error()}
 }

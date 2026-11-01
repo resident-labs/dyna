@@ -427,3 +427,67 @@ func TestAccountsQuotaHidesNothingWithoutAnOrder(t *testing.T) {
 		}
 	}
 }
+
+// A snapshot takes the last whole reading at once. Only a reading past its age starts a read, and that read shares
+// everything with accounts.quota, so turns add no usage reads of their own.
+func TestLatestReturnsAtOnceAndAddsNoReads(t *testing.T) {
+	var calls atomic.Int64
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/dyna/credentials":
+			fmt.Fprint(w, `{"credentials":[{"id":"invented","auth_index":"invented","provider":"claude","state":"unknown"}]}`)
+		case "/v0/management/auth-files/quota":
+			calls.Add(1)
+			<-release
+			fmt.Fprint(w, `{"files":[{"auth_index":"invented","status_code":200,"windows":[{"kind":"session","utilization":17}]}]}`)
+		case "/v8/management/routing/status":
+			fmt.Fprint(w, `{}`)
+		}
+	}))
+	defer server.Close()
+	var mu sync.Mutex
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	q := (&Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}).Quotas("key", quotaStore(t), clock)
+	// The proxy holds the read, and Latest still answers.
+	if got := q.Latest(); len(got) != 0 {
+		t.Fatalf("first reading: %+v", got)
+	}
+	for range 100 {
+		q.Latest()
+	}
+	close(release)
+	deadline := time.Now().Add(5 * time.Second)
+	for len(q.Latest()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the reading never arrived")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("reads for one age: %d", got)
+	}
+	if got := q.Latest(); got[0].Windows[0].UsedPercent != 17 {
+		t.Fatalf("reading: %+v", got)
+	}
+	// accounts.quota on the same cache keeps it fresh, so no read follows.
+	if _, err := q.Read(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("reads after accounts.quota: %d", got)
+	}
+	mu.Lock()
+	now = now.Add(quotaAge)
+	mu.Unlock()
+	if got := q.Latest(); len(got) != 1 {
+		t.Fatalf("an old reading stays until the new one: %+v", got)
+	}
+	for calls.Load() != 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("the old reading was not refreshed")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}

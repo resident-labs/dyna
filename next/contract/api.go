@@ -178,15 +178,17 @@ type SessionStopResponse struct {
 
 type RoomListRequest struct{}
 type RoomSummary struct {
-	ID       RoomID      `json:"id"`
-	Name     string      `json:"name"`
-	Paused   bool        `json:"paused"`
-	Created  time.Time   `json:"created"`
-	LastRead int64       `json:"lastRead"`
-	Waiting  []OpID      `json:"waiting"`  // pending owner-class operations, which only the owner decides
-	Working  []SessionID `json:"working"`  // open sessions with a running turn
-	Failed   int         `json:"failed"`   // open sessions whose last turn that was not stopped failed, or whose box failed or is lost; each counts once
-	Hostless int         `json:"hostless"` // open sessions whose box waits for a room host
+	ID       RoomID    `json:"id"`
+	Name     string    `json:"name"`
+	Paused   bool      `json:"paused"`
+	Created  time.Time `json:"created"`
+	LastRead int64     `json:"lastRead"`
+	Waiting  []OpID    `json:"waiting"` // pending owner-class operations, which only the owner decides
+	// Questions are those the owner has not answered.
+	Questions []QuestionID `json:"questions,omitempty"`
+	Working   []SessionID  `json:"working"`  // open sessions with a running turn
+	Failed    int          `json:"failed"`   // open sessions whose last turn that was not stopped failed, or whose box failed or is lost; each counts once
+	Hostless  int          `json:"hostless"` // open sessions whose box waits for a room host
 	// Deleting marks a room on its way out; it refuses new work. DeleteReason says what holds it, if anything does.
 	Deleting     bool   `json:"deleting,omitempty"`
 	DeleteReason string `json:"deleteReason,omitempty"`

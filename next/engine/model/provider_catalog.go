@@ -33,6 +33,16 @@ func OAuthProxyProvider(id contract.AccountProvider) (string, bool) {
 	return "", false
 }
 
+// ProviderName is a provider's catalog name. One the owner added has no catalog entry here, so its ID stands in.
+func ProviderName(id contract.AccountProvider) string {
+	for _, provider := range AccountProviders(nil) {
+		if provider.ID == id {
+			return provider.DisplayName
+		}
+	}
+	return strings.TrimPrefix(string(id), "custom-")
+}
+
 // AccountProviders describes the built-in catalog and the providers saved credentials add.
 func AccountProviders(credentials []Credential) []contract.AccountProviderInfo {
 	providers := make([]contract.AccountProviderInfo, 0, len(oauthProviders)+len(KeyPresets()))

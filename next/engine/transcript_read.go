@@ -14,6 +14,7 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/harness"
 	"github.com/resident-labs/dyna/harness/pi"
+	"github.com/resident-labs/dyna/room"
 )
 
 const maxTranscriptCallPosts = 8
@@ -30,14 +31,14 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 	if req.Session == "" || req.Limit < 0 || req.Limit > 20 || req.Offset < 0 || req.Cursor < 0 || req.PostIndex < 0 || (req.Page == "" && req.Cursor != 0) || (req.Page != "" && (req.Turn == "" || req.Item != "" || req.AfterItem != "" || req.Tail || req.PostIndex != 0)) || (req.Turn != "" && req.Before != "") || ((req.Item != "" || req.AfterItem != "" || req.Tail || req.PostIndex != 0) && req.Turn == "") {
 		return response, invalid("invalid transcript request")
 	}
-	room, err := s.store.TranscriptRoom(ctx, req.Session)
+	roomID, err := s.store.TranscriptRoom(ctx, req.Session)
 	if errors.Is(err, store.ErrNotFound) {
 		return response, &contract.Error{Code: contract.ErrNotFound, Message: "session not found"}
 	}
 	if err != nil {
 		return response, failure(err)
 	}
-	dir := s.layout.Transcripts(room, req.Session)
+	dir := s.layout.Transcripts(roomID, req.Session)
 	files, err := s.store.TranscriptFiles(ctx, req.Session)
 	if err != nil {
 		return response, failure(err)
@@ -115,6 +116,12 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 				value = body.Text
 				home = &body.Home
 				attachments = sanitizeTranscriptAttachments(body.Attachments)
+			}
+			if body, ok := input.Body.(contract.QuestionAnswered); ok {
+				if value, err = room.RenderDelivery(body); err != nil {
+					return response, failure(err)
+				}
+				home = &contract.Conversation{Kind: contract.ConversationDM, Session: body.Session}
 			}
 			value = harness.Mask(value)
 			if req.Item != "" {

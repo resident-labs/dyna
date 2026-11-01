@@ -107,6 +107,40 @@ test("the waiting count holds pending owner-class operations from op.list and op
   } finally { globalThis.fetch = original; }
 });
 
+test("a question waits for the owner until it is answered or withdrawn, and marks its session as waiting", async () => {
+  const listed = { id: "q1", room: "r", session: "s", text: "Which?", state: "pending", asked: "2026-01-01T00:00:00Z" };
+  const original = globalThis.fetch;
+  globalThis.fetch = async input => new Response(JSON.stringify(String(input).endsWith("question.list") ? { questions: [listed] } : { rooms: [], sessions: [{ id: "s", name: "s", boxState: "ready" }], seq: 10 }));
+  try {
+    const room = new RoomStore("r", () => () => {});
+    await room.open();
+    assert.deepEqual([room.waiting, room.status("s"), room.pendingQuestions("s").length, room.pendingQuestions("other").length], [1, "waiting", 1, 0]);
+    room.apply(event(11, { type: "question.asked", body: { id: "q2", session: "s", text: "And?" } }));
+    assert.equal(room.waiting, 2);
+    room.apply(event(12, { type: "question.answered", body: { id: "q1", session: "s", question: "Which?", answer: "This" } }));
+    assert.deepEqual([room.waiting, room.questions.get("q1")?.state, room.questions.get("q1")?.answer, room.questions.get("q1")?.asked], [1, "answered", "This", listed.asked]);
+    room.apply(event(13, { type: "question.withdrawn", body: { id: "q2", session: "s" } }));
+    assert.deepEqual([room.waiting, room.status("s")], [0, "idle"]);
+  } finally { globalThis.fetch = original; }
+});
+
+test("a DM holds a session's questions, and shows an answer as the owner's post until a turn takes it", () => {
+  const window = new EventWindow("r", dm);
+  const answered = event(2, { type: "question.answered", body: { id: "q", session: "s", question: "Which?", answer: "This" } });
+  window.apply(event(1, { type: "question.asked", body: { id: "q", session: "s", text: "Which?" } }));
+  window.apply(answered);
+  window.apply(event(3, { type: "question.asked", body: { id: "q2", session: "other", text: "Not here" } }));
+  window.apply(event(4, { type: "question.withdrawn", body: { id: "q2", session: "other" } }));
+  assert.deepEqual(window.ordered.map(item => item.seq), [1, 2]);
+  assert.deepEqual(window.posts().map(post => [post.seq, post.body.text]), [[2, "Question: Which?\n\nAnswer: This"]]);
+  assert.equal(dmOf(answered), "s");
+});
+
+test("a question stays out of the room feed", () => {
+  const events = [event(1, { type: "question.asked", body: { id: "q", session: "s", text: "Which?" } }), event(2, { type: "question.answered", body: { id: "q", session: "s", question: "Which?", answer: "This" } }), event(3, { type: "question.withdrawn", body: { id: "q2", session: "s" } })];
+  assert.deepEqual(feedRows(events, feed), []);
+});
+
 test("a pending post is replaced by the event that echoes its clientId, before its call returns", async () => {
   const window = new EventWindow("r", feed);
   const original = globalThis.fetch;
