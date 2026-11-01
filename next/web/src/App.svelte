@@ -331,6 +331,21 @@
   let terminals: TermDock | undefined = $state();
   let jobsTool: JobsTool | undefined = $state();
   let roomMenu: RoomMenu | undefined = $state();
+  // A right click on a room's rail icon opens its menu at the pointer, opening the room first if needed. The Menu key
+  // reports no pointer, so it opens beside the icon.
+  let roomMenuAt: { room: string; x: number; y: number; trigger: HTMLElement } | undefined = $state();
+  function roomContext(event: MouseEvent & { currentTarget: HTMLElement }, id: string) {
+    if (phone.current) return;
+    event.preventDefault();
+    const box = event.currentTarget.getBoundingClientRect();
+    roomMenuAt = { room: id, x: event.clientX || box.right, y: event.clientY || box.top, trigger: event.currentTarget };
+    if (id !== room || inSettings) openLocation(id);
+  }
+  $effect(() => {
+    if (!roomMenuAt || roomMenuAt.room !== room || !roomMenu) return;
+    roomMenu.openAt(roomMenuAt);
+    roomMenuAt = undefined;
+  });
   let settings: HTMLElement | undefined = $state();
   let settingsMenu: HTMLButtonElement | undefined = $state();
   let dock: HTMLElement | undefined = $state();
@@ -637,7 +652,7 @@
            gets an amber dot on its corner, with no number (spec 5.13). A room with a failed session gets a red one
            instead, in the priority order of status.ts. -->
       {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}{@const hostless = attention.hostless.get(item.id)?.size ?? 0}{@const failing = attention.failing(item.id)}
-      <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id && !inSettings ? "page" : undefined}
+      <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} oncontextmenu={event => roomContext(event, item.id)} aria-current={room === item.id && !inSettings ? "page" : undefined}
         aria-label={[item.name, failing && `${count(failing, "session")} failed`, waiting && `${count(waiting, "request")} waiting`, hostless && `${count(hostless, "session")} waiting for a host`].filter(Boolean).join(", ")} title={item.name}>
         <Avatar kind="room" name={item.name} label={initials.get(item.name)} size={40} />{#if failing}<StatusPill tone="failed" label="Failed" dot />{:else if waiting || hostless}<StatusPill tone="warning" label="Waiting" dot />{/if}</a>
     {/each}<button type="button" class="tool" title="Create a room" aria-label="Create a room" onclick={() => openNew("room")}><Icon name="plus" /></button></nav>
@@ -685,7 +700,7 @@
         {#if session && attention.can("computers") && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /></button>{/if}
         {#key session}<HeaderActions {store} {session} {attention} {closed} phone={phone.current} {paused} panelShown={panelShown} requestsOpen={section === "requests"}
           bind:jobsTool bind:roomMenu bind:requestsButton bind:toggle
-          onopen={(item, job) => terminals?.openJob(item, job)} onpause={pause} oninstructions={openInstructions} onnewsession={() => openNew("session")} onrequests={() => { section = section === "requests" ? undefined : "requests"; }} onpanel={tapped => void showPanel(!panelShown, tapped)}
+          onopen={(item, job) => terminals?.openJob(item, job)} onpause={pause} oninstructions={openInstructions} onrequests={() => { section = section === "requests" ? undefined : "requests"; }} onpanel={tapped => void showPanel(!panelShown, tapped)}
           onterminal={() => terminals?.shell(session!, title, !store?.sessions.get(session!)?.parent)}
           oncomputer={() => watch(session!)} />{/key}
       {/if}</header>
