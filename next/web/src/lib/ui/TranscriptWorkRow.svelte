@@ -106,8 +106,8 @@
   pre { max-height: 256px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.625 var(--mono); }
   .diff-summary { display: flex; gap: 8px; align-items: center; }
   .diff-summary button { border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; }
-  .add, .diff .add { color: var(--success, #65a972); }
-  .remove, .diff .remove { color: var(--danger, #d97b7b); }
+  .add, .diff .add { color: var(--success); }
+  .remove, .diff .remove { color: var(--danger); }
   .time { margin-left: auto; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
   button { border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
   button:hover { color: var(--text); }
