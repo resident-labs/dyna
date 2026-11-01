@@ -26,14 +26,15 @@ func webSearchCommand(get func() *socketClient) *cobra.Command {
 func websearchKeyCommand(get func() *socketClient) *cobra.Command {
 	c := &cobra.Command{Use: "websearch"}
 	c.AddCommand(&cobra.Command{Use: "set-key PROVIDER", Short: "Read a search key from standard input", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		data, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), 65537))
+		data, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), 4098))
 		if err != nil {
 			return fmt.Errorf("could not read search key")
 		}
-		if len(data) > 65536 {
+		key := strings.TrimRight(string(data), "\r\n")
+		if len(key) > 4096 {
 			return fmt.Errorf("search key is too long")
 		}
-		_, err = call[contract.WebsearchSetKeyRequest, contract.WebsearchSetKeyResponse](cmd.Context(), get(), contract.MethodWebsearchSetKey, contract.WebsearchSetKeyRequest{Provider: contract.WebSearchProvider(args[0]), Key: strings.TrimRight(string(data), "\r\n")})
+		_, err = call[contract.WebsearchSetKeyRequest, contract.WebsearchSetKeyResponse](cmd.Context(), get(), contract.MethodWebsearchSetKey, contract.WebsearchSetKeyRequest{Provider: contract.WebSearchProvider(args[0]), Key: key})
 		return err
 	}})
 	c.AddCommand(&cobra.Command{Use: "remove-key PROVIDER", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {

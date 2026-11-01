@@ -57,6 +57,7 @@ func TestStatusErrorReadsTheReasonFromEachBodyShape(t *testing.T) {
 		{name: "message", body: `{"message":"model is not supported"}`, want: "model is not supported"},
 		{name: "plain", body: "model is not supported", want: ""},
 		{name: "empty", body: "", want: ""},
+		{name: "oversized", body: `{"message":"` + strings.Repeat("x", 64<<10) + `"}`, want: ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			err := statusError("chatgpt", 400, strings.NewReader(test.body))
