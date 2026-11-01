@@ -92,7 +92,7 @@
 
 <style>
   .bar { height: 52px; display: flex; align-items: center; padding: 0 20px; border-bottom: 1px solid var(--line); font-weight: 600; }
-  .page { overflow-y: auto; padding: 32px; }
+  .page { flex: 1; min-height: 0; overflow-y: auto; padding: 32px; }
   form { display: grid; gap: 20px; width: min(640px, 100%); margin: 0 auto; }
   h1 { margin: 0; font-size: 22px; line-height: 1.3; }
   .intro { margin: -12px 0 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
