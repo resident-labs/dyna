@@ -18,6 +18,7 @@ type Live struct {
 	closed             map[contract.SessionID]struct{}
 	activityCount      uint64
 	computerGeneration atomic.Uint64
+	shellGeneration    atomic.Uint64
 	subscribers        map[*Subscription]contract.RoomID
 	wakeMu             sync.Mutex
 	wakePending        map[contract.SessionID]bool
@@ -35,6 +36,7 @@ type Session struct {
 	activityOrder uint64
 	channel       *Channel
 	computer      *computerState
+	shell         *shellWatch
 }
 
 // Subscription uses mu to serialize sends with close.
