@@ -15,6 +15,7 @@ func TestRenderDelivery(t *testing.T) {
 		{contract.SessionProfileChanged{Profile: "model"}, "Your model is now model.", false},
 		{contract.PostCreated{Text: "hello"}, "hello", false},
 		{contract.SessionRestarted{}, "Your box was replaced. Your conversation is restored. Unpushed work in the old volume is gone.", false},
+		{contract.SessionRestarted{ImageUpdated: true}, "Your box image was updated. Your files and conversation are kept. Anything installed outside /box is gone.", false},
 		{contract.SessionStarted{Goal: "work", Brief: "brief"}, "Goal: work\n\nbrief", false},
 		{contract.PrOpened{URL: "url"}, "PR opened: url", false},
 		{contract.OpDecided{ID: "op_1", State: contract.OpDenied, Decision: contract.Decision{Reason: "not needed"}}, "Operation op_1: denied. not needed", false},
