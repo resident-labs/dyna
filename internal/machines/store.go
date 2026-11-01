@@ -1310,7 +1310,7 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		}
 		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,labels,container_socket,ssh_connect_timeout_ms,check_tmp,max_io_heavy,max_disk_percent,resources,mounts,devices,quick_slots,wake_command) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			m.ID, m.Name, m.SSH, m.Enabled, m.Local,
-			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, mounts, devices, m.QuickSlots, marshalNames(m.WakeCommand))
+			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, labels, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, resources, mounts, devices, m.QuickSlots, marshalWakeCommand(m.WakeCommand))
 		if err != nil {
 			return err
 		}
@@ -1483,7 +1483,7 @@ func (s Store) LatestFieldChanges(ctx context.Context, id string) ([]FieldChange
 
 func updateMachine(ctx context.Context, conn *sql.Conn, m Machine) error {
 	_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, ssh=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, host_checks_grants=?, rooms=?, labels=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=?, max_io_heavy=?, max_disk_percent=?, resources=?, mounts=?, devices=?, quick_slots=?, wake_command=? WHERE id=?`,
-		m.Name, m.SSH, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), marshalGrants(m.HostChecksGrants), marshalNames(m.Rooms), marshalNames(m.Labels), m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, marshalResources(m.Resources), marshalContainerRegistrations(m.Mounts), marshalContainerRegistrations(m.Devices), m.QuickSlots, marshalNames(m.WakeCommand), m.ID)
+		m.Name, m.SSH, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), marshalGrants(m.HostChecksGrants), marshalNames(m.Rooms), marshalNames(m.Labels), m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.MaxIOHeavy, m.MaxDiskPercent, marshalResources(m.Resources), marshalContainerRegistrations(m.Mounts), marshalContainerRegistrations(m.Devices), m.QuickSlots, marshalWakeCommand(m.WakeCommand), m.ID)
 	return err
 }
 
@@ -1545,6 +1545,12 @@ func marshalGrants(grants []HostChecksGrant) string {
 	if err != nil {
 		return "[]"
 	}
+	return string(raw)
+}
+
+// marshalWakeCommand preserves argument order and repeated arguments.
+func marshalWakeCommand(command []string) string {
+	raw, _ := json.Marshal(command)
 	return string(raw)
 }
 
