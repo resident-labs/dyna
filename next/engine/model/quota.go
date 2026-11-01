@@ -17,6 +17,9 @@ import (
 type quotaEntry struct {
 	at    time.Time
 	usage contract.AccountUsage
+	// passive marks usage read from the credential list. It proves nothing about
+	// the sign-in, so ObservedState ignores it.
+	passive bool
 }
 
 type Quotas struct {
@@ -45,7 +48,7 @@ func (q *Quotas) ObservedState(index string) CredentialState {
 	q.mu.Lock()
 	entry, ok := q.cache[index]
 	q.mu.Unlock()
-	if !ok || q.now().Sub(entry.at) >= 5*time.Minute {
+	if !ok || entry.passive || q.now().Sub(entry.at) >= 5*time.Minute {
 		return CredentialUnknown
 	}
 	if entry.usage.Cause == contract.UsageSignInExpired {
@@ -57,11 +60,26 @@ func (q *Quotas) ObservedState(index string) CredentialState {
 	return CredentialUnknown
 }
 
+// CachedUsage reads an existing observation only. It never calls the proxy.
+func (q *Quotas) CachedUsage(id contract.AccountID) (contract.AccountUsage, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, entry := range q.cache {
+		if entry.usage.AccountID == id && q.now().Sub(entry.at) < 5*time.Minute {
+			return entry.usage, true
+		}
+	}
+	return contract.AccountUsage{}, false
+}
+
 func (q *Quotas) request(ctx context.Context, path string) (json.RawMessage, error) {
 	return q.management.request(ctx, http.MethodGet, "/v0/management/"+path, nil)
 }
 
 func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, error) {
+	q.mu.Lock()
+	initialGeneration := q.generation
+	q.mu.Unlock()
 	list, err := q.management.credentials(ctx)
 	if err != nil {
 		return contract.AccountsQuotaResponse{}, err
@@ -118,6 +136,11 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 				}
 				return 0
 			})
+			q.mu.Lock()
+			if q.generation == initialGeneration {
+				q.cache[file.Index] = quotaEntry{at: q.now(), usage: usage, passive: true}
+			}
+			q.mu.Unlock()
 			result.Accounts = append(result.Accounts, usage)
 			continue
 		}
