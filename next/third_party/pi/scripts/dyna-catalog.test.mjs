@@ -12,7 +12,7 @@ test("catalog validates at pack time and emits routable completions", () => {
   assert.equal(result.keys[0].defaultModel, "model");
   assert.equal(result.keys[0].url, "https://example.com/v1");
   for (const headers of [{ "X-Test": "$request" }, { Authorization: "secret" }]) assert.equal(buildCatalog([provider({ headers })]).keys.length, 0);
-  for (const url of ["http://localhost/v1", "https://user@example.com/v1", "https://example.com:444/v1", "https://example.com/v1?key=x", "https://{host}/v1"]) {
+  for (const url of ["http://localhost/v1", "https://user@example.com/v1", "https://example.com:444/v1", "https://example.com/v1?key=x", "https://example.com/v1?", "https://{host}/v1"]) {
     assert.equal(buildCatalog([provider({ getModels: () => [{ id: "model", api: "openai-completions", baseUrl: url }] })]).keys.length, 0);
   }
   assert.throws(() => buildCatalog([provider({ id: "bad/provider" })]), /invalid or duplicate provider ID/);

@@ -34,7 +34,7 @@ export function buildCatalog(providers) {
     for (const model of completions) {
       let url;
       try { url = new URL(model.baseUrl); } catch { reason = "invalid URL"; break; }
-      if (/[{}$#]/.test(model.baseUrl) || url.protocol !== "https:" || !url.hostname || url.username || url.password || url.search || (url.port && url.port !== "443") || (base && base !== model.baseUrl)) { reason = "invalid or multiple URLs"; break; }
+      if (/[{}$#?]/.test(model.baseUrl) || url.protocol !== "https:" || !url.hostname || url.username || url.password || url.search || (url.port && url.port !== "443") || (base && base !== model.baseUrl)) { reason = "invalid or multiple URLs"; break; }
       base = model.baseUrl;
     }
     if (reason) { console.warn(`${id}: ${reason}`); continue; }
