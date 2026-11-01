@@ -28,18 +28,31 @@ func (s *Store) InsertGrant(tx *sql.Tx, g contract.Grant) error {
 }
 
 func (s *Store) ListActiveGrants(ctx context.Context, room contract.RoomID, who contract.Principal, now time.Time) ([]contract.Grant, error) {
-	rows, err := s.read.QueryContext(ctx, `SELECT id,hosts,expires_at,by_kind,by_id,created_at,reason FROM grants WHERE room=? AND to_kind=? AND to_id=? AND kind='hostexec' AND revoked_at IS NULL AND expired_at IS NULL AND (expires_at IS NULL OR expires_at>?) ORDER BY id`, room, who.Kind, who.Session, now.UnixMilli())
+	rows, err := s.read.QueryContext(ctx, `SELECT id,room,to_kind,to_id,hosts,expires_at,by_kind,by_id,created_at,reason FROM grants WHERE room=? AND to_kind=? AND to_id=? AND kind='hostexec' AND revoked_at IS NULL AND expired_at IS NULL AND (expires_at IS NULL OR expires_at>?) ORDER BY id`, room, who.Kind, who.Session, now.UnixMilli())
 	if err != nil {
 		return nil, err
 	}
+	return scanGrants(rows)
+}
+
+func (s *Store) ListHostexecGrants(ctx context.Context, now time.Time) ([]contract.Grant, error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT id,room,to_kind,to_id,hosts,expires_at,by_kind,by_id,created_at,reason FROM grants WHERE kind='hostexec' AND revoked_at IS NULL AND expired_at IS NULL AND (expires_at IS NULL OR expires_at>?) ORDER BY created_at DESC,id DESC`, now.UnixMilli())
+	if err != nil {
+		return nil, err
+	}
+	return scanGrants(rows)
+}
+
+func scanGrants(rows *sql.Rows) ([]contract.Grant, error) {
+	var err error
 	defer rows.Close()
-	var grants []contract.Grant
+	grants := []contract.Grant{}
 	for rows.Next() {
-		g := contract.Grant{Kind: contract.GrantHostExec, Room: room, To: who}
+		g := contract.Grant{Kind: contract.GrantHostExec}
 		var hosts []byte
 		var expires sql.NullInt64
 		var created int64
-		if err = rows.Scan(&g.ID, &hosts, &expires, &g.By.Kind, &g.By.Session, &created, &g.Reason); err != nil {
+		if err = rows.Scan(&g.ID, &g.Room, &g.To.Kind, &g.To.Session, &hosts, &expires, &g.By.Kind, &g.By.Session, &created, &g.Reason); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(hosts, &g.Hosts); err != nil {
