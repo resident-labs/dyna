@@ -52,22 +52,49 @@ func (r *AuthRPC) List(_ struct{}, out *[]private.ProxyAuth) error {
 
 // rawCredentialIdentity reads only provider identity fields from an opaque proxy record.
 func rawCredentialIdentity(raw []byte) (string, string) {
+	return rawCredentialOwner(raw).identity()
+}
+
+func rawCredentialOwner(raw []byte) OAuthIdentity {
 	var record struct {
 		Metadata OAuthIdentity `json:"metadata"`
 	}
 	if json.Unmarshal(raw, &record) != nil {
-		return "", ""
+		return OAuthIdentity{}
 	}
-	return record.Metadata.identity()
+	return record.Metadata
 }
 
-func (identity OAuthIdentity) identity() (string, string) {
-	for _, field := range []struct{ name, value string }{
+// sameAccount compares the strongest field both sides hold. An imported sign-in
+// may hold only an email until its first request fills in the provider's ID.
+func sameAccount(saved, next OAuthIdentity) bool {
+	nextFields := next.fields()
+	for i, field := range saved.fields() {
+		a, b := strings.TrimSpace(field.value), strings.TrimSpace(nextFields[i].value)
+		if a == "" || b == "" {
+			continue
+		}
+		if field.name == "email" {
+			return strings.EqualFold(a, b)
+		}
+		return a == b
+	}
+	return false
+}
+
+type identityField struct{ name, value string }
+
+func (identity OAuthIdentity) fields() []identityField {
+	return []identityField{
 		{"account_id", identity.AccountID},
 		{"account_uuid", identity.AccountUUID},
 		{"sub", identity.Subject},
 		{"email", identity.Email},
-	} {
+	}
+}
+
+func (identity OAuthIdentity) identity() (string, string) {
+	for _, field := range identity.fields() {
 		if strings.TrimSpace(field.value) != "" {
 			return field.name, field.value
 		}
@@ -103,9 +130,11 @@ func (r *AuthRPC) Save(req AuthSave, _ *struct{}) error {
 					break
 				}
 			}
-			kind, identity := rawCredentialIdentity(saved.Record)
-			newKind, newIdentity := req.Identity.identity()
-			if saved.ID == "" || saved.Provider != req.Record.Provider || req.Record.ID != a.proxyID || identity == "" || kind != newKind || identity != newIdentity {
+			next := req.Identity
+			if next.Email == "" {
+				next.Email = rawCredentialOwner(req.Record.Record).Email
+			}
+			if saved.ID == "" || saved.Provider != req.Record.Provider || req.Record.ID != a.proxyID || !sameAccount(rawCredentialOwner(saved.Record), next) {
 				a.status, a.reason = contract.ConnectFailed, contract.ConnectWrongAccount
 				return errors.New("account completion rejected")
 			}
