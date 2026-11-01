@@ -43,13 +43,14 @@ func TestInspectContainer(t *testing.T) {
 }
 
 type heartbeatRecord struct {
-	ok   bool
-	free *int64
+	ok    bool
+	free  *int64
+	total int64
 }
 type recordingHeartbeats struct{ records []heartbeatRecord }
 
-func (r *recordingHeartbeats) RecordHostHeartbeat(_ context.Context, _ contract.HostName, ok bool, free *int64, _ time.Time) error {
-	r.records = append(r.records, heartbeatRecord{ok: ok, free: free})
+func (r *recordingHeartbeats) RecordHostHeartbeat(_ context.Context, _ contract.HostName, ok bool, free *int64, total int64, _ time.Time) error {
+	r.records = append(r.records, heartbeatRecord{ok: ok, free: free, total: total})
 	return nil
 }
 
@@ -68,8 +69,23 @@ func TestReportHeartbeatFreeDisk(t *testing.T) {
 	b.reportHeartbeat(context.Background(), "host", true, podman.Load{DiskBytes: 100, DiskUsed: 30}, time.Time{})
 	b.reportHeartbeat(context.Background(), "host", true, podman.Load{}, time.Time{})
 	b.reportHeartbeat(context.Background(), "host", false, podman.Load{DiskBytes: 100}, time.Time{})
-	if len(records.records) != 3 || records.records[0].free == nil || *records.records[0].free != 70 || records.records[1].free != nil || records.records[2].free != nil || records.records[2].ok {
+	if len(records.records) != 3 || records.records[0].free == nil || *records.records[0].free != 70 || records.records[0].total != 100 || records.records[1].free != nil || records.records[2].free != nil || records.records[2].ok {
 		t.Fatalf("heartbeat records=%+v", records.records)
+	}
+}
+
+func TestHostLoadJudgesControlPlaneDisk(t *testing.T) {
+	b := &Boxes{Store: listStore{}}
+	total := 1000 * box.GiB
+	for free, low := range map[int64]bool{151 * box.GiB: false, 149 * box.GiB: true} {
+		b.record(contract.ControlPlane, true, podman.Load{DiskBytes: total, DiskUsed: total - free}, time.Now())
+		hosts := []contract.HostSummary{{Name: contract.ControlPlane}}
+		if err := b.HostLoad(context.Background(), hosts); err != nil {
+			t.Fatal(err)
+		}
+		if hosts[0].DiskLow != low {
+			t.Fatalf("free %d: low=%v", free, hosts[0].DiskLow)
+		}
 	}
 }
 

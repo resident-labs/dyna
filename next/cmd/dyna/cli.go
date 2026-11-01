@@ -54,6 +54,7 @@ type client interface {
 	DeviceList(context.Context, contract.DeviceListRequest) (contract.DeviceListResponse, error)
 	DeviceRevoke(context.Context, contract.DeviceRevokeRequest) (contract.DeviceRevokeResponse, error)
 	DeviceSetScopes(context.Context, contract.DeviceSetScopesRequest) (contract.DeviceSetScopesResponse, error)
+	HostList(context.Context, contract.HostListRequest) (contract.HostListResponse, error)
 }
 
 type socketClient struct{ http *http.Client }
@@ -74,7 +75,7 @@ type requestType interface {
 		contract.OpWithdrawRequest |
 		contract.SessionMoveRequest |
 		contract.SessionListRequest |
-		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest
+		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest
 }
 type responseType interface {
 	contract.WebSearchResponse | contract.WebsearchSetKeyResponse | contract.WebsearchRemoveKeyResponse |
@@ -82,7 +83,7 @@ type responseType interface {
 		contract.OpWithdrawResponse |
 		contract.SessionMoveResponse |
 		contract.SessionListResponse |
-		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse
+		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.HostListResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse
 }
 
 func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
@@ -163,6 +164,9 @@ type commandExit int
 func (e commandExit) Error() string { return fmt.Sprintf("command exited with status %d", e) }
 func (c *socketClient) HostAdd(ctx context.Context, q contract.HostAddRequest) (contract.HostAddResponse, error) {
 	return call[contract.HostAddRequest, contract.HostAddResponse](ctx, c, contract.MethodHostAdd, q)
+}
+func (c *socketClient) HostList(ctx context.Context, q contract.HostListRequest) (contract.HostListResponse, error) {
+	return call[contract.HostListRequest, contract.HostListResponse](ctx, c, contract.MethodHostList, q)
 }
 func (c *socketClient) RoomSetLimits(ctx context.Context, q contract.RoomSetLimitsRequest) (contract.RoomSetLimitsResponse, error) {
 	return call[contract.RoomSetLimitsRequest, contract.RoomSetLimitsResponse](ctx, c, contract.MethodRoomSetLimits, q)
@@ -358,7 +362,23 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	add.Flags().StringSliceVar(&hostRooms, "room", nil, "Room ID allowed on this host (repeatable; default: all rooms)")
 	add.Flags().StringVar(&ssh, "ssh", "", "SSH destination")
 	add.Flags().BoolVar(&admin, "owner-only-admin", false, "Only the owner has host admin rights")
-	host.AddCommand(add)
+	list := &cobra.Command{Use: "list", Args: cobra.NoArgs, Short: "Show each host's disk use", RunE: func(cmd *cobra.Command, _ []string) error {
+		r, err := getClient().HostList(cmd.Context(), contract.HostListRequest{})
+		if err != nil {
+			return err
+		}
+		for _, h := range r.Hosts {
+			state := "ok"
+			if h.DiskLow {
+				state = "low"
+			}
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", h.Name, humanize.IBytes(uint64(h.DiskUsed)), humanize.IBytes(uint64(h.DiskBytes)), state); err != nil {
+				return err
+			}
+		}
+		return nil
+	}}
+	host.AddCommand(add, list)
 	root.AddCommand(host)
 
 	room := &cobra.Command{Use: "room"}
