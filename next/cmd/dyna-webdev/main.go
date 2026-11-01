@@ -139,6 +139,8 @@ func devAccounts(now time.Time) []devAccount {
 	return []devAccount{
 		account(contract.ProviderKimi, "kimi", "kimi", "kimi", ""),
 		account(contract.ProviderZAI, "openai-compatible-zai", "zai", "zai", ""),
+		account(contract.ProviderMeta, "meta", "meta", "meta", "", window(contract.UsageWindowFiveHour, 12, 2*time.Hour), window(contract.UsageWindowWeekly, 5, 76*time.Hour)),
+		{contract.ProviderDeepSeek, contract.AccountUsage{AccountID: "deepseek", Provider: "openai-compatible-deepseek", Label: "deepseek", Balances: []contract.UsageBalance{{Currency: "CNY", Amount: "110.00"}, {Currency: "USD", Amount: "3.50"}}}},
 		account(contract.ProviderAnthropic, "claude", "unused", "unused.seat", "", model("Fable", 0)),
 		account(contract.ProviderAnthropic, "claude", "calm", "review.bot", "", window(contract.UsageWindowFiveHour, 0, 0), window(contract.UsageWindowWeekly, 60, 24*time.Hour)),
 		account(contract.ProviderAnthropic, "claude", "studio", "Claude · studio", "", window(contract.UsageWindowFiveHour, 62, 2*time.Hour+10*time.Minute), window(contract.UsageWindowWeekly, 91, 76*time.Hour), model("Fable", 0), model("Opus", 35)),
