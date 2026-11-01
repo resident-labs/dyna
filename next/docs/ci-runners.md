@@ -62,7 +62,6 @@ needs a second scale set, which is not built.
 pool may be down. `relay` needs a container runtime. `next-pi` stays hosted because
 one Pi test rewrites a file with a same-size value and expects the change to show:
 on tmpfs both writes can land in one clock tick, so size and time both match.
-`next-web-width` is hosted too. It has not been tried on the pool.
 
 ## What a runner can touch
 
