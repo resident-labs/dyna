@@ -39,6 +39,15 @@ func (s *Store) CommitTranscriptOffset(ctx context.Context, session contract.Ses
 	})
 }
 
+// ResetTranscriptOffset forgets the acknowledgment of a file the engine no longer holds, so the box sends it again.
+// CommitTranscriptOffset only moves forward, so this is the one way back.
+func (s *Store) ResetTranscriptOffset(ctx context.Context, session contract.SessionID, path string) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE transcript_offsets SET acked=0 WHERE session=? AND path=?", session, path)
+		return err
+	})
+}
+
 // Transcripts lists files in their insertion order, oldest first.
 func (s *Store) Transcripts(ctx context.Context, session contract.SessionID) ([]contract.TranscriptFile, error) {
 	rows, err := s.Read().QueryContext(ctx, "SELECT path,acked FROM transcript_offsets WHERE session=? ORDER BY rowid", session)

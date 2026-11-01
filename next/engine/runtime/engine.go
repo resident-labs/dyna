@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"filippo.io/age"
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine"
@@ -80,6 +81,9 @@ func (s *serviceWithHosts) HostAdd(ctx context.Context, caller contract.Principa
 		var required podman.RequiredError
 		if errors.As(err, &required) {
 			return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrPodmanRequired, Message: err.Error()}
+		}
+		if errors.Is(err, store.ErrRoomDeleting) {
+			return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrConflict, Message: err.Error()}
 		}
 		return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: err.Error()}
 	}
@@ -167,10 +171,13 @@ func Run(ctx context.Context, cfg Config) error {
 	drain := model.NewDrain()
 	boxCtx, stopBoxes := context.WithCancel(ctx)
 	defer stopBoxes()
-	boxes := &Boxes{Store: st, HeartbeatStore: st, Runtime: cfg.Runtime, HostData: cfg.HostData, InstructionsDir: filepath.Join(cfg.Data, "files", "instructions"), Version: cfg.Version, PiTarball: pi, Context: boxCtx}
+	layout := box.Layout{Data: cfg.Data, HostData: cfg.HostData}
+	boxes := &Boxes{Store: st, HeartbeatStore: st, Runtime: cfg.Runtime, Layout: layout, Version: cfg.Version, PiTarball: pi, Context: boxCtx}
 	service := engine.New(st, boxes, profiles, time.Now)
+	service.SetLayout(layout)
 	service.SetMaxDepth(cfg.SessionMaxDepth)
 	service.Reconciler().SetHostMemory(boxes.hostMemory)
+	service.Reconciler().SetRoomHosts(boxes)
 	service.SetGitIdentity(cfg.GitName, cfg.GitEmail)
 	service.SetHostexecRunner(boxes)
 	boxes.Pressure = service
@@ -184,8 +191,6 @@ func Run(ctx context.Context, cfg Config) error {
 			log.Printf("host %s: start heartbeat: %v", host.Name, err)
 		}
 	}
-	service.SetTranscriptDir(filepath.Join(cfg.Data, "transcripts"))
-	service.SetFilesDir(filepath.Join(cfg.Data, "files"))
 	service.SetInstructionsPublisher(boxes.PublishInstructions)
 	mirror := &enginegit.Mirror{Data: cfg.Data, Token: token, Runner: enginegit.GitRunner{}}
 	service.SetRepositories(&enginegit.Repositories{Rooms: st, Hosts: boxes, Mirror: mirror})

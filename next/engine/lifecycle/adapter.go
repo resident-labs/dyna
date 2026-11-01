@@ -30,6 +30,20 @@ type BoxAdapter interface {
 	Recreate(context.Context, BoxSpec, string, string) error
 }
 
+// RoomHosts removes what a deleted room left on hosts. Each removal is idempotent.
+type RoomHosts interface {
+	RemoveRoom(context.Context, contract.HostName, contract.RoomID) error
+	RemoveLeftoverBox(context.Context, contract.HostName, contract.BoxID, string) error
+	// ForgetBox drops the engine's side of a box left on an offline host.
+	ForgetBox(contract.BoxID) error
+}
+
+// RoomData finishes a deleted room on the control plane.
+type RoomData interface {
+	RemoveRoomData(contract.RoomID) error
+	RoomDeleted(contract.RoomID)
+}
+
 type View interface {
 	OpenTerminal(contract.SessionID) bool
 	Connected(contract.SessionID) bool

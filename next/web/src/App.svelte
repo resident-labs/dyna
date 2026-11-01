@@ -267,10 +267,11 @@
   }
   // Each conversation keeps its own draft files; FileDraft is reactive inside, so a plain map holds them.
   const fileDrafts = new Map<string, FileDraft>();
-  const files = (key: string) => { let draft = fileDrafts.get(key); if (!draft) fileDrafts.set(key, draft = new FileDraft()); return draft; };
+  const files = (key: string) => { let draft = fileDrafts.get(key); if (!draft) fileDrafts.set(key, draft = new FileDraft(key.split("/")[0])); return draft; };
   let key = $derived(`${room}/${session ?? ""}`);
   // Pausing stops new turns in the room; attention keeps the state current from the stream.
   let paused = $derived(attention.rooms.get(room ?? "")?.paused ?? false);
+  let deleting = $derived(attention.rooms.get(room ?? "")?.deleting ?? false);
   // The room whose last pause or resume failed, so another room keeps its own line.
   let pauseFailed: string | undefined = $state();
   function pause() {
@@ -724,7 +725,8 @@
       {:else}<p class="empty">This room is not available. <button type="button" class="retry" onclick={reopen}>Try again</button></p>{/if}
     </div>
     {#if room && !unavailable && !closed}
-      {#if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
+      {#if deleting}<p class="paused" role="status"><span>This room is being deleted.</span></p>
+      {:else if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
         {#if attention.can("operate")}<button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button>{/if}</p>{/if}
       {#if attention.can("operate")}<Composer bind:this={composerBox} bind:element={composer} bind:value={() => savedDrafts.draft(key, drafts[key]),text => { drafts[key] = text; savedDrafts.save(key, text); clearReplacement(); }} onsend={send} thread={!!session} placeholder={"Message " + title}
         quote={quotes[key]} replacement={replaced[key]} onundo={() => { quotes[key] = undoForward({ quote: quotes[key], previous: replaced[key] }).quote; clearReplacement(); }} onunquote={() => { quotes[key] = undefined; clearReplacement(); }} sessions={mentions} files={files(key)} {stop} />

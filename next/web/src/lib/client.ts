@@ -45,10 +45,10 @@ export async function call<M extends keyof MethodMap>(
   return body as MethodMap[M]["response"];
 }
 
-// Stores one file in the engine; the answer is the Attachment a post carries. The engine answers a
+// Stores one file in a room; the answer is the Attachment a post carries. The engine answers a
 // failed upload with plain text, so any failure is the one typed error.
-export async function upload(file: File): Promise<Attachment> {
-  const response = await fetch(`/v1/files?name=${encodeURIComponent(file.name)}`, {
+export async function upload(file: File, room: string): Promise<Attachment> {
+  const response = await fetch(`/v1/files?name=${encodeURIComponent(file.name)}&room=${encodeURIComponent(room)}`, {
     method: "POST", credentials: "same-origin", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file,
   }).catch(() => { throw unavailable(); });
   if (!response.ok) throw unavailable();
