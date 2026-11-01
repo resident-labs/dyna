@@ -19,7 +19,7 @@
   let fit = $derived(natural.width && natural.height ? Math.min(1, box.width / natural.width, box.height / natural.height) : 1);
   let content = $derived({ width: natural.width * fit, height: natural.height * fit });
   const pointers = new Map<number, Point>();
-  let distance = 0, start: Point | undefined, moved = 0, lastTap = 0;
+  let distance = 0, start: Point | undefined, moved = 0, lastTap = 0, background = false;
   const local = (x: number, y: number) => { const r = stage.getBoundingClientRect(); return { x: x - r.left - r.width / 2, y: y - r.top - r.height / 2 }; };
   function zoom(factor: number, at: Point = { x: 0, y: 0 }) { view = zoomAt(view, factor, at, box, content); }
   function move(n: number) { index = (index + n + items.length) % items.length; view = FIT; natural = { width: 0, height: 0 }; menu = false; }
@@ -34,6 +34,7 @@
   }
   function down(e: PointerEvent) {
     if (e.target instanceof HTMLVideoElement) return;
+    background = e.target === stage;
     stage.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 1) { start = { x: e.clientX, y: e.clientY }; moved = 0; }
     if (pointers.size === 2) { const [a, b] = [...pointers.values()]; distance = Math.hypot(a.x-b.x, a.y-b.y); }
@@ -91,7 +92,7 @@
       {#if menu}<div class="menu"><a href={src} target="_blank" rel="noopener">Open original</a><button onclick={() => { onjump(item.key); dialog.close(); }}>Jump to post</button></div>{/if}
     </div>
   </header>
-  <div class="stage" bind:this={stage} use:wheel onpointerdown={down} onpointermove={drag} onpointerup={up} onpointercancel={up} onclick={e => { if (e.target === stage && moved < 8) dialog.close(); }} role="presentation">
+  <div class="stage" bind:this={stage} use:wheel onpointerdown={down} onpointermove={drag} onpointerup={up} onpointercancel={up} onclick={e => { if (background && e.target === stage && moved < 8) dialog.close(); }} role="presentation">
     {#if item.file.media.startsWith("video/")}
       {#key src}<video {src} controls preload="metadata" autoplay></video>{/key}
     {:else}
