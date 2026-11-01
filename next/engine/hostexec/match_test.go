@@ -17,7 +17,6 @@ func TestMatch(t *testing.T) {
 	}{
 		{"host", grant, "host", true}, {"other", grant, "other", false},
 		{"all", contract.Grant{ID: "g", Kind: contract.GrantHostExec, Hosts: []contract.HostName{contract.AllHosts}}, "other", true},
-		{"expired", contract.Grant{ID: "g", Kind: contract.GrantHostExec, Hosts: grant.Hosts, Expires: now}, "host", false},
 		{"revoked", contract.Grant{ID: "g", Kind: contract.GrantHostExec, Hosts: grant.Hosts, Revoked: now}, "host", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

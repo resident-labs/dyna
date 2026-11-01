@@ -11,7 +11,7 @@ var ErrNoGrant = errors.New("no_grant")
 
 func Match(grants []contract.Grant, host contract.HostName, now time.Time) (contract.Grant, error) {
 	for _, grant := range grants {
-		if grant.Kind != contract.GrantHostExec || !grant.Revoked.IsZero() || (!grant.Expires.IsZero() && !grant.Expires.After(now)) {
+		if grant.Kind != contract.GrantHostExec || !grant.Revoked.IsZero() {
 			continue
 		}
 		for _, h := range grant.Hosts {

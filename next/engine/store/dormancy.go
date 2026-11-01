@@ -86,6 +86,9 @@ func (s *Store) MarkDormantClosing(ctx context.Context, id contract.SessionID, c
 			return err
 		}
 		changed = true
+		if _, err := tx.ExecContext(ctx, `UPDATE hostexec_runs SET stopped='closed' WHERE ended_at IS NULL AND grant_id IN (SELECT id FROM grants WHERE to_kind='session' AND to_id=?)`, id); err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx, "UPDATE boxes SET want='close',due_at=0 WHERE session=?", id)
 		return err
 	})

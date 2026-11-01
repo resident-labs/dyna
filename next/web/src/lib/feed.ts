@@ -53,7 +53,7 @@ export const causes: Record<FailureCause, string> = {
   engine_restarted: "Dyna restarted while it set up the workspace",
   remove_failed: "Dyna could not remove its workspace",
   archive_failed: "Dyna could not save the session's branch",
-  grant_inactive: "The host execution grant expired or was revoked",
+  grant_inactive: "The host execution grant is no longer active",
   host_lost: "The host stopped answering during the run",
   host_busy: "host busy, try again later",
   nested_device_missing: "The host lacks the TUN device needed for nested containers",
