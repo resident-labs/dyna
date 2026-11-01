@@ -267,6 +267,11 @@ func (c *Client) WorkflowStepEnd(ctx context.Context, req contract.WorkflowStepE
 	return err
 }
 
+func (c *Client) WorkflowStepTranscript(ctx context.Context, req contract.WorkflowStepTranscriptRequest) error {
+	_, err := request[contract.WorkflowStepTranscriptRequest, contract.WorkflowStepTranscriptResponse](ctx, c, contract.MethodWorkflowStepTranscript, req)
+	return err
+}
+
 // WorkflowPost posts for a script. The step key is the client ID, so a retry or a rerun posts once.
 func (c *Client) WorkflowPost(ctx context.Context, req contract.PostRequest) (contract.PostResponse, error) {
 	return request[contract.PostRequest, contract.PostResponse](ctx, c, contract.MethodPost, req)

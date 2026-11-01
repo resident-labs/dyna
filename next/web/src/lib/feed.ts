@@ -94,7 +94,7 @@ export function subject(event: Event): string | undefined {
 
 // Events with no row. Goals show in About and the session list; failures show on the box and turn events they report.
 // A pull request's rows come from pr.changed. The typed PR events, issue events and repo.main_updated exist for subscribers and sessions.
-const unshown = new Set<Event["type"]>(["workflow.ended", "session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due", "pr.merged", "pr.closed", "ci.finished", "repo.main_updated", "issue.changed", "issue.closed"]);
+const unshown = new Set<Event["type"]>(["workflow.ended", "workflow.step_changed", "session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due", "pr.merged", "pr.closed", "ci.finished", "repo.main_updated", "issue.changed", "issue.closed"]);
 
 // Builds the rows of one conversation. Posts and final answers become post rows, a
 // failed turn and a request are each their own row, and all other events between them fold into one work row.
@@ -290,7 +290,7 @@ export const eventGroups: Record<Event["type"], string> = {
   "pr.merged": "pull requests merged", "pr.closed": "pull requests closed", "ci.finished": "CI results", "repo.main_updated": "default branch moves", "issue.changed": "issue updates", "issue.closed": "issues closed",
   "hook.finished": "subscription runs", "hook.due": "subscription wakes", "notice.posted": "notices",
   "shell.job.ended": "jobs finished", "grant.expired": "host grants expired",
-  "host.disk_low": "disk warnings", "conversation.read": "read positions", "workflow.ended": "workflow runs",
+  "host.disk_low": "disk warnings", "conversation.read": "read positions", "workflow.ended": "workflow runs", "workflow.step_changed": "workflow steps",
   "session.failed": "failure notices", "goal.set": "goals set", "goal.item_changed": "goal items changed", "goal.ended": "goals ended", "checkin.due": "check-ins",
 };
 
@@ -511,7 +511,7 @@ export function describe(event: Event, name: Name): string {
       const mem = !memBytes ? "no memory limit" : gb < 1 ? `${Math.max(1, Math.round(memBytes / 2 ** 20))} MB` : `${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB`;
       return `You set the room limit to ${cpu} and ${mem}`;
     }
-    case "workflow.ended": case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return ""; // feedRows shows no row for them.
+    case "workflow.ended": case "workflow.step_changed": case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return ""; // feedRows shows no row for them.
     case "box.pressure": return event.body.kind === "max" ? "A session reached its memory limit" : "A session is short of memory";
     case "post.created": return event.body.text;
     case "hook.finished": return `A subscription's run ${event.body.result}: ${event.body.cause ? causes[event.body.cause] : `exit code ${event.body.exitCode}`}`;
