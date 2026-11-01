@@ -86,6 +86,7 @@ func NewProxy(dir, authDir, managementKey string) (*Proxy, error) {
 	cfg.RemoteManagement.SecretKey = string(managementHash)
 	cfg.RemoteManagement.DisableControlPanel = true
 	cfg.Routing.SessionAffinity = true
+	cfg.Routing.Strategy = "soonest-reset"
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return nil, err
