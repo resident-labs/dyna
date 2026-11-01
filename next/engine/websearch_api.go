@@ -13,7 +13,7 @@ import (
 	"github.com/resident-labs/dyna/engine/websearch"
 )
 
-func searchKeyProvider(provider string) bool {
+func searchKeyProvider(provider contract.WebSearchProvider) bool {
 	switch provider {
 	case "muse", "brave", "exa", "tavily":
 		return true
@@ -28,7 +28,7 @@ func (s *Service) WebsearchSetKey(ctx context.Context, caller contract.Principal
 	if !searchKeyProvider(req.Provider) || strings.TrimSpace(req.Key) == "" {
 		return contract.WebsearchSetKeyResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "provider and key are required"}
 	}
-	if err := s.store.SetSearchKey(ctx, req.Provider, req.Key); err != nil {
+	if err := s.store.SetSearchKey(ctx, string(req.Provider), req.Key); err != nil {
 		return contract.WebsearchSetKeyResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "could not save search key"}
 	}
 	return contract.WebsearchSetKeyResponse{}, nil
@@ -41,7 +41,7 @@ func (s *Service) WebsearchRemoveKey(ctx context.Context, caller contract.Princi
 	if !searchKeyProvider(req.Provider) {
 		return contract.WebsearchRemoveKeyResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "invalid search provider"}
 	}
-	if err := s.store.RemoveSearchKey(ctx, req.Provider); err != nil {
+	if err := s.store.RemoveSearchKey(ctx, string(req.Provider)); err != nil {
 		return contract.WebsearchRemoveKeyResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "could not remove search key"}
 	}
 	return contract.WebsearchRemoveKeyResponse{}, nil
@@ -66,7 +66,7 @@ func (s *Service) orderSearchCandidates(room contract.RoomID, candidates []searc
 		if until, ok := s.searchFailures[name]; ok {
 			if now.Before(until) {
 				candidates[i].recent = true
-				attempts = append(attempts, contract.WebSearchAttempt{Provider: candidates[i].provider.Name(), Reason: contract.WebSearchRecentFailure})
+				attempts = append(attempts, contract.WebSearchAttempt{Provider: contract.WebSearchProvider(candidates[i].provider.Name()), Reason: contract.WebSearchRecentFailure})
 			} else {
 				delete(s.searchFailures, name)
 			}
@@ -121,7 +121,7 @@ func (s *Service) WebSearch(ctx context.Context, caller contract.Principal, req 
 			return out, &contract.Error{Code: contract.ErrUnavailable, Message: "search accounts unavailable"}
 		}
 		specs := []struct {
-			name     string
+			name     contract.WebSearchProvider
 			provider contract.AccountProvider
 		}{
 			{"chatgpt", contract.ProviderOpenAI}, {"claude", contract.ProviderAnthropic}, {"kimi", contract.ProviderKimi}, {"zai", contract.ProviderZAI}, {"xai", contract.ProviderXAI},
@@ -142,7 +142,7 @@ func (s *Service) WebSearch(ctx context.Context, caller contract.Principal, req 
 			case "xai":
 				provider = websearch.XAI{BaseURL: "http://cliproxy/v1", Client: client}
 			case "kimi", "zai":
-				provider = websearch.ProxySearch{Provider: spec.name, Client: client}
+				provider = websearch.ProxySearch{Provider: string(spec.name), Client: client}
 			}
 			candidates = append(candidates, searchCandidate{provider: provider, headroom: headroom})
 		}
@@ -163,9 +163,9 @@ func (s *Service) WebSearch(ctx context.Context, caller contract.Principal, req 
 	for _, candidate := range candidates {
 		results, err := websearch.Attempt(ctx, candidate.provider, websearch.Query{Text: req.Query, Limit: req.Limit})
 		if err == nil {
-			out.Provider = candidate.provider.Name()
+			out.Provider = contract.WebSearchProvider(candidate.provider.Name())
 			for _, r := range results {
-				out.Results = append(out.Results, contract.WebSearchResult{Title: r.Title, URL: r.URL, Snippet: r.Snippet, Provider: r.Provider})
+				out.Results = append(out.Results, contract.WebSearchResult{Title: r.Title, URL: r.URL, Snippet: r.Snippet, Provider: contract.WebSearchProvider(r.Provider)})
 			}
 			return out, nil
 		}
@@ -186,7 +186,7 @@ func (s *Service) WebSearch(ctx context.Context, caller contract.Principal, req 
 			s.searchFailures[string(room)+"/"+candidate.provider.Name()] = s.now().Add(5 * time.Minute)
 			s.searchMu.Unlock()
 		}
-		out.Attempts = append(out.Attempts, contract.WebSearchAttempt{Provider: candidate.provider.Name(), Reason: reason, Message: message})
+		out.Attempts = append(out.Attempts, contract.WebSearchAttempt{Provider: contract.WebSearchProvider(candidate.provider.Name()), Reason: reason, Message: message})
 	}
 	return out, nil
 }
