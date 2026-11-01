@@ -45,15 +45,45 @@ var (
 	fixtureRoom    contract.RoomID
 )
 
-type devService struct{ *engine.Service } // api.Service needs HostAdd; engine/runtime adds the real one.
+type devService struct {
+	*engine.Service
+	empty bool
+} // api.Service needs HostAdd; engine/runtime adds the real one.
 
 func (devService) HostAdd(context.Context, contract.Principal, contract.HostAddRequest) (contract.HostAddResponse, *contract.Error) {
 	return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "webdev uses only " + host}
 }
 
+// Connect is read-only in webdev. Its status uses invented values for layout checks.
+type devConnect struct{ empty bool }
+
+func (d devConnect) Status(context.Context) (contract.ConnectStatusResponse, error) {
+	if d.empty {
+		return contract.ConnectStatusResponse{Attempt: contract.ConnectAttempt{State: contract.ConnectAttemptIdle}}, nil
+	}
+	return contract.ConnectStatusResponse{
+		Attempt: contract.ConnectAttempt{State: contract.ConnectAttemptLinked}, Linked: true,
+		Relay: "https://connect.example.test", Fingerprint: "SHA256:invented-machine-key",
+	}, nil
+}
+
+func (devConnect) Start(context.Context, contract.ConnectStartRequest) error {
+	return fmt.Errorf("Connect actions are disabled in webdev")
+}
+func (devConnect) Cancel(context.Context) error {
+	return fmt.Errorf("Connect actions are disabled in webdev")
+}
+func (devConnect) Unlink(context.Context) error {
+	return fmt.Errorf("Connect actions are disabled in webdev")
+}
+
 // Account actions are disabled in the fake-model development engine.
-func (devService) AccountsList(context.Context, contract.Principal, contract.AccountsListRequest) (contract.AccountsListResponse, *contract.Error) {
-	return contract.AccountsListResponse{Providers: []contract.AccountProviderInfo{}, Accounts: []contract.Account{}}, nil
+func (d devService) AccountsList(context.Context, contract.Principal, contract.AccountsListRequest) (contract.AccountsListResponse, *contract.Error) {
+	accounts := []contract.Account{}
+	if !d.empty {
+		accounts = []contract.Account{{ID: "studio", Provider: "claude", Label: "Claude · studio", State: contract.AccountConnected}, {ID: "team", Provider: "codex", Label: "ChatGPT · team", State: contract.AccountConnected}, {ID: "spare", Provider: "kimi", Label: "Kimi · spare", State: contract.AccountSignInExpired}}
+	}
+	return contract.AccountsListResponse{Providers: []contract.AccountProviderInfo{{ID: "claude", DisplayName: "Claude", ConnectMethod: contract.ConnectOAuth, ConnectFlow: contract.ConnectFlowCallback}, {ID: "codex", DisplayName: "ChatGPT", ConnectMethod: contract.ConnectOAuth, ConnectFlow: contract.ConnectFlowDevice}, {ID: "kimi", DisplayName: "Kimi", ConnectMethod: contract.ConnectKey, ConnectFlow: contract.ConnectFlowKey}}, Accounts: accounts}, nil
 }
 func (devService) AccountsConnect(context.Context, contract.Principal, contract.AccountsConnectRequest) (contract.AccountsConnectResponse, *contract.Error) {
 	return contract.AccountsConnectResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable in webdev"}
@@ -78,17 +108,20 @@ func (devService) AccountsRemove(context.Context, contract.Principal, contract.A
 }
 
 // AccountsQuota answers with invented accounts, never a real sign-in: one busy, one calm and one expired.
-func (devService) AccountsQuota(context.Context, contract.Principal, contract.AccountsQuotaRequest) (contract.AccountsQuotaResponse, *contract.Error) {
+func (d devService) AccountsQuota(context.Context, contract.Principal, contract.AccountsQuotaRequest) (contract.AccountsQuotaResponse, *contract.Error) {
+	if d.empty {
+		return contract.AccountsQuotaResponse{Accounts: []contract.AccountUsage{}}, nil
+	}
 	at := func(d time.Duration) time.Time { return time.Now().Add(d) }
 	return contract.AccountsQuotaResponse{Accounts: []contract.AccountUsage{
-		{Provider: "claude", Label: "Claude · studio", Windows: []contract.UsageWindow{
+		{AccountID: "studio", Provider: "claude", Label: "Claude · studio", Windows: []contract.UsageWindow{
 			{Name: "five_hour", Kind: contract.UsageWindowFiveHour, UsedPercent: 62, Seconds: 18000, ResetsAt: at(2*time.Hour + 10*time.Minute)},
 			{Name: "seven_day", Kind: contract.UsageWindowWeekly, UsedPercent: 91, Seconds: 604800, ResetsAt: at(76 * time.Hour)},
 			{Name: "Fable Weekly", Kind: contract.UsageWindowWeekly, Model: "Fable", UsedPercent: 0, Seconds: 604800, ResetsAt: at(76 * time.Hour)},
 			{Name: "Opus Weekly", Kind: contract.UsageWindowWeekly, Model: "Opus", UsedPercent: 35, Seconds: 604800, ResetsAt: at(76 * time.Hour)}}},
-		{Provider: "codex", Label: "ChatGPT · team", Windows: []contract.UsageWindow{
+		{AccountID: "team", Provider: "codex", Label: "ChatGPT · team", Windows: []contract.UsageWindow{
 			{Name: "seven_day", Kind: contract.UsageWindowWeekly, UsedPercent: 35, Seconds: 604800, ResetsAt: at(100 * time.Hour)}}},
-		{Provider: "kimi", Label: "Kimi · spare", Cause: contract.UsageSignInExpired},
+		{AccountID: "spare", Provider: "kimi", Label: "Kimi · spare", Cause: contract.UsageSignInExpired},
 	}}, nil
 }
 
@@ -267,13 +300,22 @@ func (devService) ComputerWatch(ctx context.Context, _ contract.SessionID) (<-ch
 	return frames, nil
 }
 
-type profiles struct{}
+type profiles struct{ empty bool }
 
-func (profiles) List() []contract.ProfileSummary {
+func (p profiles) List() []contract.ProfileSummary {
 	// Invented models, so the session profile menu has choices. Model still runs every profile on the fake harness.
-	return []contract.ProfileSummary{{Name: "fake", Provider: contract.ModelProviderAnthropic, Model: "claude-sonnet-5-5", Thinking: contract.ThinkingMedium},
+	list := []contract.ProfileSummary{{Name: "fake", Provider: contract.ModelProviderAnthropic, Model: "claude-sonnet-5-5", Thinking: contract.ThinkingMedium},
 		{Name: "deep", Provider: contract.ModelProviderAnthropic, Model: "claude-opus-5-5", Thinking: contract.ThinkingXHigh},
 		{Name: "quick", Provider: contract.ModelProviderOpenAI, Model: "gpt-6.1-mini", Thinking: contract.ThinkingOff}}
+	if !p.empty {
+		for i := range list {
+			list[i].Taste = 8
+			list[i].Diagnostics = 7
+			list[i].Intelligence = 9
+			list[i].Cost = 6
+		}
+	}
+	return list
 }
 
 func (profiles) CompactionTokens(contract.ProfileName) int { return 0 }
@@ -429,11 +471,16 @@ func (r *routeList) Set(route string) error {
 func main() {
 	listen := flag.String("web.listen", "127.0.0.1:7790", "web listen address")
 	seed := flag.Bool("seed", false, "create example room")
+	fixture := flag.String("fixture", "", "fixture: full or empty")
 	posts := flag.Int("posts", 0, "with -seed, add this many posts across the sessions for long-list checks")
 	agents := flag.Int("agents", 0, "with -seed, add this many sessions across six more rooms for crowded Home checks")
 	var routes routeList
 	flag.Var(&routes, "web.route", "public web origin to offer when pairing, repeatable")
 	flag.Parse()
+	if *fixture != "" && *fixture != "full" && *fixture != "empty" {
+		fmt.Fprintln(os.Stderr, "fixture must be full or empty")
+		os.Exit(2)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	data, err := os.MkdirTemp("", "dyna-webdev-")
@@ -444,11 +491,12 @@ func main() {
 	defer st.Close()
 	runtime := filepath.Join(data, "runtime")
 	b := &boxes{ctx: ctx, st: st, dir: runtime, cancel: map[contract.BoxID]context.CancelFunc{}}
-	svc := engine.New(st, b, profiles{}, time.Now)
+	svc := engine.New(st, b, profiles{empty: *fixture == "empty"}, time.Now)
 	fatal(svc.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.grant": svc.HostexecGrant()}, time.Hour))
 	svc.SetFilesDir(filepath.Join(data, "files"))
 	svc.SetTranscriptDir(filepath.Join(data, "transcripts"))
-	a := api.New(devService{svc}, nil)
+	a := api.New(devService{Service: svc, empty: *fixture == "empty"}, nil)
+	a.SetConnectOperations(devConnect{empty: *fixture == "empty"})
 	a.SetFilesRoute(func(c api.Caller) http.Handler { return svc.Files(c.Principal, c.Room) })
 	app, err := fs.Sub(web.Dist, "dist")
 	fatal(err)
@@ -474,9 +522,14 @@ func main() {
 		svc.Reconciler().Wait()
 	}()
 	fatal(st.AddHost(ctx, box.Host{Name: host, State: box.HostReady, CPUs: 128, MemBytes: 256 * box.GiB, DiskBytes: 1024 * box.GiB}))
-	if *seed {
+	if *seed || *fixture == "full" {
 		seedRoom(ctx, svc, st, *posts, *agents)
 		seedDevices(ctx, st)
+	} else if *fixture == "empty" {
+		_, problem := svc.RoomCreate(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.RoomCreateRequest{Name: "web-studio", RootProfile: "fake"})
+		if problem != nil {
+			fatal(fmt.Errorf("create empty fixture room: %s", problem.Message))
+		}
 	}
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(runtime, "owner.sock"))
@@ -561,7 +614,7 @@ func seedRoom(ctx context.Context, s *engine.Service, st *store.Store, posts, ag
 		}
 	}
 	post(owner, contract.PostRequest{Text: "Welcome to the web studio. Please build a clear room view."})
-	post(contract.Principal{Kind: contract.PrincipalSession, Session: lead.Session}, contract.PostRequest{Text: "The feed and session tree are ready for review."})
+	post(contract.Principal{Kind: contract.PrincipalSession, Session: lead.Session}, contract.PostRequest{Text: "The **feed** and session tree are ready for review.\n\n- Check the layout\n- Review `inline code` and [the guide](https://example.com/guide)\n\n```typescript\nconst example = 'A long line that should stay inside its code block without making the whole page scroll sideways';\n```\n\n| Item | Description | Owner | Status |\n| --- | --- | --- | --- |\n| Responsive layout | A deliberately long description for a wide table with several columns | Web team | Ready for review |"})
 	post(contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, contract.PostRequest{Text: "I am checking the attachment previews."})
 	// A markdown-heavy post, so the markdown look shows in the feed and the thread.
 	post(contract.Principal{Kind: contract.PrincipalSession, Session: lead.Session}, contract.PostRequest{Text: "## A heading\n\n### A smaller heading\n\nStatus for **review** with `inline code`:\n\n> A quoted note for the team.\n\n1. First step\n2. Second step\n\nhttps://example.com/a-very-long-bare-url-without-spaces-that-demonstrates-wrapping-in-a-narrow-session-thread\n\n- The thread renders markdown.\n- Links open in a new tab: [docs](https://example.com/docs)\n\n| Area | State | Note |\n| --- | --- | --- |\n| Thread | Done | Cells wrap inside the table when the text is long for a narrow screen |\n| Feed | Done | Rows keep the same look |\n\n\x60\x60\x60\nnpm run check -- --a-very-long-flag-name-that-keeps-going-without-any-spaces-at-all-to-test-wrapping\n\x60\x60\x60\n\nSanitizer check: ![chart](https://example.com/chart.png) <script>window.dynaSanitizerRan = true</script> <a href=\"https://example.com/sanitizer\">sanitizer link</a>"})

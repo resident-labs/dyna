@@ -59,16 +59,14 @@ func (s *Store) StartConnectSession(ctx context.Context, x ConnectSession) error
 			previous := device
 			device = x.Device
 			// Connect uses its own cookie; the paired-device token is never issued.
-			tokenHash := sha256.Sum256(token[:])
-			if _, err := tx.ExecContext(ctx, "INSERT INTO devices(id,name,token_sha256,paired_at,last_seen_at,expires_at) VALUES(?,?,?,?,?,?)", device, "Connect browser", tokenHash[:], x.Created.UnixMilli(), x.Created.UnixMilli(), x.End.UnixMilli()); err != nil {
+			d := Device{ID: device, Name: "Connect browser", TokenHash: sha256.Sum256(token[:]), PairedAt: x.Created, LastSeenAt: x.Created, ExpiresAt: x.End}
+			if newDevice {
+				d.Scopes = FullDeviceScopes
+			}
+			if err := insertDevice(ctx, tx, d); err != nil {
 				return err
 			}
 			if newDevice {
-				for _, scope := range FullDeviceScopes {
-					if _, err := tx.ExecContext(ctx, "INSERT INTO device_scopes(device,scope) VALUES(?,?)", device, scope); err != nil {
-						return err
-					}
-				}
 				if _, err := tx.ExecContext(ctx, "INSERT INTO connect_devices(relay_device,device) VALUES(?,?)", x.RelayDevice, device); err != nil {
 					return err
 				}
