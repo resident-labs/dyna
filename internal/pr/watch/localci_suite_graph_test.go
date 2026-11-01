@@ -48,7 +48,7 @@ var expectedChecks = map[localci.Suite][]localci.CheckName{
 		"cross-build (darwin/amd64)", "cross-build (darwin/arm64)", "cross-build",
 	},
 	localci.SuiteComputerSmoke: {"computer-smoke"},
-	localci.Suite("next"):      {"next", "next-ssh"},
+	localci.Suite("next"):      {"next", "next-ssh", "next-extras"},
 	localci.Suite("next-web"):  {"next-web"},
 	localci.Suite("next-pi"):   {"next-pi"},
 	localci.SuiteGo: {
