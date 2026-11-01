@@ -1,22 +1,85 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
-import type { TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
+import type { Event, TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
 import { decodeEvent } from "./event.ts";
+import { causes } from "./feed.ts";
 
 export function pendingStartBrief(brief: string | undefined, turns: TranscriptTurn[]): string | undefined {
   return brief && !turns.some(turn => turn.inputs?.some(input => input.type === "session.started")) ? brief : undefined;
 }
 
-// Transcript inputs carry non-post event bodies as JSON. Decode the complete body once here.
-export function timelineInputText(input: TranscriptInput, full?: string): string {
-  if (input.type === "post.created" || input.type === "question.answered") return full ?? input.text;
-  if (input.type !== "session.started" || (input.more && full === undefined)) return "Started work";
+// Dyna: Someone's words are a message. An engine notice is one plain line, as T3 Code shows a notification, never a post.
+export type TimelineInput = { kind: "message" | "line" | "failed"; text: string };
+const line = (text: string): TimelineInput => ({ kind: "line", text });
+
+function eventInput(event: Event): TimelineInput | undefined {
+  switch (event.type) {
+    case "session.started": return { kind: "message", text: event.body.brief || "Started work" };
+    case "turn.ended": {
+      const { outcome, final, cause, error } = event.body;
+      if (outcome === "failed") return { kind: "failed", text: `Turn failed: ${cause ? causes[cause] : error || "no reason was given"}` };
+      if (final) return { kind: "message", text: final };
+      return line(outcome === "stopped" ? "Stopped with no reply" : "Finished with no reply");
+    }
+    case "checkin.due": return line(`Check-in on ${event.body.children?.length ?? 0} stalled ${event.body.children?.length === 1 ? "session" : "sessions"}`);
+    case "session.failed": return { kind: "failed", text: `${event.body.failures?.map(failure => failure.name).join(", ") || "A session"} failed` };
+    case "shell.job.ended": return line(`Background job ${event.body.description || event.body.job} ended`);
+    case "pr.opened": return line(`PR opened: ${event.body.url}`);
+    case "goal.set": return line(`Goal ${event.body.goal} set: ${event.body.text}`);
+    case "session.profile_changed": return line(`Model changed to ${event.body.profile}`);
+    case "session.restarted": return line(event.body.imageUpdated ? "Box image updated" : "Box replaced");
+    case "session.closed": return line(`Session ${event.body.session} closed`);
+    case "host.disk_low": return line(`Host ${event.body.host} is low on disk`);
+    case "op.decided": case "op.ran": return line(`Operation ${event.body.id}: ${event.body.state}`);
+    case "hook.due": return line(`Subscription ${event.body.subscription} is due`);
+    case "hook.finished": {
+      const { subscription, result, exitCode, cause } = event.body;
+      return { kind: result === "failed" ? "failed" : "line", text: `Subscription ${subscription} ${result}${cause ? `: ${causes[cause]}` : `, exit code ${exitCode}`}` };
+    }
+    case "notice.posted": return line(event.body.text);
+  }
+  return undefined;
+}
+
+// Transcript inputs carry non-post event bodies as JSON. Decode the complete body once here. A long body waits for its
+// whole text, and any type this build does not know says what it is.
+export function timelineInput(input: TranscriptInput, full?: string): TimelineInput {
+  if (input.type === "post.created" || input.type === "question.answered") return { kind: "message", text: full ?? input.text };
+  const neutral = line(`Event: ${input.type}`);
+  if (input.more && full === undefined) return input.type === "turn.ended" ? { kind: "message", text: "" } : input.type === "session.started" ? { kind: "message", text: "Started work" } : neutral;
   try {
     const event = decodeEvent({ id: input.id, seq: input.seq, room: input.room, at: input.at, from: input.from, type: input.type, body: JSON.parse(full ?? input.text) });
-    return event?.type === "session.started" ? event.body.brief || "Started work" : "Started work";
-  } catch { return "Started work"; }
+    return (event && eventInput(event)) ?? neutral;
+  } catch { return neutral; }
+}
+export const timelineInputText = (input: TranscriptInput, full?: string): string => timelineInput(input, full).text;
+
+// Dyna: A steer is an input that a running turn read, so it reads as one.
+export function steerInput(item: TranscriptItem): TranscriptInput {
+  return { id: item.event ?? item.id, seq: item.seq ?? 0, room: item.room ?? "", at: item.at, from: item.from ?? { kind: "engine" }, type: item.type ?? "post.created", text: item.text ?? "", more: item.more, attachments: item.attachments };
 }
 
 import { stepTitle, titleOf, type StepKind } from "./steps.ts";
+
+// Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
+// Dyna: A steer sits between the work it split, and the work after it folds under its own row, so each segment opens on
+// its own. Back-to-back steers split once, after the last of them.
+export type TimelineSegment = { id: string; steers: TranscriptItem[]; items: TranscriptItem[] };
+export function timelineSegments(turn: string, items: TranscriptItem[]): TimelineSegment[] {
+  const segments: TimelineSegment[] = [{ id: turn, steers: [], items: [] }];
+  for (const item of items) {
+    const last = segments[segments.length - 1];
+    if (item.kind !== "steer") last.items.push(item);
+    else if (last.steers.length && !last.items.length) last.steers.push(item);
+    else segments.push({ id: item.id, steers: [item], items: [] });
+  }
+  return segments;
+}
+
+// Dyna: A segment runs from its steer to the next one or the turn's end. The first keeps the whole turn's time.
+export function segmentDuration(segments: TimelineSegment[], index: number, started: string, ended: string): number {
+  if (!index) return Date.parse(ended) - Date.parse(started);
+  return Date.parse(segments[index + 1]?.steers[0]?.at ?? ended) - Date.parse(segments[index].steers.at(-1)!.at);
+}
 
 // Dyna: Transcript items already arrive in timeline order, and posts can belong to a tool.
 export type TimelineGroup = { kind: "work"; id: string; items: TranscriptItem[] } | { kind: "item" | "posts"; id: string; item: TranscriptItem };
