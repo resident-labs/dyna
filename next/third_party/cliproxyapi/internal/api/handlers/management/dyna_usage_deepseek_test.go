@@ -29,6 +29,16 @@ func TestDynaUsageDeepSeekLowBalanceIsStillABalance(t *testing.T) {
 	}
 }
 
+// The live response for an overdrawn account.
+func TestDynaUsageDeepSeekShowsANegativeBalance(t *testing.T) {
+	dynaFixedUsage(t, http.StatusOK, `{"is_available": false, "balance_infos": [{"currency": "USD", "total_balance": "-0.01", "granted_balance": "0.00", "topped_up_balance": "-0.01"}]}`)
+	auth := &coreauth.Auth{ID: "invented", Provider: "openai-compatible-deepseek", Attributes: map[string]string{"api_key": "invented-key"}}
+	entry := dynaOneEntry(t, dynaUsageHandler(t, auth))
+	if entry.State != dynaUsageOK || len(entry.Balances) != 1 || entry.Balances[0] != (dynaQuotaBalance{Currency: "USD", Amount: "-0.01"}) {
+		t.Fatalf("entry = %#v", entry)
+	}
+}
+
 func TestDynaUsageDeepSeekUnknownShapeIsNotZero(t *testing.T) {
 	for _, body := range []string{`{}`, `{"balance_infos":[]}`, `{"balance_infos":[{"currency":"USD"}]}`, `{"balance_infos":[{"total_balance":"1.00"}]}`, `{"balance_infos":[{"currency":"USD","total_balance":"n/a"}]}`} {
 		if usage := dynaParse(t, parseDeepSeekUsage, body); len(usage.balances) != 0 {

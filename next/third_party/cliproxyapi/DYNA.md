@@ -18,7 +18,7 @@ Each later patch to this folder must be its own commit. Each patch must add an e
 - OAuth in-memory handoff and adoption status: 124 product lines added, 4 removed. Dyna enables it for Claude and Codex callbacks, and it exposes adopted credential IDs for the supported flows. Upstream PR #4800 handles a busy callback port, not secret-free handoff; issue #295 asks for manual callbacks, not this storage boundary.
 - Durable credential writes: 18 product lines added, 1 removed. An opt-in store rejects publication after a failed save with a typed, secret-free error. If a provider already invalidated the old token, the owner must sign in again. Upstream PR #6295 makes file replacement atomic but does not reject an uncommitted refresh.
 - Codex metadata merge SDK bridge: 5 product lines added. The SQLite adapter reuses upstream’s `MergeCodexCredentialsFromDisk` rather than replacing token partitions on a metadata-only write. Upstream PR #3843 addresses the same preservation for file-backed stores.
-- Durable API-key registration and catalog-only providers: 38 product lines added, 1 removed. `cmd/dyna` registers a stored key and its fixed model catalog without a keyless fallback. Upstream issue #6201 asks for separate credentials and configuration; the checked open PRs do not implement this registration boundary.
+- Durable API-key registration: `cmd/dyna` registers a stored key without a keyless fallback. Upstream issue #6201 asks for separate credentials and configuration; the checked open PRs do not implement this registration boundary.
 - Staged credential activation: 21 product lines added, 6 removed. Credentials stay disabled until Dyna binds an account. A restart enables only credentials with a bound account. The 2026-10-31 upstream search found no fitting staged activation patch; PR #6715 covers a Codex login route.
 - Shared OAuth/key staging hook: 7 product lines added, 1 removed. Both creation paths use the same disabled staging boundary; the upstream search for staged OAuth activation remains the same as above.
 - Non-Codex completion adoption: 18 product lines added, 5 removed. It verifies the disabled runtime grant before the completion notification. The 2026-10-31 upstream OAuth adoption search found PR #4734 for Codex recovery, not this private handoff. A build-tagged test bridge joins the real management status and Dyna RPC paths without entering production builds.
@@ -54,6 +54,12 @@ Each later patch to this folder must be its own commit. Each patch must add an e
 - Meta usage reader: 33 product lines added, plus 52 test lines. It serves `engine/model` from the signals the #6467 patch records, with no request, because Meta has no usage endpoint. An account stays unknown until it serves a request. A window past its reset is stale, so it drops out rather than reading 0.
 
 - Removal of the passive Codex quota signals from `DynaCredentials`: 40 product lines and a test removed from the patch above. `engine/model` now reads every provider through `auth-files/quota`, so nothing reads them.
+
+- Credential-owned models for OpenAI-compatible providers: 54 product lines added, 4 removed, plus 44 test lines. `engine/model` lets the owner add a provider while the proxy runs, so a credential's `dyna_models` and `dyna_display_name` attributes replace the configuration catalog, and `DynaCredentials` reports the registry's models as the one source for accounts and profiles. This removes the `dyna-catalog-only` configuration option. Upstream has no runtime catalog per credential: the `openai-compatibility` models come only from configuration at `v8.0.49`.
+
+- Unknown usage for providers without a reader: 6 product lines added, 2 removed, plus 11 test lines. `engine/model` keeps one `auth-files/quota` call per account, so an owner-added provider answers `unknown` with no request. Readers stay keyed by the stable preset IDs `openai-compatible-zai`, `-deepseek` and `-opencode-go`.
+
+- DeepSeek negative balances: 12 product lines added, 9 removed, plus 10 test lines. An overdrawn account reports `total_balance` `-0.01`, and the reader refused it as it does a negative usage percent, so `engine/model` saw no balance. Balances now read through `dynaNumber`.
 
 ## Pulls
 

@@ -961,8 +961,6 @@ func (m GeminiModel) GetThinking() *registry.ThinkingSupport { return m.Thinking
 // OpenAICompatibility represents the configuration for OpenAI API compatibility
 // with external providers, allowing model aliases to be routed through OpenAI API format.
 type OpenAICompatibility struct {
-	// DynaCatalogOnly registers models without creating a keyless credential.
-	DynaCatalogOnly bool `yaml:"dyna-catalog-only,omitempty" json:"dyna-catalog-only,omitempty"`
 	// Name is the identifier for this OpenAI compatibility configuration.
 	Name string `yaml:"name" json:"name"`
 
