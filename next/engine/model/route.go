@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/resident-labs/dyna/contract"
 )
 
 const maxRequestBytes = 32 << 20
@@ -26,9 +28,9 @@ type RouteError struct {
 // Handler returns a route bound to one session and its allowed models.
 // socket is the proxy listener; clientKey never leaves the engine. pinnedID is the
 // credential the owner chose for this session, or empty for Automatic. It comes from the
-// store, never from the request.
-func Handler(socket string, clientKey, sessionID string, allowedModels, eligibleIDs []string, pinnedID string) http.Handler {
-	return handler(unixClient(socket), clientKey, sessionID, allowedModels, eligibleIDs, pinnedID)
+// store, never from the request. crew says the session's workers each keep their own account.
+func Handler(socket string, clientKey, sessionID string, allowedModels, eligibleIDs []string, pinnedID string, crew bool) http.Handler {
+	return handler(unixClient(socket), clientKey, sessionID, allowedModels, eligibleIDs, pinnedID, crew)
 }
 
 func unixClient(socket string) *http.Client {
@@ -37,7 +39,7 @@ func unixClient(socket string) *http.Client {
 	}}, Timeout: 30 * time.Second}
 }
 
-func handler(client *http.Client, clientKey, sessionID string, allowedModels, eligibleIDs []string, pinnedID string) http.Handler {
+func handler(client *http.Client, clientKey, sessionID string, allowedModels, eligibleIDs []string, pinnedID string, crew bool) http.Handler {
 	allowed := make(map[string]struct{}, len(allowedModels))
 	for _, name := range allowedModels {
 		allowed[name] = struct{}{}
@@ -118,10 +120,14 @@ func handler(client *http.Client, clientKey, sessionID string, allowedModels, el
 			query.Del(name)
 		}
 		r.URL.RawQuery = query.Encode()
+		affinity := sessionID
+		if worker := r.Header.Get(contract.WorkerHeader); crew && worker != "" {
+			affinity += "/" + worker
+		}
 		// Drop Connection before adding the policy: ReverseProxy removes headers
 		// named by Connection, which otherwise lets a box strip the policy.
 		// Do not forward box-controlled credentials or affinity headers.
-		for _, name := range []string{"Authorization", "X-Api-Key", "Proxy-Authorization", "X-Goog-Api-Key", "Api-Key", "X-Auth-Token", "X-Claude-Code-Session-Id", "Session-Id", "Session_id", "X-Session-Id", "X-Session-Affinity", "X-Client-Request-Id", "X-Dyna-Eligible-Auth", "X-Dyna-Pinned-Auth", "Connection"} {
+		for _, name := range []string{"Authorization", "X-Api-Key", "Proxy-Authorization", "X-Goog-Api-Key", "Api-Key", "X-Auth-Token", "X-Claude-Code-Session-Id", "Session-Id", "Session_id", "X-Session-Id", "X-Session-Affinity", "X-Client-Request-Id", "X-Dyna-Eligible-Auth", "X-Dyna-Pinned-Auth", contract.WorkerHeader, "Connection"} {
 			r.Header.Del(name)
 		}
 		encodedIDs := make([]string, len(eligibleIDs))
@@ -134,7 +140,7 @@ func handler(client *http.Client, clientKey, sessionID string, allowedModels, el
 		}
 		r.Header.Set("Authorization", "Bearer "+clientKey)
 		r.Header.Set("X-Api-Key", clientKey)
-		r.Header.Set("X-Claude-Code-Session-Id", sessionID)
+		r.Header.Set("X-Claude-Code-Session-Id", affinity)
 		proxy.ServeHTTP(w, r)
 	})
 }

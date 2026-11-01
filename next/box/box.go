@@ -87,6 +87,8 @@ func Size(name contract.BoxSizeName) (contract.BoxSize, bool) {
 		return contract.BoxSize{Name: name, CPUs: 4, MemBytes: 8 * GiB, Pids: 4096}, true
 	case contract.BoxSizeLarge:
 		return contract.BoxSize{Name: name, CPUs: 8, MemBytes: 16 * GiB, Pids: 8192}, true
+	case contract.BoxSizeXLarge:
+		return contract.BoxSize{Name: name, CPUs: 16, MemBytes: 32 * GiB, Pids: 16384}, true
 	default:
 		return contract.BoxSize{}, false
 	}
@@ -101,6 +103,8 @@ func diskRequest(name contract.BoxSizeName) int64 {
 		return 20 * GiB
 	case contract.BoxSizeLarge:
 		return 40 * GiB
+	case contract.BoxSizeXLarge:
+		return 80 * GiB
 	}
 	return 0
 }

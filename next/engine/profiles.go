@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -126,17 +127,29 @@ func (s *Service) ProfileList(ctx context.Context, who contract.Principal, _ con
 
 // AllowedModels returns the models a session may call: its profile's, and the ones its last turns ran on. A session
 // that changed profile needs the old model until it has moved: its running turn keeps that model, and its next turn
-// compacts on it. The old model stays reachable after its profile is removed.
-func (s *Service) AllowedModels(ctx context.Context, session store.Session) ([]string, error) {
+// compacts on it. The old model stays reachable after its profile is removed. A crew may also call every model of its
+// script's profiles, and the second result says the session is one.
+func (s *Service) AllowedModels(ctx context.Context, session store.Session) ([]string, bool, error) {
 	_, allowed, err := s.profiles.Model(session.Profile)
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	run, err := s.store.SessionWorkflow(ctx, session.ID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, false, err
+	}
+	crew := err == nil
+	for _, name := range run.Profiles {
+		// A profile removed during a run has no models left, so its workers fail like any refused call.
+		if _, models, err := s.profiles.Model(name); err == nil {
+			allowed = append(allowed, models...)
+		}
 	}
 	recent, err := s.store.RecentTurnModels(ctx, session.ID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return append(allowed, recent...), nil
+	return append(allowed, recent...), crew, nil
 }
 
 func (p *ProfileConfig) CompactionTokens(name contract.ProfileName) int {

@@ -123,10 +123,11 @@ func TestWakeStaysOnHostAndAccountsDisk(t *testing.T) {
 }
 func TestDiskFloorAndWarn(t *testing.T) {
 	for _, tc := range []struct{ total, floor, warn int64 }{
-		{0, 20 * box.GiB, 60 * box.GiB},
-		{100 * box.GiB, 20 * box.GiB, 60 * box.GiB},
-		{400 * box.GiB, 40 * box.GiB, 80 * box.GiB},
-		{1000 * box.GiB, 100 * box.GiB, 150 * box.GiB},
+		{0, 20 * box.GiB, 100 * box.GiB},
+		{100 * box.GiB, 20 * box.GiB, 100 * box.GiB},
+		{400 * box.GiB, 40 * box.GiB, 120 * box.GiB},
+		{1000 * box.GiB, 100 * box.GiB, 180 * box.GiB},
+		{4000 * box.GiB, 400 * box.GiB, 600 * box.GiB},
 	} {
 		floor := box.DiskFloor(tc.total)
 		if floor != tc.floor || box.DiskWarn(floor) != tc.warn {
@@ -155,7 +156,7 @@ func TestWarnComesBeforeAnySizeIsRefused(t *testing.T) {
 	now := time.Unix(100, 0)
 	for _, total := range []int64{100 * box.GiB, 200 * box.GiB, 400 * box.GiB, 1000 * box.GiB} {
 		floor := box.DiskFloor(total)
-		for _, name := range []contract.BoxSizeName{contract.BoxSizeAgent, contract.BoxSizeSmall, contract.BoxSizeMedium, contract.BoxSizeLarge} {
+		for _, name := range []contract.BoxSizeName{contract.BoxSizeAgent, contract.BoxSizeSmall, contract.BoxSizeMedium, contract.BoxSizeLarge, contract.BoxSizeXLarge} {
 			size, _ := box.Size(name)
 			// At the warn level nothing has warned yet, so nothing may be refused.
 			h := box.Host{Name: "host", State: box.HostReady, CPUs: 64, MemBytes: 256 * box.GiB, DiskBytes: box.DiskWarn(floor), DiskFloor: floor, CheckedAt: now}
@@ -214,5 +215,20 @@ func TestAdmissionRespectsHostRooms(t *testing.T) {
 	req.Room = "other"
 	if got := box.Admit([]box.Host{h}, nil, req); got.Host != "host" {
 		t.Fatalf("unrestricted host: %+v", got)
+	}
+}
+
+func TestXLargeIsTheSizeTheSpecNames(t *testing.T) {
+	size, ok := box.Size(contract.BoxSizeXLarge)
+	if !ok || size.CPUs != 16 || size.MemBytes != 32*box.GiB || size.MemBytes*3/2 != 48*box.GiB || size.Pids != 16384 {
+		t.Fatalf("%+v", size)
+	}
+	host := box.Host{Name: "host", State: box.HostReady, CPUs: 64, MemBytes: 256 * box.GiB, DiskBytes: 100 * box.GiB, DiskFloor: 20 * box.GiB, CheckedAt: time.Unix(100, 0)}
+	if p := box.Admit([]box.Host{host}, nil, box.Box{ID: "new", Size: size}); p.Host != "host" {
+		t.Fatalf("100 GiB free fits an 80 GiB request above a 20 GiB floor: %+v", p)
+	}
+	host.DiskBytes = 99 * box.GiB
+	if p := box.Admit([]box.Host{host}, nil, box.Box{ID: "new", Size: size}); p.Reason != box.PendingDisk {
+		t.Fatalf("99 GiB free: %+v", p)
 	}
 }

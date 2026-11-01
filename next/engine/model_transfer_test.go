@@ -67,7 +67,7 @@ func allowedModels(t *testing.T, s *Service, ctx context.Context, id contract.Se
 	if err != nil {
 		t.Fatal(err)
 	}
-	allowed, err := s.AllowedModels(ctx, session)
+	allowed, _, err := s.AllowedModels(ctx, session)
 	if err != nil {
 		t.Fatal(err)
 	}
