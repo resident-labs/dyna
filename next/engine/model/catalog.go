@@ -22,7 +22,13 @@ type Catalog struct {
 type PlanProvider struct {
 	ID           contract.AccountProvider `json:"id"`
 	DefaultModel string                   `json:"defaultModel"`
-	Models       []contract.CatalogModel  `json:"models"`
+	Models       []PlanModel              `json:"models"`
+}
+
+type PlanModel struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	ProxyID string `json:"proxyID"`
 }
 
 type KeyProvider struct {

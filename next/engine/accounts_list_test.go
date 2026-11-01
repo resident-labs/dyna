@@ -15,10 +15,10 @@ import (
 
 func testAccountCatalog() model.Catalog {
 	return model.Catalog{Plans: []model.PlanProvider{
-		{ID: "anthropic", Models: []contract.CatalogModel{{ID: "claude-sonnet-4-6"}}},
-		{ID: "openai", Models: []contract.CatalogModel{{ID: "gpt-5.6-luna"}}},
-		{ID: "kimi-coding", Models: []contract.CatalogModel{{ID: "k3"}}},
-		{ID: "xai", Models: []contract.CatalogModel{{ID: "grok-4.3"}}},
+		{ID: "anthropic", Models: []model.PlanModel{{ID: "claude-sonnet-4-6"}}},
+		{ID: "openai", Models: []model.PlanModel{{ID: "gpt-5.6-luna"}}},
+		{ID: "kimi-coding", Models: []model.PlanModel{{ID: "k3", ProxyID: "kimi-k3"}}},
+		{ID: "xai", Models: []model.PlanModel{{ID: "grok-4.3"}}},
 	}, Keys: []model.KeyProvider{{Provider: "zai", DisplayName: "z.ai", KeyName: "ZAI_API_KEY", DefaultModel: "model", URL: "https://example.com/v1", Models: []contract.CatalogModel{{ID: "model"}}}}}
 }
 

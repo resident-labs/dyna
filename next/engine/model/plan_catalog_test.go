@@ -30,9 +30,9 @@ func testKeyPools() map[string]pool {
 func TestPlanCatalogUsesDefaultAndExactAliases(t *testing.T) {
 	p := &Proxy{}
 	catalog := Catalog{Plans: []PlanProvider{
-		{ID: "anthropic", DefaultModel: "claude-opus-4-6", Models: []contract.CatalogModel{{ID: "not-served"}, {ID: "claude-sonnet-4-6"}, {ID: "claude-opus-4-6"}}},
-		{ID: "kimi-coding", DefaultModel: "kimi-for-coding", Models: []contract.CatalogModel{{ID: "k3"}, {ID: "kimi-for-coding"}}},
-		{ID: "openai", DefaultModel: "gpt-5.6-sol", Models: []contract.CatalogModel{{ID: "gpt-5.6-sol"}, {ID: "gpt-5.6-luna"}}},
+		{ID: "anthropic", DefaultModel: "claude-opus-4-6", Models: []PlanModel{{ID: "not-served"}, {ID: "claude-sonnet-4-6"}, {ID: "claude-opus-4-6"}}},
+		{ID: "kimi-coding", DefaultModel: "kimi-for-coding", Models: []PlanModel{{ID: "k3", ProxyID: "kimi-k3"}, {ID: "kimi-for-coding", ProxyID: "kimi-k2.8-code"}}},
+		{ID: "openai", DefaultModel: "gpt-5.6-sol", Models: []PlanModel{{ID: "gpt-5.6-sol"}, {ID: "gpt-5.6-luna"}}},
 	}}
 	if err := p.initPools(catalog); err != nil {
 		t.Fatal(err)
@@ -40,7 +40,7 @@ func TestPlanCatalogUsesDefaultAndExactAliases(t *testing.T) {
 	if len(p.pools["plan_anthropic"].info.Models) != 2 || p.pools["plan_anthropic"].defaultModel != "claude-opus-4-6" {
 		t.Fatal("wrong Claude plan models or default")
 	}
-	if len(p.pools["plan_kimi-coding"].info.Models) != 2 || p.pools["plan_kimi-coding"].defaultModel != "kimi-for-coding" || planProxyModel(contract.ProviderKimiCoding, "kimi-for-coding") != "kimi-k2.8-code" {
+	if len(p.pools["plan_kimi-coding"].info.Models) != 2 || p.pools["plan_kimi-coding"].defaultModel != "kimi-for-coding" || p.pools["plan_kimi-coding"].modelID("kimi-for-coding") != "kimi-k2.8-code" {
 		t.Fatal("wrong Kimi plan models or aliases")
 	}
 	if len(p.pools["plan_openai"].info.Models) != 2 || p.pools["plan_openai"].defaultModel != "gpt-5.6-luna" {
@@ -53,11 +53,14 @@ func TestPlanCatalogUsesDefaultAndExactAliases(t *testing.T) {
 
 func TestDualProviderPublishesBothPools(t *testing.T) {
 	p := &Proxy{}
-	catalog := Catalog{Plans: []PlanProvider{{ID: "anthropic", Models: []contract.CatalogModel{{ID: "claude-sonnet-4-6"}}}}, Keys: []KeyProvider{{Provider: "anthropic", DefaultModel: "key-only", Models: []contract.CatalogModel{{ID: "key-only"}, {ID: "claude-sonnet-4-6"}}}}}
+	catalog := Catalog{Plans: []PlanProvider{{ID: "anthropic", Models: []PlanModel{{ID: "claude-sonnet-4-6"}}}}, Keys: []KeyProvider{{Provider: "anthropic", DefaultModel: "key-only", Models: []contract.CatalogModel{{ID: "key-only"}, {ID: "claude-sonnet-4-6"}}}}}
 	if err := p.initPools(catalog); err != nil {
 		t.Fatal(err)
 	}
 	info := p.AccountProviders()[0]
+	if len(p.pools["plan_anthropic"].info.Models) != 1 {
+		t.Fatal("plan pool includes key-only model")
+	}
 	if len(info.Models) != 2 {
 		t.Fatalf("published models: %+v", info.Models)
 	}
@@ -147,7 +150,7 @@ func TestPinnedPlanCatalogDrift(t *testing.T) {
 			if !p.pools["plan_"+string(id)].models[model.ID] {
 				continue
 			}
-			if !set[planProxyModel(id, model.ID)] {
+			if !set[p.pools["plan_"+string(id)].modelID(model.ID)] {
 				t.Errorf("%s/%s has no compiled proxy model", id, model.ID)
 			}
 		}
@@ -171,7 +174,7 @@ func TestPinnedPlanCatalogDrift(t *testing.T) {
 		}
 		expected := ""
 		for _, model := range p.pools["plan_"+string(id)].info.Models {
-			if p.pools["plan_"+string(id)].models[model.ID] && common[planProxyModel(id, model.ID)] && (expected == "" || model.ID == defaultID) {
+			if p.pools["plan_"+string(id)].models[model.ID] && common[p.pools["plan_"+string(id)].modelID(model.ID)] && (expected == "" || model.ID == defaultID) {
 				expected = model.ID
 			}
 		}

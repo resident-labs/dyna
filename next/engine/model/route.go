@@ -26,7 +26,7 @@ type RouteError struct {
 // Handler returns a route bound to one session and its allowed models.
 // socket is the proxy listener; clientKey never leaves the engine.
 func Handler(socket string, clientKey, sessionID, namespace string, allowedModels, eligibleIDs []string) http.Handler {
-	return handler(unixClient(socket), clientKey, sessionID, namespace, allowedModels, eligibleIDs)
+	return handler(unixClient(socket), clientKey, sessionID, namespace, allowedModels, eligibleIDs, pool{})
 }
 
 func unixClient(socket string) *http.Client {
@@ -35,7 +35,7 @@ func unixClient(socket string) *http.Client {
 	}}, Timeout: 30 * time.Second}
 }
 
-func handler(client *http.Client, clientKey, sessionID, namespace string, allowedModels, eligibleIDs []string) http.Handler {
+func handler(client *http.Client, clientKey, sessionID, namespace string, allowedModels, eligibleIDs []string, entry pool) http.Handler {
 	allowed := make(map[string]struct{}, len(allowedModels))
 	for _, name := range allowedModels {
 		allowed[name] = struct{}{}
@@ -112,7 +112,7 @@ func handler(client *http.Client, clientKey, sessionID, namespace string, allowe
 			refuse(w, http.StatusForbidden, "account_forbidden", "No account is available to this room.")
 			return
 		}
-		encoded, _ := json.Marshal(namespace + "/" + proxyModel(namespace, model))
+		encoded, _ := json.Marshal(namespace + "/" + entry.modelID(model))
 		body = append(append(append([]byte(nil), body[:valueStart]...), encoded...), body[valueEnd:]...)
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		r.ContentLength = int64(len(body))

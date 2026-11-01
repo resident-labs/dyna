@@ -125,5 +125,5 @@ func NewProxy(dataDir, managementKey string, catalog Catalog) (*Proxy, error) {
 
 // Handler binds a route to a session and its permitted models.
 func (p *Proxy) Handler(sessionID, namespace string, allowedModels, eligibleIDs []string) http.Handler {
-	return handler(p.client, p.clientKey, sessionID, namespace, allowedModels, eligibleIDs)
+	return handler(p.client, p.clientKey, sessionID, namespace, allowedModels, eligibleIDs, p.pools[namespace])
 }

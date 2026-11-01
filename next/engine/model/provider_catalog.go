@@ -29,6 +29,12 @@ func (p *Proxy) AccountProviders() []contract.AccountProviderInfo {
 		if index, ok := indices[info.ID]; ok {
 			providers[index].Flows = append(providers[index].Flows, contract.ConnectFlowKey)
 			providers[index].KeyName = info.KeyName
+			plan := p.pools["plan_"+namespace]
+			for _, model := range info.Models {
+				if !plan.models[model.ID] {
+					providers[index].Models = append(providers[index].Models, model)
+				}
+			}
 		} else {
 			providers = append(providers, info)
 		}

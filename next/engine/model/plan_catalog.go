@@ -1,38 +1,15 @@
 package model
 
 import (
-	"strings"
-
 	"github.com/resident-labs/dyna/contract"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
 )
-
-// planProxyModel translates the pinned Pi spelling to the proxy's exact ID.
-func planProxyModel(provider contract.AccountProvider, id string) string {
-	if provider == contract.ProviderKimiCoding {
-		switch id {
-		case "k3":
-			return "kimi-k3"
-		case "k2p6":
-			return "kimi-k2.6"
-		case "kimi-for-coding":
-			return "kimi-k2.8-code"
-		}
-	}
-	return id
-}
-
-func proxyModel(namespace, id string) string {
-	if strings.HasPrefix(namespace, "plan_") {
-		return planProxyModel(contract.AccountProvider(strings.TrimPrefix(namespace, "plan_")), id)
-	}
-	return id
-}
 
 type pool struct {
 	info         contract.AccountProviderInfo
 	proxy        string
 	models       map[string]bool
+	proxyIDs     map[string]string
 	defaultModel string
 }
 
@@ -79,23 +56,25 @@ func (p *Proxy) initPools(c Catalog) error {
 			}
 		}
 		var selected string
+		proxyIDs := make(map[string]string)
 		for _, model := range provider.Models {
-			count := counts[planProxyModel(provider.ID, model.ID)]
+			proxyID := model.ProxyID
+			if proxyID == "" {
+				proxyID = model.ID
+			}
+			count := counts[proxyID]
 			if count == 0 {
 				continue
 			}
-			info.Models = append(info.Models, model)
+			info.Models = append(info.Models, contract.CatalogModel{ID: model.ID, Name: model.Name})
+			proxyIDs[model.ID] = proxyID
 			if count == len(tiers) && (selected == "" || model.ID == provider.DefaultModel) {
 				selected = model.ID
 			}
 		}
 		if selected != "" {
 			entry := makePool(info, proxy, selected)
-			for _, model := range p.pools[string(provider.ID)].info.Models {
-				if !entry.models[model.ID] {
-					entry.info.Models = append(entry.info.Models, model)
-				}
-			}
+			entry.proxyIDs = proxyIDs
 			p.pools["plan_"+string(provider.ID)] = entry
 		}
 	}
@@ -108,4 +87,11 @@ func makePool(info contract.AccountProviderInfo, proxy, defaultModel string) poo
 		models[model.ID] = true
 	}
 	return pool{info: info, proxy: proxy, models: models, defaultModel: defaultModel}
+}
+
+func (p pool) modelID(id string) string {
+	if mapped := p.proxyIDs[id]; mapped != "" {
+		return mapped
+	}
+	return id
 }
