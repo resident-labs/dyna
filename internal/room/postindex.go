@@ -150,6 +150,12 @@ func (s *Store) postIndexDB() (*sql.DB, error) {
 		})
 	}
 	if err == nil {
+		err = database.Migrate(db, "room.post_deliveries_claims", 1, func(conn *sql.Conn, _ int) error {
+			_, err := conn.ExecContext(context.Background(), `CREATE INDEX IF NOT EXISTS post_deliveries_claims ON post_deliveries(room_id, session_id) WHERE state IN ('claimed','cancelled','dismissed')`)
+			return err
+		})
+	}
+	if err == nil {
 		err = migrateSenderPolicy(db)
 	}
 	return db, err
