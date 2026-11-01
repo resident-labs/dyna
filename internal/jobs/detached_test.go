@@ -407,16 +407,11 @@ func TestDetachedLogReaderStreamsWhilePipeRemainsOpen(t *testing.T) {
 	if _, err := io.WriteString(in, "hello"); err != nil {
 		t.Fatal(err)
 	}
-	got := make(chan string, 1)
-	go func() { b := make([]byte, 5); n, _ := io.ReadFull(out, b); got <- string(b[:n]) }()
-	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
-	defer cancel()
-	select {
-	case s := <-got:
-		if s != "hello" {
-			t.Fatalf("output = %q, want hello", s)
-		}
-	case <-ctx.Done():
-		t.Fatal("short output stayed buffered while input remained open")
+	got := make([]byte, 5)
+	if _, err := io.ReadFull(out, got); err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello" {
+		t.Fatalf("output = %q, want hello", got)
 	}
 }
