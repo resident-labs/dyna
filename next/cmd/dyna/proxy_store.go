@@ -51,7 +51,7 @@ func (s *proxyStore) List(context.Context) ([]*proxyauth.Auth, error) {
 	auths := make([]*proxyauth.Auth, 0, len(records))
 	for _, record := range records {
 		switch record.Provider {
-		case "claude", "codex", "kimi", "xai", "openai-compatible-zai", "openai-compatible-opencode-go", "openai-compatible-deepseek":
+		case "claude", "codex", "kimi", "xai", "meta", "openai-compatible-zai", "openai-compatible-opencode-go", "openai-compatible-deepseek":
 		default:
 			continue
 		}

@@ -54,6 +54,8 @@ func validOAuthImport(provider contract.AccountProvider, token oauthImportToken)
 		// The Codex executor sends this as Chatgpt-Account-Id. Without an
 		// id_token, nothing else supplies it before the first refresh.
 		return validOAuthIdentifier(token.AccountID) && email
+	case contract.ProviderMeta:
+		return email && token.AccountID == ""
 	default:
 		return token.Email == "" && token.AccountID == ""
 	}
@@ -72,25 +74,38 @@ func proxyKeyRoutes(router *gin.Engine, service **cliproxy.Service, credentials 
 			c.Status(http.StatusBadRequest)
 			return
 		}
+		register := func(auth *coreauth.Auth) {
+			if err := (*service).RegisterDynaCredential(c.Request.Context(), auth); err != nil {
+				c.Status(http.StatusServiceUnavailable)
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"status": "ok"})
+		}
+		if req.Provider == contract.ProviderMeta {
+			register(&coreauth.Auth{
+				ID:         req.ID,
+				Provider:   "meta",
+				Label:      "meta",
+				Status:     coreauth.StatusActive,
+				Attributes: map[string]string{"api_key": req.Key, "auth_kind": "apikey"},
+				Metadata:   map[string]any{"type": "meta"},
+			})
+			return
+		}
 		for _, provider := range model.KeyProviders() {
 			if provider.Provider != req.Provider {
 				continue
 			}
 			name := string(provider.Provider)
 			// The proxy SDK defines provider metadata as map[string]any.
-			auth := &coreauth.Auth{
+			register(&coreauth.Auth{
 				ID:         req.ID,
 				Provider:   "openai-compatible-" + name,
 				Label:      name,
 				Status:     coreauth.StatusActive,
 				Attributes: map[string]string{"api_key": req.Key, "auth_kind": "apikey", "base_url": provider.URL, "compat_name": name, "provider_key": "openai-compatible-" + name},
 				Metadata:   map[string]any{"type": "openai-compatibility"},
-			}
-			if err := (*service).RegisterDynaCredential(c.Request.Context(), auth); err != nil {
-				c.Status(http.StatusServiceUnavailable)
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{"status": "ok"})
+			})
 			return
 		}
 		c.Status(http.StatusBadRequest)
@@ -123,6 +138,13 @@ func proxyKeyRoutes(router *gin.Engine, service **cliproxy.Service, credentials 
 		}
 		// The proxy SDK uses provider-specific metadata maps for credentials.
 		auth := &coreauth.Auth{ID: req.ID, Provider: provider, Label: provider, Status: coreauth.StatusActive, Metadata: map[string]any{"type": provider, "auth_kind": "oauth", "access_token": token.Access, "refresh_token": token.Refresh, "expired": req.ExpiresAt.UTC().Format(time.RFC3339Nano), "token_type": "Bearer"}}
+		if req.Provider == contract.ProviderMeta {
+			// Meta has no refresh grant. The identity token mints a new key after a 401,
+			// and an expiry here would stop the proxy selecting the credential first.
+			delete(auth.Metadata, "refresh_token")
+			delete(auth.Metadata, "expired")
+			auth.Metadata["dca_token"] = token.Refresh
+		}
 		if token.Domain != "" {
 			auth.Metadata["domain"] = token.Domain
 		}

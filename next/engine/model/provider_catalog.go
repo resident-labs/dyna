@@ -10,6 +10,7 @@ var oauthProviders = []struct {
 	{contract.AccountProviderInfo{ID: contract.ProviderOpenAI, DisplayName: "ChatGPT", ConnectMethod: contract.ConnectOAuth, ConnectFlow: contract.ConnectFlowCallback}, "codex"},
 	{contract.AccountProviderInfo{ID: contract.ProviderKimi, DisplayName: "Kimi Code", ConnectMethod: contract.ConnectOAuth, ConnectFlow: contract.ConnectFlowDevice}, "kimi"},
 	{contract.AccountProviderInfo{ID: contract.ProviderXAI, DisplayName: "xAI", ConnectMethod: contract.ConnectOAuth, ConnectFlow: contract.ConnectFlowDevice}, "xai"},
+	{contract.AccountProviderInfo{ID: contract.ProviderMeta, DisplayName: "Meta", ConnectMethod: contract.ConnectOAuth, ConnectFlow: contract.ConnectFlowDevice, AlsoKey: true}, "meta"},
 }
 
 // OAuthProxyProvider returns the proxy's name for a provider with OAuth sign-in.
