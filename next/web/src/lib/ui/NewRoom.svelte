@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { call } from "../client.ts";
-  import type { ProfileSummary, RoomSummary } from "../contract.gen.ts";
+  import type { RoomSummary } from "../contract.gen.ts";
   import { nameProblem } from "../name-problem.ts";
   import ProfileSelector from "./ProfileSelector.svelte";
 
@@ -9,47 +8,34 @@
     rooms: RoomSummary[]; first: boolean; onclose: () => void; oncreated: (room: string) => void;
   } = $props();
   let name = $state(""), repo = $state(""), profile = $state("");
-  let profiles: ProfileSummary[] = $state([]);
-  let loading = $state(true), busy = $state(false), attempted = $state(false);
-  let failure = $state(""), profileFailure = $state("");
+  let busy = $state(false), attempted = $state(false);
+  let failure = $state("");
   let created = $state("");
-  let problem = $derived(nameProblem(name, rooms.map(room => room.name)));
-
-  async function loadProfiles() {
-    loading = true;
-    profileFailure = "";
-    await call("profile.list", {}).then(result => {
-      profiles = result.profiles ?? [];
-      if (!profiles.some(item => item.name === profile)) profile = [...profiles].sort((a, b) => b.inUse - a.inUse)[0]?.name ?? "";
-    }, () => { profileFailure = "Profiles did not load."; });
-    loading = false;
-  }
-  onMount(() => { void loadProfiles(); });
+  let trimmedName = $derived(name.trim());
+  let problem = $derived(nameProblem(trimmedName, rooms.map(room => room.name)));
 
   async function submit() {
     if (busy) return;
     attempted = true;
-    if (!created && (problem || !profile || loading)) return;
+    if (!created && (problem || !profile)) return;
     busy = true;
     failure = "";
     if (!created) {
-      try {
-        const result = await call("room.create", { name: name.trim(), rootProfile: profile });
+      const ok = await call("room.create", { name: trimmedName, rootProfile: profile }).then(result => {
         created = result.room;
-      } catch {
-        failure = "The room could not be created. Try again.";
-        busy = false;
-        return;
-      }
+        return true;
+      }, (error: unknown) => {
+        failure = error instanceof Error ? error.message : "The room could not be created. Try again.";
+        return false;
+      });
+      if (!ok) { busy = false; return; }
     }
     if (repo.trim()) {
-      try {
-        await call("room.repo.add", { room: created, repo: repo.trim(), default: true });
-      } catch (error: unknown) {
-        failure = `${name} exists, but adding ${repo.trim()} failed: ${error instanceof Error ? error.message : "Try again."}`; 
-        busy = false;
-        return;
-      }
+      const ok = await call("room.repo.add", { room: created, repo: repo.trim(), default: true }).then(() => true, (error: unknown) => {
+        failure = `${trimmedName} exists, but adding ${repo.trim()} failed: ${error instanceof Error ? error.message : "Try again."}`;
+        return false;
+      });
+      if (!ok) { busy = false; return; }
     }
     oncreated(created);
     busy = false;
@@ -68,13 +54,10 @@
         <label for="room-name">Name</label>
         <input id="room-name" class="mono" bind:value={name} oninput={() => attempted = true} onblur={() => attempted = true} disabled={busy} aria-invalid={attempted && !!problem} aria-describedby="room-name-hint" autocomplete="off" />
         <span id="room-name-hint" class:error={attempted && !!problem}>
-          {#if attempted && problem}{problem}{:else if name.trim()}Agents address it as <span class="mono">#{name.trim()}</span>.{:else}Use letters, digits, dots, underscores or hyphens.{/if}
+          {#if attempted && problem}{problem}{:else if trimmedName}Agents address it as <span class="mono">#{trimmedName}</span>.{:else}Use letters, digits, dots, underscores or hyphens.{/if}
         </span>
       </div>
-      {#if loading}<p class="hint">Loading profiles…</p>
-      {:else if profileFailure}<p class="error" role="alert">{profileFailure} <button type="button" class="retry" onclick={() => void loadProfiles()}>Retry</button></p>
-      {:else if profiles.length}<ProfileSelector {profiles} bind:value={profile} room={true} label="Root profile" />
-      {:else}<p class="hint">Add a profile in settings before creating a room.</p>{/if}
+      <ProfileSelector bind:value={profile} label="Root profile" />
     {/if}
     <div class="field">
       <label for="room-repo">Repository <span>· optional</span></label>
@@ -83,7 +66,7 @@
     </div>
     {#if failure}<p class="error" role="alert">{failure}</p>{/if}
     <div class="actions">
-      <button class="primary" type="submit" disabled={busy || (!created && (loading || !profile || !!problem))}>{busy ? "Saving…" : created ? "Retry repository" : "Create room"} <kbd>Ctrl Enter</kbd></button>
+      <button class="primary" type="submit" disabled={busy || (!created && (!profile || !!problem))}>{busy ? "Saving…" : created ? "Retry repository" : "Create room"} <kbd>Ctrl Enter</kbd></button>
       {#if created}<button type="button" class="quiet" disabled={busy} onclick={() => oncreated(created)}>Open room</button>
       {:else if !first}<button type="button" class="quiet" disabled={busy} onclick={onclose}>Cancel</button>{/if}
     </div>

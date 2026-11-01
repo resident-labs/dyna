@@ -1,16 +1,16 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import type { ProfileSummary } from "../contract.gen.ts";
+  import { call } from "../client.ts";
+  import Icon from "./Icon.svelte";
   import { slugName } from "../profiles.ts";
 
-  let { profiles, value = $bindable(""), room = false, label = "Profile" }: {
-    profiles: ProfileSummary[]; value?: string; room?: boolean; label?: string;
-  } = $props();
-  let expanded = $state(false);
-  let narrow = $state(false);
+  let { value = $bindable(""), label = "Profile" }: { value?: string; label?: string } = $props();
+  let profiles: ProfileSummary[] = $state([]);
+  let loading = $state(true), failure = $state(false), expanded = $state(false);
   let container: HTMLDivElement;
-  let sorted = $derived([...profiles].sort ( (a, b) => b.inUse - a.inUse ));
-  let limit = $derived(room || narrow ? 3 : 4);
+  let sorted = $derived(profiles);
+  const limit = 3;
   let visible = $derived.by(() => {
     if (expanded || sorted.length <= limit) return sorted;
     const top = sorted.slice(0, limit);
@@ -19,11 +19,18 @@
     return top;
   });
 
-  onMount(() => {
-    const observer = new ResizeObserver(entries => { narrow = entries[0].contentRect.width <= 500; });
-    observer.observe(container);
-    return () => observer.disconnect();
-  });
+  let focusable = $derived(visible.find(profile => profile.name === value)?.name ?? visible[0]?.name);
+
+  async function loadProfiles() {
+    loading = true;
+    failure = false;
+    await call("profile.list", {}).then(result => {
+      profiles = (result.profiles ?? []).sort((a, b) => b.inUse - a.inUse);
+      if (!profiles.some(item => item.name === value)) value = profiles[0]?.name ?? "";
+    }, () => { failure = true; });
+    loading = false;
+  }
+  onMount(() => { void loadProfiles(); });
 
   async function move(event: KeyboardEvent, index: number) {
     const step = event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 :
@@ -38,11 +45,15 @@
 </script>
 
 <div class="selector" bind:this={container}>
+  {#if loading}<p class="hint">Loading profiles…</p>
+  {:else if failure}<p class="error" role="alert">Profiles did not load. <button type="button" class="retry" onclick={() => void loadProfiles()}>Retry</button></p>
+  {:else if !profiles.length}<p class="hint">Add a profile in settings before continuing.</p>
+  {:else}
   <div class="heading">{label} <span>· {profiles.length}</span></div>
   <div class="list" role="radiogroup" aria-label={label}>
     {#each visible as profile, index (profile.name)}
       <button type="button" role="radio" aria-checked={profile.name === value}
-        tabindex={profile.name === value || (!sorted.some(item => item.name === value) && index === 0) ? 0 : -1}
+        tabindex={profile.name === focusable ? 0 : -1}
         class:selected={profile.name === value}
         onclick={() => value = profile.name} onkeydown={event => void move(event, index)}>
         <span class="radio" aria-hidden="true"></span>
@@ -53,7 +64,7 @@
         <span class="bars">
           {#each [{ name: "Taste", value: profile.taste }, { name: "Diagnostics", value: profile.diagnostics }, { name: "Intelligence", value: profile.intelligence }, { name: "Cost", value: profile.cost }] as rating}
             <span class="rating" aria-label={`${rating.name}: ${rating.value} out of 10`}>
-              <span>{rating.name} {rating.value}</span><span class="track"><span style:width={`${Math.max(0, Math.min(10, rating.value)) * 10}%`}></span></span>
+              <span>{rating.name} {rating.value}</span><span class="track"><span style:width={`${rating.value * 10}%`}></span></span>
             </span>
           {/each}
         </span>
@@ -62,12 +73,17 @@
   </div>
   {#if sorted.length > limit}
     <button type="button" class="more" aria-expanded={expanded} onclick={() => expanded = !expanded}>
-      <span aria-hidden="true">{expanded ? "⌃" : "⌄"}</span> {expanded ? "Show fewer profiles" : `Show all ${sorted.length} profiles`}
+      <span class:up={expanded}><Icon name="chevron" /></span> {expanded ? "Show fewer profiles" : `Show all ${sorted.length} profiles`}
     </button>
+  {/if}
   {/if}
 </div>
 
 <style>
+  .hint, .error { margin: 0; font-size: 13px; color: var(--muted); }
+  .error { color: var(--danger); }
+  .retry { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
+  .up { transform: rotate(180deg); }
   .selector { container-type: inline-size; min-width: 0; }
   .heading { margin-bottom: 8px; font-size: 13px; font-weight: 600; }
   .heading span { color: var(--muted); font-weight: 400; }
