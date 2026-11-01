@@ -219,7 +219,7 @@
     const versions = await Promise.all(matches.map(async entry => {
       const page = await call("events.list", { room: entry.room ?? store.room, event: entry.event, afterSeq: 0, limit: 1 });
       const event = page.events?.[0] && decodeEvent(page.events[0]);
-      return event?.type === "post.created" && entry.file.visual ? { event, visual: entry.file.visual } : undefined;
+      return event?.type === "post.created" && event.id === entry.event && entry.file.visual ? { event, visual: entry.file.visual } : undefined;
     }));
     return versions.filter(entry => entry !== undefined).reverse();
   }
