@@ -77,11 +77,9 @@ func (s *Store) SessionDeliveries(roomID string, keys, postIDs []string) (map[st
 	return out, nil
 }
 
-// SessionDeliveryRows reads every delivery row of one session in roomID, in no
-// particular order. It is the read that replaced the session_queues blob: the
-// rows hold the claim, cancellation and dismissal state of every post the
-// session was sent in this room.
-func (s *Store) SessionDeliveryRows(roomID string, keys []string) ([]Delivery, error) {
+// SessionClaimRows reads only delivery states that contribute to a session's
+// claims, cancellations, and dismissals.
+func (s *Store) SessionClaimRows(roomID string, keys []string) ([]Delivery, error) {
 	if len(keys) == 0 {
 		return nil, nil
 	}
@@ -90,7 +88,7 @@ func (s *Store) SessionDeliveryRows(roomID string, keys []string) ([]Delivery, e
 		return nil, err
 	}
 	query := "SELECT " + deliveryColumns + " FROM post_deliveries WHERE room_id=? AND session_id IN (?" +
-		strings.Repeat(",?", len(keys)-1) + ")"
+		strings.Repeat(",?", len(keys)-1) + ") AND state IN ('claimed','cancelled','dismissed')"
 	args := make([]any, 0, len(keys)+1)
 	args = append(args, roomID)
 	for _, key := range keys {
