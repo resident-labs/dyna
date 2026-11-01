@@ -35,6 +35,8 @@ type Web struct {
 	discoverMu  sync.Mutex
 	address     string
 	handler     http.Handler
+	muxOnce     sync.Once
+	mux         http.Handler
 	now         func() time.Time
 	ticks       func() (<-chan time.Time, func())
 	tokens      map[[32]byte]time.Time
@@ -352,36 +354,44 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 		case "/v1/shell/watch":
 			streamScope = contract.ScopeTerminal
 		}
-		ctx, cancel := context.WithCancel(r.Context())
-		defer cancel()
-		ticks, stop := w.ticks()
-		defer stop()
-		go func() {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticks:
-					var scopes []contract.Scope
-					var alive bool
-					var err error
-					if session.ID != "" {
-						scopes, alive, err = w.connect.StreamScopes(ctx, session.ID)
-					} else {
-						var current store.Device
-						current, alive, err = w.devices.AuthenticateDevice(ctx, sha256.Sum256([]byte(cookie.Value)), w.now())
-						scopes = current.Scopes
-					}
-					if err != nil || !alive || (streamScope != "" && !hasScope(Caller{Web: true, Scopes: scopes}, streamScope)) {
-						cancel()
+		ctx := r.Context()
+		if streamScope != "" {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithCancel(ctx)
+			defer cancel()
+			ticks, stop := w.ticks()
+			defer stop()
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
 						return
+					case <-ticks:
+						var scopes []contract.Scope
+						var alive bool
+						var err error
+						if session.ID != "" {
+							scopes, alive, err = w.connect.StreamScopes(ctx, session.ID)
+						} else {
+							var current store.Device
+							current, alive, err = w.devices.AuthenticateDevice(ctx, sha256.Sum256([]byte(cookie.Value)), w.now())
+							scopes = current.Scopes
+						}
+						if err != nil || !alive || (streamScope != "" && !hasScope(Caller{Web: true, Scopes: scopes}, streamScope)) {
+							cancel()
+							return
+						}
 					}
 				}
-			}
-		}()
+			}()
+		}
+		ctx = context.WithValue(ctx, callerKey{}, Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner, Device: contract.DeviceID(device.ID)}, Device: device.ID, Scopes: device.Scopes, Web: true})
 		handler := w.handler
 		if handler == nil {
-			handler = w.api.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner, Device: contract.DeviceID(device.ID)}, Device: device.ID, Scopes: device.Scopes, Web: true})
+			w.muxOnce.Do(func() {
+				w.mux = w.api.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true})
+			})
+			handler = w.mux
 		}
 		handler.ServeHTTP(out, r.WithContext(ctx))
 		return
