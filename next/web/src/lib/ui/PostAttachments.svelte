@@ -2,7 +2,7 @@
   import VisualBanner from "./VisualBanner.svelte";
   import { fileSize, isImage, isThumb } from "../feed.ts";
   import type { Attachment, EventID, VisualCard } from "../contract.gen.ts";
-  let { attachments, newest, onvisual, event, at }: { attachments: Attachment[]; newest: Map<string, VisualCard>; onvisual: (visual: VisualCard) => void; event?: EventID; at?: string } = $props();
+  let { attachments, newest, onvisual, event, at, onmedia }: { attachments: Attachment[]; newest: Map<string, VisualCard>; onvisual: (visual: VisualCard) => void; event?: EventID; at?: string; onmedia: (file: Attachment) => void } = $props();
   // The engine serves each file sandboxed; the owner's cookie covers the request.
   const url = (file: Attachment) => `/v1/files/${encodeURIComponent(file.sha256)}`;
   // The type badge on a file card, such as "TXT", as in v1.
@@ -13,7 +13,9 @@
   let retried: string[] = $state([]);
   const retry = (file: Attachment) => { retried = [...retried, file.sha256]; failed = failed.filter(sha => sha !== file.sha256); };
   let images = $derived(attachments.filter(file => !file.visual && isThumb(file, failed)));
-  let others = $derived(attachments.filter(file => !file.visual && !isThumb(file, failed)));
+  let videos = $derived(attachments.filter(file => !file.visual && file.media.startsWith("video/")));
+  let others = $derived(attachments.filter(file => !file.visual && !isThumb(file, failed) && !file.media.startsWith("video/")));
+  let durations: Record<string, string> = $state({});
 </script>
 {#each attachments as file, i (i)}
   {@const visual = file.visual}
@@ -21,8 +23,9 @@
 {/each}
   <!-- As in v1, images come first as thumbnails, then a card per other file. Each opens the file in a new tab. -->
   {#if images.length}<div class="images" class:many={images.length > 1}>{#each images as file, i (i)}
-    <a class="thumb" href={url(file)} target="_blank" rel="noopener" title={`${file.name} · ${fileSize(file.bytes)}`}>
-      <img src={url(file)} alt={file.name} loading="lazy" onerror={() => { failed = [...failed, file.sha256]; }} /></a>{/each}</div>{/if}
+    <button class="thumb" onclick={() => onmedia(file)} title={`${file.name} · ${fileSize(file.bytes)}`}>
+      <img src={url(file)} alt={file.name} loading="lazy" onerror={() => { failed = [...failed, file.sha256]; }} /></button>{/each}</div>{/if}
+  {#each videos as file}<button class="video" onclick={() => onmedia(file)} aria-label={`Open ${file.name}`}><video src={url(file)} preload="metadata" muted onloadedmetadata={e => { const seconds = Math.floor(e.currentTarget.duration); if (Number.isFinite(seconds)) durations[file.sha256] = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`; }}></video><span class="play">▶</span><span class="duration">{durations[file.sha256] ?? ""}</span></button>{/each}
   {#each others as file, i (i)}{@const dead = failed.includes(file.sha256)}
     <svelte:element this={dead ? "span" : "a"} class="file" class:dead href={dead ? undefined : url(file)} target={dead ? undefined : "_blank"} rel={dead ? undefined : "noopener"}
       title={dead ? `${file.name} did not load` : `Open ${file.name}`}>
@@ -32,8 +35,12 @@
       {:else if isImage(file) && !retried.includes(file.sha256)}<button type="button" class="reload" onclick={() => retry(file)}>Retry</button>{/if}</svelte:element>{/each}
 <style>
   /* v1's sizes: one image up to 420x300, several as 200x150 crops; a 420 px file card with a 40 px type badge. */
+  .video { position: relative; display: block; width: min(420px, 100%); margin: 6px 0; padding: 0; border: 0; border-radius: 8px; overflow: hidden; background: var(--sidebar); cursor: pointer; }
+  .video video { display: block; width: 100%; max-height: 300px; object-fit: contain; }
+  .play, .duration { position: absolute; color: var(--screen-text); background: var(--screen-chip); padding: 6px; border-radius: 6px; }
+  .play { left: 50%; top: 50%; transform: translate(-50%, -50%); } .duration { bottom: 6px; right: 6px; }
   .images { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
-  .thumb { display: block; max-width: min(420px, 100%); border-radius: 8px; overflow: hidden; background: var(--sidebar); line-height: 0; }
+  .thumb { padding: 0; border: 0; cursor: pointer; display: block; max-width: min(420px, 100%); border-radius: 8px; overflow: hidden; background: var(--sidebar); line-height: 0; }
   .thumb img { display: block; max-width: 100%; max-height: 300px; object-fit: contain; }
   .many .thumb { width: 200px; height: 150px; }
   .many .thumb img { width: 100%; height: 100%; max-height: none; object-fit: cover; }
