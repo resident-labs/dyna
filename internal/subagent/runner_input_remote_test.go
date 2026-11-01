@@ -124,7 +124,7 @@ func newClaimFixture(t *testing.T, text string) *claimFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.m.rooms().SessionDeliveryRows(info.RoomID, room.DeliveryKeys(info.ID, info.Address())); err != nil {
+	if _, err := e.m.rooms().SessionClaimRows(info.RoomID, room.DeliveryKeys(info.ID, info.Address())); err != nil {
 		t.Fatal(err)
 	}
 	events := &eventLog{}
