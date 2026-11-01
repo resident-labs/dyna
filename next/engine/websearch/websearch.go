@@ -1,0 +1,253 @@
+// Package websearch runs one web search through the provider that can answer
+// it. Providers hold no state of their own: the engine supplies a credential
+// reader for each, so the search tool never sees a token or a key.
+package websearch
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"regexp"
+	"strings"
+	"sync"
+	"time"
+)
+
+// ErrNotSignedIn says one provider has no saved credential, so the chain skips
+// it and tries the next provider. A provider that was used and failed returns
+// another error.
+var ErrNotSignedIn = errors.New("not signed in")
+
+const (
+	// DefaultLimit is how many results a search returns when it names none.
+	DefaultLimit = 5
+	// MaxLimit is the most results one search returns.
+	MaxLimit = 10
+	// maxSnippet is the longest snippet a result carries.
+	maxSnippet = 300
+	// minAttempt is the least time one provider gets when the caller set a
+	// deadline, so a slow provider cannot spend the whole budget.
+	minAttempt = 5 * time.Second
+)
+
+// Result is one search result.
+type Result struct {
+	Title    string `json:"title"`
+	URL      string `json:"url"`
+	Snippet  string `json:"snippet"`
+	Provider string `json:"provider"`
+}
+
+// Query is one search request.
+type Query struct {
+	Text  string
+	Limit int
+}
+
+// results is how many results the query asks for: its own limit, kept between
+// one and MaxLimit.
+func (q Query) results() int {
+	limit := q.Limit
+	if limit <= 0 {
+		limit = DefaultLimit
+	}
+	if limit > MaxLimit {
+		limit = MaxLimit
+	}
+	return limit
+}
+
+// Provider is one web search source.
+type Provider interface {
+	// Name is the provider's name in a result and in an error.
+	Name() string
+	// Search answers a query. It returns ErrNotSignedIn when it has no
+	// credential; the chain then tries the next provider.
+	Search(ctx context.Context, q Query) ([]Result, error)
+}
+
+// noRedirect returns a redirect as the answer. A followed redirect would carry
+// a custom key header such as X-Subscription-Token to any host.
+func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
+// Attempt gives one provider its share of the remaining request budget.
+func Attempt(ctx context.Context, provider Provider, q Query) ([]Result, error) {
+	attempt, cancel := attemptContext(ctx)
+	defer cancel()
+	return provider.Search(attempt, q)
+}
+
+// SafeMessage folds and redacts a provider failure before it reaches a caller.
+func SafeMessage(err error) string { return clip(redactTokens(oneLine(err))) }
+
+// attemptContext bounds one provider's attempt to attemptBudget of the time the
+// caller left. Without a caller deadline a provider is bounded by its own
+// client timeout.
+func attemptContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return ctx, func() {}
+	}
+	left := time.Until(deadline)
+	if left <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, attemptBudget(left))
+}
+
+// attemptBudget is how long one provider may run when the caller has left this
+// much time: half of it, so the providers after it keep the other half. Half
+// would cut a short budget off before a provider starts, so it also never gives
+// less than minAttempt.
+func attemptBudget(left time.Duration) time.Duration {
+	attempt := left / 2
+	if attempt < minAttempt {
+		attempt = min(minAttempt, left)
+	}
+	return attempt
+}
+
+// oneLine keeps a provider's reason on the one line the tool reports.
+func oneLine(err error) string {
+	return strings.Join(strings.Fields(err.Error()), " ")
+}
+
+// capped returns results limited to q, tagged with the provider that found them.
+func capped(provider string, q Query, results []Result, secrets ...string) []Result {
+	limit := q.results()
+	if len(results) > limit {
+		results = results[:limit]
+	}
+	for i := range results {
+		results[i].Provider = provider
+		results[i].Title = redact(results[i].Title, secrets...)
+		results[i].URL = redact(results[i].URL, secrets...)
+		results[i].Snippet = redact(results[i].Snippet, secrets...)
+	}
+	return results
+}
+
+// text folds a snippet onto one line of at most maxSnippet characters.
+func text(s string) string {
+	return clip(fold(s))
+}
+
+// fold puts text on one line, because a snippet and an error reason are each
+// reported as one line.
+func fold(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// clip keeps at most maxSnippet characters.
+func clip(s string) string {
+	runes := []rune(s)
+	if len(runes) > maxSnippet {
+		return strings.TrimSpace(string(runes[:maxSnippet])) + "…"
+	}
+	return s
+}
+
+// StatusError retains the HTTP status for failure scheduling.
+type StatusError struct {
+	Status  int
+	message string
+}
+
+func (e *StatusError) Error() string { return e.message }
+
+// AuthFailure reports an authentication refusal.
+func AuthFailure(err error) bool {
+	var status *StatusError
+	return errors.As(err, &status) && (status.Status == 401 || status.Status == 403)
+}
+
+// statusError is the failure of a provider request that answered. The body is
+// the backend's own explanation of why it refused, and the only way to see a
+// cause such as a model the account cannot use, so the error keeps it. It is
+// folded to one line and cleared of any secret first, and the caller passes each
+// secret the request carried so the body cannot echo one back.
+func statusError(provider string, status int, body io.Reader, secrets ...string) error {
+	// The whole reason is cleared of secrets before it is folded and shortened.
+	// Clearing a shortened reason would leave a fragment of a secret that no
+	// replacement or pattern matches.
+	reason := clip(redact(fold(errorReason(body)), secrets...))
+	if reason == "" {
+		return &StatusError{Status: status, message: fmt.Sprintf("%s answered HTTP %d", provider, status)}
+	}
+	return &StatusError{Status: status, message: fmt.Sprintf("%s answered HTTP %d: %s", provider, status, reason)}
+}
+
+// redact clears every supplied secret and every credential shape from s.
+func redact(s string, secrets ...string) string {
+	for _, secret := range secrets {
+		if secret != "" {
+			s = strings.ReplaceAll(s, secret, redacted)
+		}
+	}
+	return redactTokens(s)
+}
+
+// redacted replaces a credential in text that may quote one.
+const redacted = "[redacted]"
+
+// redactedPatterns are the credential shapes a provider's error body may quote
+// back: a bearer header, an API key, and a signed token.
+var redactedPatterns []*regexp.Regexp
+var redactedOnce sync.Once
+
+// redactTokens masks every credential shape in s.
+func redactTokens(s string) string {
+	redactedOnce.Do(func() {
+		redactedPatterns = []*regexp.Regexp{
+			regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._\-]{8,}`),
+			regexp.MustCompile(`\bsk-[A-Za-z0-9._\-]{8,}`),
+			regexp.MustCompile(`\beyJ[A-Za-z0-9._\-]{16,}`),
+		}
+	})
+	for _, pattern := range redactedPatterns {
+		s = pattern.ReplaceAllString(s, redacted)
+	}
+	return s
+}
+
+// errorBody is the shape of a refusal: OpenAI and most providers name the cause
+// in error.message, and a few use detail or message at the top level.
+type errorBody struct {
+	Detail  string          `json:"detail"`
+	Message string          `json:"message"`
+	Error   json.RawMessage `json:"error"`
+}
+
+// errorReason is what the backend said went wrong in full, or empty when the
+// body names no cause. The caller folds, clears and shortens it.
+func errorReason(body io.Reader) string {
+	if body == nil {
+		return ""
+	}
+	raw, err := io.ReadAll(io.LimitReader(body, (64<<10)+1))
+	if err != nil || len(raw) > 64<<10 {
+		return ""
+	}
+	var refusal errorBody
+	if json.Unmarshal(raw, &refusal) == nil {
+		for _, named := range []string{refusal.Detail, refusal.Message} {
+			if trimmed := strings.TrimSpace(named); trimmed != "" {
+				return trimmed
+			}
+		}
+		var message string
+		if json.Unmarshal(refusal.Error, &message) == nil && strings.TrimSpace(message) != "" {
+			return strings.TrimSpace(message)
+		}
+		var nested struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(refusal.Error, &nested) == nil && strings.TrimSpace(nested.Message) != "" {
+			return strings.TrimSpace(nested.Message)
+		}
+	}
+	return ""
+}
