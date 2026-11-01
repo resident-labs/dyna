@@ -16,7 +16,7 @@ import (
 const TavilyEndpoint = "https://api.tavily.com"
 
 // tavilyClient is how long one Tavily request may take.
-var tavilyClient = &http.Client{Timeout: 20 * time.Second}
+var tavilyClient = &http.Client{Timeout: 20 * time.Second, CheckRedirect: noRedirect}
 
 // Tavily searches the Tavily API with the owner's saved API key.
 type Tavily struct {

@@ -17,7 +17,7 @@ import (
 const BraveEndpoint = "https://api.search.brave.com"
 
 // braveClient is how long one Brave request may take.
-var braveClient = &http.Client{Timeout: 20 * time.Second}
+var braveClient = &http.Client{Timeout: 20 * time.Second, CheckRedirect: noRedirect}
 
 // Brave searches the Brave Search API with the owner's saved API key.
 type Brave struct {
