@@ -355,3 +355,59 @@ func definitionGit(t *testing.T, repo string, args ...string) string {
 	}
 	return out
 }
+
+type admissionTestMachines struct{ machine machines.Machine }
+
+func (f admissionTestMachines) Get(context.Context, string) (machines.Machine, error) {
+	return f.machine, nil
+}
+func (f admissionTestMachines) GetLocal(context.Context) (machines.Machine, error) {
+	return f.machine, nil
+}
+func (f admissionTestMachines) List(context.Context) ([]machines.Machine, error) {
+	return []machines.Machine{f.machine}, nil
+}
+
+func TestDefaultCheckReservationsAllowJobWithAvailableMemory(t *testing.T) {
+	definition, err := ParseDefinition([]byte(`version: 1
+trial: [test]
+checks:
+  - id: test
+    image: test
+    command: "true"
+suites:
+  - id: test
+    checks: [test]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := Node{Name: "node", Enabled: true, CPUs: 32, MemoryBytes: 32 << 30}
+	demand, err := FirstCheckDemand(definition, []Suite{"test"}, node, "room", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	machine := machines.Machine{Name: "node", Capabilities: machines.Capabilities{CPUs: 32, MemTotal: 32 << 30}, Load: machines.Load{MemTotal: 32 << 30, MemAvailable: 24 << 30}}
+	queue := jobs.Admission{DataDir: t.TempDir(), Machines: admissionTestMachines{machine}, Engine: true}
+	for i := range 6 {
+		demand.ID = fmt.Sprintf("check-%d", i)
+		if _, err := queue.Hold(t.Context(), demand); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ok, err := queue.CanAdmit(t.Context(), jobs.Demand{Node: "node", CPUs: 2, MemoryMiB: 3 * 1024})
+	if err != nil || !ok {
+		t.Fatalf("job admission = %v, %v; want admitted", ok, err)
+	}
+	// A later probe can precede check startup, so it must not release reservations.
+	machine.LastProbe = time.Now().Add(time.Minute)
+	machine.Load.MemAvailable = 8 << 30
+	queue.Machines = admissionTestMachines{machine}
+	ok, err = queue.CanAdmit(t.Context(), jobs.Demand{Node: "node", CPUs: 2, MemoryMiB: 3 * 1024})
+	if err != nil || ok {
+		t.Fatalf("job admitted before checks started: %v, %v", ok, err)
+	}
+	if demand.MemoryMiB != 1024 || clampCheckResources(nodeCheck{}, node).MemoryMiB != 4096 {
+		t.Fatalf("reservation or hard limit changed: %+v", demand)
+	}
+}
