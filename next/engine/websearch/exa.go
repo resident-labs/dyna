@@ -16,7 +16,7 @@ import (
 const ExaEndpoint = "https://api.exa.ai"
 
 // exaClient is how long one Exa request may take.
-var exaClient = &http.Client{Timeout: 20 * time.Second}
+var exaClient = &http.Client{Timeout: 20 * time.Second, CheckRedirect: noRedirect}
 
 // Exa searches the Exa API with the owner's saved API key.
 type Exa struct {
