@@ -71,6 +71,7 @@ func (s *Session) CloseChannel(computer []chan []byte, shell []chan contract.She
 		channel.stop()
 	}
 }
+
 func (c *Channel) WakeSignal() <-chan struct{}                { return c.wake }
 func (c *Channel) Inputs() <-chan contract.ComputerInputBatch { return c.input }
 
