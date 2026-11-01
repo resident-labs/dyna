@@ -18,6 +18,9 @@ func (s *Store) AddHost(ctx context.Context, h box.Host) error {
 			return err
 		}
 		for _, room := range h.Rooms {
+			if err := refuseNewWork(ctx, tx, room); err != nil {
+				return err
+			}
 			if _, err := tx.ExecContext(ctx, "INSERT INTO host_rooms(host,room) VALUES(?,?)", h.Name, room); err != nil {
 				return err
 			}

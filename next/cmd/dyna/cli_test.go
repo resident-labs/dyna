@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -67,8 +68,8 @@ type fakeClient struct {
 	deviceScopes contract.DeviceSetScopesRequest
 	hosts        []contract.HostSummary
 
-	roomDelete     contract.RoomDeleteRequest
-	roomDeleteResp contract.RoomDeleteResponse
+	roomDelete    contract.RoomDeleteRequest
+	roomDeleteErr error
 }
 
 func (f *fakeClient) DevicePair(_ context.Context, q contract.DevicePairRequest) (contract.DevicePairResponse, error) {
@@ -108,7 +109,7 @@ func (f *fakeClient) RoomCreate(_ context.Context, q contract.RoomCreateRequest)
 }
 func (f *fakeClient) RoomDelete(_ context.Context, q contract.RoomDeleteRequest) (contract.RoomDeleteResponse, error) {
 	f.roomDelete = q
-	return f.roomDeleteResp, nil
+	return contract.RoomDeleteResponse{}, f.roomDeleteErr
 }
 func (f *fakeClient) RoomRepoAdd(_ context.Context, q contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, error) {
 	f.repoAdd = q
@@ -197,16 +198,17 @@ func TestRoomCreateMapsName(t *testing.T) {
 	}
 }
 func TestRoomDeleteNeedsDiscard(t *testing.T) {
-	f := &fakeClient{roomDeleteResp: contract.RoomDeleteResponse{OpenedAccounts: []contract.AccountID{"acct"}, OpenedHosts: []contract.HostName{"h"}}}
+	f := &fakeClient{}
 	if _, err := execCLI(f, "room", "delete", "r"); err == nil || !strings.Contains(err.Error(), "--discard") || f.roomDelete.Room != "" {
 		t.Fatalf("err=%v request=%+v", err, f.roomDelete)
 	}
-	out := runCLI(t, f, "room", "delete", "r", "--discard")
+	runCLI(t, f, "room", "delete", "r", "--discard")
 	if f.roomDelete.Room != "r" || !f.roomDelete.Discard {
 		t.Fatalf("%+v", f.roomDelete)
 	}
-	if !strings.Contains(out, "account acct was limited to this room") || !strings.Contains(out, "host h was limited to this room") {
-		t.Fatal(out)
+	f.roomDeleteErr = errors.New("room_limited: this is the only open room of account acct, host h; change those limits first")
+	if _, err := execCLI(f, "room", "delete", "r", "--discard"); err == nil || !strings.Contains(err.Error(), "account acct, host h") {
+		t.Fatalf("refusal: %v", err)
 	}
 }
 func TestRoomRepos(t *testing.T) {
