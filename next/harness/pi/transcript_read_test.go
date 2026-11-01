@@ -1,6 +1,8 @@
 package pi
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -118,10 +120,47 @@ func TestTranscriptBoundsToolIdentity(t *testing.T) {
 	}
 }
 
+func TestTranscriptPlacesSteerWhereItWasRead(t *testing.T) {
+	data := `{"type":"message","id":"u1","message":{"role":"user","deliveryId":"1"}}
+{"type":"message","id":"a1","message":{"role":"assistant","content":[{"type":"toolCall","id":"before","name":"bash","arguments":{}}]}}
+{"type":"message","id":"r1","message":{"role":"toolResult","toolCallId":"before","content":[]}}
+{"type":"message","id":"u2","message":{"role":"user","deliveryId":"2"}}
+{"type":"message","id":"u3","message":{"role":"user","deliveryId":"3"}}
+{"type":"message","id":"a2","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}
+`
+	deliveries := map[contract.DeliverySeq]contract.TurnID{1: "t", 2: "t", 3: "t"}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.jsonl"), []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Delivery 3 is a machine wake: it shows nothing, and the turn goes on.
+	r := TranscriptReader{Dir: dir, Acked: map[string]int64{"a.jsonl": int64(len(data))}, Steers: map[contract.DeliverySeq]bool{2: true}}
+	items, seen, more, err := r.ReadRecent("a.jsonl", 0, nil, deliveries, 64)
+	if err != nil || more || seen != 3 || len(items) != 3 {
+		t.Fatalf("items=%+v seen=%d more=%v err=%v", items, seen, more, err)
+	}
+	if items[0].ID != "before" || items[1].Kind != contract.TranscriptSteer || items[1].ID != "steer:2" || items[1].Delivery != 2 || items[1].Index != 1 || items[1].Turn != "t" || items[2].Text != "answer" || items[2].Index != 2 {
+		t.Fatalf("order: %+v", items)
+	}
+	full, _, _, err := r.Read("a.jsonl", 0, nil, deliveries, "steer:2", 0, 1)
+	if err != nil || len(full) != 1 || full[0].Delivery != 2 {
+		t.Fatalf("full=%+v err=%v", full, err)
+	}
+	// A page past the steer keeps the same indexes, so pages merge in order.
+	next, _, _, err := r.Read("a.jsonl", 0, nil, deliveries, "", 2, 10)
+	if err != nil || len(next) != 1 || next[0].Index != 2 {
+		t.Fatalf("next=%+v err=%v", next, err)
+	}
+	plain, seen, _, err := ReadTranscript(strings.NewReader(data), deliveries, "x", "", 0, 64)
+	if err != nil || seen != 2 || len(plain) != 2 {
+		t.Fatalf("with nothing to place, plain=%+v seen=%d err=%v", plain, seen, err)
+	}
+}
+
 func TestTranscriptRecentKeepsFinalText(t *testing.T) {
 	data := `{"type":"message","message":{"role":"user","deliveryId":"1"}}` + "\n" + `{"type":"message","id":"final","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}` + "\n"
 	data += strings.Repeat(`{"type":"message","id":"tool","message":{"role":"assistant","content":[{"type":"toolCall","id":"call","name":"read","arguments":{}}]}}`+"\n", 300)
-	items, seen, more, err := readTranscriptMode(strings.NewReader(data), map[contract.DeliverySeq]contract.TurnID{1: "t"}, "file", "", 0, 256, 16<<20, true)
+	items, seen, more, err := readTranscriptMode(strings.NewReader(data), map[contract.DeliverySeq]contract.TurnID{1: "t"}, nil, "file", "", 0, 256, 16<<20, true)
 	if err != nil || !more || seen != 301 || len(items) != 256 || items[0].Text != "answer" || items[0].Index != 0 {
 		t.Fatalf("seen=%d more=%v count=%d error=%v", seen, more, len(items), err)
 	}

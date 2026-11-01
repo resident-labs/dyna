@@ -11,8 +11,9 @@ import (
 
 // TranscriptReader reads only acknowledged transcript bytes.
 type TranscriptReader struct {
-	Dir   string
-	Acked map[string]int64
+	Dir    string
+	Acked  map[string]int64
+	Steers map[contract.DeliverySeq]bool // deliveries to place among the items, where Pi read them
 }
 
 func (r TranscriptReader) open(path string, start int64, end *int64) (*os.File, *io.SectionReader, error) {
@@ -40,7 +41,7 @@ func (r TranscriptReader) Read(path string, start int64, end *int64, deliveries 
 		return nil, 0, false, err
 	}
 	defer file.Close()
-	return ReadTranscript(section, deliveries, path, item, skip, limit)
+	return readTranscriptMode(section, deliveries, r.Steers, path, item, skip, limit, 16<<20, false)
 }
 
 // FindCalls marks candidate IDs found in a bounded range.
@@ -60,5 +61,5 @@ func (r TranscriptReader) ReadRecent(path string, start int64, end *int64, deliv
 		return nil, 0, false, err
 	}
 	defer file.Close()
-	return readTranscriptMode(section, deliveries, path, "", 0, limit, 16<<20, true)
+	return readTranscriptMode(section, deliveries, r.Steers, path, "", 0, limit, 16<<20, true)
 }
