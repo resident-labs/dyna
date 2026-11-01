@@ -21,3 +21,31 @@ Each fan-out batch launched eight session-start calls concurrently. The interval
 The latest `creating` event in each batch occurred 1.234 to 3.237 seconds after the earliest start. Last-ready followed that latest admission by 9.683 to 15.566 seconds. Admission adds delay, but it was not the dominant part of these observed batch times; box creation and startup overlapped and took longer. This does not isolate the causes within creation or prove that admission will not bottleneck larger batches.
 
 Raw event times and transcript-entry timestamps accompany the measurement report. No model output text is included.
+
+## Where the cold start goes
+
+Measured on 2026-11-01 on pve, on private Podman stores, away from CI and from hermeslab. This host is an unprivileged LXC container on a RaidZ2 ZFS pool with Podman 5.4.2. Its load average stayed between 110 and 265, and its full IO pressure near 50%. Treat every time here as a statement about this host: the shape carries over to hermeslab, the seconds do not.
+
+A cold start has three costs, and `image.built` reports only the second:
+
+| Cost | Hermeslab | pve |
+| --- | ---: | ---: |
+| Base build, outside `image.built` | not measured | 228.786 s |
+| Toolchain build | 20.749 s median | not measured |
+| First container of an image with the box mapping | not measured | see below |
+
+Boxes run with `--userns=keep-id:uid=1000,gid=1000`. The first container of an image with that mapping makes Podman chown a copy of the whole image, in `storage-chown-by-maps`, and it holds the store lock while it does. On pve that took:
+
+| Image | Files | First create |
+| --- | ---: | ---: |
+| `alpine:3.20` with one layer added, seven runs | 89 | 19.682 to 46.054 s |
+| `node:22` slim, with two other chowns running | 5,774 | 1608.614 s |
+| The real `dyna-base`, 1.25 GB | 32,368 | unfinished after 3261 s, stopped |
+
+Hermeslab reports overlay on ext4, native overlay diff, `Supports shifting: false` and no fuse-overlayfs, the same as pve's ZFS store, so the first create should chown there too. That comes from the store status, not from a timing. So the 75 s that `image.built` does not explain is base build plus chown, and **their split on hermeslab is still unknown**. The step logs below give it at the next real tag change. Pve's times do not bound it: 89 files took 20 s or more here.
+
+`force_mask` and `ignore_chown_errors` do not avoid this: the first needs fuse-overlayfs and the second squashes every user to one. An overlay `volatile` mount was slower in all three pairs tested (136, 56 and 47 s against 30, 35 and 20 s on `alpine`).
+
+## Step logs
+
+Each box start now logs one line per step, always on. Engine lines go to the engine log, for example `box box_1: repositories took 1.204s`, and cover the repository fetch and push, instructions, binary, base and toolchain images, slice, forward, container create and start. The box agent's lines cover hello, clone, checkout and Pi start. Those go to the container's log: read them with `podman logs`.

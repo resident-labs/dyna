@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/computer"
 	"github.com/resident-labs/dyna/box/dynamcp"
 	"github.com/resident-labs/dyna/box/post"
@@ -65,6 +66,7 @@ func modelArgs(model contract.ModelChoice, compactTokens int) ([]string, error) 
 func Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	steps := box.NewStepLog("box agent")
 	client := NewClient(engineSocket)
 	errs := make(chan error, 4)
 	states := make(chan struct{}, 1)
@@ -101,6 +103,7 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	steps.Done("hello")
 	workdir := "/box/work"
 	if len(hello.Repos) > 0 {
 		workdir = filepath.Join(workdir, string(hello.Repos[0].Name))
@@ -112,6 +115,7 @@ func Run(ctx context.Context) error {
 		return setupRepos(ctx, "/box/work", "/box/state/setup", hello.Repos, hello.GitName, hello.GitEmail, runGit)
 	}
 	setupErr := setup(ctx)
+	steps.Done("repository setup")
 	for _, link := range []struct{ path, target string }{
 		{"/box/pi/AGENTS.md", "/run/dyna/instructions/global/AGENTS.md"},
 		{"/box/work/AGENTS.md", "/run/dyna/instructions/room/AGENTS.md"},
@@ -186,6 +190,7 @@ func Run(ctx context.Context) error {
 		return err
 	}
 	defer h.Close()
+	steps.Done("pi start")
 	activity := &activity{}
 	h.Activity = activity.set
 	activityTicks := time.NewTicker(time.Second)

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -89,9 +90,11 @@ func setupRepo(ctx context.Context, root, stateRoot string, repo contract.BoxRep
 	if err := os.MkdirAll(filepath.Dir(dir), 0755); err != nil {
 		return err
 	}
+	steps := box.NewStepLog("repo " + string(repo.Name))
 	if _, err := git(ctx, "", "", "clone", "--no-checkout", "--reference", repo.Cache, repo.Cache, dir); err != nil {
 		return err
 	}
+	steps.Done("clone")
 	if _, err := git(ctx, dir, "", "remote", "set-url", "origin", "http://127.0.0.1:7781/git/"+string(repo.Name)+".git"); err != nil {
 		return err
 	}
@@ -102,6 +105,7 @@ func setupRepo(ctx context.Context, root, stateRoot string, repo contract.BoxRep
 	if _, err := git(ctx, dir, "", "checkout", "-b", repo.Branch, base); err != nil {
 		return err
 	}
+	steps.Done("checkout")
 	return writeSetupState(state, setupDone)
 }
 
