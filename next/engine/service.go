@@ -47,7 +47,6 @@ type Service struct {
 	mu                sync.Mutex
 	live              *live.Live
 	sessions          map[contract.SessionID]*sessionState
-	shellGeneration   uint64
 	readMu            sync.Mutex // preserves commit and live broadcast order
 	// transcriptMu serializes appends, so each offset check and write runs alone.
 	transcriptMu        sync.Mutex
@@ -57,11 +56,10 @@ type Service struct {
 	publishInstructions func(context.Context)
 }
 
-// sessionState retains shell and terminal state until their move to live.
+// sessionState retains terminal state until its move to live.
 // Take the live session lock before s.mu, never the reverse.
 type sessionState struct {
 	terminals int
-	watch     *shellWatch
 }
 
 // sessionLocked creates the entry if needed. Callers hold s.mu and pass the id of a session that exists or is being started.
@@ -135,11 +133,11 @@ func (s *Service) SessionClosed(id contract.SessionID) {
 	channel := handle.Channel()
 	handle.SetChannel(nil)
 	room, stopped := handle.ClearComputer()
+	handle.ClearShell()
 	s.mu.Lock()
-	shellWatchers := s.clearShellLocked(id)
 	delete(s.sessions, id)
 	s.mu.Unlock()
-	channel.Close(shellWatchers)
+	channel.Close()
 	if stopped {
 		_ = s.computerEvent(context.Background(), id, room, contract.ComputerStopped)
 	}
