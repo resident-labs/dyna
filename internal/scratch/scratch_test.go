@@ -46,6 +46,24 @@ func TestEnsurePrivateScratch(t *testing.T) {
 	}
 }
 
+func TestEnsureRepairsScratchPermissions(t *testing.T) {
+	isolateRoot(t)
+	path, err := Ensure("session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Ensure("session"); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0700 {
+		t.Fatalf("mode: %v, error: %v", info, err)
+	}
+}
+
 // A closed session's scratch stays for the whole retention, even for a sweep
 // aimed at that session alone, and goes in the first sweep after it ends.
 func TestSweepKeepsClosedSessionScratchForRetention(t *testing.T) {
