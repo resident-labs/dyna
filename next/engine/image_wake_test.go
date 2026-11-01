@@ -71,7 +71,7 @@ func TestWakeUsesCurrentImage(t *testing.T) {
 		recreate    bool
 		legacy      bool
 	}{
-		{name: "new", image: "new", recreate: true}, {name: "current", image: "image"}, {name: "shared mount upgrade", image: "image", legacy: true, recreate: true}, {name: "build fails", err: errors.New("build failed")},
+		{name: "new", image: "new", recreate: true}, {name: "current", image: "image"}, {name: "shared mount upgrade", image: "image", legacy: true, recreate: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _, room, sid, ctx := quietSession(t, 0)
@@ -96,9 +96,52 @@ func TestWakeUsesCurrentImage(t *testing.T) {
 			} else if h.recreated != "" || h.starts != 1 || b.Image != "image" {
 				t.Fatalf("recreate=%s starts=%d image=%s", h.recreated, h.starts, b.Image)
 			}
-			if tc.err != nil && b.Reason != tc.err.Error() {
-				t.Fatalf("reason=%q", b.Reason)
+			var notices int
+			if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_id=? AND e.type='session.restarted' AND d.state='pending' AND d.wake=0", sid).Scan(&notices); err != nil {
+				t.Fatal(err)
+			}
+			if want := map[bool]int{true: 1, false: 0}[tc.image == "new"]; notices != want {
+				t.Fatalf("notices=%d, want %d", notices, want)
 			}
 		})
+	}
+}
+
+// The box agent comes from the host, so an old image could hold a Pi it cannot drive. The box retries, then fails as any
+// box does that cannot start, and it never runs the old image.
+func TestWakeFailsWhenTheCurrentImageCannotBeBuilt(t *testing.T) {
+	s, _, room, sid, ctx := quietSession(t, 0)
+	h := &imageWakeHost{image: "image"}
+	s.boxes = h
+	resetLifecycle(s)
+	passLifecycle(t, s, ctx)
+	h.err = errors.New("build failed")
+	wakeSession(t, s, ctx, room, sid)
+	session, err := s.store.Session(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b box.Box
+	for range 3 {
+		if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, "UPDATE boxes SET due_at=0 WHERE id=?", session.Box)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		passLifecycle(t, s, ctx)
+		if b, err = s.store.Box(ctx, session.Box); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if h.starts != 0 || h.recreated != "" || b.State != contract.BoxStopped || b.Reason != "build failed" || b.Image != "image" {
+		t.Fatalf("starts=%d recreated=%s box=%+v", h.starts, h.recreated, b)
+	}
+	var cause string
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT coalesce(json_extract(body,'$.cause'),'') FROM events WHERE type='box.changed' ORDER BY seq DESC LIMIT 1").Scan(&cause); err != nil {
+		t.Fatal(err)
+	}
+	if cause != string(contract.CauseStartFailed) {
+		t.Fatalf("cause=%q", cause)
 	}
 }

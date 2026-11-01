@@ -64,6 +64,8 @@ const (
 	MethodSessionClose            Method = "session.close"
 	MethodSessionStop             Method = "session.stop"
 	MethodSessionSetProfile       Method = "session.set_profile"
+	MethodSessionAccount          Method = "session.account"
+	MethodSessionSetAccount       Method = "session.set_account"
 	MethodSessionRestart          Method = "session.restart"
 	MethodSessionMove             Method = "session.move"
 	MethodPost                    Method = "post"
@@ -256,6 +258,9 @@ type AccountUsage struct {
 	Provider   string        `json:"provider"`
 	Label      string        `json:"label"`
 	Windows    []UsageWindow `json:"windows"`
+	// Active marks an account in use: the one routing would pick next for its provider,
+	// from the proxy's own order, or one an open session chose. A spent account is neither.
+	Active bool `json:"active"`
 	// Balances are prepaid amounts for display only. They carry no meter or alert.
 	Balances []UsageBalance `json:"balances,omitempty"`
 	Cause    UsageCause     `json:"cause"`
@@ -756,6 +761,8 @@ type TurnStart struct {
 	Turn     TurnID           `json:"turn"`
 	Inputs   []TurnInput      `json:"inputs"`
 	Model    ModelChoice      `json:"model"` // the session profile's model when the turn was dispatched
+	// CompactTokens is the profile's compaction trigger, which applies with Model. 0: Pi's default.
+	CompactTokens int `json:"compactTokens,omitempty"`
 }
 type TurnQueue string
 

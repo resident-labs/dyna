@@ -187,6 +187,8 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodSessionMove, c, a.service.SessionMove)
 	call(mux, contract.MethodSessionClose, c, a.service.SessionClose)
 	call(mux, contract.MethodSessionSetProfile, c, a.service.SessionSetProfile)
+	call(mux, contract.MethodSessionAccount, c, a.service.SessionAccount)
+	call(mux, contract.MethodSessionSetAccount, c, a.service.SessionSetAccount)
 	call(mux, contract.MethodSessionRestart, c, a.service.SessionRestart)
 	call(mux, contract.MethodSessionSearch, c, a.service.SessionSearch)
 	call(mux, contract.MethodPostSearch, c, a.service.PostSearch)
