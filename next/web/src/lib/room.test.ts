@@ -593,3 +593,58 @@ test("a session counts once: a broken box, then waiting, then a running turn, th
   store.apply(event(10, { type: "turn.started", body: { session: "b", turn: "t3", inputs: [] } }));
   assert.deepEqual(store.counts, { sessions: 2, waiting: 0, failed: 0, working: 2, idle: 0 });
 });
+
+test("a session's goals load with the room and follow goal events", async () => {
+  const listed = { lastRead: 0, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "the start text", startedAt: "", hadJobs: false } as const;
+  const server = engine(0, [{ id: "s", ...listed }]);
+  const inner = globalThis.fetch;
+  const goal = (text: string) => ({ id: "g1", room: "r", session: "s", text, doneWhen: "it ships", state: "active", items: [{ number: 1, text: "a step", state: "open" }], created: "", updated: "" });
+  let goals = [goal("first")];
+  globalThis.fetch = async (input, init) => String(input).endsWith("/goal.list") ? new Response(JSON.stringify({ goals })) : inner(input, init);
+  try {
+    const room = new RoomStore("r", () => () => {});
+    await room.open();
+    await new Promise(resolve => setTimeout(resolve));
+    assert.equal(room.goals.get("s")?.[0].text, "first");
+    goals = [goal("second")];
+    room.apply(event(1, { type: "goal.set", body: { goal: "g1", session: "s", text: "second" } }));
+    await new Promise(resolve => setTimeout(resolve));
+    assert.equal(room.goals.get("s")?.[0].text, "second");
+    goals = [];
+    room.apply(event(2, { type: "goal.ended", body: { goal: "g1", session: "s", state: "done", summary: "shipped" } }));
+    await new Promise(resolve => setTimeout(resolve));
+    assert.equal(room.goals.has("s"), false);
+  } finally { globalThis.fetch = inner; server.restore(); }
+});
+
+test("a lost box's open turn is not running, and comes back with the box", async () => {
+  const listed = { lastRead: 0, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "", startedAt: "", hadJobs: false } as const;
+  const server = engine(0, [{ id: "s", ...listed }]);
+  try {
+    const room = new RoomStore("r", () => () => {});
+    await room.open();
+    room.apply(event(1, { type: "turn.started", body: { session: "s", turn: "t", inputs: [] } }));
+    assert.equal(room.running("s"), true);
+    room.apply(event(2, { type: "box.changed", body: { box: "b", session: "s", from: "ready", to: "lost", reason: "box disconnected" } }));
+    assert.equal(room.running("s"), false);
+    assert.equal(room.status("s"), "failed");
+    room.apply(event(3, { type: "box.changed", body: { box: "b", session: "s", from: "lost", to: "ready" } }));
+    assert.equal(room.running("s"), true);
+  } finally { server.restore(); }
+});
+
+test("a box that returns reads back the open turn session.list left out", async () => {
+  const listed = { lastRead: 0, name: "Agent", parent: "", profile: "p", box: "b", computer: "stopped", goal: "", startedAt: "", hadJobs: false } as const;
+  const sessions: SessionSummary[] = [{ id: "s", ...listed, boxState: "lost" }];
+  const server = engine(0, sessions);
+  try {
+    const room = new RoomStore("r", () => () => {});
+    await room.open();
+    assert.equal(room.running("s"), false);
+    sessions[0] = { id: "s", ...listed, boxState: "ready", turn: "t" };
+    server.posts.push(event(1, { type: "post.created", body: { text: "later", home: feed } })); // session.list now reads at seq 1.
+    room.apply(event(1, { type: "box.changed", body: { box: "b", session: "s", from: "lost", to: "ready" } }));
+    await new Promise(resolve => setTimeout(resolve));
+    assert.equal(room.running("s"), true);
+  } finally { server.restore(); }
+});
