@@ -335,6 +335,8 @@ var devSteps = []struct {
 	{"grep", "shortPaths\\(", 96, false, "src/lib/feed.ts:208"},
 	{"write", "src/lib/steps.ts", 190, false, "Wrote 38 lines."},
 	{"read", "app.css", 38, false, ""},
+	{"read", "/workspace/shots/mod-api-overview-dark.png", 52, false, "Read image file [image/png]"},
+	{"read", "/workspace/shots/gone.png", 48, false, "Read image file [image/png]"},
 	{"browser_snapshot", "http://127.0.0.1:5173/dm", 1250, false, "Saved a snapshot of the page."},
 	{"bash", "npx svelte-check --threshold error --fail-on-warnings --tsconfig ./tsconfig.json", 96400, false, "svelte-check found 0 errors and 0 warnings"},
 }
@@ -355,6 +357,9 @@ func (d devService) TranscriptRead(ctx context.Context, p contract.Principal, re
 		end := at.Add(step.ms * time.Millisecond)
 		response.Steps = append(response.Steps, contract.TranscriptStep{Turn: req.Turn, Tool: step.tool, Label: step.tool + " " + step.target,
 			Started: at, Ended: &end, Failed: step.failed, Preview: step.preview})
+		if strings.HasSuffix(step.target, ".png") {
+			response.Steps[len(response.Steps)-1].Image = &contract.TranscriptImage{Item: fmt.Sprintf("%s-%s", req.Turn, step.target), Media: "image/png", Bytes: 2048}
+		}
 		at = end.Add(4 * time.Second)
 	}
 	response.Truncated = sum%4 == 0
@@ -614,7 +619,7 @@ func main() {
 	svc.SetLayout(box.Layout{Data: data})
 	a := api.New(devService{Service: svc, empty: *fixture == "empty", renames: &devRenames{labels: map[contract.AccountID]string{}}}, nil)
 	a.SetConnectOperations(devConnect{empty: *fixture == "empty"})
-	a.SetFilesRoute(func(c api.Caller) http.Handler { return svc.Files(c.Principal, c.Room) })
+	a.SetFilesRoute(func(c api.Caller) http.Handler { return devFiles(svc.Files(c.Principal, c.Room)) })
 	app, err := fs.Sub(web.Dist, "dist")
 	fatal(err)
 	webServer, err := api.NewWeb(a, *listen, app, time.Now, st)
@@ -754,15 +759,8 @@ func seedRoom(ctx context.Context, s *engine.Service, st *store.Store, posts, ag
 		fatal(json.Unmarshal(rec.Body.Bytes(), &a))
 		return a
 	}
-	// A 640x360 gradient, so the image thumbnail has something to show.
-	shot := image.NewRGBA(image.Rect(0, 0, 640, 360))
-	for y := range 360 {
-		for x := range 640 {
-			shot.Set(x, y, color.RGBA{uint8(40 + x/5), uint8(60 + y/3), 150, 255})
-		}
-	}
 	var png bytes.Buffer
-	fatal(pngenc.Encode(&png, shot))
+	fatal(pngenc.Encode(&png, fixtureShot()))
 	// An invented three-version card exercises both superseded chips and the
 	// in-view preview when a capture is unavailable.
 	visualAuthor := contract.Principal{Kind: contract.PrincipalSession, Session: lead.Session}
@@ -789,6 +787,11 @@ body{font:15px system-ui;margin:0;padding:24px;color:#e8e9eb;background:#0d0f13}
 	post(contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, contract.PostRequest{Text: "My notes from the review.",
 		Attachments: []contract.Attachment{upload(contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, "notes.txt", "text/plain", "The feed rows render.\nThe previews load.\n")}})
 	by := contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}
+	var files []contract.Attachment
+	for _, file := range fixtureFiles() {
+		files = append(files, upload(by, file.name, file.media, file.body))
+	}
+	post(by, contract.PostRequest{Text: "One of each kind of file.", Attachments: files})
 	for _, reason := range []string{"Run Go tests on the host", "Inspect the host service logs"} {
 		args := contract.HostexecGrantArgs{Room: room.Room, To: by, Hosts: []contract.HostName{host}, Reason: reason}
 		if _, e := s.OpSubmit(ctx, by, contract.OpSubmitRequest{Operation: contract.Operation{Room: room.Room, Args: args}}); e != nil {
