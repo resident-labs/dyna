@@ -3,6 +3,7 @@
   import Icon from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
   import PostAttachments from "./PostAttachments.svelte";
+  import PostTarget from "./PostTarget.svelte";
   import { clock, formatTime, fullTime, type Row } from "../feed.ts";
   import type { Attachment, EventID, VisualCard } from "../contract.gen.ts";
   import { hue } from "../identity.ts";
@@ -132,7 +133,7 @@
   {#if row.first}
     <Avatar kind={row.from.kind} name={author} {root} size={40} />
     <p class="name">{#if row.from.session}<a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(row.from.session)}`} onclick={navigate} style:--hue={hue(author)}>{author}</a>{:else}<strong class={row.from.kind} style:--hue={hue(author)}>{author}</strong>{/if}
-      <time datetime={row.at} title={fullTime(row.at)}>{formatTime(row.at)}</time>{#if to}<span class="to">→ {to}</span>{/if}</p>
+      <time datetime={row.at} title={fullTime(row.at)}>{formatTime(row.at)}</time>{#if to}<PostTarget {to} />{/if}</p>
   {:else}
     <time class="follow-time" datetime={row.at} title={fullTime(row.at)}>{clock(row.at)}</time>
   {/if}
@@ -204,10 +205,9 @@
   .name a { text-decoration: none; font-weight: 600; }
   .name a:hover { text-decoration: underline; }
   .name a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-  time { flex: none; }
   /* A name stays whole up to 60% of the line, so "You" never truncates; the recipient list takes the rest. */
-  .to { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  time { flex: none; }
   strong.owner { color: var(--focus); }
   strong.engine { color: var(--text); }
-  time, .to { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  time { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 </style>
