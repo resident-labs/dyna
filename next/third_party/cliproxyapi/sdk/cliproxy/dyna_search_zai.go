@@ -247,7 +247,7 @@ func zaiItems(answer zaiEnvelope) ([]zaiItem, error) {
 func zaiError(code int, message, key string) error {
 	message = text(searchRedact(message, key))
 	if message == "" {
-		return searchRefusal(fmt.Sprintf("zai answered MCP error %d", code))
+		return searchRefusal{status: http.StatusBadGateway, message: fmt.Sprintf("zai answered MCP error %d", code)}
 	}
-	return searchRefusal(fmt.Sprintf("zai answered MCP error %d: %s", code, message))
+	return searchRefusal{status: http.StatusBadGateway, message: fmt.Sprintf("zai answered MCP error %d: %s", code, message)}
 }
