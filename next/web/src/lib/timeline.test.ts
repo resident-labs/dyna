@@ -207,10 +207,14 @@ test("an engine notice is one plain line, and a type this build does not know sa
   assert.deepEqual(timelineInput(wake("session.failed", failure)), { kind: "failed", text: "api-lead failed" });
   assert.deepEqual(timelineInput(wake("pr.opened", { repo: "r", number: 7, session: "c", url: "https://x/7" })), { kind: "line", text: "PR opened: https://x/7" });
   assert.deepEqual(timelineInput(wake("shell.job.ended", { session: "s", job: "j", exitCode: 0, tail: "", description: "Build" })), { kind: "line", text: "Background job Build ended" });
-  for (const type of ["hook.finished", "box.pressure"]) {
-    const shown = timelineInput(wake(type, {}));
-    assert.deepEqual(shown, { kind: "line", text: `Event: ${type}` });
-  }
+  assert.deepEqual(timelineInput(wake("hook.due", { subscription: "ci" })), { kind: "line", text: "Subscription ci is due" });
+  assert.deepEqual(timelineInput(wake("hook.finished", { subscription: "ci", result: "passed", exitCode: 0 })), { kind: "line", text: "Subscription ci passed, exit code 0" });
+  assert.deepEqual(timelineInput(wake("hook.finished", { subscription: "ci", result: "failed", exitCode: 2 })), { kind: "failed", text: "Subscription ci failed, exit code 2" });
+  assert.deepEqual(timelineInput(wake("hook.finished", { subscription: "ci", result: "failed", exitCode: -1, cause: "run_timeout" })).kind, "failed");
+  assert.ok(!timelineInputText(wake("hook.finished", { subscription: "ci", result: "failed", exitCode: -1, cause: "run_timeout" })).includes("exit code"));
+  assert.deepEqual(timelineInput(wake("notice.posted", { text: "The room resumes at noon." })), { kind: "line", text: "The room resumes at noon." });
+  assert.deepEqual(timelineInput(wake("future.kind", { any: "shape" })), { kind: "line", text: "Event: future.kind" });
+  assert.deepEqual(timelineInput(wake("hook.finished", { result: "unexpected" })), { kind: "line", text: "Event: hook.finished" });
 });
 
 test("a brief still reads as the start of the work", () => {

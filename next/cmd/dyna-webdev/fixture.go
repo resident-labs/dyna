@@ -67,7 +67,8 @@ func fixtureTurns() []contract.TranscriptTurn {
 			wake(1, child, contract.TurnEnded{Session: fixtureChild, Turn: "child", Outcome: contract.TurnCompleted})
 			wake(2, child, contract.TurnEnded{Session: fixtureChild, Turn: "child", Outcome: contract.TurnFailed, Cause: contract.CauseModelFailed, Error: "provider returned 500"})
 			wake(3, contract.Principal{Kind: contract.PrincipalEngine}, contract.CheckinDue{Session: fixtureSession, Children: []contract.CheckinChild{{Session: fixtureChild, Name: "builder-feed", State: "idle", Goal: "g1", Text: "Build the feed"}}})
-			turn.Inputs = append(turn.Inputs, contract.TranscriptInput{ID: "fixture-wake-4", Seq: 5, At: start, Room: fixtureRoom, Type: "hook.finished", From: contract.Principal{Kind: contract.PrincipalEngine}, Text: `{"hook":"format"}`})
+			wake(4, contract.Principal{Kind: contract.PrincipalEngine}, contract.HookFinished{Subscription: "format", Result: contract.HookPassed})
+			turn.Inputs = append(turn.Inputs, contract.TranscriptInput{ID: "fixture-wake-5", Seq: 6, At: start, Room: fixtureRoom, Type: "future.kind", From: contract.Principal{Kind: contract.PrincipalEngine}, Text: `{}`})
 		}
 		turn.Items = append(turn.Items, contract.TranscriptItem{ID: fmt.Sprintf("%s-text", id), Turn: id, Kind: contract.TranscriptText, At: start, Text: "I’ll trace the sync state and its current tests before changing the UI."})
 		turnTools := tools
