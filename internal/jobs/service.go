@@ -71,7 +71,9 @@ type Service struct {
 	// NewExecutor builds the executor of a node. Tests replace it.
 	NewExecutor func(Conn) Executor
 	// logf logs the service's own errors. Nil uses the standard logger.
-	logf func(string, ...any)
+	logf      func(string, ...any)
+	wakeProbe func(context.Context, machines.Machine) (machines.Machine, error)
+	wakeRun   func(context.Context, []string) error
 	// onRun tells a test that the service began to run a job, synchronously.
 	onRun func(Job)
 	// onPrepared tells a test that a run won its started write and is about
@@ -614,6 +616,7 @@ func (s *Service) claim(ctx context.Context) {
 		s.logger()("jobs: read queued jobs: %v", err)
 		return
 	}
+	s.wakeDemand(ctx, queued)
 	admitted, reasons, err := s.admission().Pass(ctx, queued)
 	if err != nil {
 		s.logger()("jobs: admission pass: %v", err)

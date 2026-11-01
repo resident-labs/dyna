@@ -44,6 +44,7 @@ const (
 	MethodAccountsConnectCallback Method = "accounts.connect_callback"
 	MethodAccountsConnectStatus   Method = "accounts.connect_status"
 	MethodAccountsSetKey          Method = "accounts.set_key"
+	MethodAccountsImportOAuth     Method = "accounts.import_oauth"
 	MethodAccountsRemove          Method = "accounts.remove"
 	MethodAccountsSetLimits       Method = "accounts.set_limits"
 	MethodProfileSet              Method = "profile.set"
