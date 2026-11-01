@@ -25,7 +25,7 @@ case "$suite" in
   next-extras)
     # The vendored CLIProxyAPI is a separate Go module. Its management test runs as its own check,
     # in parallel with next, to keep the next job under its budget.
-    (cd third_party/cliproxyapi && go test -count=1 ./internal/api/handlers/management -run '^TestDyna(KimiOAuthCompletesAfterAdoption|CompletionRejectsDifferentRuntimeGrant|CompletionRejectsEnabledRuntimeGrant)$')
+    (cd third_party/cliproxyapi && go test -count=1 ./internal/api/handlers/management -run '^TestDyna')
     ;;
   next-pi)
     cd third_party/pi

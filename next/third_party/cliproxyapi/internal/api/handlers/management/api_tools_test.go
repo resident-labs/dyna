@@ -837,6 +837,7 @@ func TestAPICallRefreshesExpiredXAIOAuthToken(t *testing.T) {
 
 	store := &memoryAuthStore{}
 	manager := coreauth.NewManager(store, nil, nil)
+	manager.RegisterExecutor(executor.NewXAIExecutor(&config.Config{}))
 	xaiAuth := &coreauth.Auth{
 		ID:       "xai-expired@example.com.json",
 		FileName: "xai-expired@example.com.json",
@@ -1236,6 +1237,7 @@ func TestAPICallConcurrentXAITokenRefresh(t *testing.T) {
 
 	store := &memoryAuthStore{}
 	manager := coreauth.NewManager(store, nil, nil)
+	manager.RegisterExecutor(executor.NewXAIExecutor(&config.Config{}))
 	xaiAuth := &coreauth.Auth{
 		ID:       "xai-concurrent@example.com.json",
 		FileName: "xai-concurrent@example.com.json",
@@ -1305,8 +1307,8 @@ func TestAPICallConcurrentXAITokenRefresh(t *testing.T) {
 	for err := range errCh {
 		t.Fatal(err)
 	}
-	if count := refreshCount.Load(); count == 0 {
-		t.Fatal("expected at least one refresh call")
+	if count := refreshCount.Load(); count != 1 {
+		t.Fatalf("refresh calls = %d, want 1", count)
 	}
 }
 
@@ -1392,6 +1394,7 @@ func TestAPICallRefreshesWhenOnlyIDTokenPresentWithRefreshToken(t *testing.T) {
 
 	store := &memoryAuthStore{}
 	manager := coreauth.NewManager(store, nil, nil)
+	manager.RegisterExecutor(executor.NewXAIExecutor(&config.Config{}))
 	xaiAuth := &coreauth.Auth{
 		ID:       "xai-id-only@example.com.json",
 		FileName: "xai-id-only@example.com.json",
