@@ -53,10 +53,6 @@ type searchCandidate struct {
 	recent   bool
 }
 
-type proxyCredential struct{}
-
-func (proxyCredential) Token(context.Context) (string, string, error) { return "proxy", "proxy", nil }
-
 // SetWebSearchProxy configures proxy-backed search without reading model tokens.
 func (s *Service) SetWebSearchProxy(proxy *model.Proxy, quota *model.Quotas) {
 	s.searchProxy, s.searchQuota = proxy, quota
@@ -128,7 +124,7 @@ func (s *Service) WebSearch(ctx context.Context, caller contract.Principal, req 
 			name     string
 			provider contract.AccountProvider
 		}{
-			{"chatgpt", contract.ProviderOpenAI}, {"claude", contract.ProviderAnthropic}, {"xai", contract.ProviderXAI},
+			{"chatgpt", contract.ProviderOpenAI}, {"claude", contract.ProviderAnthropic}, {"kimi", contract.ProviderKimi}, {"zai", contract.ProviderZAI}, {"xai", contract.ProviderXAI},
 		}
 		for _, spec := range specs {
 			ids, headroom, reason := searchAccounts(accounts, eligible, spec.provider, s.searchQuota.CachedUsage)
@@ -140,11 +136,13 @@ func (s *Service) WebSearch(ctx context.Context, caller contract.Principal, req 
 			var provider websearch.Provider
 			switch spec.name {
 			case "chatgpt":
-				provider = websearch.ChatGPT{BaseURL: "http://cliproxy/v1", Credential: proxyCredential{}, Client: client}
+				provider = websearch.ChatGPT{BaseURL: "http://cliproxy/v1", Client: client}
 			case "claude":
-				provider = websearch.Claude{BaseURL: "http://cliproxy", Token: func(context.Context) (string, error) { return "proxy", nil }, Client: client}
+				provider = websearch.Claude{BaseURL: "http://cliproxy/v1", Client: client}
 			case "xai":
-				provider = websearch.XAI{BaseURL: "http://cliproxy/v1", Token: func(context.Context) (string, error) { return "proxy", nil }, Client: client}
+				provider = websearch.XAI{BaseURL: "http://cliproxy/v1", Client: client}
+			case "kimi", "zai":
+				provider = websearch.ProxySearch{Provider: spec.name, Client: client}
 			}
 			candidates = append(candidates, searchCandidate{provider: provider, headroom: headroom})
 		}
