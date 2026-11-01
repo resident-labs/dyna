@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { untrack } from "svelte";
   import { SvelteMap } from "svelte/reactivity";
   import Icon from "./Icon.svelte";
   import StepList from "./StepList.svelte";
@@ -7,19 +6,27 @@
   import type { Event } from "../contract.gen.ts";
   import { TurnTranscripts } from "../transcripts.svelte.ts";
 
-  let { row, name, opened, ontoggle, transcripts, onjobs }: {
+  let { row, name, opened, ontoggle, onjobs }: {
     row: Extract<Row, { kind: "work" }>; name: (session: string) => string; opened: ReadonlySet<string>; ontoggle: (key: string) => void;
-    transcripts?: TurnTranscripts; onjobs: (session: string) => void;
+    onjobs: (session: string) => void;
   } = $props();
   let open = $derived(opened.has(row.key));
-  let read = $derived(transcripts?.of(row.events));
-  let saved = $derived(typeof read === "object" ? read : undefined);
-  let steps = $derived(saved?.steps ?? []);
-  let events = $derived(steps.length || read === "loading" ? row.events.filter(event => !["turn.started", "turn.ended", "turn.activity"].includes(event.type)) : row.events);
-  let workers = $derived([...new Set(events.flatMap(event => event.type === "turn.started" || event.type === "turn.ended" ? [event.body.session] : []))].sort((a, b) => Number(row.failedSessions.includes(b)) - Number(row.failedSessions.includes(a))));
+  let workers = $derived([...new Set(row.events.flatMap(event => event.type === "turn.started" || event.type === "turn.ended" ? [event.body.session] : []))].sort((a, b) => Number(row.failedSessions.includes(b)) - Number(row.failedSessions.includes(a))));
+  let events = $derived(row.events);
   let other = $derived(events.filter(event => event.type !== "turn.started" && event.type !== "turn.ended" && event.type !== "turn.activity" && event.type !== "computer.changed"));
   let groups = $derived([...other.reduce((groups, event) => groups.set(event.type, [...groups.get(event.type) ?? [], event]), new Map<Event["type"], Event[]>()).values()]);
   let computerSessions = $derived([...new Set(events.flatMap(event => event.type === "computer.changed" ? [event.body.session] : []))]);
+  const sessionTranscripts = new SvelteMap<string, TurnTranscripts>();
+  function transcriptOf(session: string): TurnTranscripts {
+    let transcript = sessionTranscripts.get(session);
+    if (!transcript) { transcript = new TurnTranscripts(session); sessionTranscripts.set(session, transcript); }
+    return transcript;
+  }
+  $effect(() => {
+    for (const session of workers) transcriptOf(session).read(row.events.filter(event => subject(event) === session));
+  });
+  let reads = $derived(workers.map(session => sessionTranscripts.get(session)?.of(row.events.filter(event => subject(event) === session))));
+  let expandable = $derived(computerSessions.length > 0 || groups.some(group => !!describe(group[0], name)) || reads.some(read => read === undefined || read === "loading" || read === "failed" || (typeof read === "object" && (read.steps.length > 0 || read.truncated))));
   function computerUsage(session: string): string {
     let start: number | undefined, total = 0, uses = 0;
     for (const event of events) {
@@ -31,26 +38,6 @@
     return `${name(session)} used its computer${uses ? ` ${uses} ${uses === 1 ? "time" : "times"}` : ""}${minutes ? `, ${minutes} min in all` : ""}`;
   }
   let allWorkers = $derived(opened.has(`${row.key}-all`));
-  const sessionTranscripts = new SvelteMap<string, TurnTranscripts>();
-  function transcriptOf(session: string): TurnTranscripts {
-    let transcript = sessionTranscripts.get(session);
-    if (!transcript) { transcript = new TurnTranscripts(session); sessionTranscripts.set(session, transcript); }
-    return transcript;
-  }
-  function toggleSession(session: string, own: Event[]) {
-    const key = `${row.key}-${session}`;
-    if (!opened.has(key)) transcriptOf(session).read(own);
-    ontoggle(key);
-  }
-  $effect(() => {
-    if (open) {
-      const current = row.events;
-      untrack(() => transcripts?.read(current));
-      for (const session of workers) if (opened.has(`${row.key}-${session}`)) {
-        transcriptOf(session).read(current.filter(event => subject(event) === session));
-      }
-    }
-  });
 </script>
 
 {#snippet requestDetails(event: Extract<Event, { type: "op.requested" }>)}<li class="step"><details><summary>Request details <span class="details-chevron"><Icon name="chevron" size={14} /></span></summary>
@@ -63,26 +50,30 @@
 <div class="work">
   <span class="glyph" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 3 8l9 5 9-5zM3 13l9 5 9-5" /></svg></span>
   <div class="body">
-    <button type="button" class="fold" aria-expanded={open} onclick={() => ontoggle(row.key)}>
-      <span class="summary">{workSummary(row.events, name, row.until, steps[0]?.started)} <time datetime={row.events[0].at}>{row.events.length > 1 || row.until ? timeSpan(row.events[0].at, row.until ?? row.events.at(-1)?.at ?? row.events[0].at) : clock(row.events[0].at)}</time></span>
-      <span class="chevron" class:open><Icon name="chevron" size={14} /></span>
-    </button>
-    {#if open}<div class="opened">
-      {#if read === "loading"}<p>Loading steps…</p>
-      {:else if read === "failed"}<p>The steps did not load. <button type="button" class="retry" onclick={() => transcripts?.read(row.events, true)}>Retry</button></p>
-      {:else if saved && (steps.length || saved.truncated)}<StepList {steps} truncated={saved.truncated} id={row.key} {opened} {ontoggle} />{/if}
-      {#if workers.length}{#if workers.length > 1}<button class="detail" type="button" aria-expanded={!opened.has(`${row.key}-workers`)} onclick={() => ontoggle(`${row.key}-workers`)}><Icon name="terminal" size={14} /> {workers.length === 1 ? `${name(workers[0])} worked` : `${workers.length} sessions worked`} <Icon name="chevron" size={14} /><time datetime={row.events[0].at}>{timeSpan(row.events[0].at, row.until ?? row.events.at(-1)?.at ?? row.events[0].at)}</time></button>{/if}
-        {#if workers.length === 1 || !opened.has(`${row.key}-workers`)}<ul class="workers">{#each workers.slice(0, allWorkers ? undefined : 6) as session (session)}
-          {@const own = events.filter(event => subject(event) === session && (event.type === "turn.started" || event.type === "turn.ended"))}
-          <li><button class="detail" type="button" aria-expanded={opened.has(`${row.key}-${session}`)} onclick={() => toggleSession(session, own)}>{#if workers.length === 1}<Icon name="terminal" size={14} />{/if}{name(session)} worked <Icon name="chevron" size={14} /></button><time datetime={own[0].at}>{own.length > 1 ? timeSpan(own[0].at, own.at(-1)?.at ?? own[0].at) : clock(own[0].at)}</time></li>
-          {#if opened.has(`${row.key}-${session}`)}
-            {@const transcript = sessionTranscripts.get(session)?.of(own)}
-            {#if transcript === "loading"}<li class="step">Loading steps…</li>
-            {:else if transcript === "failed"}<li class="step">The steps did not load. <button class="retry" type="button" onclick={() => sessionTranscripts.get(session)?.read(own, true)}>Retry</button></li>
-            {:else if transcript && (transcript.steps.length || transcript.truncated)}<li class="step step-list"><StepList steps={transcript.steps} truncated={transcript.truncated} id={`${row.key}-${session}`} {opened} {ontoggle} /></li>
-            {:else}{#each own as event (event.seq)}{#if describe(event, name)}<li class="step"><time datetime={event.at}>{formatTime(event.at)}</time><span>{describe(event, name)}</span></li>{/if}{/each}{/if}
+    <svelte:element this={expandable ? "button" : "div"} type={expandable ? "button" : undefined} class="fold" class:inert={!expandable} aria-expanded={expandable ? open : undefined} onclick={expandable ? () => ontoggle(row.key) : undefined}>
+      <span class="summary">{workSummary(row.events, name, row.until)} <time datetime={row.events[0].at}>{row.events.length > 1 || row.until ? timeSpan(row.events[0].at, row.until ?? row.events.at(-1)?.at ?? row.events[0].at) : clock(row.events[0].at)}</time></span>
+      {#if expandable}<span class="chevron" class:open><Icon name="chevron" size={14} /></span>{/if}
+    </svelte:element>
+    {#if open && expandable}<div class="opened">
+      {#if workers.length === 1}
+        {@const session = workers[0]}
+        {@const own = events.filter(event => subject(event) === session)}
+        {@const transcript = sessionTranscripts.get(session)?.of(own)}
+        {#if transcript === "loading" || !transcript}<p>Loading steps…</p>
+        {:else if transcript === "failed"}<p>The steps did not load. <button type="button" class="retry" onclick={() => transcriptOf(session).read(own, true)}>Retry</button></p>
+        {:else if transcript.steps.length || transcript.truncated}<StepList steps={transcript.steps} truncated={transcript.truncated} id={row.key} {opened} {ontoggle} />{/if}
+      {:else if workers.length > 1}
+        <ul class="workers">{#each workers.slice(0, allWorkers ? undefined : 6) as session (session)}
+          {@const own = events.filter(event => subject(event) === session)}
+          {@const transcript = sessionTranscripts.get(session)?.of(own)}
+          {@const available = !transcript || transcript === "loading" || transcript === "failed" || (typeof transcript === "object" && (transcript.steps.length > 0 || transcript.truncated))}
+          <li>{#if available}<button class="detail" type="button" aria-expanded={opened.has(`${row.key}-${session}`)} onclick={() => ontoggle(`${row.key}-${session}`)}>{workSummary(own, name)} <Icon name="chevron" size={14} /></button>{:else}<span>{workSummary(own, name)}</span>{/if}</li>
+          {#if available && opened.has(`${row.key}-${session}`)}
+            {#if transcript === "loading" || !transcript}<li class="step">Loading steps…</li>
+            {:else if transcript === "failed"}<li class="step">The steps did not load. <button class="retry" type="button" onclick={() => transcriptOf(session).read(own, true)}>Retry</button></li>
+            {:else}<li class="step step-list"><StepList steps={transcript.steps} truncated={transcript.truncated} id={`${row.key}-${session}`} {opened} {ontoggle} /></li>{/if}
           {/if}
-        {/each}{#if !allWorkers && workers.length > 6}<li><button class="detail" type="button" onclick={() => ontoggle(`${row.key}-all`)}>Show {workers.length - 6} more sessions</button></li>{/if}</ul>{/if}
+        {/each}{#if !allWorkers && workers.length > 6}<li><button class="detail" type="button" onclick={() => ontoggle(`${row.key}-all`)}>Show {workers.length - 6} more sessions</button></li>{/if}</ul>
       {/if}
       <ul>{#each computerSessions as session (session)}<li><Icon name="monitor" size={14} /><span>{computerUsage(session)}</span></li>{/each}{#each groups as group (group[0].type)}{@const line = describe(group[0], name)}{#if line}<li><Icon name={group[0].type === "session.closed" ? "close" : group[0].type === "session.started" ? "person" : group[0].type === "op.decided" ? "check" : group[0].type === "op.requested" ? "shield" : "list"} size={14} />{#if group.length === 1}<span>{line}{#if group[0].type === "shell.job.ended"}{@const session = group[0].body.session} <button type="button" class="retry" onclick={() => onjobs(session)}>View jobs</button>{/if}</span>{:else}<button class="detail" type="button" aria-expanded={opened.has(`${row.key}-${group[0].type}`)} onclick={() => ontoggle(`${row.key}-${group[0].type}`)}>{group.length} {eventGroups[group[0].type]} <Icon name="chevron" size={14} /></button>{/if}<time datetime={group[0].at}>{formatTime(group[0].at)}</time></li>{#if group.length === 1 && group[0].type === "op.requested"}{@render requestDetails(group[0])}{/if}{#if group.length > 1 && opened.has(`${row.key}-${group[0].type}`)}{#each group as event (event.seq)}<li class="step"><span>{describe(event, name)}{#if event.type === "shell.job.ended"} <button type="button" class="retry" onclick={() => onjobs(event.body.session)}>View jobs</button>{/if}</span><time datetime={event.at}>{formatTime(event.at)}</time></li>{#if event.type === "op.requested"}{@render requestDetails(event)}{/if}{/each}{/if}{/if}{/each}</ul>
     </div>{/if}
@@ -95,7 +86,8 @@
   @media (max-width: 640px) { .work { gap: 8px; } }
   .body { min-width: 0; }
   .fold { all: unset; display: flex; align-items: flex-start; gap: 8px; width: 100%; min-height: 24px; cursor: pointer; border-radius: 6px; }
-  .fold:hover, .retry:hover { color: var(--text); }
+  .fold.inert { cursor: default; }
+  .fold:not(.inert):hover, .retry:hover { color: var(--text); }
   .fold:focus-visible, .retry:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .summary { flex: 1; min-width: 0; padding-top: 3px; overflow-wrap: anywhere; }
   time { color: var(--muted); opacity: .8; white-space: nowrap; }
