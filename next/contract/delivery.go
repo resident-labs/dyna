@@ -23,7 +23,7 @@ type ReplyKind string
 const (
 	ReplyFinal ReplyKind = "final" // the engine delivers the final response to Target
 	ReplyPost  ReplyKind = "post"  // answer with dyna post, only if needed
-	ReplyNone  ReplyKind = "none"  // nothing is owed; end with one line
+	ReplyNone  ReplyKind = "none"  // nothing is owed, so it must not stop work in progress
 )
 
 type ReplyChannel struct {
