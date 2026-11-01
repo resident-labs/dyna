@@ -128,14 +128,10 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	catalog, skipped, err := model.LoadCatalog(pi)
+	catalog, err := model.LoadCatalog(pi)
 	if err != nil {
 		return err
 	}
-	for _, provider := range skipped {
-		log.Printf("invalid Pi catalog provider %q", provider)
-	}
-	keyProviders := catalog.KeyProviders()
 	st, err := store.Open(cfg.Data)
 	if err != nil {
 		return err
@@ -160,14 +156,11 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	managementKey := hex.EncodeToString(key[:])
-	proxy, err := model.NewProxy(cfg.Data, managementKey, keyProviders...)
+	proxy, err := model.NewProxy(cfg.Data, managementKey, catalog)
 	if err != nil {
 		return err
 	}
 	defer proxy.Listener.Close()
-	if err := proxy.SetPlanModels(catalog); err != nil {
-		return fmt.Errorf("load pinned proxy catalog: %w", err)
-	}
 	proxyCtx, stopProxy := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopProxy()
 	done := make(chan struct{})

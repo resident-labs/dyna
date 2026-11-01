@@ -7,73 +7,99 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
 )
 
-// The proxy Kimi executor translates these exact names to Pi's upstream IDs.
-var planAliases = map[contract.AccountProvider]map[string]string{
-	contract.ProviderKimiCoding: {
-		"k3":                        "kimi-k3",
-		"k3-256k":                   "kimi-k3-256k",
-		"kimi-for-coding":           "kimi-k2.8-code",
-		"kimi-for-coding-highspeed": "kimi-k2.7-code-highspeed",
-	},
-}
-
+// planProxyModel translates the pinned Pi spelling to the proxy's exact ID.
 func planProxyModel(provider contract.AccountProvider, id string) string {
-	if alias := planAliases[provider][id]; alias != "" {
-		return alias
+	if provider == contract.ProviderKimiCoding {
+		switch id {
+		case "k3":
+			return "kimi-k3"
+		case "k2p6":
+			return "kimi-k2.6"
+		case "kimi-for-coding":
+			return "kimi-k2.8-code"
+		}
 	}
 	return id
 }
 
 func proxyModel(namespace, id string) string {
-	if provider, ok := strings.CutPrefix(namespace, "plan_"); ok {
-		return planProxyModel(contract.AccountProvider(provider), id)
+	if strings.HasPrefix(namespace, "plan_") {
+		return planProxyModel(contract.AccountProvider(strings.TrimPrefix(namespace, "plan_")), id)
 	}
 	return id
 }
 
-// SetPlanModels intersects Pi's pinned list with the proxy's immutable plan lists.
-func (p *Proxy) SetPlanModels(c Catalog) error {
+type pool struct {
+	info         contract.AccountProviderInfo
+	proxy        string
+	models       map[string]bool
+	defaultModel string
+}
+
+func (p *Proxy) initPools(c Catalog) error {
 	pinned, err := cliproxy.DynaPinnedModels()
 	if err != nil {
 		return err
 	}
-	available := map[contract.AccountProvider][]string{
-		contract.ProviderAnthropic:  pinned.Claude,
-		contract.ProviderOpenAI:     pinned.Codex,
-		contract.ProviderKimiCoding: pinned.Kimi,
-		contract.ProviderXAI:        pinned.XAI,
+	p.pools = make(map[string]pool)
+	for _, key := range c.Keys {
+		p.pools[string(key.Provider)] = makePool(contract.AccountProviderInfo{ID: key.Provider, DisplayName: key.DisplayName, KeyName: key.KeyName, Flows: []contract.ConnectFlow{contract.ConnectFlowKey}, Models: key.Models}, "", key.DefaultModel)
+		p.keyOrder = append(p.keyOrder, string(key.Provider))
 	}
-	p.planModels = make(map[contract.AccountProvider][]contract.CatalogModel)
-	p.planDefaults = make(map[contract.AccountProvider]string)
-	for _, provider := range c.Providers {
-		id := contract.AccountProvider(provider.ID)
-		ids, ok := available[id]
-		if !ok {
+	for _, provider := range c.Plans {
+		var info contract.AccountProviderInfo
+		var proxy string
+		for _, option := range oauthProviders {
+			if option.info.ID == provider.ID {
+				info, proxy = option.info, option.proxy
+				break
+			}
+		}
+		var tiers [][]string
+		switch provider.ID {
+		case contract.ProviderAnthropic:
+			tiers = [][]string{pinned.Claude}
+		case contract.ProviderOpenAI:
+			tiers = [][]string{pinned.CodexFree, pinned.CodexTeam, pinned.CodexPlus, pinned.CodexPro}
+		case contract.ProviderKimiCoding:
+			tiers = [][]string{pinned.Kimi}
+		case contract.ProviderXAI:
+			tiers = [][]string{pinned.XAI}
+		default:
 			continue
 		}
-		set := make(map[string]bool, len(ids))
-		for _, name := range ids {
-			set[name] = true
-		}
-		activation := set
-		if id == contract.ProviderOpenAI {
-			activation = make(map[string]bool, len(pinned.CodexCommon))
-			for _, name := range pinned.CodexCommon {
-				activation[name] = true
+		counts := make(map[string]int)
+		for _, tier := range tiers {
+			seen := make(map[string]bool)
+			for _, id := range tier {
+				if !seen[id] {
+					counts[id]++
+					seen[id] = true
+				}
 			}
 		}
+		var selected string
 		for _, model := range provider.Models {
-			if !set[planProxyModel(id, model.ID)] {
+			count := counts[planProxyModel(provider.ID, model.ID)]
+			if count == 0 {
 				continue
 			}
-			p.planModels[id] = append(p.planModels[id], contract.CatalogModel{ID: model.ID, Name: model.Name})
-			if activation[planProxyModel(id, model.ID)] && (p.planDefaults[id] == "" || model.ID == provider.DefaultModel) {
-				p.planDefaults[id] = model.ID
+			info.Models = append(info.Models, model)
+			if count == len(tiers) && (selected == "" || model.ID == provider.DefaultModel) {
+				selected = model.ID
 			}
 		}
-		if p.planDefaults[id] == "" {
-			delete(p.planModels, id)
+		if selected != "" {
+			p.pools["plan_"+string(provider.ID)] = makePool(info, proxy, selected)
 		}
 	}
 	return nil
+}
+
+func makePool(info contract.AccountProviderInfo, proxy, defaultModel string) pool {
+	models := make(map[string]bool, len(info.Models))
+	for _, model := range info.Models {
+		models[model.ID] = true
+	}
+	return pool{info: info, proxy: proxy, models: models, defaultModel: defaultModel}
 }

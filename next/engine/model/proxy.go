@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"sync/atomic"
 
-	"github.com/resident-labs/dyna/contract"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
@@ -18,21 +17,24 @@ import (
 
 // Proxy owns the proxy listener and its private client key.
 type Proxy struct {
-	keyProviders []KeyProvider
-	planModels   map[contract.AccountProvider][]contract.CatalogModel
-	planDefaults map[contract.AccountProvider]string
-	Listener     *net.UnixListener
-	Config       string
-	Socket       string
-	clientKey    string
-	client       *http.Client
-	generation   atomic.Uint64
+	pools      map[string]pool
+	keyOrder   []string
+	Listener   *net.UnixListener
+	Config     string
+	Socket     string
+	clientKey  string
+	client     *http.Client
+	generation atomic.Uint64
 }
 
 // NewProxy creates a private proxy configuration. managementKey is held by the engine.
-func NewProxy(dataDir, managementKey string, providers ...KeyProvider) (*Proxy, error) {
+func NewProxy(dataDir, managementKey string, catalog Catalog) (*Proxy, error) {
 	if managementKey == "" {
 		return nil, fmt.Errorf("model: management key is required")
+	}
+	p := &Proxy{}
+	if err := p.initPools(catalog); err != nil {
+		return nil, err
 	}
 	var secret [32]byte
 	if _, err := rand.Read(secret[:]); err != nil {
@@ -83,7 +85,7 @@ func NewProxy(dataDir, managementKey string, providers ...KeyProvider) (*Proxy, 
 		return nil, err
 	}
 	cfg.AuthDir = authDir
-	for _, provider := range providers {
+	for _, provider := range catalog.Keys {
 		catalog := config.OpenAICompatibility{Name: string(provider.Provider), Prefix: string(provider.Provider), BaseURL: provider.URL, Headers: provider.Headers, DynaCatalogOnly: true}
 		for _, model := range provider.Models {
 			catalog.Models = append(catalog.Models, config.OpenAICompatibilityModel{Name: model.ID, Alias: model.ID})
@@ -117,7 +119,8 @@ func NewProxy(dataDir, managementKey string, providers ...KeyProvider) (*Proxy, 
 		return nil, closeErr
 	}
 	owned = false
-	return &Proxy{keyProviders: providers, Listener: listener, Config: path, Socket: socket, clientKey: key, client: unixClient(socket)}, nil
+	p.Listener, p.Config, p.Socket, p.clientKey, p.client = listener, path, socket, key, unixClient(socket)
+	return p, nil
 }
 
 // Handler binds a route to a session and its permitted models.

@@ -148,15 +148,9 @@ func (r *AuthRPC) OAuthCompleted(req OAuthCompletion, out *OAuthCompletionResult
 	defer r.Connections.mu.Unlock()
 	for _, attempt := range r.Connections.attempts {
 		if attempt.state == req.State {
-			models := r.Connections.proxy.planModels[attempt.provider]
-			if len(models) == 0 {
-				return errors.New("plan model unavailable")
-			}
+			entry := r.Connections.proxy.pools["plan_"+string(attempt.provider)]
 			out.Prefix = "plan_" + string(attempt.provider)
-			selected := r.Connections.proxy.planDefaults[attempt.provider]
-			if selected == "" {
-				selected = models[0].ID
-			}
+			selected := entry.defaultModel
 			out.Model = out.Prefix + "/" + planProxyModel(attempt.provider, selected)
 			out.Accepted = true
 			return nil

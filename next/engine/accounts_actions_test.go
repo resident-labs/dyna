@@ -28,7 +28,7 @@ func TestReconnectUnavailableBeforeLogin(t *testing.T) {
 	if err := st.BindAccount(ctx, "account", "anonymous", contract.ProviderXAI, "label"); err != nil {
 		t.Fatal(err)
 	}
-	proxy, err := model.NewProxy(t.TempDir(), "key")
+	proxy, err := model.NewProxy(t.TempDir(), "key", testAccountCatalog())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestAccountActionKeepsSecretOutOfAudit(t *testing.T) {
 	}
 	defer st.Close()
 	ctx := context.Background()
-	proxy, err := model.NewProxy(t.TempDir(), "invented-management-key", model.KeyProvider{Provider: "zai", DisplayName: "z.ai", KeyName: "ZAI_API_KEY", URL: "https://example.com/v1", Models: []contract.CatalogModel{{ID: "model"}}})
+	proxy, err := model.NewProxy(t.TempDir(), "invented-management-key", testAccountCatalog())
 	if err != nil {
 		t.Fatal(err)
 	}

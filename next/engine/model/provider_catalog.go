@@ -14,31 +14,24 @@ var oauthProviders = []struct {
 
 // AccountProviders describes the same catalog used by the connection handlers.
 func (p *Proxy) AccountProviders() []contract.AccountProviderInfo {
-	providers := make([]contract.AccountProviderInfo, 0, len(oauthProviders)+len(p.keyProviders))
-	for _, provider := range oauthProviders {
-		info := provider.info
-		if len(p.planModels[info.ID]) == 0 {
+	var providers []contract.AccountProviderInfo
+	indices := make(map[contract.AccountProvider]int)
+	for _, option := range oauthProviders {
+		entry, ok := p.pools["plan_"+string(option.info.ID)]
+		if !ok {
 			continue
 		}
-		info.Models = p.planModels[info.ID]
-		providers = append(providers, info)
+		indices[entry.info.ID] = len(providers)
+		providers = append(providers, entry.info)
 	}
-	for _, provider := range p.keyProviders {
-		index := -1
-		for i := range providers {
-			if providers[i].ID == provider.Provider {
-				index = i
-				break
-			}
+	for _, namespace := range p.keyOrder {
+		info := p.pools[namespace].info
+		if index, ok := indices[info.ID]; ok {
+			providers[index].Flows = append(providers[index].Flows, contract.ConnectFlowKey)
+			providers[index].KeyName, providers[index].Models = info.KeyName, info.Models
+		} else {
+			providers = append(providers, info)
 		}
-		if index < 0 {
-			providers = append(providers, contract.AccountProviderInfo{ID: provider.Provider, DisplayName: provider.DisplayName})
-			index = len(providers) - 1
-		}
-		info := &providers[index]
-		info.Flows = append(info.Flows, contract.ConnectFlowKey)
-		info.KeyName = provider.KeyName
-		info.Models = provider.Models
 	}
 	// TODO: legacy/shim remove later — connectMethod and connectFlow; catalog PR 4 removes them.
 	for i := range providers {

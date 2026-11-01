@@ -69,7 +69,7 @@ func TestKimiCompletionBindsAcrossProxyNotification(t *testing.T) {
 	defer harness.Close()
 	server := httptest.NewServer(harness)
 	defer server.Close()
-	p := &Proxy{planModels: testPlanModels(), client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
+	p := &Proxy{pools: testPools(), client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}
 	connections = p.Connections("invented-key", st, time.Now)
 	if _, err := connections.Start(ctx, contract.AccountsConnectRequest{Provider: contract.ProviderKimiCoding, Label: "Invented"}); err != nil {
 		t.Fatal(err)
