@@ -2,7 +2,6 @@
   import { onDestroy, onMount, tick, untrack } from "svelte";
   import { call } from "../client.ts";
   import { causes, formatTime } from "../feed.ts";
-  import { hue } from "../identity.ts";
   import { watchTranscripts } from "../stream.ts";
   import type { PostRequest, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn } from "../contract.gen.ts";
   import type { RoomStore } from "../room.svelte.ts";
@@ -15,7 +14,7 @@
   import TimelineMinimap from "./TimelineMinimap.svelte";
   import { deriveTimelineGroups, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems } from "../timeline.ts";
 
-  let { session, roomName, store, unsent, onunsent, onsettled, onpostlocation, clock = Date.now }: { session: string; roomName: string; store: RoomStore; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; clock?: () => number } = $props();
+  let { session, roomName, store, unsent, onunsent, onsettled, onpostlocation, navigate, clock = Date.now }: { session: string; roomName: string; store: RoomStore; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
   const view = untrack(() => store.window({ kind: "dm", session }));
   view.onunsent = request => onunsent(request);
   view.onsettled = request => onsettled(request);
@@ -210,8 +209,10 @@
         {#each turn.inputs ?? [] as input (input.id)}
           {#if input.from.kind === "owner"}
             <div class="owner-message" title={formatTime(input.at)}><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{#if chunkFailed["input:" + input.id + "/text"]}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Text did not load. Try again</button>{/if}</div>
+          {:else if input.from.kind === "session"}
+            <div class="agent-input"><div class="agent-sender"><Avatar kind="session" name={sender(input.from.kind, input.from.session)} size={22} />{#if input.from.session}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(input.from.session)}`} onclick={navigate}>{sender(input.from.kind, input.from.session)}</a>{:else}<strong>Session</strong>{/if}</div><div class="agent-bubble" title={formatTime(input.at)}><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{#if input.more && input.type === "post.created" && chunks["input:" + input.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Show all</button>{/if}</div></div>
           {:else}
-            <div class="input"><div class="who"><Avatar kind={input.from.kind} name={sender(input.from.kind, input.from.session)} size={22} /><strong class:identity={input.from.kind === "session"} style:--hue={hue(sender(input.from.kind, input.from.session))}>{sender(input.from.kind, input.from.session)}</strong>{#if input.home}<span class="muted">{input.home.kind === "feed" ? `in ${roomName}` : input.home.session === session ? "in your DM" : "in a DM"}</span>{/if}<time datetime={input.at}>{formatTime(input.at)}</time></div><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{#if input.more && input.type === "post.created" && chunks["input:" + input.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Show all</button>{/if}</div>
+            <div class="input"><div class="who"><Avatar kind={input.from.kind} name={sender(input.from.kind, input.from.session)} size={22} /><strong>{sender(input.from.kind, input.from.session)}</strong>{#if input.home}<span class="muted">{input.home.kind === "feed" ? `in ${roomName}` : input.home.session === session ? "in your DM" : "in a DM"}</span>{/if}<time datetime={input.at}>{formatTime(input.at)}</time></div><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{#if input.more && input.type === "post.created" && chunks["input:" + input.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Show all</button>{/if}</div>
           {/if}
         {/each}
         <!-- Dyna: Posts and the final answer remain visible outside the work fold. -->
@@ -260,6 +261,11 @@
   .spinner { display: inline-block; width: 12px; height: 12px; border: 1.5px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+  .agent-input { width: fit-content; max-width: 75%; margin: 12px 0 12px auto; }
+  .agent-sender { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 12px; }
+  .agent-sender a { color: var(--text); font-weight: 600; text-decoration: none; }
+  .agent-sender a:hover { text-decoration: underline; }
+  .agent-bubble { padding: 12px 16px; background: var(--raised); border-radius: 14px; }
   .owner-message { width: fit-content; max-width: 75%; margin: 12px 0 12px auto; padding: 12px 16px; background: var(--raised); border-radius: 14px; }
   .input { background: var(--raised); padding: 12px 16px; border-radius: 14px; margin: 12px 0; }
   p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
