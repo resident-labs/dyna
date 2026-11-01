@@ -1,12 +1,5 @@
-import type { AccountProviderInfo, AccountUsage, AccountsListResponse, UsageCause, UsageWindow } from "./contract.gen.ts";
+import type { AccountProviderInfo, AccountUsage, AccountsListResponse, UsageWindow } from "./contract.gen.ts";
 import type { Meter } from "./hosts.ts";
-
-// An expired sign-in needs the owner to act, so its row says only that; the others say why Dyna has no reading.
-export const causeText: Record<Exclude<UsageCause, "">, { pill: string; line?: string; tone?: "warning" }> = {
-  sign_in_expired: { pill: "Sign-in expired", tone: "warning" },
-  rate_limited: { pill: "Rate limited", line: "The provider asked Dyna to try again later." },
-  unreachable: { pill: "Unreachable", line: "Dyna could not read its limits." },
-};
 
 const count = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
 
@@ -41,27 +34,28 @@ function named(account: AccountUsage, catalog?: AccountsListResponse) {
 export type UsageRow = { title: string; provider?: string; windows: UsageWindow[] };
 
 // The accounts that report usage, highest figure first, then by name, so the order holds between loads.
-// An account with a cause is an alert instead, and one with neither says nothing, so it is left out.
+// An expired sign-in is an alert instead. Any other account without windows says nothing, so it is left out, whatever
+// its cause: rate limits and failed readings pass by themselves.
 export function usageRows(accounts: AccountUsage[], catalog?: AccountsListResponse): UsageRow[] {
   const peak = (row: UsageRow) => Math.max(...row.windows.map(usedOf));
   return accounts.flatMap(account => {
-    const windows = account.cause ? [] : visibleWindows(account.windows ?? []);
+    const windows = account.cause === "sign_in_expired" ? [] : visibleWindows(account.windows ?? []);
     if (!windows.length) return [];
     const { title, provider } = named(account, catalog);
     return [{ title, provider, windows }];
   }).sort((a, b) => peak(b) - peak(a) || a.title.localeCompare(b.title));
 }
 
-export type AccountAlert = { id: string; title: string; provider?: string; cause: (typeof causeText)[keyof typeof causeText]; reconnect: boolean };
+export type AccountAlert = { id: string; title: string; provider?: string; reconnect: boolean };
 
-// The accounts that go in Needs you: those with a cause, expired sign-ins first, then by name. Only a sign-in that
-// expired on a provider with OAuth can be reconnected.
+// The accounts that go in Needs you, by name: an expired sign-in is the one cause the owner can act on. Only one on a
+// provider with OAuth can be reconnected.
 export function accountAlerts(accounts: AccountUsage[], catalog?: AccountsListResponse): AccountAlert[] {
   return accounts.flatMap(account => {
-    if (!account.cause) return [];
+    if (account.cause !== "sign_in_expired") return [];
     const { title, provider, info } = named(account, catalog);
-    return [{ id: account.accountId ?? "", title, provider, cause: causeText[account.cause], reconnect: account.cause === "sign_in_expired" && info?.connectMethod === "oauth" }];
-  }).sort((a, b) => Number(!a.cause.tone) - Number(!b.cause.tone) || a.title.localeCompare(b.title));
+    return [{ id: account.accountId ?? "", title, provider, reconnect: info?.connectMethod === "oauth" }];
+  }).sort((a, b) => a.title.localeCompare(b.title));
 }
 
 // The busiest window by account, such as "pipsqueak.tasks · 5-hour 62% used"; none without one.
