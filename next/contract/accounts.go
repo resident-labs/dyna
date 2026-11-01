@@ -138,19 +138,18 @@ type AccountsSetLimitsRequest struct {
 }
 type AccountsSetLimitsResponse struct{}
 type Profile struct {
-	Description    string        `json:"description"`
-	Taste          int           `json:"taste"`
-	Diagnostics    int           `json:"diagnostics"`
-	Intelligence   int           `json:"intelligence"`
-	Cost           int           `json:"cost"`
-	Name           ProfileName   `json:"name"`
-	Provider       ModelProvider `json:"provider"`
-	Model          string        `json:"model"`
-	Thinking       ThinkingLevel `json:"thinking"`
-	AllowedModels  []string      `json:"allowedModels"`
-	CompactTokens  int           `json:"compactTokens"`
-	MaxConcurrent  int           `json:"maxConcurrent"`
-	MaxCallsPerRun int           `json:"maxCallsPerRun"`
+	Description   string        `json:"description"`
+	Taste         int           `json:"taste"`
+	Diagnostics   int           `json:"diagnostics"`
+	Intelligence  int           `json:"intelligence"`
+	Cost          int           `json:"cost"`
+	Name          ProfileName   `json:"name"`
+	Provider      ModelProvider `json:"provider"`
+	Model         string        `json:"model"`
+	Thinking      ThinkingLevel `json:"thinking"`
+	AllowedModels []string      `json:"allowedModels"`
+	CompactTokens int           `json:"compactTokens"`
+	MaxConcurrent int           `json:"maxConcurrent"`
 }
 type ProfileSetRequest struct {
 	Create  bool    `json:"create"`

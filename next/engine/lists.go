@@ -43,13 +43,11 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 	for i := range result.Sessions {
 		session := &result.Sessions[i]
 		activity, _ := s.live.Activity(session.ID)
-		s.mu.Lock()
-		state := s.sessionLocked(session.ID)
 		session.Computer = contract.ComputerStopped
-		if state.computer != nil {
-			session.Computer = state.computer.state
+		if handle, ok := s.live.LookupSession(session.ID); ok && handle.Lock() {
+			session.Computer = handle.ComputerState()
+			handle.Unlock()
 		}
-		s.mu.Unlock()
 		if session.Turn != "" && activity.Turn == session.Turn {
 			session.Activity = activity.Label
 		}

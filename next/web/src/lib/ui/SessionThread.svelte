@@ -1,18 +1,24 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from "svelte";
   import { call } from "../client.ts";
-  import { causes, formatTime } from "../feed.ts";
+  import { decodeEvent } from "../event.ts";
   import { hue } from "../identity.ts";
+  import type { VisualVersion } from "../visual.ts";
+  import { causes, formatTime } from "../feed.ts";
   import { watchTranscripts } from "../stream.ts";
-  import type { PostRequest, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn } from "../contract.gen.ts";
+  import type { PostRequest, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn, TranscriptInput, TranscriptPage, VisualCard } from "../contract.gen.ts";
   import type { RoomStore } from "../room.svelte.ts";
-  import Icon, { type IconName } from "./Icon.svelte";
-  import { activeVerb, elapsed, stepTime, titleOf, workingGroup, workSummary, type StepKind } from "../steps.ts";
+  import Icon from "./Icon.svelte";
+  import { elapsed } from "../steps.ts";
   import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
   import Markdown from "./Markdown.svelte";
+  import PostAttachments from "./PostAttachments.svelte";
+  import TranscriptWorkRow from "./TranscriptWorkRow.svelte";
+  import TimelineMinimap from "./TimelineMinimap.svelte";
+  import { deriveTimelineGroups, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems } from "../timeline.ts";
 
-  let { session, roomName, store, unsent, onunsent, onsettled, onpostlocation, clock = Date.now }: { session: string; roomName: string; store: RoomStore; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; clock?: () => number } = $props();
+  let { session, roomName, store, unsent, onunsent, onsettled, onpostlocation, navigate, onvisual, clock = Date.now }: { session: string; roomName: string; store: RoomStore; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onvisual: (versions: VisualVersion[], selected: number, send: (text: string, event: string) => Promise<void>) => void; clock?: () => number } = $props();
   const view = untrack(() => store.window({ kind: "dm", session }));
   view.onunsent = request => onunsent(request);
   view.onsettled = request => onsettled(request);
@@ -23,8 +29,8 @@
   onDestroy(() => store.leave(view));
   export async function send(request: PostRequest) { await view.post(request); }
   let turns: TranscriptTurn[] = $state([]);
+  let expandedTurns: Record<string, boolean> = $state({});
   let before: string | undefined = $state();
-  let total = $state(0);
   let now = $state(clock());
   $effect(() => {
     if (!turns.some(turn => !turn.ended)) return;
@@ -35,6 +41,20 @@
   let loading = $state(false), failed = $state(false);
   let pending = false;
   let scroller: HTMLDivElement;
+  let frameWidth = $state(0), currentTurn = $state<string | null>(null);
+  let visibleTurns: string[] = $state([]);
+  let minimapTurns = $derived(turns.map(turn => ({ id: turn.id, userText: turn.inputs?.[0]?.text ?? null, assistantText: turn.items?.findLast(item => item.kind === "text")?.text ?? null, visible: visibleTurns.includes(turn.id) })));
+  let positionFrame = 0;
+  function updatePosition() {
+    if (positionFrame) return;
+    positionFrame = requestAnimationFrame(() => {
+    positionFrame = 0;
+    const bounds = scroller.getBoundingClientRect();
+    const visible = [...scroller.querySelectorAll<HTMLElement>("article[data-turn]")].filter(el => { const rect = el.getBoundingClientRect(); return rect.bottom > bounds.top && rect.top < bounds.bottom; });
+    visibleTurns = visible.flatMap(el => el.dataset.turn ? [el.dataset.turn] : []);
+    currentTurn = visibleTurns[0] ?? null;
+    });
+  }
   let atBottom = $state(true);
   let loaded = $state(false);
   let destroyed = false;
@@ -45,11 +65,7 @@
     if (loading) { if (!older) pending = true; return; }
     loading = true;
     try {
-      const [page, work] = await Promise.all([
-        call("transcript.read", { session, before: older ? before : undefined }),
-        older ? Promise.resolve(undefined) : call("session.work", { session, limit: 1 }),
-      ]);
-      if (work) total = work.total;
+      const page = await call("transcript.read", { session, before: older ? before : undefined });
       if (destroyed) return;
       const incoming = page.turns ?? [];
       if (older) {
@@ -62,7 +78,15 @@
         const ids = new Set(incoming.map(turn => turn.id));
         const overlaps = turns.some(turn => ids.has(turn.id));
         const retained = overlaps ? turns.filter(turn => !ids.has(turn.id)) : [];
-        turns = [...retained, ...incoming.reverse()];
+        const old = new Map(turns.map(turn => [turn.id, turn]));
+        turns = [...retained, ...incoming.reverse().map(turn => {
+          const previous = old.get(turn.id);
+          return previous ? { ...turn, inputs: mergeTimelineInputs(previous.inputs ?? [], turn.inputs ?? []), items: mergeTimelineItems(previous.items ?? [], turn.items ?? []), olderItems: previous.olderItems || turn.olderItems, nextItem: previous.olderItems ? previous.nextItem : turn.nextItem,
+            ...(paging.has(turn.id + "/inputs") ? { after: previous.after } : {}),
+            ...(paging.has(turn.id + "/items") ? { mandatoryItems: previous.mandatoryItems, nextMandatory: previous.nextMandatory } : {}),
+            ...(paging.has(turn.id + "/posts") ? { mandatoryPosts: previous.mandatoryPosts, nextMandatoryPost: previous.nextMandatoryPost } : {}),
+            ...(paging.has(turn.id + "/older") ? { olderItems: previous.olderItems, nextItem: previous.nextItem } : {}) } : turn;
+        })];
         if (!retained.length) before = page.before;
         if (loaded && atBottom) { await tick(); scroller.scrollTop = scroller.scrollHeight; }
       }
@@ -72,6 +96,10 @@
     finally {
       loading = false;
       if (pending && !destroyed) { pending = false; void load(); }
+      else if (!failed && !destroyed && before) {
+        await tick();
+        if (!destroyed && !loading && scroller.scrollHeight <= scroller.clientHeight) void load(true);
+      }
     }
   }
   function markRead() {
@@ -82,30 +110,67 @@
     document.addEventListener("visibilitychange", markRead);
     const stop = watchTranscripts(id => { if (!id || id === session) void load(); });
     void load();
-    return () => { destroyed = true; stop(); document.removeEventListener("visibilitychange", markRead); };
+    return () => { destroyed = true; cancelAnimationFrame(positionFrame); stop(); document.removeEventListener("visibilitychange", markRead); };
   });
-  async function moreItems(turn: TranscriptTurn) {
-    const page = await call("transcript.read", { session, turn: turn.id, afterItem: turn.after, itemIndex: turn.nextItem, tail: turn.tail, postIndex: turn.nextPost }).catch(() => undefined);
-    const next = page?.turns?.[0];
-    if (!next) { failed = true; return; }
-    turns = turns.map(item => item.id === turn.id ? { ...item, inputs: [...item.inputs ?? [], ...next.inputs ?? []], items: [...item.items ?? [], ...next.items ?? []], more: next.more, after: next.after, nextItem: next.nextItem, tail: next.tail, nextPost: next.nextPost } : item);
+  const paging = new Set<string>();
+  type PageKind = "items" | "posts" | "older";
+  const pageCursors: Record<PageKind, { page: TranscriptPage; cursor: (turn: TranscriptTurn) => number; more: (turn: TranscriptTurn) => boolean; patch: (turn: TranscriptTurn) => Partial<TranscriptTurn> }> = {
+    items: { page: "mandatory_items", cursor: turn => turn.nextMandatory ?? 0, more: turn => !!turn.mandatoryItems, patch: turn => ({ mandatoryItems: turn.mandatoryItems, nextMandatory: turn.nextMandatory }) },
+    posts: { page: "mandatory_posts", cursor: turn => turn.nextMandatoryPost ?? 0, more: turn => !!turn.mandatoryPosts, patch: turn => ({ mandatoryPosts: turn.mandatoryPosts, nextMandatoryPost: turn.nextMandatoryPost }) },
+    older: { page: "older_items", cursor: turn => turn.nextItem ?? 0, more: turn => !!turn.olderItems, patch: turn => ({ olderItems: turn.olderItems, nextItem: turn.nextItem }) },
+  };
+  function readContinuation(turn: TranscriptTurn, kind: PageKind) {
+    const key = turn.id + "/" + kind;
+    if (paging.has(key)) return;
+    paging.add(key);
+    const pageKind = pageCursors[kind];
+    void (async () => {
+      let cursor = pageKind.cursor(turn);
+      for (;;) {
+        const page = await call("transcript.read", { session, turn: turn.id, page: pageKind.page, cursor });
+        const next = page.turns?.[0];
+        if (!next) throw new Error("Missing transcript page");
+        turns = turns.map(item => item.id === turn.id ? { ...item, items: mergeTimelineItems(item.items ?? [], next.items ?? []), ...pageKind.patch(next) } : item);
+        if (!pageKind.more(next)) break;
+        const nextCursor = pageKind.cursor(next);
+        if (nextCursor === cursor) throw new Error("Transcript cursor did not advance");
+        cursor = nextCursor;
+      }
+    })().catch(() => { failed = true; }).finally(() => { paging.delete(key); });
   }
-  type Group = { kind: "work"; id: string; items: TranscriptItem[] } | { kind: "item" | "posts"; id: string; item: TranscriptItem };
-  function groups(items: TranscriptItem[]): Group[] {
-    const result: Group[] = [];
-    for (const item of items) {
-      const last = result.at(-1);
-      if (item.kind === "tool" && last?.kind === "work") last.items.push(item);
-      else if (item.kind === "tool") result.push({ kind: "work", id: item.id, items: [item] });
-      else result.push({ kind: "item", id: item.id, item });
-      if (item.kind === "tool" && ((item.posts?.length ?? 0) > 0 || item.postsOmitted)) result.push({ kind: "posts", id: "posts:" + item.id, item });
+  function readInputs(turn: TranscriptTurn) {
+    const key = turn.id + "/inputs";
+    if (paging.has(key)) return;
+    paging.add(key);
+    void (async () => {
+      let after = turn.after;
+      while (after) {
+        const page = await call("transcript.read", { session, turn: turn.id, afterItem: after });
+        const next = page.turns?.[0];
+        if (!next || next.after === after) throw new Error("Transcript input cursor did not advance");
+        turns = turns.map(item => item.id === turn.id ? { ...item, ...next, after: next.after, inputs: mergeTimelineInputs(item.inputs ?? [], next.inputs ?? []), items: mergeTimelineItems(item.items ?? [], next.items ?? []),
+          ...(paging.has(turn.id + "/items") ? pageCursors.items.patch(item) : {}),
+          ...(paging.has(turn.id + "/posts") ? pageCursors.posts.patch(item) : {}),
+          ...(paging.has(turn.id + "/older") ? pageCursors.older.patch(item) : {}) } : item);
+        after = next.after;
+      }
+    })().catch(() => { failed = true; }).finally(() => { paging.delete(key); });
+  }
+  // Dyna: Mandatory overflow pages load immediately; older tool pages load on disclosure.
+  $effect(() => {
+    for (const turn of turns) {
+      if (turn.after) void readInputs(turn);
+      if (turn.mandatoryItems) void readContinuation(turn, "items");
+      if (turn.mandatoryPosts) void readContinuation(turn, "posts");
     }
-    return result;
-  }
+  });
   let chunks: Record<string, string> = $state({});
   let chunkFailed: Record<string, boolean> = $state({});
+  const fetching = new Set<string>();
   async function fetchPart(turn: string, item: string, part: TranscriptPart) {
     const key = item + "/" + part;
+    if (fetching.has(key)) return;
+    fetching.add(key);
     let offset: number | undefined = 0, value = "";
     try {
       do {
@@ -116,80 +181,111 @@
       chunks[key] = value;
       chunkFailed[key] = false;
     } catch { chunkFailed[key] = true; }
+    finally { fetching.delete(key); }
   }
-  const icons: Record<StepKind, IconName> = { read: "file", edit: "edit", write: "write", search: "search", list: "list", run: "terminal", fetch: "globe", tool: "tool" };
-  const kinds = (items: TranscriptItem[]) => [...new Set(items.map(item => titleOf(item).kind))];
+  // Dyna: Text can exceed the page budget; load its full content without a disclosure.
+  $effect(() => {
+    for (const turn of turns) {
+      for (const input of turn.inputs ?? []) {
+        const key = "input:" + input.id + "/text";
+        if (input.more && chunks[key] === undefined && !chunkFailed[key]) void fetchPart(turn.id, "input:" + input.id, "text");
+      }
+      for (const item of turn.items ?? []) {
+        const messages = item.kind === "text" || item.kind === "post" ? [item] : item.posts ?? [];
+        for (const message of messages) {
+          const key = message.id + "/text";
+          if (message.more && chunks[key] === undefined && !chunkFailed[key]) void fetchPart(turn.id, message.id, "text");
+        }
+      }
+    }
+  });
+  let newest = $derived(new Map(turns.flatMap(turn => (turn.items ?? []).flatMap(item => [item, ...(item.posts ?? [])]).flatMap(item => (item.attachments ?? []).flatMap(file => file.visual ? [[file.visual.id, file.visual] as const] : [])))));
+  async function openVisual(visual: VisualCard, room: string, eventId: string) {
+    const page = await call("events.list", { room, event: eventId, afterSeq: 0, limit: 1 });
+    const event = page.events?.[0] && decodeEvent(page.events[0]);
+    if (!event || event.id !== eventId || event.type !== "post.created") return;
+    onvisual([{ event, visual }], visual.version, async (text, id) => { await call("post", { room, text, visualReply: id }); });
+  }
   const sender = (kind: string, id?: string) => kind === "owner" ? "You" : id ? store.names.get(id) ?? "Session" : "Dyna";
-  const duration = (ms?: number) => ms === undefined ? "" : ms < 60000 ? `${Math.floor(ms / 1000)} s` : `${Math.floor(ms / 60000)} m ${Math.floor(ms / 1000) % 60} s`;
 </script>
 
-{#snippet postItem(turn: TranscriptTurn, item: TranscriptItem)}
-  <div class="message"><Markdown text={chunks[item.id + "/text"] ?? item.text} /></div>{#if item.more && chunks[item.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Show all</button>{/if}
+{#snippet inputAttachments(input: TranscriptInput)}
+  <PostAttachments attachments={input.attachments ?? []} {newest} event={input.id} at={input.at} onvisual={visual => void openVisual(visual, input.room, input.id)} />
 {/snippet}
 
-<div class="thread" bind:this={scroller} onscroll={() => { atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; }}>
+{#snippet postItem(turn: TranscriptTurn, item: TranscriptItem)}
+  {@const room = item.room}
+  {@const seq = item.seq}
+  {@const from = item.from}
+  <div class:agent-input={item.kind === "post"} class:message={item.kind !== "post"}>{#if item.kind === "post"}<Avatar kind={from?.kind ?? "engine"} name={sender(from?.kind ?? "engine", from?.session)} size={32} />{/if}<div class="agent-body">{#if item.kind === "post"}<div class="agent-sender">{#if from?.session}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(from.session)}`} onclick={navigate} style:--hue={hue(sender(from.kind, from.session))}>{sender(from.kind, from.session)}</a>{:else}<strong>{sender(from?.kind ?? "engine")}</strong>{/if}<time datetime={item.at}>{formatTime(item.at)}</time></div><div class="post-destination">{#if room && seq}<button onclick={() => onpostlocation(room, seq)}>{item.home?.kind === "feed" ? (item.room === store.room ? `Posted in #${roomName}` : "Posted in another room") : item.home?.kind === "dm" ? (item.home.session === session ? "Posted in this DM" : `Posted to ${sender("session", item.home.session)}`) : "Posted"}</button>{:else}Posted{/if}</div>{/if}<Markdown text={chunks[item.id + "/text"] ?? item.text} /><PostAttachments attachments={item.attachments ?? []} {newest} event={item.event ?? item.id} at={item.at} onvisual={visual => void openVisual(visual, item.room ?? store.room, item.event ?? item.id)} /></div></div>{#if chunkFailed[item.id + "/text"]}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Text did not load. Try again</button>{/if}
+{/snippet}
+
+<div class="thread-frame" bind:clientWidth={frameWidth}>
+{#if frameWidth >= 880}<TimelineMinimap turns={minimapTurns} current={currentTurn} onselect={(id) => scroller.querySelector<HTMLElement>(`article[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" })} />{/if}
+<div class="thread" bind:this={scroller} onscroll={() => { atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; updatePosition(); if (loaded && before && !loading && scroller.scrollTop < 100) void load(true); }}>
   <div class="body">
-    {#if before}<button class="older" disabled={loading} onclick={() => void load(true)}>Load earlier turns</button>{/if}
-    {#each turns as turn, index (turn.id)}
-      <article>
-        <div class="rule"><span><strong>Turn {Math.max(1, total - turns.length + index + 1)}</strong>{#if turn.durationMs !== undefined}{" · "}{duration(turn.durationMs)}{:else if !turn.ended}{" · "}{elapsed(turn.started, now)}{/if}{#if !turn.ended}{" · running"}{:else if turn.outcome === "failed"}{" · "}<StatusPill tone="failed" label="failed" word />{/if}</span><i></i></div>
+    {#each turns as turn (turn.id)}
+      {@const hasWork = !!turn.olderItems || (turn.items ?? []).some(item => item.kind === "tool" || item.kind === "thinking")}
+      {@const finalText = turn.ended ? (turn.items ?? []).findLast(item => item.kind === "text")?.id : undefined}
+      <article data-turn={turn.id}>
         {#each turn.inputs ?? [] as input (input.id)}
-          <div class="input"><div class="who"><Avatar kind={input.from.kind} name={sender(input.from.kind, input.from.session)} size={22} />{#if input.from.kind === "owner"}<strong>You</strong>{:else}<strong class:identity={input.from.kind === "session"} style:--hue={hue(sender(input.from.kind, input.from.session))}>{sender(input.from.kind, input.from.session)}</strong>{/if}{#if input.home}<span class="muted">{input.home.kind === "feed" ? `in ${roomName}` : input.home.session === session ? "in your DM" : "in a DM"}</span>{/if}<time datetime={input.at}>{formatTime(input.at)}</time></div><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{#if input.more && input.type === "post.created" && chunks["input:" + input.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Show all</button>{/if}</div>
+          {#if input.from.kind === "owner"}
+            <div class="owner-message" title={formatTime(input.at)}><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{@render inputAttachments(input)}{#if chunkFailed["input:" + input.id + "/text"]}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Text did not load. Try again</button>{/if}</div>
+          {:else}
+            <div class="agent-input"><Avatar kind={input.from.kind} name={sender(input.from.kind, input.from.session)} size={32} /><div class="agent-body"><div class="agent-sender">{#if input.from.session}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(input.from.session)}`} onclick={navigate} style:--hue={hue(sender(input.from.kind, input.from.session))}>{sender(input.from.kind, input.from.session)}</a>{:else}<strong>{sender(input.from.kind, input.from.session)}</strong>{/if}<time datetime={input.at}>{formatTime(input.at)}</time></div><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{@render inputAttachments(input)}{#if chunkFailed["input:" + input.id + "/text"]}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Text did not load. Try again</button>{/if}</div></div>
+          {/if}
         {/each}
-        {#each groups(turn.items ?? []) as group (group.id)}
+        <!-- Dyna: Posts and the final answer remain visible outside the work fold. -->
+        {#if turn.ended && hasWork}
+          <button class="work-header" aria-expanded={!!expandedTurns[turn.id]} onclick={() => { expandedTurns[turn.id] = !expandedTurns[turn.id]; if (expandedTurns[turn.id] && turn.olderItems) void readContinuation(turn, "older"); }}>Worked for {formatTimelineDuration(Date.parse(turn.ended) - Date.parse(turn.started))}<span class:open={expandedTurns[turn.id]}><Icon name="chevron" size={14} /></span></button>
+        {/if}
+        {#each deriveTimelineGroups(turn.items ?? []) as group (group.id)}
           {#if group.kind === "work"}
-            <details open={turn.outcome === "failed" || workingGroup(group.items, !!turn.ended)}>
-              <summary><span class="chevron"><Icon name="chevron" size={14} /></span>{#if !workingGroup(group.items, !!turn.ended)}{#each kinds(group.items) as kind}<Icon name={icons[kind]} size={14} />{/each}<span>{workSummary(group.items)}</span><span class="time">{stepTime({ started: group.items[0].at, ended: group.items.at(-1)?.ended })}</span>{:else}<span>Working for {elapsed(turn.started, now)}</span>{/if}</summary>
-              <div class="steps">{#each group.items as item (item.id)}
-                {@const title = titleOf(item)}
-                <details class="step"><summary>{#if !item.ended && !turn.ended}<span class="spinner" role="img" aria-label="Working"></span>{:else}<Icon name={icons[title.kind]} size={14} />{/if} <span>{!item.ended && !turn.ended ? activeVerb(title.kind, title.verb) : title.verb}</span><code>{title.target}</code><span class="time">{!item.ended && !turn.ended ? elapsed(item.at, now) : stepTime({ started: item.at, ended: item.ended })}</span>{#if item.failed}<StatusPill tone="failed" label="Failed" word />{/if}</summary>
-                  {#if item.arguments}<pre>{chunks[item.id + "/arguments"] ?? item.arguments}</pre>{/if}
-                  {#if item.output}<pre>{chunks[item.id + "/output"] ?? item.output}</pre>{/if}
-                  {#if item.more && chunks[item.id + "/arguments"] === undefined}<button onclick={() => void fetchPart(turn.id, item.id, "arguments")}>Show all arguments</button>{/if}
-                  {#if item.more && chunks[item.id + "/output"] === undefined}<button onclick={() => void fetchPart(turn.id, item.id, "output")}>Show all output</button>{/if}
-                  {#if chunkFailed[item.id + "/output"]}<button onclick={() => void fetchPart(turn.id, item.id, "output")}>Output did not load. Try again</button>{/if}
-                </details>
-              {/each}</div>
-            </details>
+            {#if !turn.ended || expandedTurns[turn.id]}
+            <TranscriptWorkRow items={group.items} ended={!!turn.ended} started={turn.started} {now} {chunks}
+              onopen={() => { if (turn.olderItems) void readContinuation(turn, "older"); }}
+              onload={async (item, part) => { await fetchPart(turn.id, item.id, part); const value = chunks[item.id + "/" + part]; if (value === undefined) throw new Error("Part did not load"); }} />
+            {/if}
           {:else if group.kind === "posts"}
             {#each group.item.posts ?? [] as post (post.id)}
               {@render postItem(turn, post)}
             {/each}
-            {#if group.item.postsOmitted && group.item.postsNext}<button class="muted" onclick={() => onpostlocation(group.item.postsNext!.room, group.item.postsNext!.seq)}>+{group.item.postsOmitted} more posts</button>{/if}
-          {:else if group.item.kind === "thinking"}
-            <details><summary><span class="chevron"><Icon name="chevron" size={14} /></span> Thought</summary><div class="thought"><Markdown text={chunks[group.item.id + "/text"] ?? group.item.text} /></div>{#if group.item.more && chunks[group.item.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, group.item.id, "text")}>Show all</button>{/if}</details>
           {:else if group.item.kind === "text" || group.item.kind === "post"}
-            {@render postItem(turn, group.item)}
+            {#if group.item.kind === "post" || visibleTimelineText(group.item.id, finalText, !!turn.ended, hasWork, !!expandedTurns[turn.id])}{@render postItem(turn, group.item)}{/if}
           {:else if group.item.kind === "too_large"}<p class="muted">This item is too large to show.</p>{/if}
         {/each}
         {#if turn.outcome === "failed"}<div class="failure"><Icon name="warning" size={16} /><div><strong>{turn.cause ? causes[turn.cause] : "The turn failed"}</strong></div></div>{/if}
-        {#if turn.more}<button onclick={() => void moreItems(turn)}>Show more of this turn</button>{/if}
         {#if !turn.ended && !(turn.items ?? []).some(item => item.kind === "tool")}<p class="muted"><span class="spinner" aria-hidden="true"></span> Working for {elapsed(turn.started, now)}</p>{/if}
       </article>
     {:else}{#if !loading && !failed}<p class="muted">The conversation will appear here.</p>{/if}{/each}
     {#each queuedPosts as post (post.id)}
-      <div class="input"><div class="who"><Avatar kind={post.from.kind} name={sender(post.from.kind, post.from.session)} size={22} /><strong>{sender(post.from.kind, post.from.session)}</strong></div><Markdown text={post.body.text} /></div>
+      <div class="input"><div class="who"><Avatar kind={post.from.kind} name={sender(post.from.kind, post.from.session)} size={22} /><strong>{sender(post.from.kind, post.from.session)}</strong></div><Markdown text={post.body.text} /><PostAttachments attachments={post.body.attachments ?? []} {newest} event={post.id} at={post.at} onvisual={visual => void openVisual(visual, post.room ?? store.room, post.id)} /></div>
     {/each}
     {#each [...view.pendingPosts.values()] as post (post.id)}
-      <div class="input" class:pending={!post.failed}><strong>You</strong><Markdown text={post.request.text} />{#if post.failed}<StatusPill tone="failed" label="Not sent" word /> <button onclick={() => void view.retry(post.id)}>Retry</button> <button onclick={() => view.discard(post.id)}>Discard</button>{/if}</div>
+      <div class="input" class:pending={!post.failed}><strong>You</strong><Markdown text={post.request.text} /><PostAttachments attachments={post.request.attachments ?? []} {newest} onvisual={() => {}} />{#if post.failed}<StatusPill tone="failed" label="Not sent" word /> <button onclick={() => void view.retry(post.id)}>Retry</button> <button onclick={() => view.discard(post.id)}>Discard</button>{/if}</div>
     {/each}
     {#if failed}<p class="muted" role="alert">The conversation did not load. <button onclick={() => void load()}>Try again</button></p>{/if}
   </div>
-  {#if !atBottom}<button class="latest" onclick={() => scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" })}>Jump to latest</button>{/if}
+</div>
+{#if !atBottom}<div class="latest-bar"><button class="latest" onclick={() => scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" })}>Jump to latest</button></div>{/if}
 </div>
 
 <style>
-  .thread { height: 100%; min-height: 0; overflow-y: auto; }
-  .body { max-width: 920px; margin: auto; padding: 16px 24px; }
+  .thread-frame { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .thread { flex: 1; min-height: 0; overflow-y: auto; }
+  .body { max-width: 784px; margin: auto; padding: 16px 24px; }
   article { margin: 0 0 24px; }
-  .rule { display: flex; gap: 12px; align-items: center; margin: 16px 0; color: var(--muted); font-size: 12.5px; }
-  .rule strong { color: var(--text); font-weight: 600; }
   .failure { display: flex; gap: 10px; color: var(--muted); margin: 12px 0; }
   .failure strong { color: var(--text); }
   .spinner { display: inline-block; width: 12px; height: 12px; border: 1.5px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
-  .rule i { flex: 1; height: 1px; background: var(--line); }
+  .agent-input { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; margin: 14px 0; }
+  .agent-body { min-width: 0; }
+  .agent-sender { display: flex; align-items: baseline; gap: 8px; }
+  .agent-sender a { color: oklch(var(--id-name) var(--hue)); font-weight: 600; text-decoration: none; }
+  .agent-sender a:hover { text-decoration: underline; }
+  .owner-message { width: fit-content; max-width: 75%; margin: 12px 0 12px auto; padding: 12px 16px; background: var(--raised); border-radius: 14px; }
   .input { background: var(--raised); padding: 12px 16px; border-radius: 14px; margin: 12px 0; }
   p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
   .who { display: flex; align-items: center; gap: 8px; }
@@ -198,24 +294,23 @@
   .who time { flex: none; margin-left: auto; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .input :global(.markdown) { margin: 4px 0 0; }
   .pending { opacity: 0.5; }
-  .message { margin: 12px 0; }
-  .muted, details { color: var(--muted); }
-  details { margin: 8px 0; font-size: 13px; }
-  summary { cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: 28px; list-style: none; border-radius: 6px; }
-  summary:hover { background: var(--hover); color: var(--text); }
-  summary::-webkit-details-marker { display: none; }
-  .chevron { display: inline-flex; flex: none; transition: transform 150ms; }
-  details:not([open]) > summary .chevron { transform: rotate(-90deg); }
-  details > .thought { margin-left: 20px; }
-  .steps { border-left: 1px solid var(--line); margin-left: 7px; padding-left: 12px; }
-  .time { margin-left: auto; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
-  code { min-width: 0; overflow-wrap: anywhere; font: 12.5px var(--mono); }
-  pre { margin: 4px 0 8px 20px; padding: 8px 12px; background: var(--sidebar); border-radius: 6px; overflow-wrap: anywhere; white-space: pre-wrap; font: 12.5px/1.45 var(--mono); }
+  .message { margin: 20px 0 12px; }
+  .post-destination button { all: unset; cursor: pointer; }
+  .post-destination button:hover { text-decoration: underline; }
+  .post-destination { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+  .message :global(.markdown h2) { font-size: 20px; margin: 20px 0 8px; }
+  .message :global(.markdown h3) { font-size: 18px; margin: 20px 0 8px; }
+  .message :global(.markdown :is(h2, h3):first-child) { margin-top: 0; }
+  .work-header { display: flex; align-items: center; gap: 4px; width: 100%; color: var(--muted); font-size: 14px; margin-top: 40px; padding: 8px 4px 12px; border-bottom: 1px solid var(--line); }
+  .work-header span { display: inline-flex; transform: rotate(-90deg); }
+  .work-header span.open { transform: none; }
+  .muted { color: var(--muted); }
   button { padding: 0; border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
   button:hover { color: var(--text); }
-  button:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); }
-  .older { display: block; margin: auto; padding: 8px; }
-  .latest { position: absolute; right: 24px; bottom: 16px; background: var(--sidebar); padding: 8px 12px; border-radius: 6px; }
+  button:focus-visible { outline: 2px solid var(--focus); }
+  .latest-bar { position: absolute; inset: auto 0 8px; display: flex; justify-content: center; pointer-events: none; }
+  .latest-bar button { pointer-events: auto; }
+  .latest { background: var(--raised); padding: 8px 12px; border-radius: 6px; }
   @media (max-width: 600px) { .body { padding: 12px 16px; } }
-  @media (pointer: coarse) { summary, button { min-height: 40px; } }
+  @media (pointer: coarse) { button { min-height: 40px; } }
 </style>

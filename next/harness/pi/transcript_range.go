@@ -52,3 +52,13 @@ func (r TranscriptReader) FindCalls(path string, start int64, end *int64, ids ma
 	defer file.Close()
 	return TranscriptFindCalls(section, ids)
 }
+
+// ReadRecent retains a bounded recent window and the last assistant text.
+func (r TranscriptReader) ReadRecent(path string, start int64, end *int64, deliveries map[contract.DeliverySeq]contract.TurnID, limit int) ([]TranscriptItem, int, bool, error) {
+	file, section, err := r.open(path, start, end)
+	if err != nil || file == nil {
+		return nil, 0, false, err
+	}
+	defer file.Close()
+	return readTranscriptMode(section, deliveries, path, "", 0, limit, 16<<20, true)
+}

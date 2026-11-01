@@ -40,9 +40,12 @@ func (s *Service) Terminal(ctx context.Context, session contract.SessionID, host
 	var id contract.BoxID
 	release := func() {}
 	if session != "" {
-		record, err := s.store.Session(ctx, session)
+		record, open, err := s.store.OpenSession(ctx, session)
 		if err != nil {
 			return nil, release, failure(err)
+		}
+		if !open {
+			return nil, release, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 		}
 		current, err := s.store.Box(ctx, record.Box)
 		if err != nil {
@@ -52,22 +55,28 @@ func (s *Service) Terminal(ctx context.Context, session contract.SessionID, host
 			return nil, release, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
 		}
 		host, id = current.Host, current.ID
+		handle, state, ok := s.lockSession(session)
+		if !ok {
+			return nil, release, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+		}
 		s.mu.Lock()
-		state := s.sessionLocked(session)
 		state.terminals++
 		s.mu.Unlock()
-		if err := s.store.WakeTerminal(ctx, id); err != nil {
+		handle.Unlock()
+		release = func() {
+			if !handle.Lock() {
+				return
+			}
+			defer handle.Unlock()
 			s.mu.Lock()
 			state.terminals--
 			s.mu.Unlock()
-			return nil, release, failure(err)
+		}
+		if err := s.store.WakeTerminal(ctx, id); err != nil {
+			release()
+			return nil, func() {}, failure(err)
 		}
 		s.reconciler.Kick()
-		release = func() {
-			s.mu.Lock()
-			state.terminals--
-			s.mu.Unlock()
-		}
 	}
 	argv, err := s.boxes.TerminalArgv(ctx, host, id)
 	if err != nil {
