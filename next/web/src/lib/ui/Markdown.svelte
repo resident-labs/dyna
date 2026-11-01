@@ -33,10 +33,10 @@
 
 <style>
   .markdown { overflow-wrap: anywhere; line-height: 1.45; }
-  .markdown :global(:is(p, ul, ol, pre, blockquote)) { margin: 0 0 4px; }
-  .markdown :global(:is(p, ul, ol, pre, blockquote):last-child) { margin-bottom: 0; }
+  .markdown :global(:is(p, ul, ol, table, pre, blockquote)) { margin: 0 0 8px; }
+  .markdown :global(:is(p, ul, ol, table, pre, blockquote):last-child) { margin-bottom: 0; }
   /* The type scale: post text is 15 px, a title 16 and a head 18. A heading is no larger than a section header. */
-  .markdown :global(:is(h1, h2, h3, h4, h5, h6)) { margin: 8px 0 4px; font-size: 15px; line-height: 1.25; }
+  .markdown :global(:is(h1, h2, h3, h4, h5, h6)) { margin: 8px 0 4px; font-size: 15px; font-weight: 600; line-height: 1.25; }
   .markdown :global(h1) { font-size: 18px; }
   .markdown :global(h2) { font-size: 16px; }
   .markdown :global(:is(h1, h2, h3, h4, h5, h6):first-child) { margin-top: 0; }
@@ -44,7 +44,7 @@
   .markdown :global(pre) { padding: 8px 12px; border-radius: 6px; background: var(--sidebar); white-space: pre-wrap; overflow-wrap: anywhere; font: 12.5px/1.45 var(--mono); }
   /* A table is capped at the text width. Its cells wrap, and only a table that still cannot fit scrolls in its own block. */
   .markdown :global(table) { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
-  .markdown :global(:is(th, td)) { padding: 6px 12px; text-align: left; overflow-wrap: normal; }
+  .markdown :global(:is(th, td)) { padding: 6px 12px; text-align: left; overflow-wrap: break-word; }
   .markdown :global(th) { font-weight: 600; border-bottom: 1px solid var(--line); }
   .markdown :global(tr + tr > :is(th, td)) { border-top: 1px solid var(--line); }
   .markdown :global(code) { font: 13px var(--mono); font-variant-ligatures: none; }
