@@ -57,13 +57,20 @@ type Service struct {
 // createSession publishes before checking the store, so close can retire the handle.
 func (s *Service) createSession(ctx context.Context, id contract.SessionID) (*live.Session, *contract.Error) {
 	handle, _ := s.live.CreateSession(id)
-	_, open, err := s.store.OpenSession(ctx, id)
+	check, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	_, open, err := s.store.OpenSession(check, id)
+	cancel()
 	if err != nil {
-		// A failed read after close can leave an empty handle; it is a store fault.
+		// A failed store read after close can leave an empty handle.
 		return nil, failure(err)
 	}
 	if !open {
 		s.retireSession(s.live.RetireHandle(handle), id)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, failure(err)
+	}
+	if !open {
 		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 	}
 	return handle, nil

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
@@ -71,7 +72,12 @@ func TestClosedSessionRejectsStaleReadAndHandle(t *testing.T) {
 	if handle.PublishActivity(row.Room, body, contract.Event{Body: body}) {
 		t.Fatal("stale handle remained usable")
 	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, problem := s.createSession(cancelled, id); problem == nil {
+		t.Fatal("cancelled validation succeeded")
+	}
 	if _, ok := s.live.LookupSession(id); ok {
-		t.Fatal("closed session remains in live state")
+		t.Fatal("cancelled validation left the closed session in live state")
 	}
 }
