@@ -115,7 +115,7 @@
 <!-- A long press opens the action sheet; a right swipe forwards on release. -->
 <div class="swipe" use:swipe>
   {#if dragging && !row.pending}<div class="cue" class:ready class:first={row.first} aria-hidden="true"><Icon name="forward" /></div>{/if}
-<article style:transform="translateX({distance}px)" class:dragging class="post" class:first={row.first} class:pending={row.pending} aria-busy={row.pending && !row.pending.failed} tabindex="-1"
+<article style:transform="translateX({distance}px)" class:dragging class="post" class:first={row.first} class:pending={row.pending} class:mention={row.from.kind !== "owner" && row.to.some(target => target.kind === "owner")} aria-busy={row.pending && !row.pending.failed} tabindex="-1"
   style:--lift="{lift}px" onpointerenter={event => raise(event, event.currentTarget)} onpointerdown={press} onpointermove={drift} onpointerup={release} onpointercancel={release}
   oncontextmenu={event => { if (sheet) event.preventDefault(); }}>
   {#if !row.pending}<div class="bar"><span class="status" role="status">{copied}</span>
@@ -126,9 +126,11 @@
     {#if onforward}<button type="button" onclick={event => { event.currentTarget.closest("dialog")?.close(); onforward(); }}><Icon name="forward" />Forward</button>{/if}
     <button type="button" onclick={event => { event.currentTarget.closest("dialog")?.close(); copy(); }}><Icon name="copy" />Copy text</button></dialog>{/if}
   {#if row.first}
-    <Avatar kind={row.from.kind} name={author} {root} />
+    <Avatar kind={row.from.kind} name={author} {root} size={40} />
     <p class="name"><strong class={row.from.kind} style:--hue={hue(author)}>{author}</strong>
       <time datetime={row.at}>{formatTime(row.at)}</time>{#if to}<span class="to">→ {to}</span>{/if}</p>
+  {:else}
+    <time class="follow-time" datetime={row.at}>{new Date(row.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>
   {/if}
   <Markdown text={row.text} />
   <PostAttachments {onmedia} attachments={row.attachments} {newest} event={visualEvent} at={row.at} />
@@ -147,9 +149,14 @@
   .post.dragging { transition: none; }
   @media (prefers-reduced-motion: reduce) { .post { transition: none; } }
   /* The avatar sits in a 32 px gutter; later posts of a run align under the first one's text. */
-  .post { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: 12px; padding: 1px 16px; }
+  .post { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr); column-gap: 16px; padding: 1px 16px; font-size: 15px; }
   /* The wash follows the pointer only; a tap or a closed menu leaves none behind. */
   @media (hover: hover) { .post:hover { background: var(--hover); } }
+  .mention { background: var(--mention-bg); box-shadow: inset 2px 0 var(--mention-bar); }
+  @media (hover: hover) { .post.mention:hover { background: linear-gradient(var(--hover), var(--hover)), var(--mention-bg); } }
+  .follow-time { grid-column: 1 !important; grid-row: 1; align-self: start; text-align: center; font-size: 11px; visibility: hidden; }
+  @media (hover: hover) { .post:hover .follow-time { visibility: visible; } }
+  @media (max-width: 640px) { .post { column-gap: 8px; } }
   .post:focus { outline: none; }
   .post > :global(*) { grid-column: 2; }
   /* v1's bar: it floats over the row's top right and is laid out while hidden, so showing it never moves the row. */
@@ -170,7 +177,7 @@
   .status { color: var(--muted); font-size: 12px; }
   .status:not(:empty) { padding: 0 6px; }
   .post > :global(.avatar) { grid-column: 1; grid-row: 1 / span 3; margin-top: 2px; }
-  .post.first { padding-top: 14px; }
+  .post.first { padding-top: 16px; }
   /* A post the engine has not confirmed is dimmed; its Not sent line keeps full contrast in the danger color, because the owner must act. */
   .pending > :global(:not(.unsent, .sheet)) { opacity: 0.5; }
   .unsent { margin: 2px 0 0; display: flex; align-items: baseline; gap: 12px; color: var(--danger); font-size: 12px; }
@@ -185,5 +192,5 @@
   .to { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   strong.owner { color: var(--focus); }
   strong.engine { color: var(--text); }
-  time, .to { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  time, .to { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 </style>
