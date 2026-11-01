@@ -20,7 +20,8 @@ func TestClosedSessionRejectsStaleReadAndHandle(t *testing.T) {
 	if _, problem := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: id, Discard: true}); problem != nil {
 		t.Fatal(problem)
 	}
-	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx) // remove the box
+	passLifecycle(t, s, ctx) // commit the session close
 	if _, problem := s.publishActivity(row, contract.Principal{Kind: contract.PrincipalSession, Session: id}, contract.TurnActivityRequest{Label: "stale"}); problem == nil {
 		t.Fatal("stale activity was accepted")
 	}
