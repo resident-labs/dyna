@@ -28,7 +28,7 @@
   <button type="button" class="move" bind:this={button} aria-haspopup="menu" aria-expanded={open} disabled={busy}
     onclick={() => void show(!open)}>Move</button>
   {#if open}
-    <MenuList label="Parents" items={candidates} keyOf={entry => entry.session} checked={parent} onchoose={name => void choose(name)} onclose={refocus => void show(false, refocus)}>
+    <MenuList label="Parents" items={candidates} keyOf={entry => entry.session} checked={parent} anchor={root} onchoose={name => void choose(name)} onclose={refocus => void show(false, refocus)}>
       {#snippet row(entry)}<span>{entry.name}</span>{/snippet}
     </MenuList>
   {/if}
