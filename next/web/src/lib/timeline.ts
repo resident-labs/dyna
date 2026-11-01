@@ -105,8 +105,8 @@ export function timelineItemRunning(item: TranscriptItem, turnEnded: boolean): b
 }
 
 // Dyna: Text can fold only when a work disclosure is present.
-export function visibleTimelineText(id: string, final: string | undefined, completed: boolean, hasWork: boolean, expanded: boolean): boolean {
-  return !completed || !hasWork || id === final || expanded;
+export function visibleTimelineText(id: string, answers: Set<string>, completed: boolean, hasWork: boolean, expanded: boolean): boolean {
+  return !completed || !hasWork || answers.has(id) || expanded;
 }
 
 // Dyna: The transcript holds a session's own posts: nested under their tool call, or sent from a shell at the end of the items.
@@ -126,6 +126,19 @@ export function finalTimelineItem(items: TranscriptItem[], session: string): Tra
     }
   }
   return final;
+}
+
+// Dyna: A steer can land after the agent finished answering, so text that closes a segment is an answer as well as the
+// turn's last message. Text before a tool in the same segment was working text.
+export function timelineAnswers(segments: TimelineSegment[], session: string): Set<string> {
+  const answers = new Set<string>();
+  const final = finalTimelineItem(segments.flatMap(segment => segment.items), session);
+  if (final) answers.add(final.id);
+  for (const { items } of segments.slice(0, -1)) {
+    const last = items.at(-1);
+    if (last?.kind === "text") answers.add(last.id);
+  }
+  return answers;
 }
 
 // Dyna: A post waits outside the turns until the transcript holds it. An agent's own post can land while an owner's

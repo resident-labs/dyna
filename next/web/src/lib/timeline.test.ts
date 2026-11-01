@@ -1,7 +1,7 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, segmentDuration, steerInput, timelineInput, timelineInputText, timelineSegments, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout } from "./timeline.ts";
+import { summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, segmentDuration, steerInput, timelineInput, timelineAnswers, timelineInputText, timelineSegments, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout } from "./timeline.ts";
 import type { TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
 
 const steer = (id: string, at = ""): TranscriptItem => ({ id: `steer:${id}`, event: id, seq: 6, turn: "t", at, kind: "steer", from: { kind: "owner" } });
@@ -42,11 +42,17 @@ test("the top row keeps the whole turn's time, and a steer's row counts from tha
   assert.deepEqual(durations, [25_000, 8_000, 5_000]);
 });
 
-test("a steer is no answer, and an answer before it folds as working text", () => {
+test("a steer is no answer, and the turn's last message comes after it", () => {
   const before: TranscriptItem = { id: "a", turn: "t", at: "", kind: "text", text: "first" };
   const after: TranscriptItem = { id: "b", turn: "t", at: "", kind: "text", text: "second" };
   assert.equal(finalTimelineItem([before, steer("sent"), after], "s")?.id, "b");
   assert.equal(finalTimelineItem([before, steer("sent")], "s")?.id, "a");
+});
+
+test("an answer a steer landed after stays out of the fold, and working text before a tool folds", () => {
+  const text = (id: string): TranscriptItem => ({ id, turn: "t", at: "", kind: "text", text: id });
+  const items = [text("narration"), work("a"), text("answer"), steer("sent"), work("b"), text("later"), work("c"), steer("again"), text("last")];
+  assert.deepEqual([...timelineAnswers(timelineSegments("t", items), "s")].sort(), ["answer", "last"]);
 });
 
 test("a repeat read of a turn keeps one steer, in its place", () => {
@@ -134,9 +140,9 @@ test("T3 durations choose units after rounding", () => {
 });
 
 test("completed text-only turns show every message without a disclosure", () => {
-  assert.equal(visibleTimelineText("first", "final", true, false, false), true);
-  assert.equal(visibleTimelineText("final", "final", true, false, false), true);
-  assert.equal(visibleTimelineText("first", "final", true, true, false), false);
+  assert.equal(visibleTimelineText("first", new Set(["final"]), true, false, false), true);
+  assert.equal(visibleTimelineText("final", new Set(["final"]), true, false, false), true);
+  assert.equal(visibleTimelineText("first", new Set(["final"]), true, true, false), false);
 });
 
 const ownedPost = (id: string, at: string): TranscriptItem => ({ id, turn: "t", at, kind: "post", from: { kind: "session", session: "s" }, home: { kind: "feed" }, room: "r" });
@@ -147,8 +153,8 @@ test("a post that ends the turn is its final message, so earlier text folds", ()
   const items = [message("narration", "2026-11-01T00:00:01Z"), tool];
   const final = finalTimelineItem(items, "s")?.id;
   assert.equal(final, "post");
-  assert.equal(visibleTimelineText("narration", final, true, true, false), false);
-  assert.equal(visibleTimelineText("narration", final, true, true, true), true);
+  assert.equal(visibleTimelineText("narration", new Set([final!]), true, true, false), false);
+  assert.equal(visibleTimelineText("narration", new Set([final!]), true, true, true), true);
 });
 
 test("text after a mid-turn post stays the final message, also when a shell post sorts last", () => {

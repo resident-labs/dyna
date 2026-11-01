@@ -18,6 +18,17 @@ func TestRecoveryOfSettledAssistant(t *testing.T) {
 	}
 }
 
+func TestRecoveryKeepsAnAnswerBeforeASteer(t *testing.T) {
+	assistant := func(text string) string {
+		return `{"type":"message","message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"` + text + `"}]}}`
+	}
+	h := recoveryFixture(t, assistant("answer")+"\n"+`{"type":"message","message":{"role":"user","deliveryId":"10","content":"more"}}`+"\n"+assistant("noted"))
+	result, done, err := h.Recover("turn_a", []contract.TurnInput{{Delivery: 9}})
+	if err != nil || !done || result.Final != "answer\n\nnoted" {
+		t.Fatalf("result=%+v done=%v err=%v", result, done, err)
+	}
+}
+
 func TestRecoveryOfInterruptedToolCall(t *testing.T) {
 	h := recoveryFixture(t, `{"type":"message","message":{"role":"assistant","stopReason":"toolUse","content":[{"type":"toolCall"}]}}`)
 	_, done, err := h.Recover("turn_a", []contract.TurnInput{{Delivery: 9}})
