@@ -408,6 +408,34 @@ func TestSessionTracksAForkPROnAnUpstreamNoRoomLists(t *testing.T) {
 	}
 }
 
+func TestHookTrackActsAsTheNamedSession(t *testing.T) {
+	r := newPRRig(t)
+	r.github.Add(fakegithub.Pull{Repo: "owner/repo", Number: 3})
+	r.github.Add(fakegithub.Pull{Repo: "owner/repo", Number: 4})
+	r.github.Add(fakegithub.Pull{Repo: "other/repo", Number: 5, HeadRepo: "other/fork"})
+	child, err := r.s.store.Session(r.ctx, r.child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracked, e := r.s.HookTrack(r.ctx, child.Room, "@"+child.Name, contract.PrTrackRequest{Repo: "owner/repo", Number: 3})
+	if e != nil || tracked.PR.Session != r.child {
+		t.Fatalf("%+v %+v", tracked, e)
+	}
+	tracked, e = r.s.HookTrack(r.ctx, child.Room, "", contract.PrTrackRequest{Repo: "owner/repo", Number: 4})
+	if e != nil || tracked.PR.Session == r.child {
+		t.Fatalf("no name goes to root: %+v %+v", tracked, e)
+	}
+	if _, e := r.s.HookTrack(r.ctx, child.Room, child.Name, contract.PrTrackRequest{Repo: "other/repo", Number: 5}); e == nil || e.Code != contract.ErrForbidden {
+		t.Fatalf("a repository the room does not list: %+v", e)
+	}
+	if _, e := r.s.HookTrack(r.ctx, child.Room, "nobody", contract.PrTrackRequest{Repo: "owner/repo", Number: 3}); e == nil {
+		t.Fatal("an unknown session was accepted")
+	}
+	if _, e := r.s.HookTrack(r.ctx, "", child.Name, contract.PrTrackRequest{Repo: "owner/repo", Number: 3}); e == nil {
+		t.Fatal("a machine run tracked a PR")
+	}
+}
+
 func TestTrackReturnsTheCanonicalNameAndTrackingTwiceIsFine(t *testing.T) {
 	r := newPRRig(t)
 	r.github.Add(fakegithub.Pull{Repo: "owner/repo", Number: 3})

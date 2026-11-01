@@ -51,26 +51,43 @@ func (a *API) SetGitHubRead(route http.Handler) { a.github = route }
 // SetGitRoute configures the per-box git route before opening sockets.
 func (a *API) SetGitRoute(route func(Caller) http.Handler) { a.git = route }
 
-// runHandler is all a Run's socket serves. POST /v1/post posts in the room. Every other path is GitHub's,
-// because gh sends its API paths unchanged over a Unix socket. The method table is not involved: no method
-// is open to a Run.
-func (a *API) runHandler(sub contract.SubscriptionID, room contract.RoomID) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/post", func(w http.ResponseWriter, r *http.Request) {
-		var req contract.PostRequest
+// runTrackRequest is a Run's pr.track. A Run lists no sessions, so it names one as a post does.
+type runTrackRequest struct {
+	Repo    contract.RepoName `json:"repo"`
+	Number  int               `json:"number"`
+	Session string            `json:"session,omitempty"`
+}
+
+// runCall serves one path of a Run's socket.
+func runCall[Req, Res any](mux *http.ServeMux, method contract.Method, fn func(context.Context, Req) (Res, *contract.Error)) {
+	mux.HandleFunc("POST /v1/"+string(method), func(w http.ResponseWriter, r *http.Request) {
+		var req Req
 		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&req); err != nil {
 			writeError(w, invalid())
 			return
 		}
-		result, err := a.service.HookPost(r.Context(), sub, room, req)
+		result, err := fn(r.Context(), req)
 		if err != nil {
 			writeError(w, err)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(result)
+	})
+}
+
+// runHandler is all a Run's socket serves. POST /v1/post posts in the room, and POST /v1/pr.track tracks a PR for one
+// of its sessions. Every other path is GitHub's, because gh sends its API paths unchanged over a Unix socket. The method
+// table is not involved: no method is open to a Run.
+func (a *API) runHandler(sub contract.SubscriptionID, room contract.RoomID) http.Handler {
+	mux := http.NewServeMux()
+	runCall(mux, contract.MethodPost, func(ctx context.Context, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
+		return a.service.HookPost(ctx, sub, room, req)
+	})
+	runCall(mux, contract.MethodPrTrack, func(ctx context.Context, req runTrackRequest) (contract.PrTrackResponse, *contract.Error) {
+		return a.service.HookTrack(ctx, room, req.Session, contract.PrTrackRequest{Repo: req.Repo, Number: req.Number})
 	})
 	mux.HandleFunc("/v1/", func(w http.ResponseWriter, _ *http.Request) { writeError(w, forbidden()) })
 	if a.github != nil {
