@@ -48,7 +48,6 @@ type Service struct {
 	live               *live.Live
 	sessions           map[contract.SessionID]*sessionState
 	computerGeneration uint64
-	activityCount      uint64
 	shellGeneration    uint64
 	readMu             sync.Mutex // preserves commit and live broadcast order
 	// transcriptMu serializes appends, so each offset check and write runs alone.
@@ -65,12 +64,9 @@ type Service struct {
 type sessionState struct {
 	computerLock sync.Mutex
 	channel      *boxChannel
-	activity     contract.TurnActivity
 	computer     *computerState
 	terminals    int
 	watch        *shellWatch
-	// activityOrder is the s.activityCount value when activity was set, so a room's newest label wins.
-	activityOrder uint64
 }
 
 // sessionLocked creates the entry if needed. Callers hold s.mu and pass the id of a session that exists or is being started.
