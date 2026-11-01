@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"dyna-agent/internal/sysload"
@@ -343,10 +344,16 @@ func (p Prober) run(ctx context.Context, m Machine, out, stderr io.Writer) error
 // output pipe open after the command is killed, such as an ssh ProxyCommand.
 func execCommand(ctx context.Context, dir string, in io.Reader, out, stderr io.Writer, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.Dir = dir
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = in, out, stderr
 	cmd.WaitDelay = 2 * time.Second
-	return cmd.Run()
+	err := cmd.Run()
+	if cmd.Process != nil {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	return err
 }
 
 // probeFailure builds the message to show the owner for a failed probe.
