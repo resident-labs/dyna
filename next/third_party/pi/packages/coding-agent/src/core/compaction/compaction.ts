@@ -935,6 +935,22 @@ export function prepareCompaction(
 	};
 }
 
+/**
+ * The summary of a compaction no model wrote. It is for a session that moves to a model that cannot
+ * hold the conversation, when a real summary failed or was not enough.
+ */
+export function modelTransferBoundary(
+	sessionFile: string | undefined,
+	reason: string,
+	previousSummary?: string,
+): string {
+	const where = sessionFile
+		? `The whole earlier conversation is in the previous session's file, ${sessionFile}. It is JSONL, one entry per line, oldest first. Read it for the context you need, then continue the work.`
+		: "The earlier conversation is not available. Continue the work from what follows.";
+	const earlier = previousSummary ? `\n\nThe latest summary of that conversation:\n\n${previousSummary}` : "";
+	return `This session moved to a new model without its earlier conversation: ${reason}. ${where}${earlier}`;
+}
+
 // ============================================================================
 // Main compaction function
 // ============================================================================
