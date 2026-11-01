@@ -73,6 +73,7 @@ git fetch origin && git checkout --detach origin/main
 next/scripts/deploy-trial.sh
 ```
 
+<!-- LEGACY(v1-transfer): this paragraph, the v1 job runner hook. Remove after the transfer. -->
 A v1 schedule hook that still calls `dyna job run` works only while a v1 engine
 runs. Replace it with a timer on the trial host that runs these commands, or
 deploy by hand.

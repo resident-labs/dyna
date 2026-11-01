@@ -23,6 +23,7 @@ type Tree struct {
 func NewTree(nodes []Node) Tree {
 	t := Tree{nodes: make(map[contract.SessionID]Node, len(nodes))}
 	for _, n := range nodes {
+		// LEGACY(v1-transfer): attaching extra parentless sessions to root, for M1 trial stores. Remove after the transfer.
 		// M1 trial stores can have several parentless sessions; attach later ones to root.
 		if n.Parent == "" {
 			if t.root == "" {
