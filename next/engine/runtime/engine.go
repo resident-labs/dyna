@@ -31,6 +31,7 @@ import (
 	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/images"
 	"github.com/resident-labs/dyna/engine/model"
+	"github.com/resident-labs/dyna/engine/prs"
 	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/web"
 )
@@ -195,6 +196,9 @@ func Run(ctx context.Context, cfg Config) error {
 	service.SetInstructionsPublisher(boxes.PublishInstructions)
 	mirror := &enginegit.Mirror{Layout: layout, Token: token, Runner: enginegit.GitRunner{}}
 	service.SetRepositories(&enginegit.Repositories{Rooms: st, Hosts: boxes, Mirror: mirror})
+	pulls := &prs.Client{Token: token, Endpoint: &url.URL{Scheme: "https", Host: "api.github.com"}, Transport: http.DefaultTransport, Now: time.Now}
+	prPoll := &prs.Poller{Store: st, GitHub: pulls, Now: time.Now}
+	service.SetPRTracking(pulls, prPoll)
 	boxes.Compose = &compose.Files{Layout: layout, Repo: mirror}
 	service.SetCompose(boxes.Compose, mirror.ImageSize)
 	if err := st.RecoverHostexec(ctx, time.Now()); err != nil {
@@ -255,7 +259,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	apiServer.SetFilesRoute(func(c api.Caller) http.Handler { return service.Files(c.Principal, c.Room) })
 	apiServer.SetGitRoute(func(c api.Caller) http.Handler {
-		return enginegit.Handler(&url.URL{Scheme: "https", Host: "github.com"}, http.DefaultTransport, token, c.Principal.Session, c.Room, st)
+		return enginegit.NotifyPush(enginegit.Handler(&url.URL{Scheme: "https", Host: "github.com"}, http.DefaultTransport, token, c.Principal.Session, c.Room, st), prPoll.Reset)
 	})
 	files, err := connect.OpenFiles(cfg.Data)
 	if err != nil {
@@ -373,6 +377,14 @@ func Run(ctx context.Context, cfg Config) error {
 		pool.Run(ctx, ticks.C)
 	}()
 	defer func() { <-ciDone }()
+	prDone := make(chan struct{})
+	go func() {
+		defer close(prDone)
+		ticks := time.NewTicker(10 * time.Second)
+		defer ticks.Stop()
+		prPoll.Run(ctx, ticks.C)
+	}()
+	defer func() { <-prDone }()
 	lastDormant := time.Now()
 	for {
 		select {

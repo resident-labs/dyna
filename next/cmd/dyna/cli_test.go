@@ -70,6 +70,10 @@ type fakeClient struct {
 	devices      []contract.Device
 	deviceRevoke contract.DeviceRevokeRequest
 	deviceScopes contract.DeviceSetScopesRequest
+	prList       contract.PrListRequest
+	prStatus     contract.PrStatusRequest
+	prTrack      contract.PrTrackRequest
+	prUntrack    contract.PrUntrackRequest
 	hosts        []contract.HostSummary
 
 	roomDelete    contract.RoomDeleteRequest
@@ -86,6 +90,22 @@ func (f *fakeClient) DeviceList(context.Context, contract.DeviceListRequest) (co
 func (f *fakeClient) DeviceRevoke(_ context.Context, q contract.DeviceRevokeRequest) (contract.DeviceRevokeResponse, error) {
 	f.deviceRevoke = q
 	return contract.DeviceRevokeResponse{}, nil
+}
+func (f *fakeClient) PrList(_ context.Context, q contract.PrListRequest) (contract.PrListResponse, error) {
+	f.prList = q
+	return contract.PrListResponse{PRs: []contract.PrSummary{{Repo: "owner/repo", Number: 7, State: contract.PrOpen, CI: contract.PrCIFailure, URL: "https://github.com/owner/repo/pull/7"}}}, nil
+}
+func (f *fakeClient) PrStatus(_ context.Context, q contract.PrStatusRequest) (contract.PrStatusResponse, error) {
+	f.prStatus = q
+	return contract.PrStatusResponse{PR: contract.PrSummary{Repo: q.Repo, Number: q.Number, State: contract.PrMerged}}, nil
+}
+func (f *fakeClient) PrTrack(_ context.Context, q contract.PrTrackRequest) (contract.PrTrackResponse, error) {
+	f.prTrack = q
+	return contract.PrTrackResponse{PR: contract.PrSummary{Repo: q.Repo, Number: q.Number}}, nil
+}
+func (f *fakeClient) PrUntrack(_ context.Context, q contract.PrUntrackRequest) (contract.PrUntrackResponse, error) {
+	f.prUntrack = q
+	return contract.PrUntrackResponse{}, nil
 }
 func (f *fakeClient) DeviceSetScopes(_ context.Context, q contract.DeviceSetScopesRequest) (contract.DeviceSetScopesResponse, error) {
 	f.deviceScopes = q
@@ -502,5 +522,28 @@ func TestRepoCICommand(t *testing.T) {
 	root.SetArgs([]string{"room", "repo", "ci", "a/b", "--mode", "box", "--host", "pve"})
 	if err := root.Execute(); err == nil {
 		t.Fatal("accepted a host with no count")
+	}
+}
+
+func TestPrTrackingCommands(t *testing.T) {
+	f := &fakeClient{}
+	out := runCLI(t, f, "pr", "list", "--all", "--room", "room_a")
+	if !f.prList.All || f.prList.Room != "room_a" || !strings.Contains(out, "owner/repo#7") || !strings.Contains(out, "ci=failure") {
+		t.Fatalf("list %+v printed %q", f.prList, out)
+	}
+	runCLI(t, f, "pr", "status", "12", "--repo", "owner/repo")
+	if f.prStatus.Repo != "owner/repo" || f.prStatus.Number != 12 {
+		t.Fatalf("status %+v", f.prStatus)
+	}
+	runCLI(t, f, "pr", "track", "12", "--repo", "upstream/repo", "--session", "ses_a")
+	if f.prTrack.Repo != "upstream/repo" || f.prTrack.Number != 12 || f.prTrack.Session != "ses_a" {
+		t.Fatalf("track %+v", f.prTrack)
+	}
+	runCLI(t, f, "pr", "untrack", "12", "--repo", "upstream/repo")
+	if f.prUntrack.Repo != "upstream/repo" || f.prUntrack.Number != 12 {
+		t.Fatalf("untrack %+v", f.prUntrack)
+	}
+	if _, err := execCLI(f, "pr", "track", "twelve"); err == nil {
+		t.Fatal("a number that is not one was accepted")
 	}
 }

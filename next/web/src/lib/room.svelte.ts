@@ -4,7 +4,8 @@ import { stream } from "./stream.ts";
 import { EventWindow } from "./window.svelte.ts";
 import { pendingReason, type PendingReason } from "./event.ts";
 import { boxFailures, countOf, failedJobs, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
-import type { BoxState, Conversation, FailureCause, Decision, Event, OpRequested, OpResult, OpState, Question, SessionStarted } from "./contract.gen.ts";
+import { prKey } from "./feed.ts";
+import type { BoxState, Conversation, FailureCause, Decision, Event, OpRequested, OpResult, OpState, PrSummary, Question, SessionStarted } from "./contract.gen.ts";
 import { failed } from "./jobs.ts";
 
 
@@ -56,6 +57,8 @@ export class RoomStore {
   readonly requests = new SvelteMap<string, Request>();
   // question.list gives the waiting ones and the latest answered ones; the stream keeps them current.
   readonly questions = new SvelteMap<string, Question>();
+  // Tracked PRs by prKey: pr.list once, then pr.changed. A room opens without them if that read fails.
+  readonly prs = new SvelteMap<string, PrSummary>();
   // Names outlive closed sessions, so old posts still show who wrote them.
   readonly names = new SvelteMap<string, string>();
   private readonly windows = new Set<EventWindow>();
@@ -160,6 +163,7 @@ export class RoomStore {
     await this.opening.then(() => { this.loaded = true; }, (error: unknown) => { this.failure = error; });
     this.changed();
     if (this.closed || !this.loaded) return;
+    void this.loadPRs();
     // A failed job counts until the owner reads past its end, as a failed turn does. The first page does not wait for this read.
     if (this.hadJobs.size) void failedJobs(this.room, this.head + 1).then(ends => {
       for (const { session, job, seq } of ends) this.failJob(session, job, seq);
@@ -168,6 +172,14 @@ export class RoomStore {
       // A conversation.read is not replayed. A read made after load() or during a dropped stream is missed, so each hello rereads.
       this.rereading = this.rereadPositions().catch(() => {});
     });
+  }
+
+  // A pr.changed that arrived first is newer than this read, so it stays.
+  private async loadPRs(): Promise<void> {
+    const listed = await call("pr.list", { room: this.room, all: true }).catch(() => undefined);
+    for (const pr of listed?.prs ?? []) {
+      if (!this.prs.has(prKey(pr.repo, pr.number))) this.prs.set(prKey(pr.repo, pr.number), pr);
+    }
   }
 
   // room.list gives the feed's read position.
@@ -292,6 +304,9 @@ export class RoomStore {
         if (to !== "ready") this.computers.delete(session);
         break;
       }
+      case "pr.changed":
+        for (const { pr } of event.body.changes ?? []) this.prs.set(prKey(pr.repo, pr.number), pr);
+        break;
       case "computer.changed":
         if (event.body.to === "running") this.computers.add(event.body.session);
         else this.computers.delete(event.body.session);

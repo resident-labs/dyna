@@ -103,6 +103,18 @@ func Handler(upstream *url.URL, transport http.RoundTripper, token string, sessi
 	})
 }
 
+// NotifyPush calls pushed after a push reaches next, so the PR poll looks sooner (spec 7.7). A push the route
+// refused also counts: it costs at most an earlier poll, within the same limit.
+func NotifyPush(next http.Handler, pushed func(contract.RepoName)) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/git/"), "/")
+		if r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "git-receive-pack" {
+			pushed(contract.RepoName(parts[0] + "/" + strings.TrimSuffix(parts[1], ".git")))
+		}
+	})
+}
+
 func validPart(s string) bool {
 	if s == "" || s == "." || s == ".." {
 		return false

@@ -135,6 +135,12 @@ func decodeEventBody(t EventType, data json.RawMessage) (EventBody, error) {
 			return nil, err
 		}
 		return v, nil
+	case "pr.changed":
+		var v PrChanged
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case "pr.opened":
 		var v PrOpened
 		if err := json.Unmarshal(data, &v); err != nil {
@@ -320,7 +326,7 @@ func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs, error) {
 	}
 }
 
-var eventBodyTypes = []EventType{"account.failed", "account.quota_low", "box.changed", "box.pressure", "computer.changed", "connect.connector", "conversation.read", "grant.expired", "host.disk_low", "image.built", "image.failed", "op.decided", "op.ran", "op.requested", "post.created", "pr.opened", "question.answered", "question.asked", "question.withdrawn", "room.deleted", "room.deleting", "room.limits_changed", "room.paused", "room.resumed", "session.closed", "session.moved", "session.profile_changed", "session.restarted", "session.started", "shell.job.ended", "transcript.changed", "turn.activity", "turn.ended", "turn.started"}
+var eventBodyTypes = []EventType{"account.failed", "account.quota_low", "box.changed", "box.pressure", "computer.changed", "connect.connector", "conversation.read", "grant.expired", "host.disk_low", "image.built", "image.failed", "op.decided", "op.ran", "op.requested", "post.created", "pr.changed", "pr.opened", "question.answered", "question.asked", "question.withdrawn", "room.deleted", "room.deleting", "room.limits_changed", "room.paused", "room.resumed", "session.closed", "session.moved", "session.profile_changed", "session.restarted", "session.started", "shell.job.ended", "transcript.changed", "turn.activity", "turn.ended", "turn.started"}
 
 func (m BoxMessage) MarshalJSON() ([]byte, error) {
 	if m.Body == nil {
@@ -414,4 +420,4 @@ var boxMessageTypes = []BoxMessageType{"archive", "computer.input", "computer.wa
 var AllOpKinds = []OpKind{"accounts.action", "hostexec.grant", "hostexec.run", "pr.open"}
 
 // AllMethods lists every Method constant.
-var AllMethods = []Method{"accounts.connect", "accounts.connect_callback", "accounts.connect_status", "accounts.import_oauth", "accounts.list", "accounts.quota", "accounts.reconnect", "accounts.remove", "accounts.rename", "accounts.set_key", "accounts.set_limits", "archive.done", "box.hello", "compose.list", "computer.changed", "computer.input", "connect.cancel", "connect.start", "connect.status", "connect.unlink", "context.snapshot", "conversation.read", "delivery.done", "device.list", "device.pair", "device.revoke", "device.scopes", "device.set_scopes", "events.list", "host.add", "host.list", "host.set_limits", "hostexec.list", "hostexec.run", "instructions.get", "instructions.set", "op.decide", "op.list", "op.submit", "op.withdraw", "post", "post.search", "profile.list", "profile.remove", "profile.set", "question.answer", "question.ask", "question.list", "repo.ci.set", "room.create", "room.delete", "room.list", "room.pause", "room.repo.add", "room.repos", "room.set_limits", "session.account", "session.close", "session.list", "session.move", "session.restart", "session.search", "session.set_account", "session.set_profile", "session.start", "session.stop", "session.work", "shell.job.ended", "shell.output", "transcript.append", "transcript.fetch", "transcript.read", "turn.activity", "turn.output", "web.login", "web.search", "websearch.remove_key", "websearch.set_key"}
+var AllMethods = []Method{"accounts.connect", "accounts.connect_callback", "accounts.connect_status", "accounts.import_oauth", "accounts.list", "accounts.quota", "accounts.reconnect", "accounts.remove", "accounts.rename", "accounts.set_key", "accounts.set_limits", "archive.done", "box.hello", "compose.list", "computer.changed", "computer.input", "connect.cancel", "connect.start", "connect.status", "connect.unlink", "context.snapshot", "conversation.read", "delivery.done", "device.list", "device.pair", "device.revoke", "device.scopes", "device.set_scopes", "events.list", "host.add", "host.list", "host.set_limits", "hostexec.list", "hostexec.run", "instructions.get", "instructions.set", "op.decide", "op.list", "op.submit", "op.withdraw", "post", "post.search", "pr.list", "pr.status", "pr.track", "pr.untrack", "profile.list", "profile.remove", "profile.set", "question.answer", "question.ask", "question.list", "repo.ci.set", "room.create", "room.delete", "room.list", "room.pause", "room.repo.add", "room.repos", "room.set_limits", "session.account", "session.close", "session.list", "session.move", "session.restart", "session.search", "session.set_account", "session.set_profile", "session.start", "session.stop", "session.work", "shell.job.ended", "shell.output", "transcript.append", "transcript.fetch", "transcript.read", "turn.activity", "turn.output", "web.login", "web.search", "websearch.remove_key", "websearch.set_key"}
