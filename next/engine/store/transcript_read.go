@@ -260,6 +260,24 @@ func (s *Store) TranscriptDeliveries(ctx context.Context, session contract.Sessi
 	return result, rows.Err()
 }
 
+// TranscriptSteers returns the deliveries a running turn took as messages to read, a child's reply among them. A machine wake, such as a shell job's end, does not split the turn's work.
+func (s *Store) TranscriptSteers(ctx context.Context, session contract.SessionID) (map[contract.DeliverySeq]bool, error) {
+	rows, err := s.Read().QueryContext(ctx, "SELECT d.seq FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND d.queue IS NOT NULL AND e.type IN ('post.created','question.answered','turn.ended')", contract.PrincipalSession, session)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[contract.DeliverySeq]bool)
+	for rows.Next() {
+		var seq contract.DeliverySeq
+		if err := rows.Scan(&seq); err != nil {
+			return nil, err
+		}
+		result[seq] = true
+	}
+	return result, rows.Err()
+}
+
 // TranscriptRoom finds a session's room, including a closed session in transcript history.
 func (s *Store) TranscriptRoom(ctx context.Context, session contract.SessionID) (contract.RoomID, error) {
 	var room contract.RoomID
