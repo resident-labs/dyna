@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestWebSearchUsesStoredKey(t *testing.T) {
@@ -28,6 +29,8 @@ func TestWebSearchUsesStoredKey(t *testing.T) {
 
 func TestWebSearchDistinguishesFailureFromEmptyResults(t *testing.T) {
 	s, _, worker, ctx := setup(t)
+	now := time.Unix(1000, 0)
+	s.now = func() time.Time { return now }
 	failed := true
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if failed {
@@ -51,6 +54,25 @@ func TestWebSearchDistinguishesFailureFromEmptyResults(t *testing.T) {
 	result, problem = s.WebSearch(ctx, caller, req)
 	if problem != nil || result.Provider != "brave" || len(result.Results) != 0 {
 		t.Fatalf("empty: %+v %v", result, problem)
+	}
+	recent := false
+	for _, attempt := range result.Attempts {
+		if attempt.Provider == "brave" && attempt.Reason == contract.WebSearchRecentFailure {
+			recent = true
+		}
+	}
+	if !recent {
+		t.Fatal("failure was not remembered")
+	}
+	now = now.Add(6 * time.Minute)
+	result, problem = s.WebSearch(ctx, caller, req)
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	for _, attempt := range result.Attempts {
+		if attempt.Provider == "brave" && attempt.Reason == contract.WebSearchRecentFailure {
+			t.Fatal("failure did not expire")
+		}
 	}
 }
 
