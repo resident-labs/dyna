@@ -59,3 +59,20 @@ export function mergeTimelineItems(existing: TranscriptItem[], incoming: Transcr
 export function mergeTimelineInputs(existing: TranscriptInput[], incoming: TranscriptInput[]): TranscriptInput[] {
   return [...new Map([...existing, ...incoming].map(input => [input.id, input])).values()].sort((a, b) => a.seq - b.seq);
 }
+
+// Ported from T3 Code (packages/shared/src/orchestrationTiming.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
+export function formatTimelineDuration(durationMs: number): string {
+  if (!Number.isFinite(durationMs) || durationMs < 0) return "0ms";
+  if (durationMs < 1_000) return `${Math.max(1, Math.round(durationMs))}ms`;
+  if (durationMs < 10_000) return `${Math.round(durationMs / 100) / 10}s`;
+  const totalSeconds = Math.round(durationMs / 1_000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts: string[] = [];
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  if (seconds > 0) parts.push(`${seconds}s`);
+  return parts.join(" ");
+}

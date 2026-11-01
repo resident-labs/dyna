@@ -13,7 +13,7 @@
   import Markdown from "./Markdown.svelte";
   import TranscriptWorkRow from "./TranscriptWorkRow.svelte";
   import TimelineMinimap from "./TimelineMinimap.svelte";
-  import { deriveTimelineGroups, mergeTimelineInputs, mergeTimelineItems } from "../timeline.ts";
+  import { deriveTimelineGroups, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems } from "../timeline.ts";
 
   let { session, roomName, store, unsent, onunsent, onsettled, onpostlocation, clock = Date.now }: { session: string; roomName: string; store: RoomStore; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; clock?: () => number } = $props();
   const view = untrack(() => store.window({ kind: "dm", session }));
@@ -186,7 +186,7 @@
 {/snippet}
 
 <div class="thread-frame" bind:clientWidth={frameWidth}>
-<TimelineMinimap turns={minimapTurns} current={currentTurn} persistent={frameWidth >= 950} onselect={(id) => scroller.querySelector<HTMLElement>(`article[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" })} />
+<TimelineMinimap turns={minimapTurns} current={currentTurn} persistent={true} onselect={(id) => scroller.querySelector<HTMLElement>(`article[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" })} />
 <div class="thread" bind:this={scroller} onscroll={() => { atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; updatePosition(); if (loaded && before && !loading && scroller.scrollTop < 100) void load(true); }}>
   <div class="body">
     {#each turns as turn (turn.id)}
@@ -197,7 +197,7 @@
         {/each}
         <!-- Dyna: Posts and the final answer remain visible outside the work fold. -->
         {#if turn.ended && (turn.olderItems || (turn.items ?? []).some(item => item.kind === "tool" || item.kind === "thinking"))}
-          <button class="work-header" aria-expanded={!!expandedTurns[turn.id]} onclick={() => { expandedTurns[turn.id] = !expandedTurns[turn.id]; if (expandedTurns[turn.id] && turn.olderItems) void readContinuation(turn, "older"); }}>Worked for {elapsed(turn.started, Date.parse(turn.ended))}<span class:open={expandedTurns[turn.id]}><Icon name="chevron" size={14} /></span></button>
+          <button class="work-header" aria-expanded={!!expandedTurns[turn.id]} onclick={() => { expandedTurns[turn.id] = !expandedTurns[turn.id]; if (expandedTurns[turn.id] && turn.olderItems) void readContinuation(turn, "older"); }}>Worked for {formatTimelineDuration(Date.parse(turn.ended) - Date.parse(turn.started))}<span class:open={expandedTurns[turn.id]}><Icon name="chevron" size={14} /></span></button>
         {/if}
         {#each deriveTimelineGroups(turn.items ?? []) as group (group.id)}
           {#if group.kind === "work"}
@@ -250,6 +250,9 @@
   .input :global(.markdown) { margin: 4px 0 0; }
   .pending { opacity: 0.5; }
   .message { margin: 12px 0; }
+  .message :global(.markdown h2) { font-size: 20px; margin: 20px 0 8px; }
+  .message :global(.markdown h3) { font-size: 18px; margin: 20px 0 8px; }
+  .message :global(.markdown :is(h2, h3):first-child) { margin-top: 0; }
   .work-header { display: flex; align-items: center; gap: 4px; width: 100%; color: var(--muted); font-size: 14px; margin-top: 40px; padding: 8px 4px 12px; border-bottom: 1px solid var(--line); }
   .work-header span { display: inline-flex; transform: rotate(-90deg); }
   .work-header span.open { transform: none; }
