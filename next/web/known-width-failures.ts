@@ -18,6 +18,5 @@ export function staleWidthFailures(baseline: readonly WidthFailure[], seen: Read
 
 // Temporary baseline. Sweep PRs remove each issue when they fix it.
 export const knownWidthFailures: readonly WidthFailure[] = [
-  { fixture: "full", route: "/settings/devices", width: 390, element: "span.line", text: "Expires in 2 days · Seen 28 days ago · Read, operate" },
   { fixture: "full", route: "/r/:room", width: 768, element: "span.title", text: "asks for host access", occurrences: 2 },
 ];

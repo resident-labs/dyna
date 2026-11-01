@@ -16,6 +16,7 @@
   let connectState: "idle" | "pending" | "failed" | "expired" = $state("idle");
   let reconnectId: string | undefined = $state(), error = $state(""), copied = $state(false), opened = $state(false), now = $state(Date.now());
   let timer: ReturnType<typeof setTimeout> | undefined, generation = 0;
+  let body: HTMLDivElement;
   const base = "/settings/accounts";
   let adding = $derived(path === base + "/add" || path.startsWith(base + "/add/"));
   let providerId = $derived(path.startsWith(base + "/add/") ? decodeURIComponent(path.slice((base + "/add/").length)) : "");
@@ -37,7 +38,7 @@
     void call("room.list", {}).then(result => { rooms = result.rooms ?? []; }, () => {});
   }
   onMount(() => { reload(); window.addEventListener("focus", reload); return () => { reset(); window.removeEventListener("focus", reload); }; });
-  $effect(() => { path; return () => { generation++; clearTimeout(timer); attempt = undefined; connectState = "idle"; redirect = ""; secret = ""; error = ""; }; });
+  $effect(() => { path; if (body) body.scrollTop = 0; return () => { generation++; clearTimeout(timer); attempt = undefined; connectState = "idle"; redirect = ""; secret = ""; error = ""; }; });
   function watch(id: string, ticket: number) {
     timer = setTimeout(() => {
       now = Date.now();
@@ -96,12 +97,11 @@
 {#if adding || accountId}
   <header class="subbar">{#if phone}<a href={adding && selected ? base + "/add" : base} onclick={navigate} aria-label={adding && selected ? "Back to providers" : "Back to Accounts"}><Icon name="backChevron" size={20} /></a>{:else}{@render back()} <span>/</span>{/if} <strong>{adding ? (phone && selected ? selected.displayName : "Add an account") : account?.label || "Account"}</strong></header>
 {:else}{@render bar("Accounts", loaded ? accounts.length : undefined, action)}{/if}
-<div class="body" data-page-ready={loaded && quotaLoaded}>
+<div class="body" data-page-ready={loaded && quotaLoaded} bind:this={body}>
 {#if failed}<p>Accounts did not load. <button class="btn" type="button" onclick={reload}>Try again</button></p>
 {:else if !loaded}<p class="muted">Loading accounts…</p>
 {:else if adding}
-  <a id="picker-back" href={base + "/add"} onclick={navigate} hidden>Back to providers</a><div class="add-layout">
-    {#if !phone || !selected}
+  <a id="picker-back" href={base + "/add"} onclick={navigate} hidden>Back to providers</a><div class="add-layout" class:has-provider={!!providerId && !!selected}>
       <section class="picker">
         <div class="search"><Icon name="search" size={18} /><input aria-label="Search providers" placeholder={`Search ${providers.length} providers`} bind:value={query} /></div>
         {#each groups as group}
@@ -115,14 +115,14 @@
           {/if}
         {/each}
       </section>
-    {/if}
     {#if selected}
       <div class="details">
+        {#if !phone}<a class="all-providers" href={base + "/add"} onclick={navigate}>← All providers</a>{/if}
         <section class="card connect">
           <h2><span class="initial">{selected.displayName.slice(0, 1)}</span>{selected.displayName}{#if !attempt}<span class="muted">{accounts.filter(a => a.provider === selected.id).length} connected</span>{:else if !phone && attempt.flow === "callback"}<span class="muted">Sign in with your plan · Dyna sees your plan limits, not your chats</span>{/if}</h2>
           {#if !attempt}
-            <p><strong>{selected.connectFlow === "callback" ? "Sign in with your plan." : selected.connectFlow === "device" ? "Sign in with a code." : "API key."}</strong> {selected.connectFlow === "callback" ? `Use a ${selected.displayName} plan you already pay for. Dyna shows its usage limits when available.` : selected.connectFlow === "device" ? "Dyna shows a short code here. You enter it on the provider’s page, and Dyna finishes by itself." : "You paste a key once. It stays on this computer, and Dyna never shows it again."}</p>
-            <p class="muted">Dyna keeps the sign-in on this computer and sends it only to {selected.displayName}.{#if selected.connectFlow === "callback"}{" "}It sees your plan limits, not your chats.{/if}</p>
+            <p><strong>{selected.connectFlow === "callback" ? "Sign in with your plan." : selected.connectFlow === "device" ? "Sign in with a code." : "API key."}</strong> {selected.connectFlow === "callback" ? `Use a ${selected.displayName} plan you already pay for. Dyna shows its usage limits when available.` : selected.connectFlow === "device" ? "Dyna shows a short code here. You enter it on the provider’s page, and Dyna finishes by itself." : "You paste a key once. It stays where Dyna runs, and Dyna never shows it again."}</p>
+            <p class="muted">Dyna keeps the sign-in where Dyna runs and sends it only to {selected.displayName}.{#if selected.connectFlow === "callback"}{" "}It sees your plan limits, not your chats.{/if}</p>
             <label class="label-field">Label <input bind:value={label} placeholder="Work, Personal, …" disabled={busy} /></label>
             {#if selected.connectFlow === "key"}<label>API key <input type="password" bind:value={secret} autocomplete="off" disabled={busy} /></label>{/if}
             <div class="start-actions"><button class="btn fill" type="button" disabled={busy || (selected.connectFlow === "key" && !secret.trim())} onclick={() => void start()}>{selected.connectFlow === "callback" ? `Sign in with ${selected.displayName}` : selected.connectFlow === "device" ? "Get a code" : "Save key"}</button>{#if selected.connectFlow === "key"}<a class="btn" href={base + "/add"} onclick={navigate}>Cancel</a>{/if}</div>
@@ -150,7 +150,7 @@
           {#if attempt}<p class="muted after"><strong>{label}</strong>{" "}joins {selected.displayName} in your account list{#if selectedReportsWindows}, with its 5-hour and Weekly limits{/if}.</p><p class="muted after">It serves every room until you choose rooms in its view.</p>
           {:else}<p><strong>Sign in with your plan</strong> <span class="muted">You approve Dyna on the provider's page, then paste back the address it lands on. Dyna shows your plan's limits.</span></p>
           <p><strong>Sign in with a code</strong> <span class="muted">Dyna shows a short code here. You enter it on the provider's page, and Dyna finishes by itself.</span></p>
-          <p><strong>API key</strong> <span class="muted">You paste a key once. It stays on this computer, and Dyna never shows it again.</span></p>{/if}
+          <p><strong>API key</strong> <span class="muted">You paste a key once. It stays where Dyna runs, and Dyna never shows it again.</span></p>{/if}
         </section>
       </div>
     {/if}
@@ -190,16 +190,18 @@
 <style>
   .subbar { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 24px; border-bottom: 1px solid var(--line); }
   .subbar a, .subbar span { color: var(--muted); } .subbar a { text-decoration: none; display: inline-flex; align-items: center; }
-  .body { flex: 1; min-height: 0; overflow: auto; box-sizing: border-box; padding: 20px 24px; display: grid; align-content: start; gap: 18px; }
+  .body { flex: 1; min-height: 0; overflow: auto; box-sizing: border-box; padding: 20px 24px; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 18px; }
   p { margin: 0; line-height: 1.45; } .muted { color: var(--muted); font-size: 12.5px; }
   h1, h2, h3 { margin: 0; font-weight: 600; } h1 { font-size: 20px; display: flex; align-items: center; gap: 12px; } h2 { font-size: 16px; } h3 { font-size: 13px; color: var(--muted); margin: 16px 8px 4px; }
   a { color: var(--focus); } .btn { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; } .add-button { margin-left: auto; }
   .initial { display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 6px; background: var(--selected); color: var(--muted); font-size: 12px; }
   .heading { display: flex; align-items: center; gap: 8px; margin: 0 8px 8px; } .heading h2, .connect h2 { display: flex; align-items: center; gap: 8px; } .heading .btn { margin-left: auto; }
   .list, .card, .picker { border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
-  .account-row { display: flex; align-items: center; } .account-row + .account-row { border-top: 1px solid var(--line); } .row { flex: 1; min-width: 0; min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; color: var(--text); text-decoration: none; } .row:hover, .picker a:hover { background: var(--hover); } .row .muted { margin-top: 4px; } .row-meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 20px; width: min(65%, 700px); margin-left: auto; }
-  .add-layout { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: 20px; align-items: start; } .picker { padding: 8px; } .search { display: flex; align-items: center; gap: 8px; padding-left: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--muted); } .picker .search input { border: 0; } .picker a { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; padding: 8px; border-radius: 6px; } .picker a .muted { margin-left: auto; } .picker a.chosen { background: var(--selected); }
-  .details { display: grid; gap: 16px; } .card { padding: 20px; } .connect { display: grid; justify-items: start; gap: 16px; } .connect h2 .muted { font-weight: 400; } .connect label, form { display: grid; gap: 8px; width: 100%; } .connect .label-field { grid-template-columns: 64px minmax(0, 320px); align-items: center; color: var(--muted); } .connect input, .picker input { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; } .step-row { display: flex; align-items: flex-start; gap: 10px; width: 100%; } .step-badge { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--selected); color: var(--muted); font-size: 12px; } .step-badge.checked { background: transparent; border: 1px solid var(--line); box-sizing: border-box; } .callback-entry { display: flex; gap: 8px; width: 100%; } .callback-entry input { flex: 1; min-width: 0; } .actions, .start-actions { display: flex; gap: 8px; align-items: center; } .retry { display: flex; align-items: center; gap: 12px; padding: 8px; text-decoration: none; } .retry .btn { text-decoration: none; } .chevron { padding: 12px 14px; color: var(--muted); text-decoration: none; } .no-usage { margin-left: auto; } .btn:not(.fill):not(.danger) { color: var(--text); } .code { display: flex; gap: 12px; align-items: center; font-family: var(--mono); font-size: 20px; }
+  .account-row { display: flex; align-items: center; } .account-row + .account-row { border-top: 1px solid var(--line); } .row { flex: 1; min-width: 0; min-height: 58px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; color: var(--text); text-decoration: none; } .row:hover, .picker a:hover { background: var(--hover); } .row .muted { margin-top: 4px; } .row-meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; flex: 1 1 420px; min-width: 0; max-width: 700px; margin-left: auto; }
+  .add-layout { display: grid; grid-template-columns: minmax(280px, 300px) minmax(420px, 1fr); gap: 20px; align-items: start; } .body { container: accounts / inline-size; } .all-providers { display: none; } .picker { padding: 8px; } .search { display: flex; align-items: center; gap: 8px; padding-left: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--muted); } .picker .search input { border: 0; } .picker a { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; padding: 8px; border-radius: 6px; } .picker a .muted { margin-left: auto; } .picker a.chosen { background: var(--selected); }
+  .details { display: grid; gap: 16px; min-width: 0; container: account-detail / inline-size; } .card { padding: 20px; } .connect { display: grid; justify-items: start; gap: 16px; } .connect h2 .muted { font-weight: 400; } .connect label, form { display: grid; gap: 8px; width: 100%; } .connect .label-field { grid-template-columns: 64px minmax(0, 320px); align-items: center; color: var(--muted); } .connect input, .picker input { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; } .step-row { display: flex; align-items: flex-start; gap: 10px; width: 100%; } .step-badge { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--selected); color: var(--muted); font-size: 12px; } .step-badge.checked { background: transparent; border: 1px solid var(--line); box-sizing: border-box; } .callback-entry { display: flex; gap: 8px; width: 100%; } .callback-entry input { flex: 1; min-width: 0; } .actions, .start-actions { display: flex; gap: 8px; align-items: center; } .retry { display: flex; align-items: center; gap: 12px; padding: 8px; text-decoration: none; } .retry .btn { text-decoration: none; } .chevron { padding: 12px 14px; color: var(--muted); text-decoration: none; } .no-usage { margin-left: auto; } .btn:not(.fill):not(.danger) { color: var(--text); } .code { display: flex; gap: 12px; align-items: center; font-family: var(--mono); font-size: 20px; }
   .legend { display: grid; gap: 16px; } .legend .after strong { color: var(--text); } .legend p:not(.after) { display: grid; grid-template-columns: 180px 1fr; gap: 16px; } .account-view { display: grid; justify-items: start; gap: 12px; max-width: 900px; } .account-view h2 { margin-top: 28px; } .meters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; width: 100%; } .remove { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 20px; width: 100%; display: flex; justify-content: space-between; gap: 16px; }
-  @media (max-width: 640px) { .body { padding: 12px 16px; } .subbar { padding: 0 16px; } .add-layout { display: block; } .picker { border: 0; padding: 0; } .search { position: sticky; top: 0; z-index: 1; } .connect .label-field { grid-template-columns: 1fr; } .legend { display: none; } .meters { grid-template-columns: 1fr; } .account-row, .row { flex-wrap: wrap; } .account-view .start-actions { flex-direction: column; align-items: flex-start; } .remove { flex-direction: column; } .remove .btn { width: 100%; } .retry { order: 2; flex-basis: 100%; } .chevron { order: 1; } .row-meters { order: 3; width: 100%; grid-template-columns: 1fr; } .callback-entry { display: block; } .actions { position: fixed; z-index: 2; bottom: 0; left: 0; right: 0; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--bg); flex-wrap: wrap; } .actions .btn { flex: 1; min-height: 44px; } .actions .muted { width: 100%; text-align: center; } }
+  @container accounts (max-width: 739px) { .add-layout { display: block; } .add-layout.has-provider .picker, .add-layout:not(.has-provider) .details { display: none; } .all-providers { display: inline-block; } .connect .label-field { grid-template-columns: 1fr; } }
+  @container account-detail (max-width: 500px) { .legend p:not(.after) { grid-template-columns: 1fr; gap: 4px; } .legend { gap: 12px; } }
+  @media (max-width: 640px) { .body { padding: 12px 16px; } .subbar { padding: 0 16px; } .add-layout { display: block; } .picker { border: 0; padding: 0; } .search { position: sticky; top: 0; z-index: 1; } .connect .label-field { grid-template-columns: 1fr; } .meters { grid-template-columns: 1fr; } .account-row, .row { flex-wrap: wrap; } .account-view .start-actions { flex-direction: column; align-items: flex-start; } .remove { flex-direction: column; } .remove .btn { width: 100%; } .retry { order: 2; flex-basis: 100%; } .chevron { order: 1; } .row-meters { order: 3; width: 100%; grid-template-columns: 1fr; } .callback-entry { display: block; } .actions { position: fixed; z-index: 2; bottom: 0; left: 0; right: 0; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--bg); flex-wrap: wrap; } .actions .btn { flex: 1; min-height: 44px; } .actions .muted { width: 100%; text-align: center; } }
 </style>
