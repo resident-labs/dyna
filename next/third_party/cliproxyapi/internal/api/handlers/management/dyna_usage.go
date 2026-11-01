@@ -69,11 +69,12 @@ type dynaUsageSource struct {
 }
 
 var dynaUsageSources = map[string]dynaUsageSource{
-	"codex":                      {request: requestCodexUsage, parse: parseCodexUsage},
-	"kimi":                       {request: requestKimiUsage, parse: parseKimiUsage},
-	"xai":                        {request: requestXAIUsage, parse: parseXAIUsage},
-	"openai-compatible-zai":      {request: requestZAIUsage, parse: parseZAIUsage},
-	"openai-compatible-deepseek": {request: requestDeepSeekUsage, parse: parseDeepSeekUsage},
+	"codex":                         {request: requestCodexUsage, parse: parseCodexUsage},
+	"kimi":                          {request: requestKimiUsage, parse: parseKimiUsage},
+	"xai":                           {request: requestXAIUsage, parse: parseXAIUsage},
+	"openai-compatible-zai":         {request: requestZAIUsage, parse: parseZAIUsage},
+	"openai-compatible-deepseek":    {request: requestDeepSeekUsage, parse: parseDeepSeekUsage},
+	"openai-compatible-opencode-go": {request: requestOpenCodeUsage, parse: parseOpenCodeUsage, absent: http.StatusForbidden},
 }
 
 // dynaUsageTransport is a variable so tests never reach a provider.
