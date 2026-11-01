@@ -138,11 +138,11 @@ func (h *Host) Build(_ context.Context, tag, base string, tar []byte) error {
 	}
 	return nil
 }
-func (h *Host) PushCache(_ context.Context, mirror, hostData, repo string, refs []string) error {
+func (h *Host) PushCache(_ context.Context, mirror, cache string, refs []string) error {
 	if err := h.call(PushCache); err != nil {
 		return err
 	}
-	h.Caches[hostData+"/git/"+repo+".git"] = append([]string(nil), refs...)
+	h.Caches[cache] = append([]string(nil), refs...)
 	return nil
 }
 

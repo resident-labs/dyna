@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/resident-labs/dyna/box"
 )
 
 const backupStamp = "20060102T150405.000000000Z"
@@ -26,7 +28,7 @@ func (s *Store) Backup(ctx context.Context, now time.Time) (string, error) {
 }
 
 func backup(ctx context.Context, db *sql.DB, dataDir, prefix, pattern string, now time.Time) (string, error) {
-	dir := filepath.Join(dataDir, "backups")
+	dir := box.Layout{Data: dataDir}.Backups()
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", err
 	}

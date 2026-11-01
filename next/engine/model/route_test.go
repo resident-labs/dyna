@@ -88,21 +88,13 @@ func TestRouteRejectsAmbiguousModel(t *testing.T) {
 }
 
 func TestProxyConfig(t *testing.T) {
-	dir := t.TempDir()
-	oldAuth := filepath.Join(dir, "cliproxy", "auth")
-	if err := os.MkdirAll(oldAuth, 0700); err != nil {
-		t.Fatal(err)
-	}
-	oldFile := filepath.Join(oldAuth, "invented.json")
-	if err := os.WriteFile(oldFile, []byte("{}"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	proxy, err := NewProxy(dir, "management-key")
+	dir := filepath.Join(t.TempDir(), "cliproxy")
+	proxy, err := NewProxy(dir, filepath.Join(dir, "auth-v2"), "management-key")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = proxy.Listener.Close() })
-	path := filepath.Join(dir, "cliproxy", "config.yaml")
+	path := filepath.Join(dir, "config.yaml")
 	info, err := os.Stat(path)
 	if err != nil || info.Mode().Perm() != 0600 {
 		t.Fatalf("config mode: %v, %v", info, err)
@@ -118,10 +110,7 @@ func TestProxyConfig(t *testing.T) {
 	if bcrypt.CompareHashAndPassword([]byte(cfg.RemoteManagement.SecretKey), []byte("management-key")) != nil {
 		t.Fatal("management key does not authenticate")
 	}
-	if _, err := os.Stat(oldFile); err != nil || cfg.AuthDir == oldAuth {
-		t.Fatal("old credentials were touched or loaded")
-	}
-	info, err = os.Stat(filepath.Join(dir, "cliproxy", "auth-v2"))
+	info, err = os.Stat(filepath.Join(dir, "auth-v2"))
 	if err != nil || info.Mode().Perm() != 0700 {
 		t.Fatalf("auth mode: %v, %v", info, err)
 	}
@@ -150,7 +139,7 @@ func TestProxyPreservesNonSocket(t *testing.T) {
 	if err := os.WriteFile(path, []byte("keep"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if proxy, err := NewProxy(dir, "key"); err == nil {
+	if proxy, err := NewProxy(proxyDir, filepath.Join(proxyDir, "auth-v2"), "key"); err == nil {
 		proxy.Listener.Close()
 		t.Fatal("accepted non-socket")
 	}
