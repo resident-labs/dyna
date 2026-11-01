@@ -215,7 +215,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 						itemsByCall[pageItems[i].CallID] = &pageItems[i]
 					}
 				}
-				err := s.store.TranscriptCallPosts(ctx, req.Session, t.ID, callIDs, func(callID string, event contract.Event, total int) {
+				err := s.store.TranscriptCallPosts(ctx, req.Session, t.ID, callIDs, maxTranscriptCallPosts+1, func(callID string, event contract.Event, total int) {
 					item := itemsByCall[callID]
 					added := false
 					if len(item.Posts) < maxTranscriptCallPosts && item.PostsNext == nil {
