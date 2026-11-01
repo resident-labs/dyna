@@ -218,7 +218,7 @@
   // A row's menu of actions. A right click or the Menu key opens it at the pointer, and the row's More button opens it
   // under the button. It closes with its session, and a button that opened it toggles it.
   let acting: { session: string; anchor: DOMRect; side: "start" | "end"; trigger: HTMLElement } | undefined = $state();
-  const canAct = (id: string, parent?: string) => attention.can("operate") && sessionActions(parent, !!store?.turns.has(id) && !store.stopping.has(id), store?.boxes.get(id)).length > 0;
+  const canAct = (id: string, parent?: string) => attention.can("operate") && sessionActions(parent, !!store?.running(id) && !store.stopping.has(id), store?.boxes.get(id)).length > 0;
   function act(event: MouseEvent & { currentTarget: HTMLElement }, id: string, parent: string | undefined, anchor: DOMRect, side: "start" | "end") {
     if (!canAct(id, parent)) return;
     event.preventDefault();
@@ -282,7 +282,7 @@
   // A DM's running turn, which the composer can stop.
   let stop = $derived.by(() => {
     const running = session, current = store;
-    if (!running || !current?.turns.has(running)) return undefined;
+    if (!running || !current?.running(running)) return undefined;
     return { stopping: current.stopping.has(running), failed: current.stopFailed.has(running), run: () => current.stop(running) };
   });
   function send() {
@@ -465,6 +465,11 @@
       case "failed": return broken ? boxReason(broken) : turnReason(cause);
       default: return reason ? waits[reason] : starting(id) ? "Starting" : store?.boxes.get(id) === "stopped" ? "Asleep" : "";
     }
+  };
+  // What the session works on, for its row in the list: the first open item of its first goal, or that goal.
+  const goalLine = (id: string) => {
+    const goal = store?.goals.get(id)?.at(-1);
+    return goal?.items?.find(item => item.state === "open")?.text ?? goal?.text ?? "";
   };
   // A DM's header says only the status word; the live line and About say what the session does. A failed session has
   // no live line, so the header gives its reason.
@@ -764,7 +769,7 @@
           onclick={openSession} oncontextmenu={event => act(event, item.session, item.parent, new DOMRect(event.clientX, event.clientY), "start")}
           onkeydown={event => { void walkTree(event); if (parent) fold(event, item.session); }}
           aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{34 + depth * 14 + (hidden ? String(hidden).length * 7 : 0)}px">
-          <SessionRow name={item.name} root={!item.parent} {state} {dot} line={status(item.session)} {mark} /></a>
+          <SessionRow name={item.name} root={!item.parent} {state} {dot} line={status(item.session) || goalLine(item.session)} {mark} /></a>
           {#if jobs(item.session)}<button type="button" class="watch" aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
             title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={async event => { if (!wide.current) await showPanel(false, event.detail > 0); void jobsTool?.show(item.session); }}><Icon name="terminal" /></button>{/if}
           {#if attention.can("computers") && store?.computers.has(item.session)}<button type="button" class="watch" class:open={watching === item.session} data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}

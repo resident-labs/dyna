@@ -14,6 +14,7 @@ var toolkits = map[string]Toolkit{
 	"computer": {Name: "computer", Title: "Computer", Destructive: true, OpenWorld: true},
 	"context":  {Name: "context", Title: "Context", Idempotent: true},
 	"device":   {Name: "device", Title: "Devices", Destructive: true},
+	"goal":     {Name: "goal", Title: "Goals"},
 	"host":     {Name: "host", Title: "Hosts", Destructive: true, OpenWorld: true},
 	"hostexec": {Name: "hostexec", Title: "Host commands", Destructive: true, OpenWorld: true},
 	"op":       {Name: "op", Title: "Operations", Destructive: true},

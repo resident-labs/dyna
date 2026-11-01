@@ -402,7 +402,7 @@ func TestSessionStartWithoutGoalOrBriefHasNoWake(t *testing.T) {
 }
 func TestRejectUnhandledDelivery(t *testing.T) {
 	s, room, session, ctx := setup(t)
-	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionClosed{Session: "other"})
+	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.RoomPaused{})
 	if err != nil {
 		t.Fatal(err)
 	}

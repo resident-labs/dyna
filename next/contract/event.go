@@ -125,12 +125,13 @@ type VisualCheck struct {
 }
 
 type SessionStarted struct {
-	Session SessionID   `json:"session"`
-	Name    string      `json:"name"`
-	Parent  SessionID   `json:"parent,omitempty"` // empty for root
-	Profile ProfileName `json:"profile"`
-	Goal    string      `json:"goal,omitempty"`
-	Brief   string      `json:"brief,omitempty"`
+	Session  SessionID   `json:"session"`
+	Name     string      `json:"name"`
+	Parent   SessionID   `json:"parent,omitempty"` // empty for root
+	Profile  ProfileName `json:"profile"`
+	Goal     string      `json:"goal,omitempty"`
+	DoneWhen string      `json:"doneWhen,omitempty"`
+	Brief    string      `json:"brief,omitempty"`
 }
 
 type SessionRestarted struct {
@@ -155,7 +156,7 @@ type SessionClosed struct {
 	Reason  SessionCloseReason `json:"reason,omitempty"`
 	Session SessionID          `json:"session"`
 	Archive string             `json:"archive,omitempty"` // refs/dyna/archive/<session>, if any
-	Unheld  []GoalID           `json:"unheld,omitempty"`  // M3: open goals left with no holder, because the parent is root (7.4)
+	Unheld  []GoalID           `json:"unheld,omitempty"`  // open goals left with no holder, because the parent is root (7.4)
 }
 
 type TurnStarted struct {

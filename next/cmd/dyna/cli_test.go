@@ -42,7 +42,27 @@ func (f *fakeClient) ContextSnapshot(context.Context, contract.ContextSnapshotRe
 	return contract.ContextSnapshotResponse{}, nil
 }
 
+func (f *fakeClient) GoalSet(_ context.Context, q contract.GoalSetRequest) (contract.GoalSetResponse, error) {
+	f.goalSet = q
+	return contract.GoalSetResponse{Goal: "g1"}, nil
+}
+func (f *fakeClient) GoalList(context.Context, contract.GoalListRequest) (contract.GoalListResponse, error) {
+	return contract.GoalListResponse{}, nil
+}
+func (f *fakeClient) GoalItem(context.Context, contract.GoalItemRequest) (contract.GoalItemResponse, error) {
+	return contract.GoalItemResponse{}, nil
+}
+func (f *fakeClient) GoalDone(_ context.Context, q contract.GoalDoneRequest) (contract.GoalDoneResponse, error) {
+	f.goalDone = q
+	return contract.GoalDoneResponse{}, nil
+}
+func (f *fakeClient) GoalJournal(context.Context, contract.GoalJournalRequest) (contract.GoalJournalResponse, error) {
+	return contract.GoalJournalResponse{}, nil
+}
+
 type fakeClient struct {
+	goalSet      contract.GoalSetRequest
+	goalDone     contract.GoalDoneRequest
 	host         contract.HostAddRequest
 	hostLimit    *contract.HostSetLimitsRequest
 	hostNoSwap   bool
@@ -257,6 +277,20 @@ func TestRoomRepos(t *testing.T) {
 		t.Fatalf("%+v: %q", f.repoList, out)
 	}
 }
+func TestGoalCommandsMapFlags(t *testing.T) {
+	f := &fakeClient{}
+	if out := runCLI(t, f, "goal", "set", "--room", "r", "--session", "s", "--text", "ship", "--done-when", "merged", "--client-id", "retry"); strings.TrimSpace(out) != "g1" {
+		t.Fatalf("output %q", out)
+	}
+	if want := (contract.GoalSetRequest{ClientID: "retry", Room: "r", Session: "s", Text: "ship", DoneWhen: "merged"}); f.goalSet != want {
+		t.Fatalf("request %+v", f.goalSet)
+	}
+	runCLI(t, f, "goal", "done", "g1", "moot", "--drop")
+	if want := (contract.GoalDoneRequest{Goal: "g1", Summary: "moot", Drop: true}); f.goalDone != want {
+		t.Fatalf("request %+v", f.goalDone)
+	}
+}
+
 func TestSessionStartMapsFlags(t *testing.T) {
 	f := &fakeClient{}
 	runCLI(t, f, "session", "start", "--room", "r", "--name", "n", "--profile", "p", "--goal", "g", "--brief", "b", "--repo", "owner/name", "--parent", "s", "--size", "large")

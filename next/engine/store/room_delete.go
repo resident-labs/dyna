@@ -148,7 +148,7 @@ func (s *Store) SetRoomDeleteReason(ctx context.Context, room contract.RoomID, r
 // the triggers that clear post_search and session_search. Archive rows that hold a ref stay until the sweep deletes the ref.
 var deleteRoom = []string{
 	`DELETE FROM hostexec_runs WHERE grant_id IN (SELECT id FROM grants WHERE room=?1) OR op IN (SELECT id FROM operations WHERE room=?1 OR (by_kind='session' AND by_id IN (SELECT id FROM sessions WHERE room=?1)))`,
-	`DELETE FROM client_replays WHERE ref IN (SELECT id FROM sessions WHERE room=?1) OR ref IN (SELECT id FROM operations WHERE room=?1) OR ref IN (SELECT id FROM questions WHERE room=?1) OR (caller_kind='session' AND caller_id IN (SELECT id FROM sessions WHERE room=?1))`,
+	`DELETE FROM client_replays WHERE ref IN (SELECT id FROM sessions WHERE room=?1) OR ref IN (SELECT id FROM operations WHERE room=?1) OR ref IN (SELECT id FROM questions WHERE room=?1) OR (caller_kind='session' AND caller_id IN (SELECT id FROM sessions WHERE room=?1)) OR (method='goal.set' AND ref LIKE ?1||'/%')`,
 	`DELETE FROM operations WHERE room=?1 OR (by_kind='session' AND by_id IN (SELECT id FROM sessions WHERE room=?1))`,
 	`DELETE FROM grants WHERE room=?1`,
 	`DELETE FROM questions WHERE room=?1`,
@@ -162,6 +162,10 @@ var deleteRoom = []string{
 	`DELETE FROM session_accounts WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM shell_jobs WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM pr_owners WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
+	`DELETE FROM goal_journal WHERE room=?1`,
+	`DELETE FROM goal_items WHERE room=?1`,
+	`DELETE FROM goals WHERE room=?1`,
+	`DELETE FROM checkins WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM boxes WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM archives WHERE ref='' AND session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM sessions WHERE room=?1`,
