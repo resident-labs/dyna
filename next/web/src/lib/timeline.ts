@@ -1,6 +1,10 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
-import type { TranscriptInput, TranscriptItem } from "./contract.gen.ts";
+import type { TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
 import { decodeEvent } from "./event.ts";
+
+export function pendingStartBrief(brief: string | undefined, turns: TranscriptTurn[]): string | undefined {
+  return brief && !turns.some(turn => turn.inputs?.some(input => input.type === "session.started")) ? brief : undefined;
+}
 
 // Transcript inputs carry non-post event bodies as JSON. Decode the complete body once here.
 export function timelineInputText(input: TranscriptInput, full?: string): string {

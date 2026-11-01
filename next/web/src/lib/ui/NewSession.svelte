@@ -7,7 +7,7 @@
 
   let { room, roomName, sessions, onclose, onstarted }: {
     room: string; roomName: string; sessions: SessionStarted[];
-    onclose: () => void; onstarted: (session: string) => void;
+    onclose: () => void; onstarted: (session: string, brief: string) => void;
   } = $props();
 
   const clientId = crypto.randomUUID();
@@ -38,7 +38,7 @@
       clientId, room, name: name.trim(), parent: parent || undefined,
       repo: repos.length >= 2 ? repo : undefined, profile,
       brief: brief.trim() || undefined, goal: goal.trim() || undefined,
-    }).then(result => onstarted(result.session), (error: unknown) => {
+    }).then(result => onstarted(result.session, brief.trim()), (error: unknown) => {
       failure = error instanceof Error ? error.message : "The session could not start. Try again.";
       busy = false;
     });
