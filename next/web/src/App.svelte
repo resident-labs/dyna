@@ -546,8 +546,9 @@
     if (open && current?.ready) untrack(() => { if (current.unseen(open)) current.see({ kind: "dm", session: open }, current.failed.get(open) ?? 0); });
   });
   // The tab names the page only. Counts stay out: a count in the title would act as an unread badge (spec 5.13).
-  // Settings names its own open pane, so this effect leaves Settings alone.
-  $effect(() => { if (!inSettings) document.title = `${title} · Dyna`; });
+  // An open Instructions or Requests section names the tab too. Settings names its own open pane, so this effect leaves Settings alone.
+  let tabTitle = $derived(section === "instructions" ? `${title} · Instructions` : section === "requests" ? `${title} · Requests` : title);
+  $effect(() => { if (!inSettings) document.title = `${tabTitle} · Dyna`; });
 </script>
 
 
