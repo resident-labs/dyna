@@ -433,7 +433,25 @@ func TestTransferEndToEnd(t *testing.T) {
 		}
 	})
 
-	// The target's trigger reaches Pi. The old process argument said 20,000; the new profile says nothing.
+	// --model takes an ID the catalog does not know, so the first turn's transfer must too.
+	t.Run("a custom model ID", func(t *testing.T) {
+		provider := &fakeProvider{}
+		box := newPiBox(t, provider)
+		h := box.start("custom-model", 0)
+		if path, reason := box.transfer(h, "custom-model", 0); path != "unchanged" {
+			t.Fatalf("path %q reason %q", path, reason)
+		}
+		box.turn(h, 1, "hello")
+		if path, reason := box.transfer(h, "other-custom-model", 0); path != "switched" {
+			t.Fatalf("path %q reason %q", path, reason)
+		}
+		box.turn(h, 2, "next")
+		requests := provider.since(0)
+		if last := requests[len(requests)-1]; last.Model != "other-custom-model" {
+			t.Fatalf("model %q", last.Model)
+		}
+	})
+
 	t.Run("trigger follows the transfer", func(t *testing.T) {
 		provider := &fakeProvider{}
 		box := newPiBox(t, provider)
