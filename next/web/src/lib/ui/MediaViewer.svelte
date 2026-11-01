@@ -115,7 +115,7 @@
       {#if menu}<div class="menu">{#if original}<a href={original} target="_blank" rel="noopener">Open original</a>{/if}<button onclick={() => { onjump(item.key); dialog.close(); }}>Jump to post</button></div>{/if}
     </div>
   </header>
-  <div class="stage" bind:this={stage} use:wheel onpointerdown={down} onpointermove={drag} onpointerup={up} onpointercancel={up} onclick={e => { if (background && e.target === stage && moved < 8) dialog.close(); }} role="presentation">
+  <div class="stage" class:media-gesture={!item.file.visual} bind:this={stage} use:wheel onpointerdown={down} onpointermove={drag} onpointerup={up} onpointercancel={up} onclick={e => { if (background && e.target === stage && moved < 8) dialog.close(); }} role="presentation">
     {#if item.file.visual}
       <div class="visual-stage">{#if visualFailed}<div class="visual-error">The card did not load. <button onclick={() => visualAttempt++}>Retry</button></div>
       {:else if versions.length}{#key item.key + ":" + item.file.visual.version}<VisualCardMedia {versions} selected={item.file.visual.version} room={item.room ?? room} send={async (text, event) => { await call("post", { room: item.room ?? room, text, visualReply: event }); }} />{/key}{/if}</div>
@@ -149,7 +149,8 @@
   .zoom { display: flex; align-items: center; background: var(--screen-chip); border: 1px solid var(--screen-line); border-radius: 20px; }
   .zoom button { min-width: 36px; height: 36px; }
   button:disabled { opacity: .45; }
-  .stage { position: absolute; inset: 56px 4vw 72px; display: grid; place-items: center; overflow: hidden; touch-action: none; user-select: none; }
+  .stage { position: absolute; inset: 56px 4vw 72px; display: grid; place-items: center; overflow: hidden; }
+  .stage.media-gesture { touch-action: none; user-select: none; }
   img, video { display: block; max-width: 92vw; max-height: calc(100dvh - 128px); object-fit: contain; }
   img { max-width: none; max-height: none; transform-origin: center; }
   .visual-stage { width: 100%; height: 100%; overflow: hidden; }
