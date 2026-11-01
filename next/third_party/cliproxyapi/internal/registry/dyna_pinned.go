@@ -3,9 +3,9 @@ package registry
 import "encoding/json"
 
 // DynaPinnedPlanModels returns only the immutable catalog embedded in this build.
-// The Codex list is shared by all plan tiers, so one activation works for each.
+// Codex contains the union of tiers; CodexCommon contains their intersection.
 type DynaPinnedPlanModels struct {
-	Claude, Codex, Kimi, XAI []string
+	Claude, Codex, CodexCommon, Kimi, XAI []string
 }
 
 func DynaPinnedModels() (DynaPinnedPlanModels, error) {
@@ -28,11 +28,20 @@ func DynaPinnedModels() (DynaPinnedPlanModels, error) {
 		}
 		sets = append(sets, set)
 	}
-	var codex []string
-	for _, id := range ids(catalog.CodexPro) {
-		if sets[0][id] && sets[1][id] && sets[2][id] {
-			codex = append(codex, id)
+	var codex, common []string
+	seen := make(map[string]bool)
+	for _, tier := range [][]*ModelInfo{catalog.CodexFree, catalog.CodexTeam, catalog.CodexPlus, catalog.CodexPro} {
+		for _, id := range ids(tier) {
+			if !seen[id] {
+				codex = append(codex, id)
+				seen[id] = true
+			}
 		}
 	}
-	return DynaPinnedPlanModels{Claude: ids(catalog.Claude), Codex: codex, Kimi: ids(catalog.Kimi), XAI: ids(catalog.XAI)}, nil
+	for _, id := range codex {
+		if sets[0][id] && sets[1][id] && sets[2][id] && sets[3][id] {
+			common = append(common, id)
+		}
+	}
+	return DynaPinnedPlanModels{Claude: ids(catalog.Claude), Codex: codex, CodexCommon: common, Kimi: ids(catalog.Kimi), XAI: ids(catalog.XAI)}, nil
 }
