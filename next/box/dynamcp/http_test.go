@@ -225,3 +225,36 @@ func TestPostPreparesAttachmentsAndVisual(t *testing.T) {
 		t.Fatalf("uploads: %+v", uploads)
 	}
 }
+
+func TestGoalToolRoutesAndDecodesStrictly(t *testing.T) {
+	var forwarded contract.Method
+	server, err := New(func(_ context.Context, method contract.Method, data []byte) ([]byte, *contract.Error) {
+		forwarded = method
+		return nil, &contract.Error{Code: contract.ErrInvalid, Message: string(data)}
+	}, nil, post.Preparer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := func(arguments string) string {
+		req := httptest.NewRequest(http.MethodPost, "/dyna/", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"goal","arguments":`+arguments+`}}`))
+		w := httptest.NewRecorder()
+		server.ServeHTTP(w, req)
+		return w.Body.String()
+	}
+	out := call(`{"action":"set","clientId":"retry","session":"ses_a","text":"ship","doneWhen":"merged"}`)
+	if forwarded != contract.MethodGoalSet {
+		t.Fatalf("method %q: %s", forwarded, out)
+	}
+	for _, want := range []string{"retry", "ses_a", "ship", "merged"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in %s", want, out)
+		}
+	}
+	forwarded = ""
+	if out := call(`{"action":"journal","goal":"g1","mood":"fine"}`); forwarded != "" || !strings.Contains(out, "mood") {
+		t.Fatalf("forwarded %q: %s", forwarded, out)
+	}
+	if out := call(`{"action":"archive"}`); !strings.Contains(out, "journal") || !strings.Contains(out, "unknown_action") {
+		t.Fatalf("unknown action: %s", out)
+	}
+}

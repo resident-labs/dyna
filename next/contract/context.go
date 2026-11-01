@@ -5,6 +5,7 @@ const MethodContextSnapshot Method = "context.snapshot"
 type ContextSectionKey string
 
 const (
+	ContextGoal     ContextSectionKey = "dyna_goal"
 	ContextChildren ContextSectionKey = "dyna_children"
 	ContextRequests ContextSectionKey = "dyna_requests"
 	ContextPRs      ContextSectionKey = "dyna_prs"

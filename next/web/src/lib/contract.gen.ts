@@ -41,7 +41,7 @@ export type InstructionsGetRequest = { room?: RoomID; };
 export type InstructionsGetResponse = { text: string; hash: string; savedAt?: string | null; };
 export type InstructionsSetRequest = { room?: RoomID; text: string; base: string; };
 export type InstructionsSetResponse = { hash: string; };
-export type Method = "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "hostexec.list" | "hostexec.run" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "question.ask" | "question.answer" | "question.list";
+export type Method = "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "question.ask" | "question.answer" | "question.list";
 export type ErrorCode = "podman_required" | "invalid" | "unknown_action" | "not_found" | "forbidden" | "conflict" | "room_limited" | "profile_exists" | "move_busy" | "has_children" | "parent_closing" | "session_closing" | "stale" | "visual_superseded" | "unavailable" | "reconnect_unavailable" | "models_unavailable" | "store_from_v1" | "store_too_old" | "no_grant";
 export type Error = { code: ErrorCode; message: string; visual?: VisualSuperseded | null; limited?: RoomLimited | null; };
 export type VisualSuperseded = { event: EventID; version: number; seq: number; };
@@ -96,7 +96,7 @@ export type RepoCIHost = { repo: RepoName; host: HostName; runners: number; size
 export type RepoCISetRequest = { repo: RepoName; mode: CIMode; hosts?: Array<RepoCIHost> | null; };
 export type RepoCISetResponse = { };
 export type RoomReposResponse = { repos: Array<RoomRepo> | null; };
-export type SessionStartRequest = { clientId?: string; room: RoomID; name: string; parent?: SessionID; repo?: RepoName; profile: ProfileName; goal?: string; brief?: string; size?: BoxSizeName; sameHost?: boolean; compose?: string; };
+export type SessionStartRequest = { clientId?: string; room: RoomID; name: string; parent?: SessionID; repo?: RepoName; profile: ProfileName; goal?: string; doneWhen?: string; brief?: string; size?: BoxSizeName; sameHost?: boolean; compose?: string; };
 export type SessionStartResponse = { session: SessionID; box: BoxID; };
 export type ComposeLevel = "global" | "room" | "repo";
 export type ComposeListRequest = { room: RoomID; repo?: RepoName; };
@@ -244,7 +244,7 @@ export type ConnectUnlinkResponse = { };
 export type ConnectConnector = { missing: boolean; };
 export type ConnectAttemptState = "idle" | "starting" | "pending" | "linked" | "unlinking" | "canceled" | "failed";
 export type ConnectAttempt = { state: ConnectAttemptState; expires: number; };
-export type ContextSectionKey = "dyna_children" | "dyna_requests" | "dyna_prs" | "dyna_profiles" | "dyna_usage";
+export type ContextSectionKey = "dyna_goal" | "dyna_children" | "dyna_requests" | "dyna_prs" | "dyna_profiles" | "dyna_usage";
 export type ContextSnapshotRequest = { section?: ContextSectionKey; };
 export type ContextSnapshotResponse = { sections: Array<ContextSection> | null; };
 export type ContextSection = { key: ContextSectionKey; text: string; };
@@ -281,7 +281,7 @@ export type VisualShot = { width: number; file: string; };
 export type VisualCheckName = "renders" | "console" | "widths" | "contrast" | "network";
 export type VisualCheckStatus = "pass" | "warn" | "fail" | "skip";
 export type VisualCheck = { name: VisualCheckName; status: VisualCheckStatus; detail?: string; };
-export type SessionStarted = { session: SessionID; name: string; parent?: SessionID; profile: ProfileName; goal?: string; brief?: string; };
+export type SessionStarted = { session: SessionID; name: string; parent?: SessionID; profile: ProfileName; goal?: string; doneWhen?: string; brief?: string; };
 export type SessionRestarted = { session: SessionID; imageUpdated?: boolean; };
 export type SessionMoved = { session: SessionID; newParent: SessionID; };
 export type SessionCloseReason = "dormant" | "disk";
@@ -307,6 +307,29 @@ export type ImageFailed = { host: HostName; repo: RepoName; name: string; tag: s
 export type BoxState = "pending" | "creating" | "starting" | "ready" | "stopped" | "closing" | "deleted" | "failed" | "lost";
 export type BoxSizeName = "agent" | "small" | "medium" | "large";
 export type BoxSize = { name: BoxSizeName; cpus: number; memBytes: number; pids: number; };
+export type GoalState = "active" | "done" | "dropped";
+export type GoalItemState = "open" | "done" | "dropped";
+export type GoalItem = { number: number; text: string; state: GoalItemState; };
+export type Goal = { id: GoalID; room: RoomID; session?: SessionID; text: string; doneWhen?: string; state: GoalState; summary?: string; items: Array<GoalItem> | null; created: string; updated: string; };
+export type GoalSetRequest = { clientId?: string; room?: RoomID; goal?: GoalID; session?: SessionID; text?: string; doneWhen?: string; };
+export type GoalSetResponse = { goal: GoalID; };
+export type GoalListRequest = { room?: RoomID; session?: SessionID; all?: boolean; };
+export type GoalListResponse = { goals: Array<Goal> | null; };
+export type GoalItemRequest = { room?: RoomID; goal: GoalID; item?: number; text?: string; state?: GoalItemState; };
+export type GoalItemResponse = { item: number; };
+export type GoalDoneRequest = { room?: RoomID; goal: GoalID; summary: string; drop?: boolean; };
+export type GoalDoneResponse = { };
+export type GoalJournalRequest = { room?: RoomID; goal: GoalID; text?: string; };
+export type GoalJournalEntry = { at: string; by: Principal; text: string; };
+export type GoalJournalResponse = { entries: Array<GoalJournalEntry> | null; };
+export type GoalSet = { goal: GoalID; session?: SessionID; text: string; doneWhen?: string; };
+export type GoalItemChanged = { goal: GoalID; item: number; text: string; state: GoalItemState; };
+export type GoalEnded = { goal: GoalID; session?: SessionID; state: GoalState; summary: string; };
+export type CheckinState = "idle" | "stopped" | "blocked";
+export type CheckinChild = { session: SessionID; name: string; parent?: string; state: CheckinState; reason?: string; idle: DurationMS; silent?: boolean; goal: GoalID; text: string; open: number; };
+export type CheckinDue = { session: SessionID; children: Array<CheckinChild> | null; };
+export type SessionFailure = { session: SessionID; name: string; parent?: string; box?: BoxState; cause?: FailureCause; reason?: string; };
+export type SessionFailed = { to: SessionID; failures: Array<SessionFailure> | null; };
 export type GrantKind = "hostexec" | "ask-owner";
 export type Grant = { id: GrantID; kind: GrantKind; to: Principal; room: RoomID; hosts?: Array<HostName> | null; reason?: string; expires?: string; by: Principal; created: string; revoked?: string; };
 export type HostexecGrantArgs = { room: RoomID; to: Principal; hosts: Array<HostName> | null; reason: string; };
@@ -392,9 +415,13 @@ export type EventBody =
   | { type: "account.quota_low"; body: AccountQuotaLow }
   | { type: "box.changed"; body: BoxChanged }
   | { type: "box.pressure"; body: BoxPressure }
+  | { type: "checkin.due"; body: CheckinDue }
   | { type: "computer.changed"; body: ComputerChanged }
   | { type: "connect.connector"; body: ConnectConnector }
   | { type: "conversation.read"; body: ConversationRead }
+  | { type: "goal.ended"; body: GoalEnded }
+  | { type: "goal.item_changed"; body: GoalItemChanged }
+  | { type: "goal.set"; body: GoalSet }
   | { type: "grant.expired"; body: GrantExpired }
   | { type: "host.disk_low"; body: HostDiskLow }
   | { type: "image.built"; body: ImageBuilt }
@@ -413,6 +440,7 @@ export type EventBody =
   | { type: "room.paused"; body: RoomPaused }
   | { type: "room.resumed"; body: RoomResumed }
   | { type: "session.closed"; body: SessionClosed }
+  | { type: "session.failed"; body: SessionFailed }
   | { type: "session.moved"; body: SessionMoved }
   | { type: "session.profile_changed"; body: SessionProfileChanged }
   | { type: "session.restarted"; body: SessionRestarted }
@@ -505,6 +533,11 @@ export interface MethodMap {
   "device.scopes": { request: DeviceScopesRequest; response: DeviceScopesResponse };
   "device.revoke": { request: DeviceRevokeRequest; response: DeviceRevokeResponse };
   "device.set_scopes": { request: DeviceSetScopesRequest; response: DeviceSetScopesResponse };
+  "goal.set": { request: GoalSetRequest; response: GoalSetResponse };
+  "goal.list": { request: GoalListRequest; response: GoalListResponse };
+  "goal.item": { request: GoalItemRequest; response: GoalItemResponse };
+  "goal.done": { request: GoalDoneRequest; response: GoalDoneResponse };
+  "goal.journal": { request: GoalJournalRequest; response: GoalJournalResponse };
   "hostexec.list": { request: HostexecListRequest; response: HostexecListResponse };
   "hostexec.run": { request: HostexecRunRequest; response: HostexecRunResponse };
   "op.submit": { request: OpSubmitRequest; response: OpSubmitResponse };
