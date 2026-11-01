@@ -44,6 +44,8 @@ export class RoomStore {
   readonly shellJobs = new SvelteMap<string, number>();
   // Jobs that failed, as "session/job", so the dock can mark one while its Jobs tab is closed.
   readonly failedJobs = new SvelteSet<string>();
+  // The session and end seq of each failed job, so a read past the end clears its mark.
+  private readonly failedEnds = new Map<string, { session: string; seq: number }>();
   // "session/job" keys that About subtracts from its running count, because the engine's list can lag.
   readonly endedJobs = new SvelteSet<string>();
   // Sessions with a job to reach: their box keeps a finished job's output.
@@ -60,6 +62,8 @@ export class RoomStore {
   private loaded = false;
   private failure: unknown;
   private stopStream = () => {};
+  // Settles when the latest reread of read positions ends. Tests await it.
+  rereading: Promise<void> = Promise.resolve();
   private closed = false;
   private changed = () => {};
   private subscribe = createSubscriber(update => { this.changed = update; });
@@ -78,7 +82,22 @@ export class RoomStore {
   }
   // Keeps a read position: room.list gives the feed's, session.list each DM's, and conversation.read events move them.
   noteRead(conversation: Conversation, seq: number): void {
-    if (seq > (this.read.get(readKey(conversation)) ?? 0)) this.read.set(readKey(conversation), seq);
+    if (seq <= (this.read.get(readKey(conversation)) ?? 0)) return;
+    this.read.set(readKey(conversation), seq);
+    this.clearReadJobs();
+  }
+  // A failed job counts until the owner reads past its end, in the feed or in its session's DM.
+  private failJob(session: string, job: string, seq: number): void {
+    if (seq <= Math.max(this.readAt({ kind: "feed" }), this.readAt({ kind: "dm", session }))) return;
+    this.failedEnds.set(`${session}/${job}`, { session, seq });
+    this.failedJobs.add(`${session}/${job}`);
+  }
+  private clearReadJobs(): void {
+    for (const [key, { session, seq }] of this.failedEnds) {
+      if (seq > Math.max(this.readAt({ kind: "feed" }), this.readAt({ kind: "dm", session }))) continue;
+      this.failedEnds.delete(key);
+      this.failedJobs.delete(key);
+    }
   }
   // The newest event the owner has read in a conversation, or 0.
   readAt(conversation: Conversation): number { return this.read.get(readKey(conversation)) ?? 0; }
@@ -105,7 +124,11 @@ export class RoomStore {
   // Each session's one status (status.ts): a request it made or its box waits for the owner, its failure is unseen or
   // its box failed, or a turn runs. The header, the panel and the counts read only these.
   status(id: string): Status { return this.statusWith(id, this.asking()); }
-  get counts(): Counts { const asking = this.asking(); return countOf([...this.sessions.keys()].map(id => this.statusWith(id, asking))); }
+  statuses(): Map<string, Status> {
+    const asking = this.asking();
+    return new Map([...this.sessions.keys()].map(id => [id, this.statusWith(id, asking)]));
+  }
+  get counts(): Counts { return countOf(this.statuses().values()); }
   private statusWith(id: string, asking: Set<string>): Status {
     const box = this.boxes.get(id);
     // A box that no host takes for its room waits until the owner changes a host, so it waits for the owner too.
@@ -125,15 +148,34 @@ export class RoomStore {
     if (this.closed || !this.loaded) return;
     // A failed job counts until the owner reads past its end, as a failed turn does. The first page does not wait for this read.
     if (this.hadJobs.size) void failedJobs(this.room, this.head + 1).then(ends => {
-      for (const { session, job, seq } of ends) if (seq > Math.max(this.readAt({ kind: "feed" }), this.readAt({ kind: "dm", session }))) this.failedJobs.add(`${session}/${job}`);
+      for (const { session, job, seq } of ends) this.failJob(session, job, seq);
     });
-    this.stopStream = this.connect(this.room, () => this.head, event => this.apply(event));
+    this.stopStream = this.connect(this.room, () => this.head, event => this.apply(event), undefined, undefined, () => {
+      // A conversation.read is not replayed. A read made after load() or during a dropped stream is missed, so each hello rereads.
+      this.rereading = this.rereadPositions().catch(() => {});
+    });
+  }
+
+  // room.list gives the feed's read position.
+  private async readFeed(): Promise<void> {
+    const rooms = await call("room.list", {});
+    const own = (rooms.rooms ?? []).find(summary => summary.id === this.room);
+    if (own) this.noteRead({ kind: "feed" }, own.lastRead);
+  }
+
+  // Rereads every read position: room.list for the feed, session.list for each DM.
+  async rereadPositions(): Promise<void> {
+    await this.readFeed();
+    const list = await call("session.list", { room: this.room });
+    for (const session of list.sessions ?? []) this.noteRead({ kind: "dm", session: session.id }, session.lastRead);
   }
 
   private async load(): Promise<void> {
     const list = await call("session.list", { room: this.room });
     // op.list reads after the seq, so an operation it misses arrives as a live event.
     const listed = await call("op.list", { room: this.room });
+    // The feed position must be known before failed jobs are classified against it.
+    await this.readFeed();
     this.head = list.seq;
     for (const session of list.sessions ?? []) {
       this.sessions.set(session.id, {
@@ -261,7 +303,7 @@ export class RoomStore {
         if (!this.turns.has(event.body.session)) this.shellJobs.set(event.body.session, Math.max(0, (this.shellJobs.get(event.body.session) ?? 0) - 1));
         this.endedJobs.add(`${event.body.session}/${event.body.job}`);
         this.hadJobs.add(event.body.session);
-        if (failed(event.body)) this.failedJobs.add(`${event.body.session}/${event.body.job}`);
+        if (failed(event.body)) this.failJob(event.body.session, event.body.job, event.seq);
         break;
       case "op.requested": this.requests.set(event.body.id, { ...event.body, state: "pending" }); break;
       case "op.decided": case "op.ran": {

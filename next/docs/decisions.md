@@ -2,6 +2,10 @@
 
 This is the unabridged spec before the split, from `738c66c6ac620d7e8aca4d78f8498ff4276d0de6` (2026-10-31). It preserves the original section numbers, sources, dates, rationale, risks and milestone evidence. The current design and settled decisions are in [spec.md](spec.md); this history is not current authority.
 
+## Connect size cap (2026-10-31)
+
+Root approved a one-time increase of the Connect cap to 2,565 Go product lines. On-demand discovery and retaining the last good route avoid 421 errors until a restart. This is the final increase. Later Connect growth must be offset in `next/engine/connect`. Do not cut authentication or session code to meet the count.
+
 # Dyna v2 specification
 
 Status: draft for owner approval. Lead: dyna:lead-rewrite. Co-authors: dyna:node-shell (sections 5 and 6) and dyna:code-architectural (sections 7, 8 and 9).
@@ -17,16 +21,17 @@ The owner settled the design on the card. Writing the spec needed the decisions 
 1. **Room events move into SQLite.** Posts and system events become rows in one `events` table, because delivery, wake rules, the web app and `dyna room log` all query them. Rule r1 keeps room messages as JSONL files today; v2 changes that for events only. Transcripts and large outputs stay files (section 4).
 2. **Every box is its own budget** (owner, q59, 2026-10-31). Every box has a top-level slice with its own size, and that size stays its hard limit. Admission counts a request well below the size for every running box, so a host can hold more boxes than their limits add up to. The owner accepted slowdown under pressure, not kills of healthy boxes. A build can still die with exit 137 when a host's RAM and swap are both full; the box and session stay. That risk is settled (5.5). The session tree holds authority, close order and event routing, and no resources, so a subtree can use every host. The engine enforces the room limit by accounting (section 5.5).
 3. **CLIProxyAPI holds every model credential.** It holds the Claude, ChatGPT, Kimi and xAI sign-ins and refreshes them, and it holds the zai, opencode-go and deepseek keys as OpenAI-compatible upstreams (M0c). The engine's own code never reads a model credential and never refreshes a model token; it adds only the proxy's client key. From M3, the proxy keeps its tokens in its own table in `store.db` (5.7). Pi holds none either. Muse is not a v2 model account: its subscription key works only in Meta's own client (M0c). M1 and M2 checks use a copied access token with no refresh token, as M0 did. From M3 on, the owner signs in on the Accounts page (5.12), which drives CLIProxyAPI's own sign-in flows. Each login has its own tokens, so v1's sign-ins keep working. The engine reads quota without any model credential, only through CLIProxyAPI (5.12).
+   - Owner, 2026-10-31: "migrate the other three manually" (Kimi Code, xAI and Muse); retain the Muse key for v2 web search.
 4. **Pi is the only harness.** The owner decided this on 2026-10-30; it replaces the card's "Claude Code and Pi". Claude models go through Pi's `anthropic` provider to the owner's Claude sign-ins in CLIProxyAPI, which presents the requests as Claude Code ("cloaking", M0c). ChatGPT goes through an `openai-responses` provider, because the native Pi `openai-codex` provider did not work through the proxy (M0b). In M0c, Pi with `claude-opus-5-5` passed tool turns, caching, compaction, steer, follow-up and abort. Pi sent effort `high` for every thinking level, so our Pi fork fixes the effort mapping in M1. Section 9.1 lists what we lose from Claude Code.
    - **Accepted risk.** Anthropic's terms allow Claude Free, Pro and Max sign-ins only in Claude Code and Claude.ai, and Anthropic blocks clients that pose as Claude Code. Pi's traffic can therefore get an account flagged, or be billed as extra usage instead of plan limits. The owner accepts this. The self-hosting trial uses one Claude account only, to limit the damage.
 5. **A dormant session stops its box.** The container stops, and its volume stays. Its request no longer counts on the host. A wake starts it again (section 5.3).
-6. **Only the owner grants host exec.** Root's default grant covers every host, including the control-plane host, with no approval step, as the owner decided. The engine refuses owner-only calls from host-exec processes (section 6).
+6. **Only the owner grants host exec.** Root's default grant covers every host, including the control-plane host, with no approval step, as the owner decided. A control-plane grant gives full owner power, including owner-only calls (owner, 2026-10-31, msg_462f3f1d210856c2; section 6).
 7. **Root is a position in the tree.** Any session above another may start, move or close it. Root is above every session, so it can do all of that with no root check. Its only extra powers are two grants (ask the owner, host exec) and one subscription (engine notices).
 8. **Self-hosting comes before the cutover.** v2 first runs its own development in a trial room beside v1. Until the cutover, v2 uses its own data, runtime and SSH control folders (`dyna-next`), so its store, owner socket, box sockets and SSH masters never meet v1's. The trial starts in M2, as soon as one box can build and test dyna (root, 2026-10-30). From then on, v2 sessions do part of the M2 and M3 work, and v1 stays the fallback until the cutover. The cutover follows only after the trial works and a dry-run import passes (section 11).
-9. **Some v1 features wait until after the cutover.** Voice and web search through Dyna come back after the cutover. The library (the feature map, the librarian and its page) is cut from v2 for now (owner, 2026-10-30); the frozen v1 backup keeps the map. Computers come back early, in M2, in a minimal form (5.14), so that agents can check web views from inside v2 (owner, 2026-10-30). Workflows are ported in M3, before the cutover, because fl-rea depends on them (owner, 2026-10-30; 9.2). The desktop window is ported in M3, so the owner keeps it. Section 9 lists every feature. There is no rollback, so the owner should check that list.
+9. **Some v1 features wait until after the cutover.** Voice comes back after the cutover. The owner requested Dyna web search in v2 now on 2026-10-31, replacing its earlier deferral. The library (the feature map, the librarian and its page) is cut from v2 for now (owner, 2026-10-30); the frozen v1 backup keeps the map. Computers come back early, in M2, in a minimal form (5.14), so that agents can check web views from inside v2 (owner, 2026-10-30). Workflows are ported in M3, before the cutover, because fl-rea depends on them (owner, 2026-10-30; 9.2). The desktop window is ported in M3, so the owner keeps it. Section 9 lists every feature. There is no rollback, so the owner should check that list.
 10. **Node jobs are not ported.** CI runs on GitHub Actions, with self-hosted runners in boxes (decision 13). Host-specific work uses host exec or a room restricted to a suitable host. Admission does not yet select hosts by device needs (5.2).
 11. **CLIProxyAPI is vendored and runs in a child process.** We keep a fork in `next/third_party/cliproxyapi`, as v1 keeps Pi, so that we can extend it. `dyna engine` supervises a child of the same binary over a Unix socket, so a proxy panic cannot stop the engine (5.7). It lands in M1, because the model route needs it.
-12. **Size budget and scope cuts (r22).** Each milestone report counts product lines per package against the plan's budget. On 2026-10-30 the owner kept subtree moves, `Run` subscriptions and terminal questions, and cut these until a need shows: box growth (`box.grow`; only the `box.pressure` report ships, 5.4, owner q40), a box starting again on another host after a host failure (a lost box waits for its host, 5.10), box checkpoints, the relocation commands (a manual procedure instead, 5.10), the bundle data of issue watches and room MCP servers, one cgroup per shell job (process groups instead, 5.8), `node_modules` reflink seeding, and external members (7.3). M1 also moves the Dyna shell server and the transcript stream to M2 (5.8).
+12. **Size budget and scope cuts (r22).** Each milestone report counts product lines per package against the plan's budget. On 2026-10-30 the owner kept subtree moves, `Run` subscriptions and `show_pty` requests, and cut these until a need shows: box growth (`box.grow`; only the `box.pressure` report ships, 5.4, owner q40), a box starting again on another host after a host failure (a lost box waits for its host, 5.10), box checkpoints, the relocation commands (a manual procedure instead, 5.10), the bundle data of issue watches and room MCP servers, one cgroup per shell job (process groups instead, 5.8), `node_modules` reflink seeding, and external members (7.3). M1 also moves the Dyna shell server and the transcript stream to M2 (5.8).
 13. **GitHub is the source of truth for PRs, merges and CI.** The owner chose this on 2026-10-30 (option B of the forge note), in place of porting v1's 42,510 lines. Dyna is stateless here: it stores only which session owns which PR and whether that PR is approved (`pr_owners`), and it reads PRs and checks from GitHub when it needs them, within the request budget of 7.7: one batched GraphQL query per repository per poll, and ETags on REST reads. CI runs on GitHub Actions: self-hosted runners in boxes run the owner's and Dyna's PRs, each box gets only a single-job just-in-time runner token from the engine, and outside PRs use GitHub-hosted runners or wait for the owner. Comment trust, merge trials, the CI time budget, the conflict radar and the room PR views are dropped. Budget: about 2,500 Go lines for PRs, approval, merges and CI, plus about 450 product lines for `gh` through the engine (the spike's range is 430 to 660, and it replaces a loopback-HTTP sketch that `gh` refuses).
    - **Approval is one flag** (owner, 2026-10-30). Dyna has no reviewer service, no review records and no `dyna/review` check. The owner, an ancestor of the author (its lead, root), or another child of such an ancestor (for example a reviewer session that the lead chose to start) runs `dyna pr approve <n>`. The author and its own children cannot approve. The flag stores the approved head SHA, so a new head clears it. When the flag matches the current head and CI is green, Dyna merges with that head SHA, and GitHub refuses the merge if the head moved. A repository with a GitHub merge queue merges through it. Each room decides who approves its PRs.
    - **External text is wrapped.** Text written on GitHub by anyone other than the owner's account (which also carries the sessions' writes), such as outside comments, reviews and issue bodies, reaches an agent wrapped, with no hold and no stored state. The wrapper is one opening line, the content, and the same line again:
@@ -435,7 +440,7 @@ type GrantKind string
 
 const (
 	GrantHostExec GrantKind = "hostexec"  // run commands on hosts (section 6)
-	GrantAskOwner GrantKind = "ask-owner" // open owner questions and terminal requests
+	GrantAskOwner GrantKind = "ask-owner" // open owner questions and show_pty requests
 )
 
 type Grant struct {
@@ -938,7 +943,7 @@ Owner, 2026-10-30: v2 ports v1's workspace tools. The engine side has two parts,
   - the control-plane host: the owner's login shell, in its own `systemd-run --user --scope` unit, so that it does not count against the engine's limits.
 - When the socket closes, the engine hangs up the PTY and stops the command's process group. When the shell exits, the engine closes the socket. In M2 there is no reattach after a page reload. M3 may keep a closed tab's shell and its last output for a few minutes.
 - An open terminal keeps its box from going dormant. A terminal to a box that is not ready is refused with `conflict` before the upgrade.
-- The engine keeps no transcript of a terminal and emits no event. A shell on the control plane acts as the owner, as a local terminal does. It does not run in a host-exec scope, so the `hostexec_scope` refusal (6.4) does not apply to it.
+- The engine keeps no transcript of a terminal and emits no event. A shell on the control plane acts as the owner, as a local terminal does.
 
 **Web renderer.** The web app reuses v1's terminal renderer, libghostty-vt in WASM from T3 Code, vendored into `next/web` with its license and README (root, 2026-10-30). v1's transport (terminal IDs, base64 writes, byte offsets and a kept buffer) exists for reattach, which waits for M3. v1's terminal pane needs only send, resize, write and exit, so a small WebSocket adapter replaces that transport.
 
@@ -950,17 +955,16 @@ Drafted by dyna:node-shell. Host exec runs one command outside every box: on a c
 
 ### 6.1 Grants
 
-A host-exec grant names the hosts, the reason and the expiry. It permits any command on those hosts until expiry or revocation. There are no command rules or per-run approvals. If no active grant matches the host, the call fails with `no_grant`.
+A host-exec grant names the hosts and reason. It permits any command until the session closes (owner, 2026-10-31, msg_64eccb5e3dff2300). There are no command rules or per-run approvals. If no active grant matches the host, the call fails with `no_grant`.
 
 `hostexec.run` is class `auto`. Every run emits `op.ran` and records a `hostexec_runs` row. The `grants` table stores hosts as JSON.
 
-### 6.2 Default grant, owner grants, revoke and expiry
+### 6.2 Default grant, owner grants and session close
 
-- **Root's default grant** is made with the room: every host including the control plane, any command, no expiry (3.5). The owner can revoke it.
-- **Owner grants.** Only the owner grants host exec: `dyna hostexec grant` or the web card, as the operation `hostexec.grant` with class `owner`. A session requests the hosts, why it needs access, and for how long. The owner approves once. The default expiry is 24 hours. `--expires never` must be explicit.
-- **Revoke.** `dyna hostexec revoke <grant>`, by the owner. Pending runs fail their grant recheck. Running units are stopped with `systemctl --user stop`; `TimeoutStopSec=5` gives SIGTERM, then SIGKILL after 5 s. The engine retries stops on its 10 s tick to cover a launch racing revoke. A reachable unit receives the stop within 10 s, and systemd forces termination within another 5 s.
-- **Expiry** is checked at match time. A sweep marks expired grants and emits `grant.expired`. A running command is not stopped at expiry; only a revoke stops it.
-- The web app lists active grants with their expiry and a revoke button.
+- Root receives an all-hosts grant, including the control plane. Only the owner grants host exec.
+- A grant lasts until its session closes. It has no expiry or revoke control. A new non-root session needs a new grant; root receives its default grant as before (owner, 2026-10-31, msg_64eccb5e3dff2300).
+- Session close blocks new runs and stops running units. The engine retries stops to cover a launch racing close.
+- The web lists active grants.
 
 ### 6.3 Run path
 
@@ -973,16 +977,16 @@ A host-exec grant names the hosts, the reason and the expiry. It permits any com
 
 Every run emits `op.requested` (when it waits), `op.decided` (when someone decides), and `op.ran` with the exit code. No command runs without these events.
 
-Table: `hostexec_runs` (`op` PK, `grant`, `host`, `scope`, `started_at`, `timeout_ms`, `ended_at`, `output_bytes`, `stopped`), where `stopped` is empty, `timeout`, `revoked` or `lost`. A lost unit is stopped after its host reconnects. The exit code and output file stay on the operation.
+Table: `hostexec_runs` (`op` PK, `grant`, `host`, `scope`, `started_at`, `timeout_ms`, `ended_at`, `output_bytes`, `stopped`), where `stopped` is empty, `timeout`, `closed` or `lost`. A lost unit is stopped after its host reconnects. The exit code and output file stay on the operation.
 
 ### 6.4 Control-plane safety and accepted risks
 
-Host exec on the control plane runs as the owner's user. To stop such a command from acting as the owner through the engine, each control-plane run gets its own scope, `dyna-hostexec-<op>.scope`. The owner socket reads each caller's cgroup. If the path contains `dyna-hostexec-`, the engine refuses every call with `hostexec_scope` and does not map the caller to the grant holder.
+Host exec on the control plane runs as the owner and can use the owner socket. A control-plane grant gives full owner power (owner, 2026-10-31, msg_462f3f1d210856c2). Named scopes remain for timeouts, session close and lost-run cleanup. The planned `show_pty` tool (`dyna show-pty`) requests a live terminal for the owner to see.
 
 Accepted risks (owner, 2026-10-30):
 
 - Every grant gives full access to its hosts. On the control plane, that includes the CLIProxyAPI sign-ins and the owner's files. Root's default grant relies on root's judgment.
-- A command can leave its scope, for example with `systemd-run --user`, or with SSH to the engine host as the owner's user, which reaches the owner socket outside any scope (decision 14). The scope check stops mistakes, not a hostile command.
+- A control-plane host-exec process can act as the owner through the owner socket.
 - A capacity-host command runs as the host user. It can read or change every box on that host and the shared caches. It can also connect to any box's forwarded socket under `<hostdata>/sock/` and act as that box's session, with its model route and git push rights. A capacity host that also runs the engine holds the model sign-ins and may hold GitHub credentials. Only we have admin on hosts.
 - Output can contain host secrets. Only the room's sessions and the owner can see it.
 
@@ -1014,7 +1018,7 @@ The engine derives every caller's `Principal` from the connection (3.7). A calle
 | `session` | one session, root included | its box socket |
 | `engine` | the control plane | internal only; never accepted on a listener |
 
-- **Owner, local.** The owner socket is `$XDG_RUNTIME_DIR/dyna/owner.sock`, mode 0600, on the control plane. No box mounts it. A caller inside a host-exec scope is refused (6.4).
+- **Owner, local.** The owner socket is `$XDG_RUNTIME_DIR/dyna/owner.sock`, mode 0600, on the control plane. No box mounts it. Host-exec processes on the control plane can use it (6.4).
 - **Owner, remote.** A paired device sends its token through Connect or the web server. The engine resolves it to the owner plus a `DeviceID`. The device's scopes limit which operation kinds it may submit. Scopes filter the owner; they are not a second identity.
 - **Session.** The engine maps each box socket to its box and session when it starts the box. A restarted box gets a new socket, and the old one stops resolving.
 - **Engine.** Notices, CI results and merge results come `From` the engine. The engine never posts, files or closes issues as root.
@@ -1026,7 +1030,7 @@ Root is the session with no parent. Four things replace the 89 root checks in 12
 | What | Form |
 |---|---|
 | Start, move, stop or close sessions | The tree: any session above another may do this. Root is above every session. |
-| Ask the owner; run host commands | The grants `ask-owner` and `hostexec`, made with the room (3.5). The owner can revoke them. |
+| Ask the owner; run host commands | The grants `ask-owner` and `hostexec`, made with the room (3.5). Host-exec grants end when the session closes. |
 | Engine notices and unowned repository events | A default room subscription that wakes root (8.5). |
 | Hold no goals | One rule: the session with no parent holds no goals. Goals that a close would hand to root stay with no holder (7.4). |
 
@@ -1518,7 +1522,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | issue-watch, room-mcp | after; their data is not imported (owner, r22) | no self-hosting step needs them; the owner adds watches and MCP servers again when they are ported |
 | voice and its children | after, ported as it is: the Go voice service with its persona, relaying to the room's root, with no redesign (owner, 2026-10-30) | no self-hosting step needs voice |
 | workflows | M3, before the cutover (9.2) | fl-rea depends on them (owner, 2026-10-30) |
-| web-search | after | Pi has no built-in search, so agents have no web search until this port (9.1) |
+| web-search | v2 now | Direct MCP tool; the proxy holds model credentials and the engine holds search-only keys (owner, 2026-10-31) |
 | computers | M2, minimal (5.14): one browser per box, driven by the agent and watched by the owner | UI work inside v2 needs screenshots and the T3 Code side-by-side (5.13) |
 | computer-reminders | after | a convenience |
 | command-palette | M3 | owner uses it to find posts and commands |
@@ -1534,7 +1538,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | settings-harnesses | dropped | harness versions live in the image; sign-in moves to accounts |
 | claude-code | dropped | Pi is the only harness (section 0, decision 4) |
 
-**What the owner gives up from the cutover until each port:** placement by device needs, voice calls, web search through Dyna, issue watches, room MCP servers, and several settings panes. External members (7.3), the reviewer service (decision 13) and, for now, the library are dropped. Paired devices, the desktop window, issues, goals, PRs and standing instructions keep working.
+**What the owner gives up from the cutover until each port:** placement by device needs, voice calls, issue watches, room MCP servers, and several settings panes. External members (7.3), the reviewer service (decision 13) and, for now, the library are dropped. Paired devices, the desktop window, issues, goals, PRs and standing instructions keep working.
 
 **What the owner accepted giving up at the cutover (q57, 2026-10-31): readable room history.** `dyna room log` starts empty. Room feeds, files, finished goals and closed issues stay in `archive/` in the data folder (8.1), and they are never imported, but nothing reads them. The `dyna` room alone holds 65,088 posts and 1,965 attachments, and with the library cut, the feed is the main record of decisions. No `dyna room log --archive` is planned. `archive/` stays in the data folder and in the backups.
 
@@ -1544,7 +1548,7 @@ Pi is the only harness (section 0, decision 4). These Claude Code features have 
 
 1. **Anthropic's tuning.** Claude Code's system prompt, tool set and tool descriptions are made and tested by Anthropic for each Claude model. Pi's are general. The self-hosting trial compares the work quality on real tasks before the cutover.
 2. **Client-side request features.** When it cloaks, the proxy adds Claude Code's beta headers and context-management fields (M0c). Features that need client code work only when Pi implements them. Pi has tool search (deferred MCP exposure and `tool_search`). Upstream Pi also sends mid-conversation system and tool changes natively to some models and folds them into the head for others. Our fork replaces both with one user-turn context update on every model (owner, 2026-10-31; 7.9), so no request feature depends on those catalog flags. The trial checks the update through the proxy.
-3. **Built-in tools.** Claude Code's web search and web fetch, its todo list, plan mode and notebook editing are gone. Pi has no web search, so agents have none until the web-search port (section 9).
+3. **Built-in tools.** Claude Code's web search and web fetch, its todo list, plan mode and notebook editing are gone. Dyna provides a direct web search tool (section 9).
 4. **First access to new Claude features.** New tools, betas and effort levels reach Claude Code first. With Pi, we wait for upstream Pi or add them to our fork.
 5. **Terms.** Claude Code is the only client in which Anthropic allows subscription sign-ins. Decision 4 records the accepted risk.
 
@@ -1561,7 +1565,7 @@ The owner chose this design on 2026-10-30. Workflows are ported before the cutov
 - **Command steps.** `run()` runs its command in the run's box. Detached steps (`job()`) run on a host through host exec (section 6), under the run's grants.
 - **Progress is saved as store events.** Each step's start and result is an event. A run therefore continues after an engine restart or update, or after its box starts again. The runner runs the script again from the start, and each step that already has a result returns it without running again. Scripts must stay deterministic, as in v1.
 - **Admission bounds fan-out.** Each step has its own box with its own size (5.4), and the room limit bounds the whole tree. A step that does not fit waits in `pending`.
-- **Profile limits bound model calls** (v1's limits, root, 2026-10-31). `maxConcurrent` holds an agent step while that many steps of its profile run in this run. `maxCallsPerRun` fails the run with a typed error past that many agent calls to the profile. Zero means no limit. Both live on the profile and in `ProfileBundle`, and the import keeps them.
+- **Profile concurrency limit** (owner, 2026-10-31). `maxConcurrent` holds an agent step while that many steps of its profile run in this run. Zero means no limit. The owner said “remove the calls per run feature/limitations entirely for now”, replacing the earlier root decision. Root decided that strict config decoding stays and there is no legacy reader because it would be a shim. v2 has not shipped. The trial profile config was backed up and edited by hand; the v1 migration drops the field.
 - **Budget:** about 1,000 to 1,500 product lines.
 - **Open for the M3 design check:** the script runtime. It is Node from `dyna-base`, or an interpreter in `dyna box-agent` as v1 embeds goja.
 
@@ -1652,11 +1656,11 @@ Acceptance:
 3. unit: an owner DM turn delivers its final response to `dm:<session>` and makes no delivery for the parent. A final response to a target that the turn already posted to is delivered quietly.
 4. unit: every box's `podman run` carries `--cgroup-parent` with its own top-level slice, and every placed box counts against its host and the room limit. One pass with more pending boxes than fit places only those that fit, by host and by room, and the rest wait, even when several are `creating` or `starting`.
 5. unit: a budget slice whose fake `memory.events` shows `high` throttling for 60 s emits one `box.pressure` and no delivery. A `stopped` box counts only its disk in admission, and a wake that does not fit goes to `pending` (fake host). Admission's 80% check reads real use, so page cache alone does not close it.
-6. unit: host-exec argv matching, mode precedence, the class from the matched grant, `no_grant`, revoke, expiry, and the `hostexec_scope` refusal.
+6. unit: host-exec argv matching, mode precedence, the class from the matched grant, `no_grant` and session close.
 7. unit: every host-exec run emits its events in order: `op.requested` when it waits, then `op.decided` and `op.ran`.
 8. unit: after a reconnect, the transcript stream resends from the last acknowledged offset with no gap and no copy.
 9. manual: in the web app, the owner posts in a room, a boxed session answers, and the answer appears without a reload. An owner DM is answered in the DM. The owner approves a waiting operation in the approvals panel.
-10. manual: root runs `podman ps` on hermeslab through host exec. A child without a grant is refused. The owner grants it for one hour, it runs, and after a revoke it is refused again.
+10. manual: root runs `podman ps` on hermeslab through host exec. A child without a grant is refused. The owner grants it, it runs, and after session close its grant is inactive.
 11. manual: a lead and its child run on hermeslab; each has its own top-level slice; closing the lead closes the child first. A dormant session's box stops and starts again on a post.
 12. manual: killing a host's master during a turn does not end the turn, and the box returns to `ready` within 15 s.
 13. manual: an agent in a box serves a web page from inside the box, opens it in its computer, takes a screenshot to a file, and attaches it to a post; the owner watches the same page live on the session page.
@@ -1667,7 +1671,7 @@ Acceptance:
 
 ### M3: bundle import and self-hosting
 
-Scope: durable session-to-account affinity before a second sign-in (5.7), the approval flag, merges and CI through GitHub (decision 13), `gh` for agents through the engine (decision 13), goals, issues, questions (with terminal requests), hooks as typed subscriptions (`Wake` and `Run`) with the default notice subscription, which wakes root on `notice.posted` (an M3 event), engine timers (check-ins, usage), accounts through CLIProxyAPI, settings and backups, `dyna update`, remote access, the desktop window, workflows (9.2), the import, and the cutover. Section 9 lists every feature.
+Scope: durable session-to-account affinity before a second sign-in (5.7), the approval flag, merges and CI through GitHub (decision 13), `gh` for agents through the engine (decision 13), goals, issues, questions and `show_pty` requests, hooks as typed subscriptions (`Wake` and `Run`) with the default notice subscription, which wakes root on `notice.posted` (an M3 event), engine timers (check-ins, usage), accounts through CLIProxyAPI, settings and backups, `dyna update`, remote access, the desktop window, workflows (9.2), the import, and the cutover. Section 9 lists every feature.
 
 The order inside M3:
 
@@ -1712,3 +1716,7 @@ Acceptance:
 - **Manual checks** are run by one terra agent per milestone, in a sandbox box.
 - **v1 is frozen.** Only blocking bugs are fixed there. The old side gets only `cmd/dyna-export`.
 - **Reporting.** Area owners report to the lead. The lead reports to @root for decisions, blockers and milestone results.
+
+### Declared agent surface (owner q68)
+
+The owner chose to ship without the five-provider evaluation gate. A Claude sanity run passed both shapes. Declared used 165,534 tokens against 179,099 for caller; this was not a controlled comparison. The lead chose declared for its simpler model and lower token count in that run. Caller ended one turn with text about the wrong action. The old surface and switch are removed.

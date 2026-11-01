@@ -3,22 +3,40 @@ package live
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/resident-labs/dyna/contract"
 )
 
-// Live holds live state. Service.mu, computerLock, readMu, transcriptMu and
-// activityMu may precede mu; mu is innermost. Code under mu takes no other lock
-// and sends no channel messages. wakeMu is never held with mu.
+// Live holds live state. Activity publication takes activityMu, then Session.mu,
+// then mu. Publish runs under Session.mu and uses non-blocking sends. Code under
+// mu takes no other lock and sends no channel messages. wakeMu never overlaps mu.
 type Live struct {
-	mu           sync.Mutex
-	activityMu   sync.Mutex
-	activityLast map[contract.SessionID]uint64
-	subscribers  map[*Subscription]contract.RoomID
-	wakeMu       sync.Mutex
-	wakePending  map[contract.SessionID]bool
-	wakeSignal   chan struct{}
-	deliver      func(map[contract.SessionID]bool)
+	mu                 sync.Mutex
+	activityMu         sync.Mutex
+	sessions           map[contract.SessionID]*Session
+	activityCount      uint64
+	computerGeneration atomic.Uint64
+	shellGeneration    atomic.Uint64
+	subscribers        map[*Subscription]contract.RoomID
+	wakeMu             sync.Mutex
+	wakePending        map[contract.SessionID]bool
+	wakeSignal         chan struct{}
+	deliver            func(map[contract.SessionID]bool)
+}
+
+// Session is a stable handle. Its mutex guards all its fields.
+type Session struct {
+	mu            sync.Mutex
+	live          *Live
+	id            contract.SessionID
+	removed       bool
+	activity      contract.TurnActivity
+	activityOrder uint64
+	channel       *Channel
+	computer      *computerState
+	shell         *shellWatch
+	terminals     int
 }
 
 // Subscription uses mu to serialize sends with close.
@@ -29,7 +47,7 @@ type Subscription struct {
 }
 
 func New(deliver func(map[contract.SessionID]bool)) *Live {
-	return &Live{activityLast: make(map[contract.SessionID]uint64), subscribers: make(map[*Subscription]contract.RoomID), wakePending: make(map[contract.SessionID]bool), wakeSignal: make(chan struct{}, 1), deliver: deliver}
+	return &Live{sessions: make(map[contract.SessionID]*Session), subscribers: make(map[*Subscription]contract.RoomID), wakePending: make(map[contract.SessionID]bool), wakeSignal: make(chan struct{}, 1), deliver: deliver}
 }
 
 func (l *Live) Subscribe(room contract.RoomID, capacity int) (*Subscription, chan contract.Event) {
@@ -46,8 +64,8 @@ func (l *Live) Unsubscribe(sub *Subscription) {
 	l.mu.Unlock()
 }
 
-// Publish copies subscribers under mu and sends outside it. Owner-only transcript
-// notifications close a full subscriber so it reconnects and catches up.
+// Publish copies subscribers under mu and sends outside it. A full subscriber closes
+// for every event it cannot take, so it reconnects and catches up from the store.
 func (l *Live) Publish(room contract.RoomID, event contract.Event, ownerOnly bool) {
 	l.mu.Lock()
 	var targets []*Subscription
@@ -63,10 +81,8 @@ func (l *Live) Publish(room contract.RoomID, event contract.Event, ownerOnly boo
 			select {
 			case sub.ch <- event:
 			default:
-				if ownerOnly {
-					close(sub.ch)
-					sub.closed = true
-				}
+				close(sub.ch)
+				sub.closed = true
 			}
 		}
 		closed := sub.closed
@@ -77,15 +93,80 @@ func (l *Live) Publish(room contract.RoomID, event contract.Event, ownerOnly boo
 	}
 }
 
-// PublishActivity drops an older update if a newer update reached publication first.
-func (l *Live) PublishActivity(room contract.RoomID, session contract.SessionID, order uint64, event contract.Event) {
+// CreateSession publishes a handle; the caller must validate it against the store.
+func (l *Live) CreateSession(id contract.SessionID) (*Session, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	s := l.sessions[id]
+	if s == nil {
+		s = &Session{live: l, id: id}
+		l.sessions[id] = s
+	}
+	return s, true
+}
+
+// LookupSession does not create state.
+func (l *Live) LookupSession(id contract.SessionID) (*Session, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	s, ok := l.sessions[id]
+	return s, ok
+}
+
+// RetireSession retires the current handle, if any.
+func (l *Live) RetireSession(id contract.SessionID) *Session {
+	s, ok := l.LookupSession(id)
+	if !ok {
+		return nil
+	}
+	return l.RetireHandle(s)
+}
+
+// RetireHandle removes only this handle and returns it locked for teardown.
+func (l *Live) RetireHandle(s *Session) *Session {
+	s.mu.Lock()
+	l.mu.Lock()
+	if s.removed || l.sessions[s.id] != s {
+		l.mu.Unlock()
+		s.mu.Unlock()
+		return nil
+	}
+	delete(l.sessions, s.id)
+	s.removed = true
+	l.mu.Unlock()
+	return s
+}
+
+// PublishActivity serializes updates and publication so streams see the same order as lists.
+func (s *Session) PublishActivity(room contract.RoomID, activity contract.TurnActivity, event contract.Event) bool {
+	l := s.live
 	l.activityMu.Lock()
 	defer l.activityMu.Unlock()
-	if order <= l.activityLast[session] {
-		return
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.removed {
+		return false
 	}
-	l.activityLast[session] = order
+	l.mu.Lock()
+	l.activityCount++
+	s.activity, s.activityOrder = activity, l.activityCount
+	l.mu.Unlock()
 	l.Publish(room, event, false)
+	return true
+}
+
+// Activity returns the last activity and its global order, or zero values.
+func (l *Live) Activity(id contract.SessionID) (contract.TurnActivity, uint64) {
+	s, ok := l.LookupSession(id)
+	if !ok {
+		return contract.TurnActivity{}, 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.removed {
+		return contract.TurnActivity{}, 0
+	}
+	return s.activity, s.activityOrder
 }
 
 // Wake queues store notifications without taking mu.

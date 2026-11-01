@@ -129,7 +129,7 @@ func (b *browser) close(ctx context.Context) {
 // inspect renders one page in a fresh tab. ctx bounds this inspection only.
 func (b *browser) inspect(ctx context.Context, doc []byte, csp string, allowNet bool) (Result, error) {
 	c := b.c
-	c.doc, c.csp, c.allowNet = doc, csp, allowNet
+	c.doc, c.csp, c.allowNet = ColorScheme(doc, Default), csp, allowNet
 	c.session, c.loaded, c.documentServed, c.blockedNetwork = "", false, false, false
 	c.hosts, c.console = map[string]bool{}, nil
 	var err error
@@ -153,6 +153,18 @@ func (b *browser) inspect(ctx context.Context, doc []byte, csp string, allowNet 
 			return Result{}, err
 		}
 	}
+	for _, setting := range []struct {
+		method string
+		params params
+	}{
+		{"Emulation.setScrollbarsHidden", params{Hidden: true}},
+		{"Emulation.setEmulatedMedia", params{Features: []mediaFeature{{Name: "prefers-color-scheme", Value: "dark"}}}},
+		{"Emulation.setDefaultBackgroundColorOverride", params{Color: &color{}}},
+	} {
+		if err = c.call(ctx, setting.method, setting.params, nil); err != nil {
+			return Result{}, err
+		}
+	}
 	if err = c.call(ctx, "Runtime.addBinding", params{Name: policyBinding}, nil); err != nil {
 		return Result{}, err
 	}
@@ -160,7 +172,8 @@ func (b *browser) inspect(ctx context.Context, doc []byte, csp string, allowNet 
 		return Result{}, err
 	}
 	metrics := func(w int) error {
-		return c.call(ctx, "Emulation.setDeviceMetricsOverride", params{Width: w, Height: 800, DeviceScaleFactor: 1}, nil)
+		mobile := false
+		return c.call(ctx, "Emulation.setDeviceMetricsOverride", params{Width: w, Height: 800, DeviceScaleFactor: 1, Mobile: &mobile}, nil)
 	}
 	if err = metrics(1280); err != nil {
 		return Result{}, err

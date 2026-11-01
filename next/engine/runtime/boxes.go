@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -40,7 +39,7 @@ type boxStore interface {
 }
 
 type heartbeatStore interface {
-	RecordHostHeartbeat(context.Context, contract.HostName, bool, *int64, time.Time) error
+	RecordHostHeartbeat(context.Context, contract.HostName, bool, *int64, int64, time.Time) error
 }
 
 type Boxes struct {
@@ -144,7 +143,7 @@ func (b *Boxes) reportHeartbeat(ctx context.Context, name contract.HostName, ok 
 		value := load.DiskBytes - load.DiskUsed
 		free = &value
 	}
-	if err := b.HeartbeatStore.RecordHostHeartbeat(ctx, name, ok, free, now); err != nil {
+	if err := b.HeartbeatStore.RecordHostHeartbeat(ctx, name, ok, free, load.DiskBytes, now); err != nil {
 		log.Printf("host %s: record heartbeat: %v", name, err)
 		return
 	}
@@ -176,6 +175,7 @@ func (b *Boxes) HostLoad(ctx context.Context, hosts []contract.HostSummary) erro
 		}
 		if h.Name == contract.ControlPlane {
 			h.Reachable, h.CPUs, h.MemBytes = true, goruntime.NumCPU(), load.MemBytes
+			h.DiskLow = load.DiskBytes > 0 && load.DiskBytes-load.DiskUsed < box.DiskWarn(box.DiskFloor(load.DiskBytes))
 		}
 	}
 	return nil
@@ -237,12 +237,9 @@ func (b *Boxes) controlPlane(data string) {
 			if mem, err := os.ReadFile(filepath.Join(root, "meminfo")); err == nil {
 				load.MemBytes, load.MemUsed = memory(string(mem))
 			}
-			var fs syscall.Statfs_t
-			if syscall.Statfs(data, &fs) == nil {
-				load.DiskBytes = int64(fs.Blocks) * fs.Bsize
-				load.DiskUsed = int64(fs.Blocks-fs.Bfree) * fs.Bsize
-			}
+			load.DiskBytes, load.DiskUsed = podman.LocalDisk(b.Context, data)
 			b.record(contract.ControlPlane, true, load, now)
+			b.reportHeartbeat(b.Context, contract.ControlPlane, true, load, now)
 		}
 	}
 }
@@ -276,8 +273,9 @@ func memory(meminfo string) (total, used int64) {
 
 func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host, error) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	if h := b.hosts[name]; h != nil {
+	h := b.hosts[name]
+	b.mu.Unlock()
+	if h != nil {
 		return h, nil
 	}
 	hosts, err := b.Store.Hosts(ctx)
@@ -297,11 +295,17 @@ func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host,
 			if err := b.Store.SetEngineHost(ctx, name, same); err != nil {
 				return nil, err
 			}
+			b.mu.Lock()
+			if existing := b.hosts[name]; existing != nil {
+				b.mu.Unlock()
+				return existing, nil
+			}
 			if b.loads == nil {
 				b.loads = make(map[contract.HostName]hostLoad)
 			}
 			b.loads[name] = hostLoad{summary: contract.HostSummary{Reachable: record.State == box.HostReady}}
 			b.cache(name, h)
+			b.mu.Unlock()
 			return h, nil
 		}
 	}
@@ -362,6 +366,10 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool,
 	return check.NoSwap, nil
 }
 
+func (b *Boxes) forward(id contract.BoxID) box.Forward {
+	return box.Forward{Box: id, HostPath: filepath.Join(b.HostData, "sock", string(id), "engine.sock"), EnginePath: filepath.Join(b.Runtime, "boxes", string(id)+".sock")}
+}
+
 func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, error) {
 	h, err := b.host(ctx, spec.Host)
 	if err != nil {
@@ -379,7 +387,7 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	}
 	ok := false
 	var forwarded, sliced, created bool
-	forward := box.Forward{Box: spec.Box, HostPath: filepath.Join(b.HostData, "sock", string(spec.Box), "engine.sock"), EnginePath: filepath.Join(b.Runtime, "boxes", string(spec.Box)+".sock")}
+	forward := b.forward(spec.Box)
 	defer func() {
 		if ok {
 			return
@@ -487,7 +495,7 @@ func (b *Boxes) restoreHost(ctx context.Context, name contract.HostName) error {
 		if record.Host != name || record.State == contract.BoxDeleted || record.State == contract.BoxFailed {
 			continue
 		}
-		forward := box.Forward{Box: record.ID, HostPath: filepath.Join(b.HostData, "sock", string(record.ID), "engine.sock"), EnginePath: filepath.Join(b.Runtime, "boxes", string(record.ID)+".sock")}
+		forward := b.forward(record.ID)
 		if err := host.AddForward(ctx, forward); err != nil {
 			return err
 		}
@@ -564,7 +572,7 @@ func (b *Boxes) Remove(ctx context.Context, id contract.BoxID) error {
 	if err != nil {
 		return err
 	}
-	forward := box.Forward{Box: id, HostPath: filepath.Join(b.HostData, "sock", string(id), "engine.sock"), EnginePath: filepath.Join(b.Runtime, "boxes", string(id)+".sock")}
+	forward := b.forward(id)
 	if err := removeHostBox(ctx, h, record, forward); err != nil {
 		return err
 	}

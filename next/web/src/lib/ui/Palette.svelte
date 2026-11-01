@@ -26,9 +26,11 @@
   let current = $derived(rooms.find(found => found.id === room));
   let actions: Action[] = $derived([
     ...current ? [
+      { id: "new-session", label: "New session", hint: `in ${current.name}`, keys: [], icon: "plus" },
       { id: "requests", label: "Requests", hint: current.waiting?.length ? `${current.waiting.length} wait${phone.current ? "" : " for you"}` : "", keys: ["G", "R"], icon: "inbox" },
       { id: "pause", label: current.paused ? "Resume the room" : "Pause the room", hint: `${current.name} · ${current.paused ? "Sessions can start turns again" : "No session starts a new turn"}`, keys: [], icon: "pause" },
     ] satisfies Action[] : [],
+    { id: "new-room", label: "Create a room", hint: "", keys: [], icon: "plus" },
     { id: "theme", label: "Theme", hint: "Carbon, Ink, Nord, Paper, Light or OLED black", keys: [], icon: "palette" },
     { id: "settings", label: "Settings", hint: "", keys: ["Ctrl", ","], icon: "gear" },
   ]);

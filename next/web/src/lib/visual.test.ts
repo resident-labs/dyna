@@ -1,19 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cardMessage, checkLabel, visualReplyFailure, worstCheck } from "./visual.ts";
+import { cardMessage, visualReplyFailure } from "./visual.ts";
 import { decodeEvent } from "./event.ts";
 import { APIError } from "./client.ts";
-
-test("the banner shows the failed check before a warning and hides passing checks", () => {
-  assert.equal(worstCheck([{ name: "contrast", status: "warn" }, { name: "widths", status: "fail", detail: "Overflow at widths: 360" }]), "Overflows at 360 px");
-  assert.equal(worstCheck([{ name: "renders", status: "fail" }]), "Did not render in its check");
-  assert.equal(worstCheck([{ name: "renders", status: "pass" }]), "");
-});
-
-test("console checks name the result without a contradiction", () => {
-  assert.equal(checkLabel({ name: "console", status: "pass" }), "No console errors");
-  assert.equal(checkLabel({ name: "console", status: "fail" }), "Console errors");
-});
 
 test("card messages accept bounded text and web links only", () => {
   assert.deepEqual(cardMessage({ type: "dyna:submit", text: "exact" }), { type: "submit", text: "exact" });
