@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack, type Snippet } from "svelte";
-  import { SvelteSet } from "svelte/reactivity";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { APIError, call } from "../client.ts";
   import VirtualList from "./VirtualList.svelte";
   import PostRow from "./PostRow.svelte";
@@ -101,8 +101,16 @@
     ...steps.length ? [{ kind: "steps" as const, key: "steps", labels: steps }] : [],
     ...failure && home.kind === "dm" && home.session ? [{ kind: "failed" as const, key: "box-failed", seq: 0, session: home.session, at: failure.at ?? "", ...boxRow(failure.box, failure.cause) }] : [],
   ]);
+  import { TurnTranscripts } from "../transcripts.svelte.ts";
+
   // Opened work rows, steps and transcripts stay while the list recycles their elements.
   const opened = new SvelteSet<string>();
+  const transcripts = new SvelteMap<string, TurnTranscripts>();
+  function transcriptOf(session: string): TurnTranscripts {
+    let transcript = transcripts.get(session);
+    if (!transcript) { transcript = new TurnTranscripts(session); transcripts.set(session, transcript); }
+    return transcript;
+  }
   // svelte-ignore state_referenced_locally
   const name = (session: string) => store.names.get(session) ?? closedSession;
   const author = (from: Principal) => from.kind === "owner" ? "You" : from.session ? name(from.session) : "Dyna";
@@ -201,7 +209,7 @@
         shows as waiting that the store lacks was decided outside the window, so it gets no buttons. -->
       {:else if item.kind === "request"}{@const live = store.requests.get(item.request.id)}
         <RequestCard {admin} request={live ?? item.request} gone={!live && item.request.state === "pending"} {store} {now} feed />
-      {:else if item.kind === "work"}<WorkRow row={item} {name} {opened} ontoggle={toggle} {onjobs} />
+      {:else if item.kind === "work"}<WorkRow row={item} {name} {opened} ontoggle={toggle} {transcripts} {transcriptOf} {onjobs} />
       {:else if item.kind === "new"}<p class="new"><span>New</span></p>
       {:else if item.kind === "day"}<p class="day"><span>{dayLabel(item.at, Date.now())}</span></p>
       {:else if item.kind === "steps"}<ul class="steps" aria-label="Finished steps">
