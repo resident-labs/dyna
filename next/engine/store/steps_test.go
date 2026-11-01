@@ -17,7 +17,7 @@ func TestUpgradeConnectSessionsFrom48(t *testing.T) {
 	defer db.Close()
 	var old []string
 	for _, line := range strings.Split(schema, "\n") {
-		if strings.HasPrefix(line, "CREATE INDEX turns_session_started_at ") || strings.HasPrefix(line, "CREATE TABLE client_replays ") || strings.HasPrefix(line, "CREATE TABLE connect_devices ") || strings.HasPrefix(line, "CREATE TABLE connect_sessions ") || strings.HasPrefix(line, "CREATE TABLE connect_revocations ") || strings.HasPrefix(line, "CREATE TABLE transcript_turns ") || strings.HasPrefix(line, "CREATE UNIQUE INDEX transcript_turns_path_start ") || strings.HasPrefix(line, "CREATE INDEX pr_owners_session ") || strings.HasPrefix(line, "CREATE INDEX operations_pending_caller ") || strings.HasPrefix(line, "CREATE TABLE disk_warnings ") {
+		if strings.HasPrefix(line, "CREATE TABLE search_keys ") || strings.HasPrefix(line, "CREATE INDEX turns_session_started_at ") || strings.HasPrefix(line, "CREATE TABLE client_replays ") || strings.HasPrefix(line, "CREATE TABLE connect_devices ") || strings.HasPrefix(line, "CREATE TABLE connect_sessions ") || strings.HasPrefix(line, "CREATE TABLE connect_revocations ") || strings.HasPrefix(line, "CREATE TABLE transcript_turns ") || strings.HasPrefix(line, "CREATE UNIQUE INDEX transcript_turns_path_start ") || strings.HasPrefix(line, "CREATE INDEX pr_owners_session ") || strings.HasPrefix(line, "CREATE INDEX operations_pending_caller ") || strings.HasPrefix(line, "CREATE TABLE disk_warnings ") {
 			continue
 		}
 		line = strings.Replace(line, ", generation INTEGER NOT NULL DEFAULT 0", "", 1)
@@ -55,6 +55,7 @@ func TestUpgradeSessionWorkFrom42(t *testing.T) {
 		"CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT, started_seq INTEGER, started_at INTEGER, ended_at INTEGER)",
 		"CREATE TABLE pr_owners (session TEXT)",
 		"CREATE TABLE operations (id TEXT PRIMARY KEY, kind TEXT, room TEXT, by_kind TEXT, by_id TEXT, class TEXT, state TEXT, card BLOB, args BLOB, args_sha256 BLOB, created_at INTEGER, expires_at INTEGER, decision BLOB, result BLOB)",
+		"CREATE TABLE grants (id TEXT, kind TEXT, expires_at INTEGER, revoked_at INTEGER, expired_at INTEGER)",
 		"CREATE TABLE hostexec_runs (op TEXT PRIMARY KEY, grant_id TEXT, host TEXT, scope TEXT, started_at INTEGER, timeout_ms INTEGER, ended_at INTEGER, output_bytes INTEGER, stopped TEXT, lost_at INTEGER)",
 		"INSERT INTO turns(id,session,started_seq) VALUES ('turn1','session1',NULL)",
 		`INSERT INTO events VALUES (5,'room','engine','','turn.started','{"turn":"turn1"}')`,
@@ -115,7 +116,8 @@ func TestUpgradeDropsRules(t *testing.T) {
 		CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO meta VALUES ('schema_version','45');
 		CREATE TABLE rules (room TEXT, number INTEGER, PRIMARY KEY(room,number)); INSERT INTO rules VALUES ('room',1);
 		CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT, started_at INTEGER, ended_at INTEGER); CREATE TABLE pr_owners (session TEXT); CREATE TABLE hosts (name TEXT);
-		CREATE TABLE operations (id TEXT, by_kind TEXT, by_id TEXT, created_at INTEGER, state TEXT);
+		CREATE TABLE operations (id TEXT, kind TEXT, args BLOB, by_kind TEXT, by_id TEXT, created_at INTEGER, state TEXT);
+		CREATE TABLE grants (id TEXT, kind TEXT, expires_at INTEGER, revoked_at INTEGER, expired_at INTEGER);
 		CREATE TABLE events (seq INTEGER PRIMARY KEY, id TEXT, at INTEGER, room TEXT, type TEXT, from_kind TEXT, from_id TEXT, body BLOB);
 		CREATE TABLE deliveries (seq INTEGER REFERENCES events(seq));
 		CREATE TABLE event_files (seq INTEGER REFERENCES events(seq));
@@ -141,5 +143,32 @@ func TestUpgradeDropsRules(t *testing.T) {
 		if err := db.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 1 {
 			t.Fatalf("total %s = %d: %v", table, count, err)
 		}
+	}
+}
+
+func TestPermanentHostexecGrantMigration(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, err = db.Exec(`CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO meta VALUES('schema_version','53');
+ CREATE TABLE grants(id TEXT,kind TEXT,expires_at INTEGER,revoked_at INTEGER,expired_at INTEGER);
+ INSERT INTO grants VALUES('active','hostexec',4102444800000,NULL,NULL),('past','hostexec',1,NULL,NULL),('revoked','hostexec',4102444800000,1,NULL);
+ CREATE TABLE operations(kind TEXT,state TEXT,args BLOB);
+ INSERT INTO operations VALUES('hostexec.grant','pending','{"expires":"future","never":false,"reason":"x"}');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := upgrade(db, 1, "", steps, nil); err != nil {
+		t.Fatal(err)
+	}
+	var active, past, revoked int
+	if err := db.QueryRow(`SELECT sum(id='active' AND expires_at IS NULL),sum(id='past' AND expired_at=1),sum(id='revoked' AND expires_at IS NOT NULL) FROM grants`).Scan(&active, &past, &revoked); err != nil || active != 1 || past != 1 || revoked != 1 {
+		t.Fatalf("grants: %d %d %d: %v", active, past, revoked, err)
+	}
+	var state, args string
+	if err := db.QueryRow(`SELECT state,args FROM operations`).Scan(&state, &args); err != nil || state != "expired" || args != `{"reason":"x"}` {
+		t.Fatalf("operation %q %q: %v", state, args, err)
 	}
 }

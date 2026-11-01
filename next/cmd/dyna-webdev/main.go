@@ -472,7 +472,7 @@ func main() {
 	}()
 	fatal(st.AddHost(ctx, box.Host{Name: host, State: box.HostReady, CPUs: 128, MemBytes: 256 * box.GiB, DiskBytes: 1024 * box.GiB}))
 	if *seed {
-		seedRoom(ctx, svc, *posts, *agents)
+		seedRoom(ctx, svc, st, *posts, *agents)
 		seedDevices(ctx, st)
 	}
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -536,7 +536,7 @@ func seedAgents(ctx context.Context, s *engine.Service, n int) {
 	}
 }
 
-func seedRoom(ctx context.Context, s *engine.Service, posts, agents int) {
+func seedRoom(ctx context.Context, s *engine.Service, st *store.Store, posts, agents int) {
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	room, e1 := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "web-studio", RootProfile: "fake"})
 	lead, e2 := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "lead-web", Profile: "fake", Goal: "Build the room view"})
@@ -616,6 +616,12 @@ body{font:15px system-ui;margin:0;padding:24px;color:#e8e9eb;background:#0d0f13}
 			log.Fatal(e.Message)
 		}
 	}
+	// Two addressed posts make the first and follow-up mention treatments easy to inspect.
+	for i, text := range []string{"The feed is ready for review.", "The spacing now matches the design."} {
+		_, err := st.Post(ctx, contract.Event{ID: contract.EventID(fmt.Sprintf("seed-mention-%d", i)), Room: room.Room, Time: time.Now(), From: by,
+			Body: contract.PostCreated{Text: text, Home: contract.Conversation{Kind: contract.ConversationFeed}, Mentions: []contract.Principal{owner}}}, nil)
+		fatal(err)
+	}
 	seedAgents(ctx, s, agents)
 	for i := range posts {
 		text := fmt.Sprintf("Long-list post %d of %d.", i+1, posts)
@@ -624,4 +630,8 @@ body{font:15px system-ui;margin:0;padding:24px;color:#e8e9eb;background:#0d0f13}
 		}
 		post(contract.Principal{Kind: contract.PrincipalSession, Session: []contract.SessionID{lead.Session, child.Session}[i%2]}, contract.PostRequest{Text: text}) // session posts wake no turns
 	}
+}
+
+func (devService) AccountsImportOAuth(context.Context, contract.Principal, contract.AccountsImportOAuthRequest) (contract.AccountsImportOAuthResponse, *contract.Error) {
+	return contract.AccountsImportOAuthResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable in webdev"}
 }
