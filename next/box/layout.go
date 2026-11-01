@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -37,8 +39,13 @@ import (
 //	<HostData>/sock/<box>/engine.sock               a box's forwarded socket, gone with the box
 //	<HostData>/runs/<run>/                          a subscription Run's files, gone with the Run
 //
-// Box volumes are Podman's, so they are not here.
+// Box volumes are Podman's, so they are not here. One path inside them is Dyna's:
+//
+//	/box/attachments/<seq>/<name>                   the files of post <seq>, stored when the post reaches the box
 type Layout struct{ Data, HostData string }
+
+// AttachmentFolder is where a box keeps the files of the posts it reads. It is a variable so that tests can run outside a box.
+var AttachmentFolder = "/box/attachments"
 
 const (
 	instructionsFile = "AGENTS.md"
@@ -153,6 +160,50 @@ func (l Layout) FindFile(hash string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// BoxAttachments names the files of post seq inside a box, in the post's order. The post's sequence keeps two posts that
+// both attach image.png apart, and the same post always gets the same paths, so a replay finds what it stored.
+func (Layout) BoxAttachments(seq int64, files []contract.Attachment) []string {
+	paths := make([]string, len(files))
+	used := make(map[string]bool, len(files))
+	for i, file := range files {
+		name := attachmentName(file.Name)
+		stem, ext := splitExtension(name)
+		for n := 2; used[name]; n++ {
+			name = stem + "-" + strconv.Itoa(n) + ext
+		}
+		used[name] = true
+		paths[i] = filepath.Join(AttachmentFolder, strconv.FormatInt(seq, 10), name)
+	}
+	return paths
+}
+
+// attachmentName turns a sender's file name into one path segment that needs no quoting in a frame.
+func attachmentName(name string) string {
+	safe := strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) || r == '.' || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, strings.ToValidUTF8(name, "_"))
+	safe = strings.TrimLeft(safe, ".")
+	if stem, ext := splitExtension(safe); len(safe) > 200 {
+		safe = strings.ToValidUTF8(stem[:200-len(ext)], "") + ext
+	}
+	if safe == "" {
+		return "file"
+	}
+	return safe
+}
+
+// splitExtension keeps a short extension whole. A long one is just the end of the name.
+func splitExtension(name string) (string, string) {
+	ext := filepath.Ext(name)
+	if len(ext) > 16 {
+		ext = ""
+	}
+	return strings.TrimSuffix(name, ext), ext
 }
 
 // Transcripts is the folder of one session's transcript copies.

@@ -36,9 +36,9 @@ const (
 //go:embed extension.js
 var extensionSource string
 
-// renderExtension fills in the values the extension shares with the box agent.
-func renderExtension() string {
-	return strings.NewReplacer("__DYNA_CALL_ID_ARGUMENT__", contract.ToolCallIDArgument, "__DYNA_MCP_URL__", pi.DynaMCPURL).Replace(extensionSource)
+// RenderExtension fills in the values the extension shares with the box agent.
+func RenderExtension() string {
+	return strings.NewReplacer("__DYNA_CALL_ID_ARGUMENT__", contract.ToolCallIDArgument, "__DYNA_MCP_URL__", pi.DynaMCPURL, "__DYNA_ATTACHMENTS__", box.AttachmentFolder).Replace(extensionSource)
 }
 
 func modelArgs(model contract.ModelChoice, compactTokens int) ([]string, error) {
@@ -187,7 +187,7 @@ func Run(ctx context.Context) error {
 	defer server.Close()
 	go func() { errs <- server.Serve(listener) }()
 	extensionPath := filepath.Join(piDir, "dyna.js")
-	if err = os.WriteFile(extensionPath, []byte(renderExtension()), 0600); err != nil {
+	if err = os.WriteFile(extensionPath, []byte(RenderExtension()), 0600); err != nil {
 		return err
 	}
 	args = piArgs(args, extensionPath, hello.Instructions, modelsPath, sessions, mcpPath)
@@ -207,7 +207,7 @@ func Run(ctx context.Context) error {
 	ticks := time.NewTicker(transcriptInterval)
 	defer ticks.Stop()
 	go transcript.Run(ctx, ticks.C, h.SessionFile)
-	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, file: h.SessionFile}, Setup: setup, setupErr: setupErr}
+	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, file: h.SessionFile}, Setup: setup, Attach: client.Attach, setupErr: setupErr}
 	var closing atomic.Bool
 	ownerInput := computer.NewInput(computer.URL)
 	go ownerInput.Run(ctx)
