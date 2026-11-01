@@ -60,6 +60,7 @@
           <span class="title"><strong>{profile.name}</strong><small>{slugName(profile.model)} · {profile.thinking}</small></span>
           {#if profile.description}<span class="description">{profile.description}</span>{/if}
         </span>
+        {#if profile.taste || profile.diagnostics || profile.intelligence || profile.cost}
         <span class="bars">
           {#each [{ name: "Taste", value: profile.taste }, { name: "Diagnostics", value: profile.diagnostics }, { name: "Intelligence", value: profile.intelligence }, { name: "Cost", value: profile.cost }] as rating}
             <span class="rating" aria-label={`${rating.name}: ${rating.value} out of 10`}>
@@ -67,6 +68,7 @@
             </span>
           {/each}
         </span>
+        {:else}<span class="unrated">Not rated</span>{/if}
       </button>
     {/each}
   </div>
@@ -99,6 +101,7 @@
   strong { font-size: 14px; font-weight: 600; }
   small, .description { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bars { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .unrated { color: var(--muted); font-size: 12.5px; }
   .rating { display: grid; gap: 4px; color: var(--muted); font-size: 11px; }
   .track { display: block; height: 3px; background: var(--track); border-radius: 3px; overflow: hidden; }
   .track span { display: block; height: 100%; background: var(--muted); }
@@ -110,6 +113,6 @@
   }
   @container (max-width: 900px) {
     .list button { grid-template-columns: 18px minmax(0, 1fr); }
-    .bars { grid-column: 2; }
+    .bars, .unrated { grid-column: 2; }
   }
 </style>
