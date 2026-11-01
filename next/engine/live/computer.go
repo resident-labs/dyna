@@ -11,6 +11,13 @@ type computerState struct {
 	lastFrame  []byte
 }
 
+func (c *computerState) closeWatchers() {
+	for ch := range c.watchers {
+		delete(c.watchers, ch)
+		close(ch)
+	}
+}
+
 // ComputerWatch identifies one subscription and its original channel.
 type ComputerWatch struct {
 	computer *computerState
@@ -42,10 +49,7 @@ func (s *Session) SetComputer(room contract.RoomID, state contract.ComputerState
 	s.computer.state = state
 	if state == contract.ComputerStopped {
 		s.computer.lastFrame = nil
-		for ch := range s.computer.watchers {
-			delete(s.computer.watchers, ch)
-			close(ch)
-		}
+		s.computer.closeWatchers()
 		if s.channel != nil {
 			s.channel.Wake()
 		}
@@ -59,14 +63,12 @@ func (s *Session) ClearComputer() (contract.RoomID, bool) {
 		return "", false
 	}
 	s.computer = nil
-	for ch := range c.watchers {
-		delete(c.watchers, ch)
-		close(ch)
-	}
+	c.closeWatchers()
 	return c.room, c.state == contract.ComputerRunning
 }
 
-// WatchComputer adds a watcher. The caller checks channel readiness first.
+// WatchComputer adds a watcher. The caller holds the session lock and checks
+// channel readiness; s.channel must be non-nil.
 func (s *Session) WatchComputer() *ComputerWatch {
 	c := s.computer
 	if c == nil || c.state != contract.ComputerRunning {
@@ -74,10 +76,7 @@ func (s *Session) WatchComputer() *ComputerWatch {
 	}
 	w := &ComputerWatch{computer: c, channel: s.channel, ch: make(chan []byte, 1)}
 	if len(c.watchers) == 0 {
-		s.live.mu.Lock()
-		s.live.computerGeneration++
-		c.generation = s.live.computerGeneration
-		s.live.mu.Unlock()
+		c.generation = s.live.computerGeneration.Add(1)
 		c.lastFrame = nil
 		s.channel.Wake()
 	} else if c.lastFrame != nil {
@@ -119,6 +118,7 @@ func (s *Session) ComputerFrame(generation uint64, frame []byte) {
 		return
 	}
 	c.lastFrame = frame
+	// Drain before sending so each one-slot watcher keeps only the newest frame.
 	for ch := range c.watchers {
 		select {
 		case <-ch:
@@ -135,10 +135,7 @@ func (s *Session) EndComputerStream(stream ComputerStream, generation uint64) {
 		return
 	}
 	c.lastFrame = nil
-	for ch := range c.watchers {
-		delete(c.watchers, ch)
-		close(ch)
-	}
+	c.closeWatchers()
 	channel.ResetComputerWatch()
 	channel.Wake()
 }
