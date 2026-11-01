@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/live"
 )
 
 type computerState struct {
@@ -25,13 +26,14 @@ func (s *Service) computerEvent(ctx context.Context, session contract.SessionID,
 }
 
 // clearComputerLocked removes the current computer. The caller holds s.mu and
-// the session's computerLock, and writes the returned stop event after unlocking s.mu.
+// the live session lock, and writes the returned stop event after unlocking s.mu.
 func (s *Service) clearComputerLocked(id contract.SessionID) (contract.RoomID, bool, []chan []byte) {
-	c := s.sessionLocked(id).computer
-	if c == nil {
+	state := s.sessions[id]
+	if state == nil || state.computer == nil {
 		return "", false, nil
 	}
-	s.sessionLocked(id).computer = nil
+	c := state.computer
+	state.computer = nil
 	var watchers []chan []byte
 	for ch := range c.watchers {
 		watchers = append(watchers, ch)
@@ -47,14 +49,20 @@ func (s *Service) ComputerChanged(ctx context.Context, caller contract.Principal
 	if req.To != contract.ComputerRunning && req.To != contract.ComputerStopped {
 		return contract.ComputerChangedResponse{}, invalid("invalid computer state")
 	}
-	session, err := s.store.Session(ctx, caller.Session)
+	session, open, err := s.store.OpenSession(ctx, caller.Session)
 	if err != nil {
 		return contract.ComputerChangedResponse{}, failure(err)
 	}
-	state := s.lockSession(session.ID)
-	defer state.computerLock.Unlock()
+	if !open {
+		return contract.ComputerChangedResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+	}
+	handle, state, ok := s.lockSession(session.ID)
+	if !ok {
+		return contract.ComputerChangedResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+	}
+	defer handle.Unlock()
 	s.mu.Lock()
-	if state.channel == nil {
+	if handle.Channel() == nil {
 		s.mu.Unlock()
 		return contract.ComputerChangedResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "box channel is not ready"}
 	}
@@ -74,10 +82,10 @@ func (s *Service) ComputerChanged(ctx context.Context, caller contract.Principal
 	s.mu.Lock()
 	c.state = req.To
 	var watchers []chan []byte
-	var channel *boxChannel
+	var channel *live.Channel
 	if req.To == contract.ComputerStopped {
 		c.lastFrame = nil
-		channel = state.channel
+		channel = handle.Channel()
 		for ch := range c.watchers {
 			watchers = append(watchers, ch)
 			delete(c.watchers, ch)
@@ -85,19 +93,12 @@ func (s *Service) ComputerChanged(ctx context.Context, caller contract.Principal
 	}
 	s.mu.Unlock()
 	if channel != nil {
-		wakeChannel(channel)
+		channel.Wake()
 	}
 	for _, ch := range watchers {
 		close(ch)
 	}
 	return contract.ComputerChangedResponse{}, nil
-}
-
-func wakeChannel(channel *boxChannel) {
-	select {
-	case channel.wake <- struct{}{}:
-	default:
-	}
 }
 
 func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-chan []byte, *contract.Error) {
@@ -109,14 +110,17 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 	if err != nil {
 		return nil, failure(err)
 	}
-	state := s.lockSession(id)
-	defer state.computerLock.Unlock()
+	handle, state, ok := s.lookupSession(id)
+	if !ok {
+		return nil, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
+	}
+	defer handle.Unlock()
 	s.mu.Lock()
-	if box.State != contract.BoxReady || state.channel == nil {
+	if box.State != contract.BoxReady || handle.Channel() == nil {
 		s.mu.Unlock()
 		return nil, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
 	}
-	channel := state.channel
+	channel := handle.Channel()
 	c := state.computer
 	if c == nil || c.state != contract.ComputerRunning {
 		s.mu.Unlock()
@@ -135,53 +139,30 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 	c.watchers[ch] = struct{}{}
 	s.mu.Unlock()
 	if first {
-		wakeChannel(channel)
+		channel.Wake()
 	} else if frame != nil {
 		ch <- frame
 	}
 	go func() {
 		<-ctx.Done()
-		state.computerLock.Lock()
-		defer state.computerLock.Unlock()
+		if !handle.Lock() {
+			return
+		}
+		defer handle.Unlock()
 		s.mu.Lock()
 		if _, ok := c.watchers[ch]; !ok {
 			s.mu.Unlock()
 			return
 		}
 		delete(c.watchers, ch)
-		wake := len(c.watchers) == 0 && state.channel == channel
+		wake := len(c.watchers) == 0 && handle.Channel() == channel
 		s.mu.Unlock()
 		close(ch)
 		if wake {
-			wakeChannel(channel)
+			channel.Wake()
 		}
 	}()
 	return ch, nil
-}
-
-// computerInputHandle holds the queue and lifetime of one box channel.
-type computerInputHandle struct {
-	queue chan contract.ComputerInputBatch
-	done  <-chan struct{}
-}
-
-// Only input that races cancellation may be dropped; later input reports replacement.
-func (h computerInputHandle) send(ctx context.Context, batch contract.ComputerInputBatch) *contract.Error {
-	select {
-	case <-h.done:
-		return &contract.Error{Code: contract.ErrConflict, Message: "box replaced"}
-	default:
-	}
-	select {
-	case <-h.done:
-		return &contract.Error{Code: contract.ErrConflict, Message: "box replaced"}
-	case <-ctx.Done():
-		return failure(ctx.Err())
-	case h.queue <- batch:
-		return nil
-	default:
-		return &contract.Error{Code: contract.ErrConflict, Message: "input queue is full"}
-	}
 }
 
 // ComputerInput queues owner events for the box's computer. It does not touch the session's turn.
@@ -192,9 +173,14 @@ func (s *Service) ComputerInput(ctx context.Context, caller contract.Principal, 
 	if _, err := s.store.Session(ctx, req.Session); err != nil {
 		return contract.ComputerInputResponse{}, failure(err)
 	}
+	handle, state, ok := s.lookupSession(req.Session)
+	if !ok {
+		return contract.ComputerInputResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
+	}
+	defer handle.Unlock()
 	s.mu.Lock()
-	state := s.sessionLocked(req.Session)
-	if state.channel == nil {
+	channel := handle.Channel()
+	if channel == nil {
 		s.mu.Unlock()
 		return contract.ComputerInputResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
 	}
@@ -202,24 +188,29 @@ func (s *Service) ComputerInput(ctx context.Context, caller contract.Principal, 
 		s.mu.Unlock()
 		return contract.ComputerInputResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "computer is not running"}
 	}
-	input := state.channel.input
 	s.mu.Unlock()
-	return contract.ComputerInputResponse{}, input.send(ctx, contract.ComputerInputBatch{Frame: req.Frame, Events: req.Events})
+	return contract.ComputerInputResponse{}, channel.SendInput(ctx, contract.ComputerInputBatch{Frame: req.Frame, Events: req.Events})
 }
 
 func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal, generation uint64, r io.Reader) *contract.Error {
 	if caller.Kind != contract.PrincipalSession {
 		return forbidden()
 	}
+	handle, state, ok := s.lookupSession(caller.Session)
+	if !ok {
+		return &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+	}
 	s.mu.Lock()
-	state := s.sessionLocked(caller.Session)
-	channel, computer := state.channel, state.computer
+	channel, computer := handle.Channel(), state.computer
 	s.mu.Unlock()
+	handle.Unlock()
 	defer func() {
-		state.computerLock.Lock()
-		defer state.computerLock.Unlock()
+		if !handle.Lock() {
+			return
+		}
+		defer handle.Unlock()
 		s.mu.Lock()
-		if computer == nil || channel == nil || state.computer != computer || state.channel != channel || computer.generation != generation {
+		if computer == nil || channel == nil || state.computer != computer || handle.Channel() != channel || computer.generation != generation {
 			s.mu.Unlock()
 			return
 		}
@@ -229,12 +220,12 @@ func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal,
 			watchers = append(watchers, ch)
 			delete(computer.watchers, ch)
 		}
-		channel.watching = 0
+		channel.ResetComputerWatch()
 		s.mu.Unlock()
 		for _, ch := range watchers {
 			close(ch)
 		}
-		wakeChannel(channel)
+		channel.Wake()
 	}()
 	var watchers []chan []byte
 	for {
@@ -249,7 +240,9 @@ func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal,
 		if _, err := io.ReadFull(r, frame); err != nil {
 			return nil
 		}
-		state.computerLock.Lock()
+		if !handle.Lock() {
+			return nil
+		}
 		s.mu.Lock()
 		watchers = watchers[:0]
 		if c := state.computer; c != nil && c.state == contract.ComputerRunning && c.generation == generation {
@@ -266,7 +259,7 @@ func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal,
 			}
 			ch <- frame
 		}
-		state.computerLock.Unlock()
+		handle.Unlock()
 		if ctx.Err() != nil {
 			return nil
 		}

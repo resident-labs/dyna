@@ -146,10 +146,12 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 }
 
 func (s *Service) Connected(id contract.SessionID) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	state := s.sessions[id]
-	return state != nil && state.channel != nil
+	handle, ok := s.live.LookupSession(id)
+	if !ok {
+		return false
+	}
+	connected, _ := handle.Connected()
+	return connected
 }
 
 // managedSession loads a target and checks the caller's authority over it.

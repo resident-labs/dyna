@@ -129,7 +129,7 @@ func (b *browser) close(ctx context.Context) {
 // inspect renders one page in a fresh tab. ctx bounds this inspection only.
 func (b *browser) inspect(ctx context.Context, doc []byte, csp string, allowNet bool) (Result, error) {
 	c := b.c
-	c.doc, c.csp, c.allowNet = doc, csp, allowNet
+	c.doc, c.csp, c.allowNet = ColorScheme(doc, Default), csp, allowNet
 	c.session, c.loaded, c.documentServed, c.blockedNetwork = "", false, false, false
 	c.hosts, c.console = map[string]bool{}, nil
 	var err error
@@ -150,6 +150,18 @@ func (b *browser) inspect(ctx context.Context, doc []byte, csp string, allowNet 
 	c.session = attached.SessionID
 	for _, method := range []string{"Page.enable", "Runtime.enable", "Network.enable", "Fetch.enable"} {
 		if err = c.call(ctx, method, params{}, nil); err != nil {
+			return Result{}, err
+		}
+	}
+	for _, setting := range []struct {
+		method string
+		params params
+	}{
+		{"Emulation.setScrollbarsHidden", params{Hidden: true}},
+		{"Emulation.setEmulatedMedia", params{Features: []mediaFeature{{Name: "prefers-color-scheme", Value: "dark"}}}},
+		{"Emulation.setDefaultBackgroundColorOverride", params{Color: &color{}}},
+	} {
+		if err = c.call(ctx, setting.method, setting.params, nil); err != nil {
 			return Result{}, err
 		}
 	}
