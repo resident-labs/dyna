@@ -35,6 +35,7 @@ type Service struct {
 	gitName, gitEmail string
 	maxDepth          int
 	store             *store.Store
+	searchBraveURL    string
 	dispatch          func(context.Context, contract.SessionID, contract.TurnID, contract.Event, bool) (contract.TurnID, []store.FeedInput, error)
 	boxes             lifecycle.BoxAdapter
 	reconciler        *lifecycle.Reconciler

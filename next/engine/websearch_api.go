@@ -57,7 +57,7 @@ func (s *Service) WebSearch(ctx context.Context, caller contract.Principal, req 
 			return value, err
 		}
 	}
-	chain := websearch.Chain{websearch.Muse{Key: key("muse")}, websearch.Brave{Key: key("brave")}, websearch.Exa{Key: key("exa")}, websearch.Tavily{Key: key("tavily")}}
+	chain := websearch.Chain{websearch.Muse{Key: key("muse")}, websearch.Brave{BaseURL: s.searchBraveURL, Key: key("brave")}, websearch.Exa{Key: key("exa")}, websearch.Tavily{Key: key("tavily")}}
 	results, err := chain.Search(ctx, websearch.Query{Text: req.Query, Limit: req.Limit})
 	if err != nil {
 		return contract.WebSearchResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: err.Error()}
