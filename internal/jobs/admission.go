@@ -920,11 +920,9 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 				availableMiB -= jobDemand(job, machine).MemoryMiB
 			}
 		}
-		// Admitted rows use Created as their admission time.
+		// Check rows do not record admission time, so reserve them until release.
 		for _, row := range q.heldRows {
-			if !row.Created.Before(machine.LastProbe) {
-				availableMiB -= row.MemoryMiB
-			}
+			availableMiB -= row.MemoryMiB
 		}
 	}
 	var writes []rowWrite
@@ -1052,7 +1050,7 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 	}
 	for _, write := range writes {
 		if write.reason == "" {
-			if _, err := conn.ExecContext(ctx, "UPDATE admissions SET state='admitted', port=?, reason='', created_ms=?, expires_ms=?+timeout_ms WHERE id=? AND state='waiting'", write.port, now.UnixMilli(), now.Add(reservationMargin).UnixMilli(), write.id); err != nil {
+			if _, err := conn.ExecContext(ctx, "UPDATE admissions SET state='admitted', port=?, reason='', expires_ms=?+timeout_ms WHERE id=? AND state='waiting'", write.port, now.Add(reservationMargin).UnixMilli(), write.id); err != nil {
 				return err
 			}
 		} else if _, err := conn.ExecContext(ctx, "UPDATE admissions SET reason=? WHERE id=? AND state='waiting'", write.reason, write.id); err != nil {
