@@ -90,3 +90,11 @@ CREATE INDEX goals_holder ON goals(session) WHERE state='active';
 CREATE TABLE goal_items (room TEXT NOT NULL, goal INTEGER NOT NULL, number INTEGER NOT NULL, text TEXT NOT NULL, state TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(room, goal, number), FOREIGN KEY(room, goal) REFERENCES goals(room, number));
 CREATE TABLE goal_journal (room TEXT NOT NULL, goal INTEGER NOT NULL, number INTEGER NOT NULL, at INTEGER NOT NULL, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, text TEXT NOT NULL, PRIMARY KEY(room, goal, number), FOREIGN KEY(room, goal) REFERENCES goals(room, number));
 CREATE TABLE checkins (session TEXT PRIMARY KEY REFERENCES sessions(id), reported_at INTEGER NOT NULL DEFAULT 0, report_seq INTEGER NOT NULL DEFAULT 0, silent_turn TEXT NOT NULL DEFAULT '', progress INTEGER NOT NULL DEFAULT 0, told INTEGER NOT NULL DEFAULT 0, told_at INTEGER NOT NULL DEFAULT 0, failure TEXT NOT NULL DEFAULT '');
+
+
+CREATE TABLE subscriptions (id TEXT PRIMARY KEY, scope TEXT NOT NULL, room TEXT REFERENCES rooms(id), session TEXT REFERENCES sessions(id), every_ms INTEGER NOT NULL, wake_kind TEXT NOT NULL, wake_id TEXT NOT NULL, run_image TEXT NOT NULL, run_size TEXT NOT NULL, created_at INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, due_at INTEGER NOT NULL DEFAULT 0, hold_until INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0, last_at INTEGER NOT NULL DEFAULT 0, last_result TEXT NOT NULL DEFAULT '', last_host TEXT NOT NULL DEFAULT '', last_seq INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX subscriptions_room ON subscriptions(room);
+CREATE TABLE subscription_events (sub TEXT NOT NULL REFERENCES subscriptions(id), event_type TEXT NOT NULL, PRIMARY KEY(sub, event_type));
+CREATE TABLE subscription_args (sub TEXT NOT NULL REFERENCES subscriptions(id), pos INTEGER NOT NULL, arg TEXT NOT NULL, PRIMARY KEY(sub, pos));
+CREATE TABLE subscription_files (sub TEXT NOT NULL REFERENCES subscriptions(id), path TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY(sub, path));
+CREATE TABLE subscription_runs (id TEXT PRIMARY KEY, sub TEXT NOT NULL UNIQUE, room TEXT, host TEXT NOT NULL, size TEXT NOT NULL, started_at INTEGER NOT NULL);

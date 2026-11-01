@@ -2,7 +2,7 @@ import { test } from "node:test";
 import { decodeEvent } from "./event.ts";
 import { dmOf } from "./window.svelte.ts";
 import assert from "node:assert/strict";
-import { clause, commandLine, dayLabel, describe, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, isThumb, prWords, quoted, requestLine, shortPaths, workIsBare, workSummary } from "./feed.ts";
+import { clause, commandLine, dayLabel, describe, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, isThumb, prWords, quoted, requestLine, shortPaths, subject, workIsBare, workSummary } from "./feed.ts";
 import type { BoxState, Event, EventBody, FailureCause, Principal } from "./contract.gen.ts";
 
 test("a forward quotes every line of the post under its label, then the owner's words", () => {
@@ -37,6 +37,16 @@ test("shows only browser image types as thumbnails, and sizes in B, KB and MB", 
 });
 
 const lead: Principal = { kind: "session", session: "l" };
+test("a subscription shows in the feed only when it fails", () => {
+  const passed = decodeEvent({ seq: 1, id: "a", at: "2026-10-31T12:00:00Z", from: { kind: "engine" }, type: "hook.finished", body: { subscription: "sub_a", result: "passed", exitCode: 0 } })!;
+  const due = decodeEvent({ seq: 2, id: "b", at: "2026-10-31T12:00:01Z", from: { kind: "engine" }, type: "hook.due", body: { subscription: "sub_a" } })!;
+  const failing = decodeEvent({ seq: 3, id: "c", at: "2026-10-31T12:00:02Z", from: { kind: "engine" }, type: "hook.finished", body: { subscription: "sub_a", result: "failed", exitCode: 3, failures: 1 } })!;
+  assert.equal(subject(passed), undefined);
+  assert.equal(describe(failing, id => id), "A subscription's run failed: exit code 3");
+  assert.equal(dayRows([passed, due], { kind: "feed" }).length, 0);
+  assert.ok(dayRows([failing], { kind: "feed" }).length > 0);
+});
+
 function event(seq: number, body: EventBody, from: Principal = { kind: "engine" }): Event {
   return { seq, id: String(seq), at: "", from, ...body };
 }
