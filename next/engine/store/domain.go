@@ -143,6 +143,10 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 			if err := s.InsertGrant(tx, g); err != nil {
 				return err
 			}
+			g = contract.Grant{ID: contract.GrantID("grant_ask_" + string(session.ID)), Kind: contract.GrantAskOwner, Room: session.Room, To: g.To, Hosts: []contract.HostName{}, By: g.By, Created: event.Time}
+			if err := s.InsertGrant(tx, g); err != nil {
+				return err
+			}
 		}
 		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)", session.Box, session.ID, host, "", size, contract.BoxPending, reason, "", event.Time.UnixMilli(), event.Time.UnixMilli())
 		if err != nil {

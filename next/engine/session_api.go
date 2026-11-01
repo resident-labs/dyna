@@ -274,7 +274,7 @@ func (s *Service) closeSession(ctx context.Context, session store.Session, disca
 		if !changed {
 			return nil
 		}
-	} else if err := s.store.MarkClosing(ctx, session.ID, discard); err != nil {
+	} else if err := s.store.MarkClosing(ctx, session.ID, discard, s.now()); err != nil {
 		return failure(err)
 	}
 	if err := s.StopHostexecs(ctx); err != nil {

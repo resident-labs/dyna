@@ -285,6 +285,10 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 			named[body.Session] = true
 		case contract.OpRequested:
 			named[body.By.Session] = true
+		case contract.QuestionAnswered:
+			named[body.Session] = true
+		case contract.QuestionWithdrawn:
+			named[body.Session] = true
 		}
 	}
 	delete(named, "")

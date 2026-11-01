@@ -23,7 +23,7 @@
     .map(item => ({ id: item.session, name: item.name, root: !item.parent, running: store.shellJobs.get(item.session) ?? 0 })));
   let sessions = $derived(session ? allSessions.filter(item => item.id === session) : allSessions);
   let failures = $derived([...store.failedJobs].filter(key => sessions.some(item => key.startsWith(`${item.id}/`))));
-  let waiting = $derived(session ? requestsFor(store.requests.values(), session).filter(request => request.state === "pending" && request.class === "owner").length : store.waiting);
+  let waiting = $derived(session ? requestsFor(store.requests.values(), session).filter(request => request.state === "pending" && request.class === "owner").length + store.pendingQuestions(session).length : store.waiting);
   let working = $derived(store.counts.working);
   let busy = $derived([...store.sessions.values()].filter(item => store.status(item.session) === "working"));
   let faces = $derived(!session && !panelShown && working > 0);

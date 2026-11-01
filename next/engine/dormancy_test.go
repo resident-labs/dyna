@@ -85,7 +85,7 @@ func TestDormancyStopsAndWakes(t *testing.T) {
 
 func TestDormancyKeepsClosingAncestor(t *testing.T) {
 	s, h, _, sid, ctx := quietSession(t, 0)
-	if err := s.store.MarkClosing(ctx, sid, false); err != nil {
+	if err := s.store.MarkClosing(ctx, sid, false, time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
 	passLifecycle(t, s, ctx)

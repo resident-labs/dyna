@@ -24,10 +24,11 @@
   const messages = new MessageSearch(untrack(() => search));
   const sessionSearch = new SessionSearch(request => call("session.search", request));
   let current = $derived(rooms.find(found => found.id === room));
+  let asks = $derived((current?.waiting?.length ?? 0) + (current?.questions?.length ?? 0));
   let actions: Action[] = $derived([
     ...current ? [
       { id: "new-session", label: "New session", hint: `in ${current.name}`, keys: [], icon: "plus" },
-      { id: "requests", label: "Requests", hint: current.waiting?.length ? `${current.waiting.length} wait${phone.current ? "" : " for you"}` : "", keys: ["G", "R"], icon: "inbox" },
+      { id: "requests", label: "Requests", hint: asks ? `${asks} wait${phone.current ? "" : " for you"}` : "", keys: ["G", "R"], icon: "inbox" },
       { id: "pause", label: current.paused ? "Resume the room" : "Pause the room", hint: `${current.name} · ${current.paused ? "Sessions can start turns again" : "No session starts a new turn"}`, keys: [], icon: "pause" },
     ] satisfies Action[] : [],
     { id: "new-room", label: "Create a room", hint: "", keys: [], icon: "plus" },

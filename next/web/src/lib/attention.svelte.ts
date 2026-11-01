@@ -11,6 +11,8 @@ import type { Event, FailureCause, RoomSummary, Scope, SessionListResponse, Sess
 export class Attention {
   readonly rooms = new SvelteMap<string, RoomSummary>();
   readonly waiting = new SvelteMap<string, SvelteSet<string>>();
+  // Per room, the questions the owner has not answered.
+  readonly questions = new SvelteMap<string, SvelteSet<string>>();
   readonly working = new SvelteMap<string, SvelteSet<string>>();
   // A working session's latest activity label, such as "read spec.md", as the engine sends it. The newest label is
   // last, so a room's busiest agent is its last working entry; room.list seeds each room's newest one.
@@ -36,6 +38,8 @@ export class Attention {
   // then offers every control, and the engine still refuses what the device cannot do.
   private readonly scopes = new SvelteSet<Scope>(everyScope.map(item => item.scope));
   can = (scope: Scope) => this.scopes.has(scope);
+  // What waits for the owner in a room: requests and questions.
+  asks = (room: string) => (this.waiting.get(room)?.size ?? 0) + (this.questions.get(room)?.size ?? 0);
   // The newest event applied; room.list gives the first value and the stream resumes after it.
   private head = 0;
   private stop = () => {};
@@ -59,6 +63,7 @@ export class Attention {
   private add(room: RoomSummary): void {
     this.rooms.set(room.id, room);
     this.waiting.set(room.id, new SvelteSet(room.waiting));
+    this.questions.set(room.id, new SvelteSet(room.questions ?? []));
     this.working.set(room.id, new SvelteSet(room.working));
     this.broken.set(room.id, new SvelteMap());
     this.failed.set(room.id, new SvelteMap());
@@ -179,7 +184,7 @@ export class Attention {
     }
     // A deleted room has no rows left, so this live event also has seq 0.
     if (event.type === "room.deleted") {
-      for (const map of [this.rooms, this.waiting, this.working, this.sessions, this.broken, this.failed, this.hostless]) map.delete(event.room ?? "");
+      for (const map of [this.rooms, this.waiting, this.questions, this.working, this.sessions, this.broken, this.failed, this.hostless]) map.delete(event.room ?? "");
       return;
     }
     // A read position also has seq 0. The feed's moves only forward, so a room store opened later starts from it.
@@ -205,6 +210,8 @@ export class Attention {
       // Only owner-class requests wait for the owner.
       case "op.requested": if (event.body.class === "owner") waiting.add(event.body.id); break;
       case "op.decided": case "op.ran": if (event.body.state !== "pending") waiting.delete(event.body.id); break;
+      case "question.asked": this.questions.get(event.room ?? "")?.add(event.body.id); break;
+      case "question.answered": case "question.withdrawn": this.questions.get(event.room ?? "")?.delete(event.body.id); break;
       case "room.paused": case "room.resumed": {
         const room = this.rooms.get(event.room ?? "");
         if (room) this.rooms.set(room.id, { ...room, paused: event.type === "room.paused" });

@@ -8,7 +8,7 @@ export function pendingStartBrief(brief: string | undefined, turns: TranscriptTu
 
 // Transcript inputs carry non-post event bodies as JSON. Decode the complete body once here.
 export function timelineInputText(input: TranscriptInput, full?: string): string {
-  if (input.type === "post.created") return full ?? input.text;
+  if (input.type === "post.created" || input.type === "question.answered") return full ?? input.text;
   if (input.type !== "session.started" || (input.more && full === undefined)) return "Started work";
   try {
     const event = decodeEvent({ id: input.id, seq: input.seq, room: input.room, at: input.at, from: input.from, type: input.type, body: JSON.parse(full ?? input.text) });

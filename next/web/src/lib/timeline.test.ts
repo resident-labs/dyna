@@ -1,7 +1,7 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout } from "./timeline.ts";
+import { summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, timelineInputText, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout } from "./timeline.ts";
 import type { TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
 
 test("a post stays queued until the transcript holds it, even after an agent's later post", () => {
@@ -123,4 +123,10 @@ test("a post names its destination only when it left this DM", () => {
   assert.equal(postDestination(ownedPost("p", ""), "s", "r", "general", name), "#general");
   assert.equal(postDestination({ ...ownedPost("p", ""), room: "elsewhere" }, "s", "r", "general", name), "another room");
   assert.equal(postDestination({ ...ownedPost("p", ""), home: undefined }, "s", "r", "general", name), undefined);
+});
+
+test("an answered question reads in the thread as its text", () => {
+  const input = { at: "", id: "e", seq: 1, room: "r", type: "question.answered", from: { kind: "owner" }, text: "Question: Which?" } as const;
+  assert.equal(timelineInputText(input), "Question: Which?");
+  assert.equal(timelineInputText({ ...input, more: true }, "Question: Which?\n\nAnswer: This"), "Question: Which?\n\nAnswer: This");
 });

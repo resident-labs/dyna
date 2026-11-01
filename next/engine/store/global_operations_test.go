@@ -22,11 +22,11 @@ func TestGlobalOperationUpgradePreservesReferences(t *testing.T) {
 		CREATE TABLE events (seq INTEGER PRIMARY KEY, room TEXT, from_kind TEXT, from_id TEXT, type TEXT, body BLOB);
 		CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT, started_seq INTEGER, started_at INTEGER, ended_at INTEGER);
 		CREATE TABLE pr_owners (session TEXT);
-		CREATE TABLE rooms(id TEXT PRIMARY KEY); CREATE TABLE sessions (id TEXT); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);
+		CREATE TABLE rooms(id TEXT PRIMARY KEY); CREATE TABLE sessions (id TEXT, room TEXT, parent TEXT, created_at INTEGER, closed_at INTEGER); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);
 		INSERT INTO rooms VALUES ('room');
 		CREATE TABLE operations (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id), by_kind TEXT NOT NULL, by_id TEXT NOT NULL, class TEXT NOT NULL, state TEXT NOT NULL, card BLOB NOT NULL, args BLOB NOT NULL, args_sha256 BLOB NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, decision BLOB, result BLOB);
 		INSERT INTO operations VALUES ('op','hostexec.run','room','owner','','owner','done','{}','{}',x'01',1,2,NULL,NULL);
-		CREATE TABLE grants (id TEXT PRIMARY KEY, kind TEXT, expires_at INTEGER, revoked_at INTEGER, expired_at INTEGER);
+		CREATE TABLE grants (id TEXT PRIMARY KEY, kind TEXT, room TEXT, to_kind TEXT, to_id TEXT, hosts BLOB, by_kind TEXT, by_id TEXT, created_at INTEGER, expires_at INTEGER, revoked_at INTEGER, expired_at INTEGER);
 		INSERT INTO grants(id) VALUES ('grant');
 		CREATE TABLE hostexec_runs (op TEXT PRIMARY KEY REFERENCES operations(id), grant_id TEXT NOT NULL REFERENCES grants(id), host TEXT NOT NULL, scope TEXT NOT NULL, started_at INTEGER NOT NULL, timeout_ms INTEGER NOT NULL, ended_at INTEGER, output_bytes INTEGER NOT NULL DEFAULT 0, stopped TEXT NOT NULL DEFAULT '', lost_at INTEGER);
 		INSERT INTO hostexec_runs VALUES ('op','grant','host','scope',1,100,2,0,'',NULL);`)

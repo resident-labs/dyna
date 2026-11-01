@@ -19,6 +19,7 @@ var toolkits = map[string]Toolkit{
 	"op":       {Name: "op", Title: "Operations", Destructive: true},
 	"post":     {Name: "post", Title: "Posts", Destructive: true},
 	"pr":       {Name: "pr", Title: "Pull requests", Destructive: true, OpenWorld: true},
+	"question": {Name: "question", Title: "Questions for the owner"},
 	"room":     {Name: "room", Title: "Rooms", Destructive: true},
 	"session":  {Name: "session", Title: "Sessions", Destructive: true},
 	"visual":   {Name: "visual", Title: "Visual checks", Idempotent: true},

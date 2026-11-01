@@ -119,7 +119,7 @@ func TestAgentActionsHideOwnerMethods(t *testing.T) {
 
 func TestPhaseOneActionCoverage(t *testing.T) {
 	required := map[string]string{
-		"context": "show", "post": "send", "session": "start list stop close restart set_profile move", "room": "log repos pause", "op": "withdraw", "hostexec": "run request_grant", "pr": "open", "visual": "check", "computer": "open click type text screenshot",
+		"context": "show", "question": "ask list", "post": "send", "session": "start list stop close restart set_profile move", "room": "log repos pause", "op": "withdraw", "hostexec": "run request_grant", "pr": "open", "visual": "check", "computer": "open click type text screenshot",
 	}
 	found := map[string]bool{}
 	for _, a := range AgentActions() {

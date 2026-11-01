@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -89,7 +90,7 @@ func TestCloseHandsPendingInputToParent(t *testing.T) {
 
 func TestPostRejectsClosingSession(t *testing.T) {
 	s, room, child, ctx := setup(t)
-	if err := s.store.MarkClosing(ctx, child, false); err != nil {
+	if err := s.store.MarkClosing(ctx, child, false, time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
 	owner := contract.Principal{Kind: contract.PrincipalOwner}

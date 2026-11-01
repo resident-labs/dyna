@@ -5,10 +5,12 @@
   import { closedSession, fromNow } from "../feed.ts";
   import { requestGroups, requestOrder, requestsFor } from "../request-groups.ts";
   import type { Request, RoomStore } from "../room.svelte.ts";
+  import type { Question } from "../contract.gen.ts";
   import Avatar from "./Avatar.svelte";
   import RequestCard from "./RequestCard.svelte";
   import RequestRow from "./RequestRow.svelte";
-  let { store, session, admin, anchor, onclose, element = $bindable() }: { store: RoomStore; session?: string; admin: boolean; anchor?: HTMLElement; onclose: () => void; element?: HTMLElement } = $props();
+  import QuestionCard from "./QuestionCard.svelte";
+  let { store, session, admin, operate, anchor, onclose, element = $bindable() }: { store: RoomStore; session?: string; admin: boolean; operate: boolean; anchor?: HTMLElement; onclose: () => void; element?: HTMLElement } = $props();
   // Like the Jobs popover, it hangs from its button: a desktop's right edge lines up with the button's.
   let right = $state<number>();
   const groupThreshold = 12, initialGroups = 3;
@@ -17,6 +19,8 @@
   let touchStart = 0;
   let rows: Record<string, ReturnType<typeof RequestRow>> = $state({});
   let requests = $derived(requestsFor(store.requests.values(), session));
+  let questions = $derived(store.pendingQuestions(session));
+  let answered = $derived([...store.questions.values()].filter(item => item.state === "answered" && (!session || item.session === session) && new Date(item.answered ?? 0).toDateString() === new Date(now).toDateString()));
   let waiting = $derived(requests.filter(item => item.state === "pending" && item.class === "owner")
     .sort((a, b) => Date.parse(a.expires) - Date.parse(b.expires)));
   let shared = $derived(requests.filter(item => item.state === "pending" && item.class !== "owner")
@@ -27,7 +31,7 @@
     .sort((a, b) => (b.decision?.at ?? "").localeCompare(a.decision?.at ?? "")));
   let current = $derived(pending.some(item => item.id === chosen) ? chosen : pending[0]?.id);
   function keys(event: KeyboardEvent) {
-    if (event.target instanceof HTMLInputElement || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || !current) return;
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || !current) return;
     const at = pending.findIndex(item => item.id === current), key = event.key.toLowerCase();
     if (key === "j" || key === "k") {
       const next = pending[Math.max(0, Math.min(pending.length - 1, at + (key === "j" ? 1 : -1)))];
@@ -65,12 +69,16 @@
 {#snippet row(request: Request, grouped = false)}
   <RequestRow bind:this={() => rows[request.id], value => { if (value) rows[request.id] = value; else delete rows[request.id]; }} row={{ kind: "approval", request }} {admin} {store} {now} {grouped} current={request.id === current} />
 {/snippet}
+{#snippet asked(question: Question)}
+  <QuestionCard {question} name={store.names.get(question.session) ?? closedSession} root={!!store.sessions.get(question.session) && !store.sessions.get(question.session)?.parent} {operate} />
+{/snippet}
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <section class="panel" aria-label="Requests" tabindex="-1" style:right={right === undefined ? null : `${right}px`} bind:this={element} onkeydown={keys}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="handle" ontouchstart={event => { touchStart = event.touches[0].clientY; }} ontouchend={event => { if (event.changedTouches[0].clientY - touchStart > 60) onclose(); }}><span></span></div>
-  <header><div><strong>Requests</strong>{#if waiting.length}<span>{waiting.length} waiting</span>{/if}</div><button type="button" aria-label="Close requests" onclick={onclose}>×</button></header>
+  <header><div><strong>Requests</strong>{#if waiting.length + questions.length}<span>{waiting.length + questions.length} waiting</span>{/if}</div><button type="button" aria-label="Close requests" onclick={onclose}>×</button></header>
   <div class="list">
+    {#each questions as question (question.id)}{@render asked(question)}{/each}
     {#if pending.length && !admin}<p class="none">Needs a device with full access.</p>{/if}
     {#if waiting.length > groupThreshold}
       {#each moreGroups ? groups : groups.slice(0, initialGroups) as [id, items] (id)}
@@ -83,13 +91,14 @@
       {/each}
       {#if groups.length > initialGroups && !moreGroups}<button class="more" type="button" onclick={() => { moreGroups = true; }}>{groups.length - initialGroups} more sessions · {groups.slice(initialGroups).reduce((n, group) => n + group[1].length, 0)} requests</button>{/if}
     {:else}
-      {#each waiting as request (request.id)}{@render row(request)}{:else}{#if store.ready}<p class="none">Nothing waits for you.</p>{/if}{/each}
+      {#each waiting as request (request.id)}{@render row(request)}{:else}{#if store.ready && !questions.length}<p class="none">Nothing waits for you.</p>{/if}{/each}
     {/if}
     {#if shared.length}<h2>Waiting for a session <span>{shared.length}</span></h2>
       {#each shared as request (request.id)}{@render row(request)}{/each}
     {/if}
-    {#if decided.length}
-      <h2>Decided today <span>{decided.length}</span></h2>
+    {#if decided.length || answered.length}
+      <h2>Decided today <span>{decided.length + answered.length}</span></h2>
+      {#each answered as question (question.id)}{@render asked(question)}{/each}
       {#each all ? decided : decided.slice(0, 5) as request (request.id)}<RequestCard {admin} {request} {store} {now} />{/each}
       {#if decided.length > 5 && !all}<button class="more" type="button" onclick={() => { all = true; }}>Show all {decided.length}</button>{/if}
     {/if}
