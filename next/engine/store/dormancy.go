@@ -57,7 +57,7 @@ AND ` + noOpenQuestion + `
 AND NOT EXISTS (SELECT 1 FROM turns t WHERE t.session=s.id AND t.ended_at IS NULL)`
 
 // aged is the normal wait. A host at its floor skips it, and the PR exemption with it.
-const aged = `b.updated_at<=? AND NOT EXISTS (SELECT 1 FROM pr_owners p WHERE p.session=s.id)`
+const aged = `b.updated_at<=? AND NOT EXISTS (SELECT 1 FROM pr_owners p WHERE p.session=s.id AND p.state='open')`
 
 // atFloor needs a run of samples, so one bad reading closes nothing. Its parameter is the latest time the run may have started.
 const atFloor = `h.state='ready' AND h.disk_bytes<=h.disk_floor AND h.disk_low_since BETWEEN 1 AND ?`
