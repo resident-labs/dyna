@@ -74,7 +74,7 @@
   const retainedRequests = new SvelteSet<string>();
   $effect(() => { for (const request of store.requests.values()) retainedRequests.add(request.id); });
   let rows = $derived(feedRows(view.ordered, home, pending, since, retainedRequests));
-  let media = $derived(conversationMedia(rows));
+  let media = $derived(conversationMedia(rows.filter(row => row.kind === "post")));
   let mediaIndex: number | undefined = $state();
   function openMedia(key: string, file: Attachment) { const index = media.findIndex(item => item.key === key && item.file === file); if (index >= 0) mediaIndex = index; }
   let newestBoxRows = $derived.by(() => {
