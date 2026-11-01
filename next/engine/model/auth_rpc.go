@@ -151,7 +151,7 @@ func (r *AuthRPC) OAuthCompleted(req OAuthCompletion, out *OAuthCompletionResult
 			entry := r.Connections.proxy.pools["plan_"+string(attempt.provider)]
 			out.Prefix = "plan_" + string(attempt.provider)
 			selected := entry.defaultModel
-			out.Model = out.Prefix + "/" + planProxyModel(attempt.provider, selected)
+			out.Model = out.Prefix + "/" + entry.modelID(selected)
 			out.Accepted = true
 			return nil
 		}

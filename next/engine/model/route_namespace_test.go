@@ -35,7 +35,7 @@ func TestRouteNamespacesAndSplices(t *testing.T) {
 			path, rawPath, body = "", "", ""
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest("POST", tt.path, strings.NewReader(tt.body))
-			Handler(up.Listener.Addr().String(), "key", "session", tt.namespace, []string{"same", "vendor/one", "k3"}, []string{"credential"}).ServeHTTP(w, req)
+			handler(unixClient(up.Listener.Addr().String()), "key", "session", tt.namespace, []string{"same", "vendor/one", "k3"}, []string{"credential"}, pool{proxyIDs: map[string]string{"k3": "kimi-k3"}}).ServeHTTP(w, req)
 			if w.Code != tt.status || path != tt.wantPath || body != tt.wantBody {
 				t.Fatalf("status=%d path=%q rawPath=%q body=%q", w.Code, path, rawPath, body)
 			}
