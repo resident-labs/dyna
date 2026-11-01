@@ -1,6 +1,7 @@
 // Package egress is the only way out of a CI runner's empty network namespace.
 // It tunnels HTTPS to public addresses and refuses everything a job must not
-// reach: loopback, private and link-local ranges, and tailnet addresses.
+// reach: loopback, private and link-local ranges, and tailnet addresses. Each job
+// gets its own socket, which is how one job's limits stay apart from another's.
 package egress
 
 import (
@@ -13,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -36,10 +38,26 @@ var notPublic = []netip.Prefix{
 // down: an out-of-memory kill would cut every other job's tunnels.
 const maxRequest = 64 << 10 // bytes in a CONNECT request
 
+const (
+	// hostRate is what the proxy moves for all jobs together. It sits below the
+	// uplink, so the proxy decides the shares and not TCP, which would divide the
+	// link by tunnel and hand it to whichever job holds the most.
+	hostRate = 64 << 20 // bytes a second
+	// busyWindow is how recently a job moved bytes to count for a share. An idle
+	// job's long poll takes nothing from the others.
+	busyWindow = time.Second
+	// burst is the credit a job keeps after a pause. Sleeps overshoot, and without
+	// it a tunnel could never catch up to its share.
+	burst = 50 * time.Millisecond
+)
+
 type limits struct {
-	tunnels int // stays well inside the proxy's memory limit, at about 100 KiB each
+	// tunnels is one job's limit. All jobs' tunnels stay well inside the proxy's
+	// memory limit, at about 100 KiB each.
+	tunnels int
 	// closeWait is how long a far end may hold a tunnel after its job has left it.
 	closeWait time.Duration
+	rate      float64 // bytes a second for the host, shared by the jobs moving data
 }
 
 // Public reports whether a job may reach addr.
@@ -77,15 +95,84 @@ func PublicDial() Dial {
 	return dialer.DialContext
 }
 
-// Serve answers HTTP CONNECT on listener until ctx ends.
-func Serve(ctx context.Context, listener net.Listener, dial Dial) error {
-	return serve(ctx, listener, dial, limits{tunnels: 4096, closeWait: time.Minute})
+// Serve answers HTTP CONNECT until ctx ends, on one listener per job.
+func Serve(ctx context.Context, listeners []net.Listener, dial Dial) error {
+	return serve(ctx, listeners, dial, limits{tunnels: 256, closeWait: time.Minute, rate: hostRate})
 }
 
-func serve(ctx context.Context, listener net.Listener, dial Dial, bound limits) error {
-	stop := context.AfterFunc(ctx, func() { listener.Close() })
-	defer stop()
-	slots := make(chan struct{}, bound.tunnels)
+// job is what one listener's connections share.
+type job struct {
+	slots chan struct{}
+	host  *host
+	moved time.Time // guarded by host.mu
+	turn  time.Time // when its next bytes may go, guarded by host.mu
+}
+
+type host struct {
+	rate float64
+	mu   sync.Mutex
+	jobs []*job
+}
+
+// pace holds n bytes until the job's share of the host's rate allows them. The
+// share is even across the jobs moving data now, however many tunnels each holds.
+func (j *job) pace(n int) {
+	h := j.host
+	h.mu.Lock()
+	now := time.Now()
+	j.moved = now
+	busy := 0
+	for _, other := range h.jobs {
+		if now.Sub(other.moved) < busyWindow {
+			busy++
+		}
+	}
+	if earliest := now.Add(-burst); j.turn.Before(earliest) {
+		j.turn = earliest
+	}
+	wait := j.turn.Sub(now)
+	j.turn = j.turn.Add(time.Duration(float64(n) * float64(busy) / h.rate * float64(time.Second)))
+	h.mu.Unlock()
+	time.Sleep(wait) // a negative wait returns at once
+}
+
+// paced counts what a tunnel writes against its job's share.
+type paced struct {
+	io.Writer
+	job *job
+}
+
+func (p paced) Write(data []byte) (int, error) {
+	p.job.pace(len(data))
+	return p.Writer.Write(data)
+}
+
+func serve(ctx context.Context, listeners []net.Listener, dial Dial, bound limits) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	shared := &host{rate: bound.rate}
+	for range listeners {
+		shared.jobs = append(shared.jobs, &job{slots: make(chan struct{}, bound.tunnels), host: shared})
+	}
+	failed := make(chan error, len(listeners))
+	for i, listener := range listeners {
+		stop := context.AfterFunc(ctx, func() { listener.Close() })
+		defer stop()
+		go func() { failed <- accept(ctx, listener, dial, bound, shared.jobs[i]) }()
+	}
+	var first error
+	for range listeners {
+		if err := <-failed; err != nil && first == nil {
+			// The proxy restarts as a whole, so one bad socket ends the rest.
+			first = err
+			cancel()
+		}
+	}
+	return first
+}
+
+// accept serves one job. Being past the limit costs that job alone.
+func accept(ctx context.Context, listener net.Listener, dial Dial, bound limits, j *job) error {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -95,18 +182,19 @@ func serve(ctx context.Context, listener net.Listener, dial Dial, bound limits) 
 			return err
 		}
 		select {
-		case slots <- struct{}{}:
+		case j.slots <- struct{}{}:
 			go func() {
-				defer func() { <-slots }()
-				handle(ctx, conn, dial, bound.closeWait)
+				defer func() { <-j.slots }()
+				handle(ctx, conn, dial, bound.closeWait, j)
 			}()
 		default:
+			reply(conn, http.StatusTooManyRequests)
 			conn.Close()
 		}
 	}
 }
 
-func handle(ctx context.Context, conn net.Conn, dial Dial, closeWait time.Duration) {
+func handle(ctx context.Context, conn net.Conn, dial Dial, closeWait time.Duration, j *job) {
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 	limited := &io.LimitedReader{R: conn, N: maxRequest}
@@ -136,14 +224,14 @@ func handle(ctx context.Context, conn net.Conn, dial Dial, closeWait time.Durati
 	done := make(chan struct{})
 	go func() {
 		// A job's long poll and a large download stay open as long as they need.
-		_, _ = io.Copy(upstream, reader)
+		_, _ = io.Copy(paced{upstream, j}, reader)
 		if half, ok := upstream.(interface{ CloseWrite() error }); ok {
 			_ = half.CloseWrite()
 		}
 		_ = upstream.SetReadDeadline(time.Now().Add(closeWait))
 		close(done)
 	}()
-	_, _ = io.Copy(conn, upstream)
+	_, _ = io.Copy(paced{conn, j}, upstream)
 	if half, ok := conn.(interface{ CloseWrite() error }); ok {
 		_ = half.CloseWrite()
 	}

@@ -3,6 +3,10 @@
 # tmpfs, so everything a job writes dies with the container.
 set -euo pipefail
 
+# The runner treats a hook it cannot start as one failed step, and always() steps
+# would still run. A hook that cannot be read or parsed means no job here at all.
+bash -n "$ACTIONS_RUNNER_HOOK_JOB_STARTED"
+
 # The container has no network. This local port is the way out, and the proxy
 # behind the socket reaches public addresses only.
 socat TCP-LISTEN:3128,bind=127.0.0.1,fork,reuseaddr UNIX-CONNECT:/run/dyna-egress/egress.sock &

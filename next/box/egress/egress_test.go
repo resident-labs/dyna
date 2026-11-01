@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -51,7 +52,7 @@ func exchange(t *testing.T, dial Dial, request string) (string, *bufio.Reader, n
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, listener, dial) }()
+	go func() { done <- Serve(ctx, []net.Listener{listener}, dial) }()
 	t.Cleanup(func() {
 		cancel()
 		if err := <-done; err != nil {
@@ -129,51 +130,188 @@ func TestServeReportsAFailedDial(t *testing.T) {
 	}
 }
 
-// start runs the proxy on a socket and returns a way to connect to it.
-func start(t *testing.T, dial Dial, bound limits) func() net.Conn {
+// startJobs runs the proxy on one socket per job and returns a way to connect to each.
+func startJobs(t *testing.T, jobs int, dial Dial, bound limits) []func() net.Conn {
 	t.Helper()
-	listener, err := net.Listen("unix", t.TempDir()+"/s")
-	if err != nil {
-		t.Fatal(err)
+	var listeners []net.Listener
+	var connects []func() net.Conn
+	for range jobs {
+		listener, err := net.Listen("unix", t.TempDir()+"/s")
+		if err != nil {
+			t.Fatal(err)
+		}
+		listeners = append(listeners, listener)
+		connects = append(connects, func() net.Conn {
+			conn, err := net.Dial("unix", listener.Addr().String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { conn.Close() })
+			return conn
+		})
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- serve(ctx, listener, dial, bound) }()
+	go func() { done <- serve(ctx, listeners, dial, bound) }()
 	t.Cleanup(func() {
 		cancel()
 		if err := <-done; err != nil {
 			t.Error(err)
 		}
 	})
-	return func() net.Conn {
-		conn, err := net.Dial("unix", listener.Addr().String())
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { conn.Close() })
-		return conn
-	}
+	return connects
 }
 
-func TestOneJobCannotHoldEveryTunnelOrGrowTheProxy(t *testing.T) {
+// start runs the proxy for one job and returns a way to connect to it.
+func start(t *testing.T, dial Dial, bound limits) func() net.Conn {
+	t.Helper()
+	return startJobs(t, 1, dial, bound)[0]
+}
+
+const connect443 = "CONNECT github.com:443 HTTP/1.1\r\nHost: github.com:443\r\n\r\n"
+
+func TestOneJobPastItsTunnelsCostsOnlyThatJob(t *testing.T) {
 	hold := make(chan struct{})
 	t.Cleanup(func() { close(hold) })
-	dialing := make(chan struct{}, 2)
-	connect := start(t, func(context.Context, string, string) (net.Conn, error) {
+	dialing := make(chan struct{}, 4)
+	jobs := startJobs(t, 2, func(context.Context, string, string) (net.Conn, error) {
 		dialing <- struct{}{}
 		<-hold
 		return nil, io.ErrClosedPipe
-	}, limits{tunnels: 2, closeWait: time.Minute})
+	}, limits{tunnels: 2, closeWait: time.Minute, rate: 1 << 30})
 	for range 2 {
-		if _, err := io.WriteString(connect(), "CONNECT github.com:443 HTTP/1.1\r\nHost: github.com:443\r\n\r\n"); err != nil {
+		if _, err := io.WriteString(jobs[0](), connect443); err != nil {
 			t.Fatal(err)
 		}
 		<-dialing
 	}
-	third := connect()
+	third := jobs[0]()
 	_ = third.SetReadDeadline(time.Now().Add(5 * time.Second))
-	if _, err := third.Read(make([]byte, 1)); err != io.EOF {
-		t.Fatalf("a tunnel past the limit got %v, want it closed", err)
+	if status, err := bufio.NewReader(third).ReadString('\n'); err != nil || !strings.Contains(status, "429") {
+		t.Fatalf("a tunnel past the limit got %q, %v", status, err)
+	}
+	// The other job's socket is still open for business.
+	if _, err := io.WriteString(jobs[1](), connect443); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-dialing:
+	case <-time.After(5 * time.Second):
+		t.Fatal("one job's tunnels starved another")
+	}
+}
+
+func TestAClosedTunnelFreesItsSlot(t *testing.T) {
+	connect := start(t, func(context.Context, string, string) (net.Conn, error) {
+		near, far := net.Pipe()
+		go far.Close()
+		return near, nil
+	}, limits{tunnels: 1, closeWait: time.Millisecond, rate: 1 << 30})
+	for range 3 {
+		conn := connect()
+		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+		if _, err := io.WriteString(conn, connect443); err != nil {
+			t.Fatal(err)
+		}
+		if status, err := bufio.NewReader(conn).ReadString('\n'); err != nil || !strings.Contains(status, "200") {
+			t.Fatalf("%q %v", status, err)
+		}
+		conn.Close()
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestFailingSocketEndsTheProxySoItRestarts(t *testing.T) {
+	listener, err := net.Listen("unix", t.TempDir()+"/s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken, err := net.Listen("unix", t.TempDir()+"/s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken.Close()
+	done := make(chan error, 1)
+	go func() { done <- serve(context.Background(), []net.Listener{listener, broken}, nil, limits{tunnels: 1}) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a dead socket went unreported")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the proxy kept running with a dead socket")
+	}
+}
+
+// flood is a far end that sends as fast as it is read.
+func flood(context.Context, string, string) (net.Conn, error) {
+	near, far := net.Pipe()
+	go func() {
+		defer far.Close()
+		chunk := make([]byte, 32<<10)
+		for {
+			if _, err := far.Write(chunk); err != nil {
+				return
+			}
+		}
+	}()
+	return near, nil
+}
+
+// download opens tunnels on one job and counts what comes back.
+func download(t *testing.T, connect func() net.Conn, tunnels int, total *atomic.Int64) {
+	t.Helper()
+	for range tunnels {
+		conn := connect()
+		if _, err := io.WriteString(conn, connect443); err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			buffer := make([]byte, 64<<10)
+			for {
+				n, err := conn.Read(buffer)
+				total.Add(int64(n))
+				if err != nil {
+					return
+				}
+			}
+		}()
+	}
+}
+
+const testRate = 64 << 20
+
+func TestJobsShareTheRateEvenlyHoweverManyTunnelsTheyHold(t *testing.T) {
+	jobs := startJobs(t, 2, flood, limits{tunnels: 64, closeWait: time.Millisecond, rate: testRate})
+	var hog, quiet atomic.Int64
+	download(t, jobs[0], 32, &hog)
+	download(t, jobs[1], 1, &quiet)
+	time.Sleep(1200 * time.Millisecond) // long enough for both to count as busy
+	hogStart, quietStart := hog.Load(), quiet.Load()
+	time.Sleep(time.Second)
+	gotHog, gotQuiet := float64(hog.Load()-hogStart), float64(quiet.Load()-quietStart)
+	if gotQuiet < gotHog/2 {
+		t.Fatalf("a hog with 32 tunnels took %.0f MiB/s against %.0f MiB/s for one tunnel", gotHog/(1<<20), gotQuiet/(1<<20))
+	}
+	if total := gotHog + gotQuiet; total > 1.2*testRate {
+		t.Fatalf("the host's rate was exceeded: %.0f MiB/s", total/(1<<20))
+	}
+}
+
+func TestAnIdleJobTakesNoShare(t *testing.T) {
+	jobs := startJobs(t, 3, flood, limits{tunnels: 64, closeWait: time.Millisecond, rate: testRate})
+	// Open tunnels that move nothing, like a runner's long poll.
+	idle := jobs[1]()
+	if _, err := io.WriteString(idle, "CONNECT github.com:443 HTTP/1.1\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	var busy atomic.Int64
+	download(t, jobs[0], 4, &busy)
+	time.Sleep(200 * time.Millisecond)
+	start := busy.Load()
+	time.Sleep(time.Second)
+	if got := busy.Load() - start; got < testRate/2 {
+		t.Fatalf("a lone busy job got %d MiB/s of %d", got>>20, testRate>>20)
 	}
 }
 
@@ -181,7 +319,7 @@ func TestServeDropsAnOversizedRequest(t *testing.T) {
 	connect := start(t, func(context.Context, string, string) (net.Conn, error) {
 		t.Error("an oversized request reached the dialer")
 		return nil, io.ErrClosedPipe
-	}, limits{tunnels: 2, closeWait: time.Minute})
+	}, limits{tunnels: 2, closeWait: time.Minute, rate: testRate})
 	conn := connect()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 	go func() {
@@ -215,7 +353,7 @@ func TestAFarEndThatNeverClosesCannotKeepATunnel(t *testing.T) {
 	connect := start(t, func(ctx context.Context, network, _ string) (net.Conn, error) {
 		conn, err := (&net.Dialer{}).DialContext(ctx, network, far.Addr().String())
 		return watched{conn, released}, err
-	}, limits{tunnels: 2, closeWait: 10 * time.Millisecond})
+	}, limits{tunnels: 2, closeWait: 10 * time.Millisecond, rate: testRate})
 	conn := connect().(*net.UnixConn)
 	if _, err := io.WriteString(conn, "CONNECT github.com:443 HTTP/1.1\r\nHost: github.com:443\r\n\r\n"); err != nil {
 		t.Fatal(err)
