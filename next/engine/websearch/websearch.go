@@ -11,6 +11,7 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -189,14 +190,18 @@ const redacted = "[redacted]"
 
 // redactedPatterns are the credential shapes a provider's error body may quote
 // back: a bearer header, an API key, and a signed token.
-var redactedPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._\-]{8,}`),
-	regexp.MustCompile(`\bsk-[A-Za-z0-9._\-]{8,}`),
-	regexp.MustCompile(`\beyJ[A-Za-z0-9._\-]{16,}`),
-}
+var redactedPatterns []*regexp.Regexp
+var redactedOnce sync.Once
 
 // redactTokens masks every credential shape in s.
 func redactTokens(s string) string {
+	redactedOnce.Do(func() {
+		redactedPatterns = []*regexp.Regexp{
+			regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._\-]{8,}`),
+			regexp.MustCompile(`\bsk-[A-Za-z0-9._\-]{8,}`),
+			regexp.MustCompile(`\beyJ[A-Za-z0-9._\-]{16,}`),
+		}
+	})
 	for _, pattern := range redactedPatterns {
 		s = pattern.ReplaceAllString(s, redacted)
 	}

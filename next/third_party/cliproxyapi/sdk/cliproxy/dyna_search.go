@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
@@ -54,13 +55,17 @@ type searchRefusal struct {
 func (e searchRefusal) Error() string   { return e.message }
 func (e searchRefusal) StatusCode() int { return e.status }
 
-var searchSecretPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._\-]{8,}`),
-	regexp.MustCompile(`\bsk-[A-Za-z0-9._\-]{8,}`),
-	regexp.MustCompile(`\beyJ[A-Za-z0-9._\-]{16,}`),
-}
+var searchSecretPatterns []*regexp.Regexp
+var searchSecretOnce sync.Once
 
 func searchRedact(s string, secrets ...string) string {
+	searchSecretOnce.Do(func() {
+		searchSecretPatterns = []*regexp.Regexp{
+			regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._\-]{8,}`),
+			regexp.MustCompile(`\bsk-[A-Za-z0-9._\-]{8,}`),
+			regexp.MustCompile(`\beyJ[A-Za-z0-9._\-]{16,}`),
+		}
+	})
 	for _, secret := range secrets {
 		if secret != "" {
 			s = strings.ReplaceAll(s, secret, "[redacted]")
