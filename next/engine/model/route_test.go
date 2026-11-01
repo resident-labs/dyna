@@ -73,7 +73,7 @@ func TestRouteRejectsURLSelectedModel(t *testing.T) {
 	target := up.Listener.Addr().String()
 	w := httptest.NewRecorder()
 	Handler(target, "secret", "session", "plan_anthropic", []string{"allowed"}, []string{"credential"}).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1beta/models/forbidden:generateContent", strings.NewReader(`{"model":"allowed"}`)))
-	if w.Code != http.StatusForbidden || called {
+	if w.Code != http.StatusNotFound || called {
 		t.Fatalf("status %d, called %v", w.Code, called)
 	}
 }

@@ -44,8 +44,7 @@ func handler(client *http.Client, clientKey, sessionID, namespace string, allowe
 	proxy.Transport = client.Transport
 	proxy.FlushInterval = -1
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gemini := strings.HasPrefix(r.URL.Path, "/model/v1beta/models/") && (strings.HasSuffix(r.URL.Path, ":generateContent") || strings.HasSuffix(r.URL.Path, ":streamGenerateContent"))
-		if r.URL.Path != "/model/v1/messages" && r.URL.Path != "/model/v1/chat/completions" && r.URL.Path != "/model/v1/responses" && !gemini {
+		if r.URL.Path != "/model/v1/messages" && r.URL.Path != "/model/v1/chat/completions" && r.URL.Path != "/model/v1/responses" {
 			refuse(w, http.StatusNotFound, "unsupported_route", "The model endpoint is not supported.")
 			return
 		}
@@ -53,7 +52,7 @@ func handler(client *http.Client, clientKey, sessionID, namespace string, allowe
 			refuse(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST is supported.")
 			return
 		}
-		if namespace == "" || (gemini && strings.HasPrefix(namespace, "plan_")) {
+		if namespace == "" {
 			refuse(w, http.StatusForbidden, "model_forbidden", "The profile does not allow this model.")
 			return
 		}
@@ -66,75 +65,59 @@ func handler(client *http.Client, clientKey, sessionID, namespace string, allowe
 			refuse(w, http.StatusRequestEntityTooLarge, "request_too_large", "Model request exceeds 32 MiB.")
 			return
 		}
-		if gemini {
-			modelAction := strings.TrimPrefix(r.URL.Path, "/model/v1beta/models/")
-			split := strings.LastIndexByte(modelAction, ':')
-			model, action := modelAction[:split], modelAction[split+1:]
-			if _, ok := allowed[model]; !ok || len(eligibleIDs) == 0 {
-				refuse(w, http.StatusForbidden, "model_forbidden", "The profile does not allow this model.")
-				return
-			}
-			r.URL.Path = "/model/v1beta/models/" + namespace + "/" + model + ":" + action
-			r.URL.RawPath = "/model/v1beta/models/" + url.PathEscape(namespace) + "%2F" + url.PathEscape(model) + ":" + action
-		} else {
-			decoder := json.NewDecoder(bytes.NewReader(body))
-			token, err := decoder.Token()
-			if err != nil || token != json.Delim('{') {
-				refuse(w, http.StatusBadRequest, "invalid_request", "A model is required.")
-				return
-			}
-			var model string
-			var valueStart, valueEnd int64
-			seenModel := false
-			valid := true
-			for decoder.More() {
-				key, err := decoder.Token()
-				if err != nil {
-					valid = false
-					break
-				}
-				var value json.RawMessage
-				if decoder.Decode(&value) != nil {
-					valid = false
-					break
-				}
-				if key == "model" {
-					if seenModel || json.Unmarshal(value, &model) != nil {
-						valid = false
-						break
-					}
-					valueEnd = decoder.InputOffset()
-					valueStart = valueEnd - int64(len(value))
-					seenModel = true
-				}
-			}
-			if valid {
-				_, err = decoder.Token()
-				valid = err == nil && decoder.Decode(new(json.RawMessage)) == io.EOF
-			}
-			if !valid || model == "" {
-				refuse(w, http.StatusBadRequest, "invalid_request", "A model is required.")
-				return
-			}
-			if _, ok := allowed[model]; !ok {
-				refuse(w, http.StatusForbidden, "model_forbidden", "The profile does not allow this model.")
-				return
-			}
-			if len(eligibleIDs) == 0 {
-				refuse(w, http.StatusForbidden, "account_forbidden", "No account is available to this room.")
-				return
-			}
-			encoded, _ := json.Marshal(namespace + "/" + proxyModel(namespace, model))
-			body = append(append(append([]byte(nil), body[:valueStart]...), encoded...), body[valueEnd:]...)
+		decoder := json.NewDecoder(bytes.NewReader(body))
+		token, err := decoder.Token()
+		if err != nil || token != json.Delim('{') {
+			refuse(w, http.StatusBadRequest, "invalid_request", "A model is required.")
+			return
 		}
+		var model string
+		var valueStart, valueEnd int64
+		seenModel := false
+		valid := true
+		for decoder.More() {
+			key, err := decoder.Token()
+			if err != nil {
+				valid = false
+				break
+			}
+			var value json.RawMessage
+			if decoder.Decode(&value) != nil {
+				valid = false
+				break
+			}
+			if key == "model" {
+				if seenModel || json.Unmarshal(value, &model) != nil {
+					valid = false
+					break
+				}
+				valueEnd = decoder.InputOffset()
+				valueStart = valueEnd - int64(len(value))
+				seenModel = true
+			}
+		}
+		if valid {
+			_, err = decoder.Token()
+			valid = err == nil && decoder.Decode(new(json.RawMessage)) == io.EOF
+		}
+		if !valid || model == "" {
+			refuse(w, http.StatusBadRequest, "invalid_request", "A model is required.")
+			return
+		}
+		if _, ok := allowed[model]; !ok {
+			refuse(w, http.StatusForbidden, "model_forbidden", "The profile does not allow this model.")
+			return
+		}
+		if len(eligibleIDs) == 0 {
+			refuse(w, http.StatusForbidden, "account_forbidden", "No account is available to this room.")
+			return
+		}
+		encoded, _ := json.Marshal(namespace + "/" + proxyModel(namespace, model))
+		body = append(append(append([]byte(nil), body[:valueStart]...), encoded...), body[valueEnd:]...)
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		r.ContentLength = int64(len(body))
 		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/model")
-		if gemini {
-			r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, "/model")
-		} else {
-			r.URL.RawPath = ""
-		}
+		r.URL.RawPath = ""
 		query := r.URL.Query()
 		for _, name := range []string{"key", "api_key", "access_token"} {
 			query.Del(name)
