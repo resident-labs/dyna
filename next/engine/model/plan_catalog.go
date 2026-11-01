@@ -55,17 +55,24 @@ func (p *Proxy) SetPlanModels(c Catalog) error {
 		for _, name := range ids {
 			set[name] = true
 		}
+		activation := set
+		if id == contract.ProviderOpenAI {
+			activation = make(map[string]bool, len(pinned.CodexCommon))
+			for _, name := range pinned.CodexCommon {
+				activation[name] = true
+			}
+		}
 		for _, model := range provider.Models {
 			if !set[planProxyModel(id, model.ID)] {
 				continue
 			}
 			p.planModels[id] = append(p.planModels[id], contract.CatalogModel{ID: model.ID, Name: model.Name})
-			if model.ID == provider.DefaultModel {
+			if activation[planProxyModel(id, model.ID)] && (p.planDefaults[id] == "" || model.ID == provider.DefaultModel) {
 				p.planDefaults[id] = model.ID
 			}
 		}
-		if len(p.planModels[id]) > 0 && p.planDefaults[id] == "" {
-			p.planDefaults[id] = p.planModels[id][0].ID
+		if p.planDefaults[id] == "" {
+			delete(p.planModels, id)
 		}
 	}
 	return nil

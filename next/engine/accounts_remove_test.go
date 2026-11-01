@@ -31,6 +31,7 @@ func TestAdoptionRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	setupTestPlanCatalog(t, proxy)
 	calls := 0
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
