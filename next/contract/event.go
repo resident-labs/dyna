@@ -133,7 +133,10 @@ type SessionMoved struct {
 
 type SessionCloseReason string
 
-const SessionCloseDormant SessionCloseReason = "dormant"
+const (
+	SessionCloseDormant SessionCloseReason = "dormant"
+	SessionCloseDisk    SessionCloseReason = "disk"
+)
 
 type SessionClosed struct {
 	Reason  SessionCloseReason `json:"reason,omitempty"`
@@ -243,7 +246,7 @@ const (
 	CauseEngineRestarted     FailureCause = "engine_restarted"      // the engine restarted while it created the box
 	CauseRemoveFailed        FailureCause = "remove_failed"         // close could not remove the box
 	CauseArchiveFailed       FailureCause = "archive_failed"        // close could not archive the session's branch
-	CauseGrantInactive       FailureCause = "grant_inactive"        // the host-exec grant expired or was revoked
+	CauseGrantInactive       FailureCause = "grant_inactive"        // the host-exec grant is no longer active
 	CauseHostLost            FailureCause = "host_lost"             // the host stopped answering during the run
 	CauseHostBusy            FailureCause = "host_busy"             // the host execution limit is full
 	CauseGithubFailed        FailureCause = "github_failed"         // GitHub refused the request or did not answer

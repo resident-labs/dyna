@@ -130,13 +130,13 @@ func setting(host contract.HostName, runners int) contract.RepoCIHost {
 }
 
 func readyHost(name contract.HostName, memory int64) box.Host {
-	return box.Host{Name: name, State: box.HostReady, CPUs: 16, MemBytes: memory, DiskBytes: 100 * box.GiB, CheckedAt: time.Unix(1, 0)}
+	return box.Host{Name: name, State: box.HostReady, CPUs: 16, MemBytes: memory, DiskBytes: 100 * box.GiB, DiskFloor: 20 * box.GiB, CheckedAt: time.Unix(1, 0)}
 }
 
 func newFixture(runners int) *fixture {
 	f := &fixture{api: &fakeAPI{}, sets: &fakeSets{}, now: time.Unix(1_000_000, 0), drivers: map[contract.HostName]*fakeDriver{"pve": {}}}
 	f.store = &fakeStore{settings: []contract.RepoCIHost{setting("pve", runners)}, hosts: []box.Host{readyHost("pve", 64*box.GiB)}}
-	f.pool = &Pool{Store: f.store, GitHub: f.api, Sets: f.sets, DiskFloor: 20 * box.GiB, Now: func() time.Time { return f.now },
+	f.pool = &Pool{Store: f.store, GitHub: f.api, Sets: f.sets, Now: func() time.Time { return f.now },
 		Hosts: func(_ context.Context, name contract.HostName) (Driver, error) { return f.drivers[name], nil }}
 	return f
 }

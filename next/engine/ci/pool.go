@@ -81,8 +81,6 @@ type Pool struct {
 	Hosts  func(context.Context, contract.HostName) (Driver, error)
 	GitHub API
 	Sets   Scaleset
-	// DiskFloor is the free disk admission keeps on a host.
-	DiskFloor int64
 	// Memory reads a host's latest memory use, as the box reconciler does.
 	Memory func(contract.HostName) int64
 	Now    func() time.Time
@@ -431,13 +429,13 @@ func (p *Pool) place(ctx context.Context, repo contract.RepoName, assigned int, 
 		// A host below its disk floor or out of memory reports only what it holds,
 		// so GitHub stops assigning it more.
 		capacity += mine[row.Host]
-		if host := view.hosts[row.Host]; host != nil && box.Admit([]box.Host{host.host}, boxes, request, p.DiskFloor).Host != "" {
+		if host := view.hosts[row.Host]; host != nil && box.Admit([]box.Host{host.host}, boxes, request).Host != "" {
 			capacity = capacity - mine[row.Host] + max(row.Runners, mine[row.Host])
 		}
 	}
 	var failures []error
 	for running < min(assigned, capacity) {
-		placement := box.Admit(open(), boxes, request, p.DiskFloor)
+		placement := box.Admit(open(), boxes, request)
 		if placement.Host == "" {
 			break
 		}
