@@ -1,5 +1,21 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
-import type { TranscriptInput, TranscriptItem } from "./contract.gen.ts";
+import type { TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
+import { decodeEvent } from "./event.ts";
+
+export function pendingStartBrief(brief: string | undefined, turns: TranscriptTurn[]): string | undefined {
+  return brief && !turns.some(turn => turn.inputs?.some(input => input.type === "session.started")) ? brief : undefined;
+}
+
+// Transcript inputs carry non-post event bodies as JSON. Decode the complete body once here.
+export function timelineInputText(input: TranscriptInput, full?: string): string {
+  if (input.type === "post.created") return full ?? input.text;
+  if (input.type !== "session.started" || (input.more && full === undefined)) return "Started work";
+  try {
+    const event = decodeEvent({ id: input.id, seq: input.seq, room: input.room, at: input.at, from: input.from, type: input.type, body: JSON.parse(full ?? input.text) });
+    return event?.type === "session.started" ? event.body.brief || "Started work" : "Started work";
+  } catch { return "Started work"; }
+}
+
 import { titleOf, type StepKind } from "./steps.ts";
 
 // Dyna: Transcript items already arrive in timeline order, and posts can belong to a tool.
