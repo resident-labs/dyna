@@ -1,32 +1,7 @@
-<script lang="ts" module>
-  import DOMPurify from "dompurify";
-  import { marked } from "marked";
-  // Links in posts open in a new tab without access to this page.
-  DOMPurify.addHook("afterSanitizeAttributes", node => {
-    if (node instanceof HTMLAnchorElement) {
-      node.target = "_blank";
-      node.rel = "noopener noreferrer";
-    }
-  });
-  // Markdown from any author is sanitized before it reaches the page. Images wait for the files view. Each text renders
-  // once: a row that scrolls back in, or gets a new row object when a page loads, reuses its HTML. Parsing and
-  // sanitizing cost about a millisecond a post, which was most of a scroll frame. The feed keeps at most 1,000 events,
-  // so a full cache starts over.
-  const rendered = new Map<string, string>();
-  export function render(text: string): string {
-    let html = rendered.get(text);
-    if (html === undefined) {
-      if (rendered.size >= 2000) rendered.clear();
-      html = DOMPurify.sanitize(marked.parse(text, { async: false, gfm: true, breaks: true }), { FORBID_TAGS: ["img"] });
-      rendered.set(text, html);
-    }
-    return html;
-  }
-</script>
-
 <script lang="ts">
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
+  import Markdown from "./Markdown.svelte";
   import VisualBanner from "./VisualBanner.svelte";
   import { fileSize, formatTime, isImage, isThumb, type Row } from "../feed.ts";
   import type { Attachment, VisualCard } from "../contract.gen.ts";
@@ -37,7 +12,6 @@
   let { row, author, to, root, onretry, ondiscard, onforward, swipeDisabled = false, newest, onvisual }: {
     row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; newest: Map<string, VisualCard>; onvisual: (visual: VisualCard) => void;
   } = $props();
-  let html = $derived(render(row.text));
   let distance = $state(0), dragging = $state(false), ready = $state(false);
   function swipe(node: HTMLElement) {
     let state: Swipe | null = null, id = -1, suppress = 0;
@@ -167,7 +141,7 @@
     <p class="name"><strong class={row.from.kind} style:--hue={hue(author)}>{author}</strong>
       <time datetime={row.at}>{formatTime(row.at)}</time>{#if to}<span class="to">→ {to}</span>{/if}</p>
   {/if}
-  <div class="text">{@html html}</div>
+  <Markdown text={row.text} />
   {#each row.attachments as file}{@const visual = file.visual}{#if visual}<div><VisualBanner {visual} newest={newest.get(visual.id) ?? visual} onopen={() => onvisual(visual)} /></div>{/if}{/each}
   <!-- As in v1, images come first as thumbnails, then a card per other file. Each opens the file in a new tab. -->
   {#if images.length}<div class="images" class:many={images.length > 1}>{#each images as file, i (i)}
@@ -256,17 +230,4 @@
   .open { margin-left: auto; color: var(--muted); font-size: 16px; }
   .file:hover .open { color: var(--text); }
   .thumb:hover, .thumb:focus-visible, .file:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-  .text { overflow-wrap: anywhere; }
-  .text :global(:is(p, ul, ol, pre, blockquote)) { margin: 0 0 4px; }
-  .text :global(:is(p, ul, ol, pre, blockquote):last-child) { margin-bottom: 0; }
-  /* The type scale: post text is 15 px, a title 16 and a head 18. A heading is no larger than a section header. */
-  .text :global(:is(h1, h2, h3, h4, h5, h6)) { margin: 8px 0 4px; font-size: 15px; line-height: 1.25; }
-  .text :global(h1) { font-size: 18px; }
-  .text :global(h2) { font-size: 16px; }
-  .text :global(:is(h1, h2, h3, h4, h5, h6):first-child) { margin-top: 0; }
-  /* A code block sits on the raised surface and scrolls sideways; it never wraps. */
-  .text :global(pre) { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); overflow-x: auto; white-space: pre; overflow-wrap: normal; }
-  .text :global(code) { font: 13px var(--mono); font-variant-ligatures: none; }
-  .text :global(blockquote) { padding-left: 10px; border-left: 2px solid var(--line); color: var(--muted); }
-  .text :global(a) { color: var(--focus); }
 </style>
