@@ -143,10 +143,26 @@
       if (quota.status === "fulfilled") { accounts = quota.value.accounts ?? []; accountsFailed = false; loadedAt = Date.now(); } else accountsFailed = true;
     });
   });
+  const hiddenKey = "dyna.usage.hidden";
   let usage = $derived(usageRows(accounts ?? [], catalog));
-  // An account with nothing left waits in a closed section under the others, since it takes no work until then.
+  // An account with nothing left waits in a closed section under the others, since it takes no work until then. The
+  // owner can hide one there, in this browser, and it comes back once it resets or its balance rises.
   let usable = $derived(usage.filter(row => !outOfLimit(row, loadedAt)));
-  let spent = $derived(usage.filter(row => outOfLimit(row, loadedAt)));
+  let out = $derived(usage.filter(row => outOfLimit(row, loadedAt)));
+  let hidden = $state<string[]>(savedHidden());
+  let spent = $derived(out.filter(row => !hidden.includes(row.id)));
+  let hiddenRows = $derived(out.filter(row => hidden.includes(row.id)));
+  function savedHidden(): string[] {
+    try { return JSON.parse(localStorage.getItem(hiddenKey) ?? "[]"); } catch { return []; }
+  }
+  function hide(next: string[]) {
+    hidden = next;
+    try { localStorage.setItem(hiddenKey, JSON.stringify(next)); } catch { /* Storage is blocked: the choice lasts until the page closes. */ }
+  }
+  $effect(() => {
+    const back = usable.map(row => row.id).filter(id => hidden.includes(id));
+    if (back.length) hide(hidden.filter(id => !back.includes(id)));
+  });
   let alerts = $derived(accountAlerts(accounts ?? [], catalog));
   // One sentence says what needs the owner: the same items as the Needs you card. Under it, a muted line sums low disk,
   // a large shared folder, machines and the busiest usage window; a part with nothing to say is left out.
@@ -207,11 +223,12 @@
   {#if hosts?.length || hostsFailed}<h2 id="machines" bind:this={machines}>Machines{#if hosts?.length}<span>{hosts.length}</span>{/if}</h2>{/if}
   {#if !hosts && hostsFailed}<p class="failed">Machines could not load.</p>{/if}
   {#if hosts?.length}<div class="cards">{#each hosts as host (host.name)}<HostCard {host} now={hostsAt} {roomName} />{/each}</div>{/if}
-  {#if usage.length || accountsFailed}<h2>Usage{#if usage.length}<span>{usage.length}</span>{/if}</h2>{/if}
+  {#if usage.length || accountsFailed}<h2>Usage{#if usage.length}<span>{usage.length - hiddenRows.length}</span>{/if}</h2>{/if}
   {#if accountsFailed}<p class="failed">Model usage could not load.</p>{/if}
   {#if usable.length}<div class="cards">{#each usable as row, i (i)}<UsageCard {row} now={loadedAt} />{/each}</div>{/if}
   {#if spent.length}<details class="spent"><summary>Limit reached<span>{spent.length}</span><i><Icon name="chevron" /></i></summary>
-    <div class="cards">{#each spent as row, i (i)}<UsageCard {row} now={loadedAt} />{/each}</div></details>{/if}
+    <div class="cards">{#each spent as row, i (i)}<UsageCard {row} now={loadedAt} onhide={() => hide([...hidden, row.id])} />{/each}</div></details>{/if}
+  {#if hiddenRows.length}<button type="button" class="unhide" onclick={() => hide([])}>Show {count(hiddenRows.length, "hidden account")}</button>{/if}
 </div>
 
 <style>
@@ -228,7 +245,9 @@
   .card h2 { margin: 0 0 8px; font-size: 16px; }
   h2 span { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
   .spent summary { display: flex; align-items: center; gap: 8px; width: fit-content; margin: 16px 8px 12px; color: var(--muted); font-size: 13px; cursor: pointer; list-style: none; }
-  .spent summary:focus-visible { outline: 2px solid var(--focus); }
+  .spent summary:focus-visible, .unhide:focus-visible { outline: 2px solid var(--focus); }
+  .unhide { all: unset; width: fit-content; margin: 12px 8px; color: var(--muted); font-size: 13px; cursor: pointer; }
+  .unhide:hover { color: var(--text); }
   .spent summary span { font-variant-numeric: tabular-nums; }
   .spent summary i { display: inline-flex; transform: rotate(-90deg); }
   .spent[open] summary i { transform: none; }

@@ -8,7 +8,9 @@
   import Avatar from "./Avatar.svelte";
   import RequestCard from "./RequestCard.svelte";
   import RequestRow from "./RequestRow.svelte";
-  let { store, session, admin, onclose, element = $bindable() }: { store: RoomStore; session?: string; admin: boolean; onclose: () => void; element?: HTMLElement } = $props();
+  let { store, session, admin, anchor, onclose, element = $bindable() }: { store: RoomStore; session?: string; admin: boolean; anchor?: HTMLElement; onclose: () => void; element?: HTMLElement } = $props();
+  // Like the Jobs popover, it hangs from its button: a desktop's right edge lines up with the button's.
+  let right = $state<number>();
   const groupThreshold = 12, initialGroups = 3;
   let now = $state(Date.now()), all = $state(false), moreGroups = $state(false), chosen = $state("");
   let expanded = $state<string[]>([]), denying = $state(""), reason = $state(""), failure = $state("");
@@ -54,13 +56,17 @@
     void current; void expanded; void moreGroups;
     void tick().then(() => element?.querySelector(".current")?.scrollIntoView({ block: "nearest" }));
   });
-  onMount(() => { element?.focus(); const timer = setInterval(() => { now = Date.now(); }, 30_000); return () => clearInterval(timer); });
+  onMount(() => {
+    const parent = element?.offsetParent;
+    if (anchor?.offsetParent && parent && window.matchMedia("(min-width: 641px)").matches) right = parent.getBoundingClientRect().right - anchor.getBoundingClientRect().right;
+    element?.focus();
+    const timer = setInterval(() => { now = Date.now(); }, 30_000); return () => clearInterval(timer); });
 </script>
 {#snippet row(request: Request, grouped = false)}
   <RequestRow bind:this={() => rows[request.id], value => { if (value) rows[request.id] = value; else delete rows[request.id]; }} row={{ kind: "approval", request }} {admin} {store} {now} {grouped} current={request.id === current} />
 {/snippet}
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<section class="panel" aria-label="Requests" tabindex="-1" bind:this={element} onkeydown={keys}>
+<section class="panel" aria-label="Requests" tabindex="-1" style:right={right === undefined ? null : `${right}px`} bind:this={element} onkeydown={keys}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="handle" ontouchstart={event => { touchStart = event.touches[0].clientY; }} ontouchend={event => { if (event.changedTouches[0].clientY - touchStart > 60) onclose(); }}><span></span></div>
   <header><div><strong>Requests</strong>{#if waiting.length}<span>{waiting.length} waiting</span>{/if}</div><button type="button" aria-label="Close requests" onclick={onclose}>×</button></header>
@@ -92,13 +98,14 @@
   {#if pending.length}<footer><kbd>J</kbd><kbd>K</kbd> move {#if admin}<kbd>A</kbd> approve <kbd>D</kbd> deny{/if} <kbd>Esc</kbd> close</footer>{/if}
 </section>
 <style>
-  .panel { position: absolute; z-index: 20; top: 48px; right: 16px; width: min(520px, calc(100% - 32px)); max-height: calc(100% - 64px); display: flex; flex-direction: column; background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 40px var(--shadow-md); }
-  header { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .panel { position: absolute; z-index: 20; top: 46px; right: 16px; width: min(460px, calc(100% - 32px)); max-height: min(560px, calc(100% - 64px)); display: flex; flex-direction: column; background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 40px var(--shadow-md); }
+  header { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 6px; }
   header strong { font-size: 16px; } header span, h2 span { margin-left: 8px; color: var(--muted); font-size: 13px; font-weight: 400; }
   button { border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
-  header button { font-size: 24px; line-height: 24px; }
+  /* A click away or Escape closes it on a desktop, as with Jobs; a phone's sheet keeps its button. */
+  header button { display: none; font-size: 24px; line-height: 24px; }
   button:hover { color: var(--text); } :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-  .list { min-height: 0; overflow-y: auto; } .none { margin: 0; padding: 20px 16px; color: var(--muted); font-size: 14px; }
+  .list { min-height: 0; overflow-y: auto; } .none { margin: 8px 14px 12px; color: var(--muted); font-size: 13px; }
   h2 { margin: 0; padding: 16px 16px 4px; font-size: 16px; }
   footer { flex: none; padding: 10px 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
   kbd { margin-left: 8px; font: 11px var(--mono); } kbd:first-child { margin-left: 0; }
@@ -107,5 +114,5 @@
   .group button { margin-left: auto; white-space: nowrap; } .more { padding: 10px 16px; font-size: 13px; }
   .deny { display: flex; gap: 8px; padding: 8px 16px; } .deny input { min-width: 0; flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--line); padding: 6px; }
   .handle { display: none; }
-  @media(max-width: 640px) { .handle { display: grid; place-items: center; height: 24px; touch-action: none; } .handle span { width: 36px; height: 4px; border-radius: 4px; background: var(--muted); } .panel { position: fixed; top: auto; right: 0; bottom: 0; width: 100%; max-height: 85dvh; border-radius: 14px 14px 0 0; } footer { display: none; } }
+  @media(max-width: 640px) { header { padding: 6px 16px 8px; } header button { display: block; } .none { margin: 8px 16px 16px; font-size: 14px; } .handle { display: grid; place-items: center; height: 24px; touch-action: none; } .handle span { width: 36px; height: 4px; border-radius: 4px; background: var(--muted); } .panel { position: fixed; top: auto; right: 0; bottom: 0; width: 100%; max-height: 85dvh; border-radius: 14px 14px 0 0; } footer { display: none; } }
 </style>

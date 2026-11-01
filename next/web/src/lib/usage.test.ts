@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountAlerts, balancesText, busiestWindow, limitReached, outOfLimit, usageRows, visibleWindows, windowLabel, windowMeter } from "./usage.ts";
+import { accountAlerts, balancesText, busiestWindow, hideLabel, limitReached, outOfLimit, usageRows, visibleWindows, windowLabel, windowMeter } from "./usage.ts";
 import type { AccountUsage, AccountsListResponse, UsageWindow } from "./contract.gen.ts";
 
 test("labels each window and hides only unused model-specific windows", () => {
@@ -94,6 +94,18 @@ test("An account is out of limit with a spent window or no credit in any balance
   assert.equal(out([], "-0.01", "3.50"), false);
   assert.equal(out([], "3.50"), false);
   assert.equal(out([]), false);
+});
+
+test("Usage shows only active sign-ins, and an account the list does not know", () => {
+  const list: AccountsListResponse = { providers: [], accounts: (["connected", "quota_low", "unknown", "failed"] as const).map(state => ({ id: state, provider: "anthropic", label: "", rooms: null, state })) };
+  const rows = usageRows(["connected", "quota_low", "unknown", "failed", "new"].map(id => usageOf(id, id, "claude")), list);
+  assert.deepEqual(rows.map(row => row.id).sort(), ["connected", "new", "quota_low"]);
+});
+
+test("Hiding a spent account waits for what brings it back", () => {
+  const now = Date.parse("2026-10-31T00:00:00Z");
+  assert.equal(hideLabel({ windows: [windowAt(100)] }, now), "Hide until it resets");
+  assert.equal(hideLabel({ windows: [] }, now), "Hide until topped up");
 });
 
 test("Names a monthly window", () => {
