@@ -20,19 +20,19 @@ type ProfileView struct {
 	// Fallback names the profile that continues a session when this profile's
 	// harness hits a usage limit with no account left. The next profile's own
 	// fallback continues the chain.
-	Fallback       string   `json:"fallback"`
-	Taste          int      `json:"taste"`
-	Intelligence   int      `json:"intelligence"`
-	Cost           int      `json:"cost"`
-	Diagnostics    int      `json:"diagnostics"`
-	TimeoutSec     int      `json:"timeoutSec"`
-	MaxConcurrent  int      `json:"maxConcurrent"`
-	MaxCallsPerRun int      `json:"maxCallsPerRun"`
-	Default        bool     `json:"default"`
-	Disabled       bool     `json:"disabled"`
-	Uses           []string `json:"uses" tstype:"string[] | null"`
-	SafeMode       bool     `json:"safeMode"`
-	ExtraArgs      []string `json:"extraArgs" tstype:"string[] | null"`
+	Fallback      string `json:"fallback"`
+	Taste         int    `json:"taste"`
+	Intelligence  int    `json:"intelligence"`
+	Cost          int    `json:"cost"`
+	Diagnostics   int    `json:"diagnostics"`
+	TimeoutSec    int    `json:"timeoutSec"`
+	MaxConcurrent int    `json:"maxConcurrent"`
+
+	Default   bool     `json:"default"`
+	Disabled  bool     `json:"disabled"`
+	Uses      []string `json:"uses" tstype:"string[] | null"`
+	SafeMode  bool     `json:"safeMode"`
+	ExtraArgs []string `json:"extraArgs" tstype:"string[] | null"`
 	// Compact is the auto-compact threshold; null keeps the harness default.
 	Compact *profile.Compact `json:"compact" tstype:"Compact | null,required"`
 	EnvKeys []string         `json:"envKeys" tstype:"string[] | null"`

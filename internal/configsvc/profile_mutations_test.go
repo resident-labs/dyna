@@ -25,7 +25,7 @@ func TestFullProfileOperationsPreserveFields(t *testing.T) {
 		Env:        map[string]string{"SECRET": "private"},
 		Output:     &workeroutput.Declaration{Dialect: workeroutput.DialectPiJSON},
 		TimeoutSec: 2100, Default: true, Managed: true, SafeMode: true,
-		Uses: []string{profile.UseAgents}, MaxConcurrent: 3, MaxCallsPerRun: 4,
+		Uses: []string{profile.UseAgents}, MaxConcurrent: 3,
 	}
 	svc := &Service{}
 	if err := svc.UpsertProfile(ctx, p); err != nil {

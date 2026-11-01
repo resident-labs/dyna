@@ -37,7 +37,6 @@ export interface ProfileView {
   diagnostics: number /* int */;
   timeoutSec: number /* int */;
   maxConcurrent: number /* int */;
-  maxCallsPerRun: number /* int */;
   default: boolean;
   disabled: boolean;
   uses: string[] | null;

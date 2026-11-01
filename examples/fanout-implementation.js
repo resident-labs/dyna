@@ -20,9 +20,7 @@
 //   target HEAD. A repair amends that commit rather than adding another.
 //   Integration verifies the one-commit range in the retained worktree, then
 //   cherry-picks it. Do not trust an arbitrary commits[] list. Dyna never pushes.
-// - maxTasks caps each independent wave (default 6, max 12). Fan-out is
-//   also sized from profile.remaining / maxCallsPerRun so a repair wave
-//   cannot exceed a capped profile. Leftover independent work and
+// - maxTasks caps each independent wave (default 6, max 12). Leftover work and
 //   planner-uncovered independent tasks share one second isolated wave
 //   when budget remains; any remainder is reserved and reported.
 // - Retained-worktree handoff selects the engine-authored worktrees() record
@@ -124,14 +122,6 @@ function isIsolatedWorktree(pwd, repo) {
   if (!p || !r || p === r) return false
   if (p.indexOf(r + '/') === 0) return false
   return isDynaWorktreeRoot(p)
-}
-
-function remainingOf(name) {
-  const list = profiles || []
-  for (let i = 0; i < list.length; i++) {
-    if (list[i] && list[i].name === name) return list[i].remaining
-  }
-  return 0
 }
 
 function pick(stat, except) {
@@ -266,13 +256,6 @@ function worktreeReport(impl, repo, expectedBase, retainedPath) {
   }
 }
 
-function fanoutBudget(wanted) {
-  const intel = remainingOf(builder)
-  const taste = remainingOf(reviewer)
-  const intelCap = (intel == null) ? wanted : Math.floor(Math.max(0, intel - 1) / 2)
-  const tasteCap = (taste == null) ? wanted : Math.floor(Math.max(0, taste - 1) / 2)
-  return Math.max(0, Math.min(wanted, maxTasks, intelCap, tasteCap))
-}
 
 function finalizeIntegration(raw) {
   const dirty = !!(raw && raw.dirtyTarget)
@@ -477,7 +460,7 @@ const planned = await agent(
 const glueFiles = asData(planned.integration && planned.integration.glueFiles).map(normalizeOwned).filter(Boolean)
 const parts = partitionWork(planned.tasks, glueFiles)
 const queue = parts.independent.slice()
-const wave1cap = fanoutBudget(queue.length)
+const wave1cap = Math.min(queue.length, maxTasks)
 const wave1items = queue.splice(0, wave1cap)
 log('wave1 ' + wave1items.length + ' independent / leftover ' + queue.length +
   ' / reserved ' + parts.reserved.length + ' (cap ' + wave1cap + ' of maxTasks ' + maxTasks + ')')
@@ -617,7 +600,7 @@ for (let i = 0; i < uncoveredTasks.length; i++) uncoveredIds[uncoveredTasks[i].i
 const reservedUncovered = uncoveredParts.reserved.map((t) =>
   Object.assign({}, t, { reason: 'planner uncovered: ' + t.reason }))
 const reservedBase = parts.reserved.concat(reservedUncovered)
-const wave2cap = fanoutBudget(queue.length)
+const wave2cap = Math.min(queue.length, maxTasks)
 const wave2items = queue.splice(0, wave2cap)
 if (wave2items.length) {
   log('wave2 ' + wave2items.length + ' leftover+uncovered independent (cap ' + wave2cap +

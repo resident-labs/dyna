@@ -224,7 +224,6 @@
       <div class="grid three">
         <label>Timeout (seconds)<input type="number" min="0" bind:value={p.timeoutSec} /></label>
         <label>At once per run<input type="number" min="0" bind:value={p.maxConcurrent} /></label>
-        <label>Calls per run<input type="number" min="0" bind:value={p.maxCallsPerRun} /></label>
       </div>
 
       <h3>Extra arguments <span>one per line, passed to the harness</span></h3>

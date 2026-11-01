@@ -10,7 +10,7 @@ import (
 func TestPublicLogEmitsWorkflowProvenance(t *testing.T) {
 	recorder := &workflowEventRecorder{}
 	if _, err := executeWorkflowTest(t, `log("hello from script"); return true;`, Options{
-		Store: mockWorkflowStore(0, 0), WorkDir: t.TempDir(), OnEvent: recorder.append,
+		Store: mockWorkflowStore(0), WorkDir: t.TempDir(), OnEvent: recorder.append,
 	}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -28,7 +28,7 @@ const pipelineResult = await pipeline([1], () => { throw new Error("drop"); });
 return {parallelResult, pipelineResult};
 `
 	if _, err := executeWorkflowTest(t, script, Options{
-		Store: mockWorkflowStore(0, 0), WorkDir: t.TempDir(), OnEvent: recorder.append,
+		Store: mockWorkflowStore(0), WorkDir: t.TempDir(), OnEvent: recorder.append,
 	}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}

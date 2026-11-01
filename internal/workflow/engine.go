@@ -138,8 +138,6 @@ type sharedState struct {
 	postOccurrences   map[string]int
 	workflowSeq       int
 	profSems          map[string]chan struct{}
-	profCalls         map[string]int
-	capErr            error // first profile call-cap failure anywhere in this run's tree
 	abortRoot         func(error)
 	worktreeRetention string
 	worktrees         []worktrees.Record
@@ -182,7 +180,7 @@ func execute(ctx context.Context, o Options, shared *sharedState, depth int, wor
 			scratchID: runstore.NewID(), jobNamespace: jobNamespace, jobOccurrences: map[string]int{}, postOccurrences: map[string]int{},
 			sem:      make(chan struct{}, maxConc),
 			cmdSem:   newCommandLimit(o.MaxCommands),
-			profSems: map[string]chan struct{}{}, profCalls: map[string]int{}, worktreeRetention: worktreeRetention,
+			profSems: map[string]chan struct{}{}, worktreeRetention: worktreeRetention,
 		}
 	}
 	if depth == 0 && o.RecordManifest {
@@ -346,30 +344,6 @@ func (e *engine) stopForUpdate(cause error) {
 		return
 	}
 	e.shared.abortRoot(fmt.Errorf("%w: %v", ErrStoppedForUpdate, cause))
-}
-
-// finish delivers the script outcome unless a profile call cap was exceeded
-// anywhere in this run's tree (root or a nested workflow()). A cap failure is
-// surfaced only after every accepted worker owned by this engine has written
-// its terminal events and journal entry; those workers must remain
-// resume-eligible. capErr lives in sharedState because per-profile caps apply
-// across nested workflow() calls, not just the engine that happened to trip it.
-func (e *engine) finish(o outcome) {
-	e.shared.mu.Lock()
-	capErr := e.shared.capErr
-	e.shared.mu.Unlock()
-	if capErr == nil {
-		e.settle(o)
-		return
-	}
-
-	e.workerMu.Lock()
-	e.stopping = true
-	e.workerMu.Unlock()
-	go func() {
-		e.workers.Wait()
-		e.settle(outcome{err: capErr})
-	}()
 }
 
 func (e *engine) beginWorker() bool {
@@ -673,11 +647,6 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 	if e.opts.Replay != nil {
 		matched, value, replayErr := e.replayCall(runstore.WorkflowCallAgent, key, id)
 		if matched || replayErr != nil {
-			if matched {
-				e.shared.mu.Lock()
-				e.shared.profCalls[prof.Name]++
-				e.shared.mu.Unlock()
-			}
 			if replayErr != nil {
 				reject(replayErr)
 			} else {
@@ -699,33 +668,6 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 		}
 	}
 
-	// Per-profile limits: users cap how hard a profile may be leaned on
-	// (e.g. don't let a workflow spin up 50 concurrent expensive workers).
-	// Exceeding a call cap still fails the whole run, but accepted workers drain
-	// naturally so their successful journal entries can be reused on resume.
-	if prof.MaxCallsPerRun > 0 {
-		e.shared.mu.Lock()
-		n := e.shared.profCalls[prof.Name]
-		if n < prof.MaxCallsPerRun {
-			e.shared.profCalls[prof.Name] = n + 1
-		}
-		overLimit := n >= prof.MaxCallsPerRun
-		var capErr error
-		if overLimit {
-			err := fmt.Errorf("profile %q call limit exceeded (%d per run)", prof.Name, prof.MaxCallsPerRun)
-			if e.shared.capErr == nil {
-				e.shared.capErr = fmt.Errorf("workflow failed: %v; size the fan-out within the profile's maxCallsPerRun (see `dyna profiles list --json`) or route bulk work to an unlimited profile", err)
-			}
-			capErr = err
-		}
-		e.shared.mu.Unlock()
-		if overLimit {
-			emitA(runstore.Event{T: "agent_end", ID: id, Label: label, Profile: prof.Name, Phase: phase, Status: "error", Error: capErr.Error()})
-			e.emitLog(runstore.LogProvenanceSystem, "profile call limit exceeded; draining accepted calls before failing run: "+capErr.Error())
-			reject(capErr)
-			return vm.ToValue(promise)
-		}
-	}
 	var profSem chan struct{}
 	if prof.MaxConcurrent > 0 {
 		e.shared.mu.Lock()

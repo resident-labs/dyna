@@ -1,7 +1,7 @@
 export const meta = { name: 'audit', description: 'Audit areas and independently verify findings', args: [{ name: 'what', required: true, description: 'What to audit' }, { name: 'paths', required: true, description: 'Non-empty array of paths to audit' }] }
 if (!args || typeof args.what !== 'string' || !args.what.trim()) throw new Error('what is required')
 if (!Array.isArray(args.paths) || !args.paths.length || args.paths.some(p => typeof p !== 'string' || !p.trim())) throw new Error('paths must be a non-empty array of paths')
-const ranked = [...profiles].filter(p => p.remaining !== 0).sort((a, b) => b.diagnostics - a.diagnostics)
+const ranked = [...profiles].sort((a, b) => b.diagnostics - a.diagnostics)
 if (ranked.length < 2) throw new Error('audit requires two enabled profiles')
 const findingsSchema = { type: 'object', required: ['findings'], properties: { findings: { type: 'array', items: { type: 'object', required: ['file', 'line', 'claim', 'evidence'], properties: { file: { type: 'string' }, line: { type: 'integer' }, claim: { type: 'string' }, evidence: { type: 'string' } } } } } }
 const verdictSchema = { type: 'object', required: ['confirmed', 'evidence'], properties: { confirmed: { type: 'boolean' }, evidence: { type: 'string' } } }

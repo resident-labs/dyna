@@ -41,7 +41,7 @@ func TestNestedWorkflowStopsWhenAncestryWriteFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	enginetest.Serve(t, store.DataDir(), calls)
-	_, err = executeWorkflowTest(t, src, Options{ScriptPath: opts.SourcePath, WorkDir: dir, Store: mockWorkflowStore(0, 0), Run: run, ResumeFrom: "wf_source"})
+	_, err = executeWorkflowTest(t, src, Options{ScriptPath: opts.SourcePath, WorkDir: dir, Store: mockWorkflowStore(0), Run: run, ResumeFrom: "wf_source"})
 	if err == nil || !strings.Contains(err.Error(), "engine refused nested ancestry") {
 		t.Fatalf("nested workflow = %v", err)
 	}

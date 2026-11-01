@@ -112,7 +112,7 @@ func TestProfileAddSendsFullFieldsToEngine(t *testing.T) {
 		Taste: 8, Diagnostics: 9, Intelligence: 7, Cost: 6, ExtraArgs: []string{"--flag", " spaced "},
 		Output:     &workeroutput.Declaration{Dialect: workeroutput.DialectPiJSON},
 		TimeoutSec: 2100, Default: true, SafeMode: true,
-		Uses: []string{profile.UseAgents}, MaxConcurrent: 3, MaxCallsPerRun: 4,
+		Uses: []string{profile.UseAgents}, MaxConcurrent: 3,
 	}
 	var called atomic.Int32
 	calls, err := websvc.Bind([]websvc.Binding{{Name: "UpsertProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true,
@@ -135,7 +135,7 @@ func TestProfileAddSendsFullFieldsToEngine(t *testing.T) {
 		"--extra-arg=--flag", "--extra-arg", " spaced ",
 		"--output-dialect", workeroutput.DialectPiJSON, "--timeout", "2100",
 		"--default", "--safe-mode", "--use", "agents",
-		"--limit-concurrent", "3", "--limit-calls", "4")
+		"--limit-concurrent", "3")
 	if called.Load() != 1 || out != "saved profile \"complete\" (pi)\n" {
 		t.Errorf("engine calls = %d, output = %q", called.Load(), out)
 	}

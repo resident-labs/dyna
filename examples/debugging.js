@@ -35,8 +35,6 @@
 //   residual uncertainty and block a clean approval.
 // - reproduced=true requires concrete observed evidence. Failed attempts stay
 //   visible. allowUnreproducedFix never counts as reproduced success.
-// - Profile pick requires remaining capacity for the reserved later route,
-//   not merely remaining>0, and falls back to a lower-ranked profile.
 // - Repository paths and prompt-context blobs are length-capped.
 
 export const meta = {
@@ -146,47 +144,13 @@ function isIsolatedWorktree(pwd, repoPath) {
   if (!p || !r || p === r || p.indexOf(r + '/') === 0) return false
   return isDynaWorktreeRoot(p)
 }
-function remainingOf(name) {
-  for (let i = 0; i < (profiles || []).length; i++) {
-    if (profiles[i] && profiles[i].name === name) return profiles[i].remaining
-  }
-  return 0
+function pick(stat, except) {
+  const list = [...(profiles || [])].filter((p) => p && p.name && !(except || {})[p.name])
+  list.sort((a, b) => (b[stat] || 0) - (a[stat] || 0) || String(a.name).localeCompare(String(b.name)))
+  return list.length ? list[0].name : ''
 }
-function available(p, need) {
-  if (!p) return false
-  const want = (need == null || need < 1) ? 1 : need
-  if (p.remaining == null) return true
-  return p.remaining >= want
-}
-function pick(stat, except, need) {
-  const skip = except || {}
-  const want = (need == null || need < 1) ? 1 : need
-  const list = [...(profiles || [])].filter((p) => p && p.name && !skip[p.name])
-  const ranked = list.filter((p) => typeof p[stat] === 'number').sort((a, b) => {
-    const aOk = available(a, want) ? 1 : 0
-    const bOk = available(b, want) ? 1 : 0
-    if (aOk !== bOk) return bOk - aOk
-    return (b[stat] - a[stat]) || String(a.name).localeCompare(String(b.name))
-  })
-  for (let i = 0; i < ranked.length; i++) if (available(ranked[i], want)) return ranked[i].name
-  for (let i = 0; i < list.length; i++) if (available(list[i], want)) return list[i].name
-  return ''
-}
-function ensure(stat, current, except, need) {
-  if (current && !(except && except[current]) && available({ remaining: remainingOf(current) }, need)) return current
-  return pick(stat, except, need)
-}
-function takeLeaving(name, wanted, leave) {
-  const rem = remainingOf(name)
-  if (wanted < 1) return 0
-  if (rem == null) return wanted
-  return Math.min(wanted, Math.max(0, rem - Math.max(0, leave || 0)))
-}
-function leaveFor(name, roles) {
-  if (!name) return 0
-  let n = 0
-  for (let i = 0; i < (roles || []).length; i++) if (roles[i] === name) n++
-  return n
+function ensure(stat, current, except) {
+  return current && !(except || {})[current] ? current : pick(stat, except)
 }
 function lensesFor(cls, n) {
   const primary = LENSES[cls] || LENSES.logic
@@ -345,33 +309,21 @@ if (!(profiles || []).length) {
   coverage.degradedReasons.push(!repo ? 'missing or overlong repo path' : 'missing symptom')
   stop('blocked', 'Hard stop: repo and symptom are required inputs.')
 } else {
-  const scoutNeed = 2
-  const investigatorNeed = maxInvestigators + 1
-  const experimenterNeed = maxExperiments
-  const implementerNeed = 2
-  const falsifierNeed = 2
-  const verifierNeed = 2
-  let scout = pick('cost', {}, scoutNeed)
-  let investigator = pick('intelligence', {}, investigatorNeed)
-  let experimenter = pick('cost', {}, experimenterNeed)
-  let implementer = pick('intelligence', {}, implementerNeed)
-  let falsifier = pick('taste', implementer ? { [implementer]: true } : {}, falsifierNeed)
+  let scout = pick('cost', {})
+  let investigator = pick('intelligence', {})
+  let experimenter = pick('cost', {})
+  let implementer = pick('intelligence', {})
+  let falsifier = pick('taste', implementer ? { [implementer]: true } : {})
   if (!falsifier) {
-    falsifier = pick('taste', {}, falsifierNeed)
-    implementer = pick('intelligence', falsifier ? { [falsifier]: true } : {}, implementerNeed) || implementer
+    falsifier = pick('taste', {})
+    implementer = pick('intelligence', falsifier ? { [falsifier]: true } : {}) || implementer
   }
   let verifier = pick('cost', Object.assign({},
     implementer ? { [implementer]: true } : {},
-    falsifier ? { [falsifier]: true } : {}), verifierNeed)
-  if (!verifier) verifier = pick('cost', implementer ? { [implementer]: true } : {}, verifierNeed)
-  if (!verifier) verifier = pick('taste', implementer ? { [implementer]: true } : {}, verifierNeed)
+    falsifier ? { [falsifier]: true } : {}))
+  if (!verifier) verifier = pick('cost', implementer ? { [implementer]: true } : {})
+  if (!verifier) verifier = pick('taste', implementer ? { [implementer]: true } : {})
   let independent = !!(falsifier && implementer && falsifier !== implementer && verifier && verifier !== implementer)
-  function reservedTail() {
-    const later = []
-    for (let i = 0; i < maxExperiments; i++) later.push(experimenter)
-    later.push(implementer, implementer, falsifier, falsifier, verifier, verifier)
-    return later
-  }
   out.falsification.reviewerProfileId = falsifier
   out.falsification.independenceVerified = independent
 
@@ -521,10 +473,10 @@ if (!(profiles || []).length) {
   }
 
   phase('Orient')
-  scout = ensure('cost', scout, {}, 1 + leaveFor(scout, [scout].concat(reservedTail())))
+  scout = ensure('cost', scout, {})
   if (!scout) {
     coverage.degradedReasons.push('no profile remaining for orientation')
-    stop('degraded', 'No profile budget remained for orientation.')
+    stop('degraded', 'No profile was available for orientation.')
   }
   const orient = scout ? await settle('orient', agent(
     readonly + '\n' + brief + '\n\n' +
@@ -549,7 +501,7 @@ if (!(profiles || []).length) {
 
   if (!stopped) {
     phase('Reproduce')
-    scout = ensure('cost', scout, {}, 1 + leaveFor(scout, reservedTail()))
+    scout = ensure('cost', scout, {})
     const failedAttempts = []
     const reproPrompt = (attempt, prior) =>
       readonly + '\n' + brief + '\n' + fence + '\n' +
@@ -590,12 +542,8 @@ if (!(profiles || []).length) {
       reproCalls += 1
       if (!usableRepro(repro)) {
         failedAttempts.push(snapshotAttempt(repro, 1, failReason(repro, repro ? 'first reproduction did not establish a baseline' : 'first reproduction worker failed')))
-        scout = ensure('cost', scout, {}, 1 + leaveFor(scout, [investigator].concat(reservedTail())))
-        const retryLeave = [investigator]
-        for (let i = 0; i < maxInvestigators; i++) retryLeave.push(investigator)
-        for (let i = 0; i < maxExperiments; i++) retryLeave.push(experimenter)
-        retryLeave.push.apply(retryLeave, reservedTail())
-        if (scout && takeLeaving(scout, 1, leaveFor(scout, retryLeave))) {
+        scout = ensure('cost', scout, {})
+        if (scout) {
           const retry = await settle('reproduce-2', agent(
             reproPrompt(2, failedAttempts[0]),
             ro({ profile: scout, label: 'reproduce-2', phase: 'Reproduce', id: 'reproduce-2', cwd: repo, schema: REPRO })))
@@ -650,30 +598,21 @@ if (!(profiles || []).length) {
     }
   }
 
-  investigator = ensure('intelligence', investigator, {}, investigatorNeed)
-  experimenter = ensure('cost', experimenter, {}, experimenterNeed)
-  implementer = ensure('intelligence', implementer, falsifier ? { [falsifier]: true } : {}, implementerNeed)
-  falsifier = ensure('taste', falsifier, implementer ? { [implementer]: true } : {}, falsifierNeed)
-  verifier = ensure('cost', verifier, implementer ? { [implementer]: true } : {}, verifierNeed)
+  investigator = ensure('intelligence', investigator, {})
+  experimenter = ensure('cost', experimenter, {})
+  implementer = ensure('intelligence', implementer, falsifier ? { [falsifier]: true } : {})
+  falsifier = ensure('taste', falsifier, implementer ? { [implementer]: true } : {})
+  verifier = ensure('cost', verifier, implementer ? { [implementer]: true } : {})
   independent = !!(falsifier && implementer && falsifier !== implementer && verifier && verifier !== implementer)
   out.falsification.reviewerProfileId = falsifier
   out.falsification.independenceVerified = independent
 
   const wanted = lensesFor(out.defectClass, maxInvestigators)
-  let nInv = 0
-  if (!stopped && investigator) {
-    for (let n = wanted.length; n >= 1; n--) {
-      const expNeed = n <= 1 ? 0 : maxExperiments
-      const later = [investigator]
-      for (let i = 0; i < expNeed; i++) later.push(experimenter)
-      later.push.apply(later, reservedTail())
-      if (takeLeaving(investigator, n, leaveFor(investigator, later)) === n) { nInv = n; break }
-    }
-  }
+  const nInv = !stopped && investigator ? wanted.length : 0
   const lenses = wanted.slice(0, nInv)
   if (!stopped) {
     coverage.skippedLenses = wanted.slice(nInv)
-    if (nInv < wanted.length) coverage.degradedReasons.push('investigators capped by reserved later-route budget')
+    if (nInv < wanted.length) coverage.degradedReasons.push('no investigator profile available')
   }
 
   const generated = []
@@ -682,8 +621,8 @@ if (!(profiles || []).length) {
   if (!stopped) {
     phase('Hypothesize')
     if (!lenses.length) {
-      coverage.skippedNotNeeded.push('hypothesize skipped: no investigator budget')
-      stop('degraded', 'No investigator budget remained after orientation and reproduction.')
+      coverage.skippedNotNeeded.push('hypothesize skipped: no investigator profile')
+      stop('degraded', 'No investigator profile was available after orientation and reproduction.')
     } else {
       log('lenses=' + lenses.length + ' class=' + out.defectClass)
       const hypRaw = await parallel(lenses.map((lens, i) => () => settle('hyp:' + lens, agent(
@@ -771,14 +710,9 @@ if (!(profiles || []).length) {
   }
   if (!stopped) {
     phase('Rank')
-    investigator = ensure('intelligence', investigator, {}, 1 + leaveFor(investigator, reservedTail()))
-    if (!investigator || !takeLeaving(investigator, 1, leaveFor(investigator, (function () {
-      const later = []
-      for (let i = 0; i < maxExperiments; i++) later.push(experimenter)
-      later.push.apply(later, reservedTail())
-      return later
-    })()))) {
-      coverage.degradedReasons.push('no rank budget after reserving the shared later route')
+    investigator = ensure('intelligence', investigator, {})
+    if (!investigator) {
+      coverage.degradedReasons.push('no investigator profile available for ranking')
       applyEvidenceGate(null)
     } else {
       ranked = await settle('rank', agent(
@@ -807,18 +741,18 @@ if (!(profiles || []).length) {
 
   const plannedExps = ((ranked && ranked.discriminatorPlan) || []).slice()
   const wantExp = Math.min(maxExperiments, Math.max(plannedExps.length, liveIds.length > 1 ? 1 : 0))
-  experimenter = ensure('cost', experimenter, {}, 1 + leaveFor(experimenter, reservedTail()))
+  experimenter = ensure('cost', experimenter, {})
   const nExp = (!stopped && experimenter)
-    ? takeLeaving(experimenter, wantExp, leaveFor(experimenter, reservedTail()))
+    ? wantExp
     : 0
   if (!stopped) {
     coverage.cappedExperiments = Math.max(0, wantExp - nExp)
-    if (coverage.cappedExperiments) coverage.degradedReasons.push('experiments capped by reserved later-route budget')
+    if (coverage.cappedExperiments) coverage.degradedReasons.push('no experiment profile available')
     phase('Discriminate')
     if (liveIds.length <= 1) {
       coverage.skippedNotNeeded.push('discriminate skipped: single live hypothesis')
     } else if (!nExp) {
-      coverage.degradedReasons.push('no experiment budget while multiple rivals remain')
+      coverage.degradedReasons.push('no experiment profile available while multiple rivals remain')
       stop('degraded', 'Multiple rival hypotheses remain and no discriminating experiment could run.')
     } else {
       const specs = plannedExps.slice(0, nExp)
@@ -827,9 +761,9 @@ if (!(profiles || []).length) {
       }
       for (let i = 0; i < specs.length && liveIds.length > 1; i++) {
         const spec = specs[i]
-        experimenter = ensure('cost', experimenter, {}, 1 + leaveFor(experimenter, reservedTail()))
-        if (!experimenter || !takeLeaving(experimenter, 1, leaveFor(experimenter, reservedTail()))) {
-          coverage.inconclusive.push('experiment ' + (spec.id || (i + 1)) + ' skipped: reserved later-route budget')
+        experimenter = ensure('cost', experimenter, {})
+        if (!experimenter) {
+          coverage.inconclusive.push('experiment ' + (spec.id || (i + 1)) + ' skipped: no experiment profile available')
           break
         }
         const exp = await settle('experiment', agent(
@@ -901,12 +835,12 @@ if (!(profiles || []).length) {
   let fixPwd = ''
   if (!stopped) {
     phase('Fix')
-    implementer = ensure('intelligence', implementer, falsifier ? { [falsifier]: true } : {}, 1 + leaveFor(implementer, [implementer, falsifier, falsifier, verifier, verifier]))
+    implementer = ensure('intelligence', implementer, falsifier ? { [falsifier]: true } : {})
     independent = !!(falsifier && implementer && falsifier !== implementer && verifier && verifier !== implementer)
     out.falsification.independenceVerified = independent
-    if (!implementer || !takeLeaving(implementer, 1, leaveFor(implementer, [implementer, falsifier, falsifier, verifier, verifier]))) {
-      coverage.degradedReasons.push('no implementer budget after reserving repair and falsification')
-      stop('degraded', 'Mechanism converged, but no implementer budget remained for an isolated fix.')
+    if (!implementer) {
+      coverage.degradedReasons.push('no implementer profile available')
+      stop('degraded', 'Mechanism converged, but no implementer profile was available for an isolated fix.')
     } else {
       const fixRaw = await settle('fix', agent(
         'Sole implementer in this isolated checkout from the recorded clean HEAD. Apply the smallest ' +
@@ -931,14 +865,11 @@ if (!(profiles || []).length) {
     }
   }
 
-  async function runVerify(label, expectedFix, expectedPwd, leaveRoles) {
+  async function runVerify(label, expectedFix, expectedPwd) {
     phase('Verify')
-    verifier = ensure('cost', verifier, implementer ? { [implementer]: true } : {}, 1 + leaveFor(verifier, leaveRoles || [falsifier, falsifier]))
+    verifier = ensure('cost', verifier, implementer ? { [implementer]: true } : {})
     if (!verifier || verifier === implementer) {
       return { ok: false, reasons: ['verifier missing or not independent of the isolated editor'], report: Object.assign({}, out.verification, { ok: false, verifierProfileId: verifier }) }
-    }
-    if (!takeLeaving(verifier, 1, leaveFor(verifier, leaveRoles || [falsifier, falsifier]))) {
-      return { ok: false, reasons: ['no verifier budget to bind the retained worktree'], report: Object.assign({}, out.verification, { ok: false, verifierProfileId: verifier }) }
     }
     const raw = await settle(label, agent(
       retainedReadonly + ' Independent checkout bind. The workflow runtime cannot inspect the filesystem. ' +
@@ -964,7 +895,7 @@ if (!(profiles || []).length) {
 
   if (!stopped) {
     phase('Falsify')
-    falsifier = ensure('taste', falsifier, implementer ? { [implementer]: true } : {}, 1 + leaveFor(falsifier, [implementer, falsifier]))
+    falsifier = ensure('taste', falsifier, implementer ? { [implementer]: true } : {})
     independent = !!(falsifier && implementer && falsifier !== implementer && verifier && verifier !== implementer)
     out.falsification.reviewerProfileId = falsifier
     out.falsification.independenceVerified = independent
@@ -972,10 +903,6 @@ if (!(profiles || []).length) {
       coverage.degradedReasons.push('only one usable profile; falsifier is not independent')
       attachFalsify(null, 'independent falsifier unavailable')
       stop('degraded', 'Fix exists in an isolated worktree, but a different-profile falsifier was not available.')
-    } else if (!takeLeaving(falsifier, 1, leaveFor(falsifier, [implementer, falsifier]))) {
-      coverage.degradedReasons.push('no falsifier budget after reserving repair and rerun')
-      attachFalsify(null, 'falsifier budget reserved for later route was insufficient')
-      stop('degraded', 'Fix exists in an isolated worktree, but falsification budget was reserved away.')
     } else {
       const falsifyPrompt = (repairReport) =>
         retainedReadonly + ' You are not the implementer. Bind every claim to the independently verified retained worktree and SHAs.\n' +
@@ -1005,10 +932,10 @@ if (!(profiles || []).length) {
         }
         out.falsification.issues = repairRationale.issues
         out.falsification.needsRepair = repairRationale.needsRepair
-        implementer = ensure('intelligence', implementer, { [falsifier]: true }, 1)
-        if (!implementer || !takeLeaving(implementer, 1, leaveFor(implementer, [falsifier, verifier]))) {
-          coverage.degradedReasons.push('repair needed but implementer budget was reserved for falsification rerun')
-          attachFalsify(falsify, 'repair not applied; budget reserved')
+        implementer = ensure('intelligence', implementer, { [falsifier]: true })
+        if (!implementer) {
+          coverage.degradedReasons.push('repair needed but no implementer profile was available')
+          attachFalsify(falsify, 'repair not applied; no implementer profile')
         } else {
           const repaired = await settle('repair', agent(
             'At most one repair in this same isolated worktree. Fix only the falsifier issues. Keep the ' +
@@ -1036,10 +963,6 @@ if (!(profiles || []).length) {
                 coverage.degradedReasons.push('post-repair verify failed: ' + rebound.reasons.join('; '))
                 attachFalsify(falsify, 'repair applied; retained worktree was not re-bound')
                 stop('blocked', 'Repair applied, but independent verification did not re-bind the retained worktree.')
-              } else if (!takeLeaving(falsifier, 1, 0)) {
-                coverage.degradedReasons.push('repair applied but falsification rerun had no budget')
-                attachFalsify(falsify, 'repair applied; rerun skipped')
-                stop('degraded', 'Repair applied, but the falsification rerun could not run.')
               } else {
                 falsify = await settle('falsify-repair', agent(
                   falsifyPrompt(repaired),

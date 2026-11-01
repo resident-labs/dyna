@@ -37,11 +37,11 @@ func (r *workflowEventRecorder) snapshot() []runstore.Event {
 	return append([]runstore.Event(nil), r.events...)
 }
 
-func mockWorkflowStore(maxConcurrent, maxCalls int) *profile.Store {
+func mockWorkflowStore(maxConcurrent int) *profile.Store {
 	return &profile.Store{Profiles: []profile.Profile{{
 		Name: "mock", Harness: profile.HarnessMock, Default: true,
 		Taste: 5, Intelligence: 5, Cost: 10,
-		MaxConcurrent: maxConcurrent, MaxCallsPerRun: maxCalls,
+		MaxConcurrent: maxConcurrent,
 	}}}
 }
 
@@ -99,7 +99,7 @@ func TestWorkflowResolvesSavedTemplateFromDefaultRegistry(t *testing.T) {
 	writeWorkflowScript(t, registry, "echo.js", `return {received: args.value, source: "saved"};`)
 
 	result, err := executeWorkflowTest(t, `return await workflow("echo", {value: 7});`, Options{
-		Store: mockWorkflowStore(0, 0), WorkDir: t.TempDir(),
+		Store: mockWorkflowStore(0), WorkDir: t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
@@ -125,7 +125,7 @@ func TestWorkflowResolvesRegistryNameAndPassesArgs(t *testing.T) {
 	writeWorkflowScript(t, registry, "echo.js", `return {received: args.value};`)
 
 	result, err := executeWorkflowTest(t, `return await workflow("echo", {value: 42});`, Options{
-		Store: mockWorkflowStore(0, 0), WorkDir: dir, WorkflowDir: registry,
+		Store: mockWorkflowStore(0), WorkDir: dir, WorkflowDir: registry,
 	})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
@@ -142,7 +142,7 @@ func TestWorkflowNestingStopsAtOneLevel(t *testing.T) {
 	writeWorkflowScript(t, dir, "grandchild.js", `return "must not execute";`)
 
 	_, err := executeWorkflowTest(t, `return await workflow("./child.js");`, Options{
-		ScriptPath: rootPath, Store: mockWorkflowStore(0, 0), WorkDir: dir,
+		ScriptPath: rootPath, Store: mockWorkflowStore(0), WorkDir: dir,
 	})
 	if err == nil || !strings.Contains(err.Error(), "workflow nesting limit exceeded") || !strings.Contains(err.Error(), "maximum depth is 1") {
 		t.Fatalf("Execute() error = %v, want clear one-level nesting diagnostic", err)
@@ -163,7 +163,7 @@ return await parallel([
   () => agent("sibling", {profile: "mock"}),
 ]);`
 	resultJSON, err := executeWorkflowTest(t, script, Options{
-		Store: mockWorkflowStore(0, 0), WorkDir: dir, WorkflowDir: registry,
+		Store: mockWorkflowStore(0), WorkDir: dir, WorkflowDir: registry,
 		MaxConc: 2, MaxAgents: 1, OnEvent: recorder.append,
 	})
 	if err != nil {
@@ -247,7 +247,7 @@ func TestNestedWorkflowSharesConcurrencyLimits(t *testing.T) {
   () => agent("SLEEP:0\nRESPOND: sibling", {profile: "mock"}),
 ]);`
 			_, err := executeTest(ctx, Options{ScriptSrc: script,
-				Store: mockWorkflowStore(tc.profileMaxConcurrent, 0), WorkDir: dir,
+				Store: mockWorkflowStore(tc.profileMaxConcurrent), WorkDir: dir,
 				WorkflowDir: registry, MaxConc: tc.maxConcurrent, OnEvent: observe,
 			})
 			if err != nil {
@@ -275,25 +275,6 @@ func TestNestedWorkflowSharesConcurrencyLimits(t *testing.T) {
 	}
 }
 
-func TestNestedWorkflowSharesProfileCallLimit(t *testing.T) {
-	dir := t.TempDir()
-	registry := filepath.Join(dir, "registry")
-	if err := os.Mkdir(registry, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeWorkflowScript(t, registry, "child.js", `return await agent("nested", {profile: "mock"});`)
-	script := `return await parallel([
-  () => workflow("child"),
-  () => agent("sibling", {profile: "mock"}),
-]);`
-	_, err := executeWorkflowTest(t, script, Options{
-		Store: mockWorkflowStore(0, 1), WorkDir: dir, WorkflowDir: registry, MaxConc: 2,
-	})
-	if err == nil || !strings.Contains(err.Error(), `profile "mock" call limit exceeded (1 per run)`) {
-		t.Fatalf("Execute() error = %v, want shared profile call cap abort", err)
-	}
-}
-
 func TestNestedWorkflowPersistsChildArtifactsAndUsesParentResumeCache(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv(runstore.AgentJournalRootEnv, "")
@@ -313,7 +294,7 @@ return await agent('SLEEP:0\nRESPOND: {"answer":"nested"}', {profile: "mock", sc
 		t.Fatal(err)
 	}
 	result, err := executeWorkflowTest(t, rootScript, Options{
-		Store: mockWorkflowStore(0, 0), Run: first, WorkDir: dir, WorkflowDir: registry,
+		Store: mockWorkflowStore(0), Run: first, WorkDir: dir, WorkflowDir: registry,
 	})
 	first.Finish("ok", result, err)
 	if err != nil {
@@ -363,7 +344,7 @@ return await agent('SLEEP:0\nRESPOND: {"answer":"nested"}', {profile: "mock", sc
 		t.Fatal(err)
 	}
 	result, err = executeWorkflowTest(t, rootScript, Options{
-		Store: mockWorkflowStore(0, 0), Run: second, WorkDir: dir, WorkflowDir: registry,
+		Store: mockWorkflowStore(0), Run: second, WorkDir: dir, WorkflowDir: registry,
 		Cache: NewCache(entries),
 	})
 	second.Finish("ok", result, err)
@@ -435,7 +416,7 @@ return await agent('SLEEP:0\nRESPOND: {"ok":true}', {profile: "mock", schema: {t
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := executeWorkflowTest(t, script, Options{Store: mockWorkflowStore(0, 0), Run: run, WorkDir: dir})
+	result, err := executeWorkflowTest(t, script, Options{Store: mockWorkflowStore(0), Run: run, WorkDir: dir})
 	run.Finish("ok", result, err)
 	if err != nil {
 		t.Fatal(err)
@@ -458,5 +439,16 @@ return await agent('SLEEP:0\nRESPOND: {"ok":true}', {profile: "mock", schema: {t
 	wantAgents := []spot{{"api", "review"}, {"web", "fix"}, {"", ""}}
 	if fmt.Sprint(phases) != fmt.Sprint(wantPhases) || fmt.Sprint(agents) != fmt.Sprint(wantAgents) {
 		t.Fatalf("phase spots = %v, agent spots = %v; want %v and %v", phases, agents, wantPhases, wantAgents)
+	}
+}
+
+func TestOldProfileCallLimitDoesNotLimitWorkflow(t *testing.T) {
+	var p profile.Profile
+	if err := json.Unmarshal([]byte(`{"name":"mock","harness":"mock","default":true,"taste":5,"intelligence":5,"cost":10,"maxCallsPerRun":1}`), &p); err != nil {
+		t.Fatal(err)
+	}
+	_, err := executeWorkflowTest(t, `return await parallel([() => agent("first"), () => agent("second")]);`, Options{Store: &profile.Store{Profiles: []profile.Profile{p}}, WorkDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

@@ -90,9 +90,6 @@ type Profile struct {
 	// MaxConcurrent caps how many workers of this profile may run at once
 	// across a workflow (0 = unlimited). Expensive models set this low.
 	MaxConcurrent int `json:"maxConcurrent,omitempty"`
-	// MaxCallsPerRun caps total agent() calls to this profile in one run
-	// (0 = unlimited). Exceeding it fails the run after accepted calls drain.
-	MaxCallsPerRun int `json:"maxCallsPerRun,omitempty"`
 	// Disabled hides the profile from workflows (agent() calls to it fail,
 	// it leaves the scripts' profiles global) while keeping its stats and
 	// description saved and editable.
@@ -232,7 +229,6 @@ func (p *Profile) Validate() error {
 	}{
 		{"timeoutSec", p.TimeoutSec},
 		{"maxConcurrent", p.MaxConcurrent},
-		{"maxCallsPerRun", p.MaxCallsPerRun},
 	} {
 		if v.v < 0 {
 			return fmt.Errorf("%s must be non-negative (got %d)", v.n, v.v)

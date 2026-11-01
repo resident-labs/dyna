@@ -52,7 +52,7 @@ return {
   requireType: typeof require,
   chdirType: typeof process.chdir,
   pidType: typeof process.pid,
-};`, Options{Store: mockWorkflowStore(0, 0), WorkDir: workDir})
+};`, Options{Store: mockWorkflowStore(0), WorkDir: workDir})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}

@@ -3,7 +3,7 @@ if (typeof args === 'string') args = { command: args }
 if (!args || typeof args.command !== 'string' || !args.command.trim()) throw new Error('command is required')
 if (args.maxRounds !== undefined && (!Number.isInteger(args.maxRounds) || args.maxRounds < 1)) throw new Error('maxRounds must be a positive integer')
 const maxRounds = args.maxRounds === undefined ? 3 : args.maxRounds
-const ranked = [...profiles].filter(p => p.remaining !== 0).sort((a, b) => b.intelligence - a.intelligence)
+const ranked = [...profiles].sort((a, b) => b.intelligence - a.intelligence)
 if (!ranked.length) throw new Error('fix-until requires an enabled profile')
 let cwd = process.cwd()
 let previous = null
