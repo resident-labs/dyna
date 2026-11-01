@@ -65,6 +65,18 @@ export function finalTimelineItem(items: TranscriptItem[], session: string): Tra
   return final;
 }
 
+// Dyna: A post waits outside the turns until the transcript holds it. An agent's own post can land while an owner's
+// message still waits, so only the newest input marks what is history; anything older is already in the transcript's past.
+export function queuedTimelinePosts<Post extends { id: string; seq: number }>(posts: Post[], turns: TranscriptTurn[]): Post[] {
+  const held = new Set<string>();
+  let lastInput = 0;
+  for (const turn of turns) {
+    for (const input of turn.inputs ?? []) { held.add(input.id); lastInput = Math.max(lastInput, input.seq); }
+    for (const item of turn.items ?? []) for (const entry of [item, ...(item.posts ?? [])]) held.add(entry.event ?? entry.id);
+  }
+  return posts.filter(post => post.seq > lastInput && !held.has(post.id));
+}
+
 // Dyna: A post names its destination only when it left the DM on screen.
 export function postDestination(item: TranscriptItem, session: string, room: string, roomName: string, sessionName: (id: string) => string): string | undefined {
   if (item.home?.kind === "dm") return item.home.session && item.home.session !== session ? sessionName(item.home.session) : undefined;

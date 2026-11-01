@@ -169,7 +169,7 @@
 <style>
   .composer { position: relative; flex: none; width: min(100% - 32px, var(--feed-reading-width) - 32px); margin: 0 auto 16px; padding: 12px 14px 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
   /* The box border is the textarea's focus ring. */
-  .composer.thread { border-radius: 16px; box-shadow: 0 8px 24px var(--shadow-lg); }
+  .composer.thread { width: min(100% - 32px, 736px); border-radius: 16px; box-shadow: 0 8px 24px var(--shadow-lg); }
   .composer:has(textarea:focus-visible) { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
   /* A raised card over the feed at the box's top left, as Discord's mention list; v1's list spans the whole box. */
   .mentions { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 2; width: min(320px, 100%); padding: 4px;
