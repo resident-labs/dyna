@@ -209,12 +209,13 @@ func (s *Store) TranscriptSentPosts(ctx context.Context, session contract.Sessio
 }
 
 type TranscriptFile struct {
-	Path  string
-	Acked int64
+	Path    string
+	Acked   int64
+	Indexed bool
 }
 
 func (s *Store) TranscriptFiles(ctx context.Context, session contract.SessionID) ([]TranscriptFile, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT path,acked FROM transcript_offsets WHERE session=? ORDER BY path", session)
+	rows, err := s.Read().QueryContext(ctx, `SELECT o.path,o.acked,EXISTS(SELECT 1 FROM transcript_turns t WHERE t.session=o.session AND t.path=o.path) FROM transcript_offsets o WHERE o.session=? ORDER BY o.path`, session)
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +223,7 @@ func (s *Store) TranscriptFiles(ctx context.Context, session contract.SessionID)
 	var files []TranscriptFile
 	for rows.Next() {
 		var f TranscriptFile
-		if err := rows.Scan(&f.Path, &f.Acked); err != nil {
+		if err := rows.Scan(&f.Path, &f.Acked, &f.Indexed); err != nil {
 			return nil, err
 		}
 		files = append(files, f)
