@@ -10,15 +10,18 @@ fi
 repo_root=$(git rev-parse --show-toplevel)
 vendor="$repo_root/next/third_party/pi"
 # The version names one build: the fork level plus the first twelve hex
-# characters of the third_party/pi tree hash, so two builds at one level never
-# collide. The package manifest's dynaFork stays the level alone.
-fork_tree=$(git -C "$repo_root" rev-parse "HEAD:next/third_party/pi")
-version="1.4.0-dyna.13.${fork_tree:0:12}"
-# The build name comes from the committed tree, but the tarball packs the
-# working files: uncommitted Pi changes would ship under a stale build name
-# and collide with the real build of that tree. Refuse them.
+# characters of the hash of what the package ships, so two builds at one level
+# collide only when they ship the same files. A change that ships nothing, such
+# as DYNA.md or a test, leaves the tarball byte-identical, and the engine reuses
+# dyna-base, whose tag hashes the tarball. The placeholder stands in for the
+# build until the package exists to hash. The package manifest's dynaFork stays
+# the level alone.
+fork_level=1.4.0-dyna.13
+version="$fork_level.000000000000"
+# The tarball packs the working files: uncommitted Pi changes would ship code
+# that no commit records. Refuse them.
 if [ -n "$(git -C "$repo_root" status --porcelain --untracked-files=all -- next/third_party/pi)" ]; then
-  echo "pi-pack: third_party/pi has uncommitted changes; commit them so the build name matches the packed tree" >&2
+  echo "pi-pack: third_party/pi has uncommitted changes; commit them first" >&2
   exit 1
 fi
 output=$1
@@ -154,6 +157,12 @@ writeFileSync(path, JSON.stringify(manifest, null, 2) + "\n");
 console.log("merged " + Object.keys(required).length + " third-party dependencies from bundled packages");
 EOF
 
+packed=$(npm pack "$stage" --ignore-scripts --pack-destination "$tmp" --silent)
+build=$(sha256sum "$tmp/$packed")
+rm "$tmp/$packed"
+placeholder=$version
+version="$fork_level.${build:0:12}"
+sed -i "s/$placeholder/$version/g" "$stage/package.json" "$stage"/node_modules/@earendil-works/*/package.json
 packed=$(npm pack "$stage" --ignore-scripts --pack-destination "$tmp" --silent)
 mv "$tmp/$packed" "$output"
 integrity=$(node -e 'const crypto=require("crypto"),fs=require("fs");process.stdout.write("sha512-"+crypto.createHash("sha512").update(fs.readFileSync(process.argv[1])).digest("base64"))' "$output")
