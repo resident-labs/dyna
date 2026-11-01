@@ -26,6 +26,9 @@ const (
 	egressMount = "/run/dyna-egress"
 	// runnerSlice sits under dyna.slice, so the heartbeat and the host's memory limit include runners.
 	runnerSlice = "dyna-ci.slice"
+	// runnerLimit is the host's own bound, in seconds. A job shares a user with the
+	// entrypoint's timeout, so it can stop that clock. This one is outside the container.
+	runnerLimit = "--timeout=22200" // 6 hours 10 minutes
 )
 
 // BuildRunnerImage builds or reuses the runner image, and drops any older one.
@@ -99,7 +102,7 @@ func runnerArgs(s box.RunnerSpec) []string {
 	// tmpfs pages count against the memory limit, so one job can never hold more than that. Leaving
 	// a quarter for processes means a full disk is an ordinary write error, not an OOM kill.
 	disk := fmt.Sprintf("size=%d", s.Size.MemBytes/4*3)
-	return []string{"podman", "--cgroup-manager=systemd", "run", "--detach", "--rm", "--name", s.Name,
+	return []string{"podman", "--cgroup-manager=systemd", "run", "--detach", "--rm", runnerLimit, "--name", s.Name,
 		"--label", ciLabel + "=runner", "--label", runnerRepoLabel + "=" + string(s.Repo), "--label", runnerIDLabel + "=" + strconv.FormatInt(s.ID, 10),
 		"--cgroup-parent=" + runnerSlice,
 		// A host's containers.conf can default to host networking, so this is always explicit.

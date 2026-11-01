@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/resident-labs/dyna/box"
@@ -57,7 +58,7 @@ func TestRunnerArgsKeepTheContainerSealed(t *testing.T) {
 	args := runnerArgs(testSpec())
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
-		"--rm", "--network=none", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges", "--user 1001:1001",
+		"--rm", "--timeout=22200", "--network=none", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges", "--user 1001:1001",
 		"--cpus=8", "--memory=17179869184", "--memory-swap=17179869184", "--pids-limit=8192",
 		"--tmpfs /home/runner:rw,exec,U,mode=0755,size=12884901888", "--tmpfs /tmp:rw,exec,mode=1777,size=12884901888",
 		"--cgroup-parent=dyna-ci.slice", "--env ACTIONS_RUNNER_INPUT_JITCONFIG", "--env DYNA_CI_REPO=owner/repo",
@@ -150,7 +151,10 @@ func TestRunnerImageContextHasEveryFile(t *testing.T) {
 	}
 }
 
-// hook runs the job-started hook in a shell, as the runner does.
+// hook runs the job-started hook under a stand-in for the runner's worker. Like
+// the real worker, it goes on to the next step when the hook fails: a step with
+// if: always(), or an action's pre step, which is on by default. The only way to
+// stop that step is to kill the worker, and that is what a refusal must do.
 func hook(t *testing.T, event, payload, repo string) (string, error) {
 	t.Helper()
 	data, err := images.Runner.ReadFile("ci-runner/job-started.sh")
@@ -169,13 +173,13 @@ func hook(t *testing.T, event, payload, repo string) (string, error) {
 	if err := os.WriteFile(path, []byte(payload), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", script)
+	cmd := exec.Command("bash", "-c", `bash -e "$1"; echo the next step ran`, "worker", script)
 	cmd.Env = append(os.Environ(), "GITHUB_REPOSITORY="+repo, "DYNA_CI_REPO=owner/repo", "GITHUB_EVENT_NAME="+event, "GITHUB_EVENT_PATH="+path)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
 
-func TestJobStartedHookAdmitsOnlyTrustedEvents(t *testing.T) {
+func TestJobStartedHookKillsTheWorkerOfARefusedJob(t *testing.T) {
 	same := `{"pull_request":{"head":{"repo":{"full_name":"owner/repo"}}}}`
 	for _, test := range []struct {
 		name, event, payload, repo string
@@ -186,18 +190,27 @@ func TestJobStartedHookAdmitsOnlyTrustedEvents(t *testing.T) {
 		{"own pull request", "pull_request", same, "owner/repo", true},
 		{"fork pull request", "pull_request", `{"pull_request":{"head":{"repo":{"full_name":"attacker/repo"}}}}`, "owner/repo", false},
 		{"deleted fork", "pull_request", `{"pull_request":{"head":{"repo":null}}}`, "owner/repo", false},
+		{"unreadable event", "pull_request", `not json`, "owner/repo", false},
 		{"pull_request_target", "pull_request_target", same, "owner/repo", false},
+		{"workflow_run", "workflow_run", same, "owner/repo", false},
 		{"issue comment", "issue_comment", `{}`, "owner/repo", false},
 		{"another repository", "push", `{}`, "other/repo", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel() // each refusal waits for its log line to reach GitHub
 			out, err := hook(t, test.event, test.payload, test.repo)
-			var exit *exec.ExitError
-			if test.ok && err != nil {
-				t.Fatalf("refused: %s", out)
+			if test.ok {
+				if err != nil || !strings.Contains(out, "the next step ran") {
+					t.Fatalf("refused: %v: %s", err, out)
+				}
+				return
 			}
-			if !test.ok && (!errors.As(err, &exit) || !strings.Contains(out, "refused this job")) {
-				t.Fatalf("admitted: %v: %s", err, out)
+			if strings.Contains(out, "the next step ran") {
+				t.Fatalf("a step ran after the refusal: %s", out)
+			}
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL {
+				t.Fatalf("the worker survived: %v: %s", err, out)
 			}
 		})
 	}
