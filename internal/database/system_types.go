@@ -14,7 +14,17 @@ type CallerCount struct {
 type DurationCounts [5]uint64
 
 // Metrics reports process-local transaction and scheduled checkpoint measurements.
+// PoolMetrics sums current connections and cumulative pool waits across open databases.
+type PoolMetrics struct {
+	Open         int           `json:"open"`
+	InUse        int           `json:"inUse"`
+	Idle         int           `json:"idle"`
+	WaitCount    int64         `json:"waitCount"`
+	WaitDuration time.Duration `json:"waitDuration"`
+}
+
 type Metrics struct {
+	Pool                 PoolMetrics    `json:"pool"`
 	WriteHold            DurationCounts `json:"writeHold"`
 	Commit               DurationCounts `json:"commit"`
 	CheckpointDuration   DurationCounts `json:"checkpointDuration"`
