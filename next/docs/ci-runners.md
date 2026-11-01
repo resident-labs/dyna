@@ -52,9 +52,11 @@ needs a second scale set, which is not built.
 
 ## What runs here
 
-`ci.yml` sends `next`, `next-extras`, `next-web` and `next-pi` to the pool. `changes`
-and `pool-watch` stay on GitHub-hosted runners, because they decide things while the
-pool may be down. `relay` stays hosted because it needs a container runtime.
+`ci.yml` sends `next`, `next-extras` and `next-web` to the pool. `changes` and
+`pool-watch` stay on GitHub-hosted runners, because they decide things while the
+pool may be down. `relay` needs a container runtime. `next-pi` stays hosted because
+one Pi test rewrites a file with a same-size value and expects the change to show:
+on tmpfs both writes can land in one clock tick, so size and time both match.
 
 ## What a runner can touch
 
@@ -110,12 +112,13 @@ runner refuses both, and they would run a fork's code with this repository's tok
   with work queued and no progress. A rerun goes hosted once the lease is gone.
 - **Engine or listener dies:** jobs in progress finish, since runners do not need
   the engine. Queued jobs wait. The next listener reads the assigned count and
-  starts their runners. A session left by a crash holds the set for a few minutes,
+  starts their runners. A session left by a crash holds the set for a few seconds,
   and the engine retries until it clears. Two engines cannot share a set.
 - **Host drops off the network mid-job:** the host leaves the capacity GitHub sees,
-  and jobs go to other hosts. GitHub fails the job on that runner when it stops
-  answering. The hourly reap deletes the registrations of idle runners, and those
-  runners exit by themselves when the host returns, freeing their slots.
+  and jobs go to other hosts. GitHub shows the runner offline within about a minute
+  and fails its job after about 10. A rerun picks another runner. The hourly reap
+  deletes the registrations of idle runners on that host, and a runner whose
+  registration is gone exits by itself within a minute of the host's return.
 - **Disk below the floor, or memory above 80%:** admission refuses the host, and
   capacity falls to what is already running.
 
