@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"slices"
 	"strings"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/model"
+	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/engine/websearch"
 )
 
@@ -92,7 +92,7 @@ func (s *Service) WebSearch(ctx context.Context, caller contract.Principal, req 
 	key := func(provider string) func(context.Context) (string, error) {
 		return func(ctx context.Context) (string, error) {
 			value, err := s.store.SearchKey(ctx, provider)
-			if errors.Is(err, sql.ErrNoRows) {
+			if errors.Is(err, store.ErrNotFound) {
 				return "", websearch.ErrNotSignedIn
 			}
 			return value, err
