@@ -29,7 +29,7 @@ func assertRefusal(t *testing.T, provider string, status int, secret string, err
 func TestStatusErrorRedactsTheWholeSecretBeforeShortening(t *testing.T) {
 	const secret = "opaque-plan-key-9f8e7d6c5b4a"
 	leader := strings.Repeat("a", maxSnippet-20)
-	err := statusError("zai", 503, strings.NewReader(leader+secret), secret)
+	err := statusError("zai", 503, strings.NewReader(`{"message":"`+leader+secret+`"}`), secret)
 	if err == nil {
 		t.Fatal("no error, want the refusal")
 	}
@@ -55,7 +55,7 @@ func TestStatusErrorReadsTheReasonFromEachBodyShape(t *testing.T) {
 		{name: "openai", body: `{"error":{"message":"model is not supported"}}`, want: "model is not supported"},
 		{name: "detail", body: `{"detail":"model is not supported"}`, want: "model is not supported"},
 		{name: "message", body: `{"message":"model is not supported"}`, want: "model is not supported"},
-		{name: "plain", body: "model is not supported", want: "model is not supported"},
+		{name: "plain", body: "model is not supported", want: ""},
 		{name: "empty", body: "", want: ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {

@@ -246,11 +246,9 @@ func redactTokens(s string) string {
 // errorBody is the shape of a refusal: OpenAI and most providers name the cause
 // in error.message, and a few use detail or message at the top level.
 type errorBody struct {
-	Detail  string `json:"detail"`
-	Message string `json:"message"`
-	Error   *struct {
-		Message string `json:"message"`
-	} `json:"error"`
+	Detail  string          `json:"detail"`
+	Message string          `json:"message"`
+	Error   json.RawMessage `json:"error"`
 }
 
 // errorReason is what the backend said went wrong in full, or empty when the
@@ -267,11 +265,16 @@ func errorReason(body io.Reader) string {
 				return trimmed
 			}
 		}
-		if refusal.Error != nil {
-			if trimmed := strings.TrimSpace(refusal.Error.Message); trimmed != "" {
-				return trimmed
-			}
+		var message string
+		if json.Unmarshal(refusal.Error, &message) == nil && strings.TrimSpace(message) != "" {
+			return strings.TrimSpace(message)
+		}
+		var nested struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(refusal.Error, &nested) == nil && strings.TrimSpace(nested.Message) != "" {
+			return strings.TrimSpace(nested.Message)
 		}
 	}
-	return string(raw)
+	return ""
 }
