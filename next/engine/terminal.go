@@ -53,18 +53,19 @@ func (s *Service) Terminal(ctx context.Context, session contract.SessionID, host
 		}
 		host, id = current.Host, current.ID
 		s.mu.Lock()
-		s.sessionLocked(session).terminals++
+		state := s.sessionLocked(session)
+		state.terminals++
 		s.mu.Unlock()
 		if err := s.store.WakeTerminal(ctx, id); err != nil {
 			s.mu.Lock()
-			s.sessions[session].terminals--
+			state.terminals--
 			s.mu.Unlock()
 			return nil, release, failure(err)
 		}
 		s.reconciler.Kick()
 		release = func() {
 			s.mu.Lock()
-			s.sessions[session].terminals--
+			state.terminals--
 			s.mu.Unlock()
 		}
 	}

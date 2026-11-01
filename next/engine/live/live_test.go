@@ -54,7 +54,8 @@ func TestActivityPublicationOrder(t *testing.T) {
 			defer done.Done()
 			<-start
 			body := contract.TurnActivity{Session: session, Label: string(session)}
-			l.PublishActivity("r", body, contract.Event{Body: body})
+			handle, _ := l.CreateSession(session)
+			handle.PublishActivity("r", body, contract.Event{Body: body})
 		}()
 	}
 	close(start)
