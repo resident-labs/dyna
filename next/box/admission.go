@@ -33,8 +33,14 @@ func SliceName(id contract.BoxID) (string, error) {
 }
 func CgroupArgs(slice string) []string { return []string{"--cgroup-parent=" + slice} }
 
+// DiskFloor is the free space a host keeps: 20 GiB, or a tenth of its disk if that is more.
+func DiskFloor(total int64) int64 { return max(20*GiB, total/10) }
+
+// DiskWarn is the free space that warns: 85% used on a large disk, and always above the point where the largest box is refused.
+func DiskWarn(floor int64) int64 { return floor + max(floor/2, 40*GiB) }
+
 // Admit uses snapshots of hosts and existing allocations.
-func Admit(hosts []Host, boxes []Box, request Box, diskFloor int64) Placement {
+func Admit(hosts []Host, boxes []Box, request Box) Placement {
 	if diskRequest(request.Size.Name) == 0 {
 		return Placement{Reason: PendingInvalidSize}
 	}
@@ -88,7 +94,7 @@ func Admit(hosts []Host, boxes []Box, request Box, diskFloor int64) Placement {
 		} else if !existing.PlacedAt.Before(h.CheckedAt) {
 			disk -= diskRequest(existing.Size.Name)
 		}
-		if disk < diskFloor {
+		if disk < h.DiskFloor {
 			reason = PendingDisk
 			continue
 		}

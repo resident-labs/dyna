@@ -27,8 +27,8 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 	if err != nil {
 		t.Fatal(err)
 	}
-	host := box.Host{Name: "h", State: box.HostReady, CPUs: 8, MemBytes: 32 * box.GiB, DiskBytes: 30 * box.GiB, CheckedAt: time.Unix(100, 0)}
-	if p := box.Admit([]box.Host{host}, boxes, boxes[0], 20*box.GiB); p.Host != "h" {
+	host := box.Host{Name: "h", State: box.HostReady, CPUs: 8, MemBytes: 32 * box.GiB, DiskBytes: 30 * box.GiB, DiskFloor: 20 * box.GiB, CheckedAt: time.Unix(100, 0)}
+	if p := box.Admit([]box.Host{host}, boxes, boxes[0]); p.Host != "h" {
 		t.Fatal(p)
 	}
 	next := boxes[0]
@@ -40,7 +40,7 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 	}
 	// The current reconciliation pass holds the old timestamp in its snapshot.
 	boxes[0] = next
-	if p := box.Admit([]box.Host{host}, boxes, boxes[1], 20*box.GiB); p.Reason != box.PendingDisk {
+	if p := box.Admit([]box.Host{host}, boxes, boxes[1]); p.Reason != box.PendingDisk {
 		t.Fatalf("same pass: %+v", p)
 	}
 	boxes, err = s.Boxes(ctx)
@@ -55,7 +55,7 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p := box.Admit([]box.Host{host}, boxes, boxes[1], 20*box.GiB); p.Reason != box.PendingDisk {
+	if p := box.Admit([]box.Host{host}, boxes, boxes[1]); p.Reason != box.PendingDisk {
 		t.Fatalf("early hello: %+v", p)
 	}
 	event.ID, event.Time = "done", time.Unix(103, 0)
@@ -66,11 +66,11 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p := box.Admit([]box.Host{host}, boxes, boxes[1], 20*box.GiB); p.Reason != box.PendingDisk {
+	if p := box.Admit([]box.Host{host}, boxes, boxes[1]); p.Reason != box.PendingDisk {
 		t.Fatalf("after create: %+v", p)
 	}
 	host.CheckedAt = time.Unix(104, 0)
-	if p := box.Admit([]box.Host{host}, boxes, boxes[1], 20*box.GiB); p.Host != "h" {
+	if p := box.Admit([]box.Host{host}, boxes, boxes[1]); p.Host != "h" {
 		t.Fatalf("after sample: %+v", p)
 	}
 }

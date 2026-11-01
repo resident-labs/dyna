@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"filippo.io/age"
-	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine"
@@ -139,7 +138,10 @@ func Run(ctx context.Context, cfg Config) error {
 	backupDone := make(chan struct{})
 	go func() {
 		defer close(backupDone)
-		(&backupLoop{store: st, dir: filepath.Join(cfg.Data, "backups"), dest: cfg.BackupDest, recipient: recipient, now: time.Now, run: sshBackup}).start(backupCtx)
+		(&backupLoop{store: st, dir: filepath.Join(cfg.Data, "backups"), dest: cfg.BackupDest, recipient: recipient, now: time.Now, run: sshBackup, free: func(ctx context.Context) (int64, bool) {
+			total, used := podman.LocalDisk(ctx, cfg.Data)
+			return total - used, total > 0
+		}}).start(backupCtx)
 	}()
 	defer func() { stopBackup(); <-backupDone }()
 	if err := st.ResetEngineHosts(ctx); err != nil {
@@ -166,13 +168,13 @@ func Run(ctx context.Context, cfg Config) error {
 	boxCtx, stopBoxes := context.WithCancel(ctx)
 	defer stopBoxes()
 	boxes := &Boxes{Store: st, HeartbeatStore: st, Runtime: cfg.Runtime, HostData: cfg.HostData, InstructionsDir: filepath.Join(cfg.Data, "files", "instructions"), Version: cfg.Version, PiTarball: pi, Context: boxCtx}
-	go boxes.controlPlane(cfg.Data)
 	service := engine.New(st, boxes, profiles, time.Now)
 	service.SetMaxDepth(cfg.SessionMaxDepth)
 	service.Reconciler().SetHostMemory(boxes.hostMemory)
 	service.SetGitIdentity(cfg.GitName, cfg.GitEmail)
 	service.SetHostexecRunner(boxes)
 	boxes.Pressure = service
+	go boxes.controlPlane(cfg.Data)
 	hosts, err := st.Hosts(ctx)
 	if err != nil {
 		return fmt.Errorf("list hosts: %w", err)
@@ -191,6 +193,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("recover hostexec runs: %w", err)
 	}
 	quotas := proxy.Quotas(managementKey, st, time.Now)
+	service.SetWebSearchProxy(proxy, quotas)
 	connections := proxy.Connections(managementKey, st, time.Now)
 	accounts := engine.NewAccountActions(service, connections, quotas)
 	if err := service.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": accounts.Entry(), "pr.open": service.PrOpen(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport), "hostexec.grant": service.HostexecGrant(), "hostexec.run": service.HostexecRunEntry()}, cfg.ApprovalsExpiry); err != nil {
@@ -346,7 +349,7 @@ func Run(ctx context.Context, cfg Config) error {
 		ticks := time.NewTicker(30 * time.Second)
 		defer ticks.Stop()
 		github := &ci.GitHub{Token: token, Endpoint: &url.URL{Scheme: "https", Host: "api.github.com"}, Transport: http.DefaultTransport, Now: time.Now}
-		pool := &ci.Pool{Store: st, Hosts: boxes.ciDriver, GitHub: github, Sets: &ci.Sets{Token: token, Name: ci.Name}, DiskFloor: 20 * box.GiB, Memory: boxes.hostMemory, Now: time.Now}
+		pool := &ci.Pool{Store: st, Hosts: boxes.ciDriver, GitHub: github, Sets: &ci.Sets{Token: token, Name: ci.Name}, Memory: boxes.hostMemory, Now: time.Now}
 		pool.Run(ctx, ticks.C)
 	}()
 	defer func() { <-ciDone }()
@@ -364,11 +367,11 @@ func Run(ctx context.Context, cfg Config) error {
 				}
 				lastDormant = now
 			}
+			if err := service.EvictDisk(ctx); err != nil {
+				log.Printf("disk eviction: %v", err)
+			}
 			if err := service.ExpireOperations(ctx); err != nil {
 				log.Printf("operation expiry sweep: %v", err)
-			}
-			if err := service.ExpireHostexecGrants(ctx); err != nil {
-				log.Printf("grant expiry sweep: %v", err)
 			}
 			if err := service.StopHostexecs(ctx); err != nil {
 				log.Printf("hostexec stop sweep: %v", err)

@@ -31,7 +31,6 @@ type client interface {
 	SessionMove(context.Context, contract.SessionMoveRequest) (contract.SessionMoveResponse, error)
 	SessionList(context.Context, contract.SessionListRequest) (contract.SessionListResponse, error)
 	HostexecRun(context.Context, contract.HostexecRunRequest) (contract.HostexecRunResponse, error)
-	HostexecRevoke(context.Context, contract.HostexecRevokeRequest) (contract.HostexecRevokeResponse, error)
 	File(context.Context, string, io.Writer) error
 	Upload(context.Context, string) (contract.Attachment, error)
 	HostAdd(context.Context, contract.HostAddRequest) (contract.HostAddResponse, error)
@@ -56,6 +55,7 @@ type client interface {
 	DeviceList(context.Context, contract.DeviceListRequest) (contract.DeviceListResponse, error)
 	DeviceRevoke(context.Context, contract.DeviceRevokeRequest) (contract.DeviceRevokeResponse, error)
 	DeviceSetScopes(context.Context, contract.DeviceSetScopesRequest) (contract.DeviceSetScopesResponse, error)
+	HostList(context.Context, contract.HostListRequest) (contract.HostListResponse, error)
 }
 
 type socketClient struct{ http *http.Client }
@@ -71,18 +71,20 @@ func newClient(socket string) *socketClient {
 }
 
 type requestType interface {
-	contract.ContextSnapshotRequest |
+	contract.WebSearchRequest | contract.WebsearchSetKeyRequest | contract.WebsearchRemoveKeyRequest |
+		contract.ContextSnapshotRequest |
 		contract.OpWithdrawRequest |
 		contract.SessionMoveRequest |
 		contract.SessionListRequest |
-		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.HostexecRevokeRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest
+		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest
 }
 type responseType interface {
-	contract.ContextSnapshotResponse |
+	contract.WebSearchResponse | contract.WebsearchSetKeyResponse | contract.WebsearchRemoveKeyResponse |
+		contract.ContextSnapshotResponse |
 		contract.OpWithdrawResponse |
 		contract.SessionMoveResponse |
 		contract.SessionListResponse |
-		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.HostexecRevokeResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RepoCISetResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse
+		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.HostListResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RepoCISetResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse
 }
 
 func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
@@ -137,9 +139,6 @@ func (c *socketClient) OpWithdraw(ctx context.Context, q contract.OpWithdrawRequ
 func (c *socketClient) HostexecRun(ctx context.Context, q contract.HostexecRunRequest) (contract.HostexecRunResponse, error) {
 	return call[contract.HostexecRunRequest, contract.HostexecRunResponse](ctx, c, contract.MethodHostexecRun, q)
 }
-func (c *socketClient) HostexecRevoke(ctx context.Context, q contract.HostexecRevokeRequest) (contract.HostexecRevokeResponse, error) {
-	return call[contract.HostexecRevokeRequest, contract.HostexecRevokeResponse](ctx, c, contract.MethodHostexecRevoke, q)
-}
 func (c *socketClient) File(ctx context.Context, hash string, out io.Writer) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://dyna/v1/files/"+hash, nil)
 	if err != nil {
@@ -166,6 +165,9 @@ type commandExit int
 func (e commandExit) Error() string { return fmt.Sprintf("command exited with status %d", e) }
 func (c *socketClient) HostAdd(ctx context.Context, q contract.HostAddRequest) (contract.HostAddResponse, error) {
 	return call[contract.HostAddRequest, contract.HostAddResponse](ctx, c, contract.MethodHostAdd, q)
+}
+func (c *socketClient) HostList(ctx context.Context, q contract.HostListRequest) (contract.HostListResponse, error) {
+	return call[contract.HostListRequest, contract.HostListResponse](ctx, c, contract.MethodHostList, q)
 }
 func (c *socketClient) RoomSetLimits(ctx context.Context, q contract.RoomSetLimitsRequest) (contract.RoomSetLimitsResponse, error) {
 	return call[contract.RoomSetLimitsRequest, contract.RoomSetLimitsResponse](ctx, c, contract.MethodRoomSetLimits, q)
@@ -322,9 +324,8 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		return nil
 	}}
 	var grantHost, grantRoom, grantTo, grantReason string
-	var grantHours int
-	grant := &cobra.Command{Use: "grant --host HOST --hours N --reason WHY", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		args := contract.HostexecGrantArgs{Room: contract.RoomID(grantRoom), Hosts: []contract.HostName{contract.HostName(grantHost)}, Reason: grantReason, Expires: time.Now().Add(time.Duration(grantHours) * time.Hour)}
+	grant := &cobra.Command{Use: "grant --host HOST --reason WHY", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		args := contract.HostexecGrantArgs{Room: contract.RoomID(grantRoom), Hosts: []contract.HostName{contract.HostName(grantHost)}, Reason: grantReason}
 		if grantTo != "" {
 			args.To = contract.Principal{Kind: contract.PrincipalSession, Session: contract.SessionID(grantTo)}
 		}
@@ -335,7 +336,6 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		return err
 	}}
 	grant.Flags().StringVar(&grantHost, "host", "", "Host name")
-	grant.Flags().IntVar(&grantHours, "hours", 24, "Hours the grant lasts")
 	grant.Flags().StringVar(&grantReason, "reason", "", "Why the session needs access")
 	grant.Flags().StringVar(&grantTo, "to", "", "Session that gets the grant (owner only)")
 	grant.Flags().StringVar(&grantRoom, "room", "", "Room ID (owner only)")
@@ -345,11 +345,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	run.Flags().StringVar(&cwd, "cwd", "", "Working directory")
 	run.Flags().DurationVar(&timeout, "timeout", 10*time.Minute, "Run timeout")
 	_ = run.MarkFlagRequired("host")
-	revoke := &cobra.Command{Use: "revoke GRANT", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := getClient().HostexecRevoke(cmd.Context(), contract.HostexecRevokeRequest{Grant: contract.GrantID(args[0])})
-		return err
-	}}
-	hostexec.AddCommand(run, revoke, grant)
+	hostexec.AddCommand(run, grant)
 	root.AddCommand(hostexec)
 
 	host := &cobra.Command{Use: "host"}
@@ -370,7 +366,23 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	add.Flags().StringSliceVar(&hostRooms, "room", nil, "Room ID allowed on this host (repeatable; default: all rooms)")
 	add.Flags().StringVar(&ssh, "ssh", "", "SSH destination")
 	add.Flags().BoolVar(&admin, "owner-only-admin", false, "Only the owner has host admin rights")
-	host.AddCommand(add)
+	list := &cobra.Command{Use: "list", Args: cobra.NoArgs, Short: "Show each host's disk use", RunE: func(cmd *cobra.Command, _ []string) error {
+		r, err := getClient().HostList(cmd.Context(), contract.HostListRequest{})
+		if err != nil {
+			return err
+		}
+		for _, h := range r.Hosts {
+			state := "ok"
+			if h.DiskLow {
+				state = "low"
+			}
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", h.Name, humanize.IBytes(uint64(h.DiskUsed)), humanize.IBytes(uint64(h.DiskBytes)), state); err != nil {
+				return err
+			}
+		}
+		return nil
+	}}
+	host.AddCommand(add, list)
 	root.AddCommand(host)
 
 	room := &cobra.Command{Use: "room"}

@@ -5,17 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 	"unicode/utf8"
 )
 
 type HostexecGrantArgs struct {
-	Room    RoomID     `json:"room"`
-	To      Principal  `json:"to"`
-	Hosts   []HostName `json:"hosts"`
-	Reason  string     `json:"reason"`
-	Expires time.Time  `json:"expires,omitzero"`
-	Never   bool       `json:"never"`
+	Room   RoomID     `json:"room"`
+	To     Principal  `json:"to"`
+	Hosts  []HostName `json:"hosts"`
+	Reason string     `json:"reason"`
 }
 
 func (HostexecGrantArgs) OpKind() OpKind          { return "hostexec.grant" }
@@ -41,7 +38,7 @@ func (a *HostexecGrantArgs) UnmarshalJSON(data []byte) error {
 	if err := dec.Decode(&v); err != nil {
 		return err
 	}
-	if (v.To.Kind != PrincipalSession && v.To.Kind != "") || len(v.Hosts) == 0 || v.Reason == "" || !utf8.ValidString(v.Reason) || utf8.RuneCountInString(v.Reason) > 300 || strings.ContainsAny(v.Reason, "\r\n") || v.Never && !v.Expires.IsZero() {
+	if (v.To.Kind != PrincipalSession && v.To.Kind != "") || len(v.Hosts) == 0 || v.Reason == "" || !utf8.ValidString(v.Reason) || utf8.RuneCountInString(v.Reason) > 300 || strings.ContainsAny(v.Reason, "\r\n") {
 		return errors.New("invalid hostexec grant")
 	}
 	*a = HostexecGrantArgs(v)

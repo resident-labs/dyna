@@ -6,11 +6,14 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 54
+const schemaVersion = 57
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
-	53: {`CREATE TABLE repo_ci_hosts (repo TEXT NOT NULL REFERENCES repos(repo), host TEXT NOT NULL REFERENCES hosts(name), runners INTEGER NOT NULL, size TEXT NOT NULL, PRIMARY KEY(repo, host))`},
+	56: {`CREATE TABLE repo_ci_hosts (repo TEXT NOT NULL REFERENCES repos(repo), host TEXT NOT NULL REFERENCES hosts(name), runners INTEGER NOT NULL, size TEXT NOT NULL, PRIMARY KEY(repo, host))`},
+	55: {`ALTER TABLE hosts ADD COLUMN disk_floor INTEGER NOT NULL DEFAULT 21474836480`, `ALTER TABLE hosts ADD COLUMN disk_low_since INTEGER NOT NULL DEFAULT 0`, `CREATE TABLE disk_warnings (host TEXT PRIMARY KEY, at INTEGER NOT NULL)`},
+	54: {`UPDATE grants SET expired_at=expires_at WHERE kind='hostexec' AND revoked_at IS NULL AND expired_at IS NULL AND expires_at IS NOT NULL AND expires_at<=CAST(strftime('%s','now') AS INTEGER)*1000`, `UPDATE grants SET expires_at=NULL WHERE kind='hostexec' AND revoked_at IS NULL AND expired_at IS NULL AND (expires_at IS NULL OR expires_at>CAST(strftime('%s','now') AS INTEGER)*1000)`, `UPDATE operations SET state='expired' WHERE kind='hostexec.grant' AND state='pending'`, `UPDATE operations SET args=json_remove(args,'$.expires','$.never') WHERE kind='hostexec.grant'`},
+	53: {`CREATE TABLE search_keys (provider TEXT PRIMARY KEY, key TEXT NOT NULL)`},
 	52: {`CREATE INDEX turns_session_started_at ON turns(session, started_at DESC)`, `UPDATE turns SET sections=NULL WHERE ended_at IS NOT NULL AND sections IS NOT NULL`},
 	51: {`CREATE TABLE client_replays (method TEXT NOT NULL, caller_kind TEXT NOT NULL, caller_id TEXT NOT NULL, client_id TEXT NOT NULL, ref TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(method, caller_kind, caller_id, client_id))`},
 	50: {`ALTER TABLE connect_link_state ADD COLUMN generation INTEGER NOT NULL DEFAULT 0`, `CREATE TABLE connect_revocations (relay_device TEXT PRIMARY KEY, revoked_at INTEGER NOT NULL)`, `CREATE TABLE connect_devices (relay_device TEXT PRIMARY KEY, device TEXT NOT NULL UNIQUE REFERENCES devices(id))`, `CREATE TABLE connect_sessions (id TEXT PRIMARY KEY, relay_device TEXT NOT NULL REFERENCES connect_devices(relay_device), origin TEXT NOT NULL, jkt TEXT NOT NULL, user_id TEXT NOT NULL, epoch INTEGER NOT NULL, generation INTEGER NOT NULL, token_hash BLOB NOT NULL UNIQUE, old1 BLOB, old2 BLOB, old3 BLOB, prev_until INTEGER NOT NULL, created_at INTEGER NOT NULL, access_until INTEGER NOT NULL, grant_end INTEGER NOT NULL, grant_at INTEGER NOT NULL)`},
