@@ -98,7 +98,7 @@
     {#if item.file.media.startsWith("video/")}
       {#key src}<video {src} controls preload="metadata" autoplay></video>{/key}
     {:else}
-      <img {src} alt={item.file.name} draggable="false" onload={event => natural = { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }}
+      <img {src} alt={item.file.name} draggable="false" onload={event => { if (event.currentTarget instanceof HTMLImageElement) natural = { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }; }}
         style:width={natural.width ? `${content.width}px` : undefined} style:height={natural.height ? `${content.height}px` : undefined}
         style:transform="translate({view.x}px, {view.y}px) scale({view.scale})" />
     {/if}
