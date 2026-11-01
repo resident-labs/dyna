@@ -22,6 +22,14 @@ export function stepTitle({ tool, label }: Pick<TranscriptStep, "tool" | "label"
   return { kind, verb, target: shortPaths(full), full };
 }
 
+// A session's activity label starts with its tool name. An MCP tool's ID reads as its step title instead (r8).
+export function activityLabel(label: string): string {
+  const tool = label.split(" ", 1)[0];
+  if (!tool.startsWith("mcp__")) return label;
+  const { verb, target } = stepTitle({ tool, label });
+  return target ? `${verb} ${target}` : verb;
+}
+
 export function titleOf(item: TranscriptItem) {
   let target = "";
   // Tool arguments are an untrusted JSON string from the harness.
