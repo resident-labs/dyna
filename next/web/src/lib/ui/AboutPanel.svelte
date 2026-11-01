@@ -19,6 +19,7 @@
     store: RoomStore; room: string; session: string; switchable: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onjobs: (event: MouseEvent) => void; onclosed: () => void;
   } = $props();
   let open = $derived(store.sessions.get(session));
+  let goals = $derived(store.goals.get(session) ?? []);
   let parent = $derived(open?.parent && store.names.get(open.parent));
   let box = $derived(store.boxes.get(session));
   let host = $derived(store.hosts.get(session));
@@ -57,9 +58,16 @@
 
 <svelte:document onvisibilitychange={() => { visible = document.visibilityState === "visible"; }} />
 <div class="about">
-  {#if open?.goal}<h3>Goal</h3><p class="goal">{open.goal}</p>{/if}
+  {#each goals as goal (goal.id)}
+    <h3>Goal</h3>
+    <p class="goal" class:joined={goal.doneWhen || goal.items?.length}>{goal.text}</p>
+    {#if goal.doneWhen}<p class="goal when muted" class:joined={goal.items?.length}>Done when {goal.doneWhen}</p>{/if}
+    {#if goal.items?.length}<ul class="items">{#each goal.items as item (item.number)}<li class:muted={item.state !== "open"} class:dropped={item.state === "dropped"}>{item.state === "done" ? "Done · " : ""}{item.text}</li>{/each}</ul>{/if}
+  {:else}
+    {#if open?.goal}<h3>Goal</h3><p class="goal">{open.goal}</p>{/if}
+  {/each}
   <dl>
-    {#if store.turns.has(session)}<dt>Turn</dt><dd>{#if store.stopping.has(session)}Stopping{:else}Running · <button type="button" onclick={() => store.stop(session)}>Stop</button>{/if}
+    {#if store.running(session)}<dt>Turn</dt><dd>{#if store.stopping.has(session)}Stopping{:else}Running · <button type="button" onclick={() => store.stop(session)}>Stop</button>{/if}
       {#if store.stopFailed.has(session)}<span class="failed">The stop did not reach the engine.</span>{/if}</dd>{/if}
     {#if parent && open?.parent}<dt>Parent</dt><dd><a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(open.parent)}`} onclick={navigate}>{parent}</a></dd>{/if}
     {#if open?.profile}<dt>Profile</dt><dd><ProfileMenu {session} profile={open.profile} {switchable} /></dd>{/if}
@@ -82,6 +90,10 @@
   .about { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; font-size: 14px; }
   h3 { margin: 0 0 4px; color: var(--muted); font-size: 12.5px; font-weight: 400; }
   .goal { margin: 0 0 16px; line-height: 1.45; overflow-wrap: anywhere; }
+  .goal.joined { margin-bottom: 4px; }
+  .when { font-size: 12.5px; }
+  .items { display: grid; gap: 4px; margin: 0 0 16px; padding: 0 0 0 16px; line-height: 1.45; overflow-wrap: anywhere; }
+  .dropped { text-decoration: line-through; }
   dl { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 8px 12px; margin: 0; }
   dt { color: var(--muted); font-size: 12.5px; line-height: 20px; }
   dd { margin: 0; line-height: 20px; overflow-wrap: anywhere; }

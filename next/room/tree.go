@@ -86,6 +86,19 @@ func (t Tree) HoldsGoals(s contract.SessionID) bool {
 	return exists && n.Parent != ""
 }
 
+// CanTend reports whether caller may work on a goal held by holder: the owner, the holder, anyone above it, and root for a goal with no holder.
+func (t Tree) CanTend(caller contract.Principal, holder contract.SessionID) bool {
+	switch {
+	case caller.Kind == contract.PrincipalOwner:
+		return true
+	case caller.Kind != contract.PrincipalSession:
+		return false
+	case holder == "":
+		return caller.Session == t.root
+	}
+	return caller.Session == holder || t.Above(caller.Session, holder)
+}
+
 // CloseOrder returns a subtree deepest first, with a stable order at each depth.
 func (t Tree) CloseOrder(s contract.SessionID) ([]contract.SessionID, error) {
 	if _, ok := t.nodes[s]; !ok {
