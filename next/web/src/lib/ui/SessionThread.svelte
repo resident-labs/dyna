@@ -13,7 +13,7 @@
   import Markdown from "./Markdown.svelte";
   import TranscriptWorkRow from "./TranscriptWorkRow.svelte";
   import TimelineMinimap from "./TimelineMinimap.svelte";
-  import { deriveTimelineGroups } from "../timeline.ts";
+  import { deriveTimelineGroups, mergeTimelineItems } from "../timeline.ts";
 
   let { session, roomName, store, unsent, onunsent, onsettled, onpostlocation, clock = Date.now }: { session: string; roomName: string; store: RoomStore; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; clock?: () => number } = $props();
   const view = untrack(() => store.window({ kind: "dm", session }));
@@ -93,13 +93,6 @@
     return () => { destroyed = true; stop(); document.removeEventListener("visibilitychange", markRead); };
   });
   const paging = new Set<string>();
-  function mergeItems(existing: TranscriptItem[], incoming: TranscriptItem[]): TranscriptItem[] {
-    const byId = new Map(existing.map(item => [item.id, item]));
-    for (const item of incoming) byId.set(item.id, item);
-    const items = [...byId.values()];
-    const nested = new Set(items.flatMap(item => (item.posts ?? []).map(post => post.event || post.id)));
-    return items.filter(item => item.kind !== "post" || !nested.has(item.event || item.id)).sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-  }
   async function readContinuation(turn: TranscriptTurn, kind: "items" | "posts" | "older") {
     const key = turn.id + "/" + kind;
     if (paging.has(key)) return;
@@ -111,7 +104,7 @@
         const page = await call("transcript.read", { session, turn: turn.id, ...request });
         const next = page.turns?.[0];
         if (!next) throw new Error("Missing transcript page");
-        turns = turns.map(item => item.id === turn.id ? { ...item, items: mergeItems(item.items ?? [], next.items ?? []), ...(kind === "older" ? { olderItems: next.olderItems, nextItem: next.nextItem } : kind === "items" ? { mandatoryItems: next.mandatoryItems, nextMandatory: next.nextMandatory } : { mandatoryPosts: next.mandatoryPosts, nextMandatoryPost: next.nextMandatoryPost }) } : item);
+        turns = turns.map(item => item.id === turn.id ? { ...item, items: mergeTimelineItems(item.items ?? [], next.items ?? []), ...(kind === "older" ? { olderItems: next.olderItems, nextItem: next.nextItem } : kind === "items" ? { mandatoryItems: next.mandatoryItems, nextMandatory: next.nextMandatory } : { mandatoryPosts: next.mandatoryPosts, nextMandatoryPost: next.nextMandatoryPost }) } : item);
         const more = kind === "items" ? next.mandatoryItems : kind === "posts" ? next.mandatoryPosts : next.olderItems;
         if (!more) break;
         const nextCursor = kind === "items" ? next.nextMandatory ?? 0 : kind === "posts" ? next.nextMandatoryPost ?? 0 : next.nextItem ?? 0;

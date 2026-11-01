@@ -45,3 +45,12 @@ export function summarizeWork(items: TranscriptItem[]): string {
   const sentence = labels.map((label, index) => index ? label[0].toLowerCase() + label.slice(1) : label);
   return sentence.length < 3 ? sentence.join(" and ") : `${sentence.slice(0, -1).join(", ")}, and ${sentence.at(-1)}`;
 }
+
+// Dyna: Continuations can repeat tools and their posts in a separate page.
+export function mergeTimelineItems(existing: TranscriptItem[], incoming: TranscriptItem[]): TranscriptItem[] {
+  const byId = new Map(existing.map(item => [item.id, item]));
+  for (const item of incoming) byId.set(item.id, item);
+  const items = [...byId.values()];
+  const nested = new Set(items.flatMap(item => (item.posts ?? []).map(post => post.event || post.id)));
+  return items.filter(item => item.kind !== "post" || !nested.has(item.event || item.id)).sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+}
