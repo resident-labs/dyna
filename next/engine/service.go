@@ -44,9 +44,7 @@ type Service struct {
 	hostexec          HostexecRunner
 	hostexecTimeout   func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 	now               func() time.Time
-	mu                sync.Mutex
 	live              *live.Live
-	sessions          map[contract.SessionID]*sessionState
 	readMu            sync.Mutex // preserves commit and live broadcast order
 	// transcriptMu serializes appends, so each offset check and write runs alone.
 	transcriptMu        sync.Mutex
@@ -56,52 +54,26 @@ type Service struct {
 	publishInstructions func(context.Context)
 }
 
-// sessionState retains terminal state until its move to live.
-// Take the live session lock before s.mu, never the reverse.
-type sessionState struct {
-	terminals int
-}
-
-// sessionLocked creates the entry if needed. Callers hold s.mu and pass the id of a session that exists or is being started.
-func (s *Service) sessionLocked(id contract.SessionID) *sessionState {
-	state := s.sessions[id]
-	if state == nil {
-		state = &sessionState{}
-		s.sessions[id] = state
-	}
-	return state
-}
-
 // lockSession creates a handle only for a session the caller read as open.
-func (s *Service) lockSession(id contract.SessionID) (*live.Session, *sessionState, bool) {
+func (s *Service) lockSession(id contract.SessionID) (*live.Session, bool) {
 	handle, ok := s.live.CreateSession(id)
 	if !ok || !handle.Lock() {
-		return nil, nil, false
+		return nil, false
 	}
-	s.mu.Lock()
-	state := s.sessionLocked(id)
-	s.mu.Unlock()
-	return handle, state, true
+	return handle, true
 }
 
 // lookupSession reads existing session state without creating it.
-func (s *Service) lookupSession(id contract.SessionID) (*live.Session, *sessionState, bool) {
+func (s *Service) lookupSession(id contract.SessionID) (*live.Session, bool) {
 	handle, ok := s.live.LookupSession(id)
 	if !ok || !handle.Lock() {
-		return nil, nil, false
+		return nil, false
 	}
-	s.mu.Lock()
-	state := s.sessions[id]
-	s.mu.Unlock()
-	if state == nil {
-		handle.Unlock()
-		return nil, nil, false
-	}
-	return handle, state, true
+	return handle, true
 }
 
 func New(st *store.Store, boxes lifecycle.BoxAdapter, profiles Profiles, now func() time.Time) *Service {
-	s := &Service{sessions: make(map[contract.SessionID]*sessionState), hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now}
+	s := &Service{hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now}
 	s.reconciler = lifecycle.New(st, boxes, s, nil, s.event, now)
 	s.live = live.New(s.deliverWakes)
 	st.SetWake(s.queueWakes)
@@ -123,7 +95,7 @@ func (s *Service) SetRepositories(repos Repositories) {
 
 func (s *Service) Reconciler() *lifecycle.Reconciler { return s.reconciler }
 
-// SessionClosed retires live and legacy session state after the close commits.
+// SessionClosed retires live session state after the close commits.
 func (s *Service) SessionClosed(id contract.SessionID) {
 	handle := s.live.RetireSession(id)
 	if handle == nil {
@@ -134,9 +106,6 @@ func (s *Service) SessionClosed(id contract.SessionID) {
 	handle.SetChannel(nil)
 	room, stopped := handle.ClearComputer()
 	handle.ClearShell()
-	s.mu.Lock()
-	delete(s.sessions, id)
-	s.mu.Unlock()
 	channel.Close()
 	if stopped {
 		_ = s.computerEvent(context.Background(), id, room, contract.ComputerStopped)
@@ -144,9 +113,8 @@ func (s *Service) SessionClosed(id contract.SessionID) {
 }
 
 func (s *Service) OpenTerminal(id contract.SessionID) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.sessions[id] != nil && s.sessions[id].terminals > 0
+	handle, ok := s.live.LookupSession(id)
+	return ok && handle.HasTerminal()
 }
 
 // SetTranscriptDir sets where transcript copies are kept, one folder per session.
