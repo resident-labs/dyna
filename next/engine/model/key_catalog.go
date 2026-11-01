@@ -13,7 +13,9 @@ type KeyProvider struct {
 // KeyProviders is the supported key catalog. Endpoints are provider documentation URLs.
 func KeyProviders() []KeyProvider {
 	return []KeyProvider{
-		{contract.ProviderZAI, "z.ai", "https://api.z.ai/api/paas/v4", []string{"glm-5.3", "glm-5.3-flash"}},
+		// The coding endpoint: z.ai bills the general /api/paas/v4 to account balance,
+		// even for a key with plan quota left (docs.z.ai/devpack/notice/api-key-management).
+		{contract.ProviderZAI, "z.ai", "https://api.z.ai/api/coding/paas/v4", []string{"glm-5.3", "glm-5.3-flash"}},
 		{contract.ProviderOpencodeGo, "OpenCode Go", "https://opencode.ai/inference/go/v1", []string{"glm-5.3", "kimi-k3", "minimax-m3.1-flash"}},
 		{contract.ProviderDeepSeek, "DeepSeek", "https://api.deepseek.com/v1", []string{"deepseek-chat", "deepseek-reasoner"}},
 	}

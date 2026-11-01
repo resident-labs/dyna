@@ -31,7 +31,7 @@
   let panes = $derived(settingsPanes.filter(pane => !pane.admin || admin));
   let shown = $derived(panes.find(pane => path === `/settings/${pane.id}` || (pane.id === "accounts" && path.startsWith("/settings/accounts/"))) ?? (phone ? undefined : panes[0]));
   // /settings and its trailing slash open the first pane or the list; any other path has no page.
-  let lost = $derived(!/^\/settings\/?$/.test(path) && !panes.some(pane => path === `/settings/${pane.id}` || (pane.id === "accounts" && /^\/settings\/accounts\/(?:add(?:\/[^/]+)?|account\/[^/]+)$/.test(path))));
+  let lost = $derived(!/^\/settings\/?$/.test(path) && !panes.some(pane => path === `/settings/${pane.id}` || (pane.id === "accounts" && /^\/settings\/accounts\/(?:add(?:\/[^/]+)?|account\/[^/]+|reconnect\/[^/]+)$/.test(path))));
   // The tab names the open pane, or Settings on the pane list. Settings owns the title while it is open.
   $effect(() => { document.title = `${lost ? "Not found" : shown?.label ?? "Settings"} · Dyna`; });
 </script>
