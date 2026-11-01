@@ -86,6 +86,7 @@
   }
   let visualPosts = $derived(view.posts().flatMap(event => (event.body.attachments ?? []).flatMap(file => file.visual ? [{ event, visual: file.visual }] : [])));
   let newest = $derived(new Map(visualPosts.map(({ visual }) => [visual.id, visual])));
+  let visualEvents = $derived(new Map(visualPosts.map(({ event }) => [`p${event.seq}`, event.id])));
   function openVisual(visual: VisualCard) {
     const versions = visualPosts.filter(item => item.visual.id === visual.id).reverse();
     const target = versions[0];
@@ -191,7 +192,7 @@
   <VirtualList bind:this={list} {items} key={item => item.key} label="Feed" {estimate} follow={view.atPresent} bind:element
     onstart={() => void view.loadOlder(() => list?.scrollSettled() ?? Promise.resolve())} onend={() => void view.loadNewer()} onbottom={shown => { if (shown) markRead(); }}>
     {#snippet row(item: Item)}
-      {#if item.kind === "post"}<div class:ring={item.key === `p${ring}`}><PostRow row={item} {newest} onvisual={openVisual} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
+      {#if item.kind === "post"}<div class:ring={item.key === `p${ring}`}><PostRow row={item} {newest} visualEvent={visualEvents.get(item.key)} onvisual={openVisual} author={author(item.from)} to={home.kind === "dm" ? undefined : item.to.map(author).join(", ")} root={root(item.from.session)}
         onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} swipeDisabled={waiting?.at === item.at && waiting.author === author(item.from)} onforward={operate ? () => onforward({ author: author(item.from), at: item.at, text: item.text, attachments: item.attachments }) : undefined} /></div>
       {:else if item.kind === "notice"}<p class="divider"><span>{describe(item.event, name)}{#if item.resumedAt}{" "}for {Math.round((Date.parse(item.resumedAt) - Date.parse(item.event.at)) / 60_000) < 1 ? "under a minute" : `${Math.round((Date.parse(item.resumedAt) - Date.parse(item.event.at)) / 60_000)} min`}{/if} · <time datetime={item.event.at}>{formatTime(item.event.at)}</time></span></p>
       {:else if item.kind === "restarted"}<div class="restart-warning"><span class="restart-mark"><StatusPill tone="warning" label="Box replaced" dot triangle /></span><p>{name(item.session)}'s box was replaced. Unpushed work in the old volume is gone. <time datetime={item.at}>{formatTime(item.at)}</time></p></div>
