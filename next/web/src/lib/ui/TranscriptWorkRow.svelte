@@ -3,7 +3,7 @@
   import { onMount } from "svelte";
   import type { TranscriptItem, TranscriptPart } from "../contract.gen.ts";
   import { activeVerb, elapsed, stepTime, titleOf, type StepKind } from "../steps.ts";
-  import { formatTimelineDuration, summarizeWork, timelineItemRunning } from "../timeline.ts";
+  import { formatTimelineDuration, summarizeWork, timelineItemRunning, workLayout } from "../timeline.ts";
   import Icon, { type IconName } from "./Icon.svelte";
   import TranscriptIcon from "./TranscriptIcon.svelte";
   import Markdown from "./Markdown.svelte";
@@ -43,10 +43,48 @@
   let tools = $derived(items.filter(item => item.kind !== "thinking"));
   // A failed call usually fails its script too, and that is one failure.
   let failedCount = $derived(tools.reduce((count, item) => count + Math.max(Number(!!item.failed), (item.calls ?? []).filter(call => call.status === "error").length), 0));
+  let layout = $derived(workLayout(items));
+  // One click reads any thought: the folded group opens with each thought whole.
   let showThoughts = $state(false);
+  function toggleThoughts() {
+    showThoughts = !showThoughts;
+    if (!showThoughts) return;
+    onopen();
+    for (const thought of thoughts) if (thought.more) void load(thought, "text");
+  }
+  // A lone thought is its own text, cut to one line. Only text that the cut hides can open, in place.
+  let openThoughts: Record<string, boolean> = $state({});
+  let cutThoughts: Record<string, boolean> = $state({});
+  function toggleThought(item: TranscriptItem) {
+    openThoughts[item.id] = !openThoughts[item.id];
+    if (!openThoughts[item.id]) return;
+    onopen();
+    if (item.more) void load(item, "text");
+  }
+  // Measured, as only layout knows what fits; an open thought keeps its answer until it closes and is measured again.
+  const measureCut = (item: TranscriptItem) => (node: HTMLElement) => {
+    const observer = new ResizeObserver(() => { if (!openThoughts[item.id]) cutThoughts[item.id] = node.scrollHeight > node.clientHeight + 1; });
+    observer.observe(node);
+    return () => observer.disconnect();
+  };
   // A live turn shows its work without a click, so its older items load now.
   onMount(() => { if (!ended) onopen(); });
 </script>
+
+{#snippet thought(item: TranscriptItem, whole: boolean)}
+  {@const open = whole || !!openThoughts[item.id]}
+  {@const folds = !whole && (!!item.more || !!cutThoughts[item.id])}
+  {@const missing = open && item.more && chunks[key(item, "text")] === undefined}
+  <div class="thought" class:open class:folds>
+    <span class="slot"><TranscriptIcon kind="thinking" /></span>
+    <div class="thought-text" {@attach !whole && measureCut(item)}>
+      <Markdown text={(chunks[key(item, "text")] ?? item.text) || "Thought"} />
+      {#if missing}<button disabled={loading[key(item, "text")]} onclick={() => void load(item, "text")}>{failures[key(item, "text")] ? "Could not load thought. Try again" : "Show all"}</button>{/if}
+    </div>
+    {#if open}<span class="time">{stepTime({ started: item.at, ended: item.ended })}</span>{/if}
+    {#if folds}<button class="thought-fold" aria-expanded={open} aria-label={open ? "Fold thought" : "Show whole thought"} onclick={() => toggleThought(item)}><TranscriptIcon kind="chevron" /></button>{/if}
+  </div>
+{/snippet}
 
 {#snippet entry(item: TranscriptItem)}
   {@const title = titleOf(item)}
@@ -54,21 +92,15 @@
   {#if item.tool === "codemode"}
     <CodemodeScript {item} {ended} {chunks} {onload} {onopen} />
   {:else}
-  <details class="entry" ontoggle={(event) => { if (event.currentTarget.open) { onopen(); if (item.more) { if (item.kind === "thinking") void load(item, "text"); else { void load(item, "arguments"); void load(item, "output"); if (item.diff) void load(item, "diff"); } } } }}>
+  <details class="entry" ontoggle={(event) => { if (event.currentTarget.open) { onopen(); if (item.more) { void load(item, "arguments"); void load(item, "output"); if (item.diff) void load(item, "diff"); } } }}>
     <summary>
-      <span class="slot">{#if running}<span class="spinner" aria-label="Working" role="img"></span>{:else}{#if item.kind === "thinking" || ["run", "search", "read", "edit", "write"].includes(title.kind)}<TranscriptIcon kind={item.kind === "thinking" ? "thinking" : title.kind} />{:else}<Icon name={icons[title.kind]} size={16} />{/if}{/if}</span>
-      {#if item.kind === "thinking"}<span class="target">{(item.text ?? "").split("\n")[0] || "Thought"}</span>{:else if running}<span class="target" title={title.full}>{activeVerb(title.kind, title.verb)} {title.target}</span>{:else if title.kind === "run" || title.kind === "edit" || title.kind === "write"}<span class="target" title={title.full}>{title.target || title.verb}</span>{:else}<span class="target" title={title.full}>{title.verb} {title.target}</span>{/if}
+      <span class="slot">{#if running}<span class="spinner" aria-label="Working" role="img"></span>{:else}{#if ["run", "search", "read", "edit", "write"].includes(title.kind)}<TranscriptIcon kind={title.kind} />{:else}<Icon name={icons[title.kind]} size={16} />{/if}{/if}</span>
+      {#if running}<span class="target" title={title.full}>{activeVerb(title.kind, title.verb)} {title.target}</span>{:else if title.kind === "run" || title.kind === "edit" || title.kind === "write"}<span class="target" title={title.full}>{title.target || title.verb}</span>{:else}<span class="target" title={title.full}>{title.verb} {title.target}</span>{/if}
       <span class="time">{running ? elapsed(item.at, now) : stepTime({ started: item.at, ended: item.ended })}</span>
       {#if item.failed}<StatusPill tone="failed" label="Failed" word />{/if}
       <span class="entry-chevron"><TranscriptIcon kind="chevron" /></span>
     </summary>
     <div class="content">
-      {#if item.kind === "thinking"}
-        <Markdown text={chunks[key(item, "text")] ?? item.text} />
-        {#if item.more && chunks[key(item, "text")] === undefined}
-          <button disabled={loading[key(item, "text")]} onclick={() => void load(item, "text")}>{failures[key(item, "text")] ? "Could not load thought. Try again" : "Show all"}</button>
-        {/if}
-      {:else}
         {#if item.diff}
           {@const diff = chunks[key(item, "diff")] ?? item.diff}
           {@const lines = diff.split("\n")}
@@ -85,23 +117,30 @@
           {/if}
         {/each}
         {/if}
-      {/if}
     </div>
   </details>
   {/if}
 {/snippet}
 
-{#if items.length === 1 && items[0].kind === "tool" && items[0].tool !== "codemode"}
+{#if layout === "single" && items[0].kind === "thinking"}
+  <div class="group">{@render thought(items[0], false)}</div>
+{:else if layout === "single"}
   <div class="group">{@render entry(items[0])}</div>
+{:else if layout === "thoughts"}
+  <div class="group">
+    <button class="group-heading thoughts" aria-expanded={showThoughts} onclick={toggleThoughts}><span class="slot"><TranscriptIcon kind="thinking" /></span><span>{summary}</span><span class="fold-chevron"><TranscriptIcon kind="chevron" /></span></button>
+    {#if showThoughts}{#each items as item (item.id)}{@render thought(item, true)}{/each}{/if}
+  </div>
 {:else if items.length}
   <div class="group">
     <div class="group-heading"><span class="slot"><TranscriptIcon kind="hammer" /></span><span>{summary}</span>
       {#if failedCount}<StatusPill tone="failed" label={`${failedCount} failed`} word />{/if}
-      {#if thoughts.length}<button class="thought-toggle" aria-expanded={showThoughts} onclick={() => showThoughts = !showThoughts}>{thoughts.length} {thoughts.length === 1 ? "thought" : "thoughts"} <TranscriptIcon kind="chevron" /></button>{/if}
+      {#if thoughts.length}<button class="thought-toggle" aria-expanded={showThoughts} onclick={toggleThoughts}>{thoughts.length} {thoughts.length === 1 ? "thought" : "thoughts"} <span class="fold-chevron"><TranscriptIcon kind="chevron" /></span></button>{/if}
     </div>
-    {#if showThoughts}{#each thoughts as thought (thought.id)}{@render entry(thought)}{/each}{/if}
     <div class="entries" role="region" aria-label="Work details">
-      {#each tools as item (item.id)}{@render entry(item)}{/each}
+      {#each items as item (item.id)}
+        {#if item.kind !== "thinking"}{@render entry(item)}{:else if showThoughts}{@render thought(item, true)}{/if}
+      {/each}
     </div>
   </div>
 {/if}
@@ -111,6 +150,22 @@
   .group { margin-left: 16px; padding-left: 8px; border-left: 1px solid var(--line); }
   .group-heading { display: flex; align-items: center; gap: 6px; }
   .thought-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .group-heading.thoughts { width: 100%; min-height: 24px; border-radius: 6px; text-align: left; }
+  .group-heading.thoughts:hover { background: var(--hover); }
+  .fold-chevron { display: inline-flex; }
+  .group-heading.thoughts .fold-chevron { margin-left: auto; }
+  [aria-expanded="true"] .fold-chevron, .thought-fold[aria-expanded="true"] { transform: rotate(90deg); }
+  /* A thought is one element, cut to one line or whole, so opening it never shows its text twice. */
+  .thought { position: relative; display: flex; align-items: flex-start; gap: 6px; min-height: 24px; border-radius: 6px; }
+  .thought .slot { height: 24px; }
+  .thought-text { flex: 1; min-width: 0; padding: 2px 0; }
+  .thought:not(.open) .thought-text { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 1; line-clamp: 1; }
+  .thought .time { padding-top: 3px; margin-left: 0; }
+  .thought-fold { display: grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 6px; }
+  /* Folded, the whole row is the button's target; open, the text stays selectable and its links work. */
+  .thought.folds:not(.open) .thought-fold::after { content: ""; position: absolute; inset: 0; }
+  .thought.folds:not(.open):hover { color: var(--text); background: var(--hover); }
+  @media (hover: none) { .thought-fold { width: 40px; height: 40px; margin: -8px; } }
   @media (max-width: 600px) { .group { margin-left: 8px; } }
   summary { display: flex; align-items: center; min-height: 24px; gap: 6px; cursor: pointer; list-style: none; border-radius: 6px; }
   summary::-webkit-details-marker { display: none; }

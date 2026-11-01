@@ -6,10 +6,23 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 56
+const schemaVersion = 58
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	57: {
+		`ALTER TABLE rooms ADD COLUMN state TEXT NOT NULL DEFAULT 'open'`,
+		`ALTER TABLE rooms ADD COLUMN reason TEXT NOT NULL DEFAULT ''`,
+		`DROP TABLE uploads`,
+		`CREATE TABLE room_leftovers (host TEXT NOT NULL REFERENCES hosts(name), room TEXT NOT NULL, box TEXT NOT NULL, slice TEXT NOT NULL, PRIMARY KEY(host, room, box))`,
+		// An archive ref outlives its room until the expiry sweep deletes it, so the row no longer needs its session or repository.
+		`CREATE TEMP TABLE archives_backup AS SELECT * FROM archives`,
+		`DROP TABLE archives`,
+		`CREATE TABLE archives (session TEXT NOT NULL, repo TEXT NOT NULL, ref TEXT NOT NULL, commit_sha TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, retry_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(session, repo))`,
+		`INSERT INTO archives SELECT * FROM archives_backup`,
+		`DROP TABLE archives_backup`,
+	},
+	56: {`CREATE TABLE repo_ci_hosts (repo TEXT NOT NULL REFERENCES repos(repo), host TEXT NOT NULL REFERENCES hosts(name), runners INTEGER NOT NULL, size TEXT NOT NULL, PRIMARY KEY(repo, host))`},
 	55: {`ALTER TABLE hosts ADD COLUMN disk_floor INTEGER NOT NULL DEFAULT 21474836480`, `ALTER TABLE hosts ADD COLUMN disk_low_since INTEGER NOT NULL DEFAULT 0`, `CREATE TABLE disk_warnings (host TEXT PRIMARY KEY, at INTEGER NOT NULL)`},
 	54: {`UPDATE grants SET expired_at=expires_at WHERE kind='hostexec' AND revoked_at IS NULL AND expired_at IS NULL AND expires_at IS NOT NULL AND expires_at<=CAST(strftime('%s','now') AS INTEGER)*1000`, `UPDATE grants SET expires_at=NULL WHERE kind='hostexec' AND revoked_at IS NULL AND expired_at IS NULL AND (expires_at IS NULL OR expires_at>CAST(strftime('%s','now') AS INTEGER)*1000)`, `UPDATE operations SET state='expired' WHERE kind='hostexec.grant' AND state='pending'`, `UPDATE operations SET args=json_remove(args,'$.expires','$.never') WHERE kind='hostexec.grant'`},
 	53: {`CREATE TABLE search_keys (provider TEXT PRIMARY KEY, key TEXT NOT NULL)`},

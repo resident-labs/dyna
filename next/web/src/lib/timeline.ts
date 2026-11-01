@@ -46,11 +46,45 @@ export function visibleTimelineText(id: string, final: string | undefined, compl
   return !completed || !hasWork || id === final || expanded;
 }
 
+// Dyna: The transcript holds a session's own posts: nested under their tool call, or sent from a shell at the end of the items.
+export function ownPost(item: TranscriptItem, session: string): boolean {
+  return item.kind === "post" && item.from?.kind === "session" && item.from.session === session;
+}
+
+// Dyna: A turn's last message is its answer. It can be a post that ended the turn, so earlier text folds as working text.
+// Text and a tool's posts arrive in order. Their times come from different clocks, so only a post from a shell, which
+// sorts after every item, is placed by its time; equal times keep item order.
+export function finalTimelineItem(items: TranscriptItem[], session: string): TranscriptItem | undefined {
+  let final: TranscriptItem | undefined;
+  for (const item of items) {
+    for (const candidate of [item, ...(item.posts ?? [])]) {
+      if (candidate.kind !== "text" && !ownPost(candidate, session)) continue;
+      if (item.kind !== "post" || !final || !(Date.parse(candidate.at) < Date.parse(final.at))) final = candidate;
+    }
+  }
+  return final;
+}
+
+// Dyna: A post names its destination only when it left the DM on screen.
+export function postDestination(item: TranscriptItem, session: string, room: string, roomName: string, sessionName: (id: string) => string): string | undefined {
+  if (item.home?.kind === "dm") return item.home.session && item.home.session !== session ? sessionName(item.home.session) : undefined;
+  if (item.home?.kind === "feed") return item.room === room ? `#${roomName}` : "another room";
+  return undefined;
+}
+
+// Dyna: One item is not a group, so it shows with no heading to open first. A script stays a group of its own actions,
+// under the heading that counts them. Thoughts alone fold under one heading; with tools, they fold beside the summary.
+export type WorkLayout = "single" | "thoughts" | "mixed";
+export function workLayout(items: TranscriptItem[]): WorkLayout {
+  if (items.length === 1 && items[0].tool !== "codemode") return "single";
+  return items.every(item => item.kind === "thinking") ? "thoughts" : "mixed";
+}
+
 // Ported from T3 Code (packages/client-runtime/src/work-log/presentation.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 // Dyna: Transcript tools have no T3 source or integration metadata.
 export function summarizeWork(items: TranscriptItem[]): string {
   const tools = items.filter(item => item.kind === "tool");
-  if (!tools.length) return items.length === 1 ? "Thought" : `Thought (×${items.length})`;
+  if (!tools.length) return `${items.length} ${items.length === 1 ? "thought" : "thoughts"}`;
   const groups = new Map<StepKind, number>();
   let scripts = 0;
   for (const item of tools) {

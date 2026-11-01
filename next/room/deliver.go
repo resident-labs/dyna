@@ -1,6 +1,10 @@
 package room
 
-import "github.com/resident-labs/dyna/contract"
+import (
+	"slices"
+
+	"github.com/resident-labs/dyna/contract"
+)
 
 // Recipient records whether an explicit mention, rather than a group, selected
 // the session. Explicit mentions take precedence over group mentions.
@@ -98,8 +102,9 @@ func PostsForReplies(inputs []contract.Delivery, events []contract.Event, sessio
 	return posts
 }
 
-// FinalReplies returns one response for each distinct final target and home.
-func FinalReplies(inputs []contract.Delivery, posts map[Destination]contract.EventID) []contract.FinalReply {
+// FinalReplies returns one response for each distinct final target and home. ended lists the
+// posts that ended the turn: such a turn has no final text, so every channel links one of them.
+func FinalReplies(inputs []contract.Delivery, posts map[Destination]contract.EventID, ended []contract.EventID) []contract.FinalReply {
 	seen := make(map[Destination]bool)
 	var replies []contract.FinalReply
 	for _, input := range inputs {
@@ -110,6 +115,9 @@ func FinalReplies(inputs []contract.Delivery, posts map[Destination]contract.Eve
 		}
 		seen[key] = true
 		post := posts[key]
+		if len(ended) > 0 && !slices.Contains(ended, post) {
+			post = ended[len(ended)-1]
+		}
 		replies = append(replies, contract.FinalReply{Reply: channel, Posted: post})
 	}
 	return replies

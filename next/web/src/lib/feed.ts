@@ -75,7 +75,7 @@ const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.sessio
 // The session an event is about; events without one belong to the room feed only.
 export function subject(event: Event): string | undefined {
   switch (event.type) {
-    case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": return undefined;
+    case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": return undefined;
     case "op.requested": return event.body.by.session;
     case "op.decided": case "op.ran": return event.from.session;
     default: return event.body.session;
@@ -190,7 +190,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       // A job without an open turn stays in the work buffer below.
     }
     if (home.kind === "dm" && session !== home.session) continue;
-    if (event.type === "room.paused" || event.type === "room.resumed" || event.type === "room.limits_changed") {
+    if (event.type === "room.paused" || event.type === "room.resumed" || event.type === "room.limits_changed" || event.type === "room.deleting") {
       const previous = deferred.at(-1);
       if (event.type === "room.resumed" && previous?.kind === "notice" && previous.event.type === "room.paused" && sameAuthor(previous.event.from, event.from) && Date.parse(event.at) - Date.parse(previous.event.at) <= 300_000) previous.resumedAt = event.at;
       else deferred.push({ kind: "notice", key: `n${event.seq}`, event });
@@ -265,7 +265,7 @@ export const eventGroups: Record<Event["type"], string> = {
   "session.restarted": "boxes replaced", "session.moved": "sessions moved", "session.profile_changed": "profiles changed",
   "turn.started": "turns started", "turn.ended": "turns ended", "turn.activity": "turn updates", "transcript.changed": "transcript updates",
   "computer.changed": "computer changes", "box.changed": "box changes", "box.pressure": "memory warnings",
-  "room.paused": "pauses", "room.resumed": "resumes", "room.limits_changed": "room limits changed",
+  "room.paused": "pauses", "room.resumed": "resumes", "room.limits_changed": "room limits changed", "room.deleting": "room deletions", "room.deleted": "room deletions",
   "op.requested": "requests", "op.decided": "requests decided", "op.ran": "requests run",
   "image.built": "images built", "image.failed": "image builds failed", "pr.opened": "pull requests opened",
   "shell.job.ended": "jobs finished", "grant.expired": "host grants expired",
@@ -438,6 +438,8 @@ export function describe(event: Event, name: Name): string {
     case "grant.expired": return "A host execution grant expired";
     // The owner reads this feed; a room's root may also pause it.
     case "room.paused": case "room.resumed": return `${event.from.session ? name(event.from.session) : "You"} ${event.type === "room.paused" ? "paused" : "resumed"} the room`;
+    case "room.deleting": return "You deleted the room";
+    case "room.deleted": return "";
     // Only the owner sets room limits. Zero means no limit. GB and MB count 2^30 and 2^20 bytes, as the Home meters do;
     // a limit under 1 GB shows in MB, rounded up to at least 1, so a real limit never reads as zero.
     case "room.limits_changed": {
