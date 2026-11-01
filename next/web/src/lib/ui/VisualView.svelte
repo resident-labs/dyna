@@ -3,6 +3,7 @@
   import { cardMessage, visualReplyFailure, type VisualVersion } from "../visual.ts";
   import Icon from "./Icon.svelte";
   import { formatTime } from "../feed.ts";
+  import { theme } from "../theme.svelte.ts";
   import { call } from "../client.ts";
   import { decodeEvent } from "../event.ts";
   import type { VisualSuperseded } from "../contract.gen.ts";
@@ -37,7 +38,7 @@
   let attempt = $state(0);
   let loaded = 0;
   let lastSubmit = 0, lastOpen = 0;
-  let url = $derived(`/v1/files/visual/${encodeURIComponent(current.event.id)}`);
+  let url = $derived(`/v1/files/visual/${encodeURIComponent(current.event.id)}?theme=${theme().mode}`);
   let recipient = $state<string>();
   $effect(() => {
     const id = current.visual.id;
