@@ -706,9 +706,11 @@
         quote={quotes[key]} replacement={replaced[key]} onundo={() => { quotes[key] = undoForward({ quote: quotes[key], previous: replaced[key] }).quote; clearReplacement(); }} onunquote={() => { quotes[key] = undefined; clearReplacement(); }} sessions={mentions} files={files(key)} {stop} />
       {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
     {/if}
-    <TermDock bind:this={terminals} terminal={attention.can("terminal")} bind:element={dock} onempty={() => composer?.focus()} phone={phone.current} strip={!!room && !session && !unavailable}
-      sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
     {/if}
+    <div hidden={section === "instructions"}>
+      <TermDock bind:this={terminals} terminal={attention.can("terminal")} bind:element={dock} onempty={() => composer?.focus()} phone={phone.current} strip={!!room && !session && !unavailable}
+        sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
+    </div>
   </main>
   {#if visual && store && !inSettings}<aside class="visual-pane"><VisualView {...visual} room={store.room} onclose={() => { visual = undefined; void tick().then(() => visualTrigger?.focus()); }} /></aside>
   {:else if room}
