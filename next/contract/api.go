@@ -545,7 +545,7 @@ const (
 
 type TranscriptItem struct {
 	ID           string                  `json:"id"`
-	Index        int                     `json:"index"`
+	Index        int                     `json:"index,omitempty"`
 	Turn         TurnID                  `json:"turn"`
 	Kind         TranscriptItemKind      `json:"kind"`
 	At           time.Time               `json:"at"`
