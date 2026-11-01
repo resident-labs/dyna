@@ -532,6 +532,7 @@ type TurnOutputRequest struct {
 	Turn      TurnID       `json:"turn"`
 	Outcome   TurnOutcome  `json:"outcome"`
 	Final     string       `json:"final,omitempty"`
+	EndPosts  []EventID    `json:"endPosts,omitempty"` // the posts that ended the turn; a completed turn with these has no final text
 	Model     string       `json:"model"`
 	Usage     Usage        `json:"usage"`
 }

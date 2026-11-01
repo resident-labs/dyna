@@ -130,6 +130,16 @@ test("a post that carried a final reply names the reply's target once", () => {
   assert.deepEqual(feedRows([posted], { kind: "feed" }).map(item => item.kind === "post" && item.to), [[parent]]);
 });
 
+test("a turn that ended on a post in the feed adds no empty answer to the DM that asked", () => {
+  const owner: Principal = { kind: "owner" };
+  const posted = event(1, { type: "post.created", body: { text: "Report", home: { kind: "feed" } } }, { kind: "session", session: "l" });
+  const ended = event(2, { type: "turn.ended", body: { session: "l", turn: "t", outcome: "completed", usage,
+    replies: [{ reply: { kind: "final", target: owner, home: { kind: "dm", session: "l" } }, posted: "1" }] } });
+  assert.deepEqual(feedRows([posted, ended], { kind: "dm", session: "l" }).filter(row => row.kind === "post"), []);
+  const row = feedRows([posted, ended], { kind: "feed" })[0];
+  assert.deepEqual(row.kind === "post" && [row.text, row.to], ["Report", [owner]]);
+});
+
 test("puts a turn's final reply in its home only, followed by its work row", () => {
   const ended = event(3, { type: "turn.ended", body: { session: "l", turn: "t", outcome: "completed", final: "Answer", usage,
     replies: [{ reply: { kind: "final", target: { kind: "owner" }, home: { kind: "dm", session: "l" } } }] } });

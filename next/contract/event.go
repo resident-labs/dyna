@@ -176,6 +176,8 @@ type TurnEnded struct {
 	// ShellJobs counts the background shell jobs still running when the turn ended. Each job's
 	// end wakes the session, so the next turn.ended carries the new count.
 	ShellJobs int `json:"shellJobs,omitempty"`
+	// EndPosts carries the harness's result to TurnOutputRequest.EndPosts. The event records the same fact in Replies.
+	EndPosts []EventID `json:"-"`
 }
 
 type ConversationRead struct {
