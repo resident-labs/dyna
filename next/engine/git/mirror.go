@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
@@ -36,22 +35,30 @@ type CacheHost interface {
 	PushCache(context.Context, string, string, []string) error
 }
 
+// Mirror keeps no lock around reads. A clone appears whole, git updates refs atomically, and objects arrive before the
+// refs that name them, so a read during a fetch sees the old state or the new one.
 type Mirror struct {
-	Layout box.Layout
-	Token  string
-	Runner Runner
-	mu     sync.Mutex
+	Layout  box.Layout
+	Token   string
+	Runner  Runner
+	fetches shared // by repository
+	pushes  shared // by repository and host
+}
+
+type cachePush struct {
+	repo contract.RepoName
+	host CacheHost
 }
 
 const SessionBranchPrefix = "v2/"
 
-// Prepare optionally fetches and pushes branches before returning the box setup.
+// Prepare optionally fetches and pushes branches before returning the box setup. Callers share fetches and pushes, but
+// each result began after its caller asked and each push began after that caller's fetch ended, so no box starts on
+// older refs than it would alone. The token is the engine's own, so sharing grants a caller nothing new.
 func (m *Mirror) Prepare(ctx context.Context, host CacheHost, repo contract.RepoName, session contract.SessionID, fetch bool) (contract.BoxRepo, error) {
 	if fetch && m.Token == "" {
 		return contract.BoxRepo{}, MissingTokenError{}
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	path, err := m.Layout.Git(repo)
 	if err != nil {
 		return contract.BoxRepo{}, err
@@ -61,36 +68,20 @@ func (m *Mirror) Prepare(ctx context.Context, host CacheHost, repo contract.Repo
 		return contract.BoxRepo{}, err
 	}
 	if fetch {
-		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-			return contract.BoxRepo{}, err
-		}
-		env := m.authEnv()
-		remote := "https://github.com/" + string(repo) + ".git"
-		_, err = os.Stat(path)
-		if errors.Is(err, os.ErrNotExist) {
-			_, err = m.Runner.Run(ctx, env, "clone", "--bare", "--no-tags", remote, path)
-		} else if err == nil {
-			_, err = m.Runner.Run(ctx, env, "--git-dir", path, "fetch", "--prune", "--no-tags", "origin", "+refs/heads/*:refs/heads/*")
-			if err != nil {
-				return contract.BoxRepo{}, err
-			}
-			out, err := m.Runner.Run(ctx, env, "--git-dir", path, "ls-remote", "--symref", "origin", "HEAD")
-			if err != nil {
-				return contract.BoxRepo{}, err
-			}
-			fields := strings.Fields(string(out))
-			if len(fields) < 3 || fields[0] != "ref:" || !strings.HasPrefix(fields[1], "refs/heads/") || fields[2] != "HEAD" {
-				return contract.BoxRepo{}, errors.New("remote default branch not found")
-			}
-			_, err = m.Runner.Run(ctx, nil, "--git-dir", path, "symbolic-ref", "HEAD", fields[1])
-			if err != nil {
-				return contract.BoxRepo{}, err
-			}
-		}
+		err := m.fetches.do(ctx, repo, func(ctx context.Context) error {
+			steps := box.NewStepLog("repo " + string(repo))
+			defer steps.Done("fetch")
+			return m.fetch(ctx, repo, path)
+		})
 		if err != nil {
 			return contract.BoxRepo{}, err
 		}
-		if err := host.PushCache(ctx, path, cache, []string{"+refs/heads/*:refs/heads/*"}); err != nil {
+		err = m.pushes.do(ctx, cachePush{repo, host}, func(ctx context.Context) error {
+			steps := box.NewStepLog("repo " + string(repo))
+			defer steps.Done("cache push")
+			return host.PushCache(ctx, path, cache, []string{"+refs/heads/*:refs/heads/*"})
+		})
+		if err != nil {
 			return contract.BoxRepo{}, err
 		}
 	}
@@ -101,6 +92,43 @@ func (m *Mirror) Prepare(ctx context.Context, host CacheHost, repo contract.Repo
 	return contract.BoxRepo{Name: repo, Cache: cache, Branch: SessionBranchPrefix + string(session), Base: strings.TrimSpace(string(out))}, nil
 }
 
+// fetch brings the mirror up to date with GitHub. A first clone goes to one side, so no reader finds a partial mirror
+// and a failed clone leaves nothing behind.
+func (m *Mirror) fetch(ctx context.Context, repo contract.RepoName, path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	env := m.authEnv()
+	remote := "https://github.com/" + string(repo) + ".git"
+	_, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		clone := path + ".clone"
+		if err := os.RemoveAll(clone); err != nil {
+			return err
+		}
+		if _, err := m.Runner.Run(ctx, env, "clone", "--bare", "--no-tags", remote, clone); err != nil {
+			return err
+		}
+		return os.Rename(clone, path)
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := m.Runner.Run(ctx, env, "--git-dir", path, "fetch", "--prune", "--no-tags", "origin", "+refs/heads/*:refs/heads/*"); err != nil {
+		return err
+	}
+	out, err := m.Runner.Run(ctx, env, "--git-dir", path, "ls-remote", "--symref", "origin", "HEAD")
+	if err != nil {
+		return err
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) < 3 || fields[0] != "ref:" || !strings.HasPrefix(fields[1], "refs/heads/") || fields[2] != "HEAD" {
+		return errors.New("remote default branch not found")
+	}
+	_, err = m.Runner.Run(ctx, nil, "--git-dir", path, "symbolic-ref", "HEAD", fields[1])
+	return err
+}
+
 func (m *Mirror) authEnv() []string {
 	credential := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + m.Token))
 	return []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.https://github.com/.extraheader", "GIT_CONFIG_VALUE_0=Authorization: Basic " + credential, "GIT_TERMINAL_PROMPT=0"}
@@ -108,8 +136,6 @@ func (m *Mirror) authEnv() []string {
 
 // ImageContext reads the default-branch toolchain context from the mirror.
 func (m *Mirror) ImageContext(ctx context.Context, repo contract.RepoName) (string, images.TreeID, []byte, []box.Need, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	path, err := m.Layout.Git(repo)
 	if err != nil {
 		return "", "", nil, nil, err
@@ -119,8 +145,6 @@ func (m *Mirror) ImageContext(ctx context.Context, repo contract.RepoName) (stri
 
 // Size reads the repository's default box size from the mirror. A missing mirror has none.
 func (m *Mirror) Size(ctx context.Context, repo contract.RepoName) (contract.BoxSizeName, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	path, err := m.Layout.Git(repo)
 	if err != nil {
 		return "", err
@@ -137,8 +161,6 @@ func (m *Mirror) DeleteArchiveRef(ctx context.Context, repo contract.RepoName, r
 	if m.Token == "" {
 		return MissingTokenError{}
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	path, err := m.Layout.Git(repo)
 	if err != nil {
 		return err
