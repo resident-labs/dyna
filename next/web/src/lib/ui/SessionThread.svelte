@@ -281,7 +281,8 @@
   button { padding: 0; border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
   button:hover { color: var(--text); }
   button:focus-visible { outline: 2px solid var(--focus); }
-  .latest-bar { flex: none; display: flex; justify-content: center; padding: 4px 12px; }
+  .latest-bar { position: absolute; inset: auto 0 8px; display: flex; justify-content: center; pointer-events: none; }
+  .latest-bar button { pointer-events: auto; }
   .latest { background: var(--raised); padding: 8px 12px; border-radius: 6px; }
   @media (max-width: 600px) { .body { padding: 12px 16px; } }
   @media (pointer: coarse) { button { min-height: 40px; } }
