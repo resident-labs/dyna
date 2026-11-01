@@ -593,6 +593,23 @@ func TestMigrateDropsRolesAndSlots(t *testing.T) {
 	}
 }
 
+func TestWakeCommandPreservesArgumentOrder(t *testing.T) {
+	ctx := context.Background()
+	s := fixture(t)
+	want := []string{"/usr/bin/tool", "z", "a", "z"}
+	m, err := s.Save(ctx, Machine{Name: "wake", SSH: "user@wake", Enabled: true, WakeCommand: want})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err = s.Get(ctx, m.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(m.WakeCommand, want) {
+		t.Fatalf("wake command = %q; want %q", m.WakeCommand, want)
+	}
+}
+
 func TestMigrateImportsSuiteFiltersAsOwnerLabels(t *testing.T) {
 	dir := storetest.DataDir(t)
 	db, err := database.Open(dir)
