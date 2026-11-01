@@ -25,6 +25,7 @@ func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox) erro
 		if err := r.store.CloseSession(ctx, row.Session, event); err != nil {
 			return err
 		}
+		r.view.SessionClosed(row.Session)
 		r.Kick()
 		return nil
 	}
