@@ -1,7 +1,7 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deriveTimelineGroups, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems } from "./timeline.ts";
+import { deriveTimelineGroups, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems } from "./timeline.ts";
 import type { TranscriptInput, TranscriptItem } from "./contract.gen.ts";
 
 // Dyna: Transcript items embed posts on their tool call.
@@ -36,4 +36,10 @@ test("T3 durations choose units after rounding", () => {
   assert.equal(formatTimelineDuration(114_000), "1m 54s");
   assert.equal(formatTimelineDuration(120_000), "2m");
   assert.equal(formatTimelineDuration(59_500), "1m");
+});
+
+test("completed text-only turns show every message without a disclosure", () => {
+  assert.equal(visibleTimelineText("first", "final", true, false, false), true);
+  assert.equal(visibleTimelineText("final", "final", true, false, false), true);
+  assert.equal(visibleTimelineText("first", "final", true, true, false), false);
 });
