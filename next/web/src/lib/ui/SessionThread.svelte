@@ -161,7 +161,7 @@
 
 <style>
   .thread { height: 100%; min-height: 0; overflow-y: auto; }
-  .body { max-width: 736px; margin: auto; padding: 16px 24px; }
+  .body { max-width: 784px; margin: auto; padding: 16px 24px; }
   article { margin: 0 0 24px; }
   .failure { display: flex; gap: 10px; color: var(--muted); margin: 12px 0; }
   .failure strong { color: var(--text); }
