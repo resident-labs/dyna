@@ -173,11 +173,16 @@ case "$suite" in
       if [[ -x "$managed" ]]; then
         DYNA_CHROMIUM=$managed
       else
-        DYNA_CHROMIUM=$(command -v google-chrome || command -v google-chrome-stable || true)
+        # A node may have a different Playwright browser revision already installed.
+        cache=$(dirname "$(dirname "$(dirname "$managed")")")
+        for candidate in "$cache"/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell; do
+          if [[ -x "$candidate" ]]; then DYNA_CHROMIUM=$candidate; break; fi
+        done
+        DYNA_CHROMIUM=${DYNA_CHROMIUM:-$(command -v google-chrome || command -v google-chrome-stable || true)}
       fi
     fi
     if [[ -z "$DYNA_CHROMIUM" || ! -x "$DYNA_CHROMIUM" ]]; then
-      echo "No non-snap Chromium found. Install the pinned Playwright headless shell or set DYNA_CHROMIUM to a non-snap browser." >&2
+      echo "No non-snap Chromium found. Install a Playwright headless shell or set DYNA_CHROMIUM to a non-snap browser." >&2
       exit 1
     fi
     export DYNA_CHROMIUM
