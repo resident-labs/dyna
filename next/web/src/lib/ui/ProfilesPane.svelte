@@ -2,12 +2,13 @@
   import { onMount, type Snippet } from "svelte";
   import { APIError, call, SignedOut } from "../client.ts";
   import { profileForSave, slugName } from "../profiles.ts";
-  import type { AccountProviderInfo, ProfileSummary, ThinkingLevel } from "../contract.gen.ts";
+  import type { ProfileSummary, ThinkingLevel } from "../contract.gen.ts";
+  import type { Provider } from "../accounts.ts";
   import Icon from "./Icon.svelte";
   import ProfileEditor from "./ProfileEditor.svelte";
 
   let { bar, phone, signedout }: { bar: Snippet<[string, number | undefined, Snippet | undefined]>; phone: boolean; signedout: () => void } = $props();
-  let providers: AccountProviderInfo[] = $state([]);
+  let providers: Provider[] = $state([]);
   let profiles: ProfileSummary[] = $state([]), loaded = $state(false), failed = $state(false);
   let editing: string | undefined = $state(), creating = $state(false), busy = $state(false), error = $state("");
   const blank: ProfileSummary = { inUse: 0, name: "", provider: "openai", model: "", thinking: "medium", description: "", taste: 0, diagnostics: 0, intelligence: 0, cost: 0 };
@@ -35,7 +36,7 @@
     off: "no thinking", minimal: "minimal thinking", low: "low thinking", medium: "medium thinking", high: "high thinking", xhigh: "very high thinking",
   };
   function reload() {
-    void call("accounts.list", {}).then(result => { providers = result.providers ?? []; }, () => {});
+    void call("accounts.list", {}).then(result => { providers = (result.providers ?? []).map(provider => ({ ...provider, flows: provider.flows ?? [] })); }, () => {});
     void call("profile.list", {}).then(result => { profiles = result.profiles ?? []; loaded = true; failed = false; },
       (error: unknown) => { if (error instanceof SignedOut) signedout(); else if (!loaded) failed = true; });
   }
