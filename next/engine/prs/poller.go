@@ -19,8 +19,8 @@ const (
 	lowQuotaWait = 10 * time.Minute
 )
 
-// Poller reads each repository with a tracked open PR, by the back-off of spec 7.7. The schedule lives in memory: an
-// engine restart polls once and starts from a minute again.
+// Poller reads each repository a room lists or a tracked open PR sits on, by the back-off of spec 7.7. The schedule lives
+// in memory: an engine restart polls once and starts from a minute again.
 type Poller struct {
 	Store  *store.Store
 	GitHub *Client
@@ -72,27 +72,32 @@ func (p *Poller) Reset(repo contract.RepoName) {
 	}
 }
 
-// due refreshes the schedule from the tracked PRs and returns the repositories to poll now.
-func (p *Poller) due(rows []store.TrackedPR) []contract.RepoName {
+// due refreshes the schedule from the tracked PRs and listed repositories, and returns the repositories to poll now.
+func (p *Poller) due(rows []store.TrackedPR, heads map[contract.RepoName]string) []contract.RepoName {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.slots == nil {
 		p.slots = map[contract.RepoName]*slot{}
 	}
-	tracked := map[contract.RepoName]bool{}
+	polled := map[contract.RepoName]bool{}
+	for repo := range heads {
+		polled[repo] = true
+	}
 	bases := map[contract.RepoName][]contract.RepoName{}
 	for _, row := range rows {
-		tracked[row.Repo] = true
+		polled[row.Repo] = true
 		if row.HeadRepo != "" && row.HeadRepo != row.Repo && !slices.Contains(bases[row.HeadRepo], row.Repo) {
 			bases[row.HeadRepo] = append(bases[row.HeadRepo], row.Repo)
 		}
-		if p.slots[row.Repo] == nil {
-			p.slots[row.Repo] = &slot{}
-		}
 	}
 	p.bases = bases
+	for repo := range polled {
+		if p.slots[repo] == nil {
+			p.slots[repo] = &slot{}
+		}
+	}
 	for repo := range p.slots {
-		if !tracked[repo] {
+		if !polled[repo] {
 			delete(p.slots, repo)
 		}
 	}
@@ -136,8 +141,13 @@ func (p *Poller) Pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	due := p.due(rows)
+	heads, err := p.Store.RepoHeads(ctx)
+	if err != nil {
+		return err
+	}
+	due := p.due(rows, heads)
 	var updates []store.PRUpdate
+	var moves []store.RepoHead
 	for _, repo := range due {
 		var numbers []int
 		for _, row := range rows {
@@ -166,10 +176,13 @@ func (p *Poller) Pass(ctx context.Context) error {
 				moved = true
 			}
 		}
+		if stored, listed := heads[repo]; listed && snapshot.Main != "" && snapshot.Main != stored {
+			moves = append(moves, store.RepoHead{Repo: repo, Head: snapshot.Main})
+		}
 		p.settle(repo, moved, snapshot.Main)
 	}
-	if len(updates) == 0 {
+	if len(updates) == 0 && len(moves) == 0 {
 		return nil
 	}
-	return p.Store.ApplyPRPoll(ctx, updates, p.Now())
+	return p.Store.ApplyPRPoll(ctx, updates, moves, p.Now())
 }

@@ -55,6 +55,14 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		return fmt.Sprintf("Question: %s\n\nAnswer: %s", b.Question, b.Answer), nil
 	case contract.PrChanged:
 		return renderPRChanged(b), nil
+	case contract.PrMergedEvent:
+		return fmt.Sprintf("PR %s#%d merged. %s", b.Repo, b.Number, b.URL), nil
+	case contract.PrClosedEvent:
+		return fmt.Sprintf("PR %s#%d closed without merging. %s", b.Repo, b.Number, b.URL), nil
+	case contract.CIFinished:
+		return fmt.Sprintf("CI on PR %s#%d finished: %s. %s", b.Repo, b.Number, b.Result, b.URL), nil
+	case contract.RepoMainUpdated:
+		return fmt.Sprintf("The default branch of %s moved to %s.", b.Repo, b.Head), nil
 	case contract.NoticePosted:
 		return b.Text, nil
 	case contract.HookDue:

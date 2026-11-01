@@ -399,6 +399,10 @@ export type PrUntrackResponse = { };
 export type PrComment = { author: string; body: string; url: string; outside: boolean; };
 export type PrChange = { pr: PrSummary; kinds?: Array<PrChangeKind> | null; failedChecks?: Array<string> | null; outside: boolean; comments?: Array<PrComment> | null; moreComments?: number; };
 export type PrChanged = { session: SessionID; changes: Array<PrChange> | null; };
+export type PrMergedEvent = { repo: RepoName; number: number; session: SessionID; url: string; };
+export type PrClosedEvent = { repo: RepoName; number: number; session: SessionID; url: string; };
+export type CIFinished = { repo: RepoName; number: number; session: SessionID; url: string; head: string; result: PrCI; };
+export type RepoMainUpdated = { repo: RepoName; head: string; };
 export type QuestionState = "pending" | "answered" | "withdrawn";
 export type Question = { id: QuestionID; room: RoomID; session: SessionID; text: string; state: QuestionState; answer?: string; asked: string; answered?: string; };
 export type QuestionAskRequest = { text: string; clientId?: string; };
@@ -446,6 +450,7 @@ export type EventBody =
   | { type: "box.changed"; body: BoxChanged }
   | { type: "box.pressure"; body: BoxPressure }
   | { type: "checkin.due"; body: CheckinDue }
+  | { type: "ci.finished"; body: CIFinished }
   | { type: "computer.changed"; body: ComputerChanged }
   | { type: "connect.connector"; body: ConnectConnector }
   | { type: "conversation.read"; body: ConversationRead }
@@ -464,10 +469,13 @@ export type EventBody =
   | { type: "op.requested"; body: OpRequested }
   | { type: "post.created"; body: PostCreated }
   | { type: "pr.changed"; body: PrChanged }
+  | { type: "pr.closed"; body: PrClosedEvent }
+  | { type: "pr.merged"; body: PrMergedEvent }
   | { type: "pr.opened"; body: PrOpened }
   | { type: "question.answered"; body: QuestionAnswered }
   | { type: "question.asked"; body: QuestionAsked }
   | { type: "question.withdrawn"; body: QuestionWithdrawn }
+  | { type: "repo.main_updated"; body: RepoMainUpdated }
   | { type: "room.deleted"; body: RoomDeleted }
   | { type: "room.deleting"; body: RoomDeleting }
   | { type: "room.limits_changed"; body: RoomLimitsChanged }

@@ -41,6 +41,12 @@ type PRUpdate struct {
 	Change    *contract.PrChange
 }
 
+// RepoHead is a repository's default branch head.
+type RepoHead struct {
+	Repo contract.RepoName
+	Head string
+}
+
 const prColumns = `p.repo,p.number,p.url,p.title,p.author,p.session,p.draft,p.state,p.head,p.review,p.ci,p.merge,s.room,p.head_repo,p.baseline,p.ci_told,p.seen_reviews,p.seen_review_comments,p.seen_comments,p.own_wake_at FROM pr_owners p JOIN sessions s ON s.id=p.session`
 
 func scanPR(row interface{ Scan(...any) error }) (TrackedPR, error) {
@@ -64,6 +70,25 @@ func (s *Store) queryPRs(ctx context.Context, query string, args ...any) ([]Trac
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// RepoHeads lists every repository a room lists, with its stored head, empty until a poll reads it.
+func (s *Store) RepoHeads(ctx context.Context) (map[contract.RepoName]string, error) {
+	rows, err := s.Read().QueryContext(ctx, "SELECT repo,main_head FROM repos")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	heads := map[contract.RepoName]string{}
+	for rows.Next() {
+		var repo contract.RepoName
+		var head string
+		if err := rows.Scan(&repo, &head); err != nil {
+			return nil, err
+		}
+		heads[repo] = head
+	}
+	return heads, rows.Err()
 }
 
 // TrackedPRs lists every PR the poll reads.
@@ -158,9 +183,84 @@ const prRecipient = `WITH RECURSIVE ancestors(id,parent,closed_at,room,depth) AS
 	UNION ALL SELECT s.id,s.parent,s.closed_at,s.room,a.depth+1 FROM sessions s JOIN ancestors a ON s.id=a.parent
 ) SELECT id,room FROM ancestors WHERE closed_at IS NULL ORDER BY depth LIMIT 1`
 
+// prEvents are what a change states to subscribers. The pr.changed beside them is what tells the owner, so they stay undelivered here.
+func prEvents(change contract.PrChange) []contract.EventBody {
+	var bodies []contract.EventBody
+	pr := change.PR
+	for _, kind := range change.Kinds {
+		switch kind {
+		case contract.PrChangeMerged:
+			bodies = append(bodies, contract.PrMergedEvent{Repo: pr.Repo, Number: pr.Number, Session: pr.Session, URL: pr.URL})
+		case contract.PrChangeClosed:
+			bodies = append(bodies, contract.PrClosedEvent{Repo: pr.Repo, Number: pr.Number, Session: pr.Session, URL: pr.URL})
+		case contract.PrChangeCIFailed, contract.PrChangeCIPassed:
+			bodies = append(bodies, contract.CIFinished{Repo: pr.Repo, Number: pr.Number, Session: pr.Session, URL: pr.URL, Head: pr.Head, Result: pr.CI})
+		}
+	}
+	return bodies
+}
+
+// appendEngineEvent adds an event from the engine.
+func (s *Store) appendEngineEvent(tx *sql.Tx, room contract.RoomID, at time.Time, body contract.EventBody) (int64, error) {
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return 0, err
+	}
+	return s.AppendEvent(tx, contract.Event{ID: contract.EventID("ev_" + hex.EncodeToString(id[:])), Room: room, Time: at, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: body})
+}
+
+// moveRepoHead stores a head a poll read. The first head ever read is no move. A move is one event in the repository's
+// default room, where the default subscription wakes root, and one quiet delivery to the root of each other room that
+// lists the repository (spec 7.6). A repository no room lists has no row and no one to tell.
+func (s *Store) moveRepoHead(ctx context.Context, tx *sql.Tx, head RepoHead, at time.Time) error {
+	var previous string
+	var room contract.RoomID
+	err := tx.QueryRowContext(ctx, "SELECT main_head,default_room FROM repos WHERE repo=?", head.Repo).Scan(&previous, &room)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && previous == head.Head {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE repos SET main_head=? WHERE repo=?", head.Head, head.Repo); err != nil {
+		return err
+	}
+	if previous == "" {
+		return nil
+	}
+	body := contract.RepoMainUpdated{Repo: head.Repo, Head: head.Head}
+	seq, err := s.appendEngineEvent(tx, room, at, body)
+	if err != nil {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, "SELECT s.id FROM room_repos r JOIN sessions s ON s.room=r.room WHERE r.repo=? AND r.room<>? AND s.parent IS NULL AND s.closed_at IS NULL", head.Repo, room)
+	if err != nil {
+		return err
+	}
+	var roots []contract.SessionID
+	for rows.Next() {
+		var root contract.SessionID
+		if err := rows.Scan(&root); err != nil {
+			rows.Close()
+			return err
+		}
+		roots = append(roots, root)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, root := range roots {
+		if err := s.InsertDelivery(ctx, tx, seq, body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: root}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ApplyPRPoll writes one pass of the poll and its events in one transaction, so a restart can neither lose a wake nor
 // repeat one. Each recipient gets one event for the pass. A row that went away meanwhile drops out.
-func (s *Store) ApplyPRPoll(ctx context.Context, updates []PRUpdate, at time.Time) error {
+func (s *Store) ApplyPRPoll(ctx context.Context, updates []PRUpdate, heads []RepoHead, at time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		type batch struct {
 			session contract.SessionID
@@ -203,19 +303,26 @@ func (s *Store) ApplyPRPoll(ctx context.Context, updates []PRUpdate, at time.Tim
 			group.changes = append(group.changes, change)
 		}
 		for _, group := range batches {
-			var id [16]byte
-			if _, err := rand.Read(id[:]); err != nil {
-				return err
-			}
 			body := contract.PrChanged{Session: group.session, Changes: group.changes}
-			seq, err := s.AppendEvent(tx, contract.Event{ID: contract.EventID("ev_" + hex.EncodeToString(id[:])), Room: group.room, Time: at, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: body})
+			seq, err := s.appendEngineEvent(tx, group.room, at, body)
 			if err != nil {
 				return err
 			}
-			if !body.Waking() {
-				continue
+			if body.Waking() {
+				if err := s.InsertDelivery(ctx, tx, seq, body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: group.session}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}); err != nil {
+					return err
+				}
 			}
-			if err := s.InsertDelivery(ctx, tx, seq, body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: group.session}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}); err != nil {
+			for _, change := range group.changes {
+				for _, event := range prEvents(change) {
+					if _, err := s.appendEngineEvent(tx, group.room, at, event); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		for _, head := range heads {
+			if err := s.moveRepoHead(ctx, tx, head, at); err != nil {
 				return err
 			}
 		}

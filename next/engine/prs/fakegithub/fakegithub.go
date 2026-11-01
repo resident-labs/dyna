@@ -283,6 +283,12 @@ func (s *Server) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 	var failures []map[string]any
 	asked := alias.FindAllStringSubmatch(input.Query, -1)
 	s.sizes = append(s.sizes, len(asked))
+	if len(asked) == 0 && strings.Contains(input.Query, "fragment ") {
+		if err := json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]string{{"type": "undefinedFragment", "message": "Fragment pull was defined, but not used"}}}); err != nil {
+			s.t.Error(err)
+		}
+		return
+	}
 	for _, match := range asked {
 		number, err := strconv.Atoi(match[2])
 		if err != nil {

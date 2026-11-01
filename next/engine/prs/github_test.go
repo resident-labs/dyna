@@ -92,6 +92,15 @@ func TestPollAsksOnceForEveryPRAndTheDefaultBranch(t *testing.T) {
 	}
 }
 
+func TestPollWithNoPRsAsksOnlyForTheHead(t *testing.T) {
+	c, server, _ := client(t)
+	server.SetMain("owner/repo", "main1")
+	snapshot, err := c.Poll(context.Background(), "owner/repo", nil)
+	if err != nil || snapshot.Main != "main1" || len(snapshot.PRs) != 0 {
+		t.Fatalf("%+v %v", snapshot, err)
+	}
+}
+
 func TestPollKeepsTheOthersWhenOnePRIsGone(t *testing.T) {
 	c, server, _ := client(t)
 	server.Add(fakegithub.Pull{Repo: "owner/repo", Number: 1})

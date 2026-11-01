@@ -312,3 +312,13 @@ test("a tracked PR's words mark only what needs someone", () => {
   assert.deepEqual(prWords({ ...summary, ci: "failure", state: "merged" }), [{ label: "Merged" }]);
   assert.deepEqual(prWords({ ...summary, state: "closed" }), [{ label: "Closed" }]);
 });
+
+test("the events for subscribers stay out of the feed, as the pr.changed beside them shows the news", () => {
+  const merged = decodeEvent(event(1, { type: "pr.merged", body: { repo: "o/r", number: 7, session: "builder", url: "u" } }));
+  const closed = decodeEvent(event(2, { type: "pr.closed", body: { repo: "o/r", number: 8, session: "builder", url: "u" } }));
+  const ci = decodeEvent(event(3, { type: "ci.finished", body: { repo: "o/r", number: 9, session: "builder", url: "u", head: "h", result: "failure" } }));
+  const main = decodeEvent(event(4, { type: "repo.main_updated", body: { repo: "o/r", head: "h" } }));
+  assert.ok(merged && closed && ci && main);
+  assert.equal(subject(main), undefined);
+  assert.equal(feedRows([merged, closed, ci, main], { kind: "feed" }).filter(row => row.kind === "work").length, 0);
+});

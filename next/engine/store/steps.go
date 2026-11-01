@@ -20,6 +20,7 @@ var steps = map[int][]string{
 		`DROP TABLE pr_owners_backup`,
 		`CREATE INDEX pr_owners_session ON pr_owners(session)`,
 		`CREATE INDEX pr_owners_state ON pr_owners(state)`,
+		`ALTER TABLE repos ADD COLUMN main_head TEXT NOT NULL DEFAULT ''`,
 	},
 	63: {
 		`CREATE TABLE subscriptions (id TEXT PRIMARY KEY, scope TEXT NOT NULL, room TEXT REFERENCES rooms(id), session TEXT REFERENCES sessions(id), every_ms INTEGER NOT NULL, wake_kind TEXT NOT NULL, wake_id TEXT NOT NULL, run_image TEXT NOT NULL, run_size TEXT NOT NULL, created_at INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, due_at INTEGER NOT NULL DEFAULT 0, hold_until INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0, last_at INTEGER NOT NULL DEFAULT 0, last_result TEXT NOT NULL DEFAULT '', last_host TEXT NOT NULL DEFAULT '', last_seq INTEGER NOT NULL DEFAULT 0)`,
