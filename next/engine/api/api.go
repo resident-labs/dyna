@@ -47,6 +47,15 @@ func (a *API) SetFilesRoute(route func(Caller) http.Handler) { a.files = route }
 // SetGitRoute configures the per-box git route before opening sockets.
 func (a *API) SetGitRoute(route func(Caller) http.Handler) { a.git = route }
 
+type callerKey struct{}
+
+func requestCaller(ctx context.Context, fallback Caller) Caller {
+	if c, ok := ctx.Value(callerKey{}).(Caller); ok {
+		return c
+	}
+	return fallback
+}
+
 func (a *API) handler(c Caller) http.Handler {
 	mux := http.NewServeMux()
 	call(mux, contract.MethodConnectStart, c, func(ctx context.Context, _ contract.Principal, req contract.ConnectStartRequest) (contract.ConnectStartResponse, *contract.Error) {
@@ -102,7 +111,8 @@ func (a *API) handler(c Caller) http.Handler {
 		return out, problem
 	})
 	call(mux, contract.MethodDeviceList, c, a.service.DeviceList)
-	call(mux, contract.MethodDeviceScopes, c, func(context.Context, contract.Principal, contract.DeviceScopesRequest) (contract.DeviceScopesResponse, *contract.Error) {
+	call(mux, contract.MethodDeviceScopes, c, func(ctx context.Context, _ contract.Principal, _ contract.DeviceScopesRequest) (contract.DeviceScopesResponse, *contract.Error) {
+		c := requestCaller(ctx, c)
 		if c.Web {
 			return contract.DeviceScopesResponse{Scopes: c.Scopes}, nil
 		}
@@ -119,6 +129,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodHostexecRun, c, a.service.HostexecRun)
 	call(mux, contract.MethodHostexecRevoke, c, a.service.HostexecRevoke)
 	call(mux, contract.MethodOpSubmit, c, func(ctx context.Context, p contract.Principal, req contract.OpSubmitRequest) (contract.OpSubmitResponse, *contract.Error) {
+		c := requestCaller(ctx, c)
 		if c.Web {
 			scope := a.service.OperationScope(req.Operation.Kind)
 			if scope == "" || !hasScope(c, scope) {
@@ -172,6 +183,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodSessionSearch, c, a.service.SessionSearch)
 	call(mux, contract.MethodPostSearch, c, a.service.PostSearch)
 	call(mux, contract.MethodPost, c, func(ctx context.Context, p contract.Principal, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
+		c := requestCaller(ctx, c)
 		if box(c) {
 			if req.Room == "" {
 				req.Room = c.Room
@@ -182,6 +194,7 @@ func (a *API) handler(c Caller) http.Handler {
 		return a.service.Post(ctx, p, req)
 	})
 	call(mux, contract.MethodEventsList, c, func(ctx context.Context, p contract.Principal, req contract.EventsListRequest) (contract.EventsListResponse, *contract.Error) {
+		c := requestCaller(ctx, c)
 		if box(c) && req.Room != c.Room {
 			return contract.EventsListResponse{}, forbidden()
 		}
@@ -189,6 +202,7 @@ func (a *API) handler(c Caller) http.Handler {
 	})
 	call(mux, contract.MethodShellOutput, c, a.service.ShellOutput)
 	mux.HandleFunc("GET /v1/shell/watch", func(w http.ResponseWriter, r *http.Request) {
+		c := requestCaller(r.Context(), c)
 		w.Header().Set("Cache-Control", "no-store")
 		if !owner(c) || !hasScope(c, contract.ScopeTerminal) {
 			writeError(w, forbidden())
@@ -248,6 +262,7 @@ func (a *API) handler(c Caller) http.Handler {
 		return a.service.ComputerInput(ctx, p, req)
 	})
 	mux.HandleFunc("POST /v1/computers/frames", func(w http.ResponseWriter, r *http.Request) {
+		c := requestCaller(r.Context(), c)
 		if !box(c) {
 			writeError(w, forbidden())
 			return
@@ -262,6 +277,7 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 	})
 	mux.HandleFunc("GET /v1/terminal", func(w http.ResponseWriter, r *http.Request) {
+		c := requestCaller(r.Context(), c)
 		if !owner(c) || !hasScope(c, contract.ScopeTerminal) {
 			writeError(w, forbidden())
 			return
@@ -283,6 +299,7 @@ func (a *API) handler(c Caller) http.Handler {
 		terminal(w, r, argv, uint16(cols), uint16(rows))
 	})
 	mux.HandleFunc("GET /v1/computers/watch", func(w http.ResponseWriter, r *http.Request) {
+		c := requestCaller(r.Context(), c)
 		w.Header().Set("Cache-Control", "no-store")
 		if !owner(c) || !c.Web || !hasScope(c, contract.ScopeComputers) {
 			writeError(w, forbidden())
@@ -330,6 +347,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodSessionWork, c, a.service.SessionWork)
 	call(mux, contract.MethodShellJobEnded, c, a.service.ShellJobEnded)
 	mux.HandleFunc("GET /v1/events", func(w http.ResponseWriter, r *http.Request) {
+		c := requestCaller(r.Context(), c)
 		if !user(c) || !hasScope(c, contract.ScopeRead) {
 			writeError(w, forbidden())
 			return
@@ -403,6 +421,7 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 	})
 	mux.HandleFunc("GET /v1/box/channel", func(w http.ResponseWriter, r *http.Request) {
+		c := requestCaller(r.Context(), c)
 		if !box(c) {
 			writeError(w, forbidden())
 			return
@@ -437,6 +456,7 @@ func (a *API) handler(c Caller) http.Handler {
 	})
 	if user(c) && a.files != nil {
 		files := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			c := requestCaller(r.Context(), c)
 			scope := contract.ScopeFiles
 			switch r.Method {
 			case http.MethodGet, http.MethodHead:
@@ -507,6 +527,7 @@ func call[Req, Resp any](mux *http.ServeMux, m contract.Method, c Caller, fn fun
 		panic("no method table entry for " + string(m))
 	}
 	mux.HandleFunc("POST /v1/"+string(m), func(w http.ResponseWriter, r *http.Request) {
+		c := requestCaller(r.Context(), c)
 		if !allows(rule.Access, c) || rule.Scope != "" && !hasScope(c, rule.Scope) {
 			writeError(w, forbidden())
 			return
