@@ -21,3 +21,14 @@ test("a post image without alt text is labeled Image, and an unsafe image gets n
   assert.doesNotMatch(unsafe, /javascript/);
   assert.match(unsafe, /Logo/);
 });
+
+test("a linked post image shows its label as one link", () => {
+  assert.equal(parse("[![Logo](https://a.com/x.png)](https://b.com/)"), '<p><a href="https://b.com/">Logo</a></p>\n');
+});
+
+test("an image address and label keep each entity once", () => {
+  assert.equal(
+    parse("![A &amp; B](https://example.com/?a=1&amp;b=2)"),
+    '<p><a href="https://example.com/?a=1&amp;b=2">A &amp; B</a></p>\n',
+  );
+});
