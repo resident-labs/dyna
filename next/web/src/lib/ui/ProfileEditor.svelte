@@ -4,6 +4,7 @@
   let draft = $state({ ...profile, maxCallsPerRun: profile.maxCallsPerRun ?? 0 });
   let compactText = $state((profile.compactTokens ?? 0).toLocaleString(undefined, { numberingSystem: "latn" }));
   let selected = $derived(providers.find(p => p.id === draft.provider));
+  let billing = $derived(draft.billing || (selected?.flows?.some(flow => flow !== "key") ? "plan" : "key"));
   const ratings = [
     { key: "taste", name: "Taste", help: "choosing the solution" },
     { key: "diagnostics", name: "Diagnostics", help: "finding what is wrong, with few false positives" },
@@ -20,7 +21,7 @@
   {#if isNew}<label class="field"><span>Name</span><input bind:value={draft.name} autocomplete="off" /></label>{/if}
   <label class="field"><span>Provider</span><select bind:value={draft.provider} onchange={() => draft.billing = undefined}>{#if !selected}<option value={draft.provider}>{draft.provider}</option>{/if}{#each providers as provider}<option value={provider.id}>{provider.displayName}</option>{/each}</select></label>
   {#if selected?.flows?.includes("key") && selected.flows.some(flow => flow !== "key")}<label class="field"><span>Billing</span><select value={draft.billing ?? "plan"} onchange={(event) => draft.billing = event.currentTarget.value === "key" ? "key" : "plan"}><option value="plan">Plan</option><option value="key">API key, billed per token</option></select></label>{/if}
-  <label class="field"><span>Model ID</span><input bind:value={draft.model} autocomplete="off" list="catalog-models" /><datalist id="catalog-models">{#each selected?.models ?? [] as model}<option value={model.id}>{model.name}</option>{/each}</datalist></label>
+  <label class="field"><span>Model ID</span><input bind:value={draft.model} autocomplete="off" list="catalog-models" /><datalist id="catalog-models">{#each (selected?.models ?? []).filter(model => model.billing?.includes(billing)) as model}<option value={model.id}>{model.name}</option>{/each}</datalist></label>
   <label class="field"><span>Thinking</span><select bind:value={draft.thinking}>{#each levels as level}<option value={level.value}>{level.label}</option>{/each}</select></label>
   <div class="field ratings"><span>Ratings</span><div>
     {#each ratings as item}
