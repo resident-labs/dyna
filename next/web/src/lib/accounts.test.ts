@@ -4,11 +4,15 @@ import { accountRows, accountState, providerGroup, removalPrompt, canReconnect, 
 import { APIError } from "./client.ts";
 import type { Account, AccountProviderInfo } from "./contract.gen.ts";
 
-test("search unfolds matching API key providers", () => {
-  const providers: AccountProviderInfo[] = Array.from({ length: 12 }, (_, i) => ({ id: "anthropic", displayName: `Provider ${i}`, connectMethod: "key", connectFlow: "key", flows: ["key"], models: [] }));
+test("groups each provider by its first flow and searches names and IDs", () => {
+  const providers: AccountProviderInfo[] = [
+    { id: "anthropic", displayName: "Claude", connectMethod: "oauth", connectFlow: "callback", flows: ["callback", "key"], models: [] },
+    ...Array.from({ length: 12 }, (_, i) => ({ id: `key-${i}`, displayName: `Provider ${i}`, connectMethod: "key" as const, connectFlow: "key" as const, flows: ["key" as const], models: [] })),
+  ];
+  assert.deepEqual(providerGroup(providers, "callback", "anthropic", false).items.map(p => p.id), ["anthropic"]);
   assert.equal(providerGroup(providers, "key", "", false).remaining, 2);
-  assert.equal(providerGroup(providers, "key", "provider 11", false).items[0].displayName, "Provider 11");
-  assert.equal(providerGroup(providers, "key", "", true).items.length, 12);
+  assert.deepEqual(providerGroup(providers, "key", "key-11", false).items.map(p => p.id), ["key-11"]);
+  assert.equal(providerGroup(providers, "key", "", true).count, 12);
 });
 
 test("only the typed unavailable error offers remove and add again", () => {
