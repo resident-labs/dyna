@@ -356,7 +356,8 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 		}
 		ctx := r.Context()
 		if streamScope != "" {
-			ctx, cancel := context.WithCancel(ctx)
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithCancel(ctx)
 			defer cancel()
 			ticks, stop := w.ticks()
 			defer stop()
