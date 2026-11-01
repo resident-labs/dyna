@@ -361,7 +361,8 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 			defer cancel()
 			ticks, stop := w.ticks()
 			defer stop()
-			go func() {
+			// ctx is a parameter because the request path reassigns the outer one below.
+			go func(ctx context.Context) {
 				for {
 					select {
 					case <-ctx.Done():
@@ -383,7 +384,7 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 						}
 					}
 				}
-			}()
+			}(ctx)
 		}
 		ctx = context.WithValue(ctx, callerKey{}, Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner, Device: contract.DeviceID(device.ID)}, Device: device.ID, Scopes: device.Scopes, Web: true})
 		handler := w.handler

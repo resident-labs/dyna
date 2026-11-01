@@ -19,6 +19,9 @@ type Caller struct {
 // Service implements the engine operations. It must authorize resource targets
 // against the caller as well as applying the API's listener-level policy.
 type Service interface {
+	WebSearch(context.Context, contract.Principal, contract.WebSearchRequest) (contract.WebSearchResponse, *contract.Error)
+	WebsearchSetKey(context.Context, contract.Principal, contract.WebsearchSetKeyRequest) (contract.WebsearchSetKeyResponse, *contract.Error)
+	WebsearchRemoveKey(context.Context, contract.Principal, contract.WebsearchRemoveKeyRequest) (contract.WebsearchRemoveKeyResponse, *contract.Error)
 	ContextSnapshot(context.Context, contract.Principal, contract.ContextSnapshotRequest) (contract.ContextSnapshotResponse, *contract.Error)
 	DevicePair(context.Context, contract.Principal, contract.DevicePairRequest) (contract.DevicePairResponse, *contract.Error)
 	DeviceList(context.Context, contract.Principal, contract.DeviceListRequest) (contract.DeviceListResponse, *contract.Error)
@@ -40,7 +43,7 @@ type Service interface {
 	RoomList(context.Context, contract.Principal, contract.RoomListRequest) (contract.RoomListResponse, *contract.Error)
 	SessionList(context.Context, contract.Principal, contract.SessionListRequest) (contract.SessionListResponse, *contract.Error)
 	HostexecRun(context.Context, contract.Principal, contract.HostexecRunRequest) (contract.HostexecRunResponse, *contract.Error)
-	HostexecRevoke(context.Context, contract.Principal, contract.HostexecRevokeRequest) (contract.HostexecRevokeResponse, *contract.Error)
+	HostexecList(context.Context, contract.Principal, contract.HostexecListRequest) (contract.HostexecListResponse, *contract.Error)
 	OpSubmit(context.Context, contract.Principal, contract.OpSubmitRequest) (contract.OpSubmitResponse, *contract.Error)
 	OpDecide(context.Context, contract.Principal, contract.OpDecideRequest) (contract.OpDecideResponse, *contract.Error)
 	OpWithdraw(context.Context, contract.Principal, contract.OpWithdrawRequest) (contract.OpWithdrawResponse, *contract.Error)
@@ -57,6 +60,7 @@ type Service interface {
 	AccountsReconnect(context.Context, contract.Principal, contract.AccountsReconnectRequest) (contract.AccountsReconnectResponse, *contract.Error)
 	AccountsConnectCallback(context.Context, contract.Principal, contract.AccountsConnectCallbackRequest) (contract.AccountsConnectCallbackResponse, *contract.Error)
 	AccountsConnectStatus(context.Context, contract.Principal, contract.AccountsConnectStatusRequest) (contract.AccountsConnectStatusResponse, *contract.Error)
+	AccountsImportOAuth(context.Context, contract.Principal, contract.AccountsImportOAuthRequest) (contract.AccountsImportOAuthResponse, *contract.Error)
 	AccountsSetKey(context.Context, contract.Principal, contract.AccountsSetKeyRequest) (contract.AccountsSetKeyResponse, *contract.Error)
 	AccountsQuota(context.Context, contract.Principal, contract.AccountsQuotaRequest) (contract.AccountsQuotaResponse, *contract.Error)
 	RoomCreate(context.Context, contract.Principal, contract.RoomCreateRequest) (contract.RoomCreateResponse, *contract.Error)

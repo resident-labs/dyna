@@ -50,6 +50,12 @@ export class Attention {
     this.stop = this.connect(undefined, () => this.head, event => this.apply(event));
   }
 
+  async created(id: string): Promise<void> {
+    const list = await call("room.list", {});
+    const room = list.rooms?.find(item => item.id === id);
+    if (room && !this.rooms.has(id)) this.add(room);
+  }
+
   private add(room: RoomSummary): void {
     this.rooms.set(room.id, room);
     this.waiting.set(room.id, new SvelteSet(room.waiting));
