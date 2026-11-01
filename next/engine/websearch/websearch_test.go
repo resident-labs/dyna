@@ -1,8 +1,12 @@
 package websearch
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -85,5 +89,29 @@ func TestStatusErrorMasksCredentialShapes(t *testing.T) {
 		if strings.Contains(err.Error(), shape) {
 			t.Fatalf("err = %v, want %q masked", err, shape)
 		}
+	}
+}
+
+func TestKeyProvidersDoNotFollowRedirects(t *testing.T) {
+	var reached atomic.Bool
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached.Store(true) }))
+	defer target.Close()
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer source.Close()
+	key := func(context.Context) (string, error) { return "search-key", nil }
+	for _, provider := range []Provider{
+		Brave{BaseURL: source.URL, Key: key},
+		Exa{BaseURL: source.URL, Key: key},
+		Tavily{BaseURL: source.URL, Key: key},
+		Muse{BaseURL: source.URL, Key: key},
+	} {
+		if _, err := provider.Search(t.Context(), Query{Text: "go"}); err == nil {
+			t.Fatalf("%s accepted a redirect", provider.Name())
+		}
+	}
+	if reached.Load() {
+		t.Fatal("a provider followed a redirect with its key")
 	}
 }
