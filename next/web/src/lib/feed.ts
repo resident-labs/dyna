@@ -139,7 +139,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
   };
   for (const event of events) {
     // Account alerts are owner-only and never belong to a room feed.
-    if (event.type === "account.failed" || event.type === "account.quota_low") continue;
+    if (event.type === "account.failed" || event.type === "account.quota_low" || event.type === "host.disk_low") continue;
     const firstAt = work[0]?.at ?? (deferred[0]?.kind === "notice" ? deferred[0].event.at : deferred[0]?.kind === "failed" || deferred[0]?.kind === "request" || deferred[0]?.kind === "restarted" ? deferred[0].at : undefined);
     if (firstAt && new Date(firstAt).toDateString() !== new Date(event.at).toDateString()) flush();
     if (event.type === "post.created") {
@@ -346,7 +346,7 @@ export const closedSession = "A closed session";
 const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
 
 // Why the engine closed a session, after "closed". The engine closes a session whose box stayed stopped for 7 days.
-const closeReasons: Record<SessionCloseReason, string> = { dormant: "after 7 quiet days" };
+const closeReasons: Record<SessionCloseReason, string> = { dormant: "after 7 quiet days", disk: "to free disk" };
 
 // One short line per work row in the owner's terms, such as "lead-web worked for 6 min · 2 turns · 1 job" or
 // "builder-feed started · 3 sessions worked for 12 min · 4 turns"; the opened row lists each event.

@@ -13,11 +13,16 @@ import (
 type dormantHost struct {
 	fakeBoxes
 	starts, stops     int
+	removed           []contract.BoxID
 	startErr, stopErr error
 }
 
 func (h *dormantHost) Start(context.Context, contract.BoxID) error { h.starts++; return h.startErr }
-func (h *dormantHost) Stop(context.Context, contract.BoxID) error  { h.stops++; return h.stopErr }
+func (h *dormantHost) Remove(_ context.Context, id contract.BoxID) error {
+	h.removed = append(h.removed, id)
+	return nil
+}
+func (h *dormantHost) Stop(context.Context, contract.BoxID) error { h.stops++; return h.stopErr }
 
 func quietSession(t *testing.T, jobs int) (*Service, *dormantHost, contract.RoomID, contract.SessionID, context.Context) {
 	t.Helper()
