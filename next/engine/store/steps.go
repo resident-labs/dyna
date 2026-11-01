@@ -6,10 +6,22 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 63
+const schemaVersion = 64
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	63: {
+		`CREATE TABLE subscriptions (id TEXT PRIMARY KEY, scope TEXT NOT NULL, room TEXT REFERENCES rooms(id), session TEXT REFERENCES sessions(id), every_ms INTEGER NOT NULL, wake_kind TEXT NOT NULL, wake_id TEXT NOT NULL, run_image TEXT NOT NULL, run_size TEXT NOT NULL, created_at INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, due_at INTEGER NOT NULL DEFAULT 0, hold_until INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0, last_at INTEGER NOT NULL DEFAULT 0, last_result TEXT NOT NULL DEFAULT '', last_host TEXT NOT NULL DEFAULT '', last_seq INTEGER NOT NULL DEFAULT 0)`,
+		`CREATE INDEX subscriptions_room ON subscriptions(room)`,
+		`CREATE TABLE subscription_events (sub TEXT NOT NULL REFERENCES subscriptions(id), event_type TEXT NOT NULL, PRIMARY KEY(sub, event_type))`,
+		`CREATE TABLE subscription_args (sub TEXT NOT NULL REFERENCES subscriptions(id), pos INTEGER NOT NULL, arg TEXT NOT NULL, PRIMARY KEY(sub, pos))`,
+		`CREATE TABLE subscription_files (sub TEXT NOT NULL REFERENCES subscriptions(id), path TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY(sub, path))`,
+		`CREATE TABLE subscription_runs (id TEXT PRIMARY KEY, sub TEXT NOT NULL UNIQUE, room TEXT, host TEXT NOT NULL, size TEXT NOT NULL, started_at INTEGER NOT NULL)`,
+		// Every existing root gets the subscription a new root gets. Dispatch starts from here, so old events fire nothing.
+		`INSERT INTO subscriptions(id,scope,room,every_ms,wake_kind,wake_id,run_image,run_size,created_at) SELECT 'sub_'||r.id,'room',r.id,0,'session',s.id,'','',CAST(strftime('%s','now') AS INTEGER)*1000 FROM rooms r JOIN sessions s ON s.room=r.id AND s.parent IS NULL AND s.closed_at IS NULL WHERE r.state='open'`,
+		`INSERT INTO subscription_events(sub,event_type) SELECT s.id,t.value FROM subscriptions s JOIN json_each('` + defaultEventsJSON + `') t`,
+		`INSERT INTO meta(key,value) SELECT 'subscription_seq',COALESCE(MAX(seq),0) FROM events`,
+	},
 	62: {
 		`CREATE TABLE goals (room TEXT NOT NULL REFERENCES rooms(id), number INTEGER NOT NULL, session TEXT REFERENCES sessions(id), text TEXT NOT NULL, done_when TEXT NOT NULL, state TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(room, number))`,
 		`CREATE INDEX goals_holder ON goals(session) WHERE state='active'`,

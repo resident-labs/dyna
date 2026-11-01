@@ -2,6 +2,8 @@ package box
 
 import (
 	"context"
+	"time"
+
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -69,6 +71,39 @@ type Runner struct {
 	ID      int64
 	Slot    int
 	Running bool
+}
+
+// BaseImage is the Run image that needs no repository: dyna-base itself.
+const BaseImage = "base"
+
+// RunLimit is the longest a subscription's Run may take.
+const RunLimit = 30 * time.Minute
+
+// RunSpec is one subscription Run. Image is BaseImage or an image folder of the room's default repository,
+// never a registry reference, and a Run with no room has no shared folder and no repository.
+type RunSpec struct {
+	ID           contract.BoxID
+	Subscription contract.SubscriptionID
+	Host         contract.HostName
+	Room         contract.RoomID
+	Image        string
+	Size         contract.BoxSize
+	Command      []string
+	Files        []contract.RunFile
+}
+
+// RunContainer is a RunSpec with its image and its host paths resolved.
+type RunContainer struct {
+	ID, Image string
+	Size      contract.BoxSize
+	Command   []string
+	Mounts    []Mount
+}
+
+// RunStatus is what a host knows about a Run's container.
+type RunStatus struct {
+	Found, Running bool
+	ExitCode       int
 }
 
 type HostDriver interface {

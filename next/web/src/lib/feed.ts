@@ -61,6 +61,7 @@ export const causes: Record<FailureCause, string> = {
   archive_failed: "Dyna could not save the session's branch",
   grant_inactive: "The host execution grant is no longer active",
   host_lost: "The host stopped answering during the run",
+  run_timeout: "It reached its time limit",
   host_busy: "host busy, try again later",
   nested_device_missing: "The host lacks the TUN device needed for nested containers",
   kvm_device_missing: "The host lacks the KVM device",
@@ -83,6 +84,7 @@ const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.sessio
 export function subject(event: Event): string | undefined {
   switch (event.type) {
     case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return undefined;
+    case "hook.finished": case "hook.due": case "notice.posted": case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": return undefined;
     case "op.requested": return event.body.by.session;
     case "op.decided": case "op.ran": return event.from.session;
     default: return event.body.session;
@@ -159,6 +161,8 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
   for (const event of events) {
     // Account alerts are owner-only and never belong to a room feed. Questions show in Needs you, Requests and the session's DM.
     if (event.type === "account.failed" || event.type === "account.quota_low" || event.type === "host.disk_low" || event.type === "question.asked" || event.type === "question.answered" || event.type === "question.withdrawn") continue;
+    // A schedule that does its job quietly says nothing. A failure and any post of its own still show.
+    if (event.type === "hook.due" || event.type === "hook.finished" && event.body.result !== "failed") continue;
     const firstAt = work[0]?.at ?? (deferred[0]?.kind === "notice" ? deferred[0].event.at : deferred[0]?.kind === "failed" || deferred[0]?.kind === "request" || deferred[0]?.kind === "restarted" ? deferred[0].at : undefined);
     if (firstAt && new Date(firstAt).toDateString() !== new Date(event.at).toDateString()) flush();
     if (event.type === "post.created") {
@@ -279,6 +283,7 @@ export const eventGroups: Record<Event["type"], string> = {
   "op.requested": "requests", "op.decided": "requests decided", "op.ran": "requests run",
   "question.asked": "questions", "question.answered": "questions answered", "question.withdrawn": "questions withdrawn",
   "image.built": "images built", "image.failed": "image builds failed", "pr.opened": "pull requests opened",
+  "hook.finished": "subscription runs", "hook.due": "subscription wakes", "notice.posted": "notices",
   "shell.job.ended": "jobs finished", "grant.expired": "host grants expired",
   "host.disk_low": "disk warnings", "conversation.read": "read positions",
   "session.failed": "failure notices", "goal.set": "goals set", "goal.item_changed": "goal items changed", "goal.ended": "goals ended", "checkin.due": "check-ins",
@@ -474,5 +479,8 @@ export function describe(event: Event, name: Name): string {
     case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return ""; // feedRows shows no row for them.
     case "box.pressure": return event.body.kind === "max" ? "A session reached its memory limit" : "A session is short of memory";
     case "post.created": return event.body.text;
+    case "hook.finished": return `A subscription's run ${event.body.result}: ${event.body.cause ? causes[event.body.cause] : `exit code ${event.body.exitCode}`}`;
+    case "hook.due": return "A subscription woke a session";
+    case "notice.posted": return event.body.text;
   }
 }

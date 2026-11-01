@@ -8,9 +8,10 @@
   import { onHost } from "../hosts.ts";
   import { failed } from "../jobs.ts";
   import { closeNote, descendants } from "../session-tree.ts";
+  import { subscriptionAction, subscriptionState, subscriptionWhen } from "../subscriptions.ts";
   import { watchShell, type ShellJob } from "../shell.ts";
   import type { RoomStore } from "../room.svelte.ts";
-  import type { SessionAccountResponse } from "../contract.gen.ts";
+  import type { SessionAccountResponse, SubscriptionInfo } from "../contract.gen.ts";
   // What a DM's session is, as design A's About tab: its goal, then one label and value per fact the engine reports.
   // A row without a value does not show. Jobs opens the dock's list on this session, and stays while the box is ready so a
   // finished job can be reached. It counts the jobs the engine lists, as that list does, because session.list's count can
@@ -47,6 +48,14 @@
     void call("session.account", { session: asked }).then(answer => { if (asked === session) account = answer; }, () => { if (asked === session) account = undefined; });
   }
   $effect(() => { void open?.profile; loadAccount(); });
+  // Root's panel is the room's, so it shows what the room is subscribed to. A list that cannot load shows nothing.
+  let isRoot = $derived(open !== undefined && !open.parent);
+  let subscriptions: SubscriptionInfo[] = $state([]);
+  $effect(() => {
+    if (!isRoot) { subscriptions = []; return; }
+    const asked = room;
+    void call("subscription.list", { room: asked }).then(answer => { if (asked === room) subscriptions = answer.subscriptions ?? []; }, () => { subscriptions = []; });
+  });
   let closing = $state(false);
   let closeFailed = $state(false);
   function close(): void {
@@ -77,6 +86,15 @@
     {#if open?.startedAt}<dt>Started</dt><dd class="muted"><time datetime={open.startedAt} title={fullTime(open.startedAt)}>{fromNow(open.startedAt, Math.max(now, Date.parse(open.startedAt)))}</time></dd>{/if}
     {#if open?.lastTurnAt}<dt>Last turn</dt><dd class="muted"><time datetime={open.lastTurnAt} title={fullTime(open.lastTurnAt)}>{fromNow(open.lastTurnAt, Math.max(now, Date.parse(open.lastTurnAt)))}</time></dd>{/if}
   </dl>
+  {#if subscriptions.length}
+    <h3 class="after">Subscriptions</h3>
+    <ul class="subscriptions">
+      {#each subscriptions as item (item.subscription.id)}
+        {@const state = subscriptionState(item)}
+        <li><span>{subscriptionWhen(item)}</span><span class="muted">{subscriptionAction(item, id => store.names.get(id) ?? id)}{#if state}{" · "}{state}{/if}</span></li>
+      {/each}
+    </ul>
+  {/if}
   {#if open?.parent}
     <div class="closebox">
       <button type="button" class="close-button" disabled={closing} onclick={close}>Close session</button>
@@ -98,6 +116,9 @@
   dt { color: var(--muted); font-size: 12.5px; line-height: 20px; }
   dd { margin: 0; line-height: 20px; overflow-wrap: anywhere; }
   .muted { color: var(--muted); }
+  .after { margin-top: 16px; }
+  .subscriptions { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
+  .subscriptions li { display: grid; }
   a, button { padding: 0; border: 0; border-radius: 4px; background: none; color: var(--focus); font: inherit; text-decoration: none; cursor: pointer; }
   .failed { display: block; color: var(--muted); font-size: 12.5px; }
   .closebox { display: grid; gap: 8px; justify-items: start; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }

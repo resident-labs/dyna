@@ -158,6 +158,9 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 			if err := s.InsertGrant(tx, g); err != nil {
 				return err
 			}
+			if err := insertDefaultSubscription(ctx, tx, session.Room, session.ID, event.Time); err != nil {
+				return err
+			}
 		}
 		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)", session.Box, session.ID, host, "", size, contract.BoxPending, reason, "", event.Time.UnixMilli(), event.Time.UnixMilli())
 		if err != nil {
@@ -202,6 +205,9 @@ func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event c
 			return sql.ErrNoRows
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE pr_owners SET session=(SELECT parent FROM sessions WHERE id=?) WHERE session=? AND EXISTS (SELECT 1 FROM sessions WHERE id=? AND parent IS NOT NULL)", id, id, id); err != nil {
+			return err
+		}
+		if err := dropSessionSubscriptions(ctx, tx, id); err != nil {
 			return err
 		}
 		var parent contract.SessionID
