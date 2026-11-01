@@ -1,9 +1,8 @@
 import type { Account, ModelProvider, ProfileSummary, ThinkingLevel } from "./contract.gen.ts";
 
 // A person reads a profile, not its slugs, as in v1's profileLabels.ts: the slug's words as a name, with SHOWN_AS
-// for those plain capitals get wrong. v1 named the harness; v2 has one, so the label names the provider and thinking.
+// for those plain capitals get wrong.
 const SHOWN_AS: Record<string, string> = { gpt: "GPT", glm: "GLM", mimo: "MiMo", deepseek: "DeepSeek" };
-const providers: Record<ModelProvider, string> = { anthropic: "Anthropic", openai: "OpenAI" };
 const thinking: Record<ThinkingLevel, string> = {
   off: "no thinking", minimal: "minimal thinking", low: "low thinking", medium: "medium thinking", high: "high thinking", xhigh: "very high thinking",
 };
@@ -35,10 +34,7 @@ export function slugName(slug: string): string {
   return parts.map(word).join(" ").replace(/(?<=\d) (?=\d)/g, ".");
 }
 
-// One profile for the owner: the model, such as "Claude Opus 5.5", over "Anthropic · high thinking". Profiles that would
-// read the same add their own name, so they still read apart.
-export function profileLabel(profile: ProfileSummary, all: ProfileSummary[]): { model: string; detail: string } {
-  const detail = (p: ProfileSummary) => `${providers[p.provider]} · ${thinking[p.thinking]}`;
-  const twin = all.some(other => other.name !== profile.name && other.model === profile.model && detail(other) === detail(profile));
-  return { model: slugName(profile.model), detail: twin ? `${detail(profile)} · ${slugName(profile.name)}` : detail(profile) };
+// One profile for the owner: its name, such as "Opus Rewrite", over "high thinking".
+export function profileLabel(profile: ProfileSummary): { name: string; detail: string } {
+  return { name: slugName(profile.name), detail: thinking[profile.thinking] };
 }

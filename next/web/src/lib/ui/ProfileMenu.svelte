@@ -14,11 +14,8 @@
   let root: HTMLDivElement;
   let button: HTMLButtonElement | undefined = $state();
   let current = $derived(profiles?.find(item => item.name === profile));
-  let label = $derived(current && profiles ? profileLabel(current, profiles) : { model: slugName(profile), detail: "" });
-  let rows = $derived.by(() => {
-    const all = profiles ?? [];
-    return all.map(item => ({ name: item.name, shown: profileLabel(item, all) }));
-  });
+  let label = $derived(current ? profileLabel(current) : { name: slugName(profile), detail: "" });
+  let rows = $derived((profiles ?? []).map(item => ({ name: item.name, shown: profileLabel(item) })));
   async function load() {
     failure = "";
     await call("profile.list", {}).then(answer => { profiles = answer.profiles ?? []; }, () => { failure = "The profiles did not load."; });
@@ -42,13 +39,13 @@
 
 <svelte:window onpointerdown={event => { if (open && event.target instanceof Node && !root.contains(event.target)) void show(false); }} />
 <div class="menu" bind:this={root}>
-  {#if !switchable}<span class="names">{label.model}{#if label.detail}<small>{label.detail}</small>{/if}</span>{:else}
-  <button type="button" class="open" bind:this={button} aria-disabled={busy} aria-haspopup="menu" aria-expanded={open} aria-label={`Profile: ${label.model} ${label.detail}. Change profile`}
+  {#if !switchable}<span class="names">{label.name}{#if label.detail}<small>{label.detail}</small>{/if}</span>{:else}
+  <button type="button" class="open" bind:this={button} aria-disabled={busy} aria-haspopup="menu" aria-expanded={open} aria-label={`Profile: ${label.name} ${label.detail}. Change profile`}
     onclick={() => void show(!open)} onkeydown={event => { if (event.key === "ArrowDown") { event.preventDefault(); void show(true); } }}>
-    <span class="names">{label.model}{#if label.detail}<small>{label.detail}</small>{/if}</span><Icon name="chevron" /></button>{/if}
+    <span class="names">{label.name}{#if label.detail}<small>{label.detail}</small>{/if}</span><Icon name="chevron" /></button>{/if}
   {#if open && profiles}
     <MenuList label="Profiles" items={rows} keyOf={entry => entry.name} checked={profile} anchor={root} onchoose={name => void choose(name)} onclose={refocus => void show(false, refocus)}>
-      {#snippet row(entry)}<span class="names">{entry.shown.model}<small>{entry.shown.detail}</small></span>{/snippet}
+      {#snippet row(entry)}<span class="names">{entry.shown.name}<small>{entry.shown.detail}</small></span>{/snippet}
     </MenuList>
   {/if}
 </div>

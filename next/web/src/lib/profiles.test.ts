@@ -15,12 +15,12 @@ test("saving a profile keeps its hidden limit and allowed models", () => {
   assert.equal(saved.taste, 8);
 });
 
-test("a profile reads as its model, provider and thinking, and twins add their name", () => {
-  const opus: ProfileSummary = { name: "deep", provider: "anthropic", model: "claude-opus-5-5", description: "", taste: 0, diagnostics: 0, intelligence: 0, cost: 0, inUse: 0, thinking: "xhigh" };
-  const gpt: ProfileSummary = { name: "quick", provider: "openai", model: "openrouter/gpt-6.1-sol", description: "", taste: 0, diagnostics: 0, intelligence: 0, cost: 0, inUse: 0, thinking: "off" };
-  assert.deepEqual(profileLabel(opus, [opus, gpt]), { model: "Claude Opus 5.5", detail: "Anthropic · very high thinking" });
-  assert.deepEqual(profileLabel(gpt, [opus, gpt]), { model: "GPT 6.1 Sol", detail: "OpenAI · no thinking" });
-  assert.deepEqual(profileLabel(opus, [opus, { ...opus, name: "rewrite" }]), { model: "Claude Opus 5.5", detail: "Anthropic · very high thinking · Deep" });
+test("a profile reads as its name and thinking", () => {
+  const opus: ProfileSummary = { name: "opus-rewrite", provider: "anthropic", model: "claude-opus-5-5", description: "", taste: 0, diagnostics: 0, intelligence: 0, cost: 0, inUse: 0, thinking: "xhigh" };
+  const glm: ProfileSummary = { name: "glm-flash", provider: "openai", model: "openrouter/glm-5.3-flash", description: "", taste: 0, diagnostics: 0, intelligence: 0, cost: 0, inUse: 0, thinking: "off" };
+  assert.deepEqual(profileLabel(opus), { name: "Opus Rewrite", detail: "very high thinking" });
+  assert.deepEqual(profileLabel(glm), { name: "GLM Flash", detail: "no thinking" });
+  assert.equal(slugName("claude-opus-5-5"), "Claude Opus 5.5");
   assert.equal(slugName("terra"), "Terra");
 });
 
