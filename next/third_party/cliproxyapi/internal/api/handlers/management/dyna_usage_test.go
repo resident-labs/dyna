@@ -281,6 +281,17 @@ func TestDynaUsageNeverRefreshes(t *testing.T) {
 	}
 }
 
+func TestDynaUsageUnknownForAProviderWithoutAReader(t *testing.T) {
+	fake := dynaFixedUsage(t, http.StatusOK, `{}`)
+	auth := &coreauth.Auth{ID: "invented", Provider: "openai-compatible-custom-acme", Attributes: map[string]string{"api_key": "invented-key"}}
+	if entry := dynaOneEntry(t, dynaUsageHandler(t, auth)); entry.State != dynaUsageUnknown || entry.Provider != "openai-compatible-custom-acme" {
+		t.Fatalf("entry = %#v", entry)
+	}
+	if len(fake.requests) != 0 {
+		t.Fatal("a provider without a reader was called")
+	}
+}
+
 func TestDynaUsageResetTimes(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

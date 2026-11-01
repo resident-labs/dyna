@@ -83,8 +83,14 @@ var dynaUsageTransport = func(h *Handler, auth *coreauth.Auth) http.RoundTripper
 	return h.apiCallTransport(auth, "")
 }
 
+// dynaUsageSourceFor gives an OpenAI-compatible provider with no reader an empty
+// one, so the owner's own providers read as unknown and not as missing.
 func dynaUsageSourceFor(auth *coreauth.Auth) (dynaUsageSource, bool) {
-	source, ok := dynaUsageSources[strings.ToLower(strings.TrimSpace(auth.Provider))]
+	provider := strings.ToLower(strings.TrimSpace(auth.Provider))
+	source, ok := dynaUsageSources[provider]
+	if !ok && strings.HasPrefix(provider, "openai-compatible-") {
+		return dynaUsageSource{request: func(*coreauth.Auth) (string, http.Header) { return "", nil }}, true
+	}
 	return source, ok
 }
 
