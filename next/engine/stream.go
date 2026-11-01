@@ -306,15 +306,12 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 					return
 				}
 				if !saved {
-					sections = []contract.ContextSection{}
-					if s.profiles.Surface(profile) != contract.AgentSurfaceOff {
-						snapshot, problem := s.ContextSnapshot(ctx, caller, contract.ContextSnapshotRequest{})
-						if problem != nil {
-							reason, cause = streamSnapshotFailed, errors.New(problem.Message)
-							return
-						}
-						sections = snapshot.Sections
+					snapshot, problem := s.ContextSnapshot(ctx, caller, contract.ContextSnapshotRequest{})
+					if problem != nil {
+						reason, cause = streamSnapshotFailed, errors.New(problem.Message)
+						return
 					}
+					sections = snapshot.Sections
 					sections, err = s.store.TurnSections(ctx, turn, sections)
 					if err != nil {
 						reason, cause = streamSectionsSaveFailed, err
