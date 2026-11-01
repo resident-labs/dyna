@@ -6,14 +6,31 @@ import or the owner-approved cutover gate.
 
 ## Boundary
 
-`cmd/dyna-export` is its own module, `dyna-agent/cmd/dyna-export`, with
-Go 1.26.10. It replaces `dyna-agent` with `../..` and
-`github.com/resident-labs/dyna` with `../../next`. It imports the
-standard-library-only `next/contract` without copying its types. The v1
-module and its dependency graph stay unchanged. The next CI gate builds and
-tests the exporter module. Production export is built from `v1-final`; the
-rehearsal builds the review commit. This module layout supersedes spec 8.2's
-old-module replacement (lead decision, 2026-10-31).
+Main has no v1 tree (owner, 2026-11-01). `cmd/dyna-export` and the v1
+`internal/` packages it reads exist only at annotated tag `v1-final`
+(`4f2192eb24`). Build the exporter from that tag, with Go 1.26.10:
+
+```sh
+git clone --branch v1-final https://github.com/resident-labs/dyna
+cd dyna/cmd/dyna-export
+go build -o dyna-export .
+```
+
+The README beside it lists the flags. At the tag, the exporter is its own
+module, `dyna-agent/cmd/dyna-export`. It replaces `dyna-agent` with `../..` and
+`github.com/resident-labs/dyna` with `../../next`, so it imports the
+standard-library-only `next/contract` of the tag without copying its types.
+No CI builds it any more. This module layout supersedes spec 8.2's old-module
+replacement (lead decision, 2026-10-31).
+
+The exporter is frozen at the tag, but `next/contract` and the importer are not.
+It writes `next/contract` as of `4f2192eb24`, and `DecodeBundle` rejects unknown
+fields. A bundle type in main can therefore drift away from what the exporter
+writes, and nothing tests that. Any change to `next/contract/bundle.go` or to a
+type it names must still accept that output: new fields stay optional, existing
+fields and enum values keep their JSON. A change that cannot do that must bump
+`BundleV1` with a conversion, or pair with a fixed exporter on a new tag cut
+from `v1-final`. `v1-final` itself never moves.
 
 The exporter opens an explicitly supplied backup with SQLite read-only, never
 calls v1 store open functions that migrate, and fails on unsupported schema.
@@ -92,7 +109,7 @@ files. A report compares SQL or file source, bundle and dry-run counts.
 Tests use invented tiny inputs: one fail-first case each for unknown version,
 missing part, unknown nested field and wrong count. Each runs under one second
 without sleeps. Also test independent SQL filters and a successful multi-room
-bundle. Run checks on hermeslab under r19.
+bundle. Run checks on a build host under r19.
 
 ## Estimates
 
@@ -100,8 +117,8 @@ Product lines, excluding tests and third party: `cmd/dyna-export` about
 900–1,300; `next/migrate` about 200–300; `next/cmd/dyna` about 30–50;
 `next/contract` about 5–15 for the manifest. Estimates exclude any policy
 or contract expansion above. Exporter and verifier share the first package
-but not selection/count code. The exporter PR uses the v1 merge queue; the
-dry-run PR touches only `next/`.
+but not selection/count code. The exporter PR used the v1 merge queue, which is
+gone from main with the rest of v1; the dry-run PR touches only `next/`.
 
 
 ## Rehearsal: 2026-10-31
