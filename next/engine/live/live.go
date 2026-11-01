@@ -11,16 +11,17 @@ import (
 // then mu. Publish runs under Session.mu and uses non-blocking sends. Code under
 // mu takes no other lock and sends no channel messages. wakeMu never overlaps mu.
 type Live struct {
-	mu            sync.Mutex
-	activityMu    sync.Mutex
-	sessions      map[contract.SessionID]*Session
-	closed        map[contract.SessionID]struct{}
-	activityCount uint64
-	subscribers   map[*Subscription]contract.RoomID
-	wakeMu        sync.Mutex
-	wakePending   map[contract.SessionID]bool
-	wakeSignal    chan struct{}
-	deliver       func(map[contract.SessionID]bool)
+	mu                 sync.Mutex
+	activityMu         sync.Mutex
+	sessions           map[contract.SessionID]*Session
+	closed             map[contract.SessionID]struct{}
+	activityCount      uint64
+	computerGeneration uint64
+	subscribers        map[*Subscription]contract.RoomID
+	wakeMu             sync.Mutex
+	wakePending        map[contract.SessionID]bool
+	wakeSignal         chan struct{}
+	deliver            func(map[contract.SessionID]bool)
 }
 
 // Session is a stable handle. Its mutex guards all its fields.
@@ -32,6 +33,7 @@ type Session struct {
 	activity      contract.TurnActivity
 	activityOrder uint64
 	channel       *Channel
+	computer      *computerState
 }
 
 // Subscription uses mu to serialize sends with close.
