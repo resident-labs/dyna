@@ -6,11 +6,12 @@
   import { watchTranscripts } from "../stream.ts";
   import type { PostRequest, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn } from "../contract.gen.ts";
   import type { RoomStore } from "../room.svelte.ts";
-  import Icon, { type IconName } from "./Icon.svelte";
-  import { activeVerb, elapsed, stepTime, titleOf, workingGroup, workSummary, type StepKind } from "../steps.ts";
+  import Icon from "./Icon.svelte";
+  import { elapsed } from "../steps.ts";
   import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
   import Markdown from "./Markdown.svelte";
+  import TranscriptWorkRow from "./TranscriptWorkRow.svelte";
   import { deriveTimelineGroups } from "../timeline.ts";
 
   let { session, roomName, store, unsent, onunsent, onsettled, onpostlocation, clock = Date.now }: { session: string; roomName: string; store: RoomStore; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; clock?: () => number } = $props();
@@ -120,8 +121,6 @@
       }
     }
   });
-  const icons: Record<StepKind, IconName> = { read: "file", edit: "edit", write: "write", search: "search", list: "list", run: "terminal", fetch: "globe", tool: "tool" };
-  const kinds = (items: TranscriptItem[]) => [...new Set(items.map(item => titleOf(item).kind))];
   const sender = (kind: string, id?: string) => kind === "owner" ? "You" : id ? store.names.get(id) ?? "Session" : "Dyna";
   const duration = (ms?: number) => ms === undefined ? "" : ms < 60000 ? `${Math.floor(ms / 1000)} s` : `${Math.floor(ms / 60000)} m ${Math.floor(ms / 1000) % 60} s`;
 </script>
@@ -140,30 +139,14 @@
         {/each}
         {#each deriveTimelineGroups(turn.items ?? []) as group (group.id)}
           {#if group.kind === "work"}
-            <details open={group.items.length === 1 || turn.outcome === "failed" || workingGroup(group.items, !!turn.ended)} ontoggle={(event) => { if (event.currentTarget.open && turn.more) void moreItems(turn); }}>
-              <summary><span class="chevron"><Icon name="chevron" size={14} /></span>{#if !workingGroup(group.items, !!turn.ended)}{#each kinds(group.items) as kind}<Icon name={icons[kind]} size={14} />{/each}<span>{workSummary(group.items)}</span><span class="time">{stepTime({ started: group.items[0].at, ended: group.items.at(-1)?.ended })}</span>{:else}<span>Working for {elapsed(turn.started, now)}</span>{/if}</summary>
-              <div class="steps">{#each group.items as item (item.id)}
-                {@const title = titleOf(item)}
-                {#if item.kind === "thinking"}
-                  <details class="step"><summary><span class="chevron"><Icon name="chevron" size={14} /></span> Thought</summary><div class="thought"><Markdown text={chunks[item.id + "/text"] ?? item.text} /></div></details>
-                {:else}
-                <details class="step"><summary>{#if !item.ended && !turn.ended}<span class="spinner" role="img" aria-label="Working"></span>{:else}<Icon name={icons[title.kind]} size={14} />{/if} <span>{!item.ended && !turn.ended ? activeVerb(title.kind, title.verb) : title.verb}</span><code>{title.target}</code><span class="time">{!item.ended && !turn.ended ? elapsed(item.at, now) : stepTime({ started: item.at, ended: item.ended })}</span>{#if item.failed}<StatusPill tone="failed" label="Failed" word />{/if}</summary>
-                  {#if item.arguments}<pre>{chunks[item.id + "/arguments"] ?? item.arguments}</pre>{/if}
-                  {#if item.output}<pre>{chunks[item.id + "/output"] ?? item.output}</pre>{/if}
-                  {#if item.more && chunks[item.id + "/arguments"] === undefined}<button onclick={() => void fetchPart(turn.id, item.id, "arguments")}>Show all arguments</button>{/if}
-                  {#if item.more && chunks[item.id + "/output"] === undefined}<button onclick={() => void fetchPart(turn.id, item.id, "output")}>Show all output</button>{/if}
-                  {#if chunkFailed[item.id + "/output"]}<button onclick={() => void fetchPart(turn.id, item.id, "output")}>Output did not load. Try again</button>{/if}
-                </details>
-                {/if}
-              {/each}</div>
-            </details>
+            <TranscriptWorkRow items={group.items} ended={!!turn.ended} started={turn.started} {now}
+              onopen={() => { if (turn.more) void moreItems(turn); }}
+              onload={async (item, part) => { await fetchPart(turn.id, item.id, part); const value = chunks[item.id + "/" + part]; if (value === undefined) throw new Error("Part did not load"); return value; }} />
           {:else if group.kind === "posts"}
             {#each group.item.posts ?? [] as post (post.id)}
               {@render postItem(turn, post)}
             {/each}
             {#if group.item.postsOmitted && group.item.postsNext}<button class="muted" onclick={() => onpostlocation(group.item.postsNext!.room, group.item.postsNext!.seq)}>+{group.item.postsOmitted} more posts</button>{/if}
-          {:else if group.item.kind === "thinking"}
-            <details><summary><span class="chevron"><Icon name="chevron" size={14} /></span> Thought</summary><div class="thought"><Markdown text={chunks[group.item.id + "/text"] ?? group.item.text} /></div>{#if group.item.more && chunks[group.item.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, group.item.id, "text")}>Show all</button>{/if}</details>
           {:else if group.item.kind === "text" || group.item.kind === "post"}
             {@render postItem(turn, group.item)}
           {:else if group.item.kind === "too_large"}<p class="muted">This item is too large to show.</p>{/if}

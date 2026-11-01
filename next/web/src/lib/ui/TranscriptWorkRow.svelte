@@ -8,12 +8,13 @@
   import Markdown from "./Markdown.svelte";
   import StatusPill from "./StatusPill.svelte";
 
-  let { items, ended, started, now, onload }: {
+  let { items, ended, started, now, onload, onopen }: {
     items: TranscriptItem[];
     ended: boolean;
     started: string;
     now: number;
     onload: (item: TranscriptItem, part: TranscriptPart) => Promise<string>;
+    onopen: () => void;
   } = $props();
 
   const icons: Record<StepKind, IconName> = { read: "file", edit: "edit", write: "write", search: "search", list: "list", run: "terminal", fetch: "globe", tool: "tool" };
@@ -38,7 +39,7 @@
 {#snippet entry(item: TranscriptItem)}
   {@const title = titleOf(item)}
   {@const running = !ended && !item.ended}
-  <details class="entry">
+  <details class="entry" ontoggle={(event) => { if (event.currentTarget.open) onopen(); }}>
     <summary>
       <span class="slot">{#if running}<span class="spinner" aria-label="Working" role="img"></span>{:else}<Icon name={item.kind === "thinking" ? "chat" : icons[title.kind]} size={16} />{/if}</span>
       <span>{item.kind === "thinking" ? "Thought" : running ? activeVerb(title.kind, title.verb) : title.verb}</span>
@@ -68,7 +69,7 @@
 {#if items.length === 1}
   {@render entry(items[0])}
 {:else if items.length > 1}
-  <details class="group">
+  <details class="group" ontoggle={(event) => { if (event.currentTarget.open) onopen(); }}>
     <summary><span class="slot"><Icon name="chevron" size={16} /></span><span>{summary}</span></summary>
     <div class="entries" role="region" aria-label="Work details">
       {#each items as item (item.id)}{@render entry(item)}{/each}
