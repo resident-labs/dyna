@@ -17,6 +17,7 @@ var methodTable = []MethodEntry{
 	method(contract.MethodAccountsReconnect, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodAccountsRemove, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodAccountsSetKey, contract.ScopeAdmin, OwnerAccess),
+	method(contract.MethodAccountsImportOAuth, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodAccountsSetLimits, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodArchiveDone, contract.ScopeRead, BoxAccess),
 	method(contract.MethodBoxHello, contract.ScopeRead, BoxAccess),
