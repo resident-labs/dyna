@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
@@ -57,7 +58,7 @@ func TestClosedSessionRejectsStaleReadAndHandle(t *testing.T) {
 	if _, problem := s.TurnActivity(ctx, caller, contract.TurnActivityRequest{Label: "stale"}); problem == nil || problem.Code != contract.ErrNotFound {
 		t.Fatalf("closed activity: %v", problem)
 	}
-	if _, ok := s.lockSession(row.ID); ok {
+	if _, problem := s.lockSession(ctx, row.ID); problem == nil {
 		t.Fatal("stale channel writer recreated the session")
 	}
 	if handle.Lock() {
@@ -71,7 +72,12 @@ func TestClosedSessionRejectsStaleReadAndHandle(t *testing.T) {
 	if handle.PublishActivity(row.Room, body, contract.Event{Body: body}) {
 		t.Fatal("stale handle remained usable")
 	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, problem := s.createSession(cancelled, id); problem == nil {
+		t.Fatal("cancelled validation succeeded")
+	}
 	if _, ok := s.live.LookupSession(id); ok {
-		t.Fatal("closed session remains in live state")
+		t.Fatal("cancelled validation left the closed session in live state")
 	}
 }
