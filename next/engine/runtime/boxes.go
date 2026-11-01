@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,6 +39,7 @@ type boxStore interface {
 	Box(context.Context, contract.BoxID) (box.Box, error)
 	Boxes(context.Context) ([]box.Box, error)
 	OpenRooms(context.Context) ([]contract.RoomID, error)
+	RoomRepos(context.Context, contract.RoomID) ([]contract.RoomRepo, error)
 }
 
 type heartbeatStore interface {
@@ -340,7 +342,97 @@ func (b *Boxes) MaintainHost(ctx context.Context, name contract.HostName) ([]con
 	if err != nil {
 		return nil, err
 	}
+	b.prepareImages(ctx, h, name)
 	return h.Maintain(ctx, b.Layout)
+}
+
+// BuildAhead prepares every ready host's images when the engine starts, which is when a deploy changes dyna-base.
+// Hosts go side by side, and each builds one image at a time, so running boxes keep the rest of their host.
+func (b *Boxes) BuildAhead(ctx context.Context) {
+	hosts, err := b.Store.Hosts(ctx)
+	if err != nil {
+		log.Printf("build ahead: list hosts: %v", err)
+		return
+	}
+	var wg sync.WaitGroup
+	for _, record := range hosts {
+		if record.State != box.HostReady {
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			h, err := b.host(ctx, record.Name)
+			if err != nil {
+				log.Printf("host %s: build ahead: %v", record.Name, err)
+				return
+			}
+			b.prepareImages(ctx, h, record.Name)
+		}()
+	}
+	wg.Wait()
+}
+
+// prepareImages builds the images that boxes on this host would use now, then prunes older ones. A failure is only
+// logged: the next box that needs the image builds it and reports the failure in its room.
+func (b *Boxes) prepareImages(ctx context.Context, h *podman.Host, name contract.HostName) {
+	steps := box.NewStepLog("host " + string(name))
+	repos, err := b.hostRepos(ctx, name)
+	if err != nil {
+		log.Printf("host %s: build ahead: %v", name, err)
+		return
+	}
+	image, err := b.image(ctx, h, name, "", "")
+	if err != nil {
+		log.Printf("host %s: build ahead: %v", name, err)
+		return
+	}
+	keep := []string{image.Tag}
+	for repo, room := range repos {
+		image, err := b.image(ctx, h, name, room, repo)
+		if err != nil {
+			log.Printf("host %s: build ahead %s: %v", name, repo, err)
+			continue
+		}
+		keep = append(keep, image.Tag)
+	}
+	steps.Done("build ahead")
+	if err := h.PruneImages(ctx, keep); err != nil {
+		log.Printf("host %s: prune images: %v", name, err)
+	}
+	steps.Done("prune images")
+}
+
+// hostRepos returns each repository that a room on this host can use, with one such room to record its build in.
+func (b *Boxes) hostRepos(ctx context.Context, name contract.HostName) (map[contract.RepoName]contract.RoomID, error) {
+	hosts, err := b.Store.Hosts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var limited []contract.RoomID
+	for _, record := range hosts {
+		if record.Name == name {
+			limited = record.Rooms
+		}
+	}
+	rooms, err := b.Store.OpenRooms(ctx)
+	if err != nil {
+		return nil, err
+	}
+	repos := make(map[contract.RepoName]contract.RoomID)
+	for _, room := range rooms {
+		if len(limited) > 0 && !slices.Contains(limited, room) {
+			continue
+		}
+		listed, err := b.Store.RoomRepos(ctx, room)
+		if err != nil {
+			return nil, err
+		}
+		for _, repo := range listed {
+			repos[repo.Repo] = room
+		}
+	}
+	return repos, nil
 }
 
 // RemoveRoom removes a room's folder from a host.
@@ -694,22 +786,27 @@ func (b *Boxes) CurrentImage(ctx context.Context, sessionID contract.SessionID, 
 	if err != nil {
 		return box.Image{}, err
 	}
-	steps := box.NewStepLog("session " + string(sessionID))
+	return b.image(ctx, h, host, session.Room, session.Repo)
+}
+
+// image selects and builds a repository's image. Every box takes its image from here, whether new, swapped or built ahead.
+func (b *Boxes) image(ctx context.Context, h *podman.Host, host contract.HostName, room contract.RoomID, repo contract.RepoName) (box.Image, error) {
+	steps := box.NewStepLog("host " + string(host))
 	tag, err := h.BuildBase(ctx, images.BaseContainerfile, b.PiTarball)
 	if err != nil {
 		return box.Image{}, err
 	}
 	steps.Done("base image")
 	var needs []box.Need
-	if session.Repo != "" {
-		name, tree, data, imageNeeds, err := b.Mirror.ImageContext(ctx, session.Repo)
+	if repo != "" {
+		name, tree, data, imageNeeds, err := b.Mirror.ImageContext(ctx, repo)
 		if err != nil {
 			return box.Image{}, err
 		}
 		steps.Done("image context")
 		needs = imageNeeds
 		if name != "" {
-			tag, err = b.Images.Build(ctx, h, session.Room, host, session.Repo, name, tag, tree, data)
+			tag, err = b.Images.Build(ctx, h, room, host, repo, name, tag, tree, data)
 			if err != nil {
 				return box.Image{}, err
 			}

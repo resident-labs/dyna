@@ -238,6 +238,10 @@ Admission serializes placement. Each placed box counts one quarter of its CPU an
 
 Optional `box-needs` requests `nested-containers` or `kvm`; unknown needs fail loading. These grant additional devices or kernel access. Missing devices fail creation with a typed cause; admission does not select by device. Restrict rooms to suitable hosts. See [the container recipe](nested-containers.md). Image tags hash the base and image folder tree. Host builds are serial and reuse existing tags.
 
+Podman gives a box's user mapping its own copy of a whole image the first time a container uses it, and every Podman command on that host waits meanwhile. Boxes that are already running keep running, because they do not call Podman, and heartbeats do not call it either. So a new image takes that copy once, right after its build, by creating and removing a throwaway container with the box mapping. The copy outlives the container. The step stops after two minutes: the image still works, and its first box makes the copy instead.
+
+When the engine starts, and daily during host maintenance, each ready host builds what its boxes would use now: the base, and the toolchain image of each repository in a room it serves, from the mirror as it stands. One image builds at a time on a host. A new box, a box swapped to a new image at wake and this pass all choose images in one place, so they agree. A box that asks before the pass reaches its image waits on the same build. The same pass then removes all but the newest two tags of each image, keeping any tag the host would use now. A removal is never forced, so an image that a container uses, stopped ones too, or that another image is built on stays for a later pass.
+
 ### 5.3 Box states
 
 A box records observed state and desired state separately. Observed states are `pending`, `creating`, `starting`, `ready`, `stopped`, `closing`, `deleted`, `failed` and `lost`; desired states are `run`, `stop`, `close` and `discard`. The reconciler commits observed changes with compare-and-set, emits `box.changed`, retries durable steps and resumes after engine restart. It admits in creation order, with at most one step per box and four per host.
@@ -275,7 +279,6 @@ Disk work that is designed but not built:
 
 - **Per-box quota.** A hard limit needs root plus an XFS graphroot with project quota, because rootless Podman has no volume quota and `--storage-opt size` covers only the rootfs. Measure instead: an hourly per-box volume size, `box.pressure` at the disk request, and a stop at a set multiple of it.
 - **Shared cache caps.** `<hostdata>/cache` has no limit and no measure. Add it to the daily size pass and `host.list`, and delete a tool's folder past a cap. Share only Cargo's registry and git folders.
-- **Image prune.** Tagged images stay forever. Use `podman image prune -af --filter until=168h`, which spares images that stopped containers use. Check this on a real host first.
 - **Orphan reaper.** Daily, list `podman ps -a --filter label=dyna.box` and `podman volume ls --filter name=dyna-box-`, and after a grace period remove any box whose row is deleted or missing.
 - **Transcript retention.** Transcripts and files of closed sessions stay forever. Keep 30 days, delete by 90, alert at 20 GiB, and sweep files with no reference weekly.
 
