@@ -1,8 +1,59 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, timelineInputText, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout } from "./timeline.ts";
+import { summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, segmentDuration, steerInput, timelineInput, timelineInputText, timelineSegments, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout } from "./timeline.ts";
 import type { TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
+
+const steer = (id: string, at = ""): TranscriptItem => ({ id: `steer:${id}`, event: id, seq: 6, turn: "t", at, kind: "steer", from: { kind: "owner" } });
+const work = (id: string): TranscriptItem => ({ id, turn: "t", at: "", kind: "tool", tool: "bash" });
+
+test("a steer leaves the queue the moment the transcript holds it, and a message after the turn stays queued", () => {
+  const input = { id: "in", seq: 5, at: "", room: "r", type: "post.created", from: { kind: "owner" }, text: "" } as TranscriptInput;
+  const turn = (items: TranscriptItem[]): TranscriptTurn => ({ id: "t", started: "", inputs: [input], items, more: false });
+  const posts = [{ id: "in", seq: 5 }, { id: "sent", seq: 6 }, { id: "after", seq: 7 }];
+  assert.deepEqual(queuedTimelinePosts(posts, [turn([work("a")])]).map(post => post.id), ["sent", "after"]);
+  assert.deepEqual(queuedTimelinePosts(posts, [turn([work("a"), steer("sent")])]).map(post => post.id), ["after"]);
+});
+
+test("a later turn's input can no longer hide a steer: the post has its place in its turn", () => {
+  const items = [work("a"), steer("sent"), { id: "b", turn: "t", at: "", kind: "text", text: "answer" } as TranscriptItem];
+  const input = (id: string, seq: number) => ({ id, seq, at: "", room: "r", type: "post.created", from: { kind: "owner" }, text: "" }) as TranscriptInput;
+  const turns: TranscriptTurn[] = [{ id: "t", started: "", inputs: [input("in", 5)], items, more: false }, { id: "u", started: "", inputs: [input("next", 9)], items: [], more: false }];
+  assert.deepEqual(queuedTimelinePosts([{ id: "sent", seq: 6 }, { id: "next", seq: 9 }], turns), []);
+  assert.deepEqual(timelineSegments("t", items).map(segment => [segment.steers.map(item => item.id), segment.items.map(item => item.id)]), [[[], ["a"]], [["steer:sent"], ["b"]]]);
+});
+
+// Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
+test("a turn's work splits at each steer, and back-to-back steers split once", () => {
+  const items = [work("a"), steer("one"), steer("two"), work("b"), steer("three"), work("c")];
+  assert.deepEqual(timelineSegments("t", items).map(segment => [segment.id, segment.steers.map(item => item.id), segment.items.map(item => item.id)]), [
+    ["t", [], ["a"]],
+    ["steer:one", ["steer:one", "steer:two"], ["b"]],
+    ["steer:three", ["steer:three"], ["c"]],
+  ]);
+  assert.deepEqual(timelineSegments("t", [steer("first"), work("a")]).map(segment => [segment.steers.length, segment.items.length]), [[0, 0], [1, 1]]);
+  assert.deepEqual(timelineSegments("t", [work("a")]).map(segment => segment.id), ["t"]);
+});
+
+// Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
+test("the top row keeps the whole turn's time, and a steer's row counts from that steer", () => {
+  const segments = timelineSegments("t", [work("a"), steer("one", "2026-11-01T00:00:10Z"), steer("two", "2026-11-01T00:00:12Z"), work("b"), steer("three", "2026-11-01T00:00:20Z"), work("c")]);
+  const durations = segments.map((_, index) => segmentDuration(segments, index, "2026-11-01T00:00:00Z", "2026-11-01T00:00:25Z"));
+  assert.deepEqual(durations, [25_000, 8_000, 5_000]);
+});
+
+test("a steer is no answer, and an answer before it folds as working text", () => {
+  const before: TranscriptItem = { id: "a", turn: "t", at: "", kind: "text", text: "first" };
+  const after: TranscriptItem = { id: "b", turn: "t", at: "", kind: "text", text: "second" };
+  assert.equal(finalTimelineItem([before, steer("sent"), after], "s")?.id, "b");
+  assert.equal(finalTimelineItem([before, steer("sent")], "s")?.id, "a");
+});
+
+test("a repeat read of a turn keeps one steer, in its place", () => {
+  const first = work("a"), late = { ...work("b"), index: 2 };
+  const placed = { ...steer("sent"), index: 1 };
+  assert.deepEqual(mergeTimelineItems([first, placed], [first, placed, late]).map(item => item.id), ["a", "steer:sent", "b"]);
+});
 
 test("a post stays queued until the transcript holds it, even after an agent's later post", () => {
   const input = { id: "in", seq: 5, at: "", room: "r", type: "post.created", from: { kind: "owner" }, text: "" } as TranscriptInput;
@@ -123,6 +174,56 @@ test("a post names its destination only when it left this DM", () => {
   assert.equal(postDestination(ownedPost("p", ""), "s", "r", "general", name), "#general");
   assert.equal(postDestination({ ...ownedPost("p", ""), room: "elsewhere" }, "s", "r", "general", name), "another room");
   assert.equal(postDestination({ ...ownedPost("p", ""), home: undefined }, "s", "r", "general", name), undefined);
+});
+
+const usage = { model: "m", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+const wake = (type: string, body: unknown, from: TranscriptInput["from"] = { kind: "engine" }): TranscriptInput => ({ at: "2026-11-01T00:00:00Z", id: "e", seq: 1, room: "r", type, from, text: JSON.stringify(body) });
+
+test("a child's reply reads as what it said, and never as started work", () => {
+  const child = { kind: "session", session: "c" } as const;
+  const ended = { session: "c", turn: "t", usage };
+  assert.deepEqual(timelineInput(wake("turn.ended", { ...ended, outcome: "completed", final: "The API is merged." }, child)), { kind: "message", text: "The API is merged." });
+  assert.deepEqual(timelineInput(wake("turn.ended", { ...ended, outcome: "completed" }, child)), { kind: "line", text: "Finished with no reply" });
+  assert.deepEqual(timelineInput(wake("turn.ended", { ...ended, outcome: "stopped" }, child)), { kind: "line", text: "Stopped with no reply" });
+  assert.deepEqual(timelineInput(wake("turn.ended", { ...ended, outcome: "failed", cause: "model_failed", error: "raw" }, child)), { kind: "failed", text: "Turn failed: The model provider refused or failed the request" });
+  assert.deepEqual(timelineInput(wake("turn.ended", { ...ended, outcome: "failed", error: "box died" }, child)), { kind: "failed", text: "Turn failed: box died" });
+});
+
+test("a long reply waits for its whole body, and an unreadable body stays neutral", () => {
+  const body = { session: "c", turn: "t", usage, outcome: "completed", final: "x".repeat(600) };
+  const whole = JSON.stringify(body);
+  const clipped: TranscriptInput = { ...wake("turn.ended", body), text: whole.slice(0, 512), more: true };
+  assert.deepEqual(timelineInput(clipped), { kind: "message", text: "" });
+  assert.deepEqual(timelineInput(clipped, whole), { kind: "message", text: body.final });
+  assert.equal(timelineInputText({ ...clipped, type: "session.started" }), "Started work");
+  assert.deepEqual(timelineInput({ ...clipped, type: "checkin.due" }), { kind: "line", text: "Event: checkin.due" });
+  assert.deepEqual(timelineInput({ ...clipped, more: false }), { kind: "line", text: "Event: turn.ended" });
+});
+
+test("an engine notice is one plain line, and a type this build does not know says what it is", () => {
+  const children = [{ session: "c", name: "api-lead", state: "idle", idle: 60000, goal: "g", text: "ship", open: 1 }];
+  const failure = { to: "root", failures: [{ session: "c", name: "api-lead", cause: "model_failed" }] };
+  assert.deepEqual(timelineInput(wake("checkin.due", { session: "s", children })), { kind: "line", text: "Check-in on 1 stalled session" });
+  assert.deepEqual(timelineInput(wake("session.failed", failure)), { kind: "failed", text: "api-lead failed" });
+  assert.deepEqual(timelineInput(wake("pr.opened", { repo: "r", number: 7, session: "c", url: "https://x/7" })), { kind: "line", text: "PR opened: https://x/7" });
+  assert.deepEqual(timelineInput(wake("shell.job.ended", { session: "s", job: "j", exitCode: 0, tail: "", description: "Build" })), { kind: "line", text: "Background job Build ended" });
+  for (const type of ["hook.finished", "box.pressure"]) {
+    const shown = timelineInput(wake(type, {}));
+    assert.deepEqual(shown, { kind: "line", text: `Event: ${type}` });
+  }
+});
+
+test("a brief still reads as the start of the work", () => {
+  const started = { session: "s", name: "n", profile: "p" };
+  assert.deepEqual(timelineInput(wake("session.started", { ...started, brief: "Do it" })), { kind: "message", text: "Do it" });
+  assert.deepEqual(timelineInput(wake("session.started", started)), { kind: "message", text: "Started work" });
+});
+
+test("a steered reply decodes as an input does", () => {
+  const body = { session: "c", turn: "t", usage, outcome: "completed", final: "Done." };
+  const item: TranscriptItem = { id: "steer:9", event: "e", seq: 9, room: "r", turn: "t", at: "2026-11-01T00:00:00Z", kind: "steer", type: "turn.ended", from: { kind: "session", session: "c" }, text: JSON.stringify(body) };
+  assert.deepEqual(timelineInput(steerInput(item)), { kind: "message", text: "Done." });
+  assert.deepEqual(timelineInput(steerInput({ ...item, type: "post.created", text: "words" })), { kind: "message", text: "words" });
 });
 
 test("an answered question reads in the thread as its text", () => {

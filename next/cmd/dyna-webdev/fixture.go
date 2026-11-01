@@ -56,6 +56,19 @@ func fixtureTurns() []contract.TranscriptTurn {
 		end := start.Add(duration)
 		turn := contract.TranscriptTurn{ID: id, Started: start, Ended: &end, DurationMS: duration.Milliseconds(), Outcome: contract.TurnCompleted,
 			Inputs: []contract.TranscriptInput{{ID: contract.EventID(fmt.Sprintf("fixture-input-%d", i)), At: start, Type: contract.EventType("post.created"), From: contract.Principal{Kind: contract.PrincipalOwner}, Text: request}}}
+		// What a parent reads: children's replies, a failed turn, a check-in and a type this build does not know.
+		if i == 5 {
+			child := contract.Principal{Kind: contract.PrincipalSession, Session: fixtureChild}
+			wake := func(n int, from contract.Principal, body contract.EventBody) {
+				data, _ := json.Marshal(body)
+				turn.Inputs = append(turn.Inputs, contract.TranscriptInput{ID: contract.EventID(fmt.Sprintf("fixture-wake-%d", n)), Seq: int64(n + 1), At: start, Room: fixtureRoom, Type: body.EventType(), From: from, Text: string(data)})
+			}
+			wake(0, child, contract.TurnEnded{Session: fixtureChild, Turn: "child", Outcome: contract.TurnCompleted, Final: "The feed rows are merged. The narrow layout passes its tests.\n\n" + strings.Repeat("- Checked another row of the feed at phone width and at desktop width.\n", 12)})
+			wake(1, child, contract.TurnEnded{Session: fixtureChild, Turn: "child", Outcome: contract.TurnCompleted})
+			wake(2, child, contract.TurnEnded{Session: fixtureChild, Turn: "child", Outcome: contract.TurnFailed, Cause: contract.CauseModelFailed, Error: "provider returned 500"})
+			wake(3, contract.Principal{Kind: contract.PrincipalEngine}, contract.CheckinDue{Session: fixtureSession, Children: []contract.CheckinChild{{Session: fixtureChild, Name: "builder-feed", State: "idle", Goal: "g1", Text: "Build the feed"}}})
+			turn.Inputs = append(turn.Inputs, contract.TranscriptInput{ID: "fixture-wake-4", Seq: 5, At: start, Room: fixtureRoom, Type: "hook.finished", From: contract.Principal{Kind: contract.PrincipalEngine}, Text: `{"hook":"format"}`})
+		}
 		turn.Items = append(turn.Items, contract.TranscriptItem{ID: fmt.Sprintf("%s-text", id), Turn: id, Kind: contract.TranscriptText, At: start, Text: "I’ll trace the sync state and its current tests before changing the UI."})
 		turnTools := tools
 		if i == 0 {
@@ -97,6 +110,11 @@ func fixtureTurns() []contract.TranscriptTurn {
 			// A turn that ends on a post: it has no final text, and its working text folds.
 			if i == 9 && j == len(turnTools)-1 {
 				item.Posts = post("The docs are up to date. The retry hint is described in the sync guide.", contract.Conversation{Kind: contract.ConversationFeed})
+			}
+			// A message the owner sent during the turn: it sits where the session read it, between the work it split.
+			if (i == 2 || i == 11) && j == 2 {
+				from := contract.Principal{Kind: contract.PrincipalOwner}
+				turn.Items = append(turn.Items, contract.TranscriptItem{ID: fmt.Sprintf("%s-steer", id), Turn: id, Kind: contract.TranscriptSteer, At: at, Text: "Keep the retry wording short, one line at most.", From: &from})
 			}
 			turn.Items = append(turn.Items, item)
 		}
