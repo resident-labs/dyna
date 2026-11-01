@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync"
@@ -67,6 +68,10 @@ type Provider interface {
 	// credential; the chain then tries the next provider.
 	Search(ctx context.Context, q Query) ([]Result, error)
 }
+
+// noRedirect returns a redirect as the answer. A followed redirect would carry
+// a custom key header such as X-Subscription-Token to any host.
+func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 // Attempt gives one provider its share of the remaining request budget.
 func Attempt(ctx context.Context, provider Provider, q Query) ([]Result, error) {

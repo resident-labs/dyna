@@ -28,7 +28,7 @@ const (
 )
 
 // museClient is how long one Muse search may take.
-var museClient = &http.Client{Timeout: 30 * time.Second}
+var museClient = &http.Client{Timeout: 30 * time.Second, CheckRedirect: noRedirect}
 
 // Muse searches the Meta Muse search API with the API key of the owner's Muse
 // sign-in. The key lives in the sign-in file (~/.config/muse/auth.json, field
