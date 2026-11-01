@@ -291,12 +291,19 @@
 
 {#snippet postItem(turn: TranscriptTurn, item: TranscriptItem, working = false)}
   {@const to = item.kind === "post" ? postDestination(item, session, store.room, roomName, id => sender("session", id)) : undefined}
-  {#snippet body()}
-    {#if to}<div class="post-destination"><PostTarget {to} onjump={item.room && item.seq ? () => onpostlocation(item.room!, item.seq!) : undefined} /></div>{/if}
+  {#snippet destination()}<div class="post-destination"><PostTarget to={to!} onjump={item.room && item.seq ? () => onpostlocation(item.room!, item.seq!) : undefined} /></div>{/snippet}
+  {#snippet content()}
     {@render message(item.id, chunks[item.id + "/text"] ?? item.text ?? "", item.attachments, item.event ?? item.id, item.at)}
     {@render textRetry(turn, item.id)}
   {/snippet}
+  {#snippet body()}{#if to}{@render destination()}{/if}{@render content()}{/snippet}
   {#if item.kind === "post" && !ownPost(item, session)}{@render inbound(item.id, item.from ?? { kind: "engine" }, item.at, body, !!item.attachments?.length)}
+  <!-- A post to somewhere else is not part of this conversation, so it folds like what arrives from elsewhere. -->
+  {:else if item.kind === "post" && to}
+    <div class="agent-input" data-media-key={item.id}>
+      {@render destination()}
+      {#if item.attachments?.length}{@render content()}{:else}<CollapsibleBody>{@render content()}</CollapsibleBody>{/if}
+    </div>
   {:else}<div class="agent-message" class:working data-media-key={item.id}>{@render body()}</div>{/if}
 {/snippet}
 
