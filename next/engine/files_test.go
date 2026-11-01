@@ -7,10 +7,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 )
@@ -23,21 +24,33 @@ func TestFileRoomAccess(t *testing.T) {
 	}
 	defer st.Close()
 	s := New(st, nil, nil, time.Now)
-	s.SetFilesDir(filepath.Join(dir, "files"))
+	s.SetLayout(box.Layout{Data: dir})
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	upload := httptest.NewRequest("POST", "/v1/files?name=note.txt", bytes.NewBufferString("hello"))
-	upload.Header.Set("Content-Type", "text/plain")
-	rec := httptest.NewRecorder()
-	s.Files(owner, "").ServeHTTP(rec, upload)
-	var file contract.Attachment
-	if rec.Code != 200 || json.NewDecoder(rec.Body).Decode(&file) != nil {
-		t.Fatalf("upload: %d", rec.Code)
-	}
 	err = st.Write(context.Background(), func(tx *sql.Tx) error {
 		_, err := tx.Exec("INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES ('a','a',0,1,1),('b','b',0,1,1)")
 		return err
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	send := func(query string) *httptest.ResponseRecorder {
+		upload := httptest.NewRequest("POST", "/v1/files?name=note.txt"+query, bytes.NewBufferString("hello"))
+		upload.Header.Set("Content-Type", "text/plain")
+		rec := httptest.NewRecorder()
+		s.Files(owner, "").ServeHTTP(rec, upload)
+		return rec
+	}
+	for query, status := range map[string]int{"": http.StatusBadRequest, "&room=missing": http.StatusNotFound} {
+		if rec := send(query); rec.Code != status {
+			t.Fatalf("upload %q: %d", query, rec.Code)
+		}
+	}
+	rec := send("&room=a")
+	var file contract.Attachment
+	if rec.Code != 200 || json.NewDecoder(rec.Body).Decode(&file) != nil {
+		t.Fatalf("upload: %d", rec.Code)
+	}
+	if _, err := os.Stat(s.layout.File("a", file.SHA256)); err != nil {
 		t.Fatal(err)
 	}
 	_, err = st.Post(context.Background(), contract.Event{ID: "e", Room: "a", Time: time.Now(), From: owner, Body: contract.PostCreated{Text: "hi", Attachments: []contract.Attachment{file}}}, nil)
@@ -76,7 +89,7 @@ func TestFileRoomAccess(t *testing.T) {
 
 func TestPostAttachesOnlyRoomFiles(t *testing.T) {
 	s, roomA, sessionA, ctx := setup(t)
-	s.SetFilesDir(filepath.Join(t.TempDir(), "files"))
+	s.SetLayout(box.Layout{Data: t.TempDir()})
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	roomB, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "other", RootProfile: "test"})
 	if e != nil {

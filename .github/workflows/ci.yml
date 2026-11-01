@@ -28,6 +28,7 @@ jobs:
       next: ${{ steps.filter.outputs.next }}
       web: ${{ steps.filter.outputs.web }}
       next_pi: ${{ steps.filter.outputs.next_pi }}
+      self_hosted: ${{ steps.runner.outputs.self_hosted }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -37,13 +38,37 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
         run: bash next/scripts/ci-changes.sh >> "$GITHUB_OUTPUT"
+      # Hosted unless the owner turned the pool on, the pool is alive, and this
+      # run's code comes from this repository. See next/docs/ci-runners.md.
+      - id: runner
+        env:
+          ENABLED: ${{ vars.DYNA_CI_SELF_HOSTED }}
+          LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}
+          SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        run: bash next/scripts/ci-runner.sh >> "$GITHUB_OUTPUT"
+
+  # A job bound for the pool can wait a day for a runner. This ends the wait when
+  # the pool dies after the run was routed to it.
+  pool-watch:
+    needs: changes
+    if: needs.changes.outputs.self_hosted == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash next/scripts/ci-pool-watch.sh
 
   # next/ is the v2 Go module. Its Go version comes from next/go.mod.
   next:
     name: next
     needs: [changes]
     if: needs.changes.outputs.next == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -53,7 +78,9 @@ jobs:
           cache-dependency-path: next/go.sum
       - name: Format, vet and test
         run: bash next/scripts/ci.sh next
+      # The self-hosted image already has it, and no sudo.
       - name: Provision OpenSSH for integration
+        if: runner.environment == 'github-hosted'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq openssh-server
@@ -75,7 +102,7 @@ jobs:
     name: next-extras
     needs: [changes]
     if: needs.changes.outputs.next == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -92,7 +119,7 @@ jobs:
     name: next-web
     needs: [changes]
     if: needs.changes.outputs.web == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6

@@ -32,8 +32,13 @@ const (
 	piDir        = "/box/pi"
 )
 
-//go:embed call_id.ts
-var callIDExtension string
+//go:embed extension.js
+var extensionSource string
+
+// renderExtension fills in the values the extension shares with the box agent.
+func renderExtension() string {
+	return strings.NewReplacer("__DYNA_CALL_ID_ARGUMENT__", contract.ToolCallIDArgument, "__DYNA_MCP_URL__", pi.DynaMCPURL).Replace(extensionSource)
+}
 
 func modelArgs(model contract.ModelChoice, compactTokens int) ([]string, error) {
 	switch model.Provider {
@@ -156,7 +161,7 @@ func Run(ctx context.Context) error {
 	mux.Handle("/", ModelRoute(engineSocket))
 	mcpPath := filepath.Join(piDir, "mcp.json")
 	dynaTools, problem := dynamcp.New(client.forward, dynamcp.BoxTools("/run/dyna/agent.sock"), post.Preparer{Dir: workdir, Render: visual.Preview, Upload: func(ctx context.Context, path string) (contract.Attachment, error) {
-		return post.UploadHTTP(ctx, client.http, path)
+		return post.UploadHTTP(ctx, client.http, "", path)
 	}})
 	if problem != nil {
 		return problem
@@ -169,9 +174,8 @@ func Run(ctx context.Context) error {
 	server := &http.Server{Handler: mux}
 	defer server.Close()
 	go func() { errs <- server.Serve(listener) }()
-	extensionPath := filepath.Join(piDir, "dyna-call-id.ts")
-	extension := strings.ReplaceAll(callIDExtension, "__DYNA_CALL_ID_ARGUMENT__", contract.ToolCallIDArgument)
-	if err = os.WriteFile(extensionPath, []byte(extension), 0600); err != nil {
+	extensionPath := filepath.Join(piDir, "dyna.js")
+	if err = os.WriteFile(extensionPath, []byte(renderExtension()), 0600); err != nil {
 		return err
 	}
 	args = append(args, "--extension", extensionPath)

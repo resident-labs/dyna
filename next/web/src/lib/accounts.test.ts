@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountPath, accountRows, accountState, addProviderError, parseModelIDs, providerGroup, reconnectPath, removalPrompt, canReconnect, reconnectUnavailable } from "./accounts.ts";
+import { accountPath, accountRows, accountState, addProviderError, labelRefusal, parseModelIDs, providerGroup, reconnectPath, removalPrompt, canReconnect, reconnectUnavailable } from "./accounts.ts";
 import { APIError } from "./client.ts";
 import type { Account, AccountProviderInfo, ErrorCode } from "./contract.gen.ts";
 
@@ -15,6 +15,12 @@ test("only the typed unavailable error offers remove and add again", () => {
   assert.equal(reconnectUnavailable(new APIError({ code: "reconnect_unavailable", message: "unavailable" })), true);
   assert.equal(reconnectUnavailable(new APIError({ code: "unavailable", message: "offline" })), false);
   assert.equal(reconnectUnavailable(new Error("reconnect_unavailable")), false);
+});
+
+test("only the engine's refusal asks for a different label", () => {
+  assert.equal(labelRefusal(new APIError({ code: "invalid", message: "invalid account label" })), "Use 1 to 128 characters, without @.");
+  assert.equal(labelRefusal(new APIError({ code: "unavailable", message: "offline" })), "The label was not saved. Try again.");
+  assert.equal(labelRefusal(new Error("invalid")), "The label was not saved. Try again.");
 });
 
 test("only expired sign-ins offer reconnect", () => {
