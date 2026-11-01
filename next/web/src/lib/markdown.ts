@@ -5,7 +5,7 @@ import { Marked, type Token, type Tokens } from "marked";
 // link does not nest another link.
 const markdown = new Marked({
   walkTokens(token) {
-    if (token.type !== "link") return;
+    if (token.type !== "link" || !token.tokens) return;
     token.tokens = token.tokens.map((child): Token => child.type === "image" ? { type: "text", raw: child.raw, text: child.text || "Image" } : child);
   },
   renderer: {
