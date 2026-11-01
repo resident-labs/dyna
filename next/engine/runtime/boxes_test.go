@@ -140,6 +140,7 @@ func (r *childSliceRunner) Run(_ context.Context, _ []byte, args ...string) ([]b
 	return []byte("DYNA-END 00000000000000000000 000\n"), nil
 }
 
+// LEGACY(v1-transfer): this test and childSliceRunner, a box on an old nested parent slice. Remove after the transfer.
 func TestLegacyParentWakeKeepsRunningChild(t *testing.T) {
 	runner := &childSliceRunner{childRunning: true}
 	host, err := podman.New("user@host", t.TempDir(), "host", runner)

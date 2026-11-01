@@ -61,6 +61,7 @@
     if (following) output.scrollTop = output.scrollHeight;
   });
   export function focus() { (output ?? block)?.focus(); }
+  // LEGACY(v1-transfer): the exitCode === -1 check here, for jobs without the end field. Remove after the transfer.
   const empty = (job: ShellJob) => job.running ? "No output yet." : job.end?.kind === "signal" || !job.end && job.exitCode === -1
     ? "No output. A signal ended the job before it printed anything." : "No output.";
 </script>

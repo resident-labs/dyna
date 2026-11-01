@@ -88,6 +88,7 @@ func (l Layout) V1Store() string { return filepath.Join(l.Data, "dyna.db") }
 // Backups is the folder of local store copies.
 func (l Layout) Backups() string { return filepath.Join(l.Data, "backups") }
 
+// LEGACY(v1-transfer): Archive and the <Data>/archive/ line above, the v1 archive folder. Remove after the transfer.
 // Archive is the read-only archive that the v1 cutover left.
 func (l Layout) Archive() string { return filepath.Join(l.Data, "archive") }
 

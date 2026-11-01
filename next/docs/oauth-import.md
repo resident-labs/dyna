@@ -21,6 +21,7 @@ The request has these fields:
     `access_token` is the minted key, or the identity token if none was minted.
     `email` is optional, and reconnect needs it.
 
+<!-- LEGACY(v1-transfer): this paragraph and the closing warning about v1, the v1 sign-in mapping. Remove after the transfer. -->
 For v1 Claude Code sign-ins, send `accessToken`, `refreshToken`, and the account
 email as `access_token`, `refresh_token`, and `email`. Convert `expiresAt` from
 Unix milliseconds. Do not send `scopes` or `subscriptionType`. For v1 Codex

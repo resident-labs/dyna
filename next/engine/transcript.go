@@ -135,6 +135,7 @@ func (s *Service) TranscriptFetch(ctx context.Context, caller contract.Principal
 // indexTranscript records complete user records and the file acknowledgment in one transaction.
 // An old unindexed file is scanned from its start; later appends revisit only the split record.
 func (s *Service) indexTranscript(ctx context.Context, session contract.SessionID, path string, file *os.File, acked, end int64) error {
+	// LEGACY(v1-transfer): the indexed check, which scans a file from before the turn index from its start. Remove after the transfer.
 	indexed, err := s.store.TranscriptPathIndexed(ctx, session, path)
 	if err != nil {
 		return err
