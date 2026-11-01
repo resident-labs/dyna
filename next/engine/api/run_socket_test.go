@@ -20,6 +20,15 @@ type runSocketService struct {
 	trackRoom contract.RoomID
 	trackFor  string
 	track     contract.PrTrackRequest
+
+	issueRoom contract.RoomID
+	issueFor  string
+	issue     contract.IssueTrackRequest
+}
+
+func (s *runSocketService) HookTrackIssue(_ context.Context, room contract.RoomID, session string, req contract.IssueTrackRequest) (contract.IssueTrackResponse, *contract.Error) {
+	s.issueRoom, s.issueFor, s.issue = room, session, req
+	return contract.IssueTrackResponse{}, nil
 }
 
 func (s *runSocketService) HookTrack(_ context.Context, room contract.RoomID, session string, req contract.PrTrackRequest) (contract.PrTrackResponse, *contract.Error) {
@@ -68,7 +77,16 @@ func TestRunSocketServesPostTrackAndGitHubOnly(t *testing.T) {
 	if got := post("/v1/pr.track", `{"repo":"o/r","number":7,"room":"room_b"}`); got != http.StatusBadRequest {
 		t.Fatalf("a Run named another room: %d", got)
 	}
-	for _, method := range []contract.Method{contract.MethodPrUntrack, contract.MethodRoomList, contract.MethodSessionList, contract.MethodSubscriptionAdd, contract.MethodHostexecRun, contract.MethodSessionStart, contract.MethodEventsList} {
+	if got := post("/v1/issue.track", `{"repo":"o/r","number":8,"session":"lead"}`); got != http.StatusOK {
+		t.Fatalf("issue track: %d", got)
+	}
+	if service.issueRoom != "room_a" || service.issueFor != "lead" || service.issue.Repo != "o/r" || service.issue.Number != 8 {
+		t.Fatalf("issue track reached the service as %+v", service)
+	}
+	if got := post("/v1/issue.track", `{"repo":"o/r","number":8,"room":"room_b"}`); got != http.StatusBadRequest {
+		t.Fatalf("a Run named another room: %d", got)
+	}
+	for _, method := range []contract.Method{contract.MethodIssueUntrack, contract.MethodIssueList, contract.MethodPrUntrack, contract.MethodRoomList, contract.MethodSessionList, contract.MethodSubscriptionAdd, contract.MethodHostexecRun, contract.MethodSessionStart, contract.MethodEventsList} {
 		if got := post("/v1/"+string(method), `{}`); got != http.StatusForbidden {
 			t.Errorf("%s: %d", method, got)
 		}

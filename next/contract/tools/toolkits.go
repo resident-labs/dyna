@@ -17,6 +17,7 @@ var toolkits = map[string]Toolkit{
 	"goal":         {Name: "goal", Title: "Goals"},
 	"host":         {Name: "host", Title: "Hosts", Destructive: true, OpenWorld: true},
 	"hostexec":     {Name: "hostexec", Title: "Host commands", Destructive: true, OpenWorld: true},
+	"issue":        {Name: "issue", Title: "Issues", OpenWorld: true},
 	"op":           {Name: "op", Title: "Operations", Destructive: true},
 	"post":         {Name: "post", Title: "Posts", Destructive: true},
 	"pr":           {Name: "pr", Title: "Pull requests", Destructive: true, OpenWorld: true},

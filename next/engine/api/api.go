@@ -51,7 +51,7 @@ func (a *API) SetGitHubRead(route http.Handler) { a.github = route }
 // SetGitRoute configures the per-box git route before opening sockets.
 func (a *API) SetGitRoute(route func(Caller) http.Handler) { a.git = route }
 
-// runTrackRequest is a Run's pr.track. A Run lists no sessions, so it names one as a post does.
+// runTrackRequest is a Run's pr.track or issue.track. A Run lists no sessions, so it names one as a post does.
 type runTrackRequest struct {
 	Repo    contract.RepoName `json:"repo"`
 	Number  int               `json:"number"`
@@ -78,9 +78,9 @@ func runCall[Req, Res any](mux *http.ServeMux, method contract.Method, fn func(c
 	})
 }
 
-// runHandler is all a Run's socket serves. POST /v1/post posts in the room, and POST /v1/pr.track tracks a PR for one
-// of its sessions. Every other path is GitHub's, because gh sends its API paths unchanged over a Unix socket. The method
-// table is not involved: no method is open to a Run.
+// runHandler is all a Run's socket serves. POST /v1/post posts in the room, and POST /v1/pr.track and /v1/issue.track
+// track a PR or an issue for one of its sessions. Every other path is GitHub's, because gh sends its API paths unchanged
+// over a Unix socket. The method table is not involved: no method is open to a Run.
 func (a *API) runHandler(sub contract.SubscriptionID, room contract.RoomID) http.Handler {
 	mux := http.NewServeMux()
 	runCall(mux, contract.MethodPost, func(ctx context.Context, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
@@ -88,6 +88,9 @@ func (a *API) runHandler(sub contract.SubscriptionID, room contract.RoomID) http
 	})
 	runCall(mux, contract.MethodPrTrack, func(ctx context.Context, req runTrackRequest) (contract.PrTrackResponse, *contract.Error) {
 		return a.service.HookTrack(ctx, room, req.Session, contract.PrTrackRequest{Repo: req.Repo, Number: req.Number})
+	})
+	runCall(mux, contract.MethodIssueTrack, func(ctx context.Context, req runTrackRequest) (contract.IssueTrackResponse, *contract.Error) {
+		return a.service.HookTrackIssue(ctx, room, req.Session, contract.IssueTrackRequest{Repo: req.Repo, Number: req.Number})
 	})
 	mux.HandleFunc("/v1/", func(w http.ResponseWriter, _ *http.Request) { writeError(w, forbidden()) })
 	if a.github != nil {
@@ -264,6 +267,10 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodPrStatus, c, a.service.PrStatus)
 	call(mux, contract.MethodPrTrack, c, a.service.PrTrack)
 	call(mux, contract.MethodPrUntrack, c, a.service.PrUntrack)
+	call(mux, contract.MethodIssueList, c, a.service.IssueList)
+	call(mux, contract.MethodIssueStatus, c, a.service.IssueStatus)
+	call(mux, contract.MethodIssueTrack, c, a.service.IssueTrack)
+	call(mux, contract.MethodIssueUntrack, c, a.service.IssueUntrack)
 	call(mux, contract.MethodPost, c, func(ctx context.Context, p contract.Principal, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
 		c := requestCaller(ctx, c)
 		if box(c) {

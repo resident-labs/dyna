@@ -13,7 +13,7 @@ import (
 var at = time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
 
 func tracked(change func(*store.TrackedPR)) store.TrackedPR {
-	row := store.TrackedPR{HeadRepo: "owner/repo", PrSummary: contract.PrSummary{Repo: "owner/repo", Number: 1, URL: "u", Title: "t", Author: "me", State: contract.PrOpen, Head: "a", CI: contract.PrCINone, Merge: contract.PrMergeClean}}
+	row := store.TrackedPR{HeadRepo: "owner/repo", Meta: &store.ItemMeta{}, PrSummary: contract.PrSummary{Repo: "owner/repo", Number: 1, URL: "u", Title: "t", Author: "me", State: contract.PrOpen, Head: "a", CI: contract.PrCINone, Merge: contract.PrMergeClean}}
 	if change != nil {
 		change(&row)
 	}

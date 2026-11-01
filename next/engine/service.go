@@ -223,7 +223,7 @@ func failure(err error) *contract.Error {
 		code = contract.ErrSessionClosing
 	} else if errors.Is(err, store.ErrParentClosing) {
 		code = contract.ErrParentClosing
-	} else if errors.Is(err, store.ErrTurnConflict) || errors.Is(err, store.ErrRoomDeleting) || errors.Is(err, store.ErrQuestionNotWaiting) || errors.Is(err, store.ErrPRTracked) {
+	} else if errors.Is(err, store.ErrTurnConflict) || errors.Is(err, store.ErrRoomDeleting) || errors.Is(err, store.ErrQuestionNotWaiting) || errors.Is(err, store.ErrPRTracked) || errors.Is(err, store.ErrIssueTracked) {
 		code = contract.ErrConflict
 	} else if errors.Is(err, store.ErrNoAskGrant) {
 		code = contract.ErrNoGrant

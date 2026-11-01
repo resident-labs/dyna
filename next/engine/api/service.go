@@ -92,6 +92,10 @@ type Service interface {
 	PrStatus(context.Context, contract.Principal, contract.PrStatusRequest) (contract.PrStatusResponse, *contract.Error)
 	PrTrack(context.Context, contract.Principal, contract.PrTrackRequest) (contract.PrTrackResponse, *contract.Error)
 	PrUntrack(context.Context, contract.Principal, contract.PrUntrackRequest) (contract.PrUntrackResponse, *contract.Error)
+	IssueList(context.Context, contract.Principal, contract.IssueListRequest) (contract.IssueListResponse, *contract.Error)
+	IssueStatus(context.Context, contract.Principal, contract.IssueStatusRequest) (contract.IssueStatusResponse, *contract.Error)
+	IssueTrack(context.Context, contract.Principal, contract.IssueTrackRequest) (contract.IssueTrackResponse, *contract.Error)
+	IssueUntrack(context.Context, contract.Principal, contract.IssueUntrackRequest) (contract.IssueUntrackResponse, *contract.Error)
 	Post(context.Context, contract.Principal, contract.PostRequest) (contract.PostResponse, *contract.Error)
 	EventsList(context.Context, contract.Principal, contract.EventsListRequest) (contract.EventsListResponse, *contract.Error)
 	BoxHello(context.Context, contract.Principal, contract.BoxHelloRequest) (contract.BoxHelloResponse, *contract.Error)
@@ -119,6 +123,8 @@ type Service interface {
 	HookPost(context.Context, contract.SubscriptionID, contract.RoomID, contract.PostRequest) (contract.PostResponse, *contract.Error)
 	// HookTrack tracks a PR for a Run, for the session it names in its room.
 	HookTrack(context.Context, contract.RoomID, string, contract.PrTrackRequest) (contract.PrTrackResponse, *contract.Error)
+	// HookTrackIssue tracks an issue for a Run, for the session it names in its room.
+	HookTrackIssue(context.Context, contract.RoomID, string, contract.IssueTrackRequest) (contract.IssueTrackResponse, *contract.Error)
 	// Events atomically subscribes after seq, including committed events not yet
 	// delivered. The producer closes the channel when ctx ends.
 	Events(context.Context, contract.Principal, contract.RoomID, int64) (<-chan contract.Event, *contract.Error)
