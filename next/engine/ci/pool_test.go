@@ -33,6 +33,7 @@ type fakeDriver struct {
 	removed  []string
 	startErr error
 	listErr  error
+	listCtx  context.Context
 }
 
 func (d *fakeDriver) BuildRunnerImage(context.Context) (string, error) {
@@ -49,7 +50,8 @@ func (d *fakeDriver) StartRunner(_ context.Context, s box.RunnerSpec) error {
 	d.runners = append(d.runners, box.Runner{Name: s.Name, Repo: s.Repo, ID: s.ID, Running: true})
 	return nil
 }
-func (d *fakeDriver) ListRunners(context.Context) ([]box.Runner, bool, error) {
+func (d *fakeDriver) ListRunners(ctx context.Context) ([]box.Runner, bool, error) {
+	d.listCtx = ctx
 	return slices.Clone(d.runners), d.egress, d.listErr
 }
 func (d *fakeDriver) RemoveRunner(_ context.Context, name string) error {
@@ -389,6 +391,28 @@ func TestDisablingRemovesRunnersAndTheScaleSetThenGoesQuiet(t *testing.T) {
 	}
 	f.drivers["pve"].listErr = errors.New("a quiet pool must not touch the host")
 	f.tick(t)
+}
+
+func TestAListenerThatFailedAsItsRepositoryLeftStillDeletesTheSet(t *testing.T) {
+	f := newFixture(1)
+	f.sets.listenErr = errors.New("session lost")
+	f.tick(t)
+	f.group.Wait()
+	f.store.settings = nil
+	f.tick(t)
+	if !slices.Equal(f.sets.deleted, []contract.RepoName{repo}) {
+		t.Fatalf("scale sets deleted: %v", f.sets.deleted)
+	}
+}
+
+// A host that hangs inside Tick would hold the lock, and with it --mode github.
+func TestTickGivesUpOnAHostThatHangs(t *testing.T) {
+	f := newFixture(1)
+	f.tick(t)
+	defer f.stop()
+	if _, bounded := f.drivers["pve"].listCtx.Deadline(); !bounded {
+		t.Fatal("a tick has no time limit")
+	}
 }
 
 func TestDisablingWhileAHostIsDownKeepsLooking(t *testing.T) {
