@@ -14,7 +14,6 @@ import (
 )
 
 type profile struct {
-	AgentSurface   contract.AgentSurface  `json:"agentSurface,omitempty"`
 	Description    string                 `json:"description"`
 	Taste          int                    `json:"taste"`
 	Diagnostics    int                    `json:"diagnostics"`
@@ -45,11 +44,19 @@ func LoadProfiles(path string) (*ProfileConfig, error) {
 		return nil, err
 	}
 	defer file.Close()
-	var profiles map[contract.ProfileName]profile
+	// Legacy shim: accept the former evaluation switch until the upgrade floor permits its removal.
+	var decoded map[contract.ProfileName]struct {
+		profile
+		AgentSurface string `json:"agentSurface"`
+	}
 	decoder := json.NewDecoder(file)
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&profiles); err != nil {
+	if err := decoder.Decode(&decoded); err != nil {
 		return nil, err
+	}
+	profiles := make(map[contract.ProfileName]profile, len(decoded))
+	for name, entry := range decoded {
+		profiles[name] = entry.profile
 	}
 	if len(profiles) == 0 {
 		return nil, fmt.Errorf("profiles: no profiles")
@@ -62,15 +69,6 @@ func LoadProfiles(path string) (*ProfileConfig, error) {
 
 func validateProfiles(profiles map[contract.ProfileName]profile) error {
 	for name, p := range profiles {
-		if p.AgentSurface == "" {
-			p.AgentSurface = contract.AgentSurfaceOff
-			profiles[name] = p
-		}
-		switch p.AgentSurface {
-		case contract.AgentSurfaceOff, contract.AgentSurfaceCaller, contract.AgentSurfaceDeclared:
-		default:
-			return fmt.Errorf("profile %q: invalid agentSurface", name)
-		}
 		for _, rating := range []int{p.Taste, p.Diagnostics, p.Intelligence, p.Cost} {
 			if rating < 0 || rating > 10 {
 				return fmt.Errorf("profile %q: ratings must be 0..10", name)
@@ -125,12 +123,6 @@ func (s *Service) ProfileList(ctx context.Context, who contract.Principal, _ con
 	return contract.ProfileListResponse{Profiles: profiles}, nil
 }
 
-func (p *ProfileConfig) Surface(name contract.ProfileName) contract.AgentSurface {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.entries[name].AgentSurface
-}
-
 func (p *ProfileConfig) CompactionTokens(name contract.ProfileName) int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -167,7 +159,6 @@ func (p *ProfileConfig) updateLocked(name contract.ProfileName, value *profile, 
 		}
 		delete(next, name)
 	} else {
-		value.AgentSurface = next[name].AgentSurface
 		next[name] = *value
 	}
 	if len(next) == 0 {
