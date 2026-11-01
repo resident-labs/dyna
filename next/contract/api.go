@@ -548,6 +548,23 @@ const (
 	TranscriptTooLarge TranscriptItemKind = "too_large"
 )
 
+type TranscriptCallStatus string
+
+const (
+	TranscriptCallRunning   TranscriptCallStatus = "running"
+	TranscriptCallOK        TranscriptCallStatus = "ok"
+	TranscriptCallError     TranscriptCallStatus = "error"
+	TranscriptCallCancelled TranscriptCallStatus = "cancelled"
+)
+
+type TranscriptCall struct {
+	Tool       string               `json:"tool"`
+	Target     string               `json:"target,omitempty"`
+	Status     TranscriptCallStatus `json:"status"`
+	DurationMs *int64               `json:"durationMs,omitempty"`
+	Error      string               `json:"error,omitempty"`
+}
+
 type TranscriptItem struct {
 	ID           string                  `json:"id"`
 	Index        int                     `json:"index,omitempty"`
@@ -558,6 +575,8 @@ type TranscriptItem struct {
 	Text         string                  `json:"text,omitempty"`
 	Tool         string                  `json:"tool,omitempty"`
 	Arguments    string                  `json:"arguments,omitempty"`
+	Script       string                  `json:"script,omitempty"`
+	Calls        []TranscriptCall        `json:"calls,omitempty"`
 	Output       string                  `json:"output,omitempty"`
 	Diff         string                  `json:"diff,omitempty"`
 	Failed       bool                    `json:"failed,omitempty"`
