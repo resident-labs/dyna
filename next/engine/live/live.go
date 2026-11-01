@@ -7,13 +7,14 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-// Live holds live state. Service.mu, computerLock, readMu, transcriptMu and
-// activityMu may precede mu; mu is innermost. Code under mu takes no other lock
-// and sends no channel messages. wakeMu is never held with mu.
+// Live holds live state. Activity publication takes activityMu, then Session.mu,
+// then mu. Publish runs under Session.mu and uses non-blocking sends. Code under
+// mu takes no other lock and sends no channel messages. wakeMu never overlaps mu.
 type Live struct {
 	mu            sync.Mutex
 	activityMu    sync.Mutex
-	sessions      map[contract.SessionID]sessionState
+	sessions      map[contract.SessionID]*Session
+	closed        map[contract.SessionID]struct{}
 	activityCount uint64
 	subscribers   map[*Subscription]contract.RoomID
 	wakeMu        sync.Mutex
@@ -22,7 +23,12 @@ type Live struct {
 	deliver       func(map[contract.SessionID]bool)
 }
 
-type sessionState struct {
+// Session is a stable handle. Its mutex guards all its fields.
+type Session struct {
+	mu            sync.Mutex
+	live          *Live
+	id            contract.SessionID
+	removed       bool
 	activity      contract.TurnActivity
 	activityOrder uint64
 }
@@ -35,7 +41,7 @@ type Subscription struct {
 }
 
 func New(deliver func(map[contract.SessionID]bool)) *Live {
-	return &Live{sessions: make(map[contract.SessionID]sessionState), subscribers: make(map[*Subscription]contract.RoomID), wakePending: make(map[contract.SessionID]bool), wakeSignal: make(chan struct{}, 1), deliver: deliver}
+	return &Live{sessions: make(map[contract.SessionID]*Session), closed: make(map[contract.SessionID]struct{}), subscribers: make(map[*Subscription]contract.RoomID), wakePending: make(map[contract.SessionID]bool), wakeSignal: make(chan struct{}, 1), deliver: deliver}
 }
 
 func (l *Live) Subscribe(room contract.RoomID, capacity int) (*Subscription, chan contract.Event) {
@@ -81,23 +87,78 @@ func (l *Live) Publish(room contract.RoomID, event contract.Event, ownerOnly boo
 	}
 }
 
+// CreateSession accepts only an ID read from an open session by the caller.
+func (l *Live) CreateSession(id contract.SessionID) (*Session, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if _, closed := l.closed[id]; closed {
+		return nil, false
+	}
+	s := l.sessions[id]
+	if s == nil {
+		s = &Session{live: l, id: id}
+		l.sessions[id] = s
+	}
+	return s, true
+}
+
+// LookupSession does not create state.
+func (l *Live) LookupSession(id contract.SessionID) (*Session, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	s, ok := l.sessions[id]
+	return s, ok
+}
+
+// CloseSession atomically removes the entry and records its closed ID.
+func (l *Live) CloseSession(id contract.SessionID) {
+	l.mu.Lock()
+	s := l.sessions[id]
+	if s == nil {
+		l.closed[id] = struct{}{}
+		l.mu.Unlock()
+		return
+	}
+	l.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	l.mu.Lock()
+	delete(l.sessions, id)
+	l.closed[id] = struct{}{}
+	s.removed = true
+	l.mu.Unlock()
+}
+
 // PublishActivity serializes updates and publication so streams see the same order as lists.
-func (l *Live) PublishActivity(room contract.RoomID, activity contract.TurnActivity, event contract.Event) {
+func (s *Session) PublishActivity(room contract.RoomID, activity contract.TurnActivity, event contract.Event) bool {
+	l := s.live
 	l.activityMu.Lock()
 	defer l.activityMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.removed {
+		return false
+	}
 	l.mu.Lock()
 	l.activityCount++
-	l.sessions[activity.Session] = sessionState{activity: activity, activityOrder: l.activityCount}
+	s.activity, s.activityOrder = activity, l.activityCount
 	l.mu.Unlock()
 	l.Publish(room, event, false)
+	return true
 }
 
 // Activity returns the last activity and its global order, or zero values.
-func (l *Live) Activity(session contract.SessionID) (contract.TurnActivity, uint64) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	state := l.sessions[session]
-	return state.activity, state.activityOrder
+func (l *Live) Activity(id contract.SessionID) (contract.TurnActivity, uint64) {
+	s, ok := l.LookupSession(id)
+	if !ok {
+		return contract.TurnActivity{}, 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.removed {
+		return contract.TurnActivity{}, 0
+	}
+	return s.activity, s.activityOrder
 }
 
 // Wake queues store notifications without taking mu.
