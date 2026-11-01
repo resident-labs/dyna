@@ -96,6 +96,38 @@ func TestQuotaNormalizedWindowsAndCache(t *testing.T) {
 	}
 }
 
+// A rename does not clear the usage cache, so Home's card must still read the new label.
+func TestQuotaCacheKeepsNoOldLabel(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/dyna/credentials":
+			fmt.Fprint(w, `{"credentials":[{"id":"invented","auth_index":"invented","provider":"claude","state":"unknown"}]}`)
+		case "/v0/management/auth-files/quota":
+			calls++
+			fmt.Fprint(w, `{"files":[{"auth_index":"invented","observed_at":"2026-01-01T00:00:00Z","status_code":200,"windows":[{"kind":"weekly_all","utilization":42}]}]}`)
+		default:
+			t.Error("unexpected request")
+		}
+	}))
+	defer server.Close()
+	st := quotaStore(t)
+	q := (&Proxy{client: &http.Client{Transport: quotaTestTransport{server.URL, server.Client().Transport}}}).Quotas("key", st, func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) })
+	if _, err := q.Read(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RenameAccount(context.Background(), "account", "Work"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := q.Read(context.Background())
+	if err != nil || len(got.Accounts) != 1 || got.Accounts[0].Label != "Work" {
+		t.Fatalf("after rename: %+v, %v", got.Accounts, err)
+	}
+	if calls != 1 {
+		t.Fatalf("quota requests = %d, want the cached one", calls)
+	}
+}
+
 func TestQuotaExpiredSignIn(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/quota") {

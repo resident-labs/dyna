@@ -47,6 +47,7 @@ const (
 	MethodAccountsImportOAuth     Method = "accounts.import_oauth"
 	MethodAccountsRemove          Method = "accounts.remove"
 	MethodAccountsSetLimits       Method = "accounts.set_limits"
+	MethodAccountsRename          Method = "accounts.rename"
 	MethodProfileSet              Method = "profile.set"
 	MethodProfileRemove           Method = "profile.remove"
 	MethodProfileList             Method = "profile.list"
