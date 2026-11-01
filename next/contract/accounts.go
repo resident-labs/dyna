@@ -48,7 +48,7 @@ type CatalogModel struct {
 }
 
 type AccountProviderInfo struct {
-	// Legacy shim: remove in catalog PR 4.
+	// TODO: legacy/shim remove later — connectMethod and connectFlow; catalog PR 4 removes them.
 	ConnectMethod ConnectMethod   `json:"connectMethod"`
 	ConnectFlow   ConnectFlow     `json:"connectFlow"`
 	ID            AccountProvider `json:"id"`

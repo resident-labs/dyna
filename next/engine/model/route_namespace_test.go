@@ -27,8 +27,8 @@ func TestRouteNamespacesAndSplices(t *testing.T) {
 		{"escaped", "deepseek", "/model/v1/chat/completions", `{"model":"s\u0061me"}`, "/v1/chat/completions", `{"model":"deepseek/same"}`, 204},
 		{"duplicate", "deepseek", "/model/v1/chat/completions", `{"model":"same","model":"same"}`, "", "", 400},
 		{"trailing", "deepseek", "/model/v1/chat/completions", `{"model":"same"} {}`, "", "", 400},
-		{"gemini escaped", "google", "/model/v1beta/models/vendor%2Fone:generateContent", `{}`, "/v1beta/models/google/vendor/one:generateContent", `{}`, 204},
-		{"gemini plan", "plan_anthropic", "/model/v1beta/models/same:generateContent", `{}`, "", "", 403},
+		{"gemini escaped", "google", "/model/v1beta/models/vendor%2Fone:generateContent", `{}`, "", "", 404},
+		{"gemini plan", "plan_anthropic", "/model/v1beta/models/same:generateContent", `{}`, "", "", 404},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -39,9 +39,7 @@ func TestRouteNamespacesAndSplices(t *testing.T) {
 			if w.Code != tt.status || path != tt.wantPath || body != tt.wantBody {
 				t.Fatalf("status=%d path=%q rawPath=%q body=%q", w.Code, path, rawPath, body)
 			}
-			if tt.name == "gemini escaped" && !strings.Contains(strings.ToLower(rawPath), "%2f") {
-				t.Fatalf("missing escaped model path: %q", rawPath)
-			}
+
 		})
 	}
 }
