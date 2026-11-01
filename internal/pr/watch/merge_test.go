@@ -954,10 +954,22 @@ func TestMergeQueueNonDefaultBase(t *testing.T) {
 	if len(rows) != 1 || rows[0].State != "unmanaged-base" {
 		t.Fatalf("non-default base: %+v", rows)
 	}
-	st.Records["parent"] = &Record{Key: "parent", Repo: "owner/repo", HeadRepo: "owner/repo", Branch: "mod-api", BaseRef: "main", DefaultBranch: "main", State: "open", Watching: true}
-	for _, row := range mergeQueue(st, nil, nil) {
-		if row.ChangeID == changeID(*child) && row.State != "waiting-base" {
-			t.Fatalf("stacked base: %+v", row)
+	parent := &Record{Key: "parent", Repo: "owner/repo", HeadRepo: "owner/repo", Branch: "mod-api", BaseRef: "main", DefaultBranch: "main", State: "open", Watching: true}
+	st.Records["parent"] = parent
+	for _, tc := range []struct {
+		repo     string
+		watching bool
+		want     string
+	}{
+		{"upstream/repo", true, "unmanaged-base"},
+		{"owner/repo", false, "unmanaged-base"},
+		{"owner/repo", true, "waiting-base"},
+	} {
+		parent.Repo, parent.Watching = tc.repo, tc.watching
+		for _, row := range mergeQueue(st, nil, nil) {
+			if row.ChangeID == changeID(*child) && row.State != tc.want {
+				t.Fatalf("parent repo %s watching %t: %+v", tc.repo, tc.watching, row)
+			}
 		}
 	}
 }
