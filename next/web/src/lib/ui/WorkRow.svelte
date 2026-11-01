@@ -3,7 +3,7 @@
   import { SvelteMap } from "svelte/reactivity";
   import Icon from "./Icon.svelte";
   import StepList from "./StepList.svelte";
-  import { commandLine, describe, eventGroups, formatTime, subject, timeSpan, workSummary, type Row } from "../feed.ts";
+  import { clock, commandLine, describe, eventGroups, formatTime, subject, timeSpan, workSummary, type Row } from "../feed.ts";
   import type { Event } from "../contract.gen.ts";
   import { TurnTranscripts } from "../transcripts.svelte.ts";
 
@@ -11,7 +11,6 @@
     row: Extract<Row, { kind: "work" }>; name: (session: string) => string; opened: ReadonlySet<string>; ontoggle: (key: string) => void;
     transcripts?: TurnTranscripts; onjobs: (session: string) => void;
   } = $props();
-  const clock = (at: string) => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   let open = $derived(opened.has(row.key));
   let read = $derived(transcripts?.of(row.events));
   let saved = $derived(typeof read === "object" ? read : undefined);
