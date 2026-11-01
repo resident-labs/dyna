@@ -28,7 +28,7 @@ func (s *terminalService) Terminal(context.Context, contract.SessionID, contract
 }
 
 func TestTerminalRoute(t *testing.T) {
-	s := &terminalService{argv: []string{"sh", "-c", `stty size; read line; stty size; echo "$line"; exit 3`}}
+	s := &terminalService{argv: []string{"sh", "-c", `echo "term=$TERM"; stty size; read line; stty size; echo "$line"; exit 3`}}
 	a := New(s, nil)
 	w := httptest.NewRecorder()
 	a.handler(boxCaller()).ServeHTTP(w, httptest.NewRequest("GET", "/v1/terminal?box=s&cols=80&rows=24", nil))
@@ -63,6 +63,9 @@ func TestTerminalRoute(t *testing.T) {
 			t.Fatalf("initial output: %q %v", b, err)
 		}
 		output += string(b)
+	}
+	if !strings.Contains(output, "term=xterm-256color") {
+		t.Fatalf("terminal output %q has no TERM", output)
 	}
 	resize, _ := json.Marshal(contract.TerminalResize{Cols: 90, Rows: 30})
 	if err := conn.Write(ctx, websocket.MessageText, resize); err != nil {
