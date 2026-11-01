@@ -11,6 +11,12 @@
   font: 15px/1.45 var(--sans); -webkit-font-smoothing: antialiased;
 }
 strong, b, h1, h2, h3, h4 { font-weight: 600; }
+/* Shared by Markdown and script views. Grammar markup never changes font metrics. */
+.hljs-keyword, .hljs-selector-tag, .hljs-doctag { color: var(--code-keyword); }
+.hljs-string, .hljs-regexp, .hljs-addition, .hljs-template-tag { color: var(--code-string); }
+.hljs-number, .hljs-literal, .hljs-symbol, .hljs-bullet, .hljs-variable.constant_ { color: var(--code-number); }
+.hljs-title, .hljs-type, .hljs-built_in, .hljs-section { color: var(--code-title); }
+.hljs-comment, .hljs-quote { color: var(--code-comment); }
 /* Thin scrollbars that stay hidden until the pointer is over their area: a muted thumb on no track. */
 * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: transparent transparent; }
 :hover { scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent; }
