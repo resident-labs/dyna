@@ -15,7 +15,11 @@ type Runner interface {
 
 var ErrImageChoice = errors.New("choosing an image is not supported yet")
 
-// Context reads the sole toolchain image from the mirrored default branch.
+// imageBranch holds the images of a repository whose default branch must stay free of Dyna files,
+// such as a fork that mirrors its upstream.
+const imageBranch = "refs/heads/dyna-images"
+
+// Context reads the sole toolchain image from the mirrored default branch or the image branch.
 func Context(ctx context.Context, runner Runner, mirror string) (string, TreeID, []byte, []box.Need, error) {
 	name, tree, err := soleImage(ctx, runner, mirror)
 	if err != nil || name == "" {
@@ -70,7 +74,14 @@ func soleImage(ctx context.Context, runner Runner, mirror string) (string, TreeI
 		return "", "", err
 	}
 	if len(root) == 0 {
-		return "", "", nil
+		commit, err := runner.Run(ctx, nil, "--git-dir", mirror, "for-each-ref", "--format=%(objectname)", imageBranch)
+		if err != nil || len(commit) == 0 {
+			return "", "", err
+		}
+		root, err = runner.Run(ctx, nil, "--git-dir", mirror, "ls-tree", strings.TrimSpace(string(commit)), ".dyna/images")
+		if err != nil || len(root) == 0 {
+			return "", "", err
+		}
 	}
 	fields := strings.Fields(string(root))
 	if len(fields) != 4 || fields[1] != "tree" {
