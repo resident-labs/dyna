@@ -3,6 +3,7 @@ package cliproxy
 import (
 	"context"
 	"errors"
+	"slices"
 
 	sdkauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
@@ -62,6 +63,11 @@ type DynaCredential struct {
 	Index    string        `json:"auth_index"`
 	Provider string        `json:"provider"`
 	State    DynaAuthState `json:"state"`
+	// DisplayName and BaseURL describe a provider the owner added. Models come
+	// from the registry, so they name what the proxy routes for this credential.
+	DisplayName string   `json:"display_name,omitempty"`
+	BaseURL     string   `json:"base_url,omitempty"`
+	Models      []string `json:"models,omitempty"`
 }
 
 // DynaCredentials lists runtime credentials, including durable pathless records.
@@ -70,7 +76,15 @@ func (s *Service) DynaCredentials() []DynaCredential {
 	out := make([]DynaCredential, 0, len(auths))
 	for _, auth := range auths {
 		auth.EnsureIndex()
-		out = append(out, DynaCredential{ID: auth.ID, Index: auth.Index, Provider: auth.Provider, State: dynaCredentialState(auth)})
+		credential := DynaCredential{ID: auth.ID, Index: auth.Index, Provider: auth.Provider, State: dynaCredentialState(auth)}
+		if name := auth.Attributes[DynaDisplayNameAttribute]; name != "" {
+			credential.DisplayName, credential.BaseURL = name, auth.Attributes["base_url"]
+		}
+		for _, model := range GlobalModelRegistry().GetModelsForClient(auth.ID) {
+			credential.Models = append(credential.Models, model.ID)
+		}
+		slices.Sort(credential.Models)
+		out = append(out, credential)
 	}
 	return out
 }
