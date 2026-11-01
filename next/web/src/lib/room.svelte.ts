@@ -124,7 +124,11 @@ export class RoomStore {
   // Each session's one status (status.ts): a request it made or its box waits for the owner, its failure is unseen or
   // its box failed, or a turn runs. The header, the panel and the counts read only these.
   status(id: string): Status { return this.statusWith(id, this.asking()); }
-  get counts(): Counts { const asking = this.asking(); return countOf([...this.sessions.keys()].map(id => this.statusWith(id, asking))); }
+  statuses(): Map<string, Status> {
+    const asking = this.asking();
+    return new Map([...this.sessions.keys()].map(id => [id, this.statusWith(id, asking)]));
+  }
+  get counts(): Counts { return countOf(this.statuses().values()); }
   private statusWith(id: string, asking: Set<string>): Status {
     const box = this.boxes.get(id);
     // A box that no host takes for its room waits until the owner changes a host, so it waits for the owner too.
