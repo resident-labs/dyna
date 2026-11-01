@@ -46,9 +46,9 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		for i, goal := range b.Unheld {
 			goals[i] = string(goal)
 		}
-		return fmt.Sprintf("Session %s closed and left goals with no holder: %s. Hand each to a session with goal set, or drop it with goal done.", b.Session, strings.Join(goals, ", ")), nil
+		return fmt.Sprintf("Session %s closed and left goals with no holder: %s.", b.Session, strings.Join(goals, ", ")), nil
 	case contract.HostDiskLow:
-		return fmt.Sprintf("Host %s is low on disk: %d GiB free, %d GiB wanted. Close sessions that are done. At the floor, new boxes wait and the oldest stopped boxes close.", b.Host, b.FreeBytes>>30, b.FloorBytes>>30), nil
+		return fmt.Sprintf("Host %s is low on disk: %d GiB free, %d GiB wanted. At the floor, new boxes wait and the oldest stopped boxes close.", b.Host, b.FreeBytes>>30, b.FloorBytes>>30), nil
 	case contract.PrOpened:
 		return fmt.Sprintf("PR opened: %s", b.URL), nil
 	case contract.QuestionAnswered:
@@ -181,11 +181,11 @@ func renderCheckin(b contract.CheckinDue) string {
 		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, "Quoted text is the sessions' own words. Move each one on, or end its goal. Progress on the goal clears the stall; a stall that stays goes up the tree.")
+	lines = append(lines, "Quoted text is the sessions' own words. Progress on the goal clears the stall; a stall that stays goes up the tree.")
 	return strings.Join(lines, "\n")
 }
 
-// renderFailures says what broke and how to repair it. A failed turn keeps its input, so the session needs a new start, not the same words.
+// renderFailures states what broke. A failed turn keeps its input, so the session needs a new start, not the same words.
 func renderFailures(b contract.SessionFailed) string {
 	lines := []string{"Sessions failed:"}
 	for _, failure := range b.Failures {
@@ -193,10 +193,10 @@ func renderFailures(b contract.SessionFailed) string {
 		if failure.Parent != "" {
 			name += " (under " + failure.Parent + ", which cannot take this)"
 		}
-		what := "its turn failed; post to it to try again"
+		what := "its turn failed; its input is kept"
 		switch failure.Box {
 		case contract.BoxFailed:
-			what = "its box failed; session restart replaces it"
+			what = "its box failed; session restart discards unpushed work"
 		case contract.BoxLost:
 			what = "its box is lost and its turn is not running; the engine is trying to recover it"
 		}
