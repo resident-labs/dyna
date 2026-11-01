@@ -577,6 +577,7 @@ type TranscriptItem struct {
 	Arguments    string                  `json:"arguments,omitempty"`
 	Script       string                  `json:"script,omitempty"`
 	Calls        []TranscriptCall        `json:"calls,omitempty"`
+	CallsOmitted int                     `json:"callsOmitted,omitempty"`
 	Output       string                  `json:"output,omitempty"`
 	Diff         string                  `json:"diff,omitempty"`
 	Failed       bool                    `json:"failed,omitempty"`
