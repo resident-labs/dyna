@@ -22,18 +22,20 @@ type Device struct {
 const DeviceLife = 30 * 24 * time.Hour
 
 func (s *Store) CreateDevice(ctx context.Context, d Device) error {
-	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "INSERT INTO devices(id,name,token_sha256,paired_at,last_seen_at,expires_at) VALUES(?,?,?,?,?,?)", d.ID, d.Name, d.TokenHash[:], d.PairedAt.UnixMilli(), d.LastSeenAt.UnixMilli(), d.ExpiresAt.UnixMilli())
-		if err != nil {
+	return s.Write(ctx, func(tx *sql.Tx) error { return insertDevice(ctx, tx, d) })
+}
+
+func insertDevice(ctx context.Context, tx *sql.Tx, d Device) error {
+	_, err := tx.ExecContext(ctx, "INSERT INTO devices(id,name,token_sha256,paired_at,last_seen_at,expires_at) VALUES(?,?,?,?,?,?)", d.ID, d.Name, d.TokenHash[:], d.PairedAt.UnixMilli(), d.LastSeenAt.UnixMilli(), d.ExpiresAt.UnixMilli())
+	if err != nil {
+		return err
+	}
+	for _, scope := range d.Scopes {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO device_scopes(device,scope) VALUES(?,?)", d.ID, scope); err != nil {
 			return err
 		}
-		for _, scope := range d.Scopes {
-			if _, err := tx.ExecContext(ctx, "INSERT INTO device_scopes(device,scope) VALUES(?,?)", d.ID, scope); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
 func readDeviceScopes(ctx context.Context, tx *sql.Tx, id string) ([]contract.Scope, error) {

@@ -46,7 +46,7 @@
 <div class="selector" bind:this={container}>
   {#if loading}<p class="hint">Loading profiles…</p>
   {:else if failure}<p class="error" role="alert">Profiles did not load. <button type="button" class="retry" onclick={() => void loadProfiles()}>Retry</button></p>
-  {:else if !profiles.length}<p class="hint">Add a profile in settings before continuing.</p>
+  {:else if !profiles.length}<p class="hint">Add a profile in <a href="/settings/profiles">settings</a> before continuing.</p>
   {:else}
   <div class="heading">{label} <span>· {profiles.length}</span></div>
   <div class="list" role="radiogroup" aria-label={label}>

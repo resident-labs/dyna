@@ -90,6 +90,10 @@ class ChangesTest(unittest.TestCase):
         base = self.pull_request("next/third_party/pi/packages/coding-agent/src/cli.ts", large=True)
         self.assertEqual(self.run_filter("pull_request", base), NOTHING | {"next": "true", "next_pi": "true"})
 
+    def test_webdev_change_runs_web(self):
+        base = self.pull_request("next/cmd/dyna-webdev/main.go")
+        self.assertEqual(self.run_filter("pull_request", base), NOTHING | {"next": "true", "web": "true"})
+
     def test_ci_change_runs_everything(self):
         for path in (".github/workflows/ci.yml", "next/scripts/ci.sh", "next/scripts/ci-changes.sh"):
             with self.subTest(path=path), tempfile.TemporaryDirectory(dir=os.environ.get("DYNA_SCRATCH")) as tmp:

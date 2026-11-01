@@ -131,6 +131,31 @@ jobs:
       - name: Check, test and build the web app
         run: bash next/scripts/ci.sh next-web
 
+  # Every route at four widths, in the full and empty webdev fixtures.
+  next-web-width:
+    name: next-web-width
+    needs: [changes]
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: next/go.mod
+          cache-dependency-path: next/go.sum
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: next/web/package-lock.json
+      - name: Build webdev and check responsive widths
+        env:
+          DYNA_WEBDEV_BIN: ${{ runner.temp }}/dyna-webdev
+        run: |
+          bash next/scripts/ci.sh next-web-width-build
+          bash next/scripts/ci.sh next-web-width
+
   next-pi:
     name: next-pi
     needs: [changes]
