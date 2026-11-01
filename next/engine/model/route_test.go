@@ -104,7 +104,7 @@ func TestProxyConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Check 7: StrictMode lives only in claude-api-key cloak blocks, so no key means strict cloak stays off.
-	if cfg.RequestRetry != 0 || !cfg.RemoteManagement.AllowRemote || cfg.RemoteManagement.SecretKey == "" || len(cfg.APIKeys) != 1 || !cfg.Routing.SessionAffinity || len(cfg.ClaudeKey) != 0 {
+	if cfg.RequestRetry != 0 || !cfg.RemoteManagement.AllowRemote || cfg.RemoteManagement.SecretKey == "" || len(cfg.APIKeys) != 1 || !cfg.Routing.SessionAffinity || cfg.Routing.Strategy != "soonest-reset" || len(cfg.ClaudeKey) != 0 {
 		t.Fatal("proxy config violates the retry, management, or affinity policy")
 	}
 	if bcrypt.CompareHashAndPassword([]byte(cfg.RemoteManagement.SecretKey), []byte("management-key")) != nil {
