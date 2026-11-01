@@ -22,6 +22,7 @@
   const key = (item: TranscriptItem, part: TranscriptPart) => item.id + "/" + part;
   async function load(item: TranscriptItem, part: TranscriptPart) {
     const id = key(item, part);
+    if (loading[id] || chunks[id] !== undefined) return;
     loading[id] = true;
     try { chunks[id] = await onload(item, part); failures[id] = false; }
     catch { failures[id] = true; }
@@ -37,7 +38,7 @@
 {#snippet entry(item: TranscriptItem)}
   {@const title = titleOf(item)}
   {@const running = !ended && !item.ended}
-  <details class="entry" ontoggle={(event) => { if (event.currentTarget.open) onopen(); }}>
+  <details class="entry" ontoggle={(event) => { if (event.currentTarget.open) { onopen(); if (item.more) { if (item.kind === "thinking") void load(item, "text"); else { void load(item, "arguments"); void load(item, "output"); } } } }}>
     <summary>
       <span class="slot">{#if running}<span class="spinner" aria-label="Working" role="img"></span>{:else}<Icon name={item.kind === "thinking" ? "chat" : icons[title.kind]} size={16} />{/if}</span>
       <span>{item.kind === "thinking" ? "Thought" : running ? activeVerb(title.kind, title.verb) : title.verb}</span>
