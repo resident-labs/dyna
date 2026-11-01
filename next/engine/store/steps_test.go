@@ -24,6 +24,7 @@ func TestUpgradeConnectSessionsFrom48(t *testing.T) {
 		line = strings.Replace(line, ", disk_floor INTEGER NOT NULL DEFAULT 21474836480, disk_low_since INTEGER NOT NULL DEFAULT 0", "", 1)
 		line = strings.Replace(line, ", state TEXT NOT NULL DEFAULT 'open', reason TEXT NOT NULL DEFAULT ''", "", 1)
 		line = strings.Replace(line, ", dispatched_model TEXT NOT NULL DEFAULT ''", "", 1)
+		line = strings.Replace(line, ", compose TEXT NOT NULL DEFAULT ''", "", 1)
 		old = append(old, strings.Replace(line, ", sections BLOB", "", 1))
 	}
 	old = append(old, "CREATE TABLE uploads (sha256 TEXT NOT NULL, room TEXT NOT NULL, PRIMARY KEY(sha256, room));")
@@ -62,7 +63,7 @@ func TestUpgradeSessionWorkFrom42(t *testing.T) {
 	for _, statement := range []string{
 		"CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
 		"CREATE TABLE rules (room TEXT, number INTEGER)",
-		"CREATE TABLE rooms (id TEXT); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);",
+		"CREATE TABLE rooms (id TEXT); CREATE TABLE sessions (id TEXT); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);",
 		"CREATE TABLE hosts (name TEXT)",
 		"CREATE TABLE deliveries (seq INTEGER)",
 		"CREATE TABLE event_files (seq INTEGER)",
@@ -131,7 +132,7 @@ func TestUpgradeDropsRules(t *testing.T) {
 	if _, err := db.Exec(`PRAGMA foreign_keys=ON;
 		CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO meta VALUES ('schema_version','45');
 		CREATE TABLE rules (room TEXT, number INTEGER, PRIMARY KEY(room,number)); INSERT INTO rules VALUES ('room',1);
-		CREATE TABLE rooms (id TEXT); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);
+		CREATE TABLE rooms (id TEXT); CREATE TABLE sessions (id TEXT); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);
 		CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT, started_at INTEGER, ended_at INTEGER); CREATE TABLE pr_owners (session TEXT); CREATE TABLE hosts (name TEXT);
 		CREATE TABLE operations (id TEXT, kind TEXT, args BLOB, by_kind TEXT, by_id TEXT, created_at INTEGER, state TEXT);
 		CREATE TABLE grants (id TEXT, kind TEXT, expires_at INTEGER, revoked_at INTEGER, expired_at INTEGER);
@@ -174,7 +175,7 @@ func TestPermanentHostexecGrantMigration(t *testing.T) {
  INSERT INTO grants VALUES('active','hostexec',4102444800000,NULL,NULL),('past','hostexec',1,NULL,NULL),('revoked','hostexec',4102444800000,1,NULL);
  CREATE TABLE operations(kind TEXT,state TEXT,args BLOB);
  INSERT INTO operations VALUES('hostexec.grant','pending','{"expires":"future","never":false,"reason":"x"}');
- CREATE TABLE rooms (id TEXT); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);
+ CREATE TABLE rooms (id TEXT); CREATE TABLE sessions (id TEXT); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);
  CREATE TABLE hosts(name TEXT); CREATE TABLE turns(id TEXT);`)
 	if err != nil {
 		t.Fatal(err)

@@ -16,6 +16,7 @@ type BoxSpec struct {
 	Size    contract.BoxSize
 	Repos   []contract.BoxRepo
 	Needs   []box.Need
+	Stack   *box.Stack
 }
 
 type BoxAdapter interface {

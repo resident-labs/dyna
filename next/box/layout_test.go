@@ -21,6 +21,7 @@ func TestLayoutKeepsARoomInOneFolder(t *testing.T) {
 	}
 	for got, want := range map[string]string{
 		l.Instructions("r"):     room + "/AGENTS.md",
+		l.Compose("r"):          room + "/compose",
 		l.File("r", "abc"):      room + "/files/abc",
 		l.Transcripts("r", "s"): room + "/transcripts/s",
 		l.HostInstructions("r"): hostRoom + "/instructions/AGENTS.md",
@@ -47,6 +48,7 @@ func TestLayoutNamesWhatNoRoomOwns(t *testing.T) {
 	}
 	for got, want := range map[string]string{
 		l.Instructions(""):      "/data/AGENTS.md",
+		l.Compose(""):           "/data/compose",
 		l.Store():               "/data/store.db",
 		l.StoreLock():           "/data/store.lock",
 		l.V1Store():             "/data/dyna.db",
