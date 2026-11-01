@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -138,6 +139,16 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		if err != nil {
 			return err
 		}
+		if started, _ := event.Body.(contract.SessionStarted); goal != "" && parent != "" {
+			var number int64
+			if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(number),0)+1 FROM goals WHERE room=?", session.Room).Scan(&number); err != nil {
+				return err
+			}
+			at := event.Time.UnixMilli()
+			if _, err := tx.ExecContext(ctx, "INSERT INTO goals(room,number,session,text,done_when,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", session.Room, number, session.ID, goal, started.DoneWhen, contract.GoalActive, at, at); err != nil {
+				return err
+			}
+		}
 		if session.NewRoomName != "" {
 			g := contract.Grant{ID: contract.GrantID("grant_" + string(session.ID)), Kind: contract.GrantHostExec, Room: session.Room, To: contract.Principal{Kind: contract.PrincipalSession, Session: session.ID}, Hosts: []contract.HostName{contract.AllHosts}, By: contract.Principal{Kind: contract.PrincipalEngine}, Created: event.Time}
 			if err := s.InsertGrant(tx, g); err != nil {
@@ -197,7 +208,11 @@ func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event c
 		if err := tx.QueryRowContext(ctx, "SELECT COALESCE(parent,'') FROM sessions WHERE id=?", id).Scan(&parent); err != nil {
 			return err
 		}
+		var unheld []contract.GoalID
 		if parent != "" {
+			if unheld, err = s.transferGoals(ctx, tx, id, parent, event.Time); err != nil {
+				return err
+			}
 			result, err := tx.ExecContext(ctx, `INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state,handoff_from)
 SELECT 'session',?,seq,'session','post','','','','',1,'pending',COALESCE(handoff_from,?) FROM deliveries WHERE to_kind='session' AND to_id=? AND state IN ('pending','taken')
 ON CONFLICT(to_kind,to_id,seq) DO NOTHING`, parent, id, id)
@@ -218,8 +233,15 @@ ON CONFLICT(to_kind,to_id,seq) DO NOTHING`, parent, id, id)
 				return err
 			}
 		}
-		_, err = s.AppendEvent(tx, event)
-		return err
+		if body, ok := event.Body.(contract.SessionClosed); ok && len(unheld) > 0 {
+			body.Unheld = unheld
+			event.Body = body
+		}
+		seq, err := s.AppendEvent(tx, event)
+		if err != nil || len(unheld) == 0 {
+			return err
+		}
+		return s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: parent}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
 	})
 }
 
@@ -268,6 +290,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			}
 			return nil
 		}
+		retrying := false
 		if output.Outcome == contract.TurnCompleted {
 			if _, err := tx.ExecContext(ctx, "UPDATE boxes SET failures=0 WHERE session=?", session); err != nil {
 				return err
@@ -288,6 +311,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 				}
 				retryAt = event.Time.Add(delay).UnixMilli()
 				retries++
+				retrying = true
 			}
 			if _, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=?,model_retries=? WHERE id=?", retryAt, retries, session); err != nil {
 				return err
@@ -325,9 +349,21 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 		if err != nil {
 			return err
 		}
+		if output.Outcome != contract.TurnStopped && !retrying && len(body.Replies) == 0 && !slices.ContainsFunc(posts, func(post contract.Event) bool {
+			return post.From.Kind == contract.PrincipalSession && post.From.Session == session
+		}) {
+			if err := markSilent(ctx, tx, session, output.Turn); err != nil {
+				return err
+			}
+		}
 		for _, reply := range body.Replies {
 			if reply.Reply.Target.Kind != contract.PrincipalSession {
 				continue
+			}
+			if output.Outcome == contract.TurnFailed {
+				if err := markFailureTold(ctx, tx, session); err != nil {
+					return err
+				}
 			}
 			d := contract.Delivery{To: reply.Reply.Target, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyPost, Target: event.From, Home: reply.Reply.Home}, Wake: reply.Posted == ""}
 			if len(ended) > 0 {

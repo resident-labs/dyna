@@ -168,6 +168,10 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `visuals` |
 | `room_leftovers` |
 | `pr_owners` |
+| `goals` |
+| `goal_items` |
+| `goal_journal` |
+| `checkins` |
 | `grants` |
 | `questions` |
 | `hostexec_runs` |
@@ -276,7 +280,7 @@ The owner accepts a kernel kill when RAM and swap fill, or at a box's own limit.
 
 New boxes choose the ready host with most free memory; existing boxes stay on their host. Children can run while their parent is dormant. `sameHost` pins a child to its parent's host. Default maximum depth is 3; zero removes the limit. Room limits count placed requests across hosts; zero means unlimited. There is no subtree cap. M1 uses hermeslab.
 
-Once every sample from a ready host has been at or below its floor for a minute, the engine closes its oldest idle leaves, stopped or failed, without the 7-day wait or the PR exemption. A sample above the floor, a failed probe, a missed heartbeat or an engine restart starts that minute again, so one bad reading closes nothing. It takes four per read, every 10 seconds. It skips a host with four closes running, or with eight stuck on a failed start or archive, so a failure common to every box stops eviction instead of starting the whole host without admission. It never closes a root, a session with an open child, a running turn, shell jobs, a pending delivery, a waiting question, or a pending, approved or running operation, and it leaves paused rooms alone. The normal sweep runs hourly, takes 200 leaves that passed 7 days, and keeps the PR exemption.
+Once every sample from a ready host has been at or below its floor for a minute, the engine closes its oldest idle leaves, stopped or failed, without the 7-day wait or the PR and goal exemptions: close archives the work and hands the goals on. A sample above the floor, a failed probe, a missed heartbeat or an engine restart starts that minute again, so one bad reading closes nothing. It takes four per read, every 10 seconds. It skips a host with four closes running, or with eight stuck on a failed start or archive, so a failure common to every box stops eviction instead of starting the whole host without admission. It never closes a root, a session with an open child, a running turn, shell jobs, a pending delivery, a waiting question, or a pending, approved or running operation, and it leaves paused rooms alone. The normal sweep runs hourly, takes 200 leaves that passed 7 days, and keeps the PR and goal exemptions.
 
 Disk work that is designed but not built:
 
@@ -463,9 +467,21 @@ There is no external member principal, token, inbox or grant. A future need requ
 
 ### 7.4 One tree per room (D-584)
 
-Each room has exactly one root; every other session has a parent in that room. The owner starts sessions under root or a chosen parent. Close ends the subtree deepest first, archives then deletes boxes, and transfers tracked PRs and archive refs to the closing session's parent. Open goals transfer too, except to root: they remain unheld and `session.closed` lists them for assignment. Pending and unacknowledged deliveries transfer to the parent, deduplicated against its own; posts to a closing session fail with `session_closing`.
+Each room has exactly one root; every other session has a parent in that room. The owner starts sessions under root or a chosen parent. Close ends the subtree deepest first, archives then deletes boxes, and transfers tracked PRs and archive refs to the closing session's parent. Open goals transfer too, except to root: they remain unheld, and `session.closed` lists them and wakes root to assign them. Pending and unacknowledged deliveries transfer to the parent, deduplicated against its own; posts to a closing session fail with `session_closing`.
 
 Root cannot close. After box failure the owner may replace its box with the same session ID, box ID, grants and history; unpushed work, the old volume and unacknowledged transcript bytes are lost, but feed and acknowledged transcript remain. The owner or an ancestor of both places may use `session.move{Session, NewParent}`; cycles and cross-room moves fail. A move updates the parent and emits `session.moved`, without touching the box.
+
+#### Goals, check-ins and failure notices (done)
+
+A goal has text, a done condition, a holder, checklist items, a journal and a state: `active`, `done` or `dropped`. Its ID is `g<n>`, numbered per room. A session started with a goal holds a real goal record from its first moment; `sessions.goal` keeps the text it started with. The holder, anyone above it and the owner may work on a goal; root or the owner may pick up a goal with no holder. A goal can go only to the caller or a session below it, and never to root. `goal done` needs every item settled; `goal done` with `drop` does not. A holder that someone else handed a goal wakes on it as on a brief. Any change to a goal, a journal line included, counts as progress.
+
+A turn is silent when it completes or fails for good with an open goal, no reply and no post of its own. A silent turn counts as a stall at once; any other goal holder counts after 10 minutes without a turn or progress. A stall is a goal holder that is idle, stopped or blocked, with nothing moving below it: a running turn, a background job or a box start excuses it for 2 hours, and a pending input, a scheduled model retry or a question waiting for the owner's answer excuses it always. Blocked means a failed or lost box, a failed last turn, an undecided operation, or one of those 2-hour limits passed.
+
+Check-ins are engine notices, in every unpaused room. Every minute the engine writes one report per session at most, stalest first, on one transaction with the clocks in `checkins`, so a restart repeats nothing. A stall goes once to the parent, then one ancestor higher per hour, until root has it; only time drives this, so a parent stuck in one turn holds nothing back. Each session gets at most one check-in per 30 minutes and none while its last report is unread. A reader that left a report unread for an hour, a closing session and a failed or lost box are skipped. A report wakes an idle or stopped reader and steers a running one. New progress on the goal starts the stall over; otherwise the same stall is never reported to the same ancestor twice, and it stops at root. Timing constants are in `room/checkin.go`.
+
+Failure notices do not wait. Every 10 seconds the engine compares each open session of every unpaused room with what its ancestors were told. A failed or lost box, or a failed last turn, sends one `session.failed` notice to the parent, or to the nearest ancestor that can read it, with root as the last resort. A run of failed retries is one failure, a failed turn whose reply already reached the parent is not repeated, and a recovery clears the record. The notice counts as telling that ancestor for check-ins, so a stuck goal holder keeps climbing from there.
+
+A failed or lost box keeps its open turn, because a box that returns or restarts resumes it. Nothing runs that turn, so `session.list` leaves it out and the web shows no running turn.
 
 ### 7.5 Reply channels (D-579)
 
@@ -482,7 +498,7 @@ The engine derives surface and reply channel from the input, including for root.
 | Sibling or other-room post | feed | post to sender if action is needed |
 | Owner answer to a question | dm | final to owner in that DM; parent does not wake |
 | Group-only mention | feed | none |
-| Check-in, engine notice, service event, shell or job end | engine or service | none |
+| Check-in, failure notice, engine notice, service event, shell or job end | engine or service | none |
 | Voice dispatch, after port | voice | final to owner in call, or feed if call ended |
 
 A final response is delivered to its target and home; if the turn already posted to that target, delivery is quiet and links that post. A `post` channel sends nothing automatically. A `none` response stays in the transcript; the frame asks for one line. Multiple inputs require one reply per distinct final target and home.
@@ -548,7 +564,7 @@ Each `contract/tools/` toolkit registers one area tool with a flat `action` enum
 | `visual` | check | the visual checker in the box | 1 |
 | `computer` | open, click, type, text, screenshot | the box computer (5.14); screenshots return as image results | 1 |
 | `context` | show | `context.snapshot` (one section in full, past its cap) | 1 |
-| `goal` | set, list, item, done, journal | `goal.*` | 2 |
+| `goal` | set, list, item, done, journal | `goal.*` (done) | 2 |
 | `issue` | file, list, show, close | `issue.*` | 2 |
 | `question` | ask, list | `question.*`; ask needs the `ask-owner` grant (7.10) | 2 |
 | `workflow` | run, status, list | `workflow.*` | 2 |
@@ -564,7 +580,7 @@ At dispatch, the engine renders ordered `Sections []ContextSection{Key, Text}` i
 
 | Section key | Contents | Cap (tokens) |
 |---|---|---|
-| `dyna_goal` (phase 2) | own goal, its done condition and open items | 200 |
+| `dyna_goal` | own goal, its done condition and open items | 200 |
 | `dyna_children` | open children, stalest first: profile, state, current item, PR state, and whether it waits for the owner's answer; at most 8 rows | 250 |
 | `dyna_requests` | operations and questions waiting on this session, and its own that wait on others | 150 |
 | `dyna_prs` | tracked PRs: approval, CI, merge state | 150 |
@@ -587,7 +603,7 @@ After the M2 trial parts, phase 1 ships the registry, ten phase-1 toolkits, MCP 
 
 The owner shipped this without the evaluation gate (q68).
 
-Phase 2 in M3 adds `goal`, `issue`, `workflow`, `subscription`, PR approval and status, `dyna_goal`, and skills with their features. `question` and `dyna_usage` have shipped.
+Phase 2 in M3 adds `issue`, `workflow`, `subscription`, PR approval and status, and skills with their features. `goal`, `dyna_goal`, `question` and `dyna_usage` have shipped.
 
 ### 7.10 Questions
 
@@ -649,7 +665,7 @@ Before cutover, horizon's root confirms whether upstream-watch needs desktop sta
 All M1–M3 features below are cutover gates. Imported data is not the same as a working feature.
 
 - **M1 and M2:** The thin slice and trial features are in section 11.
-- **M3:** goals, check-ins, questions, issues, thin PR approval and GitHub merges, the Actions runner pool, typed subscriptions, settings, accounts, backups, remote access, Connect and device scopes, web push, desktop, skills, install guard, manual update, command palette and workflows. Add arch, lt-24-005, Boat and pve only after each passes the host check and real-box QA. The relay remains unchanged. Remote access precedes workflows. Daily maintenance includes backups, archive-ref expiry, host pruning and closing eligible boxes stopped for seven days; root and sessions with open PRs, goals, children, questions or pending input are excluded.
+- **M3:** goals and check-ins (done, section 7.4), questions, issues, thin PR approval and GitHub merges, the Actions runner pool, typed subscriptions, settings, accounts, backups, remote access, Connect and device scopes, web push, desktop, skills, install guard, manual update, command palette and workflows. Add arch, lt-24-005, Boat and pve only after each passes the host check and real-box QA. The relay remains unchanged. Remote access precedes workflows. Daily maintenance includes backups, archive-ref expiry, host pruning and closing eligible boxes stopped for seven days; root and sessions with open PRs, goals, children, questions or pending input are excluded.
 - **Web search:** The direct MCP web tool searches through eligible providers. CLIProxyAPI holds model credentials; the engine holds search-only keys, including the Muse search key. The owner requested this port before cutover on 2026-10-31.
 - **After cutover:** voice returns as the existing Go service and persona without redesign; issue watches, room MCP, computer reminders, idle compaction, settings panes, release pipeline, WSL and branch QA follow. Issue-watch and room-MCP data are not imported. Manual update ships in M3; hourly auto-update follows.
 - **Dropped:** reviewer service and workspace, Dyna merge trials, comment-trust holds, CI budget service, conflict radar, room PR views, jobs, worktrees, load doctor, test slots, harness settings, Claude Code and session-format conversion. Session profile changes remain. The library is cut for now; its map stays in the frozen v1 backup. External members and placement by device needs are absent. GitHub supplies PR state; outside text is wrapped, with the accepted risks in decision 13.

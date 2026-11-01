@@ -84,3 +84,8 @@ CREATE TABLE client_replays (method TEXT NOT NULL, caller_kind TEXT NOT NULL, ca
 CREATE TABLE questions (id TEXT PRIMARY KEY, room TEXT NOT NULL REFERENCES rooms(id), session TEXT NOT NULL REFERENCES sessions(id), text TEXT NOT NULL, state TEXT NOT NULL, answer TEXT NOT NULL DEFAULT '', asked_at INTEGER NOT NULL, answered_at INTEGER);
 CREATE INDEX questions_room_state ON questions(room, state, asked_at);
 CREATE INDEX questions_session_pending ON questions(session, asked_at) WHERE state='pending';
+CREATE TABLE goals (room TEXT NOT NULL REFERENCES rooms(id), number INTEGER NOT NULL, session TEXT REFERENCES sessions(id), text TEXT NOT NULL, done_when TEXT NOT NULL, state TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(room, number));
+CREATE INDEX goals_holder ON goals(session) WHERE state='active';
+CREATE TABLE goal_items (room TEXT NOT NULL, goal INTEGER NOT NULL, number INTEGER NOT NULL, text TEXT NOT NULL, state TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(room, goal, number), FOREIGN KEY(room, goal) REFERENCES goals(room, number));
+CREATE TABLE goal_journal (room TEXT NOT NULL, goal INTEGER NOT NULL, number INTEGER NOT NULL, at INTEGER NOT NULL, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, text TEXT NOT NULL, PRIMARY KEY(room, goal, number), FOREIGN KEY(room, goal) REFERENCES goals(room, number));
+CREATE TABLE checkins (session TEXT PRIMARY KEY REFERENCES sessions(id), reported_at INTEGER NOT NULL DEFAULT 0, report_seq INTEGER NOT NULL DEFAULT 0, silent_turn TEXT NOT NULL DEFAULT '', progress INTEGER NOT NULL DEFAULT 0, told INTEGER NOT NULL DEFAULT 0, told_at INTEGER NOT NULL DEFAULT 0, failure TEXT NOT NULL DEFAULT '');

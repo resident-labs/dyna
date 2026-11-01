@@ -44,12 +44,21 @@ func renderContextSection(key contract.ContextSectionKey, lines []string, maxCha
 	return contract.ContextSection{Key: key, Text: strings.Join(kept, "\n")}
 }
 
+// contextLine folds session-written text to one line of at most n characters.
+func contextLine(text string, n int) string {
+	runes := []rune(strings.Join(strings.Fields(text), " "))
+	if len(runes) > n {
+		return string(runes[:n-1]) + "…"
+	}
+	return string(runes)
+}
+
 func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal, req contract.ContextSnapshotRequest) (contract.ContextSnapshotResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalSession {
 		return contract.ContextSnapshotResponse{}, forbidden()
 	}
 	switch req.Section {
-	case "", contract.ContextChildren, contract.ContextRequests, contract.ContextPRs, contract.ContextProfiles, contract.ContextUsage:
+	case "", contract.ContextGoal, contract.ContextChildren, contract.ContextRequests, contract.ContextPRs, contract.ContextProfiles, contract.ContextUsage:
 	default:
 		return contract.ContextSnapshotResponse{}, invalid("unknown context section")
 	}
@@ -64,8 +73,22 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		}
 	}
 	var lines []string
+	for _, g := range data.Goals {
+		lines = append(lines, fmt.Sprintf("%s: %s", g.ID, contextLine(g.Text, 300)))
+		if g.DoneWhen != "" {
+			lines = append(lines, "Done when: "+contextLine(g.DoneWhen, 200))
+		}
+		for _, item := range g.Items {
+			lines = append(lines, "- "+contextLine(item, 120))
+		}
+	}
+	add(contract.ContextGoal, lines, 800, 0)
+	lines = nil
 	for _, c := range data.Children {
 		line := fmt.Sprintf("%s: %s, %s", c.Name, c.Profile, c.State)
+		if c.Item != "" {
+			line += ", " + contextLine(c.Item, 80)
+		}
 		if c.Asking {
 			line += ", waiting for the owner's answer"
 		}

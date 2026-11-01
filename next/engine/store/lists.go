@@ -127,6 +127,10 @@ func (s *Store) SessionList(ctx context.Context, room contract.RoomID) (contract
 		if err := rows.Scan(&session.ID, &session.Name, &session.Parent, &session.Profile, &session.Box, &session.BoxState, &session.BoxReason, &session.Host, &session.Goal, &session.Turn, &session.LastOutcome, &session.ShellJobs, &session.LastRead, &started, &lastTurn, &session.HadJobs); err != nil {
 			return contract.SessionListResponse{}, err
 		}
+		// The open turn survives for session.restart to resume, but nothing is running it.
+		if session.BoxState == contract.BoxFailed || session.BoxState == contract.BoxLost {
+			session.Turn = ""
+		}
 		session.StartedAt = time.UnixMilli(started).UTC()
 		if lastTurn.Valid {
 			session.LastTurnAt = time.UnixMilli(lastTurn.Int64).UTC()
