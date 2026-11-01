@@ -170,7 +170,7 @@ func TestComposeStackOnRealPodman(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := &Boxes{hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, Store: stackStore{id: id, session: "ses_stack"}, Runtime: t.TempDir()}
+	b := &Boxes{hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}, Store: stackStore{id: id, session: "ses_stack"}, Runtime: t.TempDir()}
 	b.Layout.HostData = data
 	slice, err := box.SliceName(id)
 	if err != nil {
@@ -413,7 +413,7 @@ func TestAComposeSessionFromStartToClose(t *testing.T) {
 	}
 	runtimeDir := t.TempDir()
 	b := &Boxes{Store: st, Runtime: runtimeDir, Layout: layout, Version: "v1", PiTarball: pi, Context: ctx, Compose: files,
-		hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}}
+		hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}}
 	sum := sha256.Sum256(script)
 	b.binOnce.Do(func() { b.binSum = hex.EncodeToString(sum[:]) })
 	service := engine.New(st, b, stackProfiles{}, time.Now)
