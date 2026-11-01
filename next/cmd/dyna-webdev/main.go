@@ -98,7 +98,7 @@ func (d devService) AccountsList(context.Context, contract.Principal, contract.A
 			accounts = append(accounts, contract.Account{ID: a.usage.AccountID, Provider: a.provider, Label: a.usage.Label, State: state})
 		}
 	}
-	return contract.AccountsListResponse{Providers: model.AccountProviders(), Accounts: accounts}, nil
+	return contract.AccountsListResponse{Providers: model.AccountProviders(nil), Accounts: accounts}, nil
 }
 func (devService) AccountsConnect(context.Context, contract.Principal, contract.AccountsConnectRequest) (contract.AccountsConnectResponse, *contract.Error) {
 	return contract.AccountsConnectResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable in webdev"}

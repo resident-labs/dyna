@@ -40,3 +40,13 @@ export function accountState(account: Account): { line?: string; pill?: { tone: 
     case "connected": return {};
   }
 }
+
+// Model IDs as the owner types them, on lines or with commas.
+export const parseModelIDs = (text: string) => [...new Set(text.split(/[\s,]+/).filter(Boolean))];
+
+// Why a new provider was refused, in the owner's words.
+export function addProviderError(error: unknown): string {
+  if (error instanceof APIError && error.detail.code === "models_unavailable") return "This provider does not list its models. Enter the model IDs below.";
+  if (error instanceof APIError && error.detail.code === "invalid") return "Check the name and address. The name cannot be one Dyna already has.";
+  return "Could not save this provider. Try again.";
+}

@@ -154,10 +154,6 @@ writeFileSync(path, JSON.stringify(manifest, null, 2) + "\n");
 console.log("merged " + Object.keys(required).length + " third-party dependencies from bundled packages");
 EOF
 
-node "$vendor/scripts/dyna-catalog.mjs" "$stage/dyna-catalog.json"
-# The upstream files allowlist otherwise excludes the generated catalog.
-node -e 'const fs=require("fs"),p=process.argv[1],m=JSON.parse(fs.readFileSync(p));m.files.push("dyna-catalog.json");fs.writeFileSync(p,JSON.stringify(m,null,2)+"\n")' "$stage/package.json"
-
 packed=$(npm pack "$stage" --ignore-scripts --pack-destination "$tmp" --silent)
 mv "$tmp/$packed" "$output"
 integrity=$(node -e 'const crypto=require("crypto"),fs=require("fs");process.stdout.write("sha512-"+crypto.createHash("sha512").update(fs.readFileSync(process.argv[1])).digest("base64"))' "$output")
@@ -175,7 +171,6 @@ verify_install() {
     npm install --global --prefix "$1" --package-lock --ignore-scripts "$2"
 }
 verify_install "$fork_prefix" "$output"
-node "$vendor/scripts/dyna-catalog-verify.mjs" "$fork_prefix" "$tmp"
 verify_install "$npm_prefix" "@earendil-works/pi-coding-agent@$base"
 # Smoke-test the per-process config file flags: each must point the CLI at an
 # existing file, and a missing one must fail startup with an error.
