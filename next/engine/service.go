@@ -54,8 +54,8 @@ type Service struct {
 	readMu            sync.Mutex // preserves commit and live broadcast order
 	// transcriptMu serializes appends, so each offset check and write runs alone.
 	transcriptMu        sync.Mutex
-	transcriptDir       string
-	filesDir            string
+	layout              box.Layout
+	roomData            sync.RWMutex // writers of a room folder share it; removing one takes it alone
 	instructionsMu      sync.Mutex
 	publishInstructions func(context.Context)
 }
@@ -105,6 +105,7 @@ func (s *Service) lookupSession(id contract.SessionID) (*live.Session, bool) {
 func New(st *store.Store, boxes lifecycle.BoxAdapter, profiles Profiles, now func() time.Time) *Service {
 	s := &Service{hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now}
 	s.reconciler = lifecycle.New(st, boxes, s, nil, s.event, now)
+	s.reconciler.SetRoomData(s)
 	s.live = live.New(s.deliverWakes)
 	st.SetWake(s.queueWakes)
 	go s.live.Run(st.Done())
@@ -150,8 +151,8 @@ func (s *Service) OpenTerminal(id contract.SessionID) bool {
 	return ok && handle.HasTerminal()
 }
 
-// SetTranscriptDir sets where transcript copies are kept, one folder per session.
-func (s *Service) SetTranscriptDir(dir string) { s.transcriptDir = dir }
+// SetLayout sets where room data is kept, before the service starts.
+func (s *Service) SetLayout(layout box.Layout) { s.layout = layout }
 
 func (s *Service) transition(ctx context.Context, room contract.RoomID, b box.Box, state contract.BoxState, reason string, cause contract.FailureCause) (box.Box, error) {
 	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Cause: cause})
@@ -196,7 +197,7 @@ func failure(err error) *contract.Error {
 		code = contract.ErrSessionClosing
 	} else if errors.Is(err, store.ErrParentClosing) {
 		code = contract.ErrParentClosing
-	} else if errors.Is(err, store.ErrTurnConflict) {
+	} else if errors.Is(err, store.ErrTurnConflict) || errors.Is(err, store.ErrRoomDeleting) {
 		code = contract.ErrConflict
 	}
 	return &contract.Error{Code: code, Message: err.Error()}

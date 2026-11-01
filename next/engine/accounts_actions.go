@@ -100,6 +100,9 @@ func (s *AccountActions) runAccountAction(ctx context.Context, caller contract.P
 			if errors.Is(result.err, model.ErrReconnectUnavailable) {
 				return accountActionResult{}, &contract.Error{Code: contract.ErrReconnectUnavailable, Message: "reconnect unavailable"}
 			}
+			if errors.Is(result.err, store.ErrRoomDeleting) {
+				return accountActionResult{}, failure(result.err)
+			}
 			if errors.Is(result.err, errAccountMissing) {
 				return accountActionResult{}, &contract.Error{Code: contract.ErrNotFound, Message: "account not found"}
 			}

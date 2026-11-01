@@ -32,12 +32,14 @@ type client interface {
 	SessionList(context.Context, contract.SessionListRequest) (contract.SessionListResponse, error)
 	HostexecRun(context.Context, contract.HostexecRunRequest) (contract.HostexecRunResponse, error)
 	File(context.Context, string, io.Writer) error
-	Upload(context.Context, string) (contract.Attachment, error)
+	Upload(context.Context, contract.RoomID, string) (contract.Attachment, error)
 	HostAdd(context.Context, contract.HostAddRequest) (contract.HostAddResponse, error)
+	HostSetLimits(context.Context, contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, error)
 	RoomSetLimits(context.Context, contract.RoomSetLimitsRequest) (contract.RoomSetLimitsResponse, error)
 	RoomPause(context.Context, contract.RoomPauseRequest) (contract.RoomPauseResponse, error)
 	SessionStop(context.Context, contract.SessionStopRequest) (contract.SessionStopResponse, error)
 	RoomCreate(context.Context, contract.RoomCreateRequest) (contract.RoomCreateResponse, error)
+	RoomDelete(context.Context, contract.RoomDeleteRequest) (contract.RoomDeleteResponse, error)
 	RoomRepoAdd(context.Context, contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, error)
 	RepoCISet(context.Context, contract.RepoCISetRequest) (contract.RepoCISetResponse, error)
 	RoomRepos(context.Context, contract.RoomReposRequest) (contract.RoomReposResponse, error)
@@ -76,7 +78,7 @@ type requestType interface {
 		contract.OpWithdrawRequest |
 		contract.SessionMoveRequest |
 		contract.SessionListRequest |
-		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest
+		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostSetLimitsRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomDeleteRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest
 }
 type responseType interface {
 	contract.WebSearchResponse | contract.WebsearchSetKeyResponse | contract.WebsearchRemoveKeyResponse |
@@ -84,7 +86,7 @@ type responseType interface {
 		contract.OpWithdrawResponse |
 		contract.SessionMoveResponse |
 		contract.SessionListResponse |
-		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.HostListResponse | contract.RoomCreateResponse | contract.RoomRepoAddResponse | contract.RepoCISetResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse
+		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.HostSetLimitsResponse | contract.HostListResponse | contract.RoomCreateResponse | contract.RoomDeleteResponse | contract.RoomRepoAddResponse | contract.RepoCISetResponse | contract.RoomReposResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse
 }
 
 func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
@@ -156,8 +158,8 @@ func (c *socketClient) File(ctx context.Context, hash string, out io.Writer) err
 	return err
 }
 
-func (c *socketClient) Upload(ctx context.Context, path string) (contract.Attachment, error) {
-	return post.UploadHTTP(ctx, c.http, path)
+func (c *socketClient) Upload(ctx context.Context, room contract.RoomID, path string) (contract.Attachment, error) {
+	return post.UploadHTTP(ctx, c.http, room, path)
 }
 
 type commandExit int
@@ -181,6 +183,12 @@ func (c *socketClient) SessionStop(ctx context.Context, q contract.SessionStopRe
 
 func (c *socketClient) RoomCreate(ctx context.Context, q contract.RoomCreateRequest) (contract.RoomCreateResponse, error) {
 	return call[contract.RoomCreateRequest, contract.RoomCreateResponse](ctx, c, contract.MethodRoomCreate, q)
+}
+func (c *socketClient) HostSetLimits(ctx context.Context, q contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, error) {
+	return call[contract.HostSetLimitsRequest, contract.HostSetLimitsResponse](ctx, c, contract.MethodHostSetLimits, q)
+}
+func (c *socketClient) RoomDelete(ctx context.Context, q contract.RoomDeleteRequest) (contract.RoomDeleteResponse, error) {
+	return call[contract.RoomDeleteRequest, contract.RoomDeleteResponse](ctx, c, contract.MethodRoomDelete, q)
 }
 func (c *socketClient) RepoCISet(ctx context.Context, q contract.RepoCISetRequest) (contract.RepoCISetResponse, error) {
 	return call[contract.RepoCISetRequest, contract.RepoCISetResponse](ctx, c, contract.MethodRepoCISet, q)
@@ -366,6 +374,21 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	add.Flags().StringSliceVar(&hostRooms, "room", nil, "Room ID allowed on this host (repeatable; default: all rooms)")
 	add.Flags().StringVar(&ssh, "ssh", "", "SSH destination")
 	add.Flags().BoolVar(&admin, "owner-only-admin", false, "Only the owner has host admin rights")
+	var limitRooms []string
+	var limitAll bool
+	limitHost := &cobra.Command{Use: "limit NAME", Short: "Set the rooms a host serves", Long: "Replace the rooms a host serves. Boxes already on the host stay there. A room delete refuses while it is the only room of a host, so this is how to clear that refusal.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if limitAll == (len(limitRooms) > 0) {
+			return fmt.Errorf("pass --room for each room to serve, or --all for every room")
+		}
+		rooms := make([]contract.RoomID, len(limitRooms))
+		for i, room := range limitRooms {
+			rooms[i] = contract.RoomID(room)
+		}
+		_, err := getClient().HostSetLimits(cmd.Context(), contract.HostSetLimitsRequest{Host: contract.HostName(args[0]), Rooms: rooms})
+		return err
+	}}
+	limitHost.Flags().StringSliceVar(&limitRooms, "room", nil, "Room ID this host serves (repeatable)")
+	limitHost.Flags().BoolVar(&limitAll, "all", false, "Serve every room")
 	list := &cobra.Command{Use: "list", Args: cobra.NoArgs, Short: "Show each host's disk use", RunE: func(cmd *cobra.Command, _ []string) error {
 		r, err := getClient().HostList(cmd.Context(), contract.HostListRequest{})
 		if err != nil {
@@ -376,13 +399,16 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			if h.DiskLow {
 				state = "low"
 			}
+			if h.Leftovers > 0 {
+				state += fmt.Sprintf("\t%d left from deleted rooms", h.Leftovers)
+			}
 			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", h.Name, humanize.IBytes(uint64(h.DiskUsed)), humanize.IBytes(uint64(h.DiskBytes)), state); err != nil {
 				return err
 			}
 		}
 		return nil
 	}}
-	host.AddCommand(add, list)
+	host.AddCommand(add, limitHost, list)
 	root.AddCommand(host)
 
 	room := &cobra.Command{Use: "room"}
@@ -420,6 +446,15 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		return err
 	}}
 	create.Flags().StringVar(&rootProfile, "root-profile", "", "Root session profile")
+	var discardRoom bool
+	deleteRoom := &cobra.Command{Use: "delete ROOM --discard", Short: "Delete a room and all its data", Long: "Delete a room: its sessions, boxes, posts, files, transcripts and shared folder. Unpushed work is lost and archive refs are deleted. The deletion runs in the background; it resumes after a restart. A host that is offline is cleaned when it returns; host list counts what it still holds. It refuses while an account or host is limited to this room alone, because an empty limit means every room: change those limits first.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if !discardRoom {
+			return fmt.Errorf("deleting a room discards all its work; pass --discard to confirm")
+		}
+		_, err := getClient().RoomDelete(cmd.Context(), contract.RoomDeleteRequest{Room: contract.RoomID(args[0]), Discard: true})
+		return err
+	}}
+	deleteRoom.Flags().BoolVar(&discardRoom, "discard", false, "Confirm that all the room's work is discarded")
 	var follow bool
 	log := &cobra.Command{Use: "log ROOM", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		c := getClient()
@@ -500,7 +535,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	repoCI.Flags().StringVar(&ciSize, "size", string(contract.BoxSizeLarge), "Runner size: its CPUs, memory and disk cap")
 	_ = repoCI.MarkFlagRequired("mode") // fails only for an undefined flag
 	repo.AddCommand(addRepo, listRepos, repoCI)
-	room.AddCommand(create, log, repo)
+	room.AddCommand(create, deleteRoom, log, repo)
 	root.AddCommand(room)
 
 	session := &cobra.Command{Use: "session"}
@@ -563,7 +598,10 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	var mentions, paths []string
 	postCmd := &cobra.Command{Use: "post TEXT", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		c := getClient()
-		request, checks, err := (post.Preparer{Upload: c.Upload, Render: visual.Preview}).Prepare(cmd.Context(), tools.PostInput{Room: contract.RoomID(postRoom), Text: args[0], Mentions: mentions, Paths: paths, HTML: htmlPath, AllowNet: allowNet, VisualUpdate: contract.EventID(update)})
+		upload := func(ctx context.Context, path string) (contract.Attachment, error) {
+			return c.Upload(ctx, contract.RoomID(postRoom), path)
+		}
+		request, checks, err := (post.Preparer{Upload: upload, Render: visual.Preview}).Prepare(cmd.Context(), tools.PostInput{Room: contract.RoomID(postRoom), Text: args[0], Mentions: mentions, Paths: paths, HTML: htmlPath, AllowNet: allowNet, VisualUpdate: contract.EventID(update)})
 		if err != nil {
 			return err
 		}

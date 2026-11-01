@@ -4,12 +4,13 @@ import (
 	"context"
 	"testing"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
 
 func TestInstructionsStaleSave(t *testing.T) {
 	s, room, worker, ctx := setup(t)
-	s.SetFilesDir(t.TempDir())
+	s.SetLayout(box.Layout{Data: t.TempDir()})
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	before, problem := s.InstructionsGet(ctx, owner, contract.InstructionsGetRequest{Room: room})
 	if problem != nil || before.Text != "" || before.Hash == "" || before.SavedAt != nil {
@@ -35,7 +36,7 @@ func TestInstructionsStaleSave(t *testing.T) {
 
 func TestInstructionsSaveDoesNotWaitForPublisher(t *testing.T) {
 	s, room, _, ctx := setup(t)
-	s.SetFilesDir(t.TempDir())
+	s.SetLayout(box.Layout{Data: t.TempDir()})
 	entered, release := make(chan struct{}), make(chan struct{})
 	s.SetInstructionsPublisher(func(context.Context) { go func() { close(entered); <-release }() })
 	defer close(release)
