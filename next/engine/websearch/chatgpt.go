@@ -77,7 +77,14 @@ func (c ChatGPT) Search(ctx context.Context, q Query) ([]Result, error) {
 	if stream.failure != nil {
 		return nil, stream.failure
 	}
-	return capped(c.Name(), q, stream.chatGPTResults()), nil
+	if !stream.completed {
+		return nil, fmt.Errorf("chatgpt answer stopped early")
+	}
+	results := stream.chatGPTResults()
+	if len(results) == 0 {
+		return nil, fmt.Errorf("chatgpt answer had no search citations")
+	}
+	return capped(c.Name(), q, results), nil
 }
 
 // chatGPTRequest is the body of a search request. It stores nothing and
