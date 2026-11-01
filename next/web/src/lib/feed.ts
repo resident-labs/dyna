@@ -53,7 +53,7 @@ export const causes: Record<FailureCause, string> = {
   engine_restarted: "Dyna restarted while it set up the workspace",
   remove_failed: "Dyna could not remove its workspace",
   archive_failed: "Dyna could not save the session's branch",
-  grant_inactive: "The host execution grant expired or was revoked",
+  grant_inactive: "The host execution grant is no longer active",
   host_lost: "The host stopped answering during the run",
   host_busy: "host busy, try again later",
   nested_device_missing: "The host lacks the TUN device needed for nested containers",
@@ -92,6 +92,8 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
   const rows: Row[] = [];
   let work: Event[] = [];
   let deferred: Row[] = [];
+  const turns = new Map<string, { session: string; at: string; posted: boolean; significant: boolean; events: Event[] }>();
+  const turnRequests = new Map<string, string>();
   let today = "";
   const requests = new Map<string, Extract<Row, { kind: "request" }>>();
   const decided = new Set(events.flatMap(event => event.type === "op.decided" ? [event.body.id] : []));
@@ -135,23 +137,58 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       previous.to.length !== to.length || previous.to.some((target, i) => !sameAuthor(target, to[i]));
     rows.push({ kind: "post", key, from, at, text, attachments, first, to, ...pending && { pending } });
   };
+  // A post that carried a final reply goes to that reply's target too. The engine records this at the turn's end, later
+  // than the post, so the targets are gathered first.
+  const carried = new Map<string, Principal[]>();
+  for (const event of events) {
+    if (event.type !== "turn.ended") continue;
+    for (const { reply, posted } of event.body.replies ?? []) {
+      if (posted && reply.target) carried.set(posted, [...carried.get(posted) ?? [], reply.target]);
+    }
+  }
   for (const event of events) {
     // Account alerts are owner-only and never belong to a room feed.
-    if (event.type === "account.failed" || event.type === "account.quota_low") continue;
+    if (event.type === "account.failed" || event.type === "account.quota_low" || event.type === "host.disk_low") continue;
     const firstAt = work[0]?.at ?? (deferred[0]?.kind === "notice" ? deferred[0].event.at : deferred[0]?.kind === "failed" || deferred[0]?.kind === "request" || deferred[0]?.kind === "restarted" ? deferred[0].at : undefined);
     if (firstAt && new Date(firstAt).toDateString() !== new Date(event.at).toDateString()) flush();
     if (event.type === "post.created") {
-      if (sameHome(event.body.home, home)) post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, event.body.attachments ?? [], event.body.mentions ?? []);
+      const mentions = event.body.mentions ?? [];
+      const replied = (carried.get(event.id) ?? []).filter(target => !mentions.some(mention => sameAuthor(mention, target)));
+      if (sameHome(event.body.home, home)) {
+        for (const turn of turns.values()) if (turn.session === event.from.session) turn.posted = true;
+        post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, event.body.attachments ?? [], [...mentions, ...replied]);
+      }
       continue;
     }
     // A decision can come from a session outside a DM, so it updates the request's row before the DM filter.
     if (event.type === "op.decided" || event.type === "op.ran") {
+      const turn = turns.get(turnRequests.get(event.body.id) ?? "");
+      if (turn && event.type === "op.decided") { turn.events.push(event); continue; }
       const row = requests.get(event.body.id);
       if (row) row.request = { ...row.request, ...event.body };
       else if (event.type === "op.decided" && home.kind === "feed") work.push(event);
       continue;
     }
     const session = subject(event);
+    if (event.type === "turn.started") {
+      if (home.kind !== "dm" || session === home.session) turns.set(event.body.turn, { session: event.body.session, at: event.at, posted: false, significant: false, events: [event] });
+      continue;
+    }
+    if (event.type === "shell.job.ended" || event.type === "op.requested") {
+      const entry = [...turns].find(([, turn]) => turn.session === session);
+      let claimed = false;
+      if (entry) {
+        const [id, turn] = entry;
+        turn.significant = true;
+        if (event.type === "shell.job.ended" || (decided.has(event.body.id) && !retainedRequests.has(event.body.id))) {
+          turn.events.push(event);
+          if (event.type === "op.requested") turnRequests.set(event.body.id, id);
+          claimed = true;
+        }
+      }
+      if (claimed) continue;
+      // A job without an open turn stays in the work buffer below.
+    }
     if (home.kind === "dm" && session !== home.session) continue;
     if (event.type === "room.paused" || event.type === "room.resumed" || event.type === "room.limits_changed") {
       const previous = deferred.at(-1);
@@ -184,28 +221,28 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       // A final reply that no post of the session already carried is the session's answer here.
       const answer = event.body.final && (event.body.replies ?? []).find(({ reply, posted }) =>
         reply.kind === "final" && !posted && sameHome(reply.home ?? { kind: "feed" }, home));
-      // Only the end of a turn whose start the row holds ends the row's time.
-      const turn = event.body.turn;
-      if (event.body.final && answer) {
-        const until = work.some(e => e.type === "turn.started" && e.body.turn === turn) ? event.at : undefined;
-        // A reloaded DM window holds only posts and the turns that answered in it, so this end is the turn's only event.
-        // The work row keeps it, so the turn's steps can still open above its answer.
-        if (home.kind === "dm") work.push(event);
-        flush(until);
-      }
+      const turn = turns.get(event.body.turn);
+      turns.delete(event.body.turn);
       if (event.body.final && answer) {
         post(`a${event.seq}`, event.seq, { kind: "session", session: event.body.session }, event.at, event.body.final, [], answer.reply.target ? [answer.reply.target] : []);
       }
       // A failed turn always gets its own row, even after its answer; it never folds into a work row. Its error is the
       // harness's raw text (r8), so the row shows only the owner words for its typed cause.
       if (event.body.outcome === "failed") {
-        if (work.some(e => e.type === "turn.started" && e.body.turn === turn)) work.push(event);
+        if (turn && turn.events.length > 1) work.push(...turn.events);
         const cause = event.body.cause;
         deferred.push({ kind: "failed", key: `f${event.seq}`, seq: event.seq, session: event.body.session, at: event.at, label: "Turn failed", cause: cause ? causes[cause] : "" });
       }
-      if (answer || event.body.outcome === "failed") continue;
+      const posted = turn?.posted || !!answer;
+      const duration = turn ? Date.parse(event.at) - Date.parse(turn.at) : NaN;
+      // A turn whose start is outside the window keeps its row.
+      if (event.body.outcome !== "failed" && (!posted || turn?.significant || event.body.outcome === "stopped" || !(duration < 60_000))) {
+        if (turn) work.push(...turn.events);
+        work.push(event);
+      }
+      continue;
     }
-    work.push(event);
+    if (event.type !== "session.profile_changed" && event.type !== "transcript.changed") work.push(event);
   }
   for (const sent of pending) post(`n${sent.id}`, 0, { kind: "owner" }, sent.at, sent.text, sent.attachments, sent.to, sent);
   flush();
@@ -238,13 +275,15 @@ export const eventGroups: Record<Event["type"], string> = {
 // A full moment for a title, such as "Oct 31, 2026, 4:48 AM".
 export const fullTime = (value: string): string => new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 
+export const clock = (at: string): string => clockFormatter.format(new Date(at));
+
 // The muted time on a row's name line: the clock today, else the date and the clock. Every row that scrolls in calls
 // it, and toLocaleTimeString builds a new formatter on each call, so the two formatters are made once.
-const clock = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" });
+const clockFormatter = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" });
 const date = new Intl.DateTimeFormat([], { month: "short", day: "numeric" });
 export function formatTime(value: string): string {
   const at = new Date(value);
-  return at.toDateString() === new Date().toDateString() ? clock.format(at) : `${date.format(at)}, ${clock.format(at)}`;
+  return at.toDateString() === new Date().toDateString() ? clockFormatter.format(at) : `${date.format(at)}, ${clockFormatter.format(at)}`;
 }
 
 // A post the owner forwards, as the composer holds it until a send or a remove.
@@ -318,7 +357,7 @@ export const closedSession = "A closed session";
 const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
 
 // Why the engine closed a session, after "closed". The engine closes a session whose box stayed stopped for 7 days.
-const closeReasons: Record<SessionCloseReason, string> = { dormant: "after 7 quiet days" };
+const closeReasons: Record<SessionCloseReason, string> = { dormant: "after 7 quiet days", disk: "to free disk" };
 
 // One short line per work row in the owner's terms, such as "lead-web worked for 6 min · 2 turns · 1 job" or
 // "builder-feed started · 3 sessions worked for 12 min · 4 turns"; the opened row lists each event.
@@ -326,9 +365,9 @@ const closeReasons: Record<SessionCloseReason, string> = { dormant: "after 7 qui
 // "Worked for 20s"; without both ends the line says "lead-web worked · 2 turns". A DM's saved steps give the start
 // that a reloaded window lacks.
 export function workSummary(events: Event[], name: Name, until?: string, from?: string): string {
-  if (events.length === 1 && !until && events[0].type !== "computer.changed" && !(events[0].type === "session.closed" && events[0].body.reason)) return describe(events[0], name) || "Activity";
+  if (events.length === 1 && !until && events[0].type !== "turn.started" && events[0].type !== "turn.ended" && events[0].type !== "shell.job.ended" && events[0].type !== "computer.changed" && !(events[0].type === "session.closed" && events[0].body.reason)) return describe(events[0], name) || "Activity";
   const turns = new Set<string>();
-  let stopped = 0, images = 0, prs = 0, started = 0, closed = 0, memory = 0;
+  let stopped = 0, jobs = 0, images = 0, prs = 0, started = 0, closed = 0, memory = 0;
   const approvals = new Map<string, number>();
   let first = Infinity, last = -Infinity;
   for (const event of events) {
@@ -341,6 +380,7 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
         break;
       case "session.started": started++; break;
       case "session.closed": if (!event.body.reason) closed++; break;
+      case "shell.job.ended": jobs++; break;
       case "image.built": images++; break;
       case "pr.opened": prs++; break;
       case "box.pressure": memory++; break;
@@ -352,9 +392,13 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
   const minutes = Math.round((last - first) / 60_000);
   const took = minutes < 1 ? "under a minute" : minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${minutes % 60} min` : ""}`;
   const sessions = [...turns];
+  const named = sessions.slice(0, 3).map(name);
+  const names = named.length < 2 ? named[0] : named.length === 2 ? named.join(" and ") : `${named.slice(0, -1).join(", ")} and ${named.at(-1)}`;
+  const workers = sessions.length > 3 ? `${named.join(", ")} and ${sessions.length - 3} more` : names;
   const parts = [
-    sessions.length && `${sessions.length === 1 ? name(sessions[0]) : count(sessions.length, "session")} worked${sessions.length === 1 && last >= first ? ` for ${took}` : ""}`,
+    sessions.length && `${workers} worked${sessions.length === 1 && last >= first ? ` for ${took}` : ""}`,
     stopped && `${count(stopped, "turn")} stopped`,
+    jobs && count(jobs, "job"),
     images && `${count(images, "image")} built`,
     prs && `${count(prs, "pull request")} opened`,
     ...[...approvals].map(([by, amount]) => `${count(amount, "approval")} by ${by}`),
@@ -362,7 +406,7 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
     closed && `${closed} closed`,
     memory && count(memory, "memory warning"),
   ].filter((part): part is string => typeof part === "string").slice(0, 4);
-  return parts.join(" · ") || (events.length === 1 && events[0].type !== "computer.changed" && !(events[0].type === "session.closed" && events[0].body.reason) ? describe(events[0], name) : "") || "Activity";
+  return parts.join(" · ") || events.map(event => describe(event, name)).find(Boolean) || "Activity";
 }
 
 // One plain line for an event inside an opened work row.
@@ -374,8 +418,8 @@ export function describe(event: Event, name: Name): string {
     case "session.moved": return `${name(event.body.session)} moved under ${name(event.body.newParent)}`;
     case "computer.changed": return `${name(event.body.session)} ${event.body.to === "running" ? "opened" : "closed"} its computer`;
     case "box.changed": return ""; // feedRows keeps box changes out of work rows.
-    case "turn.started": return `${name(event.body.session)} started a turn`;
-    case "turn.ended": return event.body.outcome === "failed" ? "" : event.body.outcome === "stopped" ? `${name(event.body.session)}'s turn stopped` : `${name(event.body.session)} finished a turn`;
+    case "turn.started": return "";
+    case "turn.ended": return event.body.outcome === "stopped" ? `${name(event.body.session)}'s turn stopped` : "";
     // Live only: the room store keeps it out of every feed window.
     case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "host.disk_low": case "conversation.read": return "";
     case "turn.activity": return event.body.label;

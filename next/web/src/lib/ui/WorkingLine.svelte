@@ -6,7 +6,7 @@
   import type { Conversation } from "../contract.gen.ts";
   // The live line above the composer, as Discord's typing line: who is working now, and with one session, what it does.
   // A DM names only its own session. A session that waits for the owner is waiting, not working (status.ts).
-  let { store, home }: { store: RoomStore; home: Conversation } = $props();
+  let { store, home, navigate }: { store: RoomStore; home: Conversation; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void } = $props();
   let working = $derived([...store.sessions.values()]
     .filter(open => (home.kind === "feed" || open.session === home.session) && store.status(open.session) === "working"));
   let named = $derived(working.length > 3 ? working.slice(0, 2) : working);
@@ -18,7 +18,7 @@
      not each activity label. -->
 <p class="working" aria-live="polite">
   {#if working.length}<WorkingDot />
-    <span class="text">{#each named as open, i (open.session)}{#if i}{i === named.length - 1 && !more ? " and " : ", "}{/if}<strong style:--hue={hue(open.name)}>{open.name}</strong>{/each}{#if more}{` and ${more} more`}{/if}
+    <span class="text">{#each named as open, i (open.session)}{#if i}{i === named.length - 1 && !more ? " and " : ", "}{/if}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(open.session)}`} onclick={navigate} style:--hue={hue(open.name)}>{open.name}</a>{/each}{#if more}{` and ${more} more`}{/if}
       {working.length > 1 ? "are" : "is"} working{#if activity}<span aria-hidden="true">{` · ${shortPaths(activity)}`}</span>{/if}</span>
   {/if}
 </p>
@@ -28,5 +28,7 @@
   .working { flex: none; height: 20px; margin: 0 0 4px; padding: 0 16px 0 30px;
     display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; line-height: 20px; white-space: nowrap; }
   .text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  strong { font-weight: 600; color: oklch(var(--id-name) var(--hue)); }
+  a { font-weight: 600; color: oklch(var(--id-name) var(--hue)); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 </style>
