@@ -9,7 +9,31 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/harness/pi"
 )
+
+func TestLargeCodemodePreviewAdvancesOlderPage(t *testing.T) {
+	call := map[string]string{"name": "read", "args": `{"path":"` + strings.Repeat("x", 1024) + `"}`, "status": "error", "error": strings.Repeat("\x01", 1024)}
+	calls := make([]map[string]string, 256)
+	for i := range calls {
+		calls[i] = call
+	}
+	details, _ := json.Marshal(struct {
+		Calls []map[string]string `json:"calls"`
+	}{Calls: calls})
+	data := `{"type":"message","message":{"role":"user","deliveryId":"1"}}` + "\n" +
+		`{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"c","name":"codemode","arguments":{"code":"ok"}}]}}` + "\n" +
+		`{"type":"message","message":{"role":"toolResult","toolCallId":"c","content":[],"details":` + string(details) + `}}` + "\n"
+	items, _, _, err := pi.ReadTranscript(strings.NewReader(data), map[contract.DeliverySeq]contract.TurnID{1: "t"}, "x", "", 0, 10)
+	if err != nil || len(items) != 1 || items[0].CallsOmitted == 0 {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	turn := contract.TranscriptTurn{Items: []contract.TranscriptItem{items[0].TranscriptItem, {ID: "older", Kind: contract.TranscriptText, Text: "earlier"}}}
+	budgetTranscriptTurn(&turn, contract.TranscriptReadRequest{Page: contract.TranscriptPageOlderItems}, 180<<10)
+	if len(turn.Items) != 2 || turn.OlderItems {
+		t.Fatalf("older page did not advance: %+v", turn)
+	}
+}
 
 func TestTranscriptReadOwnerAndTurn(t *testing.T) {
 	s, ctx, caller := transcriptCaller(t)

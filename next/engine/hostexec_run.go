@@ -167,3 +167,14 @@ func (s *Service) StopHostexecs(ctx context.Context) error {
 	}
 	return nil
 }
+
+func (s *Service) HostexecList(ctx context.Context, who contract.Principal, _ contract.HostexecListRequest) (contract.HostexecListResponse, *contract.Error) {
+	if who.Kind != contract.PrincipalOwner {
+		return contract.HostexecListResponse{}, forbidden()
+	}
+	grants, err := s.store.ListHostexecGrants(ctx, s.now())
+	if err != nil {
+		return contract.HostexecListResponse{}, failure(err)
+	}
+	return contract.HostexecListResponse{Grants: grants}, nil
+}

@@ -289,6 +289,25 @@
   let feed: HTMLDivElement | undefined = $state();
   let page: HTMLElement | undefined = $state();
   let composer: HTMLTextAreaElement | undefined = $state();
+  let composerBox: Composer | undefined = $state();
+  // Files dragged over the center column show a muted outline. A drop adds them to the open draft while the composer shows.
+  let dropping = $state(false);
+  const hasFiles = (event: DragEvent) => !!event.dataTransfer?.types.includes("Files");
+  function dragOver(event: DragEvent) {
+    if (!composerBox || !hasFiles(event)) return;
+    event.preventDefault();
+    dropping = true;
+  }
+  function dragLeave(event: DragEvent & { currentTarget: HTMLElement }) {
+    if (!event.currentTarget.contains(event.relatedTarget instanceof Node ? event.relatedTarget : null)) dropping = false;
+  }
+  function drop(event: DragEvent) {
+    dropping = false;
+    if (!composerBox || !hasFiles(event)) return;
+    event.preventDefault();
+    composerBox.addFiles(event.dataTransfer?.files ?? []);
+    composer?.focus();
+  }
   let members: HTMLElement | undefined = $state();
   let computer: HTMLElement | undefined = $state();
   let terminals: TermDock | undefined = $state();
@@ -621,7 +640,8 @@
   </aside>
   {#if drawer || (panel && phone.current)}<button type="button" class="scrim" tabindex="-1" aria-label={drawer ? "Close the menu" : room ? "Close the sessions" : "Close the active rooms"}
     onclick={() => void (drawer ? showDrawer(false, true, true) : showPanel(false, true))}></button>{/if}
-  <main bind:clientWidth={mainWidth} class:header-tight={mainWidth <= 1000} class:header-narrow={mainWidth <= 600} inert={drawer || (panel && phone.current) || covered || inSettings}>
+  <main class:session-main={!!session} bind:clientWidth={mainWidth} class:header-tight={mainWidth <= 1000} class:header-narrow={mainWidth <= 600} class:dropping ondragover={dragOver} ondragleave={dragLeave} ondrop={drop} inert={drawer || (panel && phone.current) || covered || inSettings}>
+    {#if dropping}<p class="drop-label">Drop files to attach</p>{/if}
     {#if (section === "new-room" || firstRoom)}<NewRoom {rooms} first={firstRoom} onclose={() => void closeSection()} oncreated={id => { void attention.created(id).then(() => { firstRoom = false; openLocation(id); }); }} />
     {:else if section === "new-session" && room && store && store.ready}<NewSession {room} {roomName} sessions={[...store.sessions.values()]} onclose={() => void closeSection()} onstarted={(id, brief) => { startingBriefs[id] = brief; openLocation(room!, id); }} />
     {:else if section === "instructions" && room && store && !unavailable}<Instructions {room} {roomName} rooms={rooms.length} sessions={store.sessions.size} onclose={() => void closeSection()} />
@@ -633,7 +653,7 @@
       {#if room && session}<a class="crumb" href={"/r/" + encodeURIComponent(room)} onclick={navigate}>{roomName}</a><span class="count">/</span>
       {:else if room}<span class="hash"><Icon name="room" /></span>{/if}
       {#if session && !closed}<Avatar kind="session" name={title} root={!store?.sessions.get(session)?.parent} size={24} />{/if}
-      <span class="heading"><strong>{title}</strong>
+      <span class="heading"><strong title={title}>{title}</strong>
         {#if closed && !missing}<span class="count">closed</span>{:else if !session && word && !missing}<span class="count word">{word}</span>{/if}
         {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session")}</span>{/if}</span>
       {#if store && !unavailable}
@@ -670,7 +690,7 @@
       {#if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
         {#if attention.can("operate")}<button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button>{/if}</p>
       {:else if store && !session}<WorkingLine {store} {home} />{/if}
-      {#if attention.can("operate")}<Composer bind:element={composer} bind:value={() => savedDrafts.draft(key, drafts[key]),text => { drafts[key] = text; savedDrafts.save(key, text); clearReplacement(); }} onsend={send} thread={!!session} placeholder={"Message " + title}
+      {#if attention.can("operate")}<Composer bind:this={composerBox} bind:element={composer} bind:value={() => savedDrafts.draft(key, drafts[key]),text => { drafts[key] = text; savedDrafts.save(key, text); clearReplacement(); }} onsend={send} thread={!!session} placeholder={"Message " + title}
         quote={quotes[key]} replacement={replaced[key]} onundo={() => { quotes[key] = undoForward({ quote: quotes[key], previous: replaced[key] }).quote; clearReplacement(); }} onunquote={() => { quotes[key] = undefined; clearReplacement(); }} sessions={mentions} files={files(key)} {stop} />
       {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
     {/if}
@@ -754,6 +774,10 @@
   @media (max-width: 760px) { .crumb, .crumb + .count { display: none; } }
   @media (max-width: 760px) { main .tool { justify-content: center; width: 40px; height: 40px; padding: 0; border: 0; } }
   main { position: relative; }
+  /* A dashed accent outline marks the column that takes a dropped file; a muted label names the action. */
+  main.dropping { outline: 2px dashed var(--focus); outline-offset: -8px; border-radius: 8px; }
+  .drop-label { position: absolute; inset: 8px; z-index: 1; display: grid; place-items: center; margin: 0; border-radius: 8px; background: color-mix(in srgb, var(--bg) 85%, transparent); color: var(--muted); font-size: 14px; pointer-events: none; }
+  main.session-main { container: session-header / inline-size; }
   .terminal-holder:not([hidden]) { display: contents; }
   :where(main.header-tight) .tool { justify-content: center; width: 28px; padding: 0; }
   /* One quiet line of the working line's size and edge; only its Resume acts. */
@@ -770,9 +794,13 @@
   .heading { display: contents; }
   /* The header has one line, and a failed session's word is a sentence, so the word gives way and the title stays whole. */
   .word { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .heading strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  @media (min-width: 641px) { .word { flex: 1 1 0; } }
+  .heading strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (min-width: 641px) {
+    .word { flex: 1 1 0; }
+    .session-bar .heading strong { min-width: min(8rem, 100%); }
+  }
   .crumb { flex: none; max-width: 25%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @container session-header (max-width: 500px) { .session-bar .crumb, .session-bar .crumb + .count { display: none; } }
   .hash { display: inline-flex; align-items: center; }
   /* A phone's header: the menu button, the title over its muted counts, Requests only while something waits (40 px
      targets), and the Sessions button with its count. The room menu's one action, Terminal, moves into the drawer. */

@@ -15,9 +15,10 @@ import (
 var errAccountAction = errors.New("account action unavailable")
 
 type accountActionResult struct {
-	connect contract.AccountsConnectResponse
-	key     contract.AccountsSetKeyResponse
-	err     error
+	connect  contract.AccountsConnectResponse
+	key      contract.AccountsSetKeyResponse
+	imported contract.AccountsImportOAuthResponse
+	err      error
 }
 
 type AccountActions struct {
@@ -48,6 +49,8 @@ func (a *AccountActions) Entry() approve.Entry {
 				name = "Complete account authorization"
 			case contract.AccountActionComplete:
 				name = "Check account connection"
+			case contract.AccountActionImportOAuth:
+				name = "Import account sign-in"
 			case contract.AccountActionSetKey:
 				name = "Save account key"
 			case contract.AccountActionRemove:
@@ -249,4 +252,19 @@ func (s *AccountActions) AccountsSetLimits(ctx context.Context, caller contract.
 		return accountActionResult{err: s.service.store.SetAccountRooms(ctx, req.AccountID, req.Rooms)}
 	})
 	return contract.AccountsSetLimitsResponse{}, problem
+}
+
+func (s *AccountActions) AccountsImportOAuth(ctx context.Context, caller contract.Principal, req contract.AccountsImportOAuthRequest) (contract.AccountsImportOAuthResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalOwner {
+		return contract.AccountsImportOAuthResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "forbidden"}
+	}
+	req.Label = strings.TrimSpace(req.Label)
+	if (req.Provider != contract.ProviderKimi && req.Provider != contract.ProviderXAI) || req.Label == "" || len(req.Label) > 128 || strings.ContainsAny(req.Label, "\r\n@") || req.ExpiresAt.Unix() <= 0 || len(req.Credential) == 0 || len(req.Credential) > 16384 {
+		return contract.AccountsImportOAuthResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "invalid account input"}
+	}
+	result, problem := s.runAccountAction(ctx, caller, contract.AccountActionImportOAuth, "", func(ctx context.Context) accountActionResult {
+		out, err := s.connections.ImportOAuth(ctx, req)
+		return accountActionResult{imported: out, err: err}
+	})
+	return result.imported, problem
 }
