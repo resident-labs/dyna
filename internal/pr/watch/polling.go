@@ -52,6 +52,7 @@ func (s *Service) refreshUnwatchedFromProbe(ctx context.Context, key string, for
 		return err
 	}
 	gh := s.github(r.RoomID)
+	gh.runPhase = ghquota.RunUnwatchedRefresh
 	gh.requests = &requestCache{entries: st.Responses[key], used: map[string]cachedResponse{}, rates: st.RateLimits, legacyPause: st.LegacyPause, now: s.now}
 	var pull Pull
 	var requestErr error
@@ -199,6 +200,7 @@ func pullVersion(p Pull, policy ChangePolicy) string {
 // The version is saved only by process after a complete poll, so partial or
 // failed snapshots cannot turn the next attempt into a cheap success.
 func (g GitHub) pollSnapshot(ctx context.Context, r Record, policy ChangePolicy) (Snapshot, bool, error) {
+	g.runPhase = ghquota.RunWatchSnapshot
 	ref := refRecord(r)
 	pull, err := g.Pull(ctx, ref)
 	if err != nil {

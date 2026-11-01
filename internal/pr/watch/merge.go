@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"dyna-agent/internal/ghclient"
+	"dyna-agent/internal/ghquota"
 	"dyna-agent/internal/locallane"
 	"dyna-agent/internal/pr/facts"
 	"dyna-agent/internal/pr/state"
@@ -430,7 +431,9 @@ func (s *Service) publishMerge(ctx context.Context, current Record, children []R
 			log.Printf("merge landed event for %s: %v", changeID(current), noticeErr)
 		}
 	}
-	pull, readErr := s.github(current.RoomID).Pull(ctx, refRecord(current))
+	gh := s.github(current.RoomID)
+	gh.runPhase = ghquota.RunMergePublication
+	pull, readErr := gh.Pull(ctx, refRecord(current))
 	if readErr == nil && pull.Merged {
 		processErr := s.process(ctx, current.Key, Snapshot{Pull: pull, headConfirmed: true}, "", "", nil, nil, false)
 		// Processing can defer behind another publication, or report a cleanup

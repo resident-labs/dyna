@@ -622,7 +622,9 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 				}
 				continue
 			}
-			pull, err := s.github(member.RoomID).Pull(ctx, refRecord(member))
+			gh := s.github(member.RoomID)
+			gh.runPhase = ghquota.RunTrialPublication
+			pull, err := gh.Pull(ctx, refRecord(member))
 			if err != nil {
 				return err
 			}
