@@ -56,6 +56,7 @@ const (
 	MethodRoomCreate              Method = "room.create"
 	MethodRoomRepoAdd             Method = "room.repo.add"
 	MethodRoomRepos               Method = "room.repos"
+	MethodRepoCISet               Method = "repo.ci.set"
 	MethodSessionStart            Method = "session.start"
 	MethodSessionClose            Method = "session.close"
 	MethodSessionStop             Method = "session.stop"
@@ -328,6 +329,24 @@ type RoomRepoAddResponse struct{}
 type RoomReposRequest struct {
 	Room RoomID `json:"room"`
 }
+
+// RepoCIHost keeps Runners ephemeral CI runners of Size on Host for Repo.
+type RepoCIHost struct {
+	Repo    RepoName    `json:"repo"`
+	Host    HostName    `json:"host"`
+	Runners int         `json:"runners"`
+	Size    BoxSizeName `json:"size"`
+	// Room is the repository's default room. Admission checks it against the host; the engine sets it.
+	Room RoomID `json:"room,omitempty"`
+}
+
+// RepoCISetRequest replaces a repository's CI mode and runner hosts.
+type RepoCISetRequest struct {
+	Repo  RepoName     `json:"repo"`
+	Mode  CIMode       `json:"mode"`
+	Hosts []RepoCIHost `json:"hosts,omitempty"`
+}
+type RepoCISetResponse struct{}
 type RoomReposResponse struct {
 	Repos []RoomRepo `json:"repos"`
 }
