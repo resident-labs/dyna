@@ -39,6 +39,23 @@ type Forward struct {
 	Box                  contract.BoxID
 	HostPath, EnginePath string
 }
+
+// RunnerSpec is one ephemeral CI runner. Config is its single-job JIT config, a secret.
+type RunnerSpec struct {
+	Name, Image, Config string
+	Repo                contract.RepoName
+	ID                  int64 // GitHub's runner ID
+	Size                contract.BoxSize
+}
+
+// Runner is a runner container found on a host.
+type Runner struct {
+	Name    string
+	Repo    contract.RepoName
+	ID      int64
+	Running bool
+}
+
 type HostDriver interface {
 	EnsureSlice(context.Context, Slice) error
 	RemoveSlice(context.Context, string) error
