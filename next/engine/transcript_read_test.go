@@ -307,3 +307,85 @@ func TestTranscriptPostPreviewBoundsJSONEscapes(t *testing.T) {
 		t.Fatalf("preview bytes=%d, err=%v", len(data), err)
 	}
 }
+
+func TestTranscriptInputAttachmentsAndBudget(t *testing.T) {
+	s, ctx, caller := transcriptCaller(t)
+	session, err := s.store.Session(ctx, caller.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachments := make([]contract.Attachment, 16)
+	for i := range attachments {
+		attachments[i] = contract.Attachment{Name: "token=secretvalue" + strings.Repeat("\x01", 200), Media: strings.Repeat("\x01", 200), SHA256: strings.Repeat("a", 64), Bytes: 42}
+	}
+	checks := make([]contract.VisualCheck, 16)
+	for i := range checks {
+		checks[i].Detail = strings.Repeat("\x01", 200)
+	}
+	attachments[0].Visual = &contract.VisualCard{Title: "token=secretvalue", Checks: checks}
+	ids := make([]contract.EventID, 6)
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		for i := range ids {
+			ids[i] = contract.EventID(fmt.Sprintf("input-%d", i))
+			event := contract.Event{ID: ids[i], Room: session.Room, From: contract.Principal{Kind: contract.PrincipalOwner}, Time: time.Unix(1, 0), Body: contract.PostCreated{Text: "wake", Home: contract.Conversation{Kind: contract.ConversationDM, Session: caller.Session}, Attachments: attachments}}
+			if _, err := s.store.AppendEvent(tx, event); err != nil {
+				return err
+			}
+		}
+		event := contract.Event{ID: "attachment-start", Room: session.Room, From: caller, Time: time.Unix(2, 0), Body: contract.TurnStarted{Session: caller.Session, Turn: "turn_attachments", Inputs: ids}}
+		seq, err := s.store.AppendEvent(tx, event)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_seq) VALUES('turn_attachments',?,0,'','',0,0,0,0,?)", caller.Session, seq)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	after, count := "", 0
+	for pages := 0; ; pages++ {
+		page, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: caller.Session, Turn: "turn_attachments", AfterItem: after})
+		if problem != nil {
+			t.Fatal(problem)
+		}
+		wire, err := json.Marshal(page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded struct {
+			Turns []struct {
+				Inputs []struct {
+					Attachments []contract.Attachment `json:"attachments"`
+				} `json:"inputs"`
+			} `json:"turns"`
+		}
+		if err := json.Unmarshal(wire, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		turnBytes, _ := json.Marshal(page.Turns[0])
+		if len(turnBytes) > 180<<10 || len(wire) > 256<<10 {
+			t.Fatalf("turn=%d response=%d", len(turnBytes), len(wire))
+		}
+		for _, input := range decoded.Turns[0].Inputs {
+			if len(input.Attachments) != 16 {
+				t.Fatalf("attachments=%d", len(input.Attachments))
+			}
+			a := input.Attachments[0]
+			if strings.Contains(a.Name, "secretvalue") || len(a.Name) > 128 || len(a.Media) > 128 || a.SHA256 != strings.Repeat("a", 64) || a.Bytes != 42 || a.Visual == nil || strings.Contains(a.Visual.Title, "secretvalue") || len(a.Visual.Checks[0].Detail) > 128 {
+				t.Fatalf("attachment was not safely preserved: %+v", a)
+			}
+			count++
+		}
+		if !page.Turns[0].More {
+			break
+		}
+		if pages >= 6 || page.Turns[0].After == "" || page.Turns[0].After == after {
+			t.Fatal("input cursor did not advance")
+		}
+		after = page.Turns[0].After
+	}
+	if count != len(ids) {
+		t.Fatalf("received %d of %d inputs", count, len(ids))
+	}
+}
