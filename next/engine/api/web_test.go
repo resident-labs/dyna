@@ -430,6 +430,7 @@ func TestWebReusesMuxWithCurrentScopes(t *testing.T) {
 	for _, read := range []bool{true, false} {
 		devices.read.Store(read)
 		r := httptest.NewRequest(http.MethodPost, "http://dyna.localhost:7790/v1/device.scopes", strings.NewReader("{}"))
+		r.Header.Set("Origin", "http://dyna.localhost:7790")
 		r.AddCookie(&http.Cookie{Name: "dyna_device", Value: "token"})
 		out := httptest.NewRecorder()
 		w.ServeHTTP(out, r)
