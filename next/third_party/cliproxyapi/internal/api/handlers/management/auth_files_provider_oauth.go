@@ -879,7 +879,7 @@ func (h *Handler) RequestMetaToken(c *gin.Context) {
 			return
 		}
 
-		CompleteOAuthSession(state)
+		h.dynaCompleteOAuth(state, record)
 		fmt.Printf("Authentication successful! Token saved to %s\n", savedPath)
 		fmt.Println("You can now use Meta services through this CLI")
 	}()
