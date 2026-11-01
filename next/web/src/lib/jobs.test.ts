@@ -28,6 +28,7 @@ test("only the newest three passed jobs show; a failed job stays in view, and th
   assert.deepEqual([group.jobs.map(j => j.job), group.older.map(j => j.job)], [["broke", "e", "d", "c"], ["b", "a"]]);
 });
 
+// LEGACY(v1-transfer): the cases with no end field in this test, the exit-code fallback. Remove after the transfer.
 test("an end cause reads from the end field, and an older event falls back on its exit code", () => {
   const base = { exitCode: 0 };
   assert.deepEqual([{ ...base, exitCode: 2, end: { kind: "exit", code: 2 } }, { ...base, exitCode: -1, end: { kind: "signal", signal: "SIGTERM" } }, { ...base, exitCode: -1, end: { kind: "stopped" } },

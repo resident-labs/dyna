@@ -621,6 +621,7 @@ A close withdraws its sessions' waiting questions in the transaction that starts
 A waiting question means the session is not finished. It keeps the session from dormant close, disk eviction and idle check-ins, and `dyna_children` says so to the parent. Its box may still stop while quiet.
 
 ## 8. Migration bundle and cutover
+<!-- LEGACY(v1-transfer): sections 8.1 to 8.3 and the import half of 8.4, the bundle and cutover plan. Remove after the transfer. -->
 
 ### 8.1 Bundle parts
 

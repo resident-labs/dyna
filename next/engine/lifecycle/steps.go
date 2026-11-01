@@ -155,6 +155,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			due = r.retryAt(failures)
 		}
 	default:
+		// LEGACY(v1-transfer): the slice != b.Slice check below, which flattens a box on an old nested parent slice. Remove after the transfer.
 		slice, err := box.SliceName(b.ID)
 		if err != nil {
 			return err
