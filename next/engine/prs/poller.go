@@ -160,7 +160,7 @@ func (p *Poller) Pass(ctx context.Context) error {
 			if row.Repo != repo || !ok {
 				continue
 			}
-			update, changed := Compare(row, seen, snapshot.Viewer)
+			update, changed := Compare(row, seen, snapshot.Viewer, p.Now())
 			if changed {
 				updates = append(updates, update)
 				moved = true
