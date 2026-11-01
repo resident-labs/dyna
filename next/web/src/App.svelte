@@ -697,7 +697,7 @@
       {#if blocked}<Blocked kind="unreachable" onretry={connect} />
       {:else if lost === "room"}<Blocked kind="no-room" back={{ href: "/", label: "Go to Home" }} {navigate} />
       {:else if lost === "page"}<Blocked kind="no-page" back={{ href: "/", label: "Go to Home" }} {navigate} />
-      {:else if !room}<Home {attention} {initials} loaded={roomsLoaded} {navigate} onrequests={() => { section = "requests"; }} active={activity.active}
+      {:else if !room}<Home {attention} {initials} loaded={roomsLoaded} {navigate} onrequests={() => { section = "requests"; }} active={activity.active} covered={inSettings}
         onactive={event => { toggle = event.currentTarget; void showPanel(true, event.detail > 0); }} />
       {:else if unavailable === "unreachable"}<Blocked kind="unreachable" onretry={reopen} />
       {:else if store && !unavailable}
