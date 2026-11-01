@@ -145,6 +145,13 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 
 ### Layout
 
+The Profiles and Accounts half-width screenshots exposed missing numbers and overflow: room files `4832709dad7a47e793a1b6c5.png` and `03ce7be85994fd96f47ec811.png`. The owner said: "profiles have no numbers and it looks like it's overflowing too? These are fundamental flaws in the ways we're designing our UIs."
+
+- Lay out every page by its container's width, with container queries, never by the viewport. A tiled window and a phone at the same width get the same layout. [owner, 2026-10-31]
+- Every page works at 1280, 920, 768 and 390 px of window width. Nothing scrolls sideways, and no text or control is cut off. [owner, 2026-10-31]
+- Give every multi-column layout a narrow form. A navigation column becomes a top row. A list beside a detail becomes two steps. Term and description pairs stack below about 500 px of container width. [owner, 2026-10-31]
+- Give every table a narrow form. When its columns do not fit, each row becomes a card with its values under their labels. A column never clips. [owner, 2026-10-31]
+
 - Use a Discord-style server rail: Home first, one square per room, and a short pill on the edge of the selected room. [owner]
 - Open direct messages from the session list on the right. [owner]
 - Show a computer in a floating window over the feed. [owner]
@@ -155,7 +162,8 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 - Show loading as skeleton rows in the shape of the real rows, or as the old data dimmed. Never use a full-page spinner. [T3 `skeleton.tsx`] [v1 `.dimmed`]
 - Give an empty state one muted line that says what will appear and, if useful, one action. No pictures. [spec 5.13] [T3 sidebar empty]
 - Show a load error as one line in the owner's words, with Retry. [v1 LoadFailed]
-- Before a builder shows an empty state on a screenshot, it seeds real-looking data, so that the reviewer sees the full screen. [spec 5.13]
+- Never fill a column with dashes. A missing value says what is missing and offers its action, for example 'Not rated · Rate'. [owner, 2026-10-31]
+- Check every page with two dyna-webdev fixtures: full, real-looking data, and empty real data (no ratings, no accounts, one room, no posts). Reviewers see both. [spec 5.13] [owner, 2026-10-31]
 
 ### Focus and keyboard
 
