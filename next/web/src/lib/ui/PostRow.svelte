@@ -3,7 +3,7 @@
   import Icon from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
   import PostAttachments from "./PostAttachments.svelte";
-  import { formatTime, type Row } from "../feed.ts";
+  import { formatTime, fullTime, type Row } from "../feed.ts";
   import type { Attachment, EventID, VisualCard } from "../contract.gen.ts";
   import { hue } from "../identity.ts";
   import { beginSwipe, moveSwipe, releaseSwipe, ignoredSwipeTarget, type Swipe } from "../swipe.ts";
@@ -128,7 +128,7 @@
   {#if row.first}
     <Avatar kind={row.from.kind} name={author} {root} />
     <p class="name"><strong class={row.from.kind} style:--hue={hue(author)}>{author}</strong>
-      <time datetime={row.at}>{formatTime(row.at)}</time>{#if to}<span class="to">→ {to}</span>{/if}</p>
+      <time datetime={row.at} title={fullTime(row.at)}>{formatTime(row.at)}</time>{#if to}<span class="to">→ {to}</span>{/if}</p>
   {/if}
   <Markdown text={row.text} />
   <PostAttachments {onmedia} attachments={row.attachments} {newest} event={visualEvent} at={row.at} />
