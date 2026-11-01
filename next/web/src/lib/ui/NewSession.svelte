@@ -22,7 +22,7 @@
     void Promise.all([call("profile.list", {}), call("room.repos", { room })]).then(([profileResult, repoResult]) => {
       profiles = profileResult.profiles ?? [];
       repos = repoResult.repos ?? [];
-      profile = profiles[0]?.name ?? "";
+      profile = [...profiles].sort((a, b) => b.inUse - a.inUse)[0]?.name ?? "";
       repo = repos.find(item => item.default)?.repo ?? repos[0]?.repo ?? "";
       loaded = true;
     }, () => { failure = "The form could not load profiles or repositories. Close it and try again."; });
@@ -45,16 +45,13 @@
   }
 </script>
 
-<svelte:window onkeydown={event => {
-  if (event.key === "Escape" && !busy) { event.preventDefault(); onclose(); }
-}} />
 <form onsubmit={event => { event.preventDefault(); void start(); }} onkeydown={event => {
-  if (event.key === "Enter" && event.ctrlKey) { event.preventDefault(); void start(); }
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); void start(); }
 }}>
   <header><button class="back" type="button" onclick={onclose} disabled={busy}>‹ <span>{roomName}</span></button><h1>New session</h1></header>
   <div class:three={repos.length >= 2} class="fields">
     <label>Name
-      <input bind:value={name} autocomplete="off" aria-invalid={attempted && !!problem} aria-describedby={attempted && problem ? "name-problem" : undefined} />
+      <input bind:value={name} oninput={() => attempted = true} onblur={() => attempted = true} autocomplete="off" aria-invalid={attempted && !!problem} aria-describedby={attempted && problem ? "name-problem" : undefined} />
       {#if attempted && problem}<small id="name-problem" class="error">{problem}</small>{/if}
     </label>
     <label>Under
@@ -81,7 +78,8 @@
   {#if failure}<p class="error" role="alert">{failure}</p>{/if}
   {#if attempted && !profile && loaded}<p class="error" role="alert">Choose a profile.</p>{/if}
   <div class="actions">
-    <button class="primary" type="submit" disabled={busy || !loaded}>{busy ? "Starting…" : "Start session"} <kbd>Ctrl Enter</kbd></button>
+    <button class="primary" type="submit" disabled={busy || !loaded || !!problem || !profile}>{busy ? "Starting…" : "Start session"} <kbd>Ctrl Enter</kbd></button>
+    {#if problem}<span class="muted">Fix the name to start.</span>{:else if !profile}<span class="muted">Pick a profile to start.</span>{/if}
     <button type="button" onclick={onclose} disabled={busy}>Cancel</button>
   </div>
 </form>
@@ -109,6 +107,7 @@
   .actions button:not(.primary):hover { background: var(--hover); }
   .primary { background: var(--focus); color: var(--bg); font-weight: 600; }
   kbd { margin-left: 6px; padding: 1px 4px; border: 1px solid currentColor; border-radius: 3px; font-size: 11px; font-weight: 400; }
+  @media (pointer: coarse) { kbd { display: none; } }
   @media (max-width: 640px) {
     form { padding: 20px 16px 32px; gap: 20px; }
     .fields, .fields.three { grid-template-columns: 1fr; }
