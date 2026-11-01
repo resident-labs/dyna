@@ -41,7 +41,7 @@ export type InstructionsGetRequest = { room?: RoomID; };
 export type InstructionsGetResponse = { text: string; hash: string; savedAt?: string | null; };
 export type InstructionsSetRequest = { room?: RoomID; text: string; base: string; };
 export type InstructionsSetResponse = { hash: string; };
-export type Method = "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list";
+export type Method = "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled";
 export type ErrorCode = "podman_required" | "invalid" | "unknown_action" | "not_found" | "forbidden" | "conflict" | "room_limited" | "profile_exists" | "move_busy" | "has_children" | "parent_closing" | "session_closing" | "stale" | "github_quota" | "visual_superseded" | "unavailable" | "reconnect_unavailable" | "models_unavailable" | "store_from_v1" | "store_too_old" | "no_grant";
 export type Error = { code: ErrorCode; message: string; visual?: VisualSuperseded | null; limited?: RoomLimited | null; };
 export type VisualSuperseded = { event: EventID; version: number; seq: number; };
@@ -274,7 +274,7 @@ export type RoomResumed = { };
 export type RoomDeleting = { };
 export type RoomDeleted = { };
 export type SessionProfileChanged = { session: SessionID; profile: ProfileName; };
-export type PostCreated = { text: string; turn?: TurnID; mentions?: Array<Principal> | null; home: Conversation; replyTo?: EventID; attachments?: Array<Attachment> | null; clientId?: string; toolCallId?: string; };
+export type PostCreated = { text: string; turn?: TurnID; mentions?: Array<Principal> | null; home: Conversation; replyTo?: EventID; attachments?: Array<Attachment> | null; clientId?: string; toolCallId?: string; hook?: SubscriptionID; };
 export type Attachment = { name: string; media: string; bytes: number; sha256: string; visual?: VisualCard | null; };
 export type VisualCard = { id: EventID; version: number; title: string; height: number; allowNet: boolean; banner: string; thumbnail: string; shots: Array<VisualShot> | null; checks: Array<VisualCheck> | null; };
 export type VisualShot = { width: number; file: string; };
@@ -298,7 +298,7 @@ export type ShellJobEnded = { description?: string; end?: ShellJobEnd | null; se
 export type ComputerState = "running" | "stopped";
 export type ComputerChanged = { session: SessionID; to: ComputerState; };
 export type BoxChanged = { box: BoxID; session: SessionID; host?: HostName; from?: BoxState; to: BoxState; cause?: FailureCause; reason?: string; };
-export type FailureCause = "nested_device_missing" | "kvm_device_missing" | "create_failed" | "start_failed" | "no_hello" | "engine_restarted" | "remove_failed" | "archive_failed" | "grant_inactive" | "host_lost" | "host_busy" | "github_failed" | "stale" | "interrupted" | "internal" | "setup_failed" | "model_failed" | "output_limit" | "harness_failed" | "set_model_failed" | "not_started";
+export type FailureCause = "nested_device_missing" | "kvm_device_missing" | "create_failed" | "start_failed" | "no_hello" | "engine_restarted" | "remove_failed" | "archive_failed" | "grant_inactive" | "host_lost" | "host_busy" | "github_failed" | "stale" | "interrupted" | "internal" | "setup_failed" | "model_failed" | "output_limit" | "harness_failed" | "set_model_failed" | "not_started" | "run_timeout";
 export type PressureKind = "high" | "max";
 export type HostDiskLow = { host: HostName; freeBytes: number; floorBytes: number; };
 export type BoxPressure = { box: BoxID; kind: PressureKind; };
@@ -417,6 +417,19 @@ export type SessionAccountChoice = { id: AccountID; label: string; };
 export type SessionAccountResponse = { account?: AccountID; label?: string; issue?: SessionAccountIssue; choices: Array<SessionAccountChoice> | null; };
 export type SessionSetAccountRequest = { session: SessionID; account?: AccountID; };
 export type SessionSetAccountResponse = { };
+export type SubscriptionAddRequest = { scope: SubscriptionScope; room?: RoomID; session?: SessionID; on?: Array<EventType> | null; every?: DurationMS; wake?: Principal | null; run?: RunSpec | null; };
+export type SubscriptionAddResponse = { id: SubscriptionID; };
+export type SubscriptionListRequest = { room?: RoomID; };
+export type SubscriptionListResponse = { subscriptions: Array<SubscriptionInfo> | null; };
+export type SubscriptionInfo = { subscription: Subscription; disabled?: boolean; default?: boolean; running?: boolean; failures?: number; nextAt?: string | null; lastAt?: string | null; last?: HookResult; };
+export type SubscriptionRemoveRequest = { id: SubscriptionID; };
+export type SubscriptionRemoveResponse = { };
+export type SubscriptionSetEnabledRequest = { id: SubscriptionID; enabled: boolean; };
+export type SubscriptionSetEnabledResponse = { };
+export type HookResult = "passed" | "failed" | "stopped";
+export type HookFinished = { subscription: SubscriptionID; result: HookResult; exitCode: number; cause?: FailureCause; output?: string; failures?: number; retryAt?: string | null; };
+export type HookDue = { subscription: SubscriptionID; };
+export type NoticePosted = { text: string; };
 export type WebSearchProvider = "" | "chatgpt" | "claude" | "muse" | "kimi" | "zai" | "xai" | "brave" | "exa" | "tavily";
 export type WebSearchRequest = { query: string; limit?: number; };
 export type WebSearchResult = { title: string; url: string; snippet: string; provider: WebSearchProvider; };
@@ -440,9 +453,12 @@ export type EventBody =
   | { type: "goal.item_changed"; body: GoalItemChanged }
   | { type: "goal.set"; body: GoalSet }
   | { type: "grant.expired"; body: GrantExpired }
+  | { type: "hook.due"; body: HookDue }
+  | { type: "hook.finished"; body: HookFinished }
   | { type: "host.disk_low"; body: HostDiskLow }
   | { type: "image.built"; body: ImageBuilt }
   | { type: "image.failed"; body: ImageFailed }
+  | { type: "notice.posted"; body: NoticePosted }
   | { type: "op.decided"; body: OpDecided }
   | { type: "op.ran"; body: OpRan }
   | { type: "op.requested"; body: OpRequested }
@@ -569,4 +585,8 @@ export interface MethodMap {
   "question.ask": { request: QuestionAskRequest; response: QuestionAskResponse };
   "question.answer": { request: QuestionAnswerRequest; response: QuestionAnswerResponse };
   "question.list": { request: QuestionListRequest; response: QuestionListResponse };
+  "subscription.add": { request: SubscriptionAddRequest; response: SubscriptionAddResponse };
+  "subscription.list": { request: SubscriptionListRequest; response: SubscriptionListResponse };
+  "subscription.remove": { request: SubscriptionRemoveRequest; response: SubscriptionRemoveResponse };
+  "subscription.set_enabled": { request: SubscriptionSetEnabledRequest; response: SubscriptionSetEnabledResponse };
 }
