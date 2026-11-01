@@ -5,7 +5,9 @@ go 1.26.10
 require (
 	filippo.io/age v1.2.1
 	github.com/coder/websocket v1.8.14
+	github.com/compose-spec/compose-go/v2 v2.16.2
 	github.com/creack/pty v1.1.24
+	github.com/distribution/reference v0.6.0
 	github.com/dustin/go-humanize v1.0.1
 	github.com/gin-gonic/gin v1.10.1
 	github.com/spf13/cobra v1.10.2
@@ -13,6 +15,17 @@ require (
 	golang.org/x/net v0.60.0
 	golang.org/x/sync v0.23.0
 	golang.org/x/sys v0.48.0
+)
+
+require (
+	github.com/docker/go-connections v0.6.0 // indirect
+	github.com/docker/go-units v0.5.0 // indirect
+	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
+	github.com/mattn/go-shellwords v1.0.12 // indirect
+	github.com/opencontainers/go-digest v1.0.0 // indirect
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.1 // indirect
+	github.com/xhit/go-str2duration/v2 v2.1.0 // indirect
+	go.yaml.in/yaml/v4 v4.0.0-rc.4 // indirect
 )
 
 require (
@@ -66,7 +79,7 @@ require (
 	github.com/pion/webrtc/v4 v4.2.17 // indirect
 	github.com/redis/go-redis/v9 v9.19.0 // indirect
 	github.com/refraction-networking/utls v1.8.2 // indirect
-	github.com/sirupsen/logrus v1.9.3 // indirect
+	github.com/sirupsen/logrus v1.10.1
 	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect

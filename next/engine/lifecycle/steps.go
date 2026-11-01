@@ -114,6 +114,10 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			if failures >= 3 {
 				next.State, next.Reason = contract.BoxFailed, string(contract.CauseCreateFailed)
 				cause = contract.CauseCreateFailed
+				var stack box.StackError
+				if errors.As(workErr, &stack) {
+					next.Reason = stack.Error()
+				}
 			} else {
 				next.State, next.Reason = contract.BoxPending, string(box.PendingCreateRetry)
 				due = r.retryAt(failures)
@@ -165,7 +169,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		} else if imageErr != nil {
 			// A box must not start on an old image: its Pi may not match the box agent, which comes from the host.
 			workErr = imageErr
-		} else if slice != b.Slice || image.Tag != b.Image || !found || status.StaleLayout {
+		} else if stale := image.Tag != b.Image || status.Stack != image.StackHash(); slice != b.Slice || stale || !found || status.StaleLayout {
 			r.mu.Lock()
 			repos := r.repos
 			r.mu.Unlock()
@@ -174,11 +178,11 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 				sources, workErr = repos.Get(ctx, b.Session, b.Host, false)
 			}
 			if workErr == nil {
-				workErr = r.boxes.Recreate(ctx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: slice, Size: b.Size, Repos: sources, Needs: image.Needs}, image.Tag, b.Slice)
+				workErr = r.boxes.Recreate(ctx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: slice, Size: b.Size, Repos: sources, Needs: image.Needs, Stack: image.Stack}, image.Tag, b.Slice)
 			}
 			if workErr == nil {
 				var notice *contract.Event
-				if image.Tag != b.Image {
+				if stale {
 					var event contract.Event
 					event, workErr = r.event(b.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionRestarted{Session: b.Session, ImageUpdated: true})
 					notice = &event

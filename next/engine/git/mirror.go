@@ -11,6 +11,7 @@ import (
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/compose"
 	"github.com/resident-labs/dyna/engine/images"
 )
 
@@ -134,17 +135,23 @@ func (m *Mirror) authEnv() []string {
 	return []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.https://github.com/.extraheader", "GIT_CONFIG_VALUE_0=Authorization: Basic " + credential, "GIT_TERMINAL_PROMPT=0"}
 }
 
-// ImageContext reads the default-branch toolchain context from the mirror.
-func (m *Mirror) ImageContext(ctx context.Context, repo contract.RepoName) (string, images.TreeID, []byte, []box.Need, error) {
+// ImageContext reads a default-branch toolchain context from the mirror: the image called wanted, or the sole one when it
+// is empty.
+func (m *Mirror) ImageContext(ctx context.Context, repo contract.RepoName, wanted string) (string, images.TreeID, []byte, []box.Need, error) {
 	path, err := m.Layout.Git(repo)
 	if err != nil {
 		return "", "", nil, nil, err
 	}
-	return images.Context(ctx, m.Runner, path)
+	return images.Context(ctx, m.Runner, path, wanted)
 }
 
 // Size reads the repository's default box size from the mirror. A missing mirror has none.
 func (m *Mirror) Size(ctx context.Context, repo contract.RepoName) (contract.BoxSizeName, error) {
+	return m.ImageSize(ctx, repo, "")
+}
+
+// ImageSize reads the default box size of one image, or of the sole image when wanted is empty.
+func (m *Mirror) ImageSize(ctx context.Context, repo contract.RepoName, wanted string) (contract.BoxSizeName, error) {
 	path, err := m.Layout.Git(repo)
 	if err != nil {
 		return "", err
@@ -152,8 +159,85 @@ func (m *Mirror) Size(ctx context.Context, repo contract.RepoName) (contract.Box
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return "", nil
 	}
-	size, err := images.DefaultSize(ctx, m.Runner, path)
+	size, err := images.DefaultSize(ctx, m.Runner, path, wanted)
 	return contract.BoxSizeName(size), err
+}
+
+// Cloned reports whether the repository has a mirror yet.
+func (m *Mirror) Cloned(repo contract.RepoName) bool {
+	path, err := m.Layout.Git(repo)
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(path)
+	return err == nil
+}
+
+// Refresh brings the mirror up to date, sharing a fetch with any box start of this repository.
+func (m *Mirror) Refresh(ctx context.Context, repo contract.RepoName) error {
+	if m.Token == "" {
+		return MissingTokenError{}
+	}
+	path, err := m.Layout.Git(repo)
+	if err != nil {
+		return err
+	}
+	return m.fetches.do(ctx, repo, func(ctx context.Context) error { return m.fetch(ctx, repo, path) })
+}
+
+// ImageFolders lists the repository's image folders. A missing mirror has none.
+func (m *Mirror) ImageFolders(ctx context.Context, repo contract.RepoName) ([]string, error) {
+	path, err := m.Layout.Git(repo)
+	if err != nil || !m.Cloned(repo) {
+		return nil, err
+	}
+	return images.Folders(ctx, m.Runner, path)
+}
+
+// ComposeNames lists the repository's compose files.
+func (m *Mirror) ComposeNames(ctx context.Context, repo contract.RepoName) ([]string, error) {
+	path, err := m.Layout.Git(repo)
+	if err != nil {
+		return nil, err
+	}
+	blobs, err := images.ComposeBlobs(ctx, m.Runner, path)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(blobs))
+	for _, blob := range blobs {
+		if compose.ValidName(blob.Name) {
+			names = append(names, blob.Name)
+		}
+	}
+	return names, nil
+}
+
+// ComposeFile reads one compose file, or nil when the repository has no such name. It reads a file over the limit only
+// as far as the limit, since a repository chooses its files' sizes and the engine holds them in memory.
+func (m *Mirror) ComposeFile(ctx context.Context, repo contract.RepoName, name string) ([]byte, error) {
+	path, err := m.Layout.Git(repo)
+	if err != nil || !m.Cloned(repo) {
+		return nil, err
+	}
+	blobs, err := images.ComposeBlobs(ctx, m.Runner, path)
+	if err != nil {
+		return nil, err
+	}
+	for _, blob := range blobs {
+		if blob.Name != name {
+			continue
+		}
+		if blob.Bytes > compose.MaxFileBytes {
+			return make([]byte, compose.MaxFileBytes+1), nil // Parse refuses this by its length
+		}
+		data, err := images.ReadBlob(ctx, m.Runner, path, blob.Object)
+		if data == nil {
+			data = []byte{}
+		}
+		return data, err
+	}
+	return nil, nil
 }
 
 // DeleteArchiveRef deletes only the recorded archive commit, never a changed ref.

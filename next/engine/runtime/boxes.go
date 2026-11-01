@@ -24,6 +24,7 @@ import (
 	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/api"
 	"github.com/resident-labs/dyna/engine/ci"
+	"github.com/resident-labs/dyna/engine/compose"
 	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/hostexec"
 	engineimages "github.com/resident-labs/dyna/engine/images"
@@ -61,6 +62,7 @@ type Boxes struct {
 	PiTarball         []byte
 	Mirror            *enginegit.Mirror
 	Images            *engineimages.Builder
+	Compose           *compose.Files
 	Context           context.Context
 	Pressure          *engine.Service
 	Proc              string // Proc is the folder with stat and meminfo; empty means /proc.
@@ -377,25 +379,26 @@ func (b *Boxes) BuildAhead(ctx context.Context) {
 // logged: the next box that needs the image builds it and reports the failure in its room.
 func (b *Boxes) prepareImages(ctx context.Context, h *podman.Host, name contract.HostName) {
 	steps := box.NewStepLog("host " + string(name))
-	repos, err := b.hostRepos(ctx, name)
+	repos, rooms, err := b.hostRepos(ctx, name)
 	if err != nil {
 		log.Printf("host %s: build ahead: %v", name, err)
 		return
 	}
-	image, err := b.image(ctx, h, name, "", "")
+	image, err := b.image(ctx, h, name, "", "", "", contract.BoxSize{})
 	if err != nil {
 		log.Printf("host %s: build ahead: %v", name, err)
 		return
 	}
 	keep := []string{image.Tag}
 	for repo, room := range repos {
-		image, err := b.image(ctx, h, name, room, repo)
+		image, err := b.image(ctx, h, name, room, repo, "", contract.BoxSize{})
 		if err != nil {
 			log.Printf("host %s: build ahead %s: %v", name, repo, err)
 			continue
 		}
 		keep = append(keep, image.Tag)
 	}
+	keep = append(keep, b.prepareCompose(ctx, h, name, rooms)...)
 	steps.Done("build ahead")
 	if err := h.PruneImages(ctx, keep); err != nil {
 		log.Printf("host %s: prune images: %v", name, err)
@@ -403,11 +406,43 @@ func (b *Boxes) prepareImages(ctx context.Context, h *podman.Host, name contract
 	steps.Done("prune images")
 }
 
-// hostRepos returns each repository that a room on this host can use, with one such room to record its build in.
-func (b *Boxes) hostRepos(ctx context.Context, name contract.HostName) (map[contract.RepoName]contract.RoomID, error) {
+// prepareCompose builds and pulls what the compose files in reach of this host's rooms name, and returns the tags. A file
+// that fails is only logged, as an image is.
+func (b *Boxes) prepareCompose(ctx context.Context, h *podman.Host, name contract.HostName, rooms []roomRepo) []string {
+	if b.Compose == nil {
+		return nil
+	}
+	var keep []string
+	for _, pair := range rooms {
+		names, err := b.Compose.Names(ctx, pair.room, pair.repo)
+		if err != nil {
+			log.Printf("host %s: build ahead compose in %s: %v", name, pair.room, err)
+			continue
+		}
+		for _, file := range names {
+			image, err := b.image(ctx, h, name, pair.room, pair.repo, file, contract.BoxSize{})
+			if err != nil {
+				log.Printf("host %s: build ahead compose %s in %s: %v", name, file, pair.room, err)
+				continue
+			}
+			keep = append(keep, image.Tags()...)
+		}
+	}
+	return keep
+}
+
+// roomRepo is one place a session can start: a room, with one of its repositories or with none.
+type roomRepo struct {
+	room contract.RoomID
+	repo contract.RepoName
+}
+
+// hostRepos returns each repository that a room on this host can use, with one such room to record its build in, and
+// every room and repository pair, because compose files differ by room.
+func (b *Boxes) hostRepos(ctx context.Context, name contract.HostName) (map[contract.RepoName]contract.RoomID, []roomRepo, error) {
 	hosts, err := b.Store.Hosts(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var limited []contract.RoomID
 	for _, record := range hosts {
@@ -417,22 +452,25 @@ func (b *Boxes) hostRepos(ctx context.Context, name contract.HostName) (map[cont
 	}
 	rooms, err := b.Store.OpenRooms(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	repos := make(map[contract.RepoName]contract.RoomID)
+	var pairs []roomRepo
 	for _, room := range rooms {
 		if len(limited) > 0 && !slices.Contains(limited, room) {
 			continue
 		}
 		listed, err := b.Store.RoomRepos(ctx, room)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+		pairs = append(pairs, roomRepo{room: room})
 		for _, repo := range listed {
 			repos[repo.Repo] = room
+			pairs = append(pairs, roomRepo{room, repo.Repo})
 		}
 	}
-	return repos, nil
+	return repos, pairs, nil
 }
 
 // RemoveRoom removes a room's folder from a host.
@@ -528,11 +566,15 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 		return "", err
 	}
 	ok := false
-	var forwarded, sliced, created bool
+	var forwarded, sliced, created, stacked bool
 	forward := b.forward(spec.Box)
 	defer func() {
 		if ok {
 			return
+		}
+		if stacked {
+			_ = h.RemovePod(context.Background(), spec.Box)
+			_ = h.RemoveStackVolumes(context.Background(), spec.Box)
 		}
 		if created {
 			_ = h.RemoveContainer(context.Background(), spec.Box)
@@ -555,7 +597,7 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 		return "", err
 	}
 	steps.Done("image")
-	spec.Needs = image.Needs
+	spec.Needs, spec.Stack = image.Needs, image.Stack
 	slice, c := b.container(spec, image.Tag)
 	if err = h.EnsureSlice(ctx, slice); err != nil {
 		return "", err
@@ -567,6 +609,13 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	}
 	forwarded = true
 	steps.Done("forward")
+	if spec.Stack != nil {
+		stacked = true
+		if err = h.CreateStack(ctx, spec.Box, spec.Slice, spec.Stack); err != nil {
+			return "", err
+		}
+		steps.Done("compose stack")
+	}
 	if err = h.CreateContainer(ctx, c); err != nil {
 		var missing box.MissingDevice
 		if errors.As(err, &missing) {
@@ -577,6 +626,12 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	}
 	created = true
 	steps.Done("container create")
+	if spec.Stack != nil {
+		if err = h.StartSidecars(ctx, spec.Box); err != nil {
+			return "", err
+		}
+		steps.Done("sidecars")
+	}
 	if err = h.StartContainer(ctx, spec.Box); err != nil {
 		return "", err
 	}
@@ -697,15 +752,33 @@ func (b *Boxes) Start(ctx context.Context, id contract.BoxID) error {
 	if err := b.syncInstructions(ctx, host); err != nil {
 		return err
 	}
+	record, err := b.Store.Box(ctx, id)
+	if err != nil {
+		return err
+	}
+	session, err := b.Store.Session(ctx, record.Session)
+	if err != nil {
+		return err
+	}
+	// A closing box starts only to archive, so a broken sidecar cannot hold up its close.
+	if session.Compose != "" && record.State != contract.BoxClosing {
+		if err := host.StartSidecars(ctx, id); err != nil {
+			return err
+		}
+	}
 	return host.StartContainer(ctx, id)
 }
 
+// Stop stops a box and, once it is down, the rest of its pod.
 func (b *Boxes) Stop(ctx context.Context, id contract.BoxID) error {
 	host, err := b.containerHost(ctx, id)
 	if err != nil {
 		return err
 	}
-	return host.StopContainer(ctx, id)
+	if err := host.StopContainer(ctx, id); err != nil {
+		return err
+	}
+	return host.StopPod(ctx, id)
 }
 
 func (b *Boxes) Remove(ctx context.Context, id contract.BoxID) error {
@@ -738,7 +811,13 @@ func removeHostBox(ctx context.Context, h box.HostDriver, record box.Box, forwar
 	if err := h.RemoveContainer(ctx, record.ID); err != nil {
 		return err
 	}
+	if err := h.RemovePod(ctx, record.ID); err != nil {
+		return err
+	}
 	if err := h.RemoveVolume(ctx, record.ID); err != nil {
+		return err
+	}
+	if err := h.RemoveStackVolumes(ctx, record.ID); err != nil {
 		return err
 	}
 	return h.RemoveSlice(ctx, record.Slice)
@@ -786,34 +865,98 @@ func (b *Boxes) CurrentImage(ctx context.Context, sessionID contract.SessionID, 
 	if err != nil {
 		return box.Image{}, err
 	}
-	return b.image(ctx, h, host, session.Room, session.Repo)
+	var size contract.BoxSize
+	if session.Compose != "" {
+		record, err := b.Store.Box(ctx, session.Box)
+		if err != nil {
+			return box.Image{}, err
+		}
+		size = record.Size
+	}
+	return b.image(ctx, h, host, session.Room, session.Repo, session.Compose, size)
 }
 
-// image selects and builds a repository's image. Every box takes its image from here, whether new, swapped or built ahead.
-func (b *Boxes) image(ctx context.Context, h *podman.Host, host contract.HostName, room contract.RoomID, repo contract.RepoName) (box.Image, error) {
+// image selects and builds what a box uses. Every box takes its image from here, whether new, swapped or built ahead. A
+// compose name brings its file, which chooses the image and adds the sidecars; size checks the file's limits, and the zero
+// size of a build ahead skips that.
+func (b *Boxes) image(ctx context.Context, h *podman.Host, host contract.HostName, room contract.RoomID, repo contract.RepoName, composeName string, size contract.BoxSize) (box.Image, error) {
 	steps := box.NewStepLog("host " + string(host))
-	tag, err := h.BuildBase(ctx, images.BaseContainerfile, b.PiTarball)
+	base, err := h.BuildBase(ctx, images.BaseContainerfile, b.PiTarball)
 	if err != nil {
 		return box.Image{}, err
 	}
 	steps.Done("base image")
-	var needs []box.Need
-	if repo != "" {
-		name, tree, data, imageNeeds, err := b.Mirror.ImageContext(ctx, repo)
-		if err != nil {
+	var file *compose.File
+	folder := ""
+	if composeName != "" {
+		if file, err = b.Compose.Load(ctx, room, repo, composeName); err != nil {
 			return box.Image{}, err
 		}
-		steps.Done("image context")
-		needs = imageNeeds
-		if name != "" {
-			tag, err = b.Images.Build(ctx, h, room, host, repo, name, tag, tree, data)
-			if err != nil {
+		if size.Name != "" {
+			if err := file.CheckLimits(size); err != nil {
 				return box.Image{}, err
 			}
-			steps.Done("toolchain image")
 		}
+		folder = file.Agent.Build
+		steps.Done("compose file")
 	}
-	return box.Image{Tag: tag, Needs: needs}, nil
+	tag, needs, err := b.toolchain(ctx, h, host, room, repo, folder, base)
+	if err != nil {
+		return box.Image{}, err
+	}
+	image := box.Image{Tag: tag, Needs: needs}
+	if file != nil {
+		if image.Stack, err = b.stack(ctx, h, host, room, repo, base, file); err != nil {
+			return box.Image{}, err
+		}
+		steps.Done("sidecar images")
+	}
+	return image, nil
+}
+
+// toolchain builds one image of a repository: folder, or its sole image when folder is empty. With neither it is base.
+func (b *Boxes) toolchain(ctx context.Context, h *podman.Host, host contract.HostName, room contract.RoomID, repo contract.RepoName, folder, base string) (string, []box.Need, error) {
+	if repo == "" {
+		return base, nil, nil
+	}
+	steps := box.NewStepLog("host " + string(host))
+	name, tree, data, needs, err := b.Mirror.ImageContext(ctx, repo, folder)
+	if err != nil {
+		return "", nil, err
+	}
+	steps.Done("image context")
+	if name == "" {
+		return base, needs, nil
+	}
+	tag, err := b.Images.Build(ctx, h, room, host, repo, name, base, tree, data)
+	if err != nil {
+		return "", nil, err
+	}
+	steps.Done("toolchain image")
+	return tag, needs, nil
+}
+
+// stack gets each sidecar's image onto the host. box-needs grants devices, which a sidecar never gets.
+func (b *Boxes) stack(ctx context.Context, h *podman.Host, host contract.HostName, room contract.RoomID, repo contract.RepoName, base string, file *compose.File) (*box.Stack, error) {
+	tags := make(map[string]string, len(file.Sidecars))
+	for _, sidecar := range file.Sidecars {
+		if sidecar.Image != "" {
+			if err := h.PullImage(ctx, sidecar.Image); err != nil {
+				return nil, err
+			}
+			tags[sidecar.Name] = sidecar.Image
+			continue
+		}
+		tag, needs, err := b.toolchain(ctx, h, host, room, repo, sidecar.Build, base)
+		if err != nil {
+			return nil, err
+		}
+		if len(needs) > 0 {
+			return nil, box.StackError{Reason: fmt.Sprintf("service %s: image %s has box-needs, which is only for the agent", sidecar.Name, sidecar.Build)}
+		}
+		tags[sidecar.Name] = tag
+	}
+	return file.Stack(base, tags), nil
 }
 
 func (b *Boxes) StopHostexec(ctx context.Context, host contract.HostName, scope string) error {
@@ -844,12 +987,24 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, _ s
 	if err := h.RemoveContainer(ctx, spec.Box); err != nil {
 		return err
 	}
+	if spec.Stack != nil {
+		// The pod goes whole: its sidecars follow the box to new images, and its volumes stay.
+		if err := h.RemovePod(ctx, spec.Box); err != nil {
+			return err
+		}
+	}
 	steps.Done("remove old container")
 	slice, c := b.container(spec, image)
 	if err := h.EnsureSlice(ctx, slice); err != nil {
 		return err
 	}
 	steps.Done("slice")
+	if spec.Stack != nil {
+		if err := h.CreateStack(ctx, spec.Box, spec.Slice, spec.Stack); err != nil {
+			return err
+		}
+		steps.Done("compose stack")
+	}
 	if err := h.CreateContainer(ctx, c); err != nil {
 		var missing box.MissingDevice
 		if errors.As(err, &missing) {
@@ -859,6 +1014,12 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, _ s
 		return err
 	}
 	steps.Done("container create")
+	if spec.Stack != nil {
+		if err := h.StartSidecars(ctx, spec.Box); err != nil {
+			return err
+		}
+		steps.Done("sidecars")
+	}
 	if err := h.StartContainer(ctx, spec.Box); err != nil {
 		return err
 	}
@@ -879,6 +1040,14 @@ func (b *Boxes) container(spec lifecycle.BoxSpec, image string) (box.Slice, box.
 	}, Env: []box.EnvVar{{Name: "GOMODCACHE", Value: "/box/cache/gomod"}, {Name: "GOCACHE", Value: "/box/cache/gocache"}, {Name: "CARGO_HOME", Value: "/box/cache/cargo"}, {Name: "npm_config_store_dir", Value: "/box/cache/pnpm"}}}
 	for _, repo := range spec.Repos {
 		c.Mounts = append(c.Mounts, box.Mount{HostPath: repo.Cache, BoxPath: repo.Cache, ReadOnly: true})
+	}
+	if stack := spec.Stack; stack != nil {
+		c.Env = append(c.Env, stack.Env...)
+		c.Volumes = stack.Volumes
+		c.Labels = append(c.Labels, box.Label{Key: podman.StackHashLabel, Value: stack.Hash})
+		if len(stack.Sidecars) > 0 {
+			c.Pod = box.PodName(spec.Box)
+		}
 	}
 	return slice, c
 }

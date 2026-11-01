@@ -193,6 +193,9 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 			image = b.Image
 			if state != contract.BoxCreating || failures >= 3 {
 				to, reason = contract.BoxFailed, string(contract.CauseCreateFailed)
+				if failures >= 3 {
+					reason = failure // the step may know more, as for a compose file that cannot run
+				}
 			} else {
 				to, reason = contract.BoxPending, string(box.PendingCreateRetry)
 			}
