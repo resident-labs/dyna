@@ -1,8 +1,6 @@
-// The browser and its Playwright client are the same system tools used by scripts/qa-branch.sh.
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-// This pinned client lives in v1 browserdeps. Move it when v1 is removed.
-import playwright, { type Page } from "../../internal/cli/computer/browserdeps/node_modules/playwright-core/index.js";
+import playwright, { type Page } from "playwright-core";
 const { chromium } = playwright;
 import { roomRoute, settingsPanes, settingsRoute } from "./src/lib/routes.ts";
 import { knownWidthFailures, matchKnownFailure, staleWidthFailures } from "./known-width-failures.ts";
@@ -70,7 +68,7 @@ try {
               const labelledBy = (el.getAttribute("aria-labelledby") ?? "").split(/\s+/).map(id => document.getElementById(id)?.textContent ?? "").join(" ").trim();
               const label = el.getAttribute("title") || el.getAttribute("aria-label") || labelledBy;
               if (style.textOverflow === "ellipsis" && label.includes(text)) continue;
-              const element = `${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}${el.className && typeof el.className === "string" ? "." + el.className.trim().replace(/\s+/g, ".") : ""}`;
+              const element = `${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}${typeof el.className === "string" ? el.className.split(/\s+/).filter(name => name && !name.startsWith("svelte-")).map(name => "." + name).join("") : ""}`;
               found.push({ element, text: text.slice(0, 100) });
             }
             return found;

@@ -191,7 +191,7 @@ func (s *Service) closeSession(ctx context.Context, session store.Session, disca
 		return forbidden()
 	}
 	if dormant {
-		changed, err := s.store.MarkDormantClosing(ctx, session.ID, s.now().Add(-7*24*time.Hour))
+		changed, err := s.store.MarkDormantClosing(ctx, session.ID, s.now().Add(-7*24*time.Hour), s.now().Add(-diskLowWait))
 		if err != nil {
 			return failure(err)
 		}
@@ -199,6 +199,9 @@ func (s *Service) closeSession(ctx context.Context, session store.Session, disca
 			return nil
 		}
 	} else if err := s.store.MarkClosing(ctx, session.ID, discard); err != nil {
+		return failure(err)
+	}
+	if err := s.StopHostexecs(ctx); err != nil {
 		return failure(err)
 	}
 	if !discard {

@@ -42,6 +42,9 @@ func (s *Store) MarkClosing(ctx context.Context, target contract.SessionID, disc
 		if err != nil {
 			return err
 		}
+		if _, err := tx.ExecContext(ctx, `UPDATE hostexec_runs SET stopped='closed' WHERE ended_at IS NULL AND grant_id IN (SELECT g.id FROM grants g JOIN sessions s ON s.id=g.to_id WHERE g.to_kind='session' AND s.state='closing')`); err != nil {
+			return err
+		}
 		want := WantClose
 		if discard {
 			want = WantDiscard

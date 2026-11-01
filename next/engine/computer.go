@@ -30,9 +30,9 @@ func (s *Service) ComputerChanged(ctx context.Context, caller contract.Principal
 	if !open {
 		return contract.ComputerChangedResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 	}
-	handle, _, ok := s.lockSession(session.ID)
-	if !ok {
-		return contract.ComputerChangedResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+	handle, problem := s.lockSession(ctx, session.ID)
+	if problem != nil {
+		return contract.ComputerChangedResponse{}, problem
 	}
 	defer handle.Unlock()
 	if handle.Channel() == nil {
@@ -57,7 +57,7 @@ func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-c
 	if err != nil {
 		return nil, failure(err)
 	}
-	handle, _, ok := s.lookupSession(id)
+	handle, ok := s.lookupSession(id)
 	if !ok {
 		return nil, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
 	}
@@ -88,7 +88,7 @@ func (s *Service) ComputerInput(ctx context.Context, caller contract.Principal, 
 	if _, err := s.store.Session(ctx, req.Session); err != nil {
 		return contract.ComputerInputResponse{}, failure(err)
 	}
-	handle, _, ok := s.lookupSession(req.Session)
+	handle, ok := s.lookupSession(req.Session)
 	if !ok {
 		return contract.ComputerInputResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
 	}
@@ -107,12 +107,15 @@ func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal,
 	if caller.Kind != contract.PrincipalSession {
 		return forbidden()
 	}
-	handle, _, ok := s.lookupSession(caller.Session)
+	handle, ok := s.lookupSession(caller.Session)
 	if !ok {
 		return &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 	}
-	stream := handle.ComputerStream()
+	stream, attached := handle.ComputerStream()
 	handle.Unlock()
+	if !attached {
+		return &contract.Error{Code: contract.ErrNotFound, Message: "computer is not attached"}
+	}
 	defer func() {
 		if !handle.Lock() {
 			return

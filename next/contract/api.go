@@ -28,6 +28,9 @@ const (
 	MethodInstructionsGet         Method = "instructions.get"
 	MethodInstructionsSet         Method = "instructions.set"
 	MethodWebLogin                Method = "web.login"
+	MethodWebSearch               Method = "web.search"
+	MethodWebsearchSetKey         Method = "websearch.set_key"
+	MethodWebsearchRemoveKey      Method = "websearch.remove_key"
 	MethodConversationRead        Method = "conversation.read"
 	MethodRoomList                Method = "room.list"
 	MethodSessionList             Method = "session.list"
@@ -41,6 +44,7 @@ const (
 	MethodAccountsConnectCallback Method = "accounts.connect_callback"
 	MethodAccountsConnectStatus   Method = "accounts.connect_status"
 	MethodAccountsSetKey          Method = "accounts.set_key"
+	MethodAccountsImportOAuth     Method = "accounts.import_oauth"
 	MethodAccountsRemove          Method = "accounts.remove"
 	MethodAccountsSetLimits       Method = "accounts.set_limits"
 	MethodProfileSet              Method = "profile.set"
@@ -548,6 +552,23 @@ const (
 	TranscriptTooLarge TranscriptItemKind = "too_large"
 )
 
+type TranscriptCallStatus string
+
+const (
+	TranscriptCallRunning   TranscriptCallStatus = "running"
+	TranscriptCallOK        TranscriptCallStatus = "ok"
+	TranscriptCallError     TranscriptCallStatus = "error"
+	TranscriptCallCancelled TranscriptCallStatus = "cancelled"
+)
+
+type TranscriptCall struct {
+	Tool       string               `json:"tool"`
+	Target     string               `json:"target,omitempty"`
+	Status     TranscriptCallStatus `json:"status"`
+	DurationMs *int64               `json:"durationMs,omitempty"`
+	Error      string               `json:"error,omitempty"`
+}
+
 type TranscriptItem struct {
 	ID           string                  `json:"id"`
 	Index        int                     `json:"index,omitempty"`
@@ -558,6 +579,9 @@ type TranscriptItem struct {
 	Text         string                  `json:"text,omitempty"`
 	Tool         string                  `json:"tool,omitempty"`
 	Arguments    string                  `json:"arguments,omitempty"`
+	Script       string                  `json:"script,omitempty"`
+	Calls        []TranscriptCall        `json:"calls,omitempty"`
+	CallsOmitted int                     `json:"callsOmitted,omitempty"`
 	Output       string                  `json:"output,omitempty"`
 	Diff         string                  `json:"diff,omitempty"`
 	Failed       bool                    `json:"failed,omitempty"`

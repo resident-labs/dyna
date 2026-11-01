@@ -13,7 +13,7 @@ var ErrGrantInactive = errors.New("grant no longer active")
 type HostexecStop string
 
 const (
-	HostexecRevoked HostexecStop = "revoked"
+	HostexecClosed  HostexecStop = "closed"
 	HostexecLost    HostexecStop = "lost"
 	HostexecTimeout HostexecStop = "timeout"
 )
@@ -27,10 +27,10 @@ type HostexecRun struct {
 	Stopped HostexecStop
 }
 
-// StartHostexec serializes the last grant check with revocation.
+// StartHostexec serializes the last grant check with session close.
 func (s *Store) StartHostexec(ctx context.Context, run HostexecRun, who contract.Principal, room contract.RoomID, now time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		r, err := tx.Exec(`INSERT INTO hostexec_runs(op,grant_id,host,scope,started_at,timeout_ms) SELECT ?,id,?,?,?,? FROM grants WHERE id=? AND room=? AND to_kind=? AND to_id=? AND revoked_at IS NULL AND expired_at IS NULL AND (expires_at IS NULL OR expires_at>?)`, run.Op, run.Host, run.Scope, now.UnixMilli(), run.Timeout, run.Grant, room, who.Kind, who.Session, now.UnixMilli())
+		r, err := tx.Exec(`INSERT INTO hostexec_runs(op,grant_id,host,scope,started_at,timeout_ms) SELECT ?,id,?,?,?,? FROM grants WHERE id=? AND room=? AND to_kind=? AND to_id=? AND revoked_at IS NULL AND expired_at IS NULL AND EXISTS (SELECT 1 FROM sessions WHERE id=grants.to_id AND state!='closing' AND closed_at IS NULL)`, run.Op, run.Host, run.Scope, now.UnixMilli(), run.Timeout, run.Grant, room, who.Kind, who.Session)
 		if err != nil {
 			return err
 		}
@@ -50,7 +50,7 @@ func (s *Store) FinishHostexec(ctx context.Context, id contract.OpID, now time.T
 			_, err := tx.Exec("UPDATE hostexec_runs SET stopped='lost',lost_at=?,output_bytes=? WHERE op=?", now.UnixMilli(), bytes, id)
 			return err
 		}
-		_, err := tx.Exec("UPDATE hostexec_runs SET ended_at=?,output_bytes=?,stopped=CASE WHEN stopped='revoked' THEN stopped ELSE ? END WHERE op=?", now.UnixMilli(), bytes, stopped, id)
+		_, err := tx.Exec("UPDATE hostexec_runs SET ended_at=?,output_bytes=?,stopped=CASE WHEN stopped IN ('closed','revoked') THEN stopped ELSE ? END WHERE op=?", now.UnixMilli(), bytes, stopped, id)
 		return err
 	})
 }
@@ -86,7 +86,7 @@ func (s *Store) RecoverHostexec(ctx context.Context, now time.Time) error {
 }
 
 // CompleteHostexecStop waits 30 seconds for a remote launch in flight at a master drop.
-// Revoked runs retain their live runner, which records completion itself.
+// Closed-session runs retain their live runner, which records completion itself.
 func (s *Store) CompleteHostexecStop(ctx context.Context, id contract.OpID, now time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.Exec("UPDATE hostexec_runs SET ended_at=? WHERE op=? AND ended_at IS NULL AND lost_at IS NOT NULL AND lost_at+30000<=?", now.UnixMilli(), id, now.UnixMilli())
