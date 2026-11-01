@@ -128,7 +128,7 @@
         const page = await call("transcript.read", { session, turn: turn.id, afterItem: after });
         const next = page.turns?.[0];
         if (!next || next.after === after) throw new Error("Transcript input cursor did not advance");
-        turns = turns.map(item => item.id === turn.id ? { ...item, ...next, inputs: [...item.inputs ?? [], ...next.inputs ?? []], items: mergeTimelineItems(item.items ?? [], next.items ?? []) } : item);
+        turns = turns.map(item => item.id === turn.id ? { ...item, ...next, after: next.after, inputs: [...item.inputs ?? [], ...next.inputs ?? []], items: mergeTimelineItems(item.items ?? [], next.items ?? []) } : item);
         after = next.after;
       }
     } catch { failed = true; }
