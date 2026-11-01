@@ -134,7 +134,7 @@ func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, eve
 		}
 		frame += fmt.Sprintf(" Your final response goes to %s %s.", target, home)
 	case contract.ReplyPost:
-		frame += fmt.Sprintf(" No reply is delivered. Run dyna post only if %s must act.", sender)
+		frame += " No reply is delivered."
 	case contract.ReplyNone:
 		frame += " No reply is expected."
 	}
