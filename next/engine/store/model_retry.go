@@ -10,6 +10,11 @@ import (
 
 // WakeModelRetries returns due failed-turn deliveries to the normal wake path.
 func (s *Store) WakeModelRetries(ctx context.Context, now time.Time) error {
+	var due bool
+	err := s.Read().QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.state='open' AND s.closed_at IS NULL AND r.paused_at IS NULL AND s.model_retry_at>0 AND s.model_retry_at<=? AND NOT EXISTS (SELECT 1 FROM turns WHERE session=s.id AND ended_at IS NULL))`, now.UnixMilli()).Scan(&due)
+	if err != nil || !due {
+		return err
+	}
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx, `SELECT s.id FROM sessions s JOIN rooms r ON r.id=s.room
    WHERE s.state='open' AND s.closed_at IS NULL AND r.paused_at IS NULL
