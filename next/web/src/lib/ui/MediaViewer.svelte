@@ -29,6 +29,7 @@
     return () => { active = false; };
   });
   let src = $derived(`/v1/files/${encodeURIComponent(item.file.sha256)}`);
+  let original = $derived(item.file.visual ? undefined : src);
   let fit = $derived(natural.width && natural.height ? Math.min(1, box.width / natural.width, box.height / natural.height) : 1);
   let content = $derived({ width: natural.width * fit, height: natural.height * fit });
   const pointers = new Map<number, Point>();
@@ -91,7 +92,6 @@
 
 <dialog bind:this={dialog} aria-label="Media viewer" onclose={onclose} onclick={e => { if (e.target === dialog) dialog.close(); }}>
   <header>
-    {@const original = item.file.visual ? undefined : src}
     <button class="round phone" aria-label="Close" onclick={() => dialog.close()}>×</button>
     {#snippet identity()}
       <Avatar kind={item.from.kind} name={author} root={root(item.from.session)} size={32} />
