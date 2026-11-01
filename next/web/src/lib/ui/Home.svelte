@@ -18,10 +18,10 @@
   type Navigate = (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void;
   // onrequests opens the Requests panel once the link has moved to that room. loaded is false until room.list answers.
   // initials are the rooms' distinct initials, as the rail shows them. active is the Active now column's rooms; below
-  // its breakpoint they are one row here, which onactive opens as the sheet.
-  let { attention, initials, loaded, navigate, onrequests, active, onactive }: {
+  // its breakpoint they are one row here, which onactive opens as the sheet. covered is true while Settings is open over Home.
+  let { attention, initials, loaded, navigate, onrequests, active, onactive, covered }: {
     attention: Attention; initials: Map<string, string>; loaded: boolean; navigate: Navigate; onrequests: () => void;
-    active: RoomLine[]; onactive: (event: MouseEvent & { currentTarget: HTMLButtonElement }) => void;
+    active: RoomLine[]; onactive: (event: MouseEvent & { currentTarget: HTMLButtonElement }) => void; covered: boolean;
   } = $props();
   // Each room's sessions load once while Home is open, for its failure and request rows. Requests load per room, and
   // again only when a room gains a request or requester that no answer named yet. A failed load forgets its IDs and
@@ -127,16 +127,20 @@
   // The sessions panel's host foot links to /#machines, so Machines scrolls into view once it shows.
   let machines: HTMLElement | undefined = $state();
   $effect(() => { if (machines && location.hash === "#machines") machines.scrollIntoView({ block: "start" }); });
-  // Model usage loads once when Home opens: the engine caches it for 5 min. Reset times count from that answer.
+  // Model usage loads when Home opens: the engine caches it for 5 min. Reset times count from that answer.
   // accounts.list names each account's provider. Without it the cards still show their labels.
   let accounts: AccountUsage[] | undefined = $state();
   let catalog: AccountsListResponse | undefined = $state();
   let accountsFailed = $state(false);
   let loadedAt = $state(0);
+  // Home stays mounted behind Settings, so it loads again when Settings closes: an account may have changed there.
+  let opened = false;
   $effect(() => {
+    if (covered && opened) return;
+    opened = true;
     void Promise.allSettled([call("accounts.quota", {}), call("accounts.list", {})]).then(([quota, list]) => {
       if (list.status === "fulfilled") catalog = list.value;
-      if (quota.status === "fulfilled") { accounts = quota.value.accounts ?? []; loadedAt = Date.now(); } else accountsFailed = true;
+      if (quota.status === "fulfilled") { accounts = quota.value.accounts ?? []; accountsFailed = false; loadedAt = Date.now(); } else accountsFailed = true;
     });
   });
   let usage = $derived(usageRows(accounts ?? [], catalog));

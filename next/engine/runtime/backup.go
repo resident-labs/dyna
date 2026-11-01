@@ -101,7 +101,7 @@ func (b *backupLoop) copy(ctx context.Context, path string) error {
 		return err
 	}
 	defer rootDir.Close()
-	for _, name := range []string{"files", "transcripts", "archive", "connect", "cliproxy/auth"} {
+	for _, name := range []string{"AGENTS.md", "rooms", "archive", "connect", "cliproxy/auth"} {
 		root := filepath.Join(dataDir, name)
 		err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 			if errors.Is(walkErr, os.ErrNotExist) {
