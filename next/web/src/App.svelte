@@ -41,6 +41,8 @@
   import RoomMenu from "./lib/ui/RoomMenu.svelte";
   import RequestsPanel from "./lib/ui/RequestsPanel.svelte";
   import Instructions from "./lib/ui/Instructions.svelte";
+  import NewSession from "./lib/ui/NewSession.svelte";
+  import NewRoom from "./lib/ui/NewRoom.svelte";
   import ActiveNow from "./lib/ui/ActiveNow.svelte";
   import { activeRooms } from "./lib/active.ts";
   import { Attention } from "./lib/attention.svelte.ts";
@@ -127,24 +129,29 @@
     path = window.location.pathname;
     if (inSettings) return;
     behind = path;
-    section = /\/instructions\/?$/.test(path) ? "instructions" : undefined;
+    section = /\/instructions\/?$/.test(path) ? "instructions" : /\/r\/[^/]+\/new\/?$/.test(path) ? "new-session" : /^\/rooms\/new\/?$/.test(path) ? "new-room" : undefined;
   }
   window.addEventListener("popstate", follow);
   function dismissRequests(event: MouseEvent) {
     if (section === "requests" && event.target instanceof Node && !page?.contains(event.target) && !requestsButton?.contains(event.target)) section = undefined;
   }
   // The requests view shows in place of the conversation until Back, Escape or the control that opened it.
-  let section: "requests" | "instructions" | undefined = $state(/\/instructions\/?$/.test(behind) ? "instructions" : undefined);
+  let section: "requests" | "instructions" | "new-session" | "new-room" | undefined = $state(/\/instructions\/?$/.test(behind) ? "instructions" : /\/r\/[^/]+\/new\/?$/.test(behind) ? "new-session" : /^\/rooms\/new\/?$/.test(behind) ? "new-room" : undefined);
   let requestsButton: HTMLButtonElement | undefined = $state();
   function openInstructions() {
     history.pushState({ instructionsBack: behind }, "", `/r/${encodeURIComponent(room!)}/instructions`);
     panel = false;
     follow();
   }
+  function openNew(kind: "session" | "room") {
+    history.pushState({ instructionsBack: behind }, "", kind === "room" ? "/rooms/new" : `/r/${encodeURIComponent(room!)}/new`);
+    panel = false;
+    follow();
+  }
   async function closeSection(tapped = false) {
-    if (section === "instructions") {
+    if (section === "instructions" || section === "new-session" || section === "new-room") {
       if (history.state?.instructionsBack) history.back();
-      else { history.replaceState(null, "", `/r/${encodeURIComponent(room!)}`); follow(); }
+      else { history.replaceState(null, "", room ? `/r/${encodeURIComponent(room)}` : "/"); follow(); }
       return;
     }
     section = undefined;
@@ -154,10 +161,10 @@
   // A link to a room the engine does not list, or to a path the app has no page for, shows a load error in Home's
   // place. Until the room list loads, a room link is trusted, so a known room opens without a flash.
   // Room, session and instructions paths are routes; other paths show no page.
-  const route = $derived(/^\/r\/([^/]+)(?:\/s\/([^/]+)|\/instructions)?\/?$/.exec(behind));
+  const route = $derived(/^\/r\/([^/]+)(?:\/s\/([^/]+)|\/instructions|\/new)?\/?$/.exec(behind));
   const asked = $derived(route?.[1] && decodeURIComponent(route[1]));
   let room = $derived(asked && (!roomsLoaded || attention.rooms.has(asked)) ? asked : undefined);
-  let lost: "room" | "page" | undefined = $derived(room || behind === "/" ? undefined : asked ? "room" : "page");
+  let lost: "room" | "page" | undefined = $derived(room || behind === "/" || section === "new-room" ? undefined : asked ? "room" : "page");
   let session = $derived(room && route?.[2] ? decodeURIComponent(route[2]) : undefined);
   $effect(() => {
     if (!room) return;
@@ -300,7 +307,9 @@
     closePalette();
     if (item.kind === "more") return;
     if (item.kind === "action") {
-      if (item.action.id === "pause") pause();
+      if (item.action.id === "new-session") openNew("session");
+      else if (item.action.id === "new-room") openNew("room");
+      else if (item.action.id === "pause") pause();
       else if (item.action.id === "requests") { if (inSettings) { history.pushState(null, "", behind); follow(); } section = "requests"; }
       else { history.pushState(null, "", item.action.id === "theme" ? "/settings/appearance" : "/settings"); follow(); }
       return;
@@ -585,7 +594,7 @@
       <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id && !inSettings ? "page" : undefined}
         aria-label={[item.name, failing && `${count(failing, "session")} failed`, waiting && `${count(waiting, "request")} waiting`, hostless && `${count(hostless, "session")} waiting for a host`].filter(Boolean).join(", ")} title={item.name}>
         <Avatar kind="room" name={item.name} label={initials.get(item.name)} size={40} />{#if failing}<StatusPill tone="failed" label="Failed" dot />{:else if waiting || hostless}<StatusPill tone="warning" label="Waiting" dot />{/if}</a>
-    {/each}</nav>
+    {/each}<button type="button" class="tool" title="Create a room" aria-label="Create a room" onclick={() => openNew("room")}><Icon name="plus" /></button></nav>
     <footer><a class="gear" href="/settings" onclick={navigate} aria-current={inSettings ? "page" : undefined} aria-label="Settings" title="Settings"><Icon name="gear" size={20} /></a></footer>
     <!-- The drawer's second column: the open room's pages, or on Home every room by name. Counts are muted; only Requests
          uses the warning tone. -->
@@ -627,7 +636,7 @@
         {#if session && attention.can("computers") && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /></button>{/if}
         {#key session}<HeaderActions {store} {session} {attention} {closed} phone={phone.current} {paused} panelShown={panelShown} requestsOpen={section === "requests"}
           bind:jobsTool bind:roomMenu bind:requestsButton bind:toggle
-          onopen={(item, job) => terminals?.openJob(item, job)} onpause={pause} oninstructions={openInstructions} onrequests={() => { section = section === "requests" ? undefined : "requests"; }} onpanel={tapped => void showPanel(!panelShown, tapped)}
+          onopen={(item, job) => terminals?.openJob(item, job)} onpause={pause} oninstructions={openInstructions} onnewsession={() => openNew("session")} onrequests={() => { section = section === "requests" ? undefined : "requests"; }} onpanel={tapped => void showPanel(!panelShown, tapped)}
           onterminal={() => terminals?.shell(session!, title, !store?.sessions.get(session!)?.parent)}
           oncomputer={() => watch(session!)} />{/key}
       {/if}</header>
@@ -674,7 +683,7 @@
       {#if session && !closed}<header class="bar tabs">
         <button type="button" aria-pressed={!about} onclick={() => tabs.set(key, "sessions")}>Sessions</button>
         <button type="button" aria-pressed={about} onclick={() => tabs.set(key, "about")}>About</button></header>
-      {:else}<header class="bar"><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}</header>{/if}
+      {:else}<header class="bar"><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}{#if attention.can("operate")}<button type="button" class="tool" title="New session" aria-label="New session" onclick={() => openNew("session")}><Icon name="plus" /></button>{/if}</header>{/if}
       <!-- A long tree renders only its visible rows, through the feed's shared list (spec: long lists are virtual). -->
       {#if about && session && store}<AboutPanel {store} room={room} {session} switchable={attention.can("operate")} navigate={openSession} onjobs={async event => { if (!wide.current) await showPanel(false, event.detail > 0); void jobsTool?.show(session); }} />
       {:else if tree.length}<div class="tree"><VirtualList bind:this={sessionList} items={tree} key={treeKey}
