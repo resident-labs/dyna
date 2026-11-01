@@ -32,6 +32,7 @@ jobs:
       web: ${{ steps.filter.outputs.web }}
       pi: ${{ steps.filter.outputs.pi }}
       next_pi: ${{ steps.filter.outputs.next_pi }}
+      self_hosted: ${{ steps.runner.outputs.self_hosted }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -41,11 +42,35 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
         run: bash scripts/ci-changes.sh >> "$GITHUB_OUTPUT"
+      # Hosted unless the owner turned the pool on, the pool is alive, and this
+      # run's code comes from this repository. See next/docs/ci-runners.md.
+      - id: runner
+        env:
+          ENABLED: ${{ vars.DYNA_CI_SELF_HOSTED }}
+          LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}
+          SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        run: bash scripts/ci-runner.sh >> "$GITHUB_OUTPUT"
+
+  # A job bound for the pool can wait a day for a runner. This ends the wait when
+  # the pool dies after the run was routed to it.
+  pool-watch:
+    needs: changes
+    if: needs.changes.outputs.self_hosted == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-pool-watch.sh
 
   pi:
     needs: changes
     if: needs.changes.outputs.pi == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || 'ubuntu-latest' }}
     timeout-minutes: 30
     defaults:
       run:
@@ -74,7 +99,7 @@ jobs:
   next-pi:
     needs: changes
     if: needs.changes.outputs.next_pi == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || 'ubuntu-latest' }}
     timeout-minutes: 30
     env:
       NODE_OPTIONS: --experimental-strip-types
@@ -190,7 +215,7 @@ jobs:
     name: go-test-shard (${{ matrix.shard }})
     needs: [changes]
     if: needs.changes.outputs.go == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || 'ubuntu-latest' }}
     # Go's own test timeout is 5 minutes. The runner slot hooks expect 30.
     timeout-minutes: 30
     strategy:
@@ -265,7 +290,7 @@ jobs:
     name: go-static
     needs: [changes]
     if: needs.changes.outputs.go == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || 'ubuntu-latest' }}
     timeout-minutes: 15
     env:
       GOCACHE: /home/runner/.cache/go-build
@@ -292,7 +317,9 @@ jobs:
             /home/runner/go/pkg/mod
           key: go-build-${{ github.sha }}
           restore-keys: go-build-
+      # The self-hosted image already has it, and no sudo.
       - name: Install shellcheck
+        if: runner.environment == 'github-hosted'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck >/dev/null
       - name: Verify modules
         run: bash scripts/ci.sh go modules
@@ -319,7 +346,7 @@ jobs:
     name: desktop
     needs: [changes]
     if: needs.changes.outputs.go == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || 'ubuntu-latest' }}
     timeout-minutes: 15
     env:
       GOCACHE: /home/runner/.cache/go-build
@@ -378,7 +405,7 @@ jobs:
     name: next
     needs: [changes]
     if: needs.changes.outputs.go == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -388,7 +415,9 @@ jobs:
           cache-dependency-path: next/go.sum
       - name: Format, vet and test
         run: bash scripts/ci.sh next
+      # The self-hosted image already has it, and no sudo.
       - name: Provision OpenSSH for integration
+        if: runner.environment == 'github-hosted'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq openssh-server
@@ -429,7 +458,7 @@ jobs:
     name: frontend build
     needs: [changes]
     if: needs.changes.outputs.web == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || 'ubuntu-latest' }}
     timeout-minutes: 10
     defaults:
       run:
@@ -460,7 +489,7 @@ jobs:
     name: frontend test (${{ matrix.shard }})
     needs: [changes]
     if: needs.changes.outputs.web == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || 'ubuntu-latest' }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -521,7 +550,7 @@ jobs:
     name: frontend-check
     needs: [changes]
     if: needs.changes.outputs.web == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || 'ubuntu-latest' }}
     timeout-minutes: 10
     defaults:
       run:
