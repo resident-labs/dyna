@@ -34,6 +34,9 @@ const visual = object({ id: string, version: number, title: string, height: numb
   shots: nullable(array(object({ width: number, file: string }))), checks: nullable(array(object({
     name: oneOf("renders", "console", "widths", "contrast", "network"), status: oneOf("pass", "warn", "fail", "skip"), detail: optional(string),
   }))) });
+const prChangeKind = oneOf("ci_failed", "ci_passed", "changes_requested", "approved", "conflict", "merged", "closed", "comment");
+const prSummary = object({ repo: string, number: number, url: string, title: string, author: string, session: string, draft: boolean, state: oneOf("open", "merged", "closed"), head: string,
+  review: oneOf("", "approved", "changes_requested", "review_required"), ci: oneOf("", "none", "pending", "success", "failure"), merge: oneOf("", "clean", "blocked", "behind", "conflict") });
 const bodies: Record<string, Check> = {
   "connect.connector": object({ missing: boolean }),
   "account.failed": object({ accountId: string, reason: oneOf("sign_in_rejected", "refresh_failed") }),
@@ -63,6 +66,8 @@ const bodies: Record<string, Check> = {
   "host.disk_low": object({ host: string, freeBytes: number, floorBytes: number }),
   "grant.expired": object({ grant: string }),
   "pr.opened": object({ repo: string, number: number, session: string, url: string }),
+  "pr.changed": object({ session: string, changes: nullable(array(object({ pr: prSummary, kinds: optional(nullable(array(prChangeKind))), failedChecks: optional(nullable(array(string))),
+    outside: boolean, comments: optional(nullable(array(object({ author: string, body: string, url: string, outside: boolean })))), moreComments: optional(number) }))) }),
   "room.paused": object({}),
   // Whole counts, zero for no limit. The engine allows memBytes past 2^53, about 8 PB; such a limit is skipped here.
   "room.limits_changed": object({ cpus: value => Number.isSafeInteger(value) && Number(value) >= 0, memBytes: value => Number.isSafeInteger(value) && Number(value) >= 0 }),

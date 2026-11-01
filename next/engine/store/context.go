@@ -62,9 +62,12 @@ type ContextAccount struct {
 	Usable   bool
 }
 type ContextPR struct {
-	Repo     contract.RepoName
-	Number   int
-	Approved bool
+	Repo   contract.RepoName
+	Number int
+	Draft  bool
+	Review contract.PrReview
+	CI     contract.PrCI
+	Merge  contract.PrMerge
 }
 
 func (s *Store) ContextChildren(ctx context.Context, id contract.SessionID) ([]ContextChild, error) {
@@ -124,7 +127,7 @@ func (s *Store) ContextAccounts(ctx context.Context, id contract.SessionID) ([]C
 }
 
 func (s *Store) ContextPRs(ctx context.Context, id contract.SessionID) ([]ContextPR, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT repo,number,approved_head!='' FROM pr_owners WHERE session=? ORDER BY repo,number`, id)
+	rows, err := s.Read().QueryContext(ctx, `SELECT repo,number,draft,review,ci,merge FROM pr_owners WHERE session=? AND state='open' ORDER BY repo,number`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +135,7 @@ func (s *Store) ContextPRs(ctx context.Context, id contract.SessionID) ([]Contex
 	var out []ContextPR
 	for rows.Next() {
 		var p ContextPR
-		if err := rows.Scan(&p.Repo, &p.Number, &p.Approved); err != nil {
+		if err := rows.Scan(&p.Repo, &p.Number, &p.Draft, &p.Review, &p.CI, &p.Merge); err != nil {
 			return nil, err
 		}
 		out = append(out, p)

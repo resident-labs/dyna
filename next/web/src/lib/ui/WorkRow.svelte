@@ -1,14 +1,15 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import Icon from "./Icon.svelte";
+  import StatusPill from "./StatusPill.svelte";
   import StepList from "./StepList.svelte";
-  import { clock, commandLine, describe, eventGroups, formatTime, subject, timeSpan, workIsBare, workSummary, type Row } from "../feed.ts";
-  import type { Event } from "../contract.gen.ts";
+  import { changeLine, clock, commandLine, describe, eventGroups, formatTime, prKey, prWords, subject, timeSpan, wakingChanges, workIsBare, workSummary, type Row } from "../feed.ts";
+  import type { Event, PrSummary } from "../contract.gen.ts";
   import type { TurnTranscripts } from "../transcripts.svelte.ts";
 
-  let { row, name, opened, ontoggle, transcripts, transcriptOf, onjobs }: {
+  let { row, name, opened, ontoggle, transcripts, transcriptOf, onjobs, prs }: {
     row: Extract<Row, { kind: "work" }>; name: (session: string) => string; opened: ReadonlySet<string>; ontoggle: (key: string) => void;
-    transcripts: ReadonlyMap<string, TurnTranscripts>; transcriptOf: (session: string) => TurnTranscripts; onjobs: (session: string) => void;
+    transcripts: ReadonlyMap<string, TurnTranscripts>; transcriptOf: (session: string) => TurnTranscripts; onjobs: (session: string) => void; prs: ReadonlyMap<string, PrSummary>;
   } = $props();
   let open = $derived(opened.has(row.key));
   let bare = $derived(workIsBare(row.events, name, row.until));
@@ -74,7 +75,7 @@
           {/if}
         {/each}{#if !allWorkers && workers.length > 6}<li><button class="detail" type="button" onclick={() => ontoggle(`${row.key}-all`)}>Show {workers.length - 6} more sessions</button></li>{/if}</ul>
       {/if}
-      <ul>{#each computerSessions as session (session)}<li><Icon name="monitor" size={14} /><span>{computerUsage(session)}</span></li>{/each}{#each groups as group (group[0].type)}{@const line = describe(group[0], name)}{#if line}<li><Icon name={group[0].type === "session.closed" ? "close" : group[0].type === "session.started" ? "person" : group[0].type === "op.decided" ? "check" : group[0].type === "op.requested" ? "shield" : "list"} size={14} />{#if group.length === 1}<span>{#if group[0].type === "pr.opened"}<a href={group[0].body.url} target="_blank" rel="noopener noreferrer">{line}</a>{:else}{line}{/if}{#if group[0].type === "shell.job.ended"}{@const session = group[0].body.session} <button type="button" class="retry" onclick={() => onjobs(session)}>View jobs</button>{/if}</span>{:else}<button class="detail" type="button" aria-expanded={opened.has(`${row.key}-${group[0].type}`)} onclick={() => ontoggle(`${row.key}-${group[0].type}`)}>{group.length} {eventGroups[group[0].type]} <Icon name="chevron" size={14} /></button>{/if}<time datetime={group[0].at}>{formatTime(group[0].at)}</time></li>{#if group.length === 1 && group[0].type === "op.requested"}{@render requestDetails(group[0])}{/if}{#if group.length > 1 && opened.has(`${row.key}-${group[0].type}`)}{#each group as event (event.seq)}<li class="step"><span>{describe(event, name)}{#if event.type === "shell.job.ended"} <button type="button" class="retry" onclick={() => onjobs(event.body.session)}>View jobs</button>{/if}</span><time datetime={event.at}>{formatTime(event.at)}</time></li>{#if event.type === "op.requested"}{@render requestDetails(event)}{/if}{/each}{/if}{/if}{/each}</ul>
+      <ul>{#each computerSessions as session (session)}<li><Icon name="monitor" size={14} /><span>{computerUsage(session)}</span></li>{/each}{#each groups as group (group[0].type)}{@const line = describe(group[0], name)}{#if line}<li><Icon name={group[0].type === "session.closed" ? "close" : group[0].type === "session.started" ? "person" : group[0].type === "op.decided" ? "check" : group[0].type === "op.requested" ? "shield" : "list"} size={14} />{#if group.length === 1}<span>{#if group[0].type === "pr.opened"}{@const pr = prs.get(prKey(group[0].body.repo, group[0].body.number))}<a href={group[0].body.url} target="_blank" rel="noopener noreferrer">{line}</a>{#if pr}{#each prWords(pr) as word (word.label)}{" · "}{#if word.tone}<StatusPill tone={word.tone} label={word.label} word />{:else}{word.label}{/if}{/each}{/if}{:else if group[0].type === "pr.changed"}{#each wakingChanges(group[0].body) as change, index (change.pr.url)}{#if index}{" · "}{/if}<a href={change.pr.url} target="_blank" rel="noopener noreferrer">{changeLine(change)}</a>{/each}{:else}{line}{/if}{#if group[0].type === "shell.job.ended"}{@const session = group[0].body.session} <button type="button" class="retry" onclick={() => onjobs(session)}>View jobs</button>{/if}</span>{:else}<button class="detail" type="button" aria-expanded={opened.has(`${row.key}-${group[0].type}`)} onclick={() => ontoggle(`${row.key}-${group[0].type}`)}>{group.length} {eventGroups[group[0].type]} <Icon name="chevron" size={14} /></button>{/if}<time datetime={group[0].at}>{formatTime(group[0].at)}</time></li>{#if group.length === 1 && group[0].type === "op.requested"}{@render requestDetails(group[0])}{/if}{#if group.length > 1 && opened.has(`${row.key}-${group[0].type}`)}{#each group as event (event.seq)}<li class="step"><span>{describe(event, name)}{#if event.type === "shell.job.ended"} <button type="button" class="retry" onclick={() => onjobs(event.body.session)}>View jobs</button>{/if}</span><time datetime={event.at}>{formatTime(event.at)}</time></li>{#if event.type === "op.requested"}{@render requestDetails(event)}{/if}{/each}{/if}{/if}{/each}</ul>
     </div>{/if}
   </div>
 </div>

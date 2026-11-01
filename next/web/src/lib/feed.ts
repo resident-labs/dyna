@@ -1,4 +1,4 @@
-import type { Attachment, BoxState, Card, Conversation, Event, FailureCause, Principal, SessionCloseReason } from "./contract.gen.ts";
+import type { Attachment, BoxState, Card, Conversation, Event, FailureCause, PrChange, PrChanged, PrChangeKind, Principal, PrSummary, SessionCloseReason } from "./contract.gen.ts";
 import type { BoxFailure } from "./status.ts";
 import type { PendingReason } from "./event.ts";
 import type { Request } from "./room.svelte.ts";
@@ -249,6 +249,8 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       }
       continue;
     }
+    // A PR that moved without news, such as CI starting, only updates its state on the rows that show it.
+    if (event.type === "pr.changed" && !wakingChanges(event.body).length) continue;
     if (event.type !== "session.profile_changed" && event.type !== "transcript.changed") work.push(event);
   }
   for (const sent of pending) post(`n${sent.id}`, 0, { kind: "owner" }, sent.at, sent.text, sent.attachments, sent.to, sent);
@@ -275,7 +277,7 @@ export const eventGroups: Record<Event["type"], string> = {
   "room.paused": "pauses", "room.resumed": "resumes", "room.limits_changed": "room limits changed", "room.deleting": "room deletions", "room.deleted": "room deletions",
   "op.requested": "requests", "op.decided": "requests decided", "op.ran": "requests run",
   "question.asked": "questions", "question.answered": "questions answered", "question.withdrawn": "questions withdrawn",
-  "image.built": "images built", "image.failed": "image builds failed", "pr.opened": "pull requests opened",
+  "image.built": "images built", "image.failed": "image builds failed", "pr.opened": "pull requests opened", "pr.changed": "pull request updates",
   "shell.job.ended": "jobs finished", "grant.expired": "host grants expired",
   "host.disk_low": "disk warnings", "conversation.read": "read positions",
 };
@@ -370,6 +372,32 @@ const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.s
 // Why the engine closed a session, after "closed". The engine closes a session whose box stayed stopped for 7 days.
 const closeReasons: Record<SessionCloseReason, string> = { dormant: "after 7 quiet days", disk: "to free disk" };
 
+const changeWords: Record<PrChangeKind, string> = {
+  ci_failed: "CI failed", ci_passed: "CI passed", changes_requested: "changes requested", approved: "approved",
+  conflict: "conflicts with its base", merged: "merged", closed: "closed without merging", comment: "new comments",
+};
+
+// The changes of a pr.changed event that say something; the rest only keep state current.
+export const wakingChanges = (body: PrChanged): PrChange[] => (body.changes ?? []).filter(change => change.kinds?.length);
+export const changeLine = ({ pr, kinds }: PrChange): string => `${pr.repo}#${pr.number} ${(kinds ?? []).map(kind => changeWords[kind]).join(", ")}`;
+
+// How the room store and a PR's row match a tracked PR.
+export const prKey = (repo: string, number: number): string => `${repo}#${number}`;
+
+// A tracked PR's live state in the words a row shows. A tone marks only what needs someone, as color marks attention (spec 5.13).
+export function prWords(pr: PrSummary): { label: string; tone?: "failed" | "warning" }[] {
+  if (pr.state === "merged") return [{ label: "Merged" }];
+  if (pr.state === "closed") return [{ label: "Closed" }];
+  const words: { label: string; tone?: "failed" | "warning" }[] = [];
+  if (pr.ci === "failure") words.push({ label: "CI failed", tone: "failed" });
+  else if (pr.ci === "pending") words.push({ label: "CI running" });
+  else if (pr.ci === "success") words.push({ label: "CI passed" });
+  if (pr.review === "changes_requested") words.push({ label: "Changes requested", tone: "warning" });
+  else if (pr.review === "approved") words.push({ label: "Approved" });
+  if (pr.merge === "conflict") words.push({ label: "Conflict", tone: "failed" });
+  return words;
+}
+
 // One short line per work row in the owner's terms, such as "lead-web worked for 6 min · 2 turns · 1 job" or
 // "builder-feed started · 3 sessions worked for 12 min · 4 turns"; the opened row lists each event.
 // The time runs from the first turn's start to the last turn's end in the row, in whole minutes as T3 Code's
@@ -378,7 +406,7 @@ const closeReasons: Record<SessionCloseReason, string> = { dormant: "after 7 qui
 export function workSummary(events: Event[], name: Name, until?: string, from?: string): string {
   if (events.length === 1 && !until && events[0].type !== "turn.started" && events[0].type !== "turn.ended" && events[0].type !== "shell.job.ended" && events[0].type !== "computer.changed" && !(events[0].type === "session.closed" && events[0].body.reason)) return describe(events[0], name) || "Activity";
   const turns = new Set<string>();
-  let stopped = 0, jobs = 0, images = 0, prs = 0, started = 0, closed = 0, memory = 0;
+  let stopped = 0, jobs = 0, images = 0, prs = 0, updates = 0, started = 0, closed = 0, memory = 0;
   const approvals = new Map<string, number>();
   let first = Infinity, last = -Infinity;
   for (const event of events) {
@@ -394,6 +422,7 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
       case "shell.job.ended": jobs++; break;
       case "image.built": images++; break;
       case "pr.opened": prs++; break;
+      case "pr.changed": updates++; break;
       case "box.pressure": memory++; break;
       case "op.decided": if (event.body.decision.approved) { const by = event.body.decision.by.session ? name(event.body.decision.by.session) : "you"; approvals.set(by, (approvals.get(by) ?? 0) + 1); } break;
     }
@@ -412,6 +441,7 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
     jobs && count(jobs, "job"),
     images && `${count(images, "image")} built`,
     prs && `${count(prs, "pull request")} opened`,
+    updates && count(updates, "pull request update"),
     ...[...approvals].map(([by, amount]) => `${count(amount, "approval")} by ${by}`),
     started && `${count(started, "session")} started`,
     closed && `${closed} closed`,
@@ -424,7 +454,7 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
 // a PR to its link.
 export function workIsBare(events: Event[], name: Name, until?: string): boolean {
   const [only] = events;
-  return events.length === 1 && only.type !== "op.requested" && only.type !== "pr.opened" && workSummary(events, name, until) === describe(only, name);
+  return events.length === 1 && only.type !== "op.requested" && only.type !== "pr.opened" && only.type !== "pr.changed" && workSummary(events, name, until) === describe(only, name);
 }
 
 // One plain line for an event inside an opened work row.
@@ -453,6 +483,7 @@ export function describe(event: Event, name: Name): string {
     // The reason is raw build output (r8); the build log holds it.
     case "image.failed": return `Image for ${event.body.repo} failed`;
     case "pr.opened": return `${name(event.body.session)} opened pull request ${event.body.repo}#${event.body.number}`;
+    case "pr.changed": return wakingChanges(event.body).map(changeLine).join(" · ");
     case "grant.expired": return "A host execution grant expired";
     // The owner reads this feed; a room's root may also pause it.
     case "room.paused": case "room.resumed": return `${event.from.session ? name(event.from.session) : "You"} ${event.type === "room.paused" ? "paused" : "resumed"} the room`;

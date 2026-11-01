@@ -153,3 +153,18 @@ func TestTopicBranchPushAuthorization(t *testing.T) {
 		})
 	}
 }
+
+func TestNotifyPushNamesTheRepositoryOfAPush(t *testing.T) {
+	var pushed []contract.RepoName
+	route := NotifyPush(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), func(repo contract.RepoName) { pushed = append(pushed, repo) })
+	for _, request := range []*http.Request{
+		httptest.NewRequest(http.MethodGet, "/git/owner/repo.git/info/refs?service=git-receive-pack", nil),
+		httptest.NewRequest(http.MethodPost, "/git/owner/repo.git/git-upload-pack", nil),
+		httptest.NewRequest(http.MethodPost, "/git/owner/repo.git/git-receive-pack", nil),
+	} {
+		route.ServeHTTP(httptest.NewRecorder(), request)
+	}
+	if len(pushed) != 1 || pushed[0] != "owner/repo" {
+		t.Fatalf("pushed %v", pushed)
+	}
+}

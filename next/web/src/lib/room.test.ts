@@ -593,3 +593,34 @@ test("a session counts once: a broken box, then waiting, then a running turn, th
   store.apply(event(10, { type: "turn.started", body: { session: "b", turn: "t3", inputs: [] } }));
   assert.deepEqual(store.counts, { sessions: 2, waiting: 0, failed: 0, working: 2, idle: 0 });
 });
+
+test("tracked PRs come from pr.list, then pr.changed, and an older list never undoes an event", async () => {
+  const pr = { repo: "o/r", number: 7, url: "u", title: "t", author: "a", session: "s", draft: false, state: "open", head: "h", review: "", ci: "pending", merge: "" } as const;
+  const other = { ...pr, number: 8 };
+  const original = globalThis.fetch;
+  let answer: (response: Response) => void = () => {};
+  globalThis.fetch = input => String(input).endsWith("pr.list") ? new Promise<Response>(done => { answer = done; }) : Promise.resolve(new Response(JSON.stringify({ rooms: [], sessions: [], operations: [], seq: 10 })));
+  try {
+    const store = new RoomStore("r", () => () => {});
+    await store.open();
+    store.apply(event(11, { type: "pr.changed", body: { session: "s", changes: [{ pr: { ...pr, ci: "failure" }, kinds: ["ci_failed"], outside: false }] } }));
+    answer(new Response(JSON.stringify({ prs: [pr, other] })));
+    await new Promise(done => setTimeout(done));
+    assert.equal(store.prs.get("o/r#7")?.ci, "failure");
+    assert.equal(store.prs.get("o/r#8")?.ci, "pending");
+    store.close();
+  } finally { globalThis.fetch = original; }
+});
+
+test("a room opens when its PR list does not load", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = input => String(input).endsWith("pr.list") ? Promise.reject(new Error("offline")) : Promise.resolve(new Response(JSON.stringify({ rooms: [], sessions: [], operations: [], seq: 10 })));
+  try {
+    const store = new RoomStore("r", () => () => {});
+    await store.open();
+    await new Promise(done => setTimeout(done));
+    assert.equal(store.error, undefined);
+    assert.equal(store.prs.size, 0);
+    store.close();
+  } finally { globalThis.fetch = original; }
+});

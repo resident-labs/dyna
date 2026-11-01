@@ -63,14 +63,14 @@ func TestUpgradeSessionWorkFrom42(t *testing.T) {
 	for _, statement := range []string{
 		"CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
 		"CREATE TABLE rules (room TEXT, number INTEGER)",
-		"CREATE TABLE rooms (id TEXT); CREATE TABLE sessions (id TEXT, room TEXT, parent TEXT, created_at INTEGER, closed_at INTEGER); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);",
+		"CREATE TABLE rooms (id TEXT); CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT, parent TEXT, created_at INTEGER, closed_at INTEGER); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);",
 		"CREATE TABLE hosts (name TEXT)",
 		"CREATE TABLE deliveries (seq INTEGER)",
 		"CREATE TABLE event_files (seq INTEGER)",
 		"INSERT INTO meta VALUES ('schema_version','42')",
 		"CREATE TABLE events (seq INTEGER PRIMARY KEY, room TEXT, from_kind TEXT, from_id TEXT, type TEXT, body BLOB)",
 		"CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT, started_seq INTEGER, started_at INTEGER, ended_at INTEGER)",
-		"CREATE TABLE pr_owners (session TEXT)",
+		"CREATE TABLE pr_owners (repo TEXT, number INTEGER, session TEXT, goal TEXT, approved_head TEXT, branch TEXT)",
 		"CREATE TABLE operations (id TEXT PRIMARY KEY, kind TEXT, room TEXT, by_kind TEXT, by_id TEXT, class TEXT, state TEXT, card BLOB, args BLOB, args_sha256 BLOB, created_at INTEGER, expires_at INTEGER, decision BLOB, result BLOB)",
 		"CREATE TABLE grants (id TEXT, kind TEXT, room TEXT, to_kind TEXT, to_id TEXT, hosts BLOB, by_kind TEXT, by_id TEXT, created_at INTEGER, expires_at INTEGER, revoked_at INTEGER, expired_at INTEGER)",
 		"CREATE TABLE hostexec_runs (op TEXT PRIMARY KEY, grant_id TEXT, host TEXT, scope TEXT, started_at INTEGER, timeout_ms INTEGER, ended_at INTEGER, output_bytes INTEGER, stopped TEXT, lost_at INTEGER)",
@@ -132,8 +132,8 @@ func TestUpgradeDropsRules(t *testing.T) {
 	if _, err := db.Exec(`PRAGMA foreign_keys=ON;
 		CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO meta VALUES ('schema_version','45');
 		CREATE TABLE rules (room TEXT, number INTEGER, PRIMARY KEY(room,number)); INSERT INTO rules VALUES ('room',1);
-		CREATE TABLE rooms (id TEXT); CREATE TABLE sessions (id TEXT, room TEXT, parent TEXT, created_at INTEGER, closed_at INTEGER); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);
-		CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT, started_at INTEGER, ended_at INTEGER); CREATE TABLE pr_owners (session TEXT); CREATE TABLE hosts (name TEXT);
+		CREATE TABLE rooms (id TEXT); CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT, parent TEXT, created_at INTEGER, closed_at INTEGER); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);
+		CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT, started_at INTEGER, ended_at INTEGER); CREATE TABLE pr_owners (repo TEXT, number INTEGER, session TEXT, goal TEXT, approved_head TEXT, branch TEXT); CREATE TABLE hosts (name TEXT);
 		CREATE TABLE operations (id TEXT, kind TEXT, args BLOB, by_kind TEXT, by_id TEXT, created_at INTEGER, state TEXT);
 		CREATE TABLE grants (id TEXT, kind TEXT, room TEXT, to_kind TEXT, to_id TEXT, hosts BLOB, by_kind TEXT, by_id TEXT, created_at INTEGER, expires_at INTEGER, revoked_at INTEGER, expired_at INTEGER);
 		CREATE TABLE events (seq INTEGER PRIMARY KEY, id TEXT, at INTEGER, room TEXT, type TEXT, from_kind TEXT, from_id TEXT, body BLOB);
@@ -175,8 +175,8 @@ func TestPermanentHostexecGrantMigration(t *testing.T) {
  INSERT INTO grants(id,kind,expires_at,revoked_at,expired_at) VALUES('active','hostexec',4102444800000,NULL,NULL),('past','hostexec',1,NULL,NULL),('revoked','hostexec',4102444800000,1,NULL);
  CREATE TABLE operations(kind TEXT,state TEXT,args BLOB);
  INSERT INTO operations VALUES('hostexec.grant','pending','{"expires":"future","never":false,"reason":"x"}');
- CREATE TABLE rooms (id TEXT); CREATE TABLE sessions (id TEXT, room TEXT, parent TEXT, created_at INTEGER, closed_at INTEGER); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);
- CREATE TABLE hosts(name TEXT); CREATE TABLE turns(id TEXT);`)
+ CREATE TABLE rooms (id TEXT); CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT, parent TEXT, created_at INTEGER, closed_at INTEGER); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);
+ CREATE TABLE hosts(name TEXT); CREATE TABLE turns(id TEXT); CREATE TABLE pr_owners (repo TEXT, number INTEGER, session TEXT, goal TEXT, approved_head TEXT, branch TEXT);`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,6 +200,7 @@ func TestOpenRootsGetTheAskGrant(t *testing.T) {
 	}
 	defer db.Close()
 	_, err = db.Exec(`CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO meta VALUES('schema_version','61');
+ CREATE TABLE pr_owners (repo TEXT, number INTEGER, session TEXT, goal TEXT, approved_head TEXT, branch TEXT);
  CREATE TABLE rooms (id TEXT PRIMARY KEY);
  CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT, parent TEXT, created_at INTEGER, closed_at INTEGER);
  CREATE TABLE grants (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT NOT NULL, to_kind TEXT NOT NULL, to_id TEXT NOT NULL, hosts BLOB NOT NULL, expires_at INTEGER, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at INTEGER NOT NULL, revoked_at INTEGER, expired_at INTEGER, reason TEXT NOT NULL DEFAULT '');
@@ -214,5 +215,50 @@ func TestOpenRootsGetTheAskGrant(t *testing.T) {
 	var to string
 	if err := db.QueryRow(`SELECT group_concat(to_id) FROM grants WHERE kind='ask-owner' AND revoked_at IS NULL AND expired_at IS NULL`).Scan(&to); err != nil || to != "root" {
 		t.Fatalf("grants: %q: %v", to, err)
+	}
+}
+
+func TestUpgradeTrackedPRsFrom62(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var old []string
+	for _, line := range strings.Split(schema, "\n") {
+		if strings.HasPrefix(line, "CREATE INDEX pr_owners_state ") {
+			continue
+		}
+		if strings.HasPrefix(line, "CREATE TABLE pr_owners ") {
+			line = "CREATE TABLE pr_owners (repo TEXT NOT NULL REFERENCES repos(repo), number INTEGER NOT NULL, session TEXT NOT NULL REFERENCES sessions(id), goal TEXT NOT NULL, approved_head TEXT NOT NULL, branch TEXT NOT NULL DEFAULT '', PRIMARY KEY(repo, number));"
+		}
+		old = append(old, line)
+	}
+	if _, err = db.Exec(strings.Join(old, "\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`INSERT INTO meta(key,value) VALUES ('schema_version','62');
+INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+INSERT INTO repos(repo,default_room) VALUES('o/r','r');
+INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('s','r','s','p','open','',0);
+INSERT INTO pr_owners(repo,number,session,goal,approved_head,branch) VALUES('o/r',7,'s','g','abc','v2/s')`); err != nil {
+		t.Fatal(err)
+	}
+	if err = upgrade(db, 62, "", steps, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = compareSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	var goal, approved, branch, state string
+	var baseline bool
+	if err = db.QueryRow("SELECT goal,approved_head,branch,state,baseline FROM pr_owners WHERE repo='o/r' AND number=7").Scan(&goal, &approved, &branch, &state, &baseline); err != nil {
+		t.Fatal(err)
+	}
+	if goal != "g" || approved != "abc" || branch != "v2/s" || state != "open" || !baseline {
+		t.Fatalf("%q %q %q %q %v", goal, approved, branch, state, baseline)
+	}
+	if _, err = db.Exec("PRAGMA foreign_keys=ON; INSERT INTO pr_owners(repo,number,session,goal,approved_head) VALUES('upstream/r',1,'s','','')"); err != nil {
+		t.Fatal("a repository no room lists:", err)
 	}
 }

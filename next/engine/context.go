@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 // requestChars keeps a question's line short enough for several in the section's budget.
@@ -42,6 +43,45 @@ func renderContextSection(key contract.ContextSectionKey, lines []string, maxCha
 		kept = append(kept, fmt.Sprintf("%d more: context show", more))
 	}
 	return contract.ContextSection{Key: key, Text: strings.Join(kept, "\n")}
+}
+
+// prLine says a PR's state in a few words. It holds nothing from GitHub's free text, so the snapshot needs no wrapper.
+func prLine(p store.ContextPR) string {
+	var parts []string
+	if p.Draft {
+		parts = append(parts, "draft")
+	}
+	switch p.CI {
+	case contract.PrCISuccess:
+		parts = append(parts, "CI passed")
+	case contract.PrCIFailure:
+		parts = append(parts, "CI failed")
+	case contract.PrCIPending:
+		parts = append(parts, "CI running")
+	case contract.PrCINone:
+		parts = append(parts, "no CI")
+	default:
+		parts = append(parts, "CI not read yet")
+	}
+	switch p.Review {
+	case contract.PrApproved:
+		parts = append(parts, "approved")
+	case contract.PrChangesRequested:
+		parts = append(parts, "changes requested")
+	default:
+		parts = append(parts, "not approved")
+	}
+	switch p.Merge {
+	case contract.PrMergeClean:
+		parts = append(parts, "mergeable")
+	case contract.PrMergeConflict:
+		parts = append(parts, "conflict")
+	case contract.PrMergeBehind:
+		parts = append(parts, "behind base")
+	case contract.PrMergeBlocked:
+		parts = append(parts, "merge blocked")
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal, req contract.ContextSnapshotRequest) (contract.ContextSnapshotResponse, *contract.Error) {
@@ -83,11 +123,7 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	add(contract.ContextRequests, lines, 600, 0)
 	lines = nil
 	for _, p := range data.PRs {
-		approval := "not approved"
-		if p.Approved {
-			approval = "approved"
-		}
-		lines = append(lines, fmt.Sprintf("%s #%d: %s", p.Repo, p.Number, approval))
+		lines = append(lines, fmt.Sprintf("%s #%d: %s", p.Repo, p.Number, prLine(p)))
 	}
 	add(contract.ContextPRs, lines, 600, 0)
 	if s.maxDepth == 0 || data.Depth < s.maxDepth {
