@@ -17,6 +17,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
 	sdkauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
+	coreusage "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/usage"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 	"github.com/spf13/cobra"
 )
@@ -48,9 +49,13 @@ func proxyOAuthComplete(client *rpc.Client, credentials *proxyStore, service oau
 	return service.ActivateDynaCredential(context.Background(), id, "")
 }
 
-func proxyCommand() *cobra.Command {
+func proxyCommand(get func() *socketClient) *cobra.Command {
 	var path string
-	cmd := &cobra.Command{Use: "proxy", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "proxy", Short: "Use Dyna's model proxy from local harnesses", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		// The engine starts its child with --config. Anyone else asked for help.
+		if path == "" {
+			return cmd.Help()
+		}
 		cfg, err := config.LoadConfig(path)
 		if err != nil {
 			return err
@@ -67,6 +72,7 @@ func proxyCommand() *cobra.Command {
 		defer client.Close()
 		credentials := &proxyStore{client: client}
 		sdkauth.RegisterTokenStore(credentials)
+		coreusage.RegisterPlugin(localUsage{client})
 		cliproxy.EnableDynaMemoryOAuthCallbacks()
 		var service *cliproxy.Service
 		cliproxy.SetDynaOAuthCompletionHook(func(state, id string) {
@@ -116,7 +122,8 @@ func proxyCommand() *cobra.Command {
 		return service.Run(ctx)
 	}}
 	cmd.Flags().StringVar(&path, "config", "", "Proxy config path")
-	_ = cmd.MarkFlagRequired("config")
+	_ = cmd.Flags().MarkHidden("config")
+	addProxyClient(cmd, get)
 	return cmd
 }
 

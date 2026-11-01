@@ -31,6 +31,8 @@ const (
 	MethodWebSearch               Method = "web.search"
 	MethodWebsearchSetKey         Method = "websearch.set_key"
 	MethodWebsearchRemoveKey      Method = "websearch.remove_key"
+	MethodProxyKey                Method = "proxy.key"
+	MethodProxyUsage              Method = "proxy.usage"
 	MethodConversationRead        Method = "conversation.read"
 	MethodRoomList                Method = "room.list"
 	MethodSessionList             Method = "session.list"

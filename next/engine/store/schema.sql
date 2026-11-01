@@ -104,3 +104,4 @@ CREATE TABLE workflow_steps (run TEXT NOT NULL REFERENCES workflow_runs(id), key
 CREATE TABLE issue_owners (repo TEXT NOT NULL, number INTEGER NOT NULL, session TEXT NOT NULL REFERENCES sessions(id), url TEXT NOT NULL, title TEXT NOT NULL, author TEXT NOT NULL, state TEXT NOT NULL, seen_comments INTEGER NOT NULL DEFAULT 0, own_wake_at INTEGER NOT NULL DEFAULT 0, meta TEXT NOT NULL DEFAULT '', meta_wake_at INTEGER NOT NULL DEFAULT 0, baseline INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(repo, number));
 CREATE INDEX issue_owners_session ON issue_owners(session);
 CREATE INDEX issue_owners_state ON issue_owners(state);
+CREATE TABLE local_usage (model TEXT PRIMARY KEY, requests INTEGER NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL, cache_write_tokens INTEGER NOT NULL, last_at INTEGER NOT NULL);
