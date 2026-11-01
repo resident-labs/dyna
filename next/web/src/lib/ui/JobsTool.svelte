@@ -89,10 +89,10 @@
   <button type="button" class="open" class:live={running || failures.length} class:phone bind:this={button} aria-haspopup="dialog" aria-expanded={open}
     aria-label={`Jobs, ${summary}`} title={summary} onclick={() => { if (open) void close(); else void show(); }}>
     <Icon name="prompt" />{#if phone}{#if failures.length}<span class="corner"><StatusPill tone="failed" dot label="Failed" /></span>{/if}
-    {:else}<span>Jobs</span>
+    {:else}<span class="label">Jobs</span>
       {#if running}<span class="n">{running}</span>{/if}
       {#if failures.length}<StatusPill tone="failed" label={`${failures.length} failed`} />{/if}
-      <Icon name="chevron" size={12} />{/if}</button>
+      <span class="open-chevron"><Icon name="chevron" size={12} /></span>{/if}</button>
   {#if open}
     {#if phone}<button type="button" class="scrim" tabindex="-1" aria-label="Close the jobs" onclick={() => void close()}></button>{/if}
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions (the arrow keys and Escape act on the whole list) -->
@@ -129,6 +129,10 @@
   .open.phone { position: relative; justify-content: center; width: 44px; height: 44px; padding: 0; }
   .corner { position: absolute; top: 4px; right: 2px; }
   .n { font-variant-numeric: tabular-nums; }
+  @container session-header (max-width: 500px) {
+    .open { padding: 0 4px; }
+    .label, .open-chevron { display: none; }
+  }
   .open > :global(svg:last-child) { color: var(--muted); }
   .pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 5; width: min(460px, calc(100vw - 24px)); max-height: min(560px, 70vh); display: flex; flex-direction: column;
     background: var(--raised); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px var(--shadow-lg); overflow: hidden; }
