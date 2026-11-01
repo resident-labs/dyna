@@ -556,7 +556,8 @@
   });
   // The tab names the page only. Counts stay out: a count in the title would act as an unread badge (spec 5.13).
   // An open Instructions or Requests section names the tab too. Settings names its own open pane, so this effect leaves Settings alone.
-  let tabTitle = $derived(section === "instructions" ? `${title} · Instructions` : section === "requests" ? `${title} · Requests` : title);
+  const sectionNames: Record<string, string> = { instructions: "Instructions", requests: "Requests", "new-session": "New session", "new-room": "New room" };
+  let tabTitle = $derived(sectionNames[section ?? ""] ? `${title} · ${sectionNames[section ?? ""]}` : title);
   $effect(() => { if (!inSettings) document.title = `${tabTitle} · Dyna`; });
 </script>
 
