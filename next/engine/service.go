@@ -4,7 +4,6 @@ package engine
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"errors"
 	"math/big"
 	"sync"
@@ -154,7 +153,7 @@ func failure(err error) *contract.Error {
 		code = contract.ErrInvalid
 	} else if errors.Is(err, approve.ErrConflict) {
 		code = contract.ErrConflict
-	} else if errors.Is(err, sql.ErrNoRows) {
+	} else if errors.Is(err, store.ErrNotFound) {
 		code = contract.ErrNotFound
 	} else if errors.Is(err, store.ErrSessionClosing) {
 		code = contract.ErrSessionClosing
