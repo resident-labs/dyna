@@ -3,7 +3,7 @@
   import Icon from "./Icon.svelte";
   import StatusPill from "./StatusPill.svelte";
   // The room's less frequent actions. Requests has its own header button.
-  let { paused, operate, admin, onpause, oninstructions, onterminal, oncomputer, onrequests, onjobs, onsessions, jobFailed = false, waiting = 0 }: { onsessions?: () => void; onrequests?: () => void; onjobs?: () => void; jobFailed?: boolean; waiting?: number; paused: boolean; operate: boolean; admin: boolean; onpause: () => void; oninstructions: () => void; onterminal?: () => void; oncomputer?: () => void } = $props();
+  let { paused, operate, admin, onpause, oninstructions, onnewsession, onterminal, oncomputer, onrequests, onjobs, jobFailed = false, waiting = 0 }: { onrequests?: () => void; onjobs?: () => void; jobFailed?: boolean; waiting?: number; paused: boolean; operate: boolean; admin: boolean; onpause: () => void; oninstructions: () => void; onnewsession: () => void; onterminal?: () => void; oncomputer?: () => void } = $props();
   let open = $state(false);
   let root: HTMLDivElement;
   let button: HTMLButtonElement;
@@ -36,8 +36,8 @@
     <Icon name="more" />{#if waiting}<StatusPill tone="warning" label="Requests waiting" count={waiting} />{/if}{#if jobFailed}<StatusPill tone="failed" label="A job failed" dot />{/if}</button>
   {#if open}
     <div class="list" role="menu" id="room-menu" tabindex="-1" bind:this={list} onkeydown={move}>
+      {#if operate}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false); onnewsession(); }}>New session</button>{/if}
       {#if onrequests}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onrequests(); }}>Requests{#if waiting}<StatusPill tone="warning" label="Requests waiting" count={waiting} />{/if}</button>{/if}
-      {#if onsessions}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onsessions(); }}>Sessions</button>{/if}
       {#if onjobs}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onjobs(); }}>Jobs{#if jobFailed}<StatusPill tone="failed" label="A job failed" dot />{/if}</button>{/if}
       {#if onterminal}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onterminal(); }}>Terminal</button>{/if}
       {#if oncomputer}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); oncomputer(); }}>Computer</button>{/if}
@@ -50,6 +50,7 @@
 <style>
   .menu { position: relative; }
   .open { display: flex; align-items: center; gap: 4px; padding: 6px; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+  @media (max-width: 640px) { .open { justify-content: center; min-width: 44px; min-height: 44px; } }
   .open:hover, .open[aria-expanded="true"] { background: var(--hover); color: var(--text); }
   .list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 2; min-width: 180px; padding: 4px; display: grid;
     background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px var(--shadow-md); }

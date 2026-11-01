@@ -14,11 +14,11 @@ import (
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/live"
+	"github.com/resident-labs/dyna/engine/model"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
 type Profiles interface {
-	Surface(contract.ProfileName) contract.AgentSurface
 	List() []contract.ProfileSummary
 	CompactionTokens(contract.ProfileName) int
 	Model(contract.ProfileName) (contract.ModelChoice, []string, error)
@@ -33,25 +33,25 @@ type Repositories interface {
 }
 
 type Service struct {
-	gitName, gitEmail  string
-	maxDepth           int
-	store              *store.Store
-	dispatch           func(context.Context, contract.SessionID, contract.TurnID, contract.Event, bool) (contract.TurnID, []store.FeedInput, error)
-	boxes              lifecycle.BoxAdapter
-	reconciler         *lifecycle.Reconciler
-	profiles           Profiles
-	repos              Repositories
-	approvals          *approve.Service
-	hostexec           HostexecRunner
-	hostexecTimeout    func(context.Context, time.Duration) (context.Context, context.CancelFunc)
-	now                func() time.Time
-	mu                 sync.Mutex
-	live               *live.Live
-	sessions           map[contract.SessionID]*sessionState
-	computerGeneration uint64
-	activityCount      uint64
-	shellGeneration    uint64
-	readMu             sync.Mutex // preserves commit and live broadcast order
+	gitName, gitEmail string
+	maxDepth          int
+	store             *store.Store
+	searchBraveURL    string
+	searchProxy       *model.Proxy
+	searchQuota       *model.Quotas
+	searchMu          sync.Mutex
+	searchFailures    map[string]time.Time
+	dispatch          func(context.Context, contract.SessionID, contract.TurnID, contract.Event, bool) (contract.TurnID, []store.FeedInput, error)
+	boxes             lifecycle.BoxAdapter
+	reconciler        *lifecycle.Reconciler
+	profiles          Profiles
+	repos             Repositories
+	approvals         *approve.Service
+	hostexec          HostexecRunner
+	hostexecTimeout   func(context.Context, time.Duration) (context.Context, context.CancelFunc)
+	now               func() time.Time
+	live              *live.Live
+	readMu            sync.Mutex // preserves commit and live broadcast order
 	// transcriptMu serializes appends, so each offset check and write runs alone.
 	transcriptMu        sync.Mutex
 	transcriptDir       string
@@ -60,32 +60,50 @@ type Service struct {
 	publishInstructions func(context.Context)
 }
 
-// sessionState is the engine's in-memory state for one session. s.mu guards its fields.
-// computerLock serializes computer transitions and channel replacement.
-// Take computerLock before s.mu, never the reverse.
-type sessionState struct {
-	computerLock sync.Mutex
-	channel      *boxChannel
-	activity     contract.TurnActivity
-	computer     *computerState
-	terminals    int
-	watch        *shellWatch
-	// activityOrder is the s.activityCount value when activity was set, so a room's newest label wins.
-	activityOrder uint64
+// createSession publishes before checking the store, so close can retire the handle.
+func (s *Service) createSession(ctx context.Context, id contract.SessionID) (*live.Session, *contract.Error) {
+	handle, _ := s.live.CreateSession(id)
+	check, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	_, open, err := s.store.OpenSession(check, id)
+	cancel()
+	if err != nil {
+		// A failed store read after close can leave an empty handle.
+		return nil, failure(err)
+	}
+	if !open {
+		s.retireSession(s.live.RetireHandle(handle), id)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, failure(err)
+	}
+	if !open {
+		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+	}
+	return handle, nil
 }
 
-// sessionLocked creates the entry if needed. Callers hold s.mu and pass the id of a session that exists or is being started.
-func (s *Service) sessionLocked(id contract.SessionID) *sessionState {
-	state := s.sessions[id]
-	if state == nil {
-		state = &sessionState{}
-		s.sessions[id] = state
+func (s *Service) lockSession(ctx context.Context, id contract.SessionID) (*live.Session, *contract.Error) {
+	handle, problem := s.createSession(ctx, id)
+	if problem != nil {
+		return nil, problem
 	}
-	return state
+	if !handle.Lock() {
+		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+	}
+	return handle, nil
+}
+
+// lookupSession reads existing session state without creating it.
+func (s *Service) lookupSession(id contract.SessionID) (*live.Session, bool) {
+	handle, ok := s.live.LookupSession(id)
+	if !ok || !handle.Lock() {
+		return nil, false
+	}
+	return handle, true
 }
 
 func New(st *store.Store, boxes lifecycle.BoxAdapter, profiles Profiles, now func() time.Time) *Service {
-	s := &Service{sessions: make(map[contract.SessionID]*sessionState), hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now}
+	s := &Service{hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now}
 	s.reconciler = lifecycle.New(st, boxes, s, nil, s.event, now)
 	s.live = live.New(s.deliverWakes)
 	st.SetWake(s.queueWakes)
@@ -107,10 +125,29 @@ func (s *Service) SetRepositories(repos Repositories) {
 
 func (s *Service) Reconciler() *lifecycle.Reconciler { return s.reconciler }
 
+// SessionClosed retires live session state after the close commits.
+func (s *Service) SessionClosed(id contract.SessionID) {
+	s.retireSession(s.live.RetireSession(id), id)
+}
+
+func (s *Service) retireSession(handle *live.Session, id contract.SessionID) {
+	if handle == nil {
+		return
+	}
+	defer handle.Unlock()
+	channel := handle.Channel()
+	handle.SetChannel(nil)
+	room, stopped := handle.ClearComputer()
+	handle.ClearShell()
+	channel.Close()
+	if stopped {
+		_ = s.computerEvent(context.Background(), id, room, contract.ComputerStopped)
+	}
+}
+
 func (s *Service) OpenTerminal(id contract.SessionID) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.sessions[id] != nil && s.sessions[id].terminals > 0
+	handle, ok := s.live.LookupSession(id)
+	return ok && handle.HasTerminal()
 }
 
 // SetTranscriptDir sets where transcript copies are kept, one folder per session.

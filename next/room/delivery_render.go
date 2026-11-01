@@ -25,6 +25,8 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 			parts = append(parts, b.Brief)
 		}
 		return strings.Join(parts, "\n\n"), nil
+	case contract.HostDiskLow:
+		return fmt.Sprintf("Host %s is low on disk: %d GiB free, %d GiB wanted. Close sessions that are done. At the floor, new boxes wait and the oldest stopped boxes close.", b.Host, b.FreeBytes>>30, b.FloorBytes>>30), nil
 	case contract.PrOpened:
 		return fmt.Sprintf("PR opened: %s", b.URL), nil
 	case contract.OpDecided:
@@ -41,6 +43,7 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		if b.Description != "" {
 			name = "'" + b.Description + "'"
 		}
+		// TODO: legacy/shim remove later — old boxes still send shell.job.ended without End, and saved events lack it. Remove when the engine fills End at the request boundary, every supported box version sends End, and a floor migration converts saved events (D-659).
 		result := fmt.Sprintf("exited with code %d", b.ExitCode)
 		if b.End != nil {
 			switch b.End.Kind {

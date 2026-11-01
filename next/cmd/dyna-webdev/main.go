@@ -40,6 +40,8 @@ import (
 // host is the dev engine's one host, named as an owner's build machine might be, since the page shows it.
 const host = "build-server"
 
+var fixtureSession contract.SessionID
+
 type devService struct{ *engine.Service } // api.Service needs HostAdd; engine/runtime adds the real one.
 
 func (devService) HostAdd(context.Context, contract.Principal, contract.HostAddRequest) (contract.HostAddResponse, *contract.Error) {
@@ -186,6 +188,9 @@ var devSteps = []struct {
 // TranscriptRead keeps the real checks, then answers with devSteps. Each turn picks a run of them from its ID, so turns
 // differ in length, and the longest say that their record is cut.
 func (d devService) TranscriptRead(ctx context.Context, p contract.Principal, req contract.TranscriptReadRequest) (contract.TranscriptReadResponse, *contract.Error) {
+	if req.Session == fixtureSession && fixtureSession != "" && req.Turn == "" && req.Before == "" && p.Kind == contract.PrincipalOwner {
+		return contract.TranscriptReadResponse{Turns: fixtureTurns()}, nil
+	}
 	response, problem := d.Service.TranscriptRead(ctx, p, req)
 	if problem != nil {
 		return response, problem
@@ -200,6 +205,14 @@ func (d devService) TranscriptRead(ctx context.Context, p contract.Principal, re
 	}
 	response.Truncated = sum%4 == 0
 	return response, nil
+}
+
+func (d devService) SessionWork(ctx context.Context, p contract.Principal, req contract.SessionWorkRequest) (contract.SessionWorkResponse, *contract.Error) {
+	response, problem := d.Service.SessionWork(ctx, p, req)
+	if problem == nil && req.Session == fixtureSession && fixtureSession != "" {
+		response.Total = len(fixtureTurns())
+	}
+	return response, problem
 }
 
 // SessionList shows builder-feed's computer as running, so the computer view can be opened.
@@ -259,7 +272,6 @@ func (profiles) List() []contract.ProfileSummary {
 		{Name: "deep", Provider: contract.ModelProviderAnthropic, Model: "claude-opus-5-5", Thinking: contract.ThinkingXHigh},
 		{Name: "quick", Provider: contract.ModelProviderOpenAI, Model: "gpt-6.1-mini", Thinking: contract.ThinkingOff}}
 }
-func (profiles) Surface(contract.ProfileName) contract.AgentSurface { return contract.AgentSurfaceOff }
 
 func (profiles) CompactionTokens(contract.ProfileName) int { return 0 }
 
@@ -460,7 +472,7 @@ func main() {
 	}()
 	fatal(st.AddHost(ctx, box.Host{Name: host, State: box.HostReady, CPUs: 128, MemBytes: 256 * box.GiB, DiskBytes: 1024 * box.GiB}))
 	if *seed {
-		seedRoom(ctx, svc, *posts, *agents)
+		seedRoom(ctx, svc, st, *posts, *agents)
 		seedDevices(ctx, st)
 	}
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -524,7 +536,7 @@ func seedAgents(ctx context.Context, s *engine.Service, n int) {
 	}
 }
 
-func seedRoom(ctx context.Context, s *engine.Service, posts, agents int) {
+func seedRoom(ctx context.Context, s *engine.Service, st *store.Store, posts, agents int) {
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	room, e1 := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "web-studio", RootProfile: "fake"})
 	lead, e2 := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "lead-web", Profile: "fake", Goal: "Build the room view"})
@@ -534,6 +546,11 @@ func seedRoom(ctx context.Context, s *engine.Service, posts, agents int) {
 			log.Fatal(e.Message)
 		}
 	}
+	fixture, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room.Room, Name: "sync-review", Profile: "fake", Goal: "Add retry hints to the sync status"})
+	if e != nil {
+		log.Fatal(e.Message)
+	}
+	fixtureSession = fixture.Session
 	post := func(p contract.Principal, r contract.PostRequest) {
 		r.Room = room.Room
 		if _, e := s.Post(ctx, p, r); e != nil {
@@ -543,6 +560,8 @@ func seedRoom(ctx context.Context, s *engine.Service, posts, agents int) {
 	post(owner, contract.PostRequest{Text: "Welcome to the web studio. Please build a clear room view."})
 	post(contract.Principal{Kind: contract.PrincipalSession, Session: lead.Session}, contract.PostRequest{Text: "The feed and session tree are ready for review."})
 	post(contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, contract.PostRequest{Text: "I am checking the attachment previews."})
+	// A markdown-heavy post, so the markdown look shows in the feed and the thread.
+	post(contract.Principal{Kind: contract.PrincipalSession, Session: lead.Session}, contract.PostRequest{Text: "## A heading\n\n### A smaller heading\n\nStatus for **review** with `inline code`:\n\n> A quoted note for the team.\n\n1. First step\n2. Second step\n\nhttps://example.com/a-very-long-bare-url-without-spaces-that-demonstrates-wrapping-in-a-narrow-session-thread\n\n- The thread renders markdown.\n- Links open in a new tab: [docs](https://example.com/docs)\n\n| Area | State | Note |\n| --- | --- | --- |\n| Thread | Done | Cells wrap inside the table when the text is long for a narrow screen |\n| Feed | Done | Rows keep the same look |\n\n\x60\x60\x60\nnpm run check -- --a-very-long-flag-name-that-keeps-going-without-any-spaces-at-all-to-test-wrapping\n\x60\x60\x60\n\nSanitizer check: ![chart](https://example.com/chart.png) <script>window.dynaSanitizerRan = true</script> <a href=\"https://example.com/sanitizer\">sanitizer link</a>"})
 	post(owner, contract.PostRequest{Text: "What is the next step?", Home: contract.Conversation{Kind: contract.ConversationDM, Session: lead.Session}})
 	post(owner, contract.PostRequest{Text: "Exercise the failed turn view", Mentions: []string{"builder-feed"}})
 	post(owner, contract.PostRequest{Text: "Start the dev server and run the engine tests", Mentions: []string{"lead-web"}})
@@ -565,6 +584,25 @@ func seedRoom(ctx context.Context, s *engine.Service, posts, agents int) {
 	}
 	var png bytes.Buffer
 	fatal(pngenc.Encode(&png, shot))
+	// An invented three-version card exercises both superseded chips and the
+	// in-view preview when a capture is unavailable.
+	visualAuthor := contract.Principal{Kind: contract.PrincipalSession, Session: lead.Session}
+	var original contract.EventID
+	thumbnail := upload(visualAuthor, "weekly-thumbnail.png", "image/png", png.String())
+	for i, summary := range []string{"Weekly report mockup.", "Renamed the chart and fixed the labels.", "Updated the report with this week's numbers."} {
+		html := fmt.Sprintf(`<!doctype html><html><head><meta name="viewport" content="width=device-width"><title>Weekly Report</title><style>
+body{font:15px system-ui;margin:0;padding:24px;color:#e8e9eb;background:#0d0f13}h1{font-size:24px;margin:0 0 4px}p{color:#a3a8b4}.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}.tile,.chart{background:#151820;border:1px solid #272b34;border-radius:8px;padding:16px}.tile strong{display:block;font-size:24px}.chart{margin-top:12px}.bars{display:flex;align-items:end;gap:12px;height:150px}.bars span{flex:1;background:#91a2ee;min-width:12px}
+</style></head><body><h1>Weekly Report</h1><p>Oct 25 – Oct 31, 2026 · sample data</p><div class="tiles"><div class="tile">Tasks done<strong>%d</strong>12%% increase</div><div class="tile">Open PRs<strong>7</strong>3 awaiting review</div><div class="tile">Failed runs<strong>2</strong>1 vs last week</div></div><div class="chart">Daily throughput<div class="bars"><span style="height:35%%"></span><span style="height:50%%"></span><span style="height:42%%"></span><span style="height:78%%"></span><span style="height:66%%"></span><span style="height:25%%"></span><span style="height:85%%"></span></div></div></body></html>`, 40+i)
+		file := upload(visualAuthor, "weekly-report.html", "text/html", html)
+		file.Visual = &contract.VisualCard{Title: "Weekly Report", Height: 900, Thumbnail: thumbnail.SHA256}
+		result, problem := s.Post(ctx, visualAuthor, contract.PostRequest{Room: room.Room, Text: summary, VisualUpdate: original, Attachments: []contract.Attachment{file}})
+		if problem != nil {
+			log.Fatal(problem.Message)
+		}
+		if i == 0 {
+			original = result.Event
+		}
+	}
 	post(owner, contract.PostRequest{Text: "Review these examples.", Attachments: []contract.Attachment{
 		upload(owner, "preview.png", "image/png", png.String()),
 		upload(owner, "card.html", "text/html", "<!doctype html><title>Review</title><h1>Feed review</h1><p>Ready to inspect.</p>"),
@@ -578,6 +616,12 @@ func seedRoom(ctx context.Context, s *engine.Service, posts, agents int) {
 			log.Fatal(e.Message)
 		}
 	}
+	// Two addressed posts make the first and follow-up mention treatments easy to inspect.
+	for i, text := range []string{"The feed is ready for review.", "The spacing now matches the design."} {
+		_, err := st.Post(ctx, contract.Event{ID: contract.EventID(fmt.Sprintf("seed-mention-%d", i)), Room: room.Room, Time: time.Now(), From: by,
+			Body: contract.PostCreated{Text: text, Home: contract.Conversation{Kind: contract.ConversationFeed}, Mentions: []contract.Principal{owner}}}, nil)
+		fatal(err)
+	}
 	seedAgents(ctx, s, agents)
 	for i := range posts {
 		text := fmt.Sprintf("Long-list post %d of %d.", i+1, posts)
@@ -586,4 +630,8 @@ func seedRoom(ctx context.Context, s *engine.Service, posts, agents int) {
 		}
 		post(contract.Principal{Kind: contract.PrincipalSession, Session: []contract.SessionID{lead.Session, child.Session}[i%2]}, contract.PostRequest{Text: text}) // session posts wake no turns
 	}
+}
+
+func (devService) AccountsImportOAuth(context.Context, contract.Principal, contract.AccountsImportOAuthRequest) (contract.AccountsImportOAuthResponse, *contract.Error) {
+	return contract.AccountsImportOAuthResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable in webdev"}
 }

@@ -70,7 +70,7 @@ func TestProfileListOwnerOnly(t *testing.T) {
 
 func TestProfileWrites(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.json")
-	if err := os.WriteFile(path, []byte(`{"original":{"provider":"openai","model":"old","allowedModels":["old"],"thinking":"high","agentSurface":"caller"}}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"original":{"provider":"openai","model":"old","allowedModels":["old"],"thinking":"high"}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	profiles, err := engine.LoadProfiles(path)
@@ -93,9 +93,6 @@ func TestProfileWrites(t *testing.T) {
 	}
 	if got := request(owner, "/v1/profile.set", `{"profile":{"name":"original","provider":"openai","model":"old","allowedModels":["old"],"thinking":"high"}}`); got.Code != http.StatusOK {
 		t.Fatalf("update: %d %s", got.Code, got.Body)
-	}
-	if profiles.Surface("original") != contract.AgentSurfaceCaller {
-		t.Fatal("update discarded agent surface")
 	}
 	duplicate := `{"create":true,"profile":{"name":"new"}}`
 	if got := request(owner, "/v1/profile.set", duplicate); got.Code != http.StatusConflict || !strings.Contains(got.Body.String(), `"profile_exists"`) {

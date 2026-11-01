@@ -8,10 +8,9 @@ import (
 )
 
 const (
-	MethodHostexecRun    Method    = "hostexec.run"
-	MethodHostexecRevoke Method    = "hostexec.revoke"
-	ErrNoGrant           ErrorCode = "no_grant"
-	ErrHostexecScope     ErrorCode = "hostexec_scope"
+	MethodHostexecList Method    = "hostexec.list"
+	MethodHostexecRun  Method    = "hostexec.run"
+	ErrNoGrant         ErrorCode = "no_grant"
 )
 
 type HostexecRunRequest struct {
@@ -23,10 +22,10 @@ type HostexecRunRequest struct {
 type HostexecRunResponse struct {
 	Operation Operation `json:"operation"`
 }
-type HostexecRevokeRequest struct {
-	Grant GrantID `json:"grant"`
+type HostexecListRequest struct{}
+type HostexecListResponse struct {
+	Grants []Grant `json:"grants"`
 }
-type HostexecRevokeResponse struct{}
 
 type HostexecRunArgs struct {
 	Room    RoomID     `json:"room"`

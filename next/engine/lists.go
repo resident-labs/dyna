@@ -22,10 +22,7 @@ func (s *Service) RoomList(ctx context.Context, caller contract.Principal, _ con
 				continue
 			}
 			result.Rooms[i].Working = append(result.Rooms[i].Working, item.Session)
-			s.mu.Lock()
-			state := s.sessionLocked(item.Session)
-			activity, order := state.activity, state.activityOrder
-			s.mu.Unlock()
+			activity, order := s.live.Activity(item.Session)
 			if activity.Turn == item.Turn && activity.Label != "" && order > newest[i] {
 				newest[i] = order
 				result.Rooms[i].Latest = &contract.RoomActivity{Session: activity.Session, Name: item.Name, Label: activity.Label}
@@ -45,14 +42,12 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 	}
 	for i := range result.Sessions {
 		session := &result.Sessions[i]
-		s.mu.Lock()
-		state := s.sessionLocked(session.ID)
-		activity := state.activity
+		activity, _ := s.live.Activity(session.ID)
 		session.Computer = contract.ComputerStopped
-		if state.computer != nil {
-			session.Computer = state.computer.state
+		if handle, ok := s.live.LookupSession(session.ID); ok && handle.Lock() {
+			session.Computer = handle.ComputerState()
+			handle.Unlock()
 		}
-		s.mu.Unlock()
 		if session.Turn != "" && activity.Turn == session.Turn {
 			session.Activity = activity.Label
 		}

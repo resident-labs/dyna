@@ -28,7 +28,6 @@
       "diagnostics": 10,
       "compactTokens": 200000,
       "maxConcurrent": 4,
-      "maxCallsPerRun": 8,
       "default": true
     }
   ],

@@ -155,18 +155,14 @@ func Run(ctx context.Context) error {
 	mux.Handle("/shell/", http.StripPrefix("/shell", jobs.Handler()))
 	mux.Handle("/", ModelRoute(engineSocket))
 	mcpPath := filepath.Join(piDir, "mcp.json")
-	if hello.AgentSurface != contract.AgentSurfaceCaller && hello.AgentSurface != contract.AgentSurfaceDeclared {
-		err = pi.WriteMCPConfig(mcpPath, "shell", "http://127.0.0.1:7781/shell/")
-	} else {
-		dynaTools, problem := dynamcp.New(client.forward, dynamcp.BoxTools("/run/dyna/agent.sock"), post.Preparer{Dir: workdir, Render: visual.Preview, Upload: func(ctx context.Context, path string) (contract.Attachment, error) {
-			return post.UploadHTTP(ctx, client.http, path)
-		}})
-		if problem != nil {
-			return problem
-		}
-		mux.Handle("/dyna/", dynaTools)
-		err = pi.WriteAgentMCPConfig(mcpPath, dynaTools.Description(), hello.AgentSurface == contract.AgentSurfaceDeclared)
+	dynaTools, problem := dynamcp.New(client.forward, dynamcp.BoxTools("/run/dyna/agent.sock"), post.Preparer{Dir: workdir, Render: visual.Preview, Upload: func(ctx context.Context, path string) (contract.Attachment, error) {
+		return post.UploadHTTP(ctx, client.http, path)
+	}})
+	if problem != nil {
+		return problem
 	}
+	mux.Handle("/dyna/", dynaTools)
+	err = pi.WriteAgentMCPConfig(mcpPath, dynaTools.Description())
 	if err != nil {
 		return err
 	}

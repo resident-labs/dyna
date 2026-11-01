@@ -1,7 +1,7 @@
 import { call } from "./client.ts";
 import type { HostSummary, RoomShared } from "./contract.gen.ts";
 
-export const hostLabel = (host: string) => host === "control-plane" ? "This computer" : host;
+export const hostLabel = (host: string) => host === "control-plane" ? "Dyna host" : host;
 
 // One tile on a Home card: the label, the percent large with an optional muted unit after it, a bar, and the text.
 export type Meter = { label: string; text: string; percent: number; busy: boolean; unit?: string };

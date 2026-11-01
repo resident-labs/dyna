@@ -20,17 +20,19 @@ export class TurnTranscripts {
     return Promise.all(turns.map(async turn => {
       const steps: TranscriptStep[] = [];
       let itemIndex = 0;
+      let older = false;
       let tail = false;
       let postIndex = 0;
       let afterItem: string | undefined;
       let truncated = false;
       while (steps.length < 200) {
-        const read = await call("transcript.read", { session: this.#session, turn, itemIndex, afterItem, tail, postIndex });
+        const read = await call("transcript.read", { session: this.#session, turn, afterItem, tail, postIndex, ...(older && !tail && !afterItem ? { page: "older_items" as const, cursor: itemIndex } : {}) });
         steps.push(...(read.steps ?? []));
         const page = read.turns?.[0];
         if (!page?.more) break;
         if (steps.length >= 200) { truncated = true; break; }
         if (page.after) { afterItem = page.after; continue; }
+        afterItem = undefined;
         if (page.tail) {
           const nextPost = page.nextPost ?? 0;
           if (tail && nextPost <= postIndex) { truncated = true; break; }
@@ -38,8 +40,9 @@ export class TurnTranscripts {
           postIndex = nextPost;
           continue;
         }
-        if (page.nextItem == null || page.nextItem <= itemIndex) { truncated = true; break; }
+        if (page.nextItem == null || (older && page.nextItem <= itemIndex)) { truncated = true; break; }
         itemIndex = page.nextItem;
+        older = true;
       }
       if (steps.length > 200) { steps.length = 200; truncated = true; }
       return { steps, truncated };

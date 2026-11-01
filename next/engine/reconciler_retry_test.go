@@ -178,6 +178,7 @@ func TestReconcilerCleansPinnedPendingCreate(t *testing.T) {
 type retryView struct{}
 
 func (retryView) OpenTerminal(contract.SessionID) bool { return false }
+func (retryView) SessionClosed(contract.SessionID)     {}
 func (retryView) Connected(contract.SessionID) bool    { return false }
 
 func TestReconcilerResumesInterruptedCreate(t *testing.T) {
