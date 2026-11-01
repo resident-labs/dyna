@@ -43,7 +43,7 @@
   .art::after { content:""; position:absolute; inset:auto 0 0; height:28%; background:linear-gradient(transparent,var(--sidebar)); pointer-events:none; }
   .art img { width:100%; height:100%; object-fit:cover; object-position:top; opacity:0; transition:opacity 200ms; }
   .art.ready img { opacity:1; }
-  iframe { position:absolute; top:0; left:0; width:960px; height:360px; border:0; transform-origin:top left; pointer-events:none; color-scheme:inherit; }
+  iframe { position:absolute; top:0; left:0; width:980px; height:380px; border:0; transform-origin:top left; pointer-events:none; color-scheme:inherit; }
   .row { display:flex; align-items:center; min-width:0; gap:8px; padding:10px 14px 12px; }
   .row strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14.5px; font-weight:600; }
   .pill { flex:none; font:600 11px var(--mono); color:var(--focus); background:var(--selected); padding:1px 7px; border-radius:9px; }
