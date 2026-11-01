@@ -58,6 +58,8 @@ type Account struct {
 	Rooms    []RoomID             `json:"rooms"`
 	State    AccountState         `json:"state"`
 	Reason   AccountFailureReason `json:"reason,omitempty"`
+	// Models are what the proxy routes for this account.
+	Models []string `json:"models,omitempty"`
 }
 type AccountsListRequest struct{}
 type AccountsListResponse struct {
@@ -123,10 +125,17 @@ type AccountsConnectStatusResponse struct {
 	AccountID AccountID            `json:"accountId,omitempty"`
 	Reason    ConnectFailureReason `json:"reason,omitempty"`
 }
+
+// AccountsSetKeyRequest adds a key to a listed provider. With no Provider it adds an
+// OpenAI-compatible provider from DisplayName and BaseURL. Models are hand-entered IDs
+// for a provider that does not list its own.
 type AccountsSetKeyRequest struct {
-	Provider AccountProvider `json:"provider"`
-	Label    string          `json:"label"`
-	Key      string          `json:"key"`
+	Provider    AccountProvider `json:"provider,omitempty"`
+	Label       string          `json:"label"`
+	Key         string          `json:"key"`
+	DisplayName string          `json:"displayName,omitempty"`
+	BaseURL     string          `json:"baseUrl,omitempty"`
+	Models      []string        `json:"models,omitempty"`
 }
 type AccountsSetKeyResponse struct {
 	AccountID AccountID `json:"accountId"`

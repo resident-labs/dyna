@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/rpc"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/resident-labs/dyna/engine/model"
 	"github.com/resident-labs/dyna/engine/store"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
 	proxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 
@@ -34,15 +36,6 @@ func (s *proxyStore) bound(id string) (bool, error) {
 	return false, nil
 }
 
-func keyProviderURL(proxyProvider string) (string, bool) {
-	for _, provider := range model.KeyProviders() {
-		if proxyProvider == "openai-compatible-"+string(provider.Provider) {
-			return provider.URL, true
-		}
-	}
-	return "", false
-}
-
 func (s *proxyStore) List(context.Context) ([]*proxyauth.Auth, error) {
 	var records []store.ProxyAuth
 	if err := s.client.Call("Auth.List", struct{}{}, &records); err != nil {
@@ -53,16 +46,22 @@ func (s *proxyStore) List(context.Context) ([]*proxyauth.Auth, error) {
 		switch record.Provider {
 		case "claude", "codex", "kimi", "xai", "meta", "openai-compatible-zai", "openai-compatible-opencode-go", "openai-compatible-deepseek":
 		default:
-			continue
+			if !model.IsCustomProxyProvider(record.Provider) {
+				continue
+			}
 		}
 		var auth proxyauth.Auth
 		if err := json.Unmarshal(record.Record, &auth); err != nil {
 			return nil, errors.New("proxy store record invalid")
 		}
 		// A key record keeps the URL it was created with, and the executor sends to
-		// that URL. The catalog decides, so a corrected endpoint reaches old accounts.
-		if url, ok := keyProviderURL(record.Provider); ok && auth.Attributes != nil {
-			auth.Attributes["base_url"] = url
+		// that URL. The preset decides, so a corrected endpoint reaches old accounts.
+		// Records from before providers held their models take the preset's.
+		if preset, ok := model.PresetForProxy(record.Provider); ok && auth.Attributes != nil {
+			auth.Attributes["base_url"] = preset.URL
+			if auth.Attributes[cliproxy.DynaModelsAttribute] == "" {
+				auth.Attributes[cliproxy.DynaModelsAttribute] = strings.Join(preset.Models, ",")
+			}
 		}
 		// Only bound credentials may be enabled after proxy restart.
 		auth.Disabled = !record.Bound

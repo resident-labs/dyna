@@ -21,6 +21,10 @@ type Credential struct {
 	Index    string          `json:"auth_index"`
 	Provider string          `json:"provider"`
 	State    CredentialState `json:"state"`
+	// DisplayName and BaseURL describe a provider the owner added.
+	DisplayName string   `json:"display_name"`
+	BaseURL     string   `json:"base_url"`
+	Models      []string `json:"models"`
 }
 
 func (m managementClient) credentials(ctx context.Context) ([]Credential, error) {

@@ -1,4 +1,4 @@
-import type { ModelProvider, ProfileSummary, ThinkingLevel } from "./contract.gen.ts";
+import type { Account, ModelProvider, ProfileSummary, ThinkingLevel } from "./contract.gen.ts";
 
 // A person reads a profile, not its slugs, as in v1's profileLabels.ts: the slug's words as a name, with SHOWN_AS
 // for those plain capitals get wrong. v1 named the harness; v2 has one, so the label names the provider and thinking.
@@ -14,6 +14,18 @@ export function profileForSave(draft: ProfileSummary) {
   const model = profile.model.trim();
   return { ...profile, name: draft.name.trim(), model, allowedModels: Array.from(new Set([...(draft.allowedModels ?? []), model])),
     compactTokens: draft.compactTokens ?? 0, maxConcurrent: draft.maxConcurrent ?? 0 };
+}
+
+export type ProfileModel = { id: string; provider: ModelProvider };
+
+// The models the proxy routes for connected accounts. Only Claude speaks Anthropic's API; everything else goes through
+// the OpenAI-compatible route, including a provider the owner added.
+export function profileModels(accounts: readonly Account[]): ProfileModel[] {
+  const found = new Map<string, ProfileModel>();
+  for (const account of accounts) {
+    for (const id of account.models ?? []) found.set(id, { id, provider: account.provider === "anthropic" ? "anthropic" : "openai" });
+  }
+  return [...found.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
 // "gpt-6.1-sol" is "GPT 6.1 Sol". Neighboring numbers are one version: "claude-opus-5-5" is "Claude Opus 5.5".
