@@ -89,6 +89,10 @@
   .track span { display: block; height: 100%; background: var(--muted); }
   .more { display: flex; width: 100%; align-items: center; gap: 6px; padding: 9px 12px; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 12px 12px; background: var(--raised); color: var(--focus); font: 13px var(--sans); text-align: left; cursor: pointer; }
   .more:hover { background: var(--hover); }
+  @container (max-width: 500px) {
+    .bars { gap: 4px; }
+    .rating { font-size: 9px; white-space: nowrap; }
+  }
   @container (max-width: 900px) {
     .list button { grid-template-columns: 18px minmax(0, 1fr); }
     .bars { grid-column: 2; }

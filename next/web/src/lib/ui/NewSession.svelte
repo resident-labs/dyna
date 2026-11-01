@@ -112,6 +112,8 @@
   kbd { margin-left: 6px; padding: 1px 4px; border: 1px solid currentColor; border-radius: 3px; font-size: 11px; font-weight: 400; }
   @media (pointer: coarse) { kbd { display: none; } }
   @media (max-width: 640px) {
+    .pagebar { display: none; }
+    .back span { display: none; }
     form { padding: 20px 16px 32px; gap: 20px; }
     .fields, .fields.three { grid-template-columns: 1fr; }
   }
