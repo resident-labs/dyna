@@ -1287,7 +1287,7 @@ func TestShellJobEndWakesOnceAndSteersARunningTurn(t *testing.T) {
 		}
 	}
 	steer, ok := (<-channel).Body.(contract.TurnSteer)
-	if !ok || steer.Queue != contract.QueueSteer || inputBody(steer.Input.Text) != "Background job 'Build the bundle' ended by a signal (SIGTERM). Last output:\nboom" {
+	if !ok || steer.Queue != contract.QueueSteer || inputBody(steer.Input.Text) != "Your shell job 'Build the bundle' ended by a signal (SIGTERM). Last output:\nboom" {
 		t.Fatalf("unexpected steer: %+v", steer)
 	}
 	var wakes int
