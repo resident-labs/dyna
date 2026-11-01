@@ -22,7 +22,10 @@ that no job waits for a pool that does not exist yet.
    broader than that. A fine-grained token is untested.
 2. Add the host, if it is new: `dyna host add NAME --ssh user@host --owner-only-admin`.
    A laptop or any host that logs out needs `sudo loginctl enable-linger USER`
-   first, because rootless containers stop with the user's session.
+   first, because rootless containers stop with the user's session. A host is for
+   sessions too: with no `--room`, every room's boxes can land on it, and admission
+   prefers the host with the most free memory. Read the warning under
+   [What a runner can touch](#what-a-runner-can-touch) first.
 3. Turn the repository on. COUNT is the most runners at once on that host:
 
    ```sh
@@ -41,7 +44,9 @@ needs a second scale set, which is not built.
 ## Turn it off
 
 - **Stop new jobs now:** delete `DYNA_CI_SELF_HOSTED`, or set it to anything but
-  `true`. New runs use GitHub-hosted runners. Jobs already on the pool finish.
+  `true`. New runs use GitHub-hosted runners. Jobs already on the pool finish. The
+  switch only reaches `ci-runner.sh`, so a branch that sets `runs-on: dyna` itself
+  still gets a runner. To stop every job, use `--mode github`.
 - **Remove the pool:** `dyna room repo ci resident-labs/dyna --mode github`. The
   next tick kills that repository's runners, even mid-job, and deletes its scale
   set and registrations. The host's proxy goes with its last runner.
@@ -57,6 +62,7 @@ needs a second scale set, which is not built.
 pool may be down. `relay` needs a container runtime. `next-pi` stays hosted because
 one Pi test rewrites a file with a same-size value and expects the change to show:
 on tmpfs both writes can land in one clock tick, so size and time both match.
+`next-web-width` is hosted too. It has not been tried on the pool.
 
 ## What a runner can touch
 
@@ -71,7 +77,9 @@ Each runner is a rootless Podman container, built from
   volume. The proxy (`next/box/egress`) runs on the host and refuses everything
   but port 443 on public addresses. It checks the address it dials, so a public
   name that resolves to a private address is refused. Tailnet, LAN, loopback and
-  link-local addresses are all refused.
+  link-local addresses are all refused. Every job on a host shares this proxy, and
+  it cannot tell them apart. It caps tunnels and request size, so one job cannot
+  crash it, but a job that holds every tunnel starves the others until it ends.
 - **Disk:** everything writable is a tmpfs capped at three quarters of the memory
   limit, and tmpfs counts against that limit. So a job cannot grow the host's disk
   at all, and all it wrote dies with it.
@@ -79,28 +87,50 @@ Each runner is a rootless Podman container, built from
   input, never argv. Podman keeps it in the container's config, and conmon has it
   in its environment, both readable only by the host user, until the container
   goes. A job can read it from its own runner, and by then it is spent.
-- **Time:** a runner ends after 6 hours, job or no job.
+- **Time:** a runner ends after 6 hours, job or no job. A job can stop that clock,
+  since it shares the entrypoint's user, so Podman ends the container 10 minutes
+  later from outside it.
+- **Kernel:** the container shares the host's kernel, and on an LXC guest that is
+  the hypervisor's kernel. A job has no capabilities, but the default seccomp profile
+  lets it create a user namespace, and inside that it can reach kernel code such as
+  nftables. A kernel bug is therefore a way out that ends above the subordinate UID.
+  Keep CI hosts on a patched kernel.
 
 A host's `containers.conf` can make host networking the default, as pve's does,
-so the runner passes `--network=none` every time. A session box does not pass
-any network flag, so check this on a host before you run boxes there.
+so the runner passes `--network=none` every time. A session box passes no network
+flag, so on such a host it runs in the host's network: it can reach the LAN and the
+host's loopback services, see host abstract sockets, listen on the host's addresses,
+and reach every other box on that host. `dyna host add` does not check for this.
+Do not add a host like pve while sessions can be placed on it.
 
 pve is an LXC guest with no `/dev/net/tun`. pasta and slirp4netns cannot start
 there, which is why the way out is a proxy and not a filtered network.
 
 ## Forks
 
-Three layers, because the first two are in files a pull request can edit:
+Three layers. The first is a repository setting, and a pull request can edit the
+second, so the third is the one that holds:
 
 1. GitHub's fork approval setting holds a fork's run until the owner approves it.
+   This repository uses `all_external_contributors`, which holds every run. With
+   the weaker `first_time_contributors`, a returning contributor is not held.
 2. `next/scripts/ci-runner.sh` routes a fork's pull request to `ubuntu-latest`.
 3. `job-started.sh` is in the runner image, so no pull request can edit it. It runs
-   before any step and fails any job that is not a push, a manual run, or a pull
-   request from this repository. If an approved fork rewrites `runs-on: dyna`, this
-   is what stops it. A refused job fails and the runner is replaced.
+   before any step, reads the head repository from the event GitHub sent, and
+   refuses any job that is not a push, a manual run, or a pull request from this
+   repository. If an approved fork rewrites `runs-on: dyna`, this is what stops it.
+
+A refusal has to kill the runner's worker. The runner treats a failed hook as a
+failed step and carries on, so a step with `if: always()` and any action's pre
+step would still run on this host. The job shows as failed. It may name a worker
+crash, and the reason is in its "Set up runner" log. A fork can still spend a
+runner's start each time its run is approved.
 
 Do not use `pull_request_target` or `workflow_run` to build pull request code. The
 runner refuses both, and they would run a fork's code with this repository's token.
+Job-level `env:` does not reach the hook, and a `container:` job cannot move it: the
+runner gives the hook an empty environment plus its own `GITHUB_*` values, and runs
+it outside any job container.
 
 ## When things die
 
