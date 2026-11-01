@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode"
 
+	"dyna-agent/internal/ghquota"
 	"dyna-agent/internal/pr/state"
 )
 
@@ -116,11 +117,13 @@ func (s *Service) LearnNoise(ctx context.Context, key, commentID, reason, learne
 		return NoiseRule{}, false, err
 	}
 	ref := refRecord(r)
+	gh := s.github(r.RoomID)
+	gh.runPhase = ghquota.RunNoiseLearning
 	var pull Pull
-	if err = s.github(r.RoomID).api(ctx, ref, ref.path(""), &pull); err != nil {
+	if err = gh.api(ctx, ref, ref.path(""), &pull); err != nil {
 		return NoiseRule{}, false, err
 	}
-	comments, err := s.github(r.RoomID).Comments(ctx, ref)
+	comments, err := gh.Comments(ctx, ref)
 	if err != nil {
 		return NoiseRule{}, false, err
 	}

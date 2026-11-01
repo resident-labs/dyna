@@ -32,6 +32,12 @@ const (
 	RunTrialSchedule
 	RunReviewContext
 	RunFailureReport
+	RunUnwatchedRefresh
+	RunReviewerHead
+	RunChangeHead
+	RunMergePublication
+	RunTrialPublication
+	RunNoiseLearning
 )
 
 // String returns a bounded phase label without request data.
@@ -55,6 +61,18 @@ func (p RunPhase) String() string {
 		return "review-context"
 	case RunFailureReport:
 		return "failure-report"
+	case RunUnwatchedRefresh:
+		return "unwatched-refresh"
+	case RunReviewerHead:
+		return "reviewer-head"
+	case RunChangeHead:
+		return "change-head"
+	case RunMergePublication:
+		return "merge-publication"
+	case RunTrialPublication:
+		return "trial-publication"
+	case RunNoiseLearning:
+		return "noise-learning"
 	default:
 		return "other"
 	}

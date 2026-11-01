@@ -14,6 +14,7 @@ import (
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/changepolicy"
 	"dyna-agent/internal/childenv"
+	"dyna-agent/internal/ghquota"
 	"dyna-agent/internal/gitexec"
 	"dyna-agent/internal/locallane"
 	"dyna-agent/internal/pr/facts"
@@ -484,6 +485,7 @@ func (s *Service) liveHead(ctx context.Context, key string) string {
 		return head
 	}
 	gh := s.github(r.RoomID)
+	gh.runPhase = ghquota.RunChangeHead
 	gh.requests = &requestCache{used: map[string]cachedResponse{}, now: s.now}
 	pull, err := gh.Pull(ctx, refRecord(r))
 	if err != nil {

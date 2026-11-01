@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"dyna-agent/internal/ghquota"
 	harnesshealth "dyna-agent/internal/harness/health"
 	harnessruntime "dyna-agent/internal/harness/runtime"
 
@@ -169,7 +170,9 @@ func (s *Service) reviewHeadCurrent(ctx context.Context, r Record) (bool, error)
 	if changeKind(r) != "github" {
 		return true, nil
 	}
-	pull, err := s.github(r.RoomID).Pull(ctx, refRecord(r))
+	gh := s.github(r.RoomID)
+	gh.runPhase = ghquota.RunReviewerHead
+	pull, err := gh.Pull(ctx, refRecord(r))
 	if err != nil {
 		return false, err
 	}
