@@ -89,7 +89,13 @@ func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contrac
 				Role, DeliveryID, ToolCallID string
 				IsError                      bool
 				Content                      json.RawMessage
-				Details                      struct{ Diff string }
+				Details                      struct {
+					Diff  string
+					Calls []struct {
+						Name, Args, Status, Error string
+						DurationMs                *int64
+					}
+				}
 			}
 		}
 		if json.Unmarshal(line, &entry) != nil || entry.Type != "message" {
@@ -119,6 +125,12 @@ func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contrac
 					item.Kind, item.Text = contract.TranscriptThinking, harness.Mask(b.Thinking)
 				case "toolCall":
 					item.Kind, item.ID, item.Tool, item.Arguments = contract.TranscriptTool, transcriptItemID(b.ID), clipToolName(harness.Mask(b.Name)), harness.Mask(string(b.Arguments))
+					if b.Name == "codemode" {
+						var args struct{ Code string }
+						if json.Unmarshal(b.Arguments, &args) == nil {
+							item.Script = harness.Mask(args.Code)
+						}
+					}
 					if len(b.ID) <= 4096 {
 						item.CallID = b.ID
 					}
@@ -148,7 +160,10 @@ func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contrac
 					continue
 				}
 				if item.ID != fullItem {
-					item.More = len(item.Text) > 8192 || len(item.Arguments) > 8192
+					item.More = len(item.Text) > 8192 || len(item.Arguments) > 8192 || len(item.Script) > 8192
+					if len(item.Script) > 8192 {
+						item.Script = strings.ToValidUTF8(item.Script[:8192], "")
+					}
 					if len(item.Text) > 8192 {
 						item.Text = strings.ToValidUTF8(item.Text[:8192], "")
 					}
@@ -180,6 +195,40 @@ func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contrac
 				}
 			}
 			item.Output, item.Failed = harness.Mask(strings.Join(text, "\n")), m.IsError
+			if item.Tool == "codemode" {
+				// Bound JSON bytes, including escaped control characters, for older-item pages.
+				callBytes := 0
+				for i, call := range m.Details.Calls {
+					if i == 256 {
+						item.CallsOmitted += len(m.Details.Calls) - i
+						break
+					}
+					status := contract.TranscriptCallStatus(call.Status)
+					switch status {
+					case contract.TranscriptCallRunning, contract.TranscriptCallOK, contract.TranscriptCallError, contract.TranscriptCallCancelled:
+					default:
+						continue
+					}
+					tool := clipToolName(harness.Mask(call.Name))
+					target := strings.TrimPrefix(activityLabel(event{ToolName: call.Name, Args: json.RawMessage(call.Args)}), call.Name)
+					target = strings.TrimSpace(harness.Mask(target))
+					if len(target) > 1024 {
+						target = strings.ToValidUTF8(target[:1024], "")
+					}
+					callError := harness.Mask(call.Error)
+					if len(callError) > 1024 {
+						callError = strings.ToValidUTF8(callError[:1024], "")
+					}
+					preview := contract.TranscriptCall{Tool: tool, Target: target, Status: status, DurationMs: call.DurationMs, Error: callError}
+					encoded, _ := json.Marshal(preview)
+					if callBytes+len(encoded)+1 > 16<<10 {
+						item.CallsOmitted += len(m.Details.Calls) - i
+						break
+					}
+					callBytes += len(encoded) + 1
+					item.Calls = append(item.Calls, preview)
+				}
+			}
 			// Pi records applied edit details separately from the result text.
 			if (item.Tool == "edit" || item.Tool == "write") && !m.IsError {
 				item.Diff = harness.Mask(m.Details.Diff)
