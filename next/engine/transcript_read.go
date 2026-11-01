@@ -23,7 +23,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 	if caller.Kind != contract.PrincipalOwner {
 		return response, forbidden()
 	}
-	if req.Session == "" || req.Limit < 0 || req.Limit > 20 || req.Offset < 0 || req.ItemIndex < 0 || req.PostIndex < 0 || (req.Turn != "" && req.Before != "") || ((req.Item != "" || req.ItemIndex != 0 || req.PostIndex != 0 || req.Tail || req.AfterItem != "") && req.Turn == "") {
+	if req.Session == "" || req.Limit < 0 || req.Limit > 20 || req.Offset < 0 || req.ItemIndex < 0 || req.MandatoryIndex < 0 || req.MandatoryPost < 0 || req.PostIndex < 0 || (req.MandatoryItems && (req.OlderItems || req.Tail || req.ItemIndex != 0)) || (req.Turn != "" && req.Before != "") || ((req.Item != "" || req.ItemIndex != 0 || req.OlderItems || req.MandatoryItems || req.MandatoryPosts || req.MandatoryIndex != 0 || req.MandatoryPost != 0 || req.PostIndex != 0 || req.Tail || req.AfterItem != "") && req.Turn == "") {
 		return response, invalid("invalid transcript request")
 	}
 	exists, err := s.store.TranscriptSessionExists(ctx, req.Session)
@@ -93,7 +93,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 		}
 		after := req.AfterItem == ""
 		for _, input := range w.Inputs {
-			if req.Item == "" && (req.ItemIndex > 0 || req.Tail) {
+			if req.Item == "" && (req.ItemIndex > 0 || req.OlderItems || req.MandatoryItems || req.MandatoryPosts || req.Tail) {
 				break
 			}
 			if req.Item != "" && req.Item != "input:"+string(input.ID) {
@@ -133,53 +133,104 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 				return response, failure(err)
 			}
 			skip := req.ItemIndex
-			if !req.Tail {
+			if req.MandatoryItems {
+				skip = req.MandatoryIndex
+			}
+			if !req.Tail && !req.MandatoryPosts {
+				const maxItems = 256
 				var pageItems []pi.TranscriptItem
+				seenTotal := 0
+				readerMore := false
 				for _, r := range ranges {
-					items, seen, more, err := reader.Read(r.Path, r.Start, r.End, deliveries, req.Item, skip, max(0, 6-len(pageItems)))
+					var items []pi.TranscriptItem
+					var seen int
+					var more bool
+					var err error
+					if req.Item == "" && !req.OlderItems && !req.MandatoryItems {
+						items, seen, more, err = reader.ReadRecent(r.Path, r.Start, r.End, deliveries, maxItems)
+					} else {
+						items, seen, more, err = reader.Read(r.Path, r.Start, r.End, deliveries, req.Item, skip, max(0, maxItems-len(pageItems)))
+					}
 					if err != nil {
 						return response, failure(err)
 					}
+					for i := range items {
+						items[i].Index += seenTotal
+					}
+					seenTotal += seen
 					if skip > seen {
 						skip -= seen
 					} else {
 						skip = 0
 					}
 					pageItems = append(pageItems, items...)
-					t.More = t.More || more
+					if len(pageItems) > maxItems {
+						latestText := -1
+						for i := range pageItems {
+							if pageItems[i].Kind == contract.TranscriptText {
+								latestText = i
+							}
+						}
+						drop := len(pageItems) - maxItems
+						if latestText >= 0 && latestText < drop {
+							pinned := pageItems[latestText]
+							pageItems = pageItems[drop:]
+							pageItems[0] = pinned
+						} else {
+							pageItems = pageItems[drop:]
+						}
+						more = true
+					}
+					readerMore = readerMore || more
 				}
+				if readerMore && req.Item == "" {
+					if req.MandatoryItems {
+						t.MandatoryItems, t.NextMandatory = true, req.MandatoryIndex+len(pageItems)
+					} else if req.OlderItems {
+						t.OlderItems, t.NextItem = true, req.ItemIndex+len(pageItems)
+					} else {
+						t.MandatoryItems, t.OlderItems = true, true
+					}
+				}
+
 				callIDs := make([]string, 0, len(pageItems))
 				for _, item := range pageItems {
 					if item.Kind == contract.TranscriptTool && item.CallID != "" {
 						callIDs = append(callIDs, item.CallID)
 					}
 				}
-				postPages, err := s.store.TranscriptCallPosts(ctx, req.Session, t.ID, callIDs)
-				if err != nil {
-					return response, failure(err)
+				itemsByCall := make(map[string]*pi.TranscriptItem, len(pageItems))
+				for i := range pageItems {
+					if pageItems[i].CallID != "" {
+						itemsByCall[pageItems[i].CallID] = &pageItems[i]
+					}
 				}
-				for _, item := range pageItems {
-					page := postPages[item.CallID]
-					for _, event := range page.Posts {
-						if len(item.Posts) == maxTranscriptCallPosts {
-							break
-						}
+				err := s.store.TranscriptCallPosts(ctx, req.Session, t.ID, callIDs, func(callID string, event contract.Event, total int) {
+					item := itemsByCall[callID]
+					added := false
+					if len(item.Posts) < maxTranscriptCallPosts && item.PostsNext == nil {
 						post := contract.TranscriptItem{ID: string(event.ID), Turn: t.ID, At: event.Time}
 						applyTranscriptPost(&post, event)
 						item.Posts = append(item.Posts, post)
 						encoded, _ := json.Marshal(item.TranscriptItem)
 						if len(encoded) > 80<<10 {
 							item.Posts = item.Posts[:len(item.Posts)-1]
-							break
+						} else {
+							added = true
 						}
 					}
-					item.PostsOmitted = page.Total - len(item.Posts)
-					if item.PostsOmitted > 0 {
-						next := page.Posts[len(item.Posts)]
-						item.PostsNext = &contract.TranscriptPostLocation{Room: next.Room, Seq: next.Seq}
+					item.PostsOmitted = total - len(item.Posts)
+					if item.PostsOmitted > 0 && item.PostsNext == nil && !added {
+						item.PostsNext = &contract.TranscriptPostLocation{Room: event.Room, Seq: event.Seq}
 					}
+				})
+				if err != nil {
+					return response, failure(err)
+				}
+				for _, item := range pageItems {
 					t.Items = append(t.Items, item.TranscriptItem)
 				}
+
 			}
 			if req.Item != "" {
 				if len(t.Items) == 0 {
@@ -216,55 +267,54 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 				}
 				return transcriptChunk(response, value, req.Offset)
 			}
-			for len(t.Items) > 0 {
-				data, _ := json.Marshal(t)
-				if len(data) <= 180<<10 {
-					break
-				}
-				t.Items = t.Items[:len(t.Items)-1]
-				t.More = true
-			}
-			if t.More {
-				t.NextItem = req.ItemIndex + len(t.Items)
-			} else {
-				// Posts with no matching acknowledged Pi call remain visible in a bounded tail.
-				offset := req.PostIndex
-				posts, err := s.store.TranscriptSentPosts(ctx, req.Session, t.ID, 64, offset)
+			// Scan a bounded newest-first page, separately from Pi items.
+			var posts []contract.Event
+			const postPageSize = 8
+			if !req.MandatoryItems && !req.OlderItems {
+				posts, err = s.store.TranscriptSentPostsNewest(ctx, req.Session, t.ID, postPageSize, req.MandatoryPost)
 				if err != nil {
 					return response, failure(err)
 				}
-				ids := make(map[string]bool, len(posts))
-				for _, post := range posts {
-					if id := post.Body.(contract.PostCreated).ToolCallID; id != "" {
-						ids[id] = false
-					}
-				}
-				for _, r := range ranges {
-					if len(ids) == 0 {
-						break
-					}
-					if err := reader.FindCalls(r.Path, r.Start, r.End, ids); err != nil {
-						return response, failure(err)
-					}
-				}
-				for _, post := range posts {
-					if len(t.Items) == 6 {
-						break
-					}
-					offset++
-					if ids[post.Body.(contract.PostCreated).ToolCallID] {
-						continue
-					}
-					item := contract.TranscriptItem{ID: string(post.ID), Turn: t.ID, At: post.Time}
+				for i := len(posts) - 1; i >= 0; i-- {
+					post := posts[i]
+					item := contract.TranscriptItem{ID: string(post.ID), Index: 1<<30 + int(post.Seq), Turn: t.ID, At: post.Time}
 					applyTranscriptPost(&item, post)
 					t.Items = append(t.Items, item)
 				}
-				if len(t.Items) == 6 || offset-req.PostIndex == 64 {
-					t.More = true
-					t.Tail = true
-					t.NextPost = offset
-				}
 			}
+
+			budgetTranscriptTurn(&t, req, 180<<10)
+			if len(posts) > 0 {
+				kept := make(map[string]bool, len(t.Items))
+				nested := make(map[string]bool)
+				for _, item := range t.Items {
+					for _, post := range item.Posts {
+						nested[post.ID] = true
+					}
+				}
+				filtered := t.Items[:0]
+				for _, item := range t.Items {
+					kept[item.ID] = true
+					if item.Kind != contract.TranscriptPost || !nested[item.ID] {
+						filtered = append(filtered, item)
+					}
+				}
+				t.Items = filtered
+				for id := range nested {
+					kept[id] = true
+				}
+				for _, post := range posts {
+					if !kept[string(post.ID)] {
+						t.MandatoryPosts, t.NextMandatoryPost = true, int(post.Seq)
+						break
+					}
+				}
+				if !t.MandatoryPosts && len(posts) == postPageSize && posts[len(posts)-1].Seq > 1 {
+					t.MandatoryPosts, t.NextMandatoryPost = true, int(posts[len(posts)-1].Seq-1)
+				}
+				t.More = t.More || t.MandatoryPosts
+			}
+
 		}
 		if req.Turn != "" {
 			for _, item := range t.Items {
@@ -332,4 +382,102 @@ func applyTranscriptPost(item *contract.TranscriptItem, event contract.Event) {
 			}
 		}
 	}
+}
+
+// budgetTranscriptTurn retains the final text, then the newest mandatory items,
+// then tools. Mandatory continuations advance forward and contain no tools.
+func budgetTranscriptTurn(t *contract.TranscriptTurn, req contract.TranscriptReadRequest, budget int) {
+	items := t.Items
+	t.Items = nil
+	base, _ := json.Marshal(t)
+	size := len(base) + 512 // Reserve cursor and JSON framing bytes.
+	stepSize := 0
+	keep := make([]bool, len(items))
+	mandatory := func(item contract.TranscriptItem) bool {
+		return item.Kind != contract.TranscriptTool || len(item.Posts) > 0 || item.PostsOmitted > 0
+	}
+	add := func(i int) bool {
+		data, _ := json.Marshal(items[i])
+		stepBytes := 0
+		if req.Turn != "" && (items[i].Kind == contract.TranscriptTool || items[i].Kind == contract.TranscriptPost) {
+			step, _ := json.Marshal(pi.TranscriptStep(items[i]))
+			stepBytes = len(step) + 1
+		}
+		if size+len(data)+1 > budget || size+len(data)+1+stepSize+stepBytes > 250<<10 {
+			return false
+		}
+		keep[i] = true
+		size += len(data) + 1
+		stepSize += stepBytes
+		return true
+	}
+	if req.MandatoryItems {
+		for i, item := range items {
+			if item.Index < req.MandatoryIndex || !mandatory(item) {
+				continue
+			}
+			if !add(i) {
+				if !t.MandatoryItems || item.Index < t.NextMandatory {
+					t.NextMandatory = item.Index
+				}
+				t.MandatoryItems = true
+				break
+			}
+		}
+	} else if req.MandatoryPosts {
+		for i := len(items) - 1; i >= 0; i-- {
+			add(i)
+		}
+	} else if req.OlderItems {
+		for i, item := range items {
+			if !add(i) {
+				if !t.OlderItems || item.Index < t.NextItem {
+					t.NextItem = item.Index
+				}
+				t.OlderItems = true
+				break
+			}
+		}
+	} else {
+		// Reserve the final text before selecting newer posts.
+		for i := len(items) - 1; i >= 0; i-- {
+			if items[i].Kind == contract.TranscriptText {
+				add(i)
+				break
+			}
+		}
+		for i := len(items) - 1; i >= 0; i-- {
+			if !mandatory(items[i]) || keep[i] {
+				continue
+			}
+			if !add(i) {
+				if items[i].Kind != contract.TranscriptPost {
+					if !t.MandatoryItems || items[i].Index < t.NextMandatory {
+						t.NextMandatory = items[i].Index
+					}
+					t.MandatoryItems = true
+				}
+			}
+		}
+		for i := len(items) - 1; i >= 0; i-- {
+			if mandatory(items[i]) {
+				continue
+			}
+			if !add(i) {
+				if !t.OlderItems || items[i].Index < t.NextItem {
+					t.NextItem = items[i].Index
+				}
+				t.OlderItems = true
+			}
+		}
+	}
+	for i, item := range items {
+		if keep[i] {
+			t.Items = append(t.Items, item)
+		}
+	}
+	if t.Items == nil {
+		t.Items = []contract.TranscriptItem{}
+	}
+	t.More = t.More || t.OlderItems || t.MandatoryItems || t.MandatoryPosts
 }

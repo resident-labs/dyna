@@ -507,17 +507,22 @@ type SessionWorkResponse struct {
 }
 
 type TranscriptReadRequest struct {
-	Session   SessionID      `json:"session"`
-	Turn      TurnID         `json:"turn,omitempty"`
-	Before    TurnID         `json:"before,omitempty"`
-	Limit     int            `json:"limit,omitempty"`
-	Item      string         `json:"item,omitempty"`
-	Part      TranscriptPart `json:"part,omitempty"`
-	Offset    int            `json:"offset,omitempty"`
-	AfterItem string         `json:"afterItem,omitempty"`
-	ItemIndex int            `json:"itemIndex,omitempty"`
-	Tail      bool           `json:"tail,omitempty"`
-	PostIndex int            `json:"postIndex,omitempty"`
+	Session        SessionID      `json:"session"`
+	Turn           TurnID         `json:"turn,omitempty"`
+	Before         TurnID         `json:"before,omitempty"`
+	Limit          int            `json:"limit,omitempty"`
+	Item           string         `json:"item,omitempty"`
+	Part           TranscriptPart `json:"part,omitempty"`
+	Offset         int            `json:"offset,omitempty"`
+	AfterItem      string         `json:"afterItem,omitempty"`
+	ItemIndex      int            `json:"itemIndex,omitempty"`
+	OlderItems     bool           `json:"olderItems,omitempty"`
+	MandatoryItems bool           `json:"mandatoryItems,omitempty"`
+	MandatoryIndex int            `json:"mandatoryIndex,omitempty"`
+	MandatoryPosts bool           `json:"mandatoryPosts,omitempty"`
+	MandatoryPost  int            `json:"mandatoryPost,omitempty"`
+	Tail           bool           `json:"tail,omitempty"`
+	PostIndex      int            `json:"postIndex,omitempty"`
 }
 type TranscriptPart string
 
@@ -540,6 +545,7 @@ const (
 
 type TranscriptItem struct {
 	ID           string                  `json:"id"`
+	Index        int                     `json:"index"`
 	Turn         TurnID                  `json:"turn"`
 	Kind         TranscriptItemKind      `json:"kind"`
 	At           time.Time               `json:"at"`
@@ -579,19 +585,24 @@ type TranscriptInput struct {
 	More bool          `json:"more,omitempty"`
 }
 type TranscriptTurn struct {
-	ID         TurnID            `json:"id"`
-	Started    time.Time         `json:"started"`
-	Ended      *time.Time        `json:"ended,omitempty"`
-	DurationMS int64             `json:"durationMs,omitempty"`
-	Outcome    TurnOutcome       `json:"outcome,omitempty"`
-	Cause      FailureCause      `json:"cause,omitempty"`
-	Inputs     []TranscriptInput `json:"inputs"`
-	Items      []TranscriptItem  `json:"items"`
-	More       bool              `json:"more"`
-	After      string            `json:"after,omitempty"`
-	NextItem   int               `json:"nextItem,omitempty"`
-	Tail       bool              `json:"tail,omitempty"`
-	NextPost   int               `json:"nextPost,omitempty"`
+	ID                TurnID            `json:"id"`
+	Started           time.Time         `json:"started"`
+	Ended             *time.Time        `json:"ended,omitempty"`
+	DurationMS        int64             `json:"durationMs,omitempty"`
+	Outcome           TurnOutcome       `json:"outcome,omitempty"`
+	Cause             FailureCause      `json:"cause,omitempty"`
+	Inputs            []TranscriptInput `json:"inputs"`
+	Items             []TranscriptItem  `json:"items"`
+	More              bool              `json:"more"`
+	After             string            `json:"after,omitempty"`
+	NextItem          int               `json:"nextItem,omitempty"`
+	OlderItems        bool              `json:"olderItems,omitempty"`
+	MandatoryItems    bool              `json:"mandatoryItems,omitempty"`
+	NextMandatory     int               `json:"nextMandatory,omitempty"`
+	MandatoryPosts    bool              `json:"mandatoryPosts,omitempty"`
+	NextMandatoryPost int               `json:"nextMandatoryPost,omitempty"`
+	Tail              bool              `json:"tail,omitempty"`
+	NextPost          int               `json:"nextPost,omitempty"`
 }
 type TranscriptStep struct {
 	Turn    TurnID     `json:"turn"`
