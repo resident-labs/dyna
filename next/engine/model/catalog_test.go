@@ -7,6 +7,17 @@ import (
 	"testing"
 )
 
+func TestKeyCatalogPrefersPiDefault(t *testing.T) {
+	catalog := Catalog{Providers: []CatalogProvider{{ID: "fixture", KeyName: "FIXTURE_KEY", DefaultModel: "second", Models: []CatalogModel{
+		{ID: "first", API: "openai-completions", BaseURL: "https://example.com/v1"},
+		{ID: "second", API: "openai-completions", BaseURL: "https://example.com/v1"},
+	}}}}
+	providers := catalog.KeyProviders()
+	if len(providers) != 1 || providers[0].DefaultModel != "second" {
+		t.Fatal("key activation did not select Pi default")
+	}
+}
+
 func TestLoadCatalogBounds(t *testing.T) {
 	pack := func(body string) []byte {
 		var b bytes.Buffer
