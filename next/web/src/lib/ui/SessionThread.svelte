@@ -207,13 +207,13 @@
 </script>
 
 {#snippet inputAttachments(input: TranscriptInput)}
-  <PostAttachments attachments={input.attachments ?? []} {newest} onvisual={visual => void openVisual(visual, input.room, input.id)} />
+  <PostAttachments attachments={input.attachments ?? []} {newest} event={input.id} at={input.at} onvisual={visual => void openVisual(visual, input.room, input.id)} />
 {/snippet}
 
 {#snippet postItem(turn: TranscriptTurn, item: TranscriptItem)}
   {@const room = item.room}
   {@const seq = item.seq}
-  <div class:agent-input={item.kind === "post"} class:message={item.kind !== "post"}>{#if item.kind === "post"}<Avatar kind="session" name={sender("session", session)} size={32} />{/if}<div class="agent-body">{#if item.kind === "post"}<div class="agent-sender"><a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(session)}`} onclick={navigate} style:--hue={hue(sender("session", session))}>{sender("session", session)}</a><time datetime={item.at}>{formatTime(item.at)}</time></div><div class="post-destination">{#if room && seq}<button onclick={() => onpostlocation(room, seq)}>{item.home?.kind === "feed" ? (item.room === store.room ? `Posted in #${roomName}` : "Posted in another room") : item.home?.kind === "dm" ? (item.home.session === session ? "Posted in this DM" : `Posted to ${sender("session", item.home.session)}`) : "Posted"}</button>{:else}Posted{/if}</div>{/if}<Markdown text={chunks[item.id + "/text"] ?? item.text} /><PostAttachments attachments={item.attachments ?? []} {newest} onvisual={visual => void openVisual(visual, item.room ?? store.room, item.event ?? item.id)} /></div></div>{#if chunkFailed[item.id + "/text"]}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Text did not load. Try again</button>{/if}
+  <div class:agent-input={item.kind === "post"} class:message={item.kind !== "post"}>{#if item.kind === "post"}<Avatar kind="session" name={sender("session", session)} size={32} />{/if}<div class="agent-body">{#if item.kind === "post"}<div class="agent-sender"><a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(session)}`} onclick={navigate} style:--hue={hue(sender("session", session))}>{sender("session", session)}</a><time datetime={item.at}>{formatTime(item.at)}</time></div><div class="post-destination">{#if room && seq}<button onclick={() => onpostlocation(room, seq)}>{item.home?.kind === "feed" ? (item.room === store.room ? `Posted in #${roomName}` : "Posted in another room") : item.home?.kind === "dm" ? (item.home.session === session ? "Posted in this DM" : `Posted to ${sender("session", item.home.session)}`) : "Posted"}</button>{:else}Posted{/if}</div>{/if}<Markdown text={chunks[item.id + "/text"] ?? item.text} /><PostAttachments attachments={item.attachments ?? []} {newest} event={item.event ?? item.id} at={item.at} onvisual={visual => void openVisual(visual, item.room ?? store.room, item.event ?? item.id)} /></div></div>{#if chunkFailed[item.id + "/text"]}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Text did not load. Try again</button>{/if}
 {/snippet}
 
 <div class="thread-frame" bind:clientWidth={frameWidth}>
@@ -254,7 +254,7 @@
       </article>
     {:else}{#if !loading && !failed}<p class="muted">The conversation will appear here.</p>{/if}{/each}
     {#each queuedPosts as post (post.id)}
-      <div class="input"><div class="who"><Avatar kind={post.from.kind} name={sender(post.from.kind, post.from.session)} size={22} /><strong>{sender(post.from.kind, post.from.session)}</strong></div><Markdown text={post.body.text} /><PostAttachments attachments={post.body.attachments ?? []} {newest} onvisual={visual => void openVisual(visual, post.room ?? store.room, post.id)} /></div>
+      <div class="input"><div class="who"><Avatar kind={post.from.kind} name={sender(post.from.kind, post.from.session)} size={22} /><strong>{sender(post.from.kind, post.from.session)}</strong></div><Markdown text={post.body.text} /><PostAttachments attachments={post.body.attachments ?? []} {newest} event={post.id} at={post.at} onvisual={visual => void openVisual(visual, post.room ?? store.room, post.id)} /></div>
     {/each}
     {#each [...view.pendingPosts.values()] as post (post.id)}
       <div class="input" class:pending={!post.failed}><strong>You</strong><Markdown text={post.request.text} /><PostAttachments attachments={post.request.attachments ?? []} {newest} onvisual={() => {}} />{#if post.failed}<StatusPill tone="failed" label="Not sent" word /> <button onclick={() => void view.retry(post.id)}>Retry</button> <button onclick={() => view.discard(post.id)}>Discard</button>{/if}</div>
