@@ -284,7 +284,7 @@ Disk work that is designed but not built:
 
 ### 5.6 Repository copy and shared caches (M2)
 
-M1 boxes have no repository. From M2, the control plane fetches GitHub into its mirror and pushes a bare cache to each host. Hosts hold no GitHub credentials. Boxes clone against a read-only cache and keep new objects in their own volumes. Git uses the engine route (5.7).
+M1 boxes have no repository. From M2, the control plane fetches GitHub into its mirror and pushes a bare cache to each host. Starts of one repository that overlap share a fetch, and a push per host. A start only takes work that began after it asked, so it never gets older refs than it would alone. Repositories do not wait for each other, and nothing waits to read a mirror. Hosts hold no GitHub credentials. Boxes clone against a read-only cache and keep new objects in their own volumes. Git uses the engine route (5.7).
 
 Dependency caches are shared read-write per host; cross-box cache poisoning is an accepted risk. Each room also has a per-host read-write folder at `/box/shared`. Use `sameHost` to share it with a child. It survives box close but has no backup or hard quota; a lost host loses its copy. The engine measures usage and warns on high disk use.
 
