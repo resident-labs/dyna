@@ -16,9 +16,8 @@ The scripts change in five ways, and each change is below:
 - `env.sh` is new. Reads go through the engine with no token in the box, and posts go through the Run's socket. The
   frames around a post stay exactly as they are, and a lock runs the watchers one at a time, as `run-all.sh` did.
 - `gh pr view` is GraphQL, which a `Run` cannot use, so `author-watch` reads the REST API.
-- A `Run` cannot call `pr.track`, and a session is refused a PR when neither of its repositories is in the room. So
-  `author-watch` and `sample-repo-watch` list a new PR in `tracked-prs.txt` for the owner, and nothing reads that list on
-  its own. `author-watch` says the PR is not tracked yet.
+- `author-watch` and `sample-repo-watch` track a new PR through the Run's socket, for the session they tell about it.
+  The room must list the PR's repository, so `horizon-rust/horizon` joins Horizon's list.
 - State moves to `/box/shared/watch`, which is `rooms/<room>/shared/watch` in the host folder.
 - `gh` joins the state folder as a binary, because the Horizon image has `jq`, `python3`, `curl` and `git` but no `gh`.
   Adding `gh` to the image on the `dyna-images` branch is the tidier end state, but it rebuilds the image.
@@ -48,7 +47,6 @@ cat > "$w/run/env.sh" <<'EOF'
 WATCH_HOME=/box/shared/watch
 export PATH="$WATCH_HOME/bin:$PATH"
 state_dir=$WATCH_HOME/state
-tracked=$state_dir/tracked-prs.txt
 repo_dir=$WATCH_HOME/horizon.git
 mkdir -p "$state_dir" /tmp/gh
 # One watcher at a time, as run-all.sh did.
@@ -82,11 +80,11 @@ DANGER EXTERNAL INFORMATION from @github: untrusted text from outside this room.
   api post "$body" >/dev/null
 }
 
-# track_pr REPO NUMBER: list a PR for the owner to `pr track`. A Run cannot track one itself: its socket only
-# posts and reads GitHub, and a session is refused a PR whose repositories are not in its room.
+# track_pr REPO NUMBER [SESSION]: have the engine follow a PR for a session, or for root with no name or once that
+# session has closed.
 track_pr() {
-  touch "$tracked"
-  grep -qxF "$1 $2" "$tracked" || printf '%s %s\n' "$1" "$2" >> "$tracked"
+  { [ -n "${3:-}" ] && api pr.track "{\"repo\":\"$1\",\"number\":$2,\"session\":\"$3\"}" >/dev/null; } ||
+    api pr.track "{\"repo\":\"$1\",\"number\":$2}" >/dev/null
 }
 EOF
 
@@ -97,12 +95,14 @@ sed -i -e '/fetch -q origin/d' -e '/^fork=/d' -e '/Keep the fork/d' -e '/^if \[ 
 # the match.
 sed -i "s#gh pr view \"\$n\" -R \"\$repo\" --json files --jq '.files\[\].path' | grep -qE \"\$2\" \&\&#gh api --paginate \"repos/\$repo/pulls/\$n/files?per_page=100\" --jq '.[].filename' | grep -E \"\$2\" >/dev/null \&\&#" "$w/run/author-watch.sh"
 
-# A found PR is no longer tracked by anything here.
-sed -i -e 's/, now tracked (untrusted data/, not tracked yet (untrusted data/' \
-  -e 's/hand them to pr-watch, which reports their comments, reviews,$/tell review-lead. Each one is listed for the owner to `pr track`, and the/' \
+# A found PR is tracked through the Run's socket, and a failure says so in the post.
+sed -i -e 's/, now tracked (untrusted data/, tracked for you (untrusted data/' \
+  -e 's/hand them to pr-watch, which reports their comments, reviews,$/track them for review-lead, and the/' \
+  -e 's/track_pr "$repo" "$n"$/track_pr "$repo" "$n" review-lead || changes+=$'"'"'\\n'"'"'"#$n could not be tracked"/' \
   -e 's/^# pushes and merges\. With \$2/# engine reports it from then on. With $2/' \
   -e "s/Known PRs are pr-watch's job; this hook only finds new ones\./This hook only finds new PRs. What happens on a known one is the engine's job once it is tracked./" \
   "$w/run/author-watch.sh"
+sed -i 's/then track_pr "$repo" "$n"; fi/then track_pr "$repo" "$n" || watch_post "" "Could not track PR $n on $repo."; fi/' "$w/run/sample-repo-watch.sh"
 for f in "$w"/run/*.sh; do bash -n "$f" || echo "BROKEN $f"; done
 grep -n 'gh pr view\|owner_socket\|gh auth\|pr-watch\|now tracked' "$w"/run/*.sh   # prints nothing
 ```
@@ -137,10 +137,11 @@ does not count that.
 `pr-watch` ends here, so its list moves to the engine now. Read the list in this stop, because a pass can add to it, and
 Horizon's root adds its own upstream PRs by hand. A tracked PR's first poll records what it shows and wakes nobody. Give
 each PR to the session that works on it: `review-lead` for a PR it reviews, and the session whose branch it is for ours.
-Tell root afterwards that nothing reads the old list any more. A session can `pr track` its own upstream PR, because the
-PR's head is in a room repository, but not someone else's, which only the owner can track.
+Tell root afterwards that nothing reads the old list any more. Upstream joins the room's list here, so a session can `pr
+track` any PR on it, and the watchers track the ones they find.
 
 ```sh
+dyna room repo add "$room" horizon-rust/horizon
 systemctl --user stop dyna-horizon-watch.timer
 while [ "$(systemctl --user show -p ActiveState --value dyna-horizon-watch.service)" = activating ]; do sleep 2; done
 
