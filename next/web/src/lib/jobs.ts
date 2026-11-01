@@ -1,6 +1,7 @@
 import type { ShellJobEnd } from "./contract.gen.ts";
 import type { ShellJob } from "./shell.ts";
 
+// LEGACY(v1-transfer): the exit-code fallback in endOf and the exitCode reads below, for events without the end field. Remove after the transfer.
 // How a finished job ended. Events from before the end field carry only the exit code, where -1 means a signal ended it.
 type Ended = { exitCode: number; end?: ShellJobEnd | null };
 const endOf = ({ exitCode, end }: Ended): ShellJobEnd => end ?? (exitCode === -1 ? { kind: "signal" } : { kind: "exit", code: exitCode });

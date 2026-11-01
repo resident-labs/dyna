@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// LEGACY(v1-transfer): this whole file and testdata/v1bundle, the golden v1 exporter sample. Remove after the transfer.
 // TestGoldenV1BundleDecodes decodes a checked-in v1 exporter sample. Its data
 // is invented. A contract edit that breaks the v1 format fails here.
 func TestGoldenV1BundleDecodes(t *testing.T) {

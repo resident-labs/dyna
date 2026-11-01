@@ -16,6 +16,7 @@ import (
 // dataSegments are the names of Dyna's data folders. box/layout.go alone joins them.
 var dataSegments = []string{"rooms", "files", "transcripts", "instructions", "shared", "git", "cache", "bin", "sock", "store.db", "backups", "archive", "connect", "cliproxy", "AGENTS.md", "compose"}
 
+// LEGACY(v1-transfer): the migrate/dryrun.go entry in layoutOwners, for the migrate package. Remove after the transfer.
 // layoutOwners holds the files that may name these segments: Layout itself, and the migration bundle, which is a separate folder with its own rooms/.
 var layoutOwners = map[string]bool{"box/layout.go": true, "migrate/dryrun.go": true}
 

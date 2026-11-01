@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// LEGACY(v1-transfer): this test, which pins the steps from schema 42. Remove after the transfer.
 func TestGlobalOperationUpgradePreservesReferences(t *testing.T) {
 	db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "fixture.db")+"?_pragma=foreign_keys(1)")
 	if err != nil {

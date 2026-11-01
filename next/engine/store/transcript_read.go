@@ -16,6 +16,7 @@ type TranscriptTurnRange struct {
 	End   *int64
 }
 
+// LEGACY(v1-transfer): TranscriptPathIndexed, for transcript files from before the turn index. Remove after the transfer.
 // TranscriptPathIndexed reports whether a path has any indexed turn starts.
 func (s *Store) TranscriptPathIndexed(ctx context.Context, session contract.SessionID, path string) (bool, error) {
 	var indexed bool
@@ -217,6 +218,7 @@ func (s *Store) TranscriptSentPostsNewest(ctx context.Context, session contract.
 	return posts, rows.Err()
 }
 
+// LEGACY(v1-transfer): the Indexed field, read only by the transcript backfill. Remove after the transfer.
 type TranscriptFile struct {
 	Path    string
 	Acked   int64

@@ -1,4 +1,5 @@
 # Horizon watchers
+<!-- LEGACY(v1-transfer): this whole runbook, moving Horizon off its stopgap timer. Remove after the transfer. -->
 
 How to move Horizon's watchers from `dyna-horizon-watch.timer` onto typed subscriptions (spec 8.5). Run this on
 hermeslab as `pip`, after the engine with subscriptions is deployed. Nothing here needs the engine stopped.

@@ -8,6 +8,7 @@ import (
 
 const schemaVersion = 65
 
+// LEGACY(v1-transfer): steps 42 to 63, which only upgrade stores older than schema 64. Remove after the transfer.
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
 	64: {
