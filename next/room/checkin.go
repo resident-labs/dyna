@@ -36,7 +36,8 @@ type CheckinSession struct {
 	Retrying   bool      // a model retry is scheduled
 	Jobs       int       // background shell jobs still running
 	Pending    bool      // a waking input or a running operation will move it
-	Asking     bool      // it waits for the owner's answer, which will wake it
+	Asking     bool      // it has an open question for the owner; a report says so, and it excuses nothing
+	Blocked    bool      // one of those questions left it nothing safe to do, so only the answer will move it
 	Waiting    time.Time // when its oldest undecided operation was asked; zero for none
 
 	// A session with no goal reports nothing. Goal is its oldest active goal.
@@ -91,7 +92,7 @@ func (s CheckinSession) stillness(now time.Time) (state contract.CheckinState, r
 		return contract.CheckinBlocked, "its turn has run a long time", s.Last, !stuck(s.Last)
 	case s.Jobs > 0:
 		return contract.CheckinBlocked, "its background job has run a long time", s.Last, !stuck(s.Last)
-	case s.Pending, s.Retrying, s.Asking:
+	case s.Pending, s.Retrying, s.Blocked:
 		return "", "", time.Time{}, true
 	case !s.Waiting.IsZero():
 		return contract.CheckinBlocked, "it waits on an operation", s.Waiting, false
@@ -156,7 +157,7 @@ func PlanCheckins(sessions []CheckinSession, now time.Time) []CheckinPlan {
 				plan = &CheckinPlan{To: to.ID, Told: make(map[contract.SessionID]int)}
 				plans[to.ID] = plan
 			}
-			child := contract.CheckinChild{Session: s.ID, Name: s.Name, State: state, Reason: reason, Idle: contract.DurationMS(now.Sub(since).Milliseconds()), Silent: s.Silent, Goal: s.Goal, Text: s.Text, Open: s.Open}
+			child := contract.CheckinChild{Session: s.ID, Name: s.Name, State: state, Reason: reason, Idle: contract.DurationMS(now.Sub(since).Milliseconds()), Silent: s.Silent, Asking: s.Asking, Goal: s.Goal, Text: s.Text, Open: s.Open}
 			if i > 0 {
 				child.Parent = byID[s.Parent].Name
 			}

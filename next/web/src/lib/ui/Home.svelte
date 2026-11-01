@@ -8,6 +8,7 @@
   import type { AccountUsage, AccountsListResponse, Card, HostSummary, Principal, Question, SessionListResponse } from "../contract.gen.ts";
   import { clause, fromNow, requestLine } from "../feed.ts";
   import { hostLabel, hostMeters, largeShared, sharedSize, watchHosts } from "../hosts.ts";
+  import { questionPlan } from "../questions.ts";
   import { accountAlerts, busiestWindow, holdFor, holding, outOfLimit, tucked, usageRows, type UsageHold, type UsageRow } from "../usage.ts";
   import { distinctInitials, initials as letters } from "../identity.ts";
   import Avatar from "./Avatar.svelte";
@@ -212,7 +213,7 @@
         <a class="open" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>Open</a></span></div>{/each}
       {#each asking as { id, room, value, who, root } (id)}<div class="item request question">
         <Avatar kind="session" name={who} label={sessionInitials.get(value.session)} {root} size={28} />
-        <span class="lines"><span class="title"><b class="who">{who}</b> asks</span><span class="line asked">{value.text}</span><span class="line">{room.name}</span></span>
+        <span class="lines"><span class="title"><b class="who">{who}</b> asks</span><span class="line asked">{value.text}</span>{#if value.meanwhile}<span class="line plan">{questionPlan(value)}</span>{/if}<span class="line">{room.name}</span></span>
         <span class="acts"><a class="open" href={`${roomHref(room.id)}/s/${encodeURIComponent(value.session)}`} onclick={navigate}>Open</a></span>
         {#if attention.can("operate")}<div class="reply"><QuestionAnswer {id} name={who} onanswered={() => { decided.set(id, `Answered · ${who}`); }} /></div>{/if}</div>{/each}{/each}
       {#each failures as { room, title, reason } (room.id)}<div class="item failure"><Avatar kind="room" name={room.name} label={initials.get(room.name)} size={28} />
@@ -274,7 +275,8 @@
   /* The owner approves from this line, so it wraps rather than cutting off who gets access or for how long. */
   .request .line { white-space: normal; }
   /* A long question opens in full in the session's DM; four lines are enough to answer most from here. */
-  .asked { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+  .asked, .plan { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow-wrap: anywhere; }
+  .asked { color: var(--text); font-size: 13px; }
   .reply { flex-basis: 100%; padding-left: 38px; min-width: 0; }
   /* The owner acts on a failure's reason, so it wraps as well. */
   .failure .line, .hostless .line, .account .line { white-space: normal; }
