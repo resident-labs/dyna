@@ -89,10 +89,11 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 	// An explicit retry refreshes this room's full PR facts before using the
 	// same queue builder. The background worker keeps its normal poll schedule.
 	automatic, _ := ctx.Value(automaticMergeRoom{}).(bool)
-	refreshRoom := func() error {
+	refreshRoom := func(pendingOnly bool) error {
 		for key, probe := range probes {
 			r := st.Records[key]
-			if r == nil || r.RoomID != roomID || without[key] || probe.Err != nil || !currentTrialMember(r, state.MergeTrialChange{Key: key, Head: probe.Pull.Head.SHA}) {
+			if r == nil || r.RoomID != roomID || without[key] || probe.Err != nil || !currentTrialMember(r, state.MergeTrialChange{Key: key, Head: probe.Pull.Head.SHA}) ||
+				(pendingOnly && (r.CI != state.CIPending || probe.CI != "SUCCESS")) {
 				continue
 			}
 			snap, err := s.github(r.RoomID).snapshotFromPull(ctx, refRecord(*r), probe.Pull, nil)
@@ -112,7 +113,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 		return nil
 	}
 	if roomID != "" && !automatic {
-		if err := refreshRoom(); err != nil {
+		if err := refreshRoom(false); err != nil {
 			return retry(err)
 		}
 		st, err = s.readTickState(ctx)
@@ -170,7 +171,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 		}
 	}
 	if needsRefresh && automatic {
-		if err := refreshRoom(); err != nil {
+		if err := refreshRoom(!discarded); err != nil {
 			return retry(err)
 		}
 		st, err = s.readTickState(ctx)
