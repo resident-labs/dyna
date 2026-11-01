@@ -166,7 +166,7 @@ func validateForward(f box.Forward) error {
 	if strings.ContainsAny(f.HostPath+f.EnginePath, ":\n") || !filepath.IsAbs(f.HostPath) || !filepath.IsAbs(f.EnginePath) {
 		return errors.New("invalid forward path")
 	}
-	if f.Box != "" && (filepath.Base(f.HostPath) != "engine.sock" || filepath.Base(filepath.Dir(f.HostPath)) != string(f.Box)) {
+	if f.Box != "" && (filepath.Base(f.HostPath) != box.EngineSocket || filepath.Base(filepath.Dir(f.HostPath)) != string(f.Box)) {
 		return errors.New("invalid box socket path")
 	}
 	return nil
@@ -317,8 +317,8 @@ func (h *Host) executeInput(ctx context.Context, input []byte, argv ...string) (
 }
 
 // Maintain removes dangling images and compacts caches without deleting borrowed objects.
-func (h *Host) Maintain(ctx context.Context, hostData string) ([]contract.RoomShared, error) {
-	out, err := h.runUnbounded(ctx, nil, "bash", "-c", `podman image prune -f >/dev/null || exit; for repo in "$1"/git/*/*.git; do [ -d "$repo" ] || continue; git -C "$repo" gc --no-prune || exit; done; for dir in "$1"/rooms/*/shared; do [ -d "$dir" ] || continue; size=$(du -sb -- "$dir") || exit; room=${dir%/shared}; printf '%s\0%s\0' "${room##*/}" "${size%%$'\t'*}"; done`, "dyna-maintain", hostData)
+func (h *Host) Maintain(ctx context.Context, layout box.Layout) ([]contract.RoomShared, error) {
+	out, err := h.runUnbounded(ctx, nil, "bash", "-c", `podman image prune -f >/dev/null || exit; for repo in "$1"/*/*.git; do [ -d "$repo" ] || continue; git -C "$repo" gc --no-prune || exit; done; for dir in "$2"/*/"$3"; do [ -d "$dir" ] || continue; size=$(du -sb -- "$dir") || exit; room=${dir%/*}; printf '%s\0%s\0' "${room##*/}" "${size%%$'\t'*}"; done`, "dyna-maintain", layout.HostGitRoot(), layout.HostRooms(), box.SharedFolder)
 	if err != nil {
 		return nil, err
 	}

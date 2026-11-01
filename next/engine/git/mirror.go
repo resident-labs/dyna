@@ -33,34 +33,30 @@ func (GitRunner) Run(ctx context.Context, env []string, args ...string) ([]byte,
 }
 
 type CacheHost interface {
-	PushCache(context.Context, string, string, string, []string) error
+	PushCache(context.Context, string, string, []string) error
 }
 
 type Mirror struct {
-	Data   string
+	Layout box.Layout
 	Token  string
 	Runner Runner
 	mu     sync.Mutex
 }
 
-func (m *Mirror) path(repo contract.RepoName) (string, error) {
-	parts := strings.Split(string(repo), "/")
-	if len(parts) != 2 || !validPart(parts[0]) || !validPart(parts[1]) {
-		return "", errors.New("invalid repository name")
-	}
-	return filepath.Join(m.Data, "git", parts[0], parts[1]+".git"), nil
-}
-
 const SessionBranchPrefix = "v2/"
 
 // Prepare optionally fetches and pushes branches before returning the box setup.
-func (m *Mirror) Prepare(ctx context.Context, host CacheHost, hostData string, repo contract.RepoName, session contract.SessionID, fetch bool) (contract.BoxRepo, error) {
+func (m *Mirror) Prepare(ctx context.Context, host CacheHost, repo contract.RepoName, session contract.SessionID, fetch bool) (contract.BoxRepo, error) {
 	if fetch && m.Token == "" {
 		return contract.BoxRepo{}, MissingTokenError{}
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	path, err := m.path(repo)
+	path, err := m.Layout.Git(repo)
+	if err != nil {
+		return contract.BoxRepo{}, err
+	}
+	cache, err := m.Layout.HostGit(repo)
 	if err != nil {
 		return contract.BoxRepo{}, err
 	}
@@ -94,7 +90,7 @@ func (m *Mirror) Prepare(ctx context.Context, host CacheHost, hostData string, r
 		if err != nil {
 			return contract.BoxRepo{}, err
 		}
-		if err := host.PushCache(ctx, path, hostData, string(repo), []string{"+refs/heads/*:refs/heads/*"}); err != nil {
+		if err := host.PushCache(ctx, path, cache, []string{"+refs/heads/*:refs/heads/*"}); err != nil {
 			return contract.BoxRepo{}, err
 		}
 	}
@@ -102,7 +98,7 @@ func (m *Mirror) Prepare(ctx context.Context, host CacheHost, hostData string, r
 	if err != nil {
 		return contract.BoxRepo{}, err
 	}
-	return contract.BoxRepo{Name: repo, Cache: filepath.Join(hostData, "git", string(repo)+".git"), Branch: SessionBranchPrefix + string(session), Base: strings.TrimSpace(string(out))}, nil
+	return contract.BoxRepo{Name: repo, Cache: cache, Branch: SessionBranchPrefix + string(session), Base: strings.TrimSpace(string(out))}, nil
 }
 
 func (m *Mirror) authEnv() []string {
@@ -114,7 +110,7 @@ func (m *Mirror) authEnv() []string {
 func (m *Mirror) ImageContext(ctx context.Context, repo contract.RepoName) (string, images.TreeID, []byte, []box.Need, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	path, err := m.path(repo)
+	path, err := m.Layout.Git(repo)
 	if err != nil {
 		return "", "", nil, nil, err
 	}
@@ -125,7 +121,7 @@ func (m *Mirror) ImageContext(ctx context.Context, repo contract.RepoName) (stri
 func (m *Mirror) Size(ctx context.Context, repo contract.RepoName) (contract.BoxSizeName, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	path, err := m.path(repo)
+	path, err := m.Layout.Git(repo)
 	if err != nil {
 		return "", err
 	}
@@ -143,7 +139,7 @@ func (m *Mirror) DeleteArchiveRef(ctx context.Context, repo contract.RepoName, r
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	path, err := m.path(repo)
+	path, err := m.Layout.Git(repo)
 	if err != nil {
 		return err
 	}
