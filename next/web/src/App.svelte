@@ -19,6 +19,7 @@
   import Composer from "./lib/ui/Composer.svelte";
   import WorkingLine from "./lib/ui/WorkingLine.svelte";
   import SessionRow from "./lib/ui/SessionRow.svelte";
+  import SessionActions from "./lib/ui/SessionActions.svelte";
   import AboutPanel from "./lib/ui/AboutPanel.svelte";
   import HostFoot from "./lib/ui/HostFoot.svelte";
   import VirtualList from "./lib/ui/VirtualList.svelte";
@@ -26,7 +27,7 @@
   import Avatar, { setSessionLabels } from "./lib/ui/Avatar.svelte";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
   import { boxReason, count, quoted, turnReason, waits, type Quote } from "./lib/feed.ts";
-  import { sessionTree, type TreeRow } from "./lib/session-tree.ts";
+  import { sessionActions, sessionTree, type TreeRow } from "./lib/session-tree.ts";
   import { FileDraft } from "./lib/attach.svelte.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
   import type { Size } from "./lib/computerInput.ts";
@@ -213,6 +214,22 @@
   const folded = new SvelteSet<string>();
   const openIdle = new SvelteSet<string>();
   const treeKey = (entry: TreeRow) => entry.kind === "idle" ? `idle ${entry.key}` : entry.session.session;
+  // A row's menu of actions. A right click or the Menu key opens it at the pointer, and the row's More button opens it
+  // under the button. It closes with its session, and a button that opened it toggles it.
+  let acting: { session: string; anchor: DOMRect; side: "start" | "end"; trigger: HTMLElement } | undefined = $state();
+  const canAct = (id: string, parent?: string) => attention.can("operate") && sessionActions(parent, !!store?.turns.has(id) && !store.stopping.has(id), store?.boxes.get(id)).length > 0;
+  function act(event: MouseEvent & { currentTarget: HTMLElement }, id: string, parent: string | undefined, anchor: DOMRect, side: "start" | "end") {
+    if (!canAct(id, parent)) return;
+    event.preventDefault();
+    if (acting?.trigger === event.currentTarget) stopActing(true);
+    else acting = { session: id, anchor, side, trigger: event.currentTarget };
+  }
+  function stopActing(refocus: boolean) {
+    const trigger = acting?.trigger;
+    acting = undefined;
+    if (refocus && trigger?.isConnected) trigger.focus();
+  }
+  $effect.pre(() => { if (acting && !store?.sessions.has(acting.session)) acting = undefined; });
   let sessionList: VirtualList<TreeRow> | undefined = $state();
   const starting = (id: string) => { const box = store?.boxes.get(id); return box === "pending" || box === "creating" || box === "starting"; };
   let tree = $derived(sessionTree([...(store?.sessions.values() ?? [])], store?.statuses() ?? new Map(), starting, session, folded, openIdle));
@@ -723,16 +740,20 @@
           onkeydown={event => fold(event, item.session)}><Icon name="chevron" size={12} />{#if hidden}<span>{hidden}</span>{/if}</button>{/if}
         <!-- Reserve about 7 px per hidden-count digit beside the chevron. -->
         <a class="member" data-key={item.session} href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.session)}`}
-          onclick={openSession}
+          onclick={openSession} oncontextmenu={event => act(event, item.session, item.parent, new DOMRect(event.clientX, event.clientY), "start")}
           onkeydown={event => { void walkTree(event); if (parent) fold(event, item.session); }}
           aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{34 + depth * 14 + (hidden ? String(hidden).length * 7 : 0)}px">
           <SessionRow name={item.name} root={!item.parent} {state} {dot} line={status(item.session)} {mark} /></a>
           {#if jobs(item.session)}<button type="button" class="watch" aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
             title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={async event => { if (!wide.current) await showPanel(false, event.detail > 0); void jobsTool?.show(item.session); }}><Icon name="terminal" /></button>{/if}
           {#if attention.can("computers") && store?.computers.has(item.session)}<button type="button" class="watch" class:open={watching === item.session} data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}
-            title={`Watch ${item.name}'s computer`} onclick={() => watch(item.session)}><Icon name="monitor" /></button>{/if}</div>{/if}
+            title={`Watch ${item.name}'s computer`} onclick={() => watch(item.session)}><Icon name="monitor" /></button>{/if}
+          {#if canAct(item.session, item.parent)}<button type="button" class="watch" class:open={acting?.session === item.session} aria-haspopup="menu" aria-expanded={acting?.session === item.session}
+            aria-label={`Actions for ${item.name}`} title="Actions" onclick={event => act(event, item.session, item.parent, event.currentTarget.getBoundingClientRect(), "end")}><Icon name="more" /></button>{/if}</div>{/if}
         {/snippet}</VirtualList></div>
       {:else}<p class="hint">No sessions yet.</p>{/if}
+      {#if acting && store}{#key acting}<SessionActions {store} {...acting} onclose={stopActing}
+        onclosed={ids => { stopActing(false); if (session && ids.includes(session)) openLocation(room!); }} />{/key}{/if}
       <!-- The foot polls hosts, so it mounts only while the panel shows; a phone's closed panel polls nothing. -->
       {#if panelShown}<HostFoot {navigate} />{/if}
     </aside>
