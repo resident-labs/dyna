@@ -3,6 +3,7 @@
   import { parse } from "../markdown.ts";
   import { withCopyButtons } from "../codeCopy.ts";
   import { highlight } from "../highlight.ts";
+  import { paths } from "./Icon.svelte";
   // Links in posts open in a new tab without access to this page.
   DOMPurify.addHook("afterSanitizeAttributes", node => {
     if (node instanceof HTMLAnchorElement) {
@@ -19,17 +20,21 @@
     let html = rendered.get(text);
     if (html === undefined) {
       if (rendered.size >= 2000) rendered.clear();
-      html = withCopyButtons(DOMPurify.sanitize(parse(text), { FORBID_TAGS: ["img"] }));
+      html = withCopyButtons(DOMPurify.sanitize(parse(text), { FORBID_TAGS: ["img"] }), paths.copy);
       rendered.set(text, html);
     }
     return html;
   }
-  // One listener covers every code block. A copy shows "Copied" in place for 2 seconds, never a toast.
+  // One listener covers every code block. A check confirms a successful copy in place.
   const resets = new WeakMap<HTMLButtonElement, ReturnType<typeof setTimeout>>();
-  function flash(button: HTMLButtonElement, label: string) {
+  function flash(button: HTMLButtonElement, copied: boolean) {
     clearTimeout(resets.get(button));
-    button.textContent = label;
-    resets.set(button, setTimeout(() => { button.textContent = "Copy code"; }, 2000));
+    button.querySelector("path")?.setAttribute("d", copied ? paths.check : paths.copy);
+    button.setAttribute("aria-label", copied ? "Copied" : "Could not copy");
+    resets.set(button, setTimeout(() => {
+      button.querySelector("path")?.setAttribute("d", paths.copy);
+      button.setAttribute("aria-label", "Copy code");
+    }, 1500));
   }
   function copyCodeBlocks(node: HTMLElement) {
     const onClick = (event: MouseEvent) => {
@@ -37,8 +42,8 @@
       const pre = button?.closest(".code-block")?.querySelector("pre");
       if (!(button instanceof HTMLButtonElement) || !pre) return;
       navigator.clipboard.writeText(pre.textContent ?? "").then(
-        () => flash(button, "Copied"),
-        () => flash(button, "Could not copy"),
+        () => flash(button, true),
+        () => flash(button, false),
       );
     };
     node.addEventListener("click", onClick);
@@ -79,13 +84,14 @@
   /* Keep the copy control over the block without covering code or changing its height. */
   .markdown :global(.code-block) { position: relative; }
   .markdown :global(.code-head) { position: absolute; top: 4px; right: 4px; }
-  .markdown :global(.code-block > pre) { padding-right: 96px; }
-  .markdown :global(.code-copy) { height: 24px; padding: 0 8px; border: 0; border-radius: 6px; background: var(--sidebar); color: var(--muted); font: inherit; font-size: 12.5px; opacity: 0; }
+  .markdown :global(.code-block > pre) { padding-right: 32px; }
+  .markdown :global(.code-copy) { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: var(--sidebar); color: var(--muted); font: inherit; font-size: 12.5px; opacity: 0; }
   .markdown :global(.code-block:hover .code-copy), .markdown :global(.code-copy:focus-visible) { opacity: 1; }
   .markdown :global(.code-copy:hover) { color: var(--text); background: var(--hover); }
   .markdown :global(.code-copy:focus-visible) { outline: 2px solid var(--focus); outline-offset: 0; }
   @media (hover: none) {
-    .markdown :global(.code-copy) { height: 40px; padding: 0 12px; opacity: 1; }
+    .markdown :global(.code-block > pre) { padding-right: 48px; }
+    .markdown :global(.code-copy) { width: 40px; height: 40px; opacity: 1; }
   }
   /* A table is capped at the text width. Its cells wrap, and only a table that still cannot fit scrolls in its own block. */
   .markdown :global(table) { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
