@@ -259,7 +259,7 @@ func (s *AccountActions) AccountsImportOAuth(ctx context.Context, caller contrac
 		return contract.AccountsImportOAuthResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "forbidden"}
 	}
 	req.Label = strings.TrimSpace(req.Label)
-	if (req.Provider != contract.ProviderKimi && req.Provider != contract.ProviderXAI) || req.Label == "" || len(req.Label) > 128 || strings.ContainsAny(req.Label, "\r\n@") || req.ExpiresAt.Unix() <= 0 || len(req.Credential) == 0 || len(req.Credential) > 16384 {
+	if _, ok := model.OAuthProxyProvider(req.Provider); !ok || req.Label == "" || len(req.Label) > 128 || strings.ContainsAny(req.Label, "\r\n@") || req.ExpiresAt.Unix() <= 0 || len(req.Credential) == 0 || len(req.Credential) > 16384 {
 		return contract.AccountsImportOAuthResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "invalid account input"}
 	}
 	result, problem := s.runAccountAction(ctx, caller, contract.AccountActionImportOAuth, "", func(ctx context.Context) accountActionResult {
