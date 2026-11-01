@@ -1,7 +1,12 @@
 package engine
 
 import (
+	"database/sql"
+	"fmt"
+	"sync/atomic"
+
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/model"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -73,6 +78,58 @@ func TestWebSearchDistinguishesFailureFromEmptyResults(t *testing.T) {
 		if attempt.Provider == "brave" && attempt.Reason == contract.WebSearchRecentFailure {
 			t.Fatal("failure did not expire")
 		}
+	}
+}
+
+func TestWebSearchFallsBackFromChatGPTWithoutCitations(t *testing.T) {
+	s, _, worker, ctx := setup(t)
+	now := time.Unix(1000, 0)
+	s.now = func() time.Time { return now }
+	proxy, err := model.NewProxy(t.TempDir(), "management")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stream atomic.Value
+	stream.Store("")
+	upstream := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, stream.Load().(string))
+	})}
+	go func() { _ = upstream.Serve(proxy.Listener) }()
+	t.Cleanup(func() { _ = upstream.Close() })
+	s.SetWebSearchProxy(proxy, &model.Quotas{})
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT INTO accounts(id,proxy_id,provider,label) VALUES('account','proxy','openai','test')")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	brave := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"web":{"results":[{"title":"Fallback","url":"https://example.org"}]}}`)
+	}))
+	defer brave.Close()
+	s.searchBraveURL = brave.URL
+	if err := s.store.SetSearchKey(ctx, "brave", "private-key"); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		`data: {"type":"response.output_text.delta","delta":"unfinished"}` + "\n\n",
+		`data: {"type":"response.completed","response":{"output":[]}}` + "\n\n",
+	} {
+		stream.Store(body)
+		response, problem := s.WebSearch(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.WebSearchRequest{Query: "example"})
+		if problem != nil || response.Provider != contract.WebSearchBrave || len(response.Results) != 1 {
+			t.Fatalf("fallback: %+v %v", response, problem)
+		}
+		found := false
+		for _, attempt := range response.Attempts {
+			if attempt.Provider == contract.WebSearchChatGPT && attempt.Reason == contract.WebSearchFailed {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("ChatGPT failure was not reported")
+		}
+		now = now.Add(6 * time.Minute)
 	}
 }
 
