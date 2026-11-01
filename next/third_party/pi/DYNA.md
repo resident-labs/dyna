@@ -12,7 +12,7 @@ Dyna modified this vendored source. The upstream repository is `https://github.c
 
 The catalog defaults bridge exports Pi’s existing `defaultModelPerProvider` into the packed catalog so activation can prefer Pi’s default. Upstream issue [#8096](https://github.com/earendil-works/pi/issues/8096) concerns a stale default, not a packed export; no fitting upstream PR or recent export was found through upstream commit `8ffea8a1bfdc`. Remove this bridge when upstream supplies packed provider defaults.
 
-The packed catalog scripts export Pi's built-in provider registry into `dyna-catalog.json` and verify the installed package and a local model request. This enables removal of `next/engine/model/key_catalog.go`. Upstream issue and PR searches found no fitting packed catalog export; the fork uses Pi's existing registry without changing upstream behavior.
+The packed catalog scripts validate Pi's built-in provider registry, omit unsupported routes with a reason, and export plan and key lists into `dyna-catalog.json`. This enables removal of `next/engine/model/key_catalog.go`. Upstream issue and PR searches found no fitting packed catalog export; the fork uses Pi's existing registry without changing upstream behavior. Remove the bridge when upstream provides an equivalent packed export.
 
 P0 adds this documentation and changes no upstream Pi file. It changes no Pi behavior and removes no Dyna code. `scripts/pi-pack.sh` stages the built packages outside this tree, sets every internal fork package to `1.4.0-dyna.1`, and adds `dynaFork: 1` and bundled dependencies to the staged metadata. The upstream files stay unchanged.
 
