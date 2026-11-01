@@ -153,6 +153,13 @@ func TestTranscriptTurnPageAndFullOutput(t *testing.T) {
 	if _, ok := <-ownerLive; ok {
 		t.Fatal("full owner stream did not close for reconnect")
 	}
+	// A file from before indexing must remain readable after backfill.
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "DELETE FROM transcript_turns WHERE session=?", caller.Session)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	page, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: caller.Session})
 	inputEvent, err := s.store.Event(ctx, delivery)
