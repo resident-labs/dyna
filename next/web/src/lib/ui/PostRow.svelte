@@ -4,7 +4,7 @@
   import Markdown from "./Markdown.svelte";
   import PostAttachments from "./PostAttachments.svelte";
   import { formatTime, type Row } from "../feed.ts";
-  import type { EventID, VisualCard } from "../contract.gen.ts";
+  import type { Attachment, EventID, VisualCard } from "../contract.gen.ts";
   import { hue } from "../identity.ts";
   import { beginSwipe, moveSwipe, releaseSwipe, ignoredSwipeTarget, type Swipe } from "../swipe.ts";
   import { canForwardPost } from "../forward-state.ts";
