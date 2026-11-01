@@ -30,18 +30,19 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 	if req.Session == "" || req.Limit < 0 || req.Limit > 20 || req.Offset < 0 || req.Cursor < 0 || req.PostIndex < 0 || (req.Page == "" && req.Cursor != 0) || (req.Page != "" && (req.Turn == "" || req.Item != "" || req.AfterItem != "" || req.Tail || req.PostIndex != 0)) || (req.Turn != "" && req.Before != "") || ((req.Item != "" || req.AfterItem != "" || req.Tail || req.PostIndex != 0) && req.Turn == "") {
 		return response, invalid("invalid transcript request")
 	}
-	exists, err := s.store.TranscriptSessionExists(ctx, req.Session)
+	room, err := s.store.TranscriptRoom(ctx, req.Session)
+	if errors.Is(err, store.ErrNotFound) {
+		return response, &contract.Error{Code: contract.ErrNotFound, Message: "session not found"}
+	}
 	if err != nil {
 		return response, failure(err)
 	}
-	if !exists {
-		return response, &contract.Error{Code: contract.ErrNotFound, Message: "session not found"}
-	}
+	dir := s.layout.Transcripts(room, req.Session)
 	files, err := s.store.TranscriptFiles(ctx, req.Session)
 	if err != nil {
 		return response, failure(err)
 	}
-	reader := pi.TranscriptReader{Dir: filepath.Join(s.transcriptDir, string(req.Session)), Acked: make(map[string]int64, len(files))}
+	reader := pi.TranscriptReader{Dir: dir, Acked: make(map[string]int64, len(files))}
 	for _, f := range files {
 		reader.Acked[f.Path] = f.Acked
 	}
@@ -55,7 +56,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 		if f.Indexed {
 			continue
 		}
-		file, err := os.Open(filepath.Join(s.transcriptDir, string(req.Session), f.Path))
+		file, err := os.Open(filepath.Join(dir, f.Path))
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}

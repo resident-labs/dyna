@@ -54,6 +54,7 @@ const (
 	MethodRoomPause               Method = "room.pause"
 	MethodRoomSetLimits           Method = "room.set_limits"
 	MethodRoomCreate              Method = "room.create"
+	MethodRoomDelete              Method = "room.delete"
 	MethodRoomRepoAdd             Method = "room.repo.add"
 	MethodRoomRepos               Method = "room.repos"
 	MethodSessionStart            Method = "session.start"
@@ -170,6 +171,9 @@ type RoomSummary struct {
 	Working  []SessionID `json:"working"`  // open sessions with a running turn
 	Failed   int         `json:"failed"`   // open sessions whose last turn that was not stopped failed, or whose box failed or is lost; each counts once
 	Hostless int         `json:"hostless"` // open sessions whose box waits for a room host
+	// Deleting marks a room on its way out; it refuses new work. DeleteReason says what holds it, if anything does.
+	Deleting     bool   `json:"deleting,omitempty"`
+	DeleteReason string `json:"deleteReason,omitempty"`
 	// Latest is the newest current-turn activity among the working sessions; none when no working session reported one.
 	Latest *RoomActivity `json:"latest,omitempty"`
 }
@@ -288,6 +292,7 @@ type RoomShared struct {
 
 type HostSummary struct {
 	Shared            []RoomShared      `json:"shared"`
+	Leftovers         int               `json:"leftovers,omitempty"` // boxes and room folders of deleted rooms that this host still holds, removed when it returns
 	Name              HostName          `json:"name"`
 	Reachable         bool              `json:"reachable"`
 	Boxes             int               `json:"boxes"`
@@ -317,6 +322,18 @@ type RoomCreateRequest struct {
 }
 type RoomCreateResponse struct {
 	Room RoomID `json:"room"`
+}
+
+// RoomDeleteRequest deletes a room and all its data. Discard must be set, as the deletion skips every archive.
+type RoomDeleteRequest struct {
+	Room    RoomID `json:"room"`
+	Discard bool   `json:"discard"`
+}
+
+// RoomDeleteResponse names the accounts and hosts this room alone limited. An empty room list means every room, so the deletion opens them to all rooms.
+type RoomDeleteResponse struct {
+	OpenedAccounts []AccountID `json:"openedAccounts,omitempty"`
+	OpenedHosts    []HostName  `json:"openedHosts,omitempty"`
 }
 type RoomRepoAddRequest struct {
 	Room    RoomID   `json:"room"`

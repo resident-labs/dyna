@@ -66,6 +66,9 @@ type fakeClient struct {
 	deviceRevoke contract.DeviceRevokeRequest
 	deviceScopes contract.DeviceSetScopesRequest
 	hosts        []contract.HostSummary
+
+	roomDelete     contract.RoomDeleteRequest
+	roomDeleteResp contract.RoomDeleteResponse
 }
 
 func (f *fakeClient) DevicePair(_ context.Context, q contract.DevicePairRequest) (contract.DevicePairResponse, error) {
@@ -88,7 +91,7 @@ func (f *fakeClient) HostexecRun(context.Context, contract.HostexecRunRequest) (
 	return f.hostexecResp, nil
 }
 func (f *fakeClient) File(context.Context, string, io.Writer) error { return nil }
-func (f *fakeClient) Upload(_ context.Context, path string) (contract.Attachment, error) {
+func (f *fakeClient) Upload(_ context.Context, _ contract.RoomID, path string) (contract.Attachment, error) {
 	f.uploads = append(f.uploads, path)
 	return contract.Attachment{Name: path}, nil
 }
@@ -102,6 +105,10 @@ func (f *fakeClient) HostAdd(_ context.Context, q contract.HostAddRequest) (cont
 func (f *fakeClient) RoomCreate(_ context.Context, q contract.RoomCreateRequest) (contract.RoomCreateResponse, error) {
 	f.room = q
 	return contract.RoomCreateResponse{Room: "room_1"}, nil
+}
+func (f *fakeClient) RoomDelete(_ context.Context, q contract.RoomDeleteRequest) (contract.RoomDeleteResponse, error) {
+	f.roomDelete = q
+	return f.roomDeleteResp, nil
 }
 func (f *fakeClient) RoomRepoAdd(_ context.Context, q contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, error) {
 	f.repoAdd = q
@@ -187,6 +194,19 @@ func TestRoomCreateMapsName(t *testing.T) {
 	runCLI(t, f, "room", "create", "work", "--root-profile", "p")
 	if f.room.Name != "work" || f.room.RootProfile != "p" {
 		t.Fatalf("%+v", f.room)
+	}
+}
+func TestRoomDeleteNeedsDiscard(t *testing.T) {
+	f := &fakeClient{roomDeleteResp: contract.RoomDeleteResponse{OpenedAccounts: []contract.AccountID{"acct"}, OpenedHosts: []contract.HostName{"h"}}}
+	if _, err := execCLI(f, "room", "delete", "r"); err == nil || !strings.Contains(err.Error(), "--discard") || f.roomDelete.Room != "" {
+		t.Fatalf("err=%v request=%+v", err, f.roomDelete)
+	}
+	out := runCLI(t, f, "room", "delete", "r", "--discard")
+	if f.roomDelete.Room != "r" || !f.roomDelete.Discard {
+		t.Fatalf("%+v", f.roomDelete)
+	}
+	if !strings.Contains(out, "account acct was limited to this room") || !strings.Contains(out, "host h was limited to this room") {
+		t.Fatal(out)
 	}
 }
 func TestRoomRepos(t *testing.T) {

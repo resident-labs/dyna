@@ -5,10 +5,10 @@ import (
 	"errors"
 	"log"
 	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/resident-labs/dyna/box/podman"
+	"github.com/resident-labs/dyna/contract"
 )
 
 type instructionVersion struct{ generation, saves uint64 }
@@ -39,11 +39,15 @@ func (b *Boxes) PublishInstructions(ctx context.Context) {
 	}()
 }
 
-func (b *Boxes) syncInstructions(ctx context.Context, h *podman.Host) error {
-	if b.InstructionsDir == "" {
-		return nil
-	}
+// settle waits out a copy already running, which could still write into a deleted room's folder. Any later copy skips that room.
+func (s *instructionHost) settle() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+}
+
+func (b *Boxes) instructionState(h *podman.Host) *instructionHost {
 	b.instructionsMu.Lock()
+	defer b.instructionsMu.Unlock()
 	if b.instructionSynced == nil {
 		b.instructionSynced = make(map[*podman.Host]*instructionHost)
 	}
@@ -52,33 +56,35 @@ func (b *Boxes) syncInstructions(ctx context.Context, h *podman.Host) error {
 		state = &instructionHost{}
 		b.instructionSynced[h] = state
 	}
-	b.instructionsMu.Unlock()
+	return state
+}
+
+func (b *Boxes) syncInstructions(ctx context.Context, h *podman.Host) error {
+	if b.Layout.Data == "" {
+		return nil
+	}
+	state := b.instructionState(h)
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	version := instructionVersion{h.Generation(), b.instructionSaves.Load()}
 	if version.generation != 0 && state.version == version {
 		return nil
 	}
-	paths := []string{filepath.Join("global", "AGENTS.md")}
-	entries, err := os.ReadDir(filepath.Join(b.InstructionsDir, "rooms"))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	// A room being deleted is left out, or this copy would bring back the folder the deletion removes.
+	rooms, err := b.Store.OpenRooms(ctx)
+	if err != nil {
 		return err
 	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			paths = append(paths, filepath.Join("rooms", entry.Name(), "AGENTS.md"))
-		}
-	}
 	var files []podman.InstructionFile
-	for _, path := range paths {
-		data, err := os.ReadFile(filepath.Join(b.InstructionsDir, path))
+	for _, room := range append([]contract.RoomID{""}, rooms...) {
+		data, err := os.ReadFile(b.Layout.Instructions(room))
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
 		if err != nil {
 			return err
 		}
-		files = append(files, podman.InstructionFile{Path: filepath.Join(b.HostData, "instructions", path), Data: data})
+		files = append(files, podman.InstructionFile{Path: b.Layout.HostInstructions(room), Data: data})
 	}
 	if err := h.SyncInstructions(ctx, files); err != nil {
 		return err

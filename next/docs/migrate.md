@@ -256,5 +256,5 @@ The updated run exported eight profiles and recorded no unknown model mappings. 
 
 The exporter renders each scope's v1 rules in ID order under `# Instructions`. Each rule is one plain Markdown list item. The first line starts with `- `; each later line, including blank lines and code fences, has two leading spaces. Empty scopes produce empty documents. The verifier parses each document and independently compares its texts against v1 SQL in order. Rule IDs, authors and timestamps are dropped.
 
-The bundle carries the rendered documents, not rule records. After the store commit, the real import writes each file unchanged by rename to `<data>/files/instructions/global/AGENTS.md` and `<data>/files/instructions/rooms/<room-id>/AGENTS.md`. The room ID is the new ID created by the import. The offline dry run writes neither file.
+The bundle carries the rendered documents, not rule records. After the store commit, the real import writes each file unchanged by rename to `<data>/AGENTS.md` and `<data>/rooms/<room-id>/AGENTS.md`. The room ID is the new ID created by the import. The offline dry run writes neither file.
 

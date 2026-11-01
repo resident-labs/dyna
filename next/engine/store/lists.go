@@ -21,7 +21,7 @@ func (s *Store) RoomList(ctx context.Context) (contract.RoomListResponse, []Room
 	if err := s.Read().QueryRowContext(ctx, "SELECT COALESCE(MAX(seq),0) FROM events").Scan(&seq); err != nil {
 		return contract.RoomListResponse{}, nil, err
 	}
-	rows, err := s.Read().QueryContext(ctx, "SELECT r.id,r.name,r.created_at,COALESCE(c.seq,0),r.paused_at IS NOT NULL FROM rooms r LEFT JOIN conversation_reads c ON c.room=r.id AND c.conversation='feed' ORDER BY r.name")
+	rows, err := s.Read().QueryContext(ctx, "SELECT r.id,r.name,r.created_at,COALESCE(c.seq,0),r.paused_at IS NOT NULL,r.state='deleting',r.reason FROM rooms r LEFT JOIN conversation_reads c ON c.room=r.id AND c.conversation='feed' ORDER BY r.name")
 	if err != nil {
 		return contract.RoomListResponse{}, nil, err
 	}
@@ -30,7 +30,7 @@ func (s *Store) RoomList(ctx context.Context) (contract.RoomListResponse, []Room
 	for rows.Next() {
 		var room contract.RoomSummary
 		var created int64
-		if err := rows.Scan(&room.ID, &room.Name, &created, &room.LastRead, &room.Paused); err != nil {
+		if err := rows.Scan(&room.ID, &room.Name, &created, &room.LastRead, &room.Paused, &room.Deleting, &room.DeleteReason); err != nil {
 			return contract.RoomListResponse{}, nil, err
 		}
 		room.Created = time.UnixMilli(created).UTC()

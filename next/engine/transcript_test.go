@@ -6,14 +6,24 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
 
 func transcriptCaller(t *testing.T) (*Service, context.Context, contract.Principal) {
 	t.Helper()
 	s, _, session, ctx := setup(t)
-	s.SetTranscriptDir(t.TempDir())
+	s.SetLayout(box.Layout{Data: t.TempDir()})
 	return s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session}
+}
+
+func transcripts(t *testing.T, s *Service, ctx context.Context, caller contract.Principal) string {
+	t.Helper()
+	session, err := s.store.Session(ctx, caller.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s.layout.Transcripts(session.Room, caller.Session)
 }
 
 func appendTranscript(s *Service, ctx context.Context, caller contract.Principal, path string, offset int64, data string) (contract.TranscriptAppendResponse, *contract.Error) {
@@ -29,7 +39,7 @@ func TestTranscriptAppendResumesFromAckedOffset(t *testing.T) {
 	if resp, e := appendTranscript(s, ctx, caller, "sessions/a.jsonl", 0, "abcdef"); e != nil || resp.AckedOffset != 6 {
 		t.Fatalf("spanning chunk = %+v, %v; want ack 6", resp, e)
 	}
-	stored, err := os.ReadFile(filepath.Join(s.transcriptDir, string(caller.Session), "sessions/a.jsonl"))
+	stored, err := os.ReadFile(filepath.Join(transcripts(t, s, ctx, caller), "sessions/a.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +77,7 @@ func TestTranscriptAppendSkipsStoredPrefix(t *testing.T) {
 	if resp, e := appendTranscript(s, ctx, caller, "a.jsonl", 0, "xbcdef"); e != nil || resp.AckedOffset != 6 {
 		t.Fatalf("prefix chunk = %+v, %v; want ack 6", resp, e)
 	}
-	stored, err := os.ReadFile(filepath.Join(s.transcriptDir, string(caller.Session), "a.jsonl"))
+	stored, err := os.ReadFile(filepath.Join(transcripts(t, s, ctx, caller), "a.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +101,7 @@ func TestTranscriptFetchAcknowledged(t *testing.T) {
 	if _, e := appendTranscript(s, ctx, caller, "a.jsonl", 0, "abc"); e != nil {
 		t.Fatal(e)
 	}
-	name := filepath.Join(s.transcriptDir, string(caller.Session), "a.jsonl")
+	name := filepath.Join(transcripts(t, s, ctx, caller), "a.jsonl")
 	if err := os.WriteFile(name, []byte("abcdef"), 0600); err != nil {
 		t.Fatal(err)
 	}

@@ -14,6 +14,8 @@ export type DraftFile = { id: number; file: File; preview?: string; state: "savi
 export class FileDraft {
   items: DraftFile[] = $state([]);
   private next = 0;
+  private readonly room: string;
+  constructor(room: string) { this.room = room; }
   get ready(): Attachment[] { return this.items.flatMap(item => item.attachment ? [item.attachment] : []); }
   // Send waits while a file saves or has failed.
   get busy(): boolean { return this.items.some(item => item.state !== "ready"); }
@@ -41,7 +43,7 @@ export class FileDraft {
     const item = this.items.find(entry => entry.id === id);
     if (!item) return;
     item.state = "saving";
-    upload(item.file).then(attachment => this.set(id, { state: "ready", attachment }), () => this.set(id, { state: "failed" }));
+    upload(item.file, this.room).then(attachment => this.set(id, { state: "ready", attachment }), () => this.set(id, { state: "failed" }));
   }
   // A file removed while it saved stays removed.
   private set(id: number, change: Partial<DraftFile>): void {
