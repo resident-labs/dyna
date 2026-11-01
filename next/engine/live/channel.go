@@ -32,7 +32,7 @@ func (s *Session) Lock() bool {
 func (s *Session) Unlock() { s.mu.Unlock() }
 
 // Connected reports whether a live handle has a box channel.
-func (s *Session) Connected() (bool, bool) {
+func (s *Session) Connected() (connected, open bool) {
 	if !s.Lock() {
 		return false, false
 	}
@@ -59,16 +59,17 @@ func (c *Channel) Wake() {
 	}
 }
 
-// CloseChannel completes one detached channel's teardown under the session lock.
-func (s *Session) CloseChannel(computer []chan []byte, shell []chan contract.ShellJobOutput, channel *Channel) {
+// Close completes one detached channel's teardown under the session lock.
+// A nil channel still closes the detached watchers.
+func (c *Channel) Close(computer []chan []byte, shell []chan contract.ShellJobOutput) {
 	for _, ch := range computer {
 		close(ch)
 	}
 	for _, ch := range shell {
 		close(ch)
 	}
-	if channel != nil {
-		channel.stop()
+	if c != nil {
+		c.stop()
 	}
 }
 

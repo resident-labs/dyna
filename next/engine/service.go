@@ -97,6 +97,10 @@ func (s *Service) lookupSession(id contract.SessionID) (*live.Session, *sessionS
 	s.mu.Lock()
 	state := s.sessions[id]
 	s.mu.Unlock()
+	if state == nil {
+		handle.Unlock()
+		return nil, nil, false
+	}
 	return handle, state, true
 }
 
@@ -137,7 +141,7 @@ func (s *Service) SessionClosed(id contract.SessionID) {
 	shellWatchers := s.clearShellLocked(id)
 	delete(s.sessions, id)
 	s.mu.Unlock()
-	handle.CloseChannel(computerWatchers, shellWatchers, channel)
+	channel.Close(computerWatchers, shellWatchers)
 	if stopped {
 		_ = s.computerEvent(context.Background(), id, room, contract.ComputerStopped)
 	}
