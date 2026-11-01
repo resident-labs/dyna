@@ -12,6 +12,16 @@ var oauthProviders = []struct {
 	{contract.AccountProviderInfo{ID: contract.ProviderXAI, DisplayName: "xAI", ConnectMethod: contract.ConnectOAuth, ConnectFlow: contract.ConnectFlowDevice}, "xai"},
 }
 
+// OAuthProxyProvider returns the proxy's name for a provider with OAuth sign-in.
+func OAuthProxyProvider(id contract.AccountProvider) (string, bool) {
+	for _, provider := range oauthProviders {
+		if provider.info.ID == id {
+			return provider.proxy, true
+		}
+	}
+	return "", false
+}
+
 // AccountProviders describes the same catalog used by the connection handlers.
 func AccountProviders() []contract.AccountProviderInfo {
 	providers := make([]contract.AccountProviderInfo, 0, len(oauthProviders)+len(KeyProviders()))
