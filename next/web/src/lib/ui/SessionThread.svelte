@@ -73,7 +73,11 @@
         const old = new Map(turns.map(turn => [turn.id, turn]));
         turns = [...retained, ...incoming.reverse().map(turn => {
           const previous = old.get(turn.id);
-          return previous ? { ...turn, inputs: mergeTimelineInputs(previous.inputs ?? [], turn.inputs ?? []), items: mergeTimelineItems(previous.items ?? [], turn.items ?? []), olderItems: previous.olderItems && turn.olderItems, nextItem: previous.olderItems ? previous.nextItem : turn.nextItem } : turn;
+          return previous ? { ...turn, inputs: mergeTimelineInputs(previous.inputs ?? [], turn.inputs ?? []), items: mergeTimelineItems(previous.items ?? [], turn.items ?? []), olderItems: previous.olderItems && turn.olderItems, nextItem: previous.olderItems ? previous.nextItem : turn.nextItem,
+            ...(paging.has(turn.id + "/inputs") ? { after: previous.after } : {}),
+            ...(paging.has(turn.id + "/items") ? { mandatoryItems: previous.mandatoryItems, nextMandatory: previous.nextMandatory } : {}),
+            ...(paging.has(turn.id + "/posts") ? { mandatoryPosts: previous.mandatoryPosts, nextMandatoryPost: previous.nextMandatoryPost } : {}),
+            ...(paging.has(turn.id + "/older") ? { olderItems: previous.olderItems, nextItem: previous.nextItem } : {}) } : turn;
         })];
         if (!retained.length) before = page.before;
         if (loaded && atBottom) { await tick(); scroller.scrollTop = scroller.scrollHeight; }
@@ -128,7 +132,10 @@
         const page = await call("transcript.read", { session, turn: turn.id, afterItem: after });
         const next = page.turns?.[0];
         if (!next || next.after === after) throw new Error("Transcript input cursor did not advance");
-        turns = turns.map(item => item.id === turn.id ? { ...item, ...next, after: next.after, inputs: mergeTimelineInputs(item.inputs ?? [], next.inputs ?? []), items: mergeTimelineItems(item.items ?? [], next.items ?? []) } : item);
+        turns = turns.map(item => item.id === turn.id ? { ...item, ...next, after: next.after, inputs: mergeTimelineInputs(item.inputs ?? [], next.inputs ?? []), items: mergeTimelineItems(item.items ?? [], next.items ?? []),
+          ...(paging.has(turn.id + "/items") ? { mandatoryItems: item.mandatoryItems, nextMandatory: item.nextMandatory } : {}),
+          ...(paging.has(turn.id + "/posts") ? { mandatoryPosts: item.mandatoryPosts, nextMandatoryPost: item.nextMandatoryPost } : {}),
+          ...(paging.has(turn.id + "/older") ? { olderItems: item.olderItems, nextItem: item.nextItem } : {}) } : item);
         after = next.after;
       }
     } catch { failed = true; }
