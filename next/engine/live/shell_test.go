@@ -19,21 +19,44 @@ func TestShellOutputDropsOnlySlowWatcher(t *testing.T) {
 	generation := s.ShellWatchGeneration()
 	for i := 0; i < 128; i++ {
 		s.ShellOutput(generation, []contract.ShellJobOutput{{Text: "buffered"}})
-		<-fast.Events()
+		select {
+		case <-fast.Events():
+		default:
+			t.Fatal("fast watcher missed buffered output")
+		}
 	}
 	s.ShellOutput(generation, []contract.ShellJobOutput{{Text: "new"}})
-	if got := <-fast.Events(); got.Text != "new" {
-		t.Fatalf("fast watcher: %q", got.Text)
+	select {
+	case got := <-fast.Events():
+		if got.Text != "new" {
+			t.Fatalf("fast watcher: %q", got.Text)
+		}
+	default:
+		t.Fatal("fast watcher missed new output")
 	}
 	for i := 0; i < 128; i++ {
-		<-slow.Events()
+		select {
+		case <-slow.Events():
+		default:
+			t.Fatal("slow watcher lost buffered output")
+		}
 	}
-	if _, open := <-slow.Events(); open {
+	select {
+	case _, open := <-slow.Events():
+		if open {
+			t.Fatal("slow watcher remained open")
+		}
+	default:
 		t.Fatal("slow watcher remained open")
 	}
 	s.RemoveShellWatch(slow)
 	s.ClearShell()
-	if _, open := <-fast.Events(); open {
+	select {
+	case _, open := <-fast.Events():
+		if open {
+			t.Fatal("clear left fast watcher open")
+		}
+	default:
 		t.Fatal("clear left fast watcher open")
 	}
 }
