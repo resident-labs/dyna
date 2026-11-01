@@ -25,16 +25,16 @@
     {#each ratings as item}
       <div class="rating">
         <span class="rating-name">{item.name}</span>
-        <div class="steps"><button type="button" aria-label={`Clear ${item.name} rating`} onclick={() => draft[item.key] = 0}>–</button>
+        <div class="steps">
           {#each Array.from({ length: 10 }, (_, i) => i + 1) as value}
             <button type="button" class:filled={value <= draft[item.key]} aria-label={`${item.name}: ${value}`} aria-pressed={value === draft[item.key]} onclick={() => draft[item.key] = value}
-              onkeydown={(event) => { if (event.key === "Backspace" || event.key === "Delete") { event.preventDefault(); draft[item.key] = 0; } else if (event.key === "ArrowRight" || event.key === "ArrowUp") { event.preventDefault(); draft[item.key] = Math.min(10, draft[item.key] + 1); } else if (event.key === "ArrowLeft" || event.key === "ArrowDown") { event.preventDefault(); draft[item.key] = Math.max(0, draft[item.key] - 1); } }}></button>
+              onkeydown={(event) => { if (event.key === "Backspace" || event.key === "Delete") { event.preventDefault(); draft[item.key] = 0; } else if (event.key === "ArrowRight" || event.key === "ArrowUp") { event.preventDefault(); draft[item.key] = Math.min(10, draft[item.key] + 1); } else if (event.key === "ArrowLeft" || event.key === "ArrowDown") { event.preventDefault(); draft[item.key] = Math.max(0, draft[item.key] - 1); } }}>{value}</button>
           {/each}
         </div>
-        <span class="rating-value">{draft[item.key] || "Not rated"}</span><span class="help">{item.help}</span>
+        <span class="rating-value">{#if draft[item.key]}<button type="button" aria-label={`Clear ${item.name} rating`} onclick={() => draft[item.key] = 0}>Clear</button>{:else}Not rated{/if}</span><span class="help">{item.help}</span>
       </div>
     {/each}
-    <p class="help">1 to 10, higher is better. The dash or Backspace clears a rating. Agents read the ratings and the notes when they choose a profile.</p>
+    <p class="help">1 to 10, higher is better. Agents read the ratings and the notes when they choose a profile.</p>
   </div></div>
   <label class="field"><span>Notes</span><textarea bind:value={draft.description} rows="3"></textarea></label>
   <label class="field"><span>Calls per run</span><div><input class="numeric" type="number" min="0" bind:value={draft.maxCallsPerRun} /> <span class="help">a run fails past this many calls; 0 means no limit</span></div></label>
@@ -53,8 +53,9 @@
   .rating { display: grid; grid-template-columns: 100px 220px 65px minmax(0, 1fr); align-items: center; gap: 10px; color: var(--text); font-size: 12.5px; margin-bottom: 5px; }
   .steps { display: flex; gap: 3px; }
   .steps button { flex: 1; height: 16px; min-width: 0; border: 1px solid var(--line); border-radius: 4px; background: var(--selected); color: var(--muted); padding: 0; cursor: pointer; }
-  .steps button:first-child { background: transparent; border: 0; }
-  .steps button.filled { background: var(--muted); }
+  .steps button.filled { background: var(--focus); border-color: var(--focus); color: var(--bg); }
+  .rating-value { color: var(--muted); }
+  .rating-value button { border: 0; padding: 0; background: none; color: var(--text); font: inherit; cursor: pointer; text-decoration: underline; }
   .help { color: var(--muted); font-size: 12.5px; }
   p.help { margin: 8px 0 0; }
   .actions { display: flex; gap: 12px; }
