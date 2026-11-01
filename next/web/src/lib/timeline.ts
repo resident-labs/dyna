@@ -72,11 +72,19 @@ export function postDestination(item: TranscriptItem, session: string, room: str
   return undefined;
 }
 
+// Dyna: One item is not a group, so it shows with no heading to open first. A script stays a group of its own actions,
+// under the heading that counts them. Thoughts alone fold under one heading; with tools, they fold beside the summary.
+export type WorkLayout = "single" | "thoughts" | "mixed";
+export function workLayout(items: TranscriptItem[]): WorkLayout {
+  if (items.length === 1 && items[0].tool !== "codemode") return "single";
+  return items.every(item => item.kind === "thinking") ? "thoughts" : "mixed";
+}
+
 // Ported from T3 Code (packages/client-runtime/src/work-log/presentation.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 // Dyna: Transcript tools have no T3 source or integration metadata.
 export function summarizeWork(items: TranscriptItem[]): string {
   const tools = items.filter(item => item.kind === "tool");
-  if (!tools.length) return items.length === 1 ? "Thought" : `Thought (×${items.length})`;
+  if (!tools.length) return `${items.length} ${items.length === 1 ? "thought" : "thoughts"}`;
   const groups = new Map<StepKind, number>();
   let scripts = 0;
   for (const item of tools) {

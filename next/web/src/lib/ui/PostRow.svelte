@@ -10,8 +10,8 @@
   import { beginSwipe, moveSwipe, releaseSwipe, ignoredSwipeTarget, type Swipe } from "../swipe.ts";
   import { canForwardPost } from "../forward-state.ts";
   import { SwipeForward } from "../swipe-forward.ts";
-  let { row, author, to, root, room, navigate, onretry, ondiscard, onforward, swipeDisabled = false, newest, visualEvent, onmedia }: {
-    room: string; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; newest: Map<string, VisualCard>; visualEvent: EventID | undefined; onmedia: (position: number) => void;
+  let { row, author, to, root, room, navigate, onretry, ondiscard, onforward, swipeDisabled = false, belowNew = false, newest, visualEvent, onmedia }: {
+    room: string; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; belowNew?: boolean; newest: Map<string, VisualCard>; visualEvent: EventID | undefined; onmedia: (position: number) => void;
   } = $props();
   let distance = $state(0), dragging = $state(false), ready = $state(false);
   function swipe(node: HTMLElement) {
@@ -65,6 +65,8 @@
       }, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 150);
     }
     function click(event: MouseEvent) { if (Date.now() < suppress) { event.preventDefault(); event.stopImmediatePropagation(); } }
+    function enter(event: PointerEvent) { raise(event, node); }
+    node.addEventListener("pointerenter", enter);
     node.addEventListener("touchstart", start, { passive: true });
     node.addEventListener("touchmove", move, { passive: false });
     node.addEventListener("touchend", end, { passive: false });
@@ -72,6 +74,7 @@
     node.addEventListener("contextmenu", reset);
     node.addEventListener("click", click, true);
     return { destroy() {
+      node.removeEventListener("pointerenter", enter);
       node.removeEventListener("touchstart", start); node.removeEventListener("touchmove", move);
       node.removeEventListener("touchend", end); node.removeEventListener("touchcancel", reset);
       node.removeEventListener("contextmenu", reset); node.removeEventListener("click", click, true);
@@ -87,15 +90,16 @@
     navigator.clipboard.writeText(row.text).then(() => { copied = "Copied"; }, () => { copied = "Could not copy"; })
       .finally(() => { timer = setTimeout(() => { copied = ""; }, 2000); });
   }
-  // The bar sits 14 px above the row. When the row's top is under the feed's top edge, a pointer entering it lifts the bar
-  // to 4 px inside that edge, measured once per entry, never on scroll. The cap keeps it from leaving a row that is almost
-  // scrolled away, and lets a one-line row clear the edge.
+  // The 28 px bar straddles the row's top edge, or sits 4 px inside it right under the New line. When the row's top is
+  // under the feed's top edge, a pointer entering it lifts the bar to 4 px inside that edge, measured once per entry, never
+  // on scroll. The cap keeps it from leaving a row that is almost scrolled away, and lets a one-line row clear the edge.
   let lift = $state(0);
-  function raise(event: PointerEvent, row: HTMLElement) {
+  function raise(event: PointerEvent, node: HTMLElement) {
     if (event.pointerType === "touch") return;
     // The feed's scroll container: VirtualList.svelte line 13 defaults role to "feed", and line 140 renders it on .virtual.
-    const edge = row.closest('[role="feed"]')?.getBoundingClientRect().top ?? 0;
-    lift = Math.min(Math.max(0, edge + 4 - (row.getBoundingClientRect().top - 14)), row.offsetHeight + 10);
+    const edge = node.closest('[role="feed"]')?.getBoundingClientRect().top ?? 0;
+    const top = belowNew ? 4 : -14;
+    lift = Math.min(Math.max(0, edge + 4 - (node.getBoundingClientRect().top + top)), node.offsetHeight - 4 - top);
   }
   // A touch held for 450 ms without moving 10 px opens the sheet.
   let sheet = $state(false);
@@ -114,10 +118,10 @@
 </script>
 
 <!-- A long press opens the action sheet; a right swipe forwards on release. -->
-<div class="swipe" use:swipe>
+<div class="swipe" class:mention={row.from.kind !== "owner" && row.to.some(target => target.kind === "owner")} use:swipe>
   {#if dragging && !row.pending}<div class="cue" class:ready class:first={row.first} aria-hidden="true"><Icon name="forward" /></div>{/if}
-<article style:transform="translateX({distance}px)" class:dragging class="post" class:first={row.first} class:pending={row.pending} class:mention={row.from.kind !== "owner" && row.to.some(target => target.kind === "owner")} aria-busy={row.pending && !row.pending.failed} tabindex="-1"
-  style:--lift="{lift}px" onpointerenter={event => raise(event, event.currentTarget)} onpointerdown={press} onpointermove={drift} onpointerup={release} onpointercancel={release}
+<article style:transform="translateX({distance}px)" class:dragging class="post" class:first={row.first} class:tucked={belowNew} class:pending={row.pending} aria-busy={row.pending && !row.pending.failed} tabindex="-1"
+  style:--lift="{lift}px" onpointerdown={press} onpointermove={drift} onpointerup={release} onpointercancel={release}
   oncontextmenu={event => { if (sheet) event.preventDefault(); }}>
   {#if !row.pending}<div class="bar"><span class="status" role="status">{copied}</span>
     {#if onforward}<button type="button" aria-label="Forward" title="Forward" onclick={onforward}><Icon name="forward" /></button>{/if}
@@ -141,10 +145,10 @@
 </div>
 
 <style>
-  .swipe { position: relative; }
-  .swipe:has(.post.first) { margin-top: 16px; }
+  /* The post stays in the feed's capped column, and the row around it reaches the pane's edges, so a hover or mention wash runs edge to edge. */
+  .swipe { --bleed: max(0px, (100cqw - var(--feed-reading-width)) / 2); position: relative; margin-inline: calc(-1 * var(--bleed)); padding-inline: var(--bleed); }
   @media (pointer: coarse) { .swipe { overflow-x: clip; } }
-  .cue { position: absolute; left: 12px; top: 29px; z-index: 1; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--selected); color: var(--muted); opacity: .4; transform: scale(.8); }
+  .cue { position: absolute; left: calc(var(--bleed) + 12px); top: 22px; z-index: 1; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--selected); color: var(--muted); opacity: .4; transform: scale(.8); }
   .cue:not(.first) { top: 15px; }
   .cue.ready { background: var(--focus); color: var(--bg); opacity: 1; transform: scale(1.15); }
   .post { transition: transform 150ms ease; }
@@ -152,23 +156,28 @@
   @media (prefers-reduced-motion: reduce) { .post { transition: none; } }
   /* The avatar sits in a 40 px gutter; later posts of a run align under the first one's text. */
   .post { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr); column-gap: 16px; padding: 1px 16px; font-size: 15px; }
+  /* The gap above a run is inside the row, so washes on neighboring rows meet with no band between them. */
+  .post.first { padding-top: 17px; }
   /* The wash follows the pointer only; a tap or a closed menu leaves none behind. */
-  @media (hover: hover) { .post:hover { background: var(--hover); } }
-  .mention { padding-top: 4px; padding-bottom: 4px; background: linear-gradient(var(--mention-bg), var(--mention-bg)), var(--bg); }
+  @media (hover: hover) { .swipe:hover { background: var(--post-hover); } }
+  .mention { background: var(--mention-bg); }
+  .mention .post { padding-top: 4px; padding-bottom: 4px; }
+  .mention .post.first { padding-top: 20px; }
   .mention::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 2px; background: var(--mention-bar); }
-  @media (hover: hover) { .post.mention:hover { background: linear-gradient(var(--hover), var(--hover)), linear-gradient(var(--mention-bg), var(--mention-bg)), var(--bg); } }
+  @media (hover: hover) { .swipe.mention:hover { background: linear-gradient(var(--post-hover) 0 0), var(--mention-bg); } }
   .post .follow-time { grid-column: 1; grid-row: 1; align-self: start; text-align: center; font-size: 11px; visibility: hidden; }
-  @media (hover: hover) { .post:hover .follow-time { visibility: visible; } }
+  @media (hover: hover) { .swipe:hover .follow-time { visibility: visible; } }
   @media (max-width: 640px) { .post { column-gap: 8px; } }
   .post:focus { outline: none; }
   .post > :global(*) { grid-column: 2; }
-  /* v1's bar: it floats over the row's top right and is laid out while hidden, so showing it never moves the row. */
-  .bar { position: absolute; top: calc(-14px + var(--lift, 0px)); right: 16px; z-index: 1; display: flex; align-items: center; gap: 2px; padding: 2px;
-    background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 14px var(--shadow-md); opacity: 0; pointer-events: none; }
+  /* A slim bar, as in Discord: it straddles the row's top right and is laid out while hidden, so showing it never moves the row. */
+  .bar { position: absolute; top: calc(-14px + var(--lift, 0px)); right: 16px; z-index: 1; display: flex; align-items: center; height: 28px; padding: 1px;
+    background: var(--raised); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 1px 2px var(--shadow-sm); opacity: 0; pointer-events: none; }
+  .tucked .bar { top: calc(4px + var(--lift, 0px)); }
   /* Hidden by opacity, not visibility, so Tab still reaches the buttons and shows the bar. A tap focuses the row but is not focus-visible. */
-  @media (hover: hover) { .post:hover .bar { opacity: 1; pointer-events: auto; } }
+  @media (hover: hover) { .swipe:hover .bar { opacity: 1; pointer-events: auto; } }
   .post:has(:focus-visible) .bar { opacity: 1; pointer-events: auto; }
-  .bar button { all: unset; display: grid; place-items: center; width: 28px; height: 26px; border-radius: 6px; color: var(--muted); cursor: pointer; }
+  .bar button { all: unset; display: grid; place-items: center; width: 28px; height: 24px; border-radius: 4px; color: var(--muted); cursor: pointer; }
   .bar button:hover { background: var(--selected); color: var(--text); }
   .bar button:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
   /* The touch sheet: full width at the bottom, 44 px rows, closed by a tap outside or Esc. */
