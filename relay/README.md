@@ -5,7 +5,7 @@ machine links, managed tunnels, and the broker step that asks a machine to
 mint a sign-in code. It is never in the traffic path between a browser and a
 machine.
 
-Read [docs/desktop/CONNECT.md](../docs/desktop/CONNECT.md) first: it has the trust
+Read [CONNECT.md](CONNECT.md) first: it has the trust
 model, the flows, the deploy steps and the key rotation steps.
 
 ```sh
