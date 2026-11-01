@@ -7,10 +7,9 @@
   import Icon from "./Icon.svelte";
 
   // Dyna's caller owns turn ordering, viewport tracking, and scroll restoration.
-  let { turns, current, persistent = true, onselect }: {
+  let { turns, current, onselect }: {
     turns: readonly MinimapTurn[];
     current: string | null;
-    persistent?: boolean;
     onselect: (id: string) => void;
   } = $props();
 
@@ -40,7 +39,7 @@
 </script>
 
 {#if turns.length >= 2}
-  <nav class="minimap" class:transient={!persistent} aria-label="Turn navigation">
+  <nav class="minimap" aria-label="Turn navigation">
     <div class="stack">
       <button class="step previous" aria-label="Previous turn" disabled={currentIndex <= 0} onclick={() => choose(currentIndex - 1)}><Icon name="chevron" size={14} /></button>
       <div class="rail" bind:this={rail} style:height onkeydown={keydown} role="group" aria-label="Turns">
@@ -67,8 +66,6 @@
 
 <style>
   .minimap { position: absolute; inset: 0 auto 0 max(0px, calc((100% - 784px) / 2 - 24px)); width: 72px; z-index: 10; pointer-events: none; }
-  .transient { opacity: 0; transition: opacity 150ms; }
-  .transient:hover, .transient:focus-within { opacity: 1; }
   .stack { position: absolute; top: 50%; left: 12px; transform: translateY(-50%); width: 32px; pointer-events: auto; }
   .rail { position: relative; min-height: 8px; }
   .rail::before { content: ""; position: absolute; left: 12px; height: 100%; width: 1px; background: var(--line); }
@@ -87,5 +84,5 @@
   .preview strong { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .preview span { display: -webkit-box; margin-top: 4px; color: var(--muted); overflow: hidden; -webkit-line-clamp: 3; -webkit-box-orient: vertical; white-space: pre-wrap; overflow-wrap: anywhere; }
   @media (pointer: coarse) { .minimap { display: none; } }
-  @media (prefers-reduced-motion: reduce) { .transient, .mark span { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .mark span { transition: none; } }
 </style>
