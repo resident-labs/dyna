@@ -114,7 +114,8 @@
   // room.list failing blocks the whole page: the owner is signed out, or the engine is not reachable.
   let blocked: BlockedState | undefined = $state();
   let roomsLoaded = $state(false);
-  const connect = retrying(() => attention.open().then(() => { blocked = undefined; roomsLoaded = true; return undefined; },
+  let firstRoom = $state(false);
+  const connect = retrying(() => attention.open().then(() => { blocked = undefined; roomsLoaded = true; if (!attention.rooms.size) firstRoom = true; return undefined; },
     (error: unknown) => (blocked = blockedBy(error) ?? "unreachable"))).run;
   connect();
   let path = $state(window.location.pathname);
@@ -620,7 +621,7 @@
   {#if drawer || (panel && phone.current)}<button type="button" class="scrim" tabindex="-1" aria-label={drawer ? "Close the menu" : room ? "Close the sessions" : "Close the active rooms"}
     onclick={() => void (drawer ? showDrawer(false, true, true) : showPanel(false, true))}></button>{/if}
   <main bind:clientWidth={mainWidth} class:header-tight={mainWidth <= 1000} class:header-narrow={mainWidth <= 600} inert={drawer || (panel && phone.current) || covered || inSettings}>
-    {#if (section === "new-room" || (!room && roomsLoaded && !rooms.length && !blocked))}<NewRoom {rooms} first={!rooms.length} onclose={() => void closeSection()} oncreated={id => { void attention.created(id).then(() => openLocation(id)); }} />
+    {#if (section === "new-room" || firstRoom)}<NewRoom {rooms} first={firstRoom} onclose={() => void closeSection()} oncreated={id => { void attention.created(id).then(() => { firstRoom = false; openLocation(id); }); }} />
     {:else if section === "new-session" && room && store && store.ready}<NewSession {room} {roomName} sessions={[...store.sessions.values()]} onclose={() => void closeSection()} onstarted={(id, brief) => { startingBriefs[id] = brief; openLocation(room!, id); }} />
     {:else if section === "instructions" && room && store && !unavailable}<Instructions {room} {roomName} rooms={rooms.length} sessions={store.sessions.size} onclose={() => void closeSection()} />
     {:else}
