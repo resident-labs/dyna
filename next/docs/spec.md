@@ -195,6 +195,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 
 ```text
 <data>/rooms/<room>/AGENTS.md                   room instructions
+<data>/rooms/<room>/compose/<name>.yaml         room compose files
 <data>/rooms/<room>/files/<sha256>              attachments and large outputs
 <data>/rooms/<room>/transcripts/<session>/      transcript copies
 <hostdata>/rooms/<room>/instructions/AGENTS.md  the room copy a box mounts
@@ -205,6 +206,7 @@ Everything else belongs to no single room:
 
 ```text
 <data>/AGENTS.md                                global instructions
+<data>/compose/<name>.yaml                      global compose files
 <data>/store.db, <data>/store.lock              the store and its lock
 <data>/backups/                                 local copies of the store
 <data>/archive/                                 the read-only v1 archive
@@ -234,19 +236,19 @@ Admission serializes placement. Each placed box counts one quarter of its CPU an
 
 ### 5.2 Images
 
-`dyna-base` contains Debian, shell tools, git, Node, tini and pinned Pi; Pi holds no credentials. Versioned Dyna binaries mount read-only from the host, independently of the image. Repository toolchains live under `.dyna/images/<name>/Containerfile`; they start from `dyna-base` and finish as the non-root user. A repository without that folder on its default branch may keep it on a `dyna-images` branch, so a fork that mirrors its upstream stays clean.
+`dyna-base` contains Debian, shell tools, git, Node, tini and pinned Pi; Pi holds no credentials. Versioned Dyna binaries mount read-only from the host, independently of the image. Repository toolchains live under `.dyna/images/<name>/Containerfile`; they start from `dyna-base` and finish as the non-root user. A repository without that folder on its default branch may keep it on a `dyna-images` branch, so a fork that mirrors its upstream stays clean. A repository with several images needs a compose file to say which one a session uses (5.16).
 
 Optional `box-needs` requests `nested-containers` or `kvm`; unknown needs fail loading. These grant additional devices or kernel access. Missing devices fail creation with a typed cause; admission does not select by device. Restrict rooms to suitable hosts. See [the container recipe](nested-containers.md). Image tags hash the base and image folder tree. Host builds are serial and reuse existing tags.
 
 Podman gives a box's user mapping its own copy of a whole image the first time a container uses it, and every Podman command on that host waits meanwhile. Boxes that are already running keep running, because they do not call Podman, and heartbeats do not call it either. So a new image takes that copy once, right after its build, by creating and removing a throwaway container with the box mapping. The copy outlives the container. The step stops after two minutes: the image still works, and its first box makes the copy instead.
 
-When the engine starts, and daily during host maintenance, each ready host builds what its boxes would use now: the base, and the toolchain image of each repository in a room it serves, from the mirror as it stands. One image builds at a time on a host. A new box, a box swapped to a new image at wake and this pass all choose images in one place, so they agree. A box that asks before the pass reaches its image waits on the same build. The same pass then removes all but the newest two tags of each image, keeping any tag the host would use now. A removal is never forced, so an image that a container uses, stopped ones too, or that another image is built on stays for a later pass.
+When the engine starts, and daily during host maintenance, each ready host builds what its boxes would use now: the base, the toolchain image of each repository in a room it serves, and each image that the compose files in reach of those rooms build or name, from the mirror as it stands. One image builds at a time on a host. A new box, a box swapped to a new image at wake and this pass all choose images in one place, so they agree. A box that asks before the pass reaches its image waits on the same build. The same pass then removes all but the newest two tags of each image, keeping any tag the host would use now. A removal is never forced, so an image that a container uses, stopped ones too, or that another image is built on stays for a later pass.
 
 ### 5.3 Box states
 
 A box records observed state and desired state separately. Observed states are `pending`, `creating`, `starting`, `ready`, `stopped`, `closing`, `deleted`, `failed` and `lost`; desired states are `run`, `stop`, `close` and `discard`. The reconciler commits observed changes with compare-and-set, emits `box.changed`, retries durable steps and resumes after engine restart. It admits in creation order, with at most one step per box and four per host.
 
-Starting a session inserts pending/run. A quiet box without a turn, shell job or wake stops, retains its volume and no longer counts for host CPU or memory. A waking delivery requests run transactionally and admission runs again. Dispatch requires ready/run. Each start checks the image: a stopped box on an old image gets a new container with the same ID and volume, and the session is told once that anything outside `/box` is gone. A box whose current image cannot be built does not start, and fails like any box that cannot start. A running box keeps its image and its box agent until it next starts. Creation retries before failure; hello has a 60-second deadline.
+Starting a session inserts pending/run. A quiet box without a turn, shell job or wake stops, retains its volume and no longer counts for host CPU or memory. A waking delivery requests run transactionally and admission runs again. Dispatch requires ready/run. Each start checks the image: a stopped box on an old image gets a new container with the same ID and volume, and the session is told once that anything outside `/box` is gone. A box whose current image cannot be built does not start, and fails like any box that cannot start. Sidecars follow the same rule (5.16). A running box keeps its image and its box agent until it next starts. Creation retries before failure; hello has a 60-second deadline.
 
 A disconnected box becomes lost; the engine inspects its container when the host is reachable. A running container waits for reconnection, an exited one becomes stopped, and a missing one fails. The first crash restarts immediately, the second waits, and the third without a completed turn fails. Pi exiting also exits the box agent. A resumed turn marks unfinished tool calls “interrupted; state unknown” and never reruns them.
 
@@ -355,6 +357,64 @@ One Chromium runs inside each box's budget, starts on first use and stops with t
 Only the owner can watch shell jobs or open terminals; no session grant permits either. M3 paired devices need `terminal` scope. Shell watch streams masked output only while watched; the engine stores none and refuses watches on unready boxes.
 
 The web terminal opens a PTY in a ready box, capacity host or control plane, with same-origin WebSocket checks. Closing the socket stops the process group. An open box terminal prevents dormancy; M2 has no reattach. The engine keeps no terminal transcript or event. A control-plane terminal acts as owner. The renderer reuses v1's vendored libghostty-vt WASM renderer.
+
+### 5.16 Compose files
+
+A compose file gives a child session a chosen toolchain image, and sidecars such as a database. Files keep the AGENTS.md levels:
+
+```text
+<data>/compose/<name>.yaml                global
+<data>/rooms/<room>/compose/<name>.yaml   room
+.dyna/compose/<name>.yaml                 repository, on the default branch or the dyna-images branch
+```
+
+A name resolves global, then room, then repository, and the most specific file wins whole, with no merging. `session.start` takes `compose`, and without it uses `default`. With no file of that name at any level, the session starts exactly as it would with no compose files. A room's root takes none. `compose.list` (`session compose_list`) gives each name a session could use, its winning level, and why it would be refused. There is no write path: the owner keeps the global and room files, and agents keep the repository's.
+
+The session keeps the name. Every start reads the file again and checks it again, as it does an image, so a broken or deleted file fails that start, and a dormant session cannot wake until the file is back. It can still close and archive, which reads no file. A named file not found in the mirror fetches once, as does a first session of a repository; otherwise `default` is read from the mirror as it stands.
+
+```yaml
+services:
+  agent:                                # the agent's box; this name is required
+    build: .dyna/images/rust            # which image; without it, the sole image or dyna-base
+    environment:
+      DATABASE_URL: postgres://postgres:dev@db:5432/postgres
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: dev
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      retries: 20
+    mem_limit: 1g
+volumes:
+  pgdata:
+```
+
+**What a file may hold.** A file comes from a repository, and agents can write repositories, so it is untrusted at every level. `engine/compose` parses it with `compose-go`, and anything not listed here is refused with an error that names the key. A session start checks the file first, so a bad file fails there.
+
+| Key | Allowed |
+|---|---|
+| top level | `services`, `volumes`; a volume is only a name, with no settings |
+| every service | `build` (`.dyna/images/<name>`, or `context:` alone), `environment`, `volumes`, `depends_on` |
+| sidecars | also `image`, `command`, `healthcheck` (`test`, `interval`, `timeout`, `retries`, `start_period`), `cpus`, `mem_limit`, `pids_limit` |
+| service `volumes` | a declared name, a plain absolute target, optionally read-only; an agent's cannot cover `/box`, `/opt/dyna` or `/run/dyna` |
+| `depends_on` | a list, or `condition: service_started` or `service_healthy`; nothing depends on `agent`, which starts last |
+
+A sidecar takes `image` or `build`, and an image must come from a registry; `localhost` would reach other repositories' images on the host. It is pulled with no sign-in. A sidecar's `build` image may not have `box-needs`. The agent's own image, command and limits belong to its box. Limits may not pass the session's size. A file holds no variables and has no environment to read from: `$VAR` is refused, `$$` is a dollar sign, a name with no value is refused because it would pass the host's through, and an agent cannot set what Dyna sets. So a box's environment comes only from the file and Dyna, and no secret reaches it. A file is at most 64 KiB, with at most 16 services.
+
+**Running it.** One service is the box; a file with only `agent` needs no pod. Other services run in a per-box Podman pod, with the box's user mapping, in the box's slice, so together they stay under its hard limit and admission counts nothing extra. They share only the network: `127.0.0.1` reaches each service, and so does its name, through the pod's hosts file. They do not get the box's socket, repository cache, `/box` or any host path.
+
+The pod always names `pasta`, whatever a host's `containers.conf` says. So a sidecar never gets host networking, and a host where pasta cannot start, such as an LXC guest with no `/dev/net/tun`, fails the start with Podman's reason. The shared loopback is the accepted cost of `127.0.0.1`: a sidecar can reach the box agent's ports and act as that session, and a sidecar that takes one of those ports first keeps the box from starting. So a file's images carry the session's trust, like anything the agent itself runs.
+
+**Lifecycle.** Sidecars start in `depends_on` order, each once the one before is up and, with a healthcheck, passing. Dyna runs that check itself, for at most two minutes, so there are no Podman timers. The box starts last, so it never says hello before they are ready. Sidecars stop with the box and follow its dormancy. A box that is closing starts without them, so a broken sidecar cannot hold up an archive.
+
+A start compares the stack with the one on the host, which covers each sidecar's image and settings. If either that or the box's image changed, the whole pod is replaced, volumes kept, and the session is told once. Compose volumes are named after their box and go with it, and with a restart. They sit in the same Podman store as the box volume, so the host's disk floor sees them and the session's disk request covers them, with no hard quota (5.5). A new image is pulled once and warmed like a box image. Build-ahead covers both, but image pruning only covers Dyna's own tags, so a pulled image stays on the host until removed by hand. A sidecar that dies while the box runs is not restarted until the next start.
 
 ## 6. Host exec
 
@@ -478,7 +538,7 @@ Each `contract/tools/` toolkit registers one area tool with a flat `action` enum
 | Tool | Actions | Methods | Phase |
 |---|---|---|---|
 | `post` | send, update_visual | `post` | 1 |
-| `session` | start, list, stop, close, restart, set_profile, move | `session.*`; profiles are in the `dyna_profiles` section | 1 |
+| `session` | start, list, stop, close, restart, set_profile, move, compose_list | `session.*`, `compose.list`; profiles are in the `dyna_profiles` section | 1 |
 | `room` | log, repos, pause | `events.list`, `room.repos`, `room.pause` | 1 |
 | `op` | withdraw | `op.withdraw` (own pending ones; they are in `dyna_requests`); deciding is the owner's (3.5 classes) | 1 |
 | `hostexec` | run, request_grant | `hostexec.run`, `op.submit` with `hostexec.grant` | 1 |

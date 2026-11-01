@@ -366,7 +366,13 @@ func (h *Host) RemoveSlice(ctx context.Context, name string) error {
 	return err
 }
 func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
-	args := []string{"podman", "--cgroup-manager=systemd", "create", "--name", string(c.Box), boxUserNS, "--user", "1000:1000", "--label", "dyna.box=" + string(c.Box), "--cgroup-parent=" + c.Slice, "--cgroupns=private", "--systemd=always", "--stop-signal", "SIGTERM", "--entrypoint", "/usr/bin/tini", "--tmpfs", "/run/dyna:mode=1777", "--env", "HOME=/box/home", "--env", "PI_CODING_AGENT_DIR=/box/pi", "--volume", "dyna-box-" + string(c.Box) + ":/box"}
+	userns := []string{boxUserNS}
+	if c.Pod != "" {
+		// The pod sets the mapping, and Podman refuses --userns beside --pod.
+		userns = []string{"--pod", c.Pod}
+	}
+	args := append([]string{"podman", "--cgroup-manager=systemd", "create", "--name", string(c.Box)}, userns...)
+	args = append(args, "--user", "1000:1000", "--label", "dyna.box="+string(c.Box), "--cgroup-parent="+c.Slice, "--cgroupns=private", "--systemd=always", "--stop-signal", "SIGTERM", "--entrypoint", "/usr/bin/tini", "--tmpfs", "/run/dyna:mode=1777", "--env", "HOME=/box/home", "--env", "PI_CODING_AGENT_DIR=/box/pi", "--volume", "dyna-box-"+string(c.Box)+":/box")
 	for _, m := range c.Mounts {
 		if !m.ReadOnly || m.MakeDir {
 			if _, err := h.run(ctx, "bash", "-c", `if [ ! -e "$1" ]; then mkdir -p -m 0700 -- "$1"; fi`, "dyna", m.HostPath); err != nil {
@@ -378,6 +384,9 @@ func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 			v += ":ro"
 		}
 		args = append(args, "--volume", v)
+	}
+	for _, v := range c.Volumes {
+		args = append(args, "--volume", stackVolumeFlag(c.Box, v))
 	}
 	for _, e := range c.Env {
 		args = append(args, "--env", e.Name+"="+e.Value)
@@ -449,7 +458,7 @@ func (h *Host) ListContainers(ctx context.Context) ([]box.ContainerStatus, error
 	}
 	out := make([]box.ContainerStatus, 0, len(records))
 	for _, r := range records {
-		out = append(out, box.ContainerStatus{Box: contract.BoxID(r.Labels["dyna.box"]), Running: r.State == "running", StaleLayout: r.Labels["dyna.layout"] != box.ContainerLayout})
+		out = append(out, box.ContainerStatus{Box: contract.BoxID(r.Labels["dyna.box"]), Running: r.State == "running", StaleLayout: r.Labels["dyna.layout"] != box.ContainerLayout, Stack: r.Labels[StackHashLabel]})
 	}
 	return out, nil
 }

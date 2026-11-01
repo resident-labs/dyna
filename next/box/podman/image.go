@@ -104,9 +104,15 @@ func (h *Host) build(ctx context.Context, tag, base string, contextTar []byte, w
 	if err != nil || !warm {
 		return err
 	}
+	return h.warm(ctx, tag)
+}
+
+// warm makes Podman copy an image for boxUserNS now. The caller holds buildGate.
+func (h *Host) warm(ctx context.Context, tag string) error {
 	steps := box.NewStepLog("image " + tag)
-	_, err = h.runUnbounded(ctx, nil, "bash", "-c", `timeout -k 5 "$1" podman create --replace --name "$2" "$3" "$4" true && podman rm "$2"`, "dyna-warm", strconv.Itoa(warmLimit), warmName, boxUserNS, tag)
+	_, err := h.runUnbounded(ctx, nil, "bash", "-c", `timeout -k 5 "$1" podman create --replace --name "$2" "$3" "$4" true && podman rm "$2"`, "dyna-warm", strconv.Itoa(warmLimit), warmName, boxUserNS, tag)
 	steps.Done("keep-id warm")
+	var exit remoteExit
 	if errors.As(err, &exit) {
 		log.Printf("host %s: image %s not warmed, so its first box does this: %v", h.destination, tag, err)
 		return nil

@@ -14,6 +14,7 @@ import (
 // A room is one folder on each side, so deleting a room removes one folder per machine:
 //
 //	<Data>/rooms/<room>/AGENTS.md                   room instructions
+//	<Data>/rooms/<room>/compose/<name>.yaml         room compose files
 //	<Data>/rooms/<room>/files/<sha256>              attachments and large outputs
 //	<Data>/rooms/<room>/transcripts/<session>/      transcript copies
 //	<HostData>/rooms/<room>/instructions/AGENTS.md  the room copy a box mounts
@@ -22,6 +23,7 @@ import (
 // Everything else belongs to no single room:
 //
 //	<Data>/AGENTS.md                                global instructions
+//	<Data>/compose/<name>.yaml                      global compose files
 //	<Data>/store.db, <Data>/store.lock              the store and its lock
 //	<Data>/backups/                                 local copies of the store
 //	<Data>/archive/                                 the read-only v1 archive
@@ -39,6 +41,7 @@ type Layout struct{ Data, HostData string }
 
 const (
 	instructionsFile = "AGENTS.md"
+	composeFolder    = "compose"
 	// SharedFolder is the name of a room's shared folder, for a host script that visits every room.
 	SharedFolder = "shared"
 	// EngineSocket is the name of a box's socket in its host folder.
@@ -117,6 +120,14 @@ func (l Layout) Instructions(room contract.RoomID) string {
 		return filepath.Join(l.Data, instructionsFile)
 	}
 	return filepath.Join(l.room(room), instructionsFile)
+}
+
+// Compose is the folder of a room's compose files, or the global one for no room.
+func (l Layout) Compose(room contract.RoomID) string {
+	if room == "" {
+		return filepath.Join(l.Data, composeFolder)
+	}
+	return filepath.Join(l.room(room), composeFolder)
 }
 
 // Files is the folder of a room's blobs.
