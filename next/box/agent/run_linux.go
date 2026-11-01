@@ -62,6 +62,14 @@ func modelArgs(model contract.ModelChoice, compactTokens int) ([]string, error) 
 	return args, nil
 }
 
+// piArgs appends the fixed Pi flags to the model flags. "+codemode" adds the
+// codemode tool to Pi's default tools, so it stays active whatever MCP
+// exposure the servers use; "--exclude-tools bash" then removes bash only.
+func piArgs(args []string, extensionPath, instructions, modelsPath, sessions, mcpPath string) []string {
+	args = append(args, "--extension", extensionPath, "--append-system-prompt", instructions)
+	return append(args, "--mode", "rpc", "--models-file", modelsPath, "--session-dir", sessions, "--mcp-config", mcpPath, "--tools", "+codemode", "--exclude-tools", "bash", "--continue")
+}
+
 // Run connects the box, serves its model route, and runs the Pi session.
 func Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
@@ -182,9 +190,7 @@ func Run(ctx context.Context) error {
 	if err = os.WriteFile(extensionPath, []byte(renderExtension()), 0600); err != nil {
 		return err
 	}
-	args = append(args, "--extension", extensionPath)
-	args = append(args, "--append-system-prompt", hello.Instructions)
-	args = append(args, "--mode", "rpc", "--models-file", modelsPath, "--session-dir", sessions, "--mcp-config", mcpPath, "--exclude-tools", "bash", "--continue")
+	args = piArgs(args, extensionPath, hello.Instructions, modelsPath, sessions, mcpPath)
 	h, err := pi.Open(ctx, "pi", args, "", workdir)
 	if err != nil {
 		return err
