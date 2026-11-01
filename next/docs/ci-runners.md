@@ -17,9 +17,9 @@ The pool does nothing until both of these are true: the repository is in box mod
 on the engine, and the owner sets the repository variable. The order matters, so
 that no job waits for a pool that does not exist yet.
 
-1. The engine's `GH_TOKEN` needs admin on the repository: a classic token with
-   `repo` scope from an admin, or a fine-grained token with Administration and
-   Variables write. It also needs Actions variables write for the lease.
+1. The engine's `GH_TOKEN` needs admin on the repository, and Actions variables
+   write for the lease. The pool was tested with the owner's `gh` token, which is
+   broader than that. A fine-grained token is untested.
 2. Add the host, if it is new: `dyna host add NAME --ssh user@host --owner-only-admin`.
    A laptop or any host that logs out needs `sudo loginctl enable-linger USER`
    first, because rootless containers stop with the user's session.
@@ -64,7 +64,7 @@ Each runner is a rootless Podman container, built from
 `next/box/images/ci-runner` and set in `next/box/podman/runner.go`:
 
 - **Host:** no host mounts, no Podman socket, no capabilities, `no-new-privileges`,
-  a read-only image. Its process is an unmapped subuid on the host, not the host
+  a read-only image. Its process runs as a subordinate UID on the host, not as the host
   user.
 - **Network:** `--network=none`. It has only loopback and no route. The only way
   out is an HTTPS proxy, reached over one Unix socket in the `dyna-ci-egress`
