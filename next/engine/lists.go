@@ -44,9 +44,9 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 		session := &result.Sessions[i]
 		activity, _ := s.live.Activity(session.ID)
 		s.mu.Lock()
-		state := s.sessionLocked(session.ID)
+		state := s.sessions[session.ID]
 		session.Computer = contract.ComputerStopped
-		if state.computer != nil {
+		if state != nil && state.computer != nil {
 			session.Computer = state.computer.state
 		}
 		s.mu.Unlock()
