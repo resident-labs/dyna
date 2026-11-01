@@ -35,6 +35,10 @@ func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, eve
 	if err != nil {
 		return "", err
 	}
+	// A Run's post comes through the engine, but a script wrote it, so the frame must not vouch for it.
+	if post, ok := event.Body.(contract.PostCreated); ok && post.Hook != "" {
+		sender = fmt.Sprintf("the script of subscription %s", post.Hook)
+	}
 	var surface string
 	switch delivery.Surface {
 	case contract.SurfaceFeed:
@@ -45,8 +49,10 @@ func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, eve
 		surface = "as a session brief or result"
 	case contract.SurfaceCard:
 		surface = "through a card"
-	case contract.SurfaceEngine, contract.SurfaceService:
+	case contract.SurfaceEngine:
 		surface = "as a system notice"
+	case contract.SurfaceService:
+		surface = "in the room feed"
 	}
 	frame := fmt.Sprintf("[Dyna] From %s, %s.", sender, surface)
 	if delivery.HandoffFrom != "" {

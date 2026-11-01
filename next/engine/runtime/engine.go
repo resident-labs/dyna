@@ -181,6 +181,7 @@ func Run(ctx context.Context, cfg Config) error {
 	service.Reconciler().SetRoomHosts(boxes)
 	service.SetGitIdentity(cfg.GitName, cfg.GitEmail)
 	service.SetHostexecRunner(boxes)
+	service.SetHookRunner(boxes, boxes.hostMemory)
 	boxes.Pressure = service
 	go boxes.controlPlane(cfg.Data)
 	hosts, err := st.Hosts(ctx)
@@ -253,6 +254,7 @@ func Run(ctx context.Context, cfg Config) error {
 			}
 		}
 	}
+	apiServer.SetGitHubRead(enginegit.ReadOnly(&url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport, token))
 	apiServer.SetFilesRoute(func(c api.Caller) http.Handler { return service.Files(c.Principal, c.Room) })
 	apiServer.SetGitRoute(func(c api.Caller) http.Handler {
 		return enginegit.Handler(&url.URL{Scheme: "https", Host: "github.com"}, http.DefaultTransport, token, c.Principal.Session, c.Room, st)
@@ -337,6 +339,12 @@ func Run(ctx context.Context, cfg Config) error {
 		<-reconcilerDone
 		service.Reconciler().Wait()
 	}()
+	subscriptionsDone := make(chan struct{})
+	go func() {
+		defer close(subscriptionsDone)
+		service.RunSubscriptions(ctx)
+	}()
+	defer func() { <-subscriptionsDone }()
 	buildDone := make(chan struct{})
 	go func() {
 		defer close(buildDone)
