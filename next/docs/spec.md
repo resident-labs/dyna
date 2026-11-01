@@ -67,7 +67,7 @@ next/                    module github.com/resident-labs/dyna (go 1.26), no go.w
   third_party/cliproxyapi/  vendored CLIProxyAPI fork: its own Go module, our patches, DYNA.md
 ```
 
-The old module (`dyna-agent`) adds only `cmd/dyna-export`. It imports `next/contract` through a `replace` directive, so the exporter writes the exact bundle types (section 8).
+Main has no v1 tree. The old module (`dyna-agent`) and `cmd/dyna-export` exist only at tag `v1-final`, where the exporter imports that tag's `next/contract` through a `replace` directive (section 8).
 
 **One binary, three roles.**
 
@@ -464,7 +464,7 @@ Sessions are not imported. Each imported author is `ImportedAuthor{Kind, Label}`
 
 ### 8.2 How the exporter gets the types
 
-The v1 module adds `cmd/dyna-export`, which imports `next/contract` through a `go.mod` replace. The contract uses only the standard library. Old CI compares `go list -m all` with and without the replace: only `github.com/resident-labs/dyna` may differ. Build the exporter only at `v1-final`; the cutover removes the old module and replace. Build steps that copy `go.mod` also copy `next/go.mod`.
+Main has no v1 tree (owner, 2026-11-01). `cmd/dyna-export` exists only at annotated tag `v1-final` (`4f2192eb24`), and it imports that tag's `next/contract` through `go.mod` replaces. The contract uses only the standard library. Build the exporter at `v1-final`, inside `cmd/dyna-export`, as `docs/migrate.md` shows. The exporter is frozen there while `contract` and the importer move on, so changes to bundle types must keep accepting its output; `docs/migrate.md` holds the rule.
 
 ### 8.3 Cutover steps
 
@@ -475,9 +475,9 @@ There is no rollback. The owner performs steps 1, 2 and 11; an external Opus age
 2. Run `dyna pause --all`, stop new turns and the merge service, and wait for running turns to end.
 3. Commit dirty or unmerged open-session trees to `refs/dyna/archive/<session>`; keep the refs 30 days.
 4. Stop v1. Take a final SQLite backup and copy it to the desktop archive and hermeslab.
-5. Tag main `v1-final`, with the exporter and M3 `next/`.
+5. Tag `v1-final` already exists at `4f2192eb24`, before M3. Its exporter's bundle must still pass this `next/` importer (8.2).
 6. Build the exporter at that tag on hermeslab; run it read-only against the final backup on the desktop. `dyna-export verify` compares counts with SQL; any mismatch stops cutover. Copy the bundle and Connect secrets (`machine.key`, `jwks.json`, `link.json`, `tunnel-token`) to the engine host over SSH with mode 0600.
-7. Make one commit moving `next/*` to the root and deleting the old tree. The owner merges it on GitHub.
+7. Make one commit moving `next/*` to the root; the old tree left main before cutover. The owner merges it on GitHub.
 8. Build and install v2 on hermeslab. Replace the trial `dyna-next` user unit and copy its CLIProxyAPI auth folder into the new data folder. Use `KillMode=mixed`, `TimeoutStopSec` over 60 seconds, and `--web.listen 127.0.0.1:7457` for the existing tunnel.
 9. `dyna import <bundle>` writes the store in one transaction and records the bundle hash. It copies Connect secrets separately with mode 0600 and deletes the source copies. Move the desktop v1 data to `~/.local/share/dyna-v1/`; the owner deletes it after the first good week.
 10. Start the engine. Each room root starts in a box and receives `migrate.handoff` with open goals, PRs, questions, issue count and cards.
@@ -485,7 +485,7 @@ There is no rollback. The owner performs steps 1, 2 and 11; an external Opus age
 
 ### 8.4 Upgrade guard and other installs
 
-Before opening a store, v2 refuses a folder with `dyna.db` but no `store.db` with `store_from_v1`, the path, a no-rollback warning and export/import instructions pointing to `v1-final` and `docs/migrate.md`. The install script detects v1 and offers the export and import after one confirmation. Import refuses an unknown version, missing file, unknown field, count mismatch or existing `store.db`.
+Before opening a store, v2 refuses a folder with `dyna.db` but no `store.db` with `store_from_v1`, the path, a no-rollback warning and export/import instructions pointing to `v1-final` and `docs/migrate.md`. The v2 install script, once it exists, detects v1 and offers the export and import after one confirmation; until then `install.sh` on main only refuses and points here. Import refuses an unknown version, missing file, unknown field, count mismatch or existing `store.db`.
 
 Delete `migrate/` only after the owner's installs import. Tag that commit `v2-import-last` and name it in `floor.go` under the upgrade-floor rule. Thereafter the guard directs other installs to build that tag for import. The guard stays.
 
@@ -571,7 +571,7 @@ Room rules govern builder and reviewer profiles, design checks, UI process and r
 |---|---|---|
 | Spec, contract, engine core and integration | dyna:lead-rewrite | `docs/`, `contract/`, `engine/` |
 | Boxes, hosts, images, harness and host exec | dyna:node-shell | `box/`, `harness/`, `engine/hostexec` |
-| Room rules, identity, migration and exporter | dyna:code-architectural | `room/`, `migrate/`, old `cmd/dyna-export` |
+| Room rules, identity, migration and exporter | dyna:code-architectural | `room/`, `migrate/`, `cmd/dyna-export` at `v1-final` |
 | Web port | dyna:next-web-lead; design approval by dyna:lead-rewrite | `web/` |
 
-Each area owner plans the milestone for lead review and reports to the lead. One writer owns each folder at a time. v1 is frozen except for blocking fixes and `cmd/dyna-export`.
+Each area owner plans the milestone for lead review and reports to the lead. One writer owns each folder at a time. v1 is off main; its last source is tag `v1-final`.

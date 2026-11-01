@@ -1,5 +1,5 @@
 // Resident Labs Connect relay. Deploy: npx wrangler deploy (needs the
-// deploy token; see docs/desktop/CONNECT.md). Secrets, set with
+// deploy token; see relay/CONNECT.md). Secrets, set with
 // npx wrangler secret put <NAME>:
 //   CF_API_TOKEN           runtime token: Account Cloudflare Tunnel Edit, Zone DNS Edit
 //   RELAY_SIGNING_KEYS     JSON list of Ed25519 private JWKs with kid (npm run keygen)
