@@ -14,6 +14,7 @@ import (
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/live"
+	"github.com/resident-labs/dyna/engine/model"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -36,6 +37,10 @@ type Service struct {
 	maxDepth          int
 	store             *store.Store
 	searchBraveURL    string
+	searchProxy       *model.Proxy
+	searchQuota       *model.Quotas
+	searchMu          sync.Mutex
+	searchFailures    map[string]time.Time
 	dispatch          func(context.Context, contract.SessionID, contract.TurnID, contract.Event, bool) (contract.TurnID, []store.FeedInput, error)
 	boxes             lifecycle.BoxAdapter
 	reconciler        *lifecycle.Reconciler
