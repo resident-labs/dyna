@@ -318,7 +318,7 @@ func (h *Host) executeInput(ctx context.Context, input []byte, argv ...string) (
 
 // Maintain removes dangling images and compacts caches without deleting borrowed objects.
 func (h *Host) Maintain(ctx context.Context, layout box.Layout) ([]contract.RoomShared, error) {
-	out, err := h.runUnbounded(ctx, nil, "bash", "-c", `podman image prune -f >/dev/null || exit; for repo in "$1"/*/*.git; do [ -d "$repo" ] || continue; git -C "$repo" gc --no-prune || exit; done; for dir in "$2"/*/"$3"; do [ -d "$dir" ] || continue; size=$(du -sb -- "$dir") || exit; room=${dir%/*}; printf '%s\0%s\0' "${room##*/}" "${size%%$'\t'*}"; done`, "dyna-maintain", layout.HostGitRoot(), layout.HostRooms(), box.SharedFolder)
+	out, err := h.runUnbounded(ctx, nil, "bash", "-c", `podman image prune -f >/dev/null || exit; for repo in "$1"/*/*.git; do [ -d "$repo" ] || continue; git -C "$repo" gc --no-prune >/dev/null || exit; done; for dir in "$2"/*/"$3"; do [ -d "$dir" ] || continue; size=$(du -sb -- "$dir") || exit; room=${dir%/*}; printf '%s\0%s\0' "${room##*/}" "${size%%$'\t'*}"; done`, "dyna-maintain", layout.HostGitRoot(), layout.HostRooms(), box.SharedFolder)
 	if err != nil {
 		return nil, err
 	}
