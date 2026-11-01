@@ -266,6 +266,7 @@ func TestRepoCISetValidates(t *testing.T) {
 		"github, hosts":  {Repo: "a/b", Mode: contract.CIGitHub, Hosts: []contract.RepoCIHost{host("other", 1, contract.BoxSizeLarge)}},
 		"unknown host":   {Repo: "a/b", Mode: contract.CIBox, Hosts: []contract.RepoCIHost{host("nope", 1, contract.BoxSizeLarge)}},
 		"no runners":     {Repo: "a/b", Mode: contract.CIBox, Hosts: []contract.RepoCIHost{host("other", 0, contract.BoxSizeLarge)}},
+		"too many":       {Repo: "a/b", Mode: contract.CIBox, Hosts: []contract.RepoCIHost{host("other", box.RunnerSlots+1, contract.BoxSizeLarge)}},
 		"bad size":       {Repo: "a/b", Mode: contract.CIBox, Hosts: []contract.RepoCIHost{host("other", 1, "huge")}},
 		"host twice":     {Repo: "a/b", Mode: contract.CIBox, Hosts: []contract.RepoCIHost{host("other", 1, contract.BoxSizeLarge), host("other", 2, contract.BoxSizeLarge)}},
 		"two sizes":      {Repo: "a/b", Mode: contract.CIBox, Hosts: []contract.RepoCIHost{host("other", 1, contract.BoxSizeLarge), host(hosts[0].Name, 1, contract.BoxSizeSmall)}},
@@ -279,7 +280,7 @@ func TestRepoCISetValidates(t *testing.T) {
 	if _, e := s.RepoCISet(ctx, owner, contract.RepoCISetRequest{Repo: "a/b", Mode: contract.CIBox, Hosts: []contract.RepoCIHost{host("other", 2, contract.BoxSizeLarge)}}); e != nil {
 		t.Fatal(e)
 	}
-	if rows, err := s.store.CIHosts(ctx); err != nil || len(rows) != 1 || rows[0].Room != room {
+	if rows, err := s.store.CIHosts(ctx); err != nil || len(rows) != 1 {
 		t.Fatalf("%+v %v", rows, err)
 	}
 	if _, e := s.RepoCISet(ctx, owner, contract.RepoCISetRequest{Repo: "a/b", Mode: contract.CIGitHub}); e != nil {

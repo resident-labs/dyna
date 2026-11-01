@@ -155,6 +155,9 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 		if p.Memory != nil {
 			host.MemUsed = p.Memory(host.Name)
 		}
+		// host_rooms places sessions. A repository names its CI hosts outright, so a
+		// host kept away from sessions can still serve it.
+		host.Rooms = nil
 		driver, err := p.Hosts(ctx, host.Name)
 		var runners []box.Runner
 		var egress bool
@@ -272,6 +275,7 @@ func (p *Pool) sweep(ctx context.Context, host *surveyed, settings []contract.Re
 			wanted[setting.Repo] = true
 		}
 	}
+	serving := false
 	for _, runner := range host.runners {
 		if !wanted[runner.Repo] {
 			// Turning a repository off stops its runners now, including one mid-job.
@@ -293,9 +297,16 @@ func (p *Pool) sweep(ctx context.Context, host *surveyed, settings []contract.Re
 			alive[runner.Repo] = make(map[string]bool)
 		}
 		alive[runner.Repo][runner.Name] = true
+		serving = true
 	}
 	if len(wanted) == 0 && host.egress {
 		return host.driver.RemoveEgress(ctx)
+	}
+	// Its restart policy covers a crash, not a stop or a host restart, and a runner
+	// with no proxy loses its job.
+	if serving && !host.egress {
+		_, err := p.prepare(ctx, host)
+		return err
 	}
 	return nil
 }
@@ -417,7 +428,7 @@ func (p *Pool) place(ctx context.Context, repo contract.RepoName, assigned int, 
 			}
 		}
 	}
-	request := box.Box{ID: "dyna-ci-request", Room: rows[0].Room, Size: size}
+	request := box.Box{ID: "dyna-ci-request", Size: size}
 	// open lists hosts with room for one more, and the rows that name them.
 	open := func() []box.Host {
 		var hosts []box.Host
@@ -462,6 +473,35 @@ func (p *Pool) place(ctx context.Context, repo contract.RepoName, assigned int, 
 
 // start prepares a host and starts one runner on it.
 func (p *Pool) start(ctx context.Context, repo contract.RepoName, host *surveyed, size contract.BoxSize) (string, error) {
+	image, err := p.prepare(ctx, host)
+	if err != nil {
+		return "", err
+	}
+	slot, err := freeSlot(host.runners)
+	if err != nil {
+		return "", err
+	}
+	var raw [4]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	name := namePrefix + string(host.host.Name) + "-" + hex.EncodeToString(raw[:])
+	id, config, err := p.Sets.JIT(ctx, repo, name)
+	if err != nil {
+		return "", err
+	}
+	if err := host.driver.StartRunner(ctx, box.RunnerSpec{Name: name, Image: image, Config: config, Repo: repo, ID: id, Slot: slot, Size: size}); err != nil {
+		// The next attempt checks the image again, in case a host lost it.
+		delete(p.images, host.host.Name)
+		// A runner that did start after an uncertain reply loses its registration and exits.
+		return "", errors.Join(err, p.GitHub.DeleteRunner(ctx, repo, id))
+	}
+	host.runners = append(host.runners, box.Runner{Name: name, Repo: repo, ID: id, Slot: slot, Running: true})
+	return name, nil
+}
+
+// prepare returns a host's runner image, with its proxy running.
+func (p *Pool) prepare(ctx context.Context, host *surveyed) (string, error) {
 	image := p.images[host.host.Name]
 	if image == "" {
 		var err error
@@ -479,20 +519,21 @@ func (p *Pool) start(ctx context.Context, repo contract.RepoName, host *surveyed
 		}
 		host.egress = true
 	}
-	var raw [4]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", err
+	return image, nil
+}
+
+// freeSlot picks the proxy socket for a new runner on a host. Every repository's
+// runners count, because they share that host's proxy. A socket a dead runner used
+// is free: no tunnel outlives its container.
+func freeSlot(runners []box.Runner) (int, error) {
+	used := make(map[int]bool)
+	for _, runner := range runners {
+		used[runner.Slot] = used[runner.Slot] || runner.Running
 	}
-	name := namePrefix + string(host.host.Name) + "-" + hex.EncodeToString(raw[:])
-	id, config, err := p.Sets.JIT(ctx, repo, name)
-	if err != nil {
-		return "", err
+	for slot := range box.RunnerSlots {
+		if !used[slot] {
+			return slot, nil
+		}
 	}
-	if err := host.driver.StartRunner(ctx, box.RunnerSpec{Name: name, Image: image, Config: config, Repo: repo, ID: id, Size: size}); err != nil {
-		// The next attempt checks the image again, in case a host lost it.
-		delete(p.images, host.host.Name)
-		// A runner that did start after an uncertain reply loses its registration and exits.
-		return "", errors.Join(err, p.GitHub.DeleteRunner(ctx, repo, id))
-	}
-	return name, nil
+	return 0, errors.New("every proxy socket on this host is in use")
 }
