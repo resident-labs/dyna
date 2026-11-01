@@ -39,7 +39,7 @@ export type InstructionsGetRequest = { room?: RoomID; };
 export type InstructionsGetResponse = { text: string; hash: string; savedAt?: string | null; };
 export type InstructionsSetRequest = { room?: RoomID; text: string; base: string; };
 export type InstructionsSetResponse = { hash: string; };
-export type Method = "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.repo.add" | "room.repos" | "session.start" | "session.close" | "session.stop" | "session.set_profile" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "hostexec.list" | "hostexec.run" | "op.submit" | "op.decide" | "op.withdraw" | "op.list";
+export type Method = "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "session.start" | "session.close" | "session.stop" | "session.set_profile" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "hostexec.list" | "hostexec.run" | "op.submit" | "op.decide" | "op.withdraw" | "op.list";
 export type ErrorCode = "podman_required" | "invalid" | "unknown_action" | "not_found" | "forbidden" | "conflict" | "profile_exists" | "move_busy" | "has_children" | "parent_closing" | "session_closing" | "stale" | "visual_superseded" | "unavailable" | "reconnect_unavailable" | "store_from_v1" | "store_too_old" | "no_grant";
 export type Error = { code: ErrorCode; message: string; visual?: VisualSuperseded | null; };
 export type VisualSuperseded = { event: EventID; version: number; seq: number; };
@@ -55,7 +55,7 @@ export type RoomPauseResponse = { };
 export type SessionStopRequest = { session: SessionID; };
 export type SessionStopResponse = { stopping: boolean; };
 export type RoomListRequest = { };
-export type RoomSummary = { id: RoomID; name: string; paused: boolean; created: string; lastRead: number; waiting: Array<OpID> | null; working: Array<SessionID> | null; failed: number; hostless: number; latest?: RoomActivity | null; };
+export type RoomSummary = { id: RoomID; name: string; paused: boolean; created: string; lastRead: number; waiting: Array<OpID> | null; working: Array<SessionID> | null; failed: number; hostless: number; deleting?: boolean; deleteReason?: string; latest?: RoomActivity | null; };
 export type RoomActivity = { session: SessionID; name: string; label: string; };
 export type RoomListResponse = { rooms: Array<RoomSummary> | null; seq: number; };
 export type SessionListRequest = { room: RoomID; };
@@ -76,10 +76,12 @@ export type HostListRequest = { };
 export type HostListResponse = { hosts: Array<HostSummary> | null; };
 export type BackupCopyFailure = "no_space" | "failed";
 export type RoomShared = { room: RoomID; bytes: number; };
-export type HostSummary = { shared: Array<RoomShared> | null; name: HostName; reachable: boolean; boxes: number; cpus: number; memBytes: number; cpuUsed: number; memUsed: number; diskBytes: number; diskUsed: number; diskLow: boolean; backupCopyEnabled?: boolean; backupCopyAt?: string; backupCopyFailure?: BackupCopyFailure; lastSeen?: string; history: Array<HostLoadPoint> | null; };
+export type HostSummary = { shared: Array<RoomShared> | null; leftovers?: number; name: HostName; reachable: boolean; boxes: number; cpus: number; memBytes: number; cpuUsed: number; memUsed: number; diskBytes: number; diskUsed: number; diskLow: boolean; backupCopyEnabled?: boolean; backupCopyAt?: string; backupCopyFailure?: BackupCopyFailure; lastSeen?: string; history: Array<HostLoadPoint> | null; };
 export type HostLoadPoint = { at: string; cpuUsed: number; memUsed: number; };
 export type RoomCreateRequest = { name: string; rootProfile: ProfileName; };
 export type RoomCreateResponse = { room: RoomID; };
+export type RoomDeleteRequest = { room: RoomID; discard: boolean; };
+export type RoomDeleteResponse = { openedAccounts?: Array<AccountID> | null; openedHosts?: Array<HostName> | null; };
 export type RoomRepoAddRequest = { room: RoomID; repo: RepoName; default: boolean; };
 export type RoomRepoAddResponse = { };
 export type RoomReposRequest = { room: RoomID; };
@@ -255,6 +257,8 @@ export type Event = { seq: number; id: EventID; at: string; room?: RoomID; from:
 export type RoomLimitsChanged = { cpus: number; memBytes: number; };
 export type RoomPaused = { };
 export type RoomResumed = { };
+export type RoomDeleting = { };
+export type RoomDeleted = { };
 export type SessionProfileChanged = { session: SessionID; profile: ProfileName; };
 export type PostCreated = { text: string; turn?: TurnID; mentions?: Array<Principal> | null; home: Conversation; replyTo?: EventID; attachments?: Array<Attachment> | null; clientId?: string; toolCallId?: string; };
 export type Attachment = { name: string; media: string; bytes: number; sha256: string; visual?: VisualCard | null; };
@@ -368,6 +372,8 @@ export type EventBody =
   | { type: "op.requested"; body: OpRequested }
   | { type: "post.created"; body: PostCreated }
   | { type: "pr.opened"; body: PrOpened }
+  | { type: "room.deleted"; body: RoomDeleted }
+  | { type: "room.deleting"; body: RoomDeleting }
   | { type: "room.limits_changed"; body: RoomLimitsChanged }
   | { type: "room.paused"; body: RoomPaused }
   | { type: "room.resumed"; body: RoomResumed }
@@ -424,6 +430,7 @@ export interface MethodMap {
   "room.pause": { request: RoomPauseRequest; response: RoomPauseResponse };
   "room.set_limits": { request: RoomSetLimitsRequest; response: RoomSetLimitsResponse };
   "room.create": { request: RoomCreateRequest; response: RoomCreateResponse };
+  "room.delete": { request: RoomDeleteRequest; response: RoomDeleteResponse };
   "room.repo.add": { request: RoomRepoAddRequest; response: RoomRepoAddResponse };
   "room.repos": { request: RoomReposRequest; response: RoomReposResponse };
   "session.start": { request: SessionStartRequest; response: SessionStartResponse };

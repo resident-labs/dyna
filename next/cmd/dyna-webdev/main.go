@@ -443,8 +443,7 @@ func main() {
 	b := &boxes{ctx: ctx, st: st, dir: runtime, cancel: map[contract.BoxID]context.CancelFunc{}}
 	svc := engine.New(st, b, profiles{}, time.Now)
 	fatal(svc.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.grant": svc.HostexecGrant()}, time.Hour))
-	svc.SetFilesDir(filepath.Join(data, "files"))
-	svc.SetTranscriptDir(filepath.Join(data, "transcripts"))
+	svc.SetLayout(box.Layout{Data: data})
 	a := api.New(devService{svc}, nil)
 	a.SetFilesRoute(func(c api.Caller) http.Handler { return svc.Files(c.Principal, c.Room) })
 	app, err := fs.Sub(web.Dist, "dist")

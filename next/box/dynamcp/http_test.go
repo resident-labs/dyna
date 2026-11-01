@@ -140,7 +140,7 @@ func TestPostPreparesAttachmentsAndVisual(t *testing.T) {
 		}
 		return []byte(`{"event":"e"}`), nil
 	}, nil, post.Preparer{Dir: dir, Upload: func(ctx context.Context, path string) (contract.Attachment, error) {
-		return post.UploadHTTP(ctx, client, path)
+		return post.UploadHTTP(ctx, client, "", path)
 	}, Render: func(_ context.Context, data []byte, csp string, allowNet bool) visual.Result {
 		if string(data) != doc || csp != visual.CSP(false) || allowNet {
 			t.Fatal("incorrect preview input")

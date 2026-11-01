@@ -318,7 +318,7 @@ func (h *Host) executeInput(ctx context.Context, input []byte, argv ...string) (
 
 // Maintain removes dangling images and compacts caches without deleting borrowed objects.
 func (h *Host) Maintain(ctx context.Context, hostData string) ([]contract.RoomShared, error) {
-	out, err := h.runUnbounded(ctx, nil, "bash", "-c", `podman image prune -f >/dev/null || exit; for repo in "$1"/git/*/*.git; do [ -d "$repo" ] || continue; git -C "$repo" gc --no-prune || exit; done; for dir in "$1"/rooms/*; do [ -d "$dir" ] || continue; size=$(du -sb -- "$dir") || exit; printf '%s\0%s\0' "${dir##*/}" "${size%%$'\t'*}"; done`, "dyna-maintain", hostData)
+	out, err := h.runUnbounded(ctx, nil, "bash", "-c", `podman image prune -f >/dev/null || exit; for repo in "$1"/git/*/*.git; do [ -d "$repo" ] || continue; git -C "$repo" gc --no-prune || exit; done; for dir in "$1"/rooms/*/shared; do [ -d "$dir" ] || continue; size=$(du -sb -- "$dir") || exit; room=${dir%/shared}; printf '%s\0%s\0' "${room##*/}" "${size%%$'\t'*}"; done`, "dyna-maintain", hostData)
 	if err != nil {
 		return nil, err
 	}
@@ -335,6 +335,13 @@ func (h *Host) Maintain(ctx context.Context, hostData string) ([]contract.RoomSh
 		sizes = append(sizes, contract.RoomShared{Room: contract.RoomID(parts[i]), Bytes: bytes})
 	}
 	return sizes, nil
+}
+
+// RemoveRoom deletes a room's folder. It runs in the user namespace, since a box can leave read-only folders and files
+// under a subordinate ID that the host user cannot remove. Its size has no bound, so it takes no short-command slot.
+func (h *Host) RemoveRoom(ctx context.Context, dir string) error {
+	_, err := h.runUnbounded(ctx, nil, "podman", "unshare", "rm", "-rf", "--", dir)
+	return err
 }
 
 func (h *Host) EnsureSlice(ctx context.Context, s box.Slice) error {
