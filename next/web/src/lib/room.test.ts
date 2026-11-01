@@ -420,6 +420,33 @@ test("a pending box's reason comes from session.list, follows a pending to pendi
   } finally { globalThis.fetch = original; }
 });
 
+test("a session's host comes from session.list, follows its box's placement and moves, and goes with a deleted box", async () => {
+  const original = globalThis.fetch;
+  const session = { id: "s", lastRead: 0, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", host: "arch", computer: "stopped", goal: "", startedAt: "", hadJobs: false };
+  const unplaced = { id: "u", lastRead: 0, name: "New", parent: "", profile: "p", box: "c", boxState: "pending", computer: "stopped", goal: "", startedAt: "", hadJobs: false };
+  const changed = (seq: number, id: string, from: BoxState, to: BoxState, host?: string) => event(seq, { type: "box.changed", body: { box: "b", session: id, host, from, to } });
+  globalThis.fetch = async input => {
+    if (String(input).endsWith("session.list")) return new Response(JSON.stringify({ sessions: [session, unplaced], seq: 2 }));
+    return new Response(JSON.stringify({ rooms: [] }));
+  };
+  try {
+    const room = new RoomStore("r", () => () => {});
+    await room.open();
+    assert.deepEqual([room.hosts.get("s"), room.hosts.has("u")], ["arch", false]);
+    room.apply(changed(3, "u", "pending", "creating", "lab"));
+    assert.equal(room.hosts.get("u"), "lab");
+    room.apply(changed(4, "s", "ready", "stopped", "arch"));
+    assert.equal(room.hosts.get("s"), "arch");
+    room.apply(changed(5, "s", "stopped", "pending", "gpu-box"));
+    assert.equal(room.hosts.get("s"), "gpu-box");
+    room.apply(changed(6, "u", "creating", "pending"));
+    assert.equal(room.hosts.has("u"), false);
+    // The event of a deleted box still carries the host the box left.
+    room.apply(changed(7, "s", "closing", "deleted", "gpu-box"));
+    assert.equal(room.hosts.has("s"), false);
+  } finally { globalThis.fetch = original; }
+});
+
 test("a failed job counts after a fresh load until the owner reads past its end, and the page does not wait for it", async () => {
   const original = globalThis.fetch;
   let answer = (_: Response) => {};

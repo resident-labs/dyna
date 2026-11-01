@@ -217,6 +217,7 @@ type SessionSummary struct {
 	Box         BoxID         `json:"box"`
 	BoxState    BoxState      `json:"boxState"`
 	BoxReason   BoxReason     `json:"boxReason,omitempty"`
+	Host        HostName      `json:"host,omitempty"` // the machine holding the live box; empty before placement and once the box is deleted
 	Computer    ComputerState `json:"computer"`
 	Goal        string        `json:"goal"`
 	Turn        TurnID        `json:"turn,omitempty"`        // the running turn
@@ -326,7 +327,16 @@ type RoomShared struct {
 	Bytes int64  `json:"bytes"`
 }
 
+// HostSession is a session whose live box a host holds, whatever that box's state.
+type HostSession struct {
+	Room     RoomID    `json:"room"`
+	ID       SessionID `json:"id"`
+	Name     string    `json:"name"`
+	BoxState BoxState  `json:"boxState"`
+}
+
 type HostSummary struct {
+	Sessions          []HostSession     `json:"sessions,omitempty"` // in rooms the caller can read
 	Shared            []RoomShared      `json:"shared"`
 	Leftovers         int               `json:"leftovers,omitempty"` // boxes and room folders of deleted rooms that this host still holds, removed when it returns
 	Name              HostName          `json:"name"`

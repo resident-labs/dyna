@@ -127,14 +127,8 @@
   .open.phone { position: relative; justify-content: center; width: 44px; height: 44px; padding: 0; }
   .corner { position: absolute; top: 4px; right: 2px; }
   .n { font-variant-numeric: tabular-nums; }
-  .pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 5; width: min(460px, calc(100vw - 24px)); max-height: min(560px, 70vh); display: flex; flex-direction: column;
-    background: var(--raised); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px var(--shadow-lg); overflow: hidden; }
-  .pop:focus { outline: none; }
-  .sheet { position: fixed; top: 13dvh; right: 0; bottom: 0; left: 0; width: auto; max-height: none; border-width: 1px 0 0; border-radius: 16px 16px 0 0;
-    padding-bottom: env(safe-area-inset-bottom); box-shadow: 0 -8px 32px var(--shadow-lg); }
   .sheet.full { top: 0; border: 0; border-radius: 0; padding-top: env(safe-area-inset-top); }
   .scrim { all: unset; position: fixed; inset: 0; z-index: 5; background: var(--scrim); }
-  .grab { flex: none; width: 36px; height: 4px; margin: 8px auto 4px; border-radius: 2px; background: var(--firm); }
   .head { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 14px 6px; }
   .head strong { font-size: 16px; }
   .sheet .head { padding: 6px 16px 8px; }
