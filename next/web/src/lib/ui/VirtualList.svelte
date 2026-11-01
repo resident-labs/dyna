@@ -173,9 +173,8 @@
 </script>
 
 <div class="virtual" {role} aria-label={label} tabindex="-1" bind:this={element} onscroll={scrolled}
-  onwheel={() => activity()} ontouchstart={() => activity(true)} ontouchmove={() => activity()}
-  ontouchend={() => activity(false)} ontouchcancel={() => activity(false)}
-  onkeydown={event => { if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) activity(); }}>
+  ontouchstart={() => activity(true)} ontouchmove={() => activity()}
+  ontouchend={() => activity(false)} ontouchcancel={() => activity(false)}>
   {#if sticky && visible.length}{@const first = visible.find(item => item.end > (virtualizer.scrollOffset ?? 0)) ?? visible[0]}<div class="sticky">{@render sticky(rows[first.index])}</div>{/if}
   <div class="space" class:top={align === "top"} style:height="{total}px">
     {#each visible as item (item.key)}
