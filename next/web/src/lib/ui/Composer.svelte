@@ -52,6 +52,8 @@
     const message = draft.add(pasted, reserved);
     if (draft === files) note = message;
   }
+  // The picker and a drop on the center column add files here, so the note names what did not fit.
+  export const addFiles = (list: Iterable<File>) => { note = files.add(list, forwarded); };
   const id = $props.id();
   const touch = new MediaQuery("pointer: coarse");
   let caret = $state(0);
@@ -134,7 +136,7 @@
   </div>
   <div class="actions">
     <button type="button" class="attach" aria-label="Attach files" title="Attach files" onclick={() => picker?.click()}><Icon name="clip" /></button>
-    <input bind:this={picker} type="file" multiple hidden onchange={event => { note = files.add(event.currentTarget.files ?? [], forwarded); event.currentTarget.value = ""; element?.focus(); }} />
+    <input bind:this={picker} type="file" multiple hidden onchange={event => { addFiles(event.currentTarget.files ?? []); event.currentTarget.value = ""; element?.focus(); }} />
     <span class="keys">Enter to send · Shift+Enter for a new line</span>
     {#if stop && empty}<button type="button" class="send stop" aria-label={stop.stopping ? "Stopping" : "Stop"} title={stop.stopping ? "Stopping" : "Stop"} disabled={stop.stopping}
       onclick={event => { stop.run(); if (!event.detail) element?.focus(); }}><Icon name="stop" /></button>

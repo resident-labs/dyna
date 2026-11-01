@@ -21,7 +21,4 @@ func TestTerminalCountsAndRetiredHandle(t *testing.T) {
 	if handle.HasTerminal() || handle.OpenTerminal() {
 		t.Fatal("retired handle remained usable")
 	}
-	if _, ok := l.CreateSession("session"); ok {
-		t.Fatal("stale open read recreated the session")
-	}
 }

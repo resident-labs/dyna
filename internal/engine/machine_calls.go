@@ -64,7 +64,7 @@ func machinePatchOf(args []json.RawMessage) (websvc.MachinePatch, bool) {
 // local CI, so a root could send another room's work, or its own SSH
 // credentials, to a host the owner never chose.
 func rootMayPatch(patch websvc.MachinePatch) bool {
-	return !patch.Create && !patch.Remove && patch.Name == nil && patch.Labels == nil && patch.Enabled == nil && patch.SSH == nil && patch.Rooms == nil && localSocket(patch.ContainerSocket)
+	return patch.WakeCommand == nil && !patch.Create && !patch.Remove && patch.Name == nil && patch.Labels == nil && patch.Enabled == nil && patch.SSH == nil && patch.Rooms == nil && localSocket(patch.ContainerSocket)
 }
 
 // containerAccessForRoom limits a root's registrations to the room it speaks for.
