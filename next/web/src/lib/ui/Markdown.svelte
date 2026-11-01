@@ -9,7 +9,7 @@
       node.rel = "noopener noreferrer";
     }
   });
-  // Markdown from any author is sanitized before it reaches the page. Images wait for the files view. Each text renders
+  // Markdown from any author is sanitized before it reaches the page. Parse turns each image into a link, so no img appears. Each text renders
   // once: a row that scrolls back in, or gets a new row object when a page loads, reuses its HTML. Parsing and
   // sanitizing cost about a millisecond a post, which was most of a scroll frame. The feed keeps at most 1,000 events,
   // so a full cache starts over.
