@@ -145,7 +145,7 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 
 ### Layout
 
-The Profiles and Accounts half-width screenshots exposed missing numbers and overflow: `/home/ari/.local/share/dyna/rooms/room_20261022-135113-d4a73e89/files/4832709dad7a47e793a1b6c5.png` and `/home/ari/.local/share/dyna/rooms/room_20261022-135113-d4a73e89/files/03ce7be85994fd96f47ec811.png`. The owner said: "profiles have no numbers and it looks like it's overflowing too? These are fundamental flaws in the ways we're designing our UIs."
+The Profiles and Accounts half-width screenshots exposed missing numbers and overflow: room files `4832709dad7a47e793a1b6c5.png` and `03ce7be85994fd96f47ec811.png`. The owner said: "profiles have no numbers and it looks like it's overflowing too? These are fundamental flaws in the ways we're designing our UIs."
 
 - Lay out every page by its container's width, with container queries, never by the viewport. A tiled window and a phone at the same width get the same layout. [owner, 2026-10-31]
 - Every page works at 1280, 920, 768 and 390 px of window width. Nothing scrolls sideways, and no text or control is cut off. [owner, 2026-10-31]
