@@ -13,7 +13,7 @@
   let selected = $state(items[initial]), view = $state<View>(FIT), menu = $state(false);
   let dialog: HTMLDialogElement, stage: HTMLDivElement;
   let natural = $state<Size>({ width: 0, height: 0 }), box = $state<Size>({ width: 0, height: 0 });
-  let found = $derived(items.findIndex(entry => entry.key === selected.key && entry.file.sha256 === selected.file.sha256));
+  let found = $derived(items.findIndex(entry => entry.key === selected.key && entry.position === selected.position));
   let index = $derived(Math.max(0, found));
   let item = $derived(found >= 0 ? items[found] : selected);
   let author = $derived(item.from.kind === "owner" ? "You" : item.from.session ? name(item.from.session) : "Dyna");

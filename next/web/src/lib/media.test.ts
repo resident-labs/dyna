@@ -12,3 +12,9 @@ test("conversation media keeps order and excludes visual cards and other files",
   ];
   assert.deepEqual(conversationMedia(rows).map(item => [item.key, item.file.name]), [["p1", "a"], ["p2", "c"]]);
 });
+
+ test("duplicate attachments keep distinct positions in the same post", () => {
+  const file = { name: "same.png", media: "image/png", bytes: 1, sha256: "same" };
+  const items = conversationMedia([{ key: "p", from: { kind: "owner" }, at: "now", attachments: [file, file] }]);
+  assert.deepEqual(items.map(item => [item.key, item.position]), [["p", 0], ["p", 1]]);
+});

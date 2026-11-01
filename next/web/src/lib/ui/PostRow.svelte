@@ -10,7 +10,7 @@
   import { canForwardPost } from "../forward-state.ts";
   import { SwipeForward } from "../swipe-forward.ts";
   let { row, author, to, root, onretry, ondiscard, onforward, swipeDisabled = false, newest, visualEvent, onvisual, onmedia }: {
-    row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; newest: Map<string, VisualCard>; visualEvent: EventID | undefined; onvisual: (visual: VisualCard) => void; onmedia: (file: Attachment) => void;
+    row: Extract<Row, { kind: "post" }>; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; newest: Map<string, VisualCard>; visualEvent: EventID | undefined; onvisual: (visual: VisualCard) => void; onmedia: (position: number) => void;
   } = $props();
   let distance = $state(0), dragging = $state(false), ready = $state(false);
   function swipe(node: HTMLElement) {
