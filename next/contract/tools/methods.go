@@ -124,6 +124,9 @@ var methodTable = []MethodEntry{
 	method(contract.MethodTurnActivity, contract.ScopeRead, BoxAccess),
 	method(contract.MethodTurnOutput, contract.ScopeRead, BoxAccess),
 	method(contract.MethodWebLogin, contract.ScopeAdmin, OwnerLocalAccess),
+	method(contract.MethodWebSearch, contract.ScopeRead, UserAccess, act("web", "search", typ[contract.WebSearchRequest](), "Search the web for query. Limit is 1 to 10 results; omit it for 5.", "web search")),
+	method(contract.MethodWebsearchSetKey, contract.ScopeAdmin, OwnerAccess),
+	method(contract.MethodWebsearchRemoveKey, contract.ScopeAdmin, OwnerAccess),
 }
 
 var methodRows = buildMethodRows(methodTable)
