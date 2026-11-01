@@ -64,6 +64,7 @@
           {/if}
           {#if item.failed || openDiff[item.id]}<pre class="diff">{#each lines as line}<span class:add={line.startsWith("+")} class:remove={line.startsWith("-")}>{line}&#10;</span>{/each}</pre>{/if}
         {/if}
+        {#if !item.diff || item.failed}
         {#each ["arguments", "output"] as part}
           {@const name = part as "arguments" | "output"}
           {#if item[name] || chunks[key(item, name)] !== undefined}<pre>{chunks[key(item, name)] ?? item[name]}</pre>{/if}
@@ -71,6 +72,7 @@
             <button disabled={loading[key(item, name)]} onclick={() => void load(item, name)}>{failures[key(item, name)] ? `Could not load ${name}. Try again` : `Show all ${name}`}</button>
           {/if}
         {/each}
+        {/if}
       {/if}
     </div>
   </details>

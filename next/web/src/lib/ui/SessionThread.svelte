@@ -70,7 +70,11 @@
         const ids = new Set(incoming.map(turn => turn.id));
         const overlaps = turns.some(turn => ids.has(turn.id));
         const retained = overlaps ? turns.filter(turn => !ids.has(turn.id)) : [];
-        turns = [...retained, ...incoming.reverse()];
+        const old = new Map(turns.map(turn => [turn.id, turn]));
+        turns = [...retained, ...incoming.reverse().map(turn => {
+          const previous = old.get(turn.id);
+          return previous ? { ...turn, items: mergeTimelineItems(previous.items ?? [], turn.items ?? []), olderItems: previous.olderItems && turn.olderItems, nextItem: previous.olderItems ? previous.nextItem : turn.nextItem } : turn;
+        })];
         if (!retained.length) before = page.before;
         if (loaded && atBottom) { await tick(); scroller.scrollTop = scroller.scrollHeight; }
       }
@@ -114,9 +118,26 @@
     } catch { failed = true; }
     finally { paging.delete(key); }
   }
+  async function readInputs(turn: TranscriptTurn) {
+    const key = turn.id + "/inputs";
+    if (paging.has(key)) return;
+    paging.add(key);
+    let after = turn.after;
+    try {
+      while (after) {
+        const page = await call("transcript.read", { session, turn: turn.id, afterItem: after });
+        const next = page.turns?.[0];
+        if (!next || next.after === after) throw new Error("Transcript input cursor did not advance");
+        turns = turns.map(item => item.id === turn.id ? { ...item, ...next, inputs: [...item.inputs ?? [], ...next.inputs ?? []], items: mergeTimelineItems(item.items ?? [], next.items ?? []) } : item);
+        after = next.after;
+      }
+    } catch { failed = true; }
+    finally { paging.delete(key); }
+  }
   // Dyna: Mandatory overflow pages load immediately; older tool pages load on disclosure.
   $effect(() => {
     for (const turn of turns) {
+      if (turn.after) void readInputs(turn);
       if (turn.mandatoryItems) void readContinuation(turn, "items");
       if (turn.mandatoryPosts) void readContinuation(turn, "posts");
     }
