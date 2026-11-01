@@ -87,8 +87,11 @@ export function windowLabel(w: UsageWindow): string {
   return w.model ? `${period} · ${w.model}` : period;
 }
 
+// A model-specific window shows only when it adds something: it has been used, and it reads differently from the
+// account's own window for that period. Kimi reports its Code pool as a copy of its monthly limit.
 export function visibleWindows(windows: UsageWindow[]): UsageWindow[] {
-  return windows.filter(w => !w.model || Math.round(w.usedPercent) > 0);
+  const repeats = (w: UsageWindow) => windows.some(o => !o.model && o.seconds === w.seconds && o.resetsAt === w.resetsAt && usedOf(o) === usedOf(w));
+  return windows.filter(w => !w.model || (Math.round(w.usedPercent) > 0 && !repeats(w)));
 }
 
 const usedOf = (w: UsageWindow) => Math.min(100, Math.max(0, Math.round(w.usedPercent)));
@@ -97,6 +100,11 @@ const usedOf = (w: UsageWindow) => Math.min(100, Math.max(0, Math.round(w.usedPe
 export function limitReached(w: UsageWindow, now: number): boolean {
   const resets = Date.parse(w.resetsAt);
   return usedOf(w) >= 100 && !(resets > 0 && resets <= now);
+}
+
+// Whether an account takes no more work for now: a window has nothing left, or no balance has credit.
+export function outOfLimit(row: Pick<UsageRow, "windows" | "balances">, now: number): boolean {
+  return row.windows.some(w => limitReached(w, now)) || (row.balances.length > 0 && row.balances.every(b => Number(b.amount) <= 0));
 }
 
 // A usage window as a meter: a label, percent used, and time to reset; a spent window says when it comes back.

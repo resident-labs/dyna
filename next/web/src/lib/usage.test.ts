@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountAlerts, balancesText, busiestWindow, limitReached, usageRows, visibleWindows, windowLabel, windowMeter } from "./usage.ts";
+import { accountAlerts, balancesText, busiestWindow, limitReached, outOfLimit, usageRows, visibleWindows, windowLabel, windowMeter } from "./usage.ts";
 import type { AccountUsage, AccountsListResponse, UsageWindow } from "./contract.gen.ts";
 
 test("labels each window and hides only unused model-specific windows", () => {
@@ -12,6 +12,15 @@ test("labels each window and hides only unused model-specific windows", () => {
   assert.equal(windowLabel(fable), "Weekly · Fable");
   assert.deepEqual(visibleWindows([five, weekly, fable, { ...fable, usedPercent: 0.1 }, { ...fable, usedPercent: 0.6 }]), [five, weekly, { ...fable, usedPercent: 0.6 }]);
   assert.equal(busiestWindow([{ title: "studio", windows: [{ ...fable, usedPercent: 80 }] }]), "studio · Weekly (Fable) 80% used");
+});
+
+test("hides a model-specific window that repeats the account's own, and keeps one that differs", () => {
+  const month: UsageWindow = { name: "monthly", kind: "monthly", usedPercent: 99.86, seconds: 2592000, resetsAt: "2026-11-24T00:00:00Z" };
+  const code: UsageWindow = { ...month, name: "Code monthly", model: "Code" };
+  assert.deepEqual(visibleWindows([month, code]), [month]);
+  assert.deepEqual(visibleWindows([{ ...month, usedPercent: 55 }, code]), [{ ...month, usedPercent: 55 }, code]);
+  assert.deepEqual(visibleWindows([{ ...month, resetsAt: "2026-11-30T00:00:00Z" }, code]), [{ ...month, resetsAt: "2026-11-30T00:00:00Z" }, code]);
+  assert.deepEqual(visibleWindows([code]), [code]);
 });
 
 const windowAt = (usedPercent: number): UsageWindow => ({ name: "week", kind: "weekly", usedPercent, seconds: 604800, resetsAt: "" });
@@ -73,6 +82,18 @@ test("A balance keeps an account in Usage, as text after every account with wind
   assert.equal(balancesText(rows[1].balances), "110.00 CNY · 3.50 USD");
   assert.equal(balancesText([{ currency: "USD", amount: "-0.01" }]), "-0.01 USD");
   assert.deepEqual(rows[0].balances, []);
+});
+
+test("An account is out of limit with a spent window or no credit in any balance", () => {
+  const now = Date.parse("2026-10-31T00:00:00Z");
+  const out = (windows: UsageWindow[], ...amounts: string[]) => outOfLimit({ windows, balances: amounts.map(amount => ({ currency: "USD", amount })) }, now);
+  assert.equal(out([windowAt(40), windowAt(100)]), true);
+  assert.equal(out([windowAt(99)]), false);
+  assert.equal(out([], "-0.01"), true);
+  assert.equal(out([], "0.00"), true);
+  assert.equal(out([], "-0.01", "3.50"), false);
+  assert.equal(out([], "3.50"), false);
+  assert.equal(out([]), false);
 });
 
 test("Names a monthly window", () => {
