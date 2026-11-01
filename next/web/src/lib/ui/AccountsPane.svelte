@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
-  import { accountPath, accountRows, accountState, providerGroup, reconnectPath, refused, reconnectUnavailable } from "../accounts.ts";
+  import { accountPath, accountRows, accountState, addProviderError, parseModelIDs, providerGroup, reconnectPath, refused, reconnectUnavailable } from "../accounts.ts";
   import { balancesText, visibleWindows } from "../usage.ts";
   import type { Account, AccountProviderInfo, AccountUsage, AccountsConnectResponse, RoomSummary } from "../contract.gen.ts";
   import StatusPill from "./StatusPill.svelte";
@@ -12,6 +12,7 @@
   let providers: AccountProviderInfo[] = $state([]), accounts: Account[] = $state([]), rooms: RoomSummary[] = $state([]), usage: AccountUsage[] = $state([]);
   let loaded = $state(false), quotaLoaded = $state(false), failed = $state(false), busy = $state(false);
   let query = $state(""), expanded = $state(false), label = $state(""), secret = $state(""), redirect = $state(""), useKey = $state(false);
+  let providerName = $state(""), providerAddress = $state(""), modelText = $state("");
   let attempt: AccountsConnectResponse | undefined = $state();
   let connectState: "idle" | "pending" | "failed" | "expired" = $state("idle");
   let error = $state(""), copied = $state(false), opened = $state(false), now = $state(Date.now());
@@ -24,6 +25,7 @@
   let providerId = $derived(reconnecting?.provider ?? (path.startsWith(base + "/add/") ? decodeURIComponent(path.slice((base + "/add/").length)) : ""));
   let selected = $derived(providers.find(p => p.id === providerId) ?? (!phone && adding && !providerId ? providers[0] : undefined));
   let flow = $derived(useKey ? "key" : selected?.connectFlow);
+  let addingProvider = $derived(path === base + "/add/new");
   // A reconnect link for an account that is gone lands on the account view's "not found".
   let accountId = $derived(path.startsWith(accountPath("")) ? decodeURIComponent(path.slice(accountPath("").length)) : reconnecting ? "" : reconnectRoute);
   $effect(() => { if (reconnecting) label = reconnecting.label; });
@@ -77,6 +79,15 @@
     }
     busy = false;
   }
+  async function addProvider() {
+    if (busy) return;
+    busy = true; error = "";
+    const displayName = providerName.trim();
+    await call("accounts.set_key", { displayName, baseUrl: providerAddress.trim(), label: label.trim() || displayName, key: secret, models: parseModelIDs(modelText) }).then(() => {
+      providerName = ""; providerAddress = ""; modelText = ""; reset(); reload(); document.getElementById("accounts-back")?.click();
+    }, (e: unknown) => { if (e instanceof SignedOut) signedout(); else error = addProviderError(e); });
+    busy = false;
+  }
   async function finish() {
     if (!attempt || busy || !redirect.trim()) return;
     const ticket = generation, url = redirect; redirect = ""; busy = true;
@@ -105,7 +116,7 @@
 {#if failed}<p>Accounts did not load. <button class="btn" type="button" onclick={reload}>Try again</button></p>
 {:else if !loaded}<p class="muted">Loading accounts…</p>
 {:else if adding}
-  <a id="picker-back" href={base + "/add"} onclick={navigate} hidden>Back to providers</a><div class="add-layout" class:has-provider={!!providerId && !!selected}>
+  <a id="picker-back" href={base + "/add"} onclick={navigate} hidden>Back to providers</a><div class="add-layout" class:has-provider={addingProvider || (!!providerId && !!selected)}>
       <section class="picker">
         <div class="search"><Icon name="search" size={18} /><input aria-label="Search providers" placeholder={`Search ${providers.length} providers`} bind:value={query} /></div>
         {#each groups as group}
@@ -118,8 +129,25 @@
             {#if matches.remaining}<button class="btn ghost" type="button" onclick={() => expanded = true}>Show {matches.remaining} more</button>{/if}
           {/if}
         {/each}
+        <a class:chosen={addingProvider} href={providerPath("new")} onclick={(e) => { reset(); label = ""; navigate(e); }}><span class="initial">+</span><strong>Add provider</strong></a>
       </section>
-    {#if selected}
+    {#if addingProvider}
+      <div class="details">
+        {#if !phone}<a class="all-providers" href={base + "/add"} onclick={navigate}>← All providers</a>{/if}
+        <section class="card connect">
+          <h2>Add provider</h2>
+          <p><strong>Any OpenAI-compatible service.</strong> Dyna sends model requests to the address you enter, and keeps the key where Dyna runs.</p>
+          <label class="label-field">Name <input bind:value={providerName} placeholder="Acme" autocomplete="off" disabled={busy} /></label>
+          <label class="label-field">Address <input bind:value={providerAddress} placeholder="https://api.example.com/v1" autocomplete="off" inputmode="url" disabled={busy} /></label>
+          <label class="label-field">Label <input bind:value={label} placeholder="Work, Personal, …" disabled={busy} /></label>
+          <label>API key <input type="password" bind:value={secret} autocomplete="off" disabled={busy} /></label>
+          <label class="label-field">Model IDs <textarea bind:value={modelText} rows="3" disabled={busy}></textarea></label>
+          <p class="muted">Leave model IDs empty to read them from the provider.</p>
+          <div class="start-actions"><button class="btn fill" type="button" disabled={busy || !providerName.trim() || !providerAddress.trim() || !secret.trim()} onclick={() => void addProvider()}>Add provider</button><a class="btn" href={base + "/add"} onclick={navigate}>Cancel</a></div>
+          {#if error}<p role="alert">{error}</p>{/if}
+        </section>
+      </div>
+    {:else if selected}
       <div class="details">
         {#if !phone}<a class="all-providers" href={base + "/add"} onclick={navigate}>← All providers</a>{/if}
         <section class="card connect">
@@ -167,6 +195,8 @@
       <h2>Usage</h2>
       {#if accountUsage && visibleWindows(accountUsage.windows ?? []).length}<div class="meters">{#each visibleWindows(accountUsage.windows ?? []) as window (window.name)}<AccountMeter {window} now={Date.now()} />{/each}</div>{:else if !accountUsage?.balances?.length}<p class="muted">No usage limits reported.</p>{/if}
       {#if accountUsage?.balances?.length}<p class="muted">Balance {balancesText(accountUsage.balances)}</p>{/if}
+      {#if account.models?.length}<h2>Models</h2>
+      <p class="muted">{account.models.join(" · ")}</p>{/if}
       <h2>Rooms</h2>
       <p><label><input type="radio" name="room-scope" checked={!account.rooms?.length} disabled={busy} onchange={() => void setRooms(account, [])} /> Every room</label> <label><input type="radio" name="room-scope" checked={!!account.rooms?.length} disabled={busy || !rooms.length} onchange={() => void setRooms(account, [rooms[0].id])} /> Only these rooms</label></p>
       {#if account.rooms?.length}{#each rooms as room (room.id)}<label><input type="checkbox" checked={account.rooms.includes(room.id)} disabled={busy || (account.rooms.length === 1 && account.rooms.includes(room.id))} onchange={(e) => void setRooms(account, e.currentTarget.checked ? [...(account.rooms ?? []), room.id] : (account.rooms ?? []).filter(id => id !== room.id))} /> {room.name}</label>{/each}{/if}

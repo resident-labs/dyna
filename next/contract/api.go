@@ -97,6 +97,7 @@ const (
 	ErrVisualSuperseded     ErrorCode = "visual_superseded"
 	ErrUnavailable          ErrorCode = "unavailable"
 	ErrReconnectUnavailable ErrorCode = "reconnect_unavailable"
+	ErrModelsUnavailable    ErrorCode = "models_unavailable"
 	ErrStoreFromV1          ErrorCode = "store_from_v1"
 	ErrStoreTooOld          ErrorCode = "store_too_old"
 )
