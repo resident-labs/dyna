@@ -29,6 +29,28 @@ func (s *Store) AddHost(ctx context.Context, h box.Host) error {
 	})
 }
 
+// SetHostRooms replaces a host's room limit in one transaction. SetAccountRooms is its twin for accounts.
+func (s *Store) SetHostRooms(ctx context.Context, host contract.HostName, rooms []contract.RoomID) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		var name contract.HostName
+		if err := tx.QueryRowContext(ctx, "SELECT name FROM hosts WHERE name=?", host).Scan(&name); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM host_rooms WHERE host=?", host); err != nil {
+			return err
+		}
+		for _, room := range rooms {
+			if err := refuseNewWork(ctx, tx, room); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO host_rooms(host,room) VALUES(?,?)", host, room); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // diskAlertGap is the least time between alerts for one host. The btrfs metadata rule moves free space straight to zero and back,
 // so a host near that line leaves the warn band on every other sample, which free-space hysteresis alone would alert on each time.
 const diskAlertGap = time.Hour

@@ -37,6 +37,7 @@ const (
 	MethodArchiveDone             Method = "archive.done"
 	MethodDeliveryDone            Method = "delivery.done"
 	MethodHostAdd                 Method = "host.add"
+	MethodHostSetLimits           Method = "host.set_limits"
 	MethodHostList                Method = "host.list"
 	MethodAccountsList            Method = "accounts.list"
 	MethodAccountsConnect         Method = "accounts.connect"
@@ -280,6 +281,14 @@ type HostAddRequest struct {
 type HostAddResponse struct {
 	NoSwap bool `json:"noSwap"`
 }
+
+// HostSetLimitsRequest replaces the rooms a host serves. No rooms means every room, as for an account.
+// Boxes already on the host stay there. A room being deleted is refused.
+type HostSetLimitsRequest struct {
+	Host  HostName `json:"host"`
+	Rooms []RoomID `json:"rooms"`
+}
+type HostSetLimitsResponse struct{}
 
 // HostListRequest asks for the hosts an owner terminal can open (5.15). Only the owner calls it.
 type HostListRequest struct{}
