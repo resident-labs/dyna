@@ -7,6 +7,7 @@ import (
 	"regexp"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/room"
 )
 
@@ -26,27 +27,31 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 		defer close(out)
 		defer s.live.Unsubscribe(subscription)
 		defer func() { cancel() }()
+		replay := true
 		for {
-			var events []contract.Event
-			var err error
-			if room == "" {
-				events, err = s.store.OwnerEvents(ctx, after, 256)
-			} else {
-				events, err = s.store.Events(ctx, room, after, 256, nil)
-			}
-			if err != nil {
-				return
-			}
-			for _, event := range events {
-				select {
-				case out <- event:
-					after = event.Seq
-				case <-ctx.Done():
+			if replay {
+				var events []contract.Event
+				var err error
+				if room == "" {
+					events, err = s.store.OwnerEvents(ctx, after, 256)
+				} else {
+					events, err = s.store.Events(ctx, room, after, 256, nil)
+				}
+				if err != nil {
 					return
 				}
-			}
-			if len(events) == 256 {
-				continue
+				for _, event := range events {
+					select {
+					case out <- event:
+						after = event.Seq
+					case <-ctx.Done():
+						return
+					}
+				}
+				if len(events) == 256 {
+					continue
+				}
+				replay = false
 			}
 			select {
 			case event, ok := <-liveEvents:
@@ -58,13 +63,24 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 				case <-ctx.Done():
 					return
 				}
-			case _, ok := <-sub:
+			case event, ok := <-sub:
 				if !ok {
 					if ctx.Err() != nil {
 						return
 					}
 					cancel()
 					sub, cancel = s.store.Subscribe()
+					replay = true
+					continue
+				}
+				if event.Seq <= after || !store.StreamMatches(event, room) {
+					continue
+				}
+				select {
+				case out <- event:
+					after = event.Seq
+				case <-ctx.Done():
+					return
 				}
 			case <-ctx.Done():
 				return
