@@ -88,7 +88,8 @@ func PostsForReplies(inputs []contract.Delivery, events []contract.Event, sessio
 			if channel.Kind != contract.ReplyFinal || channel.Home != post.Home {
 				continue
 			}
-			matched := channel.Target.Kind == contract.PrincipalOwner
+			// The owner reads every post in a feed, but one that names others is addressed to them.
+			matched := channel.Target.Kind == contract.PrincipalOwner && len(post.Mentions) == 0
 			for _, mentioned := range post.Mentions {
 				if mentioned == channel.Target {
 					matched = true

@@ -19,6 +19,22 @@ func TestPostsForReplies(t *testing.T) {
 	}
 }
 
+func TestAPostToOthersDoesNotAnswerTheOwner(t *testing.T) {
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	lead := contract.Principal{Kind: contract.PrincipalSession, Session: "lead"}
+	root := contract.Principal{Kind: contract.PrincipalSession, Session: "root"}
+	feed := contract.Conversation{Kind: contract.ConversationFeed}
+	inputs := []contract.Delivery{{Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: owner, Home: feed}}}
+	events := []contract.Event{{ID: "to-lead", From: root, Body: contract.PostCreated{Home: feed, Mentions: []contract.Principal{lead}}}}
+	if got := PostsForReplies(inputs, events, "root"); got[Destination{Target: owner, Home: feed}] != "" {
+		t.Fatalf("a post to a lead answered the owner: %+v", got)
+	}
+	events = append(events, contract.Event{ID: "to-owner", From: root, Body: contract.PostCreated{Home: feed}})
+	if got := PostsForReplies(inputs, events, "root"); got[Destination{Target: owner, Home: feed}] != "to-owner" {
+		t.Fatalf("a plain post did not answer the owner: %+v", got)
+	}
+}
+
 func TestPostsForRepliesMatchesHome(t *testing.T) {
 	parent := contract.Principal{Kind: contract.PrincipalSession, Session: "parent"}
 	feed := contract.Conversation{Kind: contract.ConversationFeed}
