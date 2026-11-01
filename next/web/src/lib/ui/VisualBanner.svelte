@@ -21,14 +21,14 @@
   }
 </script>
 
-<button type="button" class="visual" class:older onclick={onopen} title={visual.title}>
+<button type="button" class="visual" class:older onclick={onopen}>
   {#if older}
     <span class="mini">{#if visual.thumbnail && !failed}<img src={"/v1/files/" + encodeURIComponent(visual.thumbnail)} alt="" loading="lazy" onerror={() => failed = true} />{/if}</span>
     <span class="say"><strong>{visual.title}</strong> · v{visual.version} · Superseded by v{newest.version}</span>
   {:else}
     <span class="art" class:ready use:observe bind:clientWidth={width}>
       {#if visual.banner && !failed}<img src={"/v1/files/" + encodeURIComponent(visual.banner)} alt="" loading="lazy" onload={() => ready = true} onerror={() => failed = true} />
-      {:else if mounted}<iframe src={"/v1/files/visual/" + encodeURIComponent(event) + "?theme=" + theme().mode} title="" sandbox="allow-scripts" tabindex="-1" aria-hidden="true" style:transform={"scale(" + width / 960 + ")"} onload={() => { ready = true; releasePreview?.(); }}></iframe>{/if}
+      {:else if mounted}<iframe scrolling="no" src={"/v1/files/visual/" + encodeURIComponent(event) + "?theme=" + theme().mode} title="" sandbox="allow-scripts" tabindex="-1" aria-hidden="true" style:transform={"scale(" + width / 960 + ")"} onload={() => { ready = true; releasePreview?.(); }}></iframe>{/if}
     </span>
     <span class="row"><strong>{visual.title}</strong><span class="pill">v{visual.version}</span><time datetime={at}>updated {fromNow(at, Date.now())}</time></span>
   {/if}
