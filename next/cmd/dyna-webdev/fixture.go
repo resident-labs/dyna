@@ -48,8 +48,12 @@ func fixtureTurns() []contract.TranscriptTurn {
 	for i, request := range requests {
 		id := contract.TurnID(fmt.Sprintf("fixture-turn-%02d", i+1))
 		start := base.Add(time.Duration(i) * 8 * time.Minute)
-		end := start.Add(2 * time.Minute)
-		turn := contract.TranscriptTurn{ID: id, Started: start, Ended: &end, DurationMS: 120000, Outcome: contract.TurnCompleted,
+		duration := 2 * time.Minute
+		if i == 0 {
+			duration = 114 * time.Second
+		}
+		end := start.Add(duration)
+		turn := contract.TranscriptTurn{ID: id, Started: start, Ended: &end, DurationMS: duration.Milliseconds(), Outcome: contract.TurnCompleted,
 			Inputs: []contract.TranscriptInput{{ID: contract.EventID(fmt.Sprintf("fixture-input-%d", i)), At: start, Type: contract.EventType("post.created"), From: contract.Principal{Kind: contract.PrincipalOwner}, Text: request}}}
 		turn.Items = append(turn.Items, contract.TranscriptItem{ID: fmt.Sprintf("%s-text", id), Turn: id, Kind: contract.TranscriptText, At: start, Text: "I’ll trace the sync state and its current tests before changing the UI."})
 		turnTools := tools
