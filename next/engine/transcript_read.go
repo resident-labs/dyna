@@ -24,7 +24,10 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 	if caller.Kind != contract.PrincipalOwner {
 		return response, forbidden()
 	}
-	if req.Session == "" || req.Limit < 0 || req.Limit > 20 || req.Offset < 0 || req.ItemIndex < 0 || req.MandatoryIndex < 0 || req.MandatoryPost < 0 || req.PostIndex < 0 || (req.MandatoryItems && (req.OlderItems || req.Tail || req.ItemIndex != 0)) || (req.Turn != "" && req.Before != "") || ((req.Item != "" || req.ItemIndex != 0 || req.OlderItems || req.MandatoryItems || req.MandatoryPosts || req.MandatoryIndex != 0 || req.MandatoryPost != 0 || req.PostIndex != 0 || req.Tail || req.AfterItem != "") && req.Turn == "") {
+	if req.Page != "" && req.Page != contract.TranscriptPageOlderItems && req.Page != contract.TranscriptPageMandatoryItems && req.Page != contract.TranscriptPageMandatoryPosts {
+		return response, invalid("invalid transcript page")
+	}
+	if req.Session == "" || req.Limit < 0 || req.Limit > 20 || req.Offset < 0 || req.Cursor < 0 || req.PostIndex < 0 || (req.Page == "" && req.Cursor != 0) || (req.Page != "" && (req.Turn == "" || req.Item != "" || req.AfterItem != "" || req.Tail || req.PostIndex != 0)) || (req.Turn != "" && req.Before != "") || ((req.Item != "" || req.AfterItem != "" || req.Tail || req.PostIndex != 0) && req.Turn == "") {
 		return response, invalid("invalid transcript request")
 	}
 	exists, err := s.store.TranscriptSessionExists(ctx, req.Session)
@@ -94,7 +97,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 		}
 		after := req.AfterItem == ""
 		for _, input := range w.Inputs {
-			if req.Item == "" && (req.ItemIndex > 0 || req.OlderItems || req.MandatoryItems || req.MandatoryPosts || req.Tail) {
+			if req.Item == "" && (req.Page != "" || req.Tail) {
 				break
 			}
 			if req.Item != "" && req.Item != "input:"+string(input.ID) {
@@ -142,11 +145,8 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			if err != nil {
 				return response, failure(err)
 			}
-			skip := req.ItemIndex
-			if req.MandatoryItems {
-				skip = req.MandatoryIndex
-			}
-			if !req.Tail && !req.MandatoryPosts {
+			skip := req.Cursor
+			if !req.Tail && req.Page != contract.TranscriptPageMandatoryPosts {
 				const maxItems = 256
 				var pageItems []pi.TranscriptItem
 				seenTotal := 0
@@ -156,7 +156,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 					var seen int
 					var more bool
 					var err error
-					if req.Item == "" && !req.OlderItems && !req.MandatoryItems {
+					if req.Item == "" && req.Page == "" {
 						items, seen, more, err = reader.ReadRecent(r.Path, r.Start, r.End, deliveries, maxItems)
 					} else {
 						items, seen, more, err = reader.Read(r.Path, r.Start, r.End, deliveries, req.Item, skip, max(0, maxItems-len(pageItems)))
@@ -194,10 +194,10 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 					readerMore = readerMore || more
 				}
 				if readerMore && req.Item == "" {
-					if req.MandatoryItems {
-						t.MandatoryItems, t.NextMandatory = true, req.MandatoryIndex+len(pageItems)
-					} else if req.OlderItems {
-						t.OlderItems, t.NextItem = true, req.ItemIndex+len(pageItems)
+					if req.Page == contract.TranscriptPageMandatoryItems {
+						t.MandatoryItems, t.NextMandatory = true, req.Cursor+len(pageItems)
+					} else if req.Page == contract.TranscriptPageOlderItems {
+						t.OlderItems, t.NextItem = true, req.Cursor+len(pageItems)
 					} else {
 						t.MandatoryItems, t.OlderItems = true, true
 					}
@@ -280,8 +280,8 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			// Scan a bounded newest-first page, separately from Pi items.
 			var posts []contract.Event
 			const postPageSize = 8
-			if !req.MandatoryItems && !req.OlderItems {
-				posts, err = s.store.TranscriptSentPostsNewest(ctx, req.Session, t.ID, postPageSize, req.MandatoryPost)
+			if req.Page != contract.TranscriptPageMandatoryItems && req.Page != contract.TranscriptPageOlderItems {
+				posts, err = s.store.TranscriptSentPostsNewest(ctx, req.Session, t.ID, postPageSize, req.Cursor)
 				if err != nil {
 					return response, failure(err)
 				}
@@ -377,6 +377,8 @@ func applyTranscriptPost(item *contract.TranscriptItem, event contract.Event) {
 	post := event.Body.(contract.PostCreated)
 	text := harness.Mask(post.Text)
 	item.Kind, item.Event, item.Room, item.Seq, item.Text = contract.TranscriptPost, event.ID, event.Room, event.Seq, clipTranscript(text, 4096)
+	from := event.From
+	item.From = &from
 	item.More = item.More || len(text) > 4096
 	home := post.Home
 	item.Home = &home
@@ -429,9 +431,9 @@ func budgetTranscriptTurn(t *contract.TranscriptTurn, req contract.TranscriptRea
 		stepSize += stepBytes
 		return true
 	}
-	if req.MandatoryItems {
+	if req.Page == contract.TranscriptPageMandatoryItems {
 		for i, item := range items {
-			if item.Index < req.MandatoryIndex || !mandatory(item) {
+			if item.Index < req.Cursor || !mandatory(item) {
 				continue
 			}
 			if !add(i) {
@@ -442,11 +444,11 @@ func budgetTranscriptTurn(t *contract.TranscriptTurn, req contract.TranscriptRea
 				break
 			}
 		}
-	} else if req.MandatoryPosts {
+	} else if req.Page == contract.TranscriptPageMandatoryPosts {
 		for i := len(items) - 1; i >= 0; i-- {
 			add(i)
 		}
-	} else if req.OlderItems {
+	} else if req.Page == contract.TranscriptPageOlderItems {
 		for i, item := range items {
 			if !add(i) {
 				if !t.OlderItems || item.Index < t.NextItem {
