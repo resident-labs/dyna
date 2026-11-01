@@ -94,5 +94,5 @@ func (b Brave) Search(ctx context.Context, q Query) ([]Result, error) {
 		}
 		results = append(results, Result{Title: text(found.Title), URL: found.URL, Snippet: text(found.Description)})
 	}
-	return capped(b.Name(), q, results), nil
+	return capped(b.Name(), q, results, key), nil
 }

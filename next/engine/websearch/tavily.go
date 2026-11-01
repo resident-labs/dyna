@@ -88,7 +88,7 @@ func (t Tavily) Search(ctx context.Context, q Query) ([]Result, error) {
 		}
 		results = append(results, Result{Title: text(found.Title), URL: found.URL, Snippet: text(found.Content)})
 	}
-	return capped(t.Name(), q, results), nil
+	return capped(t.Name(), q, results, key), nil
 }
 
 // tavilyRequest is the body of a search request.

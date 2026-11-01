@@ -107,7 +107,7 @@ func (m Muse) Search(ctx context.Context, q Query) ([]Result, error) {
 		}
 		results = append(results, Result{Title: text(hit.Title), URL: hit.URL, Snippet: text(hit.Snippet)})
 	}
-	return capped(m.Name(), q, results), nil
+	return capped(m.Name(), q, results, key), nil
 }
 
 // museRequest is the body of one search request. The query is the only field
