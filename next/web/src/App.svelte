@@ -507,10 +507,6 @@
   // A session's running background jobs while its box is ready. The header's Jobs tool, like About's Jobs row, keeps every
   // session that ever had jobs, since a finished job's output stays in its box. In a DM it lists only that session.
   const jobs = (id: string) => store?.boxes.get(id) === "ready" ? store.shellJobs.get(id) ?? 0 : 0;
-  let jobSessions = $derived([...store?.sessions.values() ?? []].filter(item => store?.hadJobs.has(item.session) && store?.boxes.get(item.session) === "ready")
-    .map(item => ({ id: item.session, name: item.name, root: !item.parent, running: jobs(item.session) })));
-  let toolSessions = $derived(session ? jobSessions.filter(item => item.id === session) : jobSessions);
-  let toolFailures = $derived([...store?.failedJobs ?? []].filter(key => toolSessions.some(item => key.startsWith(`${item.id}/`))));
   const wide = new MediaQuery("min-width: 761px");
   let panelShown = $derived(wide.current ? !tucked : panel);
   // Below 641 px the rail is a drawer, as in Discord's phone app: the rooms on the left and the open room's pages beside
@@ -662,11 +658,11 @@
         {#if session}<span class="session-spacer"></span>{/if}
         {#if session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title={terminals?.hasShell(session) ? "Show this session's terminal" : "Open a terminal in this session's box"} aria-pressed={terminals?.hasShell(session) ?? false} onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /></button>{/if}
         {#if session && attention.can("computers") && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /></button>{/if}
-        {#key session}<HeaderActions {store} {session} sessions={toolSessions} allSessions={jobSessions} failures={toolFailures} phone={phone.current} {paused} panelShown={panelShown} requestsOpen={section === "requests"} operate={attention.can("operate")} admin={attention.can("admin")}
+        {#key session}<HeaderActions {store} {session} {attention} {closed} phone={phone.current} {paused} panelShown={panelShown} requestsOpen={section === "requests"}
           bind:jobsTool bind:roomMenu bind:requestsButton bind:toggle
           onopen={(item, job) => terminals?.openJob(item, job)} onpause={pause} oninstructions={openInstructions} onrequests={() => { section = section === "requests" ? undefined : "requests"; }} onpanel={tapped => void showPanel(!panelShown, tapped)}
-          onterminal={session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready" ? () => terminals?.shell(session!, title, !store?.sessions.get(session!)?.parent) : undefined}
-          oncomputer={session && attention.can("computers") && store.computers.has(session) ? () => watch(session!) : undefined} />{/key}
+          onterminal={() => terminals?.shell(session!, title, !store?.sessions.get(session!)?.parent)}
+          oncomputer={() => watch(session!)} />{/key}
       {/if}</header>
     {#if routeNotice}<div class="route-notice"><Icon name="globe" size={18} /><span><strong>Moved to {routeNotice}</strong>{moveData.has("old") ? `: ${moveData.get("old")} stopped answering for 20 seconds.` : `, a nearer route to ${moveData.get("name") || "this machine"}. Same session, same room.`}</span><button type="button" aria-label="Dismiss route notice" onclick={() => { routeNotice = ""; sessionStorage.removeItem("dyna-connect-move"); }}>✕</button></div>{/if}
     {#if reloadPending}<p class="reload-notice" role="status">Dyna updated. Reload to use the new version. <button type="button" onclick={() => location.reload()}>Reload</button></p>{/if}

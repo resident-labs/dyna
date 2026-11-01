@@ -49,6 +49,7 @@
 <style>
   .menu { position: relative; }
   .open { display: flex; align-items: center; gap: 4px; padding: 6px; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+  @media (max-width: 640px) { .open { justify-content: center; min-width: 44px; min-height: 44px; } }
   .open:hover, .open[aria-expanded="true"] { background: var(--hover); color: var(--text); }
   .list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 2; min-width: 180px; padding: 4px; display: grid;
     background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px var(--shadow-md); }
