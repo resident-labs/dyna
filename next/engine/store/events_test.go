@@ -137,6 +137,36 @@ func TestEventsReplay(t *testing.T) {
 	}
 }
 
+func TestEventBySequenceReturnsAnyRoomEvent(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	err = s.Write(context.Background(), func(tx *sql.Tx) error {
+		for _, id := range []string{"room_1", "room_2"} {
+			if _, err := tx.Exec("INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES (?,?,0,1,1)", id, id); err != nil {
+				return err
+			}
+		}
+		if _, err := s.AppendEvent(tx, contract.Event{ID: "ev_1", Room: "room_1", Time: time.UnixMilli(10), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.PostCreated{Text: "first"}}); err != nil {
+			return err
+		}
+		_, err := s.AppendEvent(tx, contract.Event{ID: "ev_2", Room: "room_2", Time: time.UnixMilli(20), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.PostCreated{Text: "second"}})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Event(context.Background(), 2)
+	if err != nil || got.ID != "ev_2" || got.Room != "room_2" || got.Body.(contract.PostCreated).Text != "second" {
+		t.Fatalf("event %#v, error %v", got, err)
+	}
+	if _, err := s.Event(context.Background(), 3); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("missing event error %v", err)
+	}
+}
+
 func TestEventsBefore(t *testing.T) {
 	s, err := Open(t.TempDir())
 	if err != nil {
