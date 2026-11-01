@@ -89,7 +89,7 @@
     navigator.clipboard.writeText(row.text).then(() => { copied = "Copied"; }, () => { copied = "Could not copy"; })
       .finally(() => { timer = setTimeout(() => { copied = ""; }, 2000); });
   }
-  // The 28 px bar straddles the row's top edge, or sits 4 px inside it right under the New line. When the row's top is
+  // The 34 px bar straddles the row's top edge, or sits 4 px inside it right under the New line. When the row's top is
   // under the feed's top edge, a pointer entering it lifts the bar to 4 px inside that edge, measured once per entry, never
   // on scroll. The cap keeps it from leaving a row that is almost scrolled away, and lets a one-line row clear the edge.
   let lift = $state(0);
@@ -97,7 +97,7 @@
     if (event.pointerType === "touch") return;
     // The feed's scroll container: VirtualList.svelte line 13 defaults role to "feed", and line 140 renders it on .virtual.
     const edge = node.closest('[role="feed"]')?.getBoundingClientRect().top ?? 0;
-    const top = belowNew ? 4 : -14;
+    const top = belowNew ? 4 : -17;
     lift = Math.min(Math.max(0, edge + 4 - (node.getBoundingClientRect().top + top)), node.offsetHeight - 4 - top);
   }
   // A touch held for 450 ms without moving 10 px opens the sheet.
@@ -123,8 +123,8 @@
   style:--lift="{lift}px" onpointerdown={press} onpointermove={drift} onpointerup={release} onpointercancel={release}
   oncontextmenu={event => { if (sheet) event.preventDefault(); }}>
   {#if !row.pending}<div class="bar"><span class="status" role="status">{copied}</span>
-    {#if onforward}<button type="button" aria-label="Forward" title="Forward" onclick={onforward}><Icon name="forward" /></button>{/if}
-    <button type="button" aria-label="Copy text" title="Copy text" onclick={copy}><Icon name={copied === "Copied" ? "check" : "copy"} /></button></div>{/if}
+    {#if onforward}<button type="button" aria-label="Forward" title="Forward" onclick={onforward}><Icon name="forward" size={18} /></button>{/if}
+    <button type="button" aria-label="Copy text" title="Copy text" onclick={copy}><Icon name={copied === "Copied" ? "check" : "copy"} size={18} /></button></div>{/if}
   {#if sheet}<dialog class="sheet" aria-label="Post actions" {@attach (dialog: HTMLDialogElement) => dialog.showModal()} onclose={() => { sheet = false; }}
     onclick={event => { if (event.target === event.currentTarget) event.currentTarget.close(); }}>
     {#if onforward}<button type="button" onclick={event => { event.currentTarget.closest("dialog")?.close(); onforward(); }}><Icon name="forward" />Forward</button>{/if}
@@ -170,14 +170,14 @@
   .post:focus { outline: none; }
   .post > :global(*) { grid-column: 2; }
   /* A slim bar, as in Discord: it straddles the row's top right and is laid out while hidden, so showing it never moves the row. */
-  .bar { position: absolute; top: calc(-14px + var(--lift, 0px)); right: 16px; z-index: 1; display: flex; align-items: center; height: 28px; padding: 1px;
-    background: var(--raised); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 1px 2px var(--shadow-sm); opacity: 0; pointer-events: none; }
+  .bar { position: absolute; top: calc(-17px + var(--lift, 0px)); right: 16px; z-index: 1; display: flex; align-items: center; gap: 2px; height: 34px; padding: 2px;
+    background: var(--raised); border: 1px solid var(--firm); border-radius: 8px; box-shadow: 0 2px 8px var(--shadow-sm); opacity: 0; pointer-events: none; }
   .tucked .bar { top: calc(4px + var(--lift, 0px)); }
   /* Hidden by opacity, not visibility, so Tab still reaches the buttons and shows the bar. A tap focuses the row but is not focus-visible. */
   @media (hover: hover) { .swipe:hover .bar { opacity: 1; pointer-events: auto; } }
   .post:has(:focus-visible) .bar { opacity: 1; pointer-events: auto; }
-  .bar button { all: unset; display: grid; place-items: center; width: 28px; height: 24px; border-radius: 4px; color: var(--muted); cursor: pointer; }
-  .bar button:hover { background: var(--selected); color: var(--text); }
+  .bar button { all: unset; display: grid; place-items: center; width: 30px; height: 28px; border-radius: 6px; color: var(--text); opacity: .8; cursor: pointer; }
+  .bar button:hover { background: var(--selected); opacity: 1; }
   .bar button:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
   /* The touch sheet: full width at the bottom, 44 px rows, closed by a tap outside or Esc. */
   .sheet { position: fixed; inset: auto 0 0; margin: 0; width: 100%; max-width: none; padding: 8px 8px max(8px, env(safe-area-inset-bottom)); border: 0;
