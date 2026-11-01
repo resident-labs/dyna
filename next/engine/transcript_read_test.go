@@ -178,6 +178,14 @@ func TestTranscriptTurnPageAndFullOutput(t *testing.T) {
 	}
 	finalFound, unclaimedFound, toolCount := false, false, 0
 	for _, item := range page.Turns[0].Items {
+		if item.Kind == contract.TranscriptPost && (item.From == nil || *item.From != caller) {
+			t.Fatalf("standalone post author: %+v", item.From)
+		}
+		for _, post := range item.Posts {
+			if post.From == nil || *post.From != caller {
+				t.Fatalf("nested post author: %+v", post.From)
+			}
+		}
 		if item.Text == "final answer" {
 			finalFound = true
 		}
@@ -191,7 +199,7 @@ func TestTranscriptTurnPageAndFullOutput(t *testing.T) {
 	if !finalFound || !unclaimedFound || toolCount != 32 {
 		t.Fatalf("final=%v unclaimed=%v tools=%d", finalFound, unclaimedFound, toolCount)
 	}
-	zero, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: caller.Session, Turn: "turn_a", OlderItems: true})
+	zero, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: caller.Session, Turn: "turn_a", Page: contract.TranscriptPageOlderItems})
 	if problem != nil || len(zero.Turns[0].Inputs) != 0 || len(zero.Turns[0].Items) == 0 {
 		t.Fatalf("zero-index continuation=%+v error=%v", zero, problem)
 	}
@@ -218,7 +226,7 @@ func TestTranscriptTurnPageAndFullOutput(t *testing.T) {
 	if problem != nil || len(wire) > 180<<10 || !budgeted.Turns[0].OlderItems || !lastFound {
 		t.Fatalf("budgeted bytes=%d older=%v last=%v error=%v", len(wire), budgeted.Turns[0].OlderItems, lastFound, problem)
 	}
-	more, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: caller.Session, Turn: "turn_a", OlderItems: true, ItemIndex: budgeted.Turns[0].NextItem})
+	more, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: caller.Session, Turn: "turn_a", Page: contract.TranscriptPageOlderItems, Cursor: budgeted.Turns[0].NextItem})
 	if problem != nil || len(more.Turns[0].Items) == 0 || (more.Turns[0].OlderItems && more.Turns[0].NextItem <= budgeted.Turns[0].NextItem) {
 		t.Fatalf("continuation did not advance: error=%v", problem)
 	}
@@ -253,7 +261,7 @@ func TestTranscriptTurnPageAndFullOutput(t *testing.T) {
 		if pages >= 32 {
 			t.Fatal("mandatory post continuation did not advance")
 		}
-		next, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: caller.Session, Turn: "turn_a", MandatoryPosts: true, MandatoryPost: cursor.NextMandatoryPost})
+		next, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: caller.Session, Turn: "turn_a", Page: contract.TranscriptPageMandatoryPosts, Cursor: cursor.NextMandatoryPost})
 		if problem != nil {
 			t.Fatal(problem)
 		}
@@ -281,7 +289,7 @@ func TestTranscriptTurnPageAndFullOutput(t *testing.T) {
 	if problem != nil || !bounded.Turns[0].MandatoryItems || !pinned {
 		t.Fatalf("recent window pinned=%v error=%v", pinned, problem)
 	}
-	next, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: caller.Session, Turn: "turn_a", MandatoryItems: true, MandatoryIndex: bounded.Turns[0].NextMandatory})
+	next, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: caller.Session, Turn: "turn_a", Page: contract.TranscriptPageMandatoryItems, Cursor: bounded.Turns[0].NextMandatory})
 	if problem != nil || !next.Turns[0].MandatoryItems || next.Turns[0].NextMandatory <= bounded.Turns[0].NextMandatory {
 		t.Fatalf("item cursor did not advance: %v", problem)
 	}
@@ -387,5 +395,43 @@ func TestTranscriptInputAttachmentsAndBudget(t *testing.T) {
 	}
 	if count != len(ids) {
 		t.Fatalf("received %d of %d inputs", count, len(ids))
+	}
+}
+
+func TestTranscriptPostPreservesRecordedAuthor(t *testing.T) {
+	author := contract.Principal{Kind: contract.PrincipalSession, Session: "author"}
+	event := contract.Event{ID: "post", From: author, Body: contract.PostCreated{Text: "hello"}}
+	var item contract.TranscriptItem
+	applyTranscriptPost(&item, event)
+	data, err := json.Marshal(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		From *contract.Principal `json:"from"`
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.From == nil || *got.From != author {
+		t.Fatalf("post author = %+v, want %+v", got.From, author)
+	}
+}
+
+func TestTranscriptPageValidation(t *testing.T) {
+	s, ctx, caller := transcriptCaller(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	cases := []contract.TranscriptReadRequest{
+		{Session: caller.Session, Turn: "t", Page: "unknown"},
+		{Session: caller.Session, Turn: "t", Cursor: 1},
+		{Session: caller.Session, Page: contract.TranscriptPageOlderItems},
+		{Session: caller.Session, Turn: "t", Page: contract.TranscriptPageMandatoryItems, Item: "x"},
+		{Session: caller.Session, Turn: "t", Page: contract.TranscriptPageMandatoryPosts, AfterItem: "x"},
+		{Session: caller.Session, Turn: "t", Page: contract.TranscriptPageOlderItems, Cursor: -1},
+	}
+	for _, req := range cases {
+		if _, problem := s.TranscriptRead(ctx, owner, req); problem == nil || problem.Code != contract.ErrInvalid {
+			t.Errorf("request %+v: %v", req, problem)
+		}
 	}
 }

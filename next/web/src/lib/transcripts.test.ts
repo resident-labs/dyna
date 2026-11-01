@@ -8,7 +8,9 @@ test("Work tab marks the 200-step limit before following another cursor", async 
   const step: TranscriptStep = { turn: "t", tool: "read", label: "read", started: "2026-01-01T00:00:00Z", failed: false, preview: "" };
   const original = globalThis.fetch;
   let count = 0;
-  globalThis.fetch = async () => {
+  globalThis.fetch = async (_input, init) => {
+    if (count === 0) assert.doesNotMatch(String(init?.body), /"page":/);
+    if (count === 6) assert.match(String(init?.body), /"page":"older_items","cursor":6/);
     const size = Math.min(6, 200 - count);
     count += size;
     return Response.json({ steps: Array.from({ length: size }, () => step), turns: [{ more: true, nextItem: count, ...(count === 200 ? { after: "input:next" } : {}) }] });
