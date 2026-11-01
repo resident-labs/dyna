@@ -67,46 +67,6 @@ type Provider interface {
 	Search(ctx context.Context, q Query) ([]Result, error)
 }
 
-// Chain tries providers in order. It skips a provider that is not signed in
-// and returns the first answer. When every provider fails, the error names each
-// one with a short reason and carries no credential.
-type Chain []Provider
-
-// Search answers q from the first provider that can.
-//
-// Each provider may use only part of the caller's time, so a provider that
-// stalls still leaves the providers after it enough time to answer. Without a
-// caller deadline a provider is bounded by its own client timeout.
-func (c Chain) Search(ctx context.Context, q Query) ([]Result, error) {
-	if strings.TrimSpace(q.Text) == "" {
-		return nil, errors.New("a search query is required")
-	}
-	if len(c) == 0 {
-		return nil, errors.New("web search has no provider")
-	}
-	reasons := make([]string, 0, len(c))
-	for _, provider := range c {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		results, err := Attempt(ctx, provider, q)
-		if err == nil {
-			return results, nil
-		}
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			// The caller's own deadline is gone, so no provider after this one
-			// can answer either.
-			return nil, ctxErr
-		}
-		if errors.Is(err, ErrNotSignedIn) {
-			reasons = append(reasons, provider.Name()+" is not signed in")
-			continue
-		}
-		reasons = append(reasons, provider.Name()+" failed: "+SafeMessage(err))
-	}
-	return nil, errors.New("web search found no provider: " + strings.Join(reasons, "; "))
-}
-
 // Attempt gives one provider its share of the remaining request budget.
 func Attempt(ctx context.Context, provider Provider, q Query) ([]Result, error) {
 	attempt, cancel := attemptContext(ctx)
