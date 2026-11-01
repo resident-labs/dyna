@@ -444,6 +444,7 @@ export interface MachineLoad {
  * reference names when the registry has none.
  */
 export interface MachinePatch {
+  wakeCommand?: string[];
   name?: string;
   enabled?: boolean;
   allowHostChecks?: boolean;
