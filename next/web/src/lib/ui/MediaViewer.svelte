@@ -9,9 +9,9 @@
   import type { Point, Size, View } from "../zoom.ts";
   import type { MediaItem } from "../media.ts";
 
-  let { items, initial, name, root, room, names, loadVisual, onclose, onjump }: {
+  let { items, initial, name, root, room, loadVisual, onclose, onjump }: {
     items: MediaItem[]; initial: number; name: (session: string) => string;
-    root: (session?: string) => boolean; room: string; names: Map<string, string>; loadVisual: (item: MediaItem) => Promise<VisualVersion[]>; onclose: () => void; onjump: (key: string) => void;
+    root: (session?: string) => boolean; room: string; loadVisual: (item: MediaItem) => Promise<VisualVersion[]>; onclose: () => void; onjump: (key: string) => void;
   } = $props();
   let selected = $state(items[initial]), view = $state<View>(FIT), menu = $state(false);
   let dialog: HTMLDialogElement, stage: HTMLDivElement;
@@ -91,6 +91,7 @@
 
 <dialog bind:this={dialog} aria-label="Media viewer" onclose={onclose} onclick={e => { if (e.target === dialog) dialog.close(); }}>
   <header>
+    {@const original = item.file.visual ? undefined : src}
     <button class="round phone" aria-label="Close" onclick={() => dialog.close()}>×</button>
     {#snippet identity()}
       <Avatar kind={item.from.kind} name={author} root={root(item.from.session)} size={32} />
@@ -100,22 +101,24 @@
     {:else}<div class="sender">{@render identity()}</div>{/if}
     <button class="jump desktop" onclick={() => { onjump(item.key); dialog.close(); }}>Jump to post</button>
     <div class="spacer"></div>
-    {#if !item.file.visual && item.file.media.startsWith("image/")}
+    {#if !item.file.visual}
+    {#if item.file.media.startsWith("image/")}
       <div class="zoom desktop" role="group" aria-label="Image zoom">
         <button aria-label="Zoom out" onclick={() => zoom(1/1.5)}>−</button><button disabled={view.scale === 1} onclick={() => view = FIT}>Fit</button><button aria-label="Zoom in" onclick={() => zoom(1.5)}>+</button>
       </div>
     {/if}
-    {#if !item.file.visual}<a class="round" href={src} download={item.file.name} aria-label="Download" title="Download">↓</a>{/if}
-    {#if !item.file.visual}<a class="round desktop" href={src} target="_blank" rel="noopener" aria-label="Open original" title="Open original">↗</a>{/if}
+    <a class="round" href={src} download={item.file.name} aria-label="Download" title="Download">↓</a>
+    <a class="round desktop" href={src} target="_blank" rel="noopener" aria-label="Open original" title="Open original">↗</a>
+    {/if}
     <button class="round desktop" aria-label="Close" onclick={() => dialog.close()}>×</button>
     <div class="more phone"><button class="round" aria-label="More options" aria-expanded={menu} onclick={() => menu = !menu}>⋯</button>
-      {#if menu}<div class="menu">{#if !item.file.visual}<a href={src} target="_blank" rel="noopener">Open original</a>{/if}<button onclick={() => { onjump(item.key); dialog.close(); }}>Jump to post</button></div>{/if}
+      {#if menu}<div class="menu">{#if original}<a href={original} target="_blank" rel="noopener">Open original</a>{/if}<button onclick={() => { onjump(item.key); dialog.close(); }}>Jump to post</button></div>{/if}
     </div>
   </header>
   <div class="stage" bind:this={stage} use:wheel onpointerdown={down} onpointermove={drag} onpointerup={up} onpointercancel={up} onclick={e => { if (background && e.target === stage && moved < 8) dialog.close(); }} role="presentation">
     {#if item.file.visual}
       <div class="visual-stage">{#if visualFailed}<div class="visual-error">The card did not load. <button onclick={() => visualAttempt++}>Retry</button></div>
-      {:else if versions.length}{#key item.key + ":" + item.file.visual.version}<VisualCardMedia {versions} selected={item.file.visual.version} room={item.room ?? room} {names} send={async (text, event) => { await call("post", { room: item.room ?? room, text, visualReply: event }); }} />{/key}{/if}</div>
+      {:else if versions.length}{#key item.key + ":" + item.file.visual.version}<VisualCardMedia {versions} selected={item.file.visual.version} room={item.room ?? room} send={async (text, event) => { await call("post", { room: item.room ?? room, text, visualReply: event }); }} />{/key}{/if}</div>
     {:else if item.file.media.startsWith("video/")}
       {#key src}<video {src} controls preload="metadata" autoplay></video>{/key}
     {:else}
