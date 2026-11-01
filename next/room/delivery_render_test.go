@@ -22,6 +22,7 @@ func TestRenderDelivery(t *testing.T) {
 		{contract.OpRan{ID: "op_2", State: contract.OpFailed, Result: contract.OpResult{Error: "failed", Output: "details"}}, "Operation op_2: failed. failed\ndetails", false},
 		{contract.TurnEnded{Final: "done"}, "done", false},
 		{contract.TurnEnded{Outcome: contract.TurnFailed, Error: "bad"}, "turn failed: bad", false},
+		// LEGACY(v1-transfer): this case, a shell.job.ended event without End. Remove after the transfer.
 		{contract.ShellJobEnded{Job: "job", ExitCode: 3, Tail: "tail"}, "Background job job exited with code 3. Last output:\ntail", false},
 		{contract.HostDiskLow{Host: "h", FreeBytes: 149 << 30, FloorBytes: 100 << 30}, "Host h is low on disk: 149 GiB free, 100 GiB wanted. Close sessions that are done. At the floor, new boxes wait and the oldest stopped boxes close.", false},
 		{contract.OpRequested{}, "", true},

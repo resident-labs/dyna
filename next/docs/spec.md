@@ -193,6 +193,11 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `session_accounts` | the account the owner chose for a session; no row means Automatic |
 | `search_keys` |
 | `proxy_auths` |
+| `subscriptions` |
+| `subscription_events` |
+| `subscription_args` |
+| `subscription_files` |
+| `subscription_runs` | one row for each Run in progress, which is what stops a subscription overlapping itself |
 
 ### 4.3 Data on disk
 
@@ -616,6 +621,7 @@ A close withdraws its sessions' waiting questions in the transaction that starts
 A waiting question means the session is not finished. It keeps the session from dormant close, disk eviction and idle check-ins, and `dyna_children` says so to the parent. Its box may still stop while quiet.
 
 ## 8. Migration bundle and cutover
+<!-- LEGACY(v1-transfer): sections 8.1 to 8.3 and the import half of 8.4, the bundle and cutover plan. Remove after the transfer. -->
 
 ### 8.1 Bundle parts
 

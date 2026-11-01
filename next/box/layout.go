@@ -35,6 +35,7 @@ import (
 //	<HostData>/bin/<version>/dyna                   engine binaries, with a current link
 //	<HostData>/cache/                               dependency caches, which boxes share
 //	<HostData>/sock/<box>/engine.sock               a box's forwarded socket, gone with the box
+//	<HostData>/runs/<run>/                          a subscription Run's files, gone with the Run
 //
 // Box volumes are Podman's, so they are not here.
 type Layout struct{ Data, HostData string }
@@ -87,6 +88,7 @@ func (l Layout) V1Store() string { return filepath.Join(l.Data, "dyna.db") }
 // Backups is the folder of local store copies.
 func (l Layout) Backups() string { return filepath.Join(l.Data, "backups") }
 
+// LEGACY(v1-transfer): Archive and the <Data>/archive/ line above, the v1 archive folder. Remove after the transfer.
 // Archive is the read-only archive that the v1 cutover left.
 func (l Layout) Archive() string { return filepath.Join(l.Data, "archive") }
 
@@ -180,6 +182,11 @@ func (l Layout) HostSocketFolder(id contract.BoxID) string {
 // HostSocket is a box's forwarded socket on its host.
 func (l Layout) HostSocket(id contract.BoxID) string {
 	return filepath.Join(l.HostSocketFolder(id), EngineSocket)
+}
+
+// HostRun is the folder of one subscription Run's files.
+func (l Layout) HostRun(id contract.BoxID) string {
+	return filepath.Join(l.HostData, "runs", string(id))
 }
 
 // HostProbeSocket is the socket that host admission forwards to test forwarding.

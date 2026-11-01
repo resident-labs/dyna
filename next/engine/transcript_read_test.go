@@ -183,6 +183,7 @@ func TestTranscriptTurnPageAndFullOutput(t *testing.T) {
 	if _, ok := <-ownerLive; ok {
 		t.Fatal("full owner stream did not close for reconnect")
 	}
+	// LEGACY(v1-transfer): this part of the test, the backfill of files from before the turn index. Remove after the transfer.
 	// A file from before indexing must remain readable after backfill.
 	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "DELETE FROM transcript_turns WHERE session=?", caller.Session)

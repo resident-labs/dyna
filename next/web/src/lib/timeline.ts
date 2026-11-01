@@ -30,6 +30,12 @@ function eventInput(event: Event): TimelineInput | undefined {
     case "session.closed": return line(`Session ${event.body.session} closed`);
     case "host.disk_low": return line(`Host ${event.body.host} is low on disk`);
     case "op.decided": case "op.ran": return line(`Operation ${event.body.id}: ${event.body.state}`);
+    case "hook.due": return line(`Subscription ${event.body.subscription} is due`);
+    case "hook.finished": {
+      const { subscription, result, exitCode, cause } = event.body;
+      return { kind: result === "failed" ? "failed" : "line", text: `Subscription ${subscription} ${result}${cause ? `: ${causes[cause]}` : `, exit code ${exitCode}`}` };
+    }
+    case "notice.posted": return line(event.body.text);
   }
   return undefined;
 }

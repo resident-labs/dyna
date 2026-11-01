@@ -54,6 +54,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 	if reader.Steers, err = s.store.TranscriptSteers(ctx, req.Session); err != nil {
 		return response, failure(err)
 	}
+	// LEGACY(v1-transfer): this backfill, for transcript files from before the turn index. Remove after the transfer.
 	// Backfill pre-index files once, under the same lock as appends.
 	s.transcriptMu.Lock()
 	for _, f := range files {
