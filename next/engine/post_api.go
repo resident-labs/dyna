@@ -80,8 +80,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 					return contract.PostResponse{}, invalid("visual file not found")
 				}
 				if caller.Kind != contract.PrincipalOwner {
-					var ok bool
-					err := s.store.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM uploads WHERE sha256=?1 AND room=?2) OR EXISTS(SELECT 1 FROM event_files f JOIN events e ON e.seq=f.seq WHERE f.sha256=?1 AND e.room=?2)", ref, req.Room).Scan(&ok)
+					ok, err := s.store.FileInRoom(ctx, ref, req.Room)
 					if err != nil {
 						return contract.PostResponse{}, failure(err)
 					}
@@ -100,8 +99,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 			return contract.PostResponse{}, invalid("attachment not found")
 		}
 		if caller.Kind != contract.PrincipalOwner {
-			var ok bool
-			err = s.store.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM uploads WHERE sha256=?1 AND room=?2) OR EXISTS(SELECT 1 FROM event_files f JOIN events e ON e.seq=f.seq WHERE f.sha256=?1 AND e.room=?2)", file.SHA256, req.Room).Scan(&ok)
+			ok, err := s.store.FileInRoom(ctx, file.SHA256, req.Room)
 			if err != nil {
 				return contract.PostResponse{}, failure(err)
 			}
