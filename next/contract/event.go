@@ -135,6 +135,8 @@ type SessionStarted struct {
 
 type SessionRestarted struct {
 	Session SessionID `json:"session"`
+	// ImageUpdated marks a new container on the same volume, as opposed to a box restarted from nothing.
+	ImageUpdated bool `json:"imageUpdated,omitempty"`
 }
 
 type SessionMoved struct {
