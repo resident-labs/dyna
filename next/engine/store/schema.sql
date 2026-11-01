@@ -4,7 +4,7 @@ CREATE TABLE connect_attempt (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT
 CREATE TABLE connect_link_state (id INTEGER PRIMARY KEY CHECK(id=1), epoch INTEGER NOT NULL CHECK(epoch>=0), linked INTEGER NOT NULL CHECK(linked IN (0,1)), generation INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE connect_nonces (nonce TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
 CREATE TABLE rooms (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, cpus INTEGER NOT NULL, mem_bytes INTEGER NOT NULL, paused_at INTEGER, state TEXT NOT NULL DEFAULT 'open', reason TEXT NOT NULL DEFAULT '');
-CREATE TABLE repos (repo TEXT PRIMARY KEY, default_room TEXT NOT NULL REFERENCES rooms(id));
+CREATE TABLE repos (repo TEXT PRIMARY KEY, default_room TEXT NOT NULL REFERENCES rooms(id), main_head TEXT NOT NULL DEFAULT '');
 CREATE TABLE room_repos (room TEXT NOT NULL REFERENCES rooms(id), repo TEXT NOT NULL REFERENCES repos(repo), is_default INTEGER NOT NULL, PRIMARY KEY(room, repo));
 CREATE UNIQUE INDEX room_repos_default ON room_repos(room) WHERE is_default = 1;
 CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT NOT NULL REFERENCES rooms(id), name TEXT NOT NULL, parent TEXT REFERENCES sessions(id), profile TEXT NOT NULL, state TEXT NOT NULL, goal TEXT NOT NULL, created_at INTEGER NOT NULL, closed_at INTEGER, repo TEXT NOT NULL DEFAULT '', shell_jobs INTEGER NOT NULL DEFAULT 0, model_retry_at INTEGER NOT NULL DEFAULT 0, model_retries INTEGER NOT NULL DEFAULT 0, close_reason TEXT NOT NULL DEFAULT '', compose TEXT NOT NULL DEFAULT '');
