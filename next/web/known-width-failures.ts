@@ -25,6 +25,5 @@ export const knownWidthFailures: readonly WidthFailure[] = [
   { fixture: "empty", route: "/settings/profiles", width: 920, element: profileElement, text: emptyProfile },
   { fixture: "full", route: "/settings/profiles", width: 768, element: profileElement, text: fullProfile },
   { fixture: "full", route: "/settings/profiles", width: 920, element: profileElement, text: fullProfile },
-  { fixture: "full", route: "/settings/devices", width: 390, element: "span.line.svelte-11q8u0f", text: "Expires in 2 days · Seen 28 days ago · Read, operate" },
   { fixture: "full", route: "/r/:room", width: 768, element: "span.title.svelte-1cx619", text: "asks for host access", occurrences: 2 },
 ];
