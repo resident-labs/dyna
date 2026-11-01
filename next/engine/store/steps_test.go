@@ -217,6 +217,43 @@ func TestOpenRootsGetTheAskGrant(t *testing.T) {
 	}
 }
 
+// oldQuestions is what the step for meanwhile and blocked added to the questions table.
+const oldQuestions = ", meanwhile TEXT NOT NULL DEFAULT '', blocked INTEGER NOT NULL DEFAULT 0"
+
+func TestUpgradeLeavesOldQuestionsWithoutAPlan(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if !strings.Contains(schema, oldQuestions) {
+		t.Fatal("schema.sql lost the question columns")
+	}
+	if _, err = db.Exec(strings.Replace(schema, oldQuestions, "", 1)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`INSERT INTO meta(key,value) VALUES ('schema_version','63');
+		INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+		INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at) VALUES('root','r','root',NULL,'p','open','',1);
+		INSERT INTO questions(id,room,session,text,state,asked_at) VALUES('q_1','r','root','which?','pending',5)`); err != nil {
+		t.Fatal(err)
+	}
+	if err = upgrade(db, floorVersion, floorCommit, steps, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = compareSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	var text, state, meanwhile string
+	var blocked bool
+	if err = db.QueryRow("SELECT text,state,meanwhile,blocked FROM questions WHERE id='q_1'").Scan(&text, &state, &meanwhile, &blocked); err != nil {
+		t.Fatal(err)
+	}
+	if text != "which?" || state != "pending" || meanwhile != "" || blocked {
+		t.Fatalf("question: %q %q %q %v", text, state, meanwhile, blocked)
+	}
+}
+
 func TestUpgradeMakesStartGoalsReal(t *testing.T) {
 	dir := t.TempDir()
 	db, err := sql.Open("sqlite", filepath.Join(dir, "store.db"))
@@ -225,7 +262,7 @@ func TestUpgradeMakesStartGoalsReal(t *testing.T) {
 		if strings.HasPrefix(line, "CREATE TABLE goals ") || strings.HasPrefix(line, "CREATE INDEX goals_holder ") || strings.HasPrefix(line, "CREATE TABLE goal_items ") || strings.HasPrefix(line, "CREATE TABLE goal_journal ") || strings.HasPrefix(line, "CREATE TABLE checkins ") {
 			continue
 		}
-		old = append(old, line)
+		old = append(old, strings.Replace(line, oldQuestions, "", 1))
 	}
 	if _, err = db.Exec(strings.Join(old, "\n")); err != nil {
 		t.Fatal(err)

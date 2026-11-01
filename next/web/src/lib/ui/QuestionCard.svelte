@@ -1,5 +1,6 @@
 <script lang="ts">
   import { hue } from "../identity.ts";
+  import { questionPlan } from "../questions.ts";
   import type { Question } from "../contract.gen.ts";
   import Avatar from "./Avatar.svelte";
   import Markdown from "./Markdown.svelte";
@@ -12,6 +13,7 @@
   <article class="card">
     <p class="top"><Avatar kind="session" {name} {root} size={24} /><strong class:root style:--hue={hue(name)}>{name}</strong><span>asks</span></p>
     <div class="text"><Markdown rhythm="thread" text={question.text} /></div>
+    {#if question.meanwhile}<p class="why plan">{questionPlan(question)}</p>{/if}
     {#if operate}<QuestionAnswer id={question.id} {name} />{:else}<p class="why">Answer from a device that can post.</p>{/if}
   </article>
 {:else}
@@ -25,6 +27,7 @@
   strong.root { color: var(--text); }
   .text { min-width: 0; overflow-wrap: anywhere; }
   .why { color: var(--muted); font-size: 12.5px; }
+  .plan { min-width: 0; overflow-wrap: anywhere; }
   .decided { display: grid; padding: 8px 16px; color: var(--muted); font-size: 13px; }
   .line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @media (max-width: 640px) { .card { max-width: none; } }

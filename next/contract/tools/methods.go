@@ -101,7 +101,7 @@ var methodTable = []MethodEntry{
 		act("question", "answer", typ[contract.QuestionAnswerRequest](), "Answer a waiting question. The answer wakes the session that asked.", "question answer"),
 	),
 	method(contract.MethodQuestionAsk, contract.ScopeRead, BoxAccess,
-		act("question", "ask", typ[contract.QuestionAskRequest](), "Ask the owner a question. It needs the ask-owner grant. It does not end your turn: the answer arrives as your next input.", "question ask"),
+		act("question", "ask", typ[contract.QuestionAskRequest](), "Ask the owner a question. It needs the ask-owner grant. Asking does not stop your work: it does not end your turn, and the answer arrives as your next input. meanwhile is required: say what you do next while you wait, then do it. Set blocked only when nothing safe is left to do until the answer, and say why in meanwhile. Only blocked excuses you from check-ins.", "question ask"),
 	),
 	method(contract.MethodQuestionList, contract.ScopeRead, UserAccess,
 		act("question", "list", typ[contract.QuestionListRequest](), "List the room's waiting questions and its latest answered ones. Omit room for your own.", "question list"),

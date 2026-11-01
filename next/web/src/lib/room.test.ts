@@ -115,8 +115,9 @@ test("a question waits for the owner until it is answered or withdrawn, and mark
     const room = new RoomStore("r", () => () => {});
     await room.open();
     assert.deepEqual([room.waiting, room.status("s"), room.pendingQuestions("s").length, room.pendingQuestions("other").length], [1, "waiting", 1, 0]);
-    room.apply(event(11, { type: "question.asked", body: { id: "q2", session: "s", text: "And?" } }));
+    room.apply(event(11, { type: "question.asked", body: { id: "q2", session: "s", text: "And?", meanwhile: "The tests", blocked: true } }));
     assert.equal(room.waiting, 2);
+    assert.deepEqual([room.questions.get("q2")?.meanwhile, room.questions.get("q2")?.blocked], ["The tests", true]);
     room.apply(event(12, { type: "question.answered", body: { id: "q1", session: "s", question: "Which?", answer: "This" } }));
     assert.deepEqual([room.waiting, room.questions.get("q1")?.state, room.questions.get("q1")?.answer, room.questions.get("q1")?.asked], [1, "answered", "This", listed.asked]);
     room.apply(event(13, { type: "question.withdrawn", body: { id: "q2", session: "s" } }));

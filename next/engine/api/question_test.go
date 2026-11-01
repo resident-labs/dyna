@@ -59,7 +59,7 @@ func TestQuestionThroughTheAPI(t *testing.T) {
 	operator := a.handler(Caller{Principal: owner, Web: true, Scopes: []contract.Scope{contract.ScopeOperate}})
 	reader := a.handler(Caller{Principal: owner, Web: true, Scopes: []contract.Scope{contract.ScopeRead}})
 
-	refused := request(workerBox, "/v1/question.ask", `{"text":"may I?"}`)
+	refused := request(workerBox, "/v1/question.ask", `{"text":"may I?","meanwhile":"the next item"}`)
 	if refused.Code != http.StatusForbidden {
 		t.Fatalf("no grant: %d %s", refused.Code, refused.Body.String())
 	}
@@ -67,10 +67,13 @@ func TestQuestionThroughTheAPI(t *testing.T) {
 	if err := json.Unmarshal(refused.Body.Bytes(), &problemBody); err != nil || problemBody.Code != contract.ErrNoGrant {
 		t.Fatalf("no grant body: %s", refused.Body.String())
 	}
-	if got := request(operator, "/v1/question.ask", `{"text":"owner"}`); got.Code != http.StatusForbidden {
+	if got := request(operator, "/v1/question.ask", `{"text":"owner","meanwhile":"the next item"}`); got.Code != http.StatusForbidden {
 		t.Fatalf("owner asked: %d", got.Code)
 	}
-	asked := request(rootBox, "/v1/question.ask", `{"text":"Which database?"}`)
+	if got := request(rootBox, "/v1/question.ask", `{"text":"Which database?"}`); got.Code != http.StatusBadRequest {
+		t.Fatalf("no meanwhile: %d %s", got.Code, got.Body.String())
+	}
+	asked := request(rootBox, "/v1/question.ask", `{"text":"Which database?","meanwhile":"the schema-free tests"}`)
 	if asked.Code != http.StatusOK {
 		t.Fatalf("ask: %d %s", asked.Code, asked.Body.String())
 	}

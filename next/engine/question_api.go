@@ -24,6 +24,13 @@ func (s *Service) QuestionAsk(ctx context.Context, caller contract.Principal, re
 	if text == "" || utf8.RuneCountInString(text) > maxQuestionChars {
 		return contract.QuestionAskResponse{}, invalid("a question is 1 to 4000 characters")
 	}
+	meanwhile := strings.TrimSpace(req.Meanwhile)
+	if meanwhile == "" {
+		return contract.QuestionAskResponse{}, invalid("meanwhile is required: say what useful safe work you will do while you wait, or with blocked, why there is none")
+	}
+	if utf8.RuneCountInString(meanwhile) > maxQuestionChars {
+		return contract.QuestionAskResponse{}, invalid("meanwhile is at most 4000 characters")
+	}
 	session, err := s.store.Session(ctx, caller.Session)
 	if err != nil {
 		return contract.QuestionAskResponse{}, failure(err)
@@ -33,8 +40,8 @@ func (s *Service) QuestionAsk(ctx context.Context, caller contract.Principal, re
 	if err != nil {
 		return contract.QuestionAskResponse{}, failure(err)
 	}
-	question := contract.Question{ID: contract.QuestionID(value), Room: session.Room, Session: session.ID, Text: text, State: contract.QuestionStatePending, Asked: now}
-	event, err := s.event(session.Room, caller, contract.QuestionAsked{ID: question.ID, Session: session.ID, Text: text})
+	question := contract.Question{ID: contract.QuestionID(value), Room: session.Room, Session: session.ID, Text: text, Meanwhile: meanwhile, Blocked: req.Blocked, State: contract.QuestionStatePending, Asked: now}
+	event, err := s.event(session.Room, caller, contract.QuestionAsked{ID: question.ID, Session: session.ID, Text: text, Meanwhile: meanwhile, Blocked: req.Blocked})
 	if err != nil {
 		return contract.QuestionAskResponse{}, failure(err)
 	}
