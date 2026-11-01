@@ -3,6 +3,7 @@
   import ProfileMenu from "./ProfileMenu.svelte";
   import StatusPill from "./StatusPill.svelte";
   import { boxReason, count, fromNow, fullTime, waits } from "../feed.ts";
+  import { call } from "../client.ts";
   import { failed } from "../jobs.ts";
   import { watchShell, type ShellJob } from "../shell.ts";
   import type { RoomStore } from "../room.svelte.ts";
@@ -11,8 +12,8 @@
   // A row without a value does not show. Jobs opens the dock's list on this session, and stays while the box is ready so a
   // finished job can be reached. It counts the jobs the engine lists, as that list does, because session.list's count can
   // lag, and a job's shell.job.ended takes it off at once; until they load, or with none running, it reads Jobs.
-  let { store, room, session, switchable, navigate, onjobs }: {
-    store: RoomStore; room: string; session: string; switchable: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onjobs: (event: MouseEvent) => void;
+  let { store, room, session, switchable, navigate, onjobs, onclosed }: {
+    store: RoomStore; room: string; session: string; switchable: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onjobs: (event: MouseEvent) => void; onclosed: () => void;
   } = $props();
   const boxes: Record<BoxState, string> = {
     pending: "Starting", creating: "Starting", starting: "Starting", ready: "Ready", stopped: "Stopped",
@@ -36,6 +37,30 @@
   $effect(() => { const timer = setInterval(() => { now = Date.now(); }, 30_000); return () => clearInterval(timer); });
   let running = $derived([...listed.values()].filter(job => job.running && !store.endedJobs.has(`${session}/${job.job}`)).length);
   let failures = $derived([...listed.values()].filter(failed).length);
+  // Closing ends this session and every session under it. The engine archives their work first, deepest child first.
+  let descendants = $derived.by(() => {
+    const children = new Map<string, string[]>();
+    for (const child of store.sessions.values()) {
+      if (child.parent) children.set(child.parent, [...(children.get(child.parent) ?? []), child.session]);
+    }
+    const found = [...(children.get(session) ?? [])];
+    for (let i = 0; i < found.length; i++) found.push(...(children.get(found[i]) ?? []));
+    return found;
+  });
+  let archiveNote = $derived.by(() => {
+    if (!descendants.length) return "Its work is archived first.";
+    const names = descendants.map(id => store.names.get(id) ?? id);
+    const shown = names.slice(0, 2);
+    const rest = names.length - shown.length;
+    return `Also closes ${rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.join(" and ")}. Their work is archived first.`;
+  });
+  let closing = $state(false);
+  let closeFailed = $state(false);
+  function close(): void {
+    closing = true;
+    closeFailed = false;
+    void call("session.close", { session }).then(onclosed, () => { closing = false; closeFailed = true; });
+  }
 </script>
 
 <svelte:document onvisibilitychange={() => { visible = document.visibilityState === "visible"; }} />
@@ -51,6 +76,13 @@
     {#if open?.startedAt}<dt>Started</dt><dd class="muted"><time datetime={open.startedAt} title={fullTime(open.startedAt)}>{fromNow(open.startedAt, Math.max(now, Date.parse(open.startedAt)))}</time></dd>{/if}
     {#if open?.lastTurnAt}<dt>Last turn</dt><dd class="muted"><time datetime={open.lastTurnAt} title={fullTime(open.lastTurnAt)}>{fromNow(open.lastTurnAt, Math.max(now, Date.parse(open.lastTurnAt)))}</time></dd>{/if}
   </dl>
+  {#if open?.parent}
+    <div class="closebox">
+      <button type="button" class="close-button" disabled={closing} onclick={close}>Close session</button>
+      <p class="note muted">{archiveNote}</p>
+      {#if closeFailed}<span class="failed">The session did not close. Try again.</span>{/if}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -63,6 +95,11 @@
   .muted { color: var(--muted); }
   a, button { padding: 0; border: 0; border-radius: 4px; background: none; color: var(--focus); font: inherit; text-decoration: none; cursor: pointer; }
   .failed { display: block; color: var(--muted); font-size: 12.5px; }
+  .closebox { display: grid; gap: 8px; justify-items: start; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .note { margin: 0; font-size: 12.5px; line-height: 1.45; }
+  .close-button { height: 28px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); font-size: 13px; font-weight: 500; }
+  .close-button:hover { background: var(--hover); text-decoration: none; }
+  .close-button:disabled { background: none; color: var(--muted); cursor: default; text-decoration: none; }
   a:hover, button:hover { text-decoration: underline; }
   a:focus-visible, button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 </style>

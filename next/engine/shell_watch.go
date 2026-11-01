@@ -18,21 +18,16 @@ func (s *Service) ShellWatch(ctx context.Context, id contract.SessionID) (<-chan
 	if err != nil {
 		return nil, failure(err)
 	}
-	handle, ok := s.lockSession(id)
-	if !ok {
-		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+	handle, problem := s.createSession(ctx, id)
+	if problem != nil {
+		return nil, problem
 	}
-	defer handle.Unlock()
-	if b.State != contract.BoxReady || handle.Channel() == nil {
-		return nil, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
+	watch, problem := handle.WatchShell(b.State == contract.BoxReady)
+	if problem != nil {
+		return nil, problem
 	}
-	watch := handle.WatchShell()
 	go func() {
 		<-ctx.Done()
-		if !handle.Lock() {
-			return
-		}
-		defer handle.Unlock()
 		handle.RemoveShellWatch(watch)
 	}()
 	return watch.Events(), nil
@@ -42,11 +37,10 @@ func (s *Service) ShellOutput(_ context.Context, caller contract.Principal, req 
 	if caller.Kind != contract.PrincipalSession {
 		return contract.ShellOutputResponse{}, forbidden()
 	}
-	handle, ok := s.lookupSession(caller.Session)
+	handle, ok := s.live.LookupSession(caller.Session)
 	if !ok {
 		return contract.ShellOutputResponse{}, nil
 	}
-	defer handle.Unlock()
 	handle.ShellOutput(req.Generation, req.Jobs)
 	return contract.ShellOutputResponse{}, nil
 }
