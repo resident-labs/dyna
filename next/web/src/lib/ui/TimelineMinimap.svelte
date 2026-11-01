@@ -65,24 +65,28 @@
 {/if}
 
 <style>
-  .minimap { position: absolute; inset: 0 auto 0 max(0px, calc((100% - 784px) / 2 - 24px)); width: 72px; z-index: 10; pointer-events: none; }
+  /* The rail sits at the pane's left edge, as in T3 Code, so the gutter separates it from the reading column. */
+  .minimap { position: absolute; inset: 0 auto 0 0; width: 72px; z-index: 10; pointer-events: none; }
   .stack { position: absolute; top: 50%; left: 12px; transform: translateY(-50%); width: 32px; pointer-events: auto; }
   .rail { position: relative; min-height: 8px; }
-  .rail::before { content: ""; position: absolute; left: 12px; height: 100%; width: 1px; background: var(--line); }
+  .rail::before { content: ""; position: absolute; left: 12px; height: 100%; width: 1px; background: var(--line); opacity: .15; }
   button { color: var(--muted); border: 0; padding: 0; background: transparent; cursor: pointer; }
   button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .mark { position: absolute; left: 0; width: 32px; height: 8px; transform: translateY(-50%); display: flex; align-items: center; }
   .mark span { height: 2px; width: 8px; border-radius: 2px; background: currentColor; opacity: .35; transition: width 150ms, opacity 150ms; }
   .mark.visible span, .mark.current span { opacity: .8; }
   .mark.active span { width: 24px; opacity: 1; }
-  .step { display: flex; justify-content: center; width: 24px; height: 24px; opacity: .7; }
-  .step:hover { color: var(--text); opacity: 1; }
-  .step:disabled { opacity: .2; cursor: default; }
+  /* The steps float off the rail's ends and show only while the pointer or focus is on the rail. */
+  .step { position: absolute; left: 4px; display: flex; justify-content: center; width: 24px; height: 24px; opacity: 0; transform: translateX(-50%); transition: opacity 150ms; }
+  .previous { bottom: calc(100% + 2px); } .next { top: calc(100% + 2px); }
+  .stack:hover .step, .stack:focus-within .step { opacity: .7; }
+  .stack:hover .step:disabled, .stack:focus-within .step:disabled { opacity: .2; cursor: default; }
+  .stack .step:hover:enabled { color: var(--text); opacity: 1; }
   .previous :global(svg) { transform: rotate(180deg); }
   .preview { position: absolute; left: 32px; width: 320px; max-width: calc(100vw - 60px); transform: translateY(-50%); padding: 12px; border-radius: 12px; background: var(--raised); box-shadow: 0 8px 24px var(--shadow-lg); pointer-events: none; color: var(--text); font-size: 14px; line-height: 20px; }
   .preview.first { transform: none; } .preview.last { transform: translateY(-100%); }
   .preview strong { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .preview span { display: -webkit-box; margin-top: 4px; color: var(--muted); overflow: hidden; -webkit-line-clamp: 3; -webkit-box-orient: vertical; white-space: pre-wrap; overflow-wrap: anywhere; }
   @media (pointer: coarse) { .minimap { display: none; } }
-  @media (prefers-reduced-motion: reduce) { .mark span { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .mark span, .step { transition: none; } }
 </style>

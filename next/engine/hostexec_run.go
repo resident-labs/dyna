@@ -141,15 +141,6 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 		},
 	}
 }
-func (s *Service) HostexecRevoke(ctx context.Context, who contract.Principal, req contract.HostexecRevokeRequest) (contract.HostexecRevokeResponse, *contract.Error) {
-	if err := s.store.RevokeGrant(ctx, req.Grant, s.now()); err != nil {
-		return contract.HostexecRevokeResponse{}, failure(err)
-	}
-	if err := s.StopHostexecs(ctx); err != nil {
-		return contract.HostexecRevokeResponse{}, failure(err)
-	}
-	return contract.HostexecRevokeResponse{}, nil
-}
 func (s *Service) StopHostexecs(ctx context.Context) error {
 	runs, err := s.store.HostexecStops(ctx, s.now())
 	if err != nil {
@@ -166,4 +157,15 @@ func (s *Service) StopHostexecs(ctx context.Context) error {
 		}()
 	}
 	return nil
+}
+
+func (s *Service) HostexecList(ctx context.Context, who contract.Principal, _ contract.HostexecListRequest) (contract.HostexecListResponse, *contract.Error) {
+	if who.Kind != contract.PrincipalOwner {
+		return contract.HostexecListResponse{}, forbidden()
+	}
+	grants, err := s.store.ListHostexecGrants(ctx, s.now())
+	if err != nil {
+		return contract.HostexecListResponse{}, failure(err)
+	}
+	return contract.HostexecListResponse{Grants: grants}, nil
 }
