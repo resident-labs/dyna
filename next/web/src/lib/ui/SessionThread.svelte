@@ -29,6 +29,7 @@
   });
   onDestroy(() => store.leave(view));
   export async function send(request: PostRequest) { await view.post(request); }
+  export const empty = () => view.ready && !view.ordered.length;
   let turns: TranscriptTurn[] = $state([]);
   let pendingBrief = $derived(pendingStartBrief(startingBrief, turns));
   let expandedTurns: Record<string, boolean> = $state({});
