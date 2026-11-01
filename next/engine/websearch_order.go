@@ -13,12 +13,17 @@ func searchAccounts(accounts []store.AccountBinding, eligible []string, provider
 	ids := []string{}
 	best := -1.0
 	exhausted := false
+	failed := false
 	for _, binding := range accounts {
 		if binding.Account.Provider != provider || !slices.Contains(eligible, binding.ProxyID) {
 			continue
 		}
 		usage, ok := cached(binding.Account.ID)
 		if ok && usage.Cause == contract.UsageSignInExpired {
+			continue
+		}
+		if ok && usage.Cause == contract.UsageUnreachable {
+			failed = true
 			continue
 		}
 		worst := 0.0
@@ -41,6 +46,9 @@ func searchAccounts(accounts []store.AccountBinding, eligible []string, provider
 	}
 	if exhausted {
 		return nil, 0, contract.WebSearchNoQuota
+	}
+	if failed {
+		return nil, 0, contract.WebSearchFailed
 	}
 	return nil, 0, contract.WebSearchNotSignedIn
 }
