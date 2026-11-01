@@ -47,10 +47,6 @@ type prRig struct {
 
 var prOwner = contract.Principal{Kind: contract.PrincipalOwner}
 
-func sessionCaller(id contract.SessionID) contract.Principal {
-	return contract.Principal{Kind: contract.PrincipalSession, Session: id}
-}
-
 // connect makes a fresh client and poll, as an engine restart would.
 func (r *prRig) connect() {
 	client := &prs.Client{Token: fakegithub.Token, Endpoint: r.github.Endpoint(), Transport: http.DefaultTransport, Now: r.clock.Now}
@@ -625,17 +621,176 @@ func TestPollFailureBacksOffAndChangesNothing(t *testing.T) {
 	}
 }
 
-func TestUntrackStopsThePoll(t *testing.T) {
+func TestUntrackStopsThePollOfAnUnlistedRepository(t *testing.T) {
 	r := newPRRig(t)
-	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})
-	r.pass(t)
-	if _, e := r.s.PrUntrack(r.ctx, sessionCaller(r.child), contract.PrUntrackRequest{Number: 1}); e != nil {
+	r.github.Add(fakegithub.Pull{Repo: "upstream/repo", Number: 1, HeadRepo: "owner/repo"})
+	if _, e := r.s.PrTrack(r.ctx, sessionCaller(r.child), contract.PrTrackRequest{Repo: "upstream/repo", Number: 1}); e != nil {
 		t.Fatalf("%+v", e)
 	}
-	before, _, _ := r.github.Counts()
-	r.clock.add(time.Hour)
 	r.pass(t)
-	if after, _, _ := r.github.Counts(); after != before {
-		t.Fatal("polled a repository with nothing tracked")
+	if _, e := r.s.PrUntrack(r.ctx, sessionCaller(r.child), contract.PrUntrackRequest{Repo: "upstream/repo", Number: 1}); e != nil {
+		t.Fatalf("%+v", e)
+	}
+	r.clock.add(time.Hour)
+	before := len(r.github.QuerySizes())
+	r.pass(t)
+	// Only the room's own repository is left, and it asks for no PR.
+	sizes := r.github.QuerySizes()
+	if len(sizes) != before+1 || sizes[len(sizes)-1] != 0 {
+		t.Fatalf("queries %v", sizes)
+	}
+}
+
+// eventCount counts stored events of one type.
+func (r *prRig) eventCount(t *testing.T, kind string) int {
+	t.Helper()
+	var count int
+	if err := r.s.store.Read().QueryRow("SELECT count(*) FROM events WHERE type=?", kind).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+// deliveryCount counts deliveries of one event type to a session, by whether they wake it.
+func (r *prRig) deliveryCount(t *testing.T, kind string, to contract.SessionID, wake bool) int {
+	t.Helper()
+	var count int
+	if err := r.s.store.Read().QueryRow("SELECT count(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.type=? AND d.to_id=? AND d.wake=?", kind, to, wake).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+func (r *prRig) dispatch(t *testing.T) {
+	t.Helper()
+	if _, err := r.s.store.DispatchEvents(r.ctx, 1000); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOwnedPREventsAreEmittedOnceAndLeaveRootAlone(t *testing.T) {
+	r := newPRRig(t)
+	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})
+	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 2})
+	r.settle(t)
+	r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) { p.Rollup = "FAILURE" })
+	r.github.Edit("owner/repo", 2, func(p *fakegithub.Pull) { p.State = "CLOSED" })
+	r.pass(t)
+	r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) { p.State = "MERGED" })
+	r.clock.add(11 * time.Minute)
+	r.pass(t)
+	r.connect()
+	r.clock.add(11 * time.Minute)
+	r.pass(t)
+	r.dispatch(t)
+	for _, kind := range []string{"ci.finished", "pr.merged", "pr.closed"} {
+		if got := r.eventCount(t, kind); got != 1 {
+			t.Errorf("%d %s events", got, kind)
+		}
+		for _, to := range []contract.SessionID{r.root, r.child} {
+			if got := r.deliveryCount(t, kind, to, true) + r.deliveryCount(t, kind, to, false); got != 0 {
+				t.Errorf("%s reached %s %d times", kind, to, got)
+			}
+		}
+	}
+	// The owner hears only through pr.changed, once per pass with news.
+	if got := len(r.wakes(t, r.child)); got != 2 {
+		t.Fatalf("%d wakes", got)
+	}
+}
+
+func TestABaselineEmitsNoEvents(t *testing.T) {
+	r := newPRRig(t)
+	r.github.Add(fakegithub.Pull{Repo: "owner/repo", Number: 1, State: "OPEN", Rollup: "FAILURE"})
+	if _, e := r.s.PrTrack(r.ctx, sessionCaller(r.child), contract.PrTrackRequest{Number: 1}); e != nil {
+		t.Fatalf("%+v", e)
+	}
+	r.pass(t)
+	if got := r.eventCount(t, "ci.finished"); got != 0 {
+		t.Fatalf("%d events", got)
+	}
+}
+
+func TestASubscriberHearsAnOwnedPREvent(t *testing.T) {
+	r := newPRRig(t)
+	wake := sessionCaller(r.root)
+	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"pr.merged"}, Wake: &wake}); e != nil {
+		t.Fatalf("%+v", e)
+	}
+	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})
+	r.settle(t)
+	r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) { p.State = "MERGED" })
+	r.pass(t)
+	r.dispatch(t)
+	if got := r.deliveryCount(t, "pr.merged", r.root, true); got != 1 {
+		t.Fatalf("%d deliveries", got)
+	}
+}
+
+func TestMainMovesReachTheDefaultRoomsRootOnce(t *testing.T) {
+	r := newPRRig(t)
+	other, e := r.s.RoomCreate(r.ctx, prOwner, contract.RoomCreateRequest{Name: "other-room", RootProfile: "test"})
+	if e != nil {
+		t.Fatalf("%+v", e)
+	}
+	if err := r.s.store.AddRoomRepo(r.ctx, other.Room, "owner/repo", false); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := r.s.store.RoomTree(r.ctx, other.Room)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherRoot := tree.Root()
+	// No PR is tracked on this repository: a room listing it is enough.
+	r.github.SetMain("owner/repo", "main1")
+	r.pass(t)
+	if got := r.eventCount(t, "repo.main_updated"); got != 0 {
+		t.Fatalf("the first head read made %d events", got)
+	}
+	r.github.SetMain("owner/repo", "main2")
+	r.clock.add(11 * time.Minute)
+	r.pass(t)
+	r.dispatch(t)
+	if got := r.eventCount(t, "repo.main_updated"); got != 1 {
+		t.Fatalf("%d events", got)
+	}
+	if got := r.deliveryCount(t, "repo.main_updated", r.root, true); got != 1 {
+		t.Fatalf("the default room's root woke %d times", got)
+	}
+	if woke, quiet := r.deliveryCount(t, "repo.main_updated", otherRoot, true), r.deliveryCount(t, "repo.main_updated", otherRoot, false); woke != 0 || quiet != 1 {
+		t.Fatalf("the other room's root: %d wakes, %d quiet", woke, quiet)
+	}
+
+	// A restart repeats nothing, and a move while the engine was down is still told.
+	r.connect()
+	r.clock.add(11 * time.Minute)
+	r.pass(t)
+	r.dispatch(t)
+	if got := r.eventCount(t, "repo.main_updated"); got != 1 {
+		t.Fatalf("a restart repeated it: %d events", got)
+	}
+	r.github.SetMain("owner/repo", "main3")
+	r.connect()
+	r.clock.add(11 * time.Minute)
+	r.pass(t)
+	r.dispatch(t)
+	if got := r.deliveryCount(t, "repo.main_updated", r.root, true); got != 2 {
+		t.Fatalf("root woke %d times", got)
+	}
+}
+
+func TestAnUnlistedUpstreamsMainStaysQuiet(t *testing.T) {
+	r := newPRRig(t)
+	r.github.Add(fakegithub.Pull{Repo: "upstream/repo", Number: 1, HeadRepo: "owner/repo"})
+	if _, e := r.s.PrTrack(r.ctx, sessionCaller(r.child), contract.PrTrackRequest{Repo: "upstream/repo", Number: 1}); e != nil {
+		t.Fatalf("%+v", e)
+	}
+	r.github.SetMain("upstream/repo", "up1")
+	r.pass(t)
+	r.github.SetMain("upstream/repo", "up2")
+	r.clock.add(11 * time.Minute)
+	r.pass(t)
+	if got := r.eventCount(t, "repo.main_updated"); got != 0 {
+		t.Fatalf("%d events", got)
 	}
 }

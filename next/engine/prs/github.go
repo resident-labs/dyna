@@ -376,7 +376,11 @@ func (c *Client) Poll(ctx context.Context, repo contract.RepoName, numbers []int
 	for _, number := range numbers {
 		fmt.Fprintf(&fields, "pr%d:pullRequest(number:%d){...pull}\n", number, number)
 	}
-	query := "query($owner:String!,$name:String!){viewer{login} rateLimit{limit remaining resetAt} repository(owner:$owner,name:$name){defaultBranchRef{target{oid}}\n" + fields.String() + "}}\nfragment pull on PullRequest{" + pullFields + "}"
+	query := "query($owner:String!,$name:String!){viewer{login} rateLimit{limit remaining resetAt} repository(owner:$owner,name:$name){defaultBranchRef{target{oid}}\n" + fields.String() + "}}"
+	// GitHub refuses a fragment nothing uses, and a repository with no tracked PR asks only for its head.
+	if len(numbers) > 0 {
+		query += "\nfragment pull on PullRequest{" + pullFields + "}"
+	}
 	input, err := json.Marshal(map[string]any{"query": query, "variables": map[string]string{"owner": owner, "name": name}})
 	if err != nil {
 		return Snapshot{}, err

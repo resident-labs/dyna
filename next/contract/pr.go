@@ -142,6 +142,52 @@ type PrChanged struct {
 func (PrChanged) EventType() EventType { return "pr.changed" }
 func (PrChanged) isEventBody()         {}
 
+// PrMergedEvent, PrClosedEvent and CIFinished state what pr.changed already told the owner, for anyone else who subscribes.
+// They carry no delivery of their own, and their owner keeps the default subscription from waking root (spec 7.6).
+type PrMergedEvent struct {
+	Repo    RepoName  `json:"repo"`
+	Number  int       `json:"number"`
+	Session SessionID `json:"session"`
+	URL     string    `json:"url"`
+}
+
+type PrClosedEvent struct {
+	Repo    RepoName  `json:"repo"`
+	Number  int       `json:"number"`
+	Session SessionID `json:"session"`
+	URL     string    `json:"url"`
+}
+
+// CIFinished is one CI result on a PR's head. Result is success or failure.
+type CIFinished struct {
+	Repo    RepoName  `json:"repo"`
+	Number  int       `json:"number"`
+	Session SessionID `json:"session"`
+	URL     string    `json:"url"`
+	Head    string    `json:"head"`
+	Result  PrCI      `json:"result"`
+}
+
+// RepoMainUpdated says a repository's default branch moved. No session owns it.
+type RepoMainUpdated struct {
+	Repo RepoName `json:"repo"`
+	Head string   `json:"head"`
+}
+
+func (PrMergedEvent) EventType() EventType   { return "pr.merged" }
+func (PrMergedEvent) isEventBody()           {}
+func (PrClosedEvent) EventType() EventType   { return "pr.closed" }
+func (PrClosedEvent) isEventBody()           {}
+func (CIFinished) EventType() EventType      { return "ci.finished" }
+func (CIFinished) isEventBody()              {}
+func (RepoMainUpdated) EventType() EventType { return "repo.main_updated" }
+func (RepoMainUpdated) isEventBody()         {}
+
+func (e PrMergedEvent) OwnedBy() SessionID { return e.Session }
+func (e PrClosedEvent) OwnedBy() SessionID { return e.Session }
+func (e CIFinished) OwnedBy() SessionID    { return e.Session }
+func (RepoMainUpdated) OwnedBy() SessionID { return "" }
+
 // Waking reports whether any change needs the session's attention.
 func (b PrChanged) Waking() bool {
 	for _, change := range b.Changes {

@@ -75,6 +75,12 @@ func decodeEventBody(t EventType, data json.RawMessage) (EventBody, error) {
 			return nil, err
 		}
 		return v, nil
+	case "ci.finished":
+		var v CIFinished
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case "computer.changed":
 		var v ComputerChanged
 		if err := json.Unmarshal(data, &v); err != nil {
@@ -183,6 +189,18 @@ func decodeEventBody(t EventType, data json.RawMessage) (EventBody, error) {
 			return nil, err
 		}
 		return v, nil
+	case "pr.closed":
+		var v PrClosedEvent
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case "pr.merged":
+		var v PrMergedEvent
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case "pr.opened":
 		var v PrOpened
 		if err := json.Unmarshal(data, &v); err != nil {
@@ -203,6 +221,12 @@ func decodeEventBody(t EventType, data json.RawMessage) (EventBody, error) {
 		return v, nil
 	case "question.withdrawn":
 		var v QuestionWithdrawn
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case "repo.main_updated":
+		var v RepoMainUpdated
 		if err := json.Unmarshal(data, &v); err != nil {
 			return nil, err
 		}
@@ -374,7 +398,7 @@ func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs, error) {
 	}
 }
 
-var eventBodyTypes = []EventType{"account.failed", "account.quota_low", "box.changed", "box.pressure", "checkin.due", "computer.changed", "connect.connector", "conversation.read", "goal.ended", "goal.item_changed", "goal.set", "grant.expired", "hook.due", "hook.finished", "host.disk_low", "image.built", "image.failed", "notice.posted", "op.decided", "op.ran", "op.requested", "post.created", "pr.changed", "pr.opened", "question.answered", "question.asked", "question.withdrawn", "room.deleted", "room.deleting", "room.limits_changed", "room.paused", "room.resumed", "session.closed", "session.failed", "session.moved", "session.profile_changed", "session.restarted", "session.started", "shell.job.ended", "transcript.changed", "turn.activity", "turn.ended", "turn.started"}
+var eventBodyTypes = []EventType{"account.failed", "account.quota_low", "box.changed", "box.pressure", "checkin.due", "ci.finished", "computer.changed", "connect.connector", "conversation.read", "goal.ended", "goal.item_changed", "goal.set", "grant.expired", "hook.due", "hook.finished", "host.disk_low", "image.built", "image.failed", "notice.posted", "op.decided", "op.ran", "op.requested", "post.created", "pr.changed", "pr.closed", "pr.merged", "pr.opened", "question.answered", "question.asked", "question.withdrawn", "repo.main_updated", "room.deleted", "room.deleting", "room.limits_changed", "room.paused", "room.resumed", "session.closed", "session.failed", "session.moved", "session.profile_changed", "session.restarted", "session.started", "shell.job.ended", "transcript.changed", "turn.activity", "turn.ended", "turn.started"}
 
 func (m BoxMessage) MarshalJSON() ([]byte, error) {
 	if m.Body == nil {
