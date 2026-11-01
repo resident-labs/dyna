@@ -196,7 +196,7 @@ func fetchCmd() *cobra.Command {
 			if out, err := exec.CommandContext(c.Context(), "cp", cpArgs...).CombinedOutput(); err != nil {
 				return fmt.Errorf("copy the artifacts of job %s: %w: %s", job.ID, err, out)
 			}
-			_, err := fmt.Fprintf(c.OutOrStdout(), "copied the artifacts of job %s to %s\n", job.ID, to)
+			_, err = fmt.Fprintf(c.OutOrStdout(), "copied the artifacts of job %s to %s\n", job.ID, to)
 			return err
 		},
 	}
