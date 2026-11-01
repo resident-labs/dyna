@@ -12,11 +12,11 @@
   type JobSession = { id: string; name: string; root: boolean; running: number };
   let { store, session, attention, closed, phone, paused, panelShown, requestsOpen,
     jobsTool = $bindable(), roomMenu = $bindable(), requestsButton = $bindable(), toggle = $bindable(),
-    onopen, onpause, oninstructions, onnewsession, onrequests, onpanel, onterminal, oncomputer }: {
+    onopen, onpause, oninstructions, onrequests, onpanel, onterminal, oncomputer }: {
     store: RoomStore; session?: string; attention: Attention; closed: boolean;
     phone: boolean; paused: boolean; panelShown: boolean; requestsOpen: boolean;
     jobsTool?: JobsTool; roomMenu?: RoomMenu; requestsButton?: HTMLButtonElement; toggle?: HTMLButtonElement;
-    onopen: (session: JobSession, job: ShellJob) => void; onpause: () => void; oninstructions: () => void; onnewsession: () => void;
+    onopen: (session: JobSession, job: ShellJob) => void; onpause: () => void; oninstructions: () => void;
     onrequests: () => void; onpanel: (tapped: boolean) => void; onterminal?: () => void; oncomputer?: () => void;
   } = $props();
   let allSessions = $derived([...store.sessions.values()].filter(item => store.hadJobs.has(item.session) && store.boxes.get(item.session) === "ready")
@@ -36,7 +36,7 @@
     aria-label={waiting ? `${waiting} requests wait for you` : "Requests"} title="Requests" onclick={onrequests}>
     <Icon name="inbox" />{#if waiting}<StatusPill tone="warning" label="Waiting" count={waiting} />{/if}
   </button>
-  <RoomMenu bind:this={roomMenu} {paused} operate={attention.can("operate")} admin={attention.can("admin")} {onpause} {oninstructions} {onnewsession}
+  <RoomMenu bind:this={roomMenu} {phone} {paused} operate={attention.can("operate")} admin={attention.can("admin")} {onpause} {oninstructions}
     onrequests={phone ? onrequests : undefined} onjobs={phone ? () => void jobsTool?.show() : undefined}
     onterminal={phone && session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready" ? onterminal : undefined} oncomputer={phone && session && attention.can("computers") && store.computers.has(session) ? oncomputer : undefined} jobFailed={phone && failures.length > 0} waiting={phone ? waiting : 0} />
   <button type="button" class="panel-toggle" bind:this={toggle} aria-label={"Sessions" + (faces ? `, ${working} working` : "") + (store.counts.failed ? ", a session failed" : "")}
