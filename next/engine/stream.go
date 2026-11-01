@@ -135,20 +135,19 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 		stop()
 		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 	}
-	s.mu.Lock()
 	previous := handle.Channel()
 	var roomID contract.RoomID
 	var stopped bool
-	var computerWatchers []chan []byte
 	var shellWatchers []chan contract.ShellJobOutput
 	if previous != nil {
-		roomID, stopped, computerWatchers = s.clearComputerLocked(session.ID)
+		roomID, stopped = handle.ClearComputer()
+		s.mu.Lock()
 		shellWatchers = s.clearShellLocked(session.ID)
+		s.mu.Unlock()
 	}
 	channel := live.NewChannel(stop, ctx.Done())
 	handle.SetChannel(channel)
-	s.mu.Unlock()
-	previous.Close(computerWatchers, shellWatchers)
+	previous.Close(shellWatchers)
 	if stopped {
 		_ = s.computerEvent(context.Background(), session.ID, roomID, contract.ComputerStopped)
 	}
@@ -161,18 +160,17 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				stop()
 				return
 			}
-			s.mu.Lock()
 			var roomID contract.RoomID
 			var stopped bool
-			var computerWatchers []chan []byte
 			var shellWatchers []chan contract.ShellJobOutput
 			if handle.Channel() == channel {
 				handle.SetChannel(nil)
-				roomID, stopped, computerWatchers = s.clearComputerLocked(session.ID)
+				roomID, stopped = handle.ClearComputer()
+				s.mu.Lock()
 				shellWatchers = s.clearShellLocked(session.ID)
+				s.mu.Unlock()
 			}
-			s.mu.Unlock()
-			channel.Close(computerWatchers, shellWatchers)
+			channel.Close(shellWatchers)
 			if stopped {
 				_ = s.computerEvent(context.Background(), session.ID, roomID, contract.ComputerStopped)
 			}
@@ -209,15 +207,11 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			if !handle.Lock() {
 				return
 			}
-			s.mu.Lock()
 			if channel.TakeArchiveRetry() {
 				archiveSent = false
 			}
-			c := state.computer
-			var desired uint64
-			if c != nil && len(c.watchers) != 0 {
-				desired = c.generation
-			}
+			desired := handle.ComputerWatchGeneration()
+			s.mu.Lock()
 			var shellDesired uint64
 			if w := state.watch; w != nil && len(w.watchers) > 0 {
 				shellDesired = w.generation
