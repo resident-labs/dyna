@@ -662,11 +662,11 @@
         {#if session}<span class="session-spacer"></span>{/if}
         {#if session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title={terminals?.hasShell(session) ? "Show this session's terminal" : "Open a terminal in this session's box"} aria-pressed={terminals?.hasShell(session) ?? false} onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /></button>{/if}
         {#if session && attention.can("computers") && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /></button>{/if}
-        <HeaderActions {store} {session} sessions={toolSessions} allSessions={jobSessions} failures={toolFailures} phone={phone.current} {paused} panelShown={panelShown} requestsOpen={section === "requests"} operate={attention.can("operate")} admin={attention.can("admin")}
+        {#key session}<HeaderActions {store} {session} sessions={toolSessions} allSessions={jobSessions} failures={toolFailures} phone={phone.current} {paused} panelShown={panelShown} requestsOpen={section === "requests"} operate={attention.can("operate")} admin={attention.can("admin")}
           bind:jobsTool bind:roomMenu bind:requestsButton bind:toggle
           onopen={(item, job) => terminals?.openJob(item, job)} onpause={pause} oninstructions={openInstructions} onrequests={() => { section = section === "requests" ? undefined : "requests"; }} onpanel={tapped => void showPanel(!panelShown, tapped)}
           onterminal={session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready" ? () => terminals?.shell(session!, title, !store?.sessions.get(session!)?.parent) : undefined}
-          oncomputer={session && attention.can("computers") && store.computers.has(session) ? () => watch(session!) : undefined} />
+          oncomputer={session && attention.can("computers") && store.computers.has(session) ? () => watch(session!) : undefined} />{/key}
       {/if}</header>
     {#if routeNotice}<div class="route-notice"><Icon name="globe" size={18} /><span><strong>Moved to {routeNotice}</strong>{moveData.has("old") ? `: ${moveData.get("old")} stopped answering for 20 seconds.` : `, a nearer route to ${moveData.get("name") || "this machine"}. Same session, same room.`}</span><button type="button" aria-label="Dismiss route notice" onclick={() => { routeNotice = ""; sessionStorage.removeItem("dyna-connect-move"); }}>✕</button></div>{/if}
     {#if reloadPending}<p class="reload-notice" role="status">Dyna updated. Reload to use the new version. <button type="button" onclick={() => location.reload()}>Reload</button></p>{/if}
@@ -774,13 +774,10 @@
   .tool[aria-pressed="true"] { background: var(--selected); }
   /* The session's name gets the crumb's width: the rail or a phone's back arrow leads to the room. */
   @media (max-width: 760px) { .crumb, .crumb + .count { display: none; } }
-  @media (max-width: 760px) { main .tool { justify-content: center; width: 40px; height: 40px; padding: 0; border: 0; } .tool span { display: none; } }
+  @media (max-width: 760px) { main .tool { justify-content: center; width: 40px; height: 40px; padding: 0; border: 0; } }
   main { position: relative; }
   .terminal-holder:not([hidden]) { display: contents; }
   :where(main.header-tight) .tool { justify-content: center; width: 28px; padding: 0; }
-  :where(main.header-tight) .tool span { display: none; }
-  main.header-narrow .desktop-tabs { display: none; }
-  main.header-narrow .phone-tabs { display: flex; padding: 4px 12px; border-bottom: 1px solid var(--line); }
   /* One quiet line of the working line's size and edge; only its Resume acts. */
   .paused { flex: none; display: flex; gap: 6px; height: 20px; margin: 0 0 4px; padding: 0 16px 0 30px; color: var(--muted); font-size: 12.5px; line-height: 20px; white-space: nowrap; }
   .paused span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -795,7 +792,7 @@
   .visual-overlay .visual-pane { position:absolute; z-index:4; inset:0 0 0 64px; }
   @media (max-width:640px) { .shell.open.visual-overlay:has(.visual-pane) { grid-template-columns:minmax(0, 1fr); } .visual-overlay .visual-pane { left:0; } }
   .shell.tucked > aside.members { display: none; }
-  .narrow, .phone, .menu-toggle { display: none; }
+  .narrow, .menu-toggle { display: none; }
   @media (max-width: 760px) { .narrow { display: inline; } }
   .heading { display: contents; }
   /* The header has one line, and a failed session's word is a sentence, so the word gives way and the title stays whole. */
@@ -816,7 +813,6 @@
     .session-bar .tool { display: none; }
     .heading { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.25; }
     .heading .count { font-size: 12.5px; }
-    .phone { display: inline; }
     /* The header keeps its width for the room's name: the faces and the count already say who works. */
     .scrim { position: fixed; inset: 0; z-index: 2; padding: 0; border: 0; background: var(--scrim); }
   }
