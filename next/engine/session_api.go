@@ -269,5 +269,8 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 		}
 		return nil
 	})
+	if problem == nil {
+		s.sessionsMoved(ctx, []store.Session{target}, req.Profile)
+	}
 	return response, problem
 }

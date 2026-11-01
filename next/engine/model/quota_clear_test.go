@@ -15,6 +15,9 @@ func TestQuotaClearFencesInflightRead(t *testing.T) {
 			_, _ = w.Write([]byte(`{"credentials":[{"id":"invented","auth_index":"index","provider":"claude","state":"unknown"}]}`))
 			return
 		}
+		if r.URL.Path == "/v8/management/routing/status" {
+			return
+		}
 		close(started)
 		<-release
 		_, _ = w.Write([]byte(`{"files":[{"auth_index":"index","status_code":401}]}`))

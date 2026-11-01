@@ -185,6 +185,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `accounts` |
 | `account_rooms` |
 | `account_alerts` |
+| `session_accounts` | the account the owner chose for a session; no row means Automatic |
 | `search_keys` |
 | `proxy_auths` |
 
@@ -241,7 +242,7 @@ Optional `box-needs` requests `nested-containers` or `kvm`; unknown needs fail l
 
 A box records observed state and desired state separately. Observed states are `pending`, `creating`, `starting`, `ready`, `stopped`, `closing`, `deleted`, `failed` and `lost`; desired states are `run`, `stop`, `close` and `discard`. The reconciler commits observed changes with compare-and-set, emits `box.changed`, retries durable steps and resumes after engine restart. It admits in creation order, with at most one step per box and four per host.
 
-Starting a session inserts pending/run. A quiet box without a turn, shell job or wake stops, retains its volume and no longer counts for host CPU or memory. A waking delivery requests run transactionally and admission runs again. Dispatch requires ready/run. Creation retries before failure; hello has a 60-second deadline.
+Starting a session inserts pending/run. A quiet box without a turn, shell job or wake stops, retains its volume and no longer counts for host CPU or memory. A waking delivery requests run transactionally and admission runs again. Dispatch requires ready/run. Each start checks the image: a stopped box on an old image gets a new container with the same ID and volume, and the session is told once that anything outside `/box` is gone. A box whose current image cannot be built does not start, and fails like any box that cannot start. A running box keeps its image and its box agent until it next starts. Creation retries before failure; hello has a 60-second deadline.
 
 A disconnected box becomes lost; the engine inspects its container when the host is reachable. A running container waits for reconnection, an exited one becomes stopped, and a missing one fails. The first crash restarts immediately, the second waits, and the third without a completed turn fails. Pi exiting also exits the box agent. A resumed turn marks unfinished tool calls “interrupted; state unknown” and never reruns them.
 
@@ -288,7 +289,7 @@ Dependency caches are shared read-write per host; cross-box cache poisoning is a
 
 Each box receives only its own forwarded Unix socket. The engine derives session identity from that listener; no token is sent. The engine restores forwards after master failure, and the box agent retries and buffers output. Standing instructions mount read-only.
 
-Pi sends model calls to its loopback box agent with a placeholder key. The engine checks the profile, substitutes the CLIProxyAPI client key and streams through the proxy's Unix socket. Pi alone retries model calls. Failed turns retry pending inputs with bounded backoff; paused rooms wait for resume. Before M3 enables a second sign-in, account affinity must survive proxy restarts.
+Pi sends model calls to its loopback box agent with a placeholder key. The engine checks the profile, substitutes the CLIProxyAPI client key and streams through the proxy's Unix socket. Besides the profile's models it passes the models of the session's last two dispatched turns, so a session that changed profile can finish its running turn and compact on the model it left. The engine records those itself at dispatch, so a box cannot name one. Pi alone retries model calls. Failed turns retry pending inputs with bounded backoff; paused rooms wait for resume. Before M3 enables a second sign-in, account affinity must survive proxy restarts.
 
 CLIProxyAPI is a pinned vendored fork supervised as a separate child. Its patch ledger is `next/third_party/cliproxyapi/DYNA.md`. Strict cloak mode stays off. Claude sign-ins use cloaking, with the accepted account risk in decision 4. M1 stores proxy sign-ins in its protected file store; M3 moves them into its SQLite token store. Only the engine holds its management key. Shutdown drains admitted model calls before stopping the proxy.
 
@@ -299,6 +300,8 @@ From M2, git smart HTTP goes through the engine. Fetches cover room repositories
 The box agent runs Pi over RPC and the Dyna MCP server (7.9). M2 adds a secret-masking shell server and transcript stream. Shell jobs run locally in process groups; stopping a job kills its group. There is no `node=` option. M1 uses Pi's bash tool.
 
 Pi owns steer and follow-up queues. A delivery is done only when Pi's session file records its ID. Until `turn.output` commits, each reconnect resends `TurnStart` with all original inputs, including done deliveries, then unread later inputs as `TurnSteer` in sequence order. The runner skips IDs already in the session file. Identical turn-result retries do not duplicate events; conflicting results fail. Failed turns except `output_limit` return inputs to pending without waking, preserving reply channels. Pi controls compaction.
+
+A turn start applies the session's profile with Pi's `transfer_model`, on the first turn of each Pi process and whenever the model or compaction trigger changed. `box.hello` starts Pi on the current profile, so only this check finds a conversation that came from another model. Pi compacts on the model that last held the conversation when the context exceeds the target's limit, or when the model changes and the context is over 100,000 tokens, because the new model starts with a cold prompt cache. If compaction fails, a conversation that fits moves whole, and one that does not moves with a boundary that names the session file. The channel keeps reading during a transfer: steers wait in the runner until Pi accepts the prompt, and a stop cancels the compaction, leaves the model unchanged and returns the inputs to pending (`not_started`). Only a model Pi refuses fails the turn (`set_model_failed`). The box agent requires Pi fork level 13, which has `transfer_model`.
 
 The transcript stream sends offset-addressed chunks and resumes from the last acknowledgment. Replacement boxes retrieve acknowledged files when needed. `transcript.read` is owner-only and returns bounded tool steps. A quiet box stops after 10 minutes and uses the current host binary on wake.
 
@@ -329,6 +332,8 @@ Shell commands run in boxes. Node jobs are not ported; GitHub Actions runs CI on
 ### 5.12 Accounts page (M3)
 
 The owner manages accounts and room limits in the web app. The engine alone calls CLIProxyAPI's management API. Connect uses the proxy's OAuth or device flow; key entry passes the key to the proxy without displaying it again. The owner can add any OpenAI-compatible provider with a name, address and key, and the proxy reports each account's models, which is the list profiles choose from. Usage for every provider comes through the proxy's `auth-files/quota` readers without exposing model tokens to the engine. Typed `account.quota_low` and `account.failed` alerts are the only colored account chips. Account changes are owner-class.
+
+New work goes to the account whose quota expires first (`routing.strategy: soonest-reset`). Session affinity keeps a session on its account, so the order steers new sessions and failover. The proxy computes the order and publishes it, and `accounts.quota` marks each provider's next account active from that order, so Home and routing cannot disagree. The owner can choose an account for a session, by session and never through the box, on the session's About panel. A chosen account outranks affinity. When it cannot serve a request the request runs on Automatic and the row says so.
 
 ### 5.13 Web design
 
