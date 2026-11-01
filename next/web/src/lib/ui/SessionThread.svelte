@@ -26,6 +26,7 @@
   onDestroy(() => store.leave(view));
   export async function send(request: PostRequest) { await view.post(request); }
   let turns: TranscriptTurn[] = $state([]);
+  let expandedTurns: Record<string, boolean> = $state({});
   let before: string | undefined = $state();
   let now = $state(clock());
   $effect(() => {
@@ -142,13 +143,17 @@
         {#each turn.inputs ?? [] as input (input.id)}
           <div class="input"><div class="who"><Avatar kind={input.from.kind} name={sender(input.from.kind, input.from.session)} size={22} />{#if input.from.kind === "owner"}<strong>You</strong>{:else}<strong class:identity={input.from.kind === "session"} style:--hue={hue(sender(input.from.kind, input.from.session))}>{sender(input.from.kind, input.from.session)}</strong>{/if}{#if input.home}<span class="muted">{input.home.kind === "feed" ? `in ${roomName}` : input.home.session === session ? "in your DM" : "in a DM"}</span>{/if}<time datetime={input.at}>{formatTime(input.at)}</time></div><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{#if input.more && input.type === "post.created" && chunks["input:" + input.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Show all</button>{/if}</div>
         {/each}
-        <!-- Dyna: The T3 work header cannot fold message text because messages must stay visible. -->
-        {#if turn.ended && (turn.items ?? []).some(item => item.kind === "tool" || item.kind === "thinking")}<div class="work-header">Worked for {elapsed(turn.started, Date.parse(turn.ended))}</div>{/if}
+        <!-- Dyna: The work fold excludes message text and posts, which must remain visible. -->
+        {#if turn.ended && (turn.items ?? []).some(item => item.kind === "tool" || item.kind === "thinking")}
+          <button class="work-header" aria-expanded={!!expandedTurns[turn.id]} onclick={() => { expandedTurns[turn.id] = !expandedTurns[turn.id]; if (expandedTurns[turn.id] && turn.more) void moreItems(turn); }}>Worked for {elapsed(turn.started, Date.parse(turn.ended))}<span class:open={expandedTurns[turn.id]}><Icon name="chevron" size={14} /></span></button>
+        {/if}
         {#each deriveTimelineGroups(turn.items ?? []) as group (group.id)}
           {#if group.kind === "work"}
+            {#if !turn.ended || expandedTurns[turn.id]}
             <TranscriptWorkRow items={group.items} ended={!!turn.ended} started={turn.started} {now}
               onopen={() => { if (turn.more) void moreItems(turn); }}
               onload={async (item, part) => { await fetchPart(turn.id, item.id, part); const value = chunks[item.id + "/" + part]; if (value === undefined) throw new Error("Part did not load"); return value; }} />
+            {/if}
           {:else if group.kind === "posts"}
             {#each group.item.posts ?? [] as post (post.id)}
               {@render postItem(turn, post)}
@@ -193,7 +198,9 @@
   .input :global(.markdown) { margin: 4px 0 0; }
   .pending { opacity: 0.5; }
   .message { margin: 12px 0; }
-  .work-header { color: var(--muted); font-size: 14px; margin-top: 40px; padding: 8px 4px 12px; border-bottom: 1px solid var(--line); }
+  .work-header { display: flex; align-items: center; gap: 4px; width: 100%; color: var(--muted); font-size: 14px; margin-top: 40px; padding: 8px 4px 12px; border-bottom: 1px solid var(--line); }
+  .work-header span { display: inline-flex; transform: rotate(-90deg); }
+  .work-header span.open { transform: none; }
   .muted { color: var(--muted); }
   button { padding: 0; border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
   button:hover { color: var(--text); }

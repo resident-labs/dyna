@@ -78,7 +78,7 @@
 {#if items.length === 1}
   {@render entry(items[0])}
 {:else if items.length > 1}
-  <details class="group" ontoggle={(event) => { if (event.currentTarget.open) onopen(); }}>
+  <details class="group" open={!ended} ontoggle={(event) => { if (event.currentTarget.open) onopen(); }}>
     <summary><span class="slot"><TranscriptIcon kind="chevron" /></span><span>{summary}</span></summary>
     <div class="entries" role="region" aria-label="Work details">
       {#each items as item (item.id)}{@render entry(item)}{/each}
