@@ -123,7 +123,8 @@ func TestCompletionsProxyGate(t *testing.T) {
 	cfg.ForceModelPrefix = true
 	entry := config.OpenAICompatibility{Name: "fixture", Prefix: "fixture", BaseURL: upstream.URL + "/v1", DynaCatalogOnly: true, Headers: map[string]string{"X-Static": "fixed"}, Models: []config.OpenAICompatibilityModel{{Name: "same", Alias: "same"}, {Name: "redirect", Alias: "redirect"}, {Name: "plan_equal", Alias: "plan_equal"}}}
 	equal := config.OpenAICompatibility{Name: "equal", Prefix: "equal", BaseURL: upstream.URL + "/v1", DynaCatalogOnly: true, Models: []config.OpenAICompatibilityModel{{Name: "equal", Alias: "equal"}}}
-	cfg.OpenAICompatibility = []config.OpenAICompatibility{entry, equal}
+	kimi := config.OpenAICompatibility{Name: "kimi-coding", Prefix: "kimi-coding", BaseURL: upstream.URL + "/v1", DynaCatalogOnly: true, Models: []config.OpenAICompatibilityModel{{Name: "kimi-k3", Alias: "kimi-k3"}}}
+	cfg.OpenAICompatibility = []config.OpenAICompatibility{entry, equal, kimi}
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -174,13 +175,14 @@ func TestCompletionsProxyGate(t *testing.T) {
 	}
 	// Add and activate the key through the real management routes.
 	keyID := "dyna-key-00000000000000000000000000000001"
+	kimiKeyID := "dyna-key-00000000000000000000000000000002"
 	rpcServer := rpc.NewServer()
-	if err := rpcServer.RegisterName("Auth", &catalogAuthRPC{records: []engstore.ProxyAuth{{ID: keyID, Bound: true}}}); err != nil {
+	if err := rpcServer.RegisterName("Auth", &catalogAuthRPC{records: []engstore.ProxyAuth{{ID: keyID, Bound: true}, {ID: kimiKeyID, Bound: true}}}); err != nil {
 		t.Fatal(err)
 	}
 	serverConn, clientConn := net.Pipe()
 	go rpcServer.ServeConn(serverConn)
-	credentials := &proxyStore{client: rpc.NewClient(clientConn), catalog: []config.OpenAICompatibility{entry}}
+	credentials := &proxyStore{client: rpc.NewClient(clientConn), catalog: []config.OpenAICompatibility{entry, kimi}}
 	defer credentials.client.Close()
 	hash, err := bcrypt.GenerateFromPassword([]byte("management"), bcrypt.MinCost)
 	if err != nil {
@@ -200,6 +202,15 @@ func TestCompletionsProxyGate(t *testing.T) {
 	}
 	manage("/dyna/keys", `{"id":"`+keyID+`","provider":"fixture","key":"key-secret"}`)
 	manage("/dyna/credentials/activate", `{"id":"`+keyID+`","model":"fixture/same","prefix":"fixture"}`)
+	manage("/dyna/keys", `{"id":"`+kimiKeyID+`","provider":"kimi-coding","key":"kimi-key-secret"}`)
+	manage("/dyna/credentials/activate", `{"id":"`+kimiKeyID+`","model":"kimi-coding/kimi-k3","prefix":"kimi-coding"}`)
+	kimiPlan := &coreauth.Auth{ID: "kimi-plan", Provider: "kimi", Status: coreauth.StatusActive, Attributes: map[string]string{"base_url": upstream.URL}, Metadata: map[string]any{"access_token": "kimi-plan-secret"}}
+	if err := service.RegisterDynaCredential(ctx, kimiPlan); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ActivateDynaCredential(ctx, kimiPlan.ID, "plan_kimi-coding/kimi-k3", "plan_kimi-coding"); err != nil {
+		t.Fatal(err)
+	}
 	plan := &coreauth.Auth{ID: "real-plan", Provider: "claude", Status: coreauth.StatusActive, Attributes: map[string]string{"base_url": upstream.URL}, Metadata: map[string]any{"access_token": "sk-ant-oat-fixture", "account_uuid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}}
 	if err := service.RegisterDynaCredential(ctx, plan); err != nil {
 		t.Fatal(err)
@@ -236,7 +247,7 @@ func TestCompletionsProxyGate(t *testing.T) {
 		data, _ := io.ReadAll(response.Body)
 		return response.StatusCode, string(data)
 	}
-	for _, tc := range []struct{ model, key, bare string }{{"plan_one/same", "one-secret", "same"}, {"plan_two/same", "two-secret", "same"}, {"fixture/same", "key-secret", "same"}, {"equal/equal", "equal-secret", "equal"}, {"plan_equal/plan_equal", "plan-equal-secret", "plan_equal"}} {
+	for _, tc := range []struct{ model, key, bare string }{{"plan_one/same", "one-secret", "same"}, {"plan_two/same", "two-secret", "same"}, {"fixture/same", "key-secret", "same"}, {"plan_kimi-coding/kimi-k3", "kimi-plan-secret", "kimi-k3"}, {"kimi-coding/kimi-k3", "kimi-key-secret", "kimi-k3"}, {"equal/equal", "equal-secret", "equal"}, {"plan_equal/plan_equal", "plan-equal-secret", "plan_equal"}} {
 		status, data := call(tc.model)
 		if status != 200 || !strings.Contains(data, "hello") || gotPath != "/v1/chat/completions" || gotAuth != "Bearer "+tc.key || gotModel != tc.bare {
 			t.Fatalf("%s: status=%d body=%q path=%q auth=%q model=%q", tc.model, status, data, gotPath, gotAuth, gotModel)
