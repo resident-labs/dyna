@@ -172,7 +172,8 @@
   .older { padding: 8px 16px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
   .older button { color: var(--focus); }
   .stage { flex: 1; min-height: 0; display: flex; overflow: hidden; background: var(--bg); }
-  iframe { display:block; width:100%; height:100%; border:0; color-scheme:inherit; }
+  /* A dark inherited scheme makes Chromium paint the iframe canvas white. */
+  iframe { display:block; width:100%; height:100%; border:0; color-scheme:normal; }
   .failure { margin: auto; color: var(--muted); font-size: 13px; }
   .failure button { text-decoration: underline; }
   .confirm { flex: none; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--raised); }
