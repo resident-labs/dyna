@@ -215,7 +215,7 @@ jobs:
     name: go-test-shard (${{ matrix.shard }})
     needs: [changes]
     if: needs.changes.outputs.go == 'true'
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     # Go's own test timeout is 5 minutes. The runner slot hooks expect 30.
     timeout-minutes: 30
     strategy:

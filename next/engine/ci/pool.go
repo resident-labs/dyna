@@ -31,6 +31,8 @@ const (
 	serveWindow = 3 * time.Minute
 	reapEvery   = time.Hour
 	retryAfter  = 5 * time.Minute
+	// scaleLimit is one pass, and leaves room for the first image build on a host.
+	scaleLimit = 20 * time.Minute
 )
 
 // Driver is what the pool needs from one host.
@@ -349,6 +351,9 @@ func (p *Pool) scale(ctx context.Context, repo contract.RepoName, assigned int) 
 	if ctx.Err() != nil {
 		return 0
 	}
+	// The lock is held across SSH, so a host that hangs cannot stall the others for long.
+	ctx, cancel := context.WithTimeout(ctx, scaleLimit)
+	defer cancel()
 	view, err := p.survey(ctx)
 	if err != nil {
 		log.Printf("ci pool: %v", err)
