@@ -106,7 +106,7 @@ func (s *Session) ComputerWatchGeneration() uint64 {
 	return s.computer.generation
 }
 
-// ComputerStream captures the state associated with a frame stream.
+// ComputerStream captures frame stream state and reports whether a computer is attached.
 func (s *Session) ComputerStream() (ComputerStream, bool) {
 	if s.computer == nil {
 		return ComputerStream{}, false
