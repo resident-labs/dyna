@@ -149,7 +149,7 @@
             {:else if item.kind === "more"}
               <span class="icon"></span><span>{showAll(item.scope, item.total)}</span>
             {:else}
-              {@const author = item.post.author.kind === "owner" ? "You" : item.post.author.kind === "engine" ? "Dyna" : name(item.post.author.session)}
+              {@const author = item.post.author.kind === "owner" ? "you" : item.post.author.kind === "engine" ? "Dyna" : name(item.post.author.session)}
               <Avatar kind={item.post.author.kind} name={author} size={22} />
               <span class="body"><span class="excerpt">{#each marks(item.post.text, mode.query) as part}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</span>
                 <span class="meta"><strong style:--hue={hue(author)}>{author}</strong><span>in #{roomName(item.post.room)}</span><span>·</span><time>{stamp(item.post.time)}</time></span></span>
