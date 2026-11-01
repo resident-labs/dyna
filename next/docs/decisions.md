@@ -955,17 +955,16 @@ Drafted by dyna:node-shell. Host exec runs one command outside every box: on a c
 
 ### 6.1 Grants
 
-A host-exec grant names the hosts, the reason and the expiry. It permits any command on those hosts until expiry or revocation. There are no command rules or per-run approvals. If no active grant matches the host, the call fails with `no_grant`.
+A host-exec grant names the hosts and reason. It permits any command until the session closes (owner, 2026-10-31, msg_64eccb5e3dff2300). There are no command rules or per-run approvals. If no active grant matches the host, the call fails with `no_grant`.
 
 `hostexec.run` is class `auto`. Every run emits `op.ran` and records a `hostexec_runs` row. The `grants` table stores hosts as JSON.
 
-### 6.2 Default grant, owner grants, revoke and expiry
+### 6.2 Default grant, owner grants and session close
 
-- **Root's default grant** is made with the room: every host including the control plane, any command, no expiry (3.5). The owner can revoke it.
-- **Owner grants.** Only the owner grants host exec: `dyna hostexec grant` or the web card, as the operation `hostexec.grant` with class `owner`. A session requests the hosts, why it needs access, and for how long. The owner approves once. The default expiry is 24 hours. `--expires never` must be explicit.
-- **Revoke.** `dyna hostexec revoke <grant>`, by the owner. Pending runs fail their grant recheck. Running units are stopped with `systemctl --user stop`; `TimeoutStopSec=5` gives SIGTERM, then SIGKILL after 5 s. The engine retries stops on its 10 s tick to cover a launch racing revoke. A reachable unit receives the stop within 10 s, and systemd forces termination within another 5 s.
-- **Expiry** is checked at match time. A sweep marks expired grants and emits `grant.expired`. A running command is not stopped at expiry; only a revoke stops it.
-- The web app lists active grants with their expiry and a revoke button.
+- Root receives an all-hosts grant, including the control plane. Only the owner grants host exec.
+- A grant lasts until its session closes. It has no expiry or revoke control. A new non-root session needs a new grant; root receives its default grant as before (owner, 2026-10-31, msg_64eccb5e3dff2300).
+- Session close blocks new runs and stops running units. The engine retries stops to cover a launch racing close.
+- The web lists active grants.
 
 ### 6.3 Run path
 
@@ -978,11 +977,11 @@ A host-exec grant names the hosts, the reason and the expiry. It permits any com
 
 Every run emits `op.requested` (when it waits), `op.decided` (when someone decides), and `op.ran` with the exit code. No command runs without these events.
 
-Table: `hostexec_runs` (`op` PK, `grant`, `host`, `scope`, `started_at`, `timeout_ms`, `ended_at`, `output_bytes`, `stopped`), where `stopped` is empty, `timeout`, `revoked` or `lost`. A lost unit is stopped after its host reconnects. The exit code and output file stay on the operation.
+Table: `hostexec_runs` (`op` PK, `grant`, `host`, `scope`, `started_at`, `timeout_ms`, `ended_at`, `output_bytes`, `stopped`), where `stopped` is empty, `timeout`, `closed` or `lost`. A lost unit is stopped after its host reconnects. The exit code and output file stay on the operation.
 
 ### 6.4 Control-plane safety and accepted risks
 
-Host exec on the control plane runs as the owner and can use the owner socket. A control-plane grant gives full owner power (owner, 2026-10-31, msg_462f3f1d210856c2). Named scopes remain for timeouts, revocation and lost-run cleanup. The planned `show_pty` tool (`dyna show-pty`) requests a live terminal for the owner to see.
+Host exec on the control plane runs as the owner and can use the owner socket. A control-plane grant gives full owner power (owner, 2026-10-31, msg_462f3f1d210856c2). Named scopes remain for timeouts, session close and lost-run cleanup. The planned `show_pty` tool (`dyna show-pty`) requests a live terminal for the owner to see.
 
 Accepted risks (owner, 2026-10-30):
 
@@ -1031,7 +1030,7 @@ Root is the session with no parent. Four things replace the 89 root checks in 12
 | What | Form |
 |---|---|
 | Start, move, stop or close sessions | The tree: any session above another may do this. Root is above every session. |
-| Ask the owner; run host commands | The grants `ask-owner` and `hostexec`, made with the room (3.5). The owner can revoke them. |
+| Ask the owner; run host commands | The grants `ask-owner` and `hostexec`, made with the room (3.5). Host-exec grants end when the session closes. |
 | Engine notices and unowned repository events | A default room subscription that wakes root (8.5). |
 | Hold no goals | One rule: the session with no parent holds no goals. Goals that a close would hand to root stay with no holder (7.4). |
 
@@ -1657,11 +1656,11 @@ Acceptance:
 3. unit: an owner DM turn delivers its final response to `dm:<session>` and makes no delivery for the parent. A final response to a target that the turn already posted to is delivered quietly.
 4. unit: every box's `podman run` carries `--cgroup-parent` with its own top-level slice, and every placed box counts against its host and the room limit. One pass with more pending boxes than fit places only those that fit, by host and by room, and the rest wait, even when several are `creating` or `starting`.
 5. unit: a budget slice whose fake `memory.events` shows `high` throttling for 60 s emits one `box.pressure` and no delivery. A `stopped` box counts only its disk in admission, and a wake that does not fit goes to `pending` (fake host). Admission's 80% check reads real use, so page cache alone does not close it.
-6. unit: host-exec argv matching, mode precedence, the class from the matched grant, `no_grant`, revoke, expiry.
+6. unit: host-exec argv matching, mode precedence, the class from the matched grant, `no_grant` and session close.
 7. unit: every host-exec run emits its events in order: `op.requested` when it waits, then `op.decided` and `op.ran`.
 8. unit: after a reconnect, the transcript stream resends from the last acknowledged offset with no gap and no copy.
 9. manual: in the web app, the owner posts in a room, a boxed session answers, and the answer appears without a reload. An owner DM is answered in the DM. The owner approves a waiting operation in the approvals panel.
-10. manual: root runs `podman ps` on hermeslab through host exec. A child without a grant is refused. The owner grants it for one hour, it runs, and after a revoke it is refused again.
+10. manual: root runs `podman ps` on hermeslab through host exec. A child without a grant is refused. The owner grants it, it runs, and after session close its grant is inactive.
 11. manual: a lead and its child run on hermeslab; each has its own top-level slice; closing the lead closes the child first. A dormant session's box stops and starts again on a post.
 12. manual: killing a host's master during a turn does not end the turn, and the box returns to `ready` within 15 s.
 13. manual: an agent in a box serves a web page from inside the box, opens it in its computer, takes a screenshot to a file, and attaches it to a post; the owner watches the same page live on the session page.

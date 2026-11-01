@@ -8,7 +8,6 @@ import (
 	"github.com/resident-labs/dyna/engine/approve"
 	"strconv"
 	"strings"
-	"time"
 )
 
 func (s *Service) HostexecGrant() approve.Entry {
@@ -22,15 +21,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 		Card: func(ctx context.Context, args contract.OpArgs, who contract.Principal) contract.Card {
 			a := args.(contract.HostexecGrantArgs)
 			session, _ := s.store.Session(ctx, a.To.Session)
-			expiry := "for 24 hours"
-			if a.Never {
-				expiry = "without expiry"
-			} else if !a.Expires.IsZero() {
-				expiry = "for up to 1 hour"
-				if hours := (a.Expires.Sub(s.now()) + time.Hour - 1) / time.Hour; hours > 1 {
-					expiry = fmt.Sprintf("for up to %d hours", hours)
-				}
-			}
+
 			var hosts []string
 			warning, unknown := false, false
 			records, err := s.store.Hosts(ctx)
@@ -73,7 +64,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 			if who.Session != a.To.Session {
 				run = "Let " + session.Name + " run"
 			}
-			body := fmt.Sprintf("%s any command on %s %s.\nReason: %s", run, strings.Join(hosts, ", "), expiry, a.Reason)
+			body := fmt.Sprintf("%s any command on %s until the session closes.\nReason: %s", run, strings.Join(hosts, ", "), a.Reason)
 			if warning {
 				body += "\nThis host also runs the engine and holds the model sign-ins."
 			}
@@ -84,9 +75,6 @@ func (s *Service) HostexecGrant() approve.Entry {
 		},
 		Check: func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
 			a := args.(contract.HostexecGrantArgs)
-			if !a.Expires.IsZero() && !a.Expires.After(s.now()) {
-				return approve.ErrInvalid
-			}
 			target, err := s.store.Session(ctx, a.To.Session)
 			if err != nil || target.Room != a.Room {
 				return approve.ErrInvalid
@@ -105,11 +93,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 			if err != nil {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
 			}
-			expiry := a.Expires
-			if !a.Never && expiry.IsZero() {
-				expiry = now.Add(24 * time.Hour)
-			}
-			g := contract.Grant{ID: contract.GrantID(value), Kind: contract.GrantHostExec, Room: a.Room, To: a.To, Hosts: a.Hosts, Reason: a.Reason, Expires: expiry, By: contract.Principal{Kind: contract.PrincipalOwner}, Created: now}
+			g := contract.Grant{ID: contract.GrantID(value), Kind: contract.GrantHostExec, Room: a.Room, To: a.To, Hosts: a.Hosts, Reason: a.Reason, By: contract.Principal{Kind: contract.PrincipalOwner}, Created: now}
 			err = s.store.CreateGrant(ctx, g)
 			if err != nil {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
@@ -117,12 +101,6 @@ func (s *Service) HostexecGrant() approve.Entry {
 			return contract.OpResult{Output: value}
 		},
 	}
-}
-
-func (s *Service) ExpireHostexecGrants(ctx context.Context) error {
-	return s.store.ExpireGrants(ctx, s.now(), func(room contract.RoomID, grant contract.GrantID) (contract.Event, error) {
-		return s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.GrantExpired{Grant: grant})
-	})
 }
 
 func quoteHostexec(value string) string {
