@@ -34,7 +34,7 @@ func (r TranscriptReader) open(path string, start int64, end *int64) (*os.File, 
 }
 
 // Read decodes a bounded range from one acknowledged transcript file.
-func (r TranscriptReader) Read(path string, start int64, end *int64, deliveries map[contract.DeliverySeq]contract.TurnID, item string, skip, limit int) ([]contract.TranscriptItem, int, bool, error) {
+func (r TranscriptReader) Read(path string, start int64, end *int64, deliveries map[contract.DeliverySeq]contract.TurnID, item string, skip, limit int) ([]TranscriptItem, int, bool, error) {
 	file, section, err := r.open(path, start, end)
 	if err != nil || file == nil {
 		return nil, 0, false, err
@@ -43,12 +43,12 @@ func (r TranscriptReader) Read(path string, start int64, end *int64, deliveries 
 	return ReadTranscript(section, deliveries, path, item, skip, limit)
 }
 
-// HasPost checks a bounded range for an exact post result.
-func (r TranscriptReader) HasPost(path string, start int64, end *int64, id contract.EventID) (bool, error) {
+// FindCalls marks candidate IDs found in a bounded range.
+func (r TranscriptReader) FindCalls(path string, start int64, end *int64, ids map[string]bool) error {
 	file, section, err := r.open(path, start, end)
 	if err != nil || file == nil {
-		return false, err
+		return err
 	}
 	defer file.Close()
-	return TranscriptHasPost(section, id)
+	return TranscriptFindCalls(section, ids)
 }
