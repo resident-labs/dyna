@@ -223,7 +223,7 @@ type SessionSummary struct {
 	Host        HostName      `json:"host,omitempty"` // the machine holding the live box; empty before placement and once the box is deleted
 	Computer    ComputerState `json:"computer"`
 	Goal        string        `json:"goal"`
-	Turn        TurnID        `json:"turn,omitempty"`        // the running turn
+	Turn        TurnID        `json:"turn,omitempty"`        // the running turn; a failed or lost box runs none, whatever it left open
 	Activity    string        `json:"activity,omitempty"`    // the running turn's latest TurnActivity label
 	LastOutcome TurnOutcome   `json:"lastOutcome,omitempty"` // of the last ended turn that was not stopped; a stopped turn neither fails nor succeeds
 	ShellJobs   int           `json:"shellJobs,omitempty"`   // TurnEnded.ShellJobs of the last ended turn
@@ -417,6 +417,7 @@ type SessionStartRequest struct {
 	Repo     RepoName    `json:"repo,omitempty"`
 	Profile  ProfileName `json:"profile"`
 	Goal     string      `json:"goal,omitempty"`
+	DoneWhen string      `json:"doneWhen,omitempty"`
 	Brief    string      `json:"brief,omitempty"`
 	Size     BoxSizeName `json:"size,omitempty"`
 	SameHost bool        `json:"sameHost,omitempty"`

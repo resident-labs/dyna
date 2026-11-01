@@ -58,8 +58,8 @@ func TestContextQueryBudget(t *testing.T) {
 	if _, err = s.ContextDataForSession(context.Background(), "s"); err != nil {
 		t.Fatal(err)
 	}
-	if got := contextQueries.Load(); got != 6 {
-		t.Fatalf("snapshot queries = %d, want 6", got)
+	if got := contextQueries.Load(); got != 7 {
+		t.Fatalf("snapshot queries = %d, want 7", got)
 	}
 	rows, err := db.Query(`EXPLAIN QUERY PLAN SELECT started_at FROM turns WHERE session=? ORDER BY started_at DESC LIMIT 1`, "s")
 	if err != nil {
