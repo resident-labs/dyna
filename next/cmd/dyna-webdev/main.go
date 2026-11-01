@@ -625,3 +625,7 @@ body{font:15px system-ui;margin:0;padding:24px;color:#e8e9eb;background:#0d0f13}
 		post(contract.Principal{Kind: contract.PrincipalSession, Session: []contract.SessionID{lead.Session, child.Session}[i%2]}, contract.PostRequest{Text: text}) // session posts wake no turns
 	}
 }
+
+func (devService) AccountsImportOAuth(context.Context, contract.Principal, contract.AccountsImportOAuthRequest) (contract.AccountsImportOAuthResponse, *contract.Error) {
+	return contract.AccountsImportOAuthResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable in webdev"}
+}
