@@ -2,7 +2,6 @@
   import { untrack } from "svelte";
   import { SvelteMap } from "svelte/reactivity";
   import Icon from "./Icon.svelte";
-  import Avatar from "./Avatar.svelte";
   import StepList from "./StepList.svelte";
   import { commandLine, describe, eventGroups, formatTime, subject, timeSpan, workSummary, type Row } from "../feed.ts";
   import type { Event } from "../contract.gen.ts";
@@ -14,7 +13,6 @@
   } = $props();
   const clock = (at: string) => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   let open = $derived(opened.has(row.key));
-  let sessions = $derived([...new Set(row.events.map(subject).filter((session): session is string => !!session))]);
   let read = $derived(transcripts?.of(row.events));
   let saved = $derived(typeof read === "object" ? read : undefined);
   let steps = $derived(saved?.steps ?? []);
@@ -67,7 +65,6 @@
   <span class="glyph" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 3 8l9 5 9-5zM3 13l9 5 9-5" /></svg></span>
   <div class="body">
     <button type="button" class="fold" aria-expanded={open} onclick={() => ontoggle(row.key)}>
-      {#if sessions.length}<span class="faces">{#each sessions.slice(0, 4) as session (session)}<Avatar kind="session" name={name(session)} size={22} />{/each}{#if sessions.length > 4}<span class="extra">+{sessions.length - 4}</span>{/if}</span>{/if}
       <span class="summary">{workSummary(row.events, name, row.until, steps[0]?.started)} <time datetime={row.events[0].at}>{row.events.length > 1 || row.until ? timeSpan(row.events[0].at, row.until ?? row.events.at(-1)?.at ?? row.events[0].at) : clock(row.events[0].at)}</time></span>
       <span class="chevron" class:open><Icon name="chevron" size={14} /></span>
     </button>
@@ -94,15 +91,13 @@
 </div>
 
 <style>
-  .work { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 7px 16px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .work { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 16px; padding: 7px 16px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
   .glyph { display: flex; justify-content: center; padding-top: 5px; }
+  @media (max-width: 640px) { .work { gap: 8px; } }
   .body { min-width: 0; }
   .fold { all: unset; display: flex; align-items: flex-start; gap: 8px; width: 100%; min-height: 24px; cursor: pointer; border-radius: 6px; }
   .fold:hover, .retry:hover { color: var(--text); }
   .fold:focus-visible, .retry:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-  .faces { display: inline-flex; flex: none; padding-right: 4px; }
-  .faces :global(.avatar + .avatar) { margin-left: -5px; }
-  .extra { margin-left: 4px; }
   .summary { flex: 1; min-width: 0; padding-top: 3px; overflow-wrap: anywhere; }
   time { color: var(--muted); opacity: .8; white-space: nowrap; }
   .summary time { margin-left: 8px; }

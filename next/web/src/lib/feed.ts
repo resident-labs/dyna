@@ -143,7 +143,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     const firstAt = work[0]?.at ?? (deferred[0]?.kind === "notice" ? deferred[0].event.at : deferred[0]?.kind === "failed" || deferred[0]?.kind === "request" || deferred[0]?.kind === "restarted" ? deferred[0].at : undefined);
     if (firstAt && new Date(firstAt).toDateString() !== new Date(event.at).toDateString()) flush();
     if (event.type === "post.created") {
-      for (const turn of turns.values()) if (turn.start.type === "turn.started" && turn.start.body.session === event.from.session) turn.posted = true;
+      for (const turn of turns.values()) if (sameHome(event.body.home, home) && turn.start.type === "turn.started" && turn.start.body.session === event.from.session) turn.posted = true;
       if (sameHome(event.body.home, home)) post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, event.body.attachments ?? [], event.body.mentions ?? []);
       continue;
     }
