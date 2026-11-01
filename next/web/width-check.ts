@@ -2,10 +2,15 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 // This pinned client lives in v1 browserdeps. Move it when v1 is removed.
-import playwright from "../../internal/cli/computer/browserdeps/node_modules/playwright-core/index.js";
+import playwright, { type Page } from "../../internal/cli/computer/browserdeps/node_modules/playwright-core/index.js";
 const { chromium } = playwright;
 import { roomRoute, settingsPanes, settingsRoute } from "./src/lib/routes.ts";
 import { knownWidthFailures, matchKnownFailure, staleWidthFailures } from "./known-width-failures.ts";
+
+async function ready(page: Page) {
+  await page.locator('[data-app-ready="true"]').waitFor();
+  await page.waitForFunction(() => !document.querySelector('[data-page-ready="false"]'));
+}
 
 const widths = [1280, 920, 768, 390];
 const fixtures = ["full", "empty"] as const;
@@ -27,16 +32,13 @@ try {
     const context = await browser.newContext();
     const login = await context.newPage();
     await login.goto(logins[index]);
-    await login.locator('[data-app-ready="true"]').waitFor();
+    await ready(login);
     const origin = new URL(login.url()).origin;
     const rooms = await login.locator('nav[aria-label="Rooms"] a[href^="/r/"]').evaluateAll(links => links.map(link => link.getAttribute("href")).filter((href): href is string => href !== null));
     const routes = new Set(["/", ...rooms, "/settings", ...settingsPanes.map(pane => `/settings/${pane.id}`)]);
     for (const route of routes) {
       await login.goto(origin + route);
-      await login.locator('[data-app-ready="true"]').waitFor();
-      if (route === "/") await login.locator('.home[data-page-ready="true"]').waitFor();
-      else if (route === "/settings/devices" || route.startsWith("/settings/accounts") || route === "/settings/profiles")
-        await login.locator('section.settings [data-page-ready="true"]').waitFor();
+      await ready(login);
       for (const href of await login.locator('a[href^="/"]').evaluateAll(links => links.map(link => link.getAttribute("href")).filter((href): href is string => href !== null))) {
         if (roomRoute.test(href) || settingsRoute.test(href)) routes.add(href);
       }
@@ -51,18 +53,13 @@ try {
         const page = await context.newPage();
         await page.setViewportSize({ width, height: 900 });
         try {
-          // Chromium can report a network change during concurrent local navigations. Retry that transient error once.
+          // Chromium on hermeslab reported ERR_NETWORK_CHANGED during concurrent local navigations. Retry it once.
           await page.goto(origin + route, { waitUntil: "domcontentloaded" }).catch((error: unknown) => {
             if (error instanceof Error && error.message.includes("net::ERR_NETWORK_CHANGED")) return page.goto(origin + route, { waitUntil: "domcontentloaded" });
             throw error;
           });
-          await page.locator('[data-app-ready="true"]').waitFor();
-          if (route === "/") await page.locator('.home[data-page-ready="true"]').waitFor();
-          else if (route === "/settings/devices" || route.startsWith("/settings/accounts") || route === "/settings/profiles")
-            await page.locator('section.settings [data-page-ready="true"]').waitFor();
+          await ready(page);
           await page.evaluate(() => document.fonts.ready);
-          if (process.env.DYNA_WIDTH_SHOTS && route === "/settings/profiles" && width === 920)
-            await page.screenshot({ path: `${process.env.DYNA_WIDTH_SHOTS}/${fixture}-profiles-920.png` });
           const issues = await page.evaluate(() => {
             const found: { element: string; text: string }[] = [];
             if (document.documentElement.scrollWidth > document.documentElement.clientWidth) found.push({ element: "document", text: "" });
