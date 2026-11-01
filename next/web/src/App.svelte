@@ -545,6 +545,8 @@
     const open = session, current = store;
     if (open && current?.ready) untrack(() => { if (current.unseen(open)) current.see({ kind: "dm", session: open }, current.failed.get(open) ?? 0); });
   });
+  // The tab names the page only. Counts stay out: a count in the title would act as an unread badge (spec 5.13).
+  $effect(() => { document.title = lost || !room ? "Dyna" : `${title} · Dyna`; });
 </script>
 
 
