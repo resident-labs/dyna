@@ -1,7 +1,6 @@
 package websearch
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -63,9 +62,6 @@ type claudeBody struct {
 	Stream bool `json:"stream"`
 }
 
-// tokenFunc is one saved Claude sign-in for a test.
-type tokenFunc func(context.Context) (string, error)
-
 const claudeSearchAnswer = `{"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{}}}`
 
 func TestClaudeForcesItsSearchToolAndMapsItsHits(t *testing.T) {
@@ -84,11 +80,11 @@ func TestClaudeForcesItsSearchToolAndMapsItsHits(t *testing.T) {
 	)
 	var body claudeBody
 	server := claudeServer(t, stream, func(r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/messages" || r.URL.RawQuery != "beta=true" {
-			t.Errorf("request = %s %s?%s, want POST /v1/messages?beta=true", r.Method, r.URL.Path, r.URL.RawQuery)
+		if r.Method != http.MethodPost || r.URL.Path != "/messages" || r.URL.RawQuery != "beta=true" {
+			t.Errorf("request = %s %s?%s, want POST /messages?beta=true", r.Method, r.URL.Path, r.URL.RawQuery)
 		}
-		if got := r.Header.Get("Authorization"); got != "Bearer token-1" {
-			t.Errorf("Authorization = %q, want the saved token", got)
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("unexpected authorization: %q", got)
 		}
 		if got := r.Header.Get("anthropic-version"); got != claudeVersion {
 			t.Errorf("anthropic-version = %q", got)
@@ -99,16 +95,14 @@ func TestClaudeForcesItsSearchToolAndMapsItsHits(t *testing.T) {
 				t.Errorf("anthropic-beta = %q, missing %q", beta, want)
 			}
 		}
-		if r.Header.Get("x-app") != claudeApp || !strings.HasPrefix(r.Header.Get("User-Agent"), "claude-cli/") {
-			t.Errorf("client headers = %v", r.Header)
-		}
+
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Error(err)
 		}
 	})
 	defer server.Close()
 
-	claude := Claude{BaseURL: server.URL, Token: tokenFunc(func(context.Context) (string, error) { return "token-1", nil })}
+	claude := Claude{BaseURL: server.URL, Client: server.Client()}
 	got, err := claude.Search(t.Context(), Query{Text: "go language", Limit: 3})
 	if err != nil {
 		t.Fatal(err)
@@ -142,21 +136,6 @@ func TestClaudeForcesItsSearchToolAndMapsItsHits(t *testing.T) {
 	}
 }
 
-func TestClaudeWithoutASignInIsNotSignedIn(t *testing.T) {
-	if _, err := (Claude{}).Search(t.Context(), Query{Text: "go"}); !errors.Is(err, ErrNotSignedIn) {
-		t.Fatalf("without a token reader: err = %v, want ErrNotSignedIn", err)
-	}
-	for _, token := range []tokenFunc{
-		func(context.Context) (string, error) { return "", nil },
-		func(context.Context) (string, error) { return "", ErrNotSignedIn },
-	} {
-		claude := Claude{Token: token}
-		if _, err := claude.Search(t.Context(), Query{Text: "go"}); !errors.Is(err, ErrNotSignedIn) {
-			t.Fatalf("empty or refused token: err = %v, want ErrNotSignedIn", err)
-		}
-	}
-}
-
 // A rejected token makes the chain skip Claude instead of failing the search.
 func TestClaudeTreatsARejectedTokenAsNotSignedIn(t *testing.T) {
 	var asked bool
@@ -166,7 +145,7 @@ func TestClaudeTreatsARejectedTokenAsNotSignedIn(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"type":"error","error":{"type":"authentication_error"}}`)
 	}))
 	defer server.Close()
-	claude := Claude{BaseURL: server.URL, Token: tokenFunc(func(context.Context) (string, error) { return "token-9", nil })}
+	claude := Claude{BaseURL: server.URL, Client: server.Client()}
 	_, err := claude.Search(t.Context(), Query{Text: "go"})
 	if !errors.Is(err, ErrNotSignedIn) || !asked {
 		t.Fatalf("err = %v after %v, want ErrNotSignedIn", err, asked)
@@ -184,7 +163,7 @@ func TestClaudeReportsAStreamErrorWithoutItsBody(t *testing.T) {
 		claudeSSEEvent("error", `{"type":"error","error":{"type":"rate_limit_error","message":"credit balance is too low"}}`),
 	)
 	server := claudeServer(t, stream, nil)
-	claude := Claude{BaseURL: server.URL, Token: tokenFunc(func(context.Context) (string, error) { return "token-2", nil })}
+	claude := Claude{BaseURL: server.URL, Client: server.Client()}
 	_, err := claude.Search(t.Context(), Query{Text: "go"})
 	if err == nil || !strings.Contains(err.Error(), "credit balance is too low") {
 		t.Fatalf("err = %v, want the stream's reason", err)
@@ -200,7 +179,7 @@ func TestClaudeReportsASearchErrorCode(t *testing.T) {
 		claudeSSEEvent("content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":{"type":"web_search_tool_result_error","error_code":"max_uses_exceeded"}}}`),
 	)
 	server := claudeServer(t, stream, nil)
-	claude := Claude{BaseURL: server.URL, Token: tokenFunc(func(context.Context) (string, error) { return "token-3", nil })}
+	claude := Claude{BaseURL: server.URL, Client: server.Client()}
 	_, err := claude.Search(t.Context(), Query{Text: "go"})
 	if err == nil || !strings.Contains(err.Error(), "max_uses_exceeded") {
 		t.Fatalf("err = %v, want the search's error code", err)
@@ -215,7 +194,7 @@ func TestClaudeReportsASearchWithoutHits(t *testing.T) {
 		claudeSSEEvent("message_stop", `{"type":"message_stop"}`),
 	)
 	server := claudeServer(t, stream, nil)
-	claude := Claude{BaseURL: server.URL, Token: tokenFunc(func(context.Context) (string, error) { return "token-4", nil })}
+	claude := Claude{BaseURL: server.URL, Client: server.Client()}
 	_, err := claude.Search(t.Context(), Query{Text: "go"})
 	if err == nil || !strings.Contains(err.Error(), "no search results") {
 		t.Fatalf("err = %v, want a no-results failure", err)
