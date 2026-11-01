@@ -172,7 +172,7 @@
         {:else if changed.length}
           <div class="side-head review-title"><strong>What sessions get</strong> <span>{count(changed.length, "line")} changed</span></div>
           <div class="review">
-            <p>{delta >= 0 ? "Adds" : "Removes"} about {Math.abs(delta).toLocaleString()} tokens {delta >= 0 ? "to" : "from"} every prompt · {sessions} open sessions in {roomName}</p>
+            <p>{delta >= 0 ? "Adds" : "Removes"} about {Math.abs(delta).toLocaleString()} tokens {delta >= 0 ? "to" : "from"} every prompt · {count(sessions, "open session")} in {roomName}</p>
             {@render diffView(changes)}
             <p>Running sessions get these changed lines at their next run.</p>
           </div>
