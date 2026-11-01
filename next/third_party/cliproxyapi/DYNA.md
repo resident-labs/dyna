@@ -43,6 +43,8 @@ Each later patch to this folder must be its own commit. Each patch must add an e
 
 - Kimi usage reader: 166 product lines added, plus 122 test lines. It serves `engine/model` from `/coding/v1/usages` on the credential's domain, as `kimi-code` managed-usage.ts does. Official parsing shows false zeros (kimi-code #4133, #3817, #4473), so when legacy counters and a ratio pool cover one duration and reset, the more exhausted reading wins (CodexBar #4306). Monthly pools always show, and `boosterWallet` is a display-only balance. Upstream PR #4373 adds a background API-key probe for cooldowns in 2622 lines, which does not replace this reader.
 
+- xAI usage reader: 84 product lines added, plus 71 test lines. It serves `engine/model` from the `grok-build` billing call, with the proxy's npm-tracked client version. It reads `creditUsagePercent`, then the deprecated `monthlyLimit` and `used`. A missing percent is 0% only beside a complete weekly or monthly period, as T3 Code decided, and otherwise unknown.
+
 ## Pulls
 
 - `v8.0.49` (2026-11-01): `git subtree pull` merged with no conflicts. Every patch above still applies, and none is obsolete: PR #5434 stays open and unmerged, PR #5833 was closed unmerged. The release changes plugin login, Gemini sanitizing and Codex commentary through Claude clients. The commentary option defaults to off, so `engine/model` sees no change in routing, management paths or credential handling. `TestResponsesInterruptStopsHTTPUpstream` and `TestCodexClientModelsApplyPatchRouting` are flaky on `v8.0.48` with Dyna's patches too, so this pull did not cause them; CI does not run them.
