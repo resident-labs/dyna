@@ -15,7 +15,10 @@
   let images = $derived(attachments.filter(file => !file.visual && isThumb(file, failed)));
   let others = $derived(attachments.filter(file => !file.visual && !isThumb(file, failed)));
 </script>
-  {#each attachments as file}{@const visual = file.visual}{#if visual && event && at}<div><VisualBanner {visual} newest={newest.get(visual.id) ?? visual} {event} {at} onopen={() => onvisual(visual)} /></div>{/if}{/each}
+{#each attachments as file (file.sha256)}
+  {@const visual = file.visual}
+  {#if visual && event && at}<div><VisualBanner {visual} newest={newest.get(visual.id) ?? visual} {event} {at} onopen={() => onvisual(visual)} /></div>{/if}
+{/each}
   <!-- As in v1, images come first as thumbnails, then a card per other file. Each opens the file in a new tab. -->
   {#if images.length}<div class="images" class:many={images.length > 1}>{#each images as file, i (i)}
     <a class="thumb" href={url(file)} target="_blank" rel="noopener" title={`${file.name} · ${fileSize(file.bytes)}`}>
