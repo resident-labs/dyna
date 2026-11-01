@@ -3,13 +3,14 @@
   import AccountMenu from "./AccountMenu.svelte";
   import ProfileMenu from "./ProfileMenu.svelte";
   import StatusPill from "./StatusPill.svelte";
-  import { boxReason, count, fromNow, fullTime, waits } from "../feed.ts";
+  import { boxReason, boxWords, count, fromNow, fullTime, waits } from "../feed.ts";
   import { call } from "../client.ts";
+  import { onHost } from "../hosts.ts";
   import { failed } from "../jobs.ts";
   import { closeNote, descendants } from "../session-tree.ts";
   import { watchShell, type ShellJob } from "../shell.ts";
   import type { RoomStore } from "../room.svelte.ts";
-  import type { BoxState, SessionAccountResponse } from "../contract.gen.ts";
+  import type { SessionAccountResponse } from "../contract.gen.ts";
   // What a DM's session is, as design A's About tab: its goal, then one label and value per fact the engine reports.
   // A row without a value does not show. Jobs opens the dock's list on this session, and stays while the box is ready so a
   // finished job can be reached. It counts the jobs the engine lists, as that list does, because session.list's count can
@@ -17,13 +18,10 @@
   let { store, room, session, switchable, navigate, onjobs, onclosed }: {
     store: RoomStore; room: string; session: string; switchable: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onjobs: (event: MouseEvent) => void; onclosed: () => void;
   } = $props();
-  const boxes: Record<BoxState, string> = {
-    pending: "Starting", creating: "Starting", starting: "Starting", ready: "Ready", stopped: "Asleep",
-    closing: "Closing", deleted: "Deleted", failed: "Failed", lost: "Stopped unexpectedly",
-  };
   let open = $derived(store.sessions.get(session));
   let parent = $derived(open?.parent && store.names.get(open.parent));
   let box = $derived(store.boxes.get(session));
+  let host = $derived(store.hosts.get(session));
   let failure = $derived(store.boxFailures.get(session));
   let reason = $derived(store.pendingReasons.get(session));
   let hasJobs = $derived(box === "ready" && store.hadJobs.has(session));
@@ -66,7 +64,7 @@
     {#if parent && open?.parent}<dt>Parent</dt><dd><a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(open.parent)}`} onclick={navigate}>{parent}</a></dd>{/if}
     {#if open?.profile}<dt>Profile</dt><dd><ProfileMenu {session} profile={open.profile} {switchable} /></dd>{/if}
     {#if account}<dt>Account</dt><dd><AccountMenu {session} {account} {switchable} onchanged={loadAccount} /></dd>{/if}
-    {#if box}<dt>Box</dt><dd>{#if failure}<StatusPill tone="failed" word label="Failed" /> · {boxReason(failure)}{:else if reason === "room-host"}<StatusPill tone="warning" word label={waits[reason]} />{:else}{reason ? waits[reason] : boxes[box]}{/if}</dd>{/if}
+    {#if box}<dt>Box</dt><dd>{#if failure}<StatusPill tone="failed" word label={onHost("Failed", host)} /> · {boxReason(failure)}{:else if reason === "room-host"}<StatusPill tone="warning" word label={waits[reason]} />{:else}{reason ? waits[reason] : onHost(boxWords[box], host)}{/if}</dd>{/if}
     {#if hasJobs}<dt>Jobs</dt><dd><button type="button" onclick={onjobs}>{running ? `${count(running, "job")} running` : "Jobs"}</button>{#if failures}{" · "}<StatusPill tone="failed" label="{failures} failed" word />{/if}</dd>{/if}
     {#if open?.startedAt}<dt>Started</dt><dd class="muted"><time datetime={open.startedAt} title={fullTime(open.startedAt)}>{fromNow(open.startedAt, Math.max(now, Date.parse(open.startedAt)))}</time></dd>{/if}
     {#if open?.lastTurnAt}<dt>Last turn</dt><dd class="muted"><time datetime={open.lastTurnAt} title={fullTime(open.lastTurnAt)}>{fromNow(open.lastTurnAt, Math.max(now, Date.parse(open.lastTurnAt)))}</time></dd>{/if}

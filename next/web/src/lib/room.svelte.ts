@@ -19,6 +19,8 @@ const readKey = (conversation: Conversation) => conversation.kind === "dm" ? con
 export class RoomStore {
   readonly sessions = new SvelteMap<string, SessionStarted & { startedAt: string; lastTurnAt?: string }>();
   readonly boxes = new SvelteMap<string, BoxState>();
+  // The machine holding each session's live box. A session without one has no entry.
+  readonly hosts = new SvelteMap<string, string>();
   readonly turns = new SvelteMap<string, string>();
   // Sessions the owner asked to stop until their turn ends, and those whose request did not reach the engine.
   readonly stopping = new SvelteSet<string>();
@@ -87,6 +89,11 @@ export class RoomStore {
     this.clearReadJobs();
   }
   // A failed job counts until the owner reads past its end, in the feed or in its session's DM.
+  private noteHost(session: string, box: BoxState, host?: string): void {
+    if (host && box !== "deleted") this.hosts.set(session, host);
+    else this.hosts.delete(session);
+  }
+
   private failJob(session: string, job: string, seq: number): void {
     if (seq <= Math.max(this.readAt({ kind: "feed" }), this.readAt({ kind: "dm", session }))) return;
     this.failedEnds.set(`${session}/${job}`, { session, seq });
@@ -185,6 +192,7 @@ export class RoomStore {
       this.names.set(session.id, session.name);
       this.noteRead({ kind: "dm", session: session.id }, session.lastRead);
       this.boxes.set(session.id, session.boxState);
+      this.noteHost(session.id, session.boxState, session.host);
       if (session.boxState === "failed" || session.boxState === "lost") this.boxFailures.set(session.id, { box: session.boxState });
       const reason = pendingReason(session.boxState, session.boxReason);
       if (reason) this.pendingReasons.set(session.id, reason);
@@ -264,6 +272,8 @@ export class RoomStore {
       case "box.changed": {
         const { session, to, cause } = event.body, reason = pendingReason(to, event.body.reason);
         this.boxes.set(session, to);
+        // Placing or moving a box changes its host, and a deleted box keeps naming the one it left.
+        this.noteHost(session, to, event.body.host);
         if (to === "failed" || to === "lost") this.boxFailures.set(session, { box: to, cause: cause ?? this.boxFailures.get(session)?.cause, at: event.at });
         else this.boxFailures.delete(session);
         // A pending to pending change can name a new reason.
