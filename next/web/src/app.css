@@ -21,6 +21,12 @@ strong, b, h1, h2, h3, h4 { font-weight: 600; }
 * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: transparent transparent; }
 :hover { scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent; }
 body { margin: 0; background: var(--bg); color: var(--text); }
+/* The media viewer's blur is on the app, as a backdrop-filter took twice as long a frame with a live card open: 67 ms
+   against 33 ms at 1920 px without a GPU, at any radius from 4 to 12 px. The viewer sits in the top layer, so it stays sharp. */
+#app { transition: filter 200ms ease-out; }
+#app:has(dialog.media-viewer[open]) { filter: blur(6px); }
+@media (prefers-reduced-motion: reduce) { #app { transition: none; } }
+@media (prefers-reduced-transparency: reduce) { #app:has(dialog.media-viewer[open]) { filter: none; } }
 /* The app fills the viewport exactly; only the feed and the side panels scroll. */
 .shell { display: grid; grid-template-columns: 64px 1fr; grid-template-rows: minmax(0, 1fr); height: var(--app-height, 100dvh); overflow: hidden;
   /* viewport-fit=cover: the notch, the home bar and a landscape phone's sides stay clear. */

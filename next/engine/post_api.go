@@ -13,6 +13,42 @@ import (
 	"github.com/resident-labs/dyna/room"
 )
 
+// postFile finds a blob for a post in a room. A session uses only what its room holds. The owner can forward a blob from
+// another room, which hard-links it here: a blob never changes, so each room keeps its own link and neither depends on the other.
+func (s *Service) postFile(ctx context.Context, caller contract.Principal, room contract.RoomID, hash, missing string) (os.FileInfo, *contract.Error) {
+	path := s.layout.File(room, hash)
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		from, found := s.layout.FindFile(hash)
+		if !found {
+			return nil, invalid(missing)
+		}
+		if caller.Kind != contract.PrincipalOwner {
+			return nil, forbidden()
+		}
+		err = s.roomWrite(ctx, room, func() error {
+			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+				return err
+			}
+			if err := os.Link(from, path); err != nil && !errors.Is(err, os.ErrExist) {
+				return err
+			}
+			return nil
+		})
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, invalid(missing)
+		}
+		if err != nil {
+			return nil, failure(err)
+		}
+		info, err = os.Stat(path)
+	}
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, invalid(missing)
+	}
+	return info, nil
+}
+
 func (s *Service) Post(ctx context.Context, caller contract.Principal, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
 	if e := s.roomAccess(ctx, caller, req.Room); e != nil {
 		return contract.PostResponse{}, e
@@ -74,18 +110,8 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 				if !validHash(ref) {
 					return contract.PostResponse{}, invalid("invalid visual file")
 				}
-				info, err := os.Stat(filepath.Join(s.filesDir, ref))
-				if err != nil || !info.Mode().IsRegular() {
-					return contract.PostResponse{}, invalid("visual file not found")
-				}
-				if caller.Kind != contract.PrincipalOwner {
-					ok, err := s.store.FileInRoom(ctx, ref, req.Room)
-					if err != nil {
-						return contract.PostResponse{}, failure(err)
-					}
-					if !ok {
-						return contract.PostResponse{}, forbidden()
-					}
+				if _, problem := s.postFile(ctx, caller, req.Room, ref, "visual file not found"); problem != nil {
+					return contract.PostResponse{}, problem
 				}
 			}
 		}
@@ -93,18 +119,9 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		if !validHash(file.SHA256) || file.Name == "" || len(file.Name) > 255 || mediaErr != nil {
 			return contract.PostResponse{}, invalid("invalid attachment")
 		}
-		info, err := os.Stat(filepath.Join(s.filesDir, file.SHA256))
-		if err != nil || !info.Mode().IsRegular() {
-			return contract.PostResponse{}, invalid("attachment not found")
-		}
-		if caller.Kind != contract.PrincipalOwner {
-			ok, err := s.store.FileInRoom(ctx, file.SHA256, req.Room)
-			if err != nil {
-				return contract.PostResponse{}, failure(err)
-			}
-			if !ok {
-				return contract.PostResponse{}, forbidden()
-			}
+		info, problem := s.postFile(ctx, caller, req.Room, file.SHA256, "attachment not found")
+		if problem != nil {
+			return contract.PostResponse{}, problem
 		}
 		file.Bytes = info.Size()
 		file.Media = media

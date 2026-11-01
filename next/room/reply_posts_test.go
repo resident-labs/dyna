@@ -30,3 +30,16 @@ func TestPostsForRepliesMatchesHome(t *testing.T) {
 		t.Fatalf("posts %+v", got)
 	}
 }
+
+func TestFinalRepliesLinkEndPosts(t *testing.T) {
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	parent := contract.Principal{Kind: contract.PrincipalSession, Session: "parent"}
+	feed := contract.Conversation{Kind: contract.ConversationFeed}
+	dm := contract.Conversation{Kind: contract.ConversationDM, Session: "child"}
+	inputs := []contract.Delivery{{Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: owner, Home: feed}}, {Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: owner, Home: dm}}, {Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: parent, Home: feed}}, {Reply: contract.ReplyChannel{Kind: contract.ReplyPost, Target: parent}}}
+	posts := map[Destination]contract.EventID{{Target: owner, Home: feed}: "earlier update", {Target: owner, Home: dm}: "first end"}
+	got := FinalReplies(inputs, posts, []contract.EventID{"first end", "last end"})
+	if len(got) != 3 || got[0].Posted != "last end" || got[1].Posted != "first end" || got[2].Posted != "last end" {
+		t.Fatalf("got %+v", got)
+	}
+}

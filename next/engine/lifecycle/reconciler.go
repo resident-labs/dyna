@@ -31,6 +31,9 @@ type Reconciler struct {
 	kick         chan struct{}
 	mu           sync.Mutex
 	repos        Repositories
+	roomHosts    RoomHosts
+	roomData     RoomData
+	roomSteps    map[string]bool
 	active       map[contract.BoxID]*activeStep
 	hosts        map[contract.HostName]int
 	fresh        map[contract.BoxID]bool
@@ -40,9 +43,15 @@ type Reconciler struct {
 }
 
 func New(st *store.Store, boxes BoxAdapter, view View, repos Repositories, event func(contract.RoomID, contract.Principal, contract.EventBody) (contract.Event, error), now func() time.Time) *Reconciler {
-	return &Reconciler{store: st, boxes: boxes, view: view, repos: repos, event: event, now: now, kick: make(chan struct{}, 1), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool), disconnected: make(map[contract.BoxID]time.Time)}
+	return &Reconciler{store: st, boxes: boxes, view: view, repos: repos, event: event, now: now, kick: make(chan struct{}, 1), roomSteps: make(map[string]bool), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool), disconnected: make(map[contract.BoxID]time.Time)}
 }
 func (r *Reconciler) SetHostMemory(read func(contract.HostName) int64) { r.hostMemory = read }
+
+// SetRoomData enables room deletion before the reconciler runs.
+func (r *Reconciler) SetRoomData(data RoomData) { r.roomData = data }
+
+// SetRoomHosts adds the host side of room deletion before the reconciler runs.
+func (r *Reconciler) SetRoomHosts(hosts RoomHosts) { r.roomHosts = hosts }
 
 func (r *Reconciler) SetRepositories(repos Repositories) {
 	r.mu.Lock()
@@ -202,7 +211,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			}
 			r.mu.Unlock()
 			if step == nil {
-				if err := r.closePass(ctx, row); err != nil {
+				if err := r.closePass(ctx, row, hostState[row.Host]); err != nil {
 					return err
 				}
 			}
@@ -288,7 +297,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			r.launch(ctx, row)
 		}
 	}
-	return nil
+	return r.roomPass(ctx, hosts)
 }
 func (r *Reconciler) launch(ctx context.Context, row store.LifecycleBox) {
 	r.mu.Lock()

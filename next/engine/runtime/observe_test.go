@@ -146,7 +146,7 @@ func TestRestoreToleratesOfflineHost(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	sockets := api.NewSockets(api.New(&serviceWithHosts{Service: engine.New(st, nil, nil, time.Now)}, nil), runtimeDir, uint32(os.Getuid()), nil)
 	t.Cleanup(func() { _ = sockets.Close() })
-	b := &Boxes{Store: offlineRestoreStore{}, Sockets: sockets, Runtime: runtimeDir, HostData: filepath.Join(runtimeDir, "host"), Version: "v1", hosts: map[contract.HostName]*podman.Host{"h": host}}
+	b := &Boxes{Store: offlineRestoreStore{}, Sockets: sockets, Runtime: runtimeDir, Layout: box.Layout{HostData: filepath.Join(runtimeDir, "host")}, Version: "v1", hosts: map[contract.HostName]*podman.Host{"h": host}}
 	b.binOnce.Do(func() { b.binSum = "sum" })
 	if err := b.Restore(context.Background()); err != nil {
 		t.Fatal(err)

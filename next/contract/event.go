@@ -42,6 +42,17 @@ func (RoomPaused) isEventBody()          {}
 func (RoomResumed) EventType() EventType { return "room.resumed" }
 func (RoomResumed) isEventBody()         {}
 
+// RoomDeleting records the owner's delete. The room refuses new work from here on.
+type RoomDeleting struct{}
+
+// RoomDeleted is a live event with sequence 0: the room's rows are gone, so no row can hold it.
+type RoomDeleted struct{}
+
+func (RoomDeleting) EventType() EventType { return "room.deleting" }
+func (RoomDeleting) isEventBody()         {}
+func (RoomDeleted) EventType() EventType  { return "room.deleted" }
+func (RoomDeleted) isEventBody()          {}
+
 // SessionProfileChanged tells a session that its profile, and so its model, changed.
 type SessionProfileChanged struct {
 	Session SessionID   `json:"session"`
@@ -165,6 +176,8 @@ type TurnEnded struct {
 	// ShellJobs counts the background shell jobs still running when the turn ended. Each job's
 	// end wakes the session, so the next turn.ended carries the new count.
 	ShellJobs int `json:"shellJobs,omitempty"`
+	// EndPosts carries the harness's result to TurnOutputRequest.EndPosts. The event records the same fact in Replies.
+	EndPosts []EventID `json:"-"`
 }
 
 type ConversationRead struct {

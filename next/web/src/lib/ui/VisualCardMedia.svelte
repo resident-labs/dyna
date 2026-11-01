@@ -145,8 +145,9 @@
 
 <style>
   .viewer { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
-  header { position:relative; display:flex; align-items:center; gap:8px; height:52px; flex:none; min-width:0; padding:0 12px; border-bottom:1px solid var(--line); }
-  header strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:15px; font-weight:600; }
+  /* A second bar under the viewer's own, so it stays slim. */
+  header { position:relative; display:flex; align-items:center; gap:8px; height:40px; flex:none; min-width:0; padding:0 8px 0 16px; border-bottom:1px solid var(--line); }
+  header strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; font-weight:600; }
   button, a { font:inherit; font-size:13px; color:var(--muted); cursor:pointer; }
   button { border:0; border-radius:6px; background:none; padding:6px 8px; }
   button:hover, a:hover { background:var(--hover); color:var(--text); }
@@ -177,5 +178,5 @@
   .confirm .send { border-color: var(--focus); background: var(--focus); color: var(--bg); font-weight: 600; }
   .confirm .send:hover:enabled { background: color-mix(in srgb, var(--focus) 88%, var(--text)); }
   .confirm button:disabled { opacity: .5; cursor: default; }
-  @media (max-width:640px) { .icon { width:44px; height:44px; } .back, button.version, .versions button { min-height:44px; } .anchor { position:static; } .popover { top:52px; left:12px; right:12px; min-width:0; } }
+  @media (max-width:640px) { header { height:44px; } .icon { width:44px; height:44px; } .back, button.version, .versions button { min-height:44px; } .anchor { position:static; } .popover { top:44px; left:12px; right:12px; min-width:0; } }
 </style>

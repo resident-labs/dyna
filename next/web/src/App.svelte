@@ -267,10 +267,11 @@
   }
   // Each conversation keeps its own draft files; FileDraft is reactive inside, so a plain map holds them.
   const fileDrafts = new Map<string, FileDraft>();
-  const files = (key: string) => { let draft = fileDrafts.get(key); if (!draft) fileDrafts.set(key, draft = new FileDraft()); return draft; };
+  const files = (key: string) => { let draft = fileDrafts.get(key); if (!draft) fileDrafts.set(key, draft = new FileDraft(key.split("/")[0])); return draft; };
   let key = $derived(`${room}/${session ?? ""}`);
   // Pausing stops new turns in the room; attention keeps the state current from the stream.
   let paused = $derived(attention.rooms.get(room ?? "")?.paused ?? false);
+  let deleting = $derived(attention.rooms.get(room ?? "")?.deleting ?? false);
   // The room whose last pause or resume failed, so another room keeps its own line.
   let pauseFailed: string | undefined = $state();
   function pause() {
@@ -331,6 +332,21 @@
   let terminals: TermDock | undefined = $state();
   let jobsTool: JobsTool | undefined = $state();
   let roomMenu: RoomMenu | undefined = $state();
+  // A right click on a room's rail icon opens its menu at the pointer, opening the room first if needed. The Menu key
+  // reports no pointer, so it opens beside the icon.
+  let roomMenuAt: { room: string; x: number; y: number; trigger: HTMLElement } | undefined = $state();
+  function roomContext(event: MouseEvent & { currentTarget: HTMLElement }, id: string) {
+    if (phone.current) return;
+    event.preventDefault();
+    const box = event.currentTarget.getBoundingClientRect();
+    roomMenuAt = { room: id, x: event.clientX || box.right, y: event.clientY || box.top, trigger: event.currentTarget };
+    if (id !== room || inSettings) openLocation(id);
+  }
+  $effect(() => {
+    if (!roomMenuAt || roomMenuAt.room !== room || !roomMenu) return;
+    roomMenu.openAt(roomMenuAt);
+    roomMenuAt = undefined;
+  });
   let settings: HTMLElement | undefined = $state();
   let settingsMenu: HTMLButtonElement | undefined = $state();
   let dock: HTMLElement | undefined = $state();
@@ -637,7 +653,7 @@
            gets an amber dot on its corner, with no number (spec 5.13). A room with a failed session gets a red one
            instead, in the priority order of status.ts. -->
       {#each rooms as item (item.id)}{@const waiting = attention.waiting.get(item.id)?.size ?? 0}{@const hostless = attention.hostless.get(item.id)?.size ?? 0}{@const failing = attention.failing(item.id)}
-      <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} aria-current={room === item.id && !inSettings ? "page" : undefined}
+      <a href={"/r/" + encodeURIComponent(item.id)} onclick={navigate} oncontextmenu={event => roomContext(event, item.id)} aria-current={room === item.id && !inSettings ? "page" : undefined}
         aria-label={[item.name, failing && `${count(failing, "session")} failed`, waiting && `${count(waiting, "request")} waiting`, hostless && `${count(hostless, "session")} waiting for a host`].filter(Boolean).join(", ")} title={item.name}>
         <Avatar kind="room" name={item.name} label={initials.get(item.name)} size={40} />{#if failing}<StatusPill tone="failed" label="Failed" dot />{:else if waiting || hostless}<StatusPill tone="warning" label="Waiting" dot />{/if}</a>
     {/each}<button type="button" class="tool" title="Create a room" aria-label="Create a room" onclick={() => openNew("room")}><Icon name="plus" /></button></nav>
@@ -685,7 +701,7 @@
         {#if session && attention.can("computers") && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /></button>{/if}
         {#key session}<HeaderActions {store} {session} {attention} {closed} phone={phone.current} {paused} panelShown={panelShown} requestsOpen={section === "requests"}
           bind:jobsTool bind:roomMenu bind:requestsButton bind:toggle
-          onopen={(item, job) => terminals?.openJob(item, job)} onpause={pause} oninstructions={openInstructions} onnewsession={() => openNew("session")} onrequests={() => { section = section === "requests" ? undefined : "requests"; }} onpanel={tapped => void showPanel(!panelShown, tapped)}
+          onopen={(item, job) => terminals?.openJob(item, job)} onpause={pause} oninstructions={openInstructions} onrequests={() => { section = section === "requests" ? undefined : "requests"; }} onpanel={tapped => void showPanel(!panelShown, tapped)}
           onterminal={() => terminals?.shell(session!, title, !store?.sessions.get(session!)?.parent)}
           oncomputer={() => watch(session!)} />{/key}
       {/if}</header>
@@ -697,7 +713,7 @@
       {#if blocked}<Blocked kind="unreachable" onretry={connect} />
       {:else if lost === "room"}<Blocked kind="no-room" back={{ href: "/", label: "Go to Home" }} {navigate} />
       {:else if lost === "page"}<Blocked kind="no-page" back={{ href: "/", label: "Go to Home" }} {navigate} />
-      {:else if !room}<Home {attention} {initials} loaded={roomsLoaded} {navigate} onrequests={() => { section = "requests"; }} active={activity.active}
+      {:else if !room}<Home {attention} {initials} loaded={roomsLoaded} {navigate} onrequests={() => { section = "requests"; }} active={activity.active} covered={inSettings}
         onactive={event => { toggle = event.currentTarget; void showPanel(true, event.detail > 0); }} />
       {:else if unavailable === "unreachable"}<Blocked kind="unreachable" onretry={reopen} />
       {:else if store && !unavailable}
@@ -709,7 +725,8 @@
       {:else}<p class="empty">This room is not available. <button type="button" class="retry" onclick={reopen}>Try again</button></p>{/if}
     </div>
     {#if room && !unavailable && !closed}
-      {#if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
+      {#if deleting}<p class="paused" role="status"><span>This room is being deleted.</span></p>
+      {:else if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
         {#if attention.can("operate")}<button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button>{/if}</p>{/if}
       {#if attention.can("operate")}<Composer bind:this={composerBox} bind:element={composer} bind:value={() => savedDrafts.draft(key, drafts[key]),text => { drafts[key] = text; savedDrafts.save(key, text); clearReplacement(); }} onsend={send} thread={!!session} placeholder={"Message " + title}
         quote={quotes[key]} replacement={replaced[key]} onundo={() => { quotes[key] = undoForward({ quote: quotes[key], previous: replaced[key] }).quote; clearReplacement(); }} onunquote={() => { quotes[key] = undefined; clearReplacement(); }} sessions={mentions} files={files(key)} {stop} />

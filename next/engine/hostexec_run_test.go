@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/resident-labs/dyna/box"
 	boxhostexec "github.com/resident-labs/dyna/box/hostexec"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
@@ -140,7 +141,7 @@ func TestHostexecLostFinishesOperationAndNotifies(t *testing.T) {
 }
 func TestHostexecOutputFileRoomAccess(t *testing.T) {
 	s, room, root, ctx := setupRoot(t)
-	s.SetFilesDir(t.TempDir())
+	s.SetLayout(box.Layout{Data: t.TempDir()})
 	s.SetHostexecRunner(completedHostexec{output: bytes.Repeat([]byte("a"), (64<<10)+1)})
 	if err := s.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.run": s.HostexecRunEntry()}, time.Hour); err != nil {
 		t.Fatal(err)

@@ -15,7 +15,7 @@ Only the owner can reopen a settled owner decision. Sources and history are in [
 7. **Root.** Root is a position in the tree. An ancestor can start, move or close descendants. Root's extra powers are the ask-owner and host-exec grants and the engine-notice subscription.
 8. **Self-hosting.** Trial v2 beside v1 before cutover, with separate data, runtime and SSH control folders. Start in M2 once a box can build and test Dyna. v1 remains the fallback until the trial works and a dry-run import passes.
 9. **Scope.** Voice returns after cutover. Dyna web search ships in v2 now (owner, 2026-10-31). The library is cut for now. Minimal computers ship in M2; workflows and the desktop window ship in M3. The frozen v1 backup keeps the feature map.
-10. **Node jobs.** Do not port them. GitHub Actions runs CI with self-hosted runners in boxes. Host-specific work uses host exec or a room restricted to a suitable host. Admission does not yet select hosts by device needs.
+10. **Node jobs.** Do not port them. GitHub Actions runs CI, with Dyna's self-hosted runners on the hosts each repository chooses ([CI runners](ci-runners.md)). Host-specific work uses host exec or a room restricted to a suitable host. Admission does not yet select hosts by device needs.
 11. **Proxy process.** Vendor CLIProxyAPI in `next/third_party/cliproxyapi`. The engine supervises a child of the same binary over a Unix socket.
 12. **Size and cuts.** Milestone reports count product lines per package against the plan. Keep subtree moves, `Run` subscriptions and `show_pty` requests. Defer box growth, cross-host restart, checkpoints, relocation commands, bundle data for issue watches and room MCP servers, one cgroup per shell job, `node_modules` reflink seeding and external members. Ship `box.pressure`; use process groups for shell jobs and a manual relocation procedure.
 13. **GitHub.** GitHub is the source of truth for PRs, merges and CI. Dyna stores PR ownership and the approved head, not review records. The owner, an ancestor of the author, or another child of that ancestor may approve; the author and its children may not. A new head clears approval. Dyna merges only with green CI, passing the approved head SHA so GitHub rejects a moved head. It uses GitHub's merge queue where configured. Self-hosted runner boxes get single-job just-in-time tokens; outside PRs use GitHub-hosted runners or wait for the owner. Room policy chooses approvers. Drop comment trust, merge trials, CI time budgets, conflict radar and room PR views.
@@ -133,7 +133,7 @@ The contract package is the authority for method names, fields, body variants an
 
 The engine holds one SQLite `store.db`, protected by an exclusive `store.lock`. It uses WAL, `synchronous=NORMAL`, foreign keys and incremental auto-vacuum. `schema.sql` is the current schema; fresh stores run it, while existing stores run numbered steps from their version. The engine refuses a live schema that differs from it. Stores below the upgrade floor get `store_too_old` and the commit to update through (r17). The guard refuses a v1 `dyna.db` without `store.db`, and a store without the v2 format marker.
 
-One writer commits each state change and its events in one transaction, then publishes events in sequence order. Reads use a read-only pool. A separate connection checkpoints the WAL; commits never wait for a checkpoint. Typed body columns hold JSON, but queried state is not kept in JSON files. Settings and other configuration may use JSON. Transcripts are append-only JSONL; attachments and large outputs are files addressed by SHA-256.
+One writer commits each state change and its events in one transaction, then publishes events in sequence order. Reads use a read-only pool. A separate connection checkpoints the WAL; commits never wait for a checkpoint. Typed body columns hold JSON, but queried state is not kept in JSON files. Settings and other configuration may use JSON. Transcripts are append-only JSONL; attachments and large outputs are files addressed by SHA-256, per room (4.3).
 
 Daily SQLite backups retain three local copies; an upgrade makes a backup before its first schema step and stops if it fails. Optional off-host archives use the restricted, encrypted path in decision 14. The backup receiver keeps at least 14 archives and every copy less than 14 days old, and refuses uploads over 16 GiB or that leave less than 50 GiB free. A restore check verifies SQLite integrity and restored files. Relocation uses a fresh snapshot after writes stop, not a daily backup (5.10). After cutover, measured growth may trigger archival of events older than 180 days for closed sessions.
 
@@ -155,6 +155,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `disk_warnings` |
 | `room_shared` |
 | `host_rooms` |
+| `repo_ci_hosts` |
 | `host_labels` |
 | `boxes` |
 | `operations` |
@@ -165,7 +166,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `shell_jobs` |
 | `event_files` |
 | `visuals` |
-| `uploads` |
+| `room_leftovers` |
 | `pr_owners` |
 | `grants` |
 | `hostexec_runs` |
@@ -187,13 +188,31 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `search_keys` |
 | `proxy_auths` |
 
+### 4.3 Data on disk
+
+A room's data is one folder on each side, so deleting a room removes one folder per machine. `box.Layout` names these paths; no other code spells them.
+
+```text
+<data>/AGENTS.md                                global instructions
+<data>/rooms/<room>/AGENTS.md                   room instructions
+<data>/rooms/<room>/files/<sha256>              attachments and large outputs
+<data>/rooms/<room>/transcripts/<session>/      transcript copies
+<hostdata>/instructions/global/AGENTS.md        the global copy a box mounts
+<hostdata>/rooms/<room>/instructions/AGENTS.md  the room copy a box mounts
+<hostdata>/rooms/<room>/shared/                 /box/shared
+```
+
+Everything else stays where its role puts it: `store.db`, `backups/`, `archive/`, `cliproxy/`, `connect/` and `git/` under `<data>`, and `bin/`, `cache/`, `git/` and `sock/` under `<hostdata>`.
+
+Blobs are per room. A blob's name is its hash and its bytes never change, so each room that uses one holds its own hard link, with no reference counts: removing a room's folder cannot break another room. Every upload names a room. A session's room comes from its socket and the owner gives one in the query. A blob in the folder is what lets a post use it, so no table records uploads. When the owner forwards a post, the engine links each blob into the target room before the post commits. Sessions cannot reach another room's blobs. `event_files` joined to `events` gives the room of every stored reference: the owner reads a hash through its newest reference in a room that is not being deleted.
+
 ## 5. Machines and box lifecycle
 
 ### 5.1 Control plane and hosts
 
 The control plane runs on an always-on host. That machine may also be a capacity host, reached over SSH like any other host (decision 14). The engine runs no boxes. One Dyna-owned SSH ControlMaster per host carries framed requests; a missing or invalid reply trailer is a transport failure.
 
-The owner registers hosts with `dyna host add <name> --ssh user@addr`, optionally restricting rooms. A host becomes ready after checks for delegated cgroup v2 controllers, rootless Podman 5 or later, SSH StreamLocalForwarding, curl, git, free disk and memory, and owner-only administration. Podman is required: the installer installs it and registration reports a typed error when it is absent (owner, q60). Schedulable memory excludes the host floor; CPUs exclude one, with a minimum of one.
+The owner registers hosts with `dyna host add <name> --ssh user@addr`, optionally restricting rooms; `dyna host limit <name>` (`host.set_limits`) later replaces that list, like `accounts.set_limits` for an account, and boxes already on the host stay there. A host becomes ready after checks for delegated cgroup v2 controllers, rootless Podman 5 or later, SSH StreamLocalForwarding, curl, git, free disk and memory, and owner-only administration. Podman is required: the installer installs it and registration reports a typed error when it is absent (owner, q60). Schedulable memory excludes the host floor; CPUs exclude one, with a minimum of one.
 
 Admission serializes placement. Each placed box counts one quarter of its CPU and memory size until stopped, failed or deleted; lost boxes count. A stopped box counts only disk. A host must fit requests, remain below 80% measured memory and retain its disk floor after new requests. An ineligible room waits with `room-host`; other waits report their reason. `--git.name` and `--git.email` set box Git identity only when nonempty (owner, q61).
 
@@ -274,6 +293,14 @@ Close durably closes the subtree deepest child first; move a child first to keep
 
 A dormant box starts for archive without admission. Archive or removal failure leaves it closing for retry; a failed archive retries every 10 minutes, and so does a box that keeps failing to start or that started without connecting, which shows a reason rather than looking like a running close. Disk eviction closes the same way, so a box is removed only after its ref is verified. A clean tree already on the remote needs no disk to skip its archive. The engine cannot see from outside whether other work is pushed, so it never discards unasked. Only owner `dyna session close --discard` can delete a box that cannot start without an archive. Archive refs expire after 14 days; `dyna session restore <session>` starts a new box from one.
 
+**Room delete.** Only the owner deletes a room: `dyna room delete ROOM --discard`. The flag is the confirmation, as for `session close`, and `room.delete` refuses a request without it. Deleting a room never widens access. An empty account or host limit means every room, so the delete refuses with `room_limited`, naming each account and host with no other open room, until the owner changes those limits with `accounts.set_limits` or `host.set_limits`. A limit that also covers another open room just loses this one. One transaction makes this check and sets the room to `deleting`, so a concurrent limit change cannot slip past, and from then on no account or host limit can name the room. The same transaction starts every open session on the close path with discard, stops host commands, and makes pending operations and archive refs due. From then on the room refuses new sessions, posts, uploads, instruction saves and transcript chunks, mentions cannot name it, no box in it can wake, and a second delete gets a conflict that carries the reason, if any, the first one is held.
+
+The reconciler does the rest, with one step per room at a time. When every session is closed and no operation or host command still runs, it removes `<hostdata>/rooms/<room>` from each ready host, in the host's user namespace, since a box can leave files that the host user cannot remove. It then removes `<data>/rooms/<room>` and deletes the rows in one transaction, children first. Each step tolerates having run, so a crash at any point resumes from the top on the next pass. A ready host that fails, whether removing the folder or a box, holds the room and shows why in `room.list`.
+
+An offline host neither holds the delete nor gets skipped. A closing box on a host that is not ready counts as deleted at once, and each such box, and the room's folder on each such host, becomes a row in `room_leftovers`, which outlives the room. `host.list` counts these rows. When the host is ready again the reconciler removes the boxes and then the folder, and only then the rows. Until it does, the host keeps the room's data and any such box keeps running, cut off from the engine.
+
+Accounts and hosts survive a room delete with their links to the room dropped. A repository another room lists stays, with its default room moved to one of those rooms. One that no room lists goes, with its CI hosts. Archive refs outlive the room: `archives` holds no foreign keys, and the expiry sweep deletes each ref and its row within the hour, retrying an outage hourly without holding the room.
+
 ### 5.10 Host failure and relocation
 
 Three missed 10-second heartbeats make a host unreachable and its ready boxes lost. Lost boxes wait for that host; they never start on another (owner, r22). On return, running containers await agent reconnection, exited containers stop, and missing containers fail. Removing a host fails its boxes and loses unpushed work. Host drain is not built.
@@ -282,7 +309,7 @@ Relocation is manual (r22). Stop the old engine and keep it stopped. Copy a fres
 
 ### 5.11 Carried from D-585
 
-Shell commands run in boxes. Node jobs are not ported; GitHub Actions runs CI. Host-specific work uses host exec or room placement. One SSH master per host carries builds, host exec and forwards.
+Shell commands run in boxes. Node jobs are not ported; GitHub Actions runs CI on [Dyna's runner pool](ci-runners.md) or GitHub-hosted runners. Host-specific work uses host exec or room placement. One SSH master per host carries builds, host exec and forwards.
 
 ### 5.12 Accounts page (M3)
 
@@ -332,11 +359,11 @@ Host exec on the control plane runs as the owner and can use the owner socket. A
 
 ### Standing instructions
 
-v2 has no rules feature. Pi loads global `/box/pi/AGENTS.md`, room `/box/work/AGENTS.md`, and each repository's own file. The engine stores the first two as owner configuration at `<data>/files/instructions/global/AGENTS.md` and `<data>/files/instructions/rooms/<room-id>/AGENTS.md`. It atomically replaces files; boxes mount their folders read-only at `/run/dyna/instructions/{global,room}` and symlink to them. The room file is outside every checkout.
+v2 has no rules feature. Pi loads global `/box/pi/AGENTS.md`, room `/box/work/AGENTS.md`, and each repository's own file. The engine stores the first two as owner configuration at `<data>/AGENTS.md` and `<data>/rooms/<room-id>/AGENTS.md` (4.3). It atomically replaces files; boxes mount their folders read-only at `/run/dyna/instructions/{global,room}` and symlink to them. The room file is outside every checkout.
 
 Pi starts in the default repository's checkout, or in `/box/work` when the session has no repository.
 
-For remote hosts, the engine copies both files over its SSH master to `<hostdata>/instructions/`, reconciles hashes before box start or resume and after reconnection, and tests new and offline hosts. Only the owner edits them, in the web markdown editor; `instructions.set` uses the read hash and returns a typed conflict for stale saves. Agents ask the owner for changes. Pi sends changes as context diffs at the next run and folds them into the head at compaction; there is no delivery or event. The v1 import writes rule texts as plain Markdown bullets under a short heading, without numbers or authors.
+For remote hosts, the engine copies both files over its SSH master to the host paths in 4.3, skipping a room being deleted, reconciles hashes before box start or resume and after reconnection, and tests new and offline hosts. Only the owner edits them, in the web markdown editor; `instructions.set` uses the read hash and returns a typed conflict for stale saves. Agents ask the owner for changes. Pi sends changes as context diffs at the next run and folds them into the head at compaction; there is no delivery or event. The v1 import writes rule texts as plain Markdown bullets under a short heading, without numbers or authors.
 
 ### 7.1 Principals
 
@@ -358,7 +385,7 @@ Root cannot close. After box failure the owner may replace its box with the same
 
 ### 7.5 Reply channels (D-579)
 
-The engine derives surface and reply channel from the input, including for root. Each input starts with `[Dyna] From <sender>, <surface>. <attachments> <reply sentence>`, then the sender's text. Only that first line is an engine frame. `box.hello` supplies stable identity and the trust rule for this frame and Pi's engine-authored `context_update`; it contains no tools, commands or state.
+The engine derives surface and reply channel from the input, including for root. Each input starts with `[Dyna] From <sender>, <surface>. <attachments> <reply sentence>`, then the sender's text. Only that first line is an engine frame. `box.hello` supplies stable identity, the trust rule for this frame and Pi's engine-authored `context_update`, and how to reply; it contains no commands or state.
 
 | Input | Surface | Channel and target |
 |---|---|---|
@@ -375,6 +402,12 @@ The engine derives surface and reply channel from the input, including for root.
 
 A final response is delivered to its target and home; if the turn already posted to that target, delivery is quiet and links that post. A `post` channel sends nothing automatically. A `none` response stays in the transcript; the frame asks for one line. Multiple inputs require one reply per distinct final target and home.
 
+To answer, a session ends the turn with text; that text is the reply. A post with `endTurn` replaces that text when the reply needs attachments or mentions, or goes elsewhere. A plain post is a mid-turn update. `box.hello` states this rule.
+
+`endTurn` ends the turn with no further model call and makes the post the turn's reply. The turn has no final text, and `turn.output` names the post in `endPosts`. Every final channel of the turn links that post in `turn.ended.replies`; no event or table records `endTurn`. A session target that the post mentioned already has it. Any other session target receives the post itself as a waking delivery. A `post` or `none` channel owes nothing.
+
+Pi stops only when every tool call in the message ends the turn and no steering is queued. So a post that fails, a post beside another tool call and a turn that takes steering all continue, and the turn ends on text as usual. A post from a codemode script sends and the turn continues, because nested results never reach the agent loop; its result carries `turnContinues: true`. Recovery treats an end batch as settled and makes no model call. `endTurn` exists only on the MCP tool; `dyna post` has no turn to end.
+
 ### 7.6 Rooms and repositories
 
 A room lists zero or more repositories, exactly one default if nonempty. Each repository has exactly one default room and may appear in others. Owned events reach and wake their owning session in its room; after close, the nearest open ancestor owns them. Unowned repository events have one event row and one delivery per listing room; only the default room's root wakes.
@@ -383,7 +416,7 @@ Merge policy (`queue` or `manual`), CI mode (`github` or `box`), and commit, PR 
 
 ### 7.7 GitHub request budget (M3)
 
-Poll each repository with one batched GraphQL query for all tracked open PRs and the default branch head. Send the last ETag on every REST read. Start polling at 60 seconds; double to 10 minutes on no change, and reset on change, routed push or Dyna merge. Below 20% quota, wait at least 10 minutes and reject box `gh` calls with a typed error naming reset time. Target fewer than 300 REST requests and GraphQL queries combined per hour per repository with 20 open PRs. GitHub App webhooks through the relay replace polling later.
+Poll each repository with one batched GraphQL query for all tracked open PRs and the default branch head. Send the last ETag on every REST read. Start polling at 60 seconds; double to 10 minutes on no change, and reset on change, routed push or Dyna merge. Below 20% quota, wait at least 10 minutes and reject box `gh` calls with a typed error naming reset time. Target fewer than 300 REST requests and GraphQL queries combined per hour per repository with 20 open PRs. GitHub App webhooks through the relay replace polling later. The CI runner pool long-polls the Actions service, outside this budget; its REST use is one lease write every 5 minutes and one runner list an hour per repository ([CI runners](ci-runners.md)).
 
 ### 7.8 Remote access (M3)
 
@@ -397,7 +430,7 @@ Connect keeps its wire protocol and relay paths. `engine/connect` ports link, mi
 
 ### 7.9 Agent surface: MCP tools and the context snapshot
 
-Pi is the only harness. The box agent serves one `dyna` MCP server at `127.0.0.1:7781/dyna/`, beside `/shell/`; each call routes to `POST /v1/<method>` on the box socket. The CLI uses the same methods and principal. The engine alone authorizes and renders `context.snapshot`. Pi owns MCP, search, codemode, skills, keyed sections, compaction and context updates. The box agent configures Pi and passes state; it has no authority or credentials. Dyna ships no Pi extension. Cherry-pick upstream Pi fixes #11625 and #11632 and record them and the core change in `third_party/pi/DYNA.md`.
+Pi is the only harness. The box agent serves one `dyna` MCP server at `127.0.0.1:7781/dyna/`, beside `/shell/`; each call routes to `POST /v1/<method>` on the box socket. The CLI uses the same methods and principal. The engine alone authorizes and renders `context.snapshot`. Pi owns MCP, search, codemode, skills, keyed sections, compaction and context updates. The box agent configures Pi and passes state; it has no authority or credentials. Dyna's one Pi extension, `box/agent/extension.js`, links nested calls to their outer call and registers `mcp__dyna__post` in place of Pi's MCP tool, because only a tool's own result carries `terminate`: MCP results and the `tool_result` hook drop it. It adds no authority; the post still goes through the `dyna` MCP server. Cherry-pick upstream Pi fixes #11625 and #11632 and record them and the core change in `third_party/pi/DYNA.md`.
 
 #### Pi core change: context updates
 
@@ -517,7 +550,7 @@ Before cutover, horizon's root confirms whether upstream-watch needs desktop sta
 All M1–M3 features below are cutover gates. Imported data is not the same as a working feature.
 
 - **M1 and M2:** The thin slice and trial features are in section 11.
-- **M3:** goals, check-ins, questions, issues, thin PR approval and GitHub merges, Actions runners in boxes, typed subscriptions, settings, accounts, backups, remote access, Connect and device scopes, web push, desktop, skills, install guard, manual update, command palette and workflows. Add arch, lt-24-005, Boat and pve only after each passes the host check and real-box QA. The relay remains unchanged. Remote access precedes workflows. Daily maintenance includes backups, archive-ref expiry, host pruning and closing eligible boxes stopped for seven days; root and sessions with open PRs, goals, children or pending input are excluded.
+- **M3:** goals, check-ins, questions, issues, thin PR approval and GitHub merges, the Actions runner pool, typed subscriptions, settings, accounts, backups, remote access, Connect and device scopes, web push, desktop, skills, install guard, manual update, command palette and workflows. Add arch, lt-24-005, Boat and pve only after each passes the host check and real-box QA. The relay remains unchanged. Remote access precedes workflows. Daily maintenance includes backups, archive-ref expiry, host pruning and closing eligible boxes stopped for seven days; root and sessions with open PRs, goals, children or pending input are excluded.
 - **Web search:** The direct MCP web tool searches through eligible providers. CLIProxyAPI holds model credentials; the engine holds search-only keys, including the Muse search key. The owner requested this port before cutover on 2026-10-31.
 - **After cutover:** voice returns as the existing Go service and persona without redesign; issue watches, room MCP, computer reminders, idle compaction, settings panes, release pipeline, WSL and branch QA follow. Issue-watch and room-MCP data are not imported. Manual update ships in M3; hourly auto-update follows.
 - **Dropped:** reviewer service and workspace, Dyna merge trials, comment-trust holds, CI budget service, conflict radar, room PR views, jobs, worktrees, load doctor, test slots, harness settings, Claude Code and session-format conversion. Session profile changes remain. The library is cut for now; its map stays in the frozen v1 backup. External members and placement by device needs are absent. GitHub supplies PR state; outside text is wrapped, with the accepted risks in decision 13.
