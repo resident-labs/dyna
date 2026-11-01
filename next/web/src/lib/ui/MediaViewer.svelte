@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import Avatar from "./Avatar.svelte";
   import { formatTime } from "../feed.ts";
-  import { FIT, clampView, toggleZoom, wheelFactor, zoomAt } from "../zoom.ts";
+  import { FIT, actualScale, clampView, toggleZoom, wheelFactor, zoomAt } from "../zoom.ts";
   import type { Point, Size, View } from "../zoom.ts";
   import type { MediaItem } from "../media.ts";
 
@@ -10,10 +10,12 @@
     items: MediaItem[]; initial: number; name: (session: string) => string;
     root: (session?: string) => boolean; room: string; onclose: () => void; onjump: (key: string) => void;
   } = $props();
-  let index = $state(initial), view = $state<View>(FIT), menu = $state(false);
+  let selected = $state(items[initial]), view = $state<View>(FIT), menu = $state(false);
   let dialog: HTMLDialogElement, stage: HTMLDivElement;
   let natural = $state<Size>({ width: 0, height: 0 }), box = $state<Size>({ width: 0, height: 0 });
-  let item = $derived(items[index]);
+  let found = $derived(items.findIndex(entry => entry.key === selected.key && entry.file.sha256 === selected.file.sha256));
+  let index = $derived(Math.max(0, found));
+  let item = $derived(found >= 0 ? items[found] : selected);
   let author = $derived(item.from.kind === "owner" ? "You" : item.from.session ? name(item.from.session) : "Dyna");
   let src = $derived(`/v1/files/${encodeURIComponent(item.file.sha256)}`);
   let fit = $derived(natural.width && natural.height ? Math.min(1, box.width / natural.width, box.height / natural.height) : 1);
@@ -22,22 +24,23 @@
   let distance = 0, start: Point | undefined, moved = 0, lastTap = 0, background = false;
   const local = (x: number, y: number) => { const r = stage.getBoundingClientRect(); return { x: x - r.left - r.width / 2, y: y - r.top - r.height / 2 }; };
   function zoom(factor: number, at: Point = { x: 0, y: 0 }) { view = zoomAt(view, factor, at, box, content); }
-  function move(n: number) { index = (index + n + items.length) % items.length; view = FIT; natural = { width: 0, height: 0 }; menu = false; }
+  function move(n: number) { background = false; if (!items.length) return; selected = items[found < 0 ? (n > 0 ? 0 : items.length - 1) : (found + n + items.length) % items.length]; view = FIT; natural = { width: 0, height: 0 }; menu = false; }
   function key(e: KeyboardEvent) {
     if (e.target instanceof HTMLVideoElement || items.length < 2) return;
     if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); move(e.key === "ArrowLeft" ? -1 : 1); }
   }
   function wheel(node: HTMLElement) {
-    const handler = (e: WheelEvent) => { if (!item.file.media.startsWith("image/")) return; e.preventDefault(); zoom(wheelFactor(e.deltaY, e.ctrlKey), local(e.clientX, e.clientY)); };
+    const handler = (e: WheelEvent) => { if (item.file.visual || !item.file.media.startsWith("image/")) return; e.preventDefault(); zoom(wheelFactor(e.deltaY, e.ctrlKey), local(e.clientX, e.clientY)); };
     node.addEventListener("wheel", handler, { passive: false });
     return { destroy: () => node.removeEventListener("wheel", handler) };
   }
   function down(e: PointerEvent) {
+    background = false;
     if (e.target instanceof HTMLVideoElement) return;
     background = e.target === stage;
     stage.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 1) { start = { x: e.clientX, y: e.clientY }; moved = 0; }
-    if (pointers.size === 2) { const [a, b] = [...pointers.values()]; distance = Math.hypot(a.x-b.x, a.y-b.y); }
+    if (pointers.size === 2) { start = undefined; const [a, b] = [...pointers.values()]; distance = Math.hypot(a.x-b.x, a.y-b.y); }
   }
   function drag(e: PointerEvent) {
     const old = pointers.get(e.pointerId); if (!old) return;
@@ -59,7 +62,7 @@
       if (dy > 80 && dy > Math.abs(dx)) dialog.close();
       else if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) && items.length > 1) move(dx > 0 ? -1 : 1);
     } else if (moved < 8) {
-      if (e.timeStamp-lastTap < 300) { view = toggleZoom(view, local(e.clientX,e.clientY), box, content); lastTap = 0; }
+      if (e.timeStamp-lastTap < 300) { view = toggleZoom(view, local(e.clientX,e.clientY), box, content, actualScale(fit)); lastTap = 0; }
       else lastTap = e.timeStamp;
     }
     start = undefined;
@@ -133,8 +136,9 @@
   footer { position: absolute; bottom: 20px; width: 100%; text-align: center; font-size: 12px; pointer-events: none; }
   .phone { display: none; }
   @media (max-width: 640px) {
+    .stage { top: calc(56px + env(safe-area-inset-top)); }
     header { padding: env(safe-area-inset-top) 8px 0; height: calc(56px + env(safe-area-inset-top)); gap: 4px; }
-    .desktop { display: none; } .phone { display: block; } .round { width: 44px; height: 44px; }
+    .desktop { display: none; } .phone { display: block; } .round.phone { display: grid; } .round { width: 44px; height: 44px; }
     .identity { display: grid; gap: 1px; } .sender { min-height: 44px; display: flex; align-items: center; } .identity span { font-size: 11px; }
     .more { position: relative; } .menu { position: absolute; right: 0; top: 44px; min-width: 150px; padding: 4px; background: var(--screen-chip); border: 1px solid var(--screen-line); border-radius: 8px; }
     .menu a, .menu button { display: block; width: 100%; box-sizing: border-box; padding: 12px; text-align: left; text-decoration: none; font-size: 13px; }
