@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { call } from "../client.ts";
-  import type { ProfileSummary, RoomRepo, SessionStarted } from "../contract.gen.ts";
+  import type { RoomRepo, SessionStarted } from "../contract.gen.ts";
   import { nameProblem } from "../name-problem.ts";
   import ProfileSelector from "./ProfileSelector.svelte";
 
@@ -14,18 +14,17 @@
   let name = $state(""), parent = $state(sessions.find(item => !item.parent)?.session ?? "");
   let repo = $state(""), profile = $state(""), brief = $state(""), goal = $state("");
   let showGoal = $state(false), busy = $state(false), attempted = $state(false);
-  let profiles: ProfileSummary[] = $state([]), repos: RoomRepo[] = $state([]);
+  let repos: RoomRepo[] = $state([]);
   let loaded = $state(false), failure = $state("");
-  let problem = $derived(nameProblem(name, sessions.map(item => item.name)));
+  let trimmedName = $derived(name.trim());
+  let problem = $derived(nameProblem(trimmedName, sessions.map(item => item.name)));
 
   onMount(() => {
-    void Promise.all([call("profile.list", {}), call("room.repos", { room })]).then(([profileResult, repoResult]) => {
-      profiles = profileResult.profiles ?? [];
+    void call("room.repos", { room }).then(repoResult => {
       repos = repoResult.repos ?? [];
-      profile = [...profiles].sort((a, b) => b.inUse - a.inUse)[0]?.name ?? "";
       repo = repos.find(item => item.default)?.repo ?? repos[0]?.repo ?? "";
       loaded = true;
-    }, () => { failure = "The form could not load profiles or repositories. Close it and try again."; });
+    }, () => { failure = "The form could not load repositories. Close it and try again."; });
   });
 
   async function start() {
@@ -35,7 +34,7 @@
     busy = true;
     failure = "";
     await call("session.start", {
-      clientId, room, name: name.trim(), parent: parent || undefined,
+      clientId, room, name: trimmedName, parent: parent || undefined,
       repo: repos.length >= 2 ? repo : undefined, profile,
       brief: brief.trim() || undefined, goal: goal.trim() || undefined,
     }).then(result => onstarted(result.session, brief.trim()), (error: unknown) => {
@@ -66,7 +65,7 @@
       </label>
     {/if}
   </div>
-  {#if loaded}<ProfileSelector {profiles} bind:value={profile} />{:else}<p class="muted">Loading profiles…</p>{/if}
+  <ProfileSelector bind:value={profile} />
   <label>Brief
     <textarea bind:value={brief} rows="6"></textarea>
     <small>Its first message. Markdown works, as in the composer.</small>
