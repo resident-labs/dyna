@@ -25,6 +25,10 @@ type ContainerSpec struct {
 	Mounts       []Mount
 	Env          []EnvVar
 	Labels       []Label
+	// Pod is the pod the box joins, which then sets its user namespace and network. Empty for a box alone.
+	Pod string
+	// Volumes are its named compose volumes.
+	Volumes []Volume
 }
 
 // ContainerLayout identifies the mount layout created by the current engine.
@@ -34,6 +38,8 @@ type ContainerStatus struct {
 	Box         contract.BoxID
 	Running     bool
 	StaleLayout bool
+	// Stack is the Hash of the stack the container was made for.
+	Stack string
 }
 type Forward struct {
 	Box                  contract.BoxID
@@ -73,6 +79,8 @@ type HostDriver interface {
 	StopContainer(context.Context, contract.BoxID) error
 	RemoveContainer(context.Context, contract.BoxID) error
 	RemoveVolume(context.Context, contract.BoxID) error
+	RemovePod(context.Context, contract.BoxID) error
+	RemoveStackVolumes(context.Context, contract.BoxID) error
 	ListContainers(context.Context) ([]ContainerStatus, error)
 	AddForward(context.Context, Forward) error
 	RemoveForward(context.Context, Forward) error
