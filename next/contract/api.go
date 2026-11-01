@@ -321,6 +321,7 @@ type HostSummary struct {
 	DiskBytes         int64             `json:"diskBytes"`
 	DiskUsed          int64             `json:"diskUsed"`
 	DiskLow           bool              `json:"diskLow"`
+	EngineHost        bool              `json:"engineHost,omitempty"` // this added host is the machine the engine runs on
 	BackupCopyEnabled bool              `json:"backupCopyEnabled,omitempty"`
 	BackupCopyAt      time.Time         `json:"backupCopyAt,omitzero"`
 	BackupCopyFailure BackupCopyFailure `json:"backupCopyFailure,omitempty"`

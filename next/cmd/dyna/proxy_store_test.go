@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/rpc"
 	"testing"
 
+	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/model"
 	"github.com/resident-labs/dyna/engine/store"
 	proxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
@@ -40,6 +42,49 @@ func TestProxyStoreForwardsRawIdentity(t *testing.T) {
 	}
 	if capture.saved.Identity.Email != "new@example.test" || capture.saved.Attempt != "attempt" {
 		t.Fatal("raw identity was not forwarded")
+	}
+}
+
+func TestProxyStoreLoadsKeyEndpointFromCatalog(t *testing.T) {
+	db, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	// An account created before the catalog moved z.ai to its coding endpoint.
+	const id = "dyna-key-0123456789abcdef0123456789abcdef"
+	record, err := json.Marshal(proxyauth.Auth{ID: id, Provider: "openai-compatible-zai", Attributes: map[string]string{"api_key": "invented-key", "base_url": "https://api.z.ai/api/paas/v4", "compat_name": "zai"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveProxyAuth(ctx, store.ProxyAuth{ID: id, Provider: "openai-compatible-zai", Record: record}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.BindAccount(ctx, "account", id, contract.ProviderZAI, "Invented"); err != nil {
+		t.Fatal(err)
+	}
+	server, client := net.Pipe()
+	r := rpc.NewServer()
+	if err := r.RegisterName("Auth", &model.AuthRPC{Store: db}); err != nil {
+		t.Fatal(err)
+	}
+	go r.ServeConn(server)
+	p := &proxyStore{client: rpc.NewClient(client)}
+	defer p.client.Close()
+	mgr := proxyauth.NewManager(p, nil, nil)
+	if err := mgr.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	loaded := mgr.List()
+	if len(loaded) != 1 {
+		t.Fatalf("loaded %d credentials", len(loaded))
+	}
+	if got := loaded[0].Attributes["base_url"]; got != "https://api.z.ai/api/coding/paas/v4" {
+		t.Fatalf("stored z.ai account still uses %s", got)
+	}
+	if loaded[0].Attributes["api_key"] != "invented-key" {
+		t.Fatal("loading the endpoint lost the key")
 	}
 }
 
