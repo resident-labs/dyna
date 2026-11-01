@@ -35,6 +35,9 @@ func (m managementClient) requestAttempt(ctx context.Context, method, path strin
 	}
 	defer res.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	if res.StatusCode == http.StatusUnprocessableEntity {
+		return nil, ErrModelsUnavailable
+	}
 	if res.StatusCode != http.StatusOK {
 		return nil, errors.New("management request failed")
 	}

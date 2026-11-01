@@ -79,13 +79,9 @@ func NewProxy(dataDir, managementKey string) (*Proxy, error) {
 		return nil, err
 	}
 	cfg.AuthDir = authDir
-	for _, provider := range KeyProviders() {
-		catalog := config.OpenAICompatibility{Name: string(provider.Provider), BaseURL: provider.URL, DynaCatalogOnly: true}
-		for _, name := range provider.Models {
-			catalog.Models = append(catalog.Models, config.OpenAICompatibilityModel{Name: name, Alias: name})
-		}
-		cfg.OpenAICompatibility = append(cfg.OpenAICompatibility, catalog)
-	}
+	// An owner-added provider's models keep its prefix, so its name for a model never
+	// routes a built-in model's requests to the owner's address.
+	cfg.ForceModelPrefix = true
 	cfg.APIKeys = []string{key}
 	// Unix clients have no loopback IP; the private socket limits access.
 	cfg.RemoteManagement.AllowRemote = true
