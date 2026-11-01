@@ -21,10 +21,9 @@ fi
 # Without -q, grep consumes the whole list. A large subtree diff otherwise
 # gives printf SIGPIPE after an early match, and pipefail reports false.
 has() { printf '%s\n' "$files" | grep -E "$1" >/dev/null && echo true || echo false; }
-ci='^\.github/|^next/scripts/ci(-changes)?\.sh$'
-echo "relay=$(has "^relay/|^testdata/connect/|$ci")"
+# Each suite runs only for its own files. A CI change runs next as a smoke test; main still runs everything.
+echo "relay=$(has "^relay/|^testdata/connect/")"
 # Go tests read testdata/connect and .dyna/images. The next job also checks install.sh.
-echo "next=$(has "^next/|^testdata/connect/|^\.dyna/images/|^install\.sh$|$ci")"
-# The width check in the web suite runs the app on dyna-webdev.
-echo "web=$(has "^next/web/|^next/cmd/dyna-webdev/|$ci")"
-echo "next_pi=$(has "^next/third_party/pi/|$ci")"
+echo "next=$(has "^next/|^testdata/connect/|^\.dyna/images/|^install\.sh$|^\.github/")"
+echo "web=$(has "^next/web/")"
+echo "next_pi=$(has "^next/third_party/pi/")"

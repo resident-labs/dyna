@@ -90,16 +90,16 @@ class ChangesTest(unittest.TestCase):
         base = self.pull_request("next/third_party/pi/packages/coding-agent/src/cli.ts", large=True)
         self.assertEqual(self.run_filter("pull_request", base), NOTHING | {"next": "true", "next_pi": "true"})
 
-    def test_webdev_change_runs_web(self):
+    def test_webdev_change_runs_next_only(self):
         base = self.pull_request("next/cmd/dyna-webdev/main.go")
-        self.assertEqual(self.run_filter("pull_request", base), NOTHING | {"next": "true", "web": "true"})
+        self.assertEqual(self.run_filter("pull_request", base), NOTHING | {"next": "true"})
 
-    def test_ci_change_runs_everything(self):
+    def test_ci_change_runs_next_only(self):
         for path in (".github/workflows/ci.yml", "next/scripts/ci.sh", "next/scripts/ci-changes.sh"):
             with self.subTest(path=path), tempfile.TemporaryDirectory(dir=os.environ.get("DYNA_SCRATCH")) as tmp:
                 self.repo = Path(tmp)
                 base = self.pull_request(path)
-                self.assertEqual(self.run_filter("pull_request", base), EVERYTHING)
+                self.assertEqual(self.run_filter("pull_request", base), NOTHING | {"next": "true"})
 
     def test_other_events_run_everything(self):
         base = self.pull_request("LICENSE")
