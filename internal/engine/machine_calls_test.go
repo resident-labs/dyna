@@ -54,6 +54,9 @@ func TestRoomRootGrantsHostChecks(t *testing.T) {
 	}
 	// Route, switch and labels decide where the engine sends work, so they
 	// stay the owner's; the ci label routes local CI like the old role did.
+	if _, err := calls["SaveNode"](ctx, saveMachineArgs(`{"wakeCommand":["/usr/bin/true"]}`)); err == nil || !strings.Contains(err.Error(), "owner only") {
+		t.Fatal("root may not configure a wake command")
+	}
 	if _, err := calls["SaveNode"](ctx, saveMachineArgs(`{"enabled":false}`)); err == nil || !strings.Contains(err.Error(), "owner only") {
 		t.Fatalf("a root switching a machine off = %v, want an owner-only refusal", err)
 	}
