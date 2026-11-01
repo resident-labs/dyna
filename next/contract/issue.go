@@ -95,8 +95,9 @@ type IssueChange struct {
 	Meta         *MetaChange    `json:"meta,omitempty"`
 }
 
-// IssueChanged batches one poll's changes for the session that owns those issues. A session whose PRs moved in the same
-// pass hears of its issues in PrChanged.Issues instead, because one pass gives a session one event.
+// IssueChanged batches one poll's changes for the session that owns those issues. Every pass that moved an issue has one.
+// A session whose PRs moved in the same pass hears of its issues in PrChanged.Issues instead, because one pass gives a
+// session one delivery, and this event then carries none of its own: it is there for subscribers.
 type IssueChanged struct {
 	Session SessionID     `json:"session"`
 	Changes []IssueChange `json:"changes"`

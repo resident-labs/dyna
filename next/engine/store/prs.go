@@ -276,8 +276,10 @@ func (s *Store) moveRepoHead(ctx context.Context, tx *sql.Tx, head RepoHead, at 
 }
 
 // ApplyPRPoll writes one pass of the poll and its events in one transaction, so a restart can neither lose a wake nor
-// repeat one. Each recipient gets one event for the pass, whatever moved for it: pr.changed if any of its PRs did, with
-// its issues inside, and otherwise issue.changed. A row that went away meanwhile drops out.
+// repeat one. Each recipient gets one delivered event for the pass, whatever moved for it: pr.changed if any of its PRs
+// did, with its issues inside, and otherwise issue.changed. A pass that moved both also commits an undelivered
+// issue.changed, as pr.merged sits beside pr.changed, so a subscriber sees every issue change. A row that went away
+// meanwhile drops out.
 func (s *Store) ApplyPRPoll(ctx context.Context, updates []PRUpdate, issues []IssueUpdate, heads []RepoHead, at time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		type batch struct {
@@ -376,6 +378,9 @@ func (s *Store) ApplyPRPoll(ctx context.Context, updates []PRUpdate, issues []Is
 				}
 			}
 			events := []contract.EventBody{}
+			if len(group.changes) > 0 && len(group.issues) > 0 {
+				events = append(events, contract.IssueChanged{Session: group.session, Changes: group.issues})
+			}
 			for _, change := range group.changes {
 				events = append(events, prEvents(change)...)
 			}
