@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -382,5 +383,40 @@ func TestDetachedCheckIsLostWhenItsFolderIsRemoved(t *testing.T) {
 	var lost *NodeLostError
 	if !errors.As(err, &lost) || !lost.Gone {
 		t.Fatalf("err = %v, want a lost check", err)
+	}
+}
+
+// A descendant can keep the output pipe open after a job exits. Short output
+// must reach the log without waiting for that descendant to close the pipe.
+func TestDetachedLogReaderStreamsWhilePipeRemainsOpen(t *testing.T) {
+	script := strings.ReplaceAll(logCapScript, `>> "$1/log"`, "")
+	cmd := exec.Command("bash", "-c", script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); _ = cmd.Wait() }()
+	if _, err := io.WriteString(in, "hello"); err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan string, 1)
+	go func() { b := make([]byte, 5); n, _ := io.ReadFull(out, b); got <- string(b[:n]) }()
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+	select {
+	case s := <-got:
+		if s != "hello" {
+			t.Fatalf("output = %q, want hello", s)
+		}
+	case <-ctx.Done():
+		t.Fatal("short output stayed buffered while input remained open")
 	}
 }
