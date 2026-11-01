@@ -84,10 +84,7 @@ func (s *Service) ShellOutput(_ context.Context, caller contract.Principal, req 
 		return contract.ShellOutputResponse{}, forbidden()
 	}
 	handle, state, ok := s.lookupSession(caller.Session)
-	if !ok || state == nil {
-		if ok {
-			handle.Unlock()
-		}
+	if !ok {
 		return contract.ShellOutputResponse{}, nil
 	}
 	defer handle.Unlock()
