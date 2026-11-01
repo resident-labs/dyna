@@ -80,3 +80,7 @@ CREATE TABLE account_alerts (account TEXT NOT NULL REFERENCES accounts(id) ON DE
 CREATE TABLE session_accounts (session TEXT PRIMARY KEY REFERENCES sessions(id), account TEXT NOT NULL);
 
 CREATE TABLE client_replays (method TEXT NOT NULL, caller_kind TEXT NOT NULL, caller_id TEXT NOT NULL, client_id TEXT NOT NULL, ref TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(method, caller_kind, caller_id, client_id));
+
+CREATE TABLE questions (id TEXT PRIMARY KEY, room TEXT NOT NULL REFERENCES rooms(id), session TEXT NOT NULL REFERENCES sessions(id), text TEXT NOT NULL, state TEXT NOT NULL, answer TEXT NOT NULL DEFAULT '', asked_at INTEGER NOT NULL, answered_at INTEGER);
+CREATE INDEX questions_room_state ON questions(room, state, asked_at);
+CREATE INDEX questions_session_pending ON questions(session, asked_at) WHERE state='pending';

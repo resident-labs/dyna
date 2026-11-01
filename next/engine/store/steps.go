@@ -6,10 +6,17 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 61
+const schemaVersion = 62
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	61: {
+		`CREATE TABLE questions (id TEXT PRIMARY KEY, room TEXT NOT NULL REFERENCES rooms(id), session TEXT NOT NULL REFERENCES sessions(id), text TEXT NOT NULL, state TEXT NOT NULL, answer TEXT NOT NULL DEFAULT '', asked_at INTEGER NOT NULL, answered_at INTEGER)`,
+		`CREATE INDEX questions_room_state ON questions(room, state, asked_at)`,
+		`CREATE INDEX questions_session_pending ON questions(session, asked_at) WHERE state='pending'`,
+		// Rooms made before this step gave their roots only the host grant.
+		`INSERT INTO grants(id,kind,room,to_kind,to_id,hosts,by_kind,by_id,created_at) SELECT 'grant_ask_'||id,'ask-owner',room,'session',id,'[]','engine','',created_at FROM sessions WHERE parent IS NULL AND closed_at IS NULL`,
+	},
 	60: {`ALTER TABLE sessions ADD COLUMN compose TEXT NOT NULL DEFAULT ''`},
 	59: {`CREATE TABLE session_accounts (session TEXT PRIMARY KEY REFERENCES sessions(id), account TEXT NOT NULL)`},
 	58: {`ALTER TABLE turns ADD COLUMN dispatched_model TEXT NOT NULL DEFAULT ''`},

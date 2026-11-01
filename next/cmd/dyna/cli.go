@@ -76,6 +76,7 @@ func newClient(socket string) *socketClient {
 type requestType interface {
 	contract.WebSearchRequest | contract.WebsearchSetKeyRequest | contract.WebsearchRemoveKeyRequest |
 		contract.ContextSnapshotRequest |
+		contract.QuestionAskRequest | contract.QuestionAnswerRequest | contract.QuestionListRequest |
 		contract.OpWithdrawRequest |
 		contract.SessionMoveRequest |
 		contract.SessionListRequest |
@@ -84,6 +85,7 @@ type requestType interface {
 type responseType interface {
 	contract.WebSearchResponse | contract.WebsearchSetKeyResponse | contract.WebsearchRemoveKeyResponse |
 		contract.ContextSnapshotResponse |
+		contract.QuestionAskResponse | contract.QuestionAnswerResponse | contract.QuestionListResponse |
 		contract.OpWithdrawResponse |
 		contract.SessionMoveResponse |
 		contract.SessionListResponse |
