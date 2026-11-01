@@ -90,7 +90,7 @@ func (b *Boxes) installBinary(ctx context.Context, h *podman.Host) error {
 	if b.binErr != nil {
 		return b.binErr
 	}
-	return h.InstallBinary(ctx, b.Layout.HostData, b.Version, b.binSum, readExecutable)
+	return h.InstallBinary(ctx, b.Layout.HostBin(), b.Version, b.binSum, readExecutable)
 }
 
 // ciHost gives the CI pool a host's runner operations.
@@ -104,7 +104,7 @@ func (h ciHost) EnsureEgress(ctx context.Context, image string) error {
 	if err := h.boxes.installBinary(ctx, h.Host); err != nil {
 		return err
 	}
-	return h.Host.EnsureEgress(ctx, image, h.boxes.Layout.HostData)
+	return h.Host.EnsureEgress(ctx, image, h.boxes.Layout.HostBin())
 }
 
 func (b *Boxes) ciDriver(ctx context.Context, name contract.HostName) (ci.Driver, error) {
@@ -340,7 +340,7 @@ func (b *Boxes) MaintainHost(ctx context.Context, name contract.HostName) ([]con
 	if err != nil {
 		return nil, err
 	}
-	return h.Maintain(ctx, b.Layout.HostData)
+	return h.Maintain(ctx, b.Layout)
 }
 
 // RemoveRoom removes a room's folder from a host.
@@ -369,9 +369,8 @@ func (b *Boxes) RemoveLeftoverBox(ctx context.Context, name contract.HostName, i
 // ForgetBox closes the engine's socket for a box that its offline host still holds.
 func (b *Boxes) ForgetBox(id contract.BoxID) error { return b.Sockets.RemoveBox(id) }
 
-func (b *Boxes) CacheHost(ctx context.Context, name contract.HostName) (enginegit.CacheHost, string, error) {
-	h, err := b.host(ctx, name)
-	return h, b.Layout.HostData, err
+func (b *Boxes) CacheHost(ctx context.Context, name contract.HostName) (enginegit.CacheHost, error) {
+	return b.host(ctx, name)
 }
 
 func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool, error) {
@@ -379,7 +378,7 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool,
 	if err != nil {
 		return false, err
 	}
-	check := h.Check(ctx, podman.CheckOptions{HostData: b.Layout.HostData, Runtime: b.Runtime, AdminOnly: req.OwnerOnlyAdmin})
+	check := h.Check(ctx, podman.CheckOptions{Layout: b.Layout, Runtime: b.Runtime, AdminOnly: req.OwnerOnlyAdmin})
 	if !check.Ready() {
 		for _, item := range check.Items {
 			if !item.OK {
@@ -416,7 +415,7 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool,
 }
 
 func (b *Boxes) forward(id contract.BoxID) box.Forward {
-	return box.Forward{Box: id, HostPath: filepath.Join(b.Layout.HostData, "sock", string(id), "engine.sock"), EnginePath: filepath.Join(b.Runtime, "boxes", string(id)+".sock")}
+	return box.Forward{Box: id, HostPath: b.Layout.HostSocket(id), EnginePath: filepath.Join(b.Runtime, "boxes", string(id)+".sock")}
 }
 
 func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, error) {
@@ -753,9 +752,9 @@ func (b *Boxes) container(spec lifecycle.BoxSpec, image string) (box.Slice, box.
 	size := spec.Size
 	slice := box.Slice{Name: spec.Slice, CPUs: size.CPUs, MemHigh: size.MemBytes, MemMax: size.MemBytes * 3 / 2, Pids: size.Pids}
 	c := box.ContainerSpec{Box: spec.Box, Image: image, Slice: spec.Slice, Needs: spec.Needs, Labels: []box.Label{{Key: "dyna.layout", Value: box.ContainerLayout}}, Mounts: []box.Mount{
-		{HostPath: filepath.Join(b.Layout.HostData, "sock", string(spec.Box)), BoxPath: "/run/dyna/engine", ReadOnly: true},
-		{HostPath: filepath.Join(b.Layout.HostData, "bin"), BoxPath: "/opt/dyna/bin", ReadOnly: true},
-		{HostPath: filepath.Join(b.Layout.HostData, "cache"), BoxPath: "/box/cache"},
+		{HostPath: b.Layout.HostSocketFolder(spec.Box), BoxPath: "/run/dyna/engine", ReadOnly: true},
+		{HostPath: b.Layout.HostBin(), BoxPath: "/opt/dyna/bin", ReadOnly: true},
+		{HostPath: b.Layout.HostCache(), BoxPath: "/box/cache"},
 		{HostPath: b.Layout.HostShared(spec.Room), BoxPath: "/box/shared"},
 		{HostPath: filepath.Dir(b.Layout.HostInstructions("")), BoxPath: "/run/dyna/instructions/global", ReadOnly: true, MakeDir: true},
 		{HostPath: filepath.Dir(b.Layout.HostInstructions(spec.Room)), BoxPath: "/run/dyna/instructions/room", ReadOnly: true, MakeDir: true},
