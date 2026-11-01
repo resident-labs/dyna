@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -194,6 +195,33 @@ func (s *Service) PrTrack(ctx context.Context, caller contract.Principal, req co
 		return contract.PrTrackResponse{}, e
 	}
 	return contract.PrTrackResponse{PR: prFor(caller, stored, s.prViewer())}, nil
+}
+
+// HookTrack tracks a PR the way the named session would for itself, or root with no name, so a Run gets no reach that
+// the session lacks: the room must list the PR's repository, and tracking grants no push right.
+func (s *Service) HookTrack(ctx context.Context, id contract.RoomID, name string, req contract.PrTrackRequest) (contract.PrTrackResponse, *contract.Error) {
+	if id == "" {
+		return contract.PrTrackResponse{}, invalid("a machine run has no room to track for")
+	}
+	tree, err := s.store.RoomTree(ctx, id)
+	if err != nil {
+		return contract.PrTrackResponse{}, failure(err)
+	}
+	session := tree.Root()
+	if name = strings.TrimPrefix(name, "@"); name != "" {
+		named, err := s.store.SessionByName(ctx, id, name)
+		if errors.Is(err, store.ErrNotFound) {
+			return contract.PrTrackResponse{}, invalid("unknown session @" + name)
+		}
+		if err != nil {
+			return contract.PrTrackResponse{}, failure(err)
+		}
+		session = named.ID
+	}
+	if session == "" {
+		return contract.PrTrackResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "room has no open root"}
+	}
+	return s.PrTrack(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session}, req)
 }
 
 // PrUntrack is for the owner, the session that owns the PR, and that session's ancestors.

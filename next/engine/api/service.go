@@ -111,6 +111,8 @@ type Service interface {
 	SubscriptionSetEnabled(context.Context, contract.Principal, contract.SubscriptionSetEnabledRequest) (contract.SubscriptionSetEnabledResponse, *contract.Error)
 	// HookPost posts for a Run. Its socket fixes the subscription and the room.
 	HookPost(context.Context, contract.SubscriptionID, contract.RoomID, contract.PostRequest) (contract.PostResponse, *contract.Error)
+	// HookTrack tracks a PR for a Run, for the session it names in its room.
+	HookTrack(context.Context, contract.RoomID, string, contract.PrTrackRequest) (contract.PrTrackResponse, *contract.Error)
 	// Events atomically subscribes after seq, including committed events not yet
 	// delivered. The producer closes the channel when ctx ends.
 	Events(context.Context, contract.Principal, contract.RoomID, int64) (<-chan contract.Event, *contract.Error)

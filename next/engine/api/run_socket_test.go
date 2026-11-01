@@ -16,6 +16,15 @@ type runSocketService struct {
 	sub  contract.SubscriptionID
 	room contract.RoomID
 	req  contract.PostRequest
+
+	trackRoom contract.RoomID
+	trackFor  string
+	track     contract.PrTrackRequest
+}
+
+func (s *runSocketService) HookTrack(_ context.Context, room contract.RoomID, session string, req contract.PrTrackRequest) (contract.PrTrackResponse, *contract.Error) {
+	s.trackRoom, s.trackFor, s.track = room, session, req
+	return contract.PrTrackResponse{}, nil
 }
 
 func (s *runSocketService) HookPost(_ context.Context, sub contract.SubscriptionID, room contract.RoomID, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
@@ -24,7 +33,7 @@ func (s *runSocketService) HookPost(_ context.Context, sub contract.Subscription
 }
 
 // A Run's socket fixes its subscription and room, and serves no engine method, whatever the box asks for.
-func TestRunSocketServesPostAndGitHubOnly(t *testing.T) {
+func TestRunSocketServesPostTrackAndGitHubOnly(t *testing.T) {
 	service := &runSocketService{}
 	a := New(service, nil)
 	var github []string
@@ -50,7 +59,16 @@ func TestRunSocketServesPostAndGitHubOnly(t *testing.T) {
 	if got := post("/v1/post", `{"text":"hello","surprise":1}`); got != http.StatusBadRequest {
 		t.Fatalf("unknown field: %d", got)
 	}
-	for _, method := range []contract.Method{contract.MethodRoomList, contract.MethodSessionList, contract.MethodSubscriptionAdd, contract.MethodHostexecRun, contract.MethodSessionStart, contract.MethodEventsList} {
+	if got := post("/v1/pr.track", `{"repo":"o/r","number":7,"session":"lead"}`); got != http.StatusOK {
+		t.Fatalf("track: %d", got)
+	}
+	if service.trackRoom != "room_a" || service.trackFor != "lead" || service.track.Repo != "o/r" || service.track.Number != 7 {
+		t.Fatalf("track reached the service as %+v", service)
+	}
+	if got := post("/v1/pr.track", `{"repo":"o/r","number":7,"room":"room_b"}`); got != http.StatusBadRequest {
+		t.Fatalf("a Run named another room: %d", got)
+	}
+	for _, method := range []contract.Method{contract.MethodPrUntrack, contract.MethodRoomList, contract.MethodSessionList, contract.MethodSubscriptionAdd, contract.MethodHostexecRun, contract.MethodSessionStart, contract.MethodEventsList} {
 		if got := post("/v1/"+string(method), `{}`); got != http.StatusForbidden {
 			t.Errorf("%s: %d", method, got)
 		}
