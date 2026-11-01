@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountAlerts, busiestWindow, causeText, limitReached, usageRows, visibleWindows, windowLabel, windowMeter } from "./usage.ts";
+import { accountAlerts, busiestWindow, limitReached, usageRows, visibleWindows, windowLabel, windowMeter } from "./usage.ts";
 import type { AccountUsage, AccountsListResponse, UsageWindow } from "./contract.gen.ts";
 
 test("labels each window and hides only unused model-specific windows", () => {
@@ -12,11 +12,6 @@ test("labels each window and hides only unused model-specific windows", () => {
   assert.equal(windowLabel(fable), "Weekly · Fable");
   assert.deepEqual(visibleWindows([five, weekly, fable, { ...fable, usedPercent: 0.1 }, { ...fable, usedPercent: 0.6 }]), [five, weekly, { ...fable, usedPercent: 0.6 }]);
   assert.equal(busiestWindow([{ title: "studio", windows: [{ ...fable, usedPercent: 80 }] }]), "studio · Weekly (Fable) 80% used");
-});
-
-test("unreachable usage is muted while expired sign-in needs attention", () => {
-  assert.equal(causeText.unreachable.tone, undefined);
-  assert.equal(causeText.sign_in_expired.tone, "warning");
 });
 
 const windowAt = (usedPercent: number): UsageWindow => ({ name: "week", kind: "weekly", usedPercent, seconds: 604800, resetsAt: "" });
@@ -60,11 +55,14 @@ test("Usage keeps only accounts with reported windows, highest usage first, then
     usageOf("f", "alpha", "claude", [windowAt(5), windowAt(40)]),
     usageOf("g", "spent", "claude", [windowAt(0), windowAt(100)]),
     usageOf("h", "rounds-up", "claude", [windowAt(99.6)]),
+    usageOf("i", "limited", "claude", [windowAt(30)], "rate_limited"),
+    usageOf("j", "limited-empty", "claude", [], "rate_limited"),
+    usageOf("k", "lost-empty", "claude", null, "unreachable"),
   ]);
-  assert.deepEqual(rows.map(row => row.title), ["rounds-up", "spent", "alpha", "beta"]);
+  assert.deepEqual(rows.map(row => row.title), ["rounds-up", "spent", "alpha", "beta", "limited"]);
 });
 
-test("Needs you lists accounts with a cause, expired sign-ins first, and reconnects only an expired sign-in with OAuth", () => {
+test("Needs you lists only expired sign-ins, by name, and reconnects only those with OAuth", () => {
   const alerts = accountAlerts([
     usageOf("a", "fine", "claude"),
     usageOf("openai", "unreachable", "codex", [], "unreachable"),
@@ -75,8 +73,6 @@ test("Needs you lists accounts with a cause, expired sign-ins first, and reconne
   assert.deepEqual(alerts.map(({ id, title, provider, reconnect }) => ({ id, title, provider, reconnect })), [
     { id: "opencode-go", title: "key", provider: "OpenCode Go", reconnect: false },
     { id: "anthropic", title: "zeta", provider: "Claude", reconnect: true },
-    { id: "xai", title: "limited", provider: "xAI", reconnect: false },
-    { id: "openai", title: "unreachable", provider: "ChatGPT", reconnect: false },
   ]);
   assert.deepEqual(accountAlerts([usageOf("a", "fine", "claude"), usageOf("b", "quiet", "kimi", [])], catalog), []);
 });

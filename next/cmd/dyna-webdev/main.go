@@ -112,8 +112,9 @@ func (devService) AccountsRemove(context.Context, contract.Principal, contract.A
 }
 
 // devAccounts are invented, never a real sign-in. They show each look of Home's Usage and Needs you: a card of several
-// windows, one of a single window, spent windows, a long label, a label that says its provider, three causes, and
-// accounts that report nothing, which Home leaves out. As in the engine, usage names its provider as the proxy does.
+// windows, one of a single window, spent windows, a long label, a label that says its provider, an expired sign-in, and
+// accounts Home leaves out: those that report nothing, rate limited or not. As in the engine, usage names its provider
+// as the proxy does.
 type devAccount struct {
 	provider contract.AccountProvider
 	usage    contract.AccountUsage
