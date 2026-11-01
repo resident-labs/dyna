@@ -248,7 +248,7 @@ func TestABoxStartsItsSidecarsUnlessItIsClosing(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		b := &Boxes{hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, Store: closingStore{state: state}}
+		b := &Boxes{hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}, Store: closingStore{state: state}}
 		if err := b.Start(context.Background(), "box_1"); err != nil {
 			t.Fatal(err)
 		}

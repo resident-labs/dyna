@@ -14,10 +14,11 @@ import (
 	"github.com/resident-labs/dyna/harness"
 )
 
-// TranscriptItem keeps the raw tool-call ID outside the wire contract.
+// TranscriptItem keeps the raw tool-call ID and a steer's delivery outside the wire contract.
 type TranscriptItem struct {
 	contract.TranscriptItem
-	CallID string
+	CallID   string
+	Delivery contract.DeliverySeq
 }
 
 // ReadTranscript decodes complete Pi records and masks their content.
@@ -26,10 +27,10 @@ func ReadTranscript(r io.Reader, deliveries map[contract.DeliverySeq]contract.Tu
 }
 
 func readTranscript(r io.Reader, deliveries map[contract.DeliverySeq]contract.TurnID, source, fullItem string, skip, limit int, maxRecord int64) ([]TranscriptItem, int, bool, error) {
-	return readTranscriptMode(r, deliveries, source, fullItem, skip, limit, maxRecord, false)
+	return readTranscriptMode(r, deliveries, nil, source, fullItem, skip, limit, maxRecord, false)
 }
 
-func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contract.TurnID, source, fullItem string, skip, limit int, maxRecord int64, recent bool) ([]TranscriptItem, int, bool, error) {
+func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contract.TurnID, steers map[contract.DeliverySeq]bool, source, fullItem string, skip, limit int, maxRecord int64, recent bool) ([]TranscriptItem, int, bool, error) {
 	reader := bufio.NewReaderSize(r, 64<<10)
 	var items []*TranscriptItem
 	seen := 0
@@ -38,6 +39,31 @@ func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contrac
 	var latestText *TranscriptItem
 	var turn contract.TurnID
 	var lastAt time.Time
+	// keep counts the next item and makes room for it in the page.
+	keep := func(item *TranscriptItem) bool {
+		if fullItem != "" {
+			return item.ID == fullItem
+		}
+		if seen < skip {
+			seen++
+			return false
+		}
+		seen++
+		item.Index = seen - 1
+		if len(items) >= limit {
+			more = true
+			if !recent {
+				return false
+			}
+			drop := 0
+			if items[drop] == latestText && len(items) > 1 {
+				drop++
+			}
+			delete(calls, items[drop].ID)
+			items = append(items[:drop], items[drop+1:]...)
+		}
+		return true
+	}
 	for lineNo := 1; ; lineNo++ {
 		var line []byte
 		var size int64
@@ -105,7 +131,14 @@ func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contrac
 		m := entry.Message
 		if m.Role == "user" {
 			id, _ := strconv.ParseInt(m.DeliveryID, 10, 64)
-			turn = deliveries[contract.DeliverySeq(id)]
+			delivery := contract.DeliverySeq(id)
+			turn = deliveries[delivery]
+			if turn != "" && steers[delivery] {
+				item := TranscriptItem{TranscriptItem: contract.TranscriptItem{ID: "steer:" + m.DeliveryID, Turn: turn, Kind: contract.TranscriptSteer, At: entry.Timestamp}, Delivery: delivery}
+				if keep(&item) {
+					items = append(items, &item)
+				}
+			}
 			continue
 		}
 		if m.Role == "assistant" && turn != "" {
@@ -137,26 +170,7 @@ func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contrac
 				default:
 					continue
 				}
-				if fullItem == "" {
-					if seen < skip {
-						seen++
-						continue
-					}
-					seen++
-					item.Index = seen - 1
-					if len(items) >= limit {
-						more = true
-						if !recent {
-							continue
-						}
-						drop := 0
-						if items[drop] == latestText && len(items) > 1 {
-							drop++
-						}
-						delete(calls, items[drop].ID)
-						items = append(items[:drop], items[drop+1:]...)
-					}
-				} else if item.ID != fullItem {
+				if !keep(&item) {
 					continue
 				}
 				if item.ID != fullItem {

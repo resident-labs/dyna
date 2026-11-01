@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
@@ -37,6 +38,9 @@ func (ExecRunner) Run(ctx context.Context, in []byte, args ...string) ([]byte, e
 	return out, err
 }
 
+// masterStart bounds a new SSH master.
+const masterStart = 2 * time.Minute
+
 type Host struct {
 	buildGate           chan struct{}
 	shortGate           chan struct{}
@@ -45,7 +49,8 @@ type Host struct {
 	gate                chan struct{}
 	destination, socket string
 	runner              Runner
-	forwards            map[box.Forward]struct{}
+	forwards            map[box.Forward]struct{} // every forward this host should have
+	bound               map[box.Forward]struct{} // those the current master holds; a retry starts from here
 	restored            bool
 	masterReset         bool
 	generation          atomic.Uint64
@@ -79,7 +84,7 @@ func New(destination, runtime, hostKey string, runner Runner) (*Host, error) {
 	if !ok || !info.IsDir() || info.Mode().Perm() != 0700 || stat.Uid != uint32(os.Getuid()) {
 		return nil, errors.New("insecure SSH control socket directory")
 	}
-	return &Host{gate: make(chan struct{}, 1), buildGate: make(chan struct{}, 1), shortGate: make(chan struct{}, 5), hostexecGate: make(chan struct{}, 3), stopGate: make(chan struct{}, 1), destination: destination, socket: socket, runner: runner, forwards: make(map[box.Forward]struct{})}, nil
+	return &Host{gate: make(chan struct{}, 1), buildGate: make(chan struct{}, 1), shortGate: make(chan struct{}, 5), hostexecGate: make(chan struct{}, 3), stopGate: make(chan struct{}, 1), destination: destination, socket: socket, runner: runner, forwards: make(map[box.Forward]struct{}), bound: make(map[box.Forward]struct{})}, nil
 }
 
 // Generation changes each time the SSH master and its forwards are restored.
@@ -123,17 +128,22 @@ func (h *Host) ensure(ctx context.Context) error {
 		h.masterReset = true
 	}
 	if h.control(ctx, "check") != nil {
-		h.restored = false
+		// A check killed with its caller says nothing about the master, which may hold every forward.
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		h.restored = false
+		clear(h.bound)
 		// A master killed without cleanup leaves its socket. A new master keeps that socket and runs
 		// without multiplexing, so every later check fails and starts one more master.
 		if err := os.Remove(h.socket); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		args := []string{"ssh", "-M", "-N", "-f", "-S", h.socket, "-o", "ControlMaster=yes", "-o", "ControlPersist=10m", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3", "-o", "StreamLocalBindUnlink=yes", h.destination}
-		if _, err := h.runner.Run(ctx, nil, args...); err != nil {
+		// ssh has no limit of its own on a host that accepts and then stalls, and this holds the gate.
+		startCtx, cancel := context.WithTimeout(ctx, masterStart)
+		defer cancel()
+		if _, err := h.runner.Run(startCtx, nil, args...); err != nil {
 			return err
 		}
 	}
@@ -145,22 +155,39 @@ func (h *Host) ensure(ctx context.Context) error {
 		fs = append(fs, f)
 	}
 	sort.Slice(fs, func(i, j int) bool { return fs[i].HostPath < fs[j].HostPath })
-	for i, f := range fs {
-		// The dead master's socket is still on the host (see AddForward).
-		_, err := h.execute(ctx, "rm", "-f", "--", f.HostPath)
-		if err == nil {
-			err = h.control(ctx, "forward", "-R", f.HostPath+":"+f.EnginePath)
+	for _, f := range fs {
+		if _, ok := h.bound[f]; ok {
+			continue
 		}
-		if err != nil {
-			for _, done := range fs[:i] {
-				_ = h.control(ctx, "cancel", "-R", done.HostPath+":"+done.EnginePath)
-			}
+		// A heartbeat's short deadline can end this loop, and each forward kept here shortens the next try, so a host
+		// with many boxes finishes however slow it is.
+		if err := h.bind(ctx, f); err != nil {
 			return err
 		}
+		h.bound[f] = struct{}{}
 	}
 	h.restored = true
 	h.generation.Add(1)
 	return nil
+}
+
+// bind puts a forward on the master, replacing whatever an earlier try or master left. The master answers ok to a forward
+// it holds without asking sshd again, so after a reply lost to a killed ssh, removing the socket alone would leave the
+// forward with no socket. sshd keeps a socket from an earlier master, as after an engine restart, and then refuses the
+// forward, because its StreamLocalBindUnlink defaults to no.
+func (h *Host) bind(ctx context.Context, f box.Forward) error {
+	spec := f.HostPath + ":" + f.EnginePath
+	_ = h.control(ctx, "cancel", "-R", spec) // It fails when the master holds no such forward, the usual case.
+	var err error
+	if f.Box != "" {
+		_, err = h.execute(ctx, "bash", "-c", `mkdir -p -- "$1" && chmod 0700 -- "$1" && rm -f -- "$2"`, "dyna", filepath.Dir(f.HostPath), f.HostPath)
+	} else {
+		_, err = h.execute(ctx, "rm", "-f", "--", f.HostPath)
+	}
+	if err != nil {
+		return err
+	}
+	return h.control(ctx, "forward", "-R", spec)
 }
 func validateForward(f box.Forward) error {
 	if strings.ContainsAny(f.HostPath+f.EnginePath, ":\n") || !filepath.IsAbs(f.HostPath) || !filepath.IsAbs(f.EnginePath) {
@@ -185,17 +212,11 @@ func (h *Host) AddForward(ctx context.Context, f box.Forward) error {
 	if _, ok := h.forwards[f]; ok {
 		return nil
 	}
-	if f.Box != "" {
-		// A socket left by an earlier master, as after an engine restart, makes the forward fail:
-		// sshd keeps it, because its StreamLocalBindUnlink defaults to no.
-		if _, err := h.execute(ctx, "bash", "-c", `mkdir -p -- "$1" && chmod 0700 -- "$1" && rm -f -- "$2"`, "dyna", filepath.Dir(f.HostPath), f.HostPath); err != nil {
-			return err
-		}
-	}
-	if err := h.control(ctx, "forward", "-R", f.HostPath+":"+f.EnginePath); err != nil {
+	if err := h.bind(ctx, f); err != nil {
 		return err
 	}
 	h.forwards[f] = struct{}{}
+	h.bound[f] = struct{}{}
 	return nil
 }
 func (h *Host) RemoveForward(ctx context.Context, f box.Forward) error {
@@ -214,6 +235,7 @@ func (h *Host) RemoveForward(ctx context.Context, f box.Forward) error {
 			return err
 		}
 		delete(h.forwards, f)
+		delete(h.bound, f)
 	}
 	if f.Box != "" {
 		_, err := h.execute(ctx, "bash", "-c", `rm -f -- "$1" && { [ ! -d "$2" ] || rmdir -- "$2"; }`, "dyna", f.HostPath, filepath.Dir(f.HostPath))

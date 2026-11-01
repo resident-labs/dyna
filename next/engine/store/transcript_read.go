@@ -16,6 +16,7 @@ type TranscriptTurnRange struct {
 	End   *int64
 }
 
+// LEGACY(v1-transfer): TranscriptPathIndexed, for transcript files from before the turn index. Remove after the transfer.
 // TranscriptPathIndexed reports whether a path has any indexed turn starts.
 func (s *Store) TranscriptPathIndexed(ctx context.Context, session contract.SessionID, path string) (bool, error) {
 	var indexed bool
@@ -217,6 +218,7 @@ func (s *Store) TranscriptSentPostsNewest(ctx context.Context, session contract.
 	return posts, rows.Err()
 }
 
+// LEGACY(v1-transfer): the Indexed field, read only by the transcript backfill. Remove after the transfer.
 type TranscriptFile struct {
 	Path    string
 	Acked   int64
@@ -254,6 +256,24 @@ func (s *Store) TranscriptDeliveries(ctx context.Context, session contract.Sessi
 			return nil, err
 		}
 		result[seq] = turn
+	}
+	return result, rows.Err()
+}
+
+// TranscriptSteers returns the deliveries a running turn took as messages to read, a child's reply among them. A machine wake, such as a shell job's end, does not split the turn's work.
+func (s *Store) TranscriptSteers(ctx context.Context, session contract.SessionID) (map[contract.DeliverySeq]bool, error) {
+	rows, err := s.Read().QueryContext(ctx, "SELECT d.seq FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND d.queue IS NOT NULL AND e.type IN ('post.created','question.answered','turn.ended')", contract.PrincipalSession, session)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[contract.DeliverySeq]bool)
+	for rows.Next() {
+		var seq contract.DeliverySeq
+		if err := rows.Scan(&seq); err != nil {
+			return nil, err
+		}
+		result[seq] = true
 	}
 	return result, rows.Err()
 }

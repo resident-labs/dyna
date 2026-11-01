@@ -234,7 +234,7 @@
         shows as waiting that the store lacks was decided outside the window, so it gets no buttons. -->
       {:else if item.kind === "request"}{@const live = store.requests.get(item.request.id)}
         <RequestCard {admin} request={live ?? item.request} gone={!live && item.request.state === "pending"} {store} {now} feed />
-      {:else if item.kind === "work"}<WorkRow row={item} {name} {opened} ontoggle={toggle} {transcripts} {transcriptOf} {onjobs} />
+      {:else if item.kind === "work"}<WorkRow row={item} {name} {opened} ontoggle={toggle} {transcripts} {transcriptOf} {onjobs} prs={store.prs} />
       {:else if item.kind === "new"}<p class="new"><span>New</span></p>
       {:else if item.kind === "day"}<p class="day"><span>{dayLabel(item.at, Date.now())}</span></p>
       {:else if item.kind === "steps"}<ul class="steps" aria-label="Finished steps">
