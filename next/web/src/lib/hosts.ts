@@ -6,6 +6,19 @@ export const hostLabel = (host: string) => host === "control-plane" ? "Dyna host
 // One tile on a Home card: the label, the percent large with an optional muted unit after it, a bar, and the text.
 export type Meter = { label: string; text: string; percent: number; busy: boolean; unit?: string };
 
+// One card per machine. When the engine runs on a registered host, host.list reports that machine twice: the control
+// plane with whole-machine figures, and the registered host with only dyna.slice's use of its allowance (cores less
+// one, memory less the floor). They merge under the host's name with the whole-machine figures, the host's workspaces
+// and shared folders, and whether the engine can reach it. Until the control plane's first sample, the host stands alone.
+export function machines(hosts: HostSummary[]): HostSummary[] {
+  const plane = hosts.find(h => h.name === "control-plane");
+  const same = hosts.find(h => h.engineHost);
+  if (!plane || !same || !hostMeters(plane).length) return hosts;
+  const merged = { ...plane, name: same.name, reachable: same.reachable, lastSeen: same.lastSeen, boxes: plane.boxes + same.boxes,
+    diskLow: plane.diskLow || same.diskLow, shared: [...plane.shared ?? [], ...same.shared ?? []], engineHost: true };
+  return hosts.filter(h => h !== same).map(h => h === plane ? merged : h);
+}
+
 // A host's CPU, memory and disk meters, "3.1 of 16 cores", "9.8 of 31 GB" and "412 GB free"; none while it reports
 // no capacity, and no disk tile without a disk figure. Figures of 100 or more drop the decimal, so a tile's text
 // stays on one line, and large ones group their digits ("1,348 GB free"). A meter at 90% of its limit or more is busy. GB counts 2^30 bytes, as v1's GiB did.
@@ -56,7 +69,7 @@ export function hostLoads(hosts: HostSummary[]): { name: string; reachable: bool
   return [...hosts.filter(h => !h.reachable).map(h => ({ name: h.name, reachable: false, diskLow: h.diskLow, meters: [] })), ...loads].slice(0, 3);
 }
 
-// host.list now, then every 10 s to match the engine's beat, only while the page is visible. A tick skips while a
+// host.list as machines, now and then every 10 s to match the engine's beat, only while the page is visible. A tick skips while a
 // call is out, so calls never pile up on a slow engine and answers arrive in order. It returns the stop function.
 export function watchHosts(apply: (hosts: HostSummary[]) => void, fail: () => void): () => void {
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -64,7 +77,7 @@ export function watchHosts(apply: (hosts: HostSummary[]) => void, fail: () => vo
   const tick = () => {
     if (loading) return;
     loading = true;
-    void call("host.list", {}).then(list => apply(list.hosts ?? []), fail).finally(() => { loading = false; });
+    void call("host.list", {}).then(list => apply(machines(list.hosts ?? [])), fail).finally(() => { loading = false; });
   };
   const sync = () => { clearInterval(timer); if (document.hidden) return; tick(); timer = setInterval(tick, 10_000); };
   sync();
