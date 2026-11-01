@@ -276,8 +276,9 @@ func memory(meminfo string) (total, used int64) {
 
 func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host, error) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	if h := b.hosts[name]; h != nil {
+	h := b.hosts[name]
+	b.mu.Unlock()
+	if h != nil {
 		return h, nil
 	}
 	hosts, err := b.Store.Hosts(ctx)
@@ -297,11 +298,17 @@ func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host,
 			if err := b.Store.SetEngineHost(ctx, name, same); err != nil {
 				return nil, err
 			}
+			b.mu.Lock()
+			if existing := b.hosts[name]; existing != nil {
+				b.mu.Unlock()
+				return existing, nil
+			}
 			if b.loads == nil {
 				b.loads = make(map[contract.HostName]hostLoad)
 			}
 			b.loads[name] = hostLoad{summary: contract.HostSummary{Reachable: record.State == box.HostReady}}
 			b.cache(name, h)
+			b.mu.Unlock()
 			return h, nil
 		}
 	}
