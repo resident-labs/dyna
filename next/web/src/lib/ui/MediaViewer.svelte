@@ -47,7 +47,7 @@
   }
   function down(e: PointerEvent) {
     background = false;
-    if (e.target instanceof HTMLVideoElement) return;
+    if (item.file.visual || e.target instanceof HTMLVideoElement) return;
     background = e.target === stage;
     stage.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 1) { start = { x: e.clientX, y: e.clientY }; moved = 0; }
