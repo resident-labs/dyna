@@ -1,7 +1,7 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { summarizeWork, deriveTimelineGroups, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems } from "./timeline.ts";
+import { summarizeWork, deriveTimelineGroups, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning } from "./timeline.ts";
 import type { TranscriptInput, TranscriptItem } from "./contract.gen.ts";
 
 test("summarizes nested actions rather than their script", () => {
@@ -23,6 +23,15 @@ test("work stays together until a visible message separates it", () => {
   assert.deepEqual(deriveTimelineGroups(items).map(group => [group.kind, group.id]), [
     ["work", "a"], ["item", "c"], ["work", "d"],
   ]);
+});
+
+test("a thought is finished once it appears, and a tool runs until its result", () => {
+  const thought: TranscriptItem = { id: "a", turn: "t", at: "", kind: "thinking", text: "Plan" };
+  const tool: TranscriptItem = { id: "b", turn: "t", at: "", kind: "tool", tool: "bash" };
+  assert.equal(timelineItemRunning(thought, false), false);
+  assert.equal(timelineItemRunning(tool, false), true);
+  assert.equal(timelineItemRunning({ ...tool, ended: "2026-10-31T00:00:00Z" }, false), false);
+  assert.equal(timelineItemRunning(tool, true), false);
 });
 
 test("continuations restore item order and deduplicate linked posts", () => {

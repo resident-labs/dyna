@@ -2,7 +2,7 @@
 <script lang="ts">
   import type { TranscriptItem, TranscriptPart } from "../contract.gen.ts";
   import { activeVerb, elapsed, stepTime, titleOf, type StepKind } from "../steps.ts";
-  import { formatTimelineDuration, summarizeWork } from "../timeline.ts";
+  import { formatTimelineDuration, summarizeWork, timelineItemRunning } from "../timeline.ts";
   import Icon, { type IconName } from "./Icon.svelte";
   import TranscriptIcon from "./TranscriptIcon.svelte";
   import Markdown from "./Markdown.svelte";
@@ -36,7 +36,7 @@
   }
 
   // Dyna keeps thoughts and tools in transcript order. The caller splits at posts and other boundaries.
-  let active = $derived(!ended && items.some(item => !item.ended));
+  let active = $derived(items.some(item => timelineItemRunning(item, ended)));
   let summary = $derived(active ? `Working for ${formatTimelineDuration(now - Date.parse(started))}` : summarizeWork(items));
   let thoughts = $derived(items.filter(item => item.kind === "thinking"));
   let tools = $derived(items.filter(item => item.kind !== "thinking"));
@@ -46,7 +46,7 @@
 
 {#snippet entry(item: TranscriptItem)}
   {@const title = titleOf(item)}
-  {@const running = !ended && !item.ended}
+  {@const running = timelineItemRunning(item, ended)}
   {#if item.tool === "codemode"}
     <CodemodeScript {item} {ended} {chunks} {onload} />
   {:else}
