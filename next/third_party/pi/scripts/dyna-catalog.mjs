@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { builtinProviders } from "../packages/ai/dist/providers/all.js";
 import { defaultModelPerProvider } from "./dyna-defaults.mjs";
@@ -6,7 +6,13 @@ import { defaultModelPerProvider } from "./dyna-defaults.mjs";
 export function buildCatalog(providers) {
   if (providers.length === 0 || providers.length > 200) throw new Error("invalid provider count");
   const plans = [], keys = [], providerIDs = new Set();
-  const planIDs = { anthropic: "anthropic", "openai-codex": "openai", "kimi-coding": "kimi-coding", xai: "xai" };
+  const planIDs = { anthropic: ["anthropic", "claude"], "openai-codex": ["openai", "codex-free", "codex-team", "codex-plus", "codex-pro"], "kimi-coding": ["kimi-coding", "kimi"], xai: ["xai", "xai"] };
+  const aliases = { "kimi-coding": { k3: "kimi-k3", k2p6: "kimi-k2.6", "kimi-for-coding": "kimi-k2.8-code" } };
+  const compiled = JSON.parse(readFileSync(new URL("../../cliproxyapi/internal/registry/models/models.json", import.meta.url), "utf8"));
+  for (const [id, mapped] of Object.entries(aliases)) {
+    const available = new Set(planIDs[id].slice(1).flatMap((tier) => compiled[tier].map((model) => model.id)));
+    for (const [piID, proxyID] of Object.entries(mapped)) if (!available.has(proxyID)) throw new Error(`${id}/${piID}: mapped proxy model ${proxyID} is missing`);
+  }
   for (const provider of providers) {
     const id = provider.id, models = provider.getModels(), modelIDs = new Set();
     if (!/^[a-z0-9][a-z0-9.-]{0,63}$/.test(id) || providerIDs.has(id) || models.length > 500) throw new Error(`${id}: invalid or duplicate provider ID or model count`);
@@ -26,7 +32,17 @@ export function buildCatalog(providers) {
     }
     if (Object.keys(headers).length > 8) reason = "too many headers";
     if (reason) { console.warn(`${id}: ${reason}`); continue; }
-    if (Object.hasOwn(planIDs, id)) plans.push({ id: planIDs[id], defaultModel: defaultModelPerProvider[id], models: models.map(({ id, name }) => ({ id, name })) });
+    if (Object.hasOwn(planIDs, id)) {
+      const [planID, ...tiers] = planIDs[id];
+      const available = new Set(tiers.flatMap((tier) => compiled[tier].map((model) => model.id)));
+      const planModels = [];
+      for (const model of models) {
+        const proxyID = aliases[id]?.[model.id] ?? model.id;
+        if (!available.has(proxyID)) { console.warn(`${id}/${model.id}: no proxy model`); continue; }
+        planModels.push({ id: model.id, name: model.name, proxyID });
+      }
+      plans.push({ id: planID, defaultModel: defaultModelPerProvider[id], models: planModels });
+    }
     if (!provider.auth.apiKey?.name || id === "github-copilot") { console.warn(`${id}: no supported key flow`); continue; }
     const completions = models.filter((model) => model.api === "openai-completions");
     if (!completions.length) { console.warn(`${id}: no completions models`); continue; }
