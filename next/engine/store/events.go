@@ -74,6 +74,18 @@ func (s *Store) AppendEvent(tx *sql.Tx, event contract.Event) (int64, error) {
 		return 0, err
 	}
 	event.Seq = seq
+	event.Time = time.UnixMilli(event.Time.UnixMilli()).UTC()
+	event.From = contract.Principal{Kind: event.From.Kind}
+	switch event.From.Kind {
+	case contract.PrincipalSession:
+		event.From.Session = contract.SessionID(id)
+	case contract.PrincipalOwner:
+		event.From.Device = contract.DeviceID(id)
+	}
+	event.Body, err = contract.DecodeEventBody(event.Body.EventType(), body)
+	if err != nil {
+		return 0, err
+	}
 	s.pending = append(s.pending, event)
 	return seq, nil
 }
@@ -200,6 +212,21 @@ func (s *Store) Event(ctx context.Context, seq int64) (contract.Event, error) {
 		return contract.Event{}, sql.ErrNoRows
 	}
 	return events[0], nil
+}
+
+// StreamMatches applies the same room and type rules as Events and OwnerEvents.
+func StreamMatches(event contract.Event, room contract.RoomID) bool {
+	if room != "" {
+		return event.Room == room
+	}
+	switch event.Body.EventType() {
+	case "op.requested", "op.decided", "op.ran":
+		return true
+	case "turn.started", "turn.ended", "session.started", "session.closed", "box.changed", "room.paused", "room.resumed":
+		return event.Room != ""
+	default:
+		return false
+	}
 }
 
 // Subscribe registers a live feed. Overflow closes the channel; resubscribe
