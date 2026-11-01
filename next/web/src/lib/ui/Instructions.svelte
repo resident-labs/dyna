@@ -4,6 +4,7 @@
   import { instructionDiff, instructionHunks, type DiffLine } from "../instruction-diff.ts";
   import { recoverInstructionDraft } from "../instruction-draft.ts";
   import StatusPill from "./StatusPill.svelte";
+  import { count } from "../feed.ts";
 
   let { room, roomName, rooms, sessions, onclose }: { room: string; roomName: string; rooms: number; sessions: number; onclose: () => void } = $props();
   let selected = $state<"room" | "global">("room");
@@ -161,7 +162,7 @@
       </section>
       <aside class:mobile-hidden={mobile !== "changes"} aria-label="Instruction review">
         {#if other}
-          <div class="side-head review-title"><strong>What sessions get</strong> <span>· {changed.length} lines changed</span></div>
+          <div class="side-head review-title"><strong>What sessions get</strong> <span>· {count(changed.length, "line")} changed</span></div>
           <div class="side-head"><StatusPill tone="warning" label="Changed on another device" /><p>Nothing was saved. Your text is unchanged.</p></div>
           <div class="review"><strong>Their change</strong>
             {@render diffView(instructionDiff(base, other.text))}
@@ -169,7 +170,7 @@
             {@render diffView(changes)}
           </div>
         {:else if changed.length}
-          <div class="side-head review-title"><strong>What sessions get</strong> <span>{changed.length} lines changed</span></div>
+          <div class="side-head review-title"><strong>What sessions get</strong> <span>{count(changed.length, "line")} changed</span></div>
           <div class="review">
             <p>{delta >= 0 ? "Adds" : "Removes"} about {Math.abs(delta).toLocaleString()} tokens {delta >= 0 ? "to" : "from"} every prompt · {sessions} open sessions in {roomName}</p>
             {@render diffView(changes)}
@@ -192,7 +193,7 @@
       </aside>
     </div>
     <div class="mobile-save">
-      <span>{draft === base ? savedLabel : `${changed.length} lines changed`}</span>
+      <span>{draft === base ? savedLabel : `${count(changed.length, "line")} changed`}</span>
       {#if other}<button class="outlined" type="button" disabled={saving} onclick={useTheirs}>Use theirs</button><button class="primary" type="button" disabled={saving} onclick={() => void save(true)}>Save mine</button>
       {:else}<button type="button" disabled={draft === base} onclick={discard}>Discard</button><button class="primary" type="button" disabled={saving || draft === base} onclick={() => void save()}>Save</button>{/if}
     </div>
