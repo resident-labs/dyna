@@ -6,10 +6,11 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 54
+const schemaVersion = 55
 
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	54: {`UPDATE grants SET expired_at=expires_at WHERE kind='hostexec' AND revoked_at IS NULL AND expired_at IS NULL AND expires_at IS NOT NULL AND expires_at<=CAST(strftime('%s','now') AS INTEGER)*1000`, `UPDATE grants SET expires_at=NULL WHERE kind='hostexec' AND revoked_at IS NULL AND expired_at IS NULL AND (expires_at IS NULL OR expires_at>CAST(strftime('%s','now') AS INTEGER)*1000)`, `UPDATE operations SET state='expired' WHERE kind='hostexec.grant' AND state='pending'`, `UPDATE operations SET args=json_remove(args,'$.expires','$.never') WHERE kind='hostexec.grant'`},
 	53: {`CREATE TABLE search_keys (provider TEXT PRIMARY KEY, key TEXT NOT NULL)`},
 	52: {`CREATE INDEX turns_session_started_at ON turns(session, started_at DESC)`, `UPDATE turns SET sections=NULL WHERE ended_at IS NOT NULL AND sections IS NOT NULL`},
 	51: {`CREATE TABLE client_replays (method TEXT NOT NULL, caller_kind TEXT NOT NULL, caller_id TEXT NOT NULL, client_id TEXT NOT NULL, ref TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(method, caller_kind, caller_id, client_id))`},

@@ -41,28 +41,32 @@ func (f *fakeHostexec) StopHostexec(context.Context, contract.HostName, string) 
 	f.stopCalled <- struct{}{}
 	return nil
 }
-func TestHostexecRevocationRetryCoversLateLaunch(t *testing.T) {
-	s, room, root, ctx := setupRoot(t)
+func TestHostexecSessionCloseStopsAndEndsGrant(t *testing.T) {
+	s, room, worker, ctx := setup(t)
 	runner := &fakeHostexec{entered: make(chan struct{}), release: make(chan struct{}), stopCalled: make(chan struct{}, 2)}
 	s.SetHostexecRunner(runner)
-	if err := s.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.run": s.HostexecRunEntry()}, time.Hour); err != nil {
+	who := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
+	g := contract.Grant{ID: "grant_close", Kind: contract.GrantHostExec, Room: room, To: who, By: contract.Principal{Kind: contract.PrincipalOwner}, Created: s.now(), Hosts: []contract.HostName{"host"}}
+	if err := s.store.CreateGrant(ctx, g); err != nil {
 		t.Fatal(err)
 	}
-	principal := contract.Principal{Kind: contract.PrincipalSession, Session: root}
-	grants, err := s.store.ListActiveGrants(ctx, room, principal, s.now())
-	if err != nil {
+	if err := s.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.run": s.HostexecRunEntry()}, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan *contract.Error, 1)
 	go func() {
-		_, e := s.HostexecRun(ctx, principal, contract.HostexecRunRequest{Host: "host", Argv: []string{"true"}})
+		_, e := s.HostexecRun(ctx, who, contract.HostexecRunRequest{Host: "host", Argv: []string{"true"}})
 		done <- e
 	}()
 	<-runner.entered
-	if _, e := s.HostexecRevoke(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.HostexecRevokeRequest{Grant: grants[0].ID}); e != nil {
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: worker, Discard: true}); e != nil {
 		t.Fatal(e)
 	}
 	<-runner.stopCalled
+	grants, err := s.store.ListActiveGrants(ctx, room, who, s.now())
+	if err != nil || len(grants) != 0 {
+		t.Fatalf("closed grants: %+v %v", grants, err)
+	}
 	runner.mu.Lock()
 	runner.started = true
 	runner.mu.Unlock()
@@ -74,13 +78,11 @@ func TestHostexecRevocationRetryCoversLateLaunch(t *testing.T) {
 	stopped := runner.stopped
 	runner.mu.Unlock()
 	close(runner.release)
-	if e := <-done; e != nil {
-		t.Fatal(e)
-	}
-	if !stopped {
-		t.Fatal("retry did not stop late launch")
+	if e := <-done; e != nil || !stopped {
+		t.Fatalf("late run: stopped=%v, error=%v", stopped, e)
 	}
 }
+
 func TestHostexecNoGrant(t *testing.T) {
 	s, _, worker, ctx := setup(t)
 	_, e := s.HostexecRun(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.HostexecRunRequest{Host: "host", Argv: []string{"true"}})
@@ -185,7 +187,7 @@ func TestHostexecSignalAtDeadlineIsTimeout(t *testing.T) {
 	}
 }
 
-func TestHostexecApprovalAndRevokedRecheck(t *testing.T) {
+func TestHostexecApprovalAndSessionCloseRecheck(t *testing.T) {
 	s, room, worker, ctx := setup(t)
 	principal := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
 	grant := contract.Grant{ID: "grant_test", Kind: contract.GrantHostExec, Room: room, To: principal, Hosts: []contract.HostName{"host"}, By: contract.Principal{Kind: contract.PrincipalOwner}, Created: s.now()}
@@ -200,11 +202,11 @@ func TestHostexecApprovalAndRevokedRecheck(t *testing.T) {
 	if e != nil || result.Operation.Class != contract.ClassAuto || result.Operation.State != contract.OpDone {
 		t.Fatalf("result %+v error %+v", result, e)
 	}
-	if _, e = s.HostexecRevoke(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.HostexecRevokeRequest{Grant: grant.ID}); e != nil {
+	if _, e = s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: worker, Discard: true}); e != nil {
 		t.Fatal(e)
 	}
 	if err := s.HostexecRunEntry().Check(ctx, result.Operation.Args, principal); err == nil {
-		t.Fatal("revoked grant passed recheck")
+		t.Fatal("closed session grant passed recheck")
 	}
 }
 

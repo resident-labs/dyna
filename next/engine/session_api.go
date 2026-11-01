@@ -201,6 +201,9 @@ func (s *Service) closeSession(ctx context.Context, session store.Session, disca
 	} else if err := s.store.MarkClosing(ctx, session.ID, discard); err != nil {
 		return failure(err)
 	}
+	if err := s.StopHostexecs(ctx); err != nil {
+		return failure(err)
+	}
 	if !discard {
 		boxes, err := s.store.LifecycleBoxes(ctx)
 		if err != nil {
