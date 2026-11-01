@@ -90,15 +90,7 @@ func (s *Store) RedeemPairCode(ctx context.Context, code, name string, defaults 
 		if _, err = tx.ExecContext(ctx, "DELETE FROM pairing_codes WHERE id=1"); err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, "INSERT INTO devices(id,name,token_sha256,paired_at,last_seen_at,expires_at) VALUES(?,?,?,?,?,?)", d.ID, d.Name, d.TokenHash[:], now.UnixMilli(), now.UnixMilli(), d.ExpiresAt.UnixMilli()); err != nil {
-			return err
-		}
-		for _, scope := range d.Scopes {
-			if _, err = tx.ExecContext(ctx, "INSERT INTO device_scopes(device,scope) VALUES(?,?)", d.ID, scope); err != nil {
-				return err
-			}
-		}
-		return nil
+		return insertDevice(ctx, tx, d)
 	})
 	if err != nil {
 		return "", Device{}, err
