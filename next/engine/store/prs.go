@@ -20,29 +20,32 @@ type PRCursors struct {
 }
 
 // TrackedPR is one pr_owners row. Baseline means the next poll records the PR without a wake.
+// OwnWakeAt is when a comment by the token's own account last woke a session, in Unix milliseconds.
 type TrackedPR struct {
 	contract.PrSummary
-	Room     contract.RoomID
-	HeadRepo contract.RepoName
-	Baseline bool
-	CITold   string
-	Seen     PRCursors
+	Room      contract.RoomID
+	HeadRepo  contract.RepoName
+	Baseline  bool
+	CITold    string
+	Seen      PRCursors
+	OwnWakeAt int64
 }
 
 // PRUpdate is a poll's result for one PR. A nil Change writes the row and tells nobody.
 type PRUpdate struct {
-	PR       contract.PrSummary
-	HeadRepo contract.RepoName
-	CITold   string
-	Seen     PRCursors
-	Change   *contract.PrChange
+	PR        contract.PrSummary
+	HeadRepo  contract.RepoName
+	CITold    string
+	Seen      PRCursors
+	OwnWakeAt int64
+	Change    *contract.PrChange
 }
 
-const prColumns = `p.repo,p.number,p.url,p.title,p.author,p.session,p.draft,p.state,p.head,p.review,p.ci,p.merge,s.room,p.head_repo,p.baseline,p.ci_told,p.seen_reviews,p.seen_review_comments,p.seen_comments FROM pr_owners p JOIN sessions s ON s.id=p.session`
+const prColumns = `p.repo,p.number,p.url,p.title,p.author,p.session,p.draft,p.state,p.head,p.review,p.ci,p.merge,s.room,p.head_repo,p.baseline,p.ci_told,p.seen_reviews,p.seen_review_comments,p.seen_comments,p.own_wake_at FROM pr_owners p JOIN sessions s ON s.id=p.session`
 
 func scanPR(row interface{ Scan(...any) error }) (TrackedPR, error) {
 	var p TrackedPR
-	err := row.Scan(&p.Repo, &p.Number, &p.URL, &p.Title, &p.Author, &p.Session, &p.Draft, &p.State, &p.Head, &p.Review, &p.CI, &p.Merge, &p.Room, &p.HeadRepo, &p.Baseline, &p.CITold, &p.Seen.Reviews, &p.Seen.ReviewComments, &p.Seen.Comments)
+	err := row.Scan(&p.Repo, &p.Number, &p.URL, &p.Title, &p.Author, &p.Session, &p.Draft, &p.State, &p.Head, &p.Review, &p.CI, &p.Merge, &p.Room, &p.HeadRepo, &p.Baseline, &p.CITold, &p.Seen.Reviews, &p.Seen.ReviewComments, &p.Seen.Comments, &p.OwnWakeAt)
 	return p, err
 }
 
@@ -122,7 +125,7 @@ func (s *Store) TrackPR(ctx context.Context, pr TrackedPR) error {
 		result, err := tx.ExecContext(ctx, `INSERT INTO pr_owners(repo,number,session,goal,approved_head,head_repo,url,title,author,draft,state,head) VALUES(?,?,?,'','',?,?,?,?,?,?,?)
 ON CONFLICT(repo,number) DO UPDATE SET branch=CASE WHEN session=excluded.session THEN branch ELSE '' END,session=excluded.session,approved_head='',
 head_repo=excluded.head_repo,url=excluded.url,title=excluded.title,author=excluded.author,draft=excluded.draft,state=excluded.state,head=excluded.head,
-review='',ci='',merge='',ci_told='',seen_reviews=0,seen_review_comments=0,seen_comments=0,baseline=1 WHERE state<>'open'`,
+review='',ci='',merge='',ci_told='',seen_reviews=0,seen_review_comments=0,seen_comments=0,own_wake_at=0,baseline=1 WHERE state<>'open'`,
 			pr.Repo, pr.Number, pr.Session, pr.HeadRepo, pr.URL, pr.Title, pr.Author, pr.Draft, pr.State, pr.Head)
 		if err != nil {
 			return err
@@ -168,8 +171,8 @@ func (s *Store) ApplyPRPoll(ctx context.Context, updates []PRUpdate, at time.Tim
 		bySession := map[contract.SessionID]*batch{}
 		for _, update := range updates {
 			pr := update.PR
-			result, err := tx.ExecContext(ctx, `UPDATE pr_owners SET head_repo=?,url=?,title=?,author=?,draft=?,state=?,head=?,review=?,ci=?,merge=?,ci_told=?,seen_reviews=?,seen_review_comments=?,seen_comments=?,baseline=0 WHERE repo=? AND number=? AND state='open'`,
-				update.HeadRepo, pr.URL, pr.Title, pr.Author, pr.Draft, pr.State, pr.Head, pr.Review, pr.CI, pr.Merge, update.CITold, update.Seen.Reviews, update.Seen.ReviewComments, update.Seen.Comments, pr.Repo, pr.Number)
+			result, err := tx.ExecContext(ctx, `UPDATE pr_owners SET head_repo=?,url=?,title=?,author=?,draft=?,state=?,head=?,review=?,ci=?,merge=?,ci_told=?,seen_reviews=?,seen_review_comments=?,seen_comments=?,own_wake_at=?,baseline=0 WHERE repo=? AND number=? AND state='open'`,
+				update.HeadRepo, pr.URL, pr.Title, pr.Author, pr.Draft, pr.State, pr.Head, pr.Review, pr.CI, pr.Merge, update.CITold, update.Seen.Reviews, update.Seen.ReviewComments, update.Seen.Comments, update.OwnWakeAt, pr.Repo, pr.Number)
 			if err != nil {
 				return err
 			}

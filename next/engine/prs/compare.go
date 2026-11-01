@@ -2,6 +2,8 @@ package prs
 
 import (
 	"slices"
+	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/resident-labs/dyna/contract"
@@ -12,18 +14,30 @@ const (
 	maxChecks      = 5
 	maxComments    = 5
 	maxCommentText = 2000 // characters
+	// agentMarker opens what agents write through the owner's account, after any quote marks. Horizon's two disclosure lines both start this way.
+	agentMarker = "🤖"
+	// ownWakeGap is the shortest gap between wakes from the token account's comments on one PR.
+	ownWakeGap = 10 * time.Minute
 )
+
+func agentWrote(body string) bool {
+	return strings.HasPrefix(strings.TrimLeft(body, "> \t\r\n"), agentMarker)
+}
 
 // Compare turns one poll of one PR into what to store and who to tell. It reports whether anything moved, and with it
 // whether the poll backs off. The stored row is what makes a change news once, across restarts too.
-func Compare(row store.TrackedPR, seen Observed, viewer string) (store.PRUpdate, bool) {
+//
+// A comment by the token's own account may be a session's, so answering one must not start a loop. That account also
+// speaks for the owner, so it is not ignored: only text with the agent marker is, and the rest wakes at most once per PR in
+// ownWakeGap. A comment inside the gap waits, with its cursor unmoved, so the owner's words arrive late rather than never.
+func Compare(row store.TrackedPR, seen Observed, viewer string, now time.Time) (store.PRUpdate, bool) {
 	next := row.PrSummary
 	next.URL, next.Title, next.Author, next.Draft, next.State, next.Head, next.Review, next.CI = seen.URL, seen.Title, seen.Author, seen.Draft, seen.State, seen.Head, seen.Review, seen.CI
 	// GitHub works mergeability out on demand, and until then the last answer stands.
 	if seen.Merge != "" {
 		next.Merge = seen.Merge
 	}
-	update := store.PRUpdate{PR: next, HeadRepo: seen.HeadRepo, CITold: row.CITold, Seen: row.Seen}
+	update := store.PRUpdate{PR: next, HeadRepo: seen.HeadRepo, CITold: row.CITold, Seen: row.Seen, OwnWakeAt: row.OwnWakeAt}
 
 	var kinds []contract.PrChangeKind
 	switch {
@@ -53,16 +67,25 @@ func Compare(row store.TrackedPR, seen Observed, viewer string) (store.PRUpdate,
 		}
 	}
 
+	// A PR leaving the poll has no later pass to deliver a waiting comment.
+	waiting := seen.State == contract.PrOpen && now.Before(time.UnixMilli(row.OwnWakeAt).Add(ownWakeGap))
 	var fresh []Comment
+	ownNews := false
 	take := func(all []Comment, cursor *int64) {
 		for _, item := range all {
 			if item.ID <= *cursor {
 				continue
 			}
-			*cursor = item.ID
-			if item.Body != "" {
+			own := item.Author == viewer
+			switch {
+			case item.Body == "" || own && agentWrote(item.Body):
+			case own && waiting:
+				return
+			default:
 				fresh = append(fresh, item)
+				ownNews = ownNews || own
 			}
+			*cursor = item.ID
 		}
 	}
 	take(seen.Reviews, &update.Seen.Reviews)
@@ -80,6 +103,9 @@ func Compare(row store.TrackedPR, seen Observed, viewer string) (store.PRUpdate,
 	change := contract.PrChange{PR: next, Kinds: kinds, Outside: seen.Author != viewer}
 	if slices.Contains(kinds, contract.PrChangeCIFailed) {
 		change.FailedChecks = seen.FailedChecks[:min(len(seen.FailedChecks), maxChecks)]
+	}
+	if ownNews {
+		update.OwnWakeAt = now.UnixMilli()
 	}
 	if len(fresh) > 0 {
 		change.Kinds = append(change.Kinds, contract.PrChangeComment)

@@ -222,6 +222,60 @@ func TestClosedOwnersPRsReachTheParent(t *testing.T) {
 	}
 }
 
+// answerEveryWake runs an hour in which the session replies on GitHub to each wake, through the token's account.
+// It returns when each wake arrived.
+func (r *prRig) answerEveryWake(t *testing.T, reply string) []time.Time {
+	t.Helper()
+	var wakes []time.Time
+	id := int64(100)
+	for second := 0; second < 3600; second += 10 {
+		r.pass(t)
+		if got := r.wakes(t, r.child); len(got) > len(wakes) {
+			wakes = append(wakes, r.clock.Now())
+			id++
+			r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) {
+				p.Comments = append(p.Comments, fakegithub.Comment{ID: id, Author: "owner-account", Body: fmt.Sprintf("%s %d", reply, id)})
+			})
+		}
+		// A restart must not reopen the window.
+		if second%600 == 300 {
+			r.connect()
+		}
+		r.clock.add(10 * time.Second)
+	}
+	return wakes
+}
+
+func TestASessionAnsweringWithTheMarkerStopsAtOneWake(t *testing.T) {
+	r := newPRRig(t)
+	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})
+	r.settle(t)
+	r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) {
+		p.Comments = []fakegithub.Comment{{ID: 1, Author: "outsider", Body: "please look"}}
+	})
+	if wakes := r.answerEveryWake(t, "🤖 Agent: looking"); len(wakes) != 1 {
+		t.Fatalf("wakes at %v", wakes)
+	}
+}
+
+func TestASessionAnsweringWithoutTheMarkerStaysTenMinutesApart(t *testing.T) {
+	r := newPRRig(t)
+	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})
+	r.settle(t)
+	r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) {
+		p.Comments = []fakegithub.Comment{{ID: 1, Author: "owner-account", Body: "please rebase"}}
+	})
+	wakes := r.answerEveryWake(t, "done")
+	if len(wakes) < 2 || len(wakes) > 7 {
+		t.Fatalf("%d wakes in the hour: %v", len(wakes), wakes)
+	}
+	for i := 1; i < len(wakes); i++ {
+		if gap := wakes[i].Sub(wakes[i-1]); gap < 10*time.Minute {
+			t.Fatalf("wakes %v apart", gap)
+		}
+	}
+}
+
 func TestPollBudget(t *testing.T) {
 	r := newPRRig(t)
 	for number := 1; number <= 20; number++ {

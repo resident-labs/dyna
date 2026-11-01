@@ -141,14 +141,14 @@ func TestTrackPRKeepsAnOpenOwnerAndRetakesAFinishedRow(t *testing.T) {
 	if err := s.TrackPR(ctx, row("b")); !errors.Is(err, ErrPRTracked) {
 		t.Fatal(err)
 	}
-	if _, err := s.writer.ExecContext(ctx, "UPDATE pr_owners SET state='merged',branch='old',ci='success',baseline=0"); err != nil {
+	if _, err := s.writer.ExecContext(ctx, "UPDATE pr_owners SET state='merged',branch='old',ci='success',own_wake_at=5,baseline=0"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.TrackPR(ctx, row("b")); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.PR(ctx, "upstream/repo", 1)
-	if err != nil || got.Session != "b" || got.State != contract.PrOpen || got.CI != "" || !got.Baseline {
+	if err != nil || got.Session != "b" || got.State != contract.PrOpen || got.CI != "" || got.OwnWakeAt != 0 || !got.Baseline {
 		t.Fatalf("%+v %v", got, err)
 	}
 	if owns, err := s.OwnsPRBranch(ctx, "upstream/repo", "b", "old"); err != nil || owns {
