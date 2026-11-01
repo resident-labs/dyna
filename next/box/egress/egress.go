@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/netip"
@@ -23,9 +24,24 @@ var notPublic = []netip.Prefix{
 	netip.MustParsePrefix("192.0.0.0/24"),
 	netip.MustParsePrefix("198.18.0.0/15"),
 	netip.MustParsePrefix("240.0.0.0/4"),
-	netip.MustParsePrefix("64:ff9b::/96"), // NAT64 can lead back to a private IPv4 address.
-	netip.MustParsePrefix("2002::/16"),    // So can 6to4.
+	netip.MustParsePrefix("::/96"),          // IPv4-compatible, the older form of a mapped address.
+	netip.MustParsePrefix("64:ff9b::/96"),   // NAT64 can lead back to a private IPv4 address.
+	netip.MustParsePrefix("64:ff9b:1::/48"), // So can local NAT64.
+	netip.MustParsePrefix("2001::/32"),      // So can Teredo.
+	netip.MustParsePrefix("2002::/16"),      // So can 6to4.
+	netip.MustParsePrefix("fec0::/10"),      // Site-local, deprecated but still routable on a LAN.
 }
+
+// One proxy serves every job on a host, so one job must not be able to take it
+// down: an out-of-memory kill would cut every other job's tunnels.
+const maxRequest = 64 << 10 // bytes in a CONNECT request
+
+var (
+	// maxTunnels stays well inside the proxy's memory limit, at about 100 KiB each.
+	maxTunnels = 4096
+	// closeWait is how long a far end may hold a tunnel after its job has left it.
+	closeWait = time.Minute
+)
 
 // Public reports whether a job may reach addr.
 func Public(addr netip.Addr) bool {
@@ -66,6 +82,7 @@ func PublicDial() Dial {
 func Serve(ctx context.Context, listener net.Listener, dial Dial) error {
 	stop := context.AfterFunc(ctx, func() { listener.Close() })
 	defer stop()
+	slots := make(chan struct{}, maxTunnels)
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -74,18 +91,28 @@ func Serve(ctx context.Context, listener net.Listener, dial Dial) error {
 			}
 			return err
 		}
-		go handle(ctx, conn, dial)
+		select {
+		case slots <- struct{}{}:
+			go func() {
+				defer func() { <-slots }()
+				handle(ctx, conn, dial)
+			}()
+		default:
+			conn.Close()
+		}
 	}
 }
 
 func handle(ctx context.Context, conn net.Conn, dial Dial) {
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
-	reader := bufio.NewReader(conn)
+	limited := &io.LimitedReader{R: conn, N: maxRequest}
+	reader := bufio.NewReader(limited)
 	request, err := http.ReadRequest(reader)
 	if err != nil {
 		return
 	}
+	limited.N = math.MaxInt64
 	_, port, err := net.SplitHostPort(request.Host)
 	if err != nil || request.Method != http.MethodConnect || port != "443" {
 		reply(conn, http.StatusForbidden)
@@ -110,6 +137,7 @@ func handle(ctx context.Context, conn net.Conn, dial Dial) {
 		if half, ok := upstream.(interface{ CloseWrite() error }); ok {
 			_ = half.CloseWrite()
 		}
+		_ = upstream.SetReadDeadline(time.Now().Add(closeWait))
 		close(done)
 	}()
 	_, _ = io.Copy(conn, upstream)
