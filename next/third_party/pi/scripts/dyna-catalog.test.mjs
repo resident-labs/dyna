@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { buildCatalog } from "./dyna-catalog.mjs";
 import { defaultModelPerProvider } from "./dyna-defaults.mjs";
@@ -13,6 +14,9 @@ test("catalog validates at pack time and emits routable completions", () => {
   assert.equal(result.keys[0].url, "https://example.com/v1");
   const kimi = buildCatalog([provider({ id: "kimi-coding", getModels: () => [{ id: "k3", name: "K3" }, { id: "unknown", name: "Unknown" }] })]);
   assert.deepEqual(kimi.plans[0].models, [{ id: "k3", name: "K3", proxyID: "kimi-k3" }]);
+  const compiled = JSON.parse(readFileSync(new URL("../../cliproxyapi/internal/registry/models/models.json", import.meta.url), "utf8"));
+  compiled.kimi = compiled.kimi.filter((model) => model.id !== "kimi-k3");
+  assert.throws(() => buildCatalog([provider()], compiled), /mapped proxy model kimi-k3 is missing/);
   for (const headers of [{ "X-Test": "$request" }, { Authorization: "secret" }]) assert.equal(buildCatalog([provider({ headers })]).keys.length, 0);
   for (const url of ["http://localhost/v1", "https://user@example.com/v1", "https://example.com:444/v1", "https://example.com/v1?key=x", "https://example.com/v1?", "https://{host}/v1"]) {
     assert.equal(buildCatalog([provider({ getModels: () => [{ id: "model", api: "openai-completions", baseUrl: url }] })]).keys.length, 0);
