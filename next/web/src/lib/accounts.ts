@@ -1,19 +1,17 @@
-import type { Account, AccountProviderInfo, ConnectFlow, ConnectMethod } from "./contract.gen.ts";
+import type { Account, AccountProviderInfo, ConnectFlow } from "./contract.gen.ts";
 import { APIError } from "./client.ts";
 
+export type Provider = Omit<AccountProviderInfo, "flows"> & { flows: ConnectFlow[] };
+
 // Search always unfolds the key group, so a matching provider stays reachable.
-export function providerGroup(providers: readonly AccountProviderInfo[], flow: ConnectFlow, query: string, expanded: boolean): { items: AccountProviderInfo[]; remaining: number; count: number } {
+export function providerGroup(providers: readonly Provider[], flow: ConnectFlow, query: string, expanded: boolean): { items: Provider[]; remaining: number; count: number } {
   const search = query.trim().toLowerCase();
-  const matches = providers.filter(p => p.flows?.[0] === flow && (p.displayName.toLowerCase().includes(search) || p.id.toLowerCase().includes(search)));
+  const matches = providers.filter(p => p.flows[0] === flow && (p.displayName.toLowerCase().includes(search) || p.id.toLowerCase().includes(search)));
   const items = flow === "key" && !search && !expanded ? matches.slice(0, 10) : matches;
   return { items, remaining: matches.length - items.length, count: matches.length };
 }
 
 export const reconnectUnavailable = (error: unknown) => error instanceof APIError && error.detail.code === "reconnect_unavailable";
-
-export const canReconnect = (account: Account, method: ConnectMethod) => account.state === "sign_in_expired" && method === "oauth";
-
-export const removalPrompt = (method: ConnectMethod) => `Remove this account? Dyna deletes its ${method === "key" ? "key" : "sign-in"}. You can connect it again later.`;
 
 export const refused = (error: unknown) => error instanceof APIError && error.detail.code === "conflict";
 
