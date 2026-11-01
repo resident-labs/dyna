@@ -6,6 +6,7 @@ type (
 	BoxID          string // "box_<ulid>"
 	EventID        string // "ev_<ulid>"
 	OpID           string // "op_<ulid>"
+	QuestionID     string // "q_<ulid>"
 	ShellJobID     string // a box shell job, such as "job_1f3a9c0b7d42"
 	GrantID        string // "gr_<ulid>"
 	TurnID         string // "turn_<ulid>"

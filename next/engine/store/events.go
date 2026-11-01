@@ -41,11 +41,17 @@ func (s *Store) AppendEvent(tx *sql.Tx, event contract.Event) (int64, error) {
 		value := string(event.Room)
 		room = &value
 	}
-	// home is the session whose DM holds the event: a DM post, a turn that answered in a DM, or a stopped turn.
+	// home is the session whose DM holds the event: a DM post, a question, a turn that answered in a DM, or a stopped turn.
 	var home *contract.SessionID
 	var clientID *string
 	switch body := event.Body.(type) {
 	case contract.SessionRestarted:
+		home = &body.Session
+	case contract.QuestionAsked:
+		home = &body.Session
+	case contract.QuestionAnswered:
+		home = &body.Session
+	case contract.QuestionWithdrawn:
 		home = &body.Session
 	case contract.PostCreated:
 		if body.Home.Kind == contract.ConversationDM {
@@ -103,7 +109,7 @@ func (s *Store) EventsPage(ctx context.Context, room contract.RoomID, afterSeq, 
 
 // OwnerEvents pages the cross-room attention events.
 func (s *Store) OwnerEvents(ctx context.Context, afterSeq int64, limit int) ([]contract.Event, error) {
-	return s.eventsPage(ctx, "", afterSeq, 0, limit, []contract.EventType{"op.requested", "op.decided", "op.ran", "turn.started", "turn.ended", "session.started", "session.closed", "box.changed", "room.paused", "room.resumed"}, "", true)
+	return s.eventsPage(ctx, "", afterSeq, 0, limit, []contract.EventType{"op.requested", "op.decided", "op.ran", "question.asked", "question.answered", "question.withdrawn", "turn.started", "turn.ended", "session.started", "session.closed", "box.changed", "room.paused", "room.resumed"}, "", true)
 }
 
 func (s *Store) eventsPage(ctx context.Context, room contract.RoomID, afterSeq, beforeSeq int64, limit int, types []contract.EventType, dm contract.SessionID, allRooms bool) ([]contract.Event, error) {
@@ -222,7 +228,7 @@ func StreamMatches(event contract.Event, room contract.RoomID) bool {
 	switch event.Body.EventType() {
 	case "op.requested", "op.decided", "op.ran":
 		return true
-	case "turn.started", "turn.ended", "session.started", "session.closed", "box.changed", "room.paused", "room.resumed":
+	case "question.asked", "question.answered", "question.withdrawn", "turn.started", "turn.ended", "session.started", "session.closed", "box.changed", "room.paused", "room.resumed":
 		return event.Room != ""
 	default:
 		return false

@@ -723,6 +723,12 @@ func seedRoom(ctx context.Context, s *engine.Service, st *store.Store, posts, ag
 		log.Fatal(e.Message)
 	}
 	fixtureSession, fixtureRoom = fixture.Session, room.Room
+	// A root has the grant by itself; this one shows a question in Needs you, Requests and a DM.
+	asker := contract.Principal{Kind: contract.PrincipalSession, Session: fixture.Session}
+	fatal(st.CreateGrant(ctx, contract.Grant{ID: "grant_fixture", Kind: contract.GrantAskOwner, Room: room.Room, To: asker, By: owner, Created: time.Now()}))
+	if _, e := s.QuestionAsk(ctx, asker, contract.QuestionAskRequest{Text: "Should the retry hint show when the next attempt runs, or only say that one is coming?"}); e != nil {
+		log.Fatal(e.Message)
+	}
 	post := func(p contract.Principal, r contract.PostRequest) {
 		r.Room = room.Room
 		if _, e := s.Post(ctx, p, r); e != nil {

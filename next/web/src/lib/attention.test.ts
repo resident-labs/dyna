@@ -79,6 +79,21 @@ test("Home's session read and the room's own seed share one read, so a box chang
   } finally { globalThis.fetch = original; }
 });
 
+test("room.list seeds each room's questions, and the owner stream updates them", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ seq: 5, rooms: [{ id: "a", name: "A", created: "", waiting: ["o1"], questions: ["q1"], working: [] }, { id: "b", name: "B", created: "", waiting: null, working: null }] }));
+  try {
+    const attention = new Attention(() => () => {});
+    await attention.open();
+    assert.deepEqual([attention.asks("a"), attention.asks("b")], [2, 0]);
+    attention.apply(event(6, "b", { type: "question.asked", body: { id: "q2", session: "s", text: "Which?" } }));
+    attention.apply(event(7, "a", { type: "question.answered", body: { id: "q1", session: "s", question: "Which?", answer: "This" } }));
+    assert.deepEqual([[...attention.questions.get("a")!], [...attention.questions.get("b")!]], [[], ["q2"]]);
+    attention.apply(event(8, "b", { type: "question.withdrawn", body: { id: "q2", session: "s" } }));
+    assert.deepEqual([attention.asks("a"), attention.asks("b")], [1, 0]);
+  } finally { globalThis.fetch = original; }
+});
+
 test("room.list seeds each room's waiting requests and working sessions, and the owner stream updates them", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({ seq: 5, rooms: [

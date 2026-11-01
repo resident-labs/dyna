@@ -6,7 +6,7 @@
   import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
 
-  // The discriminant leaves room for question and terminal rows when their M3 APIs exist.
+  // The discriminant leaves room for a terminal row when its M3 API exists. A question has its own card.
   type Row = { kind: "approval"; request: Request };
   let { row, store, admin, now, current = false, grouped = false }: {
     row: Row; store: RoomStore; admin: boolean; now: number; current?: boolean; grouped?: boolean;

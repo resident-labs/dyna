@@ -21,6 +21,10 @@ func (s *Service) RoomList(ctx context.Context, caller contract.Principal, _ con
 				result.Rooms[i].Waiting = append(result.Rooms[i].Waiting, item.Operation)
 				continue
 			}
+			if item.Question != "" {
+				result.Rooms[i].Questions = append(result.Rooms[i].Questions, item.Question)
+				continue
+			}
 			result.Rooms[i].Working = append(result.Rooms[i].Working, item.Session)
 			activity, order := s.live.Activity(item.Session)
 			if activity.Turn == item.Turn && activity.Label != "" && order > newest[i] {

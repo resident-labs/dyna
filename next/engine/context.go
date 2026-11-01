@@ -9,6 +9,9 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+// requestChars keeps a question's line short enough for several in the section's budget.
+const requestChars = 80
+
 func renderContextSection(key contract.ContextSectionKey, lines []string, maxChars int, full bool, rowLimit int) contract.ContextSection {
 	if full {
 		return contract.ContextSection{Key: key, Text: strings.Join(lines, "\n")}
@@ -46,7 +49,7 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		return contract.ContextSnapshotResponse{}, forbidden()
 	}
 	switch req.Section {
-	case "", contract.ContextChildren, contract.ContextRequests, contract.ContextPRs, contract.ContextProfiles:
+	case "", contract.ContextChildren, contract.ContextRequests, contract.ContextPRs, contract.ContextProfiles, contract.ContextUsage:
 	default:
 		return contract.ContextSnapshotResponse{}, invalid("unknown context section")
 	}
@@ -62,12 +65,20 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	}
 	var lines []string
 	for _, c := range data.Children {
-		lines = append(lines, fmt.Sprintf("%s: %s, %s", c.Name, c.Profile, c.State))
+		line := fmt.Sprintf("%s: %s, %s", c.Name, c.Profile, c.State)
+		if c.Asking {
+			line += ", waiting for the owner's answer"
+		}
+		lines = append(lines, line)
 	}
 	add(contract.ContextChildren, lines, 1000, 8)
 	lines = nil
 	for _, r := range data.Requests {
-		lines = append(lines, fmt.Sprintf("%s: %s, waiting", r.ID, r.Kind))
+		line := fmt.Sprintf("%s: %s, waiting", r.ID, r.Kind)
+		if r.Text != "" {
+			line += ": " + excerpt(r.Text, requestChars)
+		}
+		lines = append(lines, line)
 	}
 	add(contract.ContextRequests, lines, 600, 0)
 	lines = nil
@@ -86,5 +97,17 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		}
 		add(contract.ContextProfiles, lines, 1200, 0)
 	}
+	if s.usage != nil {
+		add(contract.ContextUsage, usageLines(data.Accounts, s.usage.Latest(), s.now()), usageChars, 0)
+	}
 	return result, nil
+}
+
+// excerpt fits text on one row of a section.
+func excerpt(text string, limit int) string {
+	runes := []rune(strings.Join(strings.Fields(text), " "))
+	if len(runes) <= limit {
+		return string(runes)
+	}
+	return string(runes[:limit-1]) + "…"
 }
