@@ -59,6 +59,8 @@ Each later patch to this folder must be its own commit. Each patch must add an e
 
 - Unknown usage for providers without a reader: 6 product lines added, 2 removed, plus 11 test lines. `engine/model` keeps one `auth-files/quota` call per account, so an owner-added provider answers `unknown` with no request. Readers stay keyed by the stable preset IDs `openai-compatible-zai`, `-deepseek` and `-opencode-go`.
 
+- DeepSeek negative balances: 12 product lines added, 9 removed, plus 10 test lines. An overdrawn account reports `total_balance` `-0.01`, and the reader refused it as it does a negative usage percent, so `engine/model` saw no balance. Balances now read through `dynaNumber`.
+
 ## Pulls
 
 - `v8.0.49` (2026-11-01): `git subtree pull` merged with no conflicts. Every patch above still applies, and none is obsolete: PR #5434 stays open and unmerged, PR #5833 was closed unmerged. The release changes plugin login, Gemini sanitizing and Codex commentary through Claude clients. The commentary option defaults to off, so `engine/model` sees no change in routing, management paths or credential handling. `TestResponsesInterruptStopsHTTPUpstream` and `TestCodexClientModelsApplyPatchRouting` are flaky on `v8.0.48` with Dyna's patches too, and `TestEnsureClientsWaitsForPreviousTargetClose` fails there on every run, so this pull did not cause them; CI does not run them.
