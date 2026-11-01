@@ -206,7 +206,7 @@
     ...(turn.inputs ?? []).map(input => ({ kind: "post" as const, key: input.id, from: input.from, at: input.at, attachments: input.attachments ?? [] })),
     ...(turn.items ?? []).flatMap(item => [item, ...(item.posts ?? [])]).map(item => ({ kind: "post" as const, key: item.id, from: item.from ?? { kind: "engine" as const }, at: item.at, attachments: item.attachments ?? [] })),
   ]).concat(queuedPosts.map(post => ({ kind: "post" as const, key: post.id, from: post.from, at: post.at, attachments: post.body.attachments ?? [] }))));
-  let media = $derived(conversationMedia(mediaRows));
+  let media = $derived(conversationMedia([...mediaRows].sort((a, b) => a.kind === "post" && b.kind === "post" ? a.at.localeCompare(b.at) : 0)));
   let mediaIndex: number | undefined = $state();
   function openMedia(key: string, file: Attachment) { const index = media.findIndex(item => item.key === key && item.file === file); if (index >= 0) mediaIndex = index; }
   const mediaName = (id: string) => store.names.get(id) ?? "Session";
