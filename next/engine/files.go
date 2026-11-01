@@ -112,7 +112,7 @@ func (s *Service) Files(caller contract.Principal, room contract.RoomID) http.Ha
 				w.Header().Set("Cache-Control", "no-store")
 				w.Header().Set("Referrer-Policy", "no-referrer")
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				http.ServeContent(w, r, file.Name, info.ModTime(), bytes.NewReader(visual.ColorScheme(doc)))
+				http.ServeContent(w, r, file.Name, info.ModTime(), bytes.NewReader(visual.Theme(doc, r.URL.Query().Get("theme"))))
 				return
 			}
 			http.NotFound(w, r)

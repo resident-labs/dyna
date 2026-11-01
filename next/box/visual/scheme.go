@@ -8,7 +8,12 @@ import (
 )
 
 // ColorScheme supplies a default only when the document has no color-scheme meta.
-func ColorScheme(doc []byte) []byte {
+func ColorScheme(doc []byte) []byte { return colorScheme(doc, "") }
+
+// Theme supplies the app's mode when the card has no declared color scheme.
+func Theme(doc []byte, mode string) []byte { return colorScheme(doc, mode) }
+
+func colorScheme(doc []byte, mode string) []byte {
 	z := html.NewTokenizer(bytes.NewReader(doc))
 	offset, insert := 0, 0
 	head := false
@@ -38,7 +43,10 @@ func ColorScheme(doc []byte) []byte {
 			}
 		}
 	}
-	const meta = `<meta name="color-scheme" content="light dark">`
+	meta := `<meta name="color-scheme" content="light dark">`
+	if mode == "light" || mode == "dark" {
+		meta += `<style>html{color-scheme:` + mode + `;background:transparent}</style>`
+	}
 	out := make([]byte, 0, len(doc)+len(meta))
 	out = append(out, doc[:insert]...)
 	out = append(out, meta...)
