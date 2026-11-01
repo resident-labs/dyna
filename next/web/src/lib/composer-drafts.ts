@@ -1,4 +1,5 @@
 // A composer draft is kept in localStorage per conversation, so a reload keeps the text. Writes wait until typing pauses.
+// Storage may be blocked or full. Then the draft stays in memory for this visit, and a save or send never fails.
 export const draftWait = 500;
 const prefix = "dyna.draft:";
 
@@ -7,17 +8,26 @@ type DraftTimers = { setTimeout(run: () => void, ms: number): unknown; clearTime
 
 export class ComposerDrafts {
   private pending = new Map<string, string>();
+  // This visit's text per conversation. It shadows storage, so a failed removal cannot bring back a sent draft.
+  private visit = new Map<string, string>();
   private timer: unknown;
-  private storage: DraftStorage;
+  // A getter, so that reading localStorage itself can fail inside the same guard as its methods.
+  private storage: () => DraftStorage;
   private timers: DraftTimers;
 
-  constructor(storage: DraftStorage, timers: DraftTimers = globalThis) {
+  constructor(storage: () => DraftStorage, timers: DraftTimers = globalThis) {
     this.storage = storage;
     this.timers = timers;
   }
 
   load(conversation: string): string {
-    return this.storage.getItem(prefix + conversation) ?? "";
+    const kept = this.visit.get(conversation);
+    if (kept !== undefined) return kept;
+    try {
+      return this.storage().getItem(prefix + conversation) ?? "";
+    } catch {
+      return "";
+    }
   }
   // The text the composer shows and send uses: what the owner typed this visit, else the saved draft.
   draft(conversation: string, typed: string | undefined): string {
@@ -31,11 +41,23 @@ export class ComposerDrafts {
   // A sent draft drops its pending write, so a late timer cannot bring the text back.
   clear(conversation: string): void {
     this.pending.delete(conversation);
-    this.storage.removeItem(prefix + conversation);
+    this.visit.set(conversation, "");
+    try {
+      this.storage().removeItem(prefix + conversation);
+    } catch {
+      // Blocked storage keeps no draft to remove; the empty visit text hides any saved one.
+    }
   }
   flush(): void {
     this.timers.clearTimeout(this.timer);
-    for (const [conversation, text] of this.pending) this.storage.setItem(prefix + conversation, text);
+    for (const [conversation, text] of this.pending) {
+      this.visit.set(conversation, text);
+      try {
+        this.storage().setItem(prefix + conversation, text);
+      } catch {
+        // Full or blocked storage keeps the text for this visit only.
+      }
+    }
     this.pending.clear();
   }
 }

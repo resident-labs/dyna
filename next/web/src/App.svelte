@@ -224,7 +224,7 @@
   // feed with Retry, also after the owner leaves and comes back; raw keeps each request's identity for onsettled.
   let drafts: Record<string, string> = $state({});
   // A draft that is not in memory yet comes from localStorage, so a reload keeps the text. Composer and send both read it this way.
-  const savedDrafts = new ComposerDrafts(localStorage);
+  const savedDrafts = new ComposerDrafts(() => localStorage);
   let unsent: Record<string, PostRequest[]> = $state.raw({});
   const keyOf = (request: PostRequest) => `${request.room}/${request.home?.session ?? ""}`;
   const keep = (request: PostRequest) => { unsent = { ...unsent, [keyOf(request)]: [...unsent[keyOf(request)] ?? [], request] }; };
