@@ -26,7 +26,6 @@
   export async function send(request: PostRequest) { await view.post(request); }
   let turns: TranscriptTurn[] = $state([]);
   let before: string | undefined = $state();
-  let total = $state(0);
   let now = $state(clock());
   $effect(() => {
     if (!turns.some(turn => !turn.ended)) return;
@@ -47,11 +46,7 @@
     if (loading) { if (!older) pending = true; return; }
     loading = true;
     try {
-      const [page, work] = await Promise.all([
-        call("transcript.read", { session, before: older ? before : undefined }),
-        older ? Promise.resolve(undefined) : call("session.work", { session, limit: 1 }),
-      ]);
-      if (work) total = work.total;
+      const page = await call("transcript.read", { session, before: older ? before : undefined });
       if (destroyed) return;
       const incoming = page.turns ?? [];
       if (older) {
@@ -122,7 +117,6 @@
     }
   });
   const sender = (kind: string, id?: string) => kind === "owner" ? "You" : id ? store.names.get(id) ?? "Session" : "Dyna";
-  const duration = (ms?: number) => ms === undefined ? "" : ms < 60000 ? `${Math.floor(ms / 1000)} s` : `${Math.floor(ms / 60000)} m ${Math.floor(ms / 1000) % 60} s`;
 </script>
 
 {#snippet postItem(turn: TranscriptTurn, item: TranscriptItem)}
@@ -131,9 +125,8 @@
 
 <div class="thread" bind:this={scroller} onscroll={() => { atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; if (loaded && before && !loading && scroller.scrollTop < 100) void load(true); }}>
   <div class="body">
-    {#each turns as turn, index (turn.id)}
+    {#each turns as turn (turn.id)}
       <article>
-        <div class="rule"><span><strong>Turn {Math.max(1, total - turns.length + index + 1)}</strong>{#if turn.durationMs !== undefined}{" · "}{duration(turn.durationMs)}{:else if !turn.ended}{" · "}{elapsed(turn.started, now)}{/if}{#if !turn.ended}{" · running"}{:else if turn.outcome === "failed"}{" · "}<StatusPill tone="failed" label="failed" word />{/if}</span><i></i></div>
         {#each turn.inputs ?? [] as input (input.id)}
           <div class="input"><div class="who"><Avatar kind={input.from.kind} name={sender(input.from.kind, input.from.session)} size={22} />{#if input.from.kind === "owner"}<strong>You</strong>{:else}<strong class:identity={input.from.kind === "session"} style:--hue={hue(sender(input.from.kind, input.from.session))}>{sender(input.from.kind, input.from.session)}</strong>{/if}{#if input.home}<span class="muted">{input.home.kind === "feed" ? `in ${roomName}` : input.home.session === session ? "in your DM" : "in a DM"}</span>{/if}<time datetime={input.at}>{formatTime(input.at)}</time></div><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{#if input.more && input.type === "post.created" && chunks["input:" + input.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Show all</button>{/if}</div>
         {/each}
