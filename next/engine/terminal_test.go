@@ -14,6 +14,16 @@ func TestHostListOwner(t *testing.T) {
 	if problem != nil || len(list.Hosts) != 2 || list.Hosts[0].Name != contract.ControlPlane || list.Hosts[1].Name != "host" {
 		t.Fatalf("hosts: %+v %v", list, problem)
 	}
+	if list.Hosts[1].EngineHost {
+		t.Fatalf("a host is not the engine's machine until the engine compares them: %+v", list.Hosts[1])
+	}
+	if err := s.store.SetEngineHost(ctx, "host", true); err != nil {
+		t.Fatal(err)
+	}
+	list, problem = s.HostList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.HostListRequest{})
+	if problem != nil || !list.Hosts[1].EngineHost || list.Hosts[0].EngineHost {
+		t.Fatalf("engine host: %+v %v", list, problem)
+	}
 }
 
 func TestHostListBackupFailureCodes(t *testing.T) {
