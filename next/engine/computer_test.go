@@ -33,6 +33,17 @@ func computerWatchGeneration(t *testing.T, s *Service, id contract.SessionID) ui
 	return handle.ComputerWatchGeneration()
 }
 
+func TestComputerFramesRequiresComputer(t *testing.T) {
+	s, _, id, ctx := setup(t)
+	if _, ok := s.live.CreateSession(id); !ok {
+		t.Fatal("live session refused")
+	}
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: id}
+	if problem := s.ComputerFrames(ctx, caller, 0, bytes.NewReader(nil)); problem == nil || problem.Code != contract.ErrNotFound {
+		t.Fatalf("computer frames without computer: %v", problem)
+	}
+}
+
 func TestComputerWatchFanoutAndState(t *testing.T) {
 	s, room, id, ctx := setup(t)
 	connectAgent(ctx, t, s, id)
