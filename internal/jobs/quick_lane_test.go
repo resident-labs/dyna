@@ -60,6 +60,30 @@ func TestAdmissionUsesAvailableMemoryAndDefaultReservation(t *testing.T) {
 	}
 }
 
+func TestAdmissionAllowsSmallNodesAndLargeRequests(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		total, available uint64
+		request          int64
+	}{
+		{"small node", 2 << 30, 1536 << 20, 0},
+		{"large request", 8 << 30, 6 << 30, 7 * 1024},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := machines.Machine{Capabilities: machines.Capabilities{CPUs: 8, MemTotal: tc.total}, Load: machines.Load{MemTotal: tc.total, MemAvailable: tc.available}}
+			q := nodeQueue{queued: []Job{{ID: "job", Host: true, MemoryMiB: tc.request}}}
+			admitted, reasons := map[string]bool{}, map[string]string{}
+			needsWrite := false
+			if err := passNode(context.Background(), nil, time.Time{}, "node", machine, nil, q, nil, admitted, reasons, &needsWrite); err != nil {
+				t.Fatal(err)
+			}
+			if !admitted["job"] {
+				t.Fatalf("job did not start: %v", reasons)
+			}
+		})
+	}
+}
+
 func TestQuickLaneReservesMemory(t *testing.T) {
 	machine := machines.Machine{Name: "node", Capabilities: machines.Capabilities{CPUs: 8, MemTotal: 8 << 30}}
 	q := nodeQueue{queued: []Job{

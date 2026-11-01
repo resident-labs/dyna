@@ -913,7 +913,8 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 	availableMiB := int64(machine.Load.MemAvailable / (1 << 20))
 	availableKnown := machineErr == nil && machine.Load.MemTotal > 0
 	if availableKnown {
-		availableMiB -= 2048 // Keep 2 GiB for the node and untracked work.
+		// On small nodes, leave at most one quarter for the node itself.
+		availableMiB -= min(int64(2048), int64(machine.Load.MemTotal/(1<<20))/4)
 		for _, job := range q.running {
 			if !job.Started.Before(machine.LastProbe) && job.Lane != LaneQuick {
 				availableMiB -= jobDemand(job, machine).MemoryMiB
@@ -988,7 +989,7 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 			why = fmt.Sprintf("asks %d CPUs, %d free", d.CPUs, max(freeCPUs, 0))
 		case unit.lane != LaneQuick && memoryKnown && d.MemoryMiB > freeMemMiB:
 			why = fmt.Sprintf("asks %s, %s free", MemoryLabel(d.MemoryMiB), MemoryLabel(max(freeMemMiB, 0)))
-		case unit.lane != LaneQuick && availableKnown && d.MemoryMiB > availableMiB:
+		case unit.lane != LaneQuick && availableKnown && min(d.MemoryMiB, max(1, int64(machine.Load.MemTotal/(1<<20))/2)) > availableMiB:
 			why = fmt.Sprintf("asks %s, %s available after node headroom", MemoryLabel(d.MemoryMiB), MemoryLabel(max(availableMiB, 0)))
 		case !unit.isJob && port < 0:
 			why = "all check ports in use"
