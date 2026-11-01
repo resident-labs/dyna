@@ -55,7 +55,7 @@
   .steps button { flex: 1; height: 16px; min-width: 0; border: 1px solid var(--line); border-radius: 4px; background: var(--selected); color: var(--muted); padding: 0; cursor: pointer; }
   .steps button.filled { background: var(--focus); border-color: var(--focus); color: var(--bg); }
   .rating-value { color: var(--muted); }
-  .rating-value button { border: 0; padding: 0; background: none; color: var(--text); font: inherit; cursor: pointer; text-decoration: underline; }
+  .rating-value button { border: 1px solid var(--firm); border-radius: 5px; padding: 3px 8px; background: none; color: var(--text); font: inherit; cursor: pointer; }
   .help { color: var(--muted); font-size: 12.5px; }
   p.help { margin: 8px 0 0; }
   .actions { display: flex; gap: 12px; }
@@ -65,14 +65,19 @@
   @container (max-width: 479px) {
     .numeric + .help { display: block; margin-top: 6px; }
   }
+  @container (max-width: 900px) {
+    .rating { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-bottom: 16px; }
+    .rating-name { grid-column: 1; grid-row: 1; }
+    .rating-value { grid-column: 2; grid-row: 1; }
+    .rating > .help { grid-column: 1 / -1; grid-row: 2; }
+    .steps { grid-column: 1 / -1; grid-row: 3; }
+    .steps button { height: 40px; }
+  }
   @container (max-width: 640px) {
     .editor { padding: 16px 12px; }
     .actions { flex-wrap: wrap; }
     .actions button.remove, .in-use { flex-basis: 100%; }
     .field { grid-template-columns: minmax(0, 1fr); gap: 8px; }
     input:not(.numeric), select, textarea { max-width: 100%; }
-    .rating { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-bottom: 16px; }
-    .rating-name { grid-column: 1; }.rating-value { grid-column: 2; grid-row: 1; }
-    .steps { grid-column: 1 / -1; }.steps button { height: 40px; }.help { grid-column: 1 / -1; }
   }
 </style>
