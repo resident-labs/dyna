@@ -2,11 +2,12 @@
   import { onMount, type Snippet } from "svelte";
   import { APIError, call, SignedOut } from "../client.ts";
   import { profileForSave, slugName } from "../profiles.ts";
-  import type { ProfileSummary, ThinkingLevel } from "../contract.gen.ts";
+  import type { AccountProviderInfo, ProfileSummary, ThinkingLevel } from "../contract.gen.ts";
   import Icon from "./Icon.svelte";
   import ProfileEditor from "./ProfileEditor.svelte";
 
   let { bar, phone, signedout }: { bar: Snippet<[string, number | undefined, Snippet | undefined]>; phone: boolean; signedout: () => void } = $props();
+  let providers: AccountProviderInfo[] = $state([]);
   let profiles: ProfileSummary[] = $state([]), loaded = $state(false), failed = $state(false);
   let editing: string | undefined = $state(), creating = $state(false), busy = $state(false), error = $state("");
   const blank: ProfileSummary = { inUse: 0, name: "", provider: "openai", model: "", thinking: "medium", description: "", taste: 0, diagnostics: 0, intelligence: 0, cost: 0 };
@@ -34,6 +35,7 @@
     off: "no thinking", minimal: "minimal thinking", low: "low thinking", medium: "medium thinking", high: "high thinking", xhigh: "very high thinking",
   };
   function reload() {
+    void call("accounts.list", {}).then(result => { providers = result.providers ?? []; }, () => {});
     void call("profile.list", {}).then(result => { profiles = result.profiles ?? []; loaded = true; failed = false; },
       (error: unknown) => { if (error instanceof SignedOut) signedout(); else if (!loaded) failed = true; });
   }
@@ -50,17 +52,17 @@
 {/if}
 <div class="content">
   {#if phone && creating}
-    <ProfileEditor profile={blank} isNew={true} {busy} {error} {save} cancel={close} remove={() => {}} />
+    <ProfileEditor {providers} profile={blank} isNew={true} {busy} {error} {save} cancel={close} remove={() => {}} />
   {:else if phone && editing}
     {#each profiles.filter(profile => profile.name === editing) as profile (profile.name)}
       <p class="summary">{slugName(profile.model)} · {thinking[profile.thinking]}</p>
-      <ProfileEditor {profile} isNew={false} {busy} {error} {save} cancel={close} remove={() => void remove(profile.name)} />
+      <ProfileEditor {providers} {profile} isNew={false} {busy} {error} {save} cancel={close} remove={() => void remove(profile.name)} />
     {/each}
   {:else}
   {#if failed}<p role="alert">The profiles did not load. <button type="button" onclick={reload}>Try again</button></p>
   {:else if !loaded}<p class="muted">Loading profiles…</p>
   {:else}
-    {#if creating}<div class="table"><ProfileEditor profile={blank} isNew={true} {busy} {error} {save} cancel={close} remove={() => {}} /></div>{/if}
+    {#if creating}<div class="table"><ProfileEditor {providers} profile={blank} isNew={true} {busy} {error} {save} cancel={close} remove={() => {}} /></div>{/if}
     <p class="summary">{profiles.length} {profiles.length === 1 ? "profile" : "profiles"} · {profiles.filter(unrated).length} not rated</p>
     {#if !profiles.length}<p class="muted">No profiles yet.</p>
     {:else}<div class="table">
@@ -78,7 +80,7 @@
           <span class="limits">{#if profile.maxConcurrent}At most {profile.maxConcurrent} at once{#if profile.maxCallsPerRun} · {/if}{/if}{#if profile.maxCallsPerRun}{profile.maxCallsPerRun} calls per run{:else if !profile.maxConcurrent}No limits{/if}</span>
           <button type="button" class="edit" onclick={() => { const name = editing === profile.name ? undefined : profile.name; close(); editing = name; }} aria-label={`Edit ${profile.name}`}>{#if phone}<Icon name="forwardChevron" />{:else}Edit{/if}</button>
         </div>
-        {#if !phone && editing === profile.name}<ProfileEditor {profile} isNew={false} {busy} {error} {save} cancel={close} remove={() => void remove(profile.name)} />{/if}
+        {#if !phone && editing === profile.name}<ProfileEditor {providers} {profile} isNew={false} {busy} {error} {save} cancel={close} remove={() => void remove(profile.name)} />{/if}
       {/each}
     </div>{/if}
   {/if}

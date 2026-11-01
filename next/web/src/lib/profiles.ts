@@ -26,7 +26,7 @@ export function slugName(slug: string): string {
 // One profile for the owner: the model, such as "Claude Opus 5.5", over "Anthropic · high thinking". Profiles that would
 // read the same add their own name, so they still read apart.
 export function profileLabel(profile: ProfileSummary, all: ProfileSummary[]): { model: string; detail: string } {
-  const detail = (p: ProfileSummary) => `${providers[p.provider]} · ${thinking[p.thinking]}`;
+  const detail = (p: ProfileSummary) => `${providers[p.provider] ?? p.provider} · ${thinking[p.thinking]}`;
   const twin = all.some(other => other.name !== profile.name && other.model === profile.model && detail(other) === detail(profile));
   return { model: slugName(profile.model), detail: twin ? `${detail(profile)} · ${slugName(profile.name)}` : detail(profile) };
 }

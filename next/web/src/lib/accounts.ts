@@ -4,7 +4,7 @@ import { APIError } from "./client.ts";
 // Search always unfolds the key group, so a matching provider stays reachable.
 export function providerGroup(providers: readonly AccountProviderInfo[], flow: ConnectFlow, query: string, expanded: boolean): { items: AccountProviderInfo[]; remaining: number; count: number } {
   const search = query.trim().toLowerCase();
-  const matches = providers.filter(p => p.connectFlow === flow && p.displayName.toLowerCase().includes(search));
+  const matches = providers.filter(p => p.flows?.[0] === flow && (p.displayName.toLowerCase().includes(search) || p.id.toLowerCase().includes(search)));
   const items = flow === "key" && !search && !expanded ? matches.slice(0, 10) : matches;
   return { items, remaining: matches.length - items.length, count: matches.length };
 }
