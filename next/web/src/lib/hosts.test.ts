@@ -1,10 +1,49 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { backupProblem, hostLabel, hostLoads, hostMeters, largeShared, lastSeen, machines } from "./hosts.ts";
+import { backupProblem, hang, hostLabel, hostLoads, hostMeters, largeShared, lastSeen, machines, onHost, roomSessions } from "./hosts.ts";
 
 test("labels the Dyna host without implying that it runs this browser", () => {
   assert.equal(hostLabel("control-plane"), "Dyna host");
   assert.equal(hostLabel("build-server"), "build-server");
+});
+
+test("a box's state names its machine, as the host label does, once it has one", () => {
+  assert.equal(onHost("Ready", "arch"), "Ready on arch");
+  assert.equal(onHost("Asleep", "control-plane"), "Asleep on Dyna host");
+  assert.equal(onHost("Starting", undefined), "Starting");
+  assert.equal(onHost("Starting", ""), "Starting");
+});
+
+const machine = { name: "lab", reachable: true, boxes: 2, cpus: 8, memBytes: 8, cpuUsed: 0, memUsed: 0, diskBytes: 0, diskUsed: 0, diskLow: false, shared: [], history: null };
+
+test("a machine's sessions group by room, rooms by name, each room in the engine's order", () => {
+  const session = (room: string, id: string, boxState: "ready" | "stopped" = "ready") => ({ room, id, name: id, boxState });
+  const sessions = [session("r2", "b"), session("r1", "z"), session("r2", "a", "stopped")];
+  const names: Record<string, string> = { r1: "Zebra", r2: "Apple" };
+  assert.deepEqual(roomSessions({ ...machine, sessions }, room => names[room]), [
+    { room: "r2", name: "Apple", sessions: [sessions[0], sessions[2]] }, { room: "r1", name: "Zebra", sessions: [sessions[1]] }]);
+  assert.deepEqual(roomSessions(machine, room => room), []);
+  assert.deepEqual(roomSessions({ ...machine, sessions: null }, room => room), []);
+});
+
+test("a popover hangs under its button, right edges lined up, and over it when there is more room above", () => {
+  assert.equal(hang({ top: 100, right: 700, bottom: 120 }, 1000, 800), "top: 126px; right: 300px; max-height: min(560px, 70vh, 658px)");
+  // Near the viewport's right edge it keeps 12 px, and the height stops short of the bottom.
+  assert.equal(hang({ top: 300, right: 995, bottom: 320 }, 1000, 800), "top: 326px; right: 12px; max-height: min(560px, 70vh, 458px)");
+  // Low on the page it opens upward. A short viewport with more room below stays under the button.
+  assert.equal(hang({ top: 700, right: 700, bottom: 720 }, 1000, 800), "top: auto; bottom: 106px; right: 300px; max-height: min(560px, 70vh, 678px)");
+  assert.equal(hang({ top: 60, right: 700, bottom: 80 }, 1000, 300), "top: 86px; right: 300px; max-height: min(560px, 70vh, 198px)");
+});
+
+test("a merged card keeps the sessions both sides report, and an unmerged host keeps its own", () => {
+  const session = (id: string) => ({ room: "r", id, name: id, boxState: "ready" as const });
+  const plane = { ...machine, name: "control-plane", boxes: 0, sessions: null };
+  const lab = { ...machine, engineHost: true, sessions: [session("a"), session("b")] };
+  assert.deepEqual(machines([plane, lab])[0].sessions, lab.sessions);
+  assert.deepEqual(machines([{ ...plane, sessions: [session("c")] }, lab])[0].sessions?.map(s => s.id), ["c", "a", "b"]);
+  // Omitted on both sides, the engine's way of saying none, the card has none and no crash.
+  assert.deepEqual(machines([{ ...plane, sessions: undefined }, { ...lab, sessions: undefined }])[0].sessions, []);
+  assert.deepEqual(machines([{ ...plane, cpus: 0 }, lab])[1].sessions, lab.sessions);
 });
 
 test("one machine reported as the control plane and a registered host is one card, named for the host, with whole-machine figures", () => {

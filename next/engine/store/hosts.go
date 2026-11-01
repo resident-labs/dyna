@@ -189,6 +189,26 @@ func (s *Store) RoomShared(ctx context.Context) (map[contract.HostName][]contrac
 	return out, rows.Err()
 }
 
+// HostSessions lists each host's sessions, by room and then oldest first. A deleted box holds nothing, though it keeps
+// its host, and a box not placed yet has none. A session closes only after its box is deleted, so every row is open.
+func (s *Store) HostSessions(ctx context.Context) (map[contract.HostName][]contract.HostSession, error) {
+	rows, err := s.Read().QueryContext(ctx, "SELECT b.host,s.room,s.id,s.name,b.state FROM boxes b JOIN sessions s ON s.id=b.session WHERE COALESCE(b.host,'')!='' AND b.state!=? ORDER BY b.host,s.room,s.created_at,s.id", contract.BoxDeleted)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[contract.HostName][]contract.HostSession)
+	for rows.Next() {
+		var host contract.HostName
+		var session contract.HostSession
+		if err := rows.Scan(&host, &session.Room, &session.ID, &session.Name, &session.BoxState); err != nil {
+			return nil, err
+		}
+		out[host] = append(out[host], session)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
 	rows, err := s.Read().QueryContext(ctx, `SELECT h.name, h.ssh, h.state, h.cpus, h.mem_bytes, h.disk_bytes, h.disk_floor, h.checked_at, h.maintained_at, h.engine_host, hr.room FROM hosts h LEFT JOIN host_rooms hr ON hr.host=h.name ORDER BY h.name,hr.room`)
 	if err != nil {
