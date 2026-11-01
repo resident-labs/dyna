@@ -58,10 +58,13 @@ type crewWorker interface {
 type CrewConfig struct {
 	Workflow contract.BoxWorkflow
 	Engine   crewEngine
-	// Open starts a worker for a step. Args gives it its model and its own session file, and models is its configuration.
-	Open       func(ctx context.Context, profile contract.WorkflowProfile, models string) (crewWorker, error)
+	// Open starts a worker for a step in dir, its working tree. Folder is the worker's own, for the time it runs, and holds
+	// its model configuration in models.json.
+	Open       func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string) (crewWorker, error)
 	Transcript *Transcript
 	Workdir    string
+	Branch     string // the session's branch, which names the crew's other branches
+	Base       string // the run's pinned commit, when an earlier box reported it
 	Sessions   string // Pi's session folder, which all workers share: each gets its own file there
 	State      string // the agent's own folder, for the host script and the workers' configuration
 }
@@ -70,11 +73,13 @@ type CrewConfig struct {
 // processes in this box, so the session, its box and its socket stay what they are for any other session. The engine's
 // journal, not this process, holds what has finished. A restarted box runs the script again and stored steps return at once.
 type Crew struct {
-	config   CrewConfig
-	host     string
-	slots    chan struct{}
-	commands chan struct{}
-	limits   map[contract.ProfileName]chan struct{}
+	config CrewConfig
+	host   string
+	slots  chan struct{}
+	limits map[contract.ProfileName]chan struct{}
+	builds *buildLock
+	shims  string
+	repo   sync.Mutex // the changes to the one repository that all trees share
 
 	mu       sync.Mutex
 	taken    map[contract.DeliverySeq]bool
@@ -95,13 +100,30 @@ func NewCrew(config CrewConfig) (*Crew, error) {
 	if err := os.MkdirAll(filepath.Join(config.State, "workers"), 0700); err != nil {
 		return nil, err
 	}
-	c := &Crew{config: config, host: host, slots: make(chan struct{}, max(config.Workflow.Workers, 1)), commands: make(chan struct{}, 1), limits: make(map[contract.ProfileName]chan struct{}), taken: make(map[contract.DeliverySeq]bool)}
+	shims := filepath.Join(config.State, "build-lock")
+	builds, err := newBuildLock(shims, buildLockHold)
+	if err != nil {
+		return nil, err
+	}
+	c := &Crew{config: config, host: host, slots: make(chan struct{}, max(config.Workflow.Workers, 1)), limits: make(map[contract.ProfileName]chan struct{}), builds: builds, shims: shims, taken: make(map[contract.DeliverySeq]bool)}
 	for _, profile := range config.Workflow.Profiles {
 		if profile.MaxConcurrent > 0 {
 			c.limits[profile.Name] = make(chan struct{}, profile.MaxConcurrent)
 		}
 	}
 	return c, nil
+}
+
+// Export sets what every process of this box inherits from now on: the build lock's shims, and one Cargo target folder for all
+// trees, because a worktree's own would build every dependency again.
+func (c *Crew) Export() error {
+	if err := os.Setenv("PATH", c.shims+":"+os.Getenv("PATH")); err != nil {
+		return err
+	}
+	if os.Getenv("CARGO_TARGET_DIR") != "" {
+		return nil
+	}
+	return os.Setenv("CARGO_TARGET_DIR", filepath.Join(c.config.Workdir, "target"))
 }
 
 // Done never closes: no Pi outlives a crew's workers, so nothing here ends the box.
@@ -115,6 +137,7 @@ func (c *Crew) Files() []string {
 
 func (c *Crew) Close() error {
 	c.Abort(context.Background())
+	_ = c.builds.listener.Close()
 	return nil
 }
 
@@ -172,6 +195,9 @@ func (c *Crew) Start(ctx context.Context, id contract.TurnID, inputs []contract.
 	var err error
 	if head, noRepo := runGit(ctx, c.config.Workdir, "", "rev-parse", "HEAD"); noRepo == nil {
 		err = c.config.Engine.WorkflowPin(ctx, head)
+		if c.config.Base == "" {
+			c.config.Base = head
+		}
 	}
 	if err == nil {
 		final, err = c.script(ctx)
@@ -203,10 +229,11 @@ type crewCall struct {
 }
 
 type crewReply struct {
-	ID    int64  `json:"id"`
-	Value any    `json:"value,omitempty"`
-	Error string `json:"error,omitempty"`
-	Step  string `json:"step,omitempty"`
+	ID     int64  `json:"id"`
+	Value  any    `json:"value,omitempty"`
+	Error  string `json:"error,omitempty"`
+	Step   string `json:"step,omitempty"`
+	stored bool   // the journal had it, so this box may never have run it
 }
 
 // script runs the host and serves its calls until it reports an end, which is the only way it succeeds.
@@ -298,6 +325,8 @@ func (c *Crew) handle(ctx context.Context, call crewCall) crewReply {
 		return c.agentCall(ctx, call)
 	case "run":
 		return c.commandCall(ctx, call)
+	case "merge":
+		return c.mergeCall(ctx, call)
 	case "post":
 		return c.postCall(ctx, call)
 	case "workflow":
@@ -384,7 +413,7 @@ func (c *Crew) step(ctx context.Context, call crewCall, info stepInfo, work func
 	case contract.WorkflowStepDone:
 		var value any
 		_ = json.Unmarshal([]byte(stored.Result), &value)
-		return crewReply{Value: value}
+		return crewReply{Value: value, stored: true}
 	case contract.WorkflowStepFailed:
 		return crewReply{Error: stored.Reason, Step: name}
 	}
@@ -421,11 +450,12 @@ func strictOpts(raw json.RawMessage, into any) error {
 }
 
 type agentOpts struct {
-	Profile contract.ProfileName `json:"profile"`
-	Schema  json.RawMessage      `json:"schema"`
-	Label   string               `json:"label"`
-	Phase   string               `json:"phase"`
-	Timeout int                  `json:"timeout"` // seconds
+	Profile  contract.ProfileName `json:"profile"`
+	Schema   json.RawMessage      `json:"schema"`
+	Label    string               `json:"label"`
+	Phase    string               `json:"phase"`
+	Timeout  int                  `json:"timeout"` // seconds
+	Worktree bool                 `json:"worktree"`
 }
 
 func (c *Crew) agentCall(ctx context.Context, call crewCall) crewReply {
@@ -444,15 +474,22 @@ func (c *Crew) agentCall(ctx context.Context, call crewCall) crewReply {
 	if profile != nil {
 		info.profile = profile.Name
 	}
-	return c.step(ctx, call, info, func(ctx context.Context, key string) stepOutcome {
+	reply := c.step(ctx, call, info, func(ctx context.Context, key string) stepOutcome {
 		if refused != nil {
 			return stepOutcome{reason: "agent options: " + refused.Error()}
 		}
 		if profile == nil {
 			return stepOutcome{reason: fmt.Sprintf("profile %q is not in this workflow's meta.profiles", opts.Profile)}
 		}
-		return c.worker(ctx, key, *profile, prompt, opts)
+		if opts.Worktree {
+			return c.treeWorker(ctx, key, info.name(), *profile, prompt, opts)
+		}
+		return c.worker(ctx, key, *profile, prompt, opts, c.config.Workdir)
 	})
+	if opts.Worktree {
+		return c.restore(ctx, call, reply)
+	}
+	return reply
 }
 
 func acquire(ctx context.Context, slots chan struct{}) (func(), error) {
@@ -468,7 +505,7 @@ func acquire(ctx context.Context, slots chan struct{}) (func(), error) {
 }
 
 // worker runs one Pi to its final text, or to JSON that matches the schema.
-func (c *Crew) worker(ctx context.Context, key string, profile contract.WorkflowProfile, prompt string, opts agentOpts) (out stepOutcome) {
+func (c *Crew) worker(ctx context.Context, key string, profile contract.WorkflowProfile, prompt string, opts agentOpts, dir string) (out stepOutcome) {
 	var schema *jsonschema.Schema
 	if len(opts.Schema) > 0 {
 		var err error
@@ -488,18 +525,21 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 	if opts.Timeout > 0 {
 		limit = time.Duration(opts.Timeout) * time.Second
 	}
-	ctx, cancel := context.WithTimeout(ctx, limit)
+	ctx, cancel := c.builds.timeout(ctx, limit)
 	defer cancel()
-	models := filepath.Join(c.config.State, "workers", key+".json")
+	folder := filepath.Join(c.config.State, "workers", key)
+	if err := os.MkdirAll(folder, 0700); err != nil {
+		return stepOutcome{reason: err.Error()}
+	}
+	defer os.RemoveAll(folder)
 	data, err := json.Marshal(WorkerModels(key[:16]))
 	if err != nil {
 		return stepOutcome{reason: err.Error()}
 	}
-	if err := os.WriteFile(models, data, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(folder, "models.json"), data, 0600); err != nil {
 		return stepOutcome{reason: err.Error()}
 	}
-	defer os.Remove(models)
-	worker, err := c.config.Open(ctx, profile, models)
+	worker, err := c.config.Open(ctx, profile, folder, dir)
 	if err != nil {
 		return stepOutcome{reason: "the worker did not start: " + err.Error()}
 	}
@@ -521,7 +561,7 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 		out.usage.CacheReadTokens += ended.Usage.CacheReadTokens
 		out.usage.CacheWriteTokens += ended.Usage.CacheWriteTokens
 		switch {
-		case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		case errors.Is(context.Cause(ctx), context.DeadlineExceeded):
 			out.reason = fmt.Sprintf("timed out after %s", limit)
 			return out
 		case err != nil:
@@ -621,7 +661,7 @@ func (c *Crew) commandCall(ctx context.Context, call crewCall) crewReply {
 			return stepOutcome{reason: "run takes a string or a list of strings"}
 		}
 		// Builds must not fan out, whatever the script does around them.
-		release, err := acquire(ctx, c.commands)
+		release, err := c.builds.acquire(ctx, nil)
 		if err != nil {
 			return stepOutcome{reason: err.Error()}
 		}
@@ -645,7 +685,7 @@ func (c *Crew) command(ctx context.Context, argv []string, opts commandOpts) ste
 			cmd.Dir = opts.Cwd
 		}
 	}
-	cmd.Env = os.Environ()
+	cmd.Env = append(os.Environ(), "DYNA_BUILD_LOCK=held") // The caller holds it, so a build in this command must not queue.
 	for name, value := range opts.Env {
 		cmd.Env = append(cmd.Env, name+"="+value)
 	}

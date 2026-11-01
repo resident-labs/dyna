@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
@@ -100,6 +101,9 @@ func (s *Server) Handler() http.Handler {
 					resp.Error = &rpcError{-32602, "invalid tool call ID"}
 					break
 				}
+			}
+			if dir := r.URL.Query().Get("dir"); dir != "" && !filepath.IsAbs(call.Arguments.Cwd) {
+				call.Arguments.Cwd = filepath.Join(dir, call.Arguments.Cwd)
 			}
 			text, err := s.call(r.Context().Done(), call)
 			if err != nil {

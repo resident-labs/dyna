@@ -78,8 +78,12 @@ type boxHarness interface {
 }
 
 // crewInstructions follow a session's own instructions in each worker.
-func crewInstructions(name string) string {
-	return "You are one worker of workflow " + name + ", a process in your session's box, not a session of your own. A script started you and reads your final text as your result, so end with text and do not post it with endTurn. Other workers share this box and this working tree: stay within the work your prompt gives you.\n"
+func crewInstructions(name, tree string) string {
+	text := "You are one worker of workflow " + name + ", a process in your session's box, not a session of your own. A script started you and reads your final text as your result, so end with text and do not post it with endTurn. A command that outlasts the shell tool's wait becomes a background job and nothing wakes you when it ends, so read it with shell_output until it finishes before you end. Builds in this box take turns, so a job that says it is waiting for the build lock is fine: keep reading it.\n"
+	if tree == "" {
+		return text + "Other workers share this box and this working tree: stay within the work your prompt gives you.\n"
+	}
+	return text + "You have your own git worktree at " + tree + " on your own branch, and other workers cannot see it. Work only there. When you end, whatever you left there is committed and pushed for you, except ignored files. Cargo builds share CARGO_TARGET_DIR with the other workers, so reach a binary with cargo run or through that folder, not through ./target.\n"
 }
 
 // Run connects the box, serves its model route, and runs the Pi session.
@@ -191,7 +195,7 @@ func Run(ctx context.Context) error {
 		return problem
 	}
 	mux.Handle("/dyna/", dynaTools)
-	err = pi.WriteAgentMCPConfig(mcpPath, dynaTools.Description())
+	err = pi.WriteAgentMCPConfig(mcpPath, dynaTools.Description(), "")
 	if err != nil {
 		return err
 	}
@@ -207,19 +211,34 @@ func Run(ctx context.Context) error {
 	var h boxHarness
 	var files func() []string // the session files to keep sending
 	if hello.Workflow != nil {
-		open := func(ctx context.Context, profile contract.WorkflowProfile, models string) (crewWorker, error) {
+		open := func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string) (crewWorker, error) {
 			args, err := modelArgs(profile.Model, profile.CompactTokens)
 			if err != nil {
 				return nil, err
 			}
-			worker, err := pi.Open(ctx, "pi", piArgs(args, extensionPath, hello.Instructions+crewInstructions(hello.Workflow.Name), models, sessions, mcpPath), "", workdir)
+			mcp := filepath.Join(folder, "mcp.json")
+			if err := pi.WriteAgentMCPConfig(mcp, dynaTools.Description(), dir); err != nil {
+				return nil, err
+			}
+			tree := dir
+			if dir == workdir {
+				tree = ""
+			}
+			worker, err := pi.Open(ctx, "pi", piArgs(args, extensionPath, hello.Instructions+crewInstructions(hello.Workflow.Name, tree), filepath.Join(folder, "models.json"), sessions, mcp), "", dir)
 			if err != nil {
 				return nil, err
 			}
 			return worker, nil
 		}
-		crew, err := NewCrew(CrewConfig{Workflow: *hello.Workflow, Engine: client, Open: open, Transcript: transcript, Workdir: workdir, Sessions: sessions, State: piDir})
+		config := CrewConfig{Workflow: *hello.Workflow, Engine: client, Open: open, Transcript: transcript, Workdir: workdir, Sessions: sessions, State: piDir}
+		if len(hello.Repos) > 0 {
+			config.Branch, config.Base = hello.Repos[0].Branch, hello.Repos[0].Commit
+		}
+		crew, err := NewCrew(config)
 		if err != nil {
+			return err
+		}
+		if err := crew.Export(); err != nil {
 			return err
 		}
 		h, files = crew, crew.Files
