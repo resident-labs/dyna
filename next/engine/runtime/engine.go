@@ -137,9 +137,9 @@ func Run(ctx context.Context, cfg Config) error {
 	backupDone := make(chan struct{})
 	go func() {
 		defer close(backupDone)
-		(&backupLoop{store: st, dir: filepath.Join(cfg.Data, "backups"), dest: cfg.BackupDest, recipient: recipient, now: time.Now, run: sshBackup, free: func(ctx context.Context) int64 {
+		(&backupLoop{store: st, dir: filepath.Join(cfg.Data, "backups"), dest: cfg.BackupDest, recipient: recipient, now: time.Now, run: sshBackup, free: func(ctx context.Context) (int64, bool) {
 			total, used := podman.LocalDisk(ctx, cfg.Data)
-			return total - used
+			return total - used, total > 0
 		}}).start(backupCtx)
 	}()
 	defer func() { stopBackup(); <-backupDone }()
