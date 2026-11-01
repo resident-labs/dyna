@@ -19,6 +19,10 @@ export class ComposerDrafts {
   load(conversation: string): string {
     return this.storage.getItem(prefix + conversation) ?? "";
   }
+  // The text the composer shows and send uses: what the owner typed this visit, else the saved draft.
+  draft(conversation: string, typed: string | undefined): string {
+    return typed ?? this.load(conversation);
+  }
   save(conversation: string, text: string): void {
     this.pending.set(conversation, text);
     this.timers.clearTimeout(this.timer);
