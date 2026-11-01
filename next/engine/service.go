@@ -59,7 +59,7 @@ type Service struct {
 }
 
 // sessionState is the engine's in-memory state for one session. s.mu guards its fields.
-// computerLock serializes computer transitions and channel replacement.
+// computerLock serializes computer transitions, channel replacement and watcher delivery.
 // Take computerLock before s.mu, never the reverse.
 type sessionState struct {
 	computerLock sync.Mutex
@@ -76,6 +76,15 @@ func (s *Service) sessionLocked(id contract.SessionID) *sessionState {
 		state = &sessionState{}
 		s.sessions[id] = state
 	}
+	return state
+}
+
+// lockSession returns the session with its computer lock held.
+func (s *Service) lockSession(id contract.SessionID) *sessionState {
+	s.mu.Lock()
+	state := s.sessionLocked(id)
+	s.mu.Unlock()
+	state.computerLock.Lock()
 	return state
 }
 
