@@ -53,6 +53,7 @@ AND s.shell_jobs=0 AND r.paused_at IS NULL AND (b.state='failed' OR (b.want='sto
 AND NOT EXISTS (SELECT 1 FROM sessions c WHERE c.parent=s.id AND c.closed_at IS NULL)
 AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=s.id AND d.state='pending')
 AND NOT EXISTS (SELECT 1 FROM operations o WHERE o.by_kind='session' AND o.by_id=s.id AND o.state IN ('pending','approved','running'))
+AND ` + noOpenQuestion + `
 AND NOT EXISTS (SELECT 1 FROM turns t WHERE t.session=s.id AND t.ended_at IS NULL)`
 
 // aged is the normal wait. A host at its floor skips it, and the PR exemption with it.

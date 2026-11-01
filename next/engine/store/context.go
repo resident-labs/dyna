@@ -12,6 +12,7 @@ type ContextData struct {
 	Children []ContextChild
 	Requests []ContextRequest
 	PRs      []ContextPR
+	Accounts []ContextAccount
 	Depth    int
 }
 
@@ -31,6 +32,9 @@ func (s *Store) ContextDataForSession(ctx context.Context, id contract.SessionID
 	if data.PRs, err = s.ContextPRs(ctx, id); err != nil {
 		return data, err
 	}
+	if data.Accounts, err = s.ContextAccounts(ctx, id); err != nil {
+		return data, err
+	}
 	data.Depth, err = s.ContextDepth(ctx, id)
 	return data, err
 }
@@ -39,10 +43,23 @@ type ContextChild struct {
 	Name    string
 	Profile contract.ProfileName
 	State   contract.BoxState
+	Asking  bool // it waits for the owner's answer, so it is not finished
 }
+
+// ContextRequest is one of the session's operations, or a question with its text.
 type ContextRequest struct {
-	ID   contract.OpID
-	Kind contract.OpKind
+	ID   string
+	Kind string
+	Text string
+}
+
+// ContextAccount is an account by provider, with its number there. The numbers count every account, so
+// a room limit never renames one. Usable says the session's room may use it.
+type ContextAccount struct {
+	ID       contract.AccountID
+	Provider contract.AccountProvider
+	Number   int
+	Usable   bool
 }
 type ContextPR struct {
 	Repo     contract.RepoName
@@ -51,7 +68,7 @@ type ContextPR struct {
 }
 
 func (s *Store) ContextChildren(ctx context.Context, id contract.SessionID) ([]ContextChild, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT s.name,s.profile,b.state FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.parent=? AND s.closed_at IS NULL ORDER BY COALESCE((SELECT t.started_at FROM turns t WHERE t.session=s.id ORDER BY t.started_at DESC LIMIT 1),s.created_at),s.id`, id)
+	rows, err := s.Read().QueryContext(ctx, `SELECT s.name,s.profile,b.state,NOT `+noOpenQuestion+` FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.parent=? AND s.closed_at IS NULL ORDER BY COALESCE((SELECT t.started_at FROM turns t WHERE t.session=s.id ORDER BY t.started_at DESC LIMIT 1),s.created_at),s.id`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +76,7 @@ func (s *Store) ContextChildren(ctx context.Context, id contract.SessionID) ([]C
 	var out []ContextChild
 	for rows.Next() {
 		var c ContextChild
-		if err := rows.Scan(&c.Name, &c.Profile, &c.State); err != nil {
+		if err := rows.Scan(&c.Name, &c.Profile, &c.State, &c.Asking); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -68,7 +85,8 @@ func (s *Store) ContextChildren(ctx context.Context, id contract.SessionID) ([]C
 }
 
 func (s *Store) ContextRequests(ctx context.Context, id contract.SessionID) ([]ContextRequest, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT id,kind FROM operations WHERE state='pending' AND by_kind='session' AND by_id=? ORDER BY created_at,id`, id)
+	rows, err := s.Read().QueryContext(ctx, `SELECT id,kind,'',created_at FROM operations WHERE state='pending' AND by_kind='session' AND by_id=?1
+		UNION ALL SELECT id,'question',text,asked_at FROM questions WHERE state='pending' AND session=?1 ORDER BY 4,1`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -76,10 +94,31 @@ func (s *Store) ContextRequests(ctx context.Context, id contract.SessionID) ([]C
 	var out []ContextRequest
 	for rows.Next() {
 		var r ContextRequest
-		if err := rows.Scan(&r.ID, &r.Kind); err != nil {
+		var at int64
+		if err := rows.Scan(&r.ID, &r.Kind, &r.Text, &at); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ContextAccounts(ctx context.Context, id contract.SessionID) ([]ContextAccount, error) {
+	rows, err := s.Read().QueryContext(ctx, `SELECT a.id,a.provider,NOT EXISTS (SELECT 1 FROM account_rooms r WHERE r.account=a.id) OR EXISTS (SELECT 1 FROM account_rooms r WHERE r.account=a.id AND r.room=(SELECT room FROM sessions WHERE id=?)) FROM accounts a ORDER BY a.id`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ContextAccount
+	numbers := map[contract.AccountProvider]int{}
+	for rows.Next() {
+		var a ContextAccount
+		if err := rows.Scan(&a.ID, &a.Provider, &a.Usable); err != nil {
+			return nil, err
+		}
+		numbers[a.Provider]++
+		a.Number = numbers[a.Provider]
+		out = append(out, a)
 	}
 	return out, rows.Err()
 }

@@ -127,6 +127,9 @@ func (s *Store) MarkRoomDeleting(ctx context.Context, room contract.RoomID, even
 				return err
 			}
 		}
+		if err := s.withdrawQuestions(ctx, tx, event.Time); err != nil {
+			return err
+		}
 		_, err = s.AppendEvent(tx, event)
 		return err
 	})
@@ -145,9 +148,10 @@ func (s *Store) SetRoomDeleteReason(ctx context.Context, room contract.RoomID, r
 // the triggers that clear post_search and session_search. Archive rows that hold a ref stay until the sweep deletes the ref.
 var deleteRoom = []string{
 	`DELETE FROM hostexec_runs WHERE grant_id IN (SELECT id FROM grants WHERE room=?1) OR op IN (SELECT id FROM operations WHERE room=?1 OR (by_kind='session' AND by_id IN (SELECT id FROM sessions WHERE room=?1)))`,
-	`DELETE FROM client_replays WHERE ref IN (SELECT id FROM sessions WHERE room=?1) OR ref IN (SELECT id FROM operations WHERE room=?1) OR (caller_kind='session' AND caller_id IN (SELECT id FROM sessions WHERE room=?1))`,
+	`DELETE FROM client_replays WHERE ref IN (SELECT id FROM sessions WHERE room=?1) OR ref IN (SELECT id FROM operations WHERE room=?1) OR ref IN (SELECT id FROM questions WHERE room=?1) OR (caller_kind='session' AND caller_id IN (SELECT id FROM sessions WHERE room=?1))`,
 	`DELETE FROM operations WHERE room=?1 OR (by_kind='session' AND by_id IN (SELECT id FROM sessions WHERE room=?1))`,
 	`DELETE FROM grants WHERE room=?1`,
+	`DELETE FROM questions WHERE room=?1`,
 	`DELETE FROM deliveries WHERE seq IN (SELECT seq FROM events WHERE room=?1) OR (to_kind='session' AND to_id IN (SELECT id FROM sessions WHERE room=?1))`,
 	`DELETE FROM event_files WHERE seq IN (SELECT seq FROM events WHERE room=?1)`,
 	`DELETE FROM events WHERE room=?1`,

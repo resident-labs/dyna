@@ -5,13 +5,14 @@
   import { failedRooms, type RoomLine } from "../active.ts";
   import type { Attention } from "../attention.svelte.ts";
   import { accountPath, reconnectPath } from "../accounts.ts";
-  import type { AccountUsage, AccountsListResponse, Card, HostSummary, Principal, SessionListResponse } from "../contract.gen.ts";
+  import type { AccountUsage, AccountsListResponse, Card, HostSummary, Principal, Question, SessionListResponse } from "../contract.gen.ts";
   import { clause, fromNow, requestLine } from "../feed.ts";
   import { hostLabel, hostMeters, largeShared, sharedSize, watchHosts } from "../hosts.ts";
   import { accountAlerts, busiestWindow, holdFor, holding, outOfLimit, tucked, usageRows, type UsageHold, type UsageRow } from "../usage.ts";
   import { distinctInitials, initials as letters } from "../identity.ts";
   import Avatar from "./Avatar.svelte";
   import HostCard from "./HostCard.svelte";
+  import QuestionAnswer from "./QuestionAnswer.svelte";
   import Icon from "./Icon.svelte";
   import StatusPill from "./StatusPill.svelte";
   import UsageCard from "./UsageCard.svelte";
@@ -27,6 +28,7 @@
   // again only when a room gains a request or requester that no answer named yet. A failed load forgets its IDs and
   // offers Try again.
   const requests = new SvelteMap<string, { title: string; body: string; by: Principal; target: Card["target"]; expires: string }>();
+  const questions = new SvelteMap<string, Question>();
   const sessions = new SvelteMap<string, { name: string; root: boolean; room: string }>();
   // Requester IDs a session.list answered for; one it did not name is a closed session.
   const answered = new SvelteSet<string>();
@@ -53,29 +55,33 @@
       load(attention.waiting.get(room) ?? [], requests, () => call("op.list", { room }), list => {
         for (const op of list.operations ?? []) requests.set(op.id, { title: op.card.title, body: op.card.body?.split("\n")[0] ?? "", by: op.by, target: op.card.target, expires: op.expires });
       });
+      load(attention.questions.get(room) ?? [], questions, () => call("question.list", { room }), list => {
+        for (const question of list.questions ?? []) questions.set(question.id, question);
+      });
       // A requester or a failed session that started after the room's list loads it again.
-      const by = [...attention.waiting.get(room) ?? []].flatMap(id => requests.get(id)?.by.session ?? []);
+      const by = [...[...attention.waiting.get(room) ?? []].flatMap(id => requests.get(id)?.by.session ?? []), ...[...attention.questions.get(room) ?? []].flatMap(id => questions.get(id)?.session ?? [])];
       if (listed.has(room)) load([...by, ...attention.down(room).map(({ id }) => id)], sessions, () => attention.listSessions(room), keepSessions(room));
     }
   });
   const rows = <T,>(sets: Map<string, Set<string>>, known: SvelteMap<string, T>) => [...attention.rooms.values()].flatMap(room =>
     [...sets.get(room.id) ?? []].flatMap(id => { const value = known.get(id); return value === undefined ? [] : [{ id, room, value }]; }));
   // A request shows once its requester is named, as in the Requests panel. One decided here stays out while its event comes.
-  let waiting = $derived(rows(attention.waiting, requests).filter(row => !decided.has(row.id)).flatMap(row => {
-    const { by } = row.value;
+  const named = <T,>(row: T, by: Principal) => {
     if (by.kind !== "session" || !by.session) return [{ ...row, who: by.kind === "owner" ? "you" : "Dyna", root: false }];
     const session = sessions.get(by.session);
     if (!session && !answered.has(by.session)) return [];
     return [{ ...row, who: session?.name ?? "A closed session", root: session?.root ?? false }];
-  }));
+  };
+  let waiting = $derived(rows(attention.waiting, requests).filter(row => !decided.has(row.id)).flatMap(row => named(row, row.value.by)));
+  let asking = $derived(rows(attention.questions, questions).filter(row => !decided.has(row.id)).flatMap(row => named(row, { kind: "session", session: row.value.session })));
   // Each session's initials, distinct within its room as the room's own page shows them.
   let sessionInitials = $derived(new Map([...Map.groupBy(sessions, ([, item]) => item.room).values()].flatMap(list => {
     const labels = distinctInitials(list.map(([, item]) => item.name));
     return list.map(([id, item]) => [id, labels.get(item.name) ?? letters(item.name)]);
   })));
   // More than 4 requests fold into one row per room, which opens that room's Requests.
-  let groups = $derived(waiting.length <= 4 ? [] : [...attention.rooms.values()].flatMap(room => {
-    const count = waiting.filter(row => row.room.id === room.id).length;
+  let groups = $derived(waiting.length + asking.length <= 4 ? [] : [...attention.rooms.values()].flatMap(room => {
+    const count = [...waiting, ...asking].filter(row => row.room.id === room.id).length;
     return count ? [{ room, count }] : [];
   }));
   const count = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
@@ -112,7 +118,8 @@
   // A list shows while the store has items, as in v1's Home a failed load is never "all clear";
   // its count is the rows shown.
   const total = (sets: Map<string, { size: number }>) => [...sets.values()].reduce((sum, set) => sum + set.size, 0);
-  let missing = $derived(waiting.length < total(attention.waiting)
+  let asks = $derived(total(attention.waiting) + total(attention.questions));
+  let missing = $derived(waiting.length + asking.length < asks
     || [...attention.rooms.keys()].some(room => !listed.has(room)));
   const roomHref = (room: string) => "/r/" + encodeURIComponent(room);
   // Hosts load when Home opens and stay current while the page is visible (watchHosts). A failed call keeps the last
@@ -167,7 +174,6 @@
   let alerts = $derived(accountAlerts(accounts ?? [], catalog));
   // One sentence says what needs the owner: the same items as the Needs you card. Under it, a muted line sums low disk,
   // a large shared folder, machines and the busiest usage window; a part with nothing to say is left out.
-  let asks = $derived(total(attention.waiting));
   let needs = $derived(asks + failures.length + hostless.length + alerts.length);
   let unreachable = $derived(hosts?.filter(h => !h.reachable).length ?? 0);
   let low = $derived(hosts?.filter(h => h.diskLow) ?? []);
@@ -203,7 +209,12 @@
         {#if refused.has(id)}<span class="line" role="alert">{refused.get(id)}</span>{/if}</span>
       <span class="acts">{#if attention.can("admin")}<button type="button" class="approve" disabled={deciding.has(id)} onclick={event => void decide(id, `${who} ${value.title}`, true, event.currentTarget.closest(".request") ?? event.currentTarget)}>Approve</button>
         <button type="button" disabled={deciding.has(id)} onclick={event => void decide(id, `${who} ${value.title}`, false, event.currentTarget.closest(".request") ?? event.currentTarget)}>Deny</button>{/if}
-        <a class="open" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>Open</a></span></div>{/each}{/each}
+        <a class="open" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>Open</a></span></div>{/each}
+      {#each asking as { id, room, value, who, root } (id)}<div class="item request question">
+        <Avatar kind="session" name={who} label={sessionInitials.get(value.session)} {root} size={28} />
+        <span class="lines"><span class="title"><b class="who">{who}</b> asks</span><span class="line asked">{value.text}</span><span class="line">{room.name}</span></span>
+        <span class="acts"><a class="open" href={`${roomHref(room.id)}/s/${encodeURIComponent(value.session)}`} onclick={navigate}>Open</a></span>
+        {#if attention.can("operate")}<div class="reply"><QuestionAnswer {id} name={who} onanswered={() => { decided.set(id, `Answered · ${who}`); }} /></div>{/if}</div>{/each}{/each}
       {#each failures as { room, title, reason } (room.id)}<div class="item failure"><Avatar kind="room" name={room.name} label={initials.get(room.name)} size={28} />
         <span class="lines"><span class="title">{title}</span><span class="line"><StatusPill tone="failed" label={reason} /> · {room.name}</span></span>
         <span class="acts"><a class="open" href={roomHref(room.id)} onclick={navigate}>Open</a></span></div>{/each}
@@ -262,6 +273,9 @@
   .request { flex-wrap: wrap; }
   /* The owner approves from this line, so it wraps rather than cutting off who gets access or for how long. */
   .request .line { white-space: normal; }
+  /* A long question opens in full in the session's DM; four lines are enough to answer most from here. */
+  .asked { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+  .reply { flex-basis: 100%; padding-left: 38px; min-width: 0; }
   /* The owner acts on a failure's reason, so it wraps as well. */
   .failure .line, .hostless .line, .account .line { white-space: normal; }
   /* The sentence names the room, so it wraps on a phone instead of cutting the room's name. An account's name wraps too. */
@@ -301,5 +315,6 @@
   @container (max-width: 480px) {
     .acts { width: 100%; margin-left: 38px; }
     .acts button { flex: 1; height: 40px; }
+    .question .acts { order: 1; }
   }
 </style>
