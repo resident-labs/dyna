@@ -135,14 +135,6 @@ func (l *Live) RetireSession(id contract.SessionID) *Session {
 	return s
 }
 
-// CloseSession retires a session without legacy engine state.
-func (l *Live) CloseSession(id contract.SessionID) {
-	if s := l.RetireSession(id); s != nil {
-		s.CloseChannel(nil, nil, s.channel)
-		s.Unlock()
-	}
-}
-
 // PublishActivity serializes updates and publication so streams see the same order as lists.
 func (s *Session) PublishActivity(room contract.RoomID, activity contract.TurnActivity, event contract.Event) bool {
 	l := s.live
