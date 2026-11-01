@@ -169,8 +169,8 @@
 <div class="thread" bind:this={scroller} onscroll={() => { atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; updatePosition(); if (loaded && before && !loading && scroller.scrollTop < 100) void load(true); }}>
   <div class="body">
     {#each turns as turn (turn.id)}
+      {@const finalText = turn.ended ? (turn.items ?? []).findLast(item => item.kind === "text")?.id : undefined}
       <article data-turn={turn.id}>
-        {@const finalText = turn.ended ? (turn.items ?? []).findLast(item => item.kind === "text")?.id : undefined}
         {#each turn.inputs ?? [] as input (input.id)}
           <div class="input"><div class="who"><Avatar kind={input.from.kind} name={sender(input.from.kind, input.from.session)} size={22} />{#if input.from.kind === "owner"}<strong>You</strong>{:else}<strong class:identity={input.from.kind === "session"} style:--hue={hue(sender(input.from.kind, input.from.session))}>{sender(input.from.kind, input.from.session)}</strong>{/if}{#if input.home}<span class="muted">{input.home.kind === "feed" ? `in ${roomName}` : input.home.session === session ? "in your DM" : "in a DM"}</span>{/if}<time datetime={input.at}>{formatTime(input.at)}</time></div><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{#if input.more && input.type === "post.created" && chunks["input:" + input.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Show all</button>{/if}</div>
         {/each}
