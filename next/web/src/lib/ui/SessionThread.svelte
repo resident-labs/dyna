@@ -1,20 +1,24 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from "svelte";
   import { call } from "../client.ts";
+  import { decodeEvent } from "../event.ts";
+  import { hue } from "../identity.ts";
+  import type { VisualVersion } from "../visual.ts";
   import { causes, formatTime } from "../feed.ts";
   import { watchTranscripts } from "../stream.ts";
-  import type { PostRequest, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn } from "../contract.gen.ts";
+  import type { PostRequest, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn, VisualCard } from "../contract.gen.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import Icon from "./Icon.svelte";
   import { elapsed } from "../steps.ts";
   import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
   import Markdown from "./Markdown.svelte";
+  import PostAttachments from "./PostAttachments.svelte";
   import TranscriptWorkRow from "./TranscriptWorkRow.svelte";
   import TimelineMinimap from "./TimelineMinimap.svelte";
   import { deriveTimelineGroups, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems } from "../timeline.ts";
 
-  let { session, roomName, store, unsent, onunsent, onsettled, onpostlocation, navigate, clock = Date.now }: { session: string; roomName: string; store: RoomStore; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
+  let { session, roomName, store, unsent, onunsent, onsettled, onpostlocation, navigate, onvisual, clock = Date.now }: { session: string; roomName: string; store: RoomStore; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onvisual: (versions: VisualVersion[], selected: number, send: (text: string, event: string) => Promise<void>) => void; clock?: () => number } = $props();
   const view = untrack(() => store.window({ kind: "dm", session }));
   view.onunsent = request => onunsent(request);
   view.onsettled = request => onsettled(request);
@@ -181,7 +185,7 @@
     for (const turn of turns) {
       for (const input of turn.inputs ?? []) {
         const key = "input:" + input.id + "/text";
-        if (input.from.kind === "owner" && input.more && chunks[key] === undefined && !chunkFailed[key]) void fetchPart(turn.id, "input:" + input.id, "text");
+        if (input.more && chunks[key] === undefined && !chunkFailed[key]) void fetchPart(turn.id, "input:" + input.id, "text");
       }
       for (const item of turn.items ?? []) {
       const messages = item.kind === "text" || item.kind === "post" ? [item] : item.posts ?? [];
@@ -192,11 +196,20 @@
       }
     }
   });
+  let newest = $derived(new Map(turns.flatMap(turn => (turn.items ?? []).flatMap(item => [item, ...(item.posts ?? [])]).flatMap(item => (item.attachments ?? []).flatMap(file => file.visual ? [[file.visual.id, file.visual] as const] : [])))));
+  async function openVisual(visual: VisualCard, room: string, eventId: string) {
+    const page = await call("events.list", { room, event: eventId, afterSeq: 0, limit: 1 });
+    const event = page.events?.[0] && decodeEvent(page.events[0]);
+    if (!event || event.id !== eventId || event.type !== "post.created") return;
+    onvisual([{ event, visual }], visual.version, async (text, id) => { await call("post", { room, text, visualReply: id }); });
+  }
   const sender = (kind: string, id?: string) => kind === "owner" ? "You" : id ? store.names.get(id) ?? "Session" : "Dyna";
 </script>
 
 {#snippet postItem(turn: TranscriptTurn, item: TranscriptItem)}
-  <div class="message">{#if item.kind === "post"}<div class="post-destination">{item.home?.kind === "feed" ? (item.room === store.room ? `Posted in #${roomName}` : "Posted in another room") : item.home?.kind === "dm" ? (item.home.session === session ? "Posted in this DM" : `Posted to ${sender("session", item.home.session)}`) : "Posted"}</div>{/if}<Markdown text={chunks[item.id + "/text"] ?? item.text} /></div>{#if chunkFailed[item.id + "/text"]}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Text did not load. Try again</button>{/if}
+  {@const room = item.room}
+  {@const seq = item.seq}
+  <div class="message">{#if item.kind === "post"}<div class="post-destination">{#if room && seq}<button onclick={() => onpostlocation(room, seq)}>{item.home?.kind === "feed" ? (item.room === store.room ? `Posted in #${roomName}` : "Posted in another room") : item.home?.kind === "dm" ? (item.home.session === session ? "Posted in this DM" : `Posted to ${sender("session", item.home.session)}`) : "Posted"}</button>{:else}Posted{/if}</div>{/if}<Markdown text={chunks[item.id + "/text"] ?? item.text} /><PostAttachments attachments={item.attachments ?? []} {newest} onvisual={visual => void openVisual(visual, item.room ?? store.room, item.event ?? item.id)} /></div>{#if chunkFailed[item.id + "/text"]}<button onclick={() => void fetchPart(turn.id, item.id, "text")}>Text did not load. Try again</button>{/if}
 {/snippet}
 
 <div class="thread-frame" bind:clientWidth={frameWidth}>
@@ -209,10 +222,8 @@
         {#each turn.inputs ?? [] as input (input.id)}
           {#if input.from.kind === "owner"}
             <div class="owner-message" title={formatTime(input.at)}><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{#if chunkFailed["input:" + input.id + "/text"]}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Text did not load. Try again</button>{/if}</div>
-          {:else if input.from.kind === "session"}
-            <div class="agent-input"><div class="agent-sender"><Avatar kind="session" name={sender(input.from.kind, input.from.session)} size={22} />{#if input.from.session}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(input.from.session)}`} onclick={navigate}>{sender(input.from.kind, input.from.session)}</a>{:else}<strong>Session</strong>{/if}</div><div class="agent-bubble" title={formatTime(input.at)}><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{#if input.more && input.type === "post.created" && chunks["input:" + input.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Show all</button>{/if}</div></div>
           {:else}
-            <div class="input"><div class="who"><Avatar kind={input.from.kind} name={sender(input.from.kind, input.from.session)} size={22} /><strong>{sender(input.from.kind, input.from.session)}</strong>{#if input.home}<span class="muted">{input.home.kind === "feed" ? `in ${roomName}` : input.home.session === session ? "in your DM" : "in a DM"}</span>{/if}<time datetime={input.at}>{formatTime(input.at)}</time></div><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} />{#if input.more && input.type === "post.created" && chunks["input:" + input.id + "/text"] === undefined}<button onclick={() => void fetchPart(turn.id, "input:" + input.id, "text")}>Show all</button>{/if}</div>
+            <div class="agent-input"><Avatar kind={input.from.kind} name={sender(input.from.kind, input.from.session)} size={32} /><div class="agent-body"><div class="agent-sender">{#if input.from.session}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(input.from.session)}`} onclick={navigate} style:--hue={hue(sender(input.from.kind, input.from.session))}>{sender(input.from.kind, input.from.session)}</a>{:else}<strong>{sender(input.from.kind, input.from.session)}</strong>{/if}<time datetime={input.at}>{formatTime(input.at)}</time></div><Markdown text={input.type === "post.created" ? chunks["input:" + input.id + "/text"] ?? input.text : "Started work"} /></div></div>
           {/if}
         {/each}
         <!-- Dyna: Posts and the final answer remain visible outside the work fold. -->
@@ -230,7 +241,6 @@
             {#each group.item.posts ?? [] as post (post.id)}
               {@render postItem(turn, post)}
             {/each}
-            {#if group.item.postsOmitted && group.item.postsNext}<button class="muted" onclick={() => onpostlocation(group.item.postsNext!.room, group.item.postsNext!.seq)}>+{group.item.postsOmitted} more posts</button>{/if}
           {:else if group.item.kind === "text" || group.item.kind === "post"}
             {#if group.item.kind === "post" || !turn.ended || group.item.id === finalText || expandedTurns[turn.id]}{@render postItem(turn, group.item)}{/if}
           {:else if group.item.kind === "too_large"}<p class="muted">This item is too large to show.</p>{/if}
@@ -240,7 +250,7 @@
       </article>
     {:else}{#if !loading && !failed}<p class="muted">The conversation will appear here.</p>{/if}{/each}
     {#each queuedPosts as post (post.id)}
-      <div class="input"><div class="who"><Avatar kind={post.from.kind} name={sender(post.from.kind, post.from.session)} size={22} /><strong>{sender(post.from.kind, post.from.session)}</strong></div><Markdown text={post.body.text} /></div>
+      <div class="input"><div class="who"><Avatar kind={post.from.kind} name={sender(post.from.kind, post.from.session)} size={22} /><strong>{sender(post.from.kind, post.from.session)}</strong></div><Markdown text={post.body.text} /><PostAttachments attachments={post.body.attachments ?? []} {newest} onvisual={visual => void openVisual(visual, post.room ?? store.room, post.id)} /></div>
     {/each}
     {#each [...view.pendingPosts.values()] as post (post.id)}
       <div class="input" class:pending={!post.failed}><strong>You</strong><Markdown text={post.request.text} />{#if post.failed}<StatusPill tone="failed" label="Not sent" word /> <button onclick={() => void view.retry(post.id)}>Retry</button> <button onclick={() => view.discard(post.id)}>Discard</button>{/if}</div>
@@ -261,11 +271,11 @@
   .spinner { display: inline-block; width: 12px; height: 12px; border: 1.5px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
-  .agent-input { width: fit-content; max-width: 75%; margin: 12px 0 12px auto; }
-  .agent-sender { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 12px; }
-  .agent-sender a { color: var(--text); font-weight: 600; text-decoration: none; }
+  .agent-input { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; margin: 14px 0; }
+  .agent-body { min-width: 0; }
+  .agent-sender { display: flex; align-items: baseline; gap: 8px; }
+  .agent-sender a { color: oklch(var(--id-name) var(--hue)); font-weight: 600; text-decoration: none; }
   .agent-sender a:hover { text-decoration: underline; }
-  .agent-bubble { padding: 12px 16px; background: var(--raised); border-radius: 14px; }
   .owner-message { width: fit-content; max-width: 75%; margin: 12px 0 12px auto; padding: 12px 16px; background: var(--raised); border-radius: 14px; }
   .input { background: var(--raised); padding: 12px 16px; border-radius: 14px; margin: 12px 0; }
   p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
@@ -276,6 +286,8 @@
   .input :global(.markdown) { margin: 4px 0 0; }
   .pending { opacity: 0.5; }
   .message { margin: 20px 0 12px; }
+  .post-destination button { all: unset; cursor: pointer; }
+  .post-destination button:hover { text-decoration: underline; }
   .post-destination { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
   .message :global(.markdown h2) { font-size: 20px; margin: 20px 0 8px; }
   .message :global(.markdown h3) { font-size: 18px; margin: 20px 0 8px; }
