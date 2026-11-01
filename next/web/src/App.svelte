@@ -800,6 +800,7 @@
     .session-bar .heading strong { min-width: min(8rem, 100%); }
   }
   .crumb { flex: none; max-width: 25%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @container session-header (max-width: 500px) { .session-bar .crumb, .session-bar .crumb + .count { display: none; } }
   .hash { display: inline-flex; align-items: center; }
   /* A phone's header: the menu button, the title over its muted counts, Requests only while something waits (40 px
      targets), and the Sessions button with its count. The room menu's one action, Terminal, moves into the drawer. */
