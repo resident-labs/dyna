@@ -1,9 +1,7 @@
 package websearch
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -15,20 +13,20 @@ const xaiText = "Go is a language and it has docs.[[1]](https://go.dev/doc) The 
 
 // xaiCite is the citation the answer carries in the shape xAI documents: the
 // marker sits after the sentence's terminator, and the title is only its label.
-func xaiCite() xaiCitation {
+func xaiCite() responsesCitation {
 	start := strings.Index(xaiText, "[[1]]")
-	return xaiCitation{Type: "url_citation", URL: "https://go.dev/doc", Title: "1", StartIndex: start, EndIndex: start + len("[[1]](https://go.dev/doc)")}
+	return responsesCitation{Type: "url_citation", URL: "https://go.dev/doc", Title: "1", StartIndex: start, EndIndex: start + len("[[1]](https://go.dev/doc)")}
 }
 
 // xaiStreamBody is one answer stream: the text, the citation, and the finished
 // search call that repeats its sources.
-func xaiStreamBody(t *testing.T, answer string, cite xaiCitation, sources ...xaiSource) string {
+func xaiStreamBody(t *testing.T, answer string, cite responsesCitation, sources ...responsesSource) string {
 	t.Helper()
 	annotation, err := json.Marshal(cite)
 	if err != nil {
 		t.Fatal(err)
 	}
-	call, err := json.Marshal(xaiItem{Type: "web_search_call", Action: &xaiSearchCall{Sources: sources}})
+	call, err := json.Marshal(responsesItem{Type: "web_search_call", Action: &responsesSearchCall{Sources: sources}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,20 +69,15 @@ type xaiBody struct {
 }
 
 func TestXAIAsksItsSearchToolAndMapsCitations(t *testing.T) {
-	stream := xaiStreamBody(t, xaiText, xaiCite(), xaiSource{URL: "https://go.dev", Title: "Go"})
+	stream := xaiStreamBody(t, xaiText, xaiCite(), responsesSource{URL: "https://go.dev", Title: "Go"})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/responses" {
 			t.Errorf("request = %s %s, want POST /responses", r.Method, r.URL.Path)
 		}
-		if got := r.Header.Get("Authorization"); got != "Bearer session-token" {
-			t.Errorf("Authorization = %q, want the saved sign-in", got)
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("unexpected authorization: %q", got)
 		}
-		if r.Header.Get("X-Xai-Token-Auth") != xaiTokenAuth || r.Header.Get("X-Grok-Model-Override") != XAIModel {
-			t.Errorf("headers = %v, want the Grok CLI sign-in and model override", r.Header)
-		}
-		if r.Header.Get("X-Grok-Client-Identifier") != xaiClientIdentifier || r.Header.Get("X-Grok-Client-Mode") != xaiClientMode || r.Header.Get("X-Grok-Client-Version") != xaiClientVersion {
-			t.Errorf("headers = %v, want the Grok Build client name", r.Header)
-		}
+
 		var body xaiBody
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Error(err)
@@ -103,7 +96,7 @@ func TestXAIAsksItsSearchToolAndMapsCitations(t *testing.T) {
 	}))
 	defer server.Close()
 
-	search := XAI{BaseURL: server.URL, Token: xaiToken("session-token")}
+	search := XAI{BaseURL: server.URL, Client: server.Client()}
 	got, err := search.Search(t.Context(), Query{Text: "go language", Limit: 2})
 	if err != nil {
 		t.Fatal(err)
@@ -129,12 +122,12 @@ func TestXAIAsksItsSearchToolAndMapsCitations(t *testing.T) {
 // neighbouring marker never looks like a sentence end.
 func TestXAISnippetsTheProseBeforeAdjacentCitations(t *testing.T) {
 	const answer = "Grok is an AI assistant.[[1]](https://x.ai/)[[2]](https://example.com/a.b)"
-	first := xaiCitation{Type: "url_citation", URL: "https://x.ai/", Title: "1", StartIndex: strings.Index(answer, "[[1]]")}
+	first := responsesCitation{Type: "url_citation", URL: "https://x.ai/", Title: "1", StartIndex: strings.Index(answer, "[[1]]")}
 	first.EndIndex = first.StartIndex + len("[[1]](https://x.ai/)")
-	second := xaiCitation{Type: "url_citation", URL: "https://example.com/a.b", Title: "2", StartIndex: strings.Index(answer, "[[2]]")}
+	second := responsesCitation{Type: "url_citation", URL: "https://example.com/a.b", Title: "2", StartIndex: strings.Index(answer, "[[2]]")}
 	second.EndIndex = second.StartIndex + len("[[2]](https://example.com/a.b)")
 	server := xaiServer(t, xaiTwoCitationStream(t, answer, first, second))
-	got, err := (XAI{BaseURL: server.URL, Token: xaiToken("token")}).Search(t.Context(), Query{Text: "grok"})
+	got, err := (XAI{BaseURL: server.URL, Client: server.Client()}).Search(t.Context(), Query{Text: "grok"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +143,7 @@ func TestXAISnippetsTheProseBeforeAdjacentCitations(t *testing.T) {
 
 // xaiTwoCitationStream is one answer stream that carries two citations, in the
 // adjacent shape xAI writes when a sentence has more than one source.
-func xaiTwoCitationStream(t *testing.T, answer string, cites ...xaiCitation) string {
+func xaiTwoCitationStream(t *testing.T, answer string, cites ...responsesCitation) string {
 	t.Helper()
 	lines := []string{`data: {"type":"response.output_text.delta","delta":"` + answer + `"}`}
 	for _, cite := range cites {
@@ -167,7 +160,7 @@ func xaiTwoCitationStream(t *testing.T, answer string, cites ...xaiCitation) str
 // result.
 func TestXAIKeepsEachSourceOnce(t *testing.T) {
 	cite := xaiCite()
-	stream := xaiStreamBody(t, xaiText, cite, xaiSource{URL: cite.URL, Title: "Docs"}, xaiSource{URL: "https://go.dev", Title: "Go"})
+	stream := xaiStreamBody(t, xaiText, cite, responsesSource{URL: cite.URL, Title: "Docs"}, responsesSource{URL: "https://go.dev", Title: "Go"})
 	for _, test := range []struct {
 		name  string
 		limit int
@@ -178,7 +171,7 @@ func TestXAIKeepsEachSourceOnce(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := xaiServer(t, stream)
-			search := XAI{BaseURL: server.URL, Token: xaiToken("token")}
+			search := XAI{BaseURL: server.URL, Client: server.Client()}
 			got, err := search.Search(t.Context(), Query{Text: "go", Limit: test.limit})
 			if err != nil {
 				t.Fatal(err)
@@ -187,20 +180,6 @@ func TestXAIKeepsEachSourceOnce(t *testing.T) {
 				t.Fatalf("results = %+v, want %d result(s) with the citation first", got, test.want)
 			}
 		})
-	}
-}
-
-func TestXAIWithoutASignInIsNotSignedIn(t *testing.T) {
-	server := xaiServer(t, xaiStreamBody(t, xaiText, xaiCite()))
-	if _, err := (XAI{BaseURL: server.URL}).Search(t.Context(), Query{Text: "go"}); !errors.Is(err, ErrNotSignedIn) {
-		t.Fatalf("without a credential: err = %v, want ErrNotSignedIn", err)
-	}
-	if _, err := (XAI{BaseURL: server.URL, Token: xaiToken("")}).Search(t.Context(), Query{Text: "go"}); !errors.Is(err, ErrNotSignedIn) {
-		t.Fatalf("with an empty token: err = %v, want ErrNotSignedIn", err)
-	}
-	missing := XAI{BaseURL: server.URL, Token: func(context.Context) (string, error) { return "", ErrNotSignedIn }}
-	if _, err := missing.Search(t.Context(), Query{Text: "go"}); !errors.Is(err, ErrNotSignedIn) {
-		t.Fatalf("without a saved sign-in: err = %v, want ErrNotSignedIn", err)
 	}
 }
 
@@ -213,7 +192,7 @@ func TestXAIRefusalLeaksNoToken(t *testing.T) {
 	}))
 	defer server.Close()
 
-	search := XAI{BaseURL: server.URL, Token: xaiToken("sekret-token")}
+	search := XAI{BaseURL: server.URL, Client: server.Client()}
 	_, err := search.Search(t.Context(), Query{Text: "go"})
 	if err == nil || !strings.Contains(err.Error(), "HTTP 401") || !strings.Contains(err.Error(), "invalid token") {
 		t.Fatalf("err = %v, want the status and the reason", err)
@@ -226,14 +205,9 @@ func TestXAIRefusalLeaksNoToken(t *testing.T) {
 // A stream error is a failure, never an empty answer with no source.
 func TestXAIReportsAStreamError(t *testing.T) {
 	server := xaiServer(t, "data: {\"type\":\"error\",\"message\":\"rate limit\"}\n\ndata: [DONE]\n\n")
-	search := XAI{BaseURL: server.URL, Token: xaiToken("token")}
+	search := XAI{BaseURL: server.URL, Client: server.Client()}
 	_, err := search.Search(t.Context(), Query{Text: "go"})
 	if err == nil || !strings.Contains(err.Error(), "rate limit") {
 		t.Fatalf("err = %v, want the stream's reason", err)
 	}
-}
-
-// xaiToken is one Grok sign-in for a test.
-func xaiToken(token string) func(context.Context) (string, error) {
-	return func(context.Context) (string, error) { return token, nil }
 }
