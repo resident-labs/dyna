@@ -2,6 +2,7 @@ package model
 
 import (
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -53,16 +54,31 @@ func TestPlanCatalogUsesDefaultAndExactAliases(t *testing.T) {
 
 func TestDualProviderPublishesBothPools(t *testing.T) {
 	p := &Proxy{}
-	catalog := Catalog{Plans: []PlanProvider{{ID: "anthropic", Models: []PlanModel{{ID: "claude-sonnet-4-6"}}}}, Keys: []KeyProvider{{Provider: "anthropic", DefaultModel: "key-only", Models: []contract.CatalogModel{{ID: "key-only"}, {ID: "claude-sonnet-4-6"}}}}}
+	catalog := Catalog{Plans: []PlanProvider{{ID: "anthropic", Models: []PlanModel{{ID: "claude-sonnet-4-6"}, {ID: "claude-opus-4-6"}}}}, Keys: []KeyProvider{{Provider: "anthropic", DefaultModel: "key-only", Models: []contract.CatalogModel{{ID: "key-only"}, {ID: "claude-sonnet-4-6"}}}}}
 	if err := p.initPools(catalog); err != nil {
 		t.Fatal(err)
 	}
 	info := p.AccountProviders()[0]
-	if len(p.pools["plan_anthropic"].info.Models) != 1 {
+	if len(p.pools["plan_anthropic"].info.Models) != 2 {
 		t.Fatal("plan pool includes key-only model")
 	}
-	if len(info.Models) != 2 {
+	if len(info.Models) != 3 {
 		t.Fatalf("published models: %+v", info.Models)
+	}
+	for _, model := range info.Models {
+		want := []contract.ModelBilling{contract.ModelBillingKey}
+		if model.ID == "claude-sonnet-4-6" {
+			want = []contract.ModelBilling{contract.ModelBillingPlan, contract.ModelBillingKey}
+		}
+		if model.ID == "claude-opus-4-6" {
+			want = []contract.ModelBilling{contract.ModelBillingPlan}
+		}
+		if !reflect.DeepEqual(model.Billing, want) {
+			t.Fatalf("%s billing = %v, want %v", model.ID, model.Billing, want)
+		}
+	}
+	if !reflect.DeepEqual(info, p.AccountProviders()[0]) {
+		t.Fatal("catalog changed between reads")
 	}
 	if _, err := p.Namespace(contract.ModelChoice{Provider: "anthropic", Billing: contract.ModelBillingPlan, ID: "key-only"}, nil); err == nil {
 		t.Fatal("plan accepted a key-only model")

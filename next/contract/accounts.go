@@ -43,8 +43,9 @@ const (
 )
 
 type CatalogModel struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID      string         `json:"id"`
+	Name    string         `json:"name"`
+	Billing []ModelBilling `json:"billing"`
 }
 
 type AccountProviderInfo struct {
