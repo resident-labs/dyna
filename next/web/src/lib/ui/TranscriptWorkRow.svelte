@@ -2,7 +2,7 @@
 <script lang="ts">
   import type { TranscriptItem, TranscriptPart } from "../contract.gen.ts";
   import { activeVerb, elapsed, stepTime, titleOf, type StepKind } from "../steps.ts";
-  import { formatTimelineDuration, summarizeWork } from "../timeline.ts";
+  import { formatTimelineDuration, summarizeWork, timelineItemRunning } from "../timeline.ts";
   import Icon, { type IconName } from "./Icon.svelte";
   import TranscriptIcon from "./TranscriptIcon.svelte";
   import Markdown from "./Markdown.svelte";
@@ -34,13 +34,13 @@
   }
 
   // Dyna keeps thoughts and tools in transcript order. The caller splits at posts and other boundaries.
-  let active = $derived(!ended && items.some(item => !item.ended));
+  let active = $derived(items.some(item => timelineItemRunning(item, ended)));
   let summary = $derived(active ? `Working for ${formatTimelineDuration(now - Date.parse(started))}` : summarizeWork(items));
 </script>
 
 {#snippet entry(item: TranscriptItem)}
   {@const title = titleOf(item)}
-  {@const running = !ended && !item.ended}
+  {@const running = timelineItemRunning(item, ended)}
   <details class="entry" ontoggle={(event) => { if (event.currentTarget.open) { onopen(); if (item.more) { if (item.kind === "thinking") void load(item, "text"); else { void load(item, "arguments"); void load(item, "output"); if (item.diff) void load(item, "diff"); } } } }}>
     <summary>
       <span class="slot">{#if running}<span class="spinner" aria-label="Working" role="img"></span>{:else}{#if item.kind === "thinking" || ["run", "search", "read", "edit", "write"].includes(title.kind)}<TranscriptIcon kind={item.kind === "thinking" ? "thinking" : title.kind} />{:else}<Icon name={icons[title.kind]} size={16} />{/if}{/if}</span>
