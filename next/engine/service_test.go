@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1714,5 +1715,49 @@ func TestConcurrentStartAndMoveRespectDepth(t *testing.T) {
 	a, b := <-results, <-results
 	if (a == nil) == (b == nil) {
 		t.Fatalf("want exactly one success, got %v and %v", a, b)
+	}
+}
+
+// A slow stream must replay after its subscription overflows, without losing order. The first live event also checks stored times.
+func TestStreamOverflowReplaysEvents(t *testing.T) {
+	s, room, _, ctx := setup(t)
+	var after int64
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT COALESCE(MAX(seq),0) FROM events").Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	stream, problem := s.Events(ctx, contract.Principal{Kind: contract.PrincipalOwner}, room, after)
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	write := func(i int, target contract.RoomID) {
+		t.Helper()
+		event := contract.Event{ID: contract.EventID(fmt.Sprintf("stream_%d", i)), Room: target, Time: time.Unix(100, 123456789), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.PostCreated{Text: fmt.Sprint(i)}}
+		if err := s.store.RecordEvent(ctx, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(0, room)
+	first := <-stream
+	if first.Body.(contract.PostCreated).Text != "0" || !first.Time.Equal(time.UnixMilli(100123).UTC()) || first.Time.Location() != time.UTC {
+		t.Fatalf("first event: %+v", first)
+	}
+	// Block output, then fill and overflow the store subscription.
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		for i := 1; i <= 150; i++ {
+			_, err := s.store.AppendEvent(tx, contract.Event{ID: contract.EventID(fmt.Sprintf("stream_%d", i)), Room: room, Time: time.Unix(100, 123456789), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.PostCreated{Text: fmt.Sprint(i)}})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 150; i++ {
+		event := <-stream
+		if event.Body.(contract.PostCreated).Text != fmt.Sprint(i) || event.Seq <= first.Seq {
+			t.Fatalf("event %d: %+v", i, event)
+		}
+		first = event
 	}
 }

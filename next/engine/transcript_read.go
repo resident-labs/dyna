@@ -48,12 +48,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 	// Backfill pre-index files once, under the same lock as appends.
 	s.transcriptMu.Lock()
 	for _, f := range files {
-		indexed, err := s.store.TranscriptPathIndexed(ctx, req.Session, f.Path)
-		if err != nil {
-			s.transcriptMu.Unlock()
-			return response, failure(err)
-		}
-		if indexed {
+		if f.Indexed {
 			continue
 		}
 		file, err := os.Open(filepath.Join(s.transcriptDir, string(req.Session), f.Path))

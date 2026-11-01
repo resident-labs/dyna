@@ -1,4 +1,4 @@
-import type { VisualCard, VisualCheck, VisualCheckName, VisualSuperseded } from "./contract.gen.ts";
+import type { VisualCard, VisualSuperseded } from "./contract.gen.ts";
 import { APIError } from "./client.ts";
 import type { PostEvent } from "./window.svelte.ts";
 
@@ -20,26 +20,4 @@ export function cardMessage(value: unknown): { type: "open"; url: string } | { t
       (!("choice" in value) || value.choice === undefined || typeof value.choice === "string" && value.choice.length <= 16384)) {
     return { type: "submit", text: value.text };
   }
-}
-
-export function checkLabel(check: VisualCheck): string {
-  const labels: Record<VisualCheckName, string> = {
-    renders: "Renders", console: "No console errors", widths: "Widths", contrast: "Contrast", network: "Network",
-  };
-  return check.name === "console" && check.status !== "pass" ? "Console errors" : labels[check.name];
-}
-
-// Check details come from the renderer. Show typed facts instead of its raw output.
-export function worstCheck(checks: VisualCheck[] | null): string {
-  const check = checks?.find(item => item.status === "fail") ?? checks?.find(item => item.status === "warn");
-  if (!check) return "";
-  const facts: Record<VisualCheckName, string> = {
-    renders: "Did not render in its check", console: "Console errors", widths: "Overflows at checked widths",
-    contrast: "Contrast needs review", network: "Network requests blocked",
-  };
-  if (check.name === "widths") {
-    const widths = check.detail?.match(/^Overflow at widths: (\d+(?:, \d+)*)$/)?.[1];
-    if (widths) return `Overflows at ${widths} px`;
-  }
-  return facts[check.name];
 }
