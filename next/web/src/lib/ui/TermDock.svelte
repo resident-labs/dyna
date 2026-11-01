@@ -33,6 +33,8 @@
   let rest = $state(false);
   let hosts: HostSummary[] = $state([]);
   let floating = $state(false);
+  // A floating window rolled up to its title bar, where it stays.
+  let rolled = $state(false);
   let rect = $state({ x: window.innerWidth - 744, y: window.innerHeight - 464, w: 720, h: 440 });
   // The docked height, kept for the page view. Maximized, the dock takes the most height fit allows; with no tab active, only its strip shows.
   let height = $state(280);
@@ -76,6 +78,7 @@
     active = key;
     full = phone;
     rest = false;
+    rolled = false;
     await tick();
     panes[key]?.focus();
   }
@@ -104,7 +107,7 @@
     tabs.splice(index, 1);
     if (active === key) active = phone ? 0 : tabs[Math.min(index, tabs.length - 1)]?.key ?? 0;
     if (!active) full = false;
-    if (!tabs.length) floating = false;
+    if (!tabs.length) { floating = false; rolled = false; }
     await tick();
     if (!active) { if (picking) plus?.focus(); else onempty(); }
     else await show(active);
@@ -158,7 +161,7 @@
 
 {#if strip || tabs.length}
 {#if floating}<div class="holder"></div>{/if}
-<FloatWindow label="Terminals" kind={`terminals${open ? " open" : ""}${phone ? " phone" : ""}`} docked={!floating && !full} {full} bind:rect bind:element>
+<FloatWindow label="Terminals" kind={`terminals${open ? " open" : ""}${phone ? " phone" : ""}`} docked={!floating && !full} {full} {rolled} bind:rect bind:element>
   {#snippet header()}
     {#if full && shown}
       <button type="button" aria-label="Back" title="Back" onclick={() => { full = false; }}><Icon name="backChevron" /></button>
@@ -187,11 +190,11 @@
     <span class="space"></span>
     {#if shown && !phone}<span class="where" title={where}>{where}</span>{/if}
     {#if open && !phone}<button type="button" class="tool" aria-label={floating ? "Dock the terminals" : "Float the terminals"} title={floating ? "Dock" : "Float"}
-      onclick={() => { floating = !floating; }}><Icon name={floating ? "dockBottom" : "undock"} /></button>
+      onclick={() => { floating = !floating; rolled = false; }}><Icon name={floating ? "dockBottom" : "undock"} /></button>
       {#if !floating}<button type="button" class="tool" aria-label={maximized ? "Restore the terminals" : "Maximize the terminals"} title={maximized ? "Restore" : "Maximize"}
         onclick={() => { maximized = !maximized; }}><Icon name={maximized ? "restore" : "maximize"} /></button>{/if}
-      <button type="button" class="tool fold" aria-label="Collapse the terminals" title="Collapse"
-        aria-expanded="true" onclick={() => { floating = false; active = 0; }}><Icon name="chevron" /></button>{/if}
+      <button type="button" class="tool fold" class:rolled aria-label={rolled ? "Expand the terminals" : "Collapse the terminals"} title={rolled ? "Expand" : "Collapse"}
+        aria-expanded={!rolled} onclick={() => { if (!floating) active = 0; else if (rolled) void show(active); else rolled = true; }}><Icon name="chevron" /></button>{/if}
     {/if}
   {/snippet}
   {#if !floating && open && !phone && !maximized}<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions (a separator that the arrow keys move is focusable) -->
@@ -199,7 +202,7 @@
       onkeydown={event => { const step = { ArrowUp: 24, ArrowDown: -24 }[event.key]; if (step) { event.preventDefault(); height = fit(height + step); } }}></div>{/if}
   <!-- Keys typed into a shell stay there, so Escape closes no panel and Alt with an arrow key moves no window; F6 still moves between areas. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="body" hidden={!open} style:height={floating || full ? null : `${maximized ? tallest : height}px`} onkeydown={event => { if (event.key !== "F6") event.stopPropagation(); }}>
+  <div class="body" hidden={!open || rolled} style:height={floating || full ? null : `${maximized ? tallest : height}px`} onkeydown={event => { if (event.key !== "F6") event.stopPropagation(); }}>
     {#each tabs as tab (tab.key)}<div class="tabpanel" hidden={tab.key !== active}>
       {#if "job" in tab}<JobOutput bind:this={panes[tab.key]} session={tab.session} job={jobOf(tab)} label={tab.label} />
       {:else}
@@ -248,6 +251,7 @@
   /* The dock's own controls sit at the strip's right end, 28 px like a floating window's. */
   .tool { width: 28px; height: 28px; }
   .fold :global(svg) { transform: rotate(0deg); }
+  .fold.rolled :global(svg) { transform: rotate(180deg); }
   .menu { position: relative; flex: none; }
   .menu .add { display: flex; align-items: center; gap: 4px; width: auto; height: 26px; padding: 0 8px; font-size: 12.5px; font-weight: 500; white-space: nowrap; }
   :global(.terminals.phone) .menu .add { height: 32px; padding: 0 10px; }

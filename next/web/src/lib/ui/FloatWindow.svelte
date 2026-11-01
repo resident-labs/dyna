@@ -12,8 +12,8 @@
   // A view that floats as a window over the app or docks in its place in the layout. Docking changes
   // only the style, so the content never remounts. The rect belongs to the caller, so the window keeps
   // its place and size for the page view. Full, it fills the screen, as on a phone, and does not move.
-  let { label, docked, full = false, rect = $bindable(), element = $bindable(), kind, header, children, onkeydown }: {
-    label: string; docked: boolean; full?: boolean; rect: Rect; element?: HTMLElement; kind: string;
+  let { label, docked, full = false, rolled = false, rect = $bindable(), element = $bindable(), kind, header, children, onkeydown }: {
+    label: string; docked: boolean; full?: boolean; rolled?: boolean; rect: Rect; element?: HTMLElement; kind: string;
     header: Snippet; children: Snippet; onkeydown?: (event: KeyboardEvent) => void;
   } = $props();
   const fit = (next: Rect) => clamp(next, window.innerWidth, window.innerHeight);
@@ -44,12 +44,12 @@
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions (Alt with an arrow key acts on the whole window) -->
 <section class="window {kind}" class:floating={!docked} class:full aria-label={label} tabindex="-1" bind:this={element} onkeydown={key}
   style:left={docked || full ? null : `${rect.x}px`} style:top={docked || full ? null : `${rect.y}px`}
-  style:width={docked || full ? null : `${rect.w}px`} style:height={docked || full ? null : `${rect.h}px`}
+  style:width={docked || full ? null : `${rect.w}px`} style:height={docked || full || rolled ? null : `${rect.h}px`}
 >
   <!-- svelte-ignore a11y_no_static_element_interactions (dragging is for the pointer; Alt with an arrow key moves the window) -->
   <header class="bar label" onpointerdown={event => grab(event, [1, 1, 1, 1])}>{@render header()}</header>
   <div class="body">{@render children()}</div>
-  {#if !docked && !full}{#each handles as [side, edges] (side)}
+  {#if !docked && !full && !rolled}{#each handles as [side, edges] (side)}
     <!-- svelte-ignore a11y_no_static_element_interactions (resizing is for the pointer) -->
     <div class="handle {side}" onpointerdown={event => grab(event, edges)}></div>{/each}{/if}
 </section>
