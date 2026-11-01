@@ -3,6 +3,7 @@ package pi
 import (
 	"bufio"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,11 +15,21 @@ import (
 	"github.com/resident-labs/dyna/harness"
 )
 
-// TranscriptItem keeps the raw tool-call ID and a steer's delivery outside the wire contract.
+// TranscriptItem keeps the raw tool-call ID, a steer's delivery and a read's image bytes outside the wire contract.
 type TranscriptItem struct {
 	contract.TranscriptItem
-	CallID   string
-	Delivery contract.DeliverySeq
+	CallID    string
+	Delivery  contract.DeliverySeq
+	ImageData string // base64, set only when the item was asked for by ID
+}
+
+// transcriptImageMedia lists what a read row may show. A box writes its own transcript, so the recorded type is not trusted.
+func transcriptImageMedia(media string) bool {
+	switch media {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+		return true
+	}
+	return false
 }
 
 // ReadTranscript decodes complete Pi records and masks their content.
@@ -198,7 +209,7 @@ func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contrac
 			if !ok {
 				continue
 			}
-			var blocks []struct{ Type, Text string }
+			var blocks []struct{ Type, Text, Data, MimeType string }
 			if json.Unmarshal(m.Content, &blocks) != nil {
 				continue
 			}
@@ -206,6 +217,12 @@ func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contrac
 			for _, b := range blocks {
 				if b.Type == "text" {
 					text = append(text, b.Text)
+				}
+				if b.Type == "image" && item.Tool == "read" && item.Image == nil && b.Data != "" && transcriptImageMedia(b.MimeType) {
+					item.Image = &contract.TranscriptImage{Item: item.ID, Media: b.MimeType, Bytes: int64(base64.StdEncoding.DecodedLen(len(b.Data)))}
+					if item.ID == fullItem {
+						item.ImageData = b.Data
+					}
 				}
 			}
 			item.Output, item.Failed = harness.Mask(strings.Join(text, "\n")), m.IsError
@@ -315,7 +332,7 @@ func TranscriptStep(item contract.TranscriptItem) contract.TranscriptStep {
 	if runes := []rune(label); len(runes) > 80 {
 		label = string(runes[:79]) + "…"
 	}
-	return contract.TranscriptStep{Turn: item.Turn, Tool: item.Tool, Label: label, Started: item.At, Ended: item.Ended, Failed: item.Failed, Preview: item.Output}
+	return contract.TranscriptStep{Turn: item.Turn, Tool: item.Tool, Label: label, Started: item.At, Ended: item.Ended, Failed: item.Failed, Preview: item.Output, Image: item.Image}
 }
 
 func transcriptItemID(id string) string {
