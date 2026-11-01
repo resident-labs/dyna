@@ -574,15 +574,16 @@ type TranscriptPostLocation struct {
 	Seq  int64  `json:"seq"`
 }
 type TranscriptInput struct {
-	Home *Conversation `json:"home,omitempty"`
-	At   time.Time     `json:"at"`
-	ID   EventID       `json:"id"`
-	Seq  int64         `json:"seq"`
-	Room RoomID        `json:"room"`
-	Type EventType     `json:"type"`
-	From Principal     `json:"from"`
-	Text string        `json:"text"`
-	More bool          `json:"more,omitempty"`
+	Home        *Conversation `json:"home,omitempty"`
+	At          time.Time     `json:"at"`
+	ID          EventID       `json:"id"`
+	Seq         int64         `json:"seq"`
+	Room        RoomID        `json:"room"`
+	Type        EventType     `json:"type"`
+	From        Principal     `json:"from"`
+	Text        string        `json:"text"`
+	More        bool          `json:"more,omitempty"`
+	Attachments []Attachment  `json:"attachments,omitempty"`
 }
 type TranscriptTurn struct {
 	ID                TurnID            `json:"id"`
