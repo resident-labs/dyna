@@ -26,6 +26,34 @@ func TestWebSearchUsesStoredKey(t *testing.T) {
 	}
 }
 
+func TestWebSearchDistinguishesFailureFromEmptyResults(t *testing.T) {
+	s, _, worker, ctx := setup(t)
+	failed := true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if failed {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		_, _ = w.Write([]byte(`{"web":{"results":[]}}`))
+	}))
+	defer server.Close()
+	s.searchBraveURL = server.URL
+	if err := s.store.SetSearchKey(ctx, "brave", "private-key"); err != nil {
+		t.Fatal(err)
+	}
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
+	req := contract.WebSearchRequest{Query: "example"}
+	result, problem := s.WebSearch(ctx, caller, req)
+	if problem != nil || result.Provider != "" || len(result.Attempts) == 0 {
+		t.Fatalf("failure: %+v %v", result, problem)
+	}
+	failed = false
+	result, problem = s.WebSearch(ctx, caller, req)
+	if problem != nil || result.Provider != "brave" || len(result.Results) != 0 {
+		t.Fatalf("empty: %+v %v", result, problem)
+	}
+}
+
 func TestSearchKeysAreOwnerOnly(t *testing.T) {
 	s, _, worker, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
