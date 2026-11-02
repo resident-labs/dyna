@@ -791,8 +791,8 @@
       {:else}<p class="hint">No sessions yet.</p>{/if}
       {#if acting && store}{#key acting}<SessionActions {store} {...acting} onclose={stopActing}
         onclosed={ids => { stopActing(false); if (session && ids.includes(session)) openLocation(room!); }} />{/key}{/if}
-      <!-- The foot polls hosts, so it mounts only while the panel shows; a phone's closed panel polls nothing. About has its own box's load, and the foot's other machines would only sit under it, so it stays on the session list. -->
-      {#if panelShown && !about}<HostFoot {navigate} />{/if}
+      <!-- The foot polls hosts, so it mounts only while the panel shows; a phone's closed panel polls nothing. -->
+      {#if panelShown}<HostFoot {navigate} />{/if}
     </aside>
     {#if watching && !docked && !inSettings && section !== "instructions"}{@render computerView(watching)}{/if}
   {:else if activity.active.length}
