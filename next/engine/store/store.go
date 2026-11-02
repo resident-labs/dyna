@@ -109,7 +109,7 @@ func open(dir string, floor int, commit string, checkpointRun func() error) (*St
 	if fresh {
 		old := layout.V1Store()
 		if _, err := os.Stat(old); err == nil {
-			return nil, &Error{Code: StoreFromV1, Message: fmt.Sprintf("This folder holds a Dyna v1 store (%s). Dyna v2 cannot open it, and there is no way back to v1 after you import. The main branch has no v1 code. To move your data: (1) stop the v1 engine and capture a backup; (2) build the exporter from tag `v1-final`: `git clone --branch v1-final https://github.com/resident-labs/dyna && cd dyna/cmd/dyna-export && go build -o dyna-export .`; (3) run `./dyna-export` with the flags in its README.md; (4) run `dyna import` on the bundle. See docs/migrate.md.", old)}
+			return nil, &Error{Code: StoreFromV1, Message: fmt.Sprintf("This folder holds a Dyna v1 store (%s). Dyna v2 cannot open it and has no import: the owner's rooms were rebuilt by hand, and `dyna import` only ever checked a bundle. Leave this folder as it is and give v2 an empty one with --data. Tag `v1-final` holds the last v1 source. Tag `v2-import-last` holds that bundle check and its guide, docs/migrate.md.", old)}
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return nil, err
 		}

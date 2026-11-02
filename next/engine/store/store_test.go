@@ -51,7 +51,7 @@ func TestV1Guard(t *testing.T) {
 	}
 	_, err := Open(dir)
 	var e *Error
-	if !errors.As(err, &e) || e.Code != StoreFromV1 {
+	if !errors.As(err, &e) || e.Code != StoreFromV1 || !strings.Contains(e.Message, "v1-final") || !strings.Contains(e.Message, "v2-import-last") {
 		t.Fatalf("got %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "store.db")); !errors.Is(err, os.ErrNotExist) {
