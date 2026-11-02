@@ -246,6 +246,17 @@ type ShellJobEnded struct {
 	Tail        string       `json:"tail"`
 }
 
+// ShellJobRunning reports a background shell job still running. It wakes a session with no open turn. One with an open turn
+// reads it with its next turn.
+type ShellJobRunning struct {
+	Description  string     `json:"description,omitempty"`
+	Session      SessionID  `json:"session"`
+	Job          ShellJobID `json:"job"`
+	RanMinutes   int        `json:"ranMinutes"`
+	QuietMinutes *int       `json:"quietMinutes,omitempty"`
+	Tail         string     `json:"tail"`
+}
+
 type ComputerState string
 
 const (
@@ -399,8 +410,10 @@ func (TranscriptChanged) isEventBody()         {}
 func (TurnActivity) EventType() EventType { return "turn.activity" }
 func (TurnActivity) isEventBody()         {}
 
-func (ShellJobEnded) EventType() EventType { return "shell.job.ended" }
-func (ShellJobEnded) isEventBody()         {}
+func (ShellJobEnded) EventType() EventType   { return "shell.job.ended" }
+func (ShellJobEnded) isEventBody()           {}
+func (ShellJobRunning) EventType() EventType { return "shell.job.running" }
+func (ShellJobRunning) isEventBody()         {}
 
 func (ImageBuilt) EventType() EventType { return "image.built" }
 func (ImageBuilt) isEventBody()         {}

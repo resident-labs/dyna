@@ -71,7 +71,7 @@ export type InstructionsGetRequest = { room?: RoomID; };
 export type InstructionsGetResponse = { text: string; hash: string; savedAt?: string | null; };
 export type InstructionsSetRequest = { room?: RoomID; text: string; base: string; };
 export type InstructionsSetResponse = { hash: string; };
-export type Method = "addon.list" | "addon.set_enabled" | "box.notice" | "mcp.add" | "mcp.list" | "mcp.remove" | "package.add" | "package.list" | "package.remove" | "skill.list" | "skill.remove" | "skill.save" | "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "proxy.key" | "proxy.usage" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.compacted" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "box.stats" | "box.stats.report" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "issue.list" | "issue.status" | "issue.track" | "issue.untrack" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "session.responsibilities" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled" | "workflow.run" | "workflow.status" | "workflow.list" | "workflow.pin" | "workflow.step_start" | "workflow.step_end" | "workflow.step_transcript";
+export type Method = "addon.list" | "addon.set_enabled" | "box.notice" | "mcp.add" | "mcp.list" | "mcp.remove" | "package.add" | "package.list" | "package.remove" | "skill.list" | "skill.remove" | "skill.save" | "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "proxy.key" | "proxy.usage" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.compacted" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.job.running" | "shell.output" | "box.stats" | "box.stats.report" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "issue.list" | "issue.status" | "issue.track" | "issue.untrack" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "session.responsibilities" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled" | "workflow.run" | "workflow.status" | "workflow.list" | "workflow.pin" | "workflow.step_start" | "workflow.step_end" | "workflow.step_transcript";
 export type ErrorCode = "podman_required" | "invalid" | "unknown_action" | "not_found" | "forbidden" | "conflict" | "room_limited" | "profile_exists" | "move_busy" | "has_children" | "parent_closing" | "session_closing" | "stale" | "github_quota" | "visual_superseded" | "unavailable" | "reconnect_unavailable" | "models_unavailable" | "store_from_v1" | "store_too_old" | "no_grant";
 export type Error = { code: ErrorCode; message: string; visual?: VisualSuperseded | null; limited?: RoomLimited | null; };
 export type VisualSuperseded = { event: EventID; version: number; seq: number; };
@@ -182,6 +182,8 @@ export type ShellJobEndKind = "exit" | "signal" | "stopped";
 export type ShellJobEnd = { kind: ShellJobEndKind; code?: number; signal?: string; };
 export type ShellJobEndedRequest = { description?: string; end?: ShellJobEnd | null; job: ShellJobID; exitCode: number; tail: string; };
 export type ShellJobEndedResponse = { };
+export type ShellJobRunningRequest = { description?: string; job: ShellJobID; ranMinutes: number; quietMinutes?: number | null; tail: string; };
+export type ShellJobRunningResponse = { };
 export type TurnInput = { delivery: DeliverySeq; surface: Surface; reply: ReplyChannel; text: string; files?: Array<TurnFile> | null; };
 export type TurnFile = { path: string; sha256: string; bytes: number; };
 export type TurnStart = { sections: Array<ContextSection> | null; turn: TurnID; inputs: Array<TurnInput> | null; model: ModelChoice; compactTokens?: number; };
@@ -337,6 +339,7 @@ export type TranscriptChanged = { session: SessionID; turn: TurnID; };
 export type FinalReply = { reply: ReplyChannel; posted?: EventID; };
 export type Usage = { model: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; };
 export type ShellJobEnded = { description?: string; end?: ShellJobEnd | null; session: SessionID; job: ShellJobID; exitCode: number; tail: string; };
+export type ShellJobRunning = { description?: string; session: SessionID; job: ShellJobID; ranMinutes: number; quietMinutes?: number | null; tail: string; };
 export type ComputerState = "running" | "stopped";
 export type ComputerChanged = { session: SessionID; to: ComputerState; };
 export type BoxChanged = { box: BoxID; session: SessionID; host?: HostName; from?: BoxState; to: BoxState; cause?: FailureCause; reason?: string; };
@@ -584,6 +587,7 @@ export type EventBody =
   | { type: "session.restarted"; body: SessionRestarted }
   | { type: "session.started"; body: SessionStarted }
   | { type: "shell.job.ended"; body: ShellJobEnded }
+  | { type: "shell.job.running"; body: ShellJobRunning }
   | { type: "transcript.changed"; body: TranscriptChanged }
   | { type: "turn.activity"; body: TurnActivity }
   | { type: "turn.ended"; body: TurnEnded }
@@ -679,6 +683,7 @@ export interface MethodMap {
   "transcript.read": { request: TranscriptReadRequest; response: TranscriptReadResponse };
   "session.work": { request: SessionWorkRequest; response: SessionWorkResponse };
   "shell.job.ended": { request: ShellJobEndedRequest; response: ShellJobEndedResponse };
+  "shell.job.running": { request: ShellJobRunningRequest; response: ShellJobRunningResponse };
   "shell.output": { request: ShellOutputRequest; response: ShellOutputResponse };
   "box.stats": { request: BoxStatsRequest; response: BoxStatsResponse };
   "box.stats.report": { request: BoxStatsReportRequest; response: BoxStatsReportResponse };
