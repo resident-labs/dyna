@@ -44,6 +44,7 @@ type Reconciler struct {
 }
 
 func New(st *store.Store, boxes BoxAdapter, view View, repos Repositories, event func(contract.RoomID, contract.Principal, contract.EventBody) (contract.Event, error), now func() time.Time) *Reconciler {
+	st.SetTerminals(func(id contract.SessionID) bool { return view.OpenTerminal(id) })
 	return &Reconciler{store: st, boxes: boxes, view: view, repos: repos, event: event, now: now, kick: make(chan struct{}, 1), roomSteps: make(map[string]bool), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool), disconnected: make(map[contract.BoxID]time.Time)}
 }
 func (r *Reconciler) SetHostMemory(read func(contract.HostName) int64) { r.hostMemory = read }
@@ -273,13 +274,13 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			}
 		}
 	}
-	var quietCandidates []contract.SessionID
+	var ready []contract.SessionID
 	for _, row := range rows {
-		if row.Want == store.WantRun && row.Box.State == contract.BoxReady && !r.view.OpenTerminal(row.Box.Session) {
-			quietCandidates = append(quietCandidates, row.Box.Session)
+		if row.Want == store.WantRun && row.Box.State == contract.BoxReady {
+			ready = append(ready, row.Box.Session)
 		}
 	}
-	stopped, err := r.store.StopQuiet(ctx, quietCandidates, r.now().Add(-10*time.Minute))
+	stopped, err := r.store.StopQuiet(ctx, ready, r.now().Add(-10*time.Minute))
 	if err != nil {
 		return err
 	}
@@ -305,6 +306,9 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			}
 			if row.Box.State == contract.BoxStarting && !row.DueAt.IsZero() && r.hostRestoring(row.Host) {
 				continue // Its hello cannot arrive yet, so the hello deadline waits too.
+			}
+			if row.Want == store.WantStop && r.view.CompactBeforeStop(ctx, row.Session) {
+				continue // The answer kicks the next pass.
 			}
 			r.launch(ctx, row)
 		}

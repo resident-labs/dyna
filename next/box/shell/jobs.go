@@ -298,19 +298,20 @@ func (s *Server) stop(j *job) {
 	<-j.done
 }
 
-// Running counts the jobs that have not ended. The box's dormancy check reads it.
-func (s *Server) Running() int {
+// Running names the jobs that have not ended. Each turn's output carries them, for the engine's list of what a session holds.
+func (s *Server) Running() []contract.ShellJobID {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	n := 0
+	var running []contract.ShellJobID
 	for _, j := range s.jobs {
 		select {
 		case <-j.done:
 		default:
-			n++
+			running = append(running, j.id)
 		}
 	}
-	return n
+	slices.Sort(running)
+	return running
 }
 
 // Close kills every job group, as the agent stops.

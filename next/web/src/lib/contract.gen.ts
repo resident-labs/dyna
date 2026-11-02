@@ -41,7 +41,7 @@ export type InstructionsGetRequest = { room?: RoomID; };
 export type InstructionsGetResponse = { text: string; hash: string; savedAt?: string | null; };
 export type InstructionsSetRequest = { room?: RoomID; text: string; base: string; };
 export type InstructionsSetResponse = { hash: string; };
-export type Method = "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "issue.list" | "issue.status" | "issue.track" | "issue.untrack" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled" | "workflow.run" | "workflow.status" | "workflow.list" | "workflow.pin" | "workflow.step_start" | "workflow.step_end" | "workflow.step_transcript";
+export type Method = "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.compacted" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "issue.list" | "issue.status" | "issue.track" | "issue.untrack" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "session.responsibilities" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled" | "workflow.run" | "workflow.status" | "workflow.list" | "workflow.pin" | "workflow.step_start" | "workflow.step_end" | "workflow.step_transcript";
 export type ErrorCode = "podman_required" | "invalid" | "unknown_action" | "not_found" | "forbidden" | "conflict" | "room_limited" | "profile_exists" | "move_busy" | "has_children" | "parent_closing" | "session_closing" | "stale" | "github_quota" | "visual_superseded" | "unavailable" | "reconnect_unavailable" | "models_unavailable" | "store_from_v1" | "store_too_old" | "no_grant";
 export type Error = { code: ErrorCode; message: string; visual?: VisualSuperseded | null; limited?: RoomLimited | null; };
 export type VisualSuperseded = { event: EventID; version: number; seq: number; };
@@ -105,7 +105,7 @@ export type ComposeListResponse = { files: Array<ComposeFile> | null; };
 export type SessionMoveRequest = { session: SessionID; newParent: SessionID; };
 export type SessionMoveResponse = { };
 export type SessionCloseRequest = { session: SessionID; discard?: boolean; };
-export type SessionCloseResponse = { };
+export type SessionCloseResponse = { to: SessionID; handed: Array<Responsibility> | null; ended: Array<Responsibility> | null; };
 export type SessionSetProfileRequest = { session: SessionID; profile: ProfileName; };
 export type SessionSetProfileResponse = { };
 export type SessionRestartRequest = { session: SessionID; };
@@ -126,7 +126,7 @@ export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhi
 export type ModelChoice = { provider: ModelProvider; id: string; thinking: ThinkingLevel; };
 export type BoxRepo = { name: RepoName; cache: string; branch: string; base: string; commit?: string; };
 export type BoxHelloResponse = { gitName?: string; gitEmail?: string; compactTokens?: number; instructions: string; session: SessionID; box: BoxID; model: ModelChoice; repos?: Array<BoxRepo> | null; transcripts?: Array<TranscriptFile> | null; workflow?: BoxWorkflow | null; };
-export type TurnOutputRequest = { shellJobs: number; error?: string; cause?: FailureCause; turn: TurnID; outcome: TurnOutcome; final?: string; endPosts?: Array<EventID> | null; model: string; usage: Usage; unread?: Array<DeliverySeq> | null; };
+export type TurnOutputRequest = { shellJobs: number; jobs?: Array<ShellJobID> | null; error?: string; cause?: FailureCause; turn: TurnID; outcome: TurnOutcome; final?: string; endPosts?: Array<EventID> | null; model: string; usage: Usage; unread?: Array<DeliverySeq> | null; };
 export type TurnOutputResponse = { };
 export type TurnActivityRequest = { turn: TurnID; label: string; };
 export type TurnActivityResponse = { };
@@ -136,10 +136,10 @@ export type SessionWorkResponse = { turns: Array<SessionWorkTurn> | null; more: 
 export type TranscriptReadRequest = { session: SessionID; step?: string; turn?: TurnID; before?: TurnID; limit?: number; item?: string; part?: TranscriptPart; offset?: number; afterItem?: string; page?: TranscriptPage; cursor?: number; tail?: boolean; postIndex?: number; };
 export type TranscriptPage = "older_items" | "mandatory_items" | "mandatory_posts";
 export type TranscriptPart = "output" | "text" | "arguments" | "script" | "diff";
-export type TranscriptItemKind = "text" | "thinking" | "tool" | "post" | "too_large" | "steer";
+export type TranscriptItemKind = "text" | "thinking" | "tool" | "post" | "too_large" | "steer" | "compaction";
 export type TranscriptCallStatus = "running" | "ok" | "error" | "cancelled";
 export type TranscriptCall = { tool: string; target?: string; status: TranscriptCallStatus; durationMs?: number | null; error?: string; };
-export type TranscriptItem = { id: string; index?: number; turn: TurnID; kind: TranscriptItemKind; at: string; ended?: string | null; type?: EventType; text?: string; tool?: string; arguments?: string; script?: string; calls?: Array<TranscriptCall> | null; callsOmitted?: number; output?: string; diff?: string; failed?: boolean; more?: boolean; event?: EventID; room?: RoomID; from?: Principal | null; seq?: number; home?: Conversation | null; bytes?: number; attachments?: Array<Attachment> | null; image?: TranscriptImage | null; posts?: Array<TranscriptItem> | null; postsOmitted?: number; postsNext?: TranscriptPostLocation | null; };
+export type TranscriptItem = { id: string; index?: number; turn: TurnID; kind: TranscriptItemKind; at: string; ended?: string | null; type?: EventType; text?: string; tool?: string; arguments?: string; script?: string; calls?: Array<TranscriptCall> | null; callsOmitted?: number; output?: string; diff?: string; failed?: boolean; more?: boolean; event?: EventID; room?: RoomID; from?: Principal | null; seq?: number; home?: Conversation | null; bytes?: number; tokens?: number; attachments?: Array<Attachment> | null; image?: TranscriptImage | null; posts?: Array<TranscriptItem> | null; postsOmitted?: number; postsNext?: TranscriptPostLocation | null; };
 export type TranscriptImage = { item: string; media: string; bytes: number; };
 export type TranscriptPostLocation = { room: RoomID; seq: number; };
 export type TranscriptInput = { home?: Conversation | null; at: string; id: EventID; seq: number; room: RoomID; type: EventType; from: Principal; text: string; more?: boolean; attachments?: Array<Attachment> | null; };
@@ -180,6 +180,9 @@ export type ComputerChangedResponse = { };
 export type Archive = { };
 export type ArchiveDoneRequest = { repo: RepoName; commit: string; skipped: boolean; error?: string; };
 export type ArchiveDoneResponse = { };
+export type Compact = { turn: TurnID; overTokens: number; };
+export type BoxCompactedRequest = { turn: TurnID; compacted?: boolean; error?: string; tokensBefore?: number; tokensAfter?: number; usage: Usage; };
+export type BoxCompactedResponse = { };
 export type DeliverySeq = number;
 export type DeliveryDoneRequest = { delivery: DeliverySeq; };
 export type DeliveryDoneResponse = { };
@@ -246,7 +249,7 @@ export type ConnectUnlinkResponse = { };
 export type ConnectConnector = { missing: boolean; };
 export type ConnectAttemptState = "idle" | "starting" | "pending" | "linked" | "unlinking" | "canceled" | "failed";
 export type ConnectAttempt = { state: ConnectAttemptState; expires: number; };
-export type ContextSectionKey = "dyna_goal" | "dyna_children" | "dyna_requests" | "dyna_prs" | "dyna_issues" | "dyna_profiles" | "dyna_usage";
+export type ContextSectionKey = "dyna_goal" | "dyna_children" | "dyna_requests" | "dyna_holds" | "dyna_profiles" | "dyna_usage";
 export type ContextSnapshotRequest = { section?: ContextSectionKey; };
 export type ContextSnapshotResponse = { sections: Array<ContextSection> | null; };
 export type ContextSection = { key: ContextSectionKey; text: string; };
@@ -287,10 +290,11 @@ export type SessionStarted = { session: SessionID; name: string; parent?: Sessio
 export type SessionRestarted = { session: SessionID; imageUpdated?: boolean; };
 export type SessionMoved = { session: SessionID; newParent: SessionID; };
 export type SessionCloseReason = "dormant" | "disk";
-export type SessionClosed = { reason?: SessionCloseReason; session: SessionID; archive?: string; unheld?: Array<GoalID> | null; };
+export type SessionClosed = { reason?: SessionCloseReason; session: SessionID; archive?: string; unheld?: Array<GoalID> | null; handed?: Array<Responsibility> | null; };
+export type SessionCompacted = { session: SessionID; turn: TurnID; tokensBefore?: number; tokensAfter?: number; usage: Usage; error?: string; };
 export type TurnStarted = { session: SessionID; turn: TurnID; inputs: Array<EventID> | null; };
 export type TurnOutcome = "completed" | "failed" | "stopped";
-export type TurnEnded = { session: SessionID; turn: TurnID; outcome: TurnOutcome; final?: string; replies?: Array<FinalReply> | null; usage: Usage; error?: string; cause?: FailureCause; shellJobs?: number; };
+export type TurnEnded = { session: SessionID; turn: TurnID; outcome: TurnOutcome; final?: string; replies?: Array<FinalReply> | null; usage: Usage; error?: string; cause?: FailureCause; shellJobs?: number; jobs?: Array<ShellJobID> | null; };
 export type ConversationRead = { room: RoomID; conversation: Conversation; seq: number; };
 export type TurnActivity = { session: SessionID; turn: TurnID; label: string; };
 export type TranscriptChanged = { session: SessionID; turn: TurnID; };
@@ -431,6 +435,11 @@ export type QuestionListResponse = { questions: Array<Question> | null; };
 export type QuestionAsked = { id: QuestionID; session: SessionID; text: string; meanwhile?: string; blocked?: boolean; };
 export type QuestionAnswered = { id: QuestionID; session: SessionID; question: string; answer: string; };
 export type QuestionWithdrawn = { id: QuestionID; session: SessionID; };
+export type ResponsibilityKind = "turn" | "shell_job" | "terminal" | "workflow" | "goal" | "pr" | "issue" | "question" | "child";
+export type ResponsibilityGroup = "needs_box" | "owes_work";
+export type Responsibility = { kind: ResponsibilityKind; group: ResponsibilityGroup; id?: string; blocked?: boolean; };
+export type SessionResponsibilitiesRequest = { session: SessionID; };
+export type SessionResponsibilitiesResponse = { items: Array<Responsibility> | null; close: SessionCloseResponse; };
 export type Scope = "read" | "operate" | "files" | "terminal" | "computers" | "admin";
 export type SessionAccountRequest = { session: SessionID; };
 export type SessionAccountIssue = "removed" | "signed_out" | "spent" | "unavailable";
@@ -526,6 +535,7 @@ export type EventBody =
   | { type: "room.paused"; body: RoomPaused }
   | { type: "room.resumed"; body: RoomResumed }
   | { type: "session.closed"; body: SessionClosed }
+  | { type: "session.compacted"; body: SessionCompacted }
   | { type: "session.failed"; body: SessionFailed }
   | { type: "session.moved"; body: SessionMoved }
   | { type: "session.profile_changed"; body: SessionProfileChanged }
@@ -542,6 +552,7 @@ export type EventBody =
 export type OpArgs = AccountsActionArgs | HostexecGrantArgs | HostexecRunArgs | PrOpenArgs;
 export type BoxMessageBody =
   | { type: "archive"; body: Archive }
+  | { type: "compact"; body: Compact }
   | { type: "computer.input"; body: ComputerInputBatch }
   | { type: "computer.watch.start"; body: ComputerWatchStart }
   | { type: "computer.watch.stop"; body: ComputerWatchStop }
@@ -600,6 +611,7 @@ export interface MethodMap {
   "post.search": { request: PostSearchRequest; response: PostSearchResponse };
   "session.search": { request: SessionSearchRequest; response: SessionSearchResponse };
   "events.list": { request: EventsListRequest; response: EventsListResponse };
+  "box.compacted": { request: BoxCompactedRequest; response: BoxCompactedResponse };
   "box.hello": { request: BoxHelloRequest; response: BoxHelloResponse };
   "computer.changed": { request: ComputerChangedRequest; response: ComputerChangedResponse };
   "computer.input": { request: ComputerInputRequest; response: ComputerInputResponse };
@@ -643,6 +655,7 @@ export interface MethodMap {
   "question.ask": { request: QuestionAskRequest; response: QuestionAskResponse };
   "question.answer": { request: QuestionAnswerRequest; response: QuestionAnswerResponse };
   "question.list": { request: QuestionListRequest; response: QuestionListResponse };
+  "session.responsibilities": { request: SessionResponsibilitiesRequest; response: SessionResponsibilitiesResponse };
   "subscription.add": { request: SubscriptionAddRequest; response: SubscriptionAddResponse };
   "subscription.list": { request: SubscriptionListRequest; response: SubscriptionListResponse };
   "subscription.remove": { request: SubscriptionRemoveRequest; response: SubscriptionRemoveResponse };

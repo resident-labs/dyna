@@ -40,6 +40,9 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	} else if current.State != contract.BoxReady && current.State != contract.BoxClosing {
 		return contract.BoxHelloResponse{}, invalid("box is not starting, ready, or archiving")
 	}
+	if err := s.store.ForgetShellJobs(ctx, session.ID); err != nil {
+		return contract.BoxHelloResponse{}, failure(err)
+	}
 	model, _, err := s.profiles.Model(session.Profile)
 	if err != nil {
 		return contract.BoxHelloResponse{}, failure(err)
@@ -134,7 +137,7 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 			return contract.TurnOutputResponse{}, failure(err)
 		}
 	}
-	event, err := s.event(session.Room, caller, contract.TurnEnded{Session: session.ID, Turn: req.Turn, Outcome: req.Outcome, Final: req.Final, Usage: req.Usage, Error: req.Error, Cause: req.Cause, ShellJobs: req.ShellJobs})
+	event, err := s.event(session.Room, caller, contract.TurnEnded{Session: session.ID, Turn: req.Turn, Outcome: req.Outcome, Final: req.Final, Usage: req.Usage, Error: req.Error, Cause: req.Cause, ShellJobs: req.ShellJobs, Jobs: req.Jobs})
 	if err != nil {
 		return contract.TurnOutputResponse{}, failure(err)
 	}
@@ -152,7 +155,7 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 	if crew {
 		// Closing archives what the workers left in the tree. A close that fails here leaves a quiet box, which the dormant
 		// sweep closes, and the run's result is already safe.
-		if problem := s.closeSession(ctx, session, false, false); problem != nil {
+		if _, problem := s.closeSession(ctx, session, false, false); problem != nil {
 			log.Printf("workflow %s close: %s", run.ID, problem.Message)
 		}
 	}
