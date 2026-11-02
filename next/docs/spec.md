@@ -226,7 +226,6 @@ Everything else belongs to no single room:
 <data>/addons.json, <data>/skills/<name>/       global add-ons
 <data>/store.db, <data>/store.lock              the store and its lock
 <data>/backups/                                 local copies of the store
-<data>/archive/                                 the read-only v1 archive
 <data>/connect/                                 Connect credentials
 <data>/pools/<name>/script                      a node pool's script, which runs here and no box can reach
 <data>/cliproxy/, <data>/cliproxy/auth-v2/      the model proxy and its sign-in folder
@@ -754,10 +753,6 @@ A subscription fires only on news: a change with no change kinds fires nothing. 
 
 Engine timers remain scheduled tasks. The updater replaces the self-update hook. Librarian hooks did not carry over. The horizon upstream-watch becomes a `Run` on `git.main_updated` with its script as a `RunFile`. A default room subscription wakes root on `notice.posted` and `git.main_updated`.
 
-### 8.6 Open points
-
-Before cutover, horizon's root confirms whether upstream-watch needs desktop state beyond its script. Move that state into the room or change the script if needed.
-
 ## 9. Feature map
 
 All M1–M3 features below are cutover gates.
@@ -768,7 +763,7 @@ All M1–M3 features below are cutover gates.
 - **After cutover:** voice returns as the existing Go service and persona without redesign; issue watches, room MCP, computer reminders, settings panes, release pipeline, WSL and branch QA follow. Issue-watch and room-MCP data are not imported. Manual update ships in M3; hourly auto-update follows.
 - **Dropped:** reviewer service and workspace, Dyna merge trials, comment-trust holds, CI budget service, conflict radar, room PR views, jobs, session worktrees, load doctor, test slots, harness settings, Claude Code and session-format conversion. Session profile changes remain. The library is cut for now; its map stays in the frozen v1 backup. External members and placement by device needs are absent. GitHub supplies PR state; outside text is wrapped, with the accepted risks in decision 13.
 
-Readable room history is given up (owner q57): `dyna room log` starts empty. The data remains in `archive/` and backups, but no archive reader is planned. Paired devices, desktop, issues, goals, PRs and standing instructions work at cutover.
+Readable room history is given up (owner q57): `dyna room log` starts empty. The data remains in v1's own backups, and no reader is planned. Paired devices, desktop, issues, goals, PRs and standing instructions work at cutover.
 
 ### 9.1 What we lose from Claude Code
 

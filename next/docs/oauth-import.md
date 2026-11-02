@@ -21,18 +21,6 @@ The request has these fields:
     `access_token` is the minted key, or the identity token if none was minted.
     `email` is optional, and reconnect needs it.
 
-<!-- LEGACY(v1-transfer): this paragraph and the closing warning about v1, the v1 sign-in mapping. Remove after the transfer. -->
-For v1 Claude Code sign-ins, send `accessToken`, `refreshToken`, and the account
-email as `access_token`, `refresh_token`, and `email`. Convert `expiresAt` from
-Unix milliseconds. Do not send `scopes` or `subscriptionType`. For v1 Codex
-entries in Pi, also send `accountId` as `account_id`. For v1 Kimi native files,
-convert the expiry from Unix seconds. Preserve the Kimi domain and device ID
-when present. For v1 Grok, use the OIDC entry for `https://auth.x.ai` and the
-Grok client; its `key` is the access token, and its `expires_at` is the expiry.
-Pi OAuth entries use `access`, `refresh`, and a Unix-millisecond `expires`
-value. Send only the mapped values to this method. For a Pi Meta entry, `refresh`
-is the identity token and `access` is the key minted from it.
-
 Meta has no refresh grant. The proxy stores the identity token and mints a new key
 after a 401, and it ignores `expiresAt`. When the identity token itself expires, the
 owner signs in again. A Meta sign-in can also start from the Accounts page, and a
@@ -61,10 +49,10 @@ activates it and manages refresh. If activation fails, Dyna attempts to remove
 both the credential and the binding. If cleanup fails, the account remains
 visible for removal. Unbound staged credentials are pruned at proxy startup.
 
-Do not import the same sign-in twice into v2. Copying does not transfer
-exclusive ownership of a refresh token. If v1 and v2
-both refresh it, a provider may invalidate the older token. The operator must
-account for that risk before importing. Do not refresh either copy merely to
-prepare the import. The proxy refreshes a Claude sign-in 4 hours before expiry
-and a Codex sign-in 96 hours before expiry, so v2 may refresh immediately after
-activation. Stop v1 from using a sign-in before importing it.
+Do not import the same sign-in twice. Copying does not transfer exclusive
+ownership of a refresh token. If two programs both refresh it, a provider may
+invalidate the older token. The operator must account for that risk before
+importing. Do not refresh either copy merely to prepare the import. The proxy
+refreshes a Claude sign-in 4 hours before expiry and a Codex sign-in 96 hours
+before expiry, so it may refresh immediately after activation. Stop anything
+else from using a sign-in before importing it.

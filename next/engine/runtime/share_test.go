@@ -142,17 +142,6 @@ func TestTheEngineHostNeedsNoSocketForTheMount(t *testing.T) {
 	}
 }
 
-// The move calls a box stale by this number.
-func TestMoveScriptKnowsTheLayout(t *testing.T) {
-	script, err := os.ReadFile("../../scripts/shared-folder-move.sh")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(script), "LAYOUT="+box.ContainerLayout+" ") {
-		t.Fatal("scripts/shared-folder-move.sh has another container layout")
-	}
-}
-
 func TestSharedSizesAddUpEachRoomsFolder(t *testing.T) {
 	layout := box.Layout{Data: t.TempDir()}
 	for path, size := range map[string]int{filepath.Join(layout.Shared("a"), "one"): 3, filepath.Join(layout.Shared("a"), "sub", "two"): 4, filepath.Join(layout.Shared("b"), "three"): 5} {
