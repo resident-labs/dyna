@@ -31,6 +31,7 @@ type fakeService struct {
 	caller  contract.Principal
 	request contract.SessionCloseRequest
 	restart contract.SessionRestartRequest
+	refresh contract.SessionRefreshRequest
 	post    contract.PostRequest
 }
 
@@ -42,6 +43,10 @@ func (f *fakeService) SessionStart(_ context.Context, c contract.Principal, r co
 func (f *fakeService) SessionClose(_ context.Context, c contract.Principal, r contract.SessionCloseRequest) (contract.SessionCloseResponse, *contract.Error) {
 	f.caller, f.request = c, r
 	return contract.SessionCloseResponse{}, nil
+}
+func (f *fakeService) SessionRefresh(_ context.Context, c contract.Principal, r contract.SessionRefreshRequest) (contract.SessionRefreshResponse, *contract.Error) {
+	f.caller, f.refresh = c, r
+	return contract.SessionRefreshResponse{}, nil
 }
 func (f *fakeService) SessionRestart(_ context.Context, c contract.Principal, r contract.SessionRestartRequest) (contract.SessionRestartResponse, *contract.Error) {
 	f.caller, f.restart = c, r
@@ -112,6 +117,15 @@ func TestBoxCallerIsListenerIdentity(t *testing.T) {
 	_ = res.Body.Close()
 	if res.StatusCode != http.StatusOK || f.caller.Session != "session-a" {
 		t.Fatalf("status %d, caller %+v", res.StatusCode, f.caller)
+	}
+}
+
+func TestSessionRefreshPassesCaller(t *testing.T) {
+	f := &fakeService{}
+	a := New(f, nil)
+	w := request(a.handler(boxCaller()), "/v1/session.refresh", `{"room":"room-a"}`)
+	if w.Code != http.StatusOK || f.caller.Session != "session-a" || f.refresh.Room != "room-a" {
+		t.Fatalf("status=%d caller=%+v request=%+v", w.Code, f.caller, f.refresh)
 	}
 }
 

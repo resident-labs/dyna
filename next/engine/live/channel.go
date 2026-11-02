@@ -49,17 +49,37 @@ func (s *Session) Connected() (connected, open bool) {
 	return s.channel != nil, true
 }
 
-// Stale reports whether the connected box agent is older than the engine. Each connection sets it anew.
+// Stale reports whether the connected box should restart: its box agent is older than the engine, or something marked it.
 func (s *Session) Stale() bool {
 	if !s.Lock() {
 		return false
 	}
 	defer s.Unlock()
-	return s.channel != nil && s.stale
+	return s.channel != nil && (s.stale || s.refresh != "")
 }
 
-// SetStale records what the connecting box agent reported. The caller holds the session lock.
+// SetStale records what the connecting box agent reported. Each connection sets it anew. The caller holds the session lock.
 func (s *Session) SetStale(stale bool) { s.stale = stale }
+
+// Refresh returns the mark asking this box to restart, empty if there is none.
+func (s *Session) Refresh() string {
+	if !s.Lock() {
+		return ""
+	}
+	defer s.Unlock()
+	return s.refresh
+}
+
+// MarkRefresh asks this box to restart. A box does not report a mark, so unlike the stale flag it outlasts a reconnect, and the
+// first one stands, so a repeat sends no second notice. The caller holds the session lock.
+func (s *Session) MarkRefresh(mark string) {
+	if s.refresh == "" {
+		s.refresh = mark
+	}
+}
+
+// ClearRefresh says a new box agent has started, which is what a mark asked for. The caller holds the session lock.
+func (s *Session) ClearRefresh() { s.refresh = "" }
 
 // Channel returns the attached channel. The caller holds the session lock.
 func (s *Session) Channel() *Channel { return s.channel }
