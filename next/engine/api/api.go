@@ -53,6 +53,18 @@ func (a *API) SetLocalModelRoute(route http.Handler) { a.localModel = route }
 // SetGitHubRead configures the GitHub route of a Run's socket before opening sockets.
 func (a *API) SetGitHubRead(route http.Handler) { a.github = route }
 
+// githubTools serves GitHub's read-only MCP tools to a box. The service holds them, because a box's hello says whether they are
+// there; a service without them, such as a test's, has none.
+func (a *API) githubTools(w http.ResponseWriter, r *http.Request) {
+	if held, ok := a.service.(interface{ GitHubTools() http.Handler }); ok {
+		if tools := held.GitHubTools(); tools != nil {
+			tools.ServeHTTP(w, r)
+			return
+		}
+	}
+	writeError(w, &contract.Error{Code: contract.ErrUnavailable, Message: "GitHub reads are not available: the engine has no GitHub token"})
+}
+
 // SetGitRoute configures the per-box git route before opening sockets.
 func (a *API) SetGitRoute(route func(Caller) http.Handler) { a.git = route }
 
@@ -581,6 +593,9 @@ func (a *API) handler(c Caller) http.Handler {
 	}
 	if box(c) && a.model != nil {
 		mux.HandleFunc("/model/", func(w http.ResponseWriter, r *http.Request) { a.model(c).ServeHTTP(w, r) })
+	}
+	if box(c) {
+		mux.HandleFunc("/github/", a.githubTools)
 	}
 	// Never on the web listener, which Connect carries off the host.
 	if owner(c) && !c.Web && a.localModel != nil {
