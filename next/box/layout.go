@@ -16,7 +16,6 @@ import (
 // A room is one folder on each side, so deleting a room removes one folder per machine:
 //
 //	<Data>/rooms/<room>/AGENTS.md                   room instructions
-//	<Data>/rooms/<room>/AGENTS.saved.json           who saved them last
 //	<Data>/rooms/<room>/compose/<name>.yaml         room compose files
 //	<Data>/rooms/<room>/addons.json                 the room's skills, Pi packages and MCP servers
 //	<Data>/rooms/<room>/skills/<name>/              the room's skill folders
@@ -29,7 +28,6 @@ import (
 // Everything else belongs to no single room:
 //
 //	<Data>/AGENTS.md                                global instructions
-//	<Data>/AGENTS.saved.json                        who saved them last
 //	<Data>/compose/<name>.yaml                      global compose files
 //	<Data>/addons.json, <Data>/skills/<name>/       global add-ons
 //	<Data>/store.db, <Data>/store.lock              the store and its lock
@@ -59,7 +57,6 @@ var AttachmentFolder = "/box/attachments"
 
 const (
 	instructionsFile = "AGENTS.md"
-	saverFile        = "AGENTS.saved.json"
 	composeFolder    = "compose"
 	addonsFile       = "addons.json"
 	skillsFolder     = "skills"
@@ -158,14 +155,6 @@ func (l Layout) Instructions(room contract.RoomID) string {
 		return filepath.Join(l.Data, instructionsFile)
 	}
 	return filepath.Join(l.room(room), instructionsFile)
-}
-
-// InstructionsSaver records who saved a room's instructions, or the global ones for no room. Hosts never get it.
-func (l Layout) InstructionsSaver(room contract.RoomID) string {
-	if room == "" {
-		return filepath.Join(l.Data, saverFile)
-	}
-	return filepath.Join(l.room(room), saverFile)
 }
 
 // Compose is the folder of a room's compose files, or the global one for no room.

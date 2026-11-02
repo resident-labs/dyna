@@ -96,7 +96,7 @@ func newClient(socket string) *socketClient {
 }
 
 type requestType interface {
-	contract.ProxyKeyRequest | contract.ProxyUsageRequest | contract.InstructionsGetRequest | contract.InstructionsSetRequest |
+	contract.ProxyKeyRequest | contract.ProxyUsageRequest |
 		contract.WorkflowRunRequest | contract.WorkflowReloadRequest | contract.WorkflowStatusRequest | contract.WorkflowListRequest |
 		contract.AddonListRequest | contract.AddonRemoveRequest | contract.PackageAddRequest | contract.SkillSaveRequest | contract.MCPAddRequest |
 		contract.SubscriptionAddRequest | contract.SubscriptionListRequest | contract.SubscriptionRemoveRequest | contract.SubscriptionSetEnabledRequest |
@@ -113,7 +113,7 @@ type requestType interface {
 		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostSetLimitsRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomDeleteRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.ComposeListRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.SessionRefreshRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest | contract.PrListRequest | contract.PrStatusRequest | contract.PrTrackRequest | contract.PrUntrackRequest
 }
 type responseType interface {
-	contract.ProxyKeyResponse | contract.ProxyUsageResponse | contract.InstructionsGetResponse | contract.InstructionsSetResponse |
+	contract.ProxyKeyResponse | contract.ProxyUsageResponse |
 		contract.WorkflowRunResponse | contract.WorkflowReloadResponse | contract.WorkflowStatusResponse | contract.WorkflowListResponse |
 		contract.AddonListResponse | contract.AddonChangeResponse |
 		contract.SubscriptionAddResponse | contract.SubscriptionListResponse | contract.SubscriptionRemoveResponse | contract.SubscriptionSetEnabledResponse |
