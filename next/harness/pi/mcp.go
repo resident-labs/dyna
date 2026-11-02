@@ -11,18 +11,21 @@ const DynaMCPURL = "http://127.0.0.1:7781/dyna/"
 
 // MCPServer is one entry of Pi's MCP config, by URL or by command.
 type MCPServer struct {
-	URL         string   `json:"url,omitempty"`
-	Command     string   `json:"command,omitempty"`
-	Args        []string `json:"args,omitempty"`
-	Exposure    string   `json:"exposure"`
-	Description string   `json:"description,omitempty"`
-	Timeout     int      `json:"timeout,omitempty"`
+	URL      string   `json:"url,omitempty"`
+	Command  string   `json:"command,omitempty"`
+	Args     []string `json:"args,omitempty"`
+	Exposure string   `json:"exposure"`
+	// ToolExposure overrides Exposure for single tools.
+	ToolExposure map[string]string `json:"toolExposure,omitempty"`
+	Description  string            `json:"description,omitempty"`
+	Timeout      int               `json:"timeout,omitempty"`
 }
 
-// WriteAgentMCPConfig writes the dyna server and its tool exposure, with the added servers beside it.
+// WriteAgentMCPConfig writes the dyna server and its tool exposure, with the added servers beside it. The dyna tools wait for
+// tool_search, so their schemas stay out of what every request sends, and post stays direct because most turns end with it.
 func WriteAgentMCPConfig(path, description string, added map[string]MCPServer) error {
 	servers := map[string]MCPServer{
-		"dyna": {URL: DynaMCPURL, Exposure: "direct", Description: description, Timeout: 600},
+		"dyna": {URL: DynaMCPURL, Exposure: "deferred", ToolExposure: map[string]string{"post": "direct"}, Description: description, Timeout: 600},
 	}
 	maps.Insert(servers, maps.All(added))
 	data, err := json.Marshal(struct {

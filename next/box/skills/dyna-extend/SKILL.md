@@ -60,4 +60,4 @@ dyna mcp add docs https://example.com/mcp
 dyna mcp add files -- npx -y @modelcontextprotocol/server-filesystem /box/work
 ```
 
-The server joins Pi's MCP config beside `dyna`. Call its tools from `codemode` as `tools.mcp__<name>__<tool>`. Dyna has no store for an MCP server's secrets, so if a server needs a token, tell the owner instead of writing it down.
+The server joins Pi's MCP config beside `dyna`. Load its tools with `tool_search`, or call them from `codemode` as `tools.mcp__<name>__<tool>`. Dyna has no store for an MCP server's secrets, so if a server needs a token, tell the owner instead of writing it down.
