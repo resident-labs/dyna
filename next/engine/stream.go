@@ -300,11 +300,13 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 			if !stale {
 				update = handle.Refresh()
 			}
+			dispatch := s.store.Dispatch
 			if update != "" {
 				if err := s.applyUpdate(ctx, session, update); err != nil {
 					reason, cause = streamAdmissionFailed, err
 					return
 				}
+				dispatch = s.store.DispatchStale
 			}
 			// A reload reaches a crew's box on its next channel too, which ignores a version it already runs.
 			if crew {
@@ -347,7 +349,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 				reason, cause = streamEventFailed, err
 				return
 			}
-			turn, deliveries, profile, err := s.store.Dispatch(ctx, session.ID, contract.TurnID(turnID), started, replay)
+			turn, deliveries, profile, err := dispatch(ctx, session.ID, contract.TurnID(turnID), started, replay)
 			if err != nil {
 				reason, cause = streamDispatchFailed, err
 				return

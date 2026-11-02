@@ -36,25 +36,14 @@ func (s *Store) RunningSessions(ctx context.Context, room contract.RoomID) ([]co
 
 // StopQuiet requests stops for candidates that nothing needs and that have been quiet since the cutoff.
 func (s *Store) StopQuiet(ctx context.Context, ids []contract.SessionID, cutoff time.Time) ([]contract.SessionID, error) {
-	return s.stopFree(ctx, ids, quiet, cutoff.UnixMilli())
+	return s.stopFree(ctx, ids, false, quiet, cutoff.UnixMilli())
 }
 
 // StopStale requests stops for boxes on an old binary, or marked to restart, as soon as nothing needs them, with no wait. A wake
-// on its way does not hold one back: its delivery stays stored, Dispatch refuses a box that is not want='run', and WakeStopped
+// on its way does not hold one back: its delivery stays stored, DispatchStale opens no turn on a box nothing needs, and WakeStopped
 // starts it again. The stop applies the update, so a notice that it was coming and that no turn read is dropped.
 func (s *Store) StopStale(ctx context.Context, ids []contract.SessionID) ([]contract.SessionID, error) {
-	stopped, err := s.stopFree(ctx, ids, `1`)
-	if err != nil || len(stopped) == 0 {
-		return stopped, err
-	}
-	data, err := json.Marshal(stopped)
-	if err != nil {
-		return stopped, err
-	}
-	return stopped, s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `DELETE FROM deliveries AS d WHERE d.to_kind='session' AND d.to_id IN (SELECT value FROM json_each(?)) AND d.state='pending' AND `+boxUpdateNotice, string(data))
-		return err
-	})
+	return s.stopFree(ctx, ids, true, `1`)
 }
 
 // WakeStopped starts a stopped box again when a wake is waiting for it, which a stale stop leaves on purpose. The rows are
@@ -66,8 +55,9 @@ func (s *Store) WakeStopped(ctx context.Context) error {
 	})
 }
 
-// stopFree requests stops for the boxes nothing needs, of those that also pass rule.
-func (s *Store) stopFree(ctx context.Context, ids []contract.SessionID, rule string, args ...any) ([]contract.SessionID, error) {
+// stopFree requests stops for the boxes nothing needs, of those that also pass rule. With dropNotices the same write drops their
+// update notices, so no box is seen stopping with one still waiting.
+func (s *Store) stopFree(ctx context.Context, ids []contract.SessionID, dropNotices bool, rule string, args ...any) ([]contract.SessionID, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -100,7 +90,18 @@ func (s *Store) stopFree(ctx context.Context, ids []contract.SessionID, rule str
 			}
 			stopped = append(stopped, id)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil || !dropNotices || len(stopped) == 0 {
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		data, err = json.Marshal(stopped)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `DELETE FROM deliveries AS d WHERE d.to_kind='session' AND d.to_id IN (SELECT value FROM json_each(?)) AND d.state='pending' AND `+boxUpdateNotice, string(data))
+		return err
 	})
 	return stopped, err
 }

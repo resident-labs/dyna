@@ -353,9 +353,6 @@ func TestJobHoldsBoxThenEndingItAppliesUpdate(t *testing.T) {
 	if host.stops != 0 {
 		t.Fatal("stale box stopped with a job running")
 	}
-	// A job that ends just after the box loop passed the check starts one more turn on the old binary, and the box stops as
-	// that turn ends. Nothing is lost, but it is not the path under test here.
-	time.Sleep(loopSettles)
 	if _, problem := s.BoxNotice(ctx, boxCaller(sid), contract.BoxNoticeRequest{Text: "package failed"}); problem != nil {
 		t.Fatal(problem)
 	}
