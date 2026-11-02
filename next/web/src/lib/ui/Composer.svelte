@@ -9,6 +9,7 @@
   import Icon from "./Icon.svelte";
   import Avatar from "./Avatar.svelte";
   import Markdown from "./Markdown.svelte";
+  import Modal from "./Modal.svelte";
   import { count, fileSize, type Quote } from "../feed.ts";
   import { maxFiles, type FileDraft } from "../attach.svelte.ts";
   import { filesSummary } from "../files-summary.ts";
@@ -56,8 +57,8 @@
   // The picker and a drop on the center column add files here, so the note names what did not fit.
   export const addFiles = (list: Iterable<File>) => { note = files.add(list, forwarded); };
   let tray: HTMLUListElement;
+  // A picked image opens whole in the shared modal, before it goes.
   let preview = $state<{ url: string; name: string } | undefined>();
-  let previewDialog: HTMLDialogElement;
   let failedIds = new Set<number>();
   $effect(() => {
     const failed = files.items.filter(item => item.state === "failed");
@@ -65,11 +66,7 @@
     failedIds = new Set(failed.map(item => item.id));
     if (added) void tick().then(() => tray?.querySelector(`[data-file-id="${added.id}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" }));
   });
-  async function openPreview(url: string, name: string) {
-    preview = { url, name };
-    await tick();
-    previewDialog.showModal();
-  }
+  const openPreview = (url: string, name: string) => { preview = { url, name }; };
   const id = $props.id();
   const touch = new MediaQuery("pointer: coarse");
   let caret = $state(0);
@@ -145,10 +142,7 @@
         <button type="button" class="remove" aria-label="Remove {item.file.name}" title="Remove {item.file.name}" onclick={() => files.remove(item.id)}><Icon name="close" size={14} /></button>
       </li>{/each}</ul>
   {/if}
-  {#if preview}<dialog class="preview-dialog" bind:this={previewDialog} aria-label="Preview {preview.name}" onclose={() => preview = undefined}>
-    <header><span>{preview.name}</span><button type="button" onclick={() => previewDialog.close()}>Close</button></header>
-    <img src={preview.url} alt={preview.name} />
-  </dialog>{/if}
+  {#if preview}<Modal title={preview.name} wide onclose={() => { preview = undefined; }}><img class="preview" src={preview.url} alt={preview.name} /></Modal>{/if}
   {#if note || over > 0}<p class="note" class:over={over > 0} role="status">{over > 0 ? `A post can carry ${maxFiles} files; remove ${over} to send.` : note}</p>{/if}
   {#if stop?.failed && empty}<p class="note" role="status">The stop did not reach the engine. Try again.</p>{/if}
   <div class="inputline">
@@ -226,12 +220,7 @@
   .failed .sub { color: var(--danger); }
   .retry { all: unset; cursor: pointer; color: inherit; text-decoration: underline; border-radius: 3px; }
   .retry:focus-visible, .file-summary button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-  .preview-dialog { width: min(1000px, 95vw); max-height: 90dvh; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); color: var(--text); }
-  .preview-dialog::backdrop { background: var(--scrim); }
-  .preview-dialog header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-  .preview-dialog header span { overflow-wrap: anywhere; }
-  .preview-dialog button { min-height: 44px; cursor: pointer; }
-  .preview-dialog img { display: block; max-width: 100%; max-height: 75dvh; margin: auto; object-fit: contain; }
+  .preview { display: block; max-width: 100%; max-height: calc(100dvh - 160px); margin: auto; object-fit: contain; }
   .note { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
   .note.over { color: var(--danger); }
   /* The key hint shows only while the empty message box has focus. */
