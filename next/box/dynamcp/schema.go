@@ -78,12 +78,23 @@ func typeSchema(t reflect.Type) schema {
 			if name == "" {
 				name = f.Name
 			}
-			props[name] = typeSchema(f.Type)
+			prop := typeSchema(f.Type)
+			prop.Description = f.Tag.Get("desc")
+			props[name] = prop
 		}
 		return schema{Type: "object", Properties: props}
 	default:
 		return schema{Type: "object"}
 	}
+}
+
+// requestProperties lists the fields an action takes. An operation also takes the replay key.
+func requestProperties(a action) map[string]schema {
+	props := typeSchema(a.request).Properties
+	if a.op != "" {
+		props["clientId"] = schema{Type: "string"}
+	}
+	return props
 }
 
 func registry() ([]tool, map[string]map[string]action, error) {
@@ -127,18 +138,19 @@ func registry() ([]tool, map[string]map[string]action, error) {
 			a := actions[name][verb]
 			readOnly = readOnly && a.readOnly
 			help = append(help, verb+": "+a.help)
-			for key, value := range typeSchema(a.request).Properties {
+			for key, value := range requestProperties(a) {
 				if old, ok := props[key]; ok && !reflect.DeepEqual(old, value) {
 					return nil, nil, fmt.Errorf("%s.%s: incompatible property %s", name, verb, key)
 				}
 				props[key] = value
 			}
-			if a.op != "" {
-				props["clientId"] = schema{Type: "string"}
-			}
 		}
 		props["action"] = schema{Type: "string", Enum: verbs}
-		result = append(result, tool{Name: name, Title: metadata.Title, Description: strings.Join(help, "\n"), InputSchema: schema{Type: "object", Properties: props, Required: []string{"action"}}, Annotations: annotations{ReadOnly: readOnly, Destructive: metadata.Destructive, Idempotent: metadata.Idempotent, OpenWorld: metadata.OpenWorld}})
+		var required []string
+		if len(verbs) > 1 {
+			required = []string{"action"}
+		}
+		result = append(result, tool{Name: name, Title: metadata.Title, Description: strings.Join(help, "\n"), InputSchema: schema{Type: "object", Properties: props, Required: required}, Annotations: annotations{ReadOnly: readOnly, Destructive: metadata.Destructive, Idempotent: metadata.Idempotent, OpenWorld: metadata.OpenWorld}})
 	}
 	return result, actions, nil
 }
