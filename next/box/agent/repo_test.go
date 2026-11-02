@@ -130,39 +130,6 @@ func TestSetupDoneCheckoutKeepsFilesWithoutIndex(t *testing.T) {
 	}
 }
 
-// LEGACY(v1-transfer): this test, a checkout older than setup state. Remove after the transfer.
-func TestSetupLegacyCheckoutWithoutStateIsKept(t *testing.T) {
-	root, stateRoot := t.TempDir(), t.TempDir()
-	repo := contract.BoxRepo{Name: "owner/repo", Cache: "/cache", Branch: "branch", Base: "main"}
-	dir := filepath.Join(root, string(repo.Name))
-	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".git", "index"), nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("legacy work"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	var calls [][]string
-	git := func(_ context.Context, _, _ string, args ...string) (string, error) {
-		calls = append(calls, args)
-		return "", nil
-	}
-	if err := setupRepos(context.Background(), root, stateRoot, []contract.BoxRepo{repo}, "", "", git); err != nil {
-		t.Fatal(err)
-	}
-	if len(calls) != 0 {
-		t.Fatal(calls)
-	}
-	if got, err := os.ReadFile(filepath.Join(dir, "notes.txt")); err != nil || string(got) != "legacy work" {
-		t.Fatalf("legacy work lost: %q %v", got, err)
-	}
-	if got, err := os.ReadFile(filepath.Join(stateRoot, string(repo.Name))); err != nil || string(got) != setupDone {
-		t.Fatalf("state: %q %v", got, err)
-	}
-}
-
 func TestSetupStateNamesDoNotCollide(t *testing.T) {
 	root, stateRoot := t.TempDir(), t.TempDir()
 	repos := []contract.BoxRepo{
