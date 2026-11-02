@@ -27,6 +27,17 @@ func (e ShareDown) Error() string {
 	return fmt.Sprintf("the shared folder is not available on host %s: %s", e.Host, e.Reason)
 }
 
+// NothingOnHost says a closing box has neither container nor volume on its host, or was never placed, so it has nothing to
+// archive and its close can finish.
+type NothingOnHost struct {
+	Box  string
+	Host string
+}
+
+func (e NothingOnHost) Error() string {
+	return fmt.Sprintf("box %s has no container and no volume on host %s", e.Box, e.Host)
+}
+
 type MissingDevice struct {
 	Need Need
 	Host string
