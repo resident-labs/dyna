@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -45,8 +44,8 @@ func (c *Client) Channel(ctx context.Context, binary string, handle func(contrac
 		resp, err := c.http.Do(req)
 		if err == nil {
 			if resp.StatusCode != http.StatusOK {
-				resp.Body.Close()
-				return fmt.Errorf("box channel: %s", resp.Status)
+				defer resp.Body.Close()
+				return refusal("box channel", resp)
 			}
 			delay = 500 * time.Millisecond
 			connected(true)

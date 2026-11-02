@@ -1,8 +1,11 @@
 package contract
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
 	"time"
 )
 
@@ -122,6 +125,19 @@ type Error struct {
 	Message string            `json:"message"`
 	Visual  *VisualSuperseded `json:"visual,omitempty"`
 	Limited *RoomLimited      `json:"limited,omitempty"`
+}
+
+// errorBytes bounds what ReadError reads of a refusal.
+const errorBytes = 64 << 10
+
+// ReadError reads the answer to a refused call: the engine's JSON error, or the plain text of a route that writes one.
+func ReadError(body io.Reader) Error {
+	data, _ := io.ReadAll(io.LimitReader(body, errorBytes))
+	var problem Error
+	if err := json.Unmarshal(data, &problem); err != nil {
+		return Error{Message: strings.ToValidUTF8(strings.TrimSpace(string(data)), "")}
+	}
+	return problem
 }
 
 // ForeignRoom refuses a session that names a room other than its own.
