@@ -62,7 +62,6 @@ type Service struct {
 	imageSize         func(context.Context, contract.RepoName, string) (contract.BoxSizeName, error)
 	approvals         *approve.Service
 	pulls             *prs.Client
-	prPoll            *prs.Poller
 	hostexec          HostexecRunner
 	hostexecTimeout   func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 	hooks             HookRunner

@@ -354,6 +354,9 @@ export type ImageFailed = { host: HostName; repo: RepoName; name: string; tag: s
 export type BoxState = "pending" | "creating" | "starting" | "ready" | "stopped" | "closing" | "deleted" | "failed" | "lost";
 export type BoxSizeName = "agent" | "small" | "medium" | "large" | "xlarge";
 export type BoxSize = { name: BoxSizeName; cpus: number; memBytes: number; pids: number; };
+export type GitHubKind = "issue" | "pr";
+export type GitHubAction = "opened" | "edited" | "commented" | "review_commented" | "reviewed" | "closed" | "reopened" | "merged" | "labeled" | "unlabeled" | "assigned" | "unassigned" | "milestoned" | "demilestoned" | "renamed" | "review_requested" | "review_request_removed" | "convert_to_draft" | "ready_for_review" | "head_ref_force_pushed" | "mentioned";
+export type GitHubItem = { repo: RepoName; number: number; kind: GitHubKind; action: GitHubAction; actor: string; author?: string; url: string; detail?: string; text?: string; outside: boolean; };
 export type GoalState = "active" | "done" | "dropped";
 export type GoalItemState = "open" | "done" | "dropped";
 export type GoalItem = { number: number; text: string; state: GoalItemState; };
@@ -415,8 +418,7 @@ export type IssueTrackRequest = { repo?: RepoName; number: number; room?: RoomID
 export type IssueTrackResponse = { issue: IssueSummary; };
 export type IssueUntrackRequest = { repo?: RepoName; number: number; };
 export type IssueUntrackResponse = { };
-export type MetaChange = { title?: string; labelsAdded?: Array<string> | null; labelsRemoved?: Array<string> | null; assigned?: Array<string> | null; unassigned?: Array<string> | null; milestone?: string; milestoneRemoved?: boolean; bodyEdited?: boolean; reopened?: boolean; draft?: boolean; ready?: boolean; reviewersAdded?: Array<string> | null; reviewersRemoved?: Array<string> | null; };
-export type IssueChange = { issue: IssueSummary; kinds?: Array<PrChangeKind> | null; outside: boolean; comments?: Array<PrComment> | null; moreComments?: number; meta?: MetaChange | null; };
+export type IssueChange = { issue: IssueSummary; kinds?: Array<PrChangeKind> | null; outside: boolean; comments?: Array<PrComment> | null; moreComments?: number; actions?: Array<GitHubItem> | null; };
 export type IssueChanged = { session: SessionID; changes: Array<IssueChange> | null; };
 export type IssueClosedEvent = { repo: RepoName; number: number; session: SessionID; url: string; };
 export type OpKind = string;
@@ -459,7 +461,7 @@ export type PrTrackResponse = { pr: PrSummary; };
 export type PrUntrackRequest = { repo?: RepoName; number: number; };
 export type PrUntrackResponse = { };
 export type PrComment = { author: string; body: string; url: string; outside: boolean; };
-export type PrChange = { pr: PrSummary; kinds?: Array<PrChangeKind> | null; failedChecks?: Array<string> | null; outside: boolean; comments?: Array<PrComment> | null; moreComments?: number; meta?: MetaChange | null; };
+export type PrChange = { pr: PrSummary; kinds?: Array<PrChangeKind> | null; failedChecks?: Array<string> | null; outside: boolean; comments?: Array<PrComment> | null; moreComments?: number; actions?: Array<GitHubItem> | null; };
 export type PrChanged = { session: SessionID; changes: Array<PrChange> | null; issues?: Array<IssueChange> | null; };
 export type PrMergedEvent = { repo: RepoName; number: number; session: SessionID; url: string; };
 export type PrClosedEvent = { repo: RepoName; number: number; session: SessionID; url: string; };
@@ -551,6 +553,7 @@ export type EventBody =
   | { type: "computer.changed"; body: ComputerChanged }
   | { type: "connect.connector"; body: ConnectConnector }
   | { type: "conversation.read"; body: ConversationRead }
+  | { type: "github.item"; body: GitHubItem }
   | { type: "goal.ended"; body: GoalEnded }
   | { type: "goal.item_changed"; body: GoalItemChanged }
   | { type: "goal.set"; body: GoalSet }

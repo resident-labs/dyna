@@ -14,29 +14,29 @@ import (
 	"github.com/resident-labs/dyna/room"
 )
 
-// SetPRTracking connects the GitHub reader and the poll.
-func (s *Service) SetPRTracking(pulls *prs.Client, poll *prs.Poller) {
-	s.pulls = pulls
-	s.prPoll = poll
-}
+// SetPRTracking connects the GitHub reader.
+func (s *Service) SetPRTracking(pulls *prs.Client) { s.pulls = pulls }
 
-func (s *Service) resetPRPoll(repo contract.RepoName) {
-	if s.prPoll != nil {
-		s.prPoll.Reset(repo)
+// textWriter names who the free text on an item came from, if that is anyone but the owner's account. An item by the owner's
+// account can still hold an outside login's edit.
+func textWriter(author, viewer string, meta store.ItemMeta) string {
+	if author != viewer {
+		return author
 	}
+	return meta.EditedBy
 }
 
 // prFor returns a PR for this caller. A title by anyone but the owner's account reaches a session wrapped (decision 13).
-// A PR with no author yet came from pr.open and no poll has read it, so its title is the session's own.
+// A PR with no author yet came from pr.open and no pass has read it, so its title is the session's own.
 func prFor(caller contract.Principal, p store.TrackedPR, viewer string) contract.PrSummary {
 	summary := p.PrSummary
-	if caller.Kind == contract.PrincipalSession && summary.Author != "" && summary.Author != viewer {
-		summary.Title = room.WrapExternal(summary.Author, summary.Title)
+	if writer := textWriter(summary.Author, viewer, p.Meta); caller.Kind == contract.PrincipalSession && summary.Author != "" && writer != "" {
+		summary.Title = room.WrapExternal(writer, summary.Title)
 	}
 	return summary
 }
 
-// prViewer is the login that counts as the owner's: the one the poll last saw. Before any poll nobody counts, so every title is wrapped.
+// prViewer is the login that counts as the owner's: the one the poll last saw. Before any pass nobody counts, so every title is wrapped.
 func (s *Service) prViewer() string {
 	if s.pulls == nil {
 		return ""
@@ -200,11 +200,10 @@ func (s *Service) PrTrack(ctx context.Context, caller contract.Principal, req co
 			return contract.PrTrackResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "neither repository of this pull request is in your room; the owner can track it for you"}
 		}
 	}
-	row := store.TrackedPR{HeadRepo: pull.HeadRepo, PrSummary: contract.PrSummary{Repo: pull.Repo, Number: req.Number, URL: pull.URL, Title: pull.Title, Author: pull.Author, Session: owner.ID, Draft: pull.Draft, State: pull.State, Head: pull.Head}}
+	row := store.TrackedPR{HeadRepo: pull.HeadRepo, Meta: pull.Meta, PrSummary: contract.PrSummary{Repo: pull.Repo, Number: req.Number, URL: pull.URL, Title: pull.Title, Author: pull.Author, Session: owner.ID, Draft: pull.Draft, State: pull.State, Head: pull.Head}}
 	if err := s.store.TrackPR(ctx, row); err != nil {
 		return contract.PrTrackResponse{}, failure(err)
 	}
-	s.resetPRPoll(pull.Repo)
 	stored, e := s.trackedPR(ctx, caller, pull.Repo, req.Number)
 	if e != nil {
 		return contract.PrTrackResponse{}, e
