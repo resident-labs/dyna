@@ -30,6 +30,13 @@ test("PRs and issues link to GitHub, naming the repo once when they share one", 
   assert.deepEqual(issues.links?.map(link => [link.label, link.href]), [["r#8", "https://github.com/o/r/issues/8"], ["s#9", "https://github.com/o/s/issues/9"]]);
 });
 
+test("a child links to its session, and one it cannot find stays text", () => {
+  const owes = (id: string): Responsibility => ({ kind: "child", group: "owes_work", id });
+  const href = (name: string) => name === "lead" ? "/r/room/s/ses_lead" : undefined;
+  assert.deepEqual(holdRows([owes("lead")], href).map(row => [row.text, row.links]), [["1 child session", [{ label: "lead", href: "/r/room/s/ses_lead", title: "lead", internal: true }]]]);
+  assert.deepEqual(holdRows([owes("lead"), owes("gone")], href).map(row => [row.text, row.links]), [["2 child sessions: lead, gone", undefined]]);
+});
+
 test("a kind with a blocked item says so", () => {
   const rows = holdRows([{ kind: "question", group: "owes_work", id: "q1" }, { kind: "question", group: "owes_work", id: "q2", blocked: true }]);
   assert.deepEqual(rows.map(row => [row.text, row.blocked]), [["2 questions: q1, q2", true]]);
