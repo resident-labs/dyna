@@ -433,7 +433,7 @@ func (s *Store) Session(ctx context.Context, id contract.SessionID) (Session, er
 	return session, err
 }
 
-// RootSession names an open room root and its room. It returns sql.ErrNoRows for any other session.
+// RootSession names an open room root and its room. It returns ErrNotFound for any other session.
 func (s *Store) RootSession(ctx context.Context, id contract.SessionID) (string, contract.RoomName, error) {
 	var name string
 	var room contract.RoomName
