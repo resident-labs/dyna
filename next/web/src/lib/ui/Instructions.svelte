@@ -38,7 +38,7 @@
   let savedLabel = $derived(savedAt ? saved(savedAt, saver) : "Not saved yet");
   let reviewable = $derived(changed.length > 0 || !!other);
   let reviewing = $derived(mobile === "changes" && reviewable);
-  const saved = (at: string, by?: Saver) => ["Saved", savedBy(by), relative(at)].filter(Boolean).join(" ");
+  function saved(at: string, by?: Saver) { return ["Saved", savedBy(by), relative(at)].filter(Boolean).join(" "); }
   function relative(value: string) {
     const minutes = Math.floor((Date.now() - new Date(value).getTime()) / 60000);
     if (minutes < 1) return "just now";
