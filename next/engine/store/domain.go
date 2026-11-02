@@ -433,6 +433,14 @@ func (s *Store) Session(ctx context.Context, id contract.SessionID) (Session, er
 	return session, err
 }
 
+// RootSession names an open room root and its room. It returns ErrNotFound for any other session.
+func (s *Store) RootSession(ctx context.Context, id contract.SessionID) (string, contract.RoomName, error) {
+	var name string
+	var room contract.RoomName
+	err := s.Read().QueryRowContext(ctx, "SELECT s.name,r.name FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=? AND s.parent IS NULL AND s.closed_at IS NULL", id).Scan(&name, &room)
+	return name, room, err
+}
+
 func (s *Store) RoomByName(ctx context.Context, name contract.RoomName) (contract.RoomID, error) {
 	var id contract.RoomID
 	err := s.Read().QueryRowContext(ctx, "SELECT id FROM rooms WHERE name=? AND state='open'", name).Scan(&id)
