@@ -35,6 +35,7 @@ type Session struct {
 	activityOrder uint64
 	channel       *Channel
 	stale         bool
+	refresh       string
 	computer      *computerState
 	shell         *shellWatch
 	terminals     int
