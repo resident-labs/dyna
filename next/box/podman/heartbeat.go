@@ -41,10 +41,19 @@ func parseDisk(out []byte) (bytes, used int64) {
 	return 0, 0
 }
 
-// Heartbeat reports load on each good tick and reports unreachable after three misses.
+// heartbeatProbe bounds one probe. It includes the wait for the host's gate, and a host under heavy load can take many
+// seconds to start a shell, so it is generous.
+const heartbeatProbe = 20 * time.Second
+
+// masterCheck bounds the check that the SSH master is alive. The check only asks the local master process.
+const masterCheck = 5 * time.Second
+
+// Heartbeat reports load on each good tick and reports unreachable after three misses in a row.
+// A probe that fails while the SSH master is alive is not a miss: the master's keepalives still get answers, so the host is up,
+// only too busy to run the probe in time. A host that is really gone stops answering them, and the master ends.
 // Each good probe also reads the dyna budget slices and calls onPressure once per episode. The caller owns the ticks.
 func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box.Layout, report func(reachable bool, load Load), onPressure func(slice string, kind contract.PressureKind)) {
-	misses := 0
+	misses, busy := 0, false
 	seen := make(map[string]*slicePressure)
 	var prevTime time.Time
 	var prevCPU int64
@@ -54,17 +63,28 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box
 		case <-ctx.Done():
 			return
 		case now := <-ticks:
-			probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			probeCtx, cancel := context.WithTimeout(ctx, heartbeatProbe)
 			out, err := h.runUnbounded(probeCtx, nil, "bash", "-c", heartbeatScript, "dyna", layout.HostData, layout.HostShareMount())
 			cancel()
 			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				if h.answering(ctx) {
+					if !busy {
+						log.Printf("host %s: heartbeat probe failed, but its SSH master is alive: %v", h.destination, err)
+					}
+					busy, misses = true, 0
+					continue
+				}
+				busy = false
 				misses++
 				if misses >= 3 {
 					report(false, load)
 				}
 				continue
 			}
-			misses = 0
+			misses, busy = 0, false
 			load.DiskBytes, load.DiskUsed = parseDisk(out)
 			load.ShareUp = false
 			for _, line := range strings.Split(string(out), "\n") {
@@ -91,4 +111,12 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box
 			observeSlices(seen, events, now, onPressure)
 		}
 	}
+}
+
+// answering reports whether the SSH master is alive. It sends a keepalive every 5 s and ends after 15 s without an answer,
+// so a live master means the host answered within that time.
+func (h *Host) answering(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, masterCheck)
+	defer cancel()
+	return h.control(ctx, "check") == nil
 }
