@@ -153,6 +153,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `turns` |
 | `hosts` |
 | `disk_warnings` |
+| `pools` |
 | `room_shared` |
 | `host_rooms` |
 | `repo_ci_hosts` |
@@ -232,6 +233,7 @@ Everything else belongs to no single room:
 <data>/backups/                                 local copies of the store
 <data>/archive/                                 the read-only v1 archive
 <data>/connect/                                 Connect credentials
+<data>/pools/<name>/script                      a node pool's script, which runs here and no box can reach
 <data>/cliproxy/, <data>/cliproxy/auth-v2/      the model proxy and its sign-in folder
 <data>/git/<owner>/<repo>.git                   repository mirrors
 <hostdata>/instructions/global/AGENTS.md        the global copy a box mounts
@@ -255,7 +257,7 @@ Blobs are per room. A blob's name is its hash and its bytes never change, so eac
 
 The control plane runs on an always-on host. That machine may also be a capacity host, reached over SSH like any other host (decision 14). The engine runs no boxes. One Dyna-owned SSH ControlMaster per host carries framed requests; a missing or invalid reply trailer is a transport failure.
 
-The owner registers hosts with `dyna host add <name> --ssh user@addr`, optionally restricting rooms; `dyna host limit <name>` (`host.set_limits`) later replaces that list, like `accounts.set_limits` for an account, and boxes already on the host stay there. A host becomes ready after checks for delegated cgroup v2 controllers, rootless Podman 5 or later, SSH StreamLocalForwarding, curl, git, FUSE with `user_allow_other` on any host but the engine's (5.6), free disk and memory, and owner-only administration. Podman is required: the installer installs it and registration reports a typed error when it is absent (owner, q60). Schedulable memory excludes the host floor; CPUs exclude one, with a minimum of one.
+Hosts come from two places: the owner registers one by hand, and a node pool (5.17) brings one when a box needs it. The owner registers hosts with `dyna host add <name> --ssh user@addr`, optionally restricting rooms; `dyna host limit <name>` (`host.set_limits`) later replaces that list, like `accounts.set_limits` for an account, and boxes already on the host stay there. `dyna host remove <name>` refuses while a box is on the host, a repository's CI runs there, a subscription Run is on it or a room's rule names it, and says which; otherwise it removes the row and the engine's connection and forwards. A host becomes ready after checks for delegated cgroup v2 controllers, rootless Podman 5 or later, SSH StreamLocalForwarding, curl, git, FUSE with `user_allow_other` on any host but the engine's (5.6), free disk and memory, and owner-only administration. Podman is required: the installer installs it and registration reports a typed error when it is absent (owner, q60). Schedulable memory excludes the host floor; CPUs exclude one, with a minimum of one.
 
 Admission serializes placement. Each placed box counts one quarter of its CPU and memory size until stopped, failed or deleted; lost boxes count. A stopped box counts only disk. A host must fit requests, remain below 80% measured memory and retain its disk floor after new requests. An ineligible room waits with `room-host`; other waits report their reason. `--git.name` and `--git.email` set box Git identity only when nonempty (owner, q61).
 
@@ -279,7 +281,7 @@ A disconnected box becomes lost; the engine inspects its container when the host
 
 An engine restart cuts every forward, because each SSH master dies with the engine, while containers and turns run on. The engine opens local sockets at once and starts without waiting for any host. Each host then comes back by itself, retrying with backoff until it answers: first the forwards, then the current binary, which only a starting box needs, and then image builds. A deploy's binary can take minutes on a relayed link, and no running box waits for it. A box cannot reconnect before its forward returns, so its disconnect time and hello deadline wait for that, for at most 10 minutes. A heartbeat still reports a host that is really gone. A restart that lands during all this loses nothing: the next engine does the same work from the store.
 
-The owner or an authorized ancestor can restart an open session with a failed box. Restart discards its volume, unpushed work and unacknowledged transcript bytes; it preserves the session, grants, feed and acknowledged transcript. The box returns to pending/run. Old resources may be orphaned when the host is unavailable. Closing is possible in any state; lost boxes wait for host return or removal, and unarchived work can be lost (5.9–5.10).
+The owner or an authorized ancestor can restart an open session with a failed box. Restart discards its volume, unpushed work and unacknowledged transcript bytes; it preserves the session, grants, feed and acknowledged transcript. The box returns to pending/run. Old resources may be orphaned when the host is unavailable. Closing is possible in any state; lost boxes wait for the host's return unless the owner discards them, and unarchived work can be lost (5.9–5.10).
 
 ### 5.4 Sizes and pressure
 
@@ -363,7 +365,7 @@ The transcript stream sends offset-addressed chunks and resumes from the last ac
 
 Close durably closes the subtree deepest child first; move a child first to keep it running. Nothing a session holds refuses a close: the owner and its ancestors can always close it, and its list (7.4) says what happens. Root alone cannot close. Stop the harness and jobs, then archive HEAD and the dirty tree, including unignored untracked files, to `refs/dyna/archive/<session>`, without changing the branch or index. Untracked files over 50 MiB stay out, and a notice tells the parent how many, their size and the first few paths. Skip a clean tree whose HEAD is remote. Remove box resources and emit deleted and `session.closed`.
 
-A dormant box starts for archive without admission. Archive or removal failure leaves it closing for retry; a failed archive retries every 10 minutes, and so does a box that keeps failing to start or that started without connecting, which shows a reason rather than looking like a running close. After five failed archive reports, each bounded to 15 minutes in the box, retries stop (`hold`): the box stops and keeps its volume, the session stays closing, and one notice wakes the parent with the last failure and how to finish. `dyna session close` on a held session, or on any ancestor, retries the archive; a session held under a closing parent moves to its nearest open ancestor, so it holds up no other close. Disk eviction closes the same way, so a box is removed only after its ref is verified. A clean tree already on the remote needs no disk to skip its archive. The engine cannot see from outside whether other work is pushed, so it never discards unasked. Only owner `dyna session close --discard` can delete a box without an archive, when it cannot start or its archive keeps failing. Archive refs expire after 14 days; `dyna session restore <session>` starts a new box from one.
+A dormant box starts for archive without admission. Archive or removal failure leaves it closing for retry; a failed archive retries every 10 minutes, and so does a box that keeps failing to start or that started without connecting, which shows a reason rather than looking like a running close. After five failed archive reports, each bounded to 15 minutes in the box, retries stop (`hold`): the box stops and keeps its volume, the session stays closing, and one notice wakes the parent with the last failure and how to finish. `dyna session close` on a held session, or on any ancestor, retries the archive; a session held under a closing parent moves to its nearest open ancestor, so it holds up no other close. Disk eviction closes the same way, so a box is removed only after its ref is verified. A clean tree already on the remote needs no disk to skip its archive. The engine cannot see from outside whether other work is pushed, so it never discards unasked. Only owner `dyna session close --discard` can delete a box without an archive, when it cannot start or its archive keeps failing. On a host that is not ready it does so without waiting for the host, as a room delete does, and the host removes the box if it returns. Archive refs expire after 14 days; `dyna session restore <session>` starts a new box from one.
 
 **Room delete.** Only the owner deletes a room: `dyna room delete ROOM --discard`. The flag is the confirmation, as for `session close`, and `room.delete` refuses a request without it. Deleting a room never widens access. An empty account or host limit means every room, so the delete refuses with `room_limited`, naming each account and host with no other open room, until the owner changes those limits with `accounts.set_limits` or `host.set_limits`. A limit that also covers another open room just loses this one. One transaction makes this check and sets the room to `deleting`, so a concurrent limit change cannot slip past, and from then on no account or host limit can name the room. The same transaction starts every open session on the close path with discard, stops host commands, and makes pending operations and archive refs due. From then on the room refuses new sessions, posts, uploads, instruction saves and transcript chunks, mentions cannot name it, no box in it can wake, and a second delete gets a conflict that carries the reason, if any, the first one is held.
 
@@ -375,7 +377,7 @@ Accounts and hosts survive a room delete with their links to the room dropped. A
 
 ### 5.10 Host failure and relocation
 
-Three missed 10-second heartbeats make a host unreachable and its ready boxes lost. Lost boxes wait for that host; they never start on another (owner, r22). On return, running containers await agent reconnection, exited containers stop, and missing containers fail. Removing a host fails its boxes and loses unpushed work. Host drain is not built.
+Three missed 10-second heartbeats make a host unreachable and its ready boxes lost. Lost boxes wait for that host; they never start on another (owner, r22). On return, running containers await agent reconnection, exited containers stop, and missing containers fail. A host with a box on it cannot be removed, and no box can move to another host, so a machine that is gone for good ends with the owner discarding its sessions. Host drain is not built.
 
 Relocation is manual (r22). Stop the old engine and keep it stopped. Copy a fresh SQLite backup and the remaining data, including credentials and Connect secrets, over SSH. Verify integrity, start the new engine and restore forwards. Boxes keep running and buffer. Never use daily backups for relocation. Delete the transfer copy. M3 provides `docs/relocate.md`.
 
@@ -464,6 +466,28 @@ The pod always names `pasta`, whatever a host's `containers.conf` says. So a sid
 **Lifecycle.** Sidecars start in `depends_on` order, each once the one before is up and, with a healthcheck, passing. Dyna runs that check itself, for at most two minutes, so there are no Podman timers. The box starts last, so it never says hello before they are ready. Sidecars stop with the box and follow its dormancy. A box that is closing starts without them, so a broken sidecar cannot hold up an archive.
 
 A start compares the stack with the one on the host, which covers each sidecar's image and settings. If either that or the box's image changed, the whole pod is replaced, volumes kept, and the session is told once. Compose volumes are named after their box and go with it, and with a restart. They sit in the same Podman store as the box volume, so the host's disk floor sees them and the session's disk request covers them, with no hard quota (5.5). A new image is pulled once and warmed like a box image. Build-ahead covers both, but image pruning only covers Dyna's own tags, so a pulled image stays on the host until removed by hand. A sidecar that dies while the box runs is not restarted until the next start.
+
+### 5.17 Node pools
+
+Dyna decides when a node is needed, and a small script knows how to get one, so Boat, EC2 or anything else works and Dyna never knows which. The script answers `create NAME SIZE`, which prints `{"ssh": "user@host:port"}`, `destroy NAME`, and `list`, which prints a JSON list of the names it still has. It lives at `<data>/pools/<name>/script` and runs on the engine host as the owner's user, in that folder, with a timeout and a bare environment. Stdout is parsed, and stderr goes to the log and the failure notice. No box can reach it.
+
+```sh
+dyna pool add boats --script ./boat-pool.sh --per-session --max 6
+dyna pool list
+dyna pool remove boats
+dyna room hosts horizon --only boats
+```
+
+A pool is a name, a script, `max`, `per_session` and `idle`. A node is an ordinary row in `hosts` with `pool` set, and `box` for the one box a per-session node serves, so the host check, heartbeats, the shared folder, images, admission and the disk rules work unchanged. `dyna room hosts ROOM --only POOL[,HOST...]`, held in `rooms.only_hosts`, restricts where a room's new boxes go; `--clear` removes the rule. It names at most one pool, and a box already placed stays where it is. A shared node serves only rooms whose rule names its pool, and a per-session node serves only its box. The owner adds a pool directly. A session's `pool add` or `room hosts` waits for the owner as `op.requested`, because it runs on the engine host and costs money, and the card shows the script. Scripts get no secrets from Dyna.
+
+One step beside the reconciler moves each node along, and the row says where it is, so a restart carries on:
+
+- **Grow.** A new box waits with `pool-node` when its room's rule names a pool and nothing can take it. Below `max`, counting nodes being created, the step generates a name, records a `provisioning` row, runs `create` and then the host check and setup. The row comes first, so a restart cannot lose count: it finds a `provisioning` row that no step holds, runs `destroy` once and removes it. With `--per-session` a node serves exactly one box. A shared pool adds one node at a time, because the first may take every box that waits. A node too small for the box it came for is a failure.
+- **Failure.** A failed create or host check runs `destroy` once and removes the row. Boxes wait with `pool-failed`, `dyna pool list` shows the problem, and the pool backs off from a minute, doubling to an hour. The first failure of a spell posts one `notice.posted` in the box's room.
+- **Shrink.** A per-session node goes when its box is gone, and a shared one after it has held no box for `idle`, 30 minutes by default. Closing it to admission and checking that no box is on it are one write, so a node is destroyed only after its box is deleted. It stays `draining` until `destroy` works, so `max` never loses count of a machine. A dormant session keeps its node, which costs money until the session closes. The idle clock is in memory, so a restart starts it again.
+- **Audit.** Every 10 minutes the step runs `list`. A name with no row is one notice in a room that names the pool, or else the first open room, and it is never destroyed. A node the script no longer lists is marked unreachable, the lost-host path takes it from there, and a heartbeat that answers brings it back.
+
+A subscription Run follows its room's rule but never uses a node, so a room limited to a pool alone has nowhere to run them.
 
 ## 6. Host exec
 
@@ -637,7 +661,7 @@ Each `contract/tools/` toolkit registers one area tool with a flat `action` enum
 |---|---|---|---|
 | `post` | send, update_visual | `post` | 1 |
 | `session` | start, list, responsibilities, stop, close, restart, refresh, set_profile, move, compose_list | `session.*`, `compose.list`; profiles are in the `dyna_profiles` section | 1 |
-| `room` | log, repos, pause | `events.list`, `room.repos`, `room.pause` | 1 |
+| `room` | log, repos, pause, hosts | `events.list`, `room.repos`, `room.pause`, `room.hosts` | 1 |
 | `op` | withdraw | `op.withdraw` (own pending ones; they are in `dyna_requests`); deciding is the owner's (3.5 classes) | 1 |
 | `hostexec` | run, request_grant | `hostexec.run`, `op.submit` with `hostexec.grant` | 1 |
 | `pr` | open, list, status, track, untrack | `pr.open`, `pr.list`, `pr.status`, `pr.track`, `pr.untrack`; approval is deferred (7.6) | 1, 2 |
@@ -652,6 +676,7 @@ Each `contract/tools/` toolkit registers one area tool with a flat `action` enum
 | `skill` | save, list, remove | `skill.*` | 2 |
 | `package` | add, list, remove | `package.*` | 2 |
 | `mcp` | add, list, remove | `mcp.*` | 2 |
+| `pool` | add, list | `pool.add`, `pool.list`; `pool.remove` is the owner's | 2 |
 
 Every session initially declares all Dyna tools and four shell tools, with `codemode` active (`--tools +codemode`; `codemode.mode` stays `on`, so declared tools stay direct and scripts can call them) and without `tool_search`. Pi waits for direct servers before the first prompt. Maximum-depth starts fail with a typed refusal. Dyna calls use the MCP route; the box resolves names and actions, returning `unknown_action` with valid names. The handler strictly decodes arguments once and returns its typed error unchanged. Room MCP servers use codemode exposure; owner-only methods stay in CLI and web. `session.restart` requires tree access; `room.repos` allows a session its own room. The Dyna MCP timeout is 600 seconds with progress notifications; longer work returns an operation immediately and wakes the session on `op.ran`.
 

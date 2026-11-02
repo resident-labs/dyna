@@ -6,11 +6,17 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 72
+const schemaVersion = 73
 
 // LEGACY(v1-transfer): steps 42 to 63, which only upgrade stores older than schema 64. Remove after the transfer.
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	72: {
+		`CREATE TABLE pools (name TEXT PRIMARY KEY, max INTEGER NOT NULL, per_session INTEGER NOT NULL, idle_ms INTEGER NOT NULL, failures INTEGER NOT NULL DEFAULT 0, retry_at INTEGER NOT NULL DEFAULT 0, problem TEXT NOT NULL DEFAULT '', told TEXT NOT NULL DEFAULT '[]')`,
+		`ALTER TABLE hosts ADD COLUMN pool TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE hosts ADD COLUMN box TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE rooms ADD COLUMN only_hosts TEXT NOT NULL DEFAULT '[]'`,
+	},
 	71: {
 		`CREATE TABLE subscription_where (sub TEXT NOT NULL REFERENCES subscriptions(id), pos INTEGER NOT NULL, clause TEXT NOT NULL, PRIMARY KEY(sub, pos))`,
 		`CREATE TABLE subscription_queue (sub TEXT NOT NULL REFERENCES subscriptions(id), seq INTEGER NOT NULL, PRIMARY KEY(sub, seq))`,
