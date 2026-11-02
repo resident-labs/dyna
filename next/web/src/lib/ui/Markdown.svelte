@@ -1,9 +1,14 @@
 <script lang="ts" module>
+  import { createContext } from "svelte";
   import DOMPurify from "dompurify";
-  import { parse } from "../markdown.ts";
+  import { parse, renderOnce, showMentions } from "../markdown.ts";
   import { withCopyButtons } from "../codeCopy.ts";
   import { highlight } from "../highlight.ts";
+  import { hue } from "../identity.ts";
   import { paths } from "./Icon.svelte";
+  // The open room's sessions as id by name, and how a link to one opens: inside the app, like any session link.
+  export type MentionLinks = { room: string; sessions: ReadonlyMap<string, string>; open: (event: MouseEvent, href: string) => void };
+  export const [mentionLinks, setMentionLinks] = createContext<() => MentionLinks>();
   // Links in posts open in a new tab without access to this page.
   DOMPurify.addHook("afterSanitizeAttributes", node => {
     if (node instanceof HTMLAnchorElement) {
@@ -11,21 +16,9 @@
       node.rel = "noopener noreferrer";
     }
   });
-  // Markdown from any author is sanitized before it reaches the page. Parse turns each image into a link, so no img appears. Each text renders
-  // once: a row that scrolls back in, or gets a new row object when a page loads, reuses its HTML. Parsing and
-  // sanitizing cost about a millisecond a post, which was most of a scroll frame. The feed keeps at most 1,000 events,
-  // so a full cache starts over.
-  const rendered = new Map<string, string>();
-  function render(text: string): string {
-    let html = rendered.get(text);
-    if (html === undefined) {
-      if (rendered.size >= 2000) rendered.clear();
-      html = withCopyButtons(DOMPurify.sanitize(parse(text), { FORBID_TAGS: ["img"] }), paths.copy);
-      rendered.set(text, html);
-    }
-    return html;
-  }
-  // One listener covers every code block. A check confirms a successful copy in place.
+  // Markdown from any author is sanitized before it reaches the page. Parse turns each image into a link, so no img appears.
+  const render = renderOnce(text => withCopyButtons(DOMPurify.sanitize(parse(text), { FORBID_TAGS: ["img"], FORBID_ATTR: ["data-mention"] }), paths.copy));
+  // One listener covers every code block and name. A check confirms a successful copy in place.
   const resets = new WeakMap<HTMLButtonElement, ReturnType<typeof setTimeout>>();
   function flash(button: HTMLButtonElement, copied: boolean) {
     clearTimeout(resets.get(button));
@@ -36,8 +29,10 @@
       button.setAttribute("aria-label", "Copy code");
     }, 1500));
   }
-  function copyCodeBlocks(node: HTMLElement) {
+  function clicks(node: HTMLElement, links: () => MentionLinks) {
     const onClick = (event: MouseEvent) => {
+      const mention = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>("a[data-mention]") : null;
+      if (mention) { links().open(event, mention.href); return; }
       const button = event.target instanceof Element ? event.target.closest("button.code-copy") : null;
       const pre = button?.closest(".code-block")?.querySelector("pre");
       if (!(button instanceof HTMLButtonElement) || !pre) return;
@@ -52,11 +47,17 @@
 </script>
 
 <script lang="ts">
-  let { text, rhythm }: { text: string; rhythm?: "thread" } = $props();
-  let html = $derived(render(text));
+  // A file's text is not chat, so a preview turns mentions off.
+  let { text, rhythm, mentions = true }: { text: string; rhythm?: "thread"; mentions?: boolean } = $props();
+  const links = mentionLinks();
+  let parts = $derived(render(text));
+  // A text with no @name never reads the room, so a change in its sessions passes it by.
+  let html = $derived(parts.length === 1 ? parts[0] : showMentions(parts, links().room, mentions ? links().sessions : new Map()));
   let container: HTMLDivElement;
   $effect(() => {
     html;
+    // The page's CSP refuses style attributes in markup, so each name takes its hue here, before the first paint.
+    for (const name of parts.length > 1 ? container.querySelectorAll<HTMLElement>("a[data-mention]") : []) name.style.setProperty("--hue", String(hue(name.dataset.mention ?? "")));
     const blocks = container.querySelectorAll<HTMLElement>("pre code[class*='language-']");
     for (const block of blocks) {
       const language = [...block.classList].find(name => name.startsWith("language-"))?.slice(9) ?? "";
@@ -68,7 +69,7 @@
   });
 </script>
 
-<div class="markdown" class:thread={rhythm === "thread"} bind:this={container} use:copyCodeBlocks>{@html html}</div>
+<div class="markdown" class:thread={rhythm === "thread"} bind:this={container} use:clicks={links}>{@html html}</div>
 
 <style>
   .markdown { overflow-wrap: anywhere; line-height: 1.45; }
@@ -105,4 +106,8 @@
   .markdown :global(code) { font: 13px var(--mono); font-variant-ligatures: none; }
   .markdown :global(blockquote) { padding-left: 10px; border-left: 2px solid var(--line); color: var(--muted); }
   .markdown :global(a) { color: var(--focus); }
+  /* A name in the text, as in Discord: its session's color on a soft tint. It stays inline, so it wraps with the text and never changes a line's height. */
+  .markdown :global(a[data-mention]) { padding: 0 2px; border-radius: 6px; background: oklch(var(--id-face) var(--hue) / var(--id-alpha)); color: oklch(var(--id-name) var(--hue)); font-weight: 600; text-decoration: none; box-decoration-break: clone; }
+  .markdown :global(a[data-mention]:focus-visible) { outline: 2px solid var(--focus); outline-offset: 0; }
+  @media (hover: hover) { .markdown :global(a[data-mention]:hover) { background: oklch(var(--id-face) var(--hue) / calc(var(--id-alpha) * 2)); } }
 </style>
