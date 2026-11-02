@@ -1284,9 +1284,8 @@ func (b *Boxes) StopHostexec(ctx context.Context, host contract.HostName, scope 
 	return r.StopHostexec(ctx, scope)
 }
 
-// LEGACY(v1-transfer): the unused old-slice argument here and in the adapter, for old nested parent slices. Remove after the transfer.
-// Recreate replaces a container without touching its volume or a legacy parent slice.
-func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image, _ string) error {
+// Recreate replaces a container without touching its volume.
+func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image string) error {
 	steps := box.NewStepLog("box " + string(spec.Box))
 	if err := b.restoreHost(ctx, spec.Host); err != nil {
 		return err

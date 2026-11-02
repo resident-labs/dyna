@@ -39,7 +39,7 @@ func (fakeBoxes) TerminalArgv(context.Context, contract.HostName, contract.BoxID
 	return []string{"sh"}, nil
 }
 
-func (fakeBoxes) Recreate(context.Context, BoxSpec, string, string) error { return nil }
+func (fakeBoxes) Recreate(context.Context, BoxSpec, string) error { return nil }
 
 func (fakeBoxes) Create(context.Context, BoxSpec) (string, error) { return "image", nil }
 func (fakeBoxes) Remove(context.Context, contract.BoxID) error    { return nil }
@@ -1300,6 +1300,24 @@ func TestShellJobEndWakesOnceAndSteersARunningTurn(t *testing.T) {
 	}
 	if wakes != 1 || jobs != 1 {
 		t.Fatalf("wakes = %d, jobs = %d, want 1 each", wakes, jobs)
+	}
+}
+
+// LEGACY(v1-transfer): this test, a box agent from before End. Remove after the transfer.
+func TestShellJobEndFromAnAgentWithoutIt(t *testing.T) {
+	stopped := contract.ShellJobEnd{Kind: contract.ShellJobStopped}
+	for _, tt := range []struct {
+		req  contract.ShellJobEndedRequest
+		want contract.ShellJobEnd
+	}{
+		{contract.ShellJobEndedRequest{ExitCode: -1, End: &stopped}, stopped},
+		{contract.ShellJobEndedRequest{}, contract.ShellJobEnd{Kind: contract.ShellJobExited}},
+		{contract.ShellJobEndedRequest{ExitCode: 3}, contract.ShellJobEnd{Kind: contract.ShellJobExited, Code: 3}},
+		{contract.ShellJobEndedRequest{ExitCode: -1}, contract.ShellJobEnd{Kind: contract.ShellJobSignaled}},
+	} {
+		if got := shellJobEnd(tt.req); got != tt.want {
+			t.Errorf("%+v: got %+v, want %+v", tt.req, got, tt.want)
+		}
 	}
 }
 

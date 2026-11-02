@@ -163,11 +163,6 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			due = r.retryAt(failures)
 		}
 	default:
-		// LEGACY(v1-transfer): the slice != b.Slice check below, which flattens a box on an old nested parent slice. Remove after the transfer.
-		slice, err := box.SliceName(b.ID)
-		if err != nil {
-			return err
-		}
 		status, found, inspectErr := r.boxes.Inspect(ctx, b.ID)
 		image, imageErr := r.boxes.CurrentImage(ctx, b.Session, b.Host)
 		if imageErr != nil {
@@ -178,7 +173,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		} else if imageErr != nil {
 			// A box must not start on an old image: its Pi may not match the box agent, which comes from the host.
 			workErr = imageErr
-		} else if stale := image.Tag != b.Image || status.Stack != image.StackHash(); slice != b.Slice || stale || !found || status.StaleLayout {
+		} else if stale := image.Tag != b.Image || status.Stack != image.StackHash(); stale || !found || status.StaleLayout {
 			r.mu.Lock()
 			repos := r.repos
 			r.mu.Unlock()
@@ -187,7 +182,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 				sources, workErr = repos.Get(ctx, b.Session, b.Host, false)
 			}
 			if workErr == nil {
-				workErr = r.boxes.Recreate(ctx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: slice, Size: b.Size, Repos: sources, Needs: image.Needs, Stack: image.Stack}, image.Tag, b.Slice)
+				workErr = r.boxes.Recreate(ctx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources, Needs: image.Needs, Stack: image.Stack}, image.Tag)
 			}
 			if workErr == nil {
 				var notice *contract.Event
@@ -197,8 +192,8 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 					notice = &event
 				}
 				if workErr == nil {
-					workErr = r.store.SetRecreated(ctx, b.ID, slice, image.Tag, notice)
-					next.Image, next.Slice = image.Tag, slice
+					workErr = r.store.SetRecreated(ctx, b.ID, image.Tag, notice)
+					next.Image = image.Tag
 				}
 			}
 		} else {

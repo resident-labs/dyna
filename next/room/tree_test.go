@@ -17,12 +17,6 @@ func TestTree(t *testing.T) {
 			t.Fatalf("leaves: %v, want %v", got, tt.want)
 		}
 	}
-	// LEGACY(v1-transfer): this block, a tree with several parentless sessions from an M1 trial store. Remove after the transfer.
-	legacy := NewTree([]Node{{ID: "first"}, {ID: "second"}})
-	parent, err := legacy.ParentFor(contract.Principal{Kind: contract.PrincipalOwner}, "")
-	if err != nil || parent != "first" || !legacy.Above("first", "second") || !legacy.HoldsGoals("second") {
-		t.Fatalf("legacy root %q: %v", parent, err)
-	}
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	a := contract.Principal{Kind: contract.PrincipalSession, Session: "a"}
 	for _, tt := range []struct {

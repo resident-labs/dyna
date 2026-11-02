@@ -74,7 +74,7 @@ test("places completed work after the last post and suppresses short quiet turns
   const start = (seq: number, seconds: number, turn: string) => at(seq, seconds, { type: "turn.started", body: { session: "l", turn, inputs: [] } });
   const end = (seq: number, seconds: number, turn: string) => at(seq, seconds, { type: "turn.ended", body: { session: "l", turn, outcome: "completed", usage } });
   const post = (seq: number, seconds: number) => at(seq, seconds, { type: "post.created", body: { text: "update", home: { kind: "feed" } } }, lead);
-  const job = at(7, 80, { type: "shell.job.ended", body: { session: "l", job: "j", exitCode: 0, tail: "" } });
+  const job = at(7, 80, { type: "shell.job.ended", body: { session: "l", job: "j", exitCode: 0, end: { kind: "exit", code: 0 }, tail: "" } });
   const rows = feedRows([start(1, 0, "a"), post(2, 10), end(3, 20, "a"),
     start(4, 30, "b"), post(5, 40), end(6, 100, "b"),
     start(8, 101, "c"), job, end(9, 110, "c")], { kind: "feed" });
@@ -236,7 +236,7 @@ test("says how long the work in a row took, from the first turn's start to the l
   const ended = (seq: number, minutes: number, turn: string) => at(seq, minutes, { type: "turn.ended", body: { session: "l", turn, outcome: "completed", usage } });
   const events = [
     at(1, 0, { type: "turn.started", body: { session: "l", turn: "t1", inputs: [] } }), ended(2, 2, "t1"),
-    at(3, 3, { type: "shell.job.ended", body: { session: "l", job: "j", exitCode: 0, tail: "" } }), ended(4, 6, "t2"),
+    at(3, 3, { type: "shell.job.ended", body: { session: "l", job: "j", exitCode: 0, end: { kind: "exit", code: 0 }, tail: "" } }), ended(4, 6, "t2"),
   ];
   assert.equal(workSummary(events, session => names[session]), "lead-web worked for 6 min · 1 job");
   assert.equal(workSummary([events[0], ended(2, 80, "t1")], session => names[session]), "lead-web worked for 1 h 20 min");

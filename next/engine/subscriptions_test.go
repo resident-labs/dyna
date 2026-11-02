@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -995,71 +994,5 @@ func TestHookPost(t *testing.T) {
 	}
 	if _, problem := s.HookPost(ctx, sub, "", contract.PostRequest{Text: "x"}); problem == nil {
 		t.Error("a machine Run posted")
-	}
-}
-
-// LEGACY(v1-transfer): this test, which pins step 63. Remove after the transfer.
-func TestMigrationGivesExistingRootsTheDefault(t *testing.T) {
-	dir := t.TempDir()
-	st, err := store.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	s := New(st, fakeBoxes{}, fakeProfiles{}, func() time.Time { return time.Unix(1000, 0) })
-	resetLifecycle(s)
-	if err := st.AddHost(ctx, box.Host{Name: "host", State: box.HostReady, CPUs: 32, MemBytes: 64 * box.GiB, DiskBytes: 100 * box.GiB, CheckedAt: s.now()}); err != nil {
-		t.Fatal(err)
-	}
-	made, problem := s.RoomCreate(ctx, ownerCaller, contract.RoomCreateRequest{Name: "room", RootProfile: "test"})
-	if problem != nil {
-		t.Fatal(problem)
-	}
-	recordNotice(t, s, ctx, made.Room)
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-	// Back to the schema before this step, as an installed store is.
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "store.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, statement := range []string{
-		"DROP TABLE pools", "ALTER TABLE hosts DROP COLUMN box", "ALTER TABLE hosts DROP COLUMN pool", "ALTER TABLE rooms DROP COLUMN only_hosts", "DROP TABLE subscription_queue", "DROP TABLE subscription_where", "DROP TABLE github_feeds", "DROP TABLE local_usage", "DROP TABLE issue_owners", "ALTER TABLE pr_owners DROP COLUMN meta_wake_at", "ALTER TABLE pr_owners DROP COLUMN meta", "DROP TABLE workflow_steps", "DROP TABLE workflow_runs", "DROP TABLE subscription_runs", "DROP TABLE subscription_files", "DROP TABLE subscription_args", "DROP TABLE subscription_events", "DROP TABLE subscriptions",
-		"ALTER TABLE repos DROP COLUMN main_head", "DELETE FROM meta WHERE key='subscription_seq'", "ALTER TABLE questions DROP COLUMN blocked", "ALTER TABLE questions DROP COLUMN meanwhile", "UPDATE meta SET value='63' WHERE key='schema_version'",
-	} {
-		if _, err := db.Exec(statement); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	st, err = store.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	s = New(st, fakeBoxes{}, fakeProfiles{}, s.now)
-	resetLifecycle(s)
-	info := listed(t, s, ctx, made.Room, store.DefaultSubscriptionID(made.Room))
-	if !info.Default || len(info.Subscription.On) == 0 {
-		t.Fatalf("migrated default: %+v", info)
-	}
-	// The notice from before the step fires nothing; a new one does.
-	var root contract.SessionID
-	if err := st.Read().QueryRowContext(ctx, "SELECT id FROM sessions WHERE room=?", made.Room).Scan(&root); err != nil {
-		t.Fatal(err)
-	}
-	before := pendingWakes(t, s, ctx, root)
-	pass(t, s, ctx)
-	if got := pendingWakes(t, s, ctx, root); got != before {
-		t.Fatalf("history replayed: %d then %d", before, got)
-	}
-	recordNotice(t, s, ctx, made.Room)
-	pass(t, s, ctx)
-	if got := pendingWakes(t, s, ctx, root); got != before+1 {
-		t.Fatalf("after the step: %d then %d", before, got)
 	}
 }

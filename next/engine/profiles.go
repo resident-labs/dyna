@@ -45,20 +45,11 @@ func LoadProfiles(path string) (*ProfileConfig, error) {
 		return nil, err
 	}
 	defer file.Close()
-	// LEGACY(v1-transfer): the AgentSurface field, the old agentSurface switch in profiles.json. Remove after the transfer.
-	// Legacy shim: accept the former evaluation switch until the upgrade floor permits its removal.
-	var decoded map[contract.ProfileName]struct {
-		profile
-		AgentSurface string `json:"agentSurface"`
-	}
+	var profiles map[contract.ProfileName]profile
 	decoder := json.NewDecoder(file)
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&decoded); err != nil {
+	if err := decoder.Decode(&profiles); err != nil {
 		return nil, err
-	}
-	profiles := make(map[contract.ProfileName]profile, len(decoded))
-	for name, entry := range decoded {
-		profiles[name] = entry.profile
 	}
 	if len(profiles) == 0 {
 		return nil, fmt.Errorf("profiles: no profiles")
