@@ -14,7 +14,7 @@ import (
 )
 
 // dataSegments are the names of Dyna's data folders. box/layout.go alone joins them.
-var dataSegments = []string{"rooms", "files", "transcripts", "instructions", "shared", "git", "cache", "bin", "sock", "store.db", "backups", "connect", "cliproxy", "AGENTS.md", "AGENTS.saved.json", "compose", "skills", "addons.json", "pools"}
+var dataSegments = []string{"rooms", "files", "transcripts", "instructions", "shared", "git", "cache", "bin", "sock", "store.db", "backups", "connect", "cliproxy", "AGENTS.md", "compose", "skills", "addons.json", "pools"}
 
 // layoutOwners holds the files that may name these segments: Layout itself.
 var layoutOwners = map[string]bool{"box/layout.go": true}

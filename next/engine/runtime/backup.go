@@ -101,7 +101,7 @@ func (b *backupLoop) copy(ctx context.Context, path string) error {
 		return err
 	}
 	defer rootDir.Close()
-	for _, root := range []string{b.layout.Instructions(""), b.layout.InstructionsSaver(""), b.layout.Compose(""), b.layout.Addons(""), b.layout.Skills(""), b.layout.Rooms(), b.layout.Connect(), b.layout.ProxyAuth(), b.layout.Pools()} {
+	for _, root := range []string{b.layout.Instructions(""), b.layout.Compose(""), b.layout.Addons(""), b.layout.Skills(""), b.layout.Rooms(), b.layout.Connect(), b.layout.ProxyAuth(), b.layout.Pools()} {
 		err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 			if errors.Is(walkErr, os.ErrNotExist) {
 				return nil
