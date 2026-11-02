@@ -62,6 +62,31 @@ A failed call throws an `Error` with `.step` and `.reason`. An uncaught throw en
 
 `session stop` on the crew stops the run. Finished steps stay, running ones fail with `the run ended first`, the end reaches the starter as a reply, and the crew closes itself.
 
+## Shaping a run
+
+A run is worth its cost when it covers more than one context holds, checks its own findings, or takes several independent angles before committing. A small task is cheaper done directly.
+
+`pipeline()` is the default for work in stages: each item moves to its next stage as soon as it is ready, so wall time is the slowest single chain, not the sum of each stage's slowest. A barrier, `await parallel(...)` between stages, earns its wait only when a stage needs every earlier result at once: deduplicating across all findings, stopping early when there are none, or comparing items with each other. Flattening, mapping or filtering happens inside a stage and needs no barrier.
+
+```js
+const reviewed = await pipeline(groups,
+  g => agent(`Write ${g.id}`, { worktree: true, label: `write ${g.id}`, schema: WRITE }),
+  w => w.files.length ? agent(`Review commit ${w.commit} on ${w.branch}`, { label: `review ${w.step}`, schema: REVIEW }) : { empty: true })
+```
+
+Patterns, which compose:
+
+- **Write, review, fix:** a writer in a worktree, a reviewer whose prompt names the commit, and a fixer that gets the findings and the branch. The fixer's result carries its own commit, and `merge()` takes that. A fixed round count bounds the loop.
+- **Adversarial verify:** several workers each try to refute one finding, and the finding survives when most fail to. This keeps a plausible but wrong finding out.
+- **Different lenses:** when a finding can fail in more than one way, each verifier takes one lens, such as correctness, security, or whether it reproduces. Different lenses catch what repeating one lens misses.
+- **Judge panel:** several independent attempts from different starting points, scored by separate judges, then built from the best with the runners-up's good ideas. It suits a wide solution space.
+- **Loop until dry:** finders run in rounds until a set number of rounds in a row turn up nothing new, deduplicated against everything seen so far, not only against what passed. A fixed count misses the tail.
+- **Several search methods:** workers each search a different way, by file, by content, by name or by history, because each misses what the others find.
+- **Completeness check:** a last worker asks what is missing, such as an unread source, an unrun method or an unchecked claim, and its answer becomes the next round.
+- **No silent caps:** a run that samples or takes the top N says what it left out with `log()` and in its result, so a partial pass does not read as a full one.
+
+Scale follows the ask: a quick check takes a few workers and one verifier each, and a thorough audit takes more finders, three to five verifiers and a closing synthesis. Profile limits bound how many run at once. A stronger profile for reviewing and a cheaper one for writing is a common split.
+
 ## Gotchas
 
 - A worker that skips everything still reports done, because it ends with text. Reading `files.length` or a schema field before moving on catches it.
