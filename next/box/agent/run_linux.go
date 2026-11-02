@@ -162,6 +162,10 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// The session's Pi and every crew worker take the same servers. An owner's own server named github comes first.
+	if _, taken := addedServers["github"]; hello.GitHub && !taken {
+		addedServers["github"] = pi.GitHubServer()
+	}
 	steps.Done("add-ons")
 	notice := func(text string) {
 		if err := client.Notice(ctx, text); err != nil {
