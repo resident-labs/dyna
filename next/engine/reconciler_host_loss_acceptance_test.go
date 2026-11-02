@@ -31,7 +31,8 @@ func (disconnectedView) SessionClosed(contract.SessionID)     {}
 func (disconnectedView) CompactBeforeStop(context.Context, contract.SessionID) bool {
 	return false
 }
-func (disconnectedView) Stale(contract.SessionID) bool { return false }
+func (disconnectedView) Stale(contract.SessionID) bool                  { return false }
+func (disconnectedView) BoxStopped(context.Context, contract.SessionID) {}
 
 func TestReconcilerRecoversLostHost(t *testing.T) {
 	for _, tc := range []struct {

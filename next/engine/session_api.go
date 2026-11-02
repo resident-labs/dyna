@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"log"
 	"slices"
 	"time"
 
@@ -365,21 +366,32 @@ func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal,
 }
 
 // SessionRefresh marks running boxes stale, so the rule for an old binary applies to them whatever they run. A box that is not
-// running needs nothing, since it starts fresh. The mark lasts until a new box agent says hello.
+// running needs nothing, since it starts fresh. The mark lasts until a new box agent says hello. A session may mark itself by
+// name, and it then comes back on its own (BoxStopped), since it might otherwise wait for a message that never comes.
 func (s *Service) SessionRefresh(ctx context.Context, caller contract.Principal, req contract.SessionRefreshRequest) (contract.SessionRefreshResponse, *contract.Error) {
 	response := contract.SessionRefreshResponse{Marked: []contract.SessionID{}}
 	if (req.Session == "") == (req.Room == "") {
 		return response, invalid("give a session or a room")
 	}
+	self := caller.Kind == contract.PrincipalSession && req.Session == caller.Session
 	roomID := req.Room
-	if req.Session != "" {
+	switch {
+	case self:
+		session, err := s.store.Session(ctx, req.Session)
+		if err != nil {
+			return response, failure(err)
+		}
+		roomID = session.Room
+	case req.Session != "":
 		session, problem := s.managedSession(ctx, caller, req.Session)
 		if problem != nil {
 			return response, problem
 		}
 		roomID = session.Room
-	} else if problem := s.roomAccess(ctx, caller, roomID); problem != nil {
-		return response, problem
+	default:
+		if problem := s.roomAccess(ctx, caller, roomID); problem != nil {
+			return response, problem
+		}
 	}
 	tree, err := s.store.RoomTree(ctx, roomID)
 	if err != nil {
@@ -393,7 +405,7 @@ func (s *Service) SessionRefresh(ctx context.Context, caller contract.Principal,
 		return response, failure(err)
 	}
 	for _, target := range running {
-		if req.Session != "" && target != req.Session || !tree.CanManage(caller, target) {
+		if req.Session != "" && target != req.Session || !self && !tree.CanManage(caller, target) {
 			continue
 		}
 		mark, err := id("refresh_", s.now())
@@ -407,7 +419,7 @@ func (s *Service) SessionRefresh(ctx context.Context, caller contract.Principal,
 			}
 			return response, problem
 		}
-		handle.MarkRefresh(mark)
+		handle.MarkRefresh(mark, self)
 		if channel := handle.Channel(); channel != nil {
 			channel.Wake()
 		}
@@ -416,6 +428,33 @@ func (s *Service) SessionRefresh(ctx context.Context, caller contract.Principal,
 	}
 	s.reconciler.Kick()
 	return response, nil
+}
+
+// BoxStopped starts a box that asked to restart itself straight back up. Its wake waits for the stop because Dispatch steers a
+// wake into an open turn, so an earlier one would be read on the old binary and leave nothing to start the box. Held past its
+// turn, the box then needs nothing different. It carries an update notice's ID, so it goes once per mark, however often the box
+// stops before it says hello, and a close does not pass it to the parent.
+func (s *Service) BoxStopped(ctx context.Context, id contract.SessionID) {
+	handle, ok := s.live.LookupSession(id)
+	if !ok {
+		return
+	}
+	mark := handle.RefreshWake()
+	if mark == "" {
+		return
+	}
+	session, err := s.store.Session(ctx, id)
+	if err != nil {
+		log.Printf("session %s: box restart: %v", id, err)
+		return
+	}
+	notice, err := s.engineEvent(session.Room, contract.SessionNotice{Session: id, Text: room.BoxRestartedNotice, ClientID: store.BoxUpdateNoticeID(session.Box, "restarted:"+mark)})
+	if err == nil {
+		err = s.store.WakeWithNotice(ctx, notice, id)
+	}
+	if err != nil {
+		log.Printf("session %s: box restart: %v", id, err)
+	}
 }
 
 // SessionSetProfile moves a session to another profile. A failed session wakes to carry its failed input with it.
