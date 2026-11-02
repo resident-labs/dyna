@@ -50,6 +50,7 @@ const jobSchema = {
 		running: { type: "boolean" },
 		status: { type: "string" },
 		exit_code: { type: "number" },
+		message_arrived: { type: "boolean" },
 		jobs: { type: "array", items: {} },
 	},
 	additionalProperties: false,
@@ -79,13 +80,15 @@ async function modelText(text) {
 	return `${cut.content}\n\n[Output cut to the last ${formatSize(cut.outputBytes)} of ${formatSize(cut.totalBytes)}. Full output: ${path} (read it with offset/limit)]`;
 }
 
-// What bash adds when a command has moved to the background.
+// What bash adds when a command has moved to the background: at its limit, or because a message arrived for the session.
 const movedNote = "The job is in the background. You can end your turn and Dyna will wake you when it completes.";
+const steppedNote =
+	"A message arrived for you, so this command moved to the background, where it keeps running. Read the message now. job output reads its new output, and Dyna will wake you when it completes.";
 
 // One job's state as a tool result. A nonzero exit is not a tool error, since grep finding nothing is one: the text says the code.
 async function jobResult(answer, moved = false) {
 	let state = `[job ${answer.job}: ${answer.status}]`;
-	if (answer.running) state = moved ? `[job ${answer.job}] ${movedNote}` : `[job ${answer.job} is running in the background]`;
+	if (answer.running) state = moved ? `[job ${answer.job}] ${answer.message_arrived ? steppedNote : movedNote}` : `[job ${answer.job} is running in the background]`;
 	const text = await modelText(`${answer.output.trimEnd()}\n${state}`.trimStart());
 	return { content: [{ type: "text", text }], details: {}, structuredContent: answer };
 }
