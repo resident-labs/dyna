@@ -132,7 +132,7 @@ func setting(host contract.HostName, runners int) contract.RepoCIHost {
 }
 
 func readyHost(name contract.HostName, memory int64) box.Host {
-	return box.Host{Name: name, State: box.HostReady, CPUs: 16, MemBytes: memory, DiskBytes: 100 * box.GiB, DiskFloor: 20 * box.GiB, CheckedAt: time.Unix(1, 0)}
+	return box.Host{Name: name, State: box.HostReady, CI: true, CPUs: 16, MemBytes: memory, DiskBytes: 100 * box.GiB, DiskFloor: 20 * box.GiB, CheckedAt: time.Unix(1, 0)}
 }
 
 func newFixture(runners int) *fixture {
