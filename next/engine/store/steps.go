@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 79
+const schemaVersion = 80
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
@@ -35,6 +35,16 @@ var steps = map[int][]string{
 		`ALTER TABLE hosts ADD COLUMN agents INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE hosts ADD COLUMN ci INTEGER NOT NULL DEFAULT 0`,
 		`UPDATE hosts SET ci=1 WHERE name IN (SELECT host FROM repo_ci_hosts)`,
+	},
+	// A workflow's runs-on picks a runner's size, and admission picks its host, so a repository's CI is on or off, with an
+	// optional bound. A repository that named hosts is on, bounded by the runners it allowed them. A pool's node serves the
+	// runners of the rooms that name its pool, as it serves their boxes.
+	79: {
+		`ALTER TABLE repos ADD COLUMN ci INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE repos ADD COLUMN ci_max INTEGER NOT NULL DEFAULT 0`,
+		`UPDATE repos SET ci=1, ci_max=(SELECT SUM(runners) FROM repo_ci_hosts WHERE repo=repos.repo) WHERE repo IN (SELECT repo FROM repo_ci_hosts)`,
+		`DROP TABLE repo_ci_hosts`,
+		`UPDATE hosts SET ci=1 WHERE pool!=''`,
 	},
 }
 

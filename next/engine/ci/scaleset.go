@@ -21,11 +21,15 @@ const defaultRunnerGroup = 1
 // organization's runner group to allow public repositories.
 type Sets struct {
 	Token string
-	// Name is the scale set's name.
-	Name string
 
 	mu   sync.Mutex
-	sets map[contract.RepoName]*set
+	sets map[namedSet]*set
+}
+
+// namedSet is a repository's scale set by its name.
+type namedSet struct {
+	repo contract.RepoName
+	name string
 }
 
 type set struct {
@@ -33,10 +37,11 @@ type set struct {
 	id     int
 }
 
-func (s *Sets) open(ctx context.Context, repo contract.RepoName) (*set, error) {
+func (s *Sets) open(ctx context.Context, repo contract.RepoName, name string) (*set, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if found := s.sets[repo]; found != nil {
+	key := namedSet{repo, name}
+	if found := s.sets[key]; found != nil {
 		return found, nil
 	}
 	client, err := scaleset.NewClientWithPersonalAccessToken(scaleset.NewClientWithPersonalAccessTokenConfig{
@@ -47,30 +52,30 @@ func (s *Sets) open(ctx context.Context, repo contract.RepoName) (*set, error) {
 	if err != nil {
 		return nil, err
 	}
-	found, err := client.GetRunnerScaleSet(ctx, defaultRunnerGroup, s.Name)
+	found, err := client.GetRunnerScaleSet(ctx, defaultRunnerGroup, name)
 	if err != nil {
 		return nil, err
 	}
 	if found == nil {
 		// Updates stay on: GitHub stops serving a runner about a month after a newer
 		// release, and a runner too old to update would stop every job.
-		found, err = client.CreateRunnerScaleSet(ctx, &scaleset.RunnerScaleSet{Name: s.Name, RunnerGroupID: defaultRunnerGroup, Labels: []scaleset.Label{{Name: s.Name}}})
+		found, err = client.CreateRunnerScaleSet(ctx, &scaleset.RunnerScaleSet{Name: name, RunnerGroupID: defaultRunnerGroup, Labels: []scaleset.Label{{Name: name}}})
 		if err != nil {
 			return nil, err
 		}
 	}
 	opened := &set{client: client, id: found.ID}
 	if s.sets == nil {
-		s.sets = make(map[contract.RepoName]*set)
+		s.sets = make(map[namedSet]*set)
 	}
-	s.sets[repo] = opened
+	s.sets[key] = opened
 	return opened, nil
 }
 
-func (s *Sets) forget(repo contract.RepoName) {
+func (s *Sets) forget(repo contract.RepoName, name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.sets, repo)
+	delete(s.sets, namedSet{repo, name})
 }
 
 type scaler struct {
@@ -91,8 +96,8 @@ func (s scaler) HandleDesiredRunnerCount(ctx context.Context, count int) (int, e
 
 // Listen holds the scale set's one message session. A second engine gets a
 // conflict here and retries, so two engines cannot serve one set.
-func (s *Sets) Listen(ctx context.Context, repo contract.RepoName, scale Scale) error {
-	opened, err := s.open(ctx, repo)
+func (s *Sets) Listen(ctx context.Context, repo contract.RepoName, name string, scale Scale) error {
+	opened, err := s.open(ctx, repo, name)
 	if err != nil {
 		return err
 	}
@@ -103,7 +108,7 @@ func (s *Sets) Listen(ctx context.Context, repo contract.RepoName, scale Scale) 
 	session, err := opened.client.MessageSessionClient(ctx, opened.id, owner)
 	if err != nil {
 		// The set may have been deleted by hand, so the next attempt looks it up again.
-		s.forget(repo)
+		s.forget(repo, name)
 		return err
 	}
 	defer session.Close(context.WithoutCancel(ctx))
@@ -112,15 +117,15 @@ func (s *Sets) Listen(ctx context.Context, repo contract.RepoName, scale Scale) 
 		return err
 	}
 	if err := poll.Run(ctx, scaler{poll, scale}); !errors.Is(err, context.Canceled) {
-		s.forget(repo)
+		s.forget(repo, name)
 		return err
 	}
 	return nil
 }
 
-// JIT generates a single-job config for one more runner in repo's scale set.
-func (s *Sets) JIT(ctx context.Context, repo contract.RepoName, name string) (int64, string, error) {
-	opened, err := s.open(ctx, repo)
+// JIT generates a single-job config for one more runner in a scale set of repo.
+func (s *Sets) JIT(ctx context.Context, repo contract.RepoName, setName, name string) (int64, string, error) {
+	opened, err := s.open(ctx, repo, setName)
 	if err != nil {
 		return 0, "", err
 	}
@@ -134,12 +139,12 @@ func (s *Sets) JIT(ctx context.Context, repo contract.RepoName, name string) (in
 	return int64(config.Runner.ID), config.EncodedJITConfig, nil
 }
 
-// Delete removes repo's scale set. A repository that never had one is done.
-func (s *Sets) Delete(ctx context.Context, repo contract.RepoName) error {
-	opened, err := s.open(ctx, repo)
+// Delete removes a scale set of repo. A repository that never had one is done.
+func (s *Sets) Delete(ctx context.Context, repo contract.RepoName, name string) error {
+	opened, err := s.open(ctx, repo, name)
 	if err != nil {
 		return err
 	}
-	s.forget(repo)
+	s.forget(repo, name)
 	return opened.client.DeleteRunnerScaleSet(ctx, opened.id)
 }

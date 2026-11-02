@@ -487,7 +487,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	var hostRooms []string
 	var admin bool
 	var addAgents, addCI string
-	add := &cobra.Command{Use: "add NAME", Long: "Add a host. With --agents on (the default) new session boxes may land on it; with --ci on (default off) the CI pool may start runners there for a repository that names it.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	add := &cobra.Command{Use: "add NAME", Long: "Add a host. With --agents on (the default) new session boxes may land on it; with --ci on (default off) the CI pool may start runners there, placed as boxes are.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		rooms := make([]contract.RoomID, len(hostRooms))
 		for i, room := range hostRooms {
 			rooms[i] = contract.RoomID(room)
@@ -512,7 +512,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	add.Flags().StringVar(&addAgents, "agents", "on", "on or off: whether new session boxes may land on this host")
 	add.Flags().StringVar(&addCI, "ci", "off", "on or off: whether the CI pool may start runners on this host")
 	var setAgents, setCI string
-	setHost := &cobra.Command{Use: "set NAME [--agents on|off] [--ci on|off]", Short: "Turn a host's agents and CI switches", Long: "Turn a host's two switches. With agents off no new session box lands on the host; its room list still says which rooms it serves while agents are on. With ci off the CI pool starts no new runner there, though a repository still names it, and runners come back when ci is on again. Both off disables the host and keeps it registered. Boxes and runners already on the host stay until they stop, and a stopped box there waits until agents are on again.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	setHost := &cobra.Command{Use: "set NAME [--agents on|off] [--ci on|off]", Short: "Turn a host's agents and CI switches", Long: "Turn a host's two switches. With agents off no new session box lands on the host; its room list still says which rooms it serves while agents are on. With ci off the CI pool starts no new runner there, and runners come back when ci is on again. Both off disables the host and keeps it registered. Boxes and runners already on the host stay until they stop, and a stopped box there waits until agents are on again.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		req := contract.HostSetRequest{Host: contract.HostName(args[0])}
 		var err error
 		if cmd.Flags().Changed("agents") {
@@ -696,25 +696,18 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		}
 		return nil
 	}}
-	var ciMode, ciSize string
-	var ciHosts []string
-	repoCI := &cobra.Command{Use: "ci REPO", Short: "Set where CI runs for a repository", Long: "--mode box serves jobs from each --host NAME=COUNT, at most COUNT runners at once. --mode github removes them at once. See next/docs/ci-runners.md.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		request := contract.RepoCISetRequest{Repo: contract.RepoName(args[0]), Mode: contract.CIMode(ciMode)}
-		for _, host := range ciHosts {
-			name, count, ok := strings.Cut(host, "=")
-			runners, err := strconv.Atoi(count)
-			if !ok || err != nil {
-				return fmt.Errorf("--host needs NAME=COUNT, got %q", host)
-			}
-			request.Hosts = append(request.Hosts, contract.RepoCIHost{Repo: request.Repo, Host: contract.HostName(name), Runners: runners, Size: contract.BoxSizeName(ciSize)})
-		}
-		_, err := getClient().RepoCISet(cmd.Context(), request)
+	var ciOn, ciOff bool
+	var ciMax int
+	repoCI := &cobra.Command{Use: "ci REPO", Short: "Turn a repository's CI runners on or off", Long: "--on serves the repository's jobs that say runs-on: dyna-small, dyna-medium, dyna-large or dyna-xlarge, each from a runner of that size, on a host with ci on that admission picks as it picks one for a box, or on a node of the room's pool. --max bounds its runners across sizes. --off removes them at once. See next/docs/ci-runners.md.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := getClient().RepoCISet(cmd.Context(), contract.RepoCISetRequest{Repo: contract.RepoName(args[0]), On: ciOn, Max: ciMax})
 		return err
 	}}
-	repoCI.Flags().StringVar(&ciMode, "mode", "", "github or box")
-	repoCI.Flags().StringSliceVar(&ciHosts, "host", nil, "Runner host as NAME=COUNT (repeatable)")
-	repoCI.Flags().StringVar(&ciSize, "size", string(contract.BoxSizeLarge), "Runner size: its CPUs, memory and disk cap")
-	_ = repoCI.MarkFlagRequired("mode") // fails only for an undefined flag
+	repoCI.Flags().BoolVar(&ciOn, "on", false, "Serve the repository's jobs from Dyna's runners")
+	repoCI.Flags().BoolVar(&ciOff, "off", false, "Stop its runners, even mid-job, and leave its jobs to GitHub-hosted runners")
+	repoCI.Flags().IntVar(&ciMax, "max", 0, "Most runners at once across sizes; none means as many as admission allows")
+	repoCI.MarkFlagsOneRequired("on", "off")
+	repoCI.MarkFlagsMutuallyExclusive("on", "off")
+	repoCI.MarkFlagsMutuallyExclusive("off", "max")
 	repo.AddCommand(addRepo, listRepos, repoCI)
 	room.AddCommand(create, deleteRoom, log, repo)
 	root.AddCommand(room)

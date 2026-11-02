@@ -69,7 +69,7 @@ jobs:
     name: next
     needs: [changes]
     if: needs.changes.outputs.next == 'true'
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -108,7 +108,7 @@ jobs:
     name: next-extras
     needs: [changes]
     if: needs.changes.outputs.next == 'true'
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -125,7 +125,7 @@ jobs:
     name: next-web
     needs: [changes]
     if: needs.changes.outputs.web == 'true'
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6

@@ -444,19 +444,12 @@ type RoomReposRequest struct {
 	Room RoomID `json:"room"`
 }
 
-// RepoCIHost keeps Runners ephemeral CI runners of Size on Host for Repo.
-type RepoCIHost struct {
-	Repo    RepoName    `json:"repo"`
-	Host    HostName    `json:"host"`
-	Runners int         `json:"runners"`
-	Size    BoxSizeName `json:"size"`
-}
-
-// RepoCISetRequest replaces a repository's CI mode and runner hosts.
+// RepoCISetRequest turns a repository's CI runners on or off. Max bounds its runners across sizes, and zero leaves the
+// number to admission.
 type RepoCISetRequest struct {
-	Repo  RepoName     `json:"repo"`
-	Mode  CIMode       `json:"mode"`
-	Hosts []RepoCIHost `json:"hosts,omitempty"`
+	Repo RepoName `json:"repo"`
+	On   bool     `json:"on"`
+	Max  int      `json:"max,omitempty"`
 }
 type RepoCISetResponse struct{}
 type RoomReposResponse struct {
