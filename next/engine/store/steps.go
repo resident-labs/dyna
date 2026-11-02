@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 77
+const schemaVersion = 78
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
@@ -26,6 +26,9 @@ var steps = map[int][]string{
 	},
 	// A script's status() lines stay on its run, and a step names the subject it is about.
 	76: {`ALTER TABLE workflow_runs ADD COLUMN status_lines TEXT NOT NULL DEFAULT '[]'`, `ALTER TABLE workflow_steps ADD COLUMN lane TEXT NOT NULL DEFAULT ''`},
+	// A post to a parent that can't receive goes up to the nearest ancestor that can, and keeps whom it was for and why. Close no
+	// longer hands inputs over, so no row names a handoff.
+	77: {`ALTER TABLE deliveries RENAME COLUMN handoff_from TO meant_for`, `ALTER TABLE deliveries ADD COLUMN meant_why TEXT NOT NULL DEFAULT ''`},
 }
 
 // upgrade applies each future numbered step in the same transaction as its version.
