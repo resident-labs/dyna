@@ -4,7 +4,7 @@
   import StatusPill from "./StatusPill.svelte";
   // The room's less frequent actions. On a phone they sit behind the header's button; elsewhere a right click on the
   // room's rail icon opens them at the pointer, and focus returns to that icon.
-  let { phone, paused, operate, admin, onpause, oninstructions, onterminal, oncomputer, onrequests, onjobs, jobFailed = false, waiting = 0 }: { phone: boolean; onrequests?: () => void; onjobs?: () => void; jobFailed?: boolean; waiting?: number; paused: boolean; operate: boolean; admin: boolean; onpause: () => void; oninstructions: () => void; onterminal?: () => void; oncomputer?: () => void } = $props();
+  let { phone, paused, operate, admin, onpause, oninstructions, onterminal, oncomputer, onrequests, onjobs, onruns, jobFailed = false, waiting = 0 }: { phone: boolean; onrequests?: () => void; onjobs?: () => void; onruns?: () => void; jobFailed?: boolean; waiting?: number; paused: boolean; operate: boolean; admin: boolean; onpause: () => void; oninstructions: () => void; onterminal?: () => void; oncomputer?: () => void } = $props();
   let open = $state(false);
   let root: HTMLDivElement;
   let button: HTMLButtonElement | undefined = $state();
@@ -51,6 +51,7 @@
     <div class="list" class:pointer={at} style:left={at && `${at.x}px`} style:top={at && `${at.y}px`} role="menu" id="room-menu" aria-label="Room menu" tabindex="-1" bind:this={list} onkeydown={move} use:atPointer={!!at}>
       {#if onrequests}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onrequests(); }}>Requests{#if waiting}<StatusPill tone="warning" label="Requests waiting" count={waiting} />{/if}</button>{/if}
       {#if onjobs}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onjobs(); }}>Jobs{#if jobFailed}<StatusPill tone="failed" label="A job failed" dot />{/if}</button>{/if}
+      {#if onruns}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onruns(); }}>Past runs</button>{/if}
       {#if onterminal}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onterminal(); }}>Terminal</button>{/if}
       {#if oncomputer}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); oncomputer(); }}>Computer</button>{/if}
       {#if admin}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); oninstructions(); }}>Instructions</button>{/if}
