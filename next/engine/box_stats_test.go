@@ -15,7 +15,7 @@ func TestBoxStatsAsksTheBox(t *testing.T) {
 	s, _, id, ctx := setup(t)
 	connectAgent(ctx, t, s, id)
 	agent := contract.Principal{Kind: contract.PrincipalSession, Session: id}
-	messages, problem := s.BoxChannel(ctx, agent)
+	messages, problem := s.BoxChannel(ctx, agent, "")
 	if problem != nil {
 		t.Fatal(problem)
 	}

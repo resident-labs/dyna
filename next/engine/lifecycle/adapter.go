@@ -48,6 +48,7 @@ type RoomData interface {
 type View interface {
 	OpenTerminal(contract.SessionID) bool
 	Connected(contract.SessionID) bool
+	Stale(contract.SessionID) bool // its connected box agent is older than the engine
 	SessionClosed(contract.SessionID)
 	// CompactBeforeStop asks a box about to stop for being quiet to compact, and reports true while the stop should wait.
 	CompactBeforeStop(context.Context, contract.SessionID) bool

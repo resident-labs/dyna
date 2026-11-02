@@ -31,6 +31,7 @@ func (disconnectedView) SessionClosed(contract.SessionID)     {}
 func (disconnectedView) CompactBeforeStop(context.Context, contract.SessionID) bool {
 	return false
 }
+func (disconnectedView) Stale(contract.SessionID) bool { return false }
 
 func TestReconcilerRecoversLostHost(t *testing.T) {
 	for _, tc := range []struct {
@@ -49,7 +50,7 @@ func TestReconcilerRecoversLostHost(t *testing.T) {
 				t.Fatal(problem)
 			}
 			channelCtx, cancel := context.WithCancel(ctx)
-			messages, problem := s.BoxChannel(channelCtx, caller)
+			messages, problem := s.BoxChannel(channelCtx, caller, "")
 			if problem != nil {
 				cancel()
 				t.Fatal(problem)

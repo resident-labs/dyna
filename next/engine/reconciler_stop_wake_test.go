@@ -98,6 +98,7 @@ func (openTerminalView) CompactBeforeStop(context.Context, contract.SessionID) b
 	return false
 }
 func (openTerminalView) Connected(contract.SessionID) bool { return false }
+func (openTerminalView) Stale(contract.SessionID) bool     { return false }
 
 type stopCountingHost struct {
 	fakeBoxes
