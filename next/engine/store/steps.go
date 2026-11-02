@@ -6,11 +6,33 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 71
+const schemaVersion = 72
 
 // LEGACY(v1-transfer): steps 42 to 63, which only upgrade stores older than schema 64. Remove after the transfer.
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	71: {
+		`CREATE TABLE subscription_where (sub TEXT NOT NULL REFERENCES subscriptions(id), pos INTEGER NOT NULL, clause TEXT NOT NULL, PRIMARY KEY(sub, pos))`,
+		`CREATE TABLE subscription_queue (sub TEXT NOT NULL REFERENCES subscriptions(id), seq INTEGER NOT NULL, PRIMARY KEY(sub, seq))`,
+		// The default subscription left these to their owners, so they never woke root, and they now hold items nobody tracks.
+		`DELETE FROM subscription_events WHERE event_type IN ('pr.opened','pr.merged','pr.closed','ci.finished') AND sub IN (SELECT id FROM subscriptions WHERE id='sub_'||room)`,
+		`UPDATE events SET type='github.pr.changed' WHERE type='pr.changed'`,
+		`UPDATE subscription_events SET event_type='github.pr.changed' WHERE event_type='pr.changed'`,
+		`UPDATE events SET type='github.pr.opened' WHERE type='pr.opened'`,
+		`UPDATE subscription_events SET event_type='github.pr.opened' WHERE event_type='pr.opened'`,
+		`UPDATE events SET type='github.pr.merged' WHERE type='pr.merged'`,
+		`UPDATE subscription_events SET event_type='github.pr.merged' WHERE event_type='pr.merged'`,
+		`UPDATE events SET type='github.pr.closed' WHERE type='pr.closed'`,
+		`UPDATE subscription_events SET event_type='github.pr.closed' WHERE event_type='pr.closed'`,
+		`UPDATE events SET type='github.issue.changed' WHERE type='issue.changed'`,
+		`UPDATE subscription_events SET event_type='github.issue.changed' WHERE event_type='issue.changed'`,
+		`UPDATE events SET type='github.issue.closed' WHERE type='issue.closed'`,
+		`UPDATE subscription_events SET event_type='github.issue.closed' WHERE event_type='issue.closed'`,
+		`UPDATE events SET type='github.ci.finished' WHERE type='ci.finished'`,
+		`UPDATE subscription_events SET event_type='github.ci.finished' WHERE event_type='ci.finished'`,
+		`UPDATE events SET type='git.main_updated' WHERE type='repo.main_updated'`,
+		`UPDATE subscription_events SET event_type='git.main_updated' WHERE event_type='repo.main_updated'`,
+	},
 	70: {
 		// Comments now come from repository feeds, whose cursors start at the head on the first pass, so no row needs its own.
 		`CREATE TABLE github_feeds (repo TEXT NOT NULL, feed TEXT NOT NULL, etag TEXT NOT NULL, cursor TEXT NOT NULL, PRIMARY KEY(repo, feed))`,

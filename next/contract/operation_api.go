@@ -42,11 +42,15 @@ type OpRequested struct {
 	Card    Card      `json:"card"`
 	Expires time.Time `json:"expires"`
 }
+
+// OpDecided is an operation approved or denied.
 type OpDecided struct {
 	ID       OpID     `json:"id"`
 	State    OpState  `json:"state"`
 	Decision Decision `json:"decision"`
 }
+
+// OpRan is an operation finished.
 type OpRan struct {
 	ID     OpID     `json:"id"`
 	State  OpState  `json:"state"`

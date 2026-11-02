@@ -60,7 +60,7 @@ export class RoomStore {
   readonly requests = new SvelteMap<string, Request>();
   // question.list gives the waiting ones and the latest answered ones; the stream keeps them current.
   readonly questions = new SvelteMap<string, Question>();
-  // Tracked PRs by prKey: pr.list once, then pr.changed. A room opens without them if that read fails.
+  // Tracked PRs by prKey: pr.list once, then github.pr.changed. A room opens without them if that read fails.
   readonly prs = new SvelteMap<string, PrSummary>();
   // Workflow runs by crew session. They outlive the session, which closes as its run ends.
   readonly workflows = new SvelteMap<string, WorkflowInfo>();
@@ -189,7 +189,7 @@ export class RoomStore {
     });
   }
 
-  // A pr.changed that arrived first is newer than this read, so it stays.
+  // A github.pr.changed that arrived first is newer than this read, so it stays.
   private async loadPRs(): Promise<void> {
     const listed = await call("pr.list", { room: this.room, all: true }).catch(() => undefined);
     for (const pr of listed?.prs ?? []) {
@@ -375,7 +375,7 @@ export class RoomStore {
         if (to === "ready" && !this.turns.has(session)) void this.readTurns();
         break;
       }
-      case "pr.changed":
+      case "github.pr.changed":
         for (const { pr } of event.body.changes ?? []) this.prs.set(prKey(pr.repo, pr.number), pr);
         break;
       case "computer.changed":

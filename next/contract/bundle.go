@@ -382,6 +382,7 @@ type Subscription struct {
 	Room    RoomID            `json:"room,omitempty"`
 	Session SessionID         `json:"session,omitempty"`
 	On      []EventType       `json:"on,omitempty"`
+	Where   []string          `json:"where,omitempty"`
 	Every   DurationMS        `json:"every,omitempty"`
 	Wake    *Principal        `json:"wake,omitempty"`
 	Run     *RunSpec          `json:"run,omitempty"`

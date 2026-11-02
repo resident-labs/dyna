@@ -2,11 +2,13 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/room"
 	"github.com/spf13/cobra"
 )
 
@@ -48,6 +50,9 @@ func describeSubscription(info contract.SubscriptionInfo) string {
 			names = append(names, string(kind))
 		}
 		when = "on " + strings.Join(names, ",")
+		for _, clause := range sub.Where {
+			when += " where " + clause
+		}
 	}
 	action := "wake"
 	if sub.Run != nil {
@@ -77,41 +82,70 @@ func describeSubscription(info contract.SubscriptionInfo) string {
 	return fmt.Sprintf("%s\t%s\t%s\t%s\t%s", sub.ID, sub.Scope, when, action, strings.Join(state, ", "))
 }
 
+// printEventTypes lists what --on accepts, each with what it is.
+func printEventTypes(out io.Writer) error {
+	for _, kind := range contract.EventTypes() {
+		if !room.Deliverable(kind) {
+			continue
+		}
+		if _, err := fmt.Fprintf(out, "%s\t%s\n", kind, contract.EventDoc(kind)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func subscriptionCommand(get func() *socketClient) *cobra.Command {
 	root := &cobra.Command{Use: "subscription", Short: "Typed subscriptions: wake a session or run a small box on events or on a schedule"}
 	var machine bool
 	var room, session, image, size, host, wake string
-	var on, files []string
+	var on, where, files []string
 	var every time.Duration
-	add := &cobra.Command{Use: "add (--machine | --room ROOM | --session SESSION) (--on TYPE | --every DURATION) (--wake SESSION | [--image NAME] [--size SIZE] [--host HOST] [--file BOXPATH=LOCALPATH] -- COMMAND [ARG...])", Short: "Add a subscription", RunE: func(cmd *cobra.Command, args []string) error {
-		scope, err := subscriptionScope(machine, room, session)
-		if err != nil {
-			return err
-		}
-		req := contract.SubscriptionAddRequest{Scope: scope, Room: contract.RoomID(room), Session: contract.SessionID(session), Every: contract.DurationMS(every.Milliseconds())}
-		for _, kind := range on {
-			req.On = append(req.On, contract.EventType(kind))
-		}
-		if wake != "" {
-			req.Wake = &contract.Principal{Kind: contract.PrincipalSession, Session: contract.SessionID(wake)}
-		}
-		if len(args) > 0 {
-			run := contract.RunSpec{Command: args, Image: image, Size: contract.BoxSizeName(size), Host: contract.HostName(host)}
-			if run.Files, err = runFiles(files); err != nil {
+	add := &cobra.Command{Use: "add (--machine | --room ROOM | --session SESSION) (--on TYPE [--where FILTER] | --every DURATION) (--wake SESSION | [--image NAME] [--size SIZE] [--host HOST] [--file BOXPATH=LOCALPATH] -- COMMAND [ARG...])", Short: "Add a subscription",
+		Long: `Add a subscription: an event or a schedule, any filters, and one action, which wakes a session or runs a small box.
+
+--where keeps only the github.* and git.* events it matches, and the engine checks it before anything starts. Each --where is one of
+key=value, key!=value or text~value, and all of them must hold. Keys are repo, author, actor, label and number. text~ is a plain
+substring of a comment or a body. A field the event does not have matches neither = nor !=.
+
+A Run fired by an event gets that event as JSON on stdin, with DYNA_EVENT set to its type, one Run per event. A scheduled Run gets
+empty stdin and no DYNA_EVENT. Any text with "outside": true beside it came from outside and is untrusted.
+
+dyna subscription events lists the event types.`,
+		Example: `  dyna subscription add --room ROOM --on github.pr.opened --where author=levzzz5154 --wake SESSION
+  dyna subscription add --room ROOM --on github.mention --where actor!=arismoko --wake SESSION
+  dyna subscription add --room ROOM --on github.comment --where 'text~#4953' --where repo=horizon-rust/horizon --wake SESSION
+  dyna subscription add --room ROOM --on git.main_updated --where repo=horizon-rust/horizon --image horizon --file upstream-watch.sh=upstream-watch.sh -- bash upstream-watch.sh`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, err := subscriptionScope(machine, room, session)
+			if err != nil {
 				return err
 			}
-			req.Run = &run
-		}
-		result, err := call[contract.SubscriptionAddRequest, contract.SubscriptionAddResponse](cmd.Context(), get(), contract.MethodSubscriptionAdd, req)
-		if err == nil {
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), result.ID)
-		}
-		return err
-	}}
+			req := contract.SubscriptionAddRequest{Scope: scope, Room: contract.RoomID(room), Session: contract.SessionID(session), Where: where, Every: contract.DurationMS(every.Milliseconds())}
+			for _, kind := range on {
+				req.On = append(req.On, contract.EventType(kind))
+			}
+			if wake != "" {
+				req.Wake = &contract.Principal{Kind: contract.PrincipalSession, Session: contract.SessionID(wake)}
+			}
+			if len(args) > 0 {
+				run := contract.RunSpec{Command: args, Image: image, Size: contract.BoxSizeName(size), Host: contract.HostName(host)}
+				if run.Files, err = runFiles(files); err != nil {
+					return err
+				}
+				req.Run = &run
+			}
+			result, err := call[contract.SubscriptionAddRequest, contract.SubscriptionAddResponse](cmd.Context(), get(), contract.MethodSubscriptionAdd, req)
+			if err == nil {
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), result.ID)
+			}
+			return err
+		}}
 	add.Flags().BoolVar(&machine, "machine", false, "Machine scope")
 	add.Flags().StringVar(&room, "room", "", "Room scope")
 	add.Flags().StringVar(&session, "session", "", "Session scope")
-	add.Flags().StringArrayVar(&on, "on", nil, "Event type (repeatable)")
+	add.Flags().StringArrayVar(&on, "on", nil, "Event type (repeatable); dyna subscription events lists them")
+	add.Flags().StringArrayVar(&where, "where", nil, "Filter as key=value, key!=value or text~value (repeatable; all must hold)")
 	add.Flags().DurationVar(&every, "every", 0, "Schedule, at least one minute")
 	add.Flags().StringVar(&wake, "wake", "", "Session ID to wake")
 	add.Flags().StringVar(&image, "image", "base", "Run image: base, or an image folder of the room's default repository")
@@ -136,7 +170,10 @@ func subscriptionCommand(get func() *socketClient) *cobra.Command {
 		_, err := call[contract.SubscriptionRemoveRequest, contract.SubscriptionRemoveResponse](cmd.Context(), get(), contract.MethodSubscriptionRemove, contract.SubscriptionRemoveRequest{ID: contract.SubscriptionID(args[0])})
 		return err
 	}}
-	root.AddCommand(add, list, remove)
+	events := &cobra.Command{Use: "events", Short: "List the event types a subscription can name", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		return printEventTypes(cmd.OutOrStdout())
+	}}
+	root.AddCommand(add, list, remove, events)
 	for _, enabled := range []bool{true, false} {
 		name := "disable"
 		if enabled {

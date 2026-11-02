@@ -53,8 +53,8 @@ func TestEachActionReportsOnceWithItsActor(t *testing.T) {
 	if got := r.wakes(t, r.child); len(got) != 1 {
 		t.Fatalf("told again: %+v", got)
 	}
-	if got := r.eventCount(t, "pr.closed"); got != 1 {
-		t.Fatalf("%d pr.closed events", got)
+	if got := r.eventCount(t, "github.pr.closed"); got != 1 {
+		t.Fatalf("%d github.pr.closed events", got)
 	}
 }
 
@@ -273,20 +273,20 @@ func TestUntrackedItemsAreQuietEventsForSubscribers(t *testing.T) {
 	r.pass(t)
 	r.github.Add(fakegithub.Pull{Repo: "owner/repo", Number: 9, Author: "stranger", Meta: fakegithub.Meta{Body: "see #4953"}})
 	r.pass(t)
-	if got := r.eventCount(t, "github.item"); got != 0 {
+	if got := r.eventCount(t, "github.pr.opened"); got != 0 {
 		t.Fatalf("%d events with no subscriber", got)
 	}
 	wake := sessionCaller(r.root)
-	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.item"}, Wake: &wake}); e != nil {
+	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.label"}, Wake: &wake}); e != nil {
 		t.Fatalf("%+v", e)
 	}
 	r.github.EditAs("alice", "owner/repo", 9, func(p *fakegithub.Pull) { p.Meta.Labels = []string{"bug"} })
 	r.pass(t)
-	if got := r.eventCount(t, "github.item"); got != 1 {
+	if got := r.eventCount(t, "github.label"); got != 1 {
 		t.Fatalf("%d events", got)
 	}
 	var body []byte
-	if err := r.s.store.Read().QueryRow("SELECT body FROM events WHERE type='github.item'").Scan(&body); err != nil {
+	if err := r.s.store.Read().QueryRow("SELECT body FROM events WHERE type='github.label'").Scan(&body); err != nil {
 		t.Fatal(err)
 	}
 	var item contract.GitHubItem
@@ -296,11 +296,11 @@ func TestUntrackedItemsAreQuietEventsForSubscribers(t *testing.T) {
 	if item.Action != contract.GitHubLabeled || item.Actor != "alice" || item.Author != "stranger" || item.Detail != "bug" || item.Kind != contract.GitHubPR || !item.Outside {
 		t.Fatalf("%+v", item)
 	}
-	if got := r.deliveryCount(t, "github.item", r.child, true) + r.deliveryCount(t, "github.item", r.child, false); got != 0 {
+	if got := r.deliveryCount(t, "github.label", r.child, true) + r.deliveryCount(t, "github.label", r.child, false); got != 0 {
 		t.Fatalf("%d deliveries", got)
 	}
 	r.dispatch(t)
-	if got := r.deliveryCount(t, "github.item", r.root, true); got != 1 {
+	if got := r.deliveryCount(t, "github.label", r.root, true); got != 1 {
 		t.Fatalf("the subscriber heard %d", got)
 	}
 }
@@ -308,7 +308,7 @@ func TestUntrackedItemsAreQuietEventsForSubscribers(t *testing.T) {
 func TestDeployOnExistingStateReplaysNothing(t *testing.T) {
 	r := newPRRig(t)
 	wake := sessionCaller(r.root)
-	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.item"}, Wake: &wake}); e != nil {
+	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.label"}, Wake: &wake}); e != nil {
 		t.Fatalf("%+v", e)
 	}
 	// Rows that a poll has read, with years of feed behind them and no cursor.
@@ -335,7 +335,7 @@ func TestDeployOnExistingStateReplaysNothing(t *testing.T) {
 	if got := r.issueWakes(t, r.child); len(got) != 0 {
 		t.Fatalf("issue wakes %+v", got)
 	}
-	if got := r.eventCount(t, "github.item"); got != 0 {
+	if got := r.eventCount(t, "github.label"); got != 0 {
 		t.Fatalf("%d events replayed", got)
 	}
 	// The next news reads back past the first page, and still only the new is news.

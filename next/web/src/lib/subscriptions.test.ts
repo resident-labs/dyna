@@ -11,8 +11,8 @@ test("a subscription says when it fires", () => {
   assert.equal(subscriptionWhen(info({ every: 1_800_000 })), "Every 30 min");
   assert.equal(subscriptionWhen(info({ every: 7_200_000 })), "Every 2 h");
   assert.equal(subscriptionWhen(info({ every: 5_400_000 })), "Every 90 min");
-  assert.equal(subscriptionWhen(info({ on: ["notice.posted", "pr.merged"] })), "On notice.posted, pr.merged");
-  assert.equal(subscriptionWhen(info({ on: ["ci.finished", "notice.posted", "pr.closed"] })), "On 3 events");
+  assert.equal(subscriptionWhen(info({ on: ["notice.posted", "github.pr.merged"] })), "On notice.posted, github.pr.merged");
+  assert.equal(subscriptionWhen(info({ on: ["github.ci.finished", "notice.posted", "github.pr.closed"] })), "On 3 events");
 });
 
 test("a subscription says what it does", () => {

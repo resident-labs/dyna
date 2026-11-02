@@ -201,16 +201,26 @@ func recipient(table string) string {
 ) SELECT id,room FROM ancestors WHERE closed_at IS NULL ORDER BY depth LIMIT 1`
 }
 
-// prEvents are what a change states to subscribers. The pr.changed beside them is what tells the owner, so they stay undelivered here.
+// acted finds the action behind a change's kind, for who did it. A read that found a close has none.
+func acted(actions []contract.GitHubItem, item contract.GitHubItem) contract.GitHubItem {
+	for _, action := range actions {
+		if action.Action == item.Action {
+			item.Actor, item.Outside = action.Actor, action.Outside
+		}
+	}
+	return item
+}
+
+// prEvents are what a change states to subscribers. The github.pr.changed beside them is what tells the owner, so they stay undelivered here.
 func prEvents(change contract.PrChange) []contract.EventBody {
 	var bodies []contract.EventBody
 	pr := change.PR
+	item := contract.GitHubItem{Repo: pr.Repo, Number: pr.Number, Kind: contract.GitHubPR, Session: pr.Session, Author: pr.Author, URL: pr.URL}
 	for _, kind := range change.Kinds {
 		switch kind {
-		case contract.PrChangeMerged:
-			bodies = append(bodies, contract.PrMergedEvent{Repo: pr.Repo, Number: pr.Number, Session: pr.Session, URL: pr.URL})
-		case contract.PrChangeClosed:
-			bodies = append(bodies, contract.PrClosedEvent{Repo: pr.Repo, Number: pr.Number, Session: pr.Session, URL: pr.URL})
+		case contract.PrChangeMerged, contract.PrChangeClosed:
+			item.Action = contract.GitHubAction(kind)
+			bodies = append(bodies, acted(change.Actions, item).Event())
 		case contract.PrChangeCIFailed, contract.PrChangeCIPassed:
 			bodies = append(bodies, contract.CIFinished{Repo: pr.Repo, Number: pr.Number, Session: pr.Session, URL: pr.URL, Head: pr.Head, Result: pr.CI})
 		}
@@ -246,7 +256,7 @@ func (s *Store) moveRepoHead(ctx context.Context, tx *sql.Tx, head RepoHead, at 
 	if previous == "" {
 		return nil
 	}
-	body := contract.RepoMainUpdated{Repo: head.Repo, Head: head.Head}
+	body := contract.GitMainUpdated{Repo: head.Repo, Head: head.Head}
 	seq, err := s.appendEngineEvent(tx, room, at, body)
 	if err != nil {
 		return err
@@ -286,9 +296,9 @@ type GitHubPass struct {
 }
 
 // ApplyPRPoll writes one pass and its events in one transaction with the cursors that found them, so a restart can neither
-// lose a wake nor repeat one. Each recipient gets one delivered event for the pass, whatever moved for it: pr.changed if any
-// of its PRs did, with its issues inside, and otherwise issue.changed. A pass that moved both also commits an undelivered
-// issue.changed, as pr.merged sits beside pr.changed, so a subscriber sees every issue change. A row that went away meanwhile
+// lose a wake nor repeat one. Each recipient gets one delivered event for the pass, whatever moved for it: github.pr.changed if any
+// of its PRs did, with its issues inside, and otherwise github.issue.changed. A pass that moved both also commits an undelivered
+// github.issue.changed, as github.pr.merged sits beside github.pr.changed, so a subscriber sees every issue change. A row that went away meanwhile
 // drops out.
 func (s *Store) ApplyPRPoll(ctx context.Context, pass GitHubPass, at time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
@@ -396,7 +406,8 @@ func (s *Store) ApplyPRPoll(ctx context.Context, pass GitHubPass, at time.Time) 
 			}
 			for _, change := range group.issues {
 				if issue := change.Issue; slices.Contains(change.Kinds, contract.PrChangeClosed) {
-					events = append(events, contract.IssueClosedEvent{Repo: issue.Repo, Number: issue.Number, Session: issue.Session, URL: issue.URL})
+					item := contract.GitHubItem{Repo: issue.Repo, Number: issue.Number, Kind: contract.GitHubIssue, Action: contract.GitHubClosed, Session: issue.Session, Author: issue.Author, URL: issue.URL}
+					events = append(events, acted(change.Actions, item).Event())
 				}
 			}
 			for _, event := range events {
