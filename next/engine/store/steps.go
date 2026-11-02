@@ -6,13 +6,15 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 74
+const schemaVersion = 75
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
 	// shell.job.ended lost exitCode: End says how a job ended. Bodies decode strictly, and they stay BLOBs.
 	73: {`UPDATE events SET body=CAST(json_remove(CAST(body AS TEXT),'$.exitCode') AS BLOB) WHERE type='shell.job.ended' AND json_type(CAST(body AS TEXT),'$.exitCode') IS NOT NULL`},
+	// A resumed run owns the branches of the run it resumes, so a run keeps which run that is.
+	74: {`ALTER TABLE workflow_runs ADD COLUMN resumes TEXT NOT NULL DEFAULT ''`},
 }
 
 // upgrade applies each future numbered step in the same transaction as its version.

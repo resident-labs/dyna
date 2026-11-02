@@ -83,7 +83,7 @@ func Handler(upstream *url.URL, transport http.RoundTripper, token string, sessi
 				var report bytes.Buffer
 				pkt(&report, "unpack ok\n")
 				for _, ref := range rejected {
-					pkt(&report, "ng "+ref+" not owned by this session\n")
+					pkt(&report, "ng "+ref+" "+pushRule(session)+"\n")
 				}
 				io.WriteString(&report, "0000")
 				if sideband {
@@ -177,14 +177,33 @@ func commands(ctx context.Context, body io.ReadCloser, session contract.SessionI
 	}{io.MultiReader(&prefix, reader), body}, refs, sideband, nil
 }
 
-// CanPushBranch checks a session branch or a branch registered to an owned PR.
+// pushRule is what a refused push reads: the refusal and the rule that made it.
+func pushRule(session contract.SessionID) string {
+	base := SessionBranchPrefix + string(session)
+	return fmt.Sprintf("not owned by this session: it can push %s, %s-<topic>, those branches of a workflow run it resumes, and the branch of a PR it owns", base, base)
+}
+
+// CanPushBranch checks a session branch, a branch registered to an owned PR, or a session branch of a run that this session's
+// run resumes. A resumed run is a new session, and it carries on the work on the branches of the runs before it.
 func CanPushBranch(ctx context.Context, rooms RoomRepositories, repo contract.RepoName, session contract.SessionID, branch string) (bool, error) {
+	if sessionBranch(session, branch) {
+		return true, nil
+	}
+	if owned, err := rooms.OwnsPRBranch(ctx, repo, session, branch); owned || err != nil {
+		return owned, err
+	}
+	resumed, err := rooms.ResumedSessions(ctx, repo, session)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(resumed, func(earlier contract.SessionID) bool { return sessionBranch(earlier, branch) }), nil
+}
+
+func sessionBranch(session contract.SessionID, branch string) bool {
 	base := SessionBranchPrefix + string(session)
 	if branch == base {
-		return true, nil
+		return true
 	}
-	if topic, ok := strings.CutPrefix(branch, base+"-"); ok && validPart(topic) && !strings.HasSuffix(topic, ".") && !strings.HasSuffix(topic, ".lock") && !strings.Contains(topic, "..") {
-		return true, nil
-	}
-	return rooms.OwnsPRBranch(ctx, repo, session, branch)
+	topic, ok := strings.CutPrefix(branch, base+"-")
+	return ok && validPart(topic) && !strings.HasSuffix(topic, ".") && !strings.HasSuffix(topic, ".lock") && !strings.Contains(topic, "..")
 }

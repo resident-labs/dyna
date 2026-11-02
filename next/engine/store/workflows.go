@@ -14,7 +14,8 @@ import (
 const failedStepNames = 20
 
 // WorkflowRun is one run of a script, tied to the crew session that hosts it. Script, Profiles and Repo never change.
-// Commit and Image are set once, by the box's first start. Resume is read only when the run starts.
+// Commit and Image are set once, by the box's first start. Resume names the run this one resumes, and only a run's start reads
+// it from here: afterwards ResumedSessions follows the stored link.
 type WorkflowRun struct {
 	ID          contract.WorkflowRunID
 	Room        contract.RoomID
@@ -65,7 +66,7 @@ func insertWorkflow(ctx context.Context, tx *sql.Tx, session contract.SessionID,
 			return err
 		}
 	}
-	_, err = tx.ExecContext(ctx, "INSERT INTO workflow_runs(id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,started_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", run.ID, run.Room, session, run.Name, run.Description, run.Script, run.Args, string(profiles), run.Repo, run.Commit, run.Image, contract.WorkflowRunning, at.UnixMilli())
+	_, err = tx.ExecContext(ctx, "INSERT INTO workflow_runs(id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,started_at,resumes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", run.ID, run.Room, session, run.Name, run.Description, run.Script, run.Args, string(profiles), run.Repo, run.Commit, run.Image, contract.WorkflowRunning, at.UnixMilli(), run.Resume)
 	if err != nil || run.Resume == "" {
 		return err
 	}
@@ -100,6 +101,16 @@ func (s *Store) WorkflowRuns(ctx context.Context, room contract.RoomID) ([]Workf
 		runs = append(runs, run)
 	}
 	return runs, rows.Err()
+}
+
+// ResumedSessions lists the crews of the runs that session's run resumes, through any chain of resumes, in its room and on repo.
+// Any other session has none. A link that leaves the room or the repository ends the chain.
+func (s *Store) ResumedSessions(ctx context.Context, repo contract.RepoName, session contract.SessionID) ([]contract.SessionID, error) {
+	return listIDs[contract.SessionID](ctx, s.Read(), `WITH RECURSIVE chain(session,room,resumes) AS (
+		SELECT session,room,resumes FROM workflow_runs WHERE session=? AND repo=?
+		UNION
+		SELECT r.session,r.room,r.resumes FROM workflow_runs r JOIN chain c ON r.id=c.resumes AND r.room=c.room WHERE r.repo=?)
+		SELECT session FROM chain WHERE session!=?`, session, repo, repo, session)
 }
 
 // PinWorkflowCommit keeps the first commit reported.
