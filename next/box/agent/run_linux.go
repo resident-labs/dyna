@@ -154,6 +154,19 @@ func Run(ctx context.Context) error {
 			return err
 		}
 	}
+	addedServers, problems, err := roomAddons().apply(ctx)
+	if err != nil {
+		return err
+	}
+	steps.Done("add-ons")
+	notice := func(text string) {
+		if err := client.Notice(ctx, text); err != nil {
+			log.Printf("notice: %v", err)
+		}
+	}
+	if text := addonNotice(problems); text != "" {
+		notice(text)
+	}
 	args, err := modelArgs(hello.Model, hello.CompactTokens)
 	if err != nil {
 		return err
@@ -195,7 +208,7 @@ func Run(ctx context.Context) error {
 		return problem
 	}
 	mux.Handle("/dyna/", dynaTools)
-	err = pi.WriteAgentMCPConfig(mcpPath, dynaTools.Description(), "")
+	err = pi.WriteAgentMCPConfig(mcpPath, dynaTools.Description(), "", addedServers)
 	if err != nil {
 		return err
 	}
@@ -217,7 +230,7 @@ func Run(ctx context.Context) error {
 				return nil, err
 			}
 			mcp := filepath.Join(folder, "mcp.json")
-			if err := pi.WriteAgentMCPConfig(mcp, dynaTools.Description(), dir); err != nil {
+			if err := pi.WriteAgentMCPConfig(mcp, dynaTools.Description(), dir, addedServers); err != nil {
 				return nil, err
 			}
 			tree := dir
@@ -243,7 +256,7 @@ func Run(ctx context.Context) error {
 		}
 		h, files = crew, crew.Files
 	} else {
-		session, err := pi.Open(ctx, "pi", append(piArgs(args, extensionPath, hello.Instructions, modelsPath, sessions, mcpPath), "--continue"), "", workdir)
+		session, err := pi.Open(ctx, "pi", append(piArgs(args, extensionPath, hello.Instructions, modelsPath, sessions, mcpPath), "--continue"), "", workdir, func(text string) { go notice(text) })
 		if err != nil {
 			return err
 		}

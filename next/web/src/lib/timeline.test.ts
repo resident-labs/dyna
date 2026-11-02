@@ -219,6 +219,7 @@ test("an engine notice is one plain line, and a type this build does not know sa
   assert.deepEqual(timelineInput(wake("hook.finished", { subscription: "ci", result: "failed", exitCode: -1, cause: "run_timeout" })).kind, "failed");
   assert.ok(!timelineInputText(wake("hook.finished", { subscription: "ci", result: "failed", exitCode: -1, cause: "run_timeout" })).includes("exit code"));
   assert.deepEqual(timelineInput(wake("notice.posted", { text: "The room resumes at noon." })), { kind: "line", text: "The room resumes at noon." });
+  assert.deepEqual(timelineInput(wake("session.notice", { session: "ses_a", text: "package npm:x@1 did not load" })), { kind: "line", text: "package npm:x@1 did not load" });
   assert.deepEqual(timelineInput(wake("future.kind", { any: "shape" })), { kind: "line", text: "Event: future.kind" });
   assert.deepEqual(timelineInput(wake("hook.finished", { result: "unexpected" })), { kind: "line", text: "Event: hook.finished" });
 });

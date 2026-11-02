@@ -9,7 +9,7 @@ import (
 
 func TestAgentMCPExposure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mcp.json")
-	if err := WriteAgentMCPConfig(path, "areas", ""); err != nil {
+	if err := WriteAgentMCPConfig(path, "areas", "", map[string]MCPServer{"docs": {URL: "https://example.test/mcp", Exposure: "codemode"}}); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)
@@ -25,7 +25,7 @@ func TestAgentMCPExposure(t *testing.T) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		t.Fatal(err)
 	}
-	if config.Servers["dyna"].Exposure != "direct" || config.Servers["dyna"].Timeout != 600 || config.Servers["shell"].Exposure != "direct" {
+	if config.Servers["dyna"].Exposure != "direct" || config.Servers["dyna"].Timeout != 600 || config.Servers["shell"].Exposure != "direct" || config.Servers["docs"].Exposure != "codemode" {
 		t.Fatalf("%+v", config)
 	}
 }
