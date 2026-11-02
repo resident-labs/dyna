@@ -296,7 +296,7 @@ func TestSessionListKeepsJobCountWhileATurnRuns(t *testing.T) {
 		t.Fatalf("turn %q: %v", turn, err)
 	}
 	// A job that starts and ends inside this turn must not lower the count of the job that still runs.
-	if _, problem := s.ShellJobEnded(ctx, caller, contract.ShellJobEndedRequest{Job: "job_inside"}); problem != nil {
+	if _, problem := s.ShellJobEnded(ctx, caller, contract.ShellJobEndedRequest{Job: "job_inside", End: jobExited}); problem != nil {
 		t.Fatal(problem)
 	}
 	if got := listedJobs(t, s, ctx, room, sid); got != 1 {
@@ -313,7 +313,7 @@ func TestSessionListKeepsJobCountWhileATurnRuns(t *testing.T) {
 func TestSessionListLowersJobCountForAJobEndingInTheTurnEndMillisecond(t *testing.T) {
 	s, _, room, sid, ctx := quietSession(t, 1)
 	s.now = func() time.Time { return time.Unix(1000, 0) } // the same millisecond as the turn end
-	if _, problem := s.ShellJobEnded(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid}, contract.ShellJobEndedRequest{Job: "job_1"}); problem != nil {
+	if _, problem := s.ShellJobEnded(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid}, contract.ShellJobEndedRequest{Job: "job_1", End: jobExited}); problem != nil {
 		t.Fatal(problem)
 	}
 	if got := listedJobs(t, s, ctx, room, sid); got != 0 {
@@ -388,7 +388,7 @@ func TestSessionListHadJobsStaysAfterTheJobEnds(t *testing.T) {
 	if hadJobs() {
 		t.Fatal("hadJobs before any job ended")
 	}
-	if _, problem := s.ShellJobEnded(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid}, contract.ShellJobEndedRequest{Job: "job_1"}); problem != nil {
+	if _, problem := s.ShellJobEnded(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid}, contract.ShellJobEndedRequest{Job: "job_1", End: jobExited}); problem != nil {
 		t.Fatal(problem)
 	}
 	if !hadJobs() {

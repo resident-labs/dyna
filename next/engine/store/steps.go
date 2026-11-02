@@ -6,11 +6,14 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 73
+const schemaVersion = 74
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
-var steps = map[int][]string{}
+var steps = map[int][]string{
+	// shell.job.ended lost exitCode: End says how a job ended. Bodies decode strictly, and they stay BLOBs.
+	73: {`UPDATE events SET body=CAST(json_remove(CAST(body AS TEXT),'$.exitCode') AS BLOB) WHERE type='shell.job.ended' AND json_type(CAST(body AS TEXT),'$.exitCode') IS NOT NULL`},
+}
 
 // upgrade applies each future numbered step in the same transaction as its version.
 func upgrade(db *sql.DB, floor int, commit string, steps map[int][]string, before func(int) error) error {

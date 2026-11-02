@@ -54,8 +54,7 @@ func setupRepos(ctx context.Context, root, stateRoot string, repos []contract.Bo
 
 // setupRepo builds the checkout in root/<repo>. Its state file lives outside the checkout, so Pi and
 // git never change it. A checkout marked done is never inspected. A checkout marked started holds only
-// setup's own files, because Pi gets no turn before done, so setup empties it first. A checkout with
-// no state that already has files is legacy or unknown, so setup marks it done and leaves it as it is.
+// setup's own files, because Pi gets no turn before done, so setup empties it first.
 func setupRepo(ctx context.Context, root, stateRoot string, repo contract.BoxRepo, git gitRunner) error {
 	dir := filepath.Join(root, string(repo.Name))
 	state := filepath.Join(stateRoot, string(repo.Name))
@@ -77,15 +76,6 @@ func setupRepo(ctx context.Context, root, stateRoot string, repo contract.BoxRep
 		return fmt.Errorf("unknown setup state %q", value)
 	case !os.IsNotExist(err):
 		return err
-	default:
-		entries, err := os.ReadDir(dir)
-		if err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		// LEGACY(v1-transfer): keeping a checkout that has files but no state file, from boxes older than setup state. Remove after the transfer.
-		if len(entries) > 0 {
-			return writeSetupState(state, setupDone)
-		}
 	}
 	if err := writeSetupState(state, setupStarted); err != nil {
 		return err

@@ -291,7 +291,7 @@ var withJobs sync.Map
 func (d devService) TurnOutput(ctx context.Context, p contract.Principal, req contract.TurnOutputRequest) (contract.TurnOutputResponse, *contract.Error) {
 	if _, ok := withJobs.Load(p.Session); ok || marked(req.Final, "[jobs]") {
 		if _, seen := withJobs.LoadOrStore(p.Session, true); !seen {
-			d.Service.ShellJobEnded(ctx, p, contract.ShellJobEndedRequest{Job: "j1", ExitCode: 1, Tail: "FAIL"})
+			d.Service.ShellJobEnded(ctx, p, contract.ShellJobEndedRequest{Job: "j1", End: &contract.ShellJobEnd{Kind: contract.ShellJobExited, Code: 1}, Tail: "FAIL"})
 		}
 		req.ShellJobs = 1 // ShellWatch has one running job
 	}

@@ -360,7 +360,7 @@ func TestJobHoldsBoxThenEndingItAppliesUpdate(t *testing.T) {
 		t.Fatal(problem)
 	}
 
-	if _, problem := s.ShellJobEnded(ctx, boxCaller(sid), contract.ShellJobEndedRequest{Job: testJob, Tail: "built"}); problem != nil {
+	if _, problem := s.ShellJobEnded(ctx, boxCaller(sid), contract.ShellJobEndedRequest{Job: testJob, End: jobExited, Tail: "built"}); problem != nil {
 		t.Fatal(problem)
 	}
 	waitWant(t, s, ctx, sid, "stop")

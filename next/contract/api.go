@@ -832,8 +832,8 @@ type ShellJobEndedRequest struct {
 	Description string       `json:"description,omitempty"`
 	End         *ShellJobEnd `json:"end,omitempty"`
 	Job         ShellJobID   `json:"job"`
-	ExitCode    int          `json:"exitCode"`
-	Tail        string       `json:"tail"` // the last output, masked
+	ExitCode    int          `json:"exitCode"` // unread; box agents still send it and requests decode strictly
+	Tail        string       `json:"tail"`     // the last output, masked
 }
 type ShellJobEndedResponse struct{}
 
