@@ -40,6 +40,21 @@ func TestTranscriptItemsMaskAndKeepToolIdentity(t *testing.T) {
 	}
 }
 
+func TestTranscriptShowsACompactionInItsTurn(t *testing.T) {
+	data := `{"type":"message","id":"m1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","deliveryId":"1","content":[{"type":"text","text":"wake"}]}}
+{"type":"message","id":"m2","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}
+{"type":"compaction","id":"c1","timestamp":"2026-01-01T00:12:00Z","summary":"the story so far","firstKeptEntryId":"m2","tokensBefore":153000}
+`
+	items, _, _, err := ReadTranscript(strings.NewReader(data), map[contract.DeliverySeq]contract.TurnID{1: "turn_a"}, "s.jsonl", "", 0, 10)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("items %+v: %v", items, err)
+	}
+	got := items[1]
+	if got.Kind != contract.TranscriptCompaction || got.Turn != "turn_a" || got.Tokens != 153000 || got.Text != "" {
+		t.Fatalf("item %+v", got)
+	}
+}
+
 func TestTranscriptEditAppliedDiffPreviewAndFull(t *testing.T) {
 	patch := strings.Repeat("x", 9000) + " token=secretvalue"
 	data := `{"type":"message","message":{"role":"user","deliveryId":"1"}}

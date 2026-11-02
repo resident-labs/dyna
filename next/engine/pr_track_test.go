@@ -583,11 +583,11 @@ func TestSnapshotShowsOpenPRState(t *testing.T) {
 	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 2, Draft: true, Rollup: "SUCCESS", ReviewDecision: "APPROVED"})
 	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 3, State: "MERGED"})
 	r.pass(t)
-	result, e := r.s.ContextSnapshot(r.ctx, sessionCaller(r.child), contract.ContextSnapshotRequest{Section: contract.ContextPRs})
+	result, e := r.s.ContextSnapshot(r.ctx, sessionCaller(r.child), contract.ContextSnapshotRequest{Section: contract.ContextHolds})
 	if e != nil || len(result.Sections) != 1 {
 		t.Fatalf("%+v %+v", result, e)
 	}
-	want := "owner/repo #1: CI failed, changes requested, conflict\nowner/repo #2: draft, CI passed, approved, mergeable"
+	want := "You still hold: goal g2, PR owner/repo#1, PR owner/repo#2.\nPR owner/repo#1: CI failed, changes requested, conflict\nPR owner/repo#2: draft, CI passed, approved, mergeable"
 	if result.Sections[0].Text != want {
 		t.Fatalf("%q", result.Sections[0].Text)
 	}

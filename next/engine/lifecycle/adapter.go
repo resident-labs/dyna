@@ -49,6 +49,8 @@ type View interface {
 	OpenTerminal(contract.SessionID) bool
 	Connected(contract.SessionID) bool
 	SessionClosed(contract.SessionID)
+	// CompactBeforeStop asks a box about to stop for being quiet to compact, and reports true while the stop should wait.
+	CompactBeforeStop(context.Context, contract.SessionID) bool
 }
 type Repositories interface {
 	Get(context.Context, contract.SessionID, contract.HostName, bool) ([]contract.BoxRepo, error)

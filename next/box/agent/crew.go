@@ -176,6 +176,11 @@ func (c *Crew) TransferModel(context.Context, contract.TurnID, contract.ModelCho
 	return harness.ModelTransfer{Path: "unchanged"}, nil
 }
 
+// Compact does nothing: a crew has no conversation of its own, and a worker's ends with its step.
+func (c *Crew) Compact(context.Context, int64) (harness.Compaction, error) {
+	return harness.Compaction{}, nil
+}
+
 func (c *Crew) SetPromptSections(context.Context, []contract.ContextSection) error { return nil }
 
 // A script takes no input once it runs. The turn's final reply still answers whoever steered it.

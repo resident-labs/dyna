@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 	"time"
@@ -15,6 +16,9 @@ type crashView struct{ session contract.SessionID }
 func (v crashView) Connected(id contract.SessionID) bool { return id != v.session }
 func (crashView) OpenTerminal(contract.SessionID) bool   { return true }
 func (crashView) SessionClosed(contract.SessionID)       {}
+func (crashView) CompactBeforeStop(context.Context, contract.SessionID) bool {
+	return false
+}
 
 func TestRepeatedExitedBoxesFailAndCompletedTurnResets(t *testing.T) {
 	s, room, sid, ctx := setup(t)
