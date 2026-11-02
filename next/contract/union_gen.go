@@ -99,6 +99,12 @@ func decodeEventBody(t EventType, data json.RawMessage) (EventBody, error) {
 			return nil, err
 		}
 		return v, nil
+	case "github.item":
+		var v GitHubItem
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case "goal.ended":
 		var v GoalEnded
 		if err := json.Unmarshal(data, &v); err != nil {
@@ -448,7 +454,7 @@ func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs, error) {
 	}
 }
 
-var eventBodyTypes = []EventType{"account.failed", "account.quota_low", "box.changed", "box.pressure", "checkin.due", "ci.finished", "computer.changed", "connect.connector", "conversation.read", "goal.ended", "goal.item_changed", "goal.set", "grant.expired", "hook.due", "hook.finished", "host.disk_low", "image.built", "image.failed", "issue.changed", "issue.closed", "notice.posted", "op.decided", "op.ran", "op.requested", "post.created", "pr.changed", "pr.closed", "pr.merged", "pr.opened", "question.answered", "question.asked", "question.withdrawn", "repo.main_updated", "room.deleted", "room.deleting", "room.limits_changed", "room.paused", "room.resumed", "session.closed", "session.compacted", "session.failed", "session.moved", "session.notice", "session.profile_changed", "session.restarted", "session.started", "shell.job.ended", "shell.job.running", "transcript.changed", "turn.activity", "turn.ended", "turn.started", "workflow.ended", "workflow.step_changed"}
+var eventBodyTypes = []EventType{"account.failed", "account.quota_low", "box.changed", "box.pressure", "checkin.due", "ci.finished", "computer.changed", "connect.connector", "conversation.read", "github.item", "goal.ended", "goal.item_changed", "goal.set", "grant.expired", "hook.due", "hook.finished", "host.disk_low", "image.built", "image.failed", "issue.changed", "issue.closed", "notice.posted", "op.decided", "op.ran", "op.requested", "post.created", "pr.changed", "pr.closed", "pr.merged", "pr.opened", "question.answered", "question.asked", "question.withdrawn", "repo.main_updated", "room.deleted", "room.deleting", "room.limits_changed", "room.paused", "room.resumed", "session.closed", "session.compacted", "session.failed", "session.moved", "session.notice", "session.profile_changed", "session.restarted", "session.started", "shell.job.ended", "shell.job.running", "transcript.changed", "turn.activity", "turn.ended", "turn.started", "workflow.ended", "workflow.step_changed"}
 
 func (m BoxMessage) MarshalJSON() ([]byte, error) {
 	if m.Body == nil {

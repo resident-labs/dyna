@@ -2,6 +2,7 @@ package room
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
@@ -74,6 +75,8 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		return fmt.Sprintf("CI on PR %s#%d finished: %s. %s", b.Repo, b.Number, b.Result, b.URL), nil
 	case contract.RepoMainUpdated:
 		return fmt.Sprintf("The default branch of %s moved to %s.", b.Repo, b.Head), nil
+	case contract.GitHubItem:
+		return renderGitHubItem(b), nil
 	case contract.NoticePosted:
 		return b.Text, nil
 	case contract.SessionNotice:
@@ -143,70 +146,95 @@ var issueChangeWords = map[contract.PrChangeKind]string{
 	contract.PrChangeComment: "new comments",
 }
 
-// names joins names, each with a mark such as + or @, in the order given.
-func names(mark string, items []string) string {
-	marked := make([]string, len(items))
-	for i, item := range items {
-		marked[i] = mark + item
-	}
-	return strings.Join(marked, " ")
-}
-
-// metaParts states a metadata change. Logins and facts go in said. Free text an outside author may have written goes in
-// outside instead, for the caller to wrap, and said only names what moved.
-func metaParts(m *contract.MetaChange, wrapped bool) (said, outside []string) {
-	text := func(what, value string) {
-		if wrapped {
-			said = append(said, what+" changed")
-			outside = append(outside, what+" "+value)
-			return
+// renderGitHubItem shows one feed item to whoever subscribed to it, with what an outside actor wrote wrapped.
+func renderGitHubItem(item contract.GitHubItem) string {
+	said, wrapped := actionParts([]contract.GitHubItem{item}, nil)
+	lines := []string{fmt.Sprintf("%s %s#%d: %s. %s", item.Kind, item.Repo, item.Number, strings.Join(said, "; "), item.URL)}
+	lines = append(lines, wrapped...)
+	if item.Text != "" {
+		text := item.Text
+		if item.Outside {
+			text = WrapExternal(item.Actor, text)
 		}
-		said = append(said, what+" "+value)
+		lines = append(lines, text)
 	}
-	if m.Title != "" {
-		text("title", m.Title)
-	}
-	if len(m.LabelsAdded)+len(m.LabelsRemoved) > 0 {
-		text("labels", strings.TrimSpace(names("+", m.LabelsAdded)+" "+names("-", m.LabelsRemoved)))
-	}
-	if m.Milestone != "" {
-		text("milestone", m.Milestone)
-	}
-	if m.MilestoneRemoved {
-		said = append(said, "milestone removed")
-	}
-	if len(m.Assigned) > 0 {
-		said = append(said, "assigned "+names("@", m.Assigned))
-	}
-	if len(m.Unassigned) > 0 {
-		said = append(said, "unassigned "+names("@", m.Unassigned))
-	}
-	if len(m.ReviewersAdded) > 0 {
-		said = append(said, "review requested from "+names("@", m.ReviewersAdded))
-	}
-	if len(m.ReviewersRemoved) > 0 {
-		said = append(said, "review request removed for "+names("@", m.ReviewersRemoved))
-	}
-	if m.BodyEdited {
-		said = append(said, "body edited")
-	}
-	if m.Reopened {
-		said = append(said, "reopened")
-	}
-	if m.Draft {
-		said = append(said, "now a draft")
-	}
-	if m.Ready {
-		said = append(said, "ready for review")
-	}
-	return said, outside
+	return strings.Join(lines, "\n")
 }
 
-// changeHead states one item's changes in a line of facts, with any outside text wrapped beneath it.
-func changeHead(noun string, repo contract.RepoName, number int, url, author string, outside bool, words map[contract.PrChangeKind]string, kinds []contract.PrChangeKind, meta *contract.MetaChange) []string {
+// actionWords states an action in a few words. text is the part of them an outside actor wrote, which the caller wraps.
+func actionWords(item contract.GitHubItem) (said, text string) {
+	switch item.Action {
+	case contract.GitHubLabeled:
+		return "labels +" + item.Detail, "labels +" + item.Detail
+	case contract.GitHubUnlabeled:
+		return "labels -" + item.Detail, "labels -" + item.Detail
+	case contract.GitHubMilestoned:
+		return "milestone " + item.Detail, "milestone " + item.Detail
+	case contract.GitHubRenamed:
+		return "title " + item.Detail, "title " + item.Detail
+	case contract.GitHubDemilestoned:
+		return "milestone removed", ""
+	case contract.GitHubAssigned:
+		return "assigned @" + item.Detail, ""
+	case contract.GitHubUnassigned:
+		return "unassigned @" + item.Detail, ""
+	case contract.GitHubReviewRequested:
+		return "review requested from @" + item.Detail, ""
+	case contract.GitHubReviewRequestRemoved:
+		return "review request removed for @" + item.Detail, ""
+	case contract.GitHubEdited:
+		return "body edited", ""
+	case contract.GitHubReopened:
+		return "reopened", ""
+	case contract.GitHubConvertedToDraft:
+		return "now a draft", ""
+	case contract.GitHubReadyForReview:
+		return "ready for review", ""
+	}
+	return string(item.Action), ""
+}
+
+// actionParts states actions in order, a run by one actor as one part, so each reads with who did it. Text by anyone but the
+// owner's account goes in wrapped instead, and the part only names what moved.
+func actionParts(actions []contract.GitHubItem, words map[contract.PrChangeKind]string) (said, wrapped []string) {
+	for start := 0; start < len(actions); {
+		actor := actions[start].Actor
+		var parts, text []string
+		end := start
+		for ; end < len(actions) && actions[end].Actor == actor; end++ {
+			item := actions[end]
+			word, free := actionWords(item)
+			if told, ok := words[contract.PrChangeKind(item.Action)]; ok {
+				word = told
+			}
+			if free != "" && item.Outside {
+				word = strings.SplitN(free, " ", 2)[0] + " changed"
+				text = append(text, free)
+			}
+			if !slices.Contains(parts, word) {
+				parts = append(parts, word)
+			}
+		}
+		line := strings.Join(parts, ", ")
+		if actor != "" {
+			line += " by @" + actor
+		}
+		said = append(said, line)
+		if len(text) > 0 {
+			wrapped = append(wrapped, WrapExternal(actor, strings.Join(text, "\n")))
+		}
+		start = end
+	}
+	return said, wrapped
+}
+
+// changeHead states one item's changes in a line of facts, with any outside text wrapped beneath it. A merge or a close that
+// has an action reads from that action, which knows who did it.
+func changeHead(noun string, repo contract.RepoName, number int, url string, words map[contract.PrChangeKind]string, kinds []contract.PrChangeKind, actions []contract.GitHubItem) []string {
 	said := make([]string, 0, len(kinds))
 	for _, kind := range kinds {
-		if kind != contract.PrChangeMetadata {
+		acted := slices.ContainsFunc(actions, func(item contract.GitHubItem) bool { return string(item.Action) == string(kind) })
+		if kind != contract.PrChangeMetadata && !acted {
 			said = append(said, words[kind])
 		}
 	}
@@ -214,17 +242,9 @@ func changeHead(noun string, repo contract.RepoName, number int, url, author str
 	if len(said) > 0 {
 		parts = append(parts, strings.Join(said, ", "))
 	}
-	var text []string
-	if meta != nil {
-		var metaSaid []string
-		metaSaid, text = metaParts(meta, outside)
-		parts = append(parts, metaSaid...)
-	}
-	lines := []string{fmt.Sprintf("%s %s#%d: %s. %s", noun, repo, number, strings.Join(parts, "; "), url)}
-	if len(text) > 0 {
-		lines = append(lines, WrapExternal(author, strings.Join(text, "\n")))
-	}
-	return lines
+	acts, text := actionParts(actions, words)
+	parts = append(parts, acts...)
+	return append([]string{fmt.Sprintf("%s %s#%d: %s. %s", noun, repo, number, strings.Join(parts, "; "), url)}, text...)
 }
 
 // commentLines shows comments, wrapping those by anyone but the owner's account.
@@ -250,7 +270,7 @@ func renderPRChanged(b contract.PrChanged) string {
 		if len(change.Kinds) == 0 {
 			continue
 		}
-		lines := changeHead("PR", change.PR.Repo, change.PR.Number, change.PR.URL, change.PR.Author, change.Outside, prChangeWords, change.Kinds, change.Meta)
+		lines := changeHead("PR", change.PR.Repo, change.PR.Number, change.PR.URL, prChangeWords, change.Kinds, change.Actions)
 		if len(change.FailedChecks) > 0 {
 			checks := strings.Join(change.FailedChecks, ", ")
 			if change.Outside {
@@ -271,7 +291,7 @@ func issueBlocks(changes []contract.IssueChange) []string {
 			continue
 		}
 		issue := change.Issue
-		lines := changeHead("Issue", issue.Repo, issue.Number, issue.URL, issue.Author, change.Outside, issueChangeWords, change.Kinds, change.Meta)
+		lines := changeHead("Issue", issue.Repo, issue.Number, issue.URL, issueChangeWords, change.Kinds, change.Actions)
 		blocks = append(blocks, strings.Join(append(lines, commentLines(change.Comments, change.MoreComments)...), "\n"))
 	}
 	return blocks

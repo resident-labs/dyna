@@ -124,7 +124,8 @@ type PrComment struct {
 	Outside bool   `json:"outside"`
 }
 
-// PrChange is what one poll saw on one PR. No Kinds means the state moved without anything to wake for, such as CI starting.
+// PrChange is what one pass saw on one PR. No Kinds means the state moved without anything to wake for, such as CI starting.
+// Actions are what people did on it, oldest first, each with its actor.
 type PrChange struct {
 	PR           PrSummary      `json:"pr"`
 	Kinds        []PrChangeKind `json:"kinds,omitempty"`
@@ -132,7 +133,7 @@ type PrChange struct {
 	Outside      bool           `json:"outside"`                // the PR's author is not the owner's GitHub account
 	Comments     []PrComment    `json:"comments,omitempty"`
 	MoreComments int            `json:"moreComments,omitempty"`
-	Meta         *MetaChange    `json:"meta,omitempty"`
+	Actions      []GitHubItem   `json:"actions,omitempty"`
 }
 
 // PrChanged batches one poll's changes for the session that owns those PRs. Issues holds its issues that moved in the same pass.
