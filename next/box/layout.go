@@ -32,7 +32,6 @@ import (
 //	<Data>/addons.json, <Data>/skills/<name>/       global add-ons
 //	<Data>/store.db, <Data>/store.lock              the store and its lock
 //	<Data>/backups/                                 local copies of the store
-//	<Data>/archive/                                 the read-only v1 archive
 //	<Data>/connect/                                 Connect credentials
 //	<Data>/pools/<name>/script                      a node pool's script, which runs here and no box can reach
 //	<Data>/cliproxy/, <Data>/cliproxy/auth-v2/      the model proxy and its sign-in folder
@@ -106,10 +105,6 @@ func (l Layout) V1Store() string { return filepath.Join(l.Data, "dyna.db") }
 
 // Backups is the folder of local store copies.
 func (l Layout) Backups() string { return filepath.Join(l.Data, "backups") }
-
-// LEGACY(v1-transfer): Archive and the <Data>/archive/ line above, the v1 archive folder. Remove after the transfer.
-// Archive is the read-only archive that the v1 cutover left.
-func (l Layout) Archive() string { return filepath.Join(l.Data, "archive") }
 
 // Connect is the folder of Connect credentials.
 func (l Layout) Connect() string { return filepath.Join(l.Data, "connect") }
