@@ -63,11 +63,12 @@ type MethodEntry struct {
 	Actions []Action
 }
 
+// PostInput is what a caller names. A desc tag on a request field becomes that field's description in the tool schema.
 type PostInput struct {
-	Room         contract.RoomID       `json:"room"`
+	Room         contract.RoomID       `json:"room" desc:"A room_… ID, from your instructions. Omitted, it is your own room."`
 	Text         string                `json:"text"`
-	Mentions     []string              `json:"mentions,omitempty"`
-	Home         contract.Conversation `json:"home,omitempty"`
+	Mentions     []string              `json:"mentions,omitempty" desc:"Session names that receive the post, such as api-lead; the roles root, parent, children and siblings; or room:name in another room. IDs are not names."`
+	Home         contract.Conversation `json:"home,omitempty" desc:"Sessions post to the feed; a dm home is accepted from the owner only."`
 	ReplyTo      contract.EventID      `json:"replyTo,omitempty"`
 	ClientID     string                `json:"clientId,omitempty"`
 	VisualUpdate contract.EventID      `json:"visualUpdate,omitempty"`
@@ -86,7 +87,7 @@ type SkillSaveInput struct {
 }
 
 type FileRequest struct {
-	File string `json:"file"`
+	File string `json:"file" desc:"Absolute, or relative to your working directory."`
 }
 type OpenRequest struct {
 	URL string `json:"url"`

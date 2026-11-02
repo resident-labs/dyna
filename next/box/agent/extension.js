@@ -7,7 +7,6 @@ import { join, resolve } from "node:path";
 const callIDArgument = "__DYNA_CALL_ID_ARGUMENT__";
 const dynaURL = "__DYNA_MCP_URL__";
 const shellURL = "__DYNA_SHELL_URL__";
-const postTool = "mcp__dyna__post";
 
 // Every tool a search finds stays declared for the rest of the session, and Pi's default of 8 is most of the dyna tools.
 const searchLimit = 3;
@@ -198,26 +197,48 @@ export default async function (pi) {
 
 	// Only a tool's own result can carry terminate: MCP results and the tool_result hook drop it. So this
 	// tool takes the post tool's place. Pi keeps the first registration of a name, and extensions from
-	// --extension load before its MCP extension. If the tool cannot be read here, Pi's plain MCP tool stays,
+	// --extension load before its MCP extension. If the tools cannot be read here, Pi's plain MCP tools stay,
 	// and the call IDs above still link posts to their tool calls.
-	let post;
+	let post, visual;
 	try {
 		const { tools } = await dynaRPC("tools/list", {});
 		post = tools.find((tool) => tool.name === "post");
-		if (!post) throw new Error("the dyna server lists no post tool");
+		visual = tools.find((tool) => tool.name === "visual");
+		if (!post || !visual) throw new Error("the dyna server lists no post or visual tool");
 	} catch (error) {
-		console.error(`dyna extension: keeping the plain post tool: ${error.message}`);
+		console.error(`dyna extension: keeping the plain tools: ${error.message}`);
 		return;
 	}
-	pi.registerTool({
-		name: postTool,
-		label: "dyna/post",
-		description: post.description,
-		parameters: post.inputSchema,
+	const declared = (tool) => ({
+		name: `mcp__dyna__${tool.name}`,
+		label: `dyna/${tool.name}`,
+		description: tool.description,
+		parameters: tool.inputSchema,
 		outputSchema: resultSchema,
 		exposure: "direct",
 		namespace: { name: "mcp__dyna", aliases: ["dyna"] },
-		annotations: post.annotations,
+		annotations: tool.annotations,
+	});
+
+	// Pi runs the calls of one message in parallel unless one of them is sequential. A check reads a file that a
+	// write or a bash command before it in the same message may not have finished, so its message runs in order.
+	// Like every dyna tool but post, it waits for tool_search.
+	pi.registerTool({
+		...declared(visual),
+		exposure: "deferred",
+		executionMode: "sequential",
+		async execute(_toolCallId, params, signal) {
+			const { content, structuredContent, isError } = await dynaRPC("tools/call", { name: "visual", arguments: params }, signal);
+			return {
+				content,
+				details: { server: "dyna", tool: "visual" },
+				structuredContent: { content, structuredContent, ...(isError ? { isError } : {}) },
+				...(isError ? { isError } : {}),
+			};
+		},
+	});
+	pi.registerTool({
+		...declared(post),
 		async execute(toolCallId, params, signal) {
 			const result = await dynaRPC("tools/call", { name: "post", arguments: params }, signal);
 			const failed = result.isError === true;

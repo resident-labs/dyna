@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -110,22 +112,43 @@ func failure(code contract.ErrorCode, message string) result {
 	return failed(contract.Error{Code: code, Message: message})
 }
 
+// decodeProblem words the strict decoder's refusal of an unknown field with the fields the action takes.
+func decodeProblem(err error, name string, a action) string {
+	field, unknown := strings.CutPrefix(err.Error(), "json: unknown field ")
+	if !unknown {
+		return err.Error()
+	}
+	fields := slices.Sorted(maps.Keys(requestProperties(a)))
+	if len(fields) == 0 {
+		return fmt.Sprintf("unknown field %s; %s takes no fields", field, name)
+	}
+	return fmt.Sprintf("unknown field %s; %s takes: %s", field, name, strings.Join(fields, ", "))
+}
+
 func (s *Server) call(ctx context.Context, p callParams) result {
 	verbs, ok := s.actions[p.Name]
 	if !ok {
 		return failure(contract.ErrUnknownAction, "Unknown tool. Valid tools: "+s.names)
 	}
+	names := make([]string, 0, len(verbs))
+	for name := range verbs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
 	var verb string
-	if err := json.Unmarshal(p.Arguments["action"], &verb); err != nil {
-		return failure(contract.ErrInvalid, "Provide an action from the tool schema.")
+	if raw := p.Arguments["action"]; len(raw) > 0 {
+		if err := json.Unmarshal(raw, &verb); err != nil {
+			return failure(contract.ErrInvalid, "action is a string. Valid actions: "+strings.Join(names, ", "))
+		}
+	}
+	if verb == "" {
+		if len(names) > 1 {
+			return failure(contract.ErrInvalid, "action is required. Valid actions: "+strings.Join(names, ", "))
+		}
+		verb = names[0]
 	}
 	a, ok := verbs[verb]
 	if !ok {
-		var names []string
-		for name := range verbs {
-			names = append(names, name)
-		}
-		sort.Strings(names)
 		return failure(contract.ErrUnknownAction, "Unknown action. Valid actions: "+strings.Join(names, ", "))
 	}
 	delete(p.Arguments, "action")
@@ -149,7 +172,11 @@ func (s *Server) call(ctx context.Context, p callParams) result {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(decoded); err != nil {
-		return failure(contract.ErrInvalid, err.Error())
+		name := p.Name
+		if len(names) > 1 {
+			name += " " + verb
+		}
+		return failure(contract.ErrInvalid, decodeProblem(err, name, a))
 	}
 	if a.method == contract.MethodPost {
 		if s.preparer.Upload == nil {
@@ -182,6 +209,12 @@ func (s *Server) call(ctx context.Context, p callParams) result {
 			return failure(contract.ErrInvalid, err.Error())
 		}
 		data = marshal(req)
+	}
+
+	if a.local == tools.VisualCheck {
+		in := decoded.(*tools.FileRequest)
+		in.File = s.preparer.Path(in.File)
+		data = marshal(in)
 	}
 
 	if a.local != tools.NoBoxHandler {
