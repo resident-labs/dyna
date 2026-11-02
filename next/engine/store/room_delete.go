@@ -76,6 +76,7 @@ func (s *Store) RoomsReadyToDelete(ctx context.Context) ([]contract.RoomID, erro
 
 // RoomLimitedError refuses a deletion that would widen a limit. An empty limit means every room, so a limit
 // must keep an open room when this one goes. A room being deleted does not count, or two deletions could empty one limit.
+// A pool's node does not count either: admission keeps it to the rooms that name its pool, whatever its limit says.
 type RoomLimitedError struct{ Limited contract.RoomLimited }
 
 func (e *RoomLimitedError) Error() string {
@@ -96,7 +97,7 @@ func onlyRoomOf(ctx context.Context, tx *sql.Tx, room contract.RoomID) (contract
 	if err != nil {
 		return limited, err
 	}
-	limited.Hosts, err = listIDs[contract.HostName](ctx, tx, "SELECT l.host FROM host_rooms l WHERE l.room=?1 AND NOT EXISTS (SELECT 1 FROM host_rooms o JOIN rooms r ON r.id=o.room WHERE o.host=l.host AND o.room!=?1 AND r.state='open') ORDER BY l.host", room)
+	limited.Hosts, err = listIDs[contract.HostName](ctx, tx, "SELECT l.host FROM host_rooms l JOIN hosts h ON h.name=l.host WHERE h.pool='' AND l.room=?1 AND NOT EXISTS (SELECT 1 FROM host_rooms o JOIN rooms r ON r.id=o.room WHERE o.host=l.host AND o.room!=?1 AND r.state='open') ORDER BY l.host", room)
 	return limited, err
 }
 

@@ -18,6 +18,9 @@ const (
 	PendingRoomHost    PendingReason = "room-host"
 	PendingRoomLimit   PendingReason = "room-limit"
 	PendingInvalidSize PendingReason = "invalid-size"
+	// A room's pool brings its next node, so its boxes wait for that rather than for a host.
+	PendingPoolNode   PendingReason = "pool-node"
+	PendingPoolFailed PendingReason = "pool-failed"
 )
 
 type Placement struct {
@@ -41,8 +44,21 @@ func DiskWarn(floor int64) int64 {
 	return floor + max(floor/2, diskRequest(contract.BoxSizeXLarge))
 }
 
-// Admit uses snapshots of hosts and existing allocations.
-func Admit(hosts []Host, boxes []Box, request Box) Placement {
+// takes says whether a host may take a new box. A per-session node serves its one box, a shared node the rooms that name its
+// pool, and any other host every room whose rule, if it has one, names it.
+func takes(h Host, id contract.BoxID, only []string) bool {
+	switch {
+	case h.Box != "":
+		return h.Box == id
+	case h.Pool != "":
+		return slices.Contains(only, h.Pool)
+	}
+	return len(only) == 0 || slices.Contains(only, string(h.Name))
+}
+
+// Admit uses snapshots of hosts and existing allocations. only is the room's rule: the hosts and the pool its new boxes may use,
+// and none means any host.
+func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 	if diskRequest(request.Size.Name) == 0 {
 		return Placement{Reason: PendingInvalidSize}
 	}
@@ -60,7 +76,7 @@ func Admit(hosts []Host, boxes []Box, request Box) Placement {
 		if h.State != HostReady || (existing != nil && h.Name != existing.Host) {
 			continue
 		}
-		if len(h.Rooms) > 0 && !slices.Contains(h.Rooms, request.Room) {
+		if len(h.Rooms) > 0 && !slices.Contains(h.Rooms, request.Room) || existing == nil && !takes(h, request.ID, only) {
 			if reason == PendingNoReadyHost {
 				reason = PendingRoomHost
 			}

@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -44,6 +46,71 @@ func (s *Store) SetHostRooms(ctx context.Context, host contract.HostName, rooms 
 				return err
 			}
 			if _, err := tx.ExecContext(ctx, "INSERT INTO host_rooms(host,room) VALUES(?,?)", host, room); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// HostHeldError refuses to remove a host that still holds work, and says what.
+type HostHeldError struct {
+	Host contract.HostName
+	Held []string
+}
+
+func (e *HostHeldError) Error() string {
+	return fmt.Sprintf("host %s still holds %s", e.Host, strings.Join(e.Held, ", "))
+}
+
+// hostHeld reads what keeps a host, so nothing that needs it goes with it. A deleted box holds nothing, though it keeps its host.
+func hostHeld(ctx context.Context, tx *sql.Tx, host contract.HostName) error {
+	held, err := listIDs[string](ctx, tx, `SELECT 'session '||s.name||' ('||b.state||')' FROM boxes b JOIN sessions s ON s.id=b.session WHERE b.host=?1 AND b.state!='deleted'
+		UNION ALL SELECT 'CI of '||repo FROM repo_ci_hosts WHERE host=?1
+		UNION ALL SELECT 'a subscription run' FROM subscription_runs WHERE host=?1
+		UNION ALL SELECT 'the --only rule of room '||r.id FROM rooms r, json_each(r.only_hosts) j WHERE j.value=?1`, host)
+	if err != nil {
+		return err
+	}
+	if len(held) > 0 {
+		return &HostHeldError{Host: host, Held: held}
+	}
+	return nil
+}
+
+// DrainHost stops admission to a host that holds nothing, in one write with that check, so no box can land on it afterwards.
+func (s *Store) DrainHost(ctx context.Context, host contract.HostName) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		if err := hostHeld(ctx, tx, host); err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, "UPDATE hosts SET state='draining' WHERE name=? AND state!='provisioning'", host)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err == nil && n == 0 {
+			err = fmt.Errorf("host %s: %w", host, ErrNotFound)
+		}
+		return err
+	})
+}
+
+// RemoveHost deletes a host that holds nothing. Its deleted boxes let go of it, and what it still owed a deleted room goes with it.
+func (s *Store) RemoveHost(ctx context.Context, host contract.HostName) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		if err := hostHeld(ctx, tx, host); err != nil {
+			return err
+		}
+		for _, step := range []string{
+			"UPDATE boxes SET host=NULL WHERE host=?1",
+			"DELETE FROM host_rooms WHERE host=?1",
+			"DELETE FROM host_labels WHERE host=?1",
+			"DELETE FROM room_leftovers WHERE host=?1",
+			"DELETE FROM disk_warnings WHERE host=?1",
+			"DELETE FROM hosts WHERE name=?1",
+		} {
+			if _, err := tx.ExecContext(ctx, step, host); err != nil {
 				return err
 			}
 		}
@@ -215,8 +282,13 @@ func (s *Store) HostSessions(ctx context.Context) (map[contract.HostName][]contr
 	return out, rows.Err()
 }
 
+// Hosts lists the hosts. A pool's node being created has no address yet, so it is not one.
 func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT h.name, h.ssh, h.state, h.cpus, h.mem_bytes, h.disk_bytes, h.disk_floor, h.checked_at, h.maintained_at, h.engine_host, hr.room FROM hosts h LEFT JOIN host_rooms hr ON hr.host=h.name ORDER BY h.name,hr.room`)
+	return s.hosts(ctx, "h.state!='provisioning'")
+}
+
+func (s *Store) hosts(ctx context.Context, where string) ([]box.Host, error) {
+	rows, err := s.Read().QueryContext(ctx, `SELECT h.name, h.ssh, h.state, h.cpus, h.mem_bytes, h.disk_bytes, h.disk_floor, h.checked_at, h.maintained_at, h.engine_host, h.pool, h.box, hr.room FROM hosts h LEFT JOIN host_rooms hr ON hr.host=h.name WHERE `+where+` ORDER BY h.name,hr.room`)
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +298,7 @@ func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
 		var h box.Host
 		var checked, maintained int64
 		var room sql.NullString
-		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &h.DiskFloor, &checked, &maintained, &h.EngineHost, &room); err != nil {
+		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &h.DiskFloor, &checked, &maintained, &h.EngineHost, &h.Pool, &h.Box, &room); err != nil {
 			return nil, err
 		}
 		if len(hosts) == 0 || hosts[len(hosts)-1].Name != h.Name {
