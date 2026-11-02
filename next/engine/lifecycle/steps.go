@@ -46,6 +46,14 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 	var cause contract.FailureCause
 	var workErr error
 	switch {
+	case row.Want == store.WantHold:
+		workErr = r.boxes.Stop(ctx, b.ID)
+		if workErr == nil {
+			next.State, cause = contract.BoxStopped, contract.CauseArchiveFailed
+		} else {
+			failures++
+			due = r.retryAt(failures)
+		}
 	case b.State == contract.BoxLost:
 		status, found, inspectErr := r.boxes.Inspect(ctx, b.ID)
 		workErr = inspectErr
