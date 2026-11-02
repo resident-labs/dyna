@@ -202,8 +202,13 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 	return response, err
 }
 
+// CloseSession ends a session and hands what its list owes to the parent, in one write.
 func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event contract.Event) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		held, err := s.responsibilities(ctx, tx, []contract.SessionID{id}, nil) // A terminal ends with the box, so it needs no asking.
+		if err != nil {
+			return err
+		}
 		result, err := tx.ExecContext(ctx, "UPDATE sessions SET state='closed',closed_at=? WHERE id=? AND closed_at IS NULL", event.Time.UnixMilli(), id)
 		if err != nil {
 			return err
@@ -224,14 +229,20 @@ func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event c
 			return err
 		}
 		var parent contract.SessionID
-		if err := tx.QueryRowContext(ctx, "SELECT COALESCE(parent,'') FROM sessions WHERE id=?", id).Scan(&parent); err != nil {
+		var parentClosing bool
+		if err := tx.QueryRowContext(ctx, "SELECT COALESCE(s.parent,''),COALESCE(p.state='closing',0) FROM sessions s LEFT JOIN sessions p ON p.id=s.parent WHERE s.id=?", id).Scan(&parent, &parentClosing); err != nil {
 			return err
 		}
 		var unheld []contract.GoalID
+		var handed []contract.Responsibility
 		if parent != "" {
 			if unheld, err = s.transferGoals(ctx, tx, id, parent, event.Time); err != nil {
 				return err
 			}
+			all, _ := held[id].splitClose()
+			handed = slices.DeleteFunc(all, func(item contract.Responsibility) bool {
+				return item.Kind == contract.ResponsibilityGoal && slices.Contains(unheld, contract.GoalID(item.ID))
+			})
 			result, err := tx.ExecContext(ctx, `INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state,handoff_from)
 SELECT 'session',?,seq,'session','post','','','','',1,'pending',COALESCE(handoff_from,?) FROM deliveries WHERE to_kind='session' AND to_id=? AND state IN ('pending','taken')
 ON CONFLICT(to_kind,to_id,seq) DO NOTHING`, parent, id, id)
@@ -252,12 +263,13 @@ ON CONFLICT(to_kind,to_id,seq) DO NOTHING`, parent, id, id)
 				return err
 			}
 		}
-		if body, ok := event.Body.(contract.SessionClosed); ok && len(unheld) > 0 {
-			body.Unheld = unheld
+		if body, ok := event.Body.(contract.SessionClosed); ok {
+			body.Unheld, body.Handed = unheld, handed
 			event.Body = body
 		}
 		seq, err := s.AppendEvent(tx, event)
-		if err != nil || len(unheld) == 0 {
+		// A parent that is closing too names all of this in its own notice.
+		if err != nil || parentClosing || len(unheld)+len(handed) == 0 {
 			return err
 		}
 		return s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: parent}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
@@ -285,7 +297,7 @@ var ErrTurnConflict = errors.New("turn output differs from the committed result"
 
 func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output contract.TurnOutputRequest, event contract.Event, also ...func(*sql.Tx) error) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, "UPDATE turns SET ended_at=?,outcome=?,model=?,input_tokens=?,output_tokens=?,cache_read_tokens=?,cache_write_tokens=?,shell_jobs=?,sections=NULL WHERE id=? AND session=? AND ended_at IS NULL", event.Time.UnixMilli(), output.Outcome, output.Model, output.Usage.InputTokens, output.Usage.OutputTokens, output.Usage.CacheReadTokens, output.Usage.CacheWriteTokens, output.ShellJobs, output.Turn, session)
+		result, err := tx.ExecContext(ctx, "UPDATE turns SET ended_at=?,outcome=?,model=?,input_tokens=?,output_tokens=?,cache_read_tokens=?,cache_write_tokens=?,sections=NULL WHERE id=? AND session=? AND ended_at IS NULL", event.Time.UnixMilli(), output.Outcome, output.Model, output.Usage.InputTokens, output.Usage.OutputTokens, output.Usage.CacheReadTokens, output.Usage.CacheWriteTokens, output.Turn, session)
 		if err != nil {
 			return err
 		}

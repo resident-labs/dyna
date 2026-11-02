@@ -50,6 +50,13 @@ func (k serviceSink) DeliveryDone(ctx context.Context, id contract.DeliverySeq) 
 	return nil
 }
 
+func (k serviceSink) Compacted(ctx context.Context, answer contract.BoxCompactedRequest) error {
+	if _, problem := k.s.BoxCompacted(ctx, k.caller, answer); problem != nil {
+		return errors.New(problem.Message)
+	}
+	return nil
+}
+
 func (k serviceSink) TurnOutput(ctx context.Context, result contract.TurnEnded) error {
 	if _, problem := k.s.TurnOutput(ctx, k.caller, contract.TurnOutputRequest{Turn: result.Turn, Outcome: result.Outcome, Final: result.Final, Error: result.Error, Cause: result.Cause, Model: result.Usage.Model, Usage: result.Usage, Unread: result.Unread}); problem != nil {
 		return errors.New(problem.Message)
@@ -187,7 +194,7 @@ func (b *piBox) start(t *testing.T, wrap func(*pi.Harness) *observedHarness) (*p
 			select {
 			case message := <-b.channel:
 				switch message.Body.(type) {
-				case contract.TurnStart, contract.TurnSteer, contract.TurnStop:
+				case contract.TurnStart, contract.TurnSteer, contract.TurnStop, contract.Compact:
 					if err := runner.Handle(ctx, message); err != nil && ctx.Err() == nil {
 						t.Errorf("handle: %v", err)
 					}

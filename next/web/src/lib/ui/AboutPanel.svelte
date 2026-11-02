@@ -7,11 +7,11 @@
   import { call } from "../client.ts";
   import { onHost } from "../hosts.ts";
   import { failed } from "../jobs.ts";
-  import { closeNote, descendants } from "../session-tree.ts";
+  import { closeNote, descendants, handNote, holdsText } from "../session-tree.ts";
   import { subscriptionAction, subscriptionState, subscriptionWhen } from "../subscriptions.ts";
   import { watchShell, type ShellJob } from "../shell.ts";
   import type { RoomStore } from "../room.svelte.ts";
-  import type { SessionAccountResponse, SubscriptionInfo } from "../contract.gen.ts";
+  import type { Responsibility, SessionAccountResponse, SessionResponsibilitiesResponse, SubscriptionInfo } from "../contract.gen.ts";
   // What a DM's session is, as design A's About tab: its goal, then one label and value per fact the engine reports.
   // A row without a value does not show. Jobs opens the dock's list on this session, and stays while the box is ready so a
   // finished job can be reached. It counts the jobs the engine lists, as that list does, because session.list's count can
@@ -56,8 +56,27 @@
     const asked = room;
     void call("subscription.list", { room: asked }).then(answer => { if (asked === room) subscriptions = answer.subscriptions ?? []; }, () => { subscriptions = []; });
   });
+  // The engine's list of what this session still holds. Anything that can change it reads it again; one that cannot load shows nothing.
+  let holds: Responsibility[] = $state([]);
+  let plan: SessionResponsibilitiesResponse["close"] | undefined = $state();
+  function loadHolds(): Promise<void> {
+    const asked = session;
+    return call("session.responsibilities", { session: asked }).then(answer => {
+      if (asked === session) { holds = answer.items ?? []; plan = answer.close; }
+    }, () => { if (asked === session) { holds = []; plan = undefined; } });
+  }
+  $effect(() => { void box; void open?.lastTurnAt; void goals.length; void store.running(session); void loadHolds(); });
+  let held = $derived(holdsText(holds));
+  let handed = $derived(plan ? handNote(plan.handed ?? [], store.names.get(plan.to) ?? "the parent") : "");
+  let confirming = $state(false);
   let closing = $state(false);
   let closeFailed = $state(false);
+  $effect(() => { void session; confirming = false; });
+  // The confirm reads the list again, so it names what the close will really hand over.
+  function confirmClose(): void {
+    confirming = true;
+    void loadHolds();
+  }
   function close(): void {
     closing = true;
     closeFailed = false;
@@ -83,6 +102,7 @@
     {#if account}<dt>Account</dt><dd><AccountMenu {session} {account} {switchable} onchanged={loadAccount} /></dd>{/if}
     {#if box}<dt>Box</dt><dd>{#if failure}<StatusPill tone="failed" word label={onHost("Failed", host)} /> · {boxReason(failure)}{:else if reason === "room-host"}<StatusPill tone="warning" word label={waits[reason]} />{:else}{reason ? waits[reason] : onHost(boxWords[box], host)}{/if}</dd>{/if}
     {#if hasJobs}<dt>Jobs</dt><dd><button type="button" onclick={onjobs}>{running ? `${count(running, "job")} running` : "Jobs"}</button>{#if failures}{" · "}<StatusPill tone="failed" label="{failures} failed" word />{/if}</dd>{/if}
+    {#if held}<dt>Holds</dt><dd>{held}</dd>{/if}
     {#if open?.startedAt}<dt>Started</dt><dd class="muted"><time datetime={open.startedAt} title={fullTime(open.startedAt)}>{fromNow(open.startedAt, Math.max(now, Date.parse(open.startedAt)))}</time></dd>{/if}
     {#if open?.lastTurnAt}<dt>Last turn</dt><dd class="muted"><time datetime={open.lastTurnAt} title={fullTime(open.lastTurnAt)}>{fromNow(open.lastTurnAt, Math.max(now, Date.parse(open.lastTurnAt)))}</time></dd>{/if}
   </dl>
@@ -97,8 +117,17 @@
   {/if}
   {#if open?.parent}
     <div class="closebox">
-      <button type="button" class="close-button" disabled={closing} onclick={close}>Close session</button>
-      <p class="note muted">{archiveNote}</p>
+      {#if confirming}
+        {#if handed}<p class="note">{handed}</p>{/if}
+        <p class="note muted">{archiveNote}</p>
+        <div class="confirm">
+          <button type="button" class="close-button" disabled={closing} onclick={() => { confirming = false; }}>Cancel</button>
+          <button type="button" class="close-button danger" disabled={closing} onclick={close}>Close session</button>
+        </div>
+      {:else}
+        <button type="button" class="close-button" onclick={confirmClose}>Close session…</button>
+        <p class="note muted">{archiveNote}</p>
+      {/if}
       {#if closeFailed}<span class="failed">The session did not close. Try again.</span>{/if}
     </div>
   {/if}
@@ -126,6 +155,8 @@
   .close-button { height: 28px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); font-size: 13px; font-weight: 500; }
   .close-button:hover { background: var(--hover); text-decoration: none; }
   .close-button:disabled { background: none; color: var(--muted); cursor: default; text-decoration: none; }
+  .close-button.danger { color: var(--danger); }
+  .confirm { display: flex; gap: 8px; }
   a:hover, button:hover { text-decoration: underline; }
   a:focus-visible, button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 </style>

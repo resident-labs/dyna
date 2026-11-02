@@ -279,7 +279,7 @@ export function timeSpan(start: string, end: string): string {
 // Every event type has a plural group label, including types that do not currently appear in a work block.
 export const eventGroups: Record<Event["type"], string> = {
   "connect.connector": "Connect connector changes", "account.failed": "account failures", "account.quota_low": "account quota alerts",
-  "post.created": "posts", "session.started": "sessions started", "session.closed": "sessions closed",
+  "post.created": "posts", "session.started": "sessions started", "session.closed": "sessions closed", "session.compacted": "compactions",
   "session.restarted": "boxes replaced", "session.moved": "sessions moved", "session.profile_changed": "profiles changed",
   "turn.started": "turns started", "turn.ended": "turns ended", "turn.activity": "turn updates", "transcript.changed": "transcript updates",
   "computer.changed": "computer changes", "box.changed": "box changes", "box.pressure": "memory warnings",
@@ -475,6 +475,7 @@ export function describe(event: Event, name: Name): string {
     case "session.restarted": return event.body.imageUpdated ? `${name(event.body.session)}'s box image was updated.` : `${name(event.body.session)}'s box was replaced. Unpushed work in the old volume is gone.`;
     case "session.started": return `${name(event.body.session)} started`;
     case "session.closed": return `${name(event.body.session)} closed${event.body.reason ? ` ${closeReasons[event.body.reason]}` : ""}`;
+    case "session.compacted": return event.body.error ? `${name(event.body.session)} could not compact its conversation` : `${name(event.body.session)} compacted its conversation`;
     case "session.moved": return `${name(event.body.session)} moved under ${name(event.body.newParent)}`;
     case "computer.changed": return `${name(event.body.session)} ${event.body.to === "running" ? "opened" : "closed"} its computer`;
     case "box.changed": return ""; // feedRows keeps box changes out of work rows.

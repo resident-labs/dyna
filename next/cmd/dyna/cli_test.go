@@ -76,6 +76,7 @@ type fakeClient struct {
 	start        contract.SessionStartRequest
 	composeList  contract.ComposeListRequest
 	close        contract.SessionCloseRequest
+	closed       contract.SessionCloseResponse
 	setProfile   contract.SessionSetProfileRequest
 	restart      contract.SessionRestartRequest
 	post         contract.PostRequest
@@ -207,7 +208,10 @@ func (f *fakeClient) SessionSetProfile(_ context.Context, q contract.SessionSetP
 }
 func (f *fakeClient) SessionClose(_ context.Context, q contract.SessionCloseRequest) (contract.SessionCloseResponse, error) {
 	f.close = q
-	return contract.SessionCloseResponse{}, nil
+	return f.closed, nil
+}
+func (f *fakeClient) SessionResponsibilities(context.Context, contract.SessionResponsibilitiesRequest) (contract.SessionResponsibilitiesResponse, error) {
+	return contract.SessionResponsibilitiesResponse{}, nil
 }
 func (f *fakeClient) SessionRestart(_ context.Context, q contract.SessionRestartRequest) (contract.SessionRestartResponse, error) {
 	f.restart = q
@@ -380,6 +384,13 @@ func TestSessionCloseDiscard(t *testing.T) {
 	runCLI(t, f, "session", "close", "s", "--discard")
 	if f.close.Session != "s" || !f.close.Discard {
 		t.Fatalf("%+v", f.close)
+	}
+}
+
+func TestSessionCloseSaysWhatItHandedOver(t *testing.T) {
+	f := &fakeClient{closed: contract.SessionCloseResponse{To: "ses_lead", Handed: []contract.Responsibility{{Kind: contract.ResponsibilityGoal, ID: "g1"}, {Kind: contract.ResponsibilityPR, ID: "o/r#7"}}}}
+	if out := runCLI(t, f, "session", "close", "s"); !strings.Contains(out, "Handed to ses_lead: goal g1, PR o/r#7") {
+		t.Fatalf("%q", out)
 	}
 }
 

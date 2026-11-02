@@ -20,6 +20,55 @@ import (
 	"github.com/resident-labs/dyna/harness"
 )
 
+func TestCompactAsksForTheSizeThenCompactsOverIt(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		tokens  string
+		replies int
+		want    harness.Compaction
+		failed  bool
+	}{
+		{"over", "150000", 2, harness.Compaction{Compacted: true, TokensBefore: 150000, TokensAfter: 9000, Usage: contract.Usage{InputTokens: 140000, OutputTokens: 800, CacheReadTokens: 1, CacheWriteTokens: 2}}, false},
+		{"at the limit", "100000", 1, harness.Compaction{}, false},
+		{"unknown right after a compaction", "null", 1, harness.Compaction{}, false},
+		{"refused", "150000", 2, harness.Compaction{}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inputReader, inputWriter := io.Pipe()
+			outputReader, outputWriter := io.Pipe()
+			h := &Harness{stdin: inputWriter, pending: make(map[string]chan event), events: make(chan event, 1), done: make(chan struct{}), stop: make(chan struct{})}
+			go h.read(outputReader)
+			defer inputWriter.Close()
+			defer outputWriter.Close()
+			var commands []string
+			go func() {
+				reader := bufio.NewReader(inputReader)
+				for {
+					line, err := reader.ReadBytes('\n')
+					if err != nil {
+						return
+					}
+					var sent struct{ ID, Type string }
+					_ = json.Unmarshal(line, &sent)
+					commands = append(commands, sent.Type)
+					switch {
+					case sent.Type == "get_session_stats":
+						fmt.Fprintf(outputWriter, `{"id":"%s","type":"response","success":true,"data":{"contextUsage":{"tokens":%s,"contextWindow":1000000}}}`+"\n", sent.ID, tc.tokens)
+					case tc.failed:
+						fmt.Fprintf(outputWriter, `{"id":"%s","type":"response","success":false,"error":"Nothing to compact (session too small)"}`+"\n", sent.ID)
+					default:
+						fmt.Fprintf(outputWriter, `{"id":"%s","type":"response","success":true,"data":{"summary":"s","tokensBefore":150000,"estimatedTokensAfter":9000,"usage":{"input":140000,"output":800,"cacheRead":1,"cacheWrite":2}}}`+"\n", sent.ID)
+					}
+				}
+			}()
+			got, err := h.Compact(context.Background(), 100000)
+			if tc.failed != (err != nil) || got != tc.want || len(commands) != tc.replies {
+				t.Fatalf("got %+v, %v, commands %v", got, err, commands)
+			}
+		})
+	}
+}
+
 func TestTransferModelRPC(t *testing.T) {
 	inputReader, inputWriter := io.Pipe()
 	outputReader, outputWriter := io.Pipe()

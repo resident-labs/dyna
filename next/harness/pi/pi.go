@@ -157,6 +157,12 @@ type event struct {
 		Reason       string `json:"reason"`
 		TokensBefore int64  `json:"tokensBefore"`
 		TokensAfter  int64  `json:"tokensAfter"`
+		// compact answers with these, and get_session_stats with contextUsage: tokens is null right after a compaction.
+		EstimatedTokensAfter int64        `json:"estimatedTokensAfter"`
+		Usage                messageUsage `json:"usage"`
+		ContextUsage         struct {
+			Tokens *int64 `json:"tokens"`
+		} `json:"contextUsage"`
 	} `json:"data"`
 	Message struct {
 		Role          string        `json:"role"`
@@ -167,13 +173,15 @@ type event struct {
 		IsError       bool          `json:"isError"`
 		Details       resultDetails `json:"details"`
 		Content       contentBlocks `json:"content"`
-		Usage         struct {
-			Input      int64 `json:"input"`
-			Output     int64 `json:"output"`
-			CacheRead  int64 `json:"cacheRead"`
-			CacheWrite int64 `json:"cacheWrite"`
-		} `json:"usage"`
+		Usage         messageUsage  `json:"usage"`
 	} `json:"message"`
+}
+
+type messageUsage struct {
+	Input      int64 `json:"input"`
+	Output     int64 `json:"output"`
+	CacheRead  int64 `json:"cacheRead"`
+	CacheWrite int64 `json:"cacheWrite"`
 }
 
 type Harness struct {
@@ -402,6 +410,24 @@ func (h *Harness) TransferModel(ctx context.Context, id contract.TurnID, model c
 	}
 	d := reply.Data
 	return harness.ModelTransfer{Path: d.Path, Reason: d.Reason, TokensBefore: d.TokensBefore, TokensAfter: d.TokensAfter}, nil
+}
+
+// Compact reads the context size Pi reports and, over the limit, sends Pi's compact. Pi knows no size right after a
+// compaction, so a second ask does nothing. Pi records the compaction in the session file like any other.
+func (h *Harness) Compact(ctx context.Context, over int64) (harness.Compaction, error) {
+	stats, err := h.requestCommand(ctx, command{Type: "get_session_stats"})
+	if err != nil {
+		return harness.Compaction{}, err
+	}
+	if tokens := stats.Data.ContextUsage.Tokens; tokens == nil || *tokens <= over {
+		return harness.Compaction{}, nil
+	}
+	reply, err := h.requestCommand(ctx, command{Type: "compact"})
+	if err != nil {
+		return harness.Compaction{}, err
+	}
+	d := reply.Data
+	return harness.Compaction{Compacted: true, TokensBefore: d.TokensBefore, TokensAfter: d.EstimatedTokensAfter, Usage: contract.Usage{InputTokens: d.Usage.Input, OutputTokens: d.Usage.Output, CacheReadTokens: d.Usage.CacheRead, CacheWriteTokens: d.Usage.CacheWrite}}, nil
 }
 
 // SetPromptSections sends the ordered turn context before the next prompt or continuation.

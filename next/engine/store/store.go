@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -68,6 +69,7 @@ type Store struct {
 	currentTx     *sql.Tx
 	pending       []contract.Event
 	wakePending   []contract.SessionID
+	terminals     atomic.Pointer[func(contract.SessionID) bool]
 	wake          func([]contract.SessionID, []contract.Event)
 	subMu         sync.Mutex
 	subs          map[chan contract.Event]struct{}

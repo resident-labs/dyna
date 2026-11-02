@@ -120,9 +120,10 @@ func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contrac
 			continue
 		}
 		var entry struct {
-			Type, ID  string
-			Timestamp time.Time
-			Message   struct {
+			Type, ID     string
+			Timestamp    time.Time
+			TokensBefore int64
+			Message      struct {
 				Role, DeliveryID, ToolCallID string
 				IsError                      bool
 				Content                      json.RawMessage
@@ -135,7 +136,16 @@ func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contrac
 				}
 			}
 		}
-		if json.Unmarshal(line, &entry) != nil || entry.Type != "message" {
+		if json.Unmarshal(line, &entry) != nil {
+			continue
+		}
+		if entry.Type == "compaction" && turn != "" {
+			item := TranscriptItem{TranscriptItem: contract.TranscriptItem{ID: transcriptItemID(entry.ID), Turn: turn, Kind: contract.TranscriptCompaction, At: entry.Timestamp, Tokens: entry.TokensBefore}}
+			if keep(&item) {
+				items = append(items, &item)
+			}
+		}
+		if entry.Type != "message" {
 			continue
 		}
 		lastAt = entry.Timestamp

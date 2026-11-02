@@ -35,7 +35,7 @@ func (s *Service) closeIdle(ctx context.Context, ids []contract.SessionID) error
 		if err != nil {
 			return err
 		}
-		if problem := s.closeSession(ctx, session, false, true); problem != nil {
+		if _, problem := s.closeSession(ctx, session, false, true); problem != nil {
 			return fmt.Errorf("close idle session: %s", problem.Message)
 		}
 	}

@@ -61,6 +61,9 @@ func (h *harnessFake) FollowUp(context.Context, contract.TurnInput) error {
 	panic("unexpected follow-up")
 }
 func (h *harnessFake) Abort(context.Context) error { return nil }
+func (*harnessFake) Compact(context.Context, int64) (harness.Compaction, error) {
+	return harness.Compaction{}, nil
+}
 func (h *harnessFake) Delivered(_ context.Context, id contract.DeliverySeq) (bool, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -69,18 +72,25 @@ func (h *harnessFake) Delivered(_ context.Context, id contract.DeliverySeq) (boo
 func (*harnessFake) Close() error { return nil }
 
 type sinkFake struct {
-	mu      sync.Mutex
-	acked   map[contract.DeliverySeq]bool
-	done    chan contract.TurnEnded
-	entered chan struct{}
-	release chan struct{}
-	calls   int
+	mu        sync.Mutex
+	acked     map[contract.DeliverySeq]bool
+	done      chan contract.TurnEnded
+	entered   chan struct{}
+	release   chan struct{}
+	calls     int
+	compacted []contract.BoxCompactedRequest
 }
 
 func (s *sinkFake) DeliveryDone(_ context.Context, id contract.DeliverySeq) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.acked[id] = true
+	return nil
+}
+func (s *sinkFake) Compacted(_ context.Context, answer contract.BoxCompactedRequest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.compacted = append(s.compacted, answer)
 	return nil
 }
 func (s *sinkFake) TurnOutput(_ context.Context, result contract.TurnEnded) error {

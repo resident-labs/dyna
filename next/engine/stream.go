@@ -205,6 +205,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 			if channel.TakeArchiveRetry() {
 				archiveSent = false
 			}
+			compactTurn, compact := channel.TakeCompact()
 			desired := handle.ComputerWatchGeneration()
 			shellDesired := handle.ShellWatchGeneration()
 			computerChanged, shellChanged := channel.WatchChanges(desired, shellDesired)
@@ -213,6 +214,14 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 				!sendWatch(ctx, out, shellChanged, shellDesired, contract.ShellWatchStart{Generation: shellDesired}, contract.ShellWatchStop{}) {
 				reason, cause = streamWatchStopped, ctx.Err()
 				return
+			}
+			if compact {
+				select {
+				case out <- contract.BoxMessage{Body: contract.Compact{Turn: compactTurn, OverTokens: idleCompactTokens}}:
+				case <-ctx.Done():
+					reason, cause = streamCanceled, ctx.Err()
+					return
+				}
 			}
 			current, err := s.store.Box(ctx, session.Box)
 			if err != nil {

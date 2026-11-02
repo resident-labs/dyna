@@ -40,14 +40,14 @@ func checkinRooms(ctx context.Context, q sqlQuery) ([]contract.RoomID, error) {
 		WHERE g.state='active' AND g.session IS NOT NULL AND r.paused_at IS NULL AND r.state='open' ORDER BY r.id`)
 }
 
-const checkinFacts = `SELECT s.id,COALESCE(s.parent,''),s.name,s.state='closing',s.created_at,s.shell_jobs,s.model_retry_at>0,b.state,b.updated_at,
+const checkinFacts = `SELECT s.id,COALESCE(s.parent,''),s.name,s.state='closing',s.created_at,s.model_retry_at>0,b.state,b.updated_at,
 	COALESCE(t.id,''),COALESCE(t.started_at,0),COALESCE(t.ended_at,0),COALESCE(t.outcome,''),
 	EXISTS (SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=s.id AND d.wake=1 AND d.state='pending')
 		OR EXISTS (SELECT 1 FROM operations o WHERE o.by_kind='session' AND o.by_id=s.id AND o.state IN ('approved','running')),
 	COALESCE((SELECT MIN(o.created_at) FROM operations o WHERE o.by_kind='session' AND o.by_id=s.id AND o.state='pending'),0),
 	COALESCE(c.silent_turn,''),COALESCE(c.progress,0),COALESCE(c.told,0),COALESCE(c.told_at,0),COALESCE(c.reported_at,0),
 	EXISTS (SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=s.id AND d.seq=c.report_seq AND d.state IN ('pending','taken')),
-	` + failureKey + `,COALESCE(c.failure,''),b.reason,NOT ` + noOpenQuestion + `,` + blockedOnQuestion + `
+	` + failureKey + `,COALESCE(c.failure,''),b.reason
 	FROM sessions s JOIN boxes b ON b.session=s.id
 	LEFT JOIN turns t ON t.id=(SELECT id FROM turns WHERE session=s.id ORDER BY started_at DESC, rowid DESC LIMIT 1)
 	LEFT JOIN checkins c ON c.session=s.id
@@ -57,7 +57,7 @@ const checkinGoals = `SELECT g.session,g.number,g.text,g.updated_at,(SELECT COUN
 	FROM goals g WHERE g.room=? AND g.state='active' AND g.session IS NOT NULL ORDER BY g.number`
 
 // readCheckinRoom loads the planner's facts about one room. A goal that moved since the stall was told starts the stall over.
-func readCheckinRoom(ctx context.Context, tx *sql.Tx, id contract.RoomID) ([]room.CheckinSession, map[contract.SessionID]int64, error) {
+func (s *Store) readCheckinRoom(ctx context.Context, tx *sql.Tx, id contract.RoomID) ([]room.CheckinSession, map[contract.SessionID]int64, error) {
 	rows, err := tx.QueryContext(ctx, checkinFacts, id)
 	if err != nil {
 		return nil, nil, err
@@ -75,8 +75,8 @@ func readCheckinRoom(ctx context.Context, tx *sql.Tx, id contract.RoomID) ([]roo
 		var s room.CheckinSession
 		var created, boxChanged, started, ended, waiting, progress, told, reported int64
 		var turn, silent, outcome string
-		if err := rows.Scan(&s.ID, &s.Parent, &s.Name, &s.Closing, &created, &s.Jobs, &s.Retrying, &s.Box, &boxChanged,
-			&turn, &started, &ended, &outcome, &s.Pending, &waiting, &silent, &progress, &s.Told, &told, &reported, &s.Unread, &s.Failure, &s.FailureTold, &s.Reason, &s.Asking, &s.Blocked); err != nil {
+		if err := rows.Scan(&s.ID, &s.Parent, &s.Name, &s.Closing, &created, &s.Retrying, &s.Box, &boxChanged,
+			&turn, &started, &ended, &outcome, &s.Pending, &waiting, &silent, &progress, &s.Told, &told, &reported, &s.Unread, &s.Failure, &s.FailureTold, &s.Reason); err != nil {
 			return nil, nil, err
 		}
 		s.BoxChanged, s.Waiting, s.ToldAt, s.Reported = millis(boxChanged), millis(waiting), millis(told), millis(reported)
@@ -99,8 +99,19 @@ func readCheckinRoom(ctx context.Context, tx *sql.Tx, id contract.RoomID) ([]roo
 	}
 	rows.Close()
 	bySession := make(map[contract.SessionID]*room.CheckinSession, len(sessions))
+	ids := make([]contract.SessionID, len(sessions))
 	for i := range sessions {
 		bySession[sessions[i].ID] = &sessions[i]
+		ids[i] = sessions[i].ID
+	}
+	held, err := s.responsibilities(ctx, tx, ids, nil) // No terminal moves a goal, so a check-in does not ask.
+	if err != nil {
+		return nil, nil, err
+	}
+	for id, items := range held {
+		session := bySession[id]
+		session.Jobs, session.Blocked = items.Count(contract.ResponsibilityShellJob), items.Blocked()
+		session.Asking = items.Count(contract.ResponsibilityQuestion) > 0
 	}
 	goals, err := tx.QueryContext(ctx, checkinGoals, id)
 	if err != nil {
@@ -197,7 +208,7 @@ func (s *Store) SendFailureNotices(ctx context.Context, now time.Time, newEvent 
 			return err
 		}
 		for _, id := range rooms {
-			sessions, progress, err := readCheckinRoom(ctx, tx, id)
+			sessions, progress, err := s.readCheckinRoom(ctx, tx, id)
 			if err != nil {
 				return err
 			}
@@ -244,7 +255,7 @@ func (s *Store) SendCheckins(ctx context.Context, now time.Time, newEvent func(c
 			return err
 		}
 		for _, id := range rooms {
-			sessions, progress, err := readCheckinRoom(ctx, tx, id)
+			sessions, progress, err := s.readCheckinRoom(ctx, tx, id)
 			if err != nil {
 				return err
 			}

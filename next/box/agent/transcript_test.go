@@ -104,6 +104,9 @@ func TestTranscriptStartsNewFileAtZero(t *testing.T) {
 type recordingTurnSink struct{}
 
 func (recordingTurnSink) DeliveryDone(context.Context, contract.DeliverySeq) error { return nil }
+func (recordingTurnSink) Compacted(context.Context, contract.BoxCompactedRequest) error {
+	return nil
+}
 
 func (recordingTurnSink) TurnOutput(context.Context, contract.TurnEnded) error { return nil }
 

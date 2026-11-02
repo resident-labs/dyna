@@ -19,7 +19,7 @@
   import TimelineMinimap from "./TimelineMinimap.svelte";
   import PostTarget from "./PostTarget.svelte";
   import QuestionCard from "./QuestionCard.svelte";
-  import { deriveTimelineGroups, finalTimelineItem, ownPost, postDestination, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, steerInput, timelineAnswers, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief } from "../timeline.ts";
+  import { compactionNote, deriveTimelineGroups, finalTimelineItem, ownPost, postDestination, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, steerInput, timelineAnswers, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief } from "../timeline.ts";
 
   // With step, the thread reads one worker of a crew: its transcript alone, and nothing that was sent to the crew.
   let { session, step, roomName, store, operate, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { startingBrief?: string; session: string; step?: string; roomName: string; store: RoomStore; operate: boolean; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
@@ -370,6 +370,7 @@
               {/each}
             {:else if group.item.kind === "text" || group.item.kind === "post"}
               {#if group.item.kind === "post" || visibleTimelineText(group.item.id, answers, !!turn.ended, hasWork, !!expandedTurns[segment.id])}{@render postItem(turn, group.item, !!turn.ended && hasWork && group.item.kind === "text" && !answers.has(group.item.id))}{/if}
+            {:else if group.item.kind === "compaction"}<p class="muted turn-note">{compactionNote(group.item)}</p>
             {:else if group.item.kind === "too_large"}<p class="muted">This item is too large to show.</p>{/if}
           {/each}
         {/each}
