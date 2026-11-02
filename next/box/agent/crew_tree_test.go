@@ -391,7 +391,6 @@ func lockedCrew(t *testing.T, tools map[string]string) (*Crew, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	crew.seen = make(map[string]int)
 	t.Cleanup(func() { _ = crew.Close() })
 	if err := crew.Export(); err != nil {
 		t.Fatal(err)

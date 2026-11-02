@@ -44,7 +44,7 @@
   <Icon name={icons[step.kind]} size={14} />
   <span class="name" title={step.name}>{step.name}</span>
   {#if spans}<span class="when" aria-hidden="true">{#if time && spanReads(span)}<i class={step.state} style:left="{span.left}%" style:width="{span.width}%"></i>{/if}</span>{/if}
-  <span class="meta"><span class="profile" title={step.profile}>{step.profile ?? ""}</span>
+  <span class="meta"><span class="profile" title={step.profile}>{step.profile ?? ""}{#if (info.version ?? 1) > 1 && step.version}<span class="version" title="Started by script v{step.version}"> v{step.version}</span>{/if}</span>
     <span class="figure" title={tokenDetail(step.usage)}>{tokens(step.usage)}</span>
     <span class="figure">{time}</span></span>
   <span class="state">{#key state.word}<span in:fade={motion}>{#if state.tone}<StatusPill tone={state.tone} label={state.word} word />{:else}{state.word}{/if}</span>{/key}</span>
@@ -125,6 +125,7 @@
   [aria-expanded="true"] > .name { overflow-wrap: anywhere; white-space: normal; }
   .meta { display: contents; }
   .profile { min-width: 0; overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+  .version { opacity: 0.7; font-variant-numeric: tabular-nums; }
   .figure { font-size: 12.5px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
   .state { font-size: 12.5px; text-align: right; white-space: nowrap; }
   .go { display: inline-flex; width: 14px; }

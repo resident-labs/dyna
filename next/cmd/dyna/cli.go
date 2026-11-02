@@ -96,7 +96,7 @@ func newClient(socket string) *socketClient {
 
 type requestType interface {
 	contract.ProxyKeyRequest | contract.ProxyUsageRequest |
-		contract.WorkflowRunRequest | contract.WorkflowStatusRequest | contract.WorkflowListRequest |
+		contract.WorkflowRunRequest | contract.WorkflowReloadRequest | contract.WorkflowStatusRequest | contract.WorkflowListRequest |
 		contract.AddonListRequest | contract.AddonRemoveRequest | contract.PackageAddRequest | contract.SkillSaveRequest | contract.MCPAddRequest |
 		contract.SubscriptionAddRequest | contract.SubscriptionListRequest | contract.SubscriptionRemoveRequest | contract.SubscriptionSetEnabledRequest |
 		contract.WebSearchRequest | contract.WebsearchSetKeyRequest | contract.WebsearchRemoveKeyRequest |
@@ -113,7 +113,7 @@ type requestType interface {
 }
 type responseType interface {
 	contract.ProxyKeyResponse | contract.ProxyUsageResponse |
-		contract.WorkflowRunResponse | contract.WorkflowStatusResponse | contract.WorkflowListResponse |
+		contract.WorkflowRunResponse | contract.WorkflowReloadResponse | contract.WorkflowStatusResponse | contract.WorkflowListResponse |
 		contract.AddonListResponse | contract.AddonChangeResponse |
 		contract.SubscriptionAddResponse | contract.SubscriptionListResponse | contract.SubscriptionRemoveResponse | contract.SubscriptionSetEnabledResponse |
 		contract.WebSearchResponse | contract.WebsearchSetKeyResponse | contract.WebsearchRemoveKeyResponse |
