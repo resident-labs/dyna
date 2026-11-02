@@ -58,7 +58,10 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 	case contract.HostDiskLow:
 		return fmt.Sprintf("Host %s is low on disk: %d GiB free, %d GiB wanted. At the floor, new boxes wait and the oldest stopped boxes close.", b.Host, b.FreeBytes>>30, b.FloorBytes>>30), nil
 	case contract.PrOpened:
-		return fmt.Sprintf("PR opened: %s", b.URL), nil
+		if b.Actor == "" {
+			return fmt.Sprintf("PR opened: %s", b.URL), nil
+		}
+		return renderGitHubItem(b.Item()), nil
 	case contract.QuestionAnswered:
 		return fmt.Sprintf("Question: %s\n\nAnswer: %s", b.Question, b.Answer), nil
 	case contract.PrChanged:
@@ -66,17 +69,17 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 	case contract.IssueChanged:
 		return strings.Join(issueBlocks(b.Changes), "\n\n"), nil
 	case contract.IssueClosedEvent:
-		return fmt.Sprintf("Issue %s#%d closed. %s", b.Repo, b.Number, b.URL), nil
+		return fmt.Sprintf("Issue %s#%d closed%s. %s", b.Repo, b.Number, by(b.Actor), b.URL), nil
 	case contract.PrMergedEvent:
-		return fmt.Sprintf("PR %s#%d merged. %s", b.Repo, b.Number, b.URL), nil
+		return fmt.Sprintf("PR %s#%d merged%s. %s", b.Repo, b.Number, by(b.Actor), b.URL), nil
 	case contract.PrClosedEvent:
-		return fmt.Sprintf("PR %s#%d closed without merging. %s", b.Repo, b.Number, b.URL), nil
+		return fmt.Sprintf("PR %s#%d closed without merging%s. %s", b.Repo, b.Number, by(b.Actor), b.URL), nil
+	case contract.IssueOpenedEvent, contract.GitHubComment, contract.GitHubLabel, contract.GitHubMention:
+		return renderGitHubItem(b.(interface{ Item() contract.GitHubItem }).Item()), nil
 	case contract.CIFinished:
 		return fmt.Sprintf("CI on PR %s#%d finished: %s. %s", b.Repo, b.Number, b.Result, b.URL), nil
-	case contract.RepoMainUpdated:
+	case contract.GitMainUpdated:
 		return fmt.Sprintf("The default branch of %s moved to %s.", b.Repo, b.Head), nil
-	case contract.GitHubItem:
-		return renderGitHubItem(b), nil
 	case contract.NoticePosted:
 		return b.Text, nil
 	case contract.SessionNotice:
@@ -144,6 +147,13 @@ var prChangeWords = map[contract.PrChangeKind]string{
 var issueChangeWords = map[contract.PrChangeKind]string{
 	contract.PrChangeClosed:  "closed",
 	contract.PrChangeComment: "new comments",
+}
+
+func by(actor string) string {
+	if actor == "" {
+		return ""
+	}
+	return " by @" + actor
 }
 
 // renderGitHubItem shows one feed item to whoever subscribed to it, with what an outside actor wrote wrapped.
@@ -215,11 +225,7 @@ func actionParts(actions []contract.GitHubItem, words map[contract.PrChangeKind]
 				parts = append(parts, word)
 			}
 		}
-		line := strings.Join(parts, ", ")
-		if actor != "" {
-			line += " by @" + actor
-		}
-		said = append(said, line)
+		said = append(said, strings.Join(parts, ", ")+by(actor))
 		if len(text) > 0 {
 			wrapped = append(wrapped, WrapExternal(actor, strings.Join(text, "\n")))
 		}

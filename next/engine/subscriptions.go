@@ -26,6 +26,9 @@ const (
 var runImageName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
 
 func checkRun(run *contract.RunSpec) *contract.Error {
+	if slices.ContainsFunc(run.Files, func(file contract.RunFile) bool { return file.Path == box.RunEventFile }) {
+		return invalid("run file " + box.RunEventFile + " is the engine's")
+	}
 	if len(run.Command) == 0 || len(run.Command) > maxRunArgs || run.Command[0] == "" {
 		return invalid("a run needs a command of at most 64 arguments")
 	}
@@ -64,12 +67,22 @@ func checkSubscriptionShape(req contract.SubscriptionAddRequest) *contract.Error
 	}
 	for i, kind := range req.On {
 		if !room.Deliverable(kind) || slices.Contains(req.On[:i], kind) {
-			return invalid("unknown or repeated event type: " + string(kind))
+			return invalid("unknown or repeated event type: " + string(kind) + "; dyna subscription events lists them")
 		}
 		// One Run must never start another, or two subscriptions can feed each other forever.
 		if req.Run != nil && strings.HasPrefix(string(kind), "hook.") {
 			return invalid("a run cannot fire on hook events")
 		}
+	}
+	for _, clause := range req.Where {
+		if err := contract.CheckWhere(clause); err != nil {
+			return invalid(err.Error())
+		}
+	}
+	if len(req.Where) > 0 && (req.Every > 0 || slices.ContainsFunc(req.On, func(kind contract.EventType) bool {
+		return !strings.HasPrefix(string(kind), "github.") && !strings.HasPrefix(string(kind), "git.")
+	})) {
+		return invalid("where filters github.* and git.* events: dyna subscription events lists them")
 	}
 	if req.Wake != nil && (req.Wake.Kind != contract.PrincipalSession || req.Wake.Session == "") {
 		return invalid("wake must name a session")
@@ -134,7 +147,7 @@ func (s *Service) SubscriptionAdd(ctx context.Context, caller contract.Principal
 			return contract.SubscriptionAddResponse{}, invalid("unknown host")
 		}
 	}
-	sub := contract.Subscription{Scope: req.Scope, Room: req.Room, Session: req.Session, On: req.On, Every: req.Every, Wake: req.Wake, Run: req.Run}
+	sub := contract.Subscription{Scope: req.Scope, Room: req.Room, Session: req.Session, On: req.On, Where: req.Where, Every: req.Every, Wake: req.Wake, Run: req.Run}
 	switch req.Scope {
 	case contract.ScopeMachine:
 		if req.Room != "" || req.Session != "" {

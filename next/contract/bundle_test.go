@@ -74,7 +74,7 @@ func filledRoomBundle() RoomBundle {
 			Meanwhile: "waiting", Command: "sudo mount /dev/sdb2", Argv: []string{"sudo", "mount", "/dev/sdb2"}, Cwd: "/tmp", Reason: "mount", Asked: bundleTime,
 		}},
 		Subscriptions: []Subscription{{
-			ID: "sub_2", Scope: ScopeRoom, On: []EventType{"pr.merged"}, Run: &RunSpec{Command: []string{"true"}, Image: "dyna-base", Size: "small"},
+			ID: "sub_2", Scope: ScopeRoom, On: []EventType{"github.pr.merged"}, Run: &RunSpec{Command: []string{"true"}, Image: "dyna-base", Size: "small"},
 		}},
 		HookHandoff:  []HookHandoff{{Name: "manual-hook", Fields: []string{"command", "cwd"}}},
 		LimitHandoff: []RoomLimitGap{RoomLimitMemoryMaxWithoutHigh},

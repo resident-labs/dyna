@@ -77,7 +77,7 @@ type IssueChange struct {
 	Actions      []GitHubItem   `json:"actions,omitempty"`
 }
 
-// IssueChanged batches one poll's changes for the session that owns those issues. Every pass that moved an issue has one.
+// IssueChanged is one pass's changes on the tracked issues of one session. Every pass that moved an issue has one.
 // A session whose PRs moved in the same pass hears of its issues in PrChanged.Issues instead, because one pass gives a
 // session one delivery, and this event then carries none of its own: it is there for subscribers.
 type IssueChanged struct {
@@ -85,21 +85,8 @@ type IssueChanged struct {
 	Changes []IssueChange `json:"changes"`
 }
 
-func (IssueChanged) EventType() EventType { return "issue.changed" }
+func (IssueChanged) EventType() EventType { return "github.issue.changed" }
 func (IssueChanged) isEventBody()         {}
-
-// IssueClosedEvent states what the issue's change already told its owner, for anyone else who subscribes, as PrClosedEvent does.
-type IssueClosedEvent struct {
-	Repo    RepoName  `json:"repo"`
-	Number  int       `json:"number"`
-	Session SessionID `json:"session"`
-	URL     string    `json:"url"`
-}
-
-func (IssueClosedEvent) EventType() EventType { return "issue.closed" }
-func (IssueClosedEvent) isEventBody()         {}
-
-func (e IssueClosedEvent) OwnedBy() SessionID { return e.Session }
 
 // Waking reports whether any change needs the session's attention.
 func (b IssueChanged) Waking() bool { return issuesWake(b.Changes) }

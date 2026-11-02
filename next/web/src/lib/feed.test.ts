@@ -86,7 +86,7 @@ test("places completed work after the last post and suppresses short quiet turns
 test("a work row opens only when it has more to show than its summary", () => {
   const started = decodeEvent(event(1, { type: "session.started", body: { session: "eval-worker", name: "eval-worker", profile: "trial" } }));
   const dormant = decodeEvent(event(2, { type: "session.closed", body: { session: "scout", reason: "dormant" } }));
-  const pr = decodeEvent(event(3, { type: "pr.opened", body: { repo: "dyna", number: 7, session: "builder", url: "https://example.com/7" } }));
+  const pr = decodeEvent(event(3, { type: "github.pr.opened", body: { repo: "dyna", number: 7, session: "builder", url: "https://example.com/7" } }));
   assert.ok(started && dormant && pr);
   assert.equal(workIsBare([started], id => id), true);
   assert.equal(workIsBare([dormant], id => id), true);
@@ -294,8 +294,8 @@ test("account alerts decode but never enter a room feed", () => {
 const summary = { repo: "o/r", number: 7, url: "https://github.com/o/r/pull/7", title: "t", author: "a", session: "builder", draft: false, state: "open", head: "h", review: "", ci: "", merge: "" } as const;
 
 test("a PR update with news is a work row that links its PR, and one without stays out of the feed", () => {
-  const news = decodeEvent(event(1, { type: "pr.changed", body: { session: "builder", changes: [{ pr: { ...summary, ci: "failure" }, kinds: ["ci_failed", "conflict"], outside: false }] } }));
-  const quiet = decodeEvent(event(2, { type: "pr.changed", body: { session: "builder", changes: [{ pr: { ...summary, ci: "pending" }, outside: false }] } }));
+  const news = decodeEvent(event(1, { type: "github.pr.changed", body: { session: "builder", changes: [{ pr: { ...summary, ci: "failure" }, kinds: ["ci_failed", "conflict"], outside: false }] } }));
+  const quiet = decodeEvent(event(2, { type: "github.pr.changed", body: { session: "builder", changes: [{ pr: { ...summary, ci: "pending" }, outside: false }] } }));
   assert.ok(news && quiet);
   assert.equal(describe(news, id => id), "o/r#7 CI failed, conflicts with its base");
   assert.equal(workIsBare([news], id => id), false);
@@ -306,21 +306,30 @@ test("a PR update with news is a work row that links its PR, and one without sta
   assert.equal(workSummary([news, news], id => id), "2 pull request updates");
 });
 
+test("feed items decode and stay out of the feed, and a stored event from before them still reads", () => {
+  const item = { repo: "o/r", number: 2, kind: "pr" as const, action: "commented" as const, actor: "someone", url: "u", text: "hi", outside: true };
+  const comment = decodeEvent(event(1, { type: "github.comment", body: item }));
+  const untracked = decodeEvent(event(2, { type: "github.pr.opened", body: { ...item, action: "opened" as const } }));
+  const stored = decodeEvent(event(3, { type: "github.pr.merged", body: { repo: "o/r", number: 2, session: "builder", url: "u" } }));
+  assert.ok(comment && untracked && stored);
+  assert.equal(feedRows([comment, untracked], { kind: "feed" }).length, 0);
+});
+
 test("issue updates decode, carry metadata, and stay out of the feed", () => {
   const issue = { repo: "o/r", number: 9, url: "u", title: "t", author: "a", session: "builder", state: "open" as const, labels: ["bug"] };
   const actions = [{ repo: "o/r", number: 2, kind: "issue" as const, action: "labeled" as const, actor: "someone", url: "u", detail: "bug", outside: true }];
-  const changed = decodeEvent(event(1, { type: "issue.changed", body: { session: "builder", changes: [{ issue, kinds: ["metadata"], outside: false, actions }] } }));
-  const closed = decodeEvent(event(2, { type: "issue.closed", body: { repo: "o/r", number: 9, session: "builder", url: "u" } }));
-  const quiet = decodeEvent(event(3, { type: "issue.changed", body: { session: "builder", changes: [{ issue, outside: false }] } }));
-  // One pass gives one event, so a pass that moved a PR and an issue is a pr.changed that holds both.
-  const mixed = decodeEvent(event(4, { type: "pr.changed", body: { session: "builder", changes: [{ pr: summary, kinds: ["metadata"], outside: false, actions }], issues: [{ issue, kinds: ["closed"], outside: false }] } }));
+  const changed = decodeEvent(event(1, { type: "github.issue.changed", body: { session: "builder", changes: [{ issue, kinds: ["metadata"], outside: false, actions }] } }));
+  const closed = decodeEvent(event(2, { type: "github.issue.closed", body: { repo: "o/r", number: 9, session: "builder", url: "u" } }));
+  const quiet = decodeEvent(event(3, { type: "github.issue.changed", body: { session: "builder", changes: [{ issue, outside: false }] } }));
+  // One pass gives one event, so a pass that moved a PR and an issue is a github.pr.changed that holds both.
+  const mixed = decodeEvent(event(4, { type: "github.pr.changed", body: { session: "builder", changes: [{ pr: summary, kinds: ["metadata"], outside: false, actions }], issues: [{ issue, kinds: ["closed"], outside: false }] } }));
   assert.ok(changed && closed && quiet && mixed);
   assert.equal(feedRows([changed, closed, quiet], { kind: "feed" }).filter(row => row.kind === "work").length, 0);
   assert.equal(describe(mixed, id => id), "o/r#7 details changed");
 });
 
 test("a malformed PR update is skipped", () => {
-  assert.equal(decodeEvent(event(1, { type: "pr.changed", body: { session: "builder", changes: [{ pr: { ...summary, ci: "green" }, outside: false }] } } as unknown as Parameters<typeof event>[1])), undefined);
+  assert.equal(decodeEvent(event(1, { type: "github.pr.changed", body: { session: "builder", changes: [{ pr: { ...summary, ci: "green" }, outside: false }] } } as unknown as Parameters<typeof event>[1])), undefined);
 });
 
 test("a tracked PR's words mark only what needs someone", () => {
@@ -332,11 +341,11 @@ test("a tracked PR's words mark only what needs someone", () => {
   assert.deepEqual(prWords({ ...summary, state: "closed" }), [{ label: "Closed" }]);
 });
 
-test("the events for subscribers stay out of the feed, as the pr.changed beside them shows the news", () => {
-  const merged = decodeEvent(event(1, { type: "pr.merged", body: { repo: "o/r", number: 7, session: "builder", url: "u" } }));
-  const closed = decodeEvent(event(2, { type: "pr.closed", body: { repo: "o/r", number: 8, session: "builder", url: "u" } }));
-  const ci = decodeEvent(event(3, { type: "ci.finished", body: { repo: "o/r", number: 9, session: "builder", url: "u", head: "h", result: "failure" } }));
-  const main = decodeEvent(event(4, { type: "repo.main_updated", body: { repo: "o/r", head: "h" } }));
+test("the events for subscribers stay out of the feed, as the github.pr.changed beside them shows the news", () => {
+  const merged = decodeEvent(event(1, { type: "github.pr.merged", body: { repo: "o/r", number: 7, session: "builder", url: "u" } }));
+  const closed = decodeEvent(event(2, { type: "github.pr.closed", body: { repo: "o/r", number: 8, session: "builder", url: "u" } }));
+  const ci = decodeEvent(event(3, { type: "github.ci.finished", body: { repo: "o/r", number: 9, session: "builder", url: "u", head: "h", result: "failure" } }));
+  const main = decodeEvent(event(4, { type: "git.main_updated", body: { repo: "o/r", head: "h" } }));
   assert.ok(merged && closed && ci && main);
   assert.equal(subject(main), undefined);
   assert.equal(feedRows([merged, closed, ci, main], { kind: "feed" }).filter(row => row.kind === "work").length, 0);

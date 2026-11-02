@@ -29,7 +29,7 @@ func Generate(dir, output string) error {
 		if strings.HasSuffix(path, "_test.go") || filepath.Base(path) == "union_gen.go" {
 			continue
 		}
-		f, err := parser.ParseFile(fset, path, nil, 0)
+		f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 		if err != nil {
 			return err
 		}
@@ -183,6 +183,11 @@ func (m *BoxMessage) UnmarshalJSON(data []byte) error {
 		fmt.Fprintf(&g, "%q,", b.kind)
 	}
 	g.WriteString("}\n")
+	g.WriteString("\nvar eventDocs = map[EventType]string{")
+	for _, b := range bodies {
+		fmt.Fprintf(&g, "%q: %q,\n", b.kind, eventDoc(decls, b.name))
+	}
+	g.WriteString("}\n")
 	g.WriteString("\n// AllOpKinds lists every operation kind.\nvar AllOpKinds = []OpKind{")
 	for _, b := range ops {
 		fmt.Fprintf(&g, "%q,", b.kind)
@@ -303,6 +308,28 @@ func (m *BoxMessage) UnmarshalJSON(data []byte) error {
 	}
 	return os.WriteFile(filepath.Join(output, "../web/src/lib/contract.gen.ts"), ts.Bytes(), 0644)
 }
+
+// eventDoc is the first sentence of a type's doc comment, without the name it opens with.
+func eventDoc(decls []ast.Decl, name string) string {
+	for _, d := range decls {
+		gd, ok := d.(*ast.GenDecl)
+		if !ok || gd.Tok != token.TYPE {
+			continue
+		}
+		for _, sp := range gd.Specs {
+			t := sp.(*ast.TypeSpec)
+			if t.Name.Name != name || gd.Doc == nil {
+				continue
+			}
+			text := strings.Join(strings.Fields(gd.Doc.Text()), " ")
+			text = strings.TrimPrefix(strings.TrimPrefix(text, name+" "), "is ")
+			sentence, _, _ := strings.Cut(text, ". ")
+			return strings.TrimSuffix(sentence, ".")
+		}
+	}
+	return ""
+}
+
 func tsType(e ast.Expr) string {
 	switch t := e.(type) {
 	case *ast.Ident:

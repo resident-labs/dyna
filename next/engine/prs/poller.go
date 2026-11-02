@@ -86,7 +86,7 @@ func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls [
 	for _, item := range probe.Items {
 		items[item.Number] = append(items[item.Number], item)
 	}
-	// A closed item is read no more, unless a feed reopens it. What else happens on it goes to subscribers, as on any untracked item.
+	// A closed item is read no more, unless a feed reopens it. What else happens on it is not its owner's to hear.
 	watched := func(open bool, number int) bool { return open || reopens(items[number]) }
 	var numbers []int
 	for _, row := range pulls {
@@ -128,7 +128,8 @@ func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls [
 		delete(items, row.Number)
 	}
 	for _, item := range probe.Items {
-		if _, untracked := items[item.Number]; untracked {
+		_, untracked := items[item.Number]
+		if body := item.Event(); untracked || body != nil && item.Action != contract.GitHubOpened && item.Action != contract.GitHubMerged && item.Action != contract.GitHubClosed {
 			pass.Items = append(pass.Items, item)
 		}
 	}
