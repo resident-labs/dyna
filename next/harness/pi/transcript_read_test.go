@@ -110,7 +110,7 @@ func TestTranscriptItemIndexContinuesInOrder(t *testing.T) {
 }
 
 func TestTranscriptCallClaimRequiresExactID(t *testing.T) {
-	data := `{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"right","name":"mcp__shell__shell"}]}}
+	data := `{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"right","name":"bash"}]}}
 {"type":"message","message":{"role":"toolResult","toolCallId":"right","content":[{"type":"text","text":"fake-id"}]}}
 `
 	ids := map[string]bool{"right": false, "fake-id": false}

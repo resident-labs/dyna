@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/resident-labs/dyna/box/shell"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -135,6 +136,63 @@ func (c *Client) forward(ctx context.Context, method contract.Method, body []byt
 		return nil, &problem
 	}
 	return data, nil
+}
+
+// HostRun runs one command on a host and writes its output as the run ends. The engine answers only then, so the call stays
+// open as long as the command does. A problem after the engine took the command is the job's failure, not a refusal.
+func (c *Client) HostRun(ctx context.Context, r shell.Run, out io.Writer) (int, *contract.Error) {
+	req := contract.HostexecRunRequest{Host: r.Host, Command: r.Command, Cwd: r.Cwd, Timeout: contract.DurationMS(r.Timeout) * 1000}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return 0, &contract.Error{Code: contract.ErrInvalid, Message: err.Error()}
+	}
+	data, problem := c.forward(ctx, contract.MethodHostexecRun, body)
+	if problem != nil {
+		return 0, problem
+	}
+	var answer contract.HostexecRunResponse
+	if err := json.Unmarshal(data, &answer); err != nil {
+		fmt.Fprintln(out, "host run: invalid answer from the engine:", err)
+		return 1, nil
+	}
+	result := answer.Operation.Result
+	if result == nil {
+		fmt.Fprintln(out, "host run: the call ended before the command; op.ran wakes the session with its result")
+		return 1, nil
+	}
+	_, _ = io.WriteString(out, result.Output)
+	if result.OutputFile != "" {
+		if err := c.file(ctx, result.OutputFile, out); err != nil {
+			fmt.Fprintln(out, "host run: the rest of the output could not be read:", err)
+		}
+	}
+	if result.Truncated {
+		fmt.Fprintln(out, "[output truncated at 8 MiB]")
+	}
+	if result.Error != "" {
+		fmt.Fprintln(out, "host run:", result.Error)
+		if result.ExitCode == 0 {
+			return 1, nil
+		}
+	}
+	return result.ExitCode, nil
+}
+
+func (c *Client) file(ctx context.Context, hash string, out io.Writer) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://dyna/v1/files/"+hash, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return errors.New(resp.Status)
+	}
+	_, err = io.Copy(out, resp.Body)
+	return err
 }
 
 func (c *Client) call(ctx context.Context, method contract.Method, body []byte) ([]byte, error) {

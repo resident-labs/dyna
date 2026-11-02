@@ -404,9 +404,9 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	hostexec := &cobra.Command{Use: "hostexec"}
 	var runHost, cwd string
 	var timeout time.Duration
-	run := &cobra.Command{Use: "run --host HOST -- COMMAND [ARG...]", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	run := &cobra.Command{Use: "bash --host HOST COMMAND", Short: "Run a command on a host with bash -c, under a host grant.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		c := getClient()
-		res, err := c.HostexecRun(cmd.Context(), contract.HostexecRunRequest{Host: contract.HostName(runHost), Argv: args, Cwd: cwd, Timeout: contract.DurationMS(timeout.Milliseconds())})
+		res, err := c.HostexecRun(cmd.Context(), contract.HostexecRunRequest{Host: contract.HostName(runHost), Command: args[0], Cwd: cwd, Timeout: contract.DurationMS(timeout.Milliseconds())})
 		if err != nil {
 			return err
 		}
@@ -457,8 +457,8 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	run.Flags().StringVar(&cwd, "cwd", "", "Working directory")
 	run.Flags().DurationVar(&timeout, "timeout", 10*time.Minute, "Run timeout")
 	_ = run.MarkFlagRequired("host")
-	hostexec.AddCommand(run, grant)
-	root.AddCommand(hostexec)
+	hostexec.AddCommand(grant)
+	root.AddCommand(hostexec, run)
 
 	host := &cobra.Command{Use: "host"}
 	var ssh string

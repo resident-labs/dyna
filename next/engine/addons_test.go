@@ -218,7 +218,7 @@ func TestTheOwnerAddsGloballyWithoutAsking(t *testing.T) {
 
 func TestNamesThatWouldClashAreRefused(t *testing.T) {
 	s, _, worker, ctx, _ := setupAddons(t)
-	for _, add := range []contract.MCPAddRequest{{Name: "dyna", URL: "https://a.test"}, {Name: "shell", URL: "https://a.test"}, {Name: "bad name", URL: "https://a.test"}, {Name: "both", URL: "https://a.test", Command: "x"}, {Name: "none"}, {Name: "args", URL: "https://a.test", Args: []string{"x"}}, {Name: "ftp", URL: "ftp://a.test"}} {
+	for _, add := range []contract.MCPAddRequest{{Name: "dyna", URL: "https://a.test"}, {Name: "bad name", URL: "https://a.test"}, {Name: "both", URL: "https://a.test", Command: "x"}, {Name: "none"}, {Name: "args", URL: "https://a.test", Args: []string{"x"}}, {Name: "ftp", URL: "ftp://a.test"}} {
 		if _, problem := s.MCPAdd(ctx, worker, add); problem == nil {
 			t.Errorf("%+v was accepted", add)
 		}
