@@ -65,12 +65,32 @@ func NewClient(socket string) *Client {
 	return &Client{shellJobs: func() []contract.ShellJobID { return nil }, http: &http.Client{Transport: transport}, space: make(chan struct{}), queue: make(chan outgoing, 128)}
 }
 
+// backoff spaces attempts to reach the engine: half a second at first, doubling to ten seconds. The call queue, the channel
+// and the model route all wait this way.
+type backoff struct{ delay time.Duration }
+
+// wait sleeps for the next delay, and reports false when ctx ends first.
+func (b *backoff) wait(ctx context.Context) bool {
+	if b.delay == 0 {
+		b.delay = 500 * time.Millisecond
+	}
+	timer := time.NewTimer(b.delay)
+	defer timer.Stop()
+	b.delay = min(2*b.delay, 10*time.Second)
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
 // Run sends queued requests in order. A disconnect does not end a running turn.
 func (c *Client) Run(ctx context.Context) {
 	for {
 		select {
 		case item := <-c.queue:
-			delay := 500 * time.Millisecond
+			var delay backoff
 			for {
 				body, err := c.post(ctx, item.method, item.body)
 				var rejected apiError
@@ -83,18 +103,7 @@ func (c *Client) Run(ctx context.Context) {
 					c.mu.Unlock()
 					break
 				}
-				timer := time.NewTimer(delay)
-				select {
-				case <-timer.C:
-				case <-ctx.Done():
-					timer.Stop()
-				}
-				if delay < 10*time.Second {
-					delay *= 2
-					if delay > 10*time.Second {
-						delay = 10 * time.Second
-					}
-				}
+				delay.wait(ctx)
 			}
 		case <-ctx.Done():
 			return
