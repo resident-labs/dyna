@@ -50,6 +50,8 @@ type View interface {
 	Connected(contract.SessionID) bool
 	Stale(contract.SessionID) bool // its connected box agent is older than the engine, or it was marked to restart
 	SessionClosed(contract.SessionID)
+	// BoxStopped hears that a box has stopped, once nothing but a new box agent can take a delivery for it.
+	BoxStopped(context.Context, contract.SessionID)
 	// CompactBeforeStop asks a box about to stop for being quiet to compact, and reports true while the stop should wait.
 	CompactBeforeStop(context.Context, contract.SessionID) bool
 }

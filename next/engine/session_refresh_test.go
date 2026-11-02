@@ -245,7 +245,10 @@ func TestRefreshAccess(t *testing.T) {
 		t.Fatal(problem)
 	}
 	single := contract.SessionRefreshRequest{Session: child}
-	for _, caller := range []contract.Principal{boxCaller(child), boxCaller(peer), {Kind: contract.PrincipalEngine}} {
+	if _, problem := s.SessionRefresh(ctx, boxCaller(peer), contract.SessionRefreshRequest{Session: sid}); problem == nil || problem.Code != contract.ErrForbidden {
+		t.Fatalf("sibling: %v", problem)
+	}
+	for _, caller := range []contract.Principal{boxCaller(peer), {Kind: contract.PrincipalEngine}} {
 		if _, problem := s.SessionRefresh(ctx, caller, single); problem == nil || problem.Code != contract.ErrForbidden {
 			t.Fatalf("caller %+v: %v", caller, problem)
 		}
@@ -264,7 +267,7 @@ func TestRefreshAccess(t *testing.T) {
 	if _, problem := s.SessionRefresh(ctx, refreshOwner, contract.SessionRefreshRequest{Room: "room_none"}); problem == nil || problem.Code != contract.ErrNotFound {
 		t.Fatalf("unknown room: %v", problem)
 	}
-	// In a room, a session reaches only what is below it.
+	// In a room, a session reaches only what is below it, and not itself.
 	connectBox(t, s, ctx, sid, newBinary)
 	connectBox(t, s, ctx, child, newBinary)
 	connectBox(t, s, ctx, peer, newBinary)
@@ -281,5 +284,270 @@ func TestRefreshAccess(t *testing.T) {
 	}
 	if _, problem := s.SessionRefresh(ctx, boxCaller(sid), single); problem != nil {
 		t.Fatalf("ancestor: %v", problem)
+	}
+}
+
+const restartedLine = "Your box restarted on the current version."
+
+func refreshSelf(t *testing.T, s *Service, ctx context.Context, sid contract.SessionID) {
+	t.Helper()
+	response, problem := s.SessionRefresh(ctx, boxCaller(sid), contract.SessionRefreshRequest{Session: sid})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if !slices.Equal(response.Marked, []contract.SessionID{sid}) {
+		t.Fatalf("marked=%v, want %s", response.Marked, sid)
+	}
+}
+
+func awaitTurn(t *testing.T, turns <-chan contract.TurnStart) contract.TurnStart {
+	t.Helper()
+	select {
+	case start := <-turns:
+		return start
+	case <-time.After(5 * time.Second):
+		t.Fatal("no turn started")
+		return contract.TurnStart{}
+	}
+}
+
+// wakingNotices counts every notice that could start a turn, read or not.
+func wakingNotices(t *testing.T, s *Service, ctx context.Context) int {
+	t.Helper()
+	var count int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.type='session.notice' AND d.wake=1").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+func TestSelfRefreshStopsAfterItsTurnAndComesBack(t *testing.T) {
+	for _, target := range []string{"worker", "root"} {
+		s, host, room, sid, ctx := staleSession(t)
+		if target == "root" {
+			if err := s.store.Read().QueryRowContext(ctx, "SELECT parent FROM sessions WHERE id=?", sid).Scan(&sid); err != nil {
+				t.Fatal(err)
+			}
+			if _, problem := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{}); problem != nil {
+				t.Fatal(problem)
+			}
+		}
+		turn := openTurn(t, s, ctx, room, sid, "turn_open")
+		turns, disconnect := connectBox(t, s, ctx, sid, newBinary)
+		turnInputs(t, turns)
+		refreshSelf(t, s, ctx, sid)
+		time.Sleep(loopSettles)
+		passLifecycle(t, s, ctx)
+		if host.stops != 0 || boxWant(t, s, ctx, sid) != "run" {
+			t.Fatalf("%s: stopped mid-turn: stops=%d want=%s", target, host.stops, boxWant(t, s, ctx, sid))
+		}
+		// Written now, it would be steered into this turn on the old binary, and nothing would be left to start the box.
+		if got := noticeDeliveries(t, s, ctx); got != 0 {
+			t.Fatalf("%s: deliveries=%d during the turn", target, got)
+		}
+		endTurn(t, s, ctx, sid, turn)
+		waitWant(t, s, ctx, sid, "stop")
+		passLifecycle(t, s, ctx)
+		disconnect()
+		if host.stops != 1 || stateOf(t, s, ctx, sid) != contract.BoxStopped || boxWant(t, s, ctx, sid) != "run" {
+			t.Fatalf("%s: stops=%d state=%s want=%s", target, host.stops, stateOf(t, s, ctx, sid), boxWant(t, s, ctx, sid))
+		}
+		before := turnCount(t, s, ctx, sid)
+		passLifecycle(t, s, ctx)
+		if host.starts != 1 || stateOf(t, s, ctx, sid) != contract.BoxStarting {
+			t.Fatalf("%s: starts=%d state=%s", target, host.starts, stateOf(t, s, ctx, sid))
+		}
+		if _, problem := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{}); problem != nil {
+			t.Fatal(problem)
+		}
+		turns, _ = connectBox(t, s, ctx, sid, newBinary)
+		if text := turnInputs(t, turns); !strings.Contains(text, restartedLine) {
+			t.Fatalf("%s: turn inputs=%q", target, text)
+		}
+		if s.Stale(sid) || turnCount(t, s, ctx, sid) != before+1 {
+			t.Fatalf("%s: stale=%v turns=%d, want %d", target, s.Stale(sid), turnCount(t, s, ctx, sid), before+1)
+		}
+	}
+}
+
+// The job holds the box with nothing waiting, so nothing can start a turn on the old binary or stop and start the box in a loop.
+func TestSelfRefreshHeldByJobDoesNotLoop(t *testing.T) {
+	s, host, room, sid, ctx := staleSession(t)
+	leaveJob(t, s, ctx, room, sid)
+	turns := turnCount(t, s, ctx, sid)
+	started, disconnect := connectBox(t, s, ctx, sid, newBinary)
+	refreshSelf(t, s, ctx, sid)
+	waitNotices(t, s, ctx, 1)
+	if got := noticeText(t, s, ctx); got != heldByJob {
+		t.Fatalf("notice=%q", got)
+	}
+	for range 3 {
+		refreshSelf(t, s, ctx, sid)
+		time.Sleep(loopSettles)
+		passLifecycle(t, s, ctx)
+	}
+	select {
+	case start := <-started:
+		t.Fatalf("a turn started on the old binary: %+v", start)
+	default:
+	}
+	if host.stops != 0 || host.starts != 0 || boxWant(t, s, ctx, sid) != "run" || turnCount(t, s, ctx, sid) != turns {
+		t.Fatalf("stops=%d starts=%d want=%s turns=%d", host.stops, host.starts, boxWant(t, s, ctx, sid), turnCount(t, s, ctx, sid))
+	}
+	if got := updateNotices(t, s, ctx); got != 1 { // this also fails on any notice that wakes
+		t.Fatalf("notices=%d", got)
+	}
+
+	if _, problem := s.ShellJobEnded(ctx, boxCaller(sid), contract.ShellJobEndedRequest{Job: testJob, Tail: "built"}); problem != nil {
+		t.Fatal(problem)
+	}
+	waitWant(t, s, ctx, sid, "stop")
+	passLifecycle(t, s, ctx)
+	disconnect()
+	if host.stops != 1 || stateOf(t, s, ctx, sid) != contract.BoxStopped {
+		t.Fatalf("stops=%d state=%s", host.stops, stateOf(t, s, ctx, sid))
+	}
+	passLifecycle(t, s, ctx)
+	if _, problem := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{}); problem != nil {
+		t.Fatal(problem)
+	}
+	started, _ = connectBox(t, s, ctx, sid, newBinary)
+	if text := turnInputs(t, started); !strings.Contains(text, "built") || !strings.Contains(text, restartedLine) || strings.Contains(text, "An update is ready") {
+		t.Fatalf("turn inputs=%q", text)
+	}
+	if host.stops != 1 || host.starts != 1 {
+		t.Fatalf("stops=%d starts=%d", host.stops, host.starts)
+	}
+}
+
+// Nothing wakes the box loop when a terminal closes, so only the reconciler sees it, and the wake has to come from that stop too.
+func TestSelfRefreshHeldByTerminalComesBackWhenItCloses(t *testing.T) {
+	s, host, _, sid, ctx := staleSession(t)
+	handle := openTerminal(t, s, ctx, sid)
+	_, disconnect := connectBox(t, s, ctx, sid, newBinary)
+	refreshSelf(t, s, ctx, sid)
+	waitNotices(t, s, ctx, 1)
+	time.Sleep(loopSettles)
+	passLifecycle(t, s, ctx)
+	if host.stops != 0 || boxWant(t, s, ctx, sid) != "run" || wakingNotices(t, s, ctx) != 0 {
+		t.Fatalf("held by a terminal: stops=%d want=%s waking=%d", host.stops, boxWant(t, s, ctx, sid), wakingNotices(t, s, ctx))
+	}
+	handle.CloseTerminal()
+	passLifecycle(t, s, ctx)
+	disconnect()
+	if host.stops != 1 || wakingNotices(t, s, ctx) != 1 {
+		t.Fatalf("stops=%d waking=%d", host.stops, wakingNotices(t, s, ctx))
+	}
+	passLifecycle(t, s, ctx)
+	if host.starts != 1 || stateOf(t, s, ctx, sid) != contract.BoxStarting {
+		t.Fatalf("starts=%d state=%s", host.starts, stateOf(t, s, ctx, sid))
+	}
+}
+
+func TestRepeatedSelfRefreshSendsOneWake(t *testing.T) {
+	s, _, room, sid, ctx := staleSession(t)
+	turn := openTurn(t, s, ctx, room, sid, "turn_open")
+	turns, disconnect := connectBox(t, s, ctx, sid, newBinary)
+	turnInputs(t, turns)
+	for range 3 {
+		refreshSelf(t, s, ctx, sid)
+	}
+	refreshBox(t, s, ctx, sid) // an outside mark in the same turn changes nothing
+	endTurn(t, s, ctx, sid, turn)
+	waitWant(t, s, ctx, sid, "stop")
+	passLifecycle(t, s, ctx)
+	disconnect()
+	if got := wakingNotices(t, s, ctx); got != 1 {
+		t.Fatalf("waking notices=%d, want 1", got)
+	}
+	// The next restart is its own, with its own wake.
+	passLifecycle(t, s, ctx)
+	if _, problem := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{}); problem != nil {
+		t.Fatal(problem)
+	}
+	turns, _ = connectBox(t, s, ctx, sid, newBinary)
+	start := awaitTurn(t, turns)
+	refreshSelf(t, s, ctx, sid)
+	endTurn(t, s, ctx, sid, start.Turn)
+	waitWant(t, s, ctx, sid, "stop")
+	passLifecycle(t, s, ctx)
+	if got := wakingNotices(t, s, ctx); got != 2 {
+		t.Fatalf("waking notices=%d, want 2", got)
+	}
+}
+
+// A box's self-refresh ends when it comes back, so an outside mark after that stays down until its next wake, as any does.
+func TestOutsideRefreshAfterSelfRefreshLeavesNoWake(t *testing.T) {
+	s, host, room, sid, ctx := staleSession(t)
+	turn := openTurn(t, s, ctx, room, sid, "turn_open")
+	turns, disconnect := connectBox(t, s, ctx, sid, newBinary)
+	turnInputs(t, turns)
+	refreshSelf(t, s, ctx, sid)
+	endTurn(t, s, ctx, sid, turn)
+	waitWant(t, s, ctx, sid, "stop")
+	passLifecycle(t, s, ctx)
+	disconnect()
+	passLifecycle(t, s, ctx)
+	if _, problem := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{}); problem != nil {
+		t.Fatal(problem)
+	}
+	turns, disconnect = connectBox(t, s, ctx, sid, newBinary)
+	start := awaitTurn(t, turns)
+	refreshBox(t, s, ctx, sid)
+	endTurn(t, s, ctx, sid, start.Turn)
+	waitWant(t, s, ctx, sid, "stop")
+	passLifecycle(t, s, ctx)
+	disconnect()
+	passLifecycle(t, s, ctx)
+	if host.stops != 2 || host.starts != 1 || stateOf(t, s, ctx, sid) != contract.BoxStopped || wakingNotices(t, s, ctx) != 1 {
+		t.Fatalf("stops=%d starts=%d state=%s waking=%d", host.stops, host.starts, stateOf(t, s, ctx, sid), wakingNotices(t, s, ctx))
+	}
+}
+
+// stoppedSelfRefresh leaves a session whose box has stopped with its restart notice still waiting.
+func stoppedSelfRefresh(t *testing.T) (*Service, contract.RoomID, contract.SessionID, context.Context) {
+	t.Helper()
+	s, _, room, sid, ctx := staleSession(t)
+	turn := openTurn(t, s, ctx, room, sid, "turn_open")
+	turns, disconnect := connectBox(t, s, ctx, sid, newBinary)
+	turnInputs(t, turns)
+	refreshSelf(t, s, ctx, sid)
+	endTurn(t, s, ctx, sid, turn)
+	waitWant(t, s, ctx, sid, "stop")
+	passLifecycle(t, s, ctx)
+	disconnect()
+	if got := noticeDeliveries(t, s, ctx); got != 1 {
+		t.Fatalf("deliveries=%d, want the restart notice", got)
+	}
+	return s, room, sid, ctx
+}
+
+// A box can stop more than once before it says hello, if a start fails, and each stop reports.
+func TestSelfRefreshSendsOneWakePerMarkAcrossStops(t *testing.T) {
+	s, _, sid, ctx := stoppedSelfRefresh(t)
+	s.BoxStopped(ctx, sid)
+	if got := wakingNotices(t, s, ctx); got != 1 {
+		t.Fatalf("waking notices=%d, want 1", got)
+	}
+}
+
+func TestSelfRefreshNoticeIsNotHandedToParent(t *testing.T) {
+	s, room, sid, ctx := stoppedSelfRefresh(t)
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE sessions SET state='closing' WHERE id=?", sid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionClosed{Session: sid, Reason: contract.SessionCloseDormant})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.CloseSession(ctx, sid, event); err != nil {
+		t.Fatal(err)
+	}
+	// Close drops the session's own deliveries, so any left here went to the parent.
+	if got := noticeDeliveries(t, s, ctx); got != 0 {
+		t.Fatalf("notice was handed on: deliveries=%d", got)
 	}
 }
