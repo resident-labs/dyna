@@ -16,9 +16,18 @@ test("the list holds what shows nowhere else, one row per kind", () => {
   const owes = (kind: Responsibility["kind"], id?: string, blocked?: boolean): Responsibility => ({ kind, group: "owes_work", id, blocked });
   assert.deepEqual(holdRows([]), []);
   assert.deepEqual(holdRows([needs("turn", "turn_1"), needs("shell_job", "job_7f3b"), owes("goal", "g1")]), [], "the thread, the header and the goals show these");
-  assert.deepEqual(holdRows([needs("terminal"), owes("pr", "o/r#6")]).map(row => row.text), ["Terminal", "PR o/r#6"]);
-  assert.deepEqual(holdRows([owes("child", "a"), owes("pr", "o/r#6"), owes("child", "b")]).map(row => row.text), ["2 child sessions: a, b", "PR o/r#6"]);
+  assert.deepEqual(holdRows([needs("terminal"), owes("pr", "o/r#6")]).map(row => row.text), ["Terminal", "1 PR"]);
+  assert.deepEqual(holdRows([owes("child", "a"), owes("pr", "o/r#6"), owes("child", "b")]).map(row => row.text), ["2 child sessions: a, b", "1 PR"]);
   assert.deepEqual(holdRows([owes("child"), owes("child")]).map(row => row.text), ["2 child sessions"]);
+});
+
+test("PRs and issues link to GitHub, naming the repo once when they share one", () => {
+  const owes = (kind: Responsibility["kind"], id?: string): Responsibility => ({ kind, group: "owes_work", id });
+  const [prs, issues] = holdRows([owes("pr", "o/r#6"), owes("pr", "o/r#7"), owes("issue", "o/r#8"), owes("issue", "o/s#9")]);
+  assert.equal(prs.repo, "o/r");
+  assert.deepEqual(prs.links, [{ label: "#6", title: "o/r#6", href: "https://github.com/o/r/pull/6" }, { label: "#7", title: "o/r#7", href: "https://github.com/o/r/pull/7" }]);
+  assert.equal(issues.repo, undefined);
+  assert.deepEqual(issues.links?.map(link => [link.label, link.href]), [["r#8", "https://github.com/o/r/issues/8"], ["s#9", "https://github.com/o/s/issues/9"]]);
 });
 
 test("a kind with a blocked item says so", () => {
