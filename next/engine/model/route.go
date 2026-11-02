@@ -44,75 +44,43 @@ func handler(client *http.Client, clientKey, sessionID string, allowedModels, el
 	for _, name := range allowedModels {
 		allowed[name] = struct{}{}
 	}
+	allow := func(model string) bool {
+		_, ok := allowed[model]
+		return ok
+	}
+	return serve(client, clientKey, sessionID, boxRoutes, allow, eligibleIDs, pinnedID, crew)
+}
+
+// boxRoutes maps each path to its method. A box needs only what Pi sends.
+var boxRoutes = map[string]string{
+	"/model/v1/messages":         http.MethodPost,
+	"/model/v1/chat/completions": http.MethodPost,
+	"/model/v1/responses":        http.MethodPost,
+}
+
+// serve applies the policy every caller shares: it checks the model in a POST, then
+// replaces the caller's credentials and affinity headers with the engine's.
+func serve(client *http.Client, clientKey, affinityID string, routes map[string]string, allow func(string) bool, eligibleIDs []string, pinnedID string, crew bool) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: "cliproxy"})
 	proxy.Transport = client.Transport
 	proxy.FlushInterval = -1
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/model/v1/messages", "/model/v1/chat/completions", "/model/v1/responses":
-			if r.Method != http.MethodPost {
-				refuse(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST is supported.")
-				return
-			}
-		default:
+		method, ok := routes[r.URL.Path]
+		if !ok {
 			refuse(w, http.StatusNotFound, "unsupported_route", "The model endpoint is not supported.")
 			return
 		}
-		body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBytes+1))
-		if err != nil {
-			refuse(w, http.StatusBadRequest, "invalid_request", "Could not read request.")
+		if r.Method != method {
+			refuse(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only "+method+" is supported.")
 			return
 		}
-		if len(body) > maxRequestBytes {
-			refuse(w, http.StatusRequestEntityTooLarge, "request_too_large", "Model request exceeds 32 MiB.")
-			return
-		}
-		decoder := json.NewDecoder(bytes.NewReader(body))
-		token, err := decoder.Token()
-		if err != nil || token != json.Delim('{') {
-			refuse(w, http.StatusBadRequest, "invalid_request", "A model is required.")
-			return
-		}
-		var model string
-		seenModel := false
-		valid := true
-		for decoder.More() {
-			key, err := decoder.Token()
-			if err != nil {
-				valid = false
-				break
-			}
-			var value json.RawMessage
-			if decoder.Decode(&value) != nil {
-				valid = false
-				break
-			}
-			if key == "model" {
-				if seenModel || json.Unmarshal(value, &model) != nil {
-					valid = false
-					break
-				}
-				seenModel = true
-			}
-		}
-		if valid {
-			_, err = decoder.Token()
-			valid = err == nil && decoder.Decode(new(json.RawMessage)) == io.EOF
-		}
-		if !valid || model == "" {
-			refuse(w, http.StatusBadRequest, "invalid_request", "A model is required.")
-			return
-		}
-		if _, ok := allowed[model]; !ok {
-			refuse(w, http.StatusForbidden, "model_forbidden", "The profile does not allow this model.")
+		if method == http.MethodPost && !checkModel(w, r, allow) {
 			return
 		}
 		if len(eligibleIDs) == 0 {
 			refuse(w, http.StatusForbidden, "account_forbidden", "No account is available to this room.")
 			return
 		}
-		r.Body = io.NopCloser(bytes.NewReader(body))
-		r.ContentLength = int64(len(body))
 		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/model")
 		r.URL.RawPath = ""
 		query := r.URL.Query()
@@ -120,7 +88,7 @@ func handler(client *http.Client, clientKey, sessionID string, allowedModels, el
 			query.Del(name)
 		}
 		r.URL.RawQuery = query.Encode()
-		affinity := sessionID
+		affinity := affinityID
 		if worker := r.Header.Get(contract.WorkerHeader); crew && worker != "" {
 			affinity += "/" + worker
 		}
@@ -143,6 +111,63 @@ func handler(client *http.Client, clientKey, sessionID string, allowedModels, el
 		r.Header.Set("X-Claude-Code-Session-Id", affinity)
 		proxy.ServeHTTP(w, r)
 	})
+}
+
+// checkModel reads the body, refuses a request whose model the caller may not use,
+// and leaves the body ready to forward.
+func checkModel(w http.ResponseWriter, r *http.Request, allow func(string) bool) bool {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBytes+1))
+	if err != nil {
+		refuse(w, http.StatusBadRequest, "invalid_request", "Could not read request.")
+		return false
+	}
+	if len(body) > maxRequestBytes {
+		refuse(w, http.StatusRequestEntityTooLarge, "request_too_large", "Model request exceeds 32 MiB.")
+		return false
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		refuse(w, http.StatusBadRequest, "invalid_request", "A model is required.")
+		return false
+	}
+	var model string
+	seenModel := false
+	valid := true
+	for decoder.More() {
+		key, err := decoder.Token()
+		if err != nil {
+			valid = false
+			break
+		}
+		var value json.RawMessage
+		if decoder.Decode(&value) != nil {
+			valid = false
+			break
+		}
+		if key == "model" {
+			if seenModel || json.Unmarshal(value, &model) != nil {
+				valid = false
+				break
+			}
+			seenModel = true
+		}
+	}
+	if valid {
+		_, err = decoder.Token()
+		valid = err == nil && decoder.Decode(new(json.RawMessage)) == io.EOF
+	}
+	if !valid || model == "" {
+		refuse(w, http.StatusBadRequest, "invalid_request", "A model is required.")
+		return false
+	}
+	if !allow(model) {
+		refuse(w, http.StatusForbidden, "model_forbidden", "The profile does not allow this model.")
+		return false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.ContentLength = int64(len(body))
+	return true
 }
 
 func refuse(w http.ResponseWriter, status int, code, message string) {

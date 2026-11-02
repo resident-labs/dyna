@@ -193,6 +193,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `account_alerts` |
 | `session_accounts` | the account the owner chose for a session; no row means Automatic |
 | `search_keys` |
+| `local_usage` | what the owner's local harnesses used, by model (5.7) |
 | `proxy_auths` |
 | `subscriptions` |
 | `subscription_events` |
@@ -313,6 +314,10 @@ Each box receives only its own forwarded Unix socket. The engine derives session
 Pi sends model calls to its loopback box agent with a placeholder key. The engine checks the profile, substitutes the CLIProxyAPI client key and streams through the proxy's Unix socket. Besides the profile's models it passes the models of the session's last two dispatched turns, so a session that changed profile can finish its running turn and compact on the model it left. The engine records those itself at dispatch, so a box cannot name one. A crew may also call every model of its script's profiles (9.2). Pi alone retries model calls. A call that cannot reach the box socket has reached nothing, so the box agent holds it for up to 5 minutes, which carries a turn across an engine restart. Failed turns retry pending inputs with bounded backoff; paused rooms wait for resume. Before M3 enables a second sign-in, account affinity must survive proxy restarts.
 
 CLIProxyAPI is a pinned vendored fork supervised as a separate child. Its patch ledger is `next/third_party/cliproxyapi/DYNA.md`. Strict cloak mode stays off. Claude sign-ins use cloaking, with the accepted account risk in decision 4. M1 stores proxy sign-ins in its protected file store; M3 moves them into its SQLite token store. Only the engine holds its management key. Shutdown drains admitted model calls before stopping the proxy.
+
+**Local harnesses.** The owner can point Claude Code, Codex or another Anthropic-style or OpenAI-style tool at the same route. `dyna proxy env [--tool claude|codex]` prints lines to source: a loopback address and the owner's proxy key, which the engine makes on first use and keeps in `meta`. `dyna proxy reset` replaces the key. `dyna proxy serve` runs where the harness runs, on any machine with the owner socket (decision 14), and forwards that port's `/model/` paths and nothing else over the socket, so the engine opens no listener and its network listeners still accept paired devices only. The route is the box route with no profile, every account, no pin and one affinity, `local`, for all the owner's harnesses. A harness names real models, and the proxy refuses a model no account serves. It also serves `messages/count_tokens`, `responses/compact` and `GET models`, which a box does not need. Calls count against accounts as usual. `proxy.usage` (`dyna proxy usage`) totals them by model as the local client, and no session or turn sees them.
+
+The key keeps "no secret in a box". `proxy.key` answers only on the owner socket, never on a box socket or the web listener, and a box's `/model/` stays its own session's. So the key never enters a box, and a box that reached the loopback port has nothing to send it. As with the sign-ins, control-plane host exec can read it.
 
 From M2, git smart HTTP goes through the engine. Fetches cover room repositories; pushes cover only the session repository and its owned branches or archive ref. The engine rejects unauthorized refs before forwarding. Boxes have outbound internet but no device keys; engine network listeners accept paired devices only.
 

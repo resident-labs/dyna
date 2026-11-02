@@ -249,6 +249,7 @@ func Run(ctx context.Context, cfg Config) error {
 			proxy.Handler(string(session.ID), allowed, eligible, pinned, crew).ServeHTTP(w, r)
 		}))
 	})
+	apiServer.SetLocalModelRoute(drain.Wrap(proxy.Local(st)))
 	apiServer.Build = cfg.Version
 	if cfg.Version == "dev" {
 		if info, ok := debug.ReadBuildInfo(); ok {
