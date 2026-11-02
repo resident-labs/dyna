@@ -138,5 +138,16 @@ func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, eve
 	case contract.ReplyNone:
 		frame += " No reply is expected."
 	}
+	if delivery.Reply.Kind == contract.ReplyPost || delivery.Reply.Kind == contract.ReplyNone {
+		home, err := s.store.OwnerConversation(ctx, viewer)
+		if err != nil {
+			return "", nil, err
+		}
+		where := "the feed"
+		if home.Kind == contract.ConversationDM {
+			where = "your DM"
+		}
+		frame += fmt.Sprintf(" Posts to the owner go to %s.", where)
+	}
 	return frame, files, nil
 }
