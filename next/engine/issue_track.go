@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -100,7 +101,7 @@ func (s *Service) IssueTrack(ctx context.Context, caller contract.Principal, req
 			return contract.IssueTrackResponse{}, failure(err)
 		}
 		if !slices.ContainsFunc(repos, func(item contract.RoomRepo) bool { return item.Repo == repo }) {
-			return contract.IssueTrackResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "the repository of this issue is not in your room; the owner can track it for you"}
+			return contract.IssueTrackResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: fmt.Sprintf("repository %s is not in this room; the owner can track it", repo)}
 		}
 	}
 	row := store.TrackedIssue{IssueSummary: contract.IssueSummary{Repo: repo, Number: req.Number, URL: seen.URL, Title: seen.Title, Author: seen.Author, Session: owner.ID, State: contract.IssueState(seen.State)}, Meta: seen.Meta}
