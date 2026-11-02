@@ -4,6 +4,20 @@ import "time"
 
 type AccountID string
 
+// AccountProvider is one of these or, for a provider the owner added, "custom-<name>".
+type AccountProvider string
+
+const (
+	ProviderAnthropic  AccountProvider = "anthropic"
+	ProviderOpenAI     AccountProvider = "openai"
+	ProviderKimi       AccountProvider = "kimi"
+	ProviderXAI        AccountProvider = "xai"
+	ProviderZAI        AccountProvider = "zai"
+	ProviderOpencodeGo AccountProvider = "opencode-go"
+	ProviderDeepSeek   AccountProvider = "deepseek"
+	ProviderMeta       AccountProvider = "meta"
+)
+
 type AccountAction string
 
 const (

@@ -30,9 +30,11 @@ and runs them.
 
 ## Moving from v1
 
-A v2 engine refuses a v1 data folder. To move your data, follow
-[next/docs/migrate.md](next/docs/migrate.md). The exporter is built from tag
-`v1-final`.
+A v2 engine refuses a v1 data folder, and there is no import: the rooms were
+rebuilt by hand. Tag
+[`v2-import-last`](https://github.com/resident-labs/dyna/tree/v2-import-last)
+keeps the bundle check and its guide,
+[next/docs/migrate.md](https://github.com/resident-labs/dyna/blob/v2-import-last/next/docs/migrate.md).
 
 ## License
 

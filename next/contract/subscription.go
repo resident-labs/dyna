@@ -9,6 +9,41 @@ const (
 	MethodSubscriptionSetEnabled Method = "subscription.set_enabled"
 )
 
+type SubscriptionScope string
+
+const (
+	ScopeMachine SubscriptionScope = "machine"
+	ScopeRoom    SubscriptionScope = "room"
+	ScopeSession SubscriptionScope = "session"
+)
+
+// Subscription is a hook as a typed event subscription (spec 8.5). Exactly
+// one of On and Every, and exactly one of Wake and Run, is set.
+type Subscription struct {
+	ID      SubscriptionID    `json:"id"`
+	Scope   SubscriptionScope `json:"scope"`
+	Room    RoomID            `json:"room,omitempty"`
+	Session SessionID         `json:"session,omitempty"`
+	On      []EventType       `json:"on,omitempty"`
+	Where   []string          `json:"where,omitempty"`
+	Every   DurationMS        `json:"every,omitempty"`
+	Wake    *Principal        `json:"wake,omitempty"`
+	Run     *RunSpec          `json:"run,omitempty"`
+}
+
+type RunSpec struct {
+	Command []string    `json:"command"`
+	Image   string      `json:"image"`
+	Size    BoxSizeName `json:"size"`
+	Host    HostName    `json:"host,omitempty"` // Every Run goes to this host and waits for it. File locks need this, as they stop at a host.
+	Files   []RunFile   `json:"files,omitempty"`
+}
+
+type RunFile struct {
+	Path string `json:"path"` // inside the box
+	Body string `json:"body"`
+}
+
 // SubscriptionAddRequest creates one subscription (spec 8.5). The engine picks its ID. Exactly one of
 // On and Every, and exactly one of Wake and Run, is set. Scope room names Room, scope session names
 // Session, and scope machine names neither. Where filters On, as key=value, key!=value and text~value, all of which must hold.
