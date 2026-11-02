@@ -114,7 +114,7 @@ func (s *Service) WorkflowRun(ctx context.Context, caller contract.Principal, re
 
 func (s *Service) workflowInfo(ctx context.Context, run store.WorkflowRun) (contract.WorkflowInfo, error) {
 	summary, err := s.store.WorkflowSummary(ctx, run.ID)
-	return contract.WorkflowInfo{Run: run.ID, Room: run.Room, Session: run.Session, Name: run.Name, Description: run.Description, Profiles: run.Profiles, Repo: run.Repo, Commit: run.Commit, State: run.State, Result: run.Result, Failed: summary.Failed, FailedSteps: summary.FailedSteps, Usage: summary.Usage, Started: run.Started, Ended: run.Ended}, err
+	return contract.WorkflowInfo{Run: run.ID, Room: run.Room, Session: run.Session, Name: run.Name, Description: run.Description, Profiles: run.Profiles, Repo: run.Repo, Commit: run.Commit, State: run.State, Result: run.Result, Steps: summary.Steps, Failed: summary.Failed, FailedSteps: summary.FailedSteps, Usage: summary.Usage, Started: run.Started, Ended: run.Ended}, err
 }
 
 func (s *Service) WorkflowStatus(ctx context.Context, caller contract.Principal, req contract.WorkflowStatusRequest) (contract.WorkflowStatusResponse, *contract.Error) {
@@ -148,6 +148,22 @@ func (s *Service) WorkflowStatus(ctx context.Context, caller contract.Principal,
 		maskStep(&steps[i])
 	}
 	return contract.WorkflowStatusResponse{Run: info, Steps: steps, Merge: merge}, nil
+}
+
+// WorkflowStep reads what a journal row leaves out, for the run page. A closed crew keeps it.
+func (s *Service) WorkflowStep(ctx context.Context, caller contract.Principal, req contract.WorkflowStepRequest) (contract.WorkflowStepResponse, *contract.Error) {
+	run, err := s.store.SessionWorkflow(ctx, req.Session)
+	if err != nil {
+		return contract.WorkflowStepResponse{}, failure(err)
+	}
+	if problem := s.roomAccess(ctx, caller, run.Room); problem != nil {
+		return contract.WorkflowStepResponse{}, problem
+	}
+	detail, result, err := s.store.WorkflowStepOutput(ctx, run.ID, req.Key)
+	if err != nil {
+		return contract.WorkflowStepResponse{}, failure(err)
+	}
+	return contract.WorkflowStepResponse{Detail: harness.Mask(detail), Result: harness.Mask(result)}, nil
 }
 
 // maskStep covers what a read can show: a step's name quotes its command and its reason quotes the command's output.
