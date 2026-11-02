@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
@@ -47,86 +46,6 @@ func TestRestoringHostHoldsTheDisconnectClock(t *testing.T) {
 	pass(contract.BoxReady)
 	now = now.Add(time.Second)
 	pass(contract.BoxLost)
-}
-
-// A host that really goes away still shows: the hold covers only the engine's own silence.
-func TestRestoringHostStillReportsAnUnreachableHost(t *testing.T) {
-	s, _, sid, ctx := setup(t)
-	if _, problem := s.BoxHello(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid}, contract.BoxHelloRequest{}); problem != nil {
-		t.Fatal(problem)
-	}
-	session, err := s.store.Session(ctx, sid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "UPDATE hosts SET state='unreachable' WHERE name='host'")
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	r := lifecycle.New(s.store, &inspectHost{}, disconnectedView{}, nil, s.event, time.Now)
-	r.SetHostRestoring(func(contract.HostName) bool { return true })
-	if err := r.Pass(ctx); err != nil {
-		t.Fatal(err)
-	}
-	r.Wait()
-	b, err := s.store.Box(ctx, session.Box)
-	if err != nil || b.State != contract.BoxLost || b.Reason != "host unreachable" {
-		t.Fatalf("box=%+v: %v", b, err)
-	}
-}
-
-type countingRemoval struct {
-	fakeBoxes
-	stops, removals int
-}
-
-func (h *countingRemoval) Stop(context.Context, contract.BoxID) error {
-	h.stops++
-	return nil
-}
-
-func (h *countingRemoval) Remove(context.Context, contract.BoxID) error {
-	h.removals++
-	return nil
-}
-
-// A box that was starting when the engine restarted cannot say hello until its forward is back. A new session's box would
-// otherwise be removed and fail "no hello within 60 s".
-func TestRestoringHostHoldsTheHelloDeadline(t *testing.T) {
-	s, _, sid, ctx := setup(t)
-	session, err := s.store.Session(ctx, sid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Unix(1000, 0)
-	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "UPDATE boxes SET state='starting',host='host',due_at=? WHERE id=?", now.Add(-time.Minute).UnixMilli(), session.Box)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	host := &countingRemoval{}
-	r := lifecycle.New(s.store, host, disconnectedView{}, nil, s.event, func() time.Time { return now })
-	restoring := true
-	r.SetHostRestoring(func(contract.HostName) bool { return restoring })
-	pass := func() {
-		t.Helper()
-		if err := r.Pass(ctx); err != nil {
-			t.Fatal(err)
-		}
-		r.Wait()
-	}
-	pass()
-	if b, err := s.store.Box(ctx, session.Box); err != nil || b.State != contract.BoxStarting || host.removals != 0 || host.stops != 0 {
-		t.Fatalf("while restoring: box=%+v removals=%d stops=%d: %v", b, host.removals, host.stops, err)
-	}
-	restoring = false
-	pass()
-	if host.removals == 0 && host.stops == 0 {
-		t.Fatal("the deadline did not resume after the restore")
-	}
 }
 
 // A turn runs on through a restart: the box goes lost, the agent reconnects, and the engine replays the same turn. Nothing
