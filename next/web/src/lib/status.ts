@@ -1,6 +1,5 @@
 import { call } from "./client.ts";
 import type { Event, FailureCause } from "./contract.gen.ts";
-import { failed } from "./jobs.ts";
 
 // One status per session, in one priority order, so the room header and the session panel count the same way. A box
 // that failed or was lost comes first, since approving a request does not repair it. Then what waits for the owner,
@@ -28,12 +27,6 @@ export async function boxFailures(room: string, beforeSeq: number): Promise<Map<
     if (to === "failed" || to === "lost") found.set(session, { box: to, cause, at: event.at, seq: event.seq });
   }
   return found;
-}
-
-// session.list does not say which jobs failed, so this reads the newest job ends once.
-export async function failedJobs(room: string, beforeSeq: number): Promise<{ session: string; job: string; seq: number }[]> {
-  const page = await call("events.list", { room, afterSeq: 0, beforeSeq, limit: 200, types: ["shell.job.ended"] }).catch(() => undefined);
-  return (page?.events ?? []).flatMap(event => event.type === "shell.job.ended" && failed(event.body) ? [{ session: event.body.session, job: event.body.job, seq: event.seq }] : []);
 }
 
 // session.list says which last turns failed but not when, so this reads turn.ended pages back from the newest until it
