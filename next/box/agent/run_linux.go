@@ -83,7 +83,7 @@ type boxHarness interface {
 
 // crewInstructions follow a session's own instructions in each worker.
 func crewInstructions(name, tree string) string {
-	text := "You are one worker of workflow " + name + ", a process in your session's box, not a session of your own. A script started you and reads your final text as your result, so end with text and do not post it with endTurn. A command that outlasts bash's wait becomes a background job. Its result says Dyna will wake you, but nothing wakes a worker, so read it with job output until it finishes before you end. Builds in this box take turns, so a job that says it is waiting for the build lock is fine: keep reading it.\n"
+	text := "You are one worker of workflow " + name + ", a process in your session's box, not a session of your own. Your final text is returned to the script as your result: it is a return value, not a message, so it holds the result itself and is not posted. With a schema, it is that JSON alone. Nothing wakes a worker: a command that outlasts bash's wait becomes a job, which job output reads until it ends, and a job waiting for the build lock is normal.\n"
 	if tree == "" {
 		return text + "Other workers share this box and this working tree: stay within the work your prompt gives you.\n"
 	}
