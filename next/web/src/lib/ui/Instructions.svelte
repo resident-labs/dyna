@@ -3,22 +3,19 @@
   import { APIError, call } from "../client.ts";
   import { instructionDiff, instructionHunks, type DiffLine } from "../instruction-diff.ts";
   import { recoverInstructionDraft } from "../instruction-draft.ts";
-  import { savedBy } from "../instruction-saved.ts";
-  import type { InstructionsSaver } from "../contract.gen.ts";
   import Icon from "./Icon.svelte";
   import StatusPill from "./StatusPill.svelte";
   import { count } from "../feed.ts";
 
   type Scope = "room" | "global";
-  type Saver = InstructionsSaver | null;
-  type File = { text: string; hash: string; savedAt?: string | null; savedBy?: Saver };
+  type File = { text: string; hash: string; savedAt?: string | null };
   // The page opens on its two choices, the file for all rooms and this room's own. Choosing one opens it in a plain
   // editor, with a review beside it only once there are changes to review.
   let { room, roomName, rooms, sessions, onclose }: { room: string; roomName: string; rooms: number; sessions: number; onclose: () => void } = $props();
   let selected = $state<Scope>();
   let files = $state<Record<Scope, File>>();
   let unsaved = $state<Record<Scope, boolean>>({ room: false, global: false });
-  let base = $state(""), hash = $state(""), savedAt = $state<string>(), saver = $state<Saver>(), draft = $state("");
+  let base = $state(""), hash = $state(""), savedAt = $state<string>(), draft = $state("");
   let other = $state<File>();
   let loading = $state(true), failed = $state(false), saveFailed = $state(false), saving = $state(false);
   let mobile = $state<"edit" | "changes">("edit");
@@ -35,10 +32,9 @@
   let changed = $derived(changes.filter(line => line.kind !== "same"));
   let tokens = $derived(tokensOf(draft));
   let delta = $derived(tokens - tokensOf(base));
-  let savedLabel = $derived(savedAt ? saved(savedAt, saver) : "Not saved yet");
+  let savedLabel = $derived(savedAt ? `Saved ${relative(savedAt)}` : "Not saved yet");
   let reviewable = $derived(changed.length > 0 || !!other);
   let reviewing = $derived(mobile === "changes" && reviewable);
-  function saved(at: string, by?: Saver) { return ["Saved", savedBy(by), relative(at)].filter(Boolean).join(" "); }
   function relative(value: string) {
     const minutes = Math.floor((Date.now() - new Date(value).getTime()) / 60000);
     if (minutes < 1) return "just now";
@@ -75,7 +71,7 @@
     try {
       const result = await call("instructions.get", request());
       if (current !== generation) return;
-      base = result.text; hash = result.hash; savedAt = result.savedAt ?? undefined; saver = result.savedBy ?? null; draft = result.text;
+      base = result.text; hash = result.hash; savedAt = result.savedAt ?? undefined; draft = result.text;
       const storedKey = Object.keys(localStorage).find(item => item.startsWith(key));
       if (storedKey) {
         const recovered = recoverInstructionDraft(localStorage.getItem(storedKey) ?? "", storedKey.slice(key.length), result);
@@ -96,7 +92,7 @@
       if (current !== generation || saving) return;
       if (result.hash !== hash) {
         if (draft !== base) other = result;
-        else { base = draft = result.text; hash = result.hash; savedAt = result.savedAt ?? undefined; saver = result.savedBy ?? null; }
+        else { base = draft = result.text; hash = result.hash; savedAt = result.savedAt ?? undefined; }
       }
     } catch { /* The open editor keeps its draft when the engine is offline. */ }
   }
@@ -108,10 +104,10 @@
       const result = await call("instructions.set", { ...request(), text, base: overwrite && other ? other.hash : hash });
       clearDrafts(); hash = result.hash; base = text; other = undefined;
       keepDraft();
-      savedAt = new Date().toISOString(); saver = { kind: "owner" };
+      savedAt = new Date().toISOString();
       try {
         const current = await call("instructions.get", request());
-        if (current.hash === hash) { savedAt = current.savedAt ?? savedAt; saver = current.savedBy ?? saver; }
+        if (current.hash === hash) savedAt = current.savedAt ?? savedAt;
       } catch { /* The save succeeded even if its timestamp cannot be refreshed. */ }
     } catch (error: unknown) {
       if (error instanceof APIError && error.detail.code === "stale") {
@@ -122,7 +118,7 @@
   }
   function useTheirs() {
     if (!other) return;
-    clearDrafts(); base = draft = other.text; hash = other.hash; savedAt = other.savedAt ?? undefined; saver = other.savedBy ?? null; other = undefined;
+    clearDrafts(); base = draft = other.text; hash = other.hash; savedAt = other.savedAt ?? undefined; other = undefined;
   }
   function discard() {
     if (other) { useTheirs(); return; }
@@ -165,7 +161,7 @@
     <span class="choice-head"><strong>{title(which)}</strong><Icon name="chevron" size={14} /></span>
     <span class="reach">{reach(which)}</span>
     <span class="preview" class:empty={!file.text.trim()}>{file.text.trim() || "Nothing written yet"}</span>
-    <span class="meta">{#if file.text.trim()}about {tokensOf(file.text).toLocaleString()} tokens{#if file.savedAt}{" · "}saved {[savedBy(file.savedBy), relative(file.savedAt)].filter(Boolean).join(" ")}{/if}{/if}
+    <span class="meta">{#if file.text.trim()}about {tokensOf(file.text).toLocaleString()} tokens{#if file.savedAt}{" · "}saved {relative(file.savedAt)}{/if}{/if}
       {#if unsaved[which]}<StatusPill tone="warning" label="Unsaved draft" />{/if}</span>
   </button>
 {/snippet}
@@ -218,7 +214,7 @@
       </section>
       {#if reviewable}<aside class:mobile-hidden={!reviewing} aria-label="Instruction review">
         {#if other}
-          <div class="side-head"><StatusPill tone="warning" label={other.savedBy?.kind === "session" ? `Changed ${savedBy(other.savedBy)}` : "Changed on another device"} /><p>Nothing was saved. Your text is unchanged.</p></div>
+          <div class="side-head"><StatusPill tone="warning" label="Changed on another device" /><p>Nothing was saved. Your text is unchanged.</p></div>
           <div class="review"><strong>Their change</strong>
             {@render diffView(instructionDiff(base, other.text))}
             <strong>Yours</strong>
