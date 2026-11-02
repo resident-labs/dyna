@@ -63,12 +63,22 @@ func TestWorkflowKeepsTheGate(t *testing.T) {
 			t.Fatalf("ci.yml lost %q", want)
 		}
 	}
-	routed := `runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && '` + Name + `' || 'ubuntu-latest' }}`
+	routed := map[string]bool{"runs-on: ubuntu-latest": true}
+	for _, size := range Sizes {
+		routed[`runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && '`+SetName(size)+`' || 'ubuntu-latest' }}`] = true
+	}
+	pooled := 0
 	for _, line := range regexp.MustCompile(`(?m)^\s+runs-on:.*$`).FindAllString(workflow, -1) {
 		line = strings.TrimSpace(line)
-		if line != "runs-on: ubuntu-latest" && line != routed {
+		if !routed[line] {
 			t.Errorf("unrouted self-hosted job: %s", line)
 		}
+		if strings.Contains(line, "'dyna-") {
+			pooled++
+		}
+	}
+	if pooled == 0 {
+		t.Error("no job of ci.yml names a runner size")
 	}
 	names, err := filepath.Glob("../../../.github/workflows/*.yml")
 	if err != nil || len(names) == 0 {
@@ -82,7 +92,7 @@ func TestWorkflowKeepsTheGate(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(string(other), "runs-on: "+Name) || strings.Contains(string(other), "self-hosted") {
+		if strings.Contains(string(other), "runs-on: dyna") || strings.Contains(string(other), "'dyna-") || strings.Contains(string(other), "self-hosted") {
 			t.Errorf("%s reaches the pool", name)
 		}
 	}

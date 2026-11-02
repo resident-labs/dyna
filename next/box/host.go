@@ -51,20 +51,22 @@ type Forward struct {
 	HostPath, EnginePath string
 }
 
-// RunnerSlots is how many runners one host's proxy can tell apart. Each slot is
-// one socket, and a runner mounts only its own.
+// RunnerSlots is how many runners one host holds at once. A slot is one socket of the host's proxy, which a runner mounts
+// alone, and one build folder in the host's cache. A slot holds one running runner, so no two jobs share either.
 const RunnerSlots = 16
 
 // EgressSocket is the socket's name inside a slot's directory.
 const EgressSocket = "egress.sock"
 
-// RunnerSpec is one ephemeral CI runner. Config is its single-job JIT config, a secret.
+// RunnerSpec is one ephemeral CI runner. Config is its single-job JIT config, a secret. Cache is the host's cache folder,
+// which its boxes mount at /box/cache.
 type RunnerSpec struct {
 	Name, Image, Config string
 	Repo                contract.RepoName
 	ID                  int64 // GitHub's runner ID
 	Slot                int
 	Size                contract.BoxSize
+	Cache               string
 }
 
 // Runner is a runner container found on a host.
@@ -73,6 +75,7 @@ type Runner struct {
 	Repo    contract.RepoName
 	ID      int64
 	Slot    int
+	Size    contract.BoxSize
 	Running bool
 }
 

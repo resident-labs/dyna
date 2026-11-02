@@ -104,5 +104,6 @@ dyna pool list
 - A dormant session keeps its node, because its box is stopped, not gone. The node costs money until the session closes.
 - The pool audits `list` every 10 minutes. A machine Dyna has no record of is reported once and never destroyed. A node the script no longer lists is treated as a lost host, and its box waits for it. If the machine is gone for good, the owner closes the session with `dyna session close --discard`.
 - A Run from a subscription never uses a pool's node.
+- CI runners of the room's repositories use its pool as its boxes do: a job no host takes gets a node of its size, which goes after `--idle` once its runner has gone.
 - `dyna host remove NAME` removes a node through its script once nothing is on it.
 - `dyna pool remove NAME` needs an empty pool that no room names.

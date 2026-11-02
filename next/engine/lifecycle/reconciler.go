@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"log"
+	"slices"
 	"sync"
 	"time"
 
@@ -35,6 +36,7 @@ type Reconciler struct {
 	roomHosts    RoomHosts
 	roomData     RoomData
 	nodes        Nodes
+	runners      Runners
 	idle         map[contract.HostName]time.Time // when each shared node last held a box, as this engine saw
 	audited      map[string]time.Time            // when each pool last ran list
 	roomSteps    map[string]bool
@@ -194,6 +196,9 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	for i := range rows {
 		all[i] = rows[i].Box
 	}
+	// A box counts the CI runners beside it, after the rows, whose places in all follow their rows.
+	runners, runnerRows := r.runnerView()
+	all = append(all, runners...)
 	for i, row := range rows {
 		b := row.Box
 		if b.State != contract.BoxReady {
@@ -338,7 +343,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			r.launch(ctx, row)
 		}
 	}
-	if err := r.poolPass(ctx, pools, rows, all); err != nil {
+	if err := r.poolPass(ctx, pools, slices.Concat(rows, runnerRows), all); err != nil {
 		return err
 	}
 	return r.roomPass(ctx, hosts)

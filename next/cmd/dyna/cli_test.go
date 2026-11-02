@@ -675,18 +675,19 @@ func TestRoomLimitCommand(t *testing.T) {
 
 func TestRepoCICommand(t *testing.T) {
 	f := &fakeClient{}
-	root := &cobra.Command{Use: "dyna"}
-	addCLI(root, func() client { return f })
-	root.SetArgs([]string{"room", "repo", "ci", "a/b", "--mode", "box", "--host", "pve=4", "--host", "laptop=2", "--size", "medium"})
-	if err := root.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	if f.repoCI.Repo != "a/b" || f.repoCI.Mode != contract.CIBox || len(f.repoCI.Hosts) != 2 || f.repoCI.Hosts[1] != (contract.RepoCIHost{Repo: "a/b", Host: "laptop", Runners: 2, Size: contract.BoxSizeMedium}) {
+	runCLI(t, f, "room", "repo", "ci", "a/b", "--on", "--max", "4")
+	if f.repoCI != (contract.RepoCISetRequest{Repo: "a/b", On: true, Max: 4}) {
 		t.Fatalf("%+v", f.repoCI)
 	}
-	root.SetArgs([]string{"room", "repo", "ci", "a/b", "--mode", "box", "--host", "pve"})
-	if err := root.Execute(); err == nil {
-		t.Fatal("accepted a host with no count")
+	runCLI(t, f, "room", "repo", "ci", "a/b", "--off")
+	if f.repoCI != (contract.RepoCISetRequest{Repo: "a/b"}) {
+		t.Fatalf("%+v", f.repoCI)
+	}
+	for _, args := range [][]string{{"a/b"}, {"a/b", "--on", "--off"}, {"a/b", "--off", "--max", "2"}} {
+		f := &fakeClient{}
+		if _, err := execCLI(f, append([]string{"room", "repo", "ci"}, args...)...); err == nil || f.repoCI.Repo != "" {
+			t.Fatalf("accepted %v", args)
+		}
 	}
 }
 
