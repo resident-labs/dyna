@@ -4,6 +4,7 @@ import "time"
 
 const (
 	MethodWorkflowRun       Method = "workflow.run"
+	MethodWorkflowReload    Method = "workflow.reload"
 	MethodWorkflowStatus    Method = "workflow.status"
 	MethodWorkflowStep      Method = "workflow.step"
 	MethodWorkflowList      Method = "workflow.list"
@@ -60,8 +61,21 @@ type WorkflowRunResponse struct {
 	Box     BoxID         `json:"box"`
 }
 
+// WorkflowReloadRequest gives a running run a new script, which its crew runs in place of the old one in the same box. Its
+// meta keeps the run's name, repo and size; its profiles and description may change.
+type WorkflowReloadRequest struct {
+	Run    WorkflowRunID `json:"run"`
+	Script string        `json:"script"`
+}
+
+// WorkflowReloadResponse names the script version the run now runs. The first script is version 1.
+type WorkflowReloadResponse struct {
+	Run     WorkflowRunID `json:"run"`
+	Version int           `json:"version"`
+}
+
 // WorkflowInfo is one run. Steps counts its journal, Failed counts failed steps and FailedSteps names them, at most 20. Result
-// is the script's return value, or why it threw.
+// is the script's return value, or why it threw. Version is the script version it runs, 1 until a reload.
 type WorkflowInfo struct {
 	Run         WorkflowRunID `json:"run"`
 	Room        RoomID        `json:"room"`
@@ -71,6 +85,7 @@ type WorkflowInfo struct {
 	Profiles    []ProfileName `json:"profiles"`
 	Repo        RepoName      `json:"repo,omitempty"`
 	Commit      string        `json:"commit,omitempty"`
+	Version     int           `json:"version,omitempty"`
 	State       WorkflowState `json:"state"`
 	Result      string        `json:"result,omitempty"`
 	Steps       int           `json:"steps,omitempty"`
@@ -81,7 +96,8 @@ type WorkflowInfo struct {
 	Ended       time.Time     `json:"ended,omitzero"`
 }
 
-// WorkflowStep is one journal row, without its result.
+// WorkflowStep is one journal row, without its result. Version is the script version that started it; a step a resumed run
+// kept has none.
 type WorkflowStep struct {
 	Key        string            `json:"key"`
 	Parent     string            `json:"parent,omitempty"`
@@ -89,6 +105,7 @@ type WorkflowStep struct {
 	Name       string            `json:"name"`
 	Phase      string            `json:"phase,omitempty"`
 	Profile    ProfileName       `json:"profile,omitempty"`
+	Version    int               `json:"version,omitempty"`
 	State      WorkflowStepState `json:"state"`
 	Reason     string            `json:"reason,omitempty"`
 	Transcript string            `json:"transcript,omitempty"` // the worker's session file, as transcript.append names it
@@ -147,15 +164,26 @@ type WorkflowListResponse struct {
 	Runs []WorkflowInfo `json:"runs"`
 }
 
-// BoxWorkflow is what a crew's box runs. Each hello carries it, so a new box can restart the script.
+// BoxWorkflow is what a crew's box runs. Each hello carries it, so a new box can restart the script, and a reload carries it
+// to the box that runs the script.
 type BoxWorkflow struct {
 	Run      WorkflowRunID     `json:"run"`
 	Name     string            `json:"name"`
 	Script   string            `json:"script"`
+	Version  int               `json:"version"`
 	Args     string            `json:"args,omitempty"`
 	Profiles []WorkflowProfile `json:"profiles"` // in meta's order: the first is the default
 	Workers  int               `json:"workers"`  // how many Pi processes the box's memory allows at once
 }
+
+// WorkflowReload hands a crew's box a newer version of its script. The engine sends the run's current version on each channel,
+// and a box already on it ignores it.
+type WorkflowReload struct {
+	Workflow BoxWorkflow `json:"workflow"`
+}
+
+func (WorkflowReload) BoxMessageType() BoxMessageType { return "workflow.reload" }
+func (WorkflowReload) isBoxMessageBody()              {}
 
 // WorkflowProfile is one profile of meta.profiles, as a worker needs it.
 type WorkflowProfile struct {
@@ -172,7 +200,7 @@ type WorkflowPinRequest struct {
 type WorkflowPinResponse struct{}
 
 // WorkflowStepStartRequest looks a step up, and records its start when the journal has no result for it. Detail is the
-// prompt, the command or the text.
+// prompt, the command or the text. Version is the script version that made the call.
 type WorkflowStepStartRequest struct {
 	Key     string           `json:"key"`
 	Parent  string           `json:"parent,omitempty"`
@@ -181,6 +209,7 @@ type WorkflowStepStartRequest struct {
 	Phase   string           `json:"phase,omitempty"`
 	Profile ProfileName      `json:"profile,omitempty"`
 	Detail  string           `json:"detail"`
+	Version int              `json:"version,omitempty"`
 }
 
 // WorkflowStepStartResponse carries the stored outcome. An empty State means the step has none and is now running.

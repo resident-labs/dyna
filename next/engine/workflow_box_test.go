@@ -823,6 +823,62 @@ func TestWorkflowSurvivesAnEngineRestart(t *testing.T) {
 	c.closed(started.Session)
 }
 
+// A reload in a real box. The first version's slow worker is at the model when the second version arrives over the channel:
+// its call to the same step waits for that worker, the finished step returns its result, and a new step runs on a profile only
+// the second version lists, through the same route.
+func TestWorkflowReloadsInARealBox(t *testing.T) {
+	c := newRealCrew(t, nil)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	first := `export const meta = { name: 'reload', profiles: ['fast'], size: 'medium' }
+return await parallel(['task-a', 'task-b'].map((task) => () => agent('Work on ' + task, { label: task })))
+`
+	second := `export const meta = { name: 'reload', profiles: ['fast', 'deep'], size: 'medium' }
+const [kept, added] = await Promise.all([
+	parallel(['task-a', 'task-b'].map((task) => () => agent('Work on ' + task, { label: task }))),
+	agent('Work on task-c', { label: 'task-c', profile: 'deep' }),
+])
+return { kept, added }
+`
+	c.upstream.hold("task-b", "task-c")
+	started := c.start(owner, first, "")
+	c.wait("task-a stored and task-b at the model", func() bool { return c.doneSteps(started.Run) == 1 && c.upstream.count() == 2 })
+	reloaded, problem := c.s.WorkflowReload(c.ctx, owner, contract.WorkflowReloadRequest{Run: started.Run, Script: second})
+	if problem != nil || reloaded.Version != 2 {
+		t.Fatalf("reload %+v, %+v", reloaded, problem)
+	}
+	c.wait("task-c at the model", func() bool {
+		return slices.ContainsFunc(c.upstream.since(0), func(r crewRequest) bool { return r.task == "task-c" })
+	})
+	time.Sleep(2 * time.Second) // time for a second task-b worker, were one to start
+	if got := c.inBox(started.Box, "pgrep -x pi | wc -l"); got != "2" {
+		t.Fatalf("%s Pi processes after the reload, want task-b's and task-c's; the model was asked %+v", got, c.upstream.since(0))
+	}
+	c.upstream.release("task-b", "task-c")
+	c.wait("the run's end", func() bool { return c.status(started.Run).Run.State != contract.WorkflowRunning })
+	final := c.status(started.Run)
+	if want := `{"kept":["found task-a","found task-b"],"added":"found task-c"}`; final.Run.State != contract.WorkflowDone || final.Run.Failed != 0 || final.Run.Result != want || final.Run.Version != 2 {
+		t.Fatalf("run %+v", final.Run)
+	}
+	asked := map[string]string{}
+	for _, request := range c.upstream.since(0) {
+		if asked[request.task] != "" {
+			t.Fatalf("the model was asked for %s twice", request.task)
+		}
+		asked[request.task] = request.model
+	}
+	if asked["task-c"] != crewDeepModel || asked["task-b"] != crewFastModel {
+		t.Fatalf("models %v", asked)
+	}
+	versions := map[string]int{}
+	for _, step := range final.Steps {
+		versions[step.Name] = step.Version
+	}
+	if versions["task-a"] != 1 || versions["task-b"] != 1 || versions["task-c"] != 2 {
+		t.Fatalf("step versions %v", versions)
+	}
+	c.closed(started.Session)
+}
+
 func shellTool(command string) crewTool {
 	input, _ := json.Marshal(map[string]string{"command": command})
 	return crewTool{"bash", string(input)}

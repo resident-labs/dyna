@@ -71,7 +71,7 @@ func TestTheWorkflowSkillSaysWhatTheCodeDoes(t *testing.T) {
 		t.Fatal(err)
 	}
 	meta, err := Parse(data)
-	if err != nil || meta.Name != "dyna-workflows" || !strings.HasPrefix(meta.Description, "Use when you write, test or resume a Dyna workflow") {
+	if err != nil || meta.Name != "dyna-workflows" || !strings.HasPrefix(meta.Description, "Use when you write, test or resume a Dyna workflow, or reload a running one") {
 		t.Fatalf("%+v %v", meta, err)
 	}
 	text := string(data)
@@ -81,6 +81,8 @@ func TestTheWorkflowSkillSaysWhatTheCodeDoes(t *testing.T) {
 		"A session ID is not a mention", "`merge()` reads `commit`, not the tip of `branch`", "A resume is a new session", "through any chain of resumes",
 		"the run ended first", "needs no polling", "Nothing wakes a worker", "only through the prompt", "one worker per 512 MiB", "holds a box slot",
 		"dry run of one group", "give up in 40 seconds", "still reports done",
+		"Reload is for a running run, resume for an ended one", "`dyna workflow reload RUN FILE`", "no second one starts", "runs on until the run ends",
+		"`meta.name`, `meta.repo` and `meta.size` stay", "the run's models follow the new profiles", "the version that started it",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the skill does not say %q", want)
