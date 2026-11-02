@@ -95,7 +95,9 @@ func New(forward Forward, local Local, preparer post.Preparer) (*Server, error) 
 }
 
 // Description names the areas from the same registry as tools/list.
-func (s *Server) Description() string { return "Dyna tools cover " + s.names + "." }
+func (s *Server) Description() string {
+	return "Dyna tools cover " + s.names + ". A script calls one as tools.mcp__dyna__<name>."
+}
 
 func marshal[T any](v T) json.RawMessage { data, _ := json.Marshal(v); return data }
 
