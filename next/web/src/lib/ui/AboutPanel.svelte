@@ -99,10 +99,10 @@
       <h3>Holds</h3>
       {#each held as row (row.kind)}
         {#if row.links}
-          <div class="tracked">
-            <p class="tracked-head"><Icon name={row.kind === "pr" ? "pr" : "issue"} size={14} />{row.text}{#if row.repo}<span class="muted">{row.repo}</span>{/if}</p>
+          <FoldRow more>
+            {#snippet head()}<span class="tracked-head"><Icon name={row.kind === "pr" ? "pr" : "issue"} size={14} />{row.text}{#if row.repo}<span class="muted">{row.repo}</span>{/if}</span>{/snippet}
             <div class="tracked-links">{#each row.links as link (link.href)}<a href={link.href} title={link.title} target="_blank" rel="noreferrer">{link.label}</a>{/each}</div>
-          </div>
+          </FoldRow>
         {:else}
           <FoldRow>
             {#snippet head()}<WrapText text={row.text} />{/snippet}
@@ -145,10 +145,9 @@
   .when { overflow-wrap: break-word; }
   /* Each time stays whole, so a narrow panel stacks them instead of leaving "ago" alone on a line. */
   .times { display: flex; flex-wrap: wrap; gap: 0 12px; }
-  .tracked { display: grid; gap: 4px; min-width: 0; }
-  .tracked-head { display: flex; align-items: center; gap: 6px; margin: 0; }
+  .tracked-head { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
   .tracked-head span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tracked-links { display: flex; flex-wrap: wrap; gap: 2px 10px; padding-left: 20px; font-variant-numeric: tabular-nums; }
+  .tracked-links { display: flex; flex-wrap: wrap; gap: 2px 10px; font-variant-numeric: tabular-nums; }
   @media (pointer: coarse) { .tracked-links { gap: 8px 14px; } }
   ul { display: grid; gap: 4px; margin: 0; padding: 0 0 0 16px; line-height: 1.45; overflow-wrap: break-word; }
   .quiet { color: var(--muted); }
