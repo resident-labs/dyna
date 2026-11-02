@@ -19,18 +19,27 @@ func countRows(t *testing.T, s *Service, ctx context.Context, query string, args
 	return n
 }
 
-// A session's mention outside its parent and its own children is refused with one line, and nothing of the post is kept.
+// chainTree adds to receiveTree's root > worker > kid a sibling of kid, peer, and another branch, root > other > cousin.
+func chainTree(t *testing.T) (s *Service, room contract.RoomID, root, worker, kid, peer, other, cousin contract.SessionID, ctx context.Context) {
+	t.Helper()
+	s, room, root, worker, kid, ctx = receiveTree(t)
+	start := func(caller contract.Principal, name, goal string) contract.SessionID {
+		started, problem := s.SessionStart(ctx, caller, contract.SessionStartRequest{Room: room, Name: name, Profile: "test", Goal: goal})
+		if problem != nil {
+			t.Fatal(problem)
+		}
+		return started.Session
+	}
+	peer = start(asSession(worker), "peer", "")
+	other = start(contract.Principal{Kind: contract.PrincipalOwner}, "other", "goal")
+	cousin = start(asSession(other), "cousin", "")
+	return s, room, root, worker, kid, peer, other, cousin, ctx
+}
+
+// A session's mention above its parent or in another branch is refused with one line, and nothing of the post is kept.
 func TestMentionOutsideChainIsRefused(t *testing.T) {
-	s, room, root, worker, kid, ctx := receiveTree(t)
-	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	peer, problem := s.SessionStart(ctx, asSession(worker), contract.SessionStartRequest{Room: room, Name: "peer", Profile: "test"})
-	if problem != nil {
-		t.Fatal(problem)
-	}
-	if _, problem := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "other", Profile: "test", Goal: "goal"}); problem != nil {
-		t.Fatal(problem)
-	}
-	if _, problem := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "elsewhere", RootProfile: "test"}); problem != nil {
+	s, room, root, _, kid, _, _, cousin, ctx := chainTree(t)
+	if _, problem := s.RoomCreate(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.RoomCreateRequest{Name: "elsewhere", RootProfile: "test"}); problem != nil {
 		t.Fatal(problem)
 	}
 	var rootName string
@@ -40,23 +49,24 @@ func TestMentionOutsideChainIsRefused(t *testing.T) {
 	posts := func() int { return countRows(t, s, ctx, "SELECT COUNT(*) FROM events WHERE type='post.created'") }
 	deliveries := func() int { return countRows(t, s, ctx, "SELECT COUNT(*) FROM deliveries") }
 	beforePosts, beforeDeliveries := posts(), deliveries()
+	kidLine := "you can message your parent (worker) and sessions under it; your parent passes anything else on."
 	for _, c := range []struct {
 		from    contract.SessionID
+		beside  string // a mention in reach
 		mention string
 		want    string
 	}{
-		{kid, "@peer", "you can message your parent (worker) and your children; your parent passes it on."},
-		{kid, string(peer.Session), "you can message your parent (worker) and your children; your parent passes it on."},
-		{kid, "@siblings", "you can message your parent (worker) and your children; your parent passes it on."},
-		{kid, "@root", "you can message your parent (worker) and your children; your parent passes it on."},
-		{kid, "@" + rootName, "you can message your parent (worker) and your children; your parent passes it on."},
-		{kid, "@other", "you can message your parent (worker) and your children; your parent passes it on."},
-		{kid, "@elsewhere:root", "you can message your parent (worker) and your children; your parent passes it on."},
-		{worker, "@siblings", "you can message your parent (" + rootName + ") and your children; your parent passes it on."},
-		{root, "@kid", "you can message your children; a post that mentions no session goes to the owner."},
+		{kid, "worker", "@root", kidLine},
+		{kid, "worker", "@" + rootName, kidLine},
+		{kid, "worker", string(root), kidLine},
+		{kid, "worker", "@other", kidLine},
+		{kid, "worker", "@cousin", kidLine},
+		{kid, "worker", string(cousin), kidLine},
+		{kid, "worker", "@elsewhere:root", kidLine},
+		{root, "worker", "@elsewhere:root", "you can message sessions under you; a post that mentions no session goes to the owner."},
 	} {
-		// The parent beside the refused mention is not reached either.
-		_, problem := s.Post(ctx, asSession(c.from), contract.PostRequest{Room: room, Text: "hello", Mentions: []string{"@parent", c.mention}})
+		// The mention in reach beside the refused one is not reached either.
+		_, problem := s.Post(ctx, asSession(c.from), contract.PostRequest{Room: room, Text: "hello", Mentions: []string{"@" + c.beside, c.mention}})
 		if problem == nil || problem.Code != contract.ErrForbidden || problem.Message != c.want {
 			t.Errorf("%s mentions %s: %+v", c.from, c.mention, problem)
 		}
@@ -66,9 +76,13 @@ func TestMentionOutsideChainIsRefused(t *testing.T) {
 	}
 }
 
-// A session reaches its parent, as parent or by name or ID, and its own children, as children or by name or ID.
-func TestParentAndChildrenAreReached(t *testing.T) {
-	s, room, root, worker, kid, ctx := receiveTree(t)
+// A session reaches its parent and any session under its parent, by role, name or ID. Root reaches any session under it.
+func TestParentAndSessionsUnderItAreReached(t *testing.T) {
+	s, room, root, worker, kid, peer, other, cousin, ctx := chainTree(t)
+	grandkid, problem := s.SessionStart(ctx, asSession(peer), contract.SessionStartRequest{Room: room, Name: "grandkid", Profile: "test"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
 	for _, c := range []struct {
 		from    contract.SessionID
 		mention string
@@ -77,11 +91,18 @@ func TestParentAndChildrenAreReached(t *testing.T) {
 		{kid, "@parent", worker},
 		{kid, "@worker", worker},
 		{kid, string(worker), worker},
+		{kid, "@siblings", peer},
+		{kid, "@peer", peer},
+		{kid, string(peer), peer},
+		{kid, "@grandkid", grandkid.Session}, // a sibling's child
 		{worker, "@children", kid},
 		{worker, "@kid", kid},
 		{worker, string(kid), kid},
 		{worker, "@root", root}, // root is worker's parent
+		{worker, "@siblings", other},
+		{worker, "@cousin", cousin},
 		{root, "@worker", worker},
+		{root, "@grandkid", grandkid.Session},
 	} {
 		before := pendingTo(t, s, ctx, c.to)
 		if _, problem := s.Post(ctx, asSession(c.from), contract.PostRequest{Room: room, Text: "hello", Mentions: []string{c.mention}}); problem != nil {
@@ -205,20 +226,17 @@ func TestFinalReplyGoesUpPastParentThatCantReceive(t *testing.T) {
 	}
 }
 
-// A session's subscription may wake only itself or its own descendants. The owner's may wake anyone.
+// A session's subscription may wake itself, its parent and any session under its parent. The owner's may wake anyone.
 func TestSubscriptionWakesStayInTheChain(t *testing.T) {
-	s, room, root, worker, kid, ctx := receiveTree(t)
+	s, room, root, worker, kid, peer, other, cousin, ctx := chainTree(t)
 	add := func(caller contract.Principal, session contract.SessionID, wake contract.SessionID) *contract.Error {
 		_, problem := s.SubscriptionAdd(ctx, caller, contract.SubscriptionAddRequest{Scope: contract.ScopeSession, Room: room, Session: string(session), Every: "1h", Wake: string(wake)})
 		return problem
 	}
-	for _, wake := range []contract.SessionID{worker, root} {
-		if problem := add(asSession(kid), kid, wake); problem == nil || problem.Code != contract.ErrForbidden || problem.Message != "a session can wake only itself and its descendants" {
+	for _, wake := range []contract.SessionID{root, other, cousin} {
+		if problem := add(asSession(kid), kid, wake); problem == nil || problem.Code != contract.ErrForbidden || problem.Message != "a session can wake only itself, its parent and sessions under its parent" {
 			t.Fatalf("kid wakes %s: %+v", wake, problem)
 		}
-	}
-	if problem := add(asSession(worker), worker, root); problem == nil || problem.Code != contract.ErrForbidden {
-		t.Fatalf("worker wakes root: %+v", problem)
 	}
 	for _, c := range []struct {
 		caller  contract.Principal
@@ -226,7 +244,9 @@ func TestSubscriptionWakesStayInTheChain(t *testing.T) {
 		wake    contract.SessionID
 	}{
 		{asSession(kid), kid, kid},
-		{asSession(worker), kid, kid},
+		{asSession(kid), kid, worker},
+		{asSession(kid), kid, peer},
+		{asSession(worker), worker, cousin},
 		{asSession(root), kid, kid},
 		{contract.Principal{Kind: contract.PrincipalOwner}, kid, root},
 	} {

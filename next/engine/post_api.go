@@ -178,8 +178,8 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		if err != nil {
 			return contract.PostResponse{}, invalid(err.Error())
 		}
-		// Siblings and other rooms are never in a session's chain of command. The store refuses any other session outside it.
-		if caller.Kind == contract.PrincipalSession && (address.Kind == room.AddressSiblings || address.Room != "") {
+		// Another room is never in a session's chain of command. The store refuses any other session outside it.
+		if caller.Kind == contract.PrincipalSession && address.Room != "" {
 			err := s.store.OutsideChain(ctx, caller.Session)
 			if problem := chainProblem(err); problem != nil {
 				return contract.PostResponse{}, problem

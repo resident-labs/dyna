@@ -15,24 +15,28 @@ type ChainError struct{ Message string }
 func (e *ChainError) Error() string { return e.Message }
 
 // receiver decides who receives for a session now, and the chain of command is its one rule. A session may address its
-// parent and its own children, and a crew only its parent; reach is false for anyone else. The owner and the engine may
-// address any session. What a session sends its parent goes, while the parent cannot receive, to the parent's nearest
+// parent and any session under its parent: its siblings, its own children and theirs, and so on down. Root, with no
+// parent, may address any session under it. A crew may address only its parent. reach is false for anyone else, such as
+// a grandparent or another branch. The owner and the engine may address any session. What a session sends its parent goes, while the parent cannot receive, to the parent's nearest
 // ancestor that can, ending at root; why then says what stops the parent. Anything else goes where it was sent.
 //
 // A session cannot receive while it closes or after, or while its box is failed, lost, or pending because it cannot be
 // placed.
-func receiver(ctx context.Context, tx *sql.Tx, from contract.Principal, to contract.SessionID) (got contract.SessionID, why string, reach bool, err error) {
+func receiver(ctx context.Context, tx rowQuerier, from contract.Principal, to contract.SessionID) (got contract.SessionID, why string, reach bool, err error) {
 	if from.Kind != contract.PrincipalSession {
 		return to, "", true, nil
 	}
-	var parent, toParent string
-	var crew bool
-	err = tx.QueryRowContext(ctx, "SELECT COALESCE(s.parent,''),EXISTS(SELECT 1 FROM workflow_runs w WHERE w.session=s.id),COALESCE((SELECT t.parent FROM sessions t WHERE t.id=?),'') FROM sessions s WHERE s.id=?", to, from.Session).Scan(&parent, &crew, &toParent)
+	var parent string
+	var crew, under bool
+	// under: the top of from's reach, its parent or else from itself as root, is an ancestor of to.
+	err = tx.QueryRowContext(ctx, `WITH RECURSIVE f AS (SELECT COALESCE(s.parent,'') AS parent,EXISTS(SELECT 1 FROM workflow_runs w WHERE w.session=s.id) AS crew FROM sessions s WHERE s.id=?),
+		up(id) AS (SELECT parent FROM sessions WHERE id=? AND parent IS NOT NULL UNION SELECT p.parent FROM sessions p JOIN up ON p.id=up.id WHERE p.parent IS NOT NULL)
+		SELECT f.parent,f.crew,EXISTS(SELECT 1 FROM up WHERE up.id=CASE f.parent WHEN '' THEN ? ELSE f.parent END) FROM f`, from.Session, to, from.Session).Scan(&parent, &crew, &under)
 	if err != nil {
 		return "", "", false, err
 	}
 	if parent == "" || string(to) != parent {
-		return to, "", toParent == string(from.Session) && !crew, nil
+		return to, "", under && !crew, nil
 	}
 	for id := to; ; {
 		var up, state, boxState, reason string
@@ -115,15 +119,21 @@ func chainRefusal(ctx context.Context, q rowQuerier, session contract.SessionID)
 	case crew:
 		return &ChainError{Message: fmt.Sprintf("a workflow can message only its parent (%s).", parent)}
 	case parent == "":
-		return &ChainError{Message: "you can message your children; a post that mentions no session goes to the owner."}
+		return &ChainError{Message: "you can message sessions under you; a post that mentions no session goes to the owner."}
 	}
-	return &ChainError{Message: fmt.Sprintf("you can message your parent (%s) and your children; your parent passes it on.", parent)}
+	return &ChainError{Message: fmt.Sprintf("you can message your parent (%s) and sessions under it; your parent passes anything else on.", parent)}
 }
 
-// OutsideChain refuses a session's mention that by its form names no one in the session's chain of command, such as
-// siblings or a session in another room.
+// OutsideChain refuses a session's mention that by its form names no one in the session's chain of command: a session in
+// another room.
 func (s *Store) OutsideChain(ctx context.Context, session contract.SessionID) error {
 	return chainRefusal(ctx, s.Read(), session)
+}
+
+// Reaches reports whether from may address to now, by receiver's rule.
+func (s *Store) Reaches(ctx context.Context, from contract.Principal, to contract.SessionID) (bool, error) {
+	_, _, reach, err := receiver(ctx, s.Read(), from, to)
+	return reach, err
 }
 
 // dropUndelivered discards what a closing session never read. Its posts stay in the room, but nobody acts on them: replaying

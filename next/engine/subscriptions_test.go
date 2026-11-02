@@ -251,7 +251,6 @@ func TestSubscriptionAuthority(t *testing.T) {
 		"non-root on the room":          {sessionCaller(worker), roomWake, contract.ErrForbidden},
 		"non-root adds a run":           {sessionCaller(worker), runRequest(room), contract.ErrForbidden},
 		"non-root adds a session run":   {sessionCaller(worker), contract.SubscriptionAddRequest{Scope: contract.ScopeSession, Session: string(worker), Every: every, Run: runRequest(room).Run}, contract.ErrForbidden},
-		"child wakes its parent":        {sessionCaller(child.Session), scoped(child.Session, wakeOf(worker)), contract.ErrForbidden},
 		"child owns its parent's scope": {sessionCaller(child.Session), scoped(worker, wakeOf(child.Session)), contract.ErrForbidden},
 		"root of another room":          {sessionCaller(rootID), contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: other.Room, Every: every, Run: runRequest(room).Run}, contract.ErrForbidden},
 		"wake across rooms":             {ownerCaller, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: other.Room, Every: every, Wake: wakeOf(worker)}, contract.ErrInvalid},
@@ -264,11 +263,12 @@ func TestSubscriptionAuthority(t *testing.T) {
 		caller contract.Principal
 		req    contract.SubscriptionAddRequest
 	}{
-		"session on itself":     {sessionCaller(worker), scoped(worker, wakeOf(worker))},
-		"ancestor on its child": {sessionCaller(worker), scoped(child.Session, wakeOf(child.Session))},
-		"root on the room":      {sessionCaller(rootID), roomWake},
-		"root adds a run":       {sessionCaller(rootID), runRequest(room)},
-		"owner on the machine":  {ownerCaller, machine},
+		"session on itself":      {sessionCaller(worker), scoped(worker, wakeOf(worker))},
+		"ancestor on its child":  {sessionCaller(worker), scoped(child.Session, wakeOf(child.Session))},
+		"child wakes its parent": {sessionCaller(child.Session), scoped(child.Session, wakeOf(worker))},
+		"root on the room":       {sessionCaller(rootID), roomWake},
+		"root adds a run":        {sessionCaller(rootID), runRequest(room)},
+		"owner on the machine":   {ownerCaller, machine},
 	} {
 		if _, problem := s.SubscriptionAdd(ctx, c.caller, c.req); problem != nil {
 			t.Errorf("%s: %v", name, problem)

@@ -137,7 +137,7 @@ var methodTable = []MethodEntry{
 		act("package", "remove", typ[contract.AddonRemoveRequest](), "Remove a Pi package by the name package list shows. global needs the owner's approval.", "package remove"),
 	),
 	method(contract.MethodPost, contract.ScopeOperate, UserAccess,
-		act("post", "send", typ[PostInput](), "Send or update a post. Mentions reach your parent and your own children only; a post to a parent that can't receive goes to the nearest session above it that can. paths holds attachment paths; html names a visual file. Set visualUpdate to update a visual. endTurn ends the turn on this post whatever reply the turn owes and wherever the post goes, and the post stands as every reply the turn owes. The turn ends when the post succeeds and every tool call in the same message also ends it; a queued input continues it. In a codemode script the post sends, the turn continues, and the result carries turnContinues.", "post"),
+		act("post", "send", typ[PostInput](), "Send or update a post. Mentions reach your parent and the sessions under it only; a post to a parent that can't receive goes to the nearest session above it that can. paths holds attachment paths; html names a visual file. Set visualUpdate to update a visual. endTurn ends the turn on this post whatever reply the turn owes and wherever the post goes, and the post stands as every reply the turn owes. The turn ends when the post succeeds and every tool call in the same message also ends it; a queued input continues it. In a codemode script the post sends, the turn continues, and the result carries turnContinues.", "post"),
 	),
 	method(contract.MethodPostSearch, contract.ScopeRead, OwnerAccess),
 	method(contract.MethodPrList, contract.ScopeRead, UserAccess,
