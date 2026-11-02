@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -12,6 +13,10 @@ import (
 
 // archiveRetry spaces out tries on a box whose archive failed, as a full disk makes it do.
 const archiveRetry = 10 * time.Minute
+
+// archiveAttempts is how many failed archive reports end the wait: the close then goes ahead without an archive, so a box
+// cannot hold in closing for hours. Five reports ten minutes apart, each at most 15 minutes in the box, take under two hours.
+const archiveAttempts = 5
 
 // closeNotConnected marks a box that started for archive and never connected, so it shows as stuck rather than running.
 const closeNotConnected = "box did not connect to archive"
@@ -40,11 +45,11 @@ func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox, host
 	if row.State != contract.BoxClosing {
 		next := row.Box
 		next.State, next.Reason = contract.BoxClosing, ""
-		changed, err := r.change(ctx, row.Box, next, time.Time{}, row.Failures, "")
+		changed, err := r.change(ctx, row.Box, next, time.Time{}, 0, "") // From here failures counts failed archives.
 		if err != nil || !changed {
 			return err
 		}
-		row.Box, row.DueAt = next, time.Time{}
+		row.Box, row.DueAt, row.Failures = next, time.Time{}, 0
 	}
 	if row.Deleting && r.roomHosts != nil && row.Host != "" && host != box.HostReady {
 		return r.abandon(ctx, row)
@@ -60,12 +65,47 @@ func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox, host
 		return err
 	}
 	if row.Want == store.WantClose && hadTurns && r.view.Connected(row.Session) {
-		if row.Reason == "" || row.Updated.Add(archiveRetry).After(r.now()) {
+		if row.Reason == "" {
+			return nil
+		}
+		if row.Failures >= archiveAttempts {
+			return r.abandonArchive(ctx, row)
+		}
+		if row.Updated.Add(archiveRetry).After(r.now()) {
 			return nil
 		}
 		return r.retryArchive(ctx, row)
 	}
 	r.launch(ctx, row)
+	return nil
+}
+
+// abandonArchive tells the parent, which wakes for it, then lets the close go on without an archive. The notice goes once,
+// so a crash between the two steps repeats neither.
+func (r *Reconciler) abandonArchive(ctx context.Context, row store.LifecycleBox) error {
+	session, err := r.store.Session(ctx, row.Session)
+	if err != nil {
+		return err
+	}
+	tree, err := r.store.RoomTree(ctx, session.Room)
+	if err != nil {
+		return err
+	}
+	text := fmt.Sprintf("Session %s closed without an archive after %d failed tries. Its volume goes with the close, so work it had not pushed is gone. Last failure: %s", session.Name, archiveAttempts, row.Reason)
+	if len(text) > 4096 {
+		text = strings.ToValidUTF8(text[:4096], "")
+	}
+	notice, err := r.event(session.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionNotice{Session: row.Session, Text: text, ClientID: "archive-lost:" + string(row.ID)})
+	if err != nil {
+		return err
+	}
+	if err := r.store.WakeWithNotice(ctx, notice, tree.Parent(row.Session)); err != nil {
+		return err
+	}
+	if err := r.store.CompleteArchives(ctx, row.Session, nil); err != nil {
+		return err
+	}
+	r.Kick()
 	return nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -353,6 +354,99 @@ func TestArchiveFailureRetriesOnTimerAndKeepsBox(t *testing.T) {
 	}
 	if _, ok := (<-channel).Body.(contract.Archive); !ok {
 		t.Fatal("expected archive on the timed retry")
+	}
+}
+
+func TestArchiveThatKeepsFailingClosesWithoutOneAndSaysSo(t *testing.T) {
+	s, room, session, ctx := setupArchive(t)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	channel, e := testChannel(t, s, ctx, caller)
+	if e != nil {
+		t.Fatal(e)
+	}
+	<-channel
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session}); e != nil {
+		t.Fatal(e)
+	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
+	notices := func() []contract.SessionNotice {
+		t.Helper()
+		events, err := s.store.Events(ctx, room, 0, 100, []contract.EventType{"session.notice"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		bodies := make([]contract.SessionNotice, len(events))
+		for i, event := range events {
+			bodies[i] = event.Body.(contract.SessionNotice)
+		}
+		return bodies
+	}
+	for try := 1; try <= 5; try++ {
+		if _, ok := (<-channel).Body.(contract.Archive); !ok {
+			t.Fatalf("try %d: expected archive", try)
+		}
+		if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{Repo: "owner/repo", Error: "push refused"}); e != nil {
+			t.Fatal(e)
+		}
+		if try == 5 {
+			break
+		}
+		if got := notices(); len(got) != 0 {
+			t.Fatalf("try %d: notice %+v", try, got)
+		}
+		later := s.now().Add(10 * time.Minute)
+		s.now = func() time.Time { return later }
+		passLifecycle(t, s, ctx)
+	}
+	passLifecycle(t, s, ctx) // Give up.
+	passLifecycle(t, s, ctx) // Remove the box.
+	passLifecycle(t, s, ctx) // Close the session.
+	passLifecycle(t, s, ctx) // Nothing repeats.
+	got := notices()
+	if len(got) != 1 || !strings.Contains(got[0].Text, "without an archive") || !strings.Contains(got[0].Text, "push refused") || !strings.Contains(got[0].Text, "goes with the close") {
+		t.Fatalf("notices: %+v", got)
+	}
+	if _, err := s.store.Session(ctx, session); err == nil {
+		t.Fatal("session did not close")
+	}
+	var archives int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM archives WHERE session=?", session).Scan(&archives); err != nil || archives != 0 {
+		t.Fatalf("archives: %d, %v", archives, err)
+	}
+	var parent, delivered int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*),sum(wake) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.client_id LIKE 'archive-lost:%'").Scan(&parent, &delivered); err != nil || parent != 1 || delivered != 1 {
+		t.Fatalf("delivery: %d, %d, %v", parent, delivered, err)
+	}
+}
+
+func TestArchiveLeftOutIsToldToTheParent(t *testing.T) {
+	s, room, session, ctx := setupArchive(t)
+	s.SetRepositories(&fakeRepos{})
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	channel, e := testChannel(t, s, ctx, caller)
+	if e != nil {
+		t.Fatal(e)
+	}
+	<-channel
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session}); e != nil {
+		t.Fatal(e)
+	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
+	left := &contract.ArchiveLeftOut{Files: 13, Bytes: 3 << 30, Paths: []string{".proof/rustc", ".proof/cargo"}}
+	if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc", LeftOut: left}); e != nil {
+		t.Fatal(e)
+	}
+	events, err := s.store.Events(ctx, room, 0, 100, []contract.EventType{"session.notice"})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("notices: %+v, %v", events, err)
+	}
+	text := events[0].Body.(contract.SessionNotice).Text
+	for _, want := range []string{"13 untracked files", "3072 MiB", ".proof/rustc, .proof/cargo", "go with its volume"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("notice %q lacks %q", text, want)
+		}
 	}
 }
 
