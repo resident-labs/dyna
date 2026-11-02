@@ -20,6 +20,8 @@ strong, b, h1, h2, h3, h4 { font-weight: 600; }
 /* Thin scrollbars that stay hidden until the pointer is over their area: a muted thumb on no track. */
 * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: transparent transparent; }
 :hover { scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent; }
+/* A drag that runs off the end of a pane stops there, so the page does not bounce or refresh. */
+html { overscroll-behavior: none; }
 body { margin: 0; background: var(--bg); color: var(--text); }
 /* The media viewer's blur is on the app, as a backdrop-filter took twice as long a frame with a live card open: 67 ms
    against 33 ms at 1920 px without a GPU, at any radius from 4 to 12 px. The viewer sits in the top layer, so it stays sharp. */
@@ -27,12 +29,15 @@ body { margin: 0; background: var(--bg); color: var(--text); }
 #app:has(dialog.media-viewer[open]) { filter: blur(6px); }
 @media (prefers-reduced-motion: reduce) { #app { transition: none; } }
 @media (prefers-reduced-transparency: reduce) { #app:has(dialog.media-viewer[open]) { filter: none; } }
-/* The app fills the viewport exactly; only the feed and the side panels scroll. */
-.shell { display: grid; grid-template-columns: 64px 1fr; grid-template-rows: minmax(0, 1fr); height: var(--app-height, 100dvh); overflow: hidden;
+/* The app fills the viewport exactly; only the feed and the side panels scroll. Clip, as a hidden box still scrolls for a
+   caret: typing in a composer taller than the room above the keyboard pushed the whole app up. */
+.shell { display: grid; grid-template-columns: 64px 1fr; grid-template-rows: minmax(0, 1fr); height: var(--app-height, 100dvh); overflow: clip;
   /* viewport-fit=cover: the notch, the home bar and a landscape phone's sides stay clear. */
   padding: env(safe-area-inset-top) env(safe-area-inset-right) max(0px, env(safe-area-inset-bottom) - var(--keyboard, 0px)) env(safe-area-inset-left); }
 .shell.open { grid-template-columns: 64px 1fr 280px; }
 main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+/* The feed takes the spare height, so this acts only when nothing fits above the keyboard: the header gives way, not the box being typed in. */
+main:has(> .composer) { justify-content: flex-end; }
 aside { background: var(--sidebar); border-right: 1px solid var(--line); overflow-y: auto; }
 /* A column, so the host foot sits at the bottom of a short list. */
 aside.members { display: flex; flex-direction: column; border-right: 0; border-left: 1px solid var(--line); }
