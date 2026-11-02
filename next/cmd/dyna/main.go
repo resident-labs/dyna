@@ -64,7 +64,6 @@ func newRootCmd() *cobra.Command {
 	}}
 	web.AddCommand(webSearchCommand(func() *socketClient { return newClient(socket) }))
 	root.AddCommand(addonCommands(func() *socketClient { return newClient(socket) })...)
-	root.AddCommand(instructionsCommand(func() *socketClient { return newClient(socket) }))
 	root.AddCommand(web, websearchKeyCommand(func() *socketClient { return newClient(socket) }), questionCommand(func() *socketClient { return newClient(socket) }), subscriptionCommand(func() *socketClient { return newClient(socket) }), workflowCommand(func() *socketClient { return newClient(socket) }))
 	root.AddCommand(computerCommand("/run/dyna/agent.sock"))
 	root.AddCommand(proxyCommand(func() *socketClient { return newClient(socket) }))

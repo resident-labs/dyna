@@ -62,6 +62,7 @@ type Boxes struct {
 	machineIDFile     string
 	instructionSaves  atomic.Uint64
 	instructionSynced map[*podman.Host]*instructionHost
+	instructionSums   map[contract.RoomID][sha256.Size]byte // each AGENTS.md as last noted, under instructionsMu
 	Version           string
 	PiTarball         []byte
 	Mirror            *enginegit.Mirror

@@ -210,6 +210,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	service.SetInstructionsPublisher(boxes.PublishInstructions)
 	boxes.Addons = service.Addons()
+	go boxes.watchInstructions(boxCtx)
 	mirror := &enginegit.Mirror{Layout: layout, Token: token, Runner: enginegit.GitRunner{}}
 	service.SetRepositories(&enginegit.Repositories{Rooms: st, Hosts: boxes, Mirror: mirror})
 	pulls := &prs.Client{Token: token, Endpoint: &url.URL{Scheme: "https", Host: "api.github.com"}, Transport: http.DefaultTransport, Now: time.Now}
