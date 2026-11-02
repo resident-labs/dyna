@@ -159,7 +159,7 @@ func TestHeartbeatScriptSeesTheMount(t *testing.T) {
 func TestEnsureShareLeavesARunningMountAlone(t *testing.T) {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "calls")
-	tools := fakeTools(t, map[string]string{"mountpoint": "exit 0", "fusermount3": "echo fusermount3 >> " + log, "systemd-run": "echo systemd-run >> " + log, "systemctl": "exit 1"})
+	tools := fakeTools(t, map[string]string{"mountpoint": `[ "$1" = -d ] && echo 0:42; exit 0`, "podman": `[ "$1" = unshare ] && { shift; exec "$@"; }; echo "podman $*" >> ` + log, "fusermount3": "echo fusermount3 >> " + log, "systemd-run": "echo systemd-run >> " + log, "systemctl": "exit 1"})
 	script := strings.ReplaceAll(strings.ReplaceAll(shareScript, "/etc/fuse.conf 2", os.DevNull+" 2"), "grep -Eq '^[[:space:]]*user_allow_other'", "true")
 	script = strings.ReplaceAll(script, "[ -c /dev/fuse ]", "[ -c /dev/null ]")
 	cmd := exec.Command("/bin/bash", "-c", script, "dyna-share", filepath.Join(dir, "mount"), filepath.Join(dir, "cache"), "/bin/dyna", "/sock")
@@ -199,7 +199,8 @@ func TestEnsureShareStartsAMountWhereThereIsNone(t *testing.T) {
 	log := filepath.Join(dir, "calls")
 	state := filepath.Join(dir, "up")
 	tools := fakeTools(t, map[string]string{
-		"mountpoint":  "[ -e " + state + " ]",
+		"mountpoint":  "[ -e " + state + ` ] || exit 1; [ "$1" = -d ] && echo 0:42; exit 0`,
+		"podman":      `[ "$1" = unshare ] && { shift; exec "$@"; }; exit 1`,
 		"fusermount3": "echo fusermount3 >> " + log,
 		"systemd-run": `echo "systemd-run $*" >> ` + log + "\ntouch " + state,
 		"systemctl":   "exit 3",
