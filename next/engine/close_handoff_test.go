@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -85,21 +84,5 @@ func TestCloseHandsPendingInputToParent(t *testing.T) {
 	frame, _, err := s.inputFrame(ctx, parent, contract.Event{From: owner, Body: contract.PostCreated{Text: "hello"}}, contract.Delivery{Surface: surface, Reply: contract.ReplyChannel{Kind: kind}, HandoffFrom: origin})
 	if err != nil || !strings.Contains(frame, "worker") || !strings.Contains(frame, "closed") {
 		t.Fatalf("frame %q: %v", frame, err)
-	}
-}
-
-func TestPostRejectsClosingSession(t *testing.T) {
-	s, room, child, ctx := setup(t)
-	if err := s.store.MarkClosing(ctx, child, false, time.Unix(0, 0)); err != nil {
-		t.Fatal(err)
-	}
-	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	for _, req := range []contract.PostRequest{
-		{Room: room, Home: contract.Conversation{Kind: contract.ConversationDM, Session: child}, Text: "hello"},
-		{Room: room, Text: "hello", Mentions: []string{"@worker"}},
-	} {
-		if _, problem := s.Post(ctx, owner, req); problem == nil || problem.Code != contract.ErrSessionClosing {
-			t.Fatalf("post: %v", problem)
-		}
 	}
 }

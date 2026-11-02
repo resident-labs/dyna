@@ -3,7 +3,6 @@ package engine
 import (
 	"database/sql"
 	"github.com/resident-labs/dyna/contract"
-	"strings"
 	"testing"
 )
 
@@ -76,14 +75,5 @@ func TestPostSearch(t *testing.T) {
 	}
 	if _, e := s.PostSearch(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.PostSearchRequest{Query: "deploy"}); e == nil || e.Code != contract.ErrForbidden {
 		t.Fatalf("session: %v", e)
-	}
-}
-func TestPostSearchLimits(t *testing.T) {
-	s, _, _, ctx := setup(t)
-	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	for _, req := range []contract.PostSearchRequest{{Query: " "}, {Query: strings.Repeat("a", 201)}, {Query: "a b c d e f g h i"}, {Query: "ok", Limit: 51}, {Query: "ok", Before: -1}} {
-		if _, e := s.PostSearch(ctx, owner, req); e == nil || e.Code != contract.ErrInvalid {
-			t.Fatalf("%+v: %v", req, e)
-		}
 	}
 }

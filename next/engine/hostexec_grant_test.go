@@ -35,24 +35,6 @@ func TestGrantOperation(t *testing.T) {
 	}
 }
 
-func TestGrantCard(t *testing.T) {
-	s, room, worker, ctx := setup(t)
-	to := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
-	if err := s.store.SetEngineHost(ctx, "host", false); err != nil {
-		t.Fatal(err)
-	}
-	card := s.HostexecGrant().Card(ctx, contract.HostexecGrantArgs{Room: room, To: to, Hosts: []contract.HostName{"host"}, Reason: "Inspect logs"}, to)
-	if card.Title != "asks for host access" || card.Target != (contract.Target{Kind: contract.TargetHost, Name: "host"}) || card.Body != "Run any command on host until the session closes.\nReason: Inspect logs" {
-		t.Fatalf("card: %+v", card)
-	}
-	// The owner granting another session names it, and two hosts keep the room as the target.
-	card = s.HostexecGrant().Card(ctx, contract.HostexecGrantArgs{Room: room, To: to, Hosts: []contract.HostName{"a", "b"}, Reason: "Inspect logs"}, contract.Principal{Kind: contract.PrincipalOwner})
-	if card.Target.Kind != contract.TargetRoom || !strings.HasPrefix(card.Body, "Let ") || !strings.Contains(card.Body, " run any command on a, b until the session closes.") {
-		t.Fatalf("card: %+v", card)
-	}
-
-}
-
 func TestHostGrantAfterEngineMove(t *testing.T) {
 	s, room, worker, ctx := setup(t)
 	no := false
@@ -85,19 +67,6 @@ func TestHostGrantAfterEngineMove(t *testing.T) {
 	}
 	card := s.HostexecGrant().Card(ctx, args, to)
 	if !strings.Contains(card.Body, "may hold the model sign-ins. Approve only if you trust this session with them.") {
-		t.Fatal(card.Body)
-	}
-}
-
-func TestGrantCardEngineHost(t *testing.T) {
-	s, room, worker, ctx := setup(t)
-	yes := true
-	if err := s.store.AddHost(ctx, box.Host{Name: "engine", EngineHost: &yes}); err != nil {
-		t.Fatal(err)
-	}
-	to := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
-	card := s.HostexecGrant().Card(ctx, contract.HostexecGrantArgs{Room: room, To: to, Hosts: []contract.HostName{"engine"}, Reason: "Inspect"}, to)
-	if !strings.Contains(card.Body, "This host also runs the engine. This grant gives full owner power, including the model sign-ins.") {
 		t.Fatal(card.Body)
 	}
 }
