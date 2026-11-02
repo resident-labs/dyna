@@ -18,7 +18,8 @@ func (retryTestView) SessionClosed(contract.SessionID)     {}
 func (retryTestView) CompactBeforeStop(context.Context, contract.SessionID) bool {
 	return false
 }
-func (retryTestView) Stale(contract.SessionID) bool { return false }
+func (retryTestView) Stale(contract.SessionID) bool                  { return false }
+func (retryTestView) BoxStopped(context.Context, contract.SessionID) {}
 
 func TestPassWakesModelRetryWithoutEvent(t *testing.T) {
 	ctx := context.Background()

@@ -70,16 +70,30 @@ func (s *Session) Refresh() string {
 	return s.refresh
 }
 
-// MarkRefresh asks this box to restart. A box does not report a mark, so unlike the stale flag it outlasts a reconnect, and the
-// first one stands, so a repeat sends no second notice. The caller holds the session lock.
-func (s *Session) MarkRefresh(mark string) {
+// MarkRefresh asks this box to restart, and with wake to come straight back once it stops. A box does not report a mark, so unlike
+// the stale flag it outlasts a reconnect, and the first one stands, so a repeat sends no second notice. The caller holds the
+// session lock.
+func (s *Session) MarkRefresh(mark string, wake bool) {
 	if s.refresh == "" {
 		s.refresh = mark
 	}
+	s.refreshWake = s.refreshWake || wake
+}
+
+// RefreshWake returns the mark of a box that asked to come straight back, empty if it did not.
+func (s *Session) RefreshWake() string {
+	if !s.Lock() {
+		return ""
+	}
+	defer s.Unlock()
+	if !s.refreshWake {
+		return ""
+	}
+	return s.refresh
 }
 
 // ClearRefresh says a new box agent has started, which is what a mark asked for. The caller holds the session lock.
-func (s *Session) ClearRefresh() { s.refresh = "" }
+func (s *Session) ClearRefresh() { s.refresh, s.refreshWake = "", false }
 
 // Channel returns the attached channel. The caller holds the session lock.
 func (s *Session) Channel() *Channel { return s.channel }

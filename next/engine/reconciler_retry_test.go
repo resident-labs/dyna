@@ -182,8 +182,9 @@ func (retryView) SessionClosed(contract.SessionID)     {}
 func (retryView) CompactBeforeStop(context.Context, contract.SessionID) bool {
 	return false
 }
-func (retryView) Connected(contract.SessionID) bool { return false }
-func (retryView) Stale(contract.SessionID) bool     { return false }
+func (retryView) Connected(contract.SessionID) bool              { return false }
+func (retryView) Stale(contract.SessionID) bool                  { return false }
+func (retryView) BoxStopped(context.Context, contract.SessionID) {}
 
 func TestReconcilerResumesInterruptedCreate(t *testing.T) {
 	s, _, sid, ctx := setup(t)
