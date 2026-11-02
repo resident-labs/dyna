@@ -82,6 +82,10 @@ test("with no hook on, the line says what there is", () => {
   assert.equal(summary([]), "");
 });
 
+test("a disabled wake stays out of the list", () => {
+  assert.deepEqual(subscriptionRows([wake(), wake({ disabled: true })], () => "root").map(row => row.state), [""]);
+});
+
 test("the list puts failures first, then hooks, then wakes, and disabled rows last", () => {
   const rows = subscriptionRows([
     hook({ disabled: true }, ["bash", "old-watch.sh"]), wake(), hook({ last: "passed" }, ["bash", "plain-watch.sh"]), hook({ failures: 2, last: "failed" }, ["bash", "bad-watch.sh"]),
