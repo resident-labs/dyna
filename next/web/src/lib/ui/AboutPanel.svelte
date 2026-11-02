@@ -76,6 +76,7 @@
 </script>
 
 <div class="about">
+  <div class="facts-scroll">
   <dl class="facts">
     {#if parent && open?.parent}<dt>Parent</dt><dd><a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(open.parent)}`} onclick={navigate}>{parent}</a></dd>{/if}
     {#if open?.profile}<dt>Profile</dt><dd><ProfileMenu {session} profile={open.profile} {switchable} /></dd>{/if}
@@ -117,6 +118,8 @@
     </section>
   {/if}
   {#if subscriptions.length}<section><HooksRow {subscriptions} name={id => store.names.get(id) ?? id} /></section>{/if}
+  </div>
+  <div class="end">
   {#if open?.startedAt || open?.parent}
     <div class="endnote">
       {#if open?.startedAt}<p class="times"><time datetime={open.startedAt} title={fullTime(open.startedAt)}>Started {ago(open.startedAt)}</time>{#if open.lastTurnAt}<time datetime={open.lastTurnAt} title={fullTime(open.lastTurnAt)}>Last turn {ago(open.lastTurnAt)}</time>{/if}</p>{/if}
@@ -134,10 +137,14 @@
     </div>
   {/if}
   {#if closeFailed}<p class="failed">The session did not close. Try again.</p>{/if}
+  </div>
 </div>
 
 <style>
-  .about { display: flex; flex-direction: column; gap: 16px; flex: 1; min-height: 0; overflow-y: auto; padding: 16px; font-size: 14px; }
+  .about { display: flex; flex-direction: column; flex: 1; min-height: 0; font-size: 14px; }
+  .facts-scroll { display: flex; flex-direction: column; gap: 16px; flex: 1; min-height: 0; overflow-y: auto; padding: 16px; }
+  /* The times and the close stay in one place above the machines, however much the session holds. */
+  .end { display: grid; gap: 8px; padding: 8px 16px 12px; }
   /* An empty list of facts, as for a session still loading, takes no gap. */
   .about :global(.facts:empty) { display: none; }
   h3 { display: flex; align-items: baseline; gap: 6px; margin: 0 0 4px; font-size: 13px; font-weight: 600; line-height: 20px; }
