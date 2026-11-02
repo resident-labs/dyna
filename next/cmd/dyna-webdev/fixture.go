@@ -108,7 +108,7 @@ func fixtureTurns() []contract.TranscriptTurn {
 			if i == 3 && j == 1 {
 				item.Posts = post("I am checking the narrow layout.", contract.Conversation{Kind: contract.ConversationFeed})
 			}
-			// A turn that ends on a post: it has no final text, and its working text folds.
+			// A turn that ends on a post: it has no final text, and its earlier text still shows.
 			if i == 9 && j == len(turnTools)-1 {
 				item.Posts = post("The docs are up to date. The retry hint is described in the sync guide.", contract.Conversation{Kind: contract.ConversationFeed})
 			}

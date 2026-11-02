@@ -148,6 +148,7 @@ Use v1's scale. Pick the nearest step; never write another font size. [v1 `token
 - Show a failed send as "Not sent" in the danger color at full contrast, with Retry and Discard. [owner, #1458]
 - Give a failed turn its own row with the avatar column and the name line, like a post. [root, #1448] [v1 TurnCompletionRow]
 - Fold agent work into one muted line that expands in place. [spec 5.13] [T3 "Worked for 20s"]
+- Only thoughts and tool calls are work. Text the agent writes to the reader never folds: every paragraph of a turn shows in order, and opening the fold puts the work back between them. A turn that answered and then kept going had its answer hidden under its last line. [2026-11-02]
 - Write failures in the owner's words. Never show raw stderr, IDs or engine log text in the row; put details behind a fold. [owner r8] [v1]
 
 ### Layout
