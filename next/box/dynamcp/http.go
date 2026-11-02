@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/box/post"
+	"github.com/resident-labs/dyna/box/skills"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/contract/tools"
 )
@@ -170,6 +171,15 @@ func (s *Server) call(ctx context.Context, p callParams) result {
 			Checks []contract.VisualCheck `json:"checks,omitempty"`
 		}{response, checks})
 		return result{Content: []content{{Type: "text", Text: string(output)}}, StructuredContent: output}
+	}
+
+	if a.method == contract.MethodSkillSave {
+		in := decoded.(*tools.SkillSaveInput)
+		req, err := skills.Request(in.Path, s.preparer.Dir, in.Room, in.Global)
+		if err != nil {
+			return failure(contract.ErrInvalid, err.Error())
+		}
+		data = marshal(req)
 	}
 
 	if a.local != tools.NoBoxHandler {

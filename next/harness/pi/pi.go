@@ -184,8 +184,12 @@ type messageUsage struct {
 	CacheWrite int64 `json:"cacheWrite"`
 }
 
+// extensionRequest starts an extension's request to its UI. Pi always writes the type first.
+var extensionRequest = []byte(`{"type":"extension_ui_request"`)
+
 type Harness struct {
 	Activity       func(contract.TurnID, string)
+	notice         []func(string)
 	cmd            *exec.Cmd
 	stdin          io.WriteCloser
 	session        string
@@ -208,7 +212,8 @@ type Harness struct {
 var _ harness.Harness = (*Harness)(nil)
 
 // Open starts Pi in RPC mode using the caller's image configuration and session file.
-func Open(ctx context.Context, executable string, args []string, session, dir string) (*Harness, error) {
+// A notice function hears the warnings Pi gives outside a turn, such as an MCP server that did not connect.
+func Open(ctx context.Context, executable string, args []string, session, dir string, notice ...func(string)) (*Harness, error) {
 	cmd := exec.CommandContext(ctx, executable, args...)
 	cmd.Dir = dir
 	stdin, err := cmd.StdinPipe()
@@ -222,7 +227,7 @@ func Open(ctx context.Context, executable string, args []string, session, dir st
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	h := &Harness{cmd: cmd, stdin: stdin, session: session, pending: make(map[string]chan event), events: make(chan event, 256), done: make(chan struct{}), stop: make(chan struct{})}
+	h := &Harness{cmd: cmd, stdin: stdin, session: session, notice: notice, pending: make(map[string]chan event), events: make(chan event, 256), done: make(chan struct{}), stop: make(chan struct{})}
 	go h.read(stdout)
 	if session == "" {
 		state, err := h.request(ctx, "get_state", nil, nil)
@@ -244,6 +249,10 @@ func (h *Harness) read(r io.Reader) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 4096), 16<<20)
 	for scanner.Scan() {
+		if bytes.HasPrefix(scanner.Bytes(), extensionRequest) {
+			h.extensionRequest(scanner.Bytes())
+			continue
+		}
 		var e event
 		if err := json.Unmarshal(scanner.Bytes(), &e); err != nil {
 			h.readErr = err
@@ -265,6 +274,21 @@ func (h *Harness) read(r io.Reader) {
 		}
 	}
 	h.readErr = scanner.Err()
+}
+
+// extensionRequest passes on a warning. Its message is a string, which an event's message is not, and the box answers no dialog.
+func (h *Harness) extensionRequest(line []byte) {
+	var request struct {
+		Method     string `json:"method"`
+		Message    string `json:"message"`
+		NotifyType string `json:"notifyType"`
+	}
+	if json.Unmarshal(line, &request) != nil || request.Method != "notify" || request.NotifyType == "info" {
+		return
+	}
+	for _, notice := range h.notice {
+		notice(strings.TrimSuffix(request.Message, "\nRun /mcp to fix."))
+	}
 }
 
 func (h *Harness) send(ctx context.Context, typ string, input *contract.TurnInput, inputs []contract.TurnInput) error {
