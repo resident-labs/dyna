@@ -38,14 +38,18 @@ function holdItem(id?: string): { repo: string; number: string }[] {
 
 // What a session still holds, as the engine lists it, for About: one row per kind, so that a lead with ten children takes
 // a line and not ten. A kind with a blocked item says so.
-export type HoldLink = { label: string; href: string; title: string };
-export function holdRows(items: Responsibility[]): { kind: ResponsibilityKind; text: string; blocked: boolean; repo?: string; links?: HoldLink[] }[] {
+export type HoldLink = { label: string; href: string; title: string; internal?: boolean };
+export function holdRows(items: Responsibility[], sessionHref: (name: string) => string | undefined = () => undefined): { kind: ResponsibilityKind; text: string; blocked: boolean; repo?: string; links?: HoldLink[] }[] {
   const listed = items.filter(item => !shownElsewhere.includes(item.kind));
   return [...Map.groupBy(listed, item => item.kind)].map(([kind, group]) => {
     if (kind === "pr" || kind === "issue") {
       const named = group.flatMap(item => holdItem(item.id)), repos = new Set(named.map(item => item.repo));
       if (named.length === group.length) return { kind, text: count(group.length, holdingNames[kind]), blocked: group.some(item => item.blocked), repo: repos.size === 1 ? named[0].repo : undefined,
         links: named.map(({ repo, number }) => ({ label: repos.size === 1 ? `#${number}` : `${repo.split("/")[1]}#${number}`, title: `${repo}#${number}`, href: `https://github.com/${repo}/${kind === "pr" ? "pull" : "issues"}/${number}` })) };
+    }
+    if (kind === "child") {
+      const links = group.flatMap(({ id }) => { const href = id ? sessionHref(id) : undefined; return id && href ? [{ label: id, href, title: id, internal: true }] : []; });
+      if (links.length === group.length) return { kind, text: count(group.length, holdingNames[kind]), blocked: group.some(item => item.blocked), links };
     }
     const ids = group.flatMap(item => item.id ? [item.id] : []).join(", ");
     const text = group.length > 1 ? `${count(group.length, holdingNames[kind])}${ids ? `: ${ids}` : ""}` : [holdingNames[kind], ids].filter(Boolean).join(" ");

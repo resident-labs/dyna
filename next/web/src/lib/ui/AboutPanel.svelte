@@ -53,7 +53,11 @@
     }, () => { if (asked === session) { holds = []; plan = undefined; } });
   }
   $effect(() => { void store.boxes.get(session); void open?.lastTurnAt; void goals.length; void store.running(session); void loadHolds(); });
-  let held = $derived(holdRows(holds));
+  let held = $derived(holdRows(holds, name => {
+    const child = [...store.sessions.values()].find(item => item.name === name && item.parent === session);
+    return child && `/r/${encodeURIComponent(room)}/s/${encodeURIComponent(child.session)}`;
+  }));
+  const holdIcons = { pr: "pr", issue: "issue", child: "people" } as const;
   let handed = $derived(plan ? handNote(plan.handed ?? [], store.names.get(plan.to) ?? "the parent") : "");
   let confirming = $state(false);
   let closing = $state(false);
@@ -100,8 +104,8 @@
       {#each held as row (row.kind)}
         {#if row.links}
           <FoldRow more>
-            {#snippet head()}<span class="tracked-head"><Icon name={row.kind === "pr" ? "pr" : "issue"} size={14} />{row.text}{#if row.repo}<span class="muted">{row.repo}</span>{/if}</span>{/snippet}
-            <div class="tracked-links">{#each row.links as link (link.href)}<a href={link.href} title={link.title} target="_blank" rel="noreferrer">{link.label}</a>{/each}</div>
+            {#snippet head()}<span class="tracked-head"><Icon name={holdIcons[row.kind as keyof typeof holdIcons]} size={14} />{row.text}{#if row.repo}<span class="muted">{row.repo}</span>{/if}</span>{/snippet}
+            <div class="tracked-links">{#each row.links as link (link.href)}{#if link.internal}<a href={link.href} onclick={navigate}>{link.label}</a>{:else}<a href={link.href} title={link.title} target="_blank" rel="noreferrer">{link.label}</a>{/if}{/each}</div>
           </FoldRow>
         {:else}
           <FoldRow>
