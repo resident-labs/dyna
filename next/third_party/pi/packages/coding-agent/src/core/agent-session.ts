@@ -141,6 +141,7 @@ import {
 	DEFAULT_TOOL_NAMES,
 	type SettingsManager,
 } from "./settings-manager.ts";
+import type { Skill } from "./skills.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { BUILTIN_PATH_PREFIX, createSyntheticSourceInfo, isSyntheticPath, type SourceInfo } from "./source-info.ts";
 import {
@@ -538,6 +539,9 @@ export class AgentSession {
 	private _hostSections: Record<string, string> = {};
 	/** Prompt options after before_agent_start mutations for the active run. */
 	private _runSystemPromptOptions?: NormalizedBuildSystemPromptOptions;
+	/** The loader's skills and context files the prompt options last took, so only reloaded ones replace them. */
+	private _appliedSkills?: Skill[];
+	private _appliedContextFiles?: Array<{ path: string; content: string }>;
 
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
@@ -1002,6 +1006,9 @@ export class AgentSession {
 		const previousPrepareRequest = this.agent.prepareRequest;
 		this.agent.prepareRequest = async (request, signal) => {
 			const prepared = await previousPrepareRequest?.(request, signal);
+			// Context files and skills changed during a run, such as an AGENTS.md edit between two tool
+			// calls, reach the model before its next request as a context update. The head is unchanged.
+			await this._refreshPromptResources();
 			const context = prepared?.context ?? request.context;
 			const options = this._runSystemPromptOptions ?? this._baseSystemPromptOptions;
 			const update = this._preparePromptAndToolLoadout(options, context.messages);
@@ -1812,15 +1819,23 @@ export class AgentSession {
 		if (this._runSystemPromptOptions) Object.assign(this._runSystemPromptOptions.sections, this._hostSections);
 	}
 
+	/**
+	 * Take the loader's current skills and context files. The loader stats its files and rereads only
+	 * changed ones. Only what it reloaded replaces the options, so a request with no change keeps a
+	 * before_agent_start handler's edits.
+	 */
 	private async _refreshPromptResources(): Promise<void> {
 		await this._resourceLoader.refreshPromptResources?.();
 		const skills = this._resourceLoader.getSkills().skills;
 		const contextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
-		this._baseSystemPromptOptions.skills = skills;
-		this._baseSystemPromptOptions.contextFiles = contextFiles;
-		if (this._runSystemPromptOptions) {
-			this._runSystemPromptOptions.skills = skills;
-			this._runSystemPromptOptions.contextFiles = contextFiles;
+		const options = [this._baseSystemPromptOptions, this._runSystemPromptOptions];
+		if (skills !== this._appliedSkills) {
+			this._appliedSkills = skills;
+			for (const option of options) if (option) option.skills = skills;
+		}
+		if (contextFiles !== this._appliedContextFiles) {
+			this._appliedContextFiles = contextFiles;
+			for (const option of options) if (option) option.contextFiles = contextFiles;
 		}
 	}
 
