@@ -5,7 +5,7 @@ import { EventWindow } from "./window.svelte.ts";
 import { pendingReason, type PendingReason } from "./event.ts";
 import { boxFailures, countOf, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
 import { prKey } from "./feed.ts";
-import type { BoxState, Conversation, FailureCause, Decision, Event, Goal, OpRequested, OpResult, OpState, PrSummary, Question, SessionStarted, WorkflowInfo, WorkflowStep } from "./contract.gen.ts";
+import type { BoxState, Conversation, FailureCause, Decision, Event, Goal, OpRequested, OpResult, OpState, PrSummary, Question, SessionStarted, WorkflowInfo, WorkflowStatusLine, WorkflowStep } from "./contract.gen.ts";
 
 
 // An operation of the room as the Requests panel shows it: its card, then its decision and run.
@@ -59,8 +59,11 @@ export class RoomStore {
   readonly prs = new SvelteMap<string, PrSummary>();
   // Workflow runs by crew session. They outlive the session, which closes as its run ends.
   readonly workflows = new SvelteMap<string, WorkflowInfo>();
+  // Crews that session.started named before workflow.list lists their run. A crew's page is its run, reached from Runs, so
+  // it has no row among the sessions.
+  private readonly crews = new SvelteSet<string>();
   // The open run page, which takes each step row. With no row, it has lost track and reads again.
-  private readonly runPages = new Map<string, (step?: WorkflowStep) => void>();
+  private readonly runPages = new Map<string, { step: (step?: WorkflowStep) => void; status?: (line: WorkflowStatusLine) => void }>();
   private readonly runsAsked = new Set<string>();
   // Names outlive closed sessions, so old posts still show who wrote them.
   readonly names = new SvelteMap<string, string>();
@@ -135,10 +138,14 @@ export class RoomStore {
     return this.turns.has(id) && box !== "failed" && box !== "lost";
   }
   status(id: string): Status { return this.statusWith(id, this.asking()); }
+  // The sessions panel's statuses, and so its counts: a crew stands for its run, which Runs shows.
   statuses(): Map<string, Status> {
     const asking = this.asking();
-    return new Map([...this.sessions.keys()].map(id => [id, this.statusWith(id, asking)]));
+    return new Map(this.members.map(item => [item.session, this.statusWith(item.session, asking)]));
   }
+  crew(id: string): boolean { return this.crews.has(id) || this.workflows.has(id); }
+  // The sessions that the sessions panel lists: every open one but a crew.
+  get members(): (SessionStarted & { startedAt: string; lastTurnAt?: string })[] { return [...this.sessions.values()].filter(item => !this.crew(item.session)); }
   get counts(): Counts { return countOf(this.statuses().values()); }
   private statusWith(id: string, asking: Set<string>): Status {
     const box = this.boxes.get(id);
@@ -162,7 +169,7 @@ export class RoomStore {
       // A conversation.read is not replayed. A read made after load() or during a dropped stream is missed, so each hello rereads.
       this.rereading = this.rereadPositions().catch(() => {});
       void this.readWorkflows();
-      for (const page of this.runPages.values()) page();
+      for (const page of this.runPages.values()) page.step();
     });
   }
 
@@ -248,9 +255,10 @@ export class RoomStore {
     if (status) this.noteRun(status.run);
   }
 
-  watchRun(session: string, page: (step?: WorkflowStep) => void): () => void {
-    this.runPages.set(session, page);
-    return () => { this.runPages.delete(session); };
+  watchRun(session: string, page: (step?: WorkflowStep) => void, status?: (line: WorkflowStatusLine) => void): () => void {
+    const watcher = { step: page, status };
+    this.runPages.set(session, watcher);
+    return () => { if (this.runPages.get(session) === watcher) this.runPages.delete(session); };
   }
 
   private async readGoals(): Promise<void> {
@@ -294,8 +302,19 @@ export class RoomStore {
       }
       return;
     }
-    // A step row has seq 0 too and reaches only an open run page, never a window.
-    if (event.type === "workflow.step_changed") { this.runPages.get(event.body.session)?.(event.body.step); return; }
+    // A step row and a status line have seq 0 too. They reach an open run page and the run's counts and line, never a window.
+    if (event.type === "workflow.step_changed") {
+      const { session, step, steps, running, failed } = event.body, run = this.workflows.get(session);
+      if (run?.state === "running") this.workflows.set(session, { ...run, steps, running, failed });
+      this.runPages.get(session)?.step(step);
+      return;
+    }
+    if (event.type === "workflow.status_changed") {
+      const { session, status } = event.body, run = this.workflows.get(session);
+      if (run?.state === "running") this.workflows.set(session, { ...run, status, statusAt: event.at });
+      this.runPages.get(session)?.status?.({ text: status, at: event.at });
+      return;
+    }
     if (event.seq <= this.head) return;
     this.head = event.seq;
     this.step(event);
@@ -310,7 +329,8 @@ export class RoomStore {
         this.sessions.set(event.body.session, { ...event.body, startedAt: event.at });
         this.names.set(event.body.session, event.body.name);
         if (event.body.goal) void this.readGoals();
-        void this.readWorkflows(); // The event does not say which sessions are crews.
+        if (event.body.workflow) this.crews.add(event.body.session);
+        void this.readWorkflows(); // Its run's row, for the Runs list.
         break;
       case "session.closed":
         this.sessions.delete(event.body.session);
@@ -323,8 +343,8 @@ export class RoomStore {
         break;
       case "workflow.ended": {
         const { session, state, steps, failed, failedSteps, usage } = event.body, run = this.workflows.get(session);
-        if (run) this.workflows.set(session, { ...run, state, steps, failed, failedSteps, usage, ended: event.at });
-        this.runPages.get(session)?.();
+        if (run) this.workflows.set(session, { ...run, state, steps, running: 0, failed, failedSteps, usage, ended: event.at });
+        this.runPages.get(session)?.step();
         break;
       }
       case "session.profile_changed": {

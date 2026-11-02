@@ -114,18 +114,26 @@ export const runWords: Record<WorkflowState, { word: string; tone?: Tone }> = {
   running: { word: "Running", tone: "working" }, done: { word: "Done" }, failed: { word: "Failed", tone: "failed" }, stopped: { word: "Stopped" },
 };
 
-// A crew's line in the session list.
-export const runLine = (run: Pick<WorkflowInfo, "state">, starting = false): string => `Workflow · ${starting ? "Starting" : runWords[run.state].word}`;
-
-// What a run that ended came to, after its state: its feed row and its row in the header's Past runs. A run from before steps were
+// What a run that ended came to, after its state: its feed row and its row in the header's Runs. A run from before steps were
 // counted has no figure.
 export const runCounts = ({ steps, failed }: { steps?: number; failed: number }): string[] => [...steps ? [count(steps, "step")] : [], ...failed ? [`${failed} failed`] : []];
 
-// The runs a room can only reach by a list: those that ended and whose crew has left the session tree, newest first.
-export function pastRuns(runs: Iterable<WorkflowInfo>, open: { has: (session: string) => boolean }): WorkflowInfo[] {
-  const at = (run: WorkflowInfo) => Date.parse(run.ended ?? run.started);
-  return [...runs].filter(run => run.state !== "running" && !open.has(run.session)).sort((a, b) => at(b) - at(a));
+// The header's Runs: the running ones, newest first, then the rest, the latest to end first.
+export function roomRuns(runs: Iterable<WorkflowInfo>): { running: WorkflowInfo[]; past: WorkflowInfo[] } {
+  const all = [...runs], at = (run: WorkflowInfo) => Date.parse(run.ended ?? run.started);
+  return { running: all.filter(run => run.state === "running").sort((a, b) => Date.parse(b.started) - Date.parse(a.started)),
+    past: all.filter(run => run.state !== "running").sort((a, b) => at(b) - at(a)) };
 }
+
+// The line a script that never called status() gets, as "75 of 76 steps · 1 running".
+export function countedLine({ steps, running, failed }: { steps: number; running: number; failed: number }): string {
+  if (!steps) return "No steps yet";
+  return [running ? `${steps - running} of ${steps} steps` : count(steps, "step"), ...running ? [`${running} running`] : [], ...failed ? [`${failed} failed`] : []].join(" · ");
+}
+
+// A run's one line: its script's latest status(), or its counts.
+export const runStatus = (run: Pick<WorkflowInfo, "status" | "steps" | "running" | "failed">): { text: string; script: boolean } =>
+  run.status ? { text: run.status, script: true } : { text: countedLine({ steps: run.steps ?? 0, running: run.running ?? 0, failed: run.failed }), script: false };
 
 // A worker with a file has a transcript to open.
 export const openable = (step: WorkflowStep): boolean => step.kind === "agent" && !!step.transcript;
@@ -313,4 +321,152 @@ export function stepBody(step: WorkflowStep, output?: WorkflowStepResponse): Ste
     else parts.push({ kind: "text", text: detail, ...step.kind === "agent" && { label: "Prompt" } });
   }
   return parts;
+}
+
+// A run as its flowchart and timeline draw it. Nothing is read from a step's name: its phase is its stage and its lane the
+// subject it is about, as the script tagged them.
+
+// What a view calls a step: its lane, or its label.
+export const stepTitle = (step: WorkflowStep): string => step.lane || step.name;
+
+const byStart = (steps: WorkflowStep[]): WorkflowStep[] => steps.map((step, at) => ({ step, at, time: Date.parse(step.started) }))
+  .sort((a, b) => a.time - b.time || a.at - b.at).map(item => item.step);
+
+// Each step's stage: its phase, or for a child of a workflow() step that set none, its parent's.
+export function stageOf(steps: WorkflowStep[]): Map<string, string> {
+  const byKey = new Map(steps.map(step => [step.key, step]));
+  const stages = new Map<string, string>();
+  const of = (step: WorkflowStep, depth: number): string => {
+    const known = stages.get(step.key);
+    if (known !== undefined) return known;
+    const parent = !step.phase && step.parent && depth < 8 ? byKey.get(step.parent) : undefined;
+    const stage = step.phase || (parent ? of(parent, depth + 1) : "");
+    stages.set(step.key, stage);
+    return stage;
+  };
+  for (const step of steps) of(step, 0);
+  return stages;
+}
+
+export const STAGE_COLOURS = 6;
+export type Stage = { key: string; title: string; colour: string };
+
+// A run's stages in the order each first ran. Each named stage takes the next stage colour, and steps with none read muted.
+export function stagesOf(steps: WorkflowStep[], stages = stageOf(steps)): Stage[] {
+  const keys = [...new Set(byStart(steps).map(step => stages.get(step.key) ?? ""))];
+  let named = 0;
+  return keys.map(key => ({ key, title: key || (keys.length > 1 ? "Other steps" : "Steps"), colour: key ? `var(--stage-${named++ % STAGE_COLOURS + 1})` : "var(--muted)" }));
+}
+
+export type FlowNode = Stage & Tally & { steps: WorkflowStep[]; lanes: number; live: WorkflowStep[] };
+// A count of 0 is an order, not an observed path: a run without lanes, or a stage that no lane reached.
+export type FlowEdge = { from: string; to: string; count: number };
+// The failed node's key. A phase is text a script gave, and a script cannot give this.
+export const FAILED = "\u0000failed";
+
+// The flowchart: a node per stage with its counts, and an edge for each move a lane made from one stage to the next, counted,
+// so a loop and a skip show as the run made them. A failed node joins only when a step failed.
+export function flow(steps: WorkflowStep[]): { nodes: FlowNode[]; edges: FlowEdge[]; failed: WorkflowStep[]; laned: boolean } {
+  const ordered = byStart(steps.filter(step => step.kind !== "workflow"));
+  const stages = stageOf(steps);
+  const stage = (step: WorkflowStep) => stages.get(step.key) ?? "";
+  const nodes = stagesOf(ordered, stages).map(item => {
+    const own = ordered.filter(step => stage(step) === item.key);
+    return { ...item, steps: own, lanes: new Set(own.flatMap(step => step.lane ? [step.lane] : [])).size, live: own.filter(step => step.state === "running"), ...tally(own) };
+  });
+  const paths = new Map<string, string[]>();
+  for (const step of ordered) {
+    if (!step.lane) continue;
+    const path = paths.get(step.lane) ?? [];
+    if (path.at(-1) !== stage(step)) path.push(stage(step));
+    paths.set(step.lane, path);
+  }
+  const edges: FlowEdge[] = [];
+  const add = (from: string, to: string, count: number) => {
+    const edge = edges.find(item => item.from === from && item.to === to);
+    if (edge) edge.count += count; else edges.push({ from, to, count });
+  };
+  for (const path of paths.values()) for (let at = 1; at < path.length; at++) add(path[at - 1], path[at], 1);
+  // A stage no lane reached joins the stages before and after it, in the order they first ran, as every stage of a run
+  // without lanes does.
+  const reached = new Set(edges.flatMap(edge => [edge.from, edge.to]));
+  nodes.forEach((node, at) => {
+    if (reached.has(node.key)) return;
+    if (at > 0) add(nodes[at - 1].key, node.key, 0);
+    if (at < nodes.length - 1) add(node.key, nodes[at + 1].key, 0);
+  });
+  for (const node of nodes) if (node.failed) add(node.key, FAILED, node.failed);
+  return { nodes, edges, failed: ordered.filter(step => step.state === "failed"), laned: paths.size > 0 };
+}
+
+// "28m", "1h" or "2h 5m" from a span in milliseconds.
+export function minutesLabel(ms: number): string {
+  const minutes = Math.round(ms / 60_000), hours = Math.floor(minutes / 60);
+  return minutes < 60 ? `${minutes}m` : minutes % 60 ? `${hours}h ${minutes % 60}m` : `${hours}h`;
+}
+
+export type Bar = { step: WorkflowStep; row: number; left: number; width: number; kept: boolean; colour: string };
+export type Chart = { rows: number; bars: Bar[]; commands: Bar[]; fold: number; resumed: string; now?: number; ticks: { at: number; label: string }[] };
+// The share of the chart that the steps a resumed run kept fold into.
+export const FOLD = 16;
+const TICK_MINUTES = [1, 2, 5, 10, 15, 20, 30, 60, 120, 180, 360, 720, 1440];
+
+// The timeline: worker slots as rows, packed from each step's start and end, so a step takes the first row free when it
+// starts. Workers are the agent steps; a run without any packs whatever ran. Commands and posts draw on a row of their own.
+// Steps a resumed run kept fold into a band on the left, packed apart because another box ran them. A worker that waits
+// for its place has run for no time yet, so it has no bar.
+export function timeline(info: Pick<WorkflowInfo, "started" | "ended" | "state">, steps: WorkflowStep[], now: number): Chart {
+  const stages = stageOf(steps), colours = new Map(stagesOf(steps, stages).map(item => [item.key, item.colour]));
+  const resume = Date.parse(info.started);
+  const start = (step: WorkflowStep) => Date.parse(step.started);
+  const end = (step: WorkflowStep) => Math.max(start(step), step.ended ? Date.parse(step.ended) : now);
+  const shown = byStart(steps).filter(step => step.kind !== "workflow" && step.kind !== "log" && stepTime(step, now));
+  const kept = shown.filter(step => start(step) < resume);
+  const to = Math.max(info.ended ? Date.parse(info.ended) : now, ...shown.filter(step => start(step) >= resume).map(end), resume + 60_000);
+  const keptFrom = kept.length ? Math.min(...kept.map(start)) : resume, keptTo = kept.length ? Math.max(...kept.map(end)) : resume;
+  const fold = kept.length ? FOLD : 0;
+  const x = (time: number) => time < resume ? (keptTo > keptFrom ? fold * Math.min(1, (time - keptFrom) / (keptTo - keptFrom)) : 0)
+    : fold + (100 - fold) * Math.min(1, (time - resume) / (to - resume));
+  const bar = (step: WorkflowStep, row: number): Bar => ({ step, row, left: x(start(step)), width: Math.max(0, x(end(step)) - x(start(step))), kept: start(step) < resume,
+    colour: colours.get(stages.get(step.key) ?? "") ?? "var(--muted)" });
+  const pack = (list: WorkflowStep[]): Bar[] => {
+    const free: number[] = [];
+    return list.map(step => {
+      let row = free.findIndex(at => at <= start(step));
+      if (row < 0) row = free.push(0) - 1;
+      free[row] = end(step);
+      return bar(step, row);
+    });
+  };
+  const agents = shown.some(step => step.kind === "agent");
+  const workers = shown.filter(step => !agents || step.kind === "agent");
+  const bars = [...pack(workers.filter(step => start(step) < resume)), ...pack(workers.filter(step => start(step) >= resume))];
+  const commands = agents ? shown.filter(step => step.kind !== "agent").map(step => bar(step, 0)) : [];
+  // Ticks count from the first step, at a round interval that leaves at most six over the run's own time.
+  const span = (to - resume) / 60_000, every = (TICK_MINUTES.find(minutes => span / minutes <= 6) ?? 1440) * 60_000;
+  const ticks = [{ at: 0, label: "0m" }];
+  for (let offset = Math.ceil((resume - keptFrom) / every) * every || every; keptFrom + offset <= to; offset += every) {
+    const at = x(keptFrom + offset);
+    if (at - ticks[ticks.length - 1].at >= 6 && at <= 94) ticks.push({ at, label: minutesLabel(offset) });
+  }
+  const earlier = steps.filter(step => start(step) < resume).length;
+  return { rows: Math.max(1, ...bars.map(item => item.row + 1)), bars, commands, fold, ticks, now: info.state === "running" ? x(now) : undefined,
+    resumed: kept.length ? `Resumed at ${minutesLabel(resume - keptFrom)}, ${count(earlier, "earlier step")} kept` : "" };
+}
+
+export type Figures = { work: number; split: (Stage & { ms: number })[]; longest?: { step: WorkflowStep; ms: number }; wall: number; earlier: number; usage: Usage };
+
+// The figures under the timeline: worker time and its split by stage, the longest step, the wall time with what ran before a
+// resume, and the tokens, which a kept step does not carry.
+export function figures(info: Pick<WorkflowInfo, "started" | "ended">, steps: WorkflowStep[], now: number): Figures {
+  const shown = steps.filter(step => step.kind !== "workflow" && step.kind !== "log" && stepTime(step, now));
+  const workers = shown.some(step => step.kind === "agent") ? shown.filter(step => step.kind === "agent") : shown;
+  const took = (step: WorkflowStep) => runningFor(step.started, step.ended, now);
+  const stages = stageOf(steps);
+  const split = stagesOf(steps, stages).map(item => ({ ...item, ms: workers.filter(step => (stages.get(step.key) ?? "") === item.key).reduce((sum, step) => sum + took(step), 0) }))
+    .filter(part => part.ms > 0).sort((a, b) => b.ms - a.ms);
+  const longest = workers.reduce<{ step: WorkflowStep; ms: number } | undefined>((best, step) => !best || took(step) > best.ms ? { step, ms: took(step) } : best, undefined);
+  const resume = Date.parse(info.started), kept = steps.filter(step => Date.parse(step.started) < resume);
+  const earlier = kept.length ? Math.max(...kept.map(step => Date.parse(step.ended ?? step.started))) - Math.min(...kept.map(step => Date.parse(step.started))) : 0;
+  return { work: split.reduce((sum, part) => sum + part.ms, 0), split, longest, wall: runningFor(info.started, info.ended, now), earlier, usage: total(steps) };
 }

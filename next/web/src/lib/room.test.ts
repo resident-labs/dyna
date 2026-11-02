@@ -650,18 +650,29 @@ test("step rows reach only the open run page, and the run's end and a new connec
     assert.equal(store.workflows.get("crew")?.state, "running");
     const window = store.window({ kind: "feed" });
     await new Promise(done => setTimeout(done));
-    const seen: unknown[] = [];
-    const stop = store.watchRun("crew", row => seen.push(row));
-    store.apply({ seq: 0, id: "s", at: "", from: { kind: "engine" }, type: "workflow.step_changed", body: { run: "wf", session: "crew", step, steps: 1, running: 1, failed: 0 } });
+    const seen: unknown[] = [], said: unknown[] = [];
+    const stop = store.watchRun("crew", row => seen.push(row), line => said.push(line));
+    // A crew stands for its run: it has no row, no status and no count among the sessions.
+    assert.deepEqual([store.sessions.has("crew"), store.members.length, store.statuses().has("crew"), store.counts.working], [true, 0, false, 0]);
+    store.apply({ seq: 0, id: "s", at: "", from: { kind: "engine" }, type: "workflow.step_changed", body: { run: "wf", session: "crew", step, steps: 4, running: 1, failed: 1 } });
     store.apply({ seq: 0, id: "o", at: "", from: { kind: "engine" }, type: "workflow.step_changed", body: { run: "wf2", session: "other", step, steps: 1, running: 1, failed: 0 } });
     assert.deepEqual(seen, [step]);
+    assert.deepEqual([store.workflows.get("crew")?.steps, store.workflows.get("crew")?.running, store.workflows.get("crew")?.failed], [4, 1, 1]);
+    store.apply({ seq: 0, id: "l", at: "2026-01-01T00:01:00Z", from: { kind: "engine" }, type: "workflow.status_changed", body: { run: "wf", session: "crew", status: "Wave 3: 6 of 7 landed" } });
+    assert.deepEqual(said, [{ text: "Wave 3: 6 of 7 landed", at: "2026-01-01T00:01:00Z" }]);
+    assert.deepEqual([store.workflows.get("crew")?.status, store.workflows.get("crew")?.statusAt], ["Wave 3: 6 of 7 landed", "2026-01-01T00:01:00Z"]);
     assert.equal(window.ordered.length, 0);
     store.apply(event(6, { type: "workflow.ended", body: { run: "wf", session: "crew", name: "crew", state: "failed", failed: 2, failedSteps: ["a", "b"], usage } }));
     assert.deepEqual(seen, [step, undefined]);
     assert.equal(store.workflows.get("crew")?.state, "failed");
+    assert.equal(store.workflows.get("crew")?.running, 0);
     // The run outlives its crew's close, so a closed crew's page keeps its place.
     store.apply(event(7, { type: "session.closed", body: { session: "crew" } }));
     assert.equal(store.workflows.has("crew"), true);
+    // A new crew has no row from its start, before workflow.list names its run.
+    store.apply(event(8, { type: "session.started", body: { session: "crew2", name: "crew-2", profile: "p", workflow: true } }));
+    store.apply(event(9, { type: "session.started", body: { session: "s2", name: "worker", profile: "p" } }));
+    assert.deepEqual(store.members.map(item => item.session), ["s2"]);
     hello();
     assert.deepEqual(seen, [step, undefined, undefined]);
     stop();

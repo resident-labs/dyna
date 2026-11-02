@@ -31,7 +31,6 @@
   import { boxReason, count, quoted, turnReason, waits, type Quote } from "./lib/feed.ts";
   import { sessionActions, sessionTree, type TreeRow } from "./lib/session-tree.ts";
   import { activityLabel } from "./lib/steps.ts";
-  import { runLine } from "./lib/workflow.ts";
   import { FileDraft } from "./lib/attach.svelte.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
   import type { Size } from "./lib/computerInput.ts";
@@ -236,7 +235,7 @@
   $effect.pre(() => { if (acting && !store?.sessions.has(acting.session)) acting = undefined; });
   let sessionList: VirtualList<TreeRow> | undefined = $state();
   const starting = (id: string) => { const box = store?.boxes.get(id); return box === "pending" || box === "creating" || box === "starting"; };
-  let tree = $derived(sessionTree([...(store?.sessions.values() ?? [])], store?.statuses() ?? new Map(), starting, session, folded, openIdle));
+  let tree = $derived(sessionTree(store?.members ?? [], store?.statuses() ?? new Map(), starting, session, folded, openIdle));
   // Left folds a parent's subtree and Right opens it, on its row or its chevron.
   function fold(event: KeyboardEvent, id: string) {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -469,11 +468,8 @@
       default: return reason ? waits[reason] : starting(id) ? "Starting" : store?.boxes.get(id) === "stopped" ? "Asleep" : "";
     }
   };
-  // A crew's row says it is a workflow and how its run stands. What needs the owner keeps its words after that.
-  const rowLine = (id: string) => {
-    const run = store?.workflows.get(id), line = status(id) || goalLine(id);
-    return !run ? line : !line || starting(id) || store?.status(id) === "working" ? runLine(run, starting(id)) : `Workflow · ${line}`;
-  };
+  // A row's line: what needs the owner, else what the session works on. A crew has no row: Runs lists its run.
+  const rowLine = (id: string) => status(id) || goalLine(id);
   // What the session works on, for its row in the list: the first open item of its first goal, or that goal.
   const goalLine = (id: string) => {
     const goal = store?.goals.get(id)?.at(-1);
@@ -682,7 +678,7 @@
         {#if store && !unavailable}
           <button type="button" aria-pressed={section === "requests"} onclick={() => { section = "requests"; }}><Icon name="inbox" />Requests
             {#if store.waiting}<StatusPill tone="warning" label="Waiting" count={store.waiting} />{/if}</button>
-          <button type="button" onclick={event => void showPanel(true, event.detail > 0)}><Icon name="people" />Sessions<span class="count">{store.sessions.size}</span></button>
+          <button type="button" onclick={event => void showPanel(true, event.detail > 0)}><Icon name="people" />Sessions<span class="count">{store.members.length}</span></button>
           {#if attention.can("admin")}<button type="button" aria-pressed={section === "instructions"} onclick={openInstructions}><Icon name="file" />Instructions</button>{/if}
           {#if attention.can("operate")}<button type="button" onclick={pause}><Icon name="pause" />{paused ? "Resume room" : "Pause room"}</button>{/if}
         {/if}
@@ -698,7 +694,7 @@
   <main class:session-main={!!session} bind:clientWidth={mainWidth} class:header-tight={mainWidth <= 1000} class:header-narrow={mainWidth <= 600} class:dropping ondragover={dragOver} ondragleave={dragLeave} ondrop={drop} inert={drawer || (panel && phone.current) || covered || inSettings}>
     {#if dropping}<p class="drop-label">Drop files to attach</p>{/if}
     {#if (section === "new-room" || firstRoom)}<NewRoom {rooms} first={firstRoom} onclose={() => void closeSection()} oncreated={id => { void attention.created(id).then(() => { firstRoom = false; openLocation(id); }); }} />
-    {:else if section === "new-session" && room && store && store.ready}<NewSession {room} {roomName} sessions={[...store.sessions.values()]} onclose={() => void closeSection()} onstarted={(id, brief) => { startingBriefs[id] = brief; openLocation(room!, id); }} />
+    {:else if section === "new-session" && room && store && store.ready}<NewSession {room} {roomName} sessions={store.members} onclose={() => void closeSection()} onstarted={(id, brief) => { startingBriefs[id] = brief; openLocation(room!, id); }} />
     {:else if section === "instructions" && room && store && !unavailable}<Instructions {room} {roomName} rooms={rooms.length} sessions={store.sessions.size} onclose={() => void closeSection()} />
     {:else}
     <header class="bar" class:session-bar={!!session}>{#if room && session && phone.current}<a class="menu-toggle" href={"/r/" + encodeURIComponent(room)} aria-label={`Back to ${roomName}`} title={`Back to ${roomName}`}
@@ -710,7 +706,7 @@
       {#if session && !closed}<Avatar kind="session" name={title} root={!store?.sessions.get(session)?.parent} size={24} />{/if}
       <span class="heading"><strong title={title}>{title}</strong>
         {#if closed && !missing}<span class="count">closed</span>{:else if shown === "idle" && word && !missing}<span class="count word" title={word === "Asleep" ? "Wakes on your next message" : word}>{word}</span>{/if}
-        {#if store?.ready && !session}<span class="count narrow">{count(store.sessions.size, "session")}</span>{/if}</span>
+        {#if store?.ready && !session}<span class="count narrow">{count(store.members.length, "session")}</span>{/if}</span>
       {#if store && !unavailable}
         {#if session}<span class="session-spacer"></span>{/if}
         {#if session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title={terminals?.hasShell(session) ? "Show this session's terminal" : "Open a terminal in this session's box"} aria-pressed={terminals?.hasShell(session) ?? false} onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /></button>{/if}
@@ -762,7 +758,7 @@
       {#if session && !closed}<header class="bar tabs">
         <button type="button" aria-pressed={!about} onclick={() => tabs.set(key, "sessions")}>Sessions</button>
         <button type="button" aria-pressed={about} onclick={() => tabs.set(key, "about")}>About</button></header>
-      {:else}<header class="bar"><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}{#if attention.can("operate")}<button type="button" class="tool" title="New session" aria-label="New session" onclick={() => openNew("session")}><Icon name="plus" /></button>{/if}</header>{/if}
+      {:else}<header class="bar"><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.members.length + (working ? ` · ${working} working` : "")}</span>{/if}{#if attention.can("operate")}<button type="button" class="tool" title="New session" aria-label="New session" onclick={() => openNew("session")}><Icon name="plus" /></button>{/if}</header>{/if}
       <!-- A long tree renders only its visible rows, through the feed's shared list (spec: long lists are virtual). -->
       {#if about && session && store}<AboutPanel {store} room={room} {session} switchable={attention.can("operate")} shown={panelShown} navigate={openSession} onclosed={() => openLocation(room!)} />
       {:else if tree.length}<div class="tree"><VirtualList bind:this={sessionList} items={tree} key={treeKey}
