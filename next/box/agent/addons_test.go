@@ -92,7 +92,7 @@ func TestABoxGetsEveryScopeAndTheRoomWinsAClash(t *testing.T) {
 	if err != nil || len(problems) != 0 {
 		t.Fatalf("%v %v", problems, err)
 	}
-	if servers["docs"].URL != "https://room.test/mcp" || servers["docs"].Exposure != "codemode" || servers["only-global"].Command != "server" {
+	if servers["docs"].URL != "https://room.test/mcp" || servers["docs"].Exposure != "deferred" || servers["only-global"].Command != "server" {
 		t.Fatalf("%+v", servers)
 	}
 	for _, name := range []string{"dyna-extend", "shared", "clash"} {

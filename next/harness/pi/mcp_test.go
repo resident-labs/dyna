@@ -9,7 +9,7 @@ import (
 
 func TestAgentMCPExposure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mcp.json")
-	if err := WriteAgentMCPConfig(path, "areas", map[string]MCPServer{"docs": {URL: "https://example.test/mcp", Exposure: "codemode"}}); err != nil {
+	if err := WriteAgentMCPConfig(path, "areas", map[string]MCPServer{"docs": {URL: "https://example.test/mcp", Exposure: "deferred"}}); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)
@@ -18,14 +18,16 @@ func TestAgentMCPExposure(t *testing.T) {
 	}
 	var config struct {
 		Servers map[string]struct {
-			Exposure string `json:"exposure"`
-			Timeout  int    `json:"timeout"`
+			Exposure     string            `json:"exposure"`
+			ToolExposure map[string]string `json:"toolExposure"`
+			Timeout      int               `json:"timeout"`
 		} `json:"mcpServers"`
 	}
 	if err := json.Unmarshal(data, &config); err != nil {
 		t.Fatal(err)
 	}
-	if config.Servers["dyna"].Exposure != "direct" || config.Servers["dyna"].Timeout != 600 || config.Servers["docs"].Exposure != "codemode" {
+	dyna := config.Servers["dyna"]
+	if dyna.Exposure != "deferred" || dyna.ToolExposure["post"] != "direct" || dyna.Timeout != 600 || config.Servers["docs"].Exposure != "deferred" {
 		t.Fatalf("%+v", config)
 	}
 }

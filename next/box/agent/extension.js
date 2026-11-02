@@ -9,6 +9,9 @@ const dynaURL = "__DYNA_MCP_URL__";
 const shellURL = "__DYNA_SHELL_URL__";
 const postTool = "mcp__dyna__post";
 
+// Every tool a search finds stays declared for the rest of the session, and Pi's default of 8 is most of the dyna tools.
+const searchLimit = 3;
+
 // What one model request can carry in images. The model route takes 32 MiB in all, and the rest is for the conversation.
 const imageLimit = 20;
 const imageBytesLimit = 20 << 20;
@@ -145,6 +148,7 @@ export default async function (pi) {
 		const root = event.parentToolCallId ? (roots.get(event.parentToolCallId) ?? event.parentToolCallId) : event.toolCallId;
 		roots.set(event.toolCallId, root);
 		if (event.toolName.startsWith("mcp__dyna__")) event.input[callIDArgument] = root;
+		if (event.toolName === "tool_search") event.input.limit ??= searchLimit;
 	});
 
 	// Dyna's bash takes the place of Pi's, which has no background jobs. An extension's tool wins over a built-in of its name.
