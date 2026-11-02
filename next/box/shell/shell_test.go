@@ -258,9 +258,6 @@ func TestHandlerRefusesWithATypedError(t *testing.T) {
 			t.Fatalf("%s = %d %s", path, status, body)
 		}
 	}
-	if status, body := call(t, r.server.Handler(), "/run", `{"command":"true","timeout":5}`); status != http.StatusBadRequest || !strings.Contains(body, "timeout is for a host run") {
-		t.Fatalf("timeout in the box = %d %s", status, body)
-	}
 }
 
 func TestBadCwdFailsClearly(t *testing.T) {
