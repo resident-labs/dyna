@@ -346,23 +346,80 @@ func (r *Reconciler) auditPool(ctx context.Context, pool store.Pool, before []bo
 }
 
 // RemoveHost takes a host that holds nothing out of Dyna. A node goes back through its script, which the next pass runs.
-func (r *Reconciler) RemoveHost(ctx context.Context, name contract.HostName) error {
-	r.pass.Lock() // A pass places boxes from its own reading of the hosts.
-	err := r.store.DrainHost(ctx, name)
-	r.pass.Unlock()
+// With discard, every box on the host fails first, as on a host lost for good (discardHost). It returns the open sessions
+// whose boxes failed.
+func (r *Reconciler) RemoveHost(ctx context.Context, name contract.HostName, discard bool) ([]contract.SessionID, error) {
+	var failed []contract.SessionID
+	var err error
+	if discard {
+		failed, err = r.discardHost(ctx, name)
+	} else {
+		r.pass.Lock() // A pass places boxes from its own reading of the hosts.
+		err = r.store.DrainHost(ctx, name)
+		r.pass.Unlock()
+	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	nodes, err := r.store.PoolNodes(ctx)
 	if err != nil {
-		return err
+		return failed, err
 	}
 	if slices.ContainsFunc(nodes, func(node box.Host) bool { return node.Name == name }) {
 		r.Kick()
-		return nil
+		return failed, nil
 	}
 	if r.nodes != nil {
 		r.nodes.Leave(ctx, name)
 	}
-	return r.store.RemoveHost(ctx, name)
+	return failed, r.store.RemoveHost(ctx, name)
+}
+
+// discardVolumeWait bounds the removal of one box's container and volume on a host that answers.
+const discardVolumeWait = 2 * time.Minute
+
+// discardHost fails every box on a host and closes the host to admission, then removes each box's container and volume while
+// the host answers. On a host that does not, they go with the machine, and only the engine's side of each box goes now. The
+// boxes then let go of the host, so session.restart places each anew. A closing box is discarded, so its session is not
+// returned.
+func (r *Reconciler) discardHost(ctx context.Context, name contract.HostName) ([]contract.SessionID, error) {
+	r.pass.Lock() // A pass places boxes from its own reading of the hosts.
+	hosts, err := r.store.Hosts(ctx)
+	reachable := slices.ContainsFunc(hosts, func(h box.Host) bool { return h.Name == name && h.State == box.HostReady })
+	var boxes []store.LifecycleBox
+	if err == nil {
+		boxes, err = r.store.DiscardHostBoxes(ctx, name, func(room contract.RoomID, body contract.EventBody) (contract.Event, error) {
+			return r.event(room, contract.Principal{Kind: contract.PrincipalEngine}, body)
+		})
+	}
+	r.pass.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	failed := []contract.SessionID{}
+	for _, b := range boxes {
+		if b.Want != store.WantDiscard {
+			failed = append(failed, b.Session)
+		}
+		removed := false
+		if reachable {
+			removeCtx, cancel := context.WithTimeout(ctx, discardVolumeWait)
+			err := r.boxes.Remove(removeCtx, b.ID)
+			cancel()
+			if err != nil {
+				log.Printf("host %s: discard box %s: %v", name, b.ID, err)
+			}
+			removed = err == nil
+		}
+		if !removed && r.roomHosts != nil {
+			if err := r.roomHosts.ForgetBox(b.ID); err != nil {
+				log.Printf("host %s: forget box %s: %v", name, b.ID, err)
+			}
+		}
+	}
+	if err := r.store.ReleaseHostBoxes(ctx, name); err != nil {
+		return failed, err
+	}
+	r.Kick() // A closing box goes, and parents hear of the failures.
+	return failed, nil
 }
