@@ -218,7 +218,7 @@
       </section>
       {#if reviewable}<aside class:mobile-hidden={!reviewing} aria-label="Instruction review">
         {#if other}
-          <div class="side-head"><StatusPill tone="warning" label="Changed on another device" /><p>Nothing was saved. Your text is unchanged.</p></div>
+          <div class="side-head"><StatusPill tone="warning" label={other.savedBy?.kind === "session" ? `Changed ${savedBy(other.savedBy)}` : "Changed on another device"} /><p>Nothing was saved. Your text is unchanged.</p></div>
           <div class="review"><strong>Their change</strong>
             {@render diffView(instructionDiff(base, other.text))}
             <strong>Yours</strong>
