@@ -32,7 +32,7 @@ func (h *retryHost) Create(context.Context, lifecycle.BoxSpec) (string, error) {
 func (h *retryHost) Remove(context.Context, contract.BoxID) error { h.removes++; return nil }
 func (h *retryHost) Start(context.Context, contract.BoxID) error  { h.starts++; return h.startErr }
 func (*retryHost) Stop(context.Context, contract.BoxID) error     { return nil }
-func (h *retryHost) Recreate(context.Context, lifecycle.BoxSpec, string, string) error {
+func (h *retryHost) Recreate(context.Context, lifecycle.BoxSpec, string) error {
 	h.starts++
 	return h.startErr
 }

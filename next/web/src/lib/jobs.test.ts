@@ -4,7 +4,7 @@ import { decodeShellOutput } from "./event.ts";
 import { endCause, failed, failingLine, jobGroups, jobTime, jobTitle } from "./jobs.ts";
 
 test("jobs group by session, running then failed then passed, newest first, and a failure opens at its first failing line", () => {
-  const job = (id: string, running: boolean, exitCode = 0) => ({ job: id, command: id, running, exitCode, text: "", started: "" });
+  const job = (id: string, running: boolean, exitCode = 0) => ({ job: id, command: id, running, exitCode, end: running ? undefined : { kind: "exit" as const, code: exitCode }, text: "", started: "" });
   const groups = jobGroups([
     { id: "calm", jobs: [job("build", false)] },
     { id: "busy", jobs: [job("old", false), job("lint", false, 1), job("test", true), job("new", false)] },
@@ -23,17 +23,15 @@ test("a job's time reads in seconds, minutes or hours", () => {
 });
 
 test("only the newest three passed jobs show; a failed job stays in view, and the rest wait behind Show older", () => {
-  const job = (id: string, exitCode = 0) => ({ job: id, command: id, running: false, exitCode, text: "", started: "" });
+  const job = (id: string, exitCode = 0) => ({ job: id, command: id, running: false, exitCode, end: { kind: "exit" as const, code: exitCode }, text: "", started: "" });
   const [group] = jobGroups([{ id: "s", jobs: [job("a"), job("b"), job("broke", 1), job("c"), job("d"), job("e")] }]);
   assert.deepEqual([group.jobs.map(j => j.job), group.older.map(j => j.job)], [["broke", "e", "d", "c"], ["b", "a"]]);
 });
 
-// LEGACY(v1-transfer): the cases with no end field in this test, the exit-code fallback. Remove after the transfer.
-test("an end cause reads from the end field, and an older event falls back on its exit code", () => {
-  const base = { exitCode: 0 };
-  assert.deepEqual([{ ...base, exitCode: 2, end: { kind: "exit", code: 2 } }, { ...base, exitCode: -1, end: { kind: "signal", signal: "SIGTERM" } }, { ...base, exitCode: -1, end: { kind: "stopped" } },
-    { exitCode: 0 }, { exitCode: 3 }, { exitCode: -1 }].map(end => [endCause(end as never, "lead"), failed(end as never)]),
-    [["Exit 2", true], ["Ended by a signal (SIGTERM)", true], ["Stopped by lead", false], ["Passed", false], ["Exit 3", true], ["Ended by a signal", true]]);
+test("an end cause reads from the end field, and exit 0 carries no code", () => {
+  assert.deepEqual([{ end: { kind: "exit", code: 2 } }, { end: { kind: "signal", signal: "SIGTERM" } }, { end: { kind: "signal" } }, { end: { kind: "stopped" } },
+    { end: { kind: "exit" } }].map(end => [endCause(end as never, "lead"), failed(end as never)]),
+    [["Exit 2", true], ["Ended by a signal (SIGTERM)", true], ["Ended by a signal", true], ["Stopped by lead", false], ["Passed", false]]);
   assert.equal(jobTitle({ job: "j", command: "make test\nmake lint", description: "", running: false, exitCode: 0, text: "", started: "" }), "make test");
 });
 

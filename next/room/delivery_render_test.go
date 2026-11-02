@@ -27,9 +27,10 @@ func TestRenderDelivery(t *testing.T) {
 		{contract.OpRan{ID: "op_2", State: contract.OpFailed, Result: contract.OpResult{Error: "failed", Output: "details"}}, "Operation op_2: failed. failed\ndetails", false},
 		{contract.TurnEnded{Final: "done"}, "done", false},
 		{contract.TurnEnded{Outcome: contract.TurnFailed, Error: "bad"}, "turn failed: bad", false},
-		// LEGACY(v1-transfer): this case, a shell.job.ended event without End. Remove after the transfer.
-		{contract.ShellJobEnded{Job: "job", ExitCode: 3, Tail: "tail"}, "Your shell job job failed with exit code 3. Last output:\ntail", false},
-		{contract.ShellJobEnded{Job: "job", Tail: "tail"}, "Your shell job job has completed. Last output:\ntail", false},
+		{contract.ShellJobEnded{Job: "job", End: contract.ShellJobEnd{Kind: contract.ShellJobExited, Code: 3}, ExitCode: 3, Tail: "tail"}, "Your shell job job failed with exit code 3. Last output:\ntail", false},
+		{contract.ShellJobEnded{Job: "job", End: contract.ShellJobEnd{Kind: contract.ShellJobExited}, Tail: "tail"}, "Your shell job job has completed. Last output:\ntail", false},
+		{contract.ShellJobEnded{Job: "job", End: contract.ShellJobEnd{Kind: contract.ShellJobSignaled, Signal: "SIGTERM"}, ExitCode: -1, Tail: "tail"}, "Your shell job job ended by a signal (SIGTERM). Last output:\ntail", false},
+		{contract.ShellJobEnded{Job: "job", End: contract.ShellJobEnd{Kind: contract.ShellJobStopped}, ExitCode: -1, Tail: "tail"}, "Your shell job job was stopped. Last output:\ntail", false},
 		{contract.ShellJobRunning{Job: "job", Description: "Build", RanMinutes: 30, QuietMinutes: &quiet12, Tail: "a\nb"}, "Your shell job 'Build' has been running for 30 minutes. Last output 12 minutes ago:\na\nb", false},
 		{contract.ShellJobRunning{Job: "job", RanMinutes: 15}, "Your shell job job has been running for 15 minutes. It has written no output.", false},
 		{contract.ShellJobRunning{Job: "job", RanMinutes: 60, QuietMinutes: &quiet0}, "Your shell job job has been running for 1 hour. Last output under a minute ago.", false},

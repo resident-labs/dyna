@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -65,29 +63,6 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 	if reader.Steers, err = s.store.TranscriptSteers(ctx, req.Session); err != nil {
 		return response, failure(err)
 	}
-	// LEGACY(v1-transfer): this backfill, for transcript files from before the turn index. Remove after the transfer.
-	// Backfill pre-index files once, under the same lock as appends.
-	s.transcriptMu.Lock()
-	for _, f := range files {
-		if f.Indexed {
-			continue
-		}
-		file, err := os.Open(filepath.Join(dir, f.Path))
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			s.transcriptMu.Unlock()
-			return response, failure(err)
-		}
-		err = s.indexTranscript(ctx, req.Session, f.Path, file, 0, f.Acked)
-		file.Close()
-		if err != nil {
-			s.transcriptMu.Unlock()
-			return response, failure(err)
-		}
-	}
-	s.transcriptMu.Unlock()
 	limit := req.Limit
 	if limit == 0 {
 		limit = 6
