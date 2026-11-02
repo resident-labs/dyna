@@ -30,11 +30,23 @@ const holdingNames: Record<ResponsibilityKind, string> = {
 // Each of these shows elsewhere: the turn in the thread, jobs under the header's icon, and goals in the list just above.
 const shownElsewhere: ResponsibilityKind[] = ["turn", "shell_job", "goal"];
 
+// A PR or issue reads as org/repo#6216 in the list.
+function holdItem(id?: string): { repo: string; number: string }[] {
+  const match = id?.match(/^([\w.-]+\/[\w.-]+)#(\d+)$/);
+  return match ? [{ repo: match[1], number: match[2] }] : [];
+}
+
 // What a session still holds, as the engine lists it, for About: one row per kind, so that a lead with ten children takes
 // a line and not ten. A kind with a blocked item says so.
-export function holdRows(items: Responsibility[]): { kind: ResponsibilityKind; text: string; blocked: boolean }[] {
+export type HoldLink = { label: string; href: string; title: string };
+export function holdRows(items: Responsibility[]): { kind: ResponsibilityKind; text: string; blocked: boolean; repo?: string; links?: HoldLink[] }[] {
   const listed = items.filter(item => !shownElsewhere.includes(item.kind));
   return [...Map.groupBy(listed, item => item.kind)].map(([kind, group]) => {
+    if (kind === "pr" || kind === "issue") {
+      const named = group.flatMap(item => holdItem(item.id)), repos = new Set(named.map(item => item.repo));
+      if (named.length === group.length) return { kind, text: count(group.length, holdingNames[kind]), blocked: group.some(item => item.blocked), repo: repos.size === 1 ? named[0].repo : undefined,
+        links: named.map(({ repo, number }) => ({ label: repos.size === 1 ? `#${number}` : `${repo.split("/")[1]}#${number}`, title: `${repo}#${number}`, href: `https://github.com/${repo}/${kind === "pr" ? "pull" : "issues"}/${number}` })) };
+    }
     const ids = group.flatMap(item => item.id ? [item.id] : []).join(", ");
     const text = group.length > 1 ? `${count(group.length, holdingNames[kind])}${ids ? `: ${ids}` : ""}` : [holdingNames[kind], ids].filter(Boolean).join(" ");
     return { kind, text: text[0].toUpperCase() + text.slice(1), blocked: group.some(item => item.blocked) };
