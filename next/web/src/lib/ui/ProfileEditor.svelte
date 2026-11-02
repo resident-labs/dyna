@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ModelProvider, ProfileSummary, ThinkingLevel } from "../contract.gen.ts";
   import { replacements, sessionCount, type ProfileModel } from "../profiles.ts";
+  import Modal from "./Modal.svelte";
   let { profile, profiles, models, isNew, busy, error, save, cancel, remove }: { profile: ProfileSummary; profiles: ProfileSummary[]; models: ProfileModel[]; isNew: boolean; busy: boolean; error: string; save: (profile: ProfileSummary) => void; cancel: () => void; remove: (replacement?: string) => void } = $props();
   let draft = $state({ ...profile });
   // Removing a profile in use first asks where its sessions go.
@@ -49,19 +50,20 @@
   <label class="field"><span>Notes</span><textarea bind:value={draft.description} rows="3"></textarea></label>
   <label class="field"><span>Compact at</span><div><input class="numeric" inputmode="numeric" value={compactText} oninput={(event) => { compactText = event.currentTarget.value; draft.compactTokens = Number(compactText.replace(/[^0-9]/g, "")); }} onblur={() => compactText = (draft.compactTokens ?? 0).toLocaleString(undefined, { numberingSystem: "latn" })} /> <span class="help">tokens of context; 0 means Pi's default</span></div></label>
   {#if error}<p role="alert" class="help">{error}</p>{/if}
-  <div class="actions"><button class="btn fill save" type="button" disabled={busy || !draft.name.trim() || !draft.model.trim()} onclick={() => save(draft)}>Save</button><button class="btn" type="button" disabled={busy} onclick={cancel}>Cancel</button>{#if !isNew && !moving}<button class="btn danger remove" type="button" disabled={busy} onclick={askToRemove}>Remove</button>{/if}</div>
-  {#if moving}
-    <div class="replace" role="group" aria-label="Move sessions before removing">
-      {#if others.length}
-        <label class="field"><span>Move {sessionCount(profile.inUse)} to</span><select bind:value={target}>{#each others as other (other.name)}<option value={other.name}>{other.label}</option>{/each}</select></label>
-        <div class="actions"><button class="btn danger" type="button" disabled={busy || !target} onclick={() => remove(target)}>Move and remove</button><button class="btn" type="button" disabled={busy} onclick={() => moving = false}>Keep profile</button></div>
-      {:else}
-        <p class="help">{sessionCount(profile.inUse)} use this profile, and there is no other profile to move them to.</p>
-        <div class="actions"><button class="btn" type="button" onclick={() => moving = false}>Keep profile</button></div>
-      {/if}
-    </div>
-  {/if}
+  <div class="actions"><button class="btn fill save" type="button" disabled={busy || !draft.name.trim() || !draft.model.trim()} onclick={() => save(draft)}>Save</button><button class="btn" type="button" disabled={busy} onclick={cancel}>Cancel</button>{#if !isNew}<button class="btn danger remove" type="button" aria-haspopup={profile.inUse ? "dialog" : undefined} disabled={busy} onclick={askToRemove}>Remove</button>{/if}</div>
 </div></div>
+{#if moving}
+  <Modal title={`Remove ${profile.name}?`} fit {busy} initial="[data-cancel]" onclose={() => { moving = false; }}>
+    {#if others.length}
+      <label class="move"><span>Move {sessionCount(profile.inUse)} to</span><select bind:value={target}>{#each others as other (other.name)}<option value={other.name}>{other.label}</option>{/each}</select></label>
+    {:else}<p>{sessionCount(profile.inUse)} use this profile, and there is no other profile to move them to.</p>{/if}
+    {#if error}<p role="alert" class="problem">{error}</p>{/if}
+    {#snippet actions()}
+      <button class="btn" type="button" data-cancel disabled={busy} onclick={() => { moving = false; }}>Keep profile</button>
+      {#if others.length}<button class="btn danger" type="button" disabled={busy || !target} onclick={() => remove(target)}>Move and remove</button>{/if}
+    {/snippet}
+  </Modal>
+{/if}
 
 <style>
   .editor-container { container-type: inline-size; }
@@ -80,7 +82,10 @@
   p.help { margin: 8px 0 0; }
   .actions { display: flex; gap: 12px; }
   .actions button.remove { margin-left: auto; }
-  .replace { display: grid; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .move { display: grid; gap: 8px; color: var(--muted); }
+  .move select { max-width: 100%; }
+  .problem { margin: 12px 0 0; color: var(--danger); font-size: 13px; }
+  p { margin: 0; }
   .actions button:disabled { opacity: .45; }
   @container (max-width: 479px) {
     .numeric + .help { display: block; margin-top: 6px; }
