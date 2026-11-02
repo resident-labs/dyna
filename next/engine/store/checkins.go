@@ -28,10 +28,12 @@ func markFailureTold(ctx context.Context, tx *sql.Tx, session contract.SessionID
 // failureKey is the failure a session is in now: room.FailureBox, room.FailureTurn or nothing. A stopped turn neither fails nor recovers.
 const failureKey = `CASE WHEN b.state IN ('failed','lost') THEN 'box' WHEN (SELECT outcome FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND outcome!='stopped' ORDER BY ended_at DESC LIMIT 1)='failed' THEN 'turn' ELSE '' END`
 
-// failureRooms lists the rooms with a failure nobody has heard of, or a recovery not yet recorded.
-func failureRooms(ctx context.Context, q sqlQuery) ([]contract.RoomID, error) {
+// failureRooms lists the rooms with a failure nobody has heard of, or a recovery not yet recorded. A box back from a told
+// failure for less than room.FailureSettle has not recovered yet, so it does not bring its room here on every tick.
+func failureRooms(ctx context.Context, q sqlQuery, now time.Time) ([]contract.RoomID, error) {
 	return listIDs[contract.RoomID](ctx, q, `SELECT DISTINCT s.room FROM sessions s JOIN rooms r ON r.id=s.room JOIN boxes b ON b.session=s.id LEFT JOIN checkins c ON c.session=s.id
-		WHERE s.closed_at IS NULL AND s.state='open' AND s.parent IS NOT NULL AND r.paused_at IS NULL AND r.state='open' AND `+failureKey+`!=COALESCE(c.failure,'') ORDER BY s.room`)
+		WHERE s.closed_at IS NULL AND s.state='open' AND s.parent IS NOT NULL AND r.paused_at IS NULL AND r.state='open' AND `+failureKey+`!=COALESCE(c.failure,'')
+		AND NOT (COALESCE(c.failure,'')='box' AND b.updated_at>?) ORDER BY s.room`, now.Add(-room.FailureSettle).UnixMilli())
 }
 
 // checkinRooms lists the rooms a pass looks at: open, not paused, with a held goal.
@@ -198,12 +200,12 @@ func turnFailure(ctx context.Context, tx *sql.Tx, id contract.RoomID, session co
 // SendFailureNotices tells ancestors of new failures and records recoveries. It writes only when something changed, so
 // it can run on every engine tick. Clocks and records live in the store, so a restart repeats nothing and misses nothing.
 func (s *Store) SendFailureNotices(ctx context.Context, now time.Time, newEvent func(contract.RoomID, contract.EventBody) (contract.Event, error)) error {
-	rooms, err := failureRooms(ctx, s.Read())
+	rooms, err := failureRooms(ctx, s.Read(), now)
 	if err != nil || len(rooms) == 0 {
 		return err
 	}
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		rooms, err := failureRooms(ctx, tx)
+		rooms, err := failureRooms(ctx, tx, now)
 		if err != nil {
 			return err
 		}

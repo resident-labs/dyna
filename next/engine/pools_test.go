@@ -660,8 +660,10 @@ func TestANodeTheScriptLostIsALostHostAndADiscardEndsIt(t *testing.T) {
 	if _, problem := r.s.BoxHello(r.ctx, worker, contract.BoxHelloRequest{}); problem != nil {
 		t.Fatal(problem)
 	}
-	channel, problem := r.s.BoxChannel(r.ctx, worker, "")
+	channelCtx, disconnect := context.WithCancel(r.ctx)
+	channel, problem := r.s.BoxChannel(channelCtx, worker, "")
 	if problem != nil {
+		disconnect()
 		t.Fatal(problem)
 	}
 	go func() {
@@ -669,7 +671,15 @@ func TestANodeTheScriptLostIsALostHostAndADiscardEndsIt(t *testing.T) {
 		}
 	}()
 	placed := r.box(session)
+	// A machine that is gone takes its box's channel with it.
 	r.remove("machines/" + string(placed.Host))
+	disconnect()
+	for deadline := time.Now().Add(5 * time.Second); r.s.Connected(session); {
+		if time.Now().After(deadline) {
+			t.Fatal("the channel stayed connected")
+		}
+		time.Sleep(time.Millisecond)
+	}
 	r.advance(11 * time.Minute)
 	r.pass(2)
 	rows := r.nodeRows()

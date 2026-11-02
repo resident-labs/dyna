@@ -199,8 +199,11 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 		if b.State != contract.BoxReady {
 			delete(r.disconnected, b.ID)
 		} else {
-			lost := hostState[b.Host] == box.HostUnreachable
-			if r.view.Connected(b.Session) || r.hostRestoring(b.Host) {
+			// A box whose agent still holds its channel is running and reaches the engine, whatever the heartbeat says: a
+			// host too busy to answer its probe in time is not gone. A host that is really gone takes the channels with it.
+			connected := r.view.Connected(b.Session)
+			lost := !connected && hostState[b.Host] == box.HostUnreachable
+			if connected || r.hostRestoring(b.Host) {
 				delete(r.disconnected, b.ID)
 			} else {
 				since, ok := r.disconnected[b.ID]
