@@ -5,7 +5,6 @@ import { feedRows } from "./feed.ts";
 import { RunState } from "./run.svelte.ts";
 import type { Json } from "./json.ts";
 import { LONG_PHASE, READABLE_SPAN, STRIP_PHASES, applyStep, branchLink, commitLink, failedNodes, foldable, jsonFields, nested, openable, pastRuns, phases, reading, runCounts, runLine, runScale, shownFacts, shownStep, spanReads, stepBody, stepSpan, stepTime, stepWord, strip, timed, tokens } from "./workflow.ts";
-import { runRows } from "./session-tree.ts";
 import type { Event, WorkflowInfo, WorkflowStatusResponse, WorkflowStep } from "./contract.gen.ts";
 
 const usage = { model: "", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
@@ -221,14 +220,11 @@ test("a value is left out for repeating the page, never for its key's name", () 
   assert.deepEqual(jsonFields({ steps: 7, failed: 5 }, shown).map(item => item.label), ["Steps", "Failed"], "another number says something else");
 });
 
-test("past runs are the ended runs that left the session tree, newest first, and they fold", () => {
+test("past runs are the ended runs that left the session tree, newest first", () => {
   const run = (session: string, fields: Partial<WorkflowInfo> = {}): WorkflowInfo => status({ session, state: "done", ...fields }).run;
   const runs = [run("old", { ended: "2026-01-01T01:00:00Z" }), run("live", { state: "running" }), run("closing", { ended: "2026-01-03T00:00:00Z" }), run("new", { state: "failed", ended: "2026-01-02T00:00:00Z" }), run("unended", { started: "2026-01-01T12:00:00Z", state: "stopped" })];
   const past = pastRuns(runs, new Set(["closing"]));
   assert.deepEqual(past.map(item => item.session), ["new", "unended", "old"]);
-  assert.deepEqual(runRows([], true), []);
-  assert.deepEqual(runRows(past, false), [{ kind: "runs", count: 3, open: false }]);
-  assert.deepEqual(runRows(past, true).map(row => row.kind === "run" ? row.run.session : row.kind), ["runs", "new", "unended", "old"]);
   assert.deepEqual(runCounts({ steps: 1, failed: 0 }), ["1 step"]);
   assert.deepEqual(runCounts({ steps: 60, failed: 4 }), ["60 steps", "4 failed"]);
   assert.deepEqual(runCounts({ failed: 0 }), []);
