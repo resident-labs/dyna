@@ -78,13 +78,21 @@ func (b *Boxes) syncInstructions(ctx context.Context, h *podman.Host) error {
 	var files []podman.InstructionFile
 	for _, room := range append([]contract.RoomID{""}, rooms...) {
 		data, err := os.ReadFile(b.Layout.Instructions(room))
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		files = append(files, podman.InstructionFile{Path: b.Layout.HostInstructions(room), Data: data})
+		if err == nil {
+			files = append(files, podman.InstructionFile{Path: b.Layout.HostInstructions(room), Data: data})
+		}
+		if b.Addons != nil {
+			bundle, err := b.Addons.Bundle(room)
+			if err != nil {
+				return err
+			}
+			if bundle != nil {
+				files = append(files, podman.InstructionFile{Path: b.Layout.HostAddons(room), Data: bundle})
+			}
+		}
 	}
 	if err := h.SyncInstructions(ctx, files); err != nil {
 		return err

@@ -196,6 +196,7 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 	}
 	service.SetInstructionsPublisher(boxes.PublishInstructions)
+	boxes.Addons = service.Addons()
 	mirror := &enginegit.Mirror{Layout: layout, Token: token, Runner: enginegit.GitRunner{}}
 	service.SetRepositories(&enginegit.Repositories{Rooms: st, Hosts: boxes, Mirror: mirror})
 	pulls := &prs.Client{Token: token, Endpoint: &url.URL{Scheme: "https", Host: "api.github.com"}, Transport: http.DefaultTransport, Now: time.Now}
@@ -211,7 +212,7 @@ func Run(ctx context.Context, cfg Config) error {
 	service.SetUsage(quotas)
 	connections := proxy.Connections(managementKey, st, time.Now)
 	accounts := engine.NewAccountActions(service, connections, quotas)
-	if err := service.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": accounts.Entry(), "pr.open": service.PrOpen(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport), "hostexec.grant": service.HostexecGrant(), "hostexec.run": service.HostexecRunEntry()}, cfg.ApprovalsExpiry); err != nil {
+	if err := service.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": accounts.Entry(), "addon.global": service.AddonGlobal(), "pr.open": service.PrOpen(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport), "hostexec.grant": service.HostexecGrant(), "hostexec.run": service.HostexecRunEntry()}, cfg.ApprovalsExpiry); err != nil {
 		return err
 	}
 	go func() {

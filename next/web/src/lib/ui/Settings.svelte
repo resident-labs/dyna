@@ -6,6 +6,7 @@
   import SharingPane from "./SharingPane.svelte";
   import AccountsPane from "./AccountsPane.svelte";
   import ProfilesPane from "./ProfilesPane.svelte";
+  import AddonsPane from "./AddonsPane.svelte";
   import Icon from "./Icon.svelte";
   import { settingsPanes } from "../routes.ts";
   import type { Device } from "../contract.gen.ts";
@@ -52,6 +53,7 @@
     {:else if shown?.id === "devices"}<SharingPane {devices} {failed} {reload} {signedout} {bar} />
     {:else if shown?.id === "accounts"}<AccountsPane {bar} {phone} {signedout} {path} {navigate} />
     {:else if shown?.id === "profiles"}<ProfilesPane {bar} {phone} {signedout} />
+    {:else if shown?.id === "addons"}<AddonsPane {bar} {admin} {signedout} />
     {:else}
       <header class="bar"><button type="button" class="round menu" bind:this={menu} aria-label="Rooms and pages" title="Rooms and pages" onclick={onmenu}><Icon name="menu" /></button><strong>Settings</strong></header>
       <nav class="list" aria-label="Settings panes">{#each panes as pane (pane.id)}
