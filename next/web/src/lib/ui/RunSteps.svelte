@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { fade, slide } from "svelte/transition";
   import { MediaQuery, SvelteSet } from "svelte/reactivity";
   import type { WorkflowInfo, WorkflowStep } from "../contract.gen.ts";
@@ -7,9 +8,12 @@
   import StatusPill from "./StatusPill.svelte";
   import StepDetail from "./StepDetail.svelte";
 
-  // A run's steps: the strip says how far it is, each phase folds, a workflow step holds the steps it ran, and a step that is
-  // not a worker opens in place. The rows of a closed crew read the same.
-  let { session, info, steps, now, onopen }: { session: string; info: WorkflowInfo; steps: WorkflowStep[]; now: number; onopen: (step: WorkflowStep) => void } = $props();
+  // Steps of a run, as a node of its flowchart or a bar of its timeline opens them: the strip says how far they are, each phase
+  // folds, a workflow step holds the steps it ran, and a step that is not a worker opens in place. opened names the rows that
+  // start open. The rows of a closed crew read the same.
+  let { session, info, steps, now, onopen, title = "Steps", opened = [] }: {
+    session: string; info: WorkflowInfo; steps: WorkflowStep[]; now: number; onopen: (step: WorkflowStep) => void; title?: string; opened?: string[];
+  } = $props();
   const icons: Record<WorkflowStep["kind"], IconName> = { agent: "person", run: "terminal", post: "chat", log: "list", workflow: "tool" };
   const quiet = new MediaQuery("(prefers-reduced-motion: reduce)");
   let motion = $derived({ duration: quiet.current ? 0 : 200 });
@@ -24,7 +28,7 @@
   let spans = $derived(timedOnce ||= timed(steps, scale, now));
 
   // What the owner toggled differs from its default, however long a phase grows.
-  const toggled = new SvelteSet<string>();
+  const toggled = new SvelteSet<string>(untrack(() => opened));
   const toggle = (key: string) => { if (!toggled.delete(key)) toggled.add(key); };
   // A phase folds or not when it first shows, so one that grows past the limit during a live run stays open under the reader.
   const startsFolded = new Map<string, boolean>();
@@ -68,8 +72,8 @@
 {/snippet}
 
 <section class="steps" class:spans>
-  <h3>Steps {#if steps.length}<span class="tally">{#if counts.running || !settled}{settled} of {steps.length}{:else}{steps.length}{/if}{#if counts.running}{` · ${counts.running} running`}{/if}{#if counts.failed}{" · "}<button type="button" class="filter" aria-pressed={filtering} title={filtering ? "Show every step" : "Show only the failed steps"} onclick={() => { onlyFailed = !onlyFailed; }}><StatusPill tone="failed" label={`${counts.failed} failed`} word /></button>{/if}</span>{/if}</h3>
-  {#if parts.length}
+  <h3>{title} {#if steps.length > 1}<span class="tally">{#if counts.running || !settled}{settled} of {steps.length}{:else}{steps.length}{/if}{#if counts.running}{` · ${counts.running} running`}{/if}{#if counts.failed}{" · "}<button type="button" class="filter" aria-pressed={filtering} title={filtering ? "Show every step" : "Show only the failed steps"} onclick={() => { onlyFailed = !onlyFailed; }}><StatusPill tone="failed" label={`${counts.failed} failed`} word /></button>{/if}</span>{/if}</h3>
+  {#if parts.length && steps.length > 1}
     <div class="strip" role="img" aria-label={`${counts.done} done, ${counts.running} running, ${counts.failed} failed`}>
       {#each parts as part (part.key)}
         <span class="part" style:flex-grow={part.share} title={part.title}>{#each part.segments as segment (segment.state)}<i class={segment.state} style:flex-grow={segment.share}></i>{/each}</span>
@@ -79,9 +83,9 @@
   {#if !steps.length}<p class="muted">{info.state !== "running" ? "The run ended before its first step." : "The first step will appear here."}</p>{/if}
   {#each groups as phase (phase.key)}
     {@const nodes = filtering ? failedNodes(phase.nodes) : phase.nodes}
-    {@const open = filtering || folded(phase.key, phase.long) === toggled.has(`phase ${phase.key}`)}
+    {@const open = filtering || groups.length === 1 || folded(phase.key, phase.long) === toggled.has(`phase ${phase.key}`)}
     {#if nodes.length}<div class="phase">
-      {#if phase.title}<button type="button" class="phase-head" aria-expanded={open} onclick={() => toggle(`phase ${phase.key}`)}>
+      {#if phase.title && groups.length > 1}<button type="button" class="phase-head" aria-expanded={open} onclick={() => toggle(`phase ${phase.key}`)}>
         <span class="chevron" class:open><Icon name="chevron" size={14} /></span><strong title={phase.title}>{phase.title}</strong>
         <span class="summary">{phase.done + phase.failed} of {phase.steps.length}{#if phase.running}{` · ${phase.running} running`}{/if}{#if phase.failed}{" · "}<StatusPill tone="failed" label={`${phase.failed} failed`} word />{/if}</span></button>{/if}
       {#if open}<ul transition:slide={motion}>{#each nodes as node (node.step.key)}{@render row(node, 0)}{/each}</ul>{/if}
