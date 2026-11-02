@@ -24,8 +24,19 @@ func workflowCommand(get func() *socketClient) *cobra.Command {
 	}}
 	run.Flags().StringVar(&room, "room", "", "Room; a session may omit it for its own")
 	run.Flags().StringVar(&args, "args", "", "JSON the script reads as args")
-	run.Flags().StringVar(&resume, "resume", "", "An ended run whose finished steps this run keeps, so only changed steps run")
+	run.Flags().StringVar(&resume, "resume", "", "An ended run whose finished steps this run keeps, so only changed steps run; reload changes a running one")
 	run.Flags().StringVar(&clientID, "client-id", "", "Retry key: the same key returns the first run")
+	reload := &cobra.Command{Use: "reload RUN FILE", Short: "Give a running run a new script, in the same crew and box. Finished steps return their results, running ones are joined, and new ones start.", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		script, err := os.ReadFile(args[1])
+		if err != nil {
+			return err
+		}
+		result, err := call[contract.WorkflowReloadRequest, contract.WorkflowReloadResponse](cmd.Context(), get(), contract.MethodWorkflowReload, contract.WorkflowReloadRequest{Run: contract.WorkflowRunID(args[0]), Script: string(script)})
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+	}}
 	status := &cobra.Command{Use: "status RUN", Short: "Show one run and its steps", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, runs []string) error {
 		result, err := call[contract.WorkflowStatusRequest, contract.WorkflowStatusResponse](cmd.Context(), get(), contract.MethodWorkflowStatus, contract.WorkflowStatusRequest{Run: contract.WorkflowRunID(runs[0])})
 		if err != nil {
@@ -41,6 +52,6 @@ func workflowCommand(get func() *socketClient) *cobra.Command {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 	}}
 	list.Flags().StringVar(&room, "room", "", "Room; a session may omit it for its own")
-	c.AddCommand(run, status, list)
+	c.AddCommand(run, reload, status, list)
 	return c
 }

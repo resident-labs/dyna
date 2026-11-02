@@ -26,6 +26,8 @@ type fakeJournal struct {
 	files map[string]string // what each running worker reported
 	posts []contract.PostRequest
 	pin   string
+	// by step name, the script version that started each step
+	versions map[string]int
 }
 
 func newFakeJournal() *fakeJournal {
@@ -48,6 +50,10 @@ func (j *fakeJournal) WorkflowStepStart(_ context.Context, req contract.Workflow
 	if stored, ok := j.steps[req.Key]; ok && req.Kind != contract.WorkflowStepWorkflow {
 		return contract.WorkflowStepStartResponse{State: stored.State, Result: stored.Result, Reason: stored.Reason}, nil
 	}
+	if j.versions == nil {
+		j.versions = map[string]int{}
+	}
+	j.versions[req.Name] = req.Version
 	return contract.WorkflowStepStartResponse{}, nil
 }
 
@@ -78,12 +84,18 @@ type fakeWorker struct {
 	model string
 	file  string
 	act   func(dir, prompt string) // what the worker does to its tree before it answers
+	hold  func(ctx context.Context, prompt string) error
 	dir   string
 }
 
 func (w *fakeWorker) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, _ func()) (contract.TurnEnded, error) {
 	if w.act != nil {
 		w.act(w.dir, inputs[0].Text)
+	}
+	if w.hold != nil {
+		if err := w.hold(ctx, inputs[0].Text); err != nil {
+			return contract.TurnEnded{}, err
+		}
 	}
 	ended, err := w.reply(inputs[0].Text, w.model)
 	if ended.Outcome == "" {
@@ -101,6 +113,7 @@ type crewHarness struct {
 	started atomic.Int32
 	reply   func(prompt, model string) (contract.TurnEnded, error)
 	act     func(dir, prompt string)
+	hold    func(ctx context.Context, prompt string) error
 	workdir string
 	branch  string
 	base    string
@@ -119,13 +132,22 @@ func newCrewHarness(t *testing.T) *crewHarness {
 // run executes a script in a new Crew, as a new box would, and returns the turn.
 func (h *crewHarness) run(script string, profiles ...contract.WorkflowProfile) contract.TurnEnded {
 	h.t.Helper()
+	_, ended := h.start(script, profiles...)
+	return <-ended
+}
+
+var crewProfiles = []contract.WorkflowProfile{{Name: "fast", Model: contract.ModelChoice{ID: "fast-model"}}, {Name: "deep", Model: contract.ModelChoice{ID: "deep-model"}}}
+
+// start runs a script in a new Crew, whose turn comes back on the channel.
+func (h *crewHarness) start(script string, profiles ...contract.WorkflowProfile) (*Crew, <-chan contract.TurnEnded) {
+	h.t.Helper()
 	if profiles == nil {
-		profiles = []contract.WorkflowProfile{{Name: "fast", Model: contract.ModelChoice{ID: "fast-model"}}, {Name: "deep", Model: contract.ModelChoice{ID: "deep-model"}}}
+		profiles = crewProfiles
 	}
 	state, sessions := h.t.TempDir(), h.t.TempDir()
 	var opened atomic.Int32
 	crew, err := NewCrew(CrewConfig{
-		Workflow: contract.BoxWorkflow{Run: "wf_1", Name: "test", Script: script, Args: `{"topic":"bounds"}`, Profiles: profiles, Workers: 16},
+		Workflow: contract.BoxWorkflow{Run: "wf_1", Name: "test", Script: script, Version: 1, Args: `{"topic":"bounds"}`, Profiles: profiles, Workers: 16},
 		Engine:   h.journal,
 		Open: func(_ context.Context, profile contract.WorkflowProfile, folder, dir string) (crewWorker, error) {
 			data, err := os.ReadFile(filepath.Join(folder, "models.json"))
@@ -133,7 +155,7 @@ func (h *crewHarness) run(script string, profiles ...contract.WorkflowProfile) c
 				h.t.Errorf("worker configuration %s: %v", data, err)
 			}
 			h.started.Add(1)
-			return &fakeWorker{reply: h.reply, act: h.act, dir: dir, model: profile.Model.ID, file: filepath.Join(sessions, fmt.Sprintf("w%d.jsonl", opened.Add(1)))}, nil
+			return &fakeWorker{reply: h.reply, act: h.act, hold: h.hold, dir: dir, model: profile.Model.ID, file: filepath.Join(sessions, fmt.Sprintf("w%d.jsonl", opened.Add(1)))}, nil
 		},
 		Transcript: NewTranscript(&transcriptEngine{}, sessions),
 		Workdir:    h.workdir,
@@ -146,12 +168,16 @@ func (h *crewHarness) run(script string, profiles ...contract.WorkflowProfile) c
 		h.t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	ended, err := crew.Start(ctx, "turn_1", []contract.TurnInput{{Delivery: 7, Text: "run it"}}, func() {})
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	return ended
+	out := make(chan contract.TurnEnded, 1)
+	go func() {
+		defer cancel()
+		ended, err := crew.Start(ctx, "turn_1", []contract.TurnInput{{Delivery: 7, Text: "run it"}}, func() {})
+		if err != nil {
+			h.t.Error(err)
+		}
+		out <- ended
+	}()
+	return crew, out
 }
 
 func (h *crewHarness) result(script string) any {
@@ -221,6 +247,147 @@ func TestTrueDuplicatesEachRun(t *testing.T) {
 	}
 	if again := h.result(script); fmt.Sprint(again) != fmt.Sprint(first) || calls.Load() != 2 {
 		t.Fatalf("%v after %d calls", again, calls.Load())
+	}
+}
+
+// heldTasks keeps each worker whose prompt names a held task at work until the task is released, and counts them.
+type heldTasks struct {
+	mu      sync.Mutex
+	gates   map[string]chan struct{}
+	working map[string]int
+	stopped map[string]int // workers whose step ended before their task was released
+}
+
+func newHeldTasks(tasks ...string) *heldTasks {
+	held := &heldTasks{gates: map[string]chan struct{}{}, working: map[string]int{}, stopped: map[string]int{}}
+	for _, task := range tasks {
+		held.gates[task] = make(chan struct{})
+	}
+	return held
+}
+
+func (h *heldTasks) hold(ctx context.Context, prompt string) error {
+	h.mu.Lock()
+	task := strings.TrimPrefix(prompt, "work on ")
+	gate := h.gates[task]
+	if gate != nil {
+		h.working[task]++
+	}
+	h.mu.Unlock()
+	if gate == nil {
+		return nil
+	}
+	select {
+	case <-gate:
+		return nil
+	case <-ctx.Done():
+		h.mu.Lock()
+		h.stopped[task]++
+		h.mu.Unlock()
+		return ctx.Err()
+	}
+}
+
+func (h *heldTasks) count(of map[string]int, task string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return of[task]
+}
+
+func waitFor(t *testing.T, what string, done func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); !done(); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("waited for %s", what)
+		}
+	}
+}
+
+func reloaded(script string, version int, profiles ...contract.WorkflowProfile) contract.BoxWorkflow {
+	if profiles == nil {
+		profiles = crewProfiles
+	}
+	return contract.BoxWorkflow{Run: "wf_1", Name: "test", Script: script, Version: version, Args: `{"topic":"bounds"}`, Profiles: profiles, Workers: 16}
+}
+
+// A reload runs the new script in the same turn. A finished step returns its stored result, a running one is joined and its
+// worker's reply comes back to the new script, and a new key starts a worker. Each step keeps the version that started it.
+func TestAReloadJoinsRunningStepsAndKeepsFinishedOnes(t *testing.T) {
+	h := newCrewHarness(t)
+	held := newHeldTasks("slow")
+	h.hold = held.hold
+	crew, ended := h.start(crewMeta + `return await parallel([() => agent('work on quick'), () => agent('work on slow')])`)
+	waitFor(t, "the quick step stored and the slow one working", func() bool {
+		h.journal.mu.Lock()
+		stored := len(h.journal.steps)
+		h.journal.mu.Unlock()
+		return stored == 1 && held.count(held.working, "slow") == 1
+	})
+	crew.Reload(reloaded(crewMeta+`return await parallel(['quick', 'slow', 'new'].map((task) => () => agent('work on ' + task)))`, 2))
+	waitFor(t, "the new step's worker", func() bool { return h.started.Load() == 3 })
+	time.Sleep(200 * time.Millisecond)
+	if got := held.count(held.working, "slow"); got != 1 || h.started.Load() != 3 {
+		t.Fatalf("%d slow workers and %d in all: the reload started a step again", got, h.started.Load())
+	}
+	close(held.gates["slow"])
+	got := <-ended
+	if got.Outcome != contract.TurnCompleted || got.Final != `["done: work on quick","done: work on slow","done: work on new"]` {
+		t.Fatalf("turn %+v", got)
+	}
+	if h.started.Load() != 3 || held.count(held.stopped, "slow") != 0 {
+		t.Fatalf("%d workers", h.started.Load())
+	}
+	if want := map[string]int{"agent: work on quick": 1, "agent: work on slow": 1, "agent: work on new": 2}; fmt.Sprint(h.journal.versions) != fmt.Sprint(want) {
+		t.Fatalf("versions %v", h.journal.versions)
+	}
+	// An older or equal version changes nothing.
+	crew.Reload(reloaded(crewMeta+`return 'old'`, 2))
+	if crew.workflow.Script == crewMeta+`return 'old'` {
+		t.Fatal("a reload to the version the crew runs replaced its script")
+	}
+}
+
+// A running step the new script never calls goes on until the run ends, and then stops and stores nothing.
+func TestAReloadLeavesAStepItDropsRunningUntilTheEnd(t *testing.T) {
+	h := newCrewHarness(t)
+	held := newHeldTasks("slow", "last")
+	h.hold = held.hold
+	crew, ended := h.start(crewMeta + `return await agent('work on slow')`)
+	waitFor(t, "the slow worker", func() bool { return held.count(held.working, "slow") == 1 })
+	crew.Reload(reloaded(crewMeta+`return await agent('work on last')`, 2))
+	waitFor(t, "the last worker", func() bool { return held.count(held.working, "last") == 1 })
+	if held.count(held.stopped, "slow") != 0 {
+		t.Fatal("the reload stopped a running step")
+	}
+	close(held.gates["last"])
+	if got := <-ended; got.Outcome != contract.TurnCompleted || got.Final != "done: work on last" {
+		t.Fatalf("turn %+v", got)
+	}
+	if held.count(held.stopped, "slow") != 1 {
+		t.Fatal("the dropped step outlived the run")
+	}
+	h.journal.mu.Lock()
+	defer h.journal.mu.Unlock()
+	if len(h.journal.steps) != 1 {
+		t.Fatalf("journal %v: a step the end cut off stores nothing", h.journal.steps)
+	}
+}
+
+// The new version's profiles replace the old ones: its default is its own first profile, and a profile it left out fails.
+func TestAReloadSwitchesProfiles(t *testing.T) {
+	h := newCrewHarness(t)
+	h.reply = func(prompt, model string) (contract.TurnEnded, error) {
+		return contract.TurnEnded{Final: prompt + " on " + model}, nil
+	}
+	held := newHeldTasks("slow")
+	h.hold = held.hold
+	fast, deep := crewProfiles[:1], []contract.WorkflowProfile{crewProfiles[1]}
+	crew, ended := h.start("export const meta = { name: 'test', profiles: ['fast'] }\n"+`return await agent('work on slow')`, fast...)
+	waitFor(t, "the slow worker", func() bool { return held.count(held.working, "slow") == 1 })
+	crew.Reload(reloaded("export const meta = { name: 'test', profiles: ['deep'] }\n"+`return [await agent('x'), await agent('y', { profile: 'fast' }).catch((e) => e.message)]`, 2, deep...))
+	got := <-ended
+	if got.Outcome != contract.TurnCompleted || !strings.HasPrefix(got.Final, `["x on deep-model","profile \"fast\" is not in`) {
+		t.Fatalf("turn %+v", got)
 	}
 }
 

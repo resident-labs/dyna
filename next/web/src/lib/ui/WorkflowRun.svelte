@@ -108,6 +108,7 @@
         <p class="facts">{#if info.ended}<span title={fullTime(info.ended)}>{formatTime(info.ended)}</span>{/if}
           <span>{formatTimelineDuration(runningFor(info.started, info.ended, now))}</span>
           {#if tokens(usage)}<span title={tokenDetail(usage)}>{tokens(usage)} tokens</span>{/if}
+          {#if (info.version ?? 1) > 1}<span title="Reloaded {(info.version ?? 1) - 1} {info.version === 2 ? 'time' : 'times'}">script v{info.version}</span>{/if}
           {#if info.commit}<span class="from">{info.repo ?? ""} at {@render commit(info.commit)}</span>{/if}</p>
         {#if store.stopFailed.has(session)}<p class="trouble" role="alert">The stop did not reach the engine. Try again.</p>{/if}
         {#if stuck && broken}<div class="failure" role="status"><span class="slot"><Icon name="warning" size={16} /></span><span>The box failed: {boxReason(broken)}. The run waits until the session restarts.</span></div>{/if}

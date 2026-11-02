@@ -13,9 +13,10 @@ import (
 // failedStepNames bounds the steps a run's summary names. Failed always holds the true count.
 const failedStepNames = 20
 
-// WorkflowRun is one run of a script, tied to the crew session that hosts it. Script, Profiles and Repo never change.
-// Commit and Image are set once, by the box's first start. Resume names the run this one resumes, and only a run's start reads
-// it from here: afterwards ResumedSessions follows the stored link.
+// WorkflowRun is one run of a script, tied to the crew session that hosts it. Repo never changes. Script is the newest version,
+// and Description and Profiles are its meta's: a reload replaces all three and adds one to Version. Commit and Image are set
+// once, by the box's first start. Resume names the run this one resumes, and only a run's start reads it from here: afterwards
+// ResumedSessions follows the stored link.
 type WorkflowRun struct {
 	ID          contract.WorkflowRunID
 	Room        contract.RoomID
@@ -31,17 +32,18 @@ type WorkflowRun struct {
 	State       contract.WorkflowState
 	Result      string
 	Resume      contract.WorkflowRunID
+	Version     int
 	Started     time.Time
 	Ended       time.Time
 }
 
-const workflowColumns = "id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,result,started_at,ended_at"
+const workflowColumns = "id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,result,version,started_at,ended_at"
 
 func scanWorkflow(row interface{ Scan(...any) error }) (WorkflowRun, error) {
 	var run WorkflowRun
 	var profiles string
 	var started, ended int64
-	err := row.Scan(&run.ID, &run.Room, &run.Session, &run.Name, &run.Description, &run.Script, &run.Args, &profiles, &run.Repo, &run.Commit, &run.Image, &run.State, &run.Result, &started, &ended)
+	err := row.Scan(&run.ID, &run.Room, &run.Session, &run.Name, &run.Description, &run.Script, &run.Args, &profiles, &run.Repo, &run.Commit, &run.Image, &run.State, &run.Result, &run.Version, &started, &ended)
 	if err != nil {
 		return run, err
 	}
@@ -67,6 +69,10 @@ func insertWorkflow(ctx context.Context, tx *sql.Tx, session contract.SessionID,
 		}
 	}
 	_, err = tx.ExecContext(ctx, "INSERT INTO workflow_runs(id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,started_at,resumes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", run.ID, run.Room, session, run.Name, run.Description, run.Script, run.Args, string(profiles), run.Repo, run.Commit, run.Image, contract.WorkflowRunning, at.UnixMilli(), run.Resume)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, "INSERT INTO workflow_scripts(run,version,script,created_at) VALUES(?,1,?,?)", run.ID, run.Script, at.UnixMilli())
 	if err != nil || run.Resume == "" {
 		return err
 	}
@@ -113,6 +119,35 @@ func (s *Store) ResumedSessions(ctx context.Context, repo contract.RepoName, ses
 		SELECT session FROM chain WHERE session!=?`, session, repo, repo, session)
 }
 
+// ErrWorkflowEnded is a reload of a run that is no longer running.
+var ErrWorkflowEnded = errors.New("the run has ended")
+
+// ReloadWorkflow makes script the run's newest version, with its meta's description and profiles, keeps it beside the earlier
+// ones, and wakes the crew's channel to carry it to the box. It returns the new version.
+func (s *Store) ReloadWorkflow(ctx context.Context, id contract.WorkflowRunID, script, description string, profiles []contract.ProfileName, at time.Time) (int, error) {
+	listed, err := json.Marshal(profiles)
+	if err != nil {
+		return 0, err
+	}
+	var version int
+	err = s.Write(ctx, func(tx *sql.Tx) error {
+		var session contract.SessionID
+		err := tx.QueryRowContext(ctx, "UPDATE workflow_runs SET script=?,description=?,profiles=?,version=version+1 WHERE id=? AND state=? RETURNING version,session", script, description, string(listed), id, contract.WorkflowRunning).Scan(&version, &session)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrWorkflowEnded
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO workflow_scripts(run,version,script,created_at) VALUES(?,?,?,?)", id, version, script, at.UnixMilli()); err != nil {
+			return err
+		}
+		s.wakePending = append(s.wakePending, session)
+		return nil
+	})
+	return version, err
+}
+
 // PinWorkflowCommit keeps the first commit reported.
 func (s *Store) PinWorkflowCommit(ctx context.Context, id contract.WorkflowRunID, commit string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
@@ -137,8 +172,9 @@ func (s *Store) PinWorkflowImage(ctx context.Context, session contract.SessionID
 	return pinned, err
 }
 
-// StartWorkflowStep returns a step's stored outcome, or records it as running when it has none. A step that was running when
-// its box went has no outcome, so it runs again. A workflow step always does, and its inner steps find their results.
+// StartWorkflowStep returns a step's stored outcome, or records it as running when it has none, under the script version that
+// asked. A step that was running when its box went has no outcome, so it runs again. A workflow step always does, and its inner
+// steps find their results.
 func (s *Store) StartWorkflowStep(ctx context.Context, run contract.WorkflowRunID, req contract.WorkflowStepStartRequest, at time.Time) (contract.WorkflowStepStartResponse, error) {
 	var stored contract.WorkflowStepStartResponse
 	err := s.Write(ctx, func(tx *sql.Tx) error {
@@ -151,8 +187,8 @@ func (s *Store) StartWorkflowStep(ctx context.Context, run contract.WorkflowRunI
 			return nil
 		}
 		stored = contract.WorkflowStepStartResponse{}
-		_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(run,key,parent,kind,name,phase,profile,detail,state,started_at) VALUES(?,?,?,?,?,?,?,?,?,?)
-			ON CONFLICT(run,key) DO UPDATE SET state=excluded.state,reason='',transcript='',started_at=excluded.started_at,ended_at=0`, run, req.Key, req.Parent, req.Kind, req.Name, req.Phase, req.Profile, req.Detail, contract.WorkflowStepRunning, at.UnixMilli())
+		_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(run,key,parent,kind,name,phase,profile,detail,state,started_at,version) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+			ON CONFLICT(run,key) DO UPDATE SET state=excluded.state,reason='',transcript='',started_at=excluded.started_at,ended_at=0,version=excluded.version`, run, req.Key, req.Parent, req.Kind, req.Name, req.Phase, req.Profile, req.Detail, contract.WorkflowStepRunning, at.UnixMilli(), req.Version)
 		return err
 	})
 	return stored, err
@@ -186,12 +222,12 @@ func (s *Store) SetWorkflowStepTranscript(ctx context.Context, run contract.Work
 // workflowStepMore says a step holds more than its row: what it ran beyond the words its name quotes, or what a command wrote.
 const workflowStepMore = `ifnull(trim(detail,char(32,9,10,13)) NOT IN ('',substr(name,length(kind)+3)) OR CASE WHEN kind='run' AND json_valid(result) THEN ifnull(json_extract(result,'$.stdout'),'')!='' OR ifnull(json_extract(result,'$.stderr'),'')!='' OR ifnull(json_extract(result,'$.code'),0)!=0 OR json_type(result,'$.conflicts')='array' ELSE 0 END,0)`
 
-const workflowStepColumns = "key,parent,kind,name,phase,profile,state,reason,transcript," + workflowStepMore + ",input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_at,ended_at"
+const workflowStepColumns = "key,parent,kind,name,phase,profile,version,state,reason,transcript," + workflowStepMore + ",input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_at,ended_at"
 
 func scanWorkflowStep(row interface{ Scan(...any) error }, extra ...any) (contract.WorkflowStep, error) {
 	var step contract.WorkflowStep
 	var started, ended int64
-	if err := row.Scan(append([]any{&step.Key, &step.Parent, &step.Kind, &step.Name, &step.Phase, &step.Profile, &step.State, &step.Reason, &step.Transcript, &step.More, &step.Usage.InputTokens, &step.Usage.OutputTokens, &step.Usage.CacheReadTokens, &step.Usage.CacheWriteTokens, &started, &ended}, extra...)...); err != nil {
+	if err := row.Scan(append([]any{&step.Key, &step.Parent, &step.Kind, &step.Name, &step.Phase, &step.Profile, &step.Version, &step.State, &step.Reason, &step.Transcript, &step.More, &step.Usage.InputTokens, &step.Usage.OutputTokens, &step.Usage.CacheReadTokens, &step.Usage.CacheWriteTokens, &started, &ended}, extra...)...); err != nil {
 		return step, err
 	}
 	step.Started = time.UnixMilli(started).UTC()
