@@ -115,6 +115,7 @@ type Service interface {
 	TranscriptRead(context.Context, contract.Principal, contract.TranscriptReadRequest) (contract.TranscriptReadResponse, *contract.Error)
 	SessionWork(context.Context, contract.Principal, contract.SessionWorkRequest) (contract.SessionWorkResponse, *contract.Error)
 	ShellJobEnded(context.Context, contract.Principal, contract.ShellJobEndedRequest) (contract.ShellJobEndedResponse, *contract.Error)
+	ShellJobRunning(context.Context, contract.Principal, contract.ShellJobRunningRequest) (contract.ShellJobRunningResponse, *contract.Error)
 	WorkflowRun(context.Context, contract.Principal, contract.WorkflowRunRequest) (contract.WorkflowRunResponse, *contract.Error)
 	WorkflowStatus(context.Context, contract.Principal, contract.WorkflowStatusRequest) (contract.WorkflowStatusResponse, *contract.Error)
 	WorkflowList(context.Context, contract.Principal, contract.WorkflowListRequest) (contract.WorkflowListResponse, *contract.Error)

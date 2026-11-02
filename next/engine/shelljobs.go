@@ -28,3 +28,25 @@ func (s *Service) ShellJobEnded(ctx context.Context, caller contract.Principal, 
 	}
 	return contract.ShellJobEndedResponse{}, nil
 }
+
+// ShellJobRunning tells a session about a background job of its own that is still running.
+func (s *Service) ShellJobRunning(ctx context.Context, caller contract.Principal, req contract.ShellJobRunningRequest) (contract.ShellJobRunningResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalSession {
+		return contract.ShellJobRunningResponse{}, forbidden()
+	}
+	if req.Job == "" {
+		return contract.ShellJobRunningResponse{}, invalid("job is required")
+	}
+	session, err := s.store.Session(ctx, caller.Session)
+	if err != nil {
+		return contract.ShellJobRunningResponse{}, failure(err)
+	}
+	event, err := s.event(session.Room, caller, contract.ShellJobRunning{Session: session.ID, Job: req.Job, Description: req.Description, RanMinutes: req.RanMinutes, QuietMinutes: req.QuietMinutes, Tail: req.Tail})
+	if err != nil {
+		return contract.ShellJobRunningResponse{}, failure(err)
+	}
+	if err = s.store.ShellJobRunning(ctx, session.ID, req.Job, event); err != nil {
+		return contract.ShellJobRunningResponse{}, failure(err)
+	}
+	return contract.ShellJobRunningResponse{}, nil
+}

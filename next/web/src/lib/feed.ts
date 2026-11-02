@@ -94,7 +94,8 @@ export function subject(event: Event): string | undefined {
 
 // Events with no row. Goals show in About and the session list; failures show on the box and turn events they report.
 // A pull request's rows come from pr.changed. The typed PR events, issue events and repo.main_updated exist for subscribers and sessions.
-const unshown = new Set<Event["type"]>(["workflow.ended", "workflow.step_changed", "session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due", "pr.merged", "pr.closed", "ci.finished", "repo.main_updated", "issue.changed", "issue.closed"]);
+// A running job's status is for the session that owns the job.
+const unshown = new Set<Event["type"]>(["shell.job.running", "workflow.ended", "workflow.step_changed", "session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due", "pr.merged", "pr.closed", "ci.finished", "repo.main_updated", "issue.changed", "issue.closed"]);
 
 // Builds the rows of one conversation. Posts and final answers become post rows, a
 // failed turn and a request are each their own row, and all other events between them fold into one work row.
@@ -289,7 +290,7 @@ export const eventGroups: Record<Event["type"], string> = {
   "image.built": "images built", "image.failed": "image builds failed", "pr.opened": "pull requests opened", "pr.changed": "pull request updates",
   "pr.merged": "pull requests merged", "pr.closed": "pull requests closed", "ci.finished": "CI results", "repo.main_updated": "default branch moves", "issue.changed": "issue updates", "issue.closed": "issues closed",
   "hook.finished": "subscription runs", "hook.due": "subscription wakes", "notice.posted": "notices", "session.notice": "box notices",
-  "shell.job.ended": "jobs finished", "grant.expired": "host grants expired",
+  "shell.job.ended": "jobs finished", "shell.job.running": "job status", "grant.expired": "host grants expired",
   "host.disk_low": "disk warnings", "conversation.read": "read positions", "workflow.ended": "workflow runs", "workflow.step_changed": "workflow steps",
   "session.failed": "failure notices", "goal.set": "goals set", "goal.item_changed": "goal items changed", "goal.ended": "goals ended", "checkin.due": "check-ins",
 };
@@ -484,6 +485,7 @@ export function describe(event: Event, name: Name): string {
     // Live only: the room store keeps it out of every feed window.
     case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "host.disk_low": case "conversation.read": return "";
     case "turn.activity": return event.body.label;
+    case "shell.job.running": return "";
     case "shell.job.ended": {
       const who = name(event.body.session), job = event.body.description ? `job "${event.body.description}"` : "job";
       if (event.body.end?.kind === "stopped") return `${who} stopped its ${job}`;

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"slices"
@@ -27,7 +28,18 @@ const (
 	keepFinished    = 20
 	retryStart      = time.Second
 	retryMax        = 30 * time.Second
+	statusLines     = 5 // output lines in a running job's status
 )
+
+// nextMark is the running time at which a job reports next: 15 and 30 minutes, then each hour.
+func nextMark(ran time.Duration) time.Duration {
+	for _, mark := range []time.Duration{15 * time.Minute, 30 * time.Minute} {
+		if ran < mark {
+			return mark
+		}
+	}
+	return (ran/time.Hour + 1) * time.Hour
+}
 
 // process is one running command. Signal reaches its whole process group.
 type process interface {
@@ -68,13 +80,15 @@ type job struct {
 	command     string
 	description string
 	started     time.Time
+	now         func() time.Time
 	proc        process
 	done        chan struct{}
 
 	mu            sync.Mutex
 	output        []byte // the newest output
-	base          int    // bytes dropped before output[0]
-	read          int    // bytes already returned, counted from the start of all output
+	lastOutput    time.Time
+	base          int // bytes dropped before output[0]
+	read          int // bytes already returned, counted from the start of all output
 	owner         int
 	ownerFinished bool
 	exit          int
@@ -90,6 +104,7 @@ func (j *job) Write(p []byte) (int, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	n := len(p)
+	j.lastOutput = j.now()
 	if j.skipping {
 		i := bytes.IndexByte(p, '\n')
 		if i < 0 {
@@ -133,6 +148,25 @@ func (j *job) unread() (string, bool) {
 	return text, !j.finished
 }
 
+// running reports the job at now, or false once it has ended or been stopped.
+func (j *job) running(now time.Time) (contract.ShellJobRunningRequest, bool) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.finished || j.stopped {
+		return contract.ShellJobRunningRequest{}, false
+	}
+	req := contract.ShellJobRunningRequest{Job: j.id, Description: j.description, RanMinutes: int(now.Sub(j.started) / time.Minute)}
+	if !j.lastOutput.IsZero() {
+		quiet := int(now.Sub(j.lastOutput) / time.Minute)
+		req.QuietMinutes = &quiet
+		// A token may continue in the next write, so a running job releases whole lines only.
+		lines := strings.Split(strings.TrimRight(Mask(string(j.output[:bytes.LastIndexByte(j.output, '\n')+1])), "\n"), "\n")
+		text := strings.Join(lines[max(0, len(lines)-statusLines):], "\n")
+		req.Tail = strings.ToValidUTF8(text[max(0, len(text)-tailLimit):], "")
+	}
+	return req, true
+}
+
 func (j *job) status() string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -154,6 +188,8 @@ type Config struct {
 	Dir    string                                    // default working directory
 	After  func(time.Duration) <-chan time.Time      // the clock
 	Report func(contract.ShellJobEndedRequest) error // called when a background job ends; retried until it succeeds
+	// Running is called at each mark of a background job's running time. A failed call is not retried: the next mark says more.
+	Running func(contract.ShellJobRunningRequest) error
 
 	newID func() contract.ShellJobID
 	start func(command, cwd, callID string, out io.Writer) (process, error)
@@ -202,7 +238,7 @@ func (s *Server) run(cancel <-chan struct{}, command, cwd, description, callID s
 	if cwd == "" {
 		cwd = s.cfg.Dir
 	}
-	j := &job{id: s.cfg.newID(), command: command, started: s.cfg.now(), owner: -1, done: make(chan struct{})}
+	j := &job{id: s.cfg.newID(), command: command, started: s.cfg.now(), now: s.cfg.now, owner: -1, done: make(chan struct{})}
 	j.description = Mask(description)
 	proc, err := s.cfg.start(command, cwd, callID, j)
 	if err != nil {
@@ -239,8 +275,33 @@ func (s *Server) run(cancel <-chan struct{}, command, cwd, description, callID s
 	}
 	j.mu.Lock()
 	j.background = !j.finished
+	watch := j.background && s.cfg.Running != nil
 	j.mu.Unlock()
+	if watch {
+		go s.watch(j)
+	}
 	return j, nil
+}
+
+// watch reports a background job at each mark of its running time, until it ends or is stopped.
+func (s *Server) watch(j *job) {
+	for {
+		ran := s.cfg.now().Sub(j.started)
+		select {
+		case <-s.cfg.After(nextMark(ran) - ran):
+		case <-j.done:
+			return
+		case <-s.closed:
+			return
+		}
+		req, running := j.running(s.cfg.now())
+		if !running {
+			return
+		}
+		if err := s.cfg.Running(req); err != nil {
+			log.Printf("shell job %s: status: %v", j.id, err)
+		}
+	}
 }
 
 // dropOldFinished keeps the running jobs and the last few finished ones.
