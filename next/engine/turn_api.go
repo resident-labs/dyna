@@ -20,6 +20,11 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	if err != nil {
 		return contract.BoxHelloResponse{}, failure(err)
 	}
+	// This goes before the box is ready, or a mark from its last run could stop it again.
+	if handle, ok := s.lookupSession(session.ID); ok {
+		handle.ClearRefresh()
+		handle.Unlock()
+	}
 	current, err := s.store.Box(ctx, session.Box)
 	if err != nil {
 		return contract.BoxHelloResponse{}, failure(err)

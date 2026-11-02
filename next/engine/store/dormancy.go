@@ -15,9 +15,9 @@ import (
 const quiet = `(EXISTS (SELECT 1 FROM rooms WHERE id=s.room AND paused_at IS NOT NULL) OR NOT EXISTS (SELECT 1 FROM deliveries WHERE to_kind='session' AND to_id=s.id AND wake=1 AND state='pending'))
 AND EXISTS (SELECT 1 FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND ended_at<=? AND id=(SELECT id FROM turns WHERE session=s.id ORDER BY started_at DESC, rowid DESC LIMIT 1))`
 
-// BoxUpdateNoticeID is the client ID of the notice that a box's update is held up, one per box per binary.
-func BoxUpdateNoticeID(box contract.BoxID, binary string) string {
-	return "box-update:" + string(box) + ":" + binary
+// BoxUpdateNoticeID is the client ID of the notice that a box's update is held up, one per box per update.
+func BoxUpdateNoticeID(box contract.BoxID, update string) string {
+	return "box-update:" + string(box) + ":" + update
 }
 
 // boxUpdateNotice finds that notice among deliveries. It is not work: it holds no close and does not pass to the parent.
@@ -29,14 +29,19 @@ func (s *Store) CanDispatch(ctx context.Context, id contract.SessionID) (bool, e
 	return ok, err
 }
 
+// RunningSessions lists a room's open sessions whose boxes are up and meant to stay up.
+func (s *Store) RunningSessions(ctx context.Context, room contract.RoomID) ([]contract.SessionID, error) {
+	return listIDs[contract.SessionID](ctx, s.Read(), `SELECT s.id FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.room=? AND s.closed_at IS NULL AND s.state='open' AND b.want='run' AND b.state='ready' ORDER BY s.created_at,s.id`, room)
+}
+
 // StopQuiet requests stops for candidates that nothing needs and that have been quiet since the cutoff.
 func (s *Store) StopQuiet(ctx context.Context, ids []contract.SessionID, cutoff time.Time) ([]contract.SessionID, error) {
 	return s.stopFree(ctx, ids, quiet, cutoff.UnixMilli())
 }
 
-// StopStale requests stops for boxes on an old binary as soon as nothing needs them, with no wait. A wake on its way does not
-// hold one back: its delivery stays stored, Dispatch refuses a box that is not want='run', and WakeStopped starts it again.
-// The stop applies the update, so a notice that it was coming and that no turn read is dropped.
+// StopStale requests stops for boxes on an old binary, or marked to restart, as soon as nothing needs them, with no wait. A wake
+// on its way does not hold one back: its delivery stays stored, Dispatch refuses a box that is not want='run', and WakeStopped
+// starts it again. The stop applies the update, so a notice that it was coming and that no turn read is dropped.
 func (s *Store) StopStale(ctx context.Context, ids []contract.SessionID) ([]contract.SessionID, error) {
 	stopped, err := s.stopFree(ctx, ids, `1`)
 	if err != nil || len(stopped) == 0 {
