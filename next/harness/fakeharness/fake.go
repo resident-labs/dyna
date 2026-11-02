@@ -40,9 +40,12 @@ type Harness struct {
 	Models   []contract.ModelChoice // each TransferModel call, in order
 	Triggers []int                  // the compaction trigger of each TransferModel call
 	// Transfer stands in for Pi's transfer, if set. It can block to hold a transfer open.
-	Transfer  func(context.Context) (harness.ModelTransfer, error)
-	delivered map[contract.DeliverySeq]bool
-	stopped   chan struct{}
+	Transfer func(context.Context) (harness.ModelTransfer, error)
+	// CompactFunc stands in for Pi's compaction, if set. It can block to hold one open, and it gets the size asked for.
+	CompactFunc func(context.Context, int64) (harness.Compaction, error)
+	Compacts    int // each Compact call
+	delivered   map[contract.DeliverySeq]bool
+	stopped     chan struct{}
 }
 
 var _ harness.Harness = (*Harness)(nil)
@@ -95,6 +98,17 @@ func (h *Harness) TransferModel(ctx context.Context, _ contract.TurnID, model co
 		return transfer(ctx)
 	}
 	return harness.ModelTransfer{Path: "switched"}, nil
+}
+
+func (h *Harness) Compact(ctx context.Context, over int64) (harness.Compaction, error) {
+	h.mu.Lock()
+	h.Compacts++
+	compact := h.CompactFunc
+	h.mu.Unlock()
+	if compact != nil {
+		return compact(ctx, over)
+	}
+	return harness.Compaction{}, nil
 }
 
 func (*Harness) SetPromptSections(context.Context, []contract.ContextSection) error { return nil }

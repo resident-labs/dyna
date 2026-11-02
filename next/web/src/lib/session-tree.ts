@@ -1,4 +1,5 @@
-import type { BoxState, SessionStarted } from "./contract.gen.ts";
+import type { BoxState, Responsibility, ResponsibilityKind, SessionStarted } from "./contract.gen.ts";
+import { count } from "./feed.ts";
 import { urgency, type Status } from "./status.ts";
 
 export type TreeRow = { kind: "session"; session: SessionStarted; depth: number; parent: boolean; hidden: number; state: Status; dot: Status; mark?: string }
@@ -21,6 +22,25 @@ export function closeNote(names: string[]): string {
   const shown = names.slice(0, 2);
   const rest = names.length - shown.length;
   return `Also closes ${rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.join(" and ")}. Their work is archived first.`;
+}
+
+const holdingNames: Record<ResponsibilityKind, string> = {
+  turn: "turn", shell_job: "shell job", terminal: "terminal", workflow: "workflow run", goal: "goal", pr: "PR", issue: "issue", question: "question", child: "child",
+};
+
+// What a session still holds, as the engine lists it. A running turn has its own row, so it is not repeated here.
+export function holdsText(items: Responsibility[]): string {
+  return items.filter(item => item.kind !== "turn").map(item => [holdingNames[item.kind], item.id].filter(Boolean).join(" ")).join(", ");
+}
+
+// What a close hands over, as "This hands 2 goals and 1 PR to root." Nothing to hand over needs no sentence.
+export function handNote(handed: Responsibility[], to: string): string {
+  const counts = new Map<ResponsibilityKind, number>();
+  for (const item of handed) counts.set(item.kind, (counts.get(item.kind) ?? 0) + 1);
+  const parts = [...counts].map(([kind, n]) => count(n, holdingNames[kind]));
+  if (!parts.length) return "";
+  const last = parts.pop()!;
+  return `This hands ${parts.length ? `${parts.join(", ")} and ${last}` : last} to ${to}.`;
 }
 
 export type SessionAction = "move" | "stop" | "restart" | "close";

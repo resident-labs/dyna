@@ -254,53 +254,82 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	if problem != nil {
 		return contract.SessionCloseResponse{}, problem
 	}
-	if e := s.closeSession(ctx, session, req.Discard, false); e != nil {
-		return contract.SessionCloseResponse{}, e
-	}
-	return contract.SessionCloseResponse{}, nil
+	return s.closeSession(ctx, session, req.Discard, false)
 }
 
-func (s *Service) closeSession(ctx context.Context, session store.Session, discard, dormant bool) *contract.Error {
+// SessionResponsibilities reads a session's list and what a close would do with it now.
+func (s *Service) SessionResponsibilities(ctx context.Context, caller contract.Principal, req contract.SessionResponsibilitiesRequest) (contract.SessionResponsibilitiesResponse, *contract.Error) {
+	var response contract.SessionResponsibilitiesResponse
+	session, err := s.store.Session(ctx, req.Session)
+	if err != nil {
+		return response, failure(err)
+	}
+	if problem := s.roomAccess(ctx, caller, session.Room); problem != nil {
+		return response, problem
+	}
+	held, err := s.store.Responsibilities(ctx, session.ID)
+	if err != nil {
+		return response, failure(err)
+	}
+	response.Items = append([]contract.Responsibility{}, held...)
 	tree, err := s.store.RoomTree(ctx, session.Room)
 	if err != nil {
-		return failure(err)
+		return response, failure(err)
+	}
+	if order, err := tree.CloseOrder(session.ID); err == nil {
+		if response.Close, err = s.store.ClosePlan(ctx, order, tree.Parent(session.ID)); err != nil {
+			return response, failure(err)
+		}
+	}
+	return response, nil
+}
+
+// closeSession never refuses over what a session holds: the list says what the close does with it, and the response says the same.
+func (s *Service) closeSession(ctx context.Context, session store.Session, discard, dormant bool) (contract.SessionCloseResponse, *contract.Error) {
+	var plan contract.SessionCloseResponse
+	tree, err := s.store.RoomTree(ctx, session.Room)
+	if err != nil {
+		return plan, failure(err)
 	}
 	order, err := tree.CloseOrder(session.ID)
 	if err != nil {
-		return forbidden()
+		return plan, forbidden()
+	}
+	if plan, err = s.store.ClosePlan(ctx, order, tree.Parent(session.ID)); err != nil {
+		return plan, failure(err)
 	}
 	if dormant {
 		changed, err := s.store.MarkDormantClosing(ctx, session.ID, s.now().Add(-7*24*time.Hour), s.now().Add(-diskLowWait))
 		if err != nil {
-			return failure(err)
+			return plan, failure(err)
 		}
 		if !changed {
-			return nil
+			return plan, nil
 		}
 	} else if err := s.store.MarkClosing(ctx, session.ID, discard, s.now()); err != nil {
-		return failure(err)
+		return plan, failure(err)
 	}
 	if err := s.stopWorkflows(ctx, order); err != nil {
-		return failure(err)
+		return plan, failure(err)
 	}
 	if err := s.StopHostexecs(ctx); err != nil {
-		return failure(err)
+		return plan, failure(err)
 	}
 	if !discard {
 		boxes, err := s.store.LifecycleBoxes(ctx)
 		if err != nil {
-			return failure(err)
+			return plan, failure(err)
 		}
 		for _, b := range boxes {
 			if slices.Contains(order, b.Session) && b.Want == store.WantClose && b.State == contract.BoxClosing && b.Reason != "" {
 				if err := s.archiveReason(ctx, session.Room, b.Box, ""); err != nil {
-					return failure(err)
+					return plan, failure(err)
 				}
 			}
 		}
 	}
 	s.reconciler.Kick()
-	return nil
+	return plan, nil
 }
 
 // SessionRestart retries an open session whose box has failed.

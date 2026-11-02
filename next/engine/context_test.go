@@ -41,7 +41,7 @@ func TestSnapshotReplayAndCap(t *testing.T) {
 		t.Fatal(problem)
 	}
 	start := (<-ch).Body.(contract.TurnStart)
-	if len(start.Sections) != 2 || start.Sections[0].Key != contract.ContextGoal || !strings.Contains(start.Sections[1].Text, "before") {
+	if len(start.Sections) != 3 || start.Sections[0].Key != contract.ContextGoal || start.Sections[1].Key != contract.ContextHolds || !strings.Contains(start.Sections[2].Text, "before") {
 		t.Fatalf("snapshot: %+v", start.Sections)
 	}
 	profiles.name = "after"

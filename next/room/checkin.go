@@ -15,7 +15,7 @@ const (
 	CheckinIdle = 10 * time.Minute
 	// CheckinEscalate is how long one ancestor has with a stall before the next one up hears of it.
 	CheckinEscalate = time.Hour
-	// CheckinStuck is how long a turn, a background job or a box start may last before its goal holder counts as blocked.
+	// CheckinStuck is how long a turn or a box start may last before its goal holder counts as blocked.
 	CheckinStuck = 2 * time.Hour
 	// CheckinRows caps the rows one check-in shows.
 	CheckinRows = 12
@@ -34,7 +34,7 @@ type CheckinSession struct {
 	Last       time.Time // when the running turn started, the last turn ended, or the session was created
 	Failed     bool      // the last turn failed
 	Retrying   bool      // a model retry is scheduled
-	Jobs       int       // background shell jobs still running
+	Jobs       int       // background shell jobs still running, each of which wakes the session when it ends
 	Pending    bool      // a waking input or a running operation will move it
 	Asking     bool      // it has an open question for the owner; a report says so, and it excuses nothing
 	Blocked    bool      // one of those questions left it nothing safe to do, so only the answer will move it
@@ -78,7 +78,7 @@ type CheckinPlan struct {
 }
 
 // stillness says how a session that is not moving sits: a state, why, and since when. moving is true while something will
-// still move it. Past CheckinStuck a turn, a job or a box start no longer counts as moving.
+// still move it. Past CheckinStuck a turn or a box start no longer counts as moving.
 func (s CheckinSession) stillness(now time.Time) (state contract.CheckinState, reason string, since time.Time, moving bool) {
 	stuck := func(from time.Time) bool { return now.Sub(from) >= CheckinStuck }
 	switch s.Box {
@@ -90,9 +90,7 @@ func (s CheckinSession) stillness(now time.Time) (state contract.CheckinState, r
 	switch {
 	case s.Turn:
 		return contract.CheckinBlocked, "its turn has run a long time", s.Last, !stuck(s.Last)
-	case s.Jobs > 0:
-		return contract.CheckinBlocked, "its background job has run a long time", s.Last, !stuck(s.Last)
-	case s.Pending, s.Retrying, s.Blocked:
+	case s.Pending, s.Retrying, s.Blocked, s.Jobs > 0:
 		return "", "", time.Time{}, true
 	case !s.Waiting.IsZero():
 		return contract.CheckinBlocked, "it waits on an operation", s.Waiting, false

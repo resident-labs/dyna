@@ -90,8 +90,8 @@ func TestSlowCommandMovesToBackgroundAndReportsItsEnd(t *testing.T) {
 	if got := describe(j); !strings.Contains(got, "running in the background") || !strings.Contains(got, "building") {
 		t.Fatalf("unexpected foreground result %q", got)
 	}
-	if r.server.Running() != 1 {
-		t.Fatalf("running = %d, want 1", r.server.Running())
+	if len(r.server.Running()) != 1 {
+		t.Fatalf("running = %v, want 1", r.server.Running())
 	}
 	r.proc.exit <- 3
 	report := <-r.reports
@@ -99,8 +99,8 @@ func TestSlowCommandMovesToBackgroundAndReportsItsEnd(t *testing.T) {
 		t.Fatalf("unexpected report %+v", report)
 	}
 	<-j.done
-	if r.server.Running() != 0 {
-		t.Fatalf("running = %d, want 0", r.server.Running())
+	if len(r.server.Running()) != 0 {
+		t.Fatalf("running = %v, want 0", r.server.Running())
 	}
 }
 
