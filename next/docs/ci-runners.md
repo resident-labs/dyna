@@ -88,6 +88,15 @@ pool may be down. `relay` needs a container runtime. `next-pi` stays hosted beca
 one Pi test rewrites a file with a same-size value and expects the change to show:
 on tmpfs both writes can land in one clock tick, so size and time both match.
 
+The image is not `ubuntu-latest`: it has no Go or Node, an empty `/etc/machine-id`,
+and Podman's default `/dev/shm`. A job installs its own tools, and a test must not
+lean on the machine it runs on. A test that skips when a tool is missing passes
+without running, so `next` installs Node for the tests in `box/agent`.
+
+`next` fits `medium`, though `--size` defaults to `large`. In a `medium` container on
+pve it took 2 minutes from a cold cache, and peaked at 2.6 of 6 GiB of tmpfs and 4
+of 8 GiB of memory.
+
 ## What a runner can touch
 
 Each runner is a rootless Podman container, built from
@@ -110,9 +119,10 @@ Each runner is a rootless Podman container, built from
   that moment. That rate sits below the uplink so that the proxy decides the shares.
   Left to TCP, the link splits by tunnel and goes to whoever holds the most. A job
   alone on the host gets all of it, and an idle job's long poll takes nothing.
-- **Disk:** everything writable is a tmpfs capped at three quarters of the memory
-  limit, and tmpfs counts against that limit. So a job cannot grow the host's disk
-  at all, and all it wrote dies with it.
+- **Disk:** `/home/runner` and `/tmp` are each a tmpfs capped at three quarters of
+  the memory limit, and `/dev/shm` is Podman's default, 64 MB and `noexec`. All of it
+  counts against that limit. So a job cannot grow the host's disk at all, and all it
+  wrote dies with it.
 - **Secrets:** the only one is its JIT config. It reaches `podman run` on standard
   input, never argv. Podman keeps it in the container's config, and conmon has it
   in its environment, both readable only by the host user, until the container
