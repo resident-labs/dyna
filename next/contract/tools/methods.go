@@ -87,7 +87,7 @@ var methodTable = []MethodEntry{
 		act("instructions", "get", typ[contract.InstructionsGetRequest](), "Read the global AGENTS.md, or room's, with its hash and who saved it last. Only the owner and each room's root may.", "instructions get"),
 	),
 	method(contract.MethodInstructionsSet, contract.ScopeAdmin, UserAccess,
-		act("instructions", "set", typ[contract.InstructionsSetRequest](), "Replace the global AGENTS.md, or room's, with text. base is the hash from get: if someone else saved since, the save is refused as stale rather than overwriting their edit, so get again and redo the change. A saved edit reaches every session at its next turn by itself, so no session needs a message about it. Only the owner and each room's root may.", "instructions set"),
+		act("instructions", "set", typ[contract.InstructionsSetRequest](), "Replace the global AGENTS.md, or room's, with text. base is the hash from get: if someone else saved since, the save is refused as stale rather than overwriting their edit, so get again and redo the change. A saved edit reaches every session before its next model request by itself, even mid-turn, so no session needs a message about it. Only the owner and each room's root may.", "instructions set"),
 	),
 	method(contract.MethodIssueList, contract.ScopeRead, UserAccess,
 		act("issue", "list", typ[contract.IssueListRequest](), "List the tracked open issues in room. Set all to add closed ones.", "issue list"),
