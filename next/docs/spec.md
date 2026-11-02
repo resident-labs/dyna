@@ -73,7 +73,7 @@ Main has no v1 tree. The old module (`dyna-agent`) and `cmd/dyna-export` exist o
 | Command | Where it runs | What it does |
 |---|---|---|
 | `dyna engine` | control plane | serves the API, owns the store, supervises CLIProxyAPI and runs the engine timers |
-| `dyna box-agent` | in each box | turn runner, shell server, the `dyna` MCP server (7.9), transcript stream, model and git routes into the box |
+| `dyna box-agent` | in each box | turn runner, shell jobs behind the `bash` tool, the `dyna` MCP server (7.9), transcript stream, model and git routes into the box |
 | `dyna <noun> <verb>` | anywhere | the CLI. In a box it uses the box socket. On the control plane it uses the owner socket. On the owner's desktop it uses the owner socket through an SSH forward (`--socket`, decision 14). |
 
 **Dependency direction.** `contract` imports nothing from the module. `room` imports only `contract`, and it does no I/O: it decides, and the engine acts. `harness` imports only `contract`. `box` imports `contract` and `harness`, because the box agent runs the adapters. `engine` imports `room`, `box`, `harness` and `contract`. `engine/runtime` also imports `web`, which only embeds the built assets. `cmd/dyna` wires them. `engine/store` imports `contract`, `room` and `box`, and nothing else from the module. A unit test enforces this with `go list -deps`.
@@ -345,7 +345,7 @@ From M2, git smart HTTP goes through the engine. Fetches cover room repositories
 
 ### 5.8 Box agent (M1; shell server and transcript stream in M2)
 
-The box agent runs Pi over RPC and the Dyna MCP server (7.9). In a crew's box it runs the script instead (9.2), and no session Pi. M2 adds a secret-masking shell server and transcript stream. Shell jobs run locally in process groups; stopping a job kills its group. There is no `node=` option. M1 uses Pi's bash tool.
+The box agent runs Pi over RPC and the Dyna MCP server (7.9). In a crew's box it runs the script instead (9.2), and no session Pi. M2 adds a secret-masking job server and transcript stream. `bash` (7.9) runs a command as a job, locally in a process group, or on a host through the engine (6.3). Stopping a job kills its group.
 
 Pi owns steer and follow-up queues. A delivery is done only when Pi's session file records its ID. Until `turn.output` commits, each reconnect resends `TurnStart` with all original inputs, including done deliveries, then unread later inputs as `TurnSteer` in sequence order. The runner skips IDs already in the session file. Identical turn-result retries do not duplicate events; conflicting results fail. Failed turns except `output_limit` return inputs to pending without waking, preserving reply channels. Pi controls compaction, apart from one case the engine asks for, idle compaction, below.
 
@@ -489,7 +489,7 @@ Host exec runs one command outside boxes on a capacity host or the control plane
 
 ### 6.1 Grants
 
-A grant names hosts and reason, and permits any command until the session closes (owner, 2026-10-31, msg_64eccb5e3dff2300). There are no command rules or per-run approvals. A missing grant returns `no_grant`. `hostexec.run` is class `auto`; every run is recorded and emits `op.ran`.
+A grant names hosts and reason, and permits any command until the session closes (owner, 2026-10-31, msg_64eccb5e3dff2300). There are no command rules or per-run approvals. An agent runs a command with `bash` and its `host` option. A missing grant returns `no_grant`. `hostexec.run` is class `auto`; every run is recorded and emits `op.ran`.
 
 ### 6.2 Default grant, owner grants and session close
 
@@ -499,7 +499,9 @@ The planned `show_pty` tool (`dyna show-pty`) requests a live terminal for the o
 
 ### 6.3 Run path
 
-The box socket identifies the caller. The engine rechecks the grant before execution. A capacity host allows three concurrent runs; a full lane returns `host_busy`. Commands run in a named systemd user scope over SSH, or locally on the control plane, with empty stdin and the host user's login environment. The default timeout is 10 minutes and maximum two hours. Output has no live stream: 64 KiB is inline, the rest is a file, and the cap is 8 MiB. Long runs wake the caller on `op.ran`. Lost units stop after reconnect.
+The box socket identifies the caller. The engine rechecks the grant before execution. A capacity host allows three concurrent runs; a full lane returns `host_busy`. Each run is `bash -c` on one command string, in a named systemd user scope over SSH, or locally on the control plane, with empty stdin and the host user's login environment. The default timeout is 10 minutes and maximum two hours. Output has no live stream: 64 KiB is inline, the rest is a file, and the cap is 8 MiB.
+
+In a box the run is a job of the box's job server, whose call to `hostexec.run` stays open until the engine answers. So it behaves like a local job: up to 30 s in the foreground, then in the background with a job ID, a wake when it ends, status at the running marks, masking, and a row in the Jobs panel with its host. Its output arrives at its end. `job stop` refuses a host run, which ends at its timeout or with its session. A refusal such as `no_grant` leaves no job. From a box shell, `dyna bash --host HOST COMMAND` makes the same call and waits for the result. A caller that disconnects instead wakes on `op.ran`. Lost units stop after reconnect.
 
 ### 6.4 Control-plane safety and accepted risks
 
@@ -629,7 +631,7 @@ Connect keeps its wire protocol and relay paths. `engine/connect` ports link, mi
 
 ### 7.9 Agent surface: MCP tools and the context snapshot
 
-Pi is the only harness. The box agent serves one `dyna` MCP server at `127.0.0.1:7781/dyna/`, beside `/shell/`; each call routes to `POST /v1/<method>` on the box socket. The CLI uses the same methods and principal. The engine alone authorizes and renders `context.snapshot`. Pi owns MCP, search, codemode, skills, keyed sections, compaction and context updates. The box agent configures Pi and passes state; it has no authority or credentials. Dyna's one Pi extension, `box/agent/extension.js`, links nested calls to their outer call and registers `mcp__dyna__post` in place of Pi's MCP tool, because only a tool's own result carries `terminate`: MCP results and the `tool_result` hook drop it. It adds no authority; the post still goes through the `dyna` MCP server. Cherry-pick upstream Pi fixes #11625 and #11632 and record them and the core change in `third_party/pi/DYNA.md`.
+Pi is the only harness. The box agent serves one `dyna` MCP server at `127.0.0.1:7781/dyna/`; each call routes to `POST /v1/<method>` on the box socket. The CLI uses the same methods and principal. The engine alone authorizes and renders `context.snapshot`. Pi owns MCP, search, codemode, skills, keyed sections, compaction and context updates. The box agent configures Pi and passes state; it has no authority or credentials. Dyna's one Pi extension, `box/agent/extension.js`, links nested calls to their outer call, registers `mcp__dyna__post` in place of Pi's MCP tool, because only a tool's own result carries `terminate`: MCP results and the `tool_result` hook drop it, and registers `bash` and `job` (below). It adds no authority; the post still goes through the `dyna` MCP server. Cherry-pick upstream Pi fixes #11625 and #11632 and record them and the core change in `third_party/pi/DYNA.md`.
 
 #### Pi core change: context updates
 
@@ -639,7 +641,7 @@ The first head and each `appendCompaction` contain current keyed sections and de
 
 Context updates carry sections only; Dyna tool definitions stay fixed for a box's lifetime. Direct servers announce their tools; deferred and codemode servers announce their description in `mcp_servers`, and deferred tools appear on a `tool_search` hit. Standard MCP `notifications/tools/list_changed` carries list changes. Search returns a short count, not schemas.
 
-Pi declares the Dyna and shell tools directly. It activates `tool_search` only when a deferred server requires it.
+Pi declares the Dyna tools and `bash` directly. It activates `tool_search` only when a deferred server requires it.
 
 Each update entry stores its full delivered sections in `details`; compaction stores the folded head and declarations. Pi derives delivered state from the active branch's latest update, compaction or first head. Crash recovery sends only an update not yet recorded. Tests cover restart.
 
@@ -657,7 +659,7 @@ Each `contract/tools/` toolkit registers one area tool with a flat `action` enum
 | `session` | start, list, responsibilities, stop, close, restart, refresh, set_profile, move, compose_list | `session.*`, `compose.list`; profiles are in the `dyna_profiles` section | 1 |
 | `room` | log, repos, pause, hosts | `events.list`, `room.repos`, `room.pause`, `room.hosts` | 1 |
 | `op` | withdraw | `op.withdraw` (own pending ones; they are in `dyna_requests`); deciding is the owner's (3.5 classes) | 1 |
-| `hostexec` | run, request_grant | `hostexec.run`, `op.submit` with `hostexec.grant` | 1 |
+| `hostexec` | request_grant | `op.submit` with `hostexec.grant` | 1 |
 | `pr` | open, list, status, track, untrack | `pr.open`, `pr.list`, `pr.status`, `pr.track`, `pr.untrack`; approval is deferred (7.6) | 1, 2 |
 | `visual` | check | the visual checker in the box | 1 |
 | `computer` | open, click, type, text, screenshot | the box computer (5.14); screenshots return as image results | 1 |
@@ -672,7 +674,9 @@ Each `contract/tools/` toolkit registers one area tool with a flat `action` enum
 | `mcp` | add, list, remove | `mcp.*` | 2 |
 | `pool` | add, list | `pool.add`, `pool.list`; `pool.remove` is the owner's | 2 |
 
-Every session initially declares all Dyna tools and four shell tools, with `codemode` active (`--tools +codemode`; `codemode.mode` stays `on`, so declared tools stay direct and scripts can call them) and without `tool_search`. Pi waits for direct servers before the first prompt. Maximum-depth starts fail with a typed refusal. Dyna calls use the MCP route; the box resolves names and actions, returning `unknown_action` with valid names. The handler strictly decodes arguments once and returns its typed error unchanged. Room MCP servers use codemode exposure; owner-only methods stay in CLI and web. `session.restart` requires tree access; `room.repos` allows a session its own room. The Dyna MCP timeout is 600 seconds with progress notifications; longer work returns an operation immediately and wakes the session on `op.ran`.
+Every session initially declares all Dyna tools, `bash` and `job`, with `codemode` active (`--tools +codemode`; `codemode.mode` stays `on`, so declared tools stay direct and scripts can call them) and without `tool_search`. Pi waits for direct servers before the first prompt. Maximum-depth starts fail with a typed refusal. Dyna calls use the MCP route; the box resolves names and actions, returning `unknown_action` with valid names. The handler strictly decodes arguments once and returns its typed error unchanged. Room MCP servers use codemode exposure; owner-only methods stay in CLI and web. `hostexec.run` has no action of its own: `bash` reaches it, and the CLI has `dyna bash --host`. `session.restart` requires tree access; `room.repos` allows a session its own room. The Dyna MCP timeout is 600 seconds with progress notifications; longer work returns an operation immediately and wakes the session on `op.ran`.
+
+**`bash` and `job`.** Agents have one command tool, under Pi's name. The extension registers `bash` in Pi's built-in's place: an extension's tool wins over a built-in of that name, so Pi needs no patch. Pi's own bash has no background mode, so this one calls the box's job server, `box/shell`, over plain JSON at `/shell/`. It always takes a command string, with `description`, `cwd` and, for a run on another machine, `host` and `timeout`. It starts where Pi started, which is the repository's checkout, or a worker's own tree, and a `cwd` that does not exist fails with its name quoted. Its model text is the output, cut to the last 20 KiB with the rest in a file, and a line with the job's state. A nonzero exit is not a tool error, since `grep` finding nothing is one: the line says the code. A command that moves to the background adds `The job is in the background. You can end your turn and Dyna will wake you when it completes.` after its job ID. The description states what agents got wrong most: `job output` shows only new text, and `pkill -f` on the command's own text ends the job. A script's `tools.bash()` resolves to `{output, job, running, status, exit_code}`. A job stays for its life in the Jobs panel. `job` is the companion for what `bash` cannot be: `output`, `stop` and `list` name no command, and `bash` always takes one. One tool with an action costs less of the prompt than three. Both stay direct, because a command is what almost every turn does.
 
 The registry generates the server description's one sentence naming areas, and the tool list is the same for all sessions. The startup prompt does not name tools. Tool schemas and help appear in the declarations; identity and trust come from `box.hello`; instructions from context files; state from snapshot sections; skills from Pi; authority from the engine. A test checks registry and CLI action coverage.
 
@@ -792,7 +796,7 @@ A **crew** is one Dyna session with one box. The agents inside it are Pi process
 
 `parallel` and `pipeline` turn a failure into an entry `{failed: true, step, reason}`, and a failed pipeline item skips its later stages. An error no step recorded joins the journal there too, so the run's end counts it. There is no silent `null`.
 
-**Workers.** Each `agent()` is a Pi process started like a session's, with its model, the session's instructions plus one paragraph on being a worker, and its own session file in `/box/pi/sessions`. Workers share the box's tools, and those without a worktree share its main tree. The box's memory bounds them, at one worker per 512 MiB of `memory.high`, and a profile's `maxConcurrent` bounds its own; zero is unlimited. A crew's turn ends when the script does, and a step the script did not wait for fails. Its transcripts carry the crew's input, so `transcript_turns` files every worker under the crew's one turn, by path. A shell job's end still wakes the session, which has no Pi to hear it, so a worker reads a long job with `shell_output` until it ends.
+**Workers.** Each `agent()` is a Pi process started like a session's, with its model, the session's instructions plus one paragraph on being a worker, and its own session file in `/box/pi/sessions`. Workers share the box's tools, and those without a worktree share its main tree. The box's memory bounds them, at one worker per 512 MiB of `memory.high`, and a profile's `maxConcurrent` bounds its own; zero is unlimited. A crew's turn ends when the script does, and a step the script did not wait for fails. Its transcripts carry the crew's input, so `transcript_turns` files every worker under the crew's one turn, by path. A shell job's end still wakes the session, which has no Pi to hear it, so a worker reads a long job with `job output` until it ends.
 
 **Worktrees.** `worktree: true` runs a worker in its own git worktree beside the main tree, in `<repo>.worktrees/`, on its own branch `v2/<session>-<key>` from the pinned commit. The git route lets a session push that prefix, and worktrees share one repository copy, so no worker clones. Its shell and Pi start there, and it is told to stay there; nothing enforces that. When it finishes, the box agent commits what it left, except ignored files, without running hooks, and pushes the branch, with up to three tries. Only then is the step stored as done, so a stored step always has its work on the remote, and its result names the branch, the commit and the files changed. A push that fails fails the step with the reason, and a worker that fails saves nothing. The tree goes when its step ends, so a script finds the same thing in the first box as in a replacement: a branch and a commit, not a folder. When a stored step replays, the box fetches its branch, and a branch that is gone fails that call and counts at the run's end. A rerun of a step that never stored replaces whatever its lost attempt pushed. Give every worker that writes a worktree, and give writers separate files. Workers without one keep sharing the main tree, and their uncommitted files do not survive a lost box.
 

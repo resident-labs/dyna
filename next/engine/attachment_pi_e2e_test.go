@@ -165,7 +165,7 @@ func newPiBox(t *testing.T, serve http.HandlerFunc, modelDefinition map[string]a
 	}
 	return &piBox{
 		s: s, ctx: ctx, room: session.Room, caller: caller, client: agent.NewClient(socket), dir: dir, ended: make(chan contract.TurnEnded, 8),
-		args: []string{cli, "--provider", "anthropic", "--model", "m", "--thinking", "low", "--mode", "rpc", "--extension", extension, "--models-file", modelsPath, "--session-dir", sessions, "--exclude-tools", "bash", "--continue"},
+		args: []string{cli, "--provider", "anthropic", "--model", "m", "--thinking", "low", "--mode", "rpc", "--extension", extension, "--models-file", modelsPath, "--session-dir", sessions, "--continue"},
 	}
 }
 

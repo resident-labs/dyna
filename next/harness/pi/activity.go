@@ -10,7 +10,11 @@ func activityLabel(e event) string {
 	label := e.ToolName
 	var args map[string]json.RawMessage
 	_ = json.Unmarshal(e.Args, &args)
-	for _, key := range []string{"path", "command", "pattern", "query", "url"} {
+	var host string
+	if e.ToolName == "bash" && json.Unmarshal(args["host"], &host) == nil && host != "" {
+		label += " on " + host + ":"
+	}
+	for _, key := range []string{"path", "command", "pattern", "query", "url", "job"} {
 		var value string
 		if json.Unmarshal(args[key], &value) != nil || value == "" {
 			continue

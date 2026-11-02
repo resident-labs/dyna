@@ -10,6 +10,8 @@ func TestActivityLabel(t *testing.T) {
 	for _, tc := range []struct{ name, args, want string }{
 		{"read", `{"path":"/a/spec.md"}`, "read spec.md"},
 		{"bash", `{"command":"` + strings.Repeat("x", 90) + `\nignored"}`, "bash " + strings.Repeat("x", 90)},
+		{"bash", `{"command":"uptime","host":"hermeslab"}`, "bash on hermeslab: uptime"},
+		{"job", `{"action":"output","job":"job_1"}`, "job job_1"},
 		{"tool", `{"other":"value"}`, "tool"},
 		{"tool", `["not an object"]`, "tool"},
 	} {
