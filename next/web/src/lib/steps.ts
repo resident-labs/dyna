@@ -1,5 +1,7 @@
 import { shortPaths } from "./feed.ts";
-import type { Event, TranscriptItem, TranscriptStep } from "./contract.gen.ts";
+import { parsedJson } from "./json.ts";
+import { jsonFields, reading, type Field } from "./workflow.ts";
+import type { Event, TranscriptItem, TranscriptPart, TranscriptStep } from "./contract.gen.ts";
 
 export type StepKind = "read" | "edit" | "write" | "search" | "list" | "run" | "fetch" | "tool";
 
@@ -48,6 +50,18 @@ export function titleOf(item: TranscriptItem) {
   } catch { /* An incomplete preview has no row target; its fold keeps the full arguments. */ }
   const tool = item.tool ?? "tool";
   return stepTitle({ tool, label: target ? `${tool} ${target}` : "" });
+}
+
+// An opened tool reads for a person: a command or a file's body as the text it is, and any other argument as a labelled row. A
+// command's own output stays whole, JSON or not. A cut preview is not JSON yet, and the row loads the rest as it opens.
+const bodies = ["command", "content", "code", "script"];
+export function toolPart(part: TranscriptPart, text: string, kind: StepKind, cut: boolean): { text?: string; fields: Field[] } {
+  if (part === "output" && kind === "run") return { text, fields: [] };
+  if (part === "output") { const read = reading(text); return { text: read.text, fields: read.fields ?? [] }; }
+  const value = parsedJson(text);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { text: cut ? undefined : text, fields: [] };
+  const { [bodies.find(name => typeof value[name] === "string") ?? ""]: body, ...rest } = value;
+  return { text: typeof body === "string" ? body : undefined, fields: jsonFields(rest) };
 }
 export function activeVerb(kind: StepKind, fallback: string): string {
   const active: Record<StepKind, string> = { run: "Running", read: "Reading", edit: "Editing", write: "Writing", search: "Searching", list: "Listing", fetch: "Fetching", tool: fallback };

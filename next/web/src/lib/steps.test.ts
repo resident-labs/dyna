@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { activityLabel, activeVerb, elapsed, stepTime, stepTitle, titleOf, workingGroup, workSummary } from "./steps.ts";
+import { activityLabel, activeVerb, elapsed, stepTime, stepTitle, titleOf, toolPart, workingGroup, workSummary } from "./steps.ts";
 import type { TranscriptItem } from "./contract.gen.ts";
 
 test("a live duration uses the injected clock", () => {
@@ -44,4 +44,16 @@ test("an activity label never shows an MCP tool ID", () => {
   assert.equal(activityLabel("bash go test ./..."), "Ran go test ./...");
   assert.equal(activityLabel("bash on hermeslab: uptime"), "Ran on hermeslab: uptime");
   assert.equal(activityLabel("read spec.md"), "read spec.md");
+});
+
+test("an opened tool shows its command and labelled arguments, never raw JSON", () => {
+  assert.deepEqual(toolPart("arguments", '{"host":"hermeslab","command":"gh pr list\\n| head","timeout":120}', "run", false), {
+    text: "gh pr list\n| head",
+    fields: [{ label: "Host", kind: "text", text: "hermeslab" }, { label: "Timeout", kind: "text", text: "120" }],
+  });
+  assert.deepEqual(toolPart("arguments", '{"mentions":["api-lead"]}', "tool", false).fields.map(field => field.label), ["Mentions"]);
+  assert.deepEqual(toolPart("arguments", '{"host":"herm', "run", true), { text: undefined, fields: [] });
+  assert.deepEqual(toolPart("arguments", "not json", "tool", false), { text: "not json", fields: [] });
+  assert.deepEqual(toolPart("output", '{"state":"open"}', "tool", false), { text: undefined, fields: [{ label: "State", kind: "text", text: "open" }] });
+  assert.deepEqual(toolPart("output", '{"state":"open"}', "run", false), { text: '{"state":"open"}', fields: [] });
 });
