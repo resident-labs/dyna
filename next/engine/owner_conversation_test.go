@@ -1,0 +1,169 @@
+package engine
+
+import (
+	"context"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/resident-labs/dyna/contract"
+)
+
+var (
+	feedHome = contract.Conversation{Kind: contract.ConversationFeed}
+	theOwner = contract.Principal{Kind: contract.PrincipalOwner}
+)
+
+func dmHome(session contract.SessionID) contract.Conversation {
+	return contract.Conversation{Kind: contract.ConversationDM, Session: session}
+}
+
+// postHome posts as a session and returns where the post landed.
+func postHome(t *testing.T, s *Service, ctx context.Context, room contract.RoomID, from contract.SessionID, req contract.PostRequest) contract.Event {
+	t.Helper()
+	req.Room = room
+	if req.Text == "" {
+		req.Text = "update"
+	}
+	posted, problem := s.Post(ctx, boxCaller(from), req)
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	event, err := s.store.EventInRoom(ctx, room, posted.Event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return event
+}
+
+func homeOf(event contract.Event) contract.Conversation {
+	return event.Body.(contract.PostCreated).Home
+}
+
+func ownerPost(t *testing.T, s *Service, ctx context.Context, req contract.PostRequest) {
+	t.Helper()
+	if _, problem := s.Post(ctx, theOwner, req); problem != nil {
+		t.Fatal(problem)
+	}
+}
+
+// With no turn owing the owner, a post goes where the owner last wrote to the session.
+func TestSessionPostFollowsWhereTheOwnerLastWrote(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	ownerPost(t, s, ctx, contract.PostRequest{Room: room, Text: "in private", Home: dmHome(worker)})
+	if got := homeOf(postHome(t, s, ctx, room, worker, contract.PostRequest{})); got != dmHome(worker) {
+		t.Fatalf("after a DM the post went to %+v", got)
+	}
+	ownerPost(t, s, ctx, contract.PostRequest{Room: room, Text: "in the open", Mentions: []string{"worker"}})
+	if got := homeOf(postHome(t, s, ctx, room, worker, contract.PostRequest{})); got != feedHome {
+		t.Fatalf("after a feed post the post went to %+v", got)
+	}
+}
+
+// A session the owner never wrote to posts to the feed.
+func TestSessionPostWithoutOwnerGoesToTheFeed(t *testing.T) {
+	s, room, _, worker, kid, ctx := receiveTree(t)
+	ownerPost(t, s, ctx, contract.PostRequest{Room: room, Text: "in private", Home: dmHome(worker)})
+	if got := homeOf(postHome(t, s, ctx, room, kid, contract.PostRequest{})); got != feedHome {
+		t.Fatalf("post went to %+v", got)
+	}
+}
+
+// The reply a turn owes the owner keeps the turn's posts beside it, even after the owner writes elsewhere.
+func TestSessionPostFollowsTheTurnsOwedReply(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	ownerPost(t, s, ctx, contract.PostRequest{Room: room, Text: "in private", Home: dmHome(worker)})
+	channelCtx, closeChannel := context.WithCancel(ctx)
+	ch, problem := testChannel(t, s, channelCtx, boxCaller(worker))
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	start := (<-ch).Body.(contract.TurnStart)
+	closeChannel()
+	for range ch {
+	}
+	ownerPost(t, s, ctx, contract.PostRequest{Room: room, Text: "in the open", Mentions: []string{"worker"}})
+	update := postHome(t, s, ctx, room, worker, contract.PostRequest{ToolCallID: "call"})
+	if homeOf(update) != dmHome(worker) {
+		t.Fatalf("mid-turn update went to %+v", homeOf(update))
+	}
+	if _, problem := s.TurnOutput(ctx, boxCaller(worker), contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnCompleted, Final: "done"}); problem != nil {
+		t.Fatal(problem)
+	}
+	ended := eventsOf[contract.TurnEnded](t, s, ctx, room)
+	// The brief also owes the parent a reply, which the update does not answer.
+	replies := ended[len(ended)-1].Replies
+	i := slices.IndexFunc(replies, func(reply contract.FinalReply) bool { return reply.Reply.Target == theOwner })
+	if i < 0 || replies[i].Reply.Home != dmHome(worker) || replies[i].Posted != update.ID {
+		t.Fatalf("replies %+v", replies)
+	}
+	if got := homeOf(postHome(t, s, ctx, room, worker, contract.PostRequest{})); got != feedHome {
+		t.Fatalf("after the turn the post went to %+v", got)
+	}
+}
+
+// Room coordination stays in the feed, and an explicit home wins.
+func TestSessionPostMentionsAndExplicitHomes(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	ownerPost(t, s, ctx, contract.PostRequest{Room: room, Text: "in private", Home: dmHome(worker)})
+	if got := homeOf(postHome(t, s, ctx, room, worker, contract.PostRequest{Mentions: []string{"root"}})); got != feedHome {
+		t.Fatalf("a mention went to %+v", got)
+	}
+	if got := homeOf(postHome(t, s, ctx, room, worker, contract.PostRequest{Home: feedHome})); got != feedHome {
+		t.Fatalf("an explicit feed post went to %+v", got)
+	}
+	ownerPost(t, s, ctx, contract.PostRequest{Room: room, Text: "in the open", Mentions: []string{"worker"}})
+	if got := homeOf(postHome(t, s, ctx, room, worker, contract.PostRequest{Home: contract.Conversation{Kind: contract.ConversationDM}})); got != dmHome(worker) {
+		t.Fatalf("an explicit DM post went to %+v", got)
+	}
+}
+
+// A session may name its own DM only, and a DM post wakes no one.
+func TestSessionDMPost(t *testing.T) {
+	s, room, root, worker, kid, ctx := receiveTree(t)
+	for name, home := range map[string]contract.Conversation{"another's DM": dmHome(root), "a child's DM": dmHome(kid)} {
+		if _, problem := s.Post(ctx, boxCaller(worker), contract.PostRequest{Room: room, Text: "x", Home: home}); problem == nil || problem.Code != contract.ErrInvalid {
+			t.Fatalf("%s: %+v", name, problem)
+		}
+	}
+	if _, problem := s.Post(ctx, boxCaller(worker), contract.PostRequest{Room: room, Text: "x", Home: dmHome(worker), Mentions: []string{"kid"}}); problem == nil {
+		t.Fatal("a DM post named a session")
+	}
+	post := postHome(t, s, ctx, room, worker, contract.PostRequest{Home: dmHome(worker)})
+	if homeOf(post) != dmHome(worker) {
+		t.Fatalf("home %+v", homeOf(post))
+	}
+	var n int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT COUNT(*) FROM deliveries WHERE seq=?", post.Seq).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("a DM post made %d deliveries: %v", n, err)
+	}
+	page, problem := s.EventsList(ctx, theOwner, contract.EventsListRequest{Room: room, Home: &contract.Conversation{Kind: contract.ConversationDM, Session: worker}})
+	if problem != nil || len(page.Events) != 1 || page.Events[0].ID != post.ID {
+		t.Fatalf("the DM lists %+v, %v", page.Events, problem)
+	}
+}
+
+// A frame whose input owes no reply says where posts to the owner go.
+func TestFrameSaysWherePostsToTheOwnerGo(t *testing.T) {
+	s, room, _, worker, kid, ctx := receiveTree(t)
+	ownerPost(t, s, ctx, contract.PostRequest{Room: room, Text: "in private", Home: dmHome(worker)})
+	event := contract.Event{From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.PostCreated{Text: "x"}}
+	for _, c := range []struct {
+		session contract.SessionID
+		kind    contract.ReplyKind
+		want    string
+	}{
+		{worker, contract.ReplyPost, " No reply is delivered. Posts to the owner go to your DM."},
+		{worker, contract.ReplyNone, " No reply is expected. Posts to the owner go to your DM."},
+		{kid, contract.ReplyNone, " No reply is expected. Posts to the owner go to the feed."},
+	} {
+		frame, _, err := s.inputFrame(ctx, c.session, event, contract.Delivery{Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: c.kind}})
+		if err != nil || !strings.HasSuffix(frame, c.want) {
+			t.Fatalf("%s %s: %q %v", c.session, c.kind, frame, err)
+		}
+	}
+	frame, _, err := s.inputFrame(ctx, worker, event, contract.Delivery{Surface: contract.SurfaceDM, Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: theOwner, Home: dmHome(worker)}})
+	if err != nil || strings.Contains(frame, "Posts to the owner") {
+		t.Fatalf("a final frame: %q %v", frame, err)
+	}
+}

@@ -132,12 +132,24 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if req.VisualUpdate != "" && visuals != 1 {
 		return contract.PostResponse{}, invalid("visual update requires one visual")
 	}
+	// A session may name only its own DM. With no home, a post that names no one goes to the owner's conversation with it.
+	if caller.Kind == contract.PrincipalSession && req.Home.Kind == contract.ConversationDM && req.Home.Session == "" {
+		req.Home.Session = caller.Session
+	}
+	if caller.Kind == contract.PrincipalSession && req.Home.Kind == "" && len(req.Mentions) == 0 {
+		home, err := s.store.OwnerConversation(ctx, caller.Session)
+		if err != nil {
+			return contract.PostResponse{}, failure(err)
+		}
+		req.Home = home
+	}
 	if req.Home.Kind == "" {
 		req.Home.Kind = contract.ConversationFeed
 	}
 	surface := contract.SurfaceFeed
 	if req.Home.Kind == contract.ConversationDM {
-		if caller.Kind != contract.PrincipalOwner || req.Home.Session == "" || len(req.Mentions) != 0 {
+		own := caller.Kind == contract.PrincipalOwner || (caller.Kind == contract.PrincipalSession && req.Home.Session == caller.Session)
+		if !own || req.Home.Session == "" || len(req.Mentions) != 0 {
 			return contract.PostResponse{}, invalid("invalid DM")
 		}
 		session, err := s.store.Session(ctx, req.Home.Session)
