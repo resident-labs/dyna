@@ -208,7 +208,6 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 
 ```text
 <data>/rooms/<room>/AGENTS.md                   room instructions
-<data>/rooms/<room>/AGENTS.saved.json           who saved them last
 <data>/rooms/<room>/compose/<name>.yaml         room compose files
 <data>/rooms/<room>/addons.json                 the room's skills, Pi packages and MCP servers
 <data>/rooms/<room>/skills/<name>/              the room's skill folders
@@ -223,7 +222,6 @@ Everything else belongs to no single room:
 
 ```text
 <data>/AGENTS.md                                global instructions
-<data>/AGENTS.saved.json                        who saved them last
 <data>/compose/<name>.yaml                      global compose files
 <data>/addons.json, <data>/skills/<name>/       global add-ons
 <data>/store.db, <data>/store.lock              the store and its lock
@@ -517,7 +515,7 @@ v2 has no rules feature. Pi loads global `/box/pi/AGENTS.md`, room `/box/work/AG
 
 Pi starts in the default repository's checkout, or in `/box/work` when the session has no repository.
 
-For remote hosts, the engine copies both files over its SSH master to the host paths in 4.3, skipping a room being deleted, reconciles hashes before box start or resume and after reconnection, and tests new and offline hosts. The owner edits them in the web markdown editor, and each room's root, the session with no parent, reads and edits every one, global and any room's, with the `instructions` tool (`get` and `set`, owner-approved 2026-11-02). The engine refuses any other session: `only the owner or a room's root edits instructions`. A saved edit reaches every session before its next model request by itself, even mid-turn between two tool calls, so no session needs a message about it. `instructions.set` uses the read hash and returns a typed conflict for stale saves. Each save records who made it, the owner or the root by session, name and room, in `AGENTS.saved.json` beside the file, which never leaves the control plane; `instructions.get` returns it while the file still has the saved hash, and the editor shows it beside the save time. Other sessions ask their root or the owner for changes. Pi sends changes as context diffs and folds them into the head at compaction; there is no delivery or event. The v1 import writes rule texts as plain Markdown bullets under a short heading, without numbers or authors.
+For remote hosts, the engine copies both files over its SSH master to the host paths in 4.3, skipping a room being deleted, reconciles hashes before box start or resume and after reconnection, and tests new and offline hosts. It also hashes the global file and every open room's every few seconds and publishes the same way when one changed, so an edit made on disk reaches every host as an API save does. The owner edits them in the web markdown editor; `instructions.set` is owner-only, uses the read hash and returns a typed conflict for stale saves. A room's root edits the files in place on the engine host with `bash` (owner decision 2026-11-02); other agents ask their root or the owner for changes. A saved edit reaches every session before its next model request by itself, even mid-turn between two tool calls, so no session needs a message about it. Pi sends changes as context diffs and folds them into the head at compaction; there is no delivery or event. The v1 import writes rule texts as plain Markdown bullets under a short heading, without numbers or authors.
 
 ### 7.1 Principals
 
