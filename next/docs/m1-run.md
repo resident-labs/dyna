@@ -63,7 +63,6 @@ Run `next/scripts/deploy-trial.sh --dry-run` on the trial host to build and
 check the pair without installing it. The script accepts `--prefix`, `--node-bin`,
 `--socket`, `--unit`, `--web-url` and `--web-host` for other installations.
 
-v1's job runner (`dyna job run`) is gone from main, and nothing replaces it yet.
 To deploy, SSH to the trial host and run the script from a clean checkout of
 the commit you want. It needs Go and the Node in `--node-bin` on that host, and
 it restarts the trial's user service:
@@ -72,11 +71,6 @@ it restarts the trial's user service:
 git fetch origin && git checkout --detach origin/main
 next/scripts/deploy-trial.sh
 ```
-
-<!-- LEGACY(v1-transfer): this paragraph, the v1 job runner hook. Remove after the transfer. -->
-A v1 schedule hook that still calls `dyna job run` works only while a v1 engine
-runs. Replace it with a timer on the trial host that runs these commands, or
-deploy by hand.
 
 The trial never rolls back. Fix failures forward on main. An older binary
 cannot open a store after a schema step. The engine keeps

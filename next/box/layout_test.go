@@ -82,7 +82,6 @@ func TestLayoutNamesWhatNoRoomOwns(t *testing.T) {
 		l.StoreLock():           "/data/store.lock",
 		l.V1Store():             "/data/dyna.db",
 		l.Backups():             "/data/backups",
-		l.Archive():             "/data/archive",
 		l.Connect():             "/data/connect",
 		l.Proxy():               "/data/cliproxy",
 		l.ProxyAuth():           "/data/cliproxy/auth-v2",
