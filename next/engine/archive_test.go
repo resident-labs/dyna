@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -353,6 +355,248 @@ func TestArchiveFailureRetriesOnTimerAndKeepsBox(t *testing.T) {
 	}
 	if _, ok := (<-channel).Body.(contract.Archive); !ok {
 		t.Fatal("expected archive on the timed retry")
+	}
+}
+
+// failArchive fails five archives in a row, which ends the retries, and lets the reconciler stop the box.
+func failArchive(t *testing.T, s *Service, ctx context.Context, caller contract.Principal, channel <-chan contract.BoxMessage) {
+	t.Helper()
+	for try := 1; try <= 5; try++ {
+		if _, ok := (<-channel).Body.(contract.Archive); !ok {
+			t.Fatalf("try %d: expected archive", try)
+		}
+		if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{Repo: "owner/repo", Error: "push refused"}); e != nil {
+			t.Fatal(e)
+		}
+		if try < 5 {
+			later := s.now().Add(10 * time.Minute)
+			s.now = func() time.Time { return later }
+			passLifecycle(t, s, ctx)
+		}
+	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
+}
+
+// heldBox reaches a box whose close stopped retrying. disconnect drops its channel, as the stopped container would.
+func heldBox(t *testing.T) (s *Service, host *dormantHost, room contract.RoomID, session contract.SessionID, ctx context.Context, disconnect func()) {
+	t.Helper()
+	s, room, session, ctx = setupArchive(t)
+	host = &dormantHost{}
+	s.boxes = host
+	resetLifecycle(s)
+	s.SetRepositories(&fakeRepos{})
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	connected, cancel := context.WithCancel(ctx)
+	t.Cleanup(cancel)
+	channel, e := testChannel(t, s, connected, caller)
+	if e != nil {
+		t.Fatal(e)
+	}
+	<-channel
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session}); e != nil {
+		t.Fatal(e)
+	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
+	failArchive(t, s, ctx, caller, channel)
+	return s, host, room, session, ctx, func() {
+		t.Helper()
+		cancel()
+		for range channel {
+		}
+		for deadline := time.Now().Add(5 * time.Second); s.Connected(session); time.Sleep(time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("box stayed connected")
+			}
+		}
+	}
+}
+
+func TestArchiveThatKeepsFailingStopsTheBoxAndKeepsItsVolume(t *testing.T) {
+	s, host, room, session, ctx, disconnect := heldBox(t)
+	record, err := s.store.Session(ctx, session) // Still open, and so still closing.
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.store.Box(ctx, record.Box)
+	if err != nil || current.State != contract.BoxStopped || current.Reason != "push refused" {
+		t.Fatalf("box %+v, %v", current, err)
+	}
+	if host.stops != 1 || host.starts != 0 || slices.Contains(host.removed, record.Box) {
+		t.Fatalf("stops %d starts %d removed %v", host.stops, host.starts, host.removed)
+	}
+	var state, want string
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT s.state,b.want FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=?", session).Scan(&state, &want); err != nil || state != "closing" || want != "hold" {
+		t.Fatalf("state %s want %s: %v", state, want, err)
+	}
+	events, err := s.store.Events(ctx, room, 0, 100, []contract.EventType{"session.notice"})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("notices: %+v, %v", events, err)
+	}
+	text := events[0].Body.(contract.SessionNotice).Text
+	for _, part := range []string{"Its volume is kept", "dyna session close " + string(session), "--discard", "Last failure: push refused"} {
+		if !strings.Contains(text, part) {
+			t.Fatalf("notice %q lacks %q", text, part)
+		}
+	}
+	var wakes int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM deliveries WHERE seq=? AND wake=1", events[0].Seq).Scan(&wakes); err != nil || wakes != 1 {
+		t.Fatalf("wakes: %d, %v", wakes, err)
+	}
+
+	disconnect()
+	for range 3 {
+		later := s.now().Add(time.Hour)
+		s.now = func() time.Time { return later }
+		passLifecycle(t, s, ctx)
+	}
+	if host.starts != 0 || host.stops != 1 || slices.Contains(host.removed, record.Box) {
+		t.Fatalf("a held box was touched: stops %d starts %d removed %v", host.stops, host.starts, host.removed)
+	}
+
+	// The close call starts the archive again, with five more tries.
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: session}); e != nil {
+		t.Fatal(e)
+	}
+	passLifecycle(t, s, ctx)
+	if stateOf(t, s, ctx, session) != contract.BoxClosing || host.starts != 1 {
+		t.Fatalf("retry: state %s starts %d", stateOf(t, s, ctx, session), host.starts)
+	}
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	channel, e := testChannel(t, s, ctx, caller)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for message := range channel {
+		if _, ok := message.Body.(contract.Archive); ok {
+			break
+		}
+	}
+	if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc"}); e != nil {
+		t.Fatal(e)
+	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
+	if _, err := s.store.Session(ctx, session); err == nil {
+		t.Fatal("session did not close after its archive")
+	}
+}
+
+func TestHeldBoxDiscardsOnlyWhenTheOwnerSays(t *testing.T) {
+	s, host, _, session, ctx, disconnect := heldBox(t)
+	disconnect()
+	record, err := s.store.Session(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session, Discard: true}); e != nil {
+		t.Fatal(e)
+	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
+	if !slices.Contains(host.removed, record.Box) {
+		t.Fatalf("removed %v", host.removed)
+	}
+	if _, err := s.store.Session(ctx, session); err == nil {
+		t.Fatal("session did not close")
+	}
+}
+
+func TestHeldChildDoesNotHoldUpItsParentsClose(t *testing.T) {
+	s, room, parent, ctx := setupArchive(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	started, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "grandchild", Profile: "test", Parent: parent, Goal: "goal"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	child := started.Session
+	s.SetRepositories(&fakeRepos{})
+	tree, err := s.store.RoomTree(ctx, room)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := tree.Parent(parent)
+	parentCaller := contract.Principal{Kind: contract.PrincipalSession, Session: parent}
+	childCaller := contract.Principal{Kind: contract.PrincipalSession, Session: child}
+	parentChannel, e := testChannel(t, s, ctx, parentCaller)
+	if e != nil {
+		t.Fatal(e)
+	}
+	<-parentChannel
+	childChannel, e := testChannel(t, s, ctx, childCaller)
+	if e != nil {
+		t.Fatal(e)
+	}
+	<-childChannel
+	if _, e := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: parent}); e != nil {
+		t.Fatal(e)
+	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
+	failArchive(t, s, ctx, childCaller, childChannel)
+	if stateOf(t, s, ctx, child) != contract.BoxStopped {
+		t.Fatalf("child box: %s", stateOf(t, s, ctx, child))
+	}
+	if tree, err = s.store.RoomTree(ctx, room); err != nil || tree.Parent(child) != root {
+		t.Fatalf("child's parent %s, want root %s: %v", tree.Parent(child), root, err)
+	}
+	events, err := s.store.Events(ctx, room, 0, 100, []contract.EventType{"session.notice"})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("notices: %+v, %v", events, err)
+	}
+	var to contract.SessionID
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT to_id FROM deliveries WHERE seq=?", events[0].Seq).Scan(&to); err != nil || to != root {
+		t.Fatalf("notice went to %s, want root %s: %v", to, root, err)
+	}
+	passLifecycle(t, s, ctx) // The parent is now a closing leaf.
+	for message := range parentChannel {
+		if _, ok := message.Body.(contract.Archive); ok {
+			break
+		}
+	}
+	if _, e := s.ArchiveDone(ctx, parentCaller, contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc"}); e != nil {
+		t.Fatal(e)
+	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
+	if _, err := s.store.Session(ctx, parent); err == nil {
+		t.Fatal("parent did not close")
+	}
+	if _, err := s.store.Session(ctx, child); err != nil {
+		t.Fatalf("held child went with its parent: %v", err)
+	}
+}
+
+func TestArchiveLeftOutIsToldToTheParent(t *testing.T) {
+	s, room, session, ctx := setupArchive(t)
+	s.SetRepositories(&fakeRepos{})
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	channel, e := testChannel(t, s, ctx, caller)
+	if e != nil {
+		t.Fatal(e)
+	}
+	<-channel
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: session}); e != nil {
+		t.Fatal(e)
+	}
+	passLifecycle(t, s, ctx)
+	passLifecycle(t, s, ctx)
+	left := &contract.ArchiveLeftOut{Files: 13, Bytes: 3 << 30, Paths: []string{".proof/rustc", ".proof/cargo"}}
+	if _, e := s.ArchiveDone(ctx, caller, contract.ArchiveDoneRequest{Repo: "owner/repo", Commit: "abc", LeftOut: left}); e != nil {
+		t.Fatal(e)
+	}
+	events, err := s.store.Events(ctx, room, 0, 100, []contract.EventType{"session.notice"})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("notices: %+v, %v", events, err)
+	}
+	text := events[0].Body.(contract.SessionNotice).Text
+	for _, want := range []string{"13 untracked files", "3072 MiB", ".proof/rustc, .proof/cargo", "go with its volume"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("notice %q lacks %q", text, want)
+		}
 	}
 }
 

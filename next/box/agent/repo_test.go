@@ -296,7 +296,7 @@ func TestArchiveRepo(t *testing.T) {
 					return "other\trefs/heads/v2/s", nil
 				case "read-tree":
 					index = idx
-				case "add", "write-tree", "-c":
+				case "ls-files", "add", "write-tree", "-c":
 					if idx == "" || idx != index {
 						t.Fatal("real index used")
 					}
@@ -323,7 +323,7 @@ func TestArchiveRepo(t *testing.T) {
 				if got.Commit != "snapshot" || got.Error != "" || index == "" {
 					t.Fatal(got)
 				}
-				want := [][]string{{"read-tree", "HEAD"}, {"add", "-A"}, {"write-tree"}, {"-c", "user.name=Dyna Archive", "-c", "user.email=archive@dyna.invalid", "commit-tree", "tree", "-p", "head", "-m", "archive s"}, {"push", "--force", "origin", "snapshot:refs/dyna/archive/s"}}
+				want := [][]string{{"read-tree", "HEAD"}, {"ls-files", "--others", "--exclude-standard", "-z"}, {"add", "-A"}, {"write-tree"}, {"-c", "user.name=Dyna Archive", "-c", "user.email=archive@dyna.invalid", "commit-tree", "tree", "-p", "head", "-m", "archive s"}, {"push", "--force", "origin", "snapshot:refs/dyna/archive/s"}}
 				if !reflect.DeepEqual(calls[3:], want) {
 					t.Fatal(calls)
 				}
@@ -362,7 +362,7 @@ func TestArchiveRetriesBeforeReporting(t *testing.T) {
 		return ch
 	}
 	var reports []contract.ArchiveDoneRequest
-	err := archiveAndReport(context.Background(), t.TempDir(), "s", []contract.BoxRepo{{Name: "owner/repo"}}, git, after, func(_ context.Context, req contract.ArchiveDoneRequest) error {
+	err := archiveAndReport(context.Background(), t.TempDir(), "s", []contract.BoxRepo{{Name: "owner/repo"}}, git, archiveLimit, after, func(_ context.Context, req contract.ArchiveDoneRequest) error {
 		reports = append(reports, req)
 		return nil
 	})
@@ -371,6 +371,127 @@ func TestArchiveRetriesBeforeReporting(t *testing.T) {
 	}
 	if !reflect.DeepEqual(waits, []time.Duration{transcriptRetryMin, 2 * transcriptRetryMin}) {
 		t.Fatalf("waits=%v", waits)
+	}
+}
+
+func TestArchiveThatHangsIsReportedAsFailed(t *testing.T) {
+	git := func(ctx context.Context, _, _ string, args ...string) (string, error) {
+		switch args[0] {
+		case "rev-parse":
+			return "head", nil
+		case "status":
+			return "modified", nil
+		case "write-tree":
+			return "tree", nil
+		case "-c":
+			return "snapshot", nil
+		case "push":
+			<-ctx.Done()
+			return "", ctx.Err()
+		}
+		return "", nil
+	}
+	var reports []contract.ArchiveDoneRequest
+	err := archiveAndReport(context.Background(), t.TempDir(), "s", []contract.BoxRepo{{Name: "owner/repo"}}, git, time.Millisecond, time.After, func(_ context.Context, req contract.ArchiveDoneRequest) error {
+		reports = append(reports, req)
+		return nil
+	})
+	if err != nil || len(reports) != 1 || !strings.Contains(reports[0].Error, "ran past") || reports[0].Commit != "" {
+		t.Fatalf("err=%v reports=%+v", err, reports)
+	}
+}
+
+// archiveTestRepo is a real checkout with one commit and a bare origin that holds its branch.
+func archiveTestRepo(t *testing.T) (root, origin string, repo contract.BoxRepo, git func(...string) string) {
+	t.Helper()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	root, origin = t.TempDir(), t.TempDir()
+	repo = contract.BoxRepo{Name: "repo", Branch: "v2/s"}
+	dir := filepath.Join(root, string(repo.Name))
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	git = func(args ...string) string {
+		t.Helper()
+		out, err := runGit(context.Background(), dir, "", args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if _, err := runGit(context.Background(), origin, "", "init", "--bare"); err != nil {
+		t.Fatal(err)
+	}
+	git("init", "-b", "v2/s")
+	git("remote", "add", "origin", origin)
+	for name, text := range map[string]string{"tracked.txt": "first", "kept.bin": "first", ".gitignore": "ignored.bin\n"} {
+		writeFile(t, filepath.Join(dir, name), text)
+	}
+	git("add", "-A")
+	git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-m", "first")
+	git("push", "origin", "v2/s")
+	return root, origin, repo, git
+}
+
+// writeLarge makes a sparse file of size bytes, so a test costs no disk and any hashing of it would show as time.
+func writeLarge(t *testing.T, path string, size int64) {
+	t.Helper()
+	writeFile(t, path, "")
+	if err := os.Truncate(path, size); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestArchiveLeavesOutLargeUntrackedFiles(t *testing.T) {
+	root, origin, repo, git := archiveTestRepo(t)
+	dir := filepath.Join(root, string(repo.Name))
+	if err := os.MkdirAll(filepath.Join(dir, ".proof", "rust"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "tracked.txt"), "second")
+	writeFile(t, filepath.Join(dir, "small.txt"), "small")
+	writeFile(t, filepath.Join(dir, ".proof", "notes [1].txt"), "notes")
+	writeLarge(t, filepath.Join(dir, "kept.bin"), archiveFileLimit+1)    // tracked, so kept however large
+	writeLarge(t, filepath.Join(dir, "at-limit.bin"), archiveFileLimit)  // not over the limit
+	writeLarge(t, filepath.Join(dir, "ignored.bin"), archiveFileLimit+1) // ignored, so no news
+	large := []string{".proof/a b [1].bin", ".proof/rust/*.bin"}
+	for _, path := range large {
+		writeLarge(t, filepath.Join(dir, path), archiveFileLimit+1)
+	}
+
+	got := archiveRepo(context.Background(), root, "s", repo, runGit)
+	if got.Error != "" || got.Commit == "" {
+		t.Fatalf("%+v", got)
+	}
+	want := &contract.ArchiveLeftOut{Files: 2, Bytes: 2 * (archiveFileLimit + 1), Paths: large}
+	if !reflect.DeepEqual(got.LeftOut, want) {
+		t.Fatalf("left out %+v, want %+v", got.LeftOut, want)
+	}
+	if pushed := git("ls-remote", origin, "refs/dyna/archive/s"); !strings.HasPrefix(pushed, got.Commit) {
+		t.Fatalf("pushed %q, want %s", pushed, got.Commit)
+	}
+	files := strings.Split(git("ls-tree", "-r", "--name-only", got.Commit), "\n")
+	if want := []string{".gitignore", ".proof/notes [1].txt", "at-limit.bin", "kept.bin", "small.txt", "tracked.txt"}; !reflect.DeepEqual(files, want) {
+		t.Fatalf("archived %q, want %q", files, want)
+	}
+	if text := git("show", got.Commit+":tracked.txt"); text != "second" {
+		t.Fatalf("tracked.txt: %q", text)
+	}
+	if status := git("status", "--porcelain", "--", "tracked.txt"); status != "M tracked.txt" {
+		t.Fatalf("the real index changed: %q", status)
+	}
+}
+
+func TestArchiveCarriesEverythingUnderTheLimit(t *testing.T) {
+	root, _, repo, git := archiveTestRepo(t)
+	writeFile(t, filepath.Join(root, string(repo.Name), "small.txt"), "small")
+	got := archiveRepo(context.Background(), root, "s", repo, runGit)
+	if got.Error != "" || got.LeftOut != nil {
+		t.Fatalf("%+v", got)
+	}
+	if text := git("show", got.Commit+":small.txt"); text != "small" {
+		t.Fatalf("small.txt: %q", text)
 	}
 }
 
