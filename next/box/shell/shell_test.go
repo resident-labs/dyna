@@ -292,7 +292,7 @@ func TestOnlyTheLastFinishedJobsAreKept(t *testing.T) {
 
 func TestTokenSplitAcrossWritesIsMasked(t *testing.T) {
 	token := "ghp_" + strings.Repeat("a1", 15)
-	j := &job{}
+	j := &job{now: time.Now}
 	_, _ = j.Write([]byte("start " + token[:10]))
 	first, _ := j.unread()
 	_, _ = j.Write([]byte(token[10:] + " end\n"))
@@ -340,7 +340,7 @@ func TestReportTailMasksATokenAcrossTheCut(t *testing.T) {
 }
 
 func TestOutputKeepsTheNewestBytesAndReportsTheDrop(t *testing.T) {
-	j := &job{finished: true}
+	j := &job{finished: true, now: time.Now}
 	line := strings.Repeat("y", 99) + "\n"
 	for range 2*outputLimit/len(line) + 10 {
 		_, _ = j.Write([]byte(line))
@@ -354,7 +354,7 @@ func TestOutputKeepsTheNewestBytesAndReportsTheDrop(t *testing.T) {
 
 func TestSecretCrossingTheTrimPointWithoutNewlineIsDropped(t *testing.T) {
 	token := "ghp_" + strings.Repeat("a1", 15)
-	j := &job{}
+	j := &job{now: time.Now}
 	_, _ = j.Write([]byte(strings.Repeat("x", 2*outputLimit-5) + token))
 	_, _ = j.Write([]byte(strings.Repeat("a1", 10) + "\nlast\n"))
 	j.finished = true
@@ -366,7 +366,7 @@ func TestSecretCrossingTheTrimPointWithoutNewlineIsDropped(t *testing.T) {
 
 func TestOwnerViewKeepsAgentPosition(t *testing.T) {
 	token := "ghp_" + strings.Repeat("a1", 15)
-	j := &job{id: "j", command: "build " + token, done: make(chan struct{})}
+	j := &job{now: time.Now, id: "j", command: "build " + token, done: make(chan struct{})}
 	s := New(Config{})
 	s.jobs = []*job{j}
 	j.Write([]byte("first\npartial"))
@@ -400,7 +400,7 @@ func TestOwnerViewKeepsAgentPosition(t *testing.T) {
 func TestOwnerViewCarriesJobTimes(t *testing.T) {
 	r := newRig("ok\n", syscall.SIGKILL)
 	started, ended := time.Unix(100, 0), time.Unix(138, 0)
-	times := []time.Time{started, ended}
+	times := []time.Time{started, started, ended} // the second stamps the job's output
 	r.server.cfg.now = func() time.Time { now := times[0]; times = times[1:]; return now }
 	r.proc.exit <- 0
 	j, err := r.server.run(nil, "make", "", "", "")
@@ -416,7 +416,7 @@ func TestOwnerViewCarriesJobTimes(t *testing.T) {
 func TestOwnerViewBudgetsAndResets(t *testing.T) {
 	s := New(Config{})
 	for i := 0; i < 8; i++ {
-		j := &job{id: contract.ShellJobID(fmt.Sprint(i)), done: make(chan struct{})}
+		j := &job{now: time.Now, id: contract.ShellJobID(fmt.Sprint(i)), done: make(chan struct{})}
 		j.Write([]byte(strings.Repeat("x", (64<<10)-1) + "\n"))
 		s.jobs = append(s.jobs, j)
 	}
@@ -440,7 +440,7 @@ func TestOwnerViewBudgetsAndResets(t *testing.T) {
 	}
 	s.jobs = nil
 	for i := 0; i < 70; i++ {
-		s.jobs = append(s.jobs, &job{id: contract.ShellJobID(fmt.Sprint(i)), command: strings.Repeat("é", 3000), done: make(chan struct{})})
+		s.jobs = append(s.jobs, &job{now: time.Now, id: contract.ShellJobID(fmt.Sprint(i)), command: strings.Repeat("é", 3000), done: make(chan struct{})})
 	}
 	commands := s.View(true)
 	if len(commands) != 61 || len(commands[0].Command) != 4096 {

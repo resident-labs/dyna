@@ -104,7 +104,7 @@ func (s *Store) stopFree(ctx context.Context, ids []contract.SessionID, rule str
 // and no input or operation is on its way to it.
 const closable = `s.parent IS NOT NULL AND s.closed_at IS NULL AND s.state='open'
 AND r.paused_at IS NULL AND (b.state='failed' OR (b.want='stop' AND b.state='stopped'))
-AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=s.id AND d.state='pending' AND NOT ` + boxUpdateNotice + `)
+AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=s.id AND d.state='pending' AND NOT ` + jobRunningNotice + ` AND NOT ` + boxUpdateNotice + `)
 AND NOT EXISTS (SELECT 1 FROM operations o WHERE o.by_kind='session' AND o.by_id=s.id AND o.state IN ('pending','approved','running'))`
 
 // aged is the normal wait. A host at its floor skips it, along with whatever only the 7-day close waits for.

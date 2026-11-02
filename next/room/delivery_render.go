@@ -91,11 +91,17 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 			return "turn failed: " + b.Error, nil
 		}
 		return b.Final, nil
-	case contract.ShellJobEnded:
-		name := string(b.Job)
-		if b.Description != "" {
-			name = "'" + b.Description + "'"
+	case contract.ShellJobRunning:
+		text := fmt.Sprintf("Your shell job %s has been running for %s.", jobName(b.Job, b.Description), jobTime(b.RanMinutes))
+		switch {
+		case b.QuietMinutes == nil:
+			return text + " It has written no output.", nil
+		case b.Tail == "":
+			return fmt.Sprintf("%s Last output %s ago.", text, jobTime(*b.QuietMinutes)), nil
 		}
+		return fmt.Sprintf("%s Last output %s ago:\n%s", text, jobTime(*b.QuietMinutes), b.Tail), nil
+	case contract.ShellJobEnded:
+		name := jobName(b.Job, b.Description)
 		// LEGACY(v1-transfer): the exit-code fallback for shell.job.ended events without End. Remove after the transfer.
 		// TODO: legacy/shim remove later — old boxes still send shell.job.ended without End, and saved events lack it. Remove when the engine fills End at the request boundary, every supported box version sends End, and a floor migration converts saved events (D-659).
 		result := jobExit(b.ExitCode)
@@ -356,6 +362,33 @@ func Deliverable(kind contract.EventType) bool {
 	}
 	_, err = RenderDelivery(body)
 	return err == nil
+}
+
+func jobName(job contract.ShellJobID, description string) string {
+	if description != "" {
+		return "'" + description + "'"
+	}
+	return string(job)
+}
+
+// jobTime words a whole number of minutes.
+func jobTime(minutes int) string {
+	unit := func(n int, name string) string {
+		if n == 1 {
+			return "1 " + name
+		}
+		return fmt.Sprintf("%d %ss", n, name)
+	}
+	switch hours, rest := minutes/60, minutes%60; {
+	case minutes < 1:
+		return "under a minute"
+	case hours == 0:
+		return unit(rest, "minute")
+	case rest == 0:
+		return unit(hours, "hour")
+	default:
+		return unit(hours, "hour") + " " + unit(rest, "minute")
+	}
 }
 
 func jobExit(code int) string {
