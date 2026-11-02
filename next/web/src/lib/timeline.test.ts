@@ -1,7 +1,7 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { compactionNote, summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, segmentDuration, steerInput, timelineInput, timelineAnswers, timelineInputText, timelineSegments, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout } from "./timeline.ts";
+import { compactionNote, summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineSegments, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout } from "./timeline.ts";
 import type { TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
 
 const steer = (id: string, at = ""): TranscriptItem => ({ id: `steer:${id}`, event: id, seq: 6, turn: "t", at, kind: "steer", from: { kind: "owner" } });
@@ -49,10 +49,21 @@ test("a steer is no answer, and the turn's last message comes after it", () => {
   assert.equal(finalTimelineItem([before, steer("sent")], "s")?.id, "a");
 });
 
-test("an answer a steer landed after stays out of the fold, and working text before a tool folds", () => {
-  const text = (id: string): TranscriptItem => ({ id, turn: "t", at: "", kind: "text", text: id });
+const thinking = (id: string): TranscriptItem => ({ id, turn: "t", at: "", kind: "thinking", text: id });
+const text = (id: string): TranscriptItem => ({ id, turn: "t", at: "", kind: "text", text: id });
+const shown = (items: TranscriptItem[], folded: boolean) => shownTimelineGroups(items, folded).map(group => group.kind === "work" ? group.items.map(item => item.id).join("+") : group.id);
+
+// Horizon's root answered, thought again, and closed with one more paragraph. The fold hid the answer under its last line.
+test("a closed fold keeps every text the agent wrote, and opening it puts the work back between them", () => {
+  const items = [thinking("plan"), text("answer"), thinking("count"), text("closing")];
+  assert.deepEqual(shown(items, true), ["answer", "closing"]);
+  assert.deepEqual(shown(items, false), ["plan", "answer", "count", "closing"]);
+});
+
+test("text between tool calls stays in order, in every segment, and only work folds", () => {
   const items = [text("narration"), work("a"), text("answer"), steer("sent"), work("b"), text("later"), work("c"), steer("again"), text("last")];
-  assert.deepEqual([...timelineAnswers(timelineSegments("t", items), "s")].sort(), ["answer", "last"]);
+  assert.deepEqual(timelineSegments("t", items).map(segment => shown(segment.items, true)), [["narration", "answer"], ["later"], ["last"]]);
+  assert.deepEqual(timelineSegments("t", items).map(segment => shown(segment.items, false)), [["narration", "a", "answer"], ["b", "later", "c"], ["last"]]);
 });
 
 test("a repeat read of a turn keeps one steer, in its place", () => {
@@ -139,22 +150,19 @@ test("T3 durations choose units after rounding", () => {
   assert.equal(formatTimelineDuration(59_500), "1m");
 });
 
-test("completed text-only turns show every message without a disclosure", () => {
-  assert.equal(visibleTimelineText("first", new Set(["final"]), true, false, false), true);
-  assert.equal(visibleTimelineText("final", new Set(["final"]), true, false, false), true);
-  assert.equal(visibleTimelineText("first", new Set(["final"]), true, true, false), false);
+test("a text-only turn has nothing to fold", () => {
+  assert.deepEqual(shown([text("first"), text("final")], true), ["first", "final"]);
 });
 
 const ownedPost = (id: string, at: string): TranscriptItem => ({ id, turn: "t", at, kind: "post", from: { kind: "session", session: "s" }, home: { kind: "feed" }, room: "r" });
 const message = (id: string, at: string): TranscriptItem => ({ id, turn: "t", at, kind: "text", text: id });
 
-test("a post that ends the turn is its final message, so earlier text folds", () => {
+test("a post that ends the turn is its final message, and the text before it still shows", () => {
   const tool: TranscriptItem = { id: "tool", turn: "t", at: "2026-11-01T00:00:01Z", kind: "tool", posts: [ownedPost("post", "2026-11-01T00:00:02Z")] };
   const items = [message("narration", "2026-11-01T00:00:01Z"), tool];
-  const final = finalTimelineItem(items, "s")?.id;
-  assert.equal(final, "post");
-  assert.equal(visibleTimelineText("narration", new Set([final!]), true, true, false), false);
-  assert.equal(visibleTimelineText("narration", new Set([final!]), true, true, true), true);
+  assert.equal(finalTimelineItem(items, "s")?.id, "post");
+  assert.deepEqual(shown(items, true), ["narration", "posts:tool"]);
+  assert.deepEqual(shown(items, false), ["narration", "tool", "posts:tool"]);
 });
 
 test("text after a mid-turn post stays the final message, also when a shell post sorts last", () => {

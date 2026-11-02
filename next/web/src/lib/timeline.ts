@@ -110,9 +110,11 @@ export function timelineItemRunning(item: TranscriptItem, turnEnded: boolean): b
   return !turnEnded && item.kind === "tool" && !item.ended;
 }
 
-// Dyna: Text can fold only when a work disclosure is present.
-export function visibleTimelineText(id: string, answers: Set<string>, completed: boolean, hasWork: boolean, expanded: boolean): boolean {
-  return !completed || !hasWork || answers.has(id) || expanded;
+// Dyna: A closed fold hides thoughts and tool calls only. Text the agent wrote to the reader, and its posts, are never
+// work: they stay in the thread in order, and opening the fold puts the work back between them.
+export function shownTimelineGroups(items: TranscriptItem[], folded: boolean): TimelineGroup[] {
+  const groups = deriveTimelineGroups(items);
+  return folded ? groups.filter(group => group.kind !== "work") : groups;
 }
 
 // Dyna: The transcript holds a session's own posts: nested under their tool call, or sent from a shell at the end of the items.
@@ -120,7 +122,7 @@ export function ownPost(item: TranscriptItem, session: string): boolean {
   return item.kind === "post" && item.from?.kind === "session" && item.from.session === session;
 }
 
-// Dyna: A turn's last message is its answer. It can be a post that ended the turn, so earlier text folds as working text.
+// Dyna: A turn's last message stands for it in the minimap. It can be a post that ended the turn.
 // Text and a tool's posts arrive in order. Their times come from different clocks, so only a post from a shell, which
 // sorts after every item, is placed by its time; equal times keep item order.
 export function finalTimelineItem(items: TranscriptItem[], session: string): TranscriptItem | undefined {
@@ -132,19 +134,6 @@ export function finalTimelineItem(items: TranscriptItem[], session: string): Tra
     }
   }
   return final;
-}
-
-// Dyna: A steer can land after the agent finished answering, so text that closes a segment is an answer as well as the
-// turn's last message. Text before a tool in the same segment was working text.
-export function timelineAnswers(segments: TimelineSegment[], session: string): Set<string> {
-  const answers = new Set<string>();
-  const final = finalTimelineItem(segments.flatMap(segment => segment.items), session);
-  if (final) answers.add(final.id);
-  for (const { items } of segments.slice(0, -1)) {
-    const last = items.at(-1);
-    if (last?.kind === "text") answers.add(last.id);
-  }
-  return answers;
 }
 
 // Dyna: A post waits outside the turns until the transcript holds it. An agent's own post can land while an owner's
