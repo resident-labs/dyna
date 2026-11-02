@@ -78,7 +78,7 @@ var methodTable = []MethodEntry{
 		act("host", "list", typ[contract.HostListRequest](), "List hosts with disk use and whether disk is low", "host list"),
 	),
 	method(contract.MethodHostRemove, contract.ScopeAdmin, OwnerAccess,
-		act("host", "remove", typ[contract.HostRemoveRequest](), "Remove a host with nothing on it. A pool's node goes back through its script.", "host remove"),
+		act("host", "remove", typ[contract.HostRemoveRequest](), "Remove a host with nothing on it. A pool's node goes back through its script. discardBoxes removes it with its boxes failed, as a host lost for good: their volumes and unpushed work are lost, and session.restart replaces each.", "host remove"),
 	),
 	method(contract.MethodHostexecList, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodHostexecRun, contract.ScopeRead, BoxAccess),

@@ -67,8 +67,15 @@ type RoomHostsResponse struct {
 	Operation OpID `json:"operation,omitempty"`
 }
 
-// HostRemoveRequest removes a host with nothing on it. A pool's node goes back through its script.
+// HostRemoveRequest removes a host with nothing on it. A pool's node goes back through its script. DiscardBoxes removes it
+// with its boxes, as a host lost for good: each becomes failed with cause host_lost, its volume goes, and work not pushed is
+// lost. Each session can then be replaced with session.restart, and its parent hears of the failure once.
 type HostRemoveRequest struct {
-	Host HostName `json:"host"`
+	Host         HostName `json:"host"`
+	DiscardBoxes bool     `json:"discardBoxes,omitempty"`
 }
-type HostRemoveResponse struct{}
+
+// HostRemoveResponse lists the sessions whose boxes DiscardBoxes failed.
+type HostRemoveResponse struct {
+	Failed []SessionID `json:"failed,omitempty"`
+}
