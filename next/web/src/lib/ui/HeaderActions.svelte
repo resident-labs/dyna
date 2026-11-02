@@ -1,6 +1,6 @@
 <script lang="ts">
   import { requestsFor } from "../request-groups.ts";
-  import { pastRuns } from "../workflow.ts";
+  import { roomRuns } from "../workflow.ts";
   import type { Attention } from "../attention.svelte.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { ShellJob } from "../shell.ts";
@@ -28,27 +28,28 @@
   let sessions = $derived(session ? allSessions.filter(item => item.id === session) : allSessions);
   let waiting = $derived(session ? requestsFor(store.requests.values(), session).filter(request => request.state === "pending" && request.class === "owner").length + store.pendingQuestions(session).length : store.waiting);
   let working = $derived(store.counts.working);
-  let busy = $derived([...store.sessions.values()].filter(item => store.status(item.session) === "working"));
-  // The room's finished runs. A running crew stays in the sessions panel.
-  let runs = $derived(store.ready ? pastRuns(store.workflows.values(), store.sessions) : []);
+  let busy = $derived(store.members.filter(item => store.status(item.session) === "working"));
+  // The room's runs, the running ones first. A crew has no row among the sessions: its run stands for it here.
+  let runs = $derived(store.ready ? roomRuns(store.workflows.values()) : { running: [], past: [] });
+  let anyRuns = $derived(runs.running.length + runs.past.length > 0);
   let faces = $derived(!session && !panelShown && working > 0);
 </script>
 
 <div class="actions" class:session={!!session}>
   <JobsTool bind:this={jobsTool} {sessions} {allSessions} {phone} {onopen} />
-  {#if runs.length}<RunsTool bind:this={runsTool} {runs} room={store.room} {session} {phone} {navigate} />{/if}
+  {#if anyRuns}<RunsTool bind:this={runsTool} running={runs.running} past={runs.past} room={store.room} {session} {phone} {navigate} />{/if}
   <button type="button" class="requests" class:waiting={waiting > 0} bind:this={requestsButton} aria-pressed={requestsOpen}
     aria-label={waiting ? `${waiting} requests wait for you` : "Requests"} title="Requests" onclick={onrequests}>
     <Icon name="inbox" />{#if waiting}<StatusPill tone="warning" label="Waiting" count={waiting} />{/if}
   </button>
   <RoomMenu bind:this={roomMenu} {phone} {paused} operate={attention.can("operate")} admin={attention.can("admin")} {onpause} {oninstructions}
-    onrequests={phone ? onrequests : undefined} onjobs={phone ? () => void jobsTool?.show() : undefined} onruns={phone && runs.length ? () => void runsTool?.show() : undefined}
+    onrequests={phone ? onrequests : undefined} onjobs={phone ? () => void jobsTool?.show() : undefined} onruns={phone && anyRuns ? () => void runsTool?.show() : undefined} runsLive={runs.running.length > 0}
     onterminal={phone && session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready" ? onterminal : undefined} oncomputer={phone && session && attention.can("computers") && store.computers.has(session) ? oncomputer : undefined} waiting={phone ? waiting : 0} />
   <button type="button" class="panel-toggle" bind:this={toggle} aria-label={"Sessions" + (faces ? `, ${working} working` : "") + (store.counts.failed ? ", a session failed" : "")}
     title={faces ? busy.map(item => item.name).join(", ") : "Sessions"} aria-controls="sessions" aria-keyshortcuts="Control+B" aria-pressed={panelShown} onclick={event => onpanel(event.detail > 0)}>
     {#if faces}<span class="faces">{#each busy.slice(0, 3) as item (item.session)}<Avatar kind="session" name={item.name} root={!item.parent} size={24} />{/each}</span>
       {#if busy.length > 3}<span class="more">+{busy.length - 3}</span>{/if}<span class="count">{working} working</span>
-    {:else}<Icon name="people" />{#if store.ready && !session}<span class="count phone">{store.sessions.size}</span>{/if}{/if}
+    {:else}<Icon name="people" />{#if store.ready && !session}<span class="count phone">{store.members.length}</span>{/if}{/if}
     {#if store.counts.failed && !panelShown && !session}<span class="attention"></span>{/if}
   </button>
 </div>
