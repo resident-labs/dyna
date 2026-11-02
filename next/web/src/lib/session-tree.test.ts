@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { closeNote, descendants, handNote, holdsText, sessionActions, sessionTree } from "./session-tree.ts";
-import type { SessionStarted } from "./contract.gen.ts";
+import { closeNote, descendants, handNote, holdRows, sessionActions, sessionTree } from "./session-tree.ts";
+import type { Responsibility, SessionStarted } from "./contract.gen.ts";
 import type { Status } from "./status.ts";
 
 test("a session's actions follow what the engine takes", () => {
@@ -11,9 +11,23 @@ test("a session's actions follow what the engine takes", () => {
   assert.deepEqual(sessionActions("root", true, "failed"), ["move", "stop", "restart", "close"]);
 });
 
-test("the list reads as the engine sends it, without the turn that has its own row", () => {
-  assert.equal(holdsText([]), "");
-  assert.equal(holdsText([{ kind: "turn", group: "needs_box", id: "turn_1" }, { kind: "shell_job", group: "needs_box", id: "job_7f3b" }, { kind: "terminal", group: "needs_box" }, { kind: "pr", group: "owes_work", id: "o/r#6" }]), "shell job job_7f3b, terminal, PR o/r#6");
+test("the list holds what shows nowhere else, one row per kind", () => {
+  const needs = (kind: Responsibility["kind"], id?: string): Responsibility => ({ kind, group: "needs_box", id });
+  const owes = (kind: Responsibility["kind"], id?: string, blocked?: boolean): Responsibility => ({ kind, group: "owes_work", id, blocked });
+  assert.deepEqual(holdRows([]), []);
+  assert.deepEqual(holdRows([needs("turn", "turn_1"), needs("shell_job", "job_7f3b"), owes("goal", "g1")]), [], "the thread, the header and the goals show these");
+  assert.deepEqual(holdRows([needs("terminal"), owes("pr", "o/r#6")]).map(row => row.text), ["Terminal", "PR o/r#6"]);
+  assert.deepEqual(holdRows([owes("child", "a"), owes("pr", "o/r#6"), owes("child", "b")]).map(row => row.text), ["2 child sessions: a, b", "PR o/r#6"]);
+  assert.deepEqual(holdRows([owes("child"), owes("child")]).map(row => row.text), ["2 child sessions"]);
+});
+
+test("a kind with a blocked item says so", () => {
+  const rows = holdRows([{ kind: "question", group: "owes_work", id: "q1" }, { kind: "question", group: "owes_work", id: "q2", blocked: true }]);
+  assert.deepEqual(rows.map(row => [row.text, row.blocked]), [["2 questions: q1, q2", true]]);
+});
+
+test("a close counts children as sessions", () => {
+  assert.equal(handNote([{ kind: "child", group: "owes_work", id: "a" }, { kind: "child", group: "owes_work", id: "b" }], "root"), "This hands 2 child sessions to root.");
 });
 
 test("a close says what it hands over", () => {

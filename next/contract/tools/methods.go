@@ -26,6 +26,8 @@ var methodTable = []MethodEntry{
 	method(contract.MethodBoxCompacted, contract.ScopeRead, BoxAccess),
 	method(contract.MethodBoxHello, contract.ScopeRead, BoxAccess),
 	method(contract.MethodBoxNotice, contract.ScopeRead, BoxAccess),
+	method(contract.MethodBoxStats, contract.ScopeRead, OwnerAccess),
+	method(contract.MethodBoxStatsReport, contract.ScopeRead, BoxAccess),
 	method(contract.MethodComputerChanged, contract.ScopeRead, BoxAccess),
 	method(contract.MethodComputerInput, contract.ScopeComputers, OwnerAccess),
 	method(contract.MethodConnectCancel, contract.ScopeAdmin, OwnerAccess),
