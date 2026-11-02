@@ -279,6 +279,7 @@ func Run(ctx context.Context) error {
 	var stopWatch context.CancelFunc
 	var stopShellWatch context.CancelFunc
 	var shellDone chan struct{}
+	stats := newBoxStats()
 	stopShell := func() {
 		if stopShellWatch != nil {
 			stopShellWatch()
@@ -301,6 +302,10 @@ func Run(ctx context.Context) error {
 				return nil
 			case contract.ShellWatchStop:
 				stopShell()
+				return nil
+			case contract.BoxStatsAsk:
+				// A first reading takes a moment, and the channel keeps reading meanwhile.
+				go client.reportStats(ctx, stats, body.Ask)
 				return nil
 			case contract.ComputerWatchStart:
 				if stopWatch != nil {
