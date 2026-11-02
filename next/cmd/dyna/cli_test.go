@@ -519,7 +519,7 @@ func TestPostAttachments(t *testing.T) {
 }
 func TestHostexecPending(t *testing.T) {
 	f := &fakeClient{hostexecResp: contract.HostexecRunResponse{Operation: contract.Operation{ID: "op_1", State: contract.OpPending}}}
-	out := runCLI(t, f, "hostexec", "run", "--host", "h", "--", "true")
+	out := runCLI(t, f, "bash", "--host", "h", "true")
 	if !strings.Contains(out, "waits for approval") || !strings.Contains(out, "op_1") || !strings.Contains(out, "op.ran") {
 		t.Fatalf("pending output: %q", out)
 	}

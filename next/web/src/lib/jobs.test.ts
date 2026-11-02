@@ -33,6 +33,7 @@ test("an end cause reads from the end field, and exit 0 carries no code", () => 
     { end: { kind: "exit" } }].map(end => [endCause(end as never, "lead"), failed(end as never)]),
     [["Exit 2", true], ["Ended by a signal (SIGTERM)", true], ["Ended by a signal", true], ["Stopped by lead", false], ["Passed", false]]);
   assert.equal(jobTitle({ job: "j", command: "make test\nmake lint", description: "", running: false, exitCode: 0, text: "", started: "" }), "make test");
+  assert.equal(jobTitle({ job: "j", command: "uptime", host: "hermeslab", running: false, exitCode: 0, text: "", started: "" }), "uptime on hermeslab");
 });
 
 test("the output decoder keeps the description and end, and still takes a message without them", () => {
@@ -40,5 +41,6 @@ test("the output decoder keeps the description and end, and still takes a messag
   assert.deepEqual(decodeShellOutput({ ...message, description: "Build", end: { kind: "signal", signal: "SIGTERM" } }),
     { ...message, description: "Build", end: { kind: "signal", signal: "SIGTERM" } });
   assert.deepEqual(decodeShellOutput(message), message);
+  assert.deepEqual(decodeShellOutput({ ...message, host: "hermeslab" }), { ...message, host: "hermeslab" });
   assert.equal(decodeShellOutput({ ...message, end: { kind: "other" } }), undefined);
 });

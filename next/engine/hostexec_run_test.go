@@ -13,6 +13,7 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -56,7 +57,7 @@ func TestHostexecSessionCloseStopsAndEndsGrant(t *testing.T) {
 	}
 	done := make(chan *contract.Error, 1)
 	go func() {
-		_, e := s.HostexecRun(ctx, who, contract.HostexecRunRequest{Host: "host", Argv: []string{"true"}})
+		_, e := s.HostexecRun(ctx, who, contract.HostexecRunRequest{Host: "host", Command: "true"})
 		done <- e
 	}()
 	<-runner.entered
@@ -86,7 +87,7 @@ func TestHostexecSessionCloseStopsAndEndsGrant(t *testing.T) {
 
 func TestHostexecNoGrant(t *testing.T) {
 	s, _, worker, ctx := setup(t)
-	_, e := s.HostexecRun(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.HostexecRunRequest{Host: "host", Argv: []string{"true"}})
+	_, e := s.HostexecRun(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.HostexecRunRequest{Host: "host", Command: "true"})
 	if e == nil || e.Code != contract.ErrNoGrant {
 		t.Fatalf("got %+v", e)
 	}
@@ -108,7 +109,7 @@ func TestHostexecBusyFinishesRun(t *testing.T) {
 	if err := s.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.run": s.HostexecRunEntry()}, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	res, problem := s.HostexecRun(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.HostexecRunRequest{Host: "host", Argv: []string{"true"}})
+	res, problem := s.HostexecRun(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.HostexecRunRequest{Host: "host", Command: "true"})
 	if problem != nil || res.Operation.Result == nil || res.Operation.Result.Cause != contract.CauseHostBusy || !strings.Contains(res.Operation.Result.Error, "retry") {
 		t.Fatalf("busy result %+v: %v", res, problem)
 	}
@@ -119,13 +120,33 @@ func TestHostexecBusyFinishesRun(t *testing.T) {
 	}
 }
 
+func TestHostexecRunsTheCommandWithBash(t *testing.T) {
+	s, room, root, ctx := setupRoot(t)
+	s.SetHostexecRunner(completedHostexec{output: []byte("up\n")})
+	if err := s.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.run": s.HostexecRunEntry()}, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	who := contract.Principal{Kind: contract.PrincipalSession, Session: root}
+	res, problem := s.HostexecRun(ctx, who, contract.HostexecRunRequest{Host: "host", Command: "uptime | wc -l"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	args := res.Operation.Args.(contract.HostexecRunArgs)
+	if !slices.Equal(args.Argv, []string{"bash", "-c", "uptime | wc -l"}) || args.Room != room || res.Operation.Result.Output != "up\n" {
+		t.Fatalf("operation %+v", res.Operation)
+	}
+	if _, problem := s.HostexecRun(ctx, who, contract.HostexecRunRequest{Host: "host", Command: "  "}); problem == nil || problem.Code != contract.ErrInvalid {
+		t.Fatalf("an empty command: %+v", problem)
+	}
+}
+
 func TestHostexecLostFinishesOperationAndNotifies(t *testing.T) {
 	s, _, root, ctx := setupRoot(t)
 	s.SetHostexecRunner(completedHostexec{err: errors.New("master dropped")})
 	if err := s.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.run": s.HostexecRunEntry()}, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	res, e := s.HostexecRun(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.HostexecRunRequest{Host: "host", Argv: []string{"true"}})
+	res, e := s.HostexecRun(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.HostexecRunRequest{Host: "host", Command: "true"})
 	if e != nil || res.Operation.Result == nil || !strings.Contains(res.Operation.Result.Error, "master dropped") {
 		t.Fatalf("result %+v error %+v", res, e)
 	}
@@ -146,7 +167,7 @@ func TestHostexecOutputFileRoomAccess(t *testing.T) {
 	if err := s.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.run": s.HostexecRunEntry()}, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	res, e := s.HostexecRun(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.HostexecRunRequest{Host: "host", Argv: []string{"true"}})
+	res, e := s.HostexecRun(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.HostexecRunRequest{Host: "host", Command: "true"})
 	if e != nil || res.Operation.Result == nil || res.Operation.Result.OutputFile == "" {
 		t.Fatalf("result %+v error %+v", res, e)
 	}
@@ -178,7 +199,7 @@ func TestHostexecSignalAtDeadlineIsTimeout(t *testing.T) {
 	if err := s.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.run": s.HostexecRunEntry()}, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	res, e := s.HostexecRun(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.HostexecRunRequest{Host: "host", Argv: []string{"true"}, Timeout: contract.DurationMS(time.Minute.Milliseconds())})
+	res, e := s.HostexecRun(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.HostexecRunRequest{Host: "host", Command: "true", Timeout: contract.DurationMS(time.Minute.Milliseconds())})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -199,7 +220,7 @@ func TestHostexecApprovalAndSessionCloseRecheck(t *testing.T) {
 	if err := s.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.run": s.HostexecRunEntry()}, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	result, e := s.HostexecRun(ctx, principal, contract.HostexecRunRequest{Host: "host", Argv: []string{"true"}})
+	result, e := s.HostexecRun(ctx, principal, contract.HostexecRunRequest{Host: "host", Command: "true"})
 	if e != nil || result.Operation.Class != contract.ClassAuto || result.Operation.State != contract.OpDone {
 		t.Fatalf("result %+v error %+v", result, e)
 	}
@@ -226,13 +247,13 @@ func TestHostexecTimeoutDefaultAndMaximum(t *testing.T) {
 		t.Fatal(err)
 	}
 	principal := contract.Principal{Kind: contract.PrincipalSession, Session: root}
-	if _, e := s.HostexecRun(ctx, principal, contract.HostexecRunRequest{Host: "host", Argv: []string{"true"}}); e != nil {
+	if _, e := s.HostexecRun(ctx, principal, contract.HostexecRunRequest{Host: "host", Command: "true"}); e != nil {
 		t.Fatal(e)
 	}
 	if runner.args.Timeout != contract.DurationMS((10 * time.Minute).Milliseconds()) {
 		t.Fatalf("timeout %d", runner.args.Timeout)
 	}
-	if _, e := s.HostexecRun(ctx, principal, contract.HostexecRunRequest{Host: "host", Argv: []string{"true"}, Timeout: contract.DurationMS((2*time.Hour + time.Millisecond).Milliseconds())}); e == nil {
+	if _, e := s.HostexecRun(ctx, principal, contract.HostexecRunRequest{Host: "host", Command: "true", Timeout: contract.DurationMS((2*time.Hour + time.Millisecond).Milliseconds())}); e == nil {
 		t.Fatal("accepted timeout over two hours")
 	}
 }
@@ -319,7 +340,7 @@ func TestHostexecDeadlineRecordsLost(t *testing.T) {
 	if err := s.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.run": s.HostexecRunEntry()}, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	res, e := s.HostexecRun(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.HostexecRunRequest{Host: "host", Argv: []string{"true"}, Timeout: contract.DurationMS(time.Minute.Milliseconds())})
+	res, e := s.HostexecRun(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.HostexecRunRequest{Host: "host", Command: "true", Timeout: contract.DurationMS(time.Minute.Milliseconds())})
 	if e != nil || res.Operation.Result == nil || !strings.Contains(res.Operation.Result.Error, context.DeadlineExceeded.Error()) || res.Operation.Result.Cause != contract.CauseHostLost || duration != 75*time.Second {
 		t.Fatalf("result %+v error %+v deadline %s", res, e, duration)
 	}

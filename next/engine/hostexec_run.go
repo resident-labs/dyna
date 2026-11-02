@@ -41,7 +41,7 @@ func (s *Service) HostexecRun(ctx context.Context, who contract.Principal, req c
 	if req.Timeout == 0 {
 		req.Timeout = contract.DurationMS((10 * time.Minute).Milliseconds())
 	}
-	if req.Host == "" || len(req.Argv) == 0 || req.Argv[0] == "" || req.Timeout < 0 || req.Timeout > contract.DurationMS((2*time.Hour).Milliseconds()) {
+	if req.Host == "" || strings.TrimSpace(req.Command) == "" || req.Timeout < 0 || req.Timeout > contract.DurationMS((2*time.Hour).Milliseconds()) {
 		return contract.HostexecRunResponse{}, invalid("invalid host, command or timeout")
 	}
 	grant, err := s.matchHostexec(ctx, session.Room, who, req.Host)
@@ -51,7 +51,7 @@ func (s *Service) HostexecRun(ctx context.Context, who contract.Principal, req c
 	if err != nil {
 		return contract.HostexecRunResponse{}, failure(err)
 	}
-	a := contract.HostexecRunArgs{Room: session.Room, Host: req.Host, Argv: req.Argv, Cwd: req.Cwd, Timeout: req.Timeout, Grant: grant.ID}
+	a := contract.HostexecRunArgs{Room: session.Room, Host: req.Host, Argv: []string{"bash", "-c", req.Command}, Cwd: req.Cwd, Timeout: req.Timeout, Grant: grant.ID}
 	op, err := s.approvals.Submit(ctx, who, contract.Operation{Room: session.Room, Args: a})
 	if err != nil {
 		return contract.HostexecRunResponse{}, failure(err)

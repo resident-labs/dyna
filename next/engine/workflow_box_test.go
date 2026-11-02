@@ -684,7 +684,7 @@ func TestWorkflowInARealBox(t *testing.T) {
 
 func shellTool(command string) crewTool {
 	input, _ := json.Marshal(map[string]string{"command": command})
-	return crewTool{"mcp__shell__shell", string(input)}
+	return crewTool{"bash", string(input)}
 }
 
 const crewWriters = `export const meta = { name: 'writers', profiles: ['fast'], size: 'medium' }
@@ -918,7 +918,7 @@ return { steps, log: (await run('cat /box/home/builds.log')).stdout }
 	}
 	c.closed(third.Session)
 
-	// A job that outlasts the shell tool's wait goes on in the background, and its end wakes the crew's session, which has no Pi
+	// A job that outlasts bash's wait goes on in the background, and its end wakes the crew's session, which has no Pi
 	// to hear it. The worker reads the job's file instead, and the wake must not disturb the run or start the script again.
 	upstream.tools = map[string][]crewTool{
 		"task-long": {shellTool("sleep 34; echo long > long.txt"), shellTool("until [ -e long.txt ]; do sleep 0.2; done; sleep 2")},
