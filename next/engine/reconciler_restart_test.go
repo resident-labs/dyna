@@ -142,7 +142,7 @@ func TestTurnSurvivesRestartAndLoss(t *testing.T) {
 		t.Fatal(err)
 	}
 	firstCtx, stopFirst := context.WithCancel(ctx)
-	first, problem := s.BoxChannel(firstCtx, caller)
+	first, problem := s.BoxChannel(firstCtx, caller, "")
 	if problem != nil {
 		stopFirst()
 		t.Fatal(problem)
@@ -189,7 +189,7 @@ func TestTurnSurvivesRestartAndLoss(t *testing.T) {
 	// The forward is back, so the box agent reconnects on its own.
 	secondCtx, stopSecond := context.WithCancel(ctx)
 	defer stopSecond()
-	second, problem := s.BoxChannel(secondCtx, caller)
+	second, problem := s.BoxChannel(secondCtx, caller, "")
 	if problem != nil {
 		t.Fatal(problem)
 	}
