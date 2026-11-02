@@ -29,6 +29,7 @@ var ErrSubscriptionTarget = errors.New("subscription session is closed")
 // Subscription is a stored subscription with its schedule and its last result.
 type Subscription struct {
 	contract.Subscription
+	Period    time.Duration // Every, read; zero for an event subscription
 	Disabled  bool
 	Default   bool
 	DueAt     time.Time // zero when nothing is due
@@ -79,15 +80,19 @@ func nullText[T ~string](value T) *string {
 }
 
 func insertDefaultSubscription(ctx context.Context, tx *sql.Tx, id contract.RoomID, root contract.SessionID, at time.Time) error {
-	wake := contract.Principal{Kind: contract.PrincipalSession, Session: root}
-	return insertSubscription(ctx, tx, contract.Subscription{ID: DefaultSubscriptionID(id), Scope: contract.ScopeRoom, Room: id, On: defaultEvents, Wake: &wake}, at)
+	return insertSubscription(ctx, tx, contract.Subscription{ID: DefaultSubscriptionID(id), Scope: contract.ScopeRoom, Room: id, On: defaultEvents, Wake: root}, at)
 }
 
+// wakePrincipal is whom a Wake delivers to.
+func wakePrincipal(sub Subscription) contract.Principal {
+	return contract.Principal{Kind: contract.PrincipalSession, Session: sub.Wake}
+}
+
+// insertSubscription stores sub. Every is stored as every_ms, and a Wake as wake_kind session with wake_id.
 func insertSubscription(ctx context.Context, tx *sql.Tx, sub contract.Subscription, at time.Time) error {
 	var wakeKind contract.PrincipalKind
-	var wakeID contract.SessionID
-	if sub.Wake != nil {
-		wakeKind, wakeID = sub.Wake.Kind, sub.Wake.Session
+	if sub.Wake != "" {
+		wakeKind = contract.PrincipalSession
 	}
 	var image string
 	var size contract.BoxSizeName
@@ -95,12 +100,16 @@ func insertSubscription(ctx context.Context, tx *sql.Tx, sub contract.Subscripti
 	if sub.Run != nil {
 		image, size, host = sub.Run.Image, sub.Run.Size, sub.Run.Host
 	}
-	var due int64
-	if sub.Every > 0 {
-		due = at.UnixMilli() + int64(sub.Every)
+	period, err := sub.Every.Parse()
+	if err != nil {
+		return err
 	}
-	_, err := tx.ExecContext(ctx, "INSERT INTO subscriptions(id,scope,room,session,every_ms,wake_kind,wake_id,run_image,run_size,run_host,created_at,due_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-		sub.ID, sub.Scope, nullText(sub.Room), nullText(sub.Session), sub.Every, wakeKind, wakeID, image, size, host, at.UnixMilli(), due)
+	var due int64
+	if period > 0 {
+		due = at.UnixMilli() + period.Milliseconds()
+	}
+	_, err = tx.ExecContext(ctx, "INSERT INTO subscriptions(id,scope,room,session,every_ms,wake_kind,wake_id,run_image,run_size,run_host,created_at,due_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+		sub.ID, sub.Scope, nullText(sub.Room), nullText(sub.Session), period.Milliseconds(), wakeKind, sub.Wake, image, size, host, at.UnixMilli(), due)
 	if err != nil {
 		return err
 	}
@@ -138,7 +147,7 @@ func (s *Store) AddSubscription(ctx context.Context, sub contract.Subscription, 
 				return err
 			}
 		}
-		for _, session := range []contract.SessionID{sub.Session, wakeTarget(sub)} {
+		for _, session := range []contract.SessionID{sub.Session, sub.Wake} {
 			if session == "" {
 				continue
 			}
@@ -152,13 +161,6 @@ func (s *Store) AddSubscription(ctx context.Context, sub contract.Subscription, 
 		}
 		return insertSubscription(ctx, tx, sub, at)
 	})
-}
-
-func wakeTarget(sub contract.Subscription) contract.SessionID {
-	if sub.Wake == nil {
-		return ""
-	}
-	return sub.Wake.Session
 }
 
 const subscriptionSelect = `SELECT s.id,s.scope,COALESCE(s.room,''),COALESCE(s.session,''),s.every_ms,s.wake_kind,s.wake_id,s.run_image,s.run_size,s.run_host,s.enabled,s.due_at,s.hold_until,s.failures,s.last_at,s.last_result,s.last_seq,
@@ -180,13 +182,15 @@ func loadSubscriptions(ctx context.Context, q sqlQuery, where string, args ...an
 		var size contract.BoxSizeName
 		var host contract.HostName
 		var enabled bool
-		var due, hold, last int64
-		if err := rows.Scan(&sub.ID, &sub.Scope, &sub.Room, &sub.Session, &sub.Every, &wakeKind, &wakeID, &image, &size, &host, &enabled, &due, &hold, &sub.Failures, &last, &sub.Last, &sub.LastSeq, &sub.Running, &sub.Held); err != nil {
+		var every, due, hold, last int64
+		if err := rows.Scan(&sub.ID, &sub.Scope, &sub.Room, &sub.Session, &every, &wakeKind, &wakeID, &image, &size, &host, &enabled, &due, &hold, &sub.Failures, &last, &sub.Last, &sub.LastSeq, &sub.Running, &sub.Held); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		sub.Period = time.Duration(every) * time.Millisecond
+		sub.Every = contract.DurationOf(sub.Period)
 		if wakeKind != "" {
-			sub.Wake = &contract.Principal{Kind: wakeKind, Session: wakeID}
+			sub.Wake = wakeID
 		} else {
 			sub.Run = &contract.RunSpec{Image: image, Size: size, Host: host}
 		}
@@ -321,21 +325,21 @@ func subscriptionMatches(sub Subscription, event contract.Event, dm bool) bool {
 	if hasNews && !waking.Waking() || !contract.MatchesWhere(sub.Where, event.Body) {
 		return false
 	}
-	if sub.Wake == nil {
+	if sub.Wake == "" {
 		return true
 	}
 	// A session does not wake on its own events, or a turn's end would start the next turn forever.
-	if event.From.Kind == contract.PrincipalSession && event.From.Session == sub.Wake.Session {
+	if event.From.Kind == contract.PrincipalSession && event.From.Session == sub.Wake {
 		return false
 	}
 	// The owner already has the pass in its one delivery, on this event or on the github.pr.changed beside it.
 	switch body := event.Body.(type) {
 	case contract.PrChanged:
-		if body.Session == sub.Wake.Session {
+		if body.Session == sub.Wake {
 			return false
 		}
 	case contract.IssueChanged:
-		if body.Session == sub.Wake.Session {
+		if body.Session == sub.Wake {
 			return false
 		}
 	}
@@ -410,7 +414,7 @@ func (s *Store) DispatchEvents(ctx context.Context, limit int) (int, error) {
 
 // fire wakes a target on an event, or queues the event for a Run of its own. Runs of a subscription go one at a time.
 func (s *Store) fire(ctx context.Context, tx *sql.Tx, sub Subscription, event contract.Event) error {
-	if sub.Wake == nil {
+	if sub.Wake == "" {
 		if _, err := tx.ExecContext(ctx, "INSERT INTO subscription_queue(sub,seq) SELECT ?1,?2 WHERE (SELECT count(*) FROM subscription_queue WHERE sub=?1)<?3", sub.ID, event.Seq, maxQueuedRuns); err != nil {
 			return err
 		}
@@ -418,10 +422,10 @@ func (s *Store) fire(ctx context.Context, tx *sql.Tx, sub Subscription, event co
 		return err
 	}
 	var delivered bool
-	if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM deliveries WHERE to_kind=? AND to_id=? AND seq=?)", sub.Wake.Kind, sub.Wake.Session, event.Seq).Scan(&delivered); err != nil || delivered {
+	if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM deliveries WHERE to_kind=? AND to_id=? AND seq=?)", contract.PrincipalSession, sub.Wake, event.Seq).Scan(&delivered); err != nil || delivered {
 		return err
 	}
-	return s.InsertDelivery(ctx, tx, event.Seq, event.Body, contract.Delivery{To: *sub.Wake, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
+	return s.InsertDelivery(ctx, tx, event.Seq, event.Body, contract.Delivery{To: wakePrincipal(sub), Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
 }
 
 // DueSubscriptions lists what can fire now: due, enabled, past any backoff, with no Run in progress and in a
@@ -443,10 +447,10 @@ func (s *Store) DueSubscriptions(ctx context.Context, now time.Time) ([]Subscrip
 
 // nextDue is when a subscription that fired at now fires again. Only a schedule has a next time.
 func nextDue(sub Subscription, now time.Time) int64 {
-	if sub.Every == 0 {
+	if sub.Period == 0 {
 		return 0
 	}
-	return now.UnixMilli() + int64(sub.Every)
+	return now.UnixMilli() + sub.Period.Milliseconds()
 }
 
 // FireScheduledWake delivers a schedule's wake and moves the schedule. A target that has not yet taken the
@@ -461,14 +465,14 @@ func (s *Store) FireScheduledWake(ctx context.Context, sub Subscription, event c
 			return err
 		}
 		var waiting bool
-		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM deliveries WHERE to_kind=? AND to_id=? AND seq=? AND state='pending')", sub.Wake.Kind, sub.Wake.Session, sub.LastSeq).Scan(&waiting); err != nil || waiting {
+		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM deliveries WHERE to_kind=? AND to_id=? AND seq=? AND state='pending')", contract.PrincipalSession, sub.Wake, sub.LastSeq).Scan(&waiting); err != nil || waiting {
 			return err
 		}
 		seq, err := s.AppendEvent(tx, event)
 		if err != nil {
 			return err
 		}
-		if err := s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: *sub.Wake, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}); err != nil {
+		if err := s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: wakePrincipal(sub), Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, "UPDATE subscriptions SET last_seq=?,last_at=? WHERE id=?", seq, event.Time.UnixMilli(), sub.ID)
@@ -495,7 +499,7 @@ func (s *Store) BeginRun(ctx context.Context, sub Subscription, run HookRun) (bo
 			return err
 		}
 		n, err := result.RowsAffected()
-		if begun = n == 1; err != nil || !begun || sub.Every > 0 {
+		if begun = n == 1; err != nil || !begun || sub.Period > 0 {
 			return err
 		}
 		return s.nextQueued(ctx, tx, sub.ID, run.StartedAt, &event)
