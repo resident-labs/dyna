@@ -24,14 +24,23 @@ type fakeJournal struct {
 	steps map[string]contract.WorkflowStepEndRequest
 	names map[string]string
 	files map[string]string // what each running worker reported
+	lanes map[string]string
 	posts []contract.PostRequest
+	lines []string // status() lines
 	pin   string
 	// by step name, the script version that started each step
 	versions map[string]int
 }
 
 func newFakeJournal() *fakeJournal {
-	return &fakeJournal{steps: map[string]contract.WorkflowStepEndRequest{}, names: map[string]string{}, files: map[string]string{}}
+	return &fakeJournal{steps: map[string]contract.WorkflowStepEndRequest{}, names: map[string]string{}, files: map[string]string{}, lanes: map[string]string{}}
+}
+
+func (j *fakeJournal) WorkflowSetStatus(_ context.Context, req contract.WorkflowSetStatusRequest) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.lines = append(j.lines, req.Text)
+	return nil
 }
 
 func (j *fakeJournal) WorkflowPin(_ context.Context, commit string) error {
@@ -47,6 +56,7 @@ func (j *fakeJournal) WorkflowStepStart(_ context.Context, req contract.Workflow
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.names[req.Key] = req.Name
+	j.lanes[req.Key] = req.Lane
 	if stored, ok := j.steps[req.Key]; ok && req.Kind != contract.WorkflowStepWorkflow {
 		return contract.WorkflowStepStartResponse{State: stored.State, Result: stored.Result, Reason: stored.Reason}, nil
 	}
@@ -528,6 +538,43 @@ func TestPostIsAStepSoAResumeDoesNotRepeatIt(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no log step in %v", h.journal.names)
+	}
+}
+
+// status() is no step, so a resume writes its lines again, and a lane tags a step without changing its key.
+func TestStatusIsNotAStepAndALaneKeepsTheKey(t *testing.T) {
+	h := newCrewHarness(t)
+	tagged := crewMeta + `status('writing'); const a = await agent('write g1', { label: 'write', lane: 'g1' }); await run('true', { lane: 'g1' })
+await post('@root', 'g1 written', null, { lane: 'g1' }); status('g1 written'); return a`
+	if got := h.result(tagged); got != "done: write g1" {
+		t.Fatalf("result %v", got)
+	}
+	if !slices.Equal(h.journal.lines, []string{"writing", "g1 written"}) {
+		t.Fatalf("lines %q", h.journal.lines)
+	}
+	lanes := 0
+	for key, name := range h.journal.names {
+		if strings.Contains(name, "writing") {
+			t.Fatalf("a status line became a step: %q", name)
+		}
+		if h.journal.lanes[key] == "g1" {
+			lanes++
+		}
+	}
+	if len(h.journal.names) != 3 || lanes != 3 {
+		t.Fatalf("steps %v, lanes %v", h.journal.names, h.journal.lanes)
+	}
+	// The same script without its lanes finds every stored step, and posts nothing twice.
+	plain := crewMeta + `status('writing'); const a = await agent('write g1', { label: 'write' }); await run('true')
+await post('@root', 'g1 written', null); status('g1 written'); return a`
+	if h.result(plain); h.started.Load() != 1 || len(h.journal.posts) != 1 || len(h.journal.names) != 3 {
+		t.Fatalf("%d workers, %d posts, steps %v", h.started.Load(), len(h.journal.posts), h.journal.names)
+	}
+	if !slices.Equal(h.journal.lines, []string{"writing", "g1 written", "writing", "g1 written"}) {
+		t.Fatalf("lines after the resume %q", h.journal.lines)
+	}
+	if ended := h.run(crewMeta + `return await post('@root', 'x', null, { label: 'x' })`); ended.Outcome != contract.TurnFailed || !strings.Contains(ended.Error, "post takes only {lane}") {
+		t.Fatalf("turn %+v", ended)
 	}
 }
 

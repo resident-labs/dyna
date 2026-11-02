@@ -31,21 +31,23 @@ return { merged: merged.merged, conflicts: merged.conflicts, empty: written.filt
 ## Script globals
 
 - `args`: the request's JSON, already parsed, or `null`. `JSON.parse(args)` throws on an object.
-- `agent(prompt, {profile, schema, label, phase, timeout, worktree})`: one Pi worker. Returns its final text; with `schema`, the parsed value; with `worktree: true`, `{step, text, branch, commit, files}`, or `{step, output, branch, commit, files}` with `schema`, so a schema field is `r.issues`, or `r.output.issues` in a worktree. Throws on an unknown profile, a timeout (seconds, default 5 hours), no final text, or three replies that miss the schema.
-- `run(command, {cwd, env, timeout, check, label, phase})`: one command in the main tree, holding the build lock. A string runs in `sh -c`, a list directly. Returns `{code, stdout, stderr, durationMs}`, the last 64 KiB of each stream. `check` defaults to `true`, so a nonzero exit throws `exit code N: <stderr>`; with `check: false` the object carries `code`. A timeout throws either way.
+- `agent(prompt, {profile, schema, label, phase, lane, timeout, worktree})`: one Pi worker. Returns its final text; with `schema`, the parsed value; with `worktree: true`, `{step, text, branch, commit, files}`, or `{step, output, branch, commit, files}` with `schema`, so a schema field is `r.issues`, or `r.output.issues` in a worktree. Throws on an unknown profile, a timeout (seconds, default 5 hours), no final text, or three replies that miss the schema.
+- `run(command, {cwd, env, timeout, check, label, phase, lane})`: one command in the main tree, holding the build lock. A string runs in `sh -c`, a list directly. Returns `{code, stdout, stderr, durationMs}`, the last 64 KiB of each stream. `check` defaults to `true`, so a nonzero exit throws `exit code N: <stderr>`; with `check: false` the object carries `code`. A timeout throws either way.
 - `parallel(thunks)`: starts every thunk at once and returns results in input order. It does not throw: a failure becomes `{failed: true, step, reason}`.
 - `pipeline(items, ...stages)`: each item goes through the stages on its own, and a stage gets `(previous, item, index)`. Same failure entries, and a failed item skips its later stages.
 - `merge(results, {base, label, phase})`: merges each result's `commit`, in order, from `base` (the pinned commit by default) into `v2/<session>-run`. Returns `{branch, commit, merged, conflicts}`. A conflict leaves that step out and does not throw. A failed entry lands in `conflicts` with its reason. A later merge starts from `base` again, so `{base: earlier.commit}` builds on an earlier one. `merge()` reads `commit`, not the tip of `branch`: after a push to a result's branch, `{...result, commit: pushed}` carries the new work.
 - `workflow(path, args)`: runs one script from the checkout and returns its value. Nesting is one level.
-- `post(to, text, data)`: posts as the crew and returns `{event, seq}`. `to` is one name or a list: a session name, `root`, `parent`, `children`, `siblings` or `room:name`. A session ID is not a mention and fails. `data` joins the text as a JSON block.
-- `phase(title)` groups later steps on the run page. `log(...values)` and `console.*` write to the run.
+- `post(to, text, data, {lane})`: posts as the crew and returns `{event, seq}`. `to` is one name or a list: a session name, `root`, `parent`, `children`, `siblings` or `room:name`. A session ID is not a mention and fails. `data` joins the text as a JSON block.
+- `phase(title)` sets the stage of later steps, and the `phase` option sets one step's. `lane` names the subject a step is about, as in `{lane: g.id}`. Nothing is read from a step's name: the run page's flowchart has a node per phase and draws each lane's path between them, loops included, and its timeline labels a step by its lane. Without lanes, phases connect in the order they first ran.
+- `status(text)` sets the run's one line of what is happening, shown under its name on the run page and in the Runs list, as in ``status(`Wave 3: ${landed} of ${total} landed`)``. It is not a step: the run keeps the latest line and the 19 before it, and a resumed script writes its lines again as it reaches them. Without one, the page counts steps, as `75 of 76 steps · 1 running`.
+- `log(...values)` and `console.*` write to the run.
 - `Date.now()`, `Math.random()` and `new Date()` with no argument throw, because a rerun has to make the same calls.
 
 A failed call throws an `Error` with `.step` and `.reason`. An uncaught throw ends the run as `failed`. A script that returns ends `done`, however many steps failed; its value, up to 1 MiB, is the reply.
 
 ## Reload and resume
 
-Reload is for a running run, resume for an ended one. Both go by step key: a hash of the step's kind, prompt or command, options, profile and enclosing `workflow()` step, not its order. A key that matches a finished step returns the stored result, so a changed prompt, command or option reruns that step alone.
+Reload is for a running run, resume for an ended one. Both go by step key: a hash of the step's kind, prompt or command, options other than `lane`, profile and enclosing `workflow()` step, not its order. A key that matches a finished step returns the stored result, so a changed prompt, command or option reruns that step alone, and a kept step takes the lane the script now gives it.
 
 `dyna workflow reload RUN FILE`, or the tool's `reload` action, gives a running run a new script. Only the owner or a room's root reloads one.
 

@@ -311,9 +311,14 @@ test("a crew's JSON reply shows no post, and its text reply and everyone else's 
 });
 
 test("a step change decodes with seq 0 and adds no row to any conversation", () => {
-  const change = { seq: 0, id: "e", at: "2026-01-01T00:00:00Z", from: { kind: "engine" }, type: "workflow.step_changed", body: { run: "wf", session: "crew", step: step("a") } };
+  const change = { seq: 0, id: "e", at: "2026-01-01T00:00:00Z", from: { kind: "engine" }, type: "workflow.step_changed", body: { run: "wf", session: "crew", step: { ...step("a"), lane: "g1" }, steps: 1, running: 1, failed: 0 } };
   const decoded = decodeEvent(change);
   assert.ok(decoded);
   assert.equal(decodeEvent({ ...change, body: { run: "wf", session: "crew", step: { key: "a" } } }), undefined);
   assert.deepEqual(feedRows([{ ...(decoded as Event), seq: 1 }], { kind: "feed" }).filter(row => row.kind !== "day"), []);
+  const line = { ...change, type: "workflow.status_changed", body: { run: "wf", session: "crew", status: "Wave 3: 6 of 7 landed" } };
+  const said = decodeEvent(line);
+  assert.ok(said);
+  assert.equal(decodeEvent({ ...line, body: { run: "wf", session: "crew" } }), undefined);
+  assert.deepEqual(feedRows([{ ...(said as Event), seq: 1 }], { kind: "feed" }).filter(row => row.kind !== "day"), []);
 });

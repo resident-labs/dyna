@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 76
+const schemaVersion = 77
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
@@ -24,6 +24,8 @@ var steps = map[int][]string{
 		`INSERT INTO workflow_scripts(run,version,script,created_at) SELECT id,1,script,started_at FROM workflow_runs`,
 		`UPDATE workflow_steps SET version=1 WHERE started_at>=(SELECT started_at FROM workflow_runs WHERE id=workflow_steps.run)`,
 	},
+	// A script's status() lines stay on its run, and a step names the subject it is about.
+	76: {`ALTER TABLE workflow_runs ADD COLUMN status_lines TEXT NOT NULL DEFAULT '[]'`, `ALTER TABLE workflow_steps ADD COLUMN lane TEXT NOT NULL DEFAULT ''`},
 }
 
 // upgrade applies each future numbered step in the same transaction as its version.
