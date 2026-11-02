@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -10,7 +11,7 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
-func TestHostListSharedSizes(t *testing.T) {
+func TestHostListGivesTheSharedSizesOnce(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -23,18 +24,18 @@ func TestHostListSharedSizes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := st.FinishHostMaintenance(ctx, "a", []contract.RoomShared{{Room: "old", Bytes: 1}}, now); err != nil {
+	if err := st.SetRoomShared(ctx, []contract.RoomShared{{Room: "old", Bytes: 1}}, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.FinishHostMaintenance(ctx, "b", []contract.RoomShared{{Room: "other", Bytes: 3}}, now); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.FinishHostMaintenance(ctx, "a", []contract.RoomShared{{Room: "room", Bytes: 42}}, now); err != nil {
+	if err := st.SetRoomShared(ctx, []contract.RoomShared{{Room: "room", Bytes: 42}, {Room: "other", Bytes: 3}}, now); err != nil {
 		t.Fatal(err)
 	}
 	svc := New(st, nil, nil, func() time.Time { return now })
 	got, problem := svc.HostList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.HostListRequest{})
-	if problem != nil || len(got.Hosts) != 3 || len(got.Hosts[1].Shared) != 1 || got.Hosts[1].Shared[0] != (contract.RoomShared{Room: "room", Bytes: 42}) || len(got.Hosts[2].Shared) != 1 || got.Hosts[2].Shared[0].Bytes != 3 {
+	if problem != nil || len(got.Hosts) != 3 || got.Hosts[0].Name != contract.ControlPlane {
+		t.Fatalf("host list: %+v, error: %v", got, problem)
+	}
+	if want := []contract.RoomShared{{Room: "other", Bytes: 3}, {Room: "room", Bytes: 42}}; !slices.Equal(got.Hosts[0].Shared, want) || len(got.Hosts[1].Shared) != 0 || len(got.Hosts[2].Shared) != 0 {
 		t.Fatalf("host list: %+v, error: %v", got, problem)
 	}
 }

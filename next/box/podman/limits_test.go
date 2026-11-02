@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/hostexec"
 	"github.com/resident-labs/dyna/contract"
 )
@@ -128,7 +129,7 @@ func TestHostexecLanesReserveHeartbeatAndStop(t *testing.T) {
 	heartbeatDone := make(chan struct{})
 	go func() {
 		defer close(heartbeatDone)
-		h.Heartbeat(ctx, ticks, "/data", func(ok bool, _ Load) { reports <- ok }, func(string, contract.PressureKind) {})
+		h.Heartbeat(ctx, ticks, box.Layout{HostData: "/data"}, func(ok bool, _ Load) { reports <- ok }, func(string, contract.PressureKind) {})
 	}()
 	ticks <- time.Time{}
 	if !<-reports {
@@ -177,7 +178,7 @@ func TestShortCommandsLeaveHeartbeatAndHostexecUnblocked(t *testing.T) {
 	heartbeatDone := make(chan struct{})
 	go func() {
 		defer close(heartbeatDone)
-		h.Heartbeat(ctx, ticks, "/data", func(ok bool, _ Load) { reports <- ok }, func(string, contract.PressureKind) {})
+		h.Heartbeat(ctx, ticks, box.Layout{HostData: "/data"}, func(ok bool, _ Load) { reports <- ok }, func(string, contract.PressureKind) {})
 	}()
 	ticks <- time.Time{}
 	if !<-reports {

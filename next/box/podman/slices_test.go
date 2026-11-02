@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -68,7 +69,7 @@ func driveHeartbeat(t *testing.T, bodies []string, at []time.Time) []pressureRep
 	var got []pressureReport
 	go func() {
 		defer close(done)
-		h.Heartbeat(ctx, ticks, "/data", func(bool, Load) {}, func(slice string, kind contract.PressureKind) {
+		h.Heartbeat(ctx, ticks, box.Layout{HostData: "/data"}, func(bool, Load) {}, func(slice string, kind contract.PressureKind) {
 			got = append(got, pressureReport{slice, kind})
 		})
 	}()
@@ -231,7 +232,7 @@ func TestHeartbeatReportsLoad(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		h.Heartbeat(ctx, ticks, "/data", func(ok bool, load Load) {
+		h.Heartbeat(ctx, ticks, box.Layout{HostData: "/data"}, func(ok bool, load Load) {
 			reports <- sample{ok, load.CPUUsed, load.MemUsed, load.DiskBytes, load.DiskUsed}
 		}, func(string, contract.PressureKind) {})
 	}()

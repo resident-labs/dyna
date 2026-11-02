@@ -224,10 +224,6 @@ func TestSubscriptionShapeRefusals(t *testing.T) {
 
 func TestSubscriptionAuthority(t *testing.T) {
 	s, room, worker, ctx := setup(t)
-	root, err := s.store.RootBoxHost(ctx, room)
-	if err != nil || root == "" {
-		t.Fatalf("root box host: %q %v", root, err)
-	}
 	var rootID contract.SessionID
 	if err := s.store.Read().QueryRowContext(ctx, "SELECT parent FROM sessions WHERE id=?", worker).Scan(&rootID); err != nil {
 		t.Fatal(err)
@@ -818,7 +814,7 @@ func TestLostHostEndsARun(t *testing.T) {
 	}
 }
 
-func TestPlacementFollowsTheSharedFolder(t *testing.T) {
+func TestARunGoesWhereAdmissionPlacesIt(t *testing.T) {
 	s, room, _, ctx := setup(t)
 	runs, c := withRuns(t, s)
 	if err := s.store.AddHost(ctx, box.Host{Name: "bigger", State: box.HostReady, CPUs: 64, MemBytes: 256 * box.GiB, DiskBytes: 400 * box.GiB, CheckedAt: s.now()}); err != nil {
@@ -827,8 +823,52 @@ func TestPlacementFollowsTheSharedFolder(t *testing.T) {
 	addSubscription(t, s, ctx, runRequest(room))
 	c.add(30 * time.Minute)
 	pass(t, s, ctx)
+	if runs.count() != 1 || runs.last().Host != "bigger" {
+		t.Fatalf("a Run stayed on the host of the room's root: %+v", runs.started)
+	}
+}
+
+func TestAPinnedRunGoesOnlyToItsHost(t *testing.T) {
+	s, room, _, ctx := setup(t)
+	runs, c := withRuns(t, s)
+	if err := s.store.AddHost(ctx, box.Host{Name: "bigger", State: box.HostReady, CPUs: 64, MemBytes: 256 * box.GiB, DiskBytes: 400 * box.GiB, CheckedAt: s.now()}); err != nil {
+		t.Fatal(err)
+	}
+	req := runRequest(room)
+	req.Run.Host = "host"
+	addSubscription(t, s, ctx, req)
+	c.add(30 * time.Minute)
+	pass(t, s, ctx)
 	if runs.count() != 1 || runs.last().Host != "host" {
-		t.Fatalf("a Run left the host of the room's root: %+v", runs.started)
+		t.Fatalf("a pinned Run left its host: %+v", runs.started)
+	}
+}
+
+func TestAPinnedRunWaitsForItsHost(t *testing.T) {
+	s, room, _, ctx := setup(t)
+	runs, c := withRuns(t, s)
+	if err := s.store.AddHost(ctx, box.Host{Name: "away", State: box.HostUnreachable, CPUs: 64, MemBytes: 256 * box.GiB, DiskBytes: 400 * box.GiB, CheckedAt: s.now()}); err != nil {
+		t.Fatal(err)
+	}
+	req := runRequest(room)
+	req.Run.Host = "away"
+	id := addSubscription(t, s, ctx, req)
+	c.add(30 * time.Minute)
+	pass(t, s, ctx)
+	if runs.count() != 0 {
+		t.Fatalf("a pinned Run moved: %+v", runs.started)
+	}
+	if info := listed(t, s, ctx, room, id); info.Failures != 0 || info.Subscription.Run.Host != "away" {
+		t.Fatalf("a waiting Run: %+v", info)
+	}
+}
+
+func TestARunCannotPinAHostThatIsNotThere(t *testing.T) {
+	s, room, _, ctx := setup(t)
+	req := runRequest(room)
+	req.Run.Host = "nowhere"
+	if _, problem := s.SubscriptionAdd(ctx, ownerCaller, req); problem == nil || problem.Code != contract.ErrInvalid {
+		t.Fatalf("got %v", problem)
 	}
 }
 

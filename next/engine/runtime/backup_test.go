@@ -130,6 +130,52 @@ func TestBackupRunsWhenDiskCannotBeMeasured(t *testing.T) {
 	}
 }
 
+func TestBackupLeavesTheSharedFoldersOut(t *testing.T) {
+	layout := box.Layout{Data: t.TempDir()}
+	dir := layout.Backups()
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(layout.Shared("r"), "large"), layout.File("r", "a"), filepath.Join(layout.Files("r"), "shared", "kept")} {
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	members := map[string]bool{}
+	b := backupLoop{store: &fakeBackupStore{dir: dir}, layout: layout, dest: "backup-host", recipient: identity.Recipient(), free: plentyFree, now: time.Now, run: func(_ context.Context, _ string, _ int64, input *os.File) error {
+		plain, err := age.Decrypt(input, identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gz, err := gzip.NewReader(plain)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tr := tar.NewReader(gz)
+		for {
+			h, err := tr.Next()
+			if err == io.EOF {
+				return nil
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			members[h.Name] = true
+		}
+	}}
+	b.backup(context.Background())
+	if members["rooms/r/shared/large"] || !members["rooms/r/files/a"] || !members["rooms/r/files/shared/kept"] {
+		t.Fatalf("members: %v", members)
+	}
+}
+
 func TestBackupCopyFailure(t *testing.T) {
 	layout := box.Layout{Data: t.TempDir()}
 	dir := layout.Backups()
