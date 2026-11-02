@@ -77,6 +77,10 @@ jobs:
         with:
           go-version-file: next/go.mod
           cache-dependency-path: next/go.sum
+      # box/agent's crew and extension tests skip without node, and the self-hosted image has none.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
       - name: Format, vet and test
         run: bash next/scripts/ci.sh next
       # The self-hosted image already has it, and no sudo.
