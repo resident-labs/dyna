@@ -93,11 +93,12 @@ func (fakeProfiles) Model(contract.ProfileName) (contract.ModelChoice, []string,
 	return contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "model", Thinking: contract.ThinkingLow}, []string{"model"}, nil
 }
 
+// setupNow is the clock of setup's service.
+func setupNow() time.Time { return time.Unix(1000, 0) }
+
 func setup(t *testing.T) (*Service, contract.RoomID, contract.SessionID, context.Context) {
 	t.Helper()
-	now := func() time.Time { return time.Unix(1000, 0) }
-	dir := t.TempDir()
-	st, err := store.Open(dir)
+	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,6 +107,13 @@ func setup(t *testing.T) (*Service, contract.RoomID, contract.SessionID, context
 			t.Error(err)
 		}
 	})
+	return setupStore(t, st)
+}
+
+// setupStore makes setup's host, room and session in st, which the caller closes.
+func setupStore(t *testing.T, st *store.Store) (*Service, contract.RoomID, contract.SessionID, context.Context) {
+	t.Helper()
+	now := setupNow
 	if err := st.AddHost(context.Background(), box.Host{Name: "host", State: box.HostReady, CPUs: 32, MemBytes: 64 * box.GiB, DiskBytes: 100 * box.GiB, CheckedAt: now()}); err != nil {
 		t.Fatal(err)
 	}
