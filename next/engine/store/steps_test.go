@@ -10,8 +10,19 @@ import (
 	"testing"
 )
 
-// beforeWorkflows is the schema without the tables of steps 66 and 67, which come last in the file, and step 67's columns.
-var beforeWorkflows = strings.Replace(schema[:strings.Index(schema, "CREATE TABLE workflow_runs")], ", meta TEXT NOT NULL DEFAULT '', meta_wake_at INTEGER NOT NULL DEFAULT 0", "", 1)
+// beforeSeenColumns puts back the two pr_owners columns that step 69 drops.
+func beforeSeenColumns(text string) string {
+	return strings.Replace(text, "seen_reviews INTEGER NOT NULL DEFAULT 0,", "seen_reviews INTEGER NOT NULL DEFAULT 0, seen_review_comments INTEGER NOT NULL DEFAULT 0, seen_comments INTEGER NOT NULL DEFAULT 0,", 1)
+}
+
+// beforeFeeds is the schema as step 70 finds it.
+func beforeFeeds(text string) string {
+	text = beforeSeenColumns(text[:strings.Index(text, "CREATE TABLE github_feeds")])
+	return strings.Replace(text, "state TEXT NOT NULL, own_wake_at", "state TEXT NOT NULL, seen_comments INTEGER NOT NULL DEFAULT 0, own_wake_at", 1)
+}
+
+// beforeWorkflows is the schema without the tables of steps 66 and 67, which come last in the file, and with the pr_owners columns of the steps that followed undone.
+var beforeWorkflows = beforeSeenColumns(strings.Replace(schema[:strings.Index(schema, "CREATE TABLE workflow_runs")], ", meta TEXT NOT NULL DEFAULT '', meta_wake_at INTEGER NOT NULL DEFAULT 0", "", 1))
 
 func TestUpgradeGivesTrackedPRsNoMetadata(t *testing.T) {
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
@@ -19,8 +30,8 @@ func TestUpgradeGivesTrackedPRsNoMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	before := schema[:strings.Index(schema, "CREATE TABLE issue_owners")]
-	if _, err = db.Exec(withLastHost(strings.Replace(before, ", meta TEXT NOT NULL DEFAULT '', meta_wake_at INTEGER NOT NULL DEFAULT 0", "", 1))); err != nil {
+	before := strings.Replace(schema[:strings.Index(schema, "CREATE TABLE issue_owners")], ", meta TEXT NOT NULL DEFAULT '', meta_wake_at INTEGER NOT NULL DEFAULT 0", "", 1)
+	if _, err = db.Exec(withLastHost(beforeSeenColumns(before))); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = db.Exec(`INSERT INTO meta(key,value) VALUES ('schema_version','67');
@@ -283,7 +294,7 @@ func TestUpgradeMakesOneSizePerRoom(t *testing.T) {
 	if !strings.Contains(schema, central) {
 		t.Fatal("schema.sql lost the central sizes")
 	}
-	old := strings.Replace(withLastHost(schema), central, "CREATE TABLE room_shared (room TEXT NOT NULL, host TEXT NOT NULL REFERENCES hosts(name), bytes INTEGER NOT NULL, measured_at INTEGER NOT NULL, PRIMARY KEY(room, host));", 1)
+	old := strings.Replace(withLastHost(beforeFeeds(schema)), central, "CREATE TABLE room_shared (room TEXT NOT NULL, host TEXT NOT NULL REFERENCES hosts(name), bytes INTEGER NOT NULL, measured_at INTEGER NOT NULL, PRIMARY KEY(room, host));", 1)
 	if _, err = db.Exec(old); err != nil {
 		t.Fatal(err)
 	}

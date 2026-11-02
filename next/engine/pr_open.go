@@ -121,7 +121,6 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 				result.Cause = contract.CauseInternal
 				result.Error = "PR opened but ownership could not be recorded; reconcile before retrying: " + link
 			}
-			s.resetPRPoll(session.Repo)
 			return result
 		},
 	}

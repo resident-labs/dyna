@@ -15,35 +15,32 @@ import (
 // ErrPRTracked means another session already tracks this open PR.
 var ErrPRTracked = errors.New("another session tracks this pull request")
 
-// PRCursors are the newest GitHub IDs seen. Reviews, inline comments and conversation comments number separately.
-type PRCursors struct {
-	Reviews, ReviewComments, Comments int64
-}
-
-// TrackedPR is one pr_owners row. Baseline means the next poll records the PR without a wake. OwnWakeAt and MetaWakeAt
-// are when a comment by the token's own account and a metadata change last woke a session, in Unix milliseconds.
+// TrackedPR is one pr_owners row. Baseline means the next pass records the PR without a wake. SeenReviews is the newest
+// review ID seen, because reviews have no repository feed. OwnWakeAt and MetaWakeAt are when a comment by the token's own
+// account and a metadata change last woke a session, in Unix milliseconds.
 type TrackedPR struct {
 	contract.PrSummary
-	Room       contract.RoomID
-	HeadRepo   contract.RepoName
-	Baseline   bool
-	CITold     string
-	Seen       PRCursors
-	OwnWakeAt  int64
-	Meta       *ItemMeta
-	MetaWakeAt int64
+	Room        contract.RoomID
+	HeadRepo    contract.RepoName
+	Baseline    bool
+	CITold      string
+	SeenReviews int64
+	OwnWakeAt   int64
+	Meta        ItemMeta
+	MetaWakeAt  int64
 }
 
-// PRUpdate is a poll's result for one PR. A nil Change writes the row and tells nobody.
+// PRUpdate is a pass's result for one PR, read while the row's state was Was. A nil Change writes the row and tells nobody.
 type PRUpdate struct {
-	PR         contract.PrSummary
-	HeadRepo   contract.RepoName
-	CITold     string
-	Seen       PRCursors
-	OwnWakeAt  int64
-	Meta       *ItemMeta
-	MetaWakeAt int64
-	Change     *contract.PrChange
+	PR          contract.PrSummary
+	Was         contract.PrState
+	HeadRepo    contract.RepoName
+	CITold      string
+	SeenReviews int64
+	OwnWakeAt   int64
+	Meta        ItemMeta
+	MetaWakeAt  int64
+	Change      *contract.PrChange
 }
 
 // RepoHead is a repository's default branch head.
@@ -52,12 +49,12 @@ type RepoHead struct {
 	Head string
 }
 
-const prColumns = `p.repo,p.number,p.url,p.title,p.author,p.session,p.draft,p.state,p.head,p.review,p.ci,p.merge,s.room,p.head_repo,p.baseline,p.ci_told,p.seen_reviews,p.seen_review_comments,p.seen_comments,p.own_wake_at,p.meta,p.meta_wake_at FROM pr_owners p JOIN sessions s ON s.id=p.session`
+const prColumns = `p.repo,p.number,p.url,p.title,p.author,p.session,p.draft,p.state,p.head,p.review,p.ci,p.merge,s.room,p.head_repo,p.baseline,p.ci_told,p.seen_reviews,p.own_wake_at,p.meta,p.meta_wake_at FROM pr_owners p JOIN sessions s ON s.id=p.session`
 
 func scanPR(row interface{ Scan(...any) error }) (TrackedPR, error) {
 	var p TrackedPR
 	var meta string
-	err := row.Scan(&p.Repo, &p.Number, &p.URL, &p.Title, &p.Author, &p.Session, &p.Draft, &p.State, &p.Head, &p.Review, &p.CI, &p.Merge, &p.Room, &p.HeadRepo, &p.Baseline, &p.CITold, &p.Seen.Reviews, &p.Seen.ReviewComments, &p.Seen.Comments, &p.OwnWakeAt, &meta, &p.MetaWakeAt)
+	err := row.Scan(&p.Repo, &p.Number, &p.URL, &p.Title, &p.Author, &p.Session, &p.Draft, &p.State, &p.Head, &p.Review, &p.CI, &p.Merge, &p.Room, &p.HeadRepo, &p.Baseline, &p.CITold, &p.SeenReviews, &p.OwnWakeAt, &meta, &p.MetaWakeAt)
 	if err != nil {
 		return p, err
 	}
@@ -101,9 +98,9 @@ func (s *Store) RepoHeads(ctx context.Context) (map[contract.RepoName]string, er
 	return heads, rows.Err()
 }
 
-// TrackedPRs lists every PR the poll reads.
+// TrackedPRs lists every tracked PR. A merged or closed one is read no more, but a feed can still reopen it.
 func (s *Store) TrackedPRs(ctx context.Context) ([]TrackedPR, error) {
-	return s.queryPRs(ctx, `SELECT `+prColumns+` WHERE p.state='open' ORDER BY p.repo,p.number`)
+	return s.queryPRs(ctx, `SELECT `+prColumns+` ORDER BY p.repo,p.number`)
 }
 
 // RoomPRs lists a room's PRs, or every room's when room is empty. all adds merged and closed ones, newest numbers first.
@@ -156,12 +153,16 @@ func (s *Store) RecordPROpen(ctx context.Context, repo contract.RepoName, number
 // TrackPR adds a PR with a baseline, so what it already shows wakes nobody. It records no branch, because a branch
 // in pr_owners is a push right (OwnsPRBranch) and tracking is only reading. A merged or closed row can be tracked again.
 func (s *Store) TrackPR(ctx context.Context, pr TrackedPR) error {
+	meta, err := encodeMeta(pr.Meta)
+	if err != nil {
+		return err
+	}
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `INSERT INTO pr_owners(repo,number,session,goal,approved_head,head_repo,url,title,author,draft,state,head) VALUES(?,?,?,'','',?,?,?,?,?,?,?)
+		result, err := tx.ExecContext(ctx, `INSERT INTO pr_owners(repo,number,session,goal,approved_head,head_repo,url,title,author,draft,state,head,meta) VALUES(?,?,?,'','',?,?,?,?,?,?,?,?)
 ON CONFLICT(repo,number) DO UPDATE SET branch=CASE WHEN session=excluded.session THEN branch ELSE '' END,session=excluded.session,approved_head='',
 head_repo=excluded.head_repo,url=excluded.url,title=excluded.title,author=excluded.author,draft=excluded.draft,state=excluded.state,head=excluded.head,
-review='',ci='',merge='',ci_told='',seen_reviews=0,seen_review_comments=0,seen_comments=0,own_wake_at=0,meta='',meta_wake_at=0,baseline=1 WHERE state<>'open'`,
-			pr.Repo, pr.Number, pr.Session, pr.HeadRepo, pr.URL, pr.Title, pr.Author, pr.Draft, pr.State, pr.Head)
+review='',ci='',merge='',ci_told='',seen_reviews=0,own_wake_at=0,meta=excluded.meta,meta_wake_at=0,baseline=1 WHERE state<>'open'`,
+			pr.Repo, pr.Number, pr.Session, pr.HeadRepo, pr.URL, pr.Title, pr.Author, pr.Draft, pr.State, pr.Head, meta)
 		if err != nil {
 			return err
 		}
@@ -275,12 +276,21 @@ func (s *Store) moveRepoHead(ctx context.Context, tx *sql.Tx, head RepoHead, at 
 	return nil
 }
 
-// ApplyPRPoll writes one pass of the poll and its events in one transaction, so a restart can neither lose a wake nor
-// repeat one. Each recipient gets one delivered event for the pass, whatever moved for it: pr.changed if any of its PRs
-// did, with its issues inside, and otherwise issue.changed. A pass that moved both also commits an undelivered
-// issue.changed, as pr.merged sits beside pr.changed, so a subscriber sees every issue change. A row that went away
-// meanwhile drops out.
-func (s *Store) ApplyPRPoll(ctx context.Context, updates []PRUpdate, issues []IssueUpdate, heads []RepoHead, at time.Time) error {
+// GitHubPass is what one pass found, across every repository it read.
+type GitHubPass struct {
+	PRs    []PRUpdate
+	Issues []IssueUpdate
+	Heads  []RepoHead
+	Feeds  []GitHubFeed          // cursors that moved
+	Items  []contract.GitHubItem // what no session tracks
+}
+
+// ApplyPRPoll writes one pass and its events in one transaction with the cursors that found them, so a restart can neither
+// lose a wake nor repeat one. Each recipient gets one delivered event for the pass, whatever moved for it: pr.changed if any
+// of its PRs did, with its issues inside, and otherwise issue.changed. A pass that moved both also commits an undelivered
+// issue.changed, as pr.merged sits beside pr.changed, so a subscriber sees every issue change. A row that went away meanwhile
+// drops out.
+func (s *Store) ApplyPRPoll(ctx context.Context, pass GitHubPass, at time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		type batch struct {
 			session contract.SessionID
@@ -312,14 +322,14 @@ func (s *Store) ApplyPRPoll(ctx context.Context, updates []PRUpdate, issues []Is
 			}
 			return group, nil
 		}
-		for _, update := range updates {
+		for _, update := range pass.PRs {
 			pr := update.PR
 			meta, err := encodeMeta(update.Meta)
 			if err != nil {
 				return err
 			}
-			result, err := tx.ExecContext(ctx, `UPDATE pr_owners SET head_repo=?,url=?,title=?,author=?,draft=?,state=?,head=?,review=?,ci=?,merge=?,ci_told=?,seen_reviews=?,seen_review_comments=?,seen_comments=?,own_wake_at=?,meta=?,meta_wake_at=?,baseline=0 WHERE repo=? AND number=? AND state='open'`,
-				update.HeadRepo, pr.URL, pr.Title, pr.Author, pr.Draft, pr.State, pr.Head, pr.Review, pr.CI, pr.Merge, update.CITold, update.Seen.Reviews, update.Seen.ReviewComments, update.Seen.Comments, update.OwnWakeAt, meta, update.MetaWakeAt, pr.Repo, pr.Number)
+			result, err := tx.ExecContext(ctx, `UPDATE pr_owners SET head_repo=?,url=?,title=?,author=?,draft=?,state=?,head=?,review=?,ci=?,merge=?,ci_told=?,seen_reviews=?,own_wake_at=?,meta=?,meta_wake_at=?,baseline=0 WHERE repo=? AND number=? AND state=?`,
+				update.HeadRepo, pr.URL, pr.Title, pr.Author, pr.Draft, pr.State, pr.Head, pr.Review, pr.CI, pr.Merge, update.CITold, update.SeenReviews, update.OwnWakeAt, meta, update.MetaWakeAt, pr.Repo, pr.Number, update.Was)
 			if err != nil {
 				return err
 			}
@@ -336,14 +346,14 @@ func (s *Store) ApplyPRPoll(ctx context.Context, updates []PRUpdate, issues []Is
 				group.changes = append(group.changes, change)
 			}
 		}
-		for _, update := range issues {
+		for _, update := range pass.Issues {
 			issue := update.Issue
 			meta, err := encodeMeta(update.Meta)
 			if err != nil {
 				return err
 			}
-			result, err := tx.ExecContext(ctx, `UPDATE issue_owners SET url=?,title=?,author=?,state=?,seen_comments=?,own_wake_at=?,meta=?,meta_wake_at=?,baseline=0 WHERE repo=? AND number=? AND state='open'`,
-				issue.URL, issue.Title, issue.Author, issue.State, update.SeenComments, update.OwnWakeAt, meta, update.MetaWakeAt, issue.Repo, issue.Number)
+			result, err := tx.ExecContext(ctx, `UPDATE issue_owners SET url=?,title=?,author=?,state=?,own_wake_at=?,meta=?,meta_wake_at=?,baseline=0 WHERE repo=? AND number=? AND state=?`,
+				issue.URL, issue.Title, issue.Author, issue.State, update.OwnWakeAt, meta, update.MetaWakeAt, issue.Repo, issue.Number, update.Was)
 			if err != nil {
 				return err
 			}
@@ -395,12 +405,15 @@ func (s *Store) ApplyPRPoll(ctx context.Context, updates []PRUpdate, issues []Is
 				}
 			}
 		}
-		for _, head := range heads {
+		for _, head := range pass.Heads {
 			if err := s.moveRepoHead(ctx, tx, head, at); err != nil {
 				return err
 			}
 		}
-		return nil
+		if err := s.appendItems(ctx, tx, pass.Items, at); err != nil {
+			return err
+		}
+		return saveFeeds(ctx, tx, pass.Feeds)
 	})
 }
 

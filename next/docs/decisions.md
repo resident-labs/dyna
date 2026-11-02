@@ -1118,6 +1118,8 @@ The PR layer (decision 13) reads GitHub instead of keeping state, so it must kee
 5. **Agent calls share the quota.** `gh` calls from boxes (decision 13) count in the same budget as the poll. When less than 20% of the quota is left, a call from a box fails at once with a typed error that names the reset time, so the poll keeps what is left.
 6. **Later:** webhooks from a GitHub App, through the relay, replace polling after the cutover.
 
+**Changed by the owner, 2026-11-01.** Rules 1 and 3 gave way to repository feeds read by conditional GET every 60 s, flat. A 304 costs nothing, so back-off had nothing left to save, and the feeds give each action its actor and show untracked items. GraphQL stays for what no feed shows, in one query per repository, for only the PRs that need it. Rules 2, 4 and 5 stand. Spec 7.7 is current.
+
 ### 7.8 Remote access (M3)
 
 Root approved this design on 2026-10-31. v1's rules carry over. v2 keeps Connect's wire protocol and paths, so the relay does not change (r24). It keeps device state in SQLite instead of JSON files (r1).

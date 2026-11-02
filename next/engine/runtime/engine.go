@@ -208,7 +208,7 @@ func Run(ctx context.Context, cfg Config) error {
 	service.SetRepositories(&enginegit.Repositories{Rooms: st, Hosts: boxes, Mirror: mirror})
 	pulls := &prs.Client{Token: token, Endpoint: &url.URL{Scheme: "https", Host: "api.github.com"}, Transport: http.DefaultTransport, Now: time.Now}
 	prPoll := &prs.Poller{Store: st, GitHub: pulls, Now: time.Now}
-	service.SetPRTracking(pulls, prPoll)
+	service.SetPRTracking(pulls)
 	boxes.Compose = &compose.Files{Layout: layout, Repo: mirror}
 	service.SetCompose(boxes.Compose, mirror.ImageSize)
 	if err := st.RecoverHostexec(ctx, time.Now()); err != nil {
@@ -271,7 +271,7 @@ func Run(ctx context.Context, cfg Config) error {
 	apiServer.SetGitHubRead(enginegit.ReadOnly(&url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport, token))
 	apiServer.SetFilesRoute(func(c api.Caller) http.Handler { return service.Files(c.Principal, c.Room) })
 	apiServer.SetGitRoute(func(c api.Caller) http.Handler {
-		return enginegit.NotifyPush(enginegit.Handler(&url.URL{Scheme: "https", Host: "github.com"}, http.DefaultTransport, token, c.Principal.Session, c.Room, st), prPoll.Reset)
+		return enginegit.Handler(&url.URL{Scheme: "https", Host: "github.com"}, http.DefaultTransport, token, c.Principal.Session, c.Room, st)
 	})
 	files, err := connect.OpenFiles(cfg.Data)
 	if err != nil {
@@ -399,7 +399,7 @@ func Run(ctx context.Context, cfg Config) error {
 	prDone := make(chan struct{})
 	go func() {
 		defer close(prDone)
-		ticks := time.NewTicker(10 * time.Second)
+		ticks := time.NewTicker(prs.PollEvery)
 		defer ticks.Stop()
 		prPoll.Run(ctx, ticks.C)
 	}()

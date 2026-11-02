@@ -66,33 +66,15 @@ type IssueUntrackRequest struct {
 
 type IssueUntrackResponse struct{}
 
-// MetaChange is what moved on a PR's or an issue's metadata since the session was last told. Title, Milestone and the labels
-// are free text, so they reach a session wrapped when the item's author is not the owner's GitHub account. Logins are not.
-type MetaChange struct {
-	Title            string   `json:"title,omitempty"` // the new title, when it changed
-	LabelsAdded      []string `json:"labelsAdded,omitempty"`
-	LabelsRemoved    []string `json:"labelsRemoved,omitempty"`
-	Assigned         []string `json:"assigned,omitempty"`
-	Unassigned       []string `json:"unassigned,omitempty"`
-	Milestone        string   `json:"milestone,omitempty"` // the new milestone, when it changed to one
-	MilestoneRemoved bool     `json:"milestoneRemoved,omitempty"`
-	BodyEdited       bool     `json:"bodyEdited,omitempty"`
-	Reopened         bool     `json:"reopened,omitempty"`
-	Draft            bool     `json:"draft,omitempty"` // a PR became a draft
-	Ready            bool     `json:"ready,omitempty"` // a PR left draft
-	ReviewersAdded   []string `json:"reviewersAdded,omitempty"`
-	ReviewersRemoved []string `json:"reviewersRemoved,omitempty"`
-}
-
-// IssueChange is what one poll saw on one issue. Kinds are closed, comment or metadata, and no Kinds means the row moved
-// without anything to wake for.
+// IssueChange is what one pass saw on one issue. Kinds are closed, comment or metadata, and no Kinds means the row moved
+// without anything to wake for. Actions are what people did on it, oldest first, each with its actor.
 type IssueChange struct {
 	Issue        IssueSummary   `json:"issue"`
 	Kinds        []PrChangeKind `json:"kinds,omitempty"`
 	Outside      bool           `json:"outside"` // the issue's author is not the owner's GitHub account
 	Comments     []PrComment    `json:"comments,omitempty"`
 	MoreComments int            `json:"moreComments,omitempty"`
-	Meta         *MetaChange    `json:"meta,omitempty"`
+	Actions      []GitHubItem   `json:"actions,omitempty"`
 }
 
 // IssueChanged batches one poll's changes for the session that owns those issues. Every pass that moved an issue has one.

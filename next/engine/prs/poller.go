@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -13,34 +12,25 @@ import (
 )
 
 const (
-	firstWait   = time.Minute
-	longestWait = 10 * time.Minute
-	// lowQuotaWait is the shortest gap between polls of a repository with under 20% of the quota left.
+	// PollEvery is how often the engine runs a pass. It is flat, because an unchanged feed costs no quota.
+	PollEvery = time.Minute
+	// lowQuotaWait is the shortest gap between reads of a repository with under 20% of the quota left.
 	lowQuotaWait = 10 * time.Minute
+	// ciGrace is how long after a new head a PR with no checks stays read, because GitHub adds them shortly after a push and no feed says so.
+	ciGrace = 10 * time.Minute
 )
 
-// Poller reads each repository a room lists or a tracked open PR or issue sits on, by the back-off of spec 7.7. The schedule
-// lives in memory: an engine restart polls once and starts from a minute again.
+// Poller reads the feeds of each repository a room lists or a tracked PR or issue sits on (spec 7.7).
 type Poller struct {
 	Store  *store.Store
 	GitHub *Client
 	Now    func() time.Time
 
-	mu    sync.Mutex
-	slots map[contract.RepoName]*slot
-	// bases maps a repository to the bases of the PRs whose heads it holds, so a push to a fork finds its upstream PR.
-	bases map[contract.RepoName][]contract.RepoName
+	last   map[contract.RepoName]time.Time // when each repository was last read
+	failed map[contract.RepoName]string    // the last error logged for each, so a repository that stays broken logs once
 }
 
-// slot is one repository's schedule. A zero wait means it has not been polled.
-type slot struct {
-	wait time.Duration
-	last time.Time
-	next time.Time
-	main string
-}
-
-// Run polls on each tick until ctx ends.
+// Run runs a pass on each tick until ctx ends.
 func (p *Poller) Run(ctx context.Context, ticks <-chan time.Time) {
 	for {
 		select {
@@ -48,99 +38,122 @@ func (p *Poller) Run(ctx context.Context, ticks <-chan time.Time) {
 			return
 		case <-ticks:
 			if err := p.Pass(ctx); err != nil && ctx.Err() == nil {
-				log.Printf("pr poll: %v", err)
+				log.Printf("github pass: %v", err)
 			}
 		}
 	}
 }
 
-// Reset brings a repository back to the first wait, after a push or a new PR, and with it every repository a PR from it
-// merges into. The next poll is at most a minute away, however often this runs, so pushes cannot outrun the budget.
-func (p *Poller) Reset(repo contract.RepoName) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	now := p.Now()
-	for _, base := range append([]contract.RepoName{repo}, p.bases[repo]...) {
-		item := p.slots[base]
-		if item == nil || item.wait == 0 {
-			continue
-		}
-		item.wait = firstWait
-		if at := now.Add(firstWait); item.next.After(at) {
-			item.next = at
-		}
-	}
-}
-
-// due refreshes the schedule from the tracked PRs and issues and listed repositories, and returns the repositories to poll now.
-func (p *Poller) due(rows []store.TrackedPR, issues []store.TrackedIssue, heads map[contract.RepoName]string) []contract.RepoName {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.slots == nil {
-		p.slots = map[contract.RepoName]*slot{}
-	}
-	polled := map[contract.RepoName]bool{}
-	for repo := range heads {
-		polled[repo] = true
-	}
-	bases := map[contract.RepoName][]contract.RepoName{}
-	for _, row := range rows {
-		polled[row.Repo] = true
-		if row.HeadRepo != "" && row.HeadRepo != row.Repo && !slices.Contains(bases[row.HeadRepo], row.Repo) {
-			bases[row.HeadRepo] = append(bases[row.HeadRepo], row.Repo)
-		}
-	}
-	p.bases = bases
-	for _, row := range issues {
-		polled[row.Repo] = true
-	}
-	for repo := range polled {
-		if p.slots[repo] == nil {
-			p.slots[repo] = &slot{}
-		}
-	}
-	for repo := range p.slots {
-		if !polled[repo] {
-			delete(p.slots, repo)
-		}
+// due lists the repositories to read now. That is every one of them, until the quota runs low.
+func (p *Poller) due(repos map[contract.RepoName]bool) []contract.RepoName {
+	if p.last == nil {
+		p.last, p.failed = map[contract.RepoName]time.Time{}, map[contract.RepoName]string{}
 	}
 	now := p.Now()
 	_, low := p.GitHub.Low()
 	var due []contract.RepoName
-	for repo, item := range p.slots {
-		if now.Before(item.next) || low && item.wait != 0 && now.Before(item.last.Add(lowQuotaWait)) {
-			continue
+	for repo := range repos {
+		if last, read := p.last[repo]; !low || !read || !now.Before(last.Add(lowQuotaWait)) {
+			due = append(due, repo)
+			p.last[repo] = now
 		}
-		due = append(due, repo)
 	}
 	slices.Sort(due)
 	return due
 }
 
-// settle moves a repository's schedule after a poll.
-func (p *Poller) settle(repo contract.RepoName, moved bool, main string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	item := p.slots[repo]
-	if item.main != "" && main != "" && item.main != main {
-		moved = true
-	}
-	if main != "" {
-		item.main = main
-	}
-	switch {
-	case moved || item.wait == 0:
-		item.wait = firstWait
-	default:
-		item.wait = min(item.wait*2, longestWait)
-	}
-	item.last = p.Now()
-	item.next = item.last.Add(item.wait)
+// needsRead is a PR no feed will speak for: GitHub is still running its checks or working out whether it merges, and a feed
+// shows neither ending.
+func needsRead(row store.TrackedPR, now time.Time) bool {
+	waitingForChecks := row.CI == contract.PrCINone && now.Before(time.UnixMilli(row.Meta.HeadAt).Add(ciGrace))
+	return row.CI == contract.PrCIUnread || row.CI == contract.PrCIPending || waitingForChecks || row.Meta.Recheck
 }
 
-// Pass polls every due repository, then writes all their changes at once, so one pass gives a session one wake.
+func reopens(items []contract.GitHubItem) bool {
+	return slices.ContainsFunc(items, func(item contract.GitHubItem) bool { return item.Action == contract.GitHubReopened })
+}
+
+// repository reads one repository's feeds and works out what they mean. A failure anywhere keeps its cursors unmoved, so the
+// next pass reads the same news again.
+func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls []store.TrackedPR, issues []store.TrackedIssue, heads map[contract.RepoName]string, feeds map[string]store.GitHubFeed) (store.GitHubPass, error) {
+	var pass store.GitHubPass
+	probe, err := p.GitHub.Probe(ctx, repo, feeds)
+	if err != nil {
+		return pass, err
+	}
+	now, viewer := p.Now(), p.GitHub.Viewer()
+	items := map[int][]contract.GitHubItem{}
+	for _, item := range probe.Items {
+		items[item.Number] = append(items[item.Number], item)
+	}
+	// A closed item is read no more, unless a feed reopens it. What else happens on it goes to subscribers, as on any untracked item.
+	watched := func(open bool, number int) bool { return open || reopens(items[number]) }
+	var numbers []int
+	for _, row := range pulls {
+		if watched(row.State == contract.PrOpen, row.Number) && (probe.Seen[row.Number] != nil || len(items[row.Number]) > 0 || probe.Moved || probe.Resync || row.Baseline || needsRead(row, now)) {
+			numbers = append(numbers, row.Number)
+		}
+	}
+	observed, err := p.GitHub.Read(ctx, repo, numbers)
+	if err != nil {
+		return pass, err
+	}
+	for _, row := range pulls {
+		if !watched(row.State == contract.PrOpen, row.Number) {
+			continue
+		}
+		if update, changed := ComparePR(row, items[row.Number], probe.Seen[row.Number], observed[row.Number], viewer, now); changed {
+			pass.PRs = append(pass.PRs, update)
+		}
+		delete(items, row.Number)
+	}
+	for _, row := range issues {
+		if !watched(row.State == contract.IssueOpen, row.Number) {
+			continue
+		}
+		listed, state := probe.Seen[row.Number], contract.IssueState("")
+		// Issues have no query in a usual pass, so one the feeds lost is read on its own.
+		if probe.Resync {
+			_, item, err := p.GitHub.Issue(ctx, repo, row.Number)
+			if err != nil && !errors.Is(err, ErrNotFound) {
+				return pass, err
+			}
+			if err == nil {
+				listed, state = &item, contract.IssueState(item.State)
+			}
+		}
+		if update, changed := CompareIssue(row, items[row.Number], listed, state, viewer, now); changed {
+			pass.Issues = append(pass.Issues, update)
+		}
+		delete(items, row.Number)
+	}
+	for _, item := range probe.Items {
+		if _, untracked := items[item.Number]; untracked {
+			pass.Items = append(pass.Items, item)
+		}
+	}
+	if stored, listed := heads[repo]; listed && probe.Main != "" && probe.Main != stored {
+		pass.Heads = append(pass.Heads, store.RepoHead{Repo: repo, Head: probe.Main})
+	}
+	pass.Feeds = probe.Feeds
+	return pass, nil
+}
+
+// report logs a repository's failure when it changes.
+func (p *Poller) report(repo contract.RepoName, err error) {
+	text := ""
+	if err != nil && !errors.Is(err, ErrPaused) {
+		text = err.Error()
+	}
+	if text != "" && text != p.failed[repo] {
+		log.Printf("github %s: %v", repo, err)
+	}
+	p.failed[repo] = text
+}
+
+// Pass reads every due repository, then writes all they found at once, so one pass gives a session one wake.
 func (p *Poller) Pass(ctx context.Context) error {
-	rows, err := p.Store.TrackedPRs(ctx)
+	pulls, err := p.Store.TrackedPRs(ctx)
 	if err != nil {
 		return err
 	}
@@ -152,61 +165,49 @@ func (p *Poller) Pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	due := p.due(rows, issues, heads)
-	var updates []store.PRUpdate
-	var issueUpdates []store.IssueUpdate
-	var moves []store.RepoHead
-	for _, repo := range due {
-		var numbers, issueNumbers []int
-		for _, row := range rows {
-			if row.Repo == repo {
-				numbers = append(numbers, row.Number)
-			}
-		}
-		for _, row := range issues {
-			if row.Repo == repo {
-				issueNumbers = append(issueNumbers, row.Number)
-			}
-		}
-		snapshot, err := p.GitHub.Poll(ctx, repo, numbers, issueNumbers)
-		if errors.Is(err, ErrPaused) {
-			continue
-		}
-		if err != nil {
-			log.Printf("pr poll %s: %v", repo, err)
-			p.settle(repo, false, "")
-			continue
-		}
-		moved := false
-		for _, row := range rows {
-			seen, ok := snapshot.PRs[row.Number]
-			if row.Repo != repo || !ok {
-				continue
-			}
-			update, changed := Compare(row, seen, snapshot.Viewer, p.Now())
-			if changed {
-				updates = append(updates, update)
-				moved = true
-			}
-		}
-		for _, row := range issues {
-			seen, ok := snapshot.Issues[row.Number]
-			if row.Repo != repo || !ok {
-				continue
-			}
-			update, changed := CompareIssue(row, seen, snapshot.Viewer, p.Now())
-			if changed {
-				issueUpdates = append(issueUpdates, update)
-				moved = true
-			}
-		}
-		if stored, listed := heads[repo]; listed && snapshot.Main != "" && snapshot.Main != stored {
-			moves = append(moves, store.RepoHead{Repo: repo, Head: snapshot.Main})
-		}
-		p.settle(repo, moved, snapshot.Main)
+	feeds, err := p.Store.GitHubFeeds(ctx)
+	if err != nil {
+		return err
 	}
-	if len(updates) == 0 && len(issueUpdates) == 0 && len(moves) == 0 {
+	repos := map[contract.RepoName]bool{}
+	for repo := range heads {
+		repos[repo] = true
+	}
+	pullsIn := map[contract.RepoName][]store.TrackedPR{}
+	for _, row := range pulls {
+		repos[row.Repo] = true
+		pullsIn[row.Repo] = append(pullsIn[row.Repo], row)
+	}
+	issuesIn := map[contract.RepoName][]store.TrackedIssue{}
+	for _, row := range issues {
+		repos[row.Repo] = true
+		issuesIn[row.Repo] = append(issuesIn[row.Repo], row)
+	}
+	due := p.due(repos)
+	if len(due) == 0 {
 		return nil
 	}
-	return p.Store.ApplyPRPoll(ctx, updates, issueUpdates, moves, p.Now())
+	if err := p.GitHub.LoadViewer(ctx); err != nil {
+		if errors.Is(err, ErrPaused) {
+			return nil
+		}
+		return err
+	}
+	var pass store.GitHubPass
+	for _, repo := range due {
+		found, err := p.repository(ctx, repo, pullsIn[repo], issuesIn[repo], heads, feeds[repo])
+		p.report(repo, err)
+		if err != nil {
+			continue
+		}
+		pass.PRs = append(pass.PRs, found.PRs...)
+		pass.Issues = append(pass.Issues, found.Issues...)
+		pass.Heads = append(pass.Heads, found.Heads...)
+		pass.Feeds = append(pass.Feeds, found.Feeds...)
+		pass.Items = append(pass.Items, found.Items...)
+	}
+	if len(pass.PRs)+len(pass.Issues)+len(pass.Heads)+len(pass.Feeds)+len(pass.Items) == 0 {
+		return nil
+	}
+	return p.Store.ApplyPRPoll(ctx, pass, p.Now())
 }
