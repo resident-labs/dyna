@@ -252,6 +252,12 @@ test("a long path in an activity label keeps its first folder and its file, and 
   assert.equal(shortPaths("editing next/engine/files.go and web/src/a.ts"), "editing next/engine/files.go and web/src/a.ts");
 });
 
+test("a running job's status is for its session, so the feed shows no row for it", () => {
+  const status = decodeEvent(event(1, { type: "shell.job.running", body: { session: "l", job: "j", ranMinutes: 30, tail: "" } }));
+  assert.ok(status);
+  assert.deepEqual(feedRows([status], { kind: "dm", session: "l" }, [], 1), []);
+});
+
 test("a restart warning remains visible beside other work in a session DM", () => {
   const notice = decodeEvent(event(2, { type: "session.restarted", body: { session: "l" } }));
   assert.ok(notice);

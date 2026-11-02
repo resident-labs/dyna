@@ -86,6 +86,7 @@ const (
 	MethodTranscriptRead          Method = "transcript.read"
 	MethodSessionWork             Method = "session.work"
 	MethodShellJobEnded           Method = "shell.job.ended"
+	MethodShellJobRunning         Method = "shell.job.running"
 	MethodShellOutput             Method = "shell.output"
 )
 
@@ -822,6 +823,16 @@ type ShellJobEndedRequest struct {
 	Tail        string       `json:"tail"` // the last output, masked
 }
 type ShellJobEndedResponse struct{}
+
+// ShellJobRunningRequest reports a background job still running at a mark of its running time.
+type ShellJobRunningRequest struct {
+	Description  string     `json:"description,omitempty"`
+	Job          ShellJobID `json:"job"`
+	RanMinutes   int        `json:"ranMinutes"`
+	QuietMinutes *int       `json:"quietMinutes,omitempty"` // since the last output; absent before any
+	Tail         string     `json:"tail"`                   // the last whole lines of output, masked
+}
+type ShellJobRunningResponse struct{}
 type TurnInput struct {
 	Delivery DeliverySeq  `json:"delivery"`
 	Surface  Surface      `json:"surface"`
