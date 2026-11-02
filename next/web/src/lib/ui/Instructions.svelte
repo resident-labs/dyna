@@ -4,12 +4,13 @@
   import { instructionDiff, instructionHunks, type DiffLine } from "../instruction-diff.ts";
   import { recoverInstructionDraft } from "../instruction-draft.ts";
   import { savedBy } from "../instruction-saved.ts";
+  import type { InstructionsSaver } from "../contract.gen.ts";
   import Icon from "./Icon.svelte";
   import StatusPill from "./StatusPill.svelte";
   import { count } from "../feed.ts";
 
   type Scope = "room" | "global";
-  type Saver = { kind: string; session?: string; name?: string; roomName?: string } | null;
+  type Saver = InstructionsSaver | null;
   type File = { text: string; hash: string; savedAt?: string | null; savedBy?: Saver };
   // The page opens on its two choices, the file for all rooms and this room's own. Choosing one opens it in a plain
   // editor, with a review beside it only once there are changes to review.
