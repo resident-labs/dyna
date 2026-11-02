@@ -120,7 +120,7 @@ func TestRecreateMovesAStoppedBoxToANewImageAndKeepsItsVolume(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := b.Recreate(ctx, spec, newImage, slice); err != nil {
+	if err := b.Recreate(ctx, spec, newImage); err != nil {
 		t.Fatal(err)
 	}
 
