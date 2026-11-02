@@ -2,7 +2,7 @@
   import { fade, slide } from "svelte/transition";
   import { MediaQuery, SvelteSet } from "svelte/reactivity";
   import type { WorkflowInfo, WorkflowStep } from "../contract.gen.ts";
-  import { LONG_PHASE, failedNodes, foldable, openable, phases, runScale, stepSpan, stepTime, stepWord, strip, tally, tokenDetail, tokens, type StepNode } from "../workflow.ts";
+  import { LONG_PHASE, failedNodes, foldable, openable, phases, runScale, spanReads, stepSpan, stepTime, stepWord, strip, tally, timed, tokenDetail, tokens, type StepNode } from "../workflow.ts";
   import Icon, { type IconName } from "./Icon.svelte";
   import StatusPill from "./StatusPill.svelte";
   import StepDetail from "./StepDetail.svelte";
@@ -19,6 +19,9 @@
   let parts = $derived(strip(groups));
   let scale = $derived(runScale(info, now));
   let settled = $derived(counts.done + counts.failed);
+  // Once the column shows it stays, so a live run's scale moving on does not pull it away under the reader.
+  let timedOnce = false;
+  let spans = $derived(timedOnce ||= timed(steps, scale, now));
 
   // What the owner toggled differs from its default, however long a phase grows.
   const toggled = new SvelteSet<string>();
@@ -37,14 +40,15 @@
   {@const state = stepWord(step)}
   {@const span = stepSpan(step, scale, now)}
   {@const time = stepTime(step, now)}
+  <span class="fold">{#if open !== undefined}<span class="chevron" class:open><Icon name="chevron" size={14} /></span>{/if}</span>
   <Icon name={icons[step.kind]} size={14} />
   <span class="name" title={step.name}>{step.name}</span>
-  <span class="when" aria-hidden="true">{#if time}<i class={step.state} style:left="{span.left}%" style:width="{span.width}%"></i>{/if}</span>
+  {#if spans}<span class="when" aria-hidden="true">{#if time && spanReads(span)}<i class={step.state} style:left="{span.left}%" style:width="{span.width}%"></i>{/if}</span>{/if}
   <span class="meta"><span class="profile" title={step.profile}>{step.profile ?? ""}</span>
     <span class="figure" title={tokenDetail(step.usage)}>{tokens(step.usage)}</span>
     <span class="figure">{time}</span></span>
   <span class="state">{#key state.word}<span in:fade={motion}>{#if state.tone}<StatusPill tone={state.tone} label={state.word} word />{:else}{state.word}{/if}</span>{/key}</span>
-  <span class="go">{#if open !== undefined}<span class="chevron" class:open><Icon name="chevron" size={14} /></span>{:else if openable(step)}<Icon name="forwardChevron" size={14} />{/if}</span>
+  <span class="go">{#if open === undefined && openable(step)}<Icon name="forwardChevron" size={14} />{/if}</span>
 {/snippet}
 
 {#snippet row(node: StepNode, depth: number)}
@@ -58,12 +62,12 @@
     {:else if openable(step)}<button type="button" class="step" data-step={step.key} aria-label={`Open ${step.name}'s transcript, ${stepWord(step).word}`} onclick={() => onopen(step)}>{@render line(step, undefined)}</button>
     {:else}<div class="step">{@render line(step, undefined)}</div>{/if}
     {#if open && foldable(step)}<div class="opened" transition:slide={motion}><StepDetail {session} {step} repo={info.repo} /></div>
-    {:else if step.reason}<p class="reason" class:whole={filtering} title={filtering ? undefined : step.reason} in:slide={motion}>{step.reason}</p>{/if}
+    {:else if step.reason}<p class="reason" class:whole={filtering || !openable(step)} title={filtering ? undefined : step.reason} in:slide={motion}>{step.reason}</p>{/if}
     {#if nest && open}<ul class="children" transition:slide={motion}>{#each node.children as child (child.step.key)}{@render row(child, depth + 1)}{/each}</ul>{/if}
   </li>
 {/snippet}
 
-<section class="steps">
+<section class="steps" class:spans>
   <h3>Steps {#if steps.length}<span class="tally">{#if counts.running || !settled}{settled} of {steps.length}{:else}{steps.length}{/if}{#if counts.running}{` · ${counts.running} running`}{/if}{#if counts.failed}{" · "}<button type="button" class="filter" aria-pressed={filtering} title={filtering ? "Show every step" : "Show only the failed steps"} onclick={() => { onlyFailed = !onlyFailed; }}><StatusPill tone="failed" label={`${counts.failed} failed`} word /></button>{/if}</span>{/if}</h3>
   {#if parts.length}
     <div class="strip" role="img" aria-label={`${counts.done} done, ${counts.running} running, ${counts.failed} failed`}>
@@ -106,12 +110,15 @@
   .summary { min-width: 0; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .chevron { display: inline-flex; flex: none; width: 14px; color: var(--muted); transform: rotate(-90deg); transition: transform 150ms ease-out; }
   .chevron.open { transform: none; }
+  .spans { --when: 72px; }
+  /* A row that opens in place has a phase's chevron, in the same place. The column on the right is for a row that goes elsewhere. */
+  .fold { display: inline-flex; width: 14px; }
   /* A child's indent comes out of the name, which is the one column that gives, so the figures stay under the parent's. */
-  .step { all: unset; box-sizing: border-box; position: relative; display: grid; grid-template-columns: 14px minmax(0, 1fr) 72px 88px 56px 56px 64px 14px; align-items: center; gap: 8px; width: calc(100% + 8px); min-height: 28px; margin: 0 -4px; padding: 0 4px 0 calc(4px + var(--depth) * 18px); border-radius: 6px; color: var(--muted); font-size: 13px; transition: color 150ms ease-out; }
+  .step { all: unset; box-sizing: border-box; position: relative; display: grid; grid-template-columns: 14px 14px minmax(0, 1fr) var(--when,) 88px 56px 56px 64px 14px; align-items: center; gap: 8px; width: calc(100% + 8px); min-height: 28px; margin: 0 -4px; padding: 0 4px 0 calc(4px + var(--depth) * 18px); border-radius: 6px; color: var(--muted); font-size: 13px; transition: color 150ms ease-out; }
   button.step { cursor: pointer; }
   /* When a step ran within the run: bars that share a span of this column ran together. */
   .when { position: relative; height: 3px; }
-  .when i { position: absolute; top: 0; height: 3px; min-width: 2px; border-radius: 2px; background: var(--muted); opacity: 0.55; }
+  .when i { position: absolute; top: 0; height: 3px; border-radius: 2px; background: var(--muted); opacity: 0.55; }
   .when .failed { background: var(--danger); opacity: 1; }
   .when .running { background: var(--success); opacity: 1; }
   .name { min-width: 0; overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
@@ -121,9 +128,9 @@
   .figure { font-size: 12.5px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
   .state { font-size: 12.5px; text-align: right; white-space: nowrap; }
   .go { display: inline-flex; width: 14px; }
-  .reason { margin: 0 0 4px calc(22px + var(--depth) * 18px); overflow: hidden; color: var(--muted); font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; text-overflow: ellipsis; white-space: nowrap; }
+  .reason { margin: 0 0 4px calc(44px + var(--depth) * 18px); overflow: hidden; color: var(--muted); font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; text-overflow: ellipsis; white-space: nowrap; }
   .reason.whole { white-space: pre-wrap; }
-  .opened { padding-left: calc(22px + var(--depth) * 18px); min-width: 0; }
+  .opened { padding-left: calc(44px + var(--depth) * 18px); min-width: 0; }
   /* The hairline runs under the workflow step's icon, as the feed draws opened work. */
   .children { position: relative; }
   .children::before { content: ""; position: absolute; top: 2px; bottom: 6px; left: calc(var(--depth) * 18px + 7px); border-left: 1px solid var(--line); }
@@ -135,7 +142,8 @@
   .filter:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   /* A narrow column keeps the name and the state, and the figures take a second line. */
   @container run (max-width: 600px) {
-    .step { grid-template-columns: 14px minmax(0, 1fr) auto 14px; grid-template-areas: "icon name state go" ". meta meta go"; gap: 0 8px; padding-block: 4px; }
+    .step { grid-template-columns: 14px 14px minmax(0, 1fr) auto 14px; grid-template-areas: "fold icon name state go" ". . meta meta go"; gap: 0 8px; padding-block: 4px; }
+    .fold { grid-area: fold; }
     .step > :global(svg) { grid-area: icon; }
     .name { grid-area: name; }
     .when { display: none; }

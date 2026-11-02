@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { decodeEvent } from "./event.ts";
 import { feedRows } from "./feed.ts";
 import { RunState } from "./run.svelte.ts";
-import { LONG_PHASE, STRIP_PHASES, applyStep, branchLink, commitLink, failedNodes, foldable, jsonFields, type Json, nested, openable, pastRuns, phases, reading, runCounts, runLine, runScale, shownFacts, shownStep, stepBody, stepSpan, stepTime, stepWord, strip, tokens } from "./workflow.ts";
+import type { Json } from "./json.ts";
+import { LONG_PHASE, READABLE_SPAN, STRIP_PHASES, applyStep, branchLink, commitLink, failedNodes, foldable, jsonFields, nested, openable, pastRuns, phases, reading, runCounts, runLine, runScale, shownFacts, shownStep, spanReads, stepBody, stepSpan, stepTime, stepWord, strip, timed, tokens } from "./workflow.ts";
 import { runRows } from "./session-tree.ts";
 import type { Event, WorkflowInfo, WorkflowStatusResponse, WorkflowStep } from "./contract.gen.ts";
 
@@ -112,14 +113,28 @@ test("a step's span places it in the run, and a live run's scale moves by the mi
   assert.deepEqual(running, { left: 50, width: 25 });
 });
 
-test("a command, a log and a post open in place; a worker opens its transcript, and a waiting one has nothing yet", () => {
-  assert.equal(foldable(step("r", { kind: "run", transcript: undefined })), true);
-  assert.equal(foldable(step("l", { kind: "log", transcript: undefined })), true);
-  assert.equal(foldable(step("p", { kind: "post", transcript: undefined })), true);
-  assert.equal(foldable(step("w", { kind: "workflow", transcript: undefined })), false);
-  assert.equal(foldable(step("a")), false);
+test("a step opens in place only with more to show; a worker opens its transcript", () => {
+  for (const kind of ["run", "log", "post"] as const) {
+    assert.equal(foldable(step("more", { kind, transcript: undefined, more: true })), true, kind);
+    assert.equal(foldable(step("one line", { kind, transcript: undefined })), false, kind);
+  }
+  assert.equal(foldable(step("w", { kind: "workflow", transcript: undefined, more: true })), false);
+  assert.equal(foldable(step("a", { more: true })), false);
   assert.equal(foldable(step("waiting", { transcript: undefined, state: "running", ended: undefined })), false);
-  assert.equal(foldable(step("lost", { transcript: undefined, state: "failed", reason: "no place" })), true);
+  assert.equal(foldable(step("lost", { transcript: undefined, state: "failed", reason: "no place", more: true })), true);
+});
+
+test("a span too short to read as a bar does not draw, and a run with none has no column", () => {
+  const at = (s: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, s)).toISOString();
+  const scale = runScale({ started: at(0), ended: at(100) }, 0);
+  const short = step("a", { started: at(0), ended: at(READABLE_SPAN - 1) }), long = step("b", { started: at(0), ended: at(READABLE_SPAN) });
+  assert.deepEqual([spanReads(stepSpan(short, scale, 0)), spanReads(stepSpan(long, scale, 0))], [false, true]);
+  assert.equal(timed([short, short], scale, 0), false);
+  assert.equal(timed([short, long], scale, 0), true);
+  const waiting = step("w", { started: at(0), ended: undefined, state: "running", transcript: undefined });
+  assert.equal(timed([waiting], scale, Date.parse(at(90))), false, "a worker that waits has run for no time");
+  assert.equal(timed([{ ...waiting, transcript: "w.jsonl" }], scale, Date.parse(at(90))), true);
+  assert.equal(timed([], scale, 0), false);
 });
 
 test("a step's body shows what it ran and left, with JSON read as fields", () => {
@@ -140,6 +155,7 @@ test("a step's body shows what it ran and left, with JSON read as fields", () =>
   assert.deepEqual(post, [{ kind: "markdown", text: "Done." }, { kind: "fields", fields: [{ label: "Found", kind: "text", text: "2" }] }]);
   assert.deepEqual(stepBody(step("a", { transcript: undefined, state: "failed", reason: "no place" }), { detail: "Read it" }), [{ kind: "reason", text: "no place" }, { kind: "text", text: "Read it", label: "Prompt" }]);
   assert.deepEqual(stepBody(step("l", { kind: "log", transcript: undefined })), []);
+  assert.deepEqual(reading(`{"token": [masked]}`), { fields: [{ label: "Token", kind: "text", text: "[masked]" }] });
 });
 
 test("a result reads as text or as fields, never as JSON", () => {
@@ -185,13 +201,24 @@ test("a result leaves out what the page already shows, whatever the script calle
   const sha = "18b5fa2b8d9825dcdd238bbdcb671334c70eb35b";
   const steps = [step("fix-1"), step("fix-2", { state: "failed" }), step("key-3", { name: "Read the logs" })];
   const merge = { branch: "v2/s-run", commit: sha, merged: ["fix-1"], conflicts: [{ step: "fix-2", branch: "v2/s-2", files: ["f"] }] };
-  const shown = shownFacts({ name: "sweep", repo: "a/b", commit: "abc1234" }, steps, merge);
+  const shown = shownFacts({ session: "ses_1", name: "sweep", repo: "a/b", commit: "abc1234" }, steps, merge);
   assert.deepEqual(jsonFields({ merged: ["fix-1"], steps: [{ step: "fix-1", text: "x", files: ["a"] }, { name: "Read the logs" }], outcome: { branch: "v2/s-run", commit: sha, merged: ["fix-1"], conflicts: [] }, branch: "v2/s-run", head: sha, repo: "a/b", count: 3, summary: "Fixed one" }, shown).map(item => item.label), ["Count", "Summary"]);
   assert.deepEqual(jsonFields({ stepsDone: 3, steps: 3, failed: 1, merged: 1, conflicts: 1 }, shown).map(item => item.label), ["Steps done"]);
-  assert.deepEqual(jsonFields({ steps: [{ branch: "v2/s-worker", commit: "abc", files: ["a"] }], others: ["fix-1", "something else"] }, shown).map(item => item.label), ["Others"]);
-  assert.deepEqual(jsonFields({ steps: ["a"] }).map(item => item.label), ["Steps"]);
+  assert.deepEqual(jsonFields({ others: ["fix-1", "something else"] }, shown).map(item => item.label), ["Others"]);
   assert.deepEqual(reading(JSON.stringify({ branch: "v2/s-run", commit: sha, merged: ["fix-1"], conflicts: [{ step: "fix-2", branch: "v2/s-2", files: ["f"] }] }), shown), { fields: [] });
   assert.deepEqual(reading(`["fix-1","fix-2"]`, shown), { fields: [] });
+});
+
+test("a value is left out for repeating the page, never for its key's name", () => {
+  const steps = [step("a1b2c3d4e5f6a7b8c9d0"), step("second", { state: "failed" })];
+  const merge = { branch: "v2/ses_1-run", commit: "abc", merged: ["a"], conflicts: [] };
+  const shown = shownFacts({ session: "ses_1", name: "sweep" }, steps, merge);
+  const unrelated = { steps: ["Wash", "Dry", "Fold"], merged: ["pricing.md and docs.md"], conflicts: ["a Tuesday booking"], failed: ["/pricing", "/careers"] };
+  assert.deepEqual(jsonFields(unrelated, shown).map(item => item.label), ["Steps", "Merged", "Conflicts", "Failed"]);
+  assert.deepEqual(jsonFields({ steps: [{ branch: "v2/ses_1-a1b2c3d4e5f6", commit: "fed", files: ["a"] }, { name: "second" }] }, shown), [], "a step's own worktree branch names it");
+  assert.deepEqual(jsonFields({ steps: [{ branch: "v2/other-a1b2c3d4e5f6", files: ["a"] }] }, shown).map(item => item.label), ["Steps"]);
+  assert.deepEqual(jsonFields({ steps: 2, failed: 1, conflicts: 0, merged: 1 }, shown), [], "a section's own count");
+  assert.deepEqual(jsonFields({ steps: 7, failed: 5 }, shown).map(item => item.label), ["Steps", "Failed"], "another number says something else");
 });
 
 test("past runs are the ended runs that left the session tree, newest first, and they fold", () => {
@@ -267,6 +294,24 @@ test("a run that ended leaves one row in the room feed and none in a DM, between
   assert.ok(old, "an event from before steps were counted still decodes");
   const late = { ...decoded, seq: 4, at: "2026-01-02T00:00:03Z" } as Event;
   assert.equal(feedRows([decoded, late], { kind: "feed" }).filter(row => row.kind === "day").length, 2);
+});
+
+test("a crew's JSON reply shows no post, and its text reply and everyone else's JSON still do", () => {
+  const base = { from: { kind: "session" as const, session: "crew" }, at: "2026-01-01T00:00:03Z" };
+  const reply = { reply: { kind: "final" as const, target: { kind: "owner" as const } } };
+  const turn = (seq: number, session: string, final: string, posted?: string): Event => ({ seq, id: `t${seq}`, ...base, type: "turn.ended", body: { session, turn: "t", outcome: "completed", final, usage, replies: [{ ...reply, posted }] } });
+  const ended = (seq: number): Event => ({ seq, id: `e${seq}`, ...base, type: "workflow.ended", body: { run: "wf", session: "crew", name: "sweep", state: "done", steps: 3, failed: 0, usage } });
+  const posts = (events: Event[], isCrew?: (session: string) => boolean) => feedRows(events, { kind: "feed" }, [], 0, new Set(), isCrew).flatMap(row => row.kind === "post" ? [row.text] : row.kind === "run" ? ["run row"] : []);
+  const json = `{"merged":{"branch":"v2/x"},"steps":[]}`;
+  assert.deepEqual(posts([turn(1, "crew", json), ended(2)]), ["run row"]);
+  assert.deepEqual(posts([turn(1, "crew", `["a","b"]`), ended(2)]), ["run row"]);
+  assert.deepEqual(posts([turn(1, "crew", "All done"), ended(2)]), ["All done", "run row"]);
+  assert.deepEqual(posts([turn(1, "crew", "42"), ended(2)]), ["42", "run row"]);
+  assert.deepEqual(posts([turn(1, "root", json)]), [json], "only a crew's");
+  assert.deepEqual(posts([turn(1, "crew", json)], session => session === "crew"), [], "its end outside the window");
+  const post: Event = { seq: 1, id: "p1", ...base, type: "post.created", body: { text: json, home: { kind: "feed" } } };
+  assert.deepEqual(posts([post, turn(2, "crew", json, "p1"), ended(3)]), ["run row"], "a post that carried the reply");
+  assert.deepEqual(posts([post, ended(3)]), [json, "run row"], "a post of its own is the script's to make");
 });
 
 test("a step change decodes with seq 0 and adds no row to any conversation", () => {
