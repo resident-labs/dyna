@@ -2,12 +2,14 @@ package engine
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/store"
+	"github.com/resident-labs/dyna/room"
 )
 
 func (s *Service) archiveReason(ctx context.Context, room contract.RoomID, current box.Box, reason string) error {
@@ -20,6 +22,23 @@ func (s *Service) archiveReason(ctx context.Context, room contract.RoomID, curre
 		return err
 	}
 	return s.store.SetClosingReason(ctx, current.ID, reason, event)
+}
+
+// noticeLeftOut tells the parent what the archive did not carry. It waits for the parent's next turn and goes once.
+func (s *Service) noticeLeftOut(ctx context.Context, session store.Session, left contract.ArchiveLeftOut) error {
+	tree, err := s.store.RoomTree(ctx, session.Room)
+	if err != nil {
+		return err
+	}
+	text := room.ArchiveLeftOutNotice(session.Name, left)
+	if len(text) > 4096 {
+		text = strings.ToValidUTF8(text[:4096], "")
+	}
+	notice, err := s.engineEvent(session.Room, contract.SessionNotice{Session: session.ID, Text: text, ClientID: "archive-left-out:" + string(session.Box)})
+	if err != nil {
+		return err
+	}
+	return s.store.SendSessionNotice(ctx, notice, tree.Parent(session.ID))
 }
 
 func (s *Service) ArchiveDone(ctx context.Context, caller contract.Principal, req contract.ArchiveDoneRequest) (contract.ArchiveDoneResponse, *contract.Error) {
@@ -74,6 +93,11 @@ func (s *Service) ArchiveDone(ctx context.Context, caller contract.Principal, re
 	}
 	if req.Skipped {
 		ref = ""
+	}
+	if req.LeftOut != nil {
+		if err := s.noticeLeftOut(ctx, session, *req.LeftOut); err != nil {
+			return contract.ArchiveDoneResponse{}, failure(err)
+		}
 	}
 	now := s.now()
 	report := store.Archive{Session: session.ID, Repo: req.Repo, Ref: ref, Commit: req.Commit, CreatedAt: now, ExpiresAt: now.Add(14 * 24 * time.Hour)}
