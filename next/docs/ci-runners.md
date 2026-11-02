@@ -121,7 +121,12 @@ Each runner is a rootless Podman container, built from
   alone on the host gets all of it, and an idle job's long poll takes nothing.
 - **Disk:** `/home/runner` and `/tmp` are each a tmpfs capped at three quarters of
   the memory limit, and `/dev/shm` is Podman's default, 64 MB and `noexec`. All of it
-  counts against that limit. So a job cannot grow the host's disk at all, and all it
+  counts against that limit. The one exception is `/cache`
+  (`DYNA_CI_CACHE`): a volume per repository and runner slot that outlives the job,
+  so a build folder such as `CARGO_TARGET_DIR=$DYNA_CI_CACHE/target` stays warm, as on
+  upstream projects' own runners. A slot runs one job at a time, so no two jobs share
+  a cache at once, and only the repository's own pushes and pull requests reach the
+  pool. Before a job starts, a cache over 40 GiB is emptied. Everything else a job
   wrote dies with it.
 - **Secrets:** the only one is its JIT config. It reaches `podman run` on standard
   input, never argv. Podman keeps it in the container's config, and conmon has it
