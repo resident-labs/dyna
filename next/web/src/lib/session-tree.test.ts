@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { closeNote, descendants, sessionActions, sessionTree } from "./session-tree.ts";
+import { closeNote, descendants, handNote, holdsText, sessionActions, sessionTree } from "./session-tree.ts";
 import type { SessionStarted } from "./contract.gen.ts";
 import type { Status } from "./status.ts";
 
@@ -9,6 +9,19 @@ test("a session's actions follow what the engine takes", () => {
   assert.deepEqual(sessionActions(undefined, true, "failed"), ["stop", "restart"]);
   assert.deepEqual(sessionActions("root", false, "ready"), ["move", "close"]);
   assert.deepEqual(sessionActions("root", true, "failed"), ["move", "stop", "restart", "close"]);
+});
+
+test("the list reads as the engine sends it, without the turn that has its own row", () => {
+  assert.equal(holdsText([]), "");
+  assert.equal(holdsText([{ kind: "turn", group: "needs_box", id: "turn_1" }, { kind: "shell_job", group: "needs_box", id: "job_7f3b" }, { kind: "terminal", group: "needs_box" }, { kind: "pr", group: "owes_work", id: "o/r#6" }]), "shell job job_7f3b, terminal, PR o/r#6");
+});
+
+test("a close says what it hands over", () => {
+  const goal = { kind: "goal", group: "owes_work", id: "g1" } as const, pr = { kind: "pr", group: "owes_work", id: "o/r#1" } as const, issue = { kind: "issue", group: "owes_work", id: "o/r#2" } as const;
+  assert.equal(handNote([], "root"), "");
+  assert.equal(handNote([pr], "lead"), "This hands 1 PR to lead.");
+  assert.equal(handNote([goal, goal, pr], "root"), "This hands 2 goals and 1 PR to root.");
+  assert.equal(handNote([goal, pr, issue], "root"), "This hands 1 goal, 1 PR and 1 issue to root.");
 });
 
 test("a close names what it takes along", () => {

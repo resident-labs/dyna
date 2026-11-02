@@ -8,10 +8,14 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
+	"github.com/resident-labs/dyna/room"
 )
 
 // requestChars keeps a question's line short enough for several in the section's budget.
 const requestChars = 80
+
+// holdsChars is the budget of dyna_holds, which holdsLine also keeps to, so its first line always fits.
+const holdsChars = 1000
 
 func renderContextSection(key contract.ContextSectionKey, lines []string, maxChars int, full bool, rowLimit int) contract.ContextSection {
 	if full {
@@ -84,6 +88,31 @@ func prLine(p store.ContextPR) string {
 	return strings.Join(parts, ", ")
 }
 
+// holdsLine states what the session still holds. The turn being dispatched is not one of those: it is open because it is
+// starting. A budget of 0 names everything.
+func holdsLine(held store.Held, budget int) string {
+	var names []string
+	used := 0
+	for _, item := range held {
+		if item.Kind == contract.ResponsibilityTurn {
+			continue
+		}
+		name := room.ResponsibilityName(item)
+		if used += len(name) + 2; budget > 0 && used > budget {
+			break
+		}
+		names = append(names, name)
+	}
+	more := len(held) - held.Count(contract.ResponsibilityTurn) - len(names)
+	if more > 0 {
+		names = append(names, fmt.Sprintf("%d more: context show", more))
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return "You still hold: " + strings.Join(names, ", ") + "."
+}
+
 // contextLine folds session-written text to one line of at most n characters.
 func contextLine(text string, n int) string {
 	runes := []rune(strings.Join(strings.Fields(text), " "))
@@ -98,7 +127,7 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		return contract.ContextSnapshotResponse{}, forbidden()
 	}
 	switch req.Section {
-	case "", contract.ContextGoal, contract.ContextChildren, contract.ContextRequests, contract.ContextPRs, contract.ContextIssues, contract.ContextProfiles, contract.ContextUsage:
+	case "", contract.ContextGoal, contract.ContextChildren, contract.ContextRequests, contract.ContextHolds, contract.ContextProfiles, contract.ContextUsage:
 	default:
 		return contract.ContextSnapshotResponse{}, invalid("unknown context section")
 	}
@@ -145,15 +174,17 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	}
 	add(contract.ContextRequests, lines, 600, 0)
 	lines = nil
+	budget := holdsChars / 2
+	if req.Section != "" {
+		budget = 0
+	}
+	if line := holdsLine(data.Held, budget); line != "" {
+		lines = append(lines, line)
+	}
 	for _, p := range data.PRs {
-		lines = append(lines, fmt.Sprintf("%s #%d: %s", p.Repo, p.Number, prLine(p)))
+		lines = append(lines, fmt.Sprintf("PR %s#%d: %s", p.Repo, p.Number, prLine(p)))
 	}
-	add(contract.ContextPRs, lines, 600, 0)
-	lines = nil
-	for _, i := range data.Issues {
-		lines = append(lines, fmt.Sprintf("%s #%d", i.Repo, i.Number))
-	}
-	add(contract.ContextIssues, lines, 400, 0)
+	add(contract.ContextHolds, lines, holdsChars, 0)
 	if s.maxDepth == 0 || data.Depth < s.maxDepth {
 		lines = nil
 		for _, p := range s.profiles.List() {

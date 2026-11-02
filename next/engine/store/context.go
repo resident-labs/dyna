@@ -12,8 +12,8 @@ type ContextData struct {
 	Goals    []ContextGoal
 	Children []ContextChild
 	Requests []ContextRequest
+	Held     Held
 	PRs      []ContextPR
-	Issues   []ContextIssue
 	Accounts []ContextAccount
 	Depth    int
 }
@@ -34,10 +34,10 @@ func (s *Store) ContextDataForSession(ctx context.Context, id contract.SessionID
 	if data.Requests, err = s.ContextRequests(ctx, id); err != nil {
 		return data, err
 	}
-	if data.PRs, err = s.ContextPRs(ctx, id); err != nil {
+	if data.Held, err = s.Responsibilities(ctx, id); err != nil {
 		return data, err
 	}
-	if data.Issues, err = s.ContextIssues(ctx, id); err != nil {
+	if data.PRs, err = s.ContextPRs(ctx, id); err != nil {
 		return data, err
 	}
 	if data.Accounts, err = s.ContextAccounts(ctx, id); err != nil {
@@ -112,20 +112,33 @@ func (s *Store) ContextGoals(ctx context.Context, id contract.SessionID) ([]Cont
 }
 
 func (s *Store) ContextChildren(ctx context.Context, id contract.SessionID) ([]ContextChild, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT s.name,s.profile,b.state,COALESCE((SELECT COALESCE((SELECT i.text FROM goal_items i WHERE i.room=g.room AND i.goal=g.number AND i.state='open' ORDER BY i.number LIMIT 1),g.text) FROM goals g WHERE g.session=s.id AND g.state='active' ORDER BY g.number LIMIT 1),''),NOT `+noOpenQuestion+` FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.parent=? AND s.closed_at IS NULL ORDER BY COALESCE((SELECT t.started_at FROM turns t WHERE t.session=s.id ORDER BY t.started_at DESC LIMIT 1),s.created_at),s.id`, id)
+	rows, err := s.Read().QueryContext(ctx, `SELECT s.id,s.name,s.profile,b.state,COALESCE((SELECT COALESCE((SELECT i.text FROM goal_items i WHERE i.room=g.room AND i.goal=g.number AND i.state='open' ORDER BY i.number LIMIT 1),g.text) FROM goals g WHERE g.session=s.id AND g.state='active' ORDER BY g.number LIMIT 1),'') FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.parent=? AND s.closed_at IS NULL ORDER BY COALESCE((SELECT t.started_at FROM turns t WHERE t.session=s.id ORDER BY t.started_at DESC LIMIT 1),s.created_at),s.id`, id)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []ContextChild
+	var ids []contract.SessionID
 	for rows.Next() {
 		var c ContextChild
-		if err := rows.Scan(&c.Name, &c.Profile, &c.State, &c.Item, &c.Asking); err != nil {
+		var child contract.SessionID
+		if err := rows.Scan(&child, &c.Name, &c.Profile, &c.State, &c.Item); err != nil {
 			return nil, err
 		}
-		out = append(out, c)
+		out, ids = append(out, c), append(ids, child)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	held, err := s.ResponsibilitiesOf(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Asking = held[ids[i]].Count(contract.ResponsibilityQuestion) > 0
+	}
+	return out, nil
 }
 
 func (s *Store) ContextRequests(ctx context.Context, id contract.SessionID) ([]ContextRequest, error) {
