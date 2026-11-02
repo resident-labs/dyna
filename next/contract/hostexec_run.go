@@ -13,9 +13,10 @@ const (
 	ErrNoGrant         ErrorCode = "no_grant"
 )
 
+// HostexecRunRequest runs Command on Host with bash -c.
 type HostexecRunRequest struct {
 	Host    HostName   `json:"host"`
-	Argv    []string   `json:"argv"`
+	Command string     `json:"command"`
 	Cwd     string     `json:"cwd"`
 	Timeout DurationMS `json:"timeout"`
 }

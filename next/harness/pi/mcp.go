@@ -3,7 +3,6 @@ package pi
 import (
 	"encoding/json"
 	"maps"
-	"net/url"
 	"os"
 )
 
@@ -20,16 +19,10 @@ type MCPServer struct {
 	Timeout     int      `json:"timeout,omitempty"`
 }
 
-// WriteAgentMCPConfig writes the box servers and their tool exposure, with the added servers beside them. A nonempty dir is
-// where shell commands start, for a crew worker whose tree is not the box's.
-func WriteAgentMCPConfig(path, description, dir string, added map[string]MCPServer) error {
-	shell := "http://127.0.0.1:7781/shell/"
-	if dir != "" {
-		shell += "?dir=" + url.QueryEscape(dir)
-	}
+// WriteAgentMCPConfig writes the dyna server and its tool exposure, with the added servers beside it.
+func WriteAgentMCPConfig(path, description string, added map[string]MCPServer) error {
 	servers := map[string]MCPServer{
-		"shell": {URL: shell, Exposure: "direct"},
-		"dyna":  {URL: DynaMCPURL, Exposure: "direct", Description: description, Timeout: 600},
+		"dyna": {URL: DynaMCPURL, Exposure: "direct", Description: description, Timeout: 600},
 	}
 	maps.Insert(servers, maps.All(added))
 	data, err := json.Marshal(struct {

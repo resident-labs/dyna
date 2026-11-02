@@ -22,6 +22,8 @@ test("summarizes adjacent tool kinds and shows a parsed target", () => {
   assert.equal(titleOf(items[0]).target, "npm test");
   assert.equal(titleOf(items[1]).target, "");
   assert.equal(titleOf({ ...items[2], arguments: '{"path":"reader.ts"}' }).target, "reader.ts");
+  assert.deepEqual(titleOf({ ...items[0], arguments: '{"command":"uptime","host":"hermeslab"}' }), { kind: "run", verb: "Ran", target: "on hermeslab: uptime", full: "on hermeslab: uptime" });
+  assert.equal(titleOf({ ...items[0], tool: "job", arguments: '{"action":"output","job":"job_1"}' }).target, "job_1");
 });
 
 test("a step reads as what it did, and no tool ID reaches the row", () => {
@@ -39,6 +41,7 @@ test("a step's time reads in ms, then seconds, then minutes, and an unfinished s
 
 test("an activity label never shows an MCP tool ID", () => {
   assert.equal(activityLabel("mcp__dyna__session"), "Session");
-  assert.equal(activityLabel("mcp__shell__shell go test ./..."), "Ran go test ./...");
+  assert.equal(activityLabel("bash go test ./..."), "Ran go test ./...");
+  assert.equal(activityLabel("bash on hermeslab: uptime"), "Ran on hermeslab: uptime");
   assert.equal(activityLabel("read spec.md"), "read spec.md");
 });

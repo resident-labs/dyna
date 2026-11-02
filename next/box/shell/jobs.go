@@ -1,4 +1,4 @@
-// Package shell runs the box's shell jobs and serves them to Pi over MCP.
+// Package shell runs the box's shell jobs and serves them to Dyna's Pi extension, whose bash and job tools they are.
 package shell
 
 import (
@@ -51,6 +51,10 @@ type process interface {
 type execProcess struct{ cmd *exec.Cmd }
 
 func startBash(command, cwd, callID string, out io.Writer) (process, error) {
+	// exec skips its own check of Dir when SysProcAttr is set, and leaves a bare "no such file". %q shows a zero-width character.
+	if _, err := os.Stat(cwd); cwd != "" && err != nil {
+		return nil, invalid(fmt.Sprintf("cwd %q does not exist", cwd))
+	}
 	cmd := exec.Command("bash", "-c", command)
 	cmd.Env = append(os.Environ(), contract.ToolCallIDEnv+"="+callID)
 	cmd.Dir, cmd.Stdout, cmd.Stderr = cwd, out, out
@@ -75,10 +79,27 @@ func (p *execProcess) GroupAlive() bool { return syscall.Kill(-p.cmd.Process.Pid
 
 func (p *execProcess) Signal(sig syscall.Signal) { _ = syscall.Kill(-p.cmd.Process.Pid, sig) }
 
+// hostProcess is one command on a host. The engine runs it and answers when it ends, so nothing here can signal it.
+type hostProcess struct {
+	done    chan struct{}
+	code    int
+	refused *contract.Error // the engine ran nothing
+}
+
+func (p *hostProcess) Wait() (int, string) {
+	<-p.done
+	return p.code, ""
+}
+
+func (p *hostProcess) GroupAlive() bool { return false }
+
+func (p *hostProcess) Signal(syscall.Signal) {}
+
 type job struct {
 	id          contract.ShellJobID
 	command     string
 	description string
+	host        contract.HostName
 	started     time.Time
 	now         func() time.Time
 	proc        process
@@ -183,13 +204,24 @@ func (j *job) status() string {
 	}
 }
 
+// Run is one bash call.
+type Run struct {
+	Command     string            `json:"command"`
+	Description string            `json:"description"`
+	Cwd         string            `json:"cwd"` // absolute in the box; on a host, from its login folder
+	CallID      string            `json:"callId"`
+	Host        contract.HostName `json:"host"`    // empty: this box
+	Timeout     int               `json:"timeout"` // seconds, for a host run; 0: the engine's default
+}
+
 // Config sets what the tests replace.
 type Config struct {
-	Dir    string                                    // default working directory
 	After  func(time.Duration) <-chan time.Time      // the clock
 	Report func(contract.ShellJobEndedRequest) error // called when a background job ends; retried until it succeeds
 	// Running is called at each mark of a background job's running time. A failed call is not retried: the next mark says more.
 	Running func(contract.ShellJobRunningRequest) error
+	// Host runs a command on a host through the engine and returns its exit code. All its output comes as the run ends.
+	Host func(Run, io.Writer) (int, *contract.Error)
 
 	newID func() contract.ShellJobID
 	start func(command, cwd, callID string, out io.Writer) (process, error)
@@ -233,16 +265,32 @@ func (s *Server) find(id contract.ShellJobID) (*job, bool) {
 	return nil, false
 }
 
+// startHost hands a command to the engine. A refusal also goes in the output, in case the call has moved to the background.
+func (s *Server) startHost(r Run, out io.Writer) *hostProcess {
+	p := &hostProcess{done: make(chan struct{})}
+	go func() {
+		defer close(p.done)
+		p.code, p.refused = s.cfg.Host(r, out)
+		if p.refused != nil {
+			p.code = 1
+			_, _ = fmt.Fprintln(out, refusal{*p.refused})
+		}
+	}()
+	return p
+}
+
 // run starts a command and waits up to the foreground limit. A job still running then continues in the background.
-func (s *Server) run(cancel <-chan struct{}, command, cwd, description, callID string) (*job, error) {
-	if cwd == "" {
-		cwd = s.cfg.Dir
-	}
-	j := &job{id: s.cfg.newID(), command: command, started: s.cfg.now(), now: s.cfg.now, owner: -1, done: make(chan struct{})}
-	j.description = Mask(description)
-	proc, err := s.cfg.start(command, cwd, callID, j)
-	if err != nil {
-		return nil, err
+func (s *Server) run(cancel <-chan struct{}, r Run) (*job, error) {
+	j := &job{id: s.cfg.newID(), command: r.Command, host: r.Host, started: s.cfg.now(), now: s.cfg.now, owner: -1, done: make(chan struct{})}
+	j.description = Mask(r.Description)
+	var proc process
+	if r.Host != "" {
+		proc = s.startHost(r, j)
+	} else {
+		var err error
+		if proc, err = s.cfg.start(r.Command, r.Cwd, r.CallID, j); err != nil {
+			return nil, err
+		}
 	}
 	j.proc = proc
 	s.mu.Lock()
@@ -269,6 +317,10 @@ func (s *Server) run(cancel <-chan struct{}, command, cwd, description, callID s
 	}()
 	select {
 	case <-j.done:
+		if host, ok := proc.(*hostProcess); ok && host.refused != nil {
+			s.forget(j)
+			return nil, refusal{*host.refused}
+		}
 		return j, nil
 	case <-s.cfg.After(foregroundLimit):
 	case <-cancel:
@@ -281,6 +333,13 @@ func (s *Server) run(cancel <-chan struct{}, command, cwd, description, callID s
 		go s.watch(j)
 	}
 	return j, nil
+}
+
+// forget drops a job that never ran.
+func (s *Server) forget(j *job) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.jobs = slices.DeleteFunc(s.jobs, func(other *job) bool { return other == j })
 }
 
 // watch reports a background job at each mark of its running time, until it ends or is stopped.
@@ -425,7 +484,7 @@ func (s *Server) View(reset bool) []contract.ShellJobOutput {
 		if fresh || end > start || j.ownerFinished != j.finished {
 			command := Mask(j.command)
 			command = strings.ToValidUTF8(command[:min(len(command), 4<<10)], "")
-			result = append(result, contract.ShellJobOutput{Job: j.id, Description: j.description, End: j.end, Command: command, Running: !j.finished, ExitCode: j.exit, Text: Mask(string(j.output[start:end])), Reset: fresh,
+			result = append(result, contract.ShellJobOutput{Job: j.id, Description: j.description, Host: j.host, End: j.end, Command: command, Running: !j.finished, ExitCode: j.exit, Text: Mask(string(j.output[start:end])), Reset: fresh,
 				Started: j.started, Ended: j.ended})
 			budget -= end - start + len(command) + 256 // JSON fields and job ID
 			s.viewNext = (index + 1) % len(s.jobs)

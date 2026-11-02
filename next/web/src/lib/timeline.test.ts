@@ -89,7 +89,7 @@ test("thoughts alone count as thoughts, with no title beside the count", () => {
 
 test("summarizes nested actions rather than their script", () => {
   const items: TranscriptItem[] = [{ id: "c", turn: "t", at: "", kind: "tool", tool: "codemode", calls: [
-    { tool: "mcp__shell__shell", status: "ok" }, { tool: "read", status: "ok" }, { tool: "read", status: "error" }, { tool: "write", status: "ok" },
+    { tool: "bash", status: "ok" }, { tool: "read", status: "ok" }, { tool: "read", status: "error" }, { tool: "write", status: "ok" },
   ] }];
   assert.equal(summarizeWork(items), "Ran 1 command, read 2 files, and wrote 1 file");
   assert.equal(summarizeWork([{ id: "l", turn: "t", at: "", kind: "tool", tool: "ls" }, { id: "s", turn: "t", at: "", kind: "tool", tool: "codemode" }]), "Used 1 tool and ran 1 script");

@@ -6,7 +6,7 @@ export type StepKind = "read" | "edit" | "write" | "search" | "list" | "run" | "
 // What a step did, not which tool did it. Each harness tool name maps to one kind; any other tool keeps its own name,
 // written as words, so the view never shows a tool ID (r8).
 const kinds: Record<string, StepKind> = {
-  read: "read", edit: "edit", write: "write", grep: "search", find: "search", web_search: "search", ls: "list", bash: "run", mcp__shell__shell: "run", web_fetch: "fetch",
+  read: "read", edit: "edit", write: "write", grep: "search", find: "search", web_search: "search", ls: "list", bash: "run", web_fetch: "fetch",
 };
 const verbs: Record<Exclude<StepKind, "tool">, string> = {
   read: "Read", edit: "Edited", write: "Wrote", search: "Searched", list: "Listed", run: "Ran", fetch: "Fetched",
@@ -22,10 +22,10 @@ export function stepTitle({ tool, label }: Pick<TranscriptStep, "tool" | "label"
   return { kind, verb, target: shortPaths(full), full };
 }
 
-// A session's activity label starts with its tool name. An MCP tool's ID reads as its step title instead (r8).
+// A session's activity label starts with its tool name. bash and an MCP tool's ID read as their step title instead (r8).
 export function activityLabel(label: string): string {
   const tool = label.split(" ", 1)[0];
-  if (!tool.startsWith("mcp__")) return label;
+  if (tool !== "bash" && !tool.startsWith("mcp__")) return label;
   const { verb, target } = stepTitle({ tool, label });
   return target ? `${verb} ${target}` : verb;
 }
@@ -37,10 +37,13 @@ export function titleOf(item: TranscriptItem) {
     const value: unknown = JSON.parse(item.arguments ?? "{}");
     if (value && typeof value === "object" && !Array.isArray(value)) {
       const entries: [string, unknown][] = Object.entries(value);
-      for (const key of ["command", "path", "query", "pattern", "url"]) {
+      for (const key of ["command", "path", "query", "pattern", "url", "job"]) {
         const field = entries.find(([name]) => name === key)?.[1];
         if (typeof field === "string") { target = field; break; }
       }
+      // A command that ran on another machine says which, as the box's own activity label does.
+      const host = entries.find(([name]) => name === "host")?.[1];
+      if (item.tool === "bash" && typeof host === "string" && host) target = `on ${host}: ${target}`;
     }
   } catch { /* An incomplete preview has no row target; its fold keeps the full arguments. */ }
   const tool = item.tool ?? "tool";
