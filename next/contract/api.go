@@ -10,17 +10,26 @@ import (
 )
 
 type InstructionsGetRequest struct {
-	Room RoomID `json:"room,omitempty"`
+	Room RoomID `json:"room,omitempty" desc:"A room_… ID. Omitted, it is the global file every room reads."`
 }
 type InstructionsGetResponse struct {
-	Text    string     `json:"text"`
-	Hash    string     `json:"hash"`
-	SavedAt *time.Time `json:"savedAt,omitempty"`
+	Text    string             `json:"text"`
+	Hash    string             `json:"hash"`
+	SavedAt *time.Time         `json:"savedAt,omitempty"`
+	SavedBy *InstructionsSaver `json:"savedBy,omitempty"` // absent when the file predates the record
 }
 type InstructionsSetRequest struct {
-	Room RoomID `json:"room,omitempty"`
-	Text string `json:"text"`
-	Base string `json:"base"`
+	Room RoomID `json:"room,omitempty" desc:"A room_… ID. Omitted, it is the global file every room reads."`
+	Text string `json:"text" desc:"The whole new file."`
+	Base string `json:"base" desc:"The hash get returned for the file you changed."`
+}
+
+// InstructionsSaver is who saved an instructions file: the owner, or a room's root session, named as it was then.
+type InstructionsSaver struct {
+	Kind     PrincipalKind `json:"kind"`
+	Session  SessionID     `json:"session,omitempty"`
+	Name     string        `json:"name,omitempty"`
+	RoomName RoomName      `json:"roomName,omitempty"`
 }
 type InstructionsSetResponse struct {
 	Hash string `json:"hash"`
