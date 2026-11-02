@@ -11,9 +11,6 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-// A real PNG signature, which is all the frame reads of a file.
-const pngHead = "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
-
 func uploadFile(t *testing.T, s *Service, room contract.RoomID, name, media, body string) contract.Attachment {
 	t.Helper()
 	req := httptest.NewRequest("POST", "/v1/files?name="+name, bytes.NewBufferString(body))
