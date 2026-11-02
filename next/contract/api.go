@@ -53,6 +53,7 @@ const (
 	MethodDeliveryDone            Method = "delivery.done"
 	MethodHostAdd                 Method = "host.add"
 	MethodHostSetLimits           Method = "host.set_limits"
+	MethodHostSet                 Method = "host.set"
 	MethodHostList                Method = "host.list"
 	MethodAccountsList            Method = "accounts.list"
 	MethodAccountsConnect         Method = "accounts.connect"
@@ -330,11 +331,14 @@ type UsageBalance struct {
 	Amount   string `json:"amount"`
 }
 
+// HostAddRequest adds a host. Its switches start with agents on unless Agents is false, and CI off unless CI is true.
 type HostAddRequest struct {
 	Rooms          []RoomID `json:"rooms,omitempty"`
 	Name           HostName `json:"name"`
 	SSH            string   `json:"ssh"`
 	OwnerOnlyAdmin bool     `json:"ownerOnlyAdmin"`
+	Agents         *bool    `json:"agents,omitempty"`
+	CI             bool     `json:"ci,omitempty"`
 }
 type HostAddResponse struct {
 	NoSwap bool `json:"noSwap"`
@@ -347,6 +351,16 @@ type HostSetLimitsRequest struct {
 	Rooms []RoomID `json:"rooms"`
 }
 type HostSetLimitsResponse struct{}
+
+// HostSetRequest turns a host's two switches, each on its own; a nil one stays as it is. With agents off no new session box
+// lands on the host, and with CI off the CI pool starts no runner there, though a repository still names it. Both off
+// disables the host and keeps it registered. What already runs there stays until it stops.
+type HostSetRequest struct {
+	Host   HostName `json:"host"`
+	Agents *bool    `json:"agents,omitempty"`
+	CI     *bool    `json:"ci,omitempty"`
+}
+type HostSetResponse struct{}
 
 // HostListRequest asks for the hosts an owner terminal can open (5.15). Only the owner calls it.
 type HostListRequest struct{}
@@ -390,6 +404,8 @@ type HostSummary struct {
 	DiskLow           bool              `json:"diskLow"`
 	EngineHost        bool              `json:"engineHost,omitempty"` // this added host is the machine the engine runs on
 	Pool              string            `json:"pool,omitempty"`       // the pool that holds this node
+	Agents            bool              `json:"agents,omitempty"`     // new session boxes may land on this added host
+	CI                bool              `json:"ci,omitempty"`         // the CI pool may start runners on this added host
 	BackupCopyEnabled bool              `json:"backupCopyEnabled,omitempty"`
 	BackupCopyAt      time.Time         `json:"backupCopyAt,omitzero"`
 	BackupCopyFailure BackupCopyFailure `json:"backupCopyFailure,omitempty"`

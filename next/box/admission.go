@@ -44,6 +44,12 @@ func DiskWarn(floor int64) int64 {
 	return floor + max(floor/2, diskRequest(contract.BoxSizeXLarge))
 }
 
+// Serves says whether a host takes a room's session boxes: agents are on, and its room list, which empty means every room,
+// holds the room.
+func (h Host) Serves(room contract.RoomID) bool {
+	return !h.NoAgents && (len(h.Rooms) == 0 || slices.Contains(h.Rooms, room))
+}
+
 // takes says whether a host may take a new box. A per-session node serves its one box, a shared node the rooms that name its
 // pool, and any other host every room whose rule, if it has one, names it.
 func takes(h Host, id contract.BoxID, only []string) bool {
@@ -76,7 +82,7 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 		if h.State != HostReady || (existing != nil && h.Name != existing.Host) {
 			continue
 		}
-		if len(h.Rooms) > 0 && !slices.Contains(h.Rooms, request.Room) || existing == nil && !takes(h, request.ID, only) {
+		if !h.Serves(request.Room) || existing == nil && !takes(h, request.ID, only) {
 			if reason == PendingNoReadyHost {
 				reason = PendingRoomHost
 			}
