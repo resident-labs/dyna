@@ -28,10 +28,10 @@
   import Avatar, { setSessionLabels } from "./lib/ui/Avatar.svelte";
   import { setMentionLinks } from "./lib/ui/Markdown.svelte";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
-  import { boxReason, count, quoted, turnReason, waits, type Quote } from "./lib/feed.ts";
-  import { sessionActions, sessionTree, type TreeRow } from "./lib/session-tree.ts";
+  import { boxReason, count, formatTime, quoted, turnReason, waits, type Quote } from "./lib/feed.ts";
+  import { runRows, sessionActions, sessionTree, type TreeRow } from "./lib/session-tree.ts";
   import { activityLabel } from "./lib/steps.ts";
-  import { runLine } from "./lib/workflow.ts";
+  import { pastRuns, runCounts, runLine, runWords } from "./lib/workflow.ts";
   import { FileDraft } from "./lib/attach.svelte.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
   import type { Size } from "./lib/computerInput.ts";
@@ -217,7 +217,11 @@
   // more idle siblings fold into one "N idle" row that opens in place, so a room of 100 sessions shows its work first.
   const folded = new SvelteSet<string>();
   const openIdle = new SvelteSet<string>();
-  const treeKey = (entry: TreeRow) => entry.kind === "idle" ? `idle ${entry.key}` : entry.session.session;
+  const treeKey = (entry: TreeRow) => entry.kind === "idle" ? `idle ${entry.key}` : entry.kind === "runs" ? "past runs" : entry.kind === "run" ? `run ${entry.run.session}` : entry.session.session;
+  // The room's past runs fold under the tree, and open by themselves on a past run's page, so the owner sees where it sits.
+  let pastOpen = $state(false);
+  let past = $derived(store?.ready ? pastRuns(store.workflows.values(), store.sessions) : []);
+  $effect(() => { if (session && past.some(run => run.session === session)) untrack(() => { pastOpen = true; }); });
   // A row's menu of actions. A right click or the Menu key opens it at the pointer, and the row's More button opens it
   // under the button. It closes with its session, and a button that opened it toggles it.
   let acting: { session: string; anchor: DOMRect; side: "start" | "end"; trigger: HTMLElement } | undefined = $state();
@@ -236,7 +240,7 @@
   $effect.pre(() => { if (acting && !store?.sessions.has(acting.session)) acting = undefined; });
   let sessionList: VirtualList<TreeRow> | undefined = $state();
   const starting = (id: string) => { const box = store?.boxes.get(id); return box === "pending" || box === "creating" || box === "starting"; };
-  let tree = $derived(sessionTree([...(store?.sessions.values() ?? [])], store?.statuses() ?? new Map(), starting, session, folded, openIdle));
+  let tree = $derived([...sessionTree([...(store?.sessions.values() ?? [])], store?.statuses() ?? new Map(), starting, session, folded, openIdle), ...runRows(past, pastOpen)]);
   // Left folds a parent's subtree and Right opens it, on its row or its chevron.
   function fold(event: KeyboardEvent, id: string) {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -770,6 +774,11 @@
         {#snippet row(entry: TreeRow)}
         {#if entry.kind === "idle"}<button type="button" class="idle" data-key={treeKey(entry)} aria-expanded={entry.open} style:padding-left="{entry.depth * 14}px" onkeydown={walkTree}
           onclick={() => { if (!openIdle.delete(entry.key)) openIdle.add(entry.key); }}><Icon name="chevron" size={12} />{count(entry.count, "idle session")}</button>
+        {:else if entry.kind === "runs"}<button type="button" class="idle past" data-key={treeKey(entry)} aria-expanded={entry.open} onkeydown={walkTree} onclick={() => { pastOpen = !pastOpen; }}><Icon name="chevron" size={12} />Past runs<span class="count">{entry.count}</span></button>
+        {:else if entry.kind === "run"}{@const run = entry.run}{@const word = runWords[run.state]}
+        <a class="member run" data-key={treeKey(entry)} href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(run.session)}`} onclick={openSession} onkeydown={walkTree}
+          aria-current={session === run.session ? "page" : undefined} title={run.description}><span class="who"><strong>{run.name}</strong>
+          <span>{#if word.tone}<StatusPill tone={word.tone} label={word.word} word />{:else}{word.word}{/if}{#each runCounts(run) as part (part)}{` · ${part}`}{/each}{` · ${formatTime(run.ended ?? run.started)}`}</span></span></a>
         {:else}{@const { session: item, depth, parent, hidden, state, dot, mark } = entry}
         <div class="row">{#if parent}<button type="button" class="fold" aria-expanded={!hidden} style:left="{6 + depth * 14}px"
           aria-label={hidden ? `Show ${count(hidden, "session")} under ${item.name}` : `Hide the sessions under ${item.name}`}
@@ -902,6 +911,13 @@
   .idle { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 12px; width: 100%; height: 32px; color: var(--muted);
     font-size: 12.5px; cursor: pointer; }
   .idle :global(svg) { flex: none; width: 16px; }
+  /* The fold's words and each past run line up with the avatars above them, and a run reads quieter than an open session. */
+  .idle.past { gap: 6px; padding-left: 12px; }
+  .idle.past .count { margin-left: 2px; font-variant-numeric: tabular-nums; }
+  a.member.run { min-height: 44px; padding-left: 34px; }
+  .who { display: grid; flex: 1; min-width: 0; color: var(--muted); font-size: 12.5px; line-height: 1.3; }
+  .who strong { overflow: hidden; color: var(--text); font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+  .who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .idle[aria-expanded="false"] :global(svg) { transform: rotate(-90deg); }
   @media (hover: hover) { .idle:hover { background: var(--hover); color: var(--text); } }
   .idle:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }

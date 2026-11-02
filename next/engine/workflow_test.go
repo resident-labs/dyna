@@ -323,6 +323,119 @@ func TestClosingACrewStopsItsRun(t *testing.T) {
 	}
 }
 
+func TestAClosedCrewKeepsWhatItsStepsRanAndCountsThem(t *testing.T) {
+	w := setupWorkflow(t)
+	started, crew := w.start(w.owner, workflowScript)
+	w.turn(crew)
+	if _, problem := w.WorkflowStepStart(w.ctx, crew, contract.WorkflowStepStartRequest{Key: "cmd", Kind: contract.WorkflowStepCommand, Name: "run: deploy", Detail: "deploy --token=hunter2"}); problem != nil {
+		t.Fatal(problem)
+	}
+	if _, problem := w.WorkflowStepEnd(w.ctx, crew, contract.WorkflowStepEndRequest{Key: "cmd", State: contract.WorkflowStepDone, Result: `{"code":0,"stdout":"token=hunter2 sent"}`}); problem != nil {
+		t.Fatal(problem)
+	}
+	w.step(crew, "other", contract.WorkflowStepFailed, "refused")
+	// A merge conflict joins the journal as a failed log, and every count of the run takes it in.
+	if _, problem := w.WorkflowStepStart(w.ctx, crew, contract.WorkflowStepStartRequest{Key: "conflict", Kind: contract.WorkflowStepLog, Name: "merge conflict: fix-1"}); problem != nil {
+		t.Fatal(problem)
+	}
+	if _, problem := w.WorkflowStepEnd(w.ctx, crew, contract.WorkflowStepEndRequest{Key: "conflict", State: contract.WorkflowStepFailed, Reason: "conflicts in a.go"}); problem != nil {
+		t.Fatal(problem)
+	}
+	if _, problem := w.SessionClose(w.ctx, w.owner, contract.SessionCloseRequest{Session: started.Session}); problem != nil {
+		t.Fatal(problem)
+	}
+	output, problem := w.WorkflowStep(w.ctx, w.owner, contract.WorkflowStepRequest{Session: started.Session, Key: "cmd"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if strings.Contains(output.Detail, "hunter2") || strings.Contains(output.Result, "hunter2") || !strings.HasPrefix(output.Detail, "deploy") || !strings.Contains(output.Result, `"code":0`) {
+		t.Fatalf("output %+v", output)
+	}
+	if _, problem := w.WorkflowStep(w.ctx, w.owner, contract.WorkflowStepRequest{Session: started.Session, Key: "nothing"}); problem == nil || problem.Code != contract.ErrNotFound {
+		t.Fatalf("a step that is not in the journal: %+v", problem)
+	}
+	if _, problem := w.WorkflowStep(w.ctx, w.owner, contract.WorkflowStepRequest{Session: w.root, Key: "cmd"}); problem == nil || problem.Code != contract.ErrNotFound {
+		t.Fatalf("a session with no run: %+v", problem)
+	}
+	// The page counts the journal, Past runs reads the list and the feed reads the event. All three say the same.
+	status, problem := w.WorkflowStatus(w.ctx, w.owner, contract.WorkflowStatusRequest{Run: started.Run})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	failed := 0
+	for _, step := range status.Steps {
+		if step.State == contract.WorkflowStepFailed {
+			failed++
+		}
+	}
+	if len(status.Steps) != 3 || failed != 2 || status.Run.Steps != 3 || status.Run.Failed != 2 {
+		t.Fatalf("journal %d steps, %d failed; run %+v", len(status.Steps), failed, status.Run)
+	}
+	runs, problem := w.WorkflowList(w.ctx, w.owner, contract.WorkflowListRequest{Room: w.room})
+	if problem != nil || len(runs.Runs) != 1 || runs.Runs[0].Steps != 3 || runs.Runs[0].Failed != 2 {
+		t.Fatalf("list %+v, %+v", runs.Runs, problem)
+	}
+	listed, problem := w.EventsList(w.ctx, w.owner, contract.EventsListRequest{Room: w.room, Types: []contract.EventType{"workflow.ended"}, Limit: 10})
+	if problem != nil || len(listed.Events) != 1 {
+		t.Fatalf("%+v, %+v", listed, problem)
+	}
+	if ended, ok := listed.Events[0].Body.(contract.WorkflowEnded); !ok || ended.Steps != 3 || ended.Failed != 2 {
+		t.Fatalf("event %+v", listed.Events[0].Body)
+	}
+}
+
+func TestAStepSaysWhetherItHoldsMoreThanItsRow(t *testing.T) {
+	w := setupWorkflow(t)
+	_, crew := w.start(w.owner, workflowScript)
+	w.turn(crew)
+	long := strings.Repeat("x", 100)
+	for _, c := range []struct {
+		key    string
+		kind   contract.WorkflowStepKind
+		name   string
+		detail string
+		result string
+		more   bool
+	}{
+		{"one-line", contract.WorkflowStepLog, "log: 12 issues", "12 issues", "null", false},
+		{"no-text", contract.WorkflowStepLog, "merge conflict: x", "", "", false},
+		{"two-lines", contract.WorkflowStepLog, "log: first", "first\nsecond", "null", true},
+		{"clipped", contract.WorkflowStepLog, "log: " + long[:80], long, "null", true},
+		{"post", contract.WorkflowStepPost, "post: hello", "hello", `{"seq":9}`, false},
+		{"post-data", contract.WorkflowStepPost, "post: hello", "hello\n\n```json\n{}\n```", `{"seq":9}`, true},
+		{"quiet", contract.WorkflowStepCommand, "run: npm ci", "npm ci", `{"code":0,"stdout":"","stderr":"","durationMs":4}`, false},
+		{"output", contract.WorkflowStepCommand, "run: npm ci", "npm ci", `{"code":0,"stdout":"ok","stderr":"","durationMs":4}`, true},
+		{"errors", contract.WorkflowStepCommand, "run: npm ci", "npm ci", `{"code":0,"stdout":"","stderr":"warn","durationMs":4}`, true},
+		{"exit", contract.WorkflowStepCommand, "run: npm ci", "npm ci", `{"code":3,"stdout":"","stderr":"","durationMs":4}`, true},
+		{"merge", contract.WorkflowStepCommand, "run: merge a", "merge a", `{"branch":"b","commit":"c","merged":["a"],"conflicts":[]}`, true},
+		{"labelled", contract.WorkflowStepCommand, "Install", "npm ci", `{"code":0,"stdout":"","stderr":""}`, true},
+		{"cut-off", contract.WorkflowStepCommand, "run: npm ci", "npm ci", "", false},
+	} {
+		if _, problem := w.WorkflowStepStart(w.ctx, crew, contract.WorkflowStepStartRequest{Key: c.key, Kind: c.kind, Name: c.name, Detail: c.detail}); problem != nil {
+			t.Fatal(problem)
+		}
+		if _, problem := w.WorkflowStepEnd(w.ctx, crew, contract.WorkflowStepEndRequest{Key: c.key, State: contract.WorkflowStepDone, Result: c.result}); problem != nil {
+			t.Fatal(problem)
+		}
+		step, err := w.store.WorkflowStep(w.ctx, mustRun(t, w, crew), c.key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if step.More != c.more {
+			t.Errorf("%s: more is %v", c.key, step.More)
+		}
+	}
+}
+
+func mustRun(t *testing.T, w workflowCase, crew contract.Principal) contract.WorkflowRunID {
+	t.Helper()
+	run, err := w.store.SessionWorkflow(w.ctx, crew.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return run.ID
+}
+
 func TestAResumedRunKeepsFinishedStepsAndTheFixedCommit(t *testing.T) {
 	w := setupWorkflow(t)
 	started, crew := w.start(w.owner, workflowScript)
