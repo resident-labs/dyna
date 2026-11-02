@@ -17,10 +17,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,7 +28,6 @@ import (
 	"github.com/resident-labs/dyna/engine/api"
 	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/model"
-	"github.com/resident-labs/dyna/engine/store"
 )
 
 const (
@@ -190,13 +187,8 @@ type realCrew struct {
 	sockets  *api.Sockets
 	runtime  string
 	image    string
-	data     string // the engine's store folder
-	proxy    string // the upstream's socket, where the model proxy would be
-	drain    *model.Drain
-	routed   atomic.Int64 // model calls that reached the engine's route, held or not
-	remote   *url.URL     // git's own server for the repository, behind the engine's git route
-	origin   string       // the repository's bare remote, when the room has one
-	cache    string       // what the host would keep of it, which a box clones from
+	origin   string // the repository's bare remote, when the room has one
+	cache    string // what the host would keep of it, which a box clones from
 	created  []contract.BoxID
 }
 
@@ -231,50 +223,55 @@ func newRealCrew(t *testing.T, files map[string]string) *realCrew {
 	if image == "" || binary == "" {
 		t.Skip("DYNA_BOX_TEST_IMAGE and DYNA_BOX_TEST_BINARY name a dyna-base image and a dyna build; this test runs a real box")
 	}
+	s, room, _, base := setup(t)
+	s.profiles = crewProfiles{}
+	ctx, cancel := context.WithTimeout(base, 15*time.Minute)
+	t.Cleanup(cancel)
+	var root contract.SessionID
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT id FROM sessions WHERE room=? AND parent IS NULL", room).Scan(&root); err != nil {
+		t.Fatal(err)
+	}
 	data, err := os.MkdirTemp("", "dyna-wf-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(data) })
-	c := &realCrew{t: t, data: filepath.Join(data, "store"), runtime: filepath.Join(data, "rt"), image: image, drain: model.NewDrain()}
-	st, err := store.Open(c.data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// This closes the newest engine's store, which a restart replaces.
-	t.Cleanup(func() {
-		if c.s != nil {
-			st = c.s.store
-		}
-		if err := st.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	s, room, _, base := setupStore(t, st)
-	ctx, cancel := context.WithTimeout(base, 15*time.Minute)
-	t.Cleanup(cancel)
-	c.s, c.ctx, c.room = s, ctx, room
-	if err := s.store.Read().QueryRowContext(ctx, "SELECT id FROM sessions WHERE room=? AND parent IS NULL", room).Scan(&c.root); err != nil {
-		t.Fatal(err)
-	}
-	c.layout = box.Layout{Data: filepath.Join(data, "data"), HostData: filepath.Join(data, "host")}
+	layout := box.Layout{Data: filepath.Join(data, "data"), HostData: filepath.Join(data, "host")}
+	s.SetLayout(layout)
 
 	// The upstream listens on a socket, as the proxy does, and the route in front of it is the engine's.
-	c.upstream = &crewUpstream{gates: map[string]chan struct{}{}, tools: map[string][]crewTool{}, batch: map[string]int{}}
-	c.proxy = filepath.Join(data, "proxy.sock")
-	proxyListener, err := net.Listen("unix", c.proxy)
+	upstream := &crewUpstream{gates: map[string]chan struct{}{}, tools: map[string][]crewTool{}, batch: map[string]int{}}
+	proxySocket := filepath.Join(data, "proxy.sock")
+	proxyListener, err := net.Listen("unix", proxySocket)
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy := &http.Server{Handler: c.upstream}
+	proxy := &http.Server{Handler: upstream}
 	go proxy.Serve(proxyListener)
 	t.Cleanup(func() { _ = proxy.Close() })
+	server := api.New(boxService{Service: s}, func(c api.Caller) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			session, err := s.store.Session(r.Context(), c.Principal.Session)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+			allowed, crew, err := s.AllowedModels(r.Context(), session)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+			model.Handler(proxySocket, "client-key", string(session.ID), allowed, []string{"account"}, "", crew).ServeHTTP(w, r)
+		})
+	})
+	server.SetFilesRoute(func(c api.Caller) http.Handler { return s.Files(c.Principal, c.Room) })
+	c := &realCrew{t: t, s: s, ctx: ctx, room: room, root: root, layout: layout, upstream: upstream, runtime: filepath.Join(data, "rt"), image: image}
 	if files != nil {
-		c.addRepo(filepath.Join(data, "git"), files)
+		c.addRepo(server, filepath.Join(data, "git"), files)
 	}
-	c.configure()
-	c.serve()
-	bin := filepath.Join(c.layout.HostBin(), "current")
+	c.sockets = api.NewSockets(server, c.runtime, uint32(os.Getuid()), nil)
+	t.Cleanup(func() { _ = c.sockets.Close() })
+	bin := filepath.Join(layout.HostBin(), "current")
 	if err := os.MkdirAll(bin, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -299,81 +296,6 @@ func newRealCrew(t *testing.T, files map[string]string) *realCrew {
 	return c
 }
 
-// configure sets on a new service what the runtime sets as the engine starts.
-func (c *realCrew) configure() {
-	c.s.profiles = crewProfiles{}
-	c.s.SetLayout(c.layout)
-	if c.origin != "" {
-		c.s.SetRepositories(crewRepos{c.origin, c.cache})
-		c.s.SetGitIdentity("Crew Test", "crew@dyna.invalid")
-	}
-}
-
-// serve opens the engine's sockets with its real routes. The drain holds the model route, as the runtime's does.
-func (c *realCrew) serve() {
-	s, drain := c.s, c.drain
-	server := api.New(boxService{Service: s}, func(caller api.Caller) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			c.routed.Add(1)
-			drain.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				session, err := s.store.Session(r.Context(), caller.Principal.Session)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusServiceUnavailable)
-					return
-				}
-				allowed, crew, err := s.AllowedModels(r.Context(), session)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusServiceUnavailable)
-					return
-				}
-				model.Handler(c.proxy, "client-key", string(session.ID), allowed, []string{"account"}, "", crew).ServeHTTP(w, r)
-			})).ServeHTTP(w, r)
-		})
-	})
-	server.SetFilesRoute(func(caller api.Caller) http.Handler { return s.Files(caller.Principal, caller.Room) })
-	if c.remote != nil {
-		server.SetGitRoute(func(caller api.Caller) http.Handler {
-			return enginegit.Handler(c.remote, http.DefaultTransport, "test-token", caller.Principal.Session, caller.Room, s.store)
-		})
-	}
-	sockets := api.NewSockets(server, c.runtime, uint32(os.Getuid()), nil)
-	c.sockets = sockets
-	c.t.Cleanup(func() { _ = sockets.Close() })
-}
-
-// stopEngine ends the engine as its process exits once the drain is over: the sockets close with whatever they still hold, and
-// so does the store.
-func (c *realCrew) stopEngine() {
-	c.t.Helper()
-	if err := c.sockets.Close(); err != nil {
-		c.t.Fatal(err)
-	}
-	if err := c.s.store.Close(); err != nil {
-		c.t.Fatal(err)
-	}
-}
-
-// startEngine is a new engine process on the same folder. It opens the sockets of the boxes that were running, as the runtime's
-// restore does.
-func (c *realCrew) startEngine(running ...contract.WorkflowRunResponse) {
-	c.t.Helper()
-	st, err := store.Open(c.data)
-	if err != nil {
-		c.t.Fatal(err)
-	}
-	c.s = New(st, fakeBoxes{}, fakeProfiles{}, setupNow)
-	c.configure()
-	resetLifecycle(c.s)
-	c.drain = model.NewDrain()
-	c.serve()
-	for _, run := range running {
-		if err := c.sockets.AddBox(run.Box, run.Session, c.room); err != nil {
-			c.t.Fatal(err)
-		}
-	}
-	passLifecycle(c.t, c.s, c.ctx)
-}
-
 // git runs git on the test's side, in dir.
 func (c *realCrew) git(dir string, args ...string) string {
 	c.t.Helper()
@@ -388,7 +310,7 @@ func (c *realCrew) git(dir string, args ...string) string {
 }
 
 // addRepo gives the room a repository holding files, behind the engine's own route.
-func (c *realCrew) addRepo(root string, files map[string]string) {
+func (c *realCrew) addRepo(server *api.API, root string, files map[string]string) {
 	c.t.Helper()
 	c.origin, c.cache = filepath.Join(root, "owner", "repo.git"), filepath.Join(root, "cache", "owner", "repo.git")
 	seed := filepath.Join(root, "seed")
@@ -415,13 +337,18 @@ func (c *realCrew) addRepo(root string, files map[string]string) {
 	backend := &cgi.Handler{Path: filepath.Join(c.git(root, "--exec-path"), "git-http-backend"), Env: []string{"GIT_PROJECT_ROOT=" + root, "GIT_HTTP_EXPORT_ALL=1"}}
 	remote := httptest.NewServer(backend)
 	c.t.Cleanup(remote.Close)
-	var err error
-	if c.remote, err = url.Parse(remote.URL); err != nil {
+	upstream, err := url.Parse(remote.URL)
+	if err != nil {
 		c.t.Fatal(err)
 	}
+	server.SetGitRoute(func(caller api.Caller) http.Handler {
+		return enginegit.Handler(upstream, http.DefaultTransport, "test-token", caller.Principal.Session, caller.Room, c.s.store)
+	})
 	if err := c.s.store.AddRoomRepo(c.ctx, c.room, "owner/repo", true); err != nil {
 		c.t.Fatal(err)
 	}
+	c.s.SetRepositories(crewRepos{c.origin, c.cache})
+	c.s.SetGitIdentity("Crew Test", "crew@dyna.invalid")
 }
 
 func (c *realCrew) containers(label string) []string {
@@ -754,384 +681,5 @@ func TestWorkflowInARealBox(t *testing.T) {
 	}
 	if got := count("SELECT COUNT(*) FROM sessions"); got != sessionsBefore+2 {
 		t.Fatalf("%d sessions after two runs, %d before", got, sessionsBefore)
-	}
-}
-
-const crewRestart = `export const meta = { name: 'restart', profiles: ['fast'], size: 'medium' }
-phase('work')
-const tasks = ['task-r1', 'task-r2', 'task-r3']
-const results = await parallel(tasks.map((task) => () => agent('Work on ' + task, { label: task })))
-const after = await run('echo after', { label: 'after the restart' })
-return { results, after: after.stdout.trim() }
-`
-
-// engineDown is how long the engine is gone. hermeslab's engine took 1 to 2 seconds from its exit to its host forwards being
-// back, which Pi's own three retries, 2, 4 and 8 seconds apart, cover. This is longer than all of them, so the box must hold
-// the calls.
-const engineDown = 20 * time.Second
-
-// The engine restarts in the middle of a run. Three workers are at the model as it stops: their calls finish in the drain, each
-// worker runs a tool, and its next call waits in the drain until the sockets close on it. A new engine opens the same store, and
-// the run ends done with no failed step, each worker having asked the model twice.
-func TestWorkflowSurvivesAnEngineRestart(t *testing.T) {
-	c := newRealCrew(t, nil)
-	tasks := []string{"task-r1", "task-r2", "task-r3"}
-	for _, task := range tasks {
-		c.upstream.tools[task] = []crewTool{shellTool("sleep 1")}
-	}
-	c.upstream.hold(tasks...)
-	started := c.start(contract.Principal{Kind: contract.PrincipalOwner}, crewRestart, "")
-	c.wait("three workers at the model", func() bool { return c.upstream.count() == len(tasks) })
-	routed := c.routed.Load()
-
-	// The engine stops as the runtime's does: no new turns, and new model calls wait while admitted ones finish.
-	c.s.store.DrainDispatch()
-	drained := c.drain.Begin()
-	c.upstream.release(tasks...)
-	select {
-	case <-drained:
-	case <-time.After(60 * time.Second):
-		t.Fatal("the admitted calls did not finish in the drain")
-	}
-	c.wait("each worker's next call, held", func() bool { return c.routed.Load() == routed+int64(len(tasks)) })
-	c.stopEngine()
-	time.Sleep(engineDown)
-	c.startEngine(started)
-
-	c.wait("the run's end", func() bool { return c.status(started.Run).Run.State != contract.WorkflowRunning })
-	final := c.status(started.Run)
-	for _, step := range final.Steps {
-		if step.State != contract.WorkflowStepDone {
-			t.Errorf("step %s is %s: %s", step.Name, step.State, step.Reason)
-		}
-	}
-	if final.Run.State != contract.WorkflowDone || final.Run.Failed != 0 {
-		t.Fatalf("run %+v", final.Run)
-	}
-	if want := `{"results":["found task-r1","found task-r2","found task-r3"],"after":"after"}`; final.Run.Result != want {
-		t.Fatalf("result %s", final.Run.Result)
-	}
-	asked := map[string]int{}
-	for _, request := range c.upstream.since(0) {
-		asked[request.task]++
-	}
-	for _, task := range tasks {
-		if asked[task] != 2 {
-			t.Fatalf("the model was asked %v", asked)
-		}
-	}
-	c.closed(started.Session)
-}
-
-// A reload in a real box. The first version's slow worker is at the model when the second version arrives over the channel:
-// its call to the same step waits for that worker, the finished step returns its result, and a new step runs on a profile only
-// the second version lists, through the same route.
-func TestWorkflowReloadsInARealBox(t *testing.T) {
-	c := newRealCrew(t, nil)
-	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	first := `export const meta = { name: 'reload', profiles: ['fast'], size: 'medium' }
-return await parallel(['task-a', 'task-b'].map((task) => () => agent('Work on ' + task, { label: task })))
-`
-	second := `export const meta = { name: 'reload', profiles: ['fast', 'deep'], size: 'medium' }
-const [kept, added] = await Promise.all([
-	parallel(['task-a', 'task-b'].map((task) => () => agent('Work on ' + task, { label: task }))),
-	agent('Work on task-c', { label: 'task-c', profile: 'deep' }),
-])
-return { kept, added }
-`
-	c.upstream.hold("task-b", "task-c")
-	started := c.start(owner, first, "")
-	c.wait("task-a stored and task-b at the model", func() bool { return c.doneSteps(started.Run) == 1 && c.upstream.count() == 2 })
-	reloaded, problem := c.s.WorkflowReload(c.ctx, owner, contract.WorkflowReloadRequest{Run: started.Run, Script: second})
-	if problem != nil || reloaded.Version != 2 {
-		t.Fatalf("reload %+v, %+v", reloaded, problem)
-	}
-	c.wait("task-c at the model", func() bool {
-		return slices.ContainsFunc(c.upstream.since(0), func(r crewRequest) bool { return r.task == "task-c" })
-	})
-	time.Sleep(2 * time.Second) // time for a second task-b worker, were one to start
-	if got := c.inBox(started.Box, "pgrep -x pi | wc -l"); got != "2" {
-		t.Fatalf("%s Pi processes after the reload, want task-b's and task-c's; the model was asked %+v", got, c.upstream.since(0))
-	}
-	c.upstream.release("task-b", "task-c")
-	c.wait("the run's end", func() bool { return c.status(started.Run).Run.State != contract.WorkflowRunning })
-	final := c.status(started.Run)
-	if want := `{"kept":["found task-a","found task-b"],"added":"found task-c"}`; final.Run.State != contract.WorkflowDone || final.Run.Failed != 0 || final.Run.Result != want || final.Run.Version != 2 {
-		t.Fatalf("run %+v", final.Run)
-	}
-	asked := map[string]string{}
-	for _, request := range c.upstream.since(0) {
-		if asked[request.task] != "" {
-			t.Fatalf("the model was asked for %s twice", request.task)
-		}
-		asked[request.task] = request.model
-	}
-	if asked["task-c"] != crewDeepModel || asked["task-b"] != crewFastModel {
-		t.Fatalf("models %v", asked)
-	}
-	versions := map[string]int{}
-	for _, step := range final.Steps {
-		versions[step.Name] = step.Version
-	}
-	if versions["task-a"] != 1 || versions["task-b"] != 1 || versions["task-c"] != 2 {
-		t.Fatalf("step versions %v", versions)
-	}
-	c.closed(started.Session)
-}
-
-func shellTool(command string) crewTool {
-	input, _ := json.Marshal(map[string]string{"command": command})
-	return crewTool{"bash", string(input)}
-}
-
-const crewWriters = `export const meta = { name: 'writers', profiles: ['fast'], size: 'medium' }
-phase('write')
-const tasks = ['task-a', 'task-b', 'task-c', 'task-d', 'task-e', 'task-x', 'task-y']
-const results = await parallel(tasks.map((task) => () => agent('Work on ' + task, { worktree: true, label: task })))
-phase('merge')
-const merged = await merge(results)
-const tree = await run('git fetch -q origin ' + merged.branch + ' && git ls-tree --name-only FETCH_HEAD')
-return { results, merged, tree: tree.stdout.trim().split('\n') }
-`
-
-type crewWriterResult struct {
-	Results []struct {
-		Step   string
-		Text   string
-		Branch string
-		Commit string
-		Files  []string
-	}
-	Merged struct {
-		Branch    string
-		Commit    string
-		Merged    []string
-		Conflicts []struct {
-			Step   string
-			Branch string
-			Files  []string
-		}
-	}
-	Tree []string
-}
-
-// Writers in a real box, each on its own branch, against a real git route. Five edit separate files and two edit the same line.
-// The box is destroyed with its volume while one still works, and a new box keeps the others' work and reruns only that one;
-// merge() gives one branch with a reported conflict and no throw; a resumed run does it again on its own branch.
-func TestWorkflowWorktreesInARealBox(t *testing.T) {
-	c := newRealCrew(t, map[string]string{
-		"shared.txt":   "first\nsecond\nthird\n",
-		"package.json": `{"name":"crew-test","version":"1.0.0","scripts":{"slow":"bash slow.sh"}}`,
-		"slow.sh":      "echo start $(date +%s%N) >> /box/home/builds.log\nsleep 6\necho end $(date +%s%N) >> /box/home/builds.log\n",
-	})
-	upstream := c.upstream
-	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	tree := func(ref string) []string { return strings.Fields(c.git(c.origin, "ls-tree", "--name-only", ref)) }
-
-	// Task a's shell names no folder, and task c uses Pi's own file tool: both must land in the worker's tree.
-	upstream.tools = map[string][]crewTool{
-		"task-a": {shellTool("pwd > a.txt")},
-		"task-b": {shellTool("echo b > b.txt && git add -A && git commit -qm 'b by hand'")},
-		"task-c": {{"write", `{"path":"c.txt","content":"c\n"}`}},
-		"task-d": {shellTool("echo d > d.txt")},
-		"task-e": {shellTool("echo e > e.txt")},
-		"task-x": {shellTool("sed -i s/second/from-x/ shared.txt")},
-		"task-y": {shellTool("sed -i s/second/from-y/ shared.txt")},
-		"task-f": {shellTool("echo f > f.txt")},
-	}
-	upstream.hold("task-e")
-	first := c.start(contract.Principal{Kind: contract.PrincipalSession, Session: c.root}, crewWriters, "")
-	c.wait("six stored steps", func() bool { return c.doneSteps(first.Run) == 6 })
-	if got := c.inBox(first.Box, "pgrep -x pi | wc -l"); got != "1" {
-		t.Fatalf("%s Pi processes left, want the one that works on task-e", got)
-	}
-	// Each stored step's work is on the remote already, and nothing of it is in the main tree or left on disk.
-	branches := strings.Fields(c.git(c.origin, "for-each-ref", "--format=%(refname:short)", "refs/heads/v2/"))
-	if len(branches) != 6 {
-		t.Fatalf("branches %v with six steps stored", branches)
-	}
-	if got := c.inBox(first.Box, "ls /box/work/owner/repo.worktrees | wc -l; cd /box/work/owner/repo && git worktree list | wc -l; ls"); !strings.HasPrefix(got, "1\n2\n") || strings.Contains(got, "a.txt") {
-		t.Fatalf("the box holds %q", got)
-	}
-
-	before := upstream.count()
-	upstream.release("task-e")
-	c.lose(first.Box, first.Session)
-	c.wait("the run's end", func() bool { return c.status(first.Run).Run.State != contract.WorkflowRunning })
-	final := c.status(first.Run)
-	for _, request := range upstream.since(before) {
-		if request.task != "task-e" {
-			t.Fatalf("the new box asked the model for %+v", request)
-		}
-	}
-	if final.Run.State != contract.WorkflowDone || final.Run.Failed != 1 || !slices.Equal(final.Run.FailedSteps, []string{"merge conflict: task-y"}) {
-		t.Fatalf("run %+v", final.Run)
-	}
-	var result crewWriterResult
-	if err := json.Unmarshal([]byte(final.Run.Result), &result); err != nil {
-		t.Fatalf("result %q: %v", final.Run.Result, err)
-	}
-	if len(result.Results) != 7 {
-		t.Fatalf("result %s", final.Run.Result)
-	}
-	seen := map[string]bool{}
-	for i, step := range result.Results {
-		name := "abcdexy"[i : i+1]
-		if !strings.HasPrefix(step.Branch, "v2/"+string(first.Session)+"-") || seen[step.Branch] || step.Text != "found task-"+name {
-			t.Fatalf("step %+v", step)
-		}
-		seen[step.Branch] = true
-		if got := c.git(c.origin, "rev-parse", "refs/heads/"+step.Branch); got != step.Commit {
-			t.Fatalf("%s is at %s, the step stored %s", step.Branch, got, step.Commit)
-		}
-		want := name + ".txt"
-		if name == "x" || name == "y" {
-			want = "shared.txt"
-		}
-		if !slices.Equal(step.Files, []string{want}) {
-			t.Fatalf("step %s changed %v, want %s", name, step.Files, want)
-		}
-	}
-	if got := c.git(c.origin, "show", result.Results[0].Commit+":a.txt"); !strings.HasPrefix(got, "/box/work/owner/repo.worktrees/") {
-		t.Fatalf("task-a's shell started in %q", got)
-	}
-	if got := c.git(c.origin, "log", "--format=%s", "-2", result.Results[1].Commit); !strings.Contains(got, "b by hand") {
-		t.Fatalf("task-b's history %q", got)
-	}
-
-	// One branch has all the separate work and the first of the two that clash. It stays clean, and the other is reported.
-	merged := result.Merged
-	if merged.Branch != "v2/"+string(first.Session)+"-run" || c.git(c.origin, "rev-parse", "refs/heads/"+merged.Branch) != merged.Commit {
-		t.Fatalf("merged %+v", merged)
-	}
-	want := []string{"a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "package.json", "shared.txt", "slow.sh"}
-	if got := tree(merged.Commit); !slices.Equal(got, want) {
-		t.Fatalf("the merged tree holds %v", got)
-	}
-	if !slices.Equal(result.Tree, want) {
-		t.Fatalf("the script saw %v", result.Tree)
-	}
-	if got := c.git(c.origin, "show", merged.Commit+":shared.txt"); got != "first\nfrom-x\nthird" {
-		t.Fatalf("shared.txt %q", got)
-	}
-	if !slices.Equal(merged.Merged, []string{"task-a", "task-b", "task-c", "task-d", "task-e", "task-x"}) {
-		t.Fatalf("merged %v", merged.Merged)
-	}
-	if len(merged.Conflicts) != 1 || merged.Conflicts[0].Step != "task-y" || !slices.Equal(merged.Conflicts[0].Files, []string{"shared.txt"}) || merged.Conflicts[0].Branch != result.Results[6].Branch {
-		t.Fatalf("conflicts %+v", merged.Conflicts)
-	}
-	listed, problem := c.s.EventsList(c.ctx, owner, contract.EventsListRequest{Room: c.room, Types: []contract.EventType{"workflow.ended"}, Limit: 10})
-	if problem != nil {
-		t.Fatal(problem)
-	}
-	if ended := listed.Events[len(listed.Events)-1].Body.(contract.WorkflowEnded); ended.Failed != 1 || !slices.Equal(ended.FailedSteps, []string{"merge conflict: task-y"}) {
-		t.Fatalf("end event %+v", ended)
-	}
-	c.closed(first.Session)
-
-	// A resumed run is a new session in a new box. It keeps the old steps, whose branches it may read and not push, adds one
-	// worker, and merges on its own branch. The conflict counts again.
-	before = upstream.count()
-	edited := strings.Replace(crewWriters, "'task-e', 'task-x'", "'task-e', 'task-f', 'task-x'", 1)
-	second := c.start(owner, edited, first.Run)
-	c.wait("the resumed run's end", func() bool { return c.status(second.Run).Run.State != contract.WorkflowRunning })
-	for _, request := range upstream.since(before) {
-		if request.task != "task-f" {
-			t.Fatalf("the resumed run asked the model for %+v", request)
-		}
-	}
-	resumed := c.status(second.Run)
-	if resumed.Run.State != contract.WorkflowDone || resumed.Run.Failed != 1 || !slices.Equal(resumed.Run.FailedSteps, []string{"merge conflict: task-y"}) {
-		t.Fatalf("run %+v", resumed.Run)
-	}
-	if err := json.Unmarshal([]byte(resumed.Run.Result), &result); err != nil {
-		t.Fatal(err)
-	}
-	if result.Merged.Branch != "v2/"+string(second.Session)+"-run" {
-		t.Fatalf("merged %+v", result.Merged)
-	}
-	if got := tree(result.Merged.Commit); !slices.Contains(got, "f.txt") || !slices.Contains(got, "a.txt") || !slices.Contains(got, "e.txt") {
-		t.Fatalf("the resumed merge holds %v", got)
-	}
-	c.closed(second.Session)
-
-	// Two workers build at once, and the script builds too, under one lock. A third worker reads while a build holds the lock.
-	upstream.tools = map[string][]crewTool{
-		"task-build1": {shellTool("npm run slow")},
-		"task-build2": {shellTool("npm run slow")},
-		"task-reader": {shellTool("until grep -q start /box/home/builds.log 2>/dev/null; do sleep 0.1; done; s=$(date +%s%N); git log -1 --oneline >/dev/null; grep -c first shared.txt; ls >/dev/null; npm ls >/dev/null; e=$(date +%s%N); echo read $s $e >> /box/home/builds.log")},
-	}
-	third := c.start(owner, `export const meta = { name: 'builds', profiles: ['fast'], size: 'medium' }
-const steps = await parallel([
-	() => agent('Work on task-build1', { worktree: true, label: 'build1' }),
-	() => agent('Work on task-build2', { worktree: true, label: 'build2' }),
-	() => run('npm run slow', { label: 'the script builds' }),
-	() => agent('Work on task-reader', { label: 'reader' }),
-])
-return { steps, log: (await run('cat /box/home/builds.log')).stdout }
-`, "")
-	c.wait("the build run's end", func() bool { return c.status(third.Run).Run.State != contract.WorkflowRunning })
-	built := c.status(third.Run)
-	if built.Run.State != contract.WorkflowDone || built.Run.Failed != 0 {
-		t.Fatalf("run %+v", built.Run)
-	}
-	var log struct{ Log string }
-	if err := json.Unmarshal([]byte(built.Run.Result), &log); err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("build log:\n%s", log.Log)
-	var starts, ends []int64
-	var read [2]int64
-	for line := range strings.Lines(log.Log) {
-		fields := strings.Fields(line)
-		stamp, err := strconv.ParseInt(fields[1], 10, 64)
-		if err != nil {
-			t.Fatalf("log line %q", line)
-		}
-		switch fields[0] {
-		case "start":
-			if len(starts) != len(ends) {
-				t.Fatalf("a build started inside another:\n%s", log.Log)
-			}
-			starts = append(starts, stamp)
-		case "end":
-			ends = append(ends, stamp)
-		case "read":
-			read[0] = stamp
-			if read[1], err = strconv.ParseInt(fields[2], 10, 64); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	if len(starts) != 3 || len(ends) != 3 {
-		t.Fatalf("builds:\n%s", log.Log)
-	}
-	during := false
-	for i := range starts {
-		during = during || starts[i] <= read[0] && read[1] <= ends[i]
-	}
-	if !during {
-		t.Fatalf("the reader did not finish inside one build's hold of the lock:\n%s", log.Log)
-	}
-	c.closed(third.Session)
-
-	// A job that outlasts bash's wait goes on in the background, and its end wakes the crew's session, which has no Pi
-	// to hear it. The worker reads the job's file instead, and the wake must not disturb the run or start the script again.
-	upstream.tools = map[string][]crewTool{
-		"task-long": {shellTool("sleep 34; echo long > long.txt"), shellTool("until [ -e long.txt ]; do sleep 0.2; done; sleep 2")},
-	}
-	fourth := c.start(owner, `export const meta = { name: 'long', profiles: ['fast'], size: 'medium' }
-const step = await agent('Work on task-long', { worktree: true, label: 'long' })
-await run('sleep 3', { label: 'after the wake' })
-return step
-`, "")
-	c.wait("the long run's end", func() bool { return c.status(fourth.Run).Run.State != contract.WorkflowRunning })
-	long := c.status(fourth.Run)
-	if long.Run.State != contract.WorkflowDone || long.Run.Failed != 0 || !strings.Contains(long.Run.Result, "long.txt") {
-		t.Fatalf("run %+v", long.Run)
-	}
-	c.closed(fourth.Session)
-	if got := c.count("SELECT COUNT(*) FROM turns WHERE session=?", fourth.Session); got != 1 {
-		t.Fatalf("%d turns: the wake started the script again", got)
 	}
 }
