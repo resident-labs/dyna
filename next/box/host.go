@@ -17,6 +17,9 @@ type Mount struct {
 	HostPath, BoxPath string
 	ReadOnly          bool
 	MakeDir           bool
+	// OnMount names the mount that HostPath sits on. Under a mount that is down lies a plain empty folder, so the host makes
+	// no folder there.
+	OnMount string
 }
 type EnvVar struct{ Name, Value string }
 type Label struct{ Key, Value string }
@@ -34,7 +37,7 @@ type ContainerSpec struct {
 }
 
 // ContainerLayout identifies the mount layout created by the current engine.
-const ContainerLayout = "3"
+const ContainerLayout = "4"
 
 type ContainerStatus struct {
 	Box         contract.BoxID

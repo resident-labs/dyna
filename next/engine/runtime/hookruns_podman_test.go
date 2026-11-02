@@ -119,6 +119,7 @@ touch /box/home/scratch /tmp/scratch
 test -x ./watch.sh && test -f sub/data.txt
 n=$(cat /box/shared/count 2>/dev/null || echo 0)
 echo $((n + 1)) > /box/shared/count
+touch /box/cache/scratch
 curl -fsS --unix-socket "$DYNA_SOCKET" http://api.github.com/repos/o/r/issues | grep -q curl-title
 mkdir -p /tmp/gh
 printf 'http_unix_socket: %s\n' "$DYNA_SOCKET" > /tmp/gh/config.yml
@@ -173,7 +174,7 @@ func TestRealRunInASmallBox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := &Boxes{Layout: layout, Runtime: runtimeDir, Sockets: sockets, hosts: map[contract.HostName]*podman.Host{"h": host}}
+	b := &Boxes{Store: restoreStore{hosts: engineHosts("h")}, Layout: layout, Runtime: runtimeDir, Sockets: sockets, hosts: map[contract.HostName]*podman.Host{"h": host}}
 	size, _ := box.Size(contract.BoxSizeSmall)
 	spec := func(id contract.BoxID, command ...string) box.RunSpec {
 		return box.RunSpec{ID: id, Subscription: "sub_watch", Host: "h", Room: "room_watch", Size: size, Command: command,
