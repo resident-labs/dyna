@@ -67,6 +67,7 @@ type fakeClient struct {
 	goalDone     contract.GoalDoneRequest
 	host         contract.HostAddRequest
 	hostLimit    *contract.HostSetLimitsRequest
+	hostSet      *contract.HostSetRequest
 	hostNoSwap   bool
 	room         contract.RoomCreateRequest
 	limits       contract.RoomSetLimitsRequest
@@ -199,6 +200,10 @@ func (f *fakeClient) HostAdd(_ context.Context, q contract.HostAddRequest) (cont
 func (f *fakeClient) HostSetLimits(_ context.Context, q contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, error) {
 	f.hostLimit = &q
 	return contract.HostSetLimitsResponse{}, nil
+}
+func (f *fakeClient) HostSet(_ context.Context, q contract.HostSetRequest) (contract.HostSetResponse, error) {
+	f.hostSet = &q
+	return contract.HostSetResponse{}, nil
 }
 func (f *fakeClient) RoomCreate(_ context.Context, q contract.RoomCreateRequest) (contract.RoomCreateResponse, error) {
 	f.room = q
@@ -620,7 +625,7 @@ func TestDeviceListPrintsDevices(t *testing.T) {
 func TestHostListPrintsDiskState(t *testing.T) {
 	f := &fakeClient{hosts: []contract.HostSummary{{Name: contract.ControlPlane, DiskBytes: 100 << 30, DiskUsed: 40 << 30}, {Name: "worker", DiskBytes: 100 << 30, DiskUsed: 90 << 30, DiskLow: true}}}
 	out := runCLI(t, f, "host", "list")
-	if out != "control-plane\t40 GiB\t100 GiB\tok\nworker\t90 GiB\t100 GiB\tlow\n" {
+	if out != "control-plane\t40 GiB\t100 GiB\tok\nworker\t90 GiB\t100 GiB\tlow\tagents off\tci off\n" {
 		t.Fatalf("output=%q", out)
 	}
 }

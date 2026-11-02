@@ -48,6 +48,21 @@ func (s *Service) HostSetLimits(ctx context.Context, caller contract.Principal, 
 	return contract.HostSetLimitsResponse{}, nil
 }
 
+// HostSet turns a host's agents and CI switches. Admission and the CI pool read them on their next pass.
+func (s *Service) HostSet(ctx context.Context, caller contract.Principal, req contract.HostSetRequest) (contract.HostSetResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalOwner {
+		return contract.HostSetResponse{}, forbidden()
+	}
+	if req.Agents == nil && req.CI == nil {
+		return contract.HostSetResponse{}, invalid("set agents, ci or both")
+	}
+	if err := s.store.SetHostSwitches(ctx, req.Host, req.Agents, req.CI); err != nil {
+		return contract.HostSetResponse{}, failure(err)
+	}
+	s.reconciler.Kick()
+	return contract.HostSetResponse{}, nil
+}
+
 // roomWrite runs a write to the room's folder while no deletion can remove it, and refuses a room that is going or gone.
 // So nothing recreates a folder after the deletion removed it.
 func (s *Service) roomWrite(ctx context.Context, room contract.RoomID, write func() error) error {
