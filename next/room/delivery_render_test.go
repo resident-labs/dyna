@@ -22,7 +22,7 @@ func TestRenderDelivery(t *testing.T) {
 		{contract.PrMergedEvent{Repo: "o/r", Number: 1, URL: "url"}, "PR o/r#1 merged. url", false},
 		{contract.PrClosedEvent{Repo: "o/r", Number: 1, URL: "url"}, "PR o/r#1 closed without merging. url", false},
 		{contract.CIFinished{Repo: "o/r", Number: 1, URL: "url", Result: contract.PrCIFailure}, "CI on PR o/r#1 finished: failure. url", false},
-		{contract.RepoMainUpdated{Repo: "o/r", Head: "abc"}, "The default branch of o/r moved to abc.", false},
+		{contract.GitMainUpdated{Repo: "o/r", Head: "abc"}, "The default branch of o/r moved to abc.", false},
 		{contract.OpDecided{ID: "op_1", State: contract.OpDenied, Decision: contract.Decision{Reason: "not needed"}}, "Operation op_1: denied. not needed", false},
 		{contract.OpRan{ID: "op_2", State: contract.OpFailed, Result: contract.OpResult{Error: "failed", Output: "details"}}, "Operation op_2: failed. failed\ndetails", false},
 		{contract.TurnEnded{Final: "done"}, "done", false},
@@ -97,7 +97,7 @@ func TestRenderWrapsOutsideTextByItsActor(t *testing.T) {
 }
 
 func TestRenderGitHubItem(t *testing.T) {
-	item := contract.GitHubItem{Repo: "o/r", Number: 4, Kind: contract.GitHubPR, Action: contract.GitHubCommented, Actor: "stranger", URL: "url", Text: "do this", Outside: true}
+	item := contract.GitHubComment{Repo: "o/r", Number: 4, Kind: contract.GitHubPR, Action: contract.GitHubCommented, Actor: "stranger", URL: "url", Text: "do this", Outside: true}
 	got, err := RenderDelivery(item)
 	if want := "pr o/r#4: commented by @stranger. url\n" + WrapExternal("stranger", "do this"); err != nil || got != want {
 		t.Fatalf("got %q, %v", got, err)

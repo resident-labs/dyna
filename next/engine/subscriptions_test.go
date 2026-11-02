@@ -338,8 +338,8 @@ func TestDefaultSubscriptionWakesRoot(t *testing.T) {
 	if got := pendingWakes(t, s, ctx, root); got != before+1 {
 		t.Fatalf("dispatch repeated: wakes %d", got)
 	}
-	// An owned repository event stays with its owner. One with no owner reaches root.
-	for _, body := range []contract.PrOpened{{Repo: "o/r", Number: 1, Session: "ses_someone"}, {Repo: "o/r", Number: 2}} {
+	// A PR event is for subscribers, whoever owns it. The default branch moving reaches root.
+	for _, body := range []contract.EventBody{contract.PrOpened{Repo: "o/r", Number: 1, Session: "ses_someone"}, contract.PrOpened{Repo: "o/r", Number: 2}, contract.GitMainUpdated{Repo: "o/r", Head: "abc"}} {
 		event, err := s.event(room, engineSender, body)
 		if err != nil {
 			t.Fatal(err)
@@ -1026,7 +1026,7 @@ func TestMigrationGivesExistingRootsTheDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
-		"DROP TABLE github_feeds", "DROP TABLE local_usage", "DROP TABLE issue_owners", "ALTER TABLE pr_owners DROP COLUMN meta_wake_at", "ALTER TABLE pr_owners DROP COLUMN meta", "DROP TABLE workflow_steps", "DROP TABLE workflow_runs", "DROP TABLE subscription_runs", "DROP TABLE subscription_files", "DROP TABLE subscription_args", "DROP TABLE subscription_events", "DROP TABLE subscriptions",
+		"DROP TABLE subscription_queue", "DROP TABLE subscription_where", "DROP TABLE github_feeds", "DROP TABLE local_usage", "DROP TABLE issue_owners", "ALTER TABLE pr_owners DROP COLUMN meta_wake_at", "ALTER TABLE pr_owners DROP COLUMN meta", "DROP TABLE workflow_steps", "DROP TABLE workflow_runs", "DROP TABLE subscription_runs", "DROP TABLE subscription_files", "DROP TABLE subscription_args", "DROP TABLE subscription_events", "DROP TABLE subscriptions",
 		"ALTER TABLE repos DROP COLUMN main_head", "DELETE FROM meta WHERE key='subscription_seq'", "ALTER TABLE questions DROP COLUMN blocked", "ALTER TABLE questions DROP COLUMN meanwhile", "UPDATE meta SET value='63' WHERE key='schema_version'",
 	} {
 		if _, err := db.Exec(statement); err != nil {

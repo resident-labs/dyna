@@ -68,19 +68,23 @@ func saveFeeds(ctx context.Context, tx *sql.Tx, feeds []GitHubFeed) error {
 	return err
 }
 
-// appendItems adds what no session tracks as quiet events in the repository's default room, and only those a subscription lists:
-// a busy repository shows thousands of items a day, and nothing else reads them. An upstream no room lists has no one to tell.
+// appendItems adds feed items as quiet events in the repository's default room, and only those a subscription lists: a busy
+// repository shows thousands of items a day, and nothing else reads them. An upstream no room lists has no one to tell.
 func (s *Store) appendItems(ctx context.Context, tx *sql.Tx, items []contract.GitHubItem, at time.Time) error {
 	for _, item := range items {
+		body := item.Event()
+		if body == nil {
+			continue
+		}
 		var room contract.RoomID
-		err := tx.QueryRowContext(ctx, "SELECT r.default_room FROM repos r WHERE r.repo=? AND EXISTS(SELECT 1 FROM subscription_events e JOIN subscriptions s ON s.id=e.sub WHERE s.enabled=1 AND e.event_type=?)", item.Repo, item.EventType()).Scan(&room)
+		err := tx.QueryRowContext(ctx, "SELECT r.default_room FROM repos r WHERE r.repo=? AND EXISTS(SELECT 1 FROM subscription_events e JOIN subscriptions s ON s.id=e.sub WHERE s.enabled=1 AND e.event_type=?)", item.Repo, body.EventType()).Scan(&room)
 		if err == sql.ErrNoRows {
 			continue
 		}
 		if err != nil {
 			return err
 		}
-		if _, err := s.appendEngineEvent(tx, room, at, item); err != nil {
+		if _, err := s.appendEngineEvent(tx, room, at, body); err != nil {
 			return err
 		}
 	}

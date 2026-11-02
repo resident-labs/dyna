@@ -78,7 +78,7 @@ func TestPrOpenRecordsOwnerAndNotifiesParent(t *testing.T) {
 		t.Fatalf("owner %q error %v", owner, err)
 	}
 	var count int
-	if err := s.store.Read().QueryRow("SELECT count(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.type='pr.opened' AND d.wake=1").Scan(&count); err != nil || count != 1 {
+	if err := s.store.Read().QueryRow("SELECT count(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.type='github.pr.opened' AND d.wake=1").Scan(&count); err != nil || count != 1 {
 		t.Fatalf("wakes %d error %v", count, err)
 	}
 }
@@ -174,7 +174,7 @@ func TestPrOpenTransfersAfterSessionClose(t *testing.T) {
 		t.Fatalf("transferred branch: allowed %v error %v", allowed, err)
 	}
 	var notifications int
-	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.type='pr.opened' AND d.to_id=? AND d.wake=1", parent).Scan(&notifications); err != nil || notifications != 1 {
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.type='github.pr.opened' AND d.to_id=? AND d.wake=1", parent).Scan(&notifications); err != nil || notifications != 1 {
 		t.Fatalf("notifications %d error %v", notifications, err)
 	}
 }

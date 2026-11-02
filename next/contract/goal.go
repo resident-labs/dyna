@@ -160,7 +160,7 @@ type CheckinChild struct {
 	Open    int          `json:"open"` // the goal's open items
 }
 
-// CheckinDue is one report to Session. It is an engine notice: it wakes Session and owes no reply.
+// CheckinDue is a report of sessions that hold open goals with nothing moving them. It is an engine notice: it wakes Session and owes no reply.
 type CheckinDue struct {
 	Session  SessionID      `json:"session"`
 	Children []CheckinChild `json:"children"`
@@ -179,7 +179,7 @@ type SessionFailure struct {
 	Reason  string       `json:"reason,omitempty"`
 }
 
-// SessionFailed is one notice to To, sent as soon as the engine sees the failure. It wakes To and owes no reply.
+// SessionFailed is a session or a box failing, told to To as soon as the engine sees it. It wakes To and owes no reply.
 type SessionFailed struct {
 	To       SessionID        `json:"to"`
 	Failures []SessionFailure `json:"failures"`

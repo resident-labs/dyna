@@ -96,10 +96,10 @@ func (r *prRig) settle(t *testing.T) {
 	r.clock.add(11 * time.Minute)
 }
 
-// wakes returns the pr.changed deliveries that wake a session.
+// wakes returns the github.pr.changed deliveries that wake a session.
 func (r *prRig) wakes(t *testing.T, to contract.SessionID) []contract.PrChanged {
 	t.Helper()
-	rows, err := r.s.store.Read().QueryContext(r.ctx, "SELECT e.body FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.type='pr.changed' AND d.to_id=? AND d.wake=1 ORDER BY e.seq", to)
+	rows, err := r.s.store.Read().QueryContext(r.ctx, "SELECT e.body FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.type='github.pr.changed' AND d.to_id=? AND d.wake=1 ORDER BY e.seq", to)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -643,10 +643,10 @@ func TestAFailedReadMovesNoCursorSoTheNewsComesAgain(t *testing.T) {
 	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})
 	r.settle(t)
 	r.github.EditAs("alice", "owner/repo", 1, func(p *fakegithub.Pull) { p.Meta.Labels = []string{"bug"} })
-	before := r.eventCount(t, "pr.changed")
+	before := r.eventCount(t, "github.pr.changed")
 	r.poll.GitHub.Token = "wrong"
 	r.pass(t)
-	if got := r.eventCount(t, "pr.changed"); got != before {
+	if got := r.eventCount(t, "github.pr.changed"); got != before {
 		t.Fatalf("%d events", got-before)
 	}
 	r.poll.GitHub.Token = fakegithub.Token
@@ -719,7 +719,7 @@ func TestOwnedPREventsAreEmittedOnceAndLeaveRootAlone(t *testing.T) {
 	r.clock.add(11 * time.Minute)
 	r.pass(t)
 	r.dispatch(t)
-	for _, kind := range []string{"ci.finished", "pr.merged", "pr.closed"} {
+	for _, kind := range []string{"github.ci.finished", "github.pr.merged", "github.pr.closed"} {
 		if got := r.eventCount(t, kind); got != 1 {
 			t.Errorf("%d %s events", got, kind)
 		}
@@ -729,7 +729,7 @@ func TestOwnedPREventsAreEmittedOnceAndLeaveRootAlone(t *testing.T) {
 			}
 		}
 	}
-	// The owner hears only through pr.changed, once per pass with news.
+	// The owner hears only through github.pr.changed, once per pass with news.
 	if got := len(r.wakes(t, r.child)); got != 2 {
 		t.Fatalf("%d wakes", got)
 	}
@@ -742,7 +742,7 @@ func TestABaselineEmitsNoEvents(t *testing.T) {
 		t.Fatalf("%+v", e)
 	}
 	r.pass(t)
-	if got := r.eventCount(t, "ci.finished"); got != 0 {
+	if got := r.eventCount(t, "github.ci.finished"); got != 0 {
 		t.Fatalf("%d events", got)
 	}
 }
@@ -750,7 +750,7 @@ func TestABaselineEmitsNoEvents(t *testing.T) {
 func TestASubscriberHearsAnOwnedPREvent(t *testing.T) {
 	r := newPRRig(t)
 	wake := sessionCaller(r.root)
-	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"pr.merged"}, Wake: &wake}); e != nil {
+	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.pr.merged"}, Wake: &wake}); e != nil {
 		t.Fatalf("%+v", e)
 	}
 	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})
@@ -758,7 +758,7 @@ func TestASubscriberHearsAnOwnedPREvent(t *testing.T) {
 	r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) { p.State = "MERGED" })
 	r.pass(t)
 	r.dispatch(t)
-	if got := r.deliveryCount(t, "pr.merged", r.root, true); got != 1 {
+	if got := r.deliveryCount(t, "github.pr.merged", r.root, true); got != 1 {
 		t.Fatalf("%d deliveries", got)
 	}
 }
@@ -780,20 +780,20 @@ func TestMainMovesReachTheDefaultRoomsRootOnce(t *testing.T) {
 	// No PR is tracked on this repository: a room listing it is enough.
 	r.github.SetMain("owner/repo", "main1")
 	r.pass(t)
-	if got := r.eventCount(t, "repo.main_updated"); got != 0 {
+	if got := r.eventCount(t, "git.main_updated"); got != 0 {
 		t.Fatalf("the first head read made %d events", got)
 	}
 	r.github.SetMain("owner/repo", "main2")
 	r.clock.add(11 * time.Minute)
 	r.pass(t)
 	r.dispatch(t)
-	if got := r.eventCount(t, "repo.main_updated"); got != 1 {
+	if got := r.eventCount(t, "git.main_updated"); got != 1 {
 		t.Fatalf("%d events", got)
 	}
-	if got := r.deliveryCount(t, "repo.main_updated", r.root, true); got != 1 {
+	if got := r.deliveryCount(t, "git.main_updated", r.root, true); got != 1 {
 		t.Fatalf("the default room's root woke %d times", got)
 	}
-	if woke, quiet := r.deliveryCount(t, "repo.main_updated", otherRoot, true), r.deliveryCount(t, "repo.main_updated", otherRoot, false); woke != 0 || quiet != 1 {
+	if woke, quiet := r.deliveryCount(t, "git.main_updated", otherRoot, true), r.deliveryCount(t, "git.main_updated", otherRoot, false); woke != 0 || quiet != 1 {
 		t.Fatalf("the other room's root: %d wakes, %d quiet", woke, quiet)
 	}
 
@@ -802,7 +802,7 @@ func TestMainMovesReachTheDefaultRoomsRootOnce(t *testing.T) {
 	r.clock.add(11 * time.Minute)
 	r.pass(t)
 	r.dispatch(t)
-	if got := r.eventCount(t, "repo.main_updated"); got != 1 {
+	if got := r.eventCount(t, "git.main_updated"); got != 1 {
 		t.Fatalf("a restart repeated it: %d events", got)
 	}
 	r.github.SetMain("owner/repo", "main3")
@@ -810,7 +810,7 @@ func TestMainMovesReachTheDefaultRoomsRootOnce(t *testing.T) {
 	r.clock.add(11 * time.Minute)
 	r.pass(t)
 	r.dispatch(t)
-	if got := r.deliveryCount(t, "repo.main_updated", r.root, true); got != 2 {
+	if got := r.deliveryCount(t, "git.main_updated", r.root, true); got != 2 {
 		t.Fatalf("root woke %d times", got)
 	}
 }
@@ -826,7 +826,7 @@ func TestAnUnlistedUpstreamsMainStaysQuiet(t *testing.T) {
 	r.github.SetMain("upstream/repo", "up2")
 	r.clock.add(11 * time.Minute)
 	r.pass(t)
-	if got := r.eventCount(t, "repo.main_updated"); got != 0 {
+	if got := r.eventCount(t, "git.main_updated"); got != 0 {
 		t.Fatalf("%d events", got)
 	}
 }

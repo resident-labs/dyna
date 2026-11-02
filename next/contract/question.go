@@ -68,7 +68,7 @@ type QuestionAsked struct {
 	Blocked   bool       `json:"blocked,omitempty"`
 }
 
-// QuestionAnswered carries the question too, so the delivery reads alone.
+// QuestionAnswered is a question answered. It carries the question too, so the delivery reads alone.
 type QuestionAnswered struct {
 	ID       QuestionID `json:"id"`
 	Session  SessionID  `json:"session"`

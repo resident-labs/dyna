@@ -57,3 +57,31 @@ func TestSubscriptionListLine(t *testing.T) {
 		}
 	}
 }
+
+func TestSubscriptionLineShowsItsFilters(t *testing.T) {
+	line := describeSubscription(contract.SubscriptionInfo{Subscription: contract.Subscription{ID: "sub_a", Scope: contract.ScopeRoom, On: []contract.EventType{"github.pr.opened"}, Where: []string{"author=lev", "actor!=x"}}})
+	if !strings.Contains(line, "on github.pr.opened where author=lev where actor!=x") {
+		t.Fatal(line)
+	}
+}
+
+func TestSubscriptionEventsListsEachWithItsLine(t *testing.T) {
+	var out strings.Builder
+	if err := printEventTypes(&out); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	for _, want := range []string{"github.pr.opened\ta pull request opened, by a session or on GitHub", "git.main_updated\ta repository's default branch moving", "github.mention\tthe owner's GitHub account mentioned on an issue or a pull request"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("no %q in:\n%s", want, text)
+		}
+	}
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		if kind, doc, _ := strings.Cut(line, "\t"); doc == "" {
+			t.Errorf("%s has no description", kind)
+		}
+	}
+	if strings.Contains(text, "turn.activity") {
+		t.Error("an event no subscription can name is listed")
+	}
+}
