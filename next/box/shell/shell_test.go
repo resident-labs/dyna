@@ -55,7 +55,6 @@ func newRig(output string, killOn syscall.Signal) *rig {
 		reports: make(chan contract.ShellJobEndedRequest, 4),
 	}
 	r.server = New(Config{
-		Dir: "/box/work",
 		After: func(time.Duration) <-chan time.Time {
 			t := timer{make(chan time.Time, 1)}
 			r.timers <- t
@@ -82,13 +81,13 @@ func TestSlowCommandMovesToBackgroundAndReportsItsEnd(t *testing.T) {
 	r := newRig("building\n", syscall.SIGKILL)
 	done := make(chan *job)
 	go func() {
-		j, _ := r.server.run(nil, "make", "", "", "")
+		j, _ := r.server.run(nil, Run{Command: "make"})
 		done <- j
 	}()
 	(<-r.timers).fire <- time.Time{}
 	j := <-done
-	if got := describe(j); !strings.Contains(got, "running in the background") || !strings.Contains(got, "building") {
-		t.Fatalf("unexpected foreground result %q", got)
+	if got := result(j); !got.Running || got.Status != "running" || got.ExitCode != nil || !strings.Contains(got.Output, "building") {
+		t.Fatalf("unexpected foreground result %+v", got)
 	}
 	if len(r.server.Running()) != 1 {
 		t.Fatalf("running = %v, want 1", r.server.Running())
@@ -107,12 +106,12 @@ func TestSlowCommandMovesToBackgroundAndReportsItsEnd(t *testing.T) {
 func TestFastCommandReturnsItsExitWithoutReport(t *testing.T) {
 	r := newRig("ok\n", syscall.SIGKILL)
 	r.proc.exit <- 0
-	j, err := r.server.run(nil, "true", "", "", "")
+	j, err := r.server.run(nil, Run{Command: "true"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := describe(j); got != "ok\n\n[job job_1: exit 0]" {
-		t.Fatalf("unexpected result %q", got)
+	if got := result(j); got.Output != "ok\n" || got.Status != "exit 0" || got.Running || got.ExitCode == nil || *got.ExitCode != 0 {
+		t.Fatalf("unexpected result %+v", got)
 	}
 	select {
 	case report := <-r.reports:
@@ -125,7 +124,7 @@ func TestStopKillsTheGroupAfterTheGracePeriod(t *testing.T) {
 	r := newRig("", syscall.SIGKILL) // the process ignores SIGTERM
 	done := make(chan *job)
 	go func() {
-		j, _ := r.server.run(nil, "sleep 99", "", "", "")
+		j, _ := r.server.run(nil, Run{Command: "sleep 99"})
 		done <- j
 	}()
 	(<-r.timers).fire <- time.Time{}
@@ -151,7 +150,7 @@ func TestCloseKillsEveryJobGroup(t *testing.T) {
 	r := newRig("", syscall.SIGKILL)
 	done := make(chan *job)
 	go func() {
-		j, _ := r.server.run(nil, "sleep 99", "", "", "")
+		j, _ := r.server.run(nil, Run{Command: "sleep 99"})
 		done <- j
 	}()
 	(<-r.timers).fire <- time.Time{}
@@ -186,62 +185,168 @@ func TestMaskHidesSecretsOnly(t *testing.T) {
 	}
 }
 
-func TestHandlerRunsAShellCall(t *testing.T) {
+func call(t *testing.T, handler http.Handler, path, body string) (int, string) {
+	t.Helper()
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
+	return response.Code, response.Body.String()
+}
+
+func TestHandlerRunsACommand(t *testing.T) {
 	r := newRig("secret=abc\n", syscall.SIGKILL)
 	r.proc.exit <- 0
-	server := httptest.NewServer(r.server.Handler())
-	defer server.Close()
-	post := func(body string) (*http.Response, string) {
-		resp, err := http.Post(server.URL, "application/json", strings.NewReader(body))
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		data, _ := io.ReadAll(resp.Body)
-		return resp, string(data)
-	}
-	if resp, _ := post(`{"jsonrpc":"2.0","method":"notifications/initialized"}`); resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("notification status = %d", resp.StatusCode)
-	}
-	if _, body := post(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`); !strings.Contains(body, `"shell_jobs"`) {
-		t.Fatalf("tools/list = %s", body)
-	}
-	_, body := post(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"shell","arguments":{"command":"env"}}}`)
-	if !strings.Contains(body, "secret=[masked]") || strings.Contains(body, "abc") || !strings.Contains(body, "exit 0") {
-		t.Fatalf("tools/call = %s", body)
+	status, body := call(t, r.server.Handler(), "/run", `{"command":"env"}`)
+	if status != http.StatusOK || !strings.Contains(body, "secret=[masked]") || strings.Contains(body, "abc") || !strings.Contains(body, `"status":"exit 0"`) || !strings.Contains(body, `"exit_code":0`) || !strings.Contains(body, `"job":"job_1"`) {
+		t.Fatalf("run = %d %s", status, body)
 	}
 }
 
-func TestAWorkersShellStartsInItsOwnTree(t *testing.T) {
-	for cwd, want := range map[string]string{"": "/box/work/repo.worktrees/one", "src": "/box/work/repo.worktrees/one/src", "/tmp": "/tmp"} {
-		r := newRig("", syscall.SIGKILL)
-		var got string
-		r.server.cfg.start = func(_, dir, _ string, _ io.Writer) (process, error) {
-			got = dir
-			return r.proc, nil
-		}
-		r.proc.exit <- 0
-		body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"shell","arguments":{"command":"pwd","cwd":"` + cwd + `"}}}`
-		r.server.Handler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/?dir=/box/work/repo.worktrees/one", strings.NewReader(body)))
-		if got != want {
-			t.Fatalf("cwd %q: started in %q, want %q", cwd, got, want)
-		}
-	}
-}
-
-func TestMCPPassesCallIDToShell(t *testing.T) {
+func TestHandlerRefusesWithATypedError(t *testing.T) {
 	r := newRig("", syscall.SIGKILL)
-	var got string
-	r.server.cfg.start = func(_, _, id string, _ io.Writer) (process, error) {
-		got = id
+	for path, input := range map[string]string{
+		"/run": `{"command":" "}`,
+		"/job": `{"action":"output","job":"job_9"}`,
+	} {
+		if status, body := call(t, r.server.Handler(), path, input); status != http.StatusBadRequest || !strings.Contains(body, `"code":"invalid"`) {
+			t.Fatalf("%s = %d %s", path, status, body)
+		}
+	}
+	if status, body := call(t, r.server.Handler(), "/run", `{"command":"true","timeout":5}`); status != http.StatusBadRequest || !strings.Contains(body, "timeout is for a host run") {
+		t.Fatalf("timeout in the box = %d %s", status, body)
+	}
+}
+
+func TestBadCwdFailsClearly(t *testing.T) {
+	server := New(Config{After: time.After})
+	status, body := call(t, server.Handler(), "/run", "{\"command\":\"true\",\"cwd\":\"/box/no\u200bpe\"}")
+	if status != http.StatusBadRequest || !strings.Contains(body, `cwd \"/box/no\\u200bpe\" does not exist`) {
+		t.Fatalf("run = %d %s", status, body)
+	}
+}
+
+func TestHandlerPassesCwdAndCallID(t *testing.T) {
+	r := newRig("", syscall.SIGKILL)
+	var dir, id string
+	r.server.cfg.start = func(_, cwd, callID string, _ io.Writer) (process, error) {
+		dir, id = cwd, callID
 		return r.proc, nil
 	}
 	r.proc.exit <- 0
-	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"shell","arguments":{"command":"true","_dynaCallId":"call-1"}}}`))
-	response := httptest.NewRecorder()
-	r.server.Handler().ServeHTTP(response, request)
-	if got != "call-1" {
-		t.Fatalf("call ID = %q", got)
+	call(t, r.server.Handler(), "/run", `{"command":"true","cwd":"/box/work/repo.worktrees/one","callId":"call-1"}`)
+	if dir != "/box/work/repo.worktrees/one" || id != "call-1" {
+		t.Fatalf("cwd %q, call ID %q", dir, id)
+	}
+}
+
+func TestHandlerListsReadsAndStopsJobs(t *testing.T) {
+	r := newRig("line\n", syscall.SIGTERM)
+	finish := make(chan string, 1)
+	go func() {
+		_, body := call(t, r.server.Handler(), "/run", `{"command":"sleep 99"}`)
+		finish <- body
+	}()
+	(<-r.timers).fire <- time.Now()
+	if body := <-finish; !strings.Contains(body, `"running":true`) || !strings.Contains(body, `"status":"running"`) {
+		t.Fatalf("run = %s", body)
+	}
+	if _, body := call(t, r.server.Handler(), "/job", `{"action":"list"}`); !strings.Contains(body, `"job":"job_1"`) || !strings.Contains(body, `"command":"sleep 99"`) {
+		t.Fatalf("list = %s", body)
+	}
+	if _, body := call(t, r.server.Handler(), "/job", `{"action":"output","job":"job_1"}`); !strings.Contains(body, `"output":""`) {
+		t.Fatalf("a call's own read leaves nothing unread: %s", body)
+	}
+	if _, body := call(t, r.server.Handler(), "/job", `{"action":"stop","job":"job_1"}`); !strings.Contains(body, `"status":"stopped"`) {
+		t.Fatalf("stop = %s", body)
+	}
+	if _, body := call(t, r.server.Handler(), "/job", `{"action":"nothing"}`); !strings.Contains(body, "action is output") {
+		t.Fatalf("unknown action = %s", body)
+	}
+}
+
+// hostRig runs a command on a fake engine that answers when the test says.
+func hostRig(answer func(Run, io.Writer) (int, *contract.Error)) *rig {
+	r := newRig("", syscall.SIGKILL)
+	r.server.cfg.Host = answer
+	return r
+}
+
+func TestHostCommandRunsThroughTheEngine(t *testing.T) {
+	var asked Run
+	r := hostRig(func(run Run, out io.Writer) (int, *contract.Error) {
+		asked = run
+		_, _ = io.WriteString(out, "token=abc\n")
+		return 3, nil
+	})
+	r.server.cfg.start = func(string, string, string, io.Writer) (process, error) {
+		t.Fatal("a host command must not start in the box")
+		return nil, nil
+	}
+	_, body := call(t, r.server.Handler(), "/run", `{"command":"uptime","host":"h","cwd":"logs","timeout":60}`)
+	if asked.Host != "h" || asked.Command != "uptime" || asked.Cwd != "logs" || asked.Timeout != 60 {
+		t.Fatalf("asked %+v", asked)
+	}
+	if !strings.Contains(body, `"exit_code":3`) || !strings.Contains(body, "token=[masked]") {
+		t.Fatalf("run = %s", body)
+	}
+	if view := r.server.View(true); len(view) != 1 || view[0].Host != "h" || view[0].Command != "uptime" {
+		t.Fatalf("view %+v", view)
+	}
+}
+
+func TestRefusedHostCommandLeavesNoJob(t *testing.T) {
+	r := hostRig(func(Run, io.Writer) (int, *contract.Error) {
+		return 0, &contract.Error{Code: contract.ErrNoGrant, Message: "no matching host-exec grant"}
+	})
+	status, body := call(t, r.server.Handler(), "/run", `{"command":"uptime","host":"h"}`)
+	if status != http.StatusBadRequest || !strings.Contains(body, `"code":"no_grant"`) {
+		t.Fatalf("run = %d %s", status, body)
+	}
+	if view := r.server.View(true); len(view) != 0 {
+		t.Fatalf("view %+v", view)
+	}
+}
+
+func TestSlowHostCommandMovesToBackgroundAndReportsItsEnd(t *testing.T) {
+	release := make(chan struct{})
+	r := hostRig(func(_ Run, out io.Writer) (int, *contract.Error) {
+		<-release
+		_, _ = io.WriteString(out, "done\n")
+		return 0, nil
+	})
+	finish := make(chan string, 1)
+	go func() {
+		_, body := call(t, r.server.Handler(), "/run", `{"command":"sleep 99","host":"h"}`)
+		finish <- body
+	}()
+	(<-r.timers).fire <- time.Now()
+	if body := <-finish; !strings.Contains(body, `"running":true`) {
+		t.Fatalf("run = %s", body)
+	}
+	if status, body := call(t, r.server.Handler(), "/job", `{"action":"stop","job":"job_1"}`); status != http.StatusBadRequest || !strings.Contains(body, "nothing here can stop a host run") {
+		t.Fatalf("stop = %d %s", status, body)
+	}
+	close(release)
+	if got := <-r.reports; got.Job != "job_1" || got.ExitCode != 0 || !strings.Contains(got.Tail, "done") {
+		t.Fatalf("report %+v", got)
+	}
+}
+
+func TestLateHostRefusalReachesTheJobOutput(t *testing.T) {
+	release := make(chan struct{})
+	r := hostRig(func(Run, io.Writer) (int, *contract.Error) {
+		<-release
+		return 0, &contract.Error{Code: contract.ErrNoGrant, Message: "no grant"}
+	})
+	finish := make(chan struct{})
+	go func() {
+		call(t, r.server.Handler(), "/run", `{"command":"x","host":"h"}`)
+		close(finish)
+	}()
+	(<-r.timers).fire <- time.Now()
+	<-finish
+	close(release)
+	if got := <-r.reports; got.ExitCode != 1 || !strings.Contains(got.Tail, "no_grant: no grant") {
+		t.Fatalf("report %+v", got)
 	}
 }
 
@@ -250,7 +355,7 @@ func TestReportRetriesUntilTheEngineAccepts(t *testing.T) {
 	r.failing = 1
 	done := make(chan *job)
 	go func() {
-		j, _ := r.server.run(nil, "make", "", "", "")
+		j, _ := r.server.run(nil, Run{Command: "make"})
 		done <- j
 	}()
 	(<-r.timers).fire <- time.Time{}
@@ -275,7 +380,7 @@ func TestOnlyTheLastFinishedJobsAreKept(t *testing.T) {
 		},
 	})
 	for range keepFinished + 2 {
-		if _, err := server.run(nil, "true", "", "", ""); err != nil {
+		if _, err := server.run(nil, Run{Command: "true"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -307,7 +412,7 @@ func TestStopKillsAChildThatOutlivesTheLeader(t *testing.T) {
 	r.proc.orphan = true
 	done := make(chan *job)
 	go func() {
-		j, _ := r.server.run(nil, "sleep 99 &", "", "", "")
+		j, _ := r.server.run(nil, Run{Command: "sleep 99 &"})
 		done <- j
 	}()
 	(<-r.timers).fire <- time.Time{}
@@ -326,7 +431,7 @@ func TestReportTailMasksATokenAcrossTheCut(t *testing.T) {
 	token := "ghp_" + strings.Repeat("a1", 15)
 	r := newRig(strings.Repeat("x", tailLimit-10)+" "+token+"\n", syscall.SIGKILL)
 	r.proc.exit <- 0
-	if _, err := r.server.run(nil, "env", "", "", ""); err != nil {
+	if _, err := r.server.run(nil, Run{Command: "env"}); err != nil {
 		t.Fatal(err)
 	}
 	j, _ := r.server.find("job_1")
@@ -403,7 +508,7 @@ func TestOwnerViewCarriesJobTimes(t *testing.T) {
 	times := []time.Time{started, started, ended} // the second stamps the job's output
 	r.server.cfg.now = func() time.Time { now := times[0]; times = times[1:]; return now }
 	r.proc.exit <- 0
-	j, err := r.server.run(nil, "make", "", "", "")
+	j, err := r.server.run(nil, Run{Command: "make"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +573,7 @@ func TestJobEndAndDescription(t *testing.T) {
 			r.proc.signal = tc.signal
 			r.proc.stopCode = tc.code
 			done := make(chan *job, 1)
-			go func() { j, _ := r.server.run(nil, "build", "", "Build the bundle", ""); done <- j }()
+			go func() { j, _ := r.server.run(nil, Run{Command: "build", Description: "Build the bundle"}); done <- j }()
 			(<-r.timers).fire <- time.Time{}
 			j := <-done
 			if tc.stopped {

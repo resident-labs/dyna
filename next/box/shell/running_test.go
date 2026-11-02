@@ -75,7 +75,7 @@ func newStatusRig(t *testing.T) (*statusRig, io.Writer, *job) {
 	})
 	done := make(chan *job)
 	go func() {
-		j, _ := r.server.run(nil, "make", "", "Build", "")
+		j, _ := r.server.run(nil, Run{Command: "make", Description: "Build"})
 		done <- j
 	}()
 	out := <-r.out
@@ -256,7 +256,7 @@ func TestForegroundJobHasNoStatus(t *testing.T) {
 		return nil
 	}
 	r.proc.exit <- 0
-	if _, err := r.server.run(nil, "true", "", "", ""); err != nil {
+	if _, err := r.server.run(nil, Run{Command: "true"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(r.timers) > 1 {
