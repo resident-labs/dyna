@@ -750,7 +750,7 @@ func TestABaselineEmitsNoEvents(t *testing.T) {
 func TestASubscriberHearsAnOwnedPREvent(t *testing.T) {
 	r := newPRRig(t)
 	wake := sessionCaller(r.root)
-	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.pr.merged"}, Wake: &wake}); e != nil {
+	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.pr.merged"}, Wake: string(wake.Session)}); e != nil {
 		t.Fatalf("%+v", e)
 	}
 	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})

@@ -173,7 +173,7 @@ func TestAMixedPassGivesOneEventAndOneWake(t *testing.T) {
 func (r *prRig) subscribe(t *testing.T, to contract.SessionID) {
 	t.Helper()
 	wake := sessionCaller(to)
-	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.issue.changed"}, Wake: &wake}); e != nil {
+	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.issue.changed"}, Wake: string(wake.Session)}); e != nil {
 		t.Fatalf("%+v", e)
 	}
 }
@@ -734,7 +734,7 @@ func TestARepositoryWithOnlyIssuesIsReadOnItsOwn(t *testing.T) {
 func TestIssueClosedIsAnOwnedEventOnce(t *testing.T) {
 	r := newPRRig(t)
 	wake := sessionCaller(r.root)
-	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.issue.closed"}, Wake: &wake}); e != nil {
+	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.issue.closed"}, Wake: string(wake.Session)}); e != nil {
 		t.Fatalf("%+v", e)
 	}
 	r.track(t, fakegithub.Issue{Repo: "owner/repo", Number: 1})
