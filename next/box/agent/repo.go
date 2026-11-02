@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,7 @@ type gitRunner func(context.Context, string, string, ...string) (string, error)
 func runGit(ctx context.Context, dir, index string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
+	cmd.WaitDelay = 5 * time.Second // a killed git's helpers can hold the output open
 	if index != "" {
 		cmd.Env = append(os.Environ(), "GIT_INDEX_FILE="+index)
 	}
@@ -138,6 +140,50 @@ func writeSetupState(path, value string) error {
 	return err
 }
 
+const (
+	// archiveFileLimit is the largest untracked file an archive carries. GitHub warns over 50 MiB and refuses over 100 MiB.
+	archiveFileLimit = 50 << 20
+	// archivePathsNamed is how many left-out paths a report names.
+	archivePathsNamed = 5
+	// archiveLimit bounds one report's tries, so a push that hangs comes back as a failure the engine can count.
+	archiveLimit = 15 * time.Minute
+)
+
+// archiveAdd is `git add -A` on the temporary index without the untracked files over archiveFileLimit. It goes by size
+// alone, so those are never hashed. HEAD is in the index, so a file HEAD tracks is never left out.
+func archiveAdd(ctx context.Context, dir, index string, git gitRunner) (*contract.ArchiveLeftOut, error) {
+	untracked, err := git(ctx, dir, index, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return nil, err
+	}
+	var left contract.ArchiveLeftOut
+	pathspecs := ".\x00"
+	for _, path := range strings.Split(untracked, "\x00") {
+		info, err := os.Lstat(filepath.Join(dir, path))
+		if err != nil || info.Size() <= archiveFileLimit {
+			continue
+		}
+		left.Files++
+		left.Bytes += info.Size()
+		if len(left.Paths) < archivePathsNamed {
+			left.Paths = append(left.Paths, path)
+		}
+		pathspecs += ":(exclude,literal)" + path + "\x00"
+	}
+	if left.Files == 0 {
+		_, err = git(ctx, dir, index, "add", "-A")
+		return nil, err
+	}
+	log.Printf("archive %s: left out %d untracked files over %d MiB, %d bytes: %s", dir, left.Files, archiveFileLimit>>20, left.Bytes, strings.Join(left.Paths, ", "))
+	file := index + ".pathspecs"
+	if err := os.WriteFile(file, []byte(pathspecs), 0600); err != nil {
+		return nil, err
+	}
+	defer os.Remove(file)
+	_, err = git(ctx, dir, index, "add", "-A", "--pathspec-file-nul", "--pathspec-from-file="+file)
+	return &left, err
+}
+
 func archiveRepo(ctx context.Context, root string, session contract.SessionID, repo contract.BoxRepo, git gitRunner) (result contract.ArchiveDoneRequest) {
 	result.Repo = repo.Name
 	dir := filepath.Join(root, string(repo.Name))
@@ -168,7 +214,7 @@ func archiveRepo(ctx context.Context, root string, session contract.SessionID, r
 				_, err = git(ctx, dir, index, "read-tree", "HEAD")
 			}
 			if err == nil {
-				_, err = git(ctx, dir, index, "add", "-A")
+				result.LeftOut, err = archiveAdd(ctx, dir, index, git)
 			}
 			var tree string
 			if err == nil {
@@ -189,22 +235,28 @@ func archiveRepo(ctx context.Context, root string, session contract.SessionID, r
 	return
 }
 
-func archiveAndReport(ctx context.Context, root string, session contract.SessionID, repos []contract.BoxRepo, git gitRunner, after func(time.Duration) <-chan time.Time, done func(context.Context, contract.ArchiveDoneRequest) error) error {
+func archiveAndReport(ctx context.Context, root string, session contract.SessionID, repos []contract.BoxRepo, git gitRunner, limit time.Duration, after func(time.Duration) <-chan time.Time, done func(context.Context, contract.ArchiveDoneRequest) error) error {
 	if len(repos) == 0 {
 		return done(ctx, contract.ArchiveDoneRequest{})
 	}
 	for _, repo := range repos {
 		var result contract.ArchiveDoneRequest
 		attempts := 0
-		if err := retryClose(ctx, after, func(ctx context.Context) error {
+		bound, cancel := context.WithTimeout(ctx, limit)
+		err := retryClose(bound, after, func(ctx context.Context) error {
 			result = archiveRepo(ctx, root, session, repo, git)
 			attempts++
 			if result.Error != "" && attempts < 5 {
 				return errors.New(result.Error)
 			}
 			return nil
-		}); err != nil {
-			return err
+		})
+		cancel()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil {
+			result.Error = fmt.Sprintf("archive ran past %s: %s", limit, result.Error)
 		}
 		if err := done(ctx, result); err != nil {
 			return err

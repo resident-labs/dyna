@@ -124,10 +124,10 @@ func (s *Store) SetArchiveRetry(ctx context.Context, id contract.BoxID, want Box
 	})
 }
 
-// SetClosingReason records an archive failure without deleting the box.
+// SetClosingReason records and counts an archive failure without deleting the box. An empty reason clears the last one for a retry.
 func (s *Store) SetClosingReason(ctx context.Context, id contract.BoxID, reason string, event contract.Event) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, "UPDATE boxes SET reason=?,updated_at=? WHERE id=? AND state=?", reason, event.Time.UnixMilli(), id, contract.BoxClosing)
+		result, err := tx.ExecContext(ctx, "UPDATE boxes SET reason=?,updated_at=?,failures=failures+(?!='') WHERE id=? AND state=?", reason, event.Time.UnixMilli(), reason, id, contract.BoxClosing)
 		if err != nil {
 			return err
 		}
