@@ -22,4 +22,5 @@ type AuthStore interface {
 	SaveProxyAuth(context.Context, private.ProxyAuth, bool) error
 	DeleteProxyAuth(context.Context, string) error
 	PruneUnboundProxyAuths(context.Context) error
+	AddLocalUsage(context.Context, contract.ProxyUsage) error
 }
