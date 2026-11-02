@@ -99,7 +99,7 @@ export function subject(event: Event): string | undefined {
 // Events with no row. Goals show in About and the session list; failures show on the box and turn events they report.
 // A pull request's rows come from github.pr.changed. The typed PR events, issue events, feed items and git.main_updated exist for subscribers and sessions.
 // A running job's status is for the session that owns the job.
-const unshown = new Set<Event["type"]>(["shell.job.running", "workflow.step_changed", "session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due", "github.pr.merged", "github.pr.closed", "github.ci.finished", "git.main_updated", "github.issue.opened", "github.comment", "github.label", "github.mention", "github.issue.changed", "github.issue.closed"]);
+const unshown = new Set<Event["type"]>(["shell.job.running", "workflow.step_changed", "workflow.status_changed", "session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due", "github.pr.merged", "github.pr.closed", "github.ci.finished", "git.main_updated", "github.issue.opened", "github.comment", "github.label", "github.mention", "github.issue.changed", "github.issue.closed"]);
 
 // Builds the rows of one conversation. Posts and final answers become post rows, a
 // failed turn and a request are each their own row, and all other events between them fold into one work row.
@@ -308,7 +308,7 @@ export const eventGroups: Record<Event["type"], string> = {
   "github.pr.merged": "pull requests merged", "github.pr.closed": "pull requests closed", "github.ci.finished": "CI results", "git.main_updated": "default branch moves", "github.issue.opened": "issues opened", "github.comment": "GitHub comments", "github.label": "GitHub labels", "github.mention": "GitHub mentions", "github.issue.changed": "issue updates", "github.issue.closed": "issues closed",
   "hook.finished": "subscription runs", "hook.due": "subscription wakes", "notice.posted": "notices", "session.notice": "box notices",
   "shell.job.ended": "jobs finished", "shell.job.running": "job status", "grant.expired": "host grants expired",
-  "host.disk_low": "disk warnings", "conversation.read": "read positions", "workflow.ended": "workflow runs", "workflow.step_changed": "workflow steps",
+  "host.disk_low": "disk warnings", "conversation.read": "read positions", "workflow.ended": "workflow runs", "workflow.step_changed": "workflow steps", "workflow.status_changed": "workflow status lines",
   "session.failed": "failure notices", "goal.set": "goals set", "goal.item_changed": "goal items changed", "goal.ended": "goals ended", "checkin.due": "check-ins",
 };
 
@@ -532,7 +532,7 @@ export function describe(event: Event, name: Name): string {
       return `You set the room limit to ${cpu} and ${mem}`;
     }
     case "workflow.ended": return ""; // feedRows gives it a row of its own.
-    case "workflow.step_changed": case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return ""; // feedRows shows no row for them.
+    case "workflow.step_changed": case "workflow.status_changed": case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return ""; // feedRows shows no row for them.
     case "box.pressure": return event.body.kind === "max" ? "A session reached its memory limit" : "A session is short of memory";
     case "post.created": return event.body.text;
     case "hook.finished": return `A subscription's run ${event.body.result}: ${event.body.cause ? causes[event.body.cause] : `exit code ${event.body.exitCode}`}`;
