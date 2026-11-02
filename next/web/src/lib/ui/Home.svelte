@@ -2,7 +2,7 @@
   import { tick } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { APIError, call } from "../client.ts";
-  import { failedRooms, type RoomLine } from "../active.ts";
+  import { activeRooms, failedRooms } from "../active.ts";
   import type { Attention } from "../attention.svelte.ts";
   import { accountPath, reconnectPath } from "../accounts.ts";
   import type { AccountUsage, AccountsListResponse, Card, HostSummary, Principal, Question, SessionListResponse } from "../contract.gen.ts";
@@ -19,12 +19,12 @@
   import UsageCard from "./UsageCard.svelte";
   type Navigate = (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void;
   // onrequests opens the Requests panel once the link has moved to that room. loaded is false until room.list answers.
-  // initials are the rooms' distinct initials, as the rail shows them. active is the Active now column's rooms; below
-  // its breakpoint they are one row here, which onactive opens as the sheet. covered is true while Settings is open over Home.
-  let { attention, initials, loaded, navigate, onrequests, active, onactive, covered }: {
+  // initials are the rooms' distinct initials, as the rail shows them. covered is true while Settings is open over Home.
+  let { attention, initials, loaded, navigate, onrequests, covered }: {
     attention: Attention; initials: Map<string, string>; loaded: boolean; navigate: Navigate; onrequests: () => void;
-    active: RoomLine[]; onactive: (event: MouseEvent & { currentTarget: HTMLButtonElement }) => void; covered: boolean;
+    covered: boolean;
   } = $props();
+  let active = $derived(activeRooms(attention).active);
   // Each room's sessions load once while Home is open, for its failure and request rows. Requests load per room, and
   // again only when a room gains a request or requester that no answer named yet. A failed load forgets its IDs and
   // offers Try again.
@@ -230,8 +230,6 @@
       {#each [...decided] as [id, line] (id)}<p class="decided">{line}</p>{/each}</div>
     </section></div>{/if}
   <!-- Under Needs you, never above it, so Approve stays high. It stands for the column below the column's breakpoint. -->
-  {#if active.length}<button type="button" class="strip" aria-haspopup="dialog" onclick={onactive}><b>Active now</b><em>{active.length}</em>
-    <span class="stack">{#each active.slice(0, 3) as { room } (room.id)}<Avatar kind="room" name={room.name} label={initials.get(room.name)} size={24} />{/each}</span><Icon name="chevron" /></button>{/if}
   {#if failed && missing}<p class="failed">Some items could not load. <button type="button" class="retry" onclick={() => { failed = false; attempt++; }}>Try again</button></p>{/if}
   {#if hosts?.length || hostsFailed}<h2 id="machines" bind:this={machines}>Machines{#if hosts?.length}<span>{hosts.length}</span>{/if}</h2>{/if}
   {#if !hosts && hostsFailed}<p class="failed">Machines could not load.</p>{/if}
@@ -305,12 +303,6 @@
   /* A folded room's row starts with a chevron, as every fold line does. */
   .fold :global(svg) { flex: none; color: var(--muted); transform: rotate(-90deg); }
   /* The column's one row: no card, so it reads as a link to the sheet and not as more content. */
-  .strip { display: flex; align-items: center; gap: 10px; min-height: 44px; margin: 4px 8px 0; padding: 6px 8px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 14px; font-weight: 500; text-align: left; cursor: pointer; }
-  .strip em { color: var(--muted); font-style: normal; font-variant-numeric: tabular-nums; }
-  .strip :global(svg) { flex: none; color: var(--muted); transform: rotate(-90deg); }
-  @media (hover: hover) { .strip:hover { background: var(--hover); } }
-  @media (min-width: 761px) { .strip { display: none; } }
-  .stack { display: flex; flex: none; align-items: center; gap: 4px; margin-left: auto; }
   .decided { margin: 0; padding: 8px; color: var(--muted); font-size: 13px; }
   @media (max-width: 640px) { .home { padding: 12px 8px 24px; } .hero { margin-bottom: 12px; } }
   /* On a narrow card, Approve and Deny fill the width at 40 px, an easy touch target. */
