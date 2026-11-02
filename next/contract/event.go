@@ -247,7 +247,6 @@ type ShellJobEnded struct {
 	End         ShellJobEnd `json:"end"`
 	Session     SessionID   `json:"session"`
 	Job         ShellJobID  `json:"job"`
-	ExitCode    int         `json:"exitCode"`
 	Tail        string      `json:"tail"`
 }
 

@@ -444,7 +444,7 @@ func TestSteerTakesItsPlaceInTheTurn(t *testing.T) {
 		t.Fatalf("expected steer: %+v", steer)
 	}
 	// A running turn takes a shell job's end as a steer too, and it has no message to show.
-	if _, e = s.ShellJobEnded(ctx, caller, contract.ShellJobEndedRequest{Job: "job_1", Description: "Build", End: &contract.ShellJobEnd{Kind: contract.ShellJobSignaled, Signal: "SIGTERM"}, ExitCode: -1, Tail: "boom"}); e != nil {
+	if _, e = s.ShellJobEnded(ctx, caller, contract.ShellJobEndedRequest{Job: "job_1", Description: "Build", End: &contract.ShellJobEnd{Kind: contract.ShellJobSignaled, Signal: "SIGTERM"}, Tail: "boom"}); e != nil {
 		t.Fatal(e)
 	}
 	wake, ok := (<-channel).Body.(contract.TurnSteer)
