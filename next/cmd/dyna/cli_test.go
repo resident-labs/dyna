@@ -107,6 +107,11 @@ type fakeClient struct {
 
 	roomDelete    contract.RoomDeleteRequest
 	roomDeleteErr error
+
+	hostRemove contract.HostRemoveRequest
+	poolAdd    contract.PoolAddRequest
+	poolRemove contract.PoolRemoveRequest
+	roomHosts  contract.RoomHostsRequest
 }
 
 func (f *fakeClient) DevicePair(_ context.Context, q contract.DevicePairRequest) (contract.DevicePairResponse, error) {
@@ -164,6 +169,25 @@ func (f *fakeClient) File(context.Context, string, io.Writer) error { return nil
 func (f *fakeClient) Upload(_ context.Context, _ contract.RoomID, path string) (contract.Attachment, error) {
 	f.uploads = append(f.uploads, path)
 	return contract.Attachment{Name: path}, nil
+}
+func (f *fakeClient) HostRemove(_ context.Context, q contract.HostRemoveRequest) (contract.HostRemoveResponse, error) {
+	f.hostRemove = q
+	return contract.HostRemoveResponse{}, nil
+}
+func (f *fakeClient) PoolAdd(_ context.Context, q contract.PoolAddRequest) (contract.PoolAddResponse, error) {
+	f.poolAdd = q
+	return contract.PoolAddResponse{}, nil
+}
+func (f *fakeClient) PoolList(context.Context, contract.PoolListRequest) (contract.PoolListResponse, error) {
+	return contract.PoolListResponse{Pools: []contract.Pool{{Name: "boats", Max: 6, PerSession: true, Nodes: 2}}}, nil
+}
+func (f *fakeClient) PoolRemove(_ context.Context, q contract.PoolRemoveRequest) (contract.PoolRemoveResponse, error) {
+	f.poolRemove = q
+	return contract.PoolRemoveResponse{}, nil
+}
+func (f *fakeClient) RoomHosts(_ context.Context, q contract.RoomHostsRequest) (contract.RoomHostsResponse, error) {
+	f.roomHosts = q
+	return contract.RoomHostsResponse{}, nil
 }
 func (f *fakeClient) HostList(context.Context, contract.HostListRequest) (contract.HostListResponse, error) {
 	return contract.HostListResponse{Hosts: f.hosts}, nil
@@ -272,6 +296,45 @@ func TestHostAddMapsFlags(t *testing.T) {
 		t.Fatalf("%+v", f.host)
 	}
 }
+func TestPoolCommandsMapFlags(t *testing.T) {
+	f := &fakeClient{}
+	script := filepath.Join(t.TempDir(), "pool.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runCLI(t, f, "pool", "add", "boats", "--script", script, "--per-session", "--max", "6")
+	if f.poolAdd.Name != "boats" || f.poolAdd.Script != "#!/bin/sh\n" || !f.poolAdd.PerSession || f.poolAdd.Max != 6 || f.poolAdd.Idle != 30*60*1000 {
+		t.Fatalf("%+v", f.poolAdd)
+	}
+	if _, err := execCLI(&fakeClient{}, "pool", "add", "boats", "--script", script); err == nil {
+		t.Fatal("--max is required")
+	}
+	if out := runCLI(t, f, "pool", "list"); !strings.Contains(out, "boats\t2 of 6 nodes\tper session") {
+		t.Fatal(out)
+	}
+	runCLI(t, f, "pool", "remove", "boats")
+	if f.poolRemove.Name != "boats" {
+		t.Fatalf("%+v", f.poolRemove)
+	}
+	runCLI(t, f, "room", "hosts", "horizon", "--only", "boats,hermeslab")
+	if f.roomHosts.Room != "horizon" || !slices.Equal(f.roomHosts.Only, []string{"boats", "hermeslab"}) {
+		t.Fatalf("%+v", f.roomHosts)
+	}
+	runCLI(t, f, "room", "hosts", "horizon", "--clear")
+	if f.roomHosts.Room != "horizon" || len(f.roomHosts.Only) != 0 {
+		t.Fatalf("%+v", f.roomHosts)
+	}
+	for _, args := range [][]string{{"room", "hosts", "horizon"}, {"room", "hosts", "horizon", "--clear", "--only", "boats"}} {
+		if _, err := execCLI(&fakeClient{}, args...); err == nil {
+			t.Fatalf("%v", args)
+		}
+	}
+	runCLI(t, f, "host", "remove", "node")
+	if f.hostRemove.Host != "node" {
+		t.Fatalf("%+v", f.hostRemove)
+	}
+}
+
 func TestHostLimitMapsFlags(t *testing.T) {
 	f := &fakeClient{}
 	runCLI(t, f, "host", "limit", "h", "--room", "room_a", "--room", "room_b")

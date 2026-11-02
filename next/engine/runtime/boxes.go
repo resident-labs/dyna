@@ -80,7 +80,8 @@ type Boxes struct {
 	recovering        sync.WaitGroup
 	retryDelay        time.Duration // retryDelay is the first wait between recovery tries; zero means restoreRetryMin.
 	loads             map[contract.HostName]hostLoad
-	cpuPrev           *cpuTimes // cpuPrev is the last /proc/stat sample of this machine, nil before the first.
+	beats             map[contract.HostName]context.CancelFunc // each host's heartbeat
+	cpuPrev           *cpuTimes                                // cpuPrev is the last /proc/stat sample of this machine, nil before the first.
 	installs          map[*podman.Host]chan struct{}
 	binOnce           sync.Once
 	binSum            string
@@ -178,23 +179,56 @@ func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
 		return
 	}
 	b.hosts[name] = h
+	if b.beats == nil {
+		b.beats = make(map[contract.HostName]context.CancelFunc)
+	}
+	ctx, stop := context.WithCancel(b.Context)
+	b.beats[name] = stop
 	ticker := time.NewTicker(10 * time.Second)
 	go func() {
 		defer ticker.Stop()
-		h.Heartbeat(b.Context, ticker.C, b.Layout, func(ok bool, load podman.Load) {
+		h.Heartbeat(ctx, ticker.C, b.Layout, func(ok bool, load podman.Load) {
 			now := time.Now()
 			if ok {
-				if err := b.syncInstructions(b.Context, h); err != nil {
+				if err := b.syncInstructions(ctx, h); err != nil {
 					log.Printf("host %s: instructions: %v", name, err)
 				}
 			}
 			b.record(name, ok, load, now)
-			b.reportHeartbeat(b.Context, name, ok, load, now)
+			b.reportHeartbeat(ctx, name, ok, load, now)
 			if ok && !load.ShareUp && b.recovered(name) {
-				b.repairShare(b.Context, name)
+				b.repairShare(ctx, name)
 			}
 		}, b.pressure(name))
 	}()
+}
+
+// forgetHost drops the engine's side of a host that is leaving: its heartbeat, its connection, its forwards and what this
+// process knows of it. The name can then come back as a new host.
+func (b *Boxes) forgetHost(ctx context.Context, name contract.HostName) {
+	b.mu.Lock()
+	h := b.hosts[name]
+	if stop := b.beats[name]; stop != nil {
+		stop()
+	}
+	delete(b.beats, name)
+	delete(b.hosts, name)
+	delete(b.restored, name)
+	delete(b.installed, name)
+	delete(b.shareProblems, name)
+	delete(b.recoveries, name)
+	delete(b.loads, name)
+	delete(b.installs, h)
+	b.mu.Unlock()
+	if h == nil {
+		return
+	}
+	b.instructionsMu.Lock()
+	delete(b.instructionSynced, h)
+	b.instructionsMu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	h.Close(ctx)
 }
 
 func (b *Boxes) reportHeartbeat(ctx context.Context, name contract.HostName, ok bool, load podman.Load, now time.Time) {
@@ -351,6 +385,9 @@ func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host,
 			h, err := podman.New(record.SSH, b.Runtime, string(name), nil)
 			if err != nil {
 				return nil, err
+			}
+			if record.Pool != "" {
+				h.TrustNewKey()
 			}
 			b.mu.Lock()
 			if existing := b.hosts[name]; existing != nil {
@@ -543,41 +580,82 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool,
 	if err != nil {
 		return false, err
 	}
-	same, err := b.engineHost(ctx, h)
+	record, noSwap, err := b.setUpHost(ctx, h, req.Name, req.SSH, req.OwnerOnlyAdmin)
 	if err != nil {
 		return false, err
 	}
-	check := h.Check(ctx, podman.CheckOptions{Layout: b.Layout, Runtime: b.Runtime, AdminOnly: req.OwnerOnlyAdmin, EngineHost: same})
+	record.Rooms = req.Rooms
+	if err := b.Store.AddHost(ctx, record); err != nil {
+		return false, err
+	}
+	b.adopt(req.Name, h)
+	return noSwap, nil
+}
+
+// joinHost brings a pool's new machine in the way AddHost brings in the owner's, and leaves recording it to the pool step.
+func (b *Boxes) joinHost(ctx context.Context, name contract.HostName, ssh string) (box.Host, error) {
+	h, err := podman.New(ssh, b.Runtime, string(name), b.hostRunner)
+	if err != nil {
+		return box.Host{}, err
+	}
+	h.TrustNewKey()
+	record, _, err := b.setUpHost(ctx, h, name, ssh, true)
+	if err != nil {
+		return box.Host{}, err
+	}
+	b.adopt(name, h)
+	return record, nil
+}
+
+// setUpHost runs the host check and installs what a host needs, and reports whether it has no swap.
+func (b *Boxes) setUpHost(ctx context.Context, h *podman.Host, name contract.HostName, ssh string, ownerOnly bool) (box.Host, bool, error) {
+	same, err := b.engineHost(ctx, h)
+	if err != nil {
+		return box.Host{}, false, err
+	}
+	check := h.Check(ctx, podman.CheckOptions{Layout: b.Layout, Runtime: b.Runtime, AdminOnly: ownerOnly, EngineHost: same})
 	if !check.Ready() {
 		for _, item := range check.Items {
 			if !item.OK {
 				if item.Name == podman.CheckPodman {
-					return false, podman.RequiredError{}
+					return box.Host{}, false, podman.RequiredError{}
 				}
-				return false, fmt.Errorf("host check %s: %s", item.Name, item.Reason)
+				return box.Host{}, false, fmt.Errorf("host check %s: %s", item.Name, item.Reason)
 			}
 		}
-		return false, fmt.Errorf("host check failed")
+		return box.Host{}, false, fmt.Errorf("host check failed")
 	}
 	if err := b.installBinary(ctx, h); err != nil {
-		return false, err
+		return box.Host{}, false, err
 	}
 	if err := b.syncInstructions(ctx, h); err != nil {
-		return false, err
+		return box.Host{}, false, err
 	}
-	record := box.Host{Rooms: req.Rooms, EngineHost: &same, Name: req.Name, SSH: req.SSH, State: box.HostReady, CPUs: check.CPUs, MemBytes: check.MemBytes, DiskBytes: check.DiskBytes, CheckedAt: time.Now()}
-	if err := b.Store.AddHost(ctx, record); err != nil {
-		return false, err
-	}
+	return box.Host{EngineHost: &same, Name: name, SSH: ssh, State: box.HostReady, CPUs: check.CPUs, MemBytes: check.MemBytes, DiskBytes: check.DiskBytes, CheckedAt: time.Now()}, check.NoSwap, nil
+}
+
+// adopt starts a recorded host's heartbeat.
+func (b *Boxes) adopt(name contract.HostName, h *podman.Host) {
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	if b.loads == nil {
 		b.loads = make(map[contract.HostName]hostLoad)
 	}
-	b.loads[req.Name] = hostLoad{summary: contract.HostSummary{Reachable: true}}
-	b.cache(req.Name, h)
-	b.mu.Unlock()
-	return check.NoSwap, nil
+	b.loads[name] = hostLoad{summary: contract.HostSummary{Reachable: true}}
+	b.cache(name, h)
 }
+
+// poolHosts is what the pool step needs: the pool's script, and this engine's side of a machine.
+type poolHosts struct {
+	lifecycle.Script
+	boxes *Boxes
+}
+
+func (p poolHosts) Join(ctx context.Context, name contract.HostName, ssh string) (box.Host, error) {
+	return p.boxes.joinHost(ctx, name, ssh)
+}
+
+func (p poolHosts) Leave(ctx context.Context, name contract.HostName) { p.boxes.forgetHost(ctx, name) }
 
 func (b *Boxes) forward(id contract.BoxID) box.Forward {
 	return box.Forward{Box: id, HostPath: b.Layout.HostSocket(id), EnginePath: filepath.Join(b.Runtime, "boxes", string(id)+".sock")}
@@ -787,7 +865,7 @@ func (b *Boxes) keepTrying(ctx context.Context, name contract.HostName, what str
 		if err == nil {
 			return true
 		}
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || errors.Is(err, store.ErrNotFound) { // A host removed meanwhile has nothing left to try.
 			return false
 		}
 		if err.Error() != last {

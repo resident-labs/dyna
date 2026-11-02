@@ -13,6 +13,7 @@
   // The workspace count opens the machine's sessions by room, as Jobs does: a popover, a sheet on a phone. Workspaces
   // count running boxes and the list also holds asleep ones, so its rows can outnumber the count, and "0 workspaces" can
   // open a list of asleep sessions. A machine with no sessions keeps the count as plain text.
+  // A pool's node names its pool under the tiles.
   // The list sits in the top layer: a card is a size container, and Home's scroll area would clip a popover in its first column.
   // That layer gives Escape, the click away and focus's return. Its backdrop lets taps through, so a phone's scrim is the popover itself.
   let { host, now, roomName, navigate }: { host: HostSummary; now: number; roomName: (room: string) => string; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void } = $props();
@@ -40,6 +41,7 @@
       {:else if host.name !== "control-plane"}{count(host.boxes, "workspace")}{/if}</span></h3>
   {#if host.reachable || seen}<div class="tiles" class:dimmed={!host.reachable}>{#each hostMeters(host) as meter (meter.label)}<MeterTile {meter} />{/each}</div>{/if}
   {#if seen}<p class="aside seen">{seen}</p>{/if}
+  {#if host.pool}<p class="aside seen">Pool {host.pool}</p>{/if}
   {#each largeShared(host) as folder (folder.room)}<p class="aside shared">Shared folder of {roomName(folder.room)}: {sharedSize(folder.bytes)}</p>{/each}
   {#if listed}
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions (Escape closes it; a tap on the scrim has no key) -->

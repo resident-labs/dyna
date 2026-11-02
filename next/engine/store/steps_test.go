@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,12 +18,12 @@ func beforeSeenColumns(text string) string {
 
 // beforeFeeds is the schema as step 70 finds it.
 func beforeFeeds(text string) string {
-	text = beforeSeenColumns(text[:strings.Index(text, "CREATE TABLE github_feeds")])
+	text = withoutPools(beforeSeenColumns(text[:strings.Index(text, "CREATE TABLE github_feeds")]))
 	return strings.Replace(text, "state TEXT NOT NULL, own_wake_at", "state TEXT NOT NULL, seen_comments INTEGER NOT NULL DEFAULT 0, own_wake_at", 1)
 }
 
 // beforeWorkflows is the schema without the tables of steps 66 and 67, which come last in the file, and with the pr_owners columns of the steps that followed undone.
-var beforeWorkflows = beforeSeenColumns(strings.Replace(schema[:strings.Index(schema, "CREATE TABLE workflow_runs")], ", meta TEXT NOT NULL DEFAULT '', meta_wake_at INTEGER NOT NULL DEFAULT 0", "", 1))
+var beforeWorkflows = withoutPools(beforeSeenColumns(strings.Replace(schema[:strings.Index(schema, "CREATE TABLE workflow_runs")], ", meta TEXT NOT NULL DEFAULT '', meta_wake_at INTEGER NOT NULL DEFAULT 0", "", 1)))
 
 func TestUpgradeRenamesGitHubEventsAndKeepsDefaultsQuiet(t *testing.T) {
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
@@ -30,7 +31,7 @@ func TestUpgradeRenamesGitHubEventsAndKeepsDefaultsQuiet(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	before := schema[:strings.Index(schema, "CREATE TABLE subscription_where")]
+	before := withoutPools(schema[:strings.Index(schema, "CREATE TABLE subscription_where")])
 	if _, err = db.Exec(before); err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +299,7 @@ func TestOpenRootsGetTheAskGrant(t *testing.T) {
 	defer db.Close()
 	_, err = db.Exec(`CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO meta VALUES('schema_version','61');
  CREATE TABLE pr_owners (repo TEXT, number INTEGER, session TEXT, goal TEXT, approved_head TEXT, branch TEXT); CREATE TABLE repos (repo TEXT PRIMARY KEY);
- CREATE TABLE events (seq INTEGER PRIMARY KEY, type TEXT); CREATE TABLE rooms (id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT 'open');
+ CREATE TABLE events (seq INTEGER PRIMARY KEY, type TEXT); CREATE TABLE rooms (id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT 'open'); CREATE TABLE hosts (name TEXT PRIMARY KEY);
  CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT, parent TEXT, created_at INTEGER, closed_at INTEGER, goal TEXT);
  CREATE TABLE grants (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT NOT NULL, to_kind TEXT NOT NULL, to_id TEXT NOT NULL, hosts BLOB NOT NULL, expires_at INTEGER, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at INTEGER NOT NULL, revoked_at INTEGER, expired_at INTEGER, reason TEXT NOT NULL DEFAULT '');
  INSERT INTO rooms(id) VALUES('room');
@@ -329,9 +330,44 @@ func TestMoveScriptUndoesTheRightStep(t *testing.T) {
 	}
 }
 
-// withLastHost puts back the column that step 69 renames.
+// withLastHost gives the schema before the shared folder step: it puts back the column that step renames and takes out the pools step.
 func withLastHost(schema string) string {
-	return strings.Replace(schema, "run_host TEXT", "last_host TEXT", 1)
+	return withoutPools(strings.Replace(schema, "run_host TEXT", "last_host TEXT", 1))
+}
+
+// withoutPools gives the schema before step 72.
+func withoutPools(schema string) string {
+	for _, added := range []string{", only_hosts TEXT NOT NULL DEFAULT '[]'", ", pool TEXT NOT NULL DEFAULT '', box TEXT NOT NULL DEFAULT ''"} {
+		schema = strings.Replace(schema, added, "", 1)
+	}
+	lines := strings.Split(schema, "\n")
+	return strings.Join(slices.DeleteFunc(lines, func(line string) bool { return strings.HasPrefix(line, "CREATE TABLE pools ") }), "\n")
+}
+
+func TestUpgradeAddsPoolsAndLeavesHostsAlone(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err = db.Exec(withoutPools(schema)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`INSERT INTO meta(key,value) VALUES ('schema_version','72');
+		INSERT INTO hosts(name,ssh,state,cpus,mem_bytes,disk_bytes,checked_at) VALUES('h','h','ready',1,1,1,0);
+		INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0)`); err != nil {
+		t.Fatal(err)
+	}
+	if err = upgrade(db, floorVersion, floorCommit, steps, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = compareSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	var pool, only string
+	if err = db.QueryRow("SELECT h.pool,r.only_hosts FROM hosts h,rooms r").Scan(&pool, &only); err != nil || pool != "" || only != "[]" {
+		t.Fatalf("pool %q, rule %q, err %v", pool, only, err)
+	}
 }
 
 // The sizes of the old per-host folders say nothing about the central one, so the next measure starts the table again.
