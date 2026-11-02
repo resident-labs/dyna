@@ -3,6 +3,7 @@
   import BoxFacts from "./BoxFacts.svelte";
   import FoldRow from "./FoldRow.svelte";
   import HooksRow from "./HooksRow.svelte";
+  import Icon from "./Icon.svelte";
   import ProfileMenu from "./ProfileMenu.svelte";
   import StatusPill from "./StatusPill.svelte";
   import WrapText from "./WrapText.svelte";
@@ -97,10 +98,17 @@
     <section>
       <h3>Holds</h3>
       {#each held as row (row.kind)}
-        <FoldRow>
-          {#snippet head()}<WrapText text={row.text} />{/snippet}
-          {#snippet aside()}{#if row.blocked}<StatusPill tone="blocked" word label="Blocked" />{/if}{/snippet}
-        </FoldRow>
+        {#if row.links}
+          <div class="tracked">
+            <p class="tracked-head"><Icon name={row.kind === "pr" ? "pr" : "issue"} size={14} />{row.text}{#if row.repo}<span class="muted">{row.repo}</span>{/if}</p>
+            <div class="tracked-links">{#each row.links as link (link.href)}<a href={link.href} title={link.title} target="_blank" rel="noreferrer">{link.label}</a>{/each}</div>
+          </div>
+        {:else}
+          <FoldRow>
+            {#snippet head()}<WrapText text={row.text} />{/snippet}
+            {#snippet aside()}{#if row.blocked}<StatusPill tone="blocked" word label="Blocked" />{/if}{/snippet}
+          </FoldRow>
+        {/if}
       {/each}
     </section>
   {/if}
@@ -137,6 +145,11 @@
   .when { overflow-wrap: break-word; }
   /* Each time stays whole, so a narrow panel stacks them instead of leaving "ago" alone on a line. */
   .times { display: flex; flex-wrap: wrap; gap: 0 12px; }
+  .tracked { display: grid; gap: 4px; min-width: 0; }
+  .tracked-head { display: flex; align-items: center; gap: 6px; margin: 0; }
+  .tracked-head span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tracked-links { display: flex; flex-wrap: wrap; gap: 2px 10px; padding-left: 20px; font-variant-numeric: tabular-nums; }
+  @media (pointer: coarse) { .tracked-links { gap: 8px 14px; } }
   ul { display: grid; gap: 4px; margin: 0; padding: 0 0 0 16px; line-height: 1.45; overflow-wrap: break-word; }
   .quiet { color: var(--muted); }
   .dropped { text-decoration: line-through; }
