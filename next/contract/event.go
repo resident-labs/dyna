@@ -243,12 +243,12 @@ type Usage struct {
 
 // ShellJobEnded reports a background shell job that ended. It wakes the session once.
 type ShellJobEnded struct {
-	Description string       `json:"description,omitempty"`
-	End         *ShellJobEnd `json:"end,omitempty"`
-	Session     SessionID    `json:"session"`
-	Job         ShellJobID   `json:"job"`
-	ExitCode    int          `json:"exitCode"`
-	Tail        string       `json:"tail"`
+	Description string      `json:"description,omitempty"`
+	End         ShellJobEnd `json:"end"`
+	Session     SessionID   `json:"session"`
+	Job         ShellJobID  `json:"job"`
+	ExitCode    int         `json:"exitCode"`
+	Tail        string      `json:"tail"`
 }
 
 // ShellJobRunning reports a background shell job still running. It wakes a session with no open turn. One with an open turn

@@ -16,14 +16,6 @@ type TranscriptTurnRange struct {
 	End   *int64
 }
 
-// LEGACY(v1-transfer): TranscriptPathIndexed, for transcript files from before the turn index. Remove after the transfer.
-// TranscriptPathIndexed reports whether a path has any indexed turn starts.
-func (s *Store) TranscriptPathIndexed(ctx context.Context, session contract.SessionID, path string) (bool, error) {
-	var indexed bool
-	err := s.Read().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM transcript_turns WHERE session=? AND path=?)`, session, path).Scan(&indexed)
-	return indexed, err
-}
-
 // TranscriptTurnRanges returns each file range for a turn, with the next start as its exclusive end.
 func (s *Store) TranscriptTurnRanges(ctx context.Context, session contract.SessionID, turn contract.TurnID) ([]TranscriptTurnRange, error) {
 	rows, err := s.Read().QueryContext(ctx, `SELECT t.turn,t.path,t.start,(SELECT min(n.start) FROM transcript_turns n WHERE n.session=t.session AND n.path=t.path AND n.start>t.start) FROM transcript_turns t WHERE t.session=? AND t.turn=? ORDER BY t.path,t.start`, session, turn)
@@ -218,15 +210,13 @@ func (s *Store) TranscriptSentPostsNewest(ctx context.Context, session contract.
 	return posts, rows.Err()
 }
 
-// LEGACY(v1-transfer): the Indexed field, read only by the transcript backfill. Remove after the transfer.
 type TranscriptFile struct {
-	Path    string
-	Acked   int64
-	Indexed bool
+	Path  string
+	Acked int64
 }
 
 func (s *Store) TranscriptFiles(ctx context.Context, session contract.SessionID) ([]TranscriptFile, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT o.path,o.acked,EXISTS(SELECT 1 FROM transcript_turns t WHERE t.session=o.session AND t.path=o.path) FROM transcript_offsets o WHERE o.session=? ORDER BY o.path`, session)
+	rows, err := s.Read().QueryContext(ctx, `SELECT path,acked FROM transcript_offsets WHERE session=? ORDER BY path`, session)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +224,7 @@ func (s *Store) TranscriptFiles(ctx context.Context, session contract.SessionID)
 	var files []TranscriptFile
 	for rows.Next() {
 		var f TranscriptFile
-		if err := rows.Scan(&f.Path, &f.Acked, &f.Indexed); err != nil {
+		if err := rows.Scan(&f.Path, &f.Acked); err != nil {
 			return nil, err
 		}
 		files = append(files, f)

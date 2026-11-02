@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -86,7 +87,7 @@ func TestStoreBelowFloorIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err := db.Exec("UPDATE meta SET value='41' WHERE key='schema_version'"); err != nil {
+	if _, err := db.Exec("UPDATE meta SET value=? WHERE key='schema_version'", strconv.Itoa(floorVersion-1)); err != nil {
 		t.Fatal(err)
 	}
 	_, err = Open(dir)

@@ -28,7 +28,7 @@ type BoxAdapter interface {
 	Remove(context.Context, contract.BoxID) error
 	Start(context.Context, contract.BoxID) error
 	Stop(context.Context, contract.BoxID) error
-	Recreate(context.Context, BoxSpec, string, string) error
+	Recreate(context.Context, BoxSpec, string) error
 }
 
 // RoomHosts removes what a deleted room left on hosts. Each removal is idempotent.

@@ -27,8 +27,8 @@ const card = object({
 });
 const state = oneOf("pending", "approved", "denied", "expired", "withdrawn", "done", "failed");
 const cause = optional(oneOf("run_timeout", "create_failed", "start_failed", "no_hello", "engine_restarted", "remove_failed", "archive_failed", "grant_inactive", "host_lost", "host_busy", "github_failed", "stale", "interrupted", "internal", "setup_failed", "model_failed", "output_limit", "harness_failed", "set_model_failed", "not_started", "workflow_failed", "nested_device_missing", "kvm_device_missing"));
-// How a shell job ended (the end field is new, so it may be missing).
-const jobEnd = optional(nullable(object({ kind: oneOf("exit", "signal", "stopped"), code: optional(number), signal: optional(string) })));
+// How a shell job ended.
+const jobEnd = object({ kind: oneOf("exit", "signal", "stopped"), code: optional(number), signal: optional(string) });
 const boxState = oneOf("pending", "creating", "starting", "ready", "stopped", "closing", "deleted", "failed", "lost");
 const visual = object({ id: string, version: number, title: string, height: number, allowNet: boolean, banner: string, thumbnail: string,
   shots: nullable(array(object({ width: number, file: string }))), checks: nullable(array(object({
@@ -128,7 +128,7 @@ export function decodeEvent(value: unknown): Event | undefined {
 }
 
 const shellOutput = object({ job: string, command: string, running: boolean, exitCode: number, text: string, reset: optional(boolean),
-  started: string, ended: optional(string), description: optional(string), end: jobEnd });
+  started: string, ended: optional(string), description: optional(string), end: optional(nullable(jobEnd)) });
 // Each message of /v1/shell/watch passes here once; one that does not match is skipped like an event.
 export function decodeShellOutput(value: unknown): ShellJobOutput | undefined {
   // The check covers every field of the generated type.

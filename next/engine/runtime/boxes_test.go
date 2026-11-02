@@ -12,7 +12,6 @@ import (
 	"github.com/resident-labs/dyna/box/fakehost"
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
-	"github.com/resident-labs/dyna/engine/lifecycle"
 )
 
 type pendingStore struct{ boxStore }
@@ -127,33 +126,6 @@ func TestRecordHostLoad(t *testing.T) {
 	b.record("host", true, podman.Load{}, start.Add(61*time.Minute))
 	if got := b.loads["host"].summary.History; len(got) != 1 {
 		t.Fatalf("old points retained: %+v", got)
-	}
-}
-
-type childSliceRunner struct{ childRunning bool }
-
-func (r *childSliceRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte, error) {
-	command := args[len(args)-1]
-	if strings.Contains(command, "'systemctl' '--user' 'stop'") && strings.Contains(command, "dyna-parent.slice") {
-		r.childRunning = false
-	}
-	return []byte("DYNA-END 00000000000000000000 000\n"), nil
-}
-
-// LEGACY(v1-transfer): this test and childSliceRunner, a box on an old nested parent slice. Remove after the transfer.
-func TestLegacyParentWakeKeepsRunningChild(t *testing.T) {
-	runner := &childSliceRunner{childRunning: true}
-	host, err := podman.New("user@host", t.TempDir(), "host", runner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b := &Boxes{Store: restoreStore{hosts: engineHosts("host")}, hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}}
-	spec := lifecycle.BoxSpec{Box: "parent", Host: "host", Slice: "dyna-box_parent.slice"}
-	if err := b.Recreate(context.Background(), spec, "new-image", "dyna-parent.slice"); err != nil {
-		t.Fatal(err)
-	}
-	if !runner.childRunning {
-		t.Fatal("image refresh stopped the running child slice")
 	}
 }
 
