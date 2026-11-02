@@ -308,12 +308,12 @@ test("a PR update with news is a work row that links its PR, and one without sta
 
 test("issue updates decode, carry metadata, and stay out of the feed", () => {
   const issue = { repo: "o/r", number: 9, url: "u", title: "t", author: "a", session: "builder", state: "open" as const, labels: ["bug"] };
-  const meta = { labelsAdded: ["bug"], assigned: ["x"], bodyEdited: true };
-  const changed = decodeEvent(event(1, { type: "issue.changed", body: { session: "builder", changes: [{ issue, kinds: ["metadata"], outside: false, meta }] } }));
+  const actions = [{ repo: "o/r", number: 2, kind: "issue" as const, action: "labeled" as const, actor: "someone", url: "u", detail: "bug", outside: true }];
+  const changed = decodeEvent(event(1, { type: "issue.changed", body: { session: "builder", changes: [{ issue, kinds: ["metadata"], outside: false, actions }] } }));
   const closed = decodeEvent(event(2, { type: "issue.closed", body: { repo: "o/r", number: 9, session: "builder", url: "u" } }));
   const quiet = decodeEvent(event(3, { type: "issue.changed", body: { session: "builder", changes: [{ issue, outside: false }] } }));
   // One pass gives one event, so a pass that moved a PR and an issue is a pr.changed that holds both.
-  const mixed = decodeEvent(event(4, { type: "pr.changed", body: { session: "builder", changes: [{ pr: summary, kinds: ["metadata"], outside: false, meta }], issues: [{ issue, kinds: ["closed"], outside: false }] } }));
+  const mixed = decodeEvent(event(4, { type: "pr.changed", body: { session: "builder", changes: [{ pr: summary, kinds: ["metadata"], outside: false, actions }], issues: [{ issue, kinds: ["closed"], outside: false }] } }));
   assert.ok(changed && closed && quiet && mixed);
   assert.equal(feedRows([changed, closed, quiet], { kind: "feed" }).filter(row => row.kind === "work").length, 0);
   assert.equal(describe(mixed, id => id), "o/r#7 details changed");

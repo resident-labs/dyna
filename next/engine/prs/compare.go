@@ -25,136 +25,165 @@ func agentWrote(body string) bool {
 	return strings.HasPrefix(strings.TrimLeft(body, "> \t\r\n"), agentMarker)
 }
 
-// reading is what PRs and issues compare alike in one poll of one item. open means the item stays in the poll, so what is
-// held back has a later pass to arrive on.
-type reading struct {
-	viewer  string
-	now     time.Time
-	open    bool
-	waiting bool // the token's own account woke a session inside ownWakeGap
-	fresh   []Comment
-	ownNews bool
-}
-
 func withinGap(at int64, now time.Time) bool { return now.Before(time.UnixMilli(at).Add(ownWakeGap)) }
 
-func newReading(viewer string, now time.Time, open bool, ownWakeAt int64) *reading {
-	return &reading{viewer: viewer, now: now, open: open, waiting: open && withinGap(ownWakeAt, now)}
+// reading sorts what a pass brought for one item, and what earlier passes held back, into what to tell now and what waits.
+type reading struct {
+	comments []contract.GitHubItem
+	actions  []contract.GitHubItem
+	held     []contract.GitHubItem
+	ownNews  bool
 }
 
-// take moves a cursor past new comments, and stops at a comment that must wait.
-func (r *reading) take(all []Comment, cursor *int64) {
-	for _, item := range all {
-		if item.ID <= *cursor {
-			continue
-		}
-		own := item.Author == r.viewer
-		switch {
-		case item.Body == "" || own && agentWrote(item.Body):
-		case own && r.waiting:
-			return
+// A comment by the token's own account may be a session's, so answering one must not start a loop. That account also speaks
+// for the owner, so it is not ignored: only text with the agent marker is, and the rest wakes at most once per item in
+// ownWakeGap. A comment inside the gap waits, so the owner's words arrive late rather than never. open means the item stays
+// watched, so what is held back has a later pass to arrive on.
+func sift(items []contract.GitHubItem, now time.Time, open bool, ownWakeAt int64) *reading {
+	r := &reading{}
+	waiting := open && withinGap(ownWakeAt, now)
+	for _, item := range items {
+		switch item.Action {
+		case contract.GitHubOpened, contract.GitHubForcePushed, contract.GitHubMentioned: // for subscribers
+		case contract.GitHubCommented, contract.GitHubReviewCommented, contract.GitHubReviewed:
+			own := !item.Outside
+			switch {
+			case item.Text == "" || own && agentWrote(item.Text):
+			case own && waiting:
+				r.held = append(r.held, item)
+			default:
+				r.comments = append(r.comments, item)
+				r.ownNews = r.ownNews || own
+			}
 		default:
-			r.fresh = append(r.fresh, item)
-			r.ownNews = r.ownNews || own
-		}
-		*cursor = item.ID
-	}
-}
-
-// comments returns what take found, capped, and how many more there were.
-func (r *reading) comments() ([]contract.PrComment, int) {
-	var out []contract.PrComment
-	for _, item := range r.fresh[:min(len(r.fresh), maxComments)] {
-		out = append(out, contract.PrComment{Author: item.Author, Body: shorten(item.Body), URL: item.URL, Outside: item.Author != r.viewer})
-	}
-	return out, max(len(r.fresh)-maxComments, 0)
-}
-
-// meta compares metadata with what the session was last told. The first read has nothing to compare with, so it records
-// what the item shows. Labels churn, so a change with nothing else to tell wakes at most once per item in ownWakeGap: inside it
-// the told metadata stays, so the change waits and arrives on the first poll after, or when the item leaves the poll. Other
-// news on the item carries it at once, without spending the window. It returns the metadata to store, what to tell, and the
-// wake time to store.
-func (r *reading) meta(told *store.ItemMeta, seen store.ItemMeta, wokeAt int64, news bool) (*store.ItemMeta, *contract.MetaChange, int64) {
-	if told == nil {
-		return &seen, nil, wokeAt
-	}
-	change := diffMeta(*told, seen)
-	if change == nil || !news && r.open && withinGap(wokeAt, r.now) {
-		return told, nil, wokeAt
-	}
-	if !news {
-		wokeAt = r.now.UnixMilli()
-	}
-	return &seen, change, wokeAt
-}
-
-// diffMeta says what moved, or nil if nothing did.
-func diffMeta(told, seen store.ItemMeta) *contract.MetaChange {
-	change := contract.MetaChange{
-		BodyEdited: seen.EditedAt != told.EditedAt,
-		Reopened:   seen.Reopened > told.Reopened,
-		Draft:      seen.Draft && !told.Draft,
-		Ready:      told.Draft && !seen.Draft,
-	}
-	if seen.Title != told.Title {
-		change.Title = seen.Title
-	}
-	if seen.Milestone != told.Milestone {
-		change.Milestone = seen.Milestone
-		change.MilestoneRemoved = seen.Milestone == ""
-	}
-	change.LabelsAdded, change.LabelsRemoved = diffNames(told.Labels, seen.Labels)
-	change.Assigned, change.Unassigned = diffNames(told.Assignees, seen.Assignees)
-	change.ReviewersAdded, change.ReviewersRemoved = diffNames(told.Reviewers, seen.Reviewers)
-	if reflect.DeepEqual(change, contract.MetaChange{}) {
-		return nil
-	}
-	return &change
-}
-
-func diffNames(told, seen []string) (added, removed []string) {
-	for _, name := range seen {
-		if !slices.Contains(told, name) {
-			added = append(added, name)
+			r.actions = append(r.actions, item)
 		}
 	}
-	for _, name := range told {
-		if !slices.Contains(seen, name) {
-			removed = append(removed, name)
-		}
-	}
-	return added, removed
+	return r
 }
 
-// Compare turns one poll of one PR into what to store and who to tell. It reports whether anything moved, and with it
-// whether the poll backs off. The stored row is what makes a change news once, across restarts too.
-//
-// A comment by the token's own account may be a session's, so answering one must not start a loop. That account also
-// speaks for the owner, so it is not ignored: only text with the agent marker is, and the rest wakes at most once per PR in
-// ownWakeGap. A comment inside the gap waits, with its cursor unmoved, so the owner's words arrive late rather than never.
-func Compare(row store.TrackedPR, seen Observed, viewer string, now time.Time) (store.PRUpdate, bool) {
-	next := row.PrSummary
-	next.URL, next.Title, next.Author, next.Draft, next.State, next.Head, next.Review, next.CI = seen.URL, seen.Title, seen.Author, seen.Draft, seen.State, seen.Head, seen.Review, seen.CI
-	// GitHub works mergeability out on demand, and until then the last answer stands.
-	if seen.Merge != "" {
-		next.Merge = seen.Merge
-	}
-	update := store.PRUpdate{PR: next, HeadRepo: seen.HeadRepo, CITold: row.CITold, Seen: row.Seen, OwnWakeAt: row.OwnWakeAt}
-
-	var kinds []contract.PrChangeKind
+// limit applies the metadata window. Labels churn, so actions with nothing else to tell wake at most once per item in
+// ownWakeGap: inside it they wait, and arrive on the first pass after, or when the item leaves the watch. Other news on the
+// item carries them at once, without spending the window. It returns the wake time to store.
+func (r *reading) limit(news bool, open bool, wokeAt int64, now time.Time) int64 {
 	switch {
-	case seen.State == contract.PrMerged:
+	case len(r.actions) == 0 || news:
+		return wokeAt
+	case open && withinGap(wokeAt, now):
+		r.held, r.actions = append(r.held, r.actions...), nil
+		return wokeAt
+	}
+	return now.UnixMilli()
+}
+
+// shown returns the comments to show, capped, and how many more there were.
+func (r *reading) shown() ([]contract.PrComment, int) {
+	var out []contract.PrComment
+	for _, item := range r.comments[:min(len(r.comments), maxComments)] {
+		out = append(out, contract.PrComment{Author: item.Actor, Body: item.Text, URL: item.URL, Outside: item.Outside})
+	}
+	return out, max(len(r.comments)-maxComments, 0)
+}
+
+// kinds adds what the comments and actions make news to what a read found. An action that is a kind already, as a merge is, adds nothing.
+func (r *reading) kinds(read []contract.PrChangeKind) []contract.PrChangeKind {
+	if len(r.comments) > 0 {
+		read = append(read, contract.PrChangeComment)
+	}
+	if slices.ContainsFunc(r.actions, func(item contract.GitHubItem) bool { return !slices.Contains(read, contract.PrChangeKind(item.Action)) }) {
+		read = append(read, contract.PrChangeMetadata)
+	}
+	return read
+}
+
+// refresh takes a feed's view of an item, and tells an edit by a body hash that differs from one already held.
+func refresh(meta *store.ItemMeta, listed *FeedItem, item contract.GitHubItem) []contract.GitHubItem {
+	var edits []contract.GitHubItem
+	if meta.Body != "" && meta.Body != listed.Meta.Body {
+		item.Number, item.Kind, item.Action, item.URL = listed.Number, listed.Kind, contract.GitHubEdited, listed.URL
+		edits = append(edits, item)
+	}
+	meta.Labels, meta.Assignees, meta.Milestone, meta.Body = listed.Meta.Labels, listed.Meta.Assignees, listed.Meta.Milestone, listed.Meta.Body
+	return edits
+}
+
+// noteWriter remembers an outside login that set free text, so the item's text reads as theirs however it is reached.
+func noteWriter(meta *store.ItemMeta, items []contract.GitHubItem) {
+	for _, item := range items {
+		switch item.Action {
+		case contract.GitHubRenamed, contract.GitHubLabeled, contract.GitHubMilestoned:
+			if item.Outside {
+				meta.EditedBy = item.Actor
+			}
+		}
+	}
+}
+
+// settle sorts an item's items under the wake limits and puts what waits in meta. tell says there is something to tell.
+func settle(items []contract.GitHubItem, meta *store.ItemMeta, kinds int, open bool, ownWakeAt int64, wokeAt *int64, now time.Time) (*reading, bool) {
+	found := sift(append(slices.Clone(meta.Waiting), items...), now, open, ownWakeAt)
+	*wokeAt = found.limit(kinds+len(found.comments) > 0, open, *wokeAt, now)
+	meta.Waiting = found.held
+	return found, len(found.comments)+len(found.actions) > 0
+}
+
+// ComparePR turns what one pass found on one PR into what to store and who to tell, and reports whether there is anything to
+// write. listed is the PR as a feed showed it this pass, and seen as a query read it, each nil if there was neither. items are
+// the feeds' records of it, oldest first. The stored row is what makes a read's change news once, across restarts too.
+func ComparePR(row store.TrackedPR, items []contract.GitHubItem, listed *FeedItem, seen *Observed, viewer string, now time.Time) (store.PRUpdate, bool) {
+	next, meta := row.PrSummary, row.Meta
+	update := store.PRUpdate{Was: row.State, HeadRepo: row.HeadRepo, CITold: row.CITold, SeenReviews: row.SeenReviews, OwnWakeAt: row.OwnWakeAt, MetaWakeAt: row.MetaWakeAt}
+	if listed != nil {
+		next.URL, next.Title, next.Author, next.Draft = listed.URL, listed.Title, listed.Author, listed.Draft
+		items = append(slices.Clone(items), refresh(&meta, listed, contract.GitHubItem{Repo: row.Repo, Author: listed.Author})...)
+	}
+	var kinds []contract.PrChangeKind
+	var failed []string
+	if seen != nil {
+		next.State, next.Head, next.Review, next.CI = seen.State, seen.Head, seen.Review, seen.CI
+		update.HeadRepo = seen.HeadRepo
+		// GitHub works mergeability out on demand, and until then the last answer stands.
+		if seen.Merge != "" {
+			next.Merge = seen.Merge
+		}
+		meta.Recheck = seen.Merge == ""
+		if seen.Head != row.Head {
+			meta.HeadAt = now.UnixMilli()
+		}
+		for _, review := range seen.Reviews {
+			if review.ID > update.SeenReviews {
+				update.SeenReviews = review.ID
+				items = append(items, contract.GitHubItem{Repo: row.Repo, Number: row.Number, Kind: contract.GitHubPR, Action: contract.GitHubReviewed, Actor: review.Author, URL: review.URL, Text: shorten(review.Body), Outside: review.Author != viewer})
+			}
+		}
+	}
+	// An event is at least as new as the read beside it, which can lag it, and nothing would read this PR again to catch up.
+	for _, item := range items {
+		switch item.Action {
+		case contract.GitHubMerged:
+			next.State = contract.PrMerged
+		case contract.GitHubClosed:
+			next.State = contract.PrClosed
+		case contract.GitHubReopened:
+			next.State = contract.PrOpen
+		}
+	}
+	if seen != nil && seen.State == contract.PrMerged {
+		next.State = contract.PrMerged
+	}
+	switch {
+	case next.State == contract.PrMerged && row.State != contract.PrMerged:
 		kinds = append(kinds, contract.PrChangeMerged)
-	case seen.State == contract.PrClosed:
+	case next.State == contract.PrClosed && row.State != contract.PrClosed:
 		kinds = append(kinds, contract.PrChangeClosed)
-	default:
+	case next.State == contract.PrOpen && seen != nil:
 		// A result is news once per head, so a rerun that ends the same way stays quiet.
 		told := seen.Head + ":" + string(seen.CI)
 		if (seen.CI == contract.PrCISuccess || seen.CI == contract.PrCIFailure) && told != row.CITold {
 			update.CITold = told
 			if seen.CI == contract.PrCIFailure {
 				kinds = append(kinds, contract.PrChangeCIFailed)
+				failed = seen.FailedChecks[:min(len(seen.FailedChecks), maxChecks)]
 			} else {
 				kinds = append(kinds, contract.PrChangeCIPassed)
 			}
@@ -169,75 +198,65 @@ func Compare(row store.TrackedPR, seen Observed, viewer string, now time.Time) (
 			kinds = append(kinds, contract.PrChangeConflict)
 		}
 	}
-
-	// A PR leaving the poll has no later pass to deliver a waiting comment.
-	read := newReading(viewer, now, seen.State == contract.PrOpen, row.OwnWakeAt)
-	read.take(seen.Reviews, &update.Seen.Reviews)
-	read.take(seen.ReviewComments, &update.Seen.ReviewComments)
-	read.take(seen.Comments, &update.Seen.Comments)
-	var meta *contract.MetaChange
-	update.Meta, meta, update.MetaWakeAt = read.meta(row.Meta, seen.Meta, row.MetaWakeAt, len(kinds)+len(read.fresh) > 0)
-
-	moved := next != row.PrSummary || seen.HeadRepo != row.HeadRepo || update.Seen != row.Seen || update.CITold != row.CITold
+	noteWriter(&meta, items)
+	update.PR, update.Meta = next, meta
 	// A baseline records the PR as it stands: nothing it already shows is a change.
 	if row.Baseline {
+		update.Meta.Waiting = nil
 		return update, true
 	}
-	if !moved && meta == nil {
-		// Metadata read for the first time is a row to write and nothing to tell.
-		return update, update.Meta != row.Meta
+	found, tell := settle(items, &update.Meta, len(kinds), next.State == contract.PrOpen, row.OwnWakeAt, &update.MetaWakeAt, now)
+	if next == row.PrSummary && update.HeadRepo == row.HeadRepo && update.CITold == row.CITold && !tell {
+		return update, update.SeenReviews != row.SeenReviews || !reflect.DeepEqual(update.Meta, row.Meta)
 	}
-	change := contract.PrChange{PR: next, Kinds: kinds, Outside: seen.Author != viewer, Meta: meta}
-	if slices.Contains(kinds, contract.PrChangeCIFailed) {
-		change.FailedChecks = seen.FailedChecks[:min(len(seen.FailedChecks), maxChecks)]
-	}
-	if read.ownNews {
+	change := contract.PrChange{PR: next, Kinds: found.kinds(kinds), FailedChecks: failed, Outside: next.Author != "" && next.Author != viewer, Actions: found.actions}
+	change.Comments, change.MoreComments = found.shown()
+	if found.ownNews {
 		update.OwnWakeAt = now.UnixMilli()
-	}
-	if len(read.fresh) > 0 {
-		change.Kinds = append(change.Kinds, contract.PrChangeComment)
-		change.Comments, change.MoreComments = read.comments()
-	}
-	if meta != nil {
-		change.Kinds = append(change.Kinds, contract.PrChangeMetadata)
 	}
 	update.Change = &change
 	return update, true
 }
 
-// CompareIssue does for one issue what Compare does for a PR, under the same rules for comments and metadata.
-func CompareIssue(row store.TrackedIssue, seen ObservedIssue, viewer string, now time.Time) (store.IssueUpdate, bool) {
-	next := row.IssueSummary
-	next.URL, next.Title, next.Author, next.State = seen.URL, seen.Meta.Title, seen.Author, seen.State
-	update := store.IssueUpdate{Issue: next, SeenComments: row.SeenComments, OwnWakeAt: row.OwnWakeAt}
-
-	var kinds []contract.PrChangeKind
-	if seen.State == contract.IssueClosed {
-		kinds = append(kinds, contract.PrChangeClosed)
+// CompareIssue does for one issue what ComparePR does for a PR, under the same rules. A feed's events move its state, and state
+// is what a query read when the feeds lost their place, or empty.
+func CompareIssue(row store.TrackedIssue, items []contract.GitHubItem, listed *FeedItem, state contract.IssueState, viewer string, now time.Time) (store.IssueUpdate, bool) {
+	next, meta := row.IssueSummary, row.Meta
+	update := store.IssueUpdate{Was: row.State, OwnWakeAt: row.OwnWakeAt, MetaWakeAt: row.MetaWakeAt}
+	if listed != nil {
+		next.URL, next.Title, next.Author = listed.URL, listed.Title, listed.Author
+		items = append(slices.Clone(items), refresh(&meta, listed, contract.GitHubItem{Repo: row.Repo, Author: listed.Author})...)
 	}
-	read := newReading(viewer, now, seen.State == contract.IssueOpen, row.OwnWakeAt)
-	read.take(seen.Comments, &update.SeenComments)
-	var meta *contract.MetaChange
-	update.Meta, meta, update.MetaWakeAt = read.meta(row.Meta, seen.Meta, row.MetaWakeAt, len(kinds)+len(read.fresh) > 0)
-
-	moved := next.URL != row.URL || next.Title != row.Title || next.Author != row.Author || next.State != row.State || update.SeenComments != row.SeenComments
+	for _, item := range items {
+		switch item.Action {
+		case contract.GitHubClosed:
+			next.State = contract.IssueClosed
+		case contract.GitHubReopened:
+			next.State = contract.IssueOpen
+		}
+	}
+	if state != "" {
+		next.State = state
+	}
+	next.Labels, next.Assignees, next.Milestone = meta.Labels, meta.Assignees, meta.Milestone
+	noteWriter(&meta, items)
+	update.Issue, update.Meta = next, meta
 	if row.Baseline {
+		update.Meta.Waiting = nil
 		return update, true
 	}
-	if !moved && meta == nil {
-		return update, update.Meta != row.Meta
+	var kinds []contract.PrChangeKind
+	if next.State == contract.IssueClosed && row.State != contract.IssueClosed {
+		kinds = append(kinds, contract.PrChangeClosed)
 	}
-	change := contract.IssueChange{Issue: next, Kinds: kinds, Outside: seen.Author != viewer, Meta: meta}
-	if read.ownNews {
+	found, tell := settle(items, &update.Meta, len(kinds), next.State == contract.IssueOpen, row.OwnWakeAt, &update.MetaWakeAt, now)
+	if reflect.DeepEqual(next, row.IssueSummary) && !tell {
+		return update, !reflect.DeepEqual(update.Meta, row.Meta)
+	}
+	change := contract.IssueChange{Issue: next, Kinds: found.kinds(kinds), Outside: next.Author != viewer, Actions: found.actions}
+	change.Comments, change.MoreComments = found.shown()
+	if found.ownNews {
 		update.OwnWakeAt = now.UnixMilli()
-	}
-	if len(read.fresh) > 0 {
-		change.Kinds = append(change.Kinds, contract.PrChangeComment)
-		change.Comments, change.MoreComments = read.comments()
-	}
-	if meta != nil {
-		change.Kinds = append(change.Kinds, contract.PrChangeMetadata)
-		change.Issue.Labels, change.Issue.Assignees, change.Issue.Milestone = seen.Meta.Labels, seen.Meta.Assignees, seen.Meta.Milestone
 	}
 	update.Change = &change
 	return update, true

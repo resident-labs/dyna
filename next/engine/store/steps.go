@@ -6,11 +6,18 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 70
+const schemaVersion = 71
 
 // LEGACY(v1-transfer): steps 42 to 63, which only upgrade stores older than schema 64. Remove after the transfer.
 // Every schema change adds an entry here and updates schema.sql.
 var steps = map[int][]string{
+	70: {
+		// Comments now come from repository feeds, whose cursors start at the head on the first pass, so no row needs its own.
+		`CREATE TABLE github_feeds (repo TEXT NOT NULL, feed TEXT NOT NULL, etag TEXT NOT NULL, cursor TEXT NOT NULL, PRIMARY KEY(repo, feed))`,
+		`ALTER TABLE pr_owners DROP COLUMN seen_review_comments`,
+		`ALTER TABLE pr_owners DROP COLUMN seen_comments`,
+		`ALTER TABLE issue_owners DROP COLUMN seen_comments`,
+	},
 	69: {
 		// A room's shared folder is now one central copy. The per-host sizes describe folders that are going away, and the next measure fills this.
 		`DROP TABLE IF EXISTS room_shared`,

@@ -37,10 +37,10 @@ const visual = object({ id: string, version: number, title: string, height: numb
 const prChangeKind = oneOf("ci_failed", "ci_passed", "changes_requested", "approved", "conflict", "merged", "closed", "comment", "metadata");
 const changeComments = optional(nullable(array(object({ author: string, body: string, url: string, outside: boolean }))));
 const names = optional(nullable(array(string)));
-const metaChange = optional(nullable(object({ title: optional(string), labelsAdded: names, labelsRemoved: names, assigned: names, unassigned: names, milestone: optional(string), milestoneRemoved: optional(boolean),
-  bodyEdited: optional(boolean), reopened: optional(boolean), draft: optional(boolean), ready: optional(boolean), reviewersAdded: names, reviewersRemoved: names })));
+const githubAction = object({ repo: string, number: number, kind: oneOf("issue", "pr"), action: string, actor: string, author: optional(string), url: string, detail: optional(string), text: optional(string), outside: boolean });
+const actions = optional(nullable(array(githubAction)));
 const issueChanges = nullable(array(object({ issue: object({ repo: string, number: number, url: string, title: string, author: string, session: string, state: oneOf("open", "closed"), labels: names, assignees: names, milestone: optional(string) }),
-  kinds: optional(nullable(array(prChangeKind))), outside: boolean, comments: changeComments, moreComments: optional(number), meta: metaChange })));
+  kinds: optional(nullable(array(prChangeKind))), outside: boolean, comments: changeComments, moreComments: optional(number), actions })));
 const prSummary = object({ repo: string, number: number, url: string, title: string, author: string, session: string, draft: boolean, state: oneOf("open", "merged", "closed"), head: string,
   review: oneOf("", "approved", "changes_requested", "review_required"), ci: oneOf("", "none", "pending", "success", "failure"), merge: oneOf("", "clean", "blocked", "behind", "conflict") });
 const bodies: Record<string, Check> = {
@@ -78,8 +78,9 @@ const bodies: Record<string, Check> = {
   "pr.closed": object({ repo: string, number: number, session: string, url: string }),
   "ci.finished": object({ repo: string, number: number, session: string, url: string, head: string, result: oneOf("", "none", "pending", "success", "failure") }),
   "repo.main_updated": object({ repo: string, head: string }),
+  "github.item": githubAction,
   "pr.changed": object({ session: string, changes: nullable(array(object({ pr: prSummary, kinds: optional(nullable(array(prChangeKind))), failedChecks: optional(nullable(array(string))),
-    outside: boolean, comments: changeComments, moreComments: optional(number), meta: metaChange }))), issues: optional(issueChanges) }),
+    outside: boolean, comments: changeComments, moreComments: optional(number), actions }))), issues: optional(issueChanges) }),
   "issue.changed": object({ session: string, changes: issueChanges }),
   "issue.closed": object({ repo: string, number: number, session: string, url: string }),
   "hook.finished": object({ subscription: string, result: oneOf("passed", "failed", "stopped"), exitCode: number, cause, output: optional(string), failures: optional(number), retryAt: optional(string) }),
