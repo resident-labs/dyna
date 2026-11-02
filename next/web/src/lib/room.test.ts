@@ -486,9 +486,9 @@ test("a failed job counts after a fresh load until the owner reads past its end,
   const original = globalThis.fetch;
   let answer = (_: Response) => {};
   const ends = [
-    event(1, { type: "shell.job.ended", body: { session: "s", job: "read", exitCode: 1, tail: "" } }),
-    event(3, { type: "shell.job.ended", body: { session: "s", job: "passed", exitCode: 0, tail: "" } }),
-    event(4, { type: "shell.job.ended", body: { session: "s", job: "unread", exitCode: 1, tail: "" } }),
+    event(1, { type: "shell.job.ended", body: { session: "s", job: "read", exitCode: 1, end: { kind: "exit", code: 1 }, tail: "" } }),
+    event(3, { type: "shell.job.ended", body: { session: "s", job: "passed", exitCode: 0, end: { kind: "exit", code: 0 }, tail: "" } }),
+    event(4, { type: "shell.job.ended", body: { session: "s", job: "unread", exitCode: 1, end: { kind: "exit", code: 1 }, tail: "" } }),
   ];
   const session = { id: "s", lastRead: 2, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "", startedAt: "", hadJobs: true };
   globalThis.fetch = async input => {
@@ -510,8 +510,8 @@ test("a read that passes a counted failed job clears its mark, even when the rea
   const original = globalThis.fetch;
   let answer = (_: Response) => {};
   const ends = [
-    event(3, { type: "shell.job.ended", body: { session: "s", job: "passed", exitCode: 0, tail: "" } }),
-    event(4, { type: "shell.job.ended", body: { session: "s", job: "unread", exitCode: 1, tail: "" } }),
+    event(3, { type: "shell.job.ended", body: { session: "s", job: "passed", exitCode: 0, end: { kind: "exit", code: 0 }, tail: "" } }),
+    event(4, { type: "shell.job.ended", body: { session: "s", job: "unread", exitCode: 1, end: { kind: "exit", code: 1 }, tail: "" } }),
   ];
   const session = { id: "s", lastRead: 2, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "", startedAt: "", hadJobs: true };
   globalThis.fetch = async input => {
@@ -534,7 +534,7 @@ test("a read that passes a counted failed job clears its mark, even when the rea
 test("a job that ends counts as ended at once, even while a turn holds the running count", () => {
   const room = new RoomStore("r", () => () => {});
   room.apply(event(1, { type: "turn.started", body: { session: "s", turn: "t", inputs: [] } }));
-  room.apply(event(2, { type: "shell.job.ended", body: { session: "s", job: "j", exitCode: 0, tail: "" } }));
+  room.apply(event(2, { type: "shell.job.ended", body: { session: "s", job: "j", exitCode: 0, end: { kind: "exit", code: 0 }, tail: "" } }));
   assert.deepEqual([...room.endedJobs], ["s/j"]);
   assert.equal(room.failedJobs.size, 0);
 });
@@ -546,7 +546,7 @@ test("a session with a finished or running job stays reachable after a fresh loa
     const room = new RoomStore("r", () => () => {});
     await room.open();
     assert.deepEqual([...room.hadJobs], ["s", "r"]);
-    room.apply(event(4, { type: "shell.job.ended", body: { session: "x", job: "j", exitCode: 0, tail: "" } }));
+    room.apply(event(4, { type: "shell.job.ended", body: { session: "x", job: "j", exitCode: 0, end: { kind: "exit", code: 0 }, tail: "" } }));
     assert.deepEqual([...room.hadJobs], ["s", "r", "x"]);
   } finally { server.restore(); }
 });

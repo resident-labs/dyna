@@ -13,7 +13,6 @@ type movingHost struct {
 	fakeBoxes
 	mu        sync.Mutex
 	stopped   []contract.BoxID
-	oldSlices []string
 	recreated []BoxSpec
 	failStop  bool
 }
@@ -27,10 +26,9 @@ func (h *movingHost) Stop(_ context.Context, id contract.BoxID) error {
 	}
 	return nil
 }
-func (h *movingHost) Recreate(_ context.Context, spec BoxSpec, _, oldSlice string) error {
+func (h *movingHost) Recreate(_ context.Context, spec BoxSpec, _ string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.oldSlices = append(h.oldSlices, oldSlice)
 	h.recreated = append(h.recreated, spec)
 	return nil
 }

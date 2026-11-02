@@ -1,23 +1,17 @@
 import type { ShellJobEnd } from "./contract.gen.ts";
 import type { ShellJob } from "./shell.ts";
 
-// LEGACY(v1-transfer): the exit-code fallback in endOf and the exitCode reads below, for events without the end field. Remove after the transfer.
-// How a finished job ended. Events from before the end field carry only the exit code, where -1 means a signal ended it.
-type Ended = { exitCode: number; end?: ShellJobEnd | null };
-const endOf = ({ exitCode, end }: Ended): ShellJobEnd => end ?? (exitCode === -1 ? { kind: "signal" } : { kind: "exit", code: exitCode });
+// How a job ended. A running job has no end yet, and an exit with code 0 carries no code.
+type Ended = { end?: ShellJobEnd | null };
 // A nonzero exit or a signal is a failure; a stop that its session asked for is not.
-export function failed(job: Ended & { running?: boolean }): boolean {
-  if (job.running) return false;
-  const end = endOf(job);
-  return end.kind === "signal" || end.kind === "exit" && (end.code ?? job.exitCode) !== 0;
+export function failed({ end, running }: Ended & { running?: boolean }): boolean {
+  return !running && (end?.kind === "signal" || end?.kind === "exit" && !!end.code);
 }
 // The end cause in words, such as "Exit 2", "Ended by a signal (SIGTERM)", "Stopped by root" or "Passed".
-export function endCause(job: Ended, session: string): string {
-  const end = endOf(job);
-  if (end.kind === "signal") return end.signal ? `Ended by a signal (${end.signal})` : "Ended by a signal";
-  if (end.kind === "stopped") return `Stopped by ${session}`;
-  const code = end.code ?? job.exitCode;
-  return code ? `Exit ${code}` : "Passed";
+export function endCause({ end }: Ended, session: string): string {
+  if (end?.kind === "signal") return end.signal ? `Ended by a signal (${end.signal})` : "Ended by a signal";
+  if (end?.kind === "stopped") return `Stopped by ${session}`;
+  return end?.code ? `Exit ${end.code}` : "Passed";
 }
 // A job's title: the description its session gave, or else its command's first line.
 export const jobTitle = (job: ShellJob) => job.description || job.command.split("\n", 1)[0];

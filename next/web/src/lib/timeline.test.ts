@@ -212,7 +212,7 @@ test("an engine notice is one plain line, and a type this build does not know sa
   assert.deepEqual(timelineInput(wake("checkin.due", { session: "s", children })), { kind: "line", text: "Check-in on 1 stalled session" });
   assert.deepEqual(timelineInput(wake("session.failed", failure)), { kind: "failed", text: "api-lead failed" });
   assert.deepEqual(timelineInput(wake("github.pr.opened", { repo: "r", number: 7, session: "c", url: "https://x/7" })), { kind: "line", text: "PR opened: https://x/7" });
-  assert.deepEqual(timelineInput(wake("shell.job.ended", { session: "s", job: "j", exitCode: 0, tail: "", description: "Build" })), { kind: "line", text: "Background job Build ended" });
+  assert.deepEqual(timelineInput(wake("shell.job.ended", { session: "s", job: "j", exitCode: 0, end: { kind: "exit" }, tail: "", description: "Build" })), { kind: "line", text: "Background job Build ended" });
   assert.deepEqual(timelineInput(wake("hook.due", { subscription: "ci" })), { kind: "line", text: "Subscription ci is due" });
   assert.deepEqual(timelineInput(wake("hook.finished", { subscription: "ci", result: "passed", exitCode: 0 })), { kind: "line", text: "Subscription ci passed, exit code 0" });
   assert.deepEqual(timelineInput(wake("hook.finished", { subscription: "ci", result: "failed", exitCode: 2 })), { kind: "failed", text: "Subscription ci failed, exit code 2" });

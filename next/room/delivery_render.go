@@ -107,21 +107,14 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		}
 		return fmt.Sprintf("%s Last output %s ago:\n%s", text, jobTime(*b.QuietMinutes), b.Tail), nil
 	case contract.ShellJobEnded:
-		name := jobName(b.Job, b.Description)
-		// LEGACY(v1-transfer): the exit-code fallback for shell.job.ended events without End. Remove after the transfer.
-		// TODO: legacy/shim remove later — old boxes still send shell.job.ended without End, and saved events lack it. Remove when the engine fills End at the request boundary, every supported box version sends End, and a floor migration converts saved events (D-659).
-		result := jobExit(b.ExitCode)
-		if b.End != nil {
-			switch b.End.Kind {
-			case contract.ShellJobExited:
-				result = jobExit(b.End.Code)
-			case contract.ShellJobSignaled:
-				result = fmt.Sprintf("ended by a signal (%s)", b.End.Signal)
-			case contract.ShellJobStopped:
-				result = "was stopped"
-			}
+		result := jobExit(b.End.Code)
+		switch b.End.Kind {
+		case contract.ShellJobSignaled:
+			result = fmt.Sprintf("ended by a signal (%s)", b.End.Signal)
+		case contract.ShellJobStopped:
+			result = "was stopped"
 		}
-		return fmt.Sprintf("Your shell job %s %s. Last output:\n%s", name, result, b.Tail), nil
+		return fmt.Sprintf("Your shell job %s %s. Last output:\n%s", jobName(b.Job, b.Description), result, b.Tail), nil
 	default:
 		return "", fmt.Errorf("event body %T cannot be delivered to a session", body)
 	}
