@@ -1438,7 +1438,7 @@ Before it opens anything, v2 checks the data folder. If `dyna.db` exists and `st
 
 - The v2 install script detects a v1 store and runs steps 2 to 4 after one confirmation.
 - `dyna import` refuses a bundle whose version it does not know, and a data folder that already has `store.db`.
-- **When `migrate/` goes.** It is deleted right after the owner's installs have imported. That commit is tagged `v2-import-last`, and `floor.go` names it (r18). From then on, step 4 of the guard text says to build `dyna` at `v2-import-last` for the import. The guard itself stays.
+- **When `migrate/` goes.** It is deleted right after the owner's installs have imported. That commit is tagged `v2-import-last`, and `floor.go` names it (r18). From then on, step 4 of the guard text says to build `dyna` at `v2-import-last` for the import. The guard itself stays. No install ever imported: the rooms were rebuilt by hand, and on 2026-11-01 the owner said no other v1 install needs an import, so `migrate/` went with `dyna import` still a dry run, and the guard says there is no import (spec 8.4).
 
 ### 8.5 Hooks as typed subscriptions
 

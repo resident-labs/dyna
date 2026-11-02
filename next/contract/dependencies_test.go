@@ -26,7 +26,6 @@ func TestDependencyDirection(t *testing.T) {
 	allowed := map[string][]string{
 		"contract": {}, "room": {"contract"}, "harness": {"contract"},
 		"box": {"contract", "harness"}, "engine": {"contract", "room", "box", "harness"},
-		"migrate":          {"contract", "engine/store"},
 		"engine/lifecycle": {"contract", "box", "engine/store"},
 		"engine/store":     {"contract", "room", "box"},
 		"engine/approve":   {"contract", "engine/store"},
