@@ -91,7 +91,7 @@ func (a addonStart) apply(ctx context.Context) (map[string]pi.MCPServer, []strin
 		case contract.AddonPackage:
 			packages = append(packages, item.Addon)
 		case contract.AddonMCP:
-			servers[item.Name] = pi.MCPServer{URL: item.URL, Command: item.Command, Args: item.Args, Exposure: "codemode"}
+			servers[item.Name] = pi.MCPServer{URL: item.URL, Command: item.Command, Args: item.Args, Exposure: "deferred"}
 		}
 	}
 	paths, failed := a.install(ctx, packages)
