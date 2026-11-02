@@ -63,6 +63,7 @@ func TestRunnerArgsKeepTheContainerSealed(t *testing.T) {
 		"--tmpfs /home/runner:rw,exec,U,mode=0755,size=12884901888", "--tmpfs /tmp:rw,exec,mode=1777,size=12884901888",
 		"--cgroup-parent=dyna-ci.slice", "--env ACTIONS_RUNNER_INPUT_JITCONFIG", "--env DYNA_CI_REPO=owner/repo",
 		"--label dyna.ci.slot=3", "--mount type=volume,source=dyna-ci-egress,destination=/run/dyna-egress,subpath=3,ro",
+		"--mount type=volume,source=dyna-ci-cache-owner-repo-3,destination=/cache", "--env DYNA_CI_CACHE=/cache",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("args miss %q: %s", want, joined)
@@ -245,5 +246,28 @@ func TestJobStartedHookKillsTheWorkerOfARefusedJob(t *testing.T) {
 				t.Fatalf("the worker survived: %v: %s", err, out)
 			}
 		})
+	}
+}
+
+func TestEachRepositorySlotHasItsOwnBuildCache(t *testing.T) {
+	if got := cacheName("Owner/My_Repo.git", 7); got != "dyna-ci-cache-owner-my_repo.git-7" {
+		t.Fatalf("cache name %q", got)
+	}
+	if cacheName("a/b", 1) == cacheName("a/b", 2) || cacheName("a/b", 1) == cacheName("a/c", 1) {
+		t.Fatal("two slots or two repositories share a cache")
+	}
+	h, runner := newFrameHost(t)
+	if err := h.StartRunner(context.Background(), testSpec()); err != nil {
+		t.Fatal(err)
+	}
+	prepared := false
+	for _, args := range runner.args {
+		joined := strings.Join(args, " ")
+		if strings.Contains(joined, "podman volume create") && strings.Contains(joined, "dyna-ci-cache-owner-repo-3") {
+			prepared = true
+		}
+	}
+	if !prepared {
+		t.Fatal("the cache volume is not prepared before the runner starts")
 	}
 }
