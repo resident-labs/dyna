@@ -209,6 +209,10 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if errors.As(err, &superseded) {
 		return contract.PostResponse{}, &contract.Error{Code: contract.ErrVisualSuperseded, Message: "visual has a newer version", Visual: &contract.VisualSuperseded{Event: superseded.Event, Version: superseded.Version, Seq: superseded.Seq}}
 	}
+	var cant *store.CantReceiveError
+	if errors.As(err, &cant) {
+		return contract.PostResponse{}, &contract.Error{Code: contract.ErrConflict, Message: cant.Message}
+	}
 	if errors.Is(err, store.ErrVisualNoAuthor) {
 		return contract.PostResponse{}, invalid("visual has no session author")
 	}
