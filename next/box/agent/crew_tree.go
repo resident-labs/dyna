@@ -174,21 +174,6 @@ type mergeEntry struct {
 	Reason string `json:"reason"`
 }
 
-// mergeConflict is a step that did not merge. A failed step has a reason and no files, because it left nothing to merge.
-type mergeConflict struct {
-	Step   string   `json:"step"`
-	Branch string   `json:"branch,omitempty"`
-	Files  []string `json:"files"`
-	Reason string   `json:"reason,omitempty"`
-}
-
-type mergeResult struct {
-	Branch    string          `json:"branch"`
-	Commit    string          `json:"commit"`
-	Merged    []string        `json:"merged"`
-	Conflicts []mergeConflict `json:"conflicts"`
-}
-
 // mergeCall merges worktree steps into the run's branch. A conflict is a result, not a failure of the step, but each one joins
 // the journal as a failed entry so that the run's end counts it. Failed entries are not kept across a resume, so a stored merge
 // writes them again here.
@@ -217,7 +202,7 @@ func (c *Crew) mergeCall(ctx context.Context, call crewCall) crewReply {
 	if reply.Error != "" {
 		return reply
 	}
-	var result mergeResult
+	var result contract.WorkflowMerge
 	data, _ := json.Marshal(reply.Value)
 	_ = json.Unmarshal(data, &result)
 	for _, conflict := range result.Conflicts {
@@ -248,10 +233,10 @@ func (c *Crew) merge(ctx context.Context, key string, entries []mergeEntry, opts
 		return stepOutcome{reason: err.Error()}
 	}
 	defer c.removeTree(ctx, dir)
-	result := mergeResult{Branch: c.config.Branch + "-run", Merged: []string{}, Conflicts: []mergeConflict{}}
+	result := contract.WorkflowMerge{Branch: c.config.Branch + "-run", Merged: []string{}, Conflicts: []contract.WorkflowConflict{}}
 	for _, entry := range entries {
 		if entry.Failed {
-			result.Conflicts = append(result.Conflicts, mergeConflict{Step: entry.Step, Files: []string{}, Reason: entry.Reason})
+			result.Conflicts = append(result.Conflicts, contract.WorkflowConflict{Step: entry.Step, Files: []string{}, Reason: entry.Reason})
 			continue
 		}
 		_, err := runGit(ctx, dir, "", "merge", "--no-ff", "--no-verify", "-m", "merge "+entry.Step, entry.Commit)
@@ -267,7 +252,7 @@ func (c *Crew) merge(ctx context.Context, key string, entries []mergeEntry, opts
 			return stepOutcome{reason: err.Error()}
 		}
 		files := strings.FieldsFunc(unmerged, func(r rune) bool { return r == 0 })
-		result.Conflicts = append(result.Conflicts, mergeConflict{Step: entry.Step, Branch: entry.Branch, Files: files})
+		result.Conflicts = append(result.Conflicts, contract.WorkflowConflict{Step: entry.Step, Branch: entry.Branch, Files: files})
 	}
 	commit, err := runGit(ctx, dir, "", "rev-parse", "HEAD")
 	if err != nil {
