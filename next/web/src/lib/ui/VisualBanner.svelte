@@ -13,7 +13,9 @@
   let { visual, newest, event, at, onopen }: { visual: VisualCard; newest: VisualCard; event: EventID; at: string; onopen: () => void } = $props();
   let older = $derived(visual.version < newest.version);
   let failed = $state(false), ready = $state(false), visible = $state(false), mounted = $state(false), width = $state(0);
-  $effect(() => { visual.banner; visual.thumbnail; failed = false; ready = false; });
+  // A new object for the same capture must not reset this: its image has already loaded, and no load event would follow.
+  let capture = $derived(`${visual.banner} ${visual.thumbnail}`);
+  $effect(() => { capture; failed = false; ready = false; });
   let fit = $derived((!failed && measured.get(visual.banner)) || declaredFit(visual.height));
   // A quarter of the capture's size finds where its content ends and is cheap to read back. A canvas that refuses the read
   // leaves the card at its declared height.
