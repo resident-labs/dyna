@@ -35,6 +35,7 @@ type Client struct {
 	mu      sync.Mutex
 	rest    quota
 	graphql quota
+	others  map[string]*quota // the quotas only agents' reads spend, such as search, by GitHub's resource name
 	etags   map[string]cachedRead
 	viewer  string
 	resting map[string]time.Time // when a feed that asked for a longer X-Poll-Interval may be read again
@@ -47,15 +48,16 @@ type cachedRead struct {
 
 // quota is what GitHub last said. low holds until reset, or until GitHub reports more room. until is a refusal's wait.
 type quota struct {
-	low   bool
-	reset time.Time
-	until time.Time
+	low              bool
+	limit, remaining int
+	reset            time.Time
+	until            time.Time
 }
 
 // note records a quota reading. Under 20% left counts as low (spec 7.7).
 func (q *quota) note(limit, remaining int, reset time.Time) {
 	q.low = limit > 0 && remaining*5 < limit
-	q.reset = reset
+	q.limit, q.remaining, q.reset = limit, remaining, reset
 }
 
 func (q *quota) lowAt(now time.Time) bool {

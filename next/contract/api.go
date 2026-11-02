@@ -625,6 +625,8 @@ type BoxHelloResponse struct {
 	Repos         []BoxRepo        `json:"repos,omitempty"`
 	Transcripts   []TranscriptFile `json:"transcripts,omitempty"`
 	Workflow      *BoxWorkflow     `json:"workflow,omitempty"` // a crew's box runs this script and no Pi of its own
+	// GitHub says the engine serves GitHub's read-only MCP tools at /github/ on the box socket, with its own token.
+	GitHub bool `json:"github,omitempty"`
 }
 type TurnOutputRequest struct {
 	ShellJobs int          `json:"shellJobs"`

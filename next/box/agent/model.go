@@ -57,7 +57,7 @@ func modelRoute(transport http.RoundTripper) http.Handler {
 		Director: func(r *http.Request) {
 			r.URL.Scheme = "http"
 			r.URL.Host = "dyna"
-			if !strings.HasPrefix(r.URL.Path, "/git/") {
+			if !strings.HasPrefix(r.URL.Path, "/git/") && !strings.HasPrefix(r.URL.Path, "/github/") {
 				r.URL.Path = "/model" + r.URL.Path
 				if r.URL.RawPath != "" {
 					r.URL.RawPath = "/model" + r.URL.RawPath
