@@ -624,7 +624,7 @@ func main() {
 	runtime := filepath.Join(data, "runtime")
 	b := &boxes{ctx: ctx, st: st, dir: runtime, cancel: map[contract.BoxID]context.CancelFunc{}}
 	svc := engine.New(st, b, profiles{empty: *fixture == "empty"}, time.Now)
-	fatal(svc.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.grant": svc.HostexecGrant()}, time.Hour))
+	fatal(svc.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.grant": svc.HostexecGrant(), "addon.global": svc.AddonGlobal()}, time.Hour))
 	svc.SetLayout(box.Layout{Data: data})
 	a := api.New(devService{Service: svc, empty: *fixture == "empty", renames: &devRenames{labels: map[contract.AccountID]string{}}}, nil)
 	a.SetConnectOperations(devConnect{empty: *fixture == "empty"})
@@ -656,6 +656,7 @@ func main() {
 	if *seed || *fixture == "full" {
 		seedRoom(ctx, svc, st, *posts, *agents)
 		seedDevices(ctx, st)
+		seedAddons(svc)
 	} else if *fixture == "empty" {
 		_, problem := svc.RoomCreate(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.RoomCreateRequest{Name: "web-studio", RootProfile: "fake"})
 		if problem != nil {
@@ -684,6 +685,19 @@ func seedDevices(ctx context.Context, st *store.Store) {
 			Scopes: []contract.Scope{contract.ScopeRead, contract.ScopeOperate}},
 	} {
 		fatal(st.CreateDevice(ctx, d))
+	}
+}
+
+// seedAddons adds invented items in two scopes, so Settings shows every kind and a disabled row.
+func seedAddons(s *engine.Service) {
+	at := time.Now().Add(-3 * time.Hour)
+	for _, item := range []contract.Addon{
+		{Kind: contract.AddonPackage, Name: "@example/pi-tools", Source: "npm:@example/pi-tools@1.4.2", By: "owner", At: &at},
+		{Kind: contract.AddonMCP, Name: "docs", URL: "https://docs.example.test/mcp", By: "owner", At: &at, Disabled: true},
+		{Kind: contract.AddonMCP, Name: "files", Room: fixtureRoom, Command: "npx", Args: []string{"-y", "@example/files-server", "/box/work"}, By: "lead-web", At: &at},
+		{Kind: contract.AddonPackage, Name: "github.com/example/pi-review", Room: fixtureRoom, Source: "https://github.com/example/pi-review@4a080252f06caf63a525d7873c5d94d3c23887e0", By: "lead-web", At: &at},
+	} {
+		fatal(s.Addons().Put(item.Room, item))
 	}
 }
 

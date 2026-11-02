@@ -17,15 +17,19 @@ import (
 //
 //	<Data>/rooms/<room>/AGENTS.md                   room instructions
 //	<Data>/rooms/<room>/compose/<name>.yaml         room compose files
+//	<Data>/rooms/<room>/addons.json                 the room's skills, Pi packages and MCP servers
+//	<Data>/rooms/<room>/skills/<name>/              the room's skill folders
 //	<Data>/rooms/<room>/files/<sha256>              attachments and large outputs
 //	<Data>/rooms/<room>/transcripts/<session>/      transcript copies
 //	<HostData>/rooms/<room>/instructions/AGENTS.md  the room copy a box mounts
+//	<HostData>/rooms/<room>/instructions/addons.tgz the room's add-ons, one file a box unpacks at its start
 //	<HostData>/rooms/<room>/shared/                 /box/shared
 //
 // Everything else belongs to no single room:
 //
 //	<Data>/AGENTS.md                                global instructions
 //	<Data>/compose/<name>.yaml                      global compose files
+//	<Data>/addons.json, <Data>/skills/<name>/       global add-ons
 //	<Data>/store.db, <Data>/store.lock              the store and its lock
 //	<Data>/backups/                                 local copies of the store
 //	<Data>/archive/                                 the read-only v1 archive
@@ -33,6 +37,7 @@ import (
 //	<Data>/cliproxy/, <Data>/cliproxy/auth-v2/      the model proxy and its sign-in folder
 //	<Data>/git/<owner>/<repo>.git                   repository mirrors, which rooms share
 //	<HostData>/instructions/global/AGENTS.md        the global copy a box mounts
+//	<HostData>/instructions/global/addons.tgz       the global add-ons, as the room's
 //	<HostData>/git/<owner>/<repo>.git               repository caches, which rooms share
 //	<HostData>/bin/<version>/dyna                   engine binaries, with a current link
 //	<HostData>/cache/                               dependency caches, which boxes share
@@ -50,6 +55,10 @@ var AttachmentFolder = "/box/attachments"
 const (
 	instructionsFile = "AGENTS.md"
 	composeFolder    = "compose"
+	addonsFile       = "addons.json"
+	skillsFolder     = "skills"
+	// AddonBundle is the name of the file a box unpacks its add-ons from, beside AGENTS.md in the folders it mounts.
+	AddonBundle = "addons.tgz"
 	// SharedFolder is the name of a room's shared folder, for a host script that visits every room.
 	SharedFolder = "shared"
 	// EngineSocket is the name of a box's socket in its host folder.
@@ -137,6 +146,22 @@ func (l Layout) Compose(room contract.RoomID) string {
 		return filepath.Join(l.Data, composeFolder)
 	}
 	return filepath.Join(l.room(room), composeFolder)
+}
+
+// Addons is the list of a room's add-ons, or the global one for no room.
+func (l Layout) Addons(room contract.RoomID) string {
+	if room == "" {
+		return filepath.Join(l.Data, addonsFile)
+	}
+	return filepath.Join(l.room(room), addonsFile)
+}
+
+// Skills is the folder of a room's skills, or the global one for no room.
+func (l Layout) Skills(room contract.RoomID) string {
+	if room == "" {
+		return filepath.Join(l.Data, skillsFolder)
+	}
+	return filepath.Join(l.room(room), skillsFolder)
 }
 
 // Files is the folder of a room's blobs.
@@ -263,6 +288,11 @@ func (l Layout) HostInstructions(room contract.RoomID) string {
 		return filepath.Join(l.HostData, "instructions", "global", instructionsFile)
 	}
 	return filepath.Join(l.hostRoom(room), "instructions", instructionsFile)
+}
+
+// HostAddons is the bundle a host keeps for a room, or the global one for no room, beside its instructions.
+func (l Layout) HostAddons(room contract.RoomID) string {
+	return filepath.Join(filepath.Dir(l.HostInstructions(room)), AddonBundle)
 }
 
 // HostShared is the folder that every box of the room mounts at /box/shared.

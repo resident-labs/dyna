@@ -102,7 +102,7 @@ func (b *backupLoop) copy(ctx context.Context, path string) error {
 	}
 	defer rootDir.Close()
 	// LEGACY(v1-transfer): the Archive root in this list, the v1 archive folder. Remove after the transfer.
-	for _, root := range []string{b.layout.Instructions(""), b.layout.Compose(""), b.layout.Rooms(), b.layout.Archive(), b.layout.Connect(), b.layout.ProxyAuth()} {
+	for _, root := range []string{b.layout.Instructions(""), b.layout.Compose(""), b.layout.Addons(""), b.layout.Skills(""), b.layout.Rooms(), b.layout.Archive(), b.layout.Connect(), b.layout.ProxyAuth()} {
 		err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 			if errors.Is(walkErr, os.ErrNotExist) {
 				return nil

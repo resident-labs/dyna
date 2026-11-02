@@ -124,6 +124,18 @@ type Service interface {
 	SubscriptionList(context.Context, contract.Principal, contract.SubscriptionListRequest) (contract.SubscriptionListResponse, *contract.Error)
 	SubscriptionRemove(context.Context, contract.Principal, contract.SubscriptionRemoveRequest) (contract.SubscriptionRemoveResponse, *contract.Error)
 	SubscriptionSetEnabled(context.Context, contract.Principal, contract.SubscriptionSetEnabledRequest) (contract.SubscriptionSetEnabledResponse, *contract.Error)
+	AddonList(context.Context, contract.Principal, contract.AddonListRequest) (contract.AddonListResponse, *contract.Error)
+	AddonSetEnabled(context.Context, contract.Principal, contract.AddonSetEnabledRequest) (contract.AddonSetEnabledResponse, *contract.Error)
+	BoxNotice(context.Context, contract.Principal, contract.BoxNoticeRequest) (contract.BoxNoticeResponse, *contract.Error)
+	MCPAdd(context.Context, contract.Principal, contract.MCPAddRequest) (contract.AddonChangeResponse, *contract.Error)
+	MCPList(context.Context, contract.Principal, contract.AddonListRequest) (contract.AddonListResponse, *contract.Error)
+	MCPRemove(context.Context, contract.Principal, contract.AddonRemoveRequest) (contract.AddonChangeResponse, *contract.Error)
+	PackageAdd(context.Context, contract.Principal, contract.PackageAddRequest) (contract.AddonChangeResponse, *contract.Error)
+	PackageList(context.Context, contract.Principal, contract.AddonListRequest) (contract.AddonListResponse, *contract.Error)
+	PackageRemove(context.Context, contract.Principal, contract.AddonRemoveRequest) (contract.AddonChangeResponse, *contract.Error)
+	SkillList(context.Context, contract.Principal, contract.AddonListRequest) (contract.AddonListResponse, *contract.Error)
+	SkillRemove(context.Context, contract.Principal, contract.AddonRemoveRequest) (contract.AddonChangeResponse, *contract.Error)
+	SkillSave(context.Context, contract.Principal, contract.SkillSaveRequest) (contract.AddonChangeResponse, *contract.Error)
 	// HookPost posts for a Run. Its socket fixes the subscription and the room.
 	HookPost(context.Context, contract.SubscriptionID, contract.RoomID, contract.PostRequest) (contract.PostResponse, *contract.Error)
 	// HookTrack tracks a PR for a Run, for the session it names in its room.

@@ -17,6 +17,7 @@ import (
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine"
+	"github.com/resident-labs/dyna/engine/addons"
 	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/store"
 )
@@ -103,6 +104,49 @@ func TestInstructionsRepairAfterOfflineSave(t *testing.T) {
 	got, err := os.ReadFile(filepath.Join(hostData, "rooms", "room", "instructions", "AGENTS.md"))
 	if err != nil || string(got) != "new" {
 		t.Fatalf("got %q: %v", got, err)
+	}
+}
+
+// Add-ons travel beside instructions: a save reaches the host, and a scope emptied later replaces its old copy.
+func TestAddonsMirrorBesideInstructions(t *testing.T) {
+	ctx := context.Background()
+	layout := box.Layout{Data: t.TempDir(), HostData: t.TempDir()}
+	files := &addons.Files{Layout: layout}
+	host, err := podman.New("user@host", t.TempDir(), "host", &instructionTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &Boxes{Store: instructionStore{}, Layout: layout, Addons: files, hosts: map[contract.HostName]*podman.Host{"host": host}}
+	if err := b.syncInstructions(ctx, host); err != nil {
+		t.Fatal(err)
+	}
+	for _, room := range []contract.RoomID{"", "room"} {
+		if _, err := os.Stat(layout.HostAddons(room)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("a scope that holds nothing mirrored a file: %v", err)
+		}
+	}
+	item := contract.Addon{Kind: contract.AddonMCP, Name: "docs", URL: "https://example.test/mcp"}
+	if err := files.Put("room", item); err != nil {
+		t.Fatal(err)
+	}
+	b.instructionSaves.Add(1)
+	if err := b.syncInstructions(ctx, host); err != nil {
+		t.Fatal(err)
+	}
+	full, err := os.ReadFile(layout.HostAddons("room"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := files.Remove("room", item.Kind, item.Name); err != nil {
+		t.Fatal(err)
+	}
+	b.instructionSaves.Add(1)
+	if err := b.syncInstructions(ctx, host); err != nil {
+		t.Fatal(err)
+	}
+	empty, err := os.ReadFile(layout.HostAddons("room"))
+	if err != nil || bytes.Equal(empty, full) {
+		t.Fatalf("the host kept the old copy: %v", err)
 	}
 }
 
