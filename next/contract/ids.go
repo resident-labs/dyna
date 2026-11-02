@@ -12,7 +12,7 @@ type (
 	TurnID         string // "turn_<ulid>"
 	DeviceID       string // "dev_<ulid>", a paired device
 	SubscriptionID string // "sub_<ulid>"
-	GoalID         string // "g<n>"; v1 numbers are kept at import (M3)
+	GoalID         string // "g<n>"
 	WorkflowRunID  string // "wf_<ulid>"
 	HostName       string // a registered host, such as "hermeslab"
 	RepoName       string // "owner/name" on GitHub
