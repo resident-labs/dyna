@@ -37,11 +37,41 @@ export type ProfileRemoveResponse = { };
 export type AccountFailureReason = "sign_in_rejected" | "refresh_failed" | "proxy_failed" | "credential_missing";
 export type AccountFailed = { accountId: AccountID; reason: AccountFailureReason; };
 export type AccountQuotaLow = { accountId: AccountID; window: string; remainingPercent: number; floor: number; };
+export type AddonKind = "skill" | "package" | "mcp";
+export type Addon = { kind: AddonKind; name: string; room?: RoomID; builtIn?: boolean; disabled?: boolean; by?: string; at?: string | null; description?: string; source?: string; url?: string; command?: string; args?: Array<string> | null; };
+export type AddonListRequest = { room?: RoomID; };
+export type AddonListResponse = { items: Array<Addon> | null; };
+export type AddonChangeResponse = { item?: Addon | null; operation?: OpID; };
+export type PackageAddRequest = { source: string; room?: RoomID; global?: boolean; };
+export type SkillSaveRequest = { archive?: string | null; url?: string; room?: RoomID; global?: boolean; };
+export type MCPAddRequest = { name: string; url?: string; command?: string; args?: Array<string> | null; room?: RoomID; global?: boolean; };
+export type AddonRemoveRequest = { name: string; room?: RoomID; global?: boolean; };
+export type MCPAddResponse = AddonChangeResponse;
+export type MCPListRequest = AddonListRequest;
+export type MCPListResponse = AddonListResponse;
+export type MCPRemoveRequest = AddonRemoveRequest;
+export type MCPRemoveResponse = AddonChangeResponse;
+export type PackageAddResponse = AddonChangeResponse;
+export type PackageListRequest = AddonListRequest;
+export type PackageListResponse = AddonListResponse;
+export type PackageRemoveRequest = AddonRemoveRequest;
+export type PackageRemoveResponse = AddonChangeResponse;
+export type SkillListRequest = AddonListRequest;
+export type SkillListResponse = AddonListResponse;
+export type SkillRemoveRequest = AddonRemoveRequest;
+export type SkillRemoveResponse = AddonChangeResponse;
+export type SkillSaveResponse = AddonChangeResponse;
+export type AddonSetEnabledRequest = { kind: AddonKind; name: string; room?: RoomID; enabled: boolean; };
+export type AddonSetEnabledResponse = { };
+export type BoxNoticeRequest = { text: string; };
+export type BoxNoticeResponse = { };
+export type SessionNotice = { session: SessionID; text: string; };
+export type AddonGlobalArgs = { remove?: boolean; addon: AddonKind; name: string; source?: string; description?: string; bundle?: string; url?: string; command?: string; args?: Array<string> | null; };
 export type InstructionsGetRequest = { room?: RoomID; };
 export type InstructionsGetResponse = { text: string; hash: string; savedAt?: string | null; };
 export type InstructionsSetRequest = { room?: RoomID; text: string; base: string; };
 export type InstructionsSetResponse = { hash: string; };
-export type Method = "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "proxy.key" | "proxy.usage" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.compacted" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "issue.list" | "issue.status" | "issue.track" | "issue.untrack" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "session.responsibilities" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled" | "workflow.run" | "workflow.status" | "workflow.list" | "workflow.pin" | "workflow.step_start" | "workflow.step_end" | "workflow.step_transcript";
+export type Method = "addon.list" | "addon.set_enabled" | "box.notice" | "mcp.add" | "mcp.list" | "mcp.remove" | "package.add" | "package.list" | "package.remove" | "skill.list" | "skill.remove" | "skill.save" | "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "proxy.key" | "proxy.usage" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.compacted" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.output" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "issue.list" | "issue.status" | "issue.track" | "issue.untrack" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "session.responsibilities" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled" | "workflow.run" | "workflow.status" | "workflow.list" | "workflow.pin" | "workflow.step_start" | "workflow.step_end" | "workflow.step_transcript";
 export type ErrorCode = "podman_required" | "invalid" | "unknown_action" | "not_found" | "forbidden" | "conflict" | "room_limited" | "profile_exists" | "move_busy" | "has_children" | "parent_closing" | "session_closing" | "stale" | "github_quota" | "visual_superseded" | "unavailable" | "reconnect_unavailable" | "models_unavailable" | "store_from_v1" | "store_too_old" | "no_grant";
 export type Error = { code: ErrorCode; message: string; visual?: VisualSuperseded | null; limited?: RoomLimited | null; };
 export type VisualSuperseded = { event: EventID; version: number; seq: number; };
@@ -543,6 +573,7 @@ export type EventBody =
   | { type: "session.compacted"; body: SessionCompacted }
   | { type: "session.failed"; body: SessionFailed }
   | { type: "session.moved"; body: SessionMoved }
+  | { type: "session.notice"; body: SessionNotice }
   | { type: "session.profile_changed"; body: SessionProfileChanged }
   | { type: "session.restarted"; body: SessionRestarted }
   | { type: "session.started"; body: SessionStarted }
@@ -554,7 +585,7 @@ export type EventBody =
   | { type: "workflow.ended"; body: WorkflowEnded }
   | { type: "workflow.step_changed"; body: WorkflowStepChanged }
 ;
-export type OpArgs = AccountsActionArgs | HostexecGrantArgs | HostexecRunArgs | PrOpenArgs;
+export type OpArgs = AccountsActionArgs | AddonGlobalArgs | HostexecGrantArgs | HostexecRunArgs | PrOpenArgs;
 export type BoxMessageBody =
   | { type: "archive"; body: Archive }
   | { type: "compact"; body: Compact }
@@ -568,6 +599,18 @@ export type BoxMessageBody =
   | { type: "turn.stop"; body: TurnStop }
 ;
 export interface MethodMap {
+  "addon.list": { request: AddonListRequest; response: AddonListResponse };
+  "addon.set_enabled": { request: AddonSetEnabledRequest; response: AddonSetEnabledResponse };
+  "box.notice": { request: BoxNoticeRequest; response: BoxNoticeResponse };
+  "mcp.add": { request: MCPAddRequest; response: MCPAddResponse };
+  "mcp.list": { request: MCPListRequest; response: MCPListResponse };
+  "mcp.remove": { request: MCPRemoveRequest; response: MCPRemoveResponse };
+  "package.add": { request: PackageAddRequest; response: PackageAddResponse };
+  "package.list": { request: PackageListRequest; response: PackageListResponse };
+  "package.remove": { request: PackageRemoveRequest; response: PackageRemoveResponse };
+  "skill.list": { request: SkillListRequest; response: SkillListResponse };
+  "skill.remove": { request: SkillRemoveRequest; response: SkillRemoveResponse };
+  "skill.save": { request: SkillSaveRequest; response: SkillSaveResponse };
   "instructions.get": { request: InstructionsGetRequest; response: InstructionsGetResponse };
   "instructions.set": { request: InstructionsSetRequest; response: InstructionsSetResponse };
   "web.login": { request: WebLoginRequest; response: WebLoginResponse };

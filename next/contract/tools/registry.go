@@ -78,6 +78,13 @@ type PostInput struct {
 	EndTurn      bool                  `json:"endTurn,omitempty"` // read by the box's Pi extension, which alone can end a turn
 }
 
+// SkillSaveInput is what a caller names. A box reads a local path itself, so the engine gets the folder.
+type SkillSaveInput struct {
+	Path   string          `json:"path"`
+	Room   contract.RoomID `json:"room,omitempty"`
+	Global bool            `json:"global,omitempty"`
+}
+
 type FileRequest struct {
 	File string `json:"file"`
 }

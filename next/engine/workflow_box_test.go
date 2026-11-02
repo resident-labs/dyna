@@ -60,6 +60,7 @@ type crewUpstream struct {
 	requests []crewRequest
 	gates    map[string]chan struct{}
 	tools    map[string][]crewTool
+	bodies   map[string][2]string // the last system prompt and messages of each task
 }
 
 var crewTask = regexp.MustCompile(`(task|refuse)-[a-z0-9]+`)
@@ -69,11 +70,16 @@ func (m *crewUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Model    string          `json:"model"`
 		Messages json.RawMessage `json:"messages"`
+		System   json.RawMessage `json:"system"`
 	}
 	_ = json.Unmarshal(data, &body)
 	task := crewTask.FindString(string(body.Messages))
 	m.mu.Lock()
 	m.requests = append(m.requests, crewRequest{task, body.Model, r.Header.Get("X-Claude-Code-Session-Id")})
+	if m.bodies == nil {
+		m.bodies = map[string][2]string{}
+	}
+	m.bodies[task] = [2]string{string(body.System), string(body.Messages)}
 	gate := m.gates[task]
 	m.mu.Unlock()
 	if gate != nil {
@@ -109,6 +115,12 @@ func (m *crewUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	send("content_block_stop", `{"type":"content_block_stop","index":0}`)
 	send("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`)
 	send("message_stop", `{"type":"message_stop"}`)
+}
+
+func (m *crewUpstream) lastBody(task string) (string, string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.bodies[task][0], m.bodies[task][1]
 }
 
 func (m *crewUpstream) hold(tasks ...string) {
@@ -310,6 +322,9 @@ func (c *realCrew) addRepo(server *api.API, root string, files map[string]string
 	c.git(root, "init", "--bare", "-b", "main", c.cache)
 	c.git(seed, "init", "-b", "main")
 	for name, text := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(seed, name)), 0755); err != nil {
+			c.t.Fatal(err)
+		}
 		if err := os.WriteFile(filepath.Join(seed, name), []byte(text), 0644); err != nil {
 			c.t.Fatal(err)
 		}
@@ -361,6 +376,7 @@ func (c *realCrew) boot(id contract.BoxID) {
 	mounts := []box.Mount{
 		{HostPath: c.layout.HostSocketFolder(id), BoxPath: "/run/dyna/engine", ReadOnly: true},
 		{HostPath: c.layout.HostBin(), BoxPath: "/opt/dyna/bin", ReadOnly: true},
+		{HostPath: c.layout.HostCache(), BoxPath: "/box/cache"},
 		{HostPath: filepath.Dir(c.layout.HostInstructions("")), BoxPath: "/run/dyna/instructions/global", ReadOnly: true, MakeDir: true},
 		{HostPath: filepath.Dir(c.layout.HostInstructions(c.room)), BoxPath: "/run/dyna/instructions/room", ReadOnly: true, MakeDir: true},
 	}

@@ -76,6 +76,8 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		return fmt.Sprintf("The default branch of %s moved to %s.", b.Repo, b.Head), nil
 	case contract.NoticePosted:
 		return b.Text, nil
+	case contract.SessionNotice:
+		return b.Text, nil
 	case contract.HookDue:
 		return fmt.Sprintf("Subscription %s is due.", b.Subscription), nil
 	case contract.HookFinished:
