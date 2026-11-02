@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -35,7 +34,7 @@ func runningSum() (string, error) {
 // Channel reads typed messages and reconnects after a broken socket. Each connection reports binary, which is how an engine
 // that restarted learns it, since a running box does not say hello again.
 func (c *Client) Channel(ctx context.Context, binary string, handle func(contract.BoxMessage) error, connected func(bool)) error {
-	delay := 500 * time.Millisecond
+	var delay backoff
 	for {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://dyna/v1/box/channel?binary="+url.QueryEscape(binary), nil)
 		if err != nil {
@@ -47,7 +46,7 @@ func (c *Client) Channel(ctx context.Context, binary string, handle func(contrac
 				defer resp.Body.Close()
 				return refusal("box channel", resp)
 			}
-			delay = 500 * time.Millisecond
+			delay = backoff{}
 			connected(true)
 			decoder := json.NewDecoder(resp.Body)
 			for {
@@ -74,19 +73,8 @@ func (c *Client) Channel(ctx context.Context, binary string, handle func(contrac
 			resp.Body.Close()
 			connected(false)
 		}
-		if ctx.Err() != nil {
+		if !delay.wait(ctx) {
 			return ctx.Err()
-		}
-		timer := time.NewTimer(delay)
-		select {
-		case <-timer.C:
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		}
-		delay *= 2
-		if delay > 10*time.Second {
-			delay = 10 * time.Second
 		}
 	}
 }
