@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -176,14 +177,24 @@ func (s *Service) beginRun(ctx context.Context, sub store.Subscription, now time
 	if run.Host, err = s.placeRun(ctx, sub, run.ID, size); err != nil || run.Host == "" {
 		return err
 	}
-	begun, err := s.store.BeginRun(ctx, sub, run)
+	begun, event, err := s.store.BeginRun(ctx, sub, run)
 	if err != nil || !begun {
 		return err
+	}
+	spec := box.RunSpec{ID: run.ID, Subscription: sub.ID, Host: run.Host, Room: run.Room, Image: sub.Run.Image, Size: size, Command: sub.Run.Command, Files: sub.Run.Files}
+	// A Run fired by an event reads it on stdin. Outside text in it keeps its outside flag, for the script to see.
+	if event != nil {
+		body, err := json.Marshal(*event)
+		if err != nil {
+			return err
+		}
+		spec.Event = event.Body.EventType()
+		spec.Files = append(slices.Clone(spec.Files), contract.RunFile{Path: box.RunEventFile, Body: string(body)})
 	}
 	s.hookStarts.add(run.ID)
 	go func() {
 		defer s.hookStarts.done(run.ID)
-		err := s.hooks.StartRun(ctx, box.RunSpec{ID: run.ID, Subscription: sub.ID, Host: run.Host, Room: run.Room, Image: sub.Run.Image, Size: size, Command: sub.Run.Command, Files: sub.Run.Files})
+		err := s.hooks.StartRun(ctx, spec)
 		if err == nil {
 			return
 		}

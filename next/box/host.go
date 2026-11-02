@@ -82,8 +82,12 @@ const BaseImage = "base"
 // RunLimit is the longest a subscription's Run may take.
 const RunLimit = 30 * time.Minute
 
+// RunEventFile holds the event that fired a Run, among its files. The command reads it on stdin.
+const RunEventFile = ".dyna-event.json"
+
 // RunSpec is one subscription Run. Image is BaseImage or an image folder of the room's default repository,
-// never a registry reference, and a Run with no room has no shared folder and no repository.
+// never a registry reference, and a Run with no room has no shared folder and no repository. Event is the type of what fired
+// it, with RunEventFile among Files, and a schedule's Run has neither.
 type RunSpec struct {
 	ID           contract.BoxID
 	Subscription contract.SubscriptionID
@@ -93,6 +97,7 @@ type RunSpec struct {
 	Size         contract.BoxSize
 	Command      []string
 	Files        []contract.RunFile
+	Event        contract.EventType
 }
 
 // RunContainer is a RunSpec with its image and its host paths resolved.
@@ -101,6 +106,7 @@ type RunContainer struct {
 	Size      contract.BoxSize
 	Command   []string
 	Mounts    []Mount
+	Event     contract.EventType
 }
 
 // RunStatus is what a host knows about a Run's container.

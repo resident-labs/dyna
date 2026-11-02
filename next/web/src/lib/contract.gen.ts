@@ -275,7 +275,7 @@ export type HookHandoffReason = "checkoutUnverified";
 export type SessionHandoff = { name: V1Address; profile: string; profileWarning?: ProfileHandoffReason; parent?: V1Address; goals?: Array<GoalID> | null; archiveRef?: string; lastPost: string; };
 export type ProfileHandoffReason = "unsupportedMuse";
 export type SubscriptionScope = "machine" | "room" | "session";
-export type Subscription = { id: SubscriptionID; scope: SubscriptionScope; room?: RoomID; session?: SessionID; on?: Array<EventType> | null; every?: DurationMS; wake?: Principal | null; run?: RunSpec | null; };
+export type Subscription = { id: SubscriptionID; scope: SubscriptionScope; room?: RoomID; session?: SessionID; on?: Array<EventType> | null; where?: Array<string> | null; every?: DurationMS; wake?: Principal | null; run?: RunSpec | null; };
 export type RunSpec = { command: Array<string> | null; image: string; size: BoxSizeName; host?: HostName; files?: Array<RunFile> | null; };
 export type RunFile = { path: string; body: string; };
 export type ConnectStartRequest = { relay: string; name: string; };
@@ -356,7 +356,15 @@ export type BoxSizeName = "agent" | "small" | "medium" | "large" | "xlarge";
 export type BoxSize = { name: BoxSizeName; cpus: number; memBytes: number; pids: number; };
 export type GitHubKind = "issue" | "pr";
 export type GitHubAction = "opened" | "edited" | "commented" | "review_commented" | "reviewed" | "closed" | "reopened" | "merged" | "labeled" | "unlabeled" | "assigned" | "unassigned" | "milestoned" | "demilestoned" | "renamed" | "review_requested" | "review_request_removed" | "convert_to_draft" | "ready_for_review" | "head_ref_force_pushed" | "mentioned";
-export type GitHubItem = { repo: RepoName; number: number; kind: GitHubKind; action: GitHubAction; actor: string; author?: string; url: string; detail?: string; text?: string; outside: boolean; };
+export type GitHubItem = { repo: RepoName; number: number; kind?: GitHubKind; action?: GitHubAction; session?: SessionID; actor?: string; author?: string; url: string; detail?: string; text?: string; outside?: boolean; };
+export type PrOpened = GitHubItem;
+export type PrMergedEvent = GitHubItem;
+export type PrClosedEvent = GitHubItem;
+export type IssueOpenedEvent = GitHubItem;
+export type IssueClosedEvent = GitHubItem;
+export type GitHubComment = GitHubItem;
+export type GitHubLabel = GitHubItem;
+export type GitHubMention = GitHubItem;
 export type GoalState = "active" | "done" | "dropped";
 export type GoalItemState = "open" | "done" | "dropped";
 export type GoalItem = { number: number; text: string; state: GoalItemState; };
@@ -420,7 +428,6 @@ export type IssueUntrackRequest = { repo?: RepoName; number: number; };
 export type IssueUntrackResponse = { };
 export type IssueChange = { issue: IssueSummary; kinds?: Array<PrChangeKind> | null; outside: boolean; comments?: Array<PrComment> | null; moreComments?: number; actions?: Array<GitHubItem> | null; };
 export type IssueChanged = { session: SessionID; changes: Array<IssueChange> | null; };
-export type IssueClosedEvent = { repo: RepoName; number: number; session: SessionID; url: string; };
 export type OpKind = string;
 export type Class = "auto" | "owner";
 export type OpState = "pending" | "approved" | "running" | "denied" | "expired" | "withdrawn" | "done" | "failed";
@@ -432,7 +439,6 @@ export type Target = { kind: TargetKind; name: string; };
 export type Change = { field: ChangeField; old: string; new: string; };
 export type Decision = { by: Principal; approved: boolean; reason?: string; at: string; };
 export type PrOpenArgs = { title: string; body: string; base: string; head?: string; draft: boolean; };
-export type PrOpened = { repo: RepoName; number: number; session: SessionID; url: string; };
 export type PrOpenResult = { number: number; url: string; };
 export type OpResult = { pr?: PrOpenResult | null; exitCode: number; cause?: FailureCause; error?: string; output?: string; truncated?: boolean; outputFile?: string; };
 export type OpSubmitRequest = { clientId?: string; operation: Operation; };
@@ -463,10 +469,8 @@ export type PrUntrackResponse = { };
 export type PrComment = { author: string; body: string; url: string; outside: boolean; };
 export type PrChange = { pr: PrSummary; kinds?: Array<PrChangeKind> | null; failedChecks?: Array<string> | null; outside: boolean; comments?: Array<PrComment> | null; moreComments?: number; actions?: Array<GitHubItem> | null; };
 export type PrChanged = { session: SessionID; changes: Array<PrChange> | null; issues?: Array<IssueChange> | null; };
-export type PrMergedEvent = { repo: RepoName; number: number; session: SessionID; url: string; };
-export type PrClosedEvent = { repo: RepoName; number: number; session: SessionID; url: string; };
 export type CIFinished = { repo: RepoName; number: number; session: SessionID; url: string; head: string; result: PrCI; };
-export type RepoMainUpdated = { repo: RepoName; head: string; };
+export type GitMainUpdated = { repo: RepoName; head: string; };
 export type ProxyKeyRequest = { reset?: boolean; };
 export type ProxyKeyResponse = { key: string; };
 export type ProxyUsageRequest = { };
@@ -495,7 +499,7 @@ export type SessionAccountChoice = { id: AccountID; label: string; };
 export type SessionAccountResponse = { account?: AccountID; label?: string; issue?: SessionAccountIssue; choices: Array<SessionAccountChoice> | null; };
 export type SessionSetAccountRequest = { session: SessionID; account?: AccountID; };
 export type SessionSetAccountResponse = { };
-export type SubscriptionAddRequest = { scope: SubscriptionScope; room?: RoomID; session?: SessionID; on?: Array<EventType> | null; every?: DurationMS; wake?: Principal | null; run?: RunSpec | null; };
+export type SubscriptionAddRequest = { scope: SubscriptionScope; room?: RoomID; session?: SessionID; on?: Array<EventType> | null; where?: Array<string> | null; every?: DurationMS; wake?: Principal | null; run?: RunSpec | null; };
 export type SubscriptionAddResponse = { id: SubscriptionID; };
 export type SubscriptionListRequest = { room?: RoomID; };
 export type SubscriptionListResponse = { subscriptions: Array<SubscriptionInfo> | null; };
@@ -508,6 +512,7 @@ export type HookResult = "passed" | "failed" | "stopped";
 export type HookFinished = { subscription: SubscriptionID; result: HookResult; exitCode: number; cause?: FailureCause; output?: string; failures?: number; retryAt?: string | null; };
 export type HookDue = { subscription: SubscriptionID; };
 export type NoticePosted = { text: string; };
+export type EventFields = { };
 export type WebSearchProvider = "" | "chatgpt" | "claude" | "muse" | "kimi" | "zai" | "xai" | "brave" | "exa" | "tavily";
 export type WebSearchRequest = { query: string; limit?: number; };
 export type WebSearchResult = { title: string; url: string; snippet: string; provider: WebSearchProvider; };
@@ -549,11 +554,21 @@ export type EventBody =
   | { type: "box.changed"; body: BoxChanged }
   | { type: "box.pressure"; body: BoxPressure }
   | { type: "checkin.due"; body: CheckinDue }
-  | { type: "ci.finished"; body: CIFinished }
   | { type: "computer.changed"; body: ComputerChanged }
   | { type: "connect.connector"; body: ConnectConnector }
   | { type: "conversation.read"; body: ConversationRead }
-  | { type: "github.item"; body: GitHubItem }
+  | { type: "git.main_updated"; body: GitMainUpdated }
+  | { type: "github.ci.finished"; body: CIFinished }
+  | { type: "github.comment"; body: GitHubComment }
+  | { type: "github.issue.changed"; body: IssueChanged }
+  | { type: "github.issue.closed"; body: IssueClosedEvent }
+  | { type: "github.issue.opened"; body: IssueOpenedEvent }
+  | { type: "github.label"; body: GitHubLabel }
+  | { type: "github.mention"; body: GitHubMention }
+  | { type: "github.pr.changed"; body: PrChanged }
+  | { type: "github.pr.closed"; body: PrClosedEvent }
+  | { type: "github.pr.merged"; body: PrMergedEvent }
+  | { type: "github.pr.opened"; body: PrOpened }
   | { type: "goal.ended"; body: GoalEnded }
   | { type: "goal.item_changed"; body: GoalItemChanged }
   | { type: "goal.set"; body: GoalSet }
@@ -563,21 +578,14 @@ export type EventBody =
   | { type: "host.disk_low"; body: HostDiskLow }
   | { type: "image.built"; body: ImageBuilt }
   | { type: "image.failed"; body: ImageFailed }
-  | { type: "issue.changed"; body: IssueChanged }
-  | { type: "issue.closed"; body: IssueClosedEvent }
   | { type: "notice.posted"; body: NoticePosted }
   | { type: "op.decided"; body: OpDecided }
   | { type: "op.ran"; body: OpRan }
   | { type: "op.requested"; body: OpRequested }
   | { type: "post.created"; body: PostCreated }
-  | { type: "pr.changed"; body: PrChanged }
-  | { type: "pr.closed"; body: PrClosedEvent }
-  | { type: "pr.merged"; body: PrMergedEvent }
-  | { type: "pr.opened"; body: PrOpened }
   | { type: "question.answered"; body: QuestionAnswered }
   | { type: "question.asked"; body: QuestionAsked }
   | { type: "question.withdrawn"; body: QuestionWithdrawn }
-  | { type: "repo.main_updated"; body: RepoMainUpdated }
   | { type: "room.deleted"; body: RoomDeleted }
   | { type: "room.deleting"; body: RoomDeleting }
   | { type: "room.limits_changed"; body: RoomLimitsChanged }

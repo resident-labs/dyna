@@ -396,6 +396,13 @@ func (s *Server) metaEvents(repo contract.RepoName, number int, actor string, be
 	return moved || before.Body != after.Body
 }
 
+// Mention shows a login mentioned on an item, which is how GitHub tells it: the actor is the login, and nothing says who wrote it.
+func (s *Server) Mention(repo contract.RepoName, number int, login string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.emit(repo, number, "mentioned", login, nil)
+}
+
 // Hold keeps what edits add to the feeds off them until Release, for a feed that shows an item late.
 func (s *Server) Hold() {
 	s.mu.Lock()

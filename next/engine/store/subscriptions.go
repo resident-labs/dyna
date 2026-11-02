@@ -11,11 +11,13 @@ import (
 	"github.com/resident-labs/dyna/room"
 )
 
-// defaultEventsJSON lists what wakes root by default: engine notices and repository events (spec 7.2, 8.5).
-// An owned repository event is left to its owner, and a type that nothing emits yet matches nothing.
-const defaultEventsJSON = `["notice.posted","pr.opened","pr.merged","pr.closed","ci.finished","repo.main_updated"]`
+// defaultEventsJSON lists what wakes root by default: engine notices and the default branch moving (spec 7.2, 8.5).
+const defaultEventsJSON = `["notice.posted","git.main_updated"]`
 
-var defaultEvents = []contract.EventType{"notice.posted", "pr.opened", "pr.merged", "pr.closed", "ci.finished", "repo.main_updated"}
+var defaultEvents = []contract.EventType{"notice.posted", "git.main_updated"}
+
+// maxQueuedRuns bounds the events waiting for a subscription's Runs. A burst past it stays in the room log but starts no Run.
+const maxQueuedRuns = 256
 
 // roomSubscriptions selects a room's subscriptions: its own, its sessions', and a machine one that wakes a session here.
 const roomSubscriptions = `room=?1 OR session IN (SELECT id FROM sessions WHERE room=?1) OR (wake_kind='session' AND wake_id IN (SELECT id FROM sessions WHERE room=?1))`
@@ -106,6 +108,11 @@ func insertSubscription(ctx context.Context, tx *sql.Tx, sub contract.Subscripti
 	}
 	for _, kind := range sub.On {
 		if _, err := tx.ExecContext(ctx, "INSERT INTO subscription_events(sub,event_type) VALUES(?,?)", sub.ID, kind); err != nil {
+			return err
+		}
+	}
+	for pos, clause := range sub.Where {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO subscription_where(sub,pos,clause) VALUES(?,?,?)", sub.ID, pos, clause); err != nil {
 			return err
 		}
 	}
@@ -207,6 +214,9 @@ func loadSubscriptionParts(ctx context.Context, q sqlQuery, sub *Subscription) e
 	if sub.On, err = listIDs[contract.EventType](ctx, q, "SELECT event_type FROM subscription_events WHERE sub=? ORDER BY event_type", sub.ID); err != nil {
 		return err
 	}
+	if sub.Where, err = listIDs[string](ctx, q, "SELECT clause FROM subscription_where WHERE sub=? ORDER BY pos", sub.ID); err != nil {
+		return err
+	}
 	if sub.Run == nil {
 		return nil
 	}
@@ -251,6 +261,8 @@ func (s *Store) RoomSubscriptions(ctx context.Context, id contract.RoomID) ([]Su
 func deleteSubscription(ctx context.Context, tx *sql.Tx, id contract.SubscriptionID) error {
 	for _, statement := range []string{
 		"DELETE FROM subscription_events WHERE sub=?",
+		"DELETE FROM subscription_where WHERE sub=?",
+		"DELETE FROM subscription_queue WHERE sub=?",
 		"DELETE FROM subscription_args WHERE sub=?",
 		"DELETE FROM subscription_files WHERE sub=?",
 		"DELETE FROM subscriptions WHERE id=?",
@@ -306,12 +318,9 @@ func subscriptionMatches(sub Subscription, event contract.Event, dm bool) bool {
 	if !found {
 		return false
 	}
-	if owned, ok := event.Body.(interface{ OwnedBy() contract.SessionID }); ok && sub.Default && owned.OwnedBy() != "" {
-		return false
-	}
-	// An issue.changed with no news only keeps rows current, so it has nothing to say.
-	issues, isIssues := event.Body.(contract.IssueChanged)
-	if isIssues && !issues.Waking() {
+	// A change that only keeps a row current has nothing to say, and a Where is checked here, before anything starts.
+	waking, hasNews := event.Body.(interface{ Waking() bool })
+	if hasNews && !waking.Waking() || !contract.MatchesWhere(sub.Where, event.Body) {
 		return false
 	}
 	if sub.Wake == nil {
@@ -321,9 +330,16 @@ func subscriptionMatches(sub Subscription, event contract.Event, dm bool) bool {
 	if event.From.Kind == contract.PrincipalSession && event.From.Session == sub.Wake.Session {
 		return false
 	}
-	// The issue's owner already has the pass in its one delivery, on this event or on the pr.changed beside it.
-	if isIssues && issues.Session == sub.Wake.Session {
-		return false
+	// The owner already has the pass in its one delivery, on this event or on the github.pr.changed beside it.
+	switch body := event.Body.(type) {
+	case contract.PrChanged:
+		if body.Session == sub.Wake.Session {
+			return false
+		}
+	case contract.IssueChanged:
+		if body.Session == sub.Wake.Session {
+			return false
+		}
 	}
 	_, err := room.RenderDelivery(event.Body)
 	return err == nil
@@ -394,9 +410,12 @@ func (s *Store) DispatchEvents(ctx context.Context, limit int) (int, error) {
 	return count, err
 }
 
-// fire wakes a target on an event, or marks a Run due. Many events before a Run starts make one Run.
+// fire wakes a target on an event, or queues the event for a Run of its own. Runs of a subscription go one at a time.
 func (s *Store) fire(ctx context.Context, tx *sql.Tx, sub Subscription, event contract.Event) error {
 	if sub.Wake == nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO subscription_queue(sub,seq) SELECT ?1,?2 WHERE (SELECT count(*) FROM subscription_queue WHERE sub=?1)<?3", sub.ID, event.Seq, maxQueuedRuns); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx, "UPDATE subscriptions SET due_at=? WHERE id=? AND due_at=0", event.Time.UnixMilli(), sub.ID)
 		return err
 	}
@@ -459,12 +478,13 @@ func (s *Store) FireScheduledWake(ctx context.Context, sub Subscription, event c
 	})
 }
 
-// BeginRun claims a due subscription for one Run. The unique row is what stops two Runs of a subscription
-// overlapping, and the check on due_at is what stops one firing being started twice.
-func (s *Store) BeginRun(ctx context.Context, sub Subscription, run HookRun) (bool, error) {
+// BeginRun claims a due subscription for one Run, and returns the event that Run is for, or nil for a schedule's. The unique row
+// is what stops two Runs of a subscription overlapping, and the check on due_at is what stops one firing being started twice.
+func (s *Store) BeginRun(ctx context.Context, sub Subscription, run HookRun) (bool, *contract.Event, error) {
 	begun := false
+	var event *contract.Event
 	err := s.Write(ctx, func(tx *sql.Tx) error {
-		begun = false
+		begun, event = false, nil
 		result, err := tx.ExecContext(ctx, "UPDATE subscriptions SET due_at=? WHERE id=? AND enabled=1 AND due_at=?", nextDue(sub, run.StartedAt), sub.ID, millis(sub.DueAt))
 		if err != nil {
 			return err
@@ -477,10 +497,40 @@ func (s *Store) BeginRun(ctx context.Context, sub Subscription, run HookRun) (bo
 			return err
 		}
 		n, err := result.RowsAffected()
-		begun = n == 1
-		return err
+		if begun = n == 1; err != nil || !begun || sub.Every > 0 {
+			return err
+		}
+		return s.nextQueued(ctx, tx, sub.ID, run.StartedAt, &event)
 	})
-	return begun, err
+	return begun, event, err
+}
+
+// nextQueued takes the oldest event waiting for a Run, and leaves the subscription due if another waits behind it.
+func (s *Store) nextQueued(ctx context.Context, tx *sql.Tx, id contract.SubscriptionID, at time.Time, event **contract.Event) error {
+	rows, err := tx.QueryContext(ctx, "SELECT e.seq,e.id,e.at,e.room,e.type,e.from_kind,e.from_id,e.body FROM subscription_queue q JOIN events e ON e.seq=q.seq WHERE q.sub=? ORDER BY q.seq LIMIT 1", id)
+	if err != nil {
+		return err
+	}
+	var found *contract.Event
+	if rows.Next() {
+		next, err := scanEvent(rows)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		found = &next
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil || found == nil {
+		return err
+	}
+	*event = found
+	if _, err := tx.ExecContext(ctx, "DELETE FROM subscription_queue WHERE sub=? AND seq<=?", id, found.Seq); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, "UPDATE subscriptions SET due_at=? WHERE id=? AND EXISTS(SELECT 1 FROM subscription_queue WHERE sub=?)", at.UnixMilli(), id, id)
+	return err
 }
 
 // ActiveRuns lists the Runs in progress.

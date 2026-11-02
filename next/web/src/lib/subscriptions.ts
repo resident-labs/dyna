@@ -11,7 +11,8 @@ const period = (ms: number): string => {
 // What fires a subscription, as one short phrase. A long list of events reads as its count; the row's title holds them.
 export const subscriptionWhen = ({ subscription }: SubscriptionInfo): string => {
   const on = subscription.on ?? [];
-  return subscription.every ? period(subscription.every) : on.length > 2 ? `On ${on.length} events` : `On ${on.join(", ")}`;
+  const where = subscription.where?.length ? ` where ${subscription.where.join(", ")}` : "";
+  return subscription.every ? period(subscription.every) : on.length > 2 ? `On ${on.length} events${where}` : `On ${on.join(", ")}${where}`;
 };
 
 // What a subscription does. A Run reads as its command, and a wake as the session it wakes.

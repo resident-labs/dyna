@@ -24,6 +24,57 @@ func beforeFeeds(text string) string {
 // beforeWorkflows is the schema without the tables of steps 66 and 67, which come last in the file, and with the pr_owners columns of the steps that followed undone.
 var beforeWorkflows = beforeSeenColumns(strings.Replace(schema[:strings.Index(schema, "CREATE TABLE workflow_runs")], ", meta TEXT NOT NULL DEFAULT '', meta_wake_at INTEGER NOT NULL DEFAULT 0", "", 1))
 
+func TestUpgradeRenamesGitHubEventsAndKeepsDefaultsQuiet(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	before := schema[:strings.Index(schema, "CREATE TABLE subscription_where")]
+	if _, err = db.Exec(before); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`INSERT INTO meta(key,value) VALUES ('schema_version','71');
+		INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+		INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('s','r','s','p','open','',0);
+		INSERT INTO events(id,at,room,type,from_kind,from_id,body) VALUES('e1',1,'r','pr.changed','engine','','{}'),('e2',2,'r','repo.main_updated','engine','','{}'),('e3',3,'r','ci.finished','engine','','{}'),('e4',4,'r','post.created','engine','','{}');
+		INSERT INTO subscriptions(id,scope,room,every_ms,wake_kind,wake_id,run_image,run_size,created_at) VALUES('sub_r','room','r',0,'session','s','','',0),('sub_mine','room','r',0,'session','s','','',0);
+		INSERT INTO subscription_events(sub,event_type) VALUES('sub_r','notice.posted'),('sub_r','pr.opened'),('sub_r','pr.merged'),('sub_r','pr.closed'),('sub_r','ci.finished'),('sub_r','repo.main_updated'),('sub_mine','pr.merged'),('sub_mine','issue.changed')`); err != nil {
+		t.Fatal(err)
+	}
+	if err = upgrade(db, floorVersion, floorCommit, steps, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = compareSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	list := func(query string) string {
+		rows, err := db.Query(query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var value string
+			if err := rows.Scan(&value); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, value)
+		}
+		return strings.Join(out, " ")
+	}
+	if got, want := list("SELECT type FROM events ORDER BY id"), "github.pr.changed git.main_updated github.ci.finished post.created"; got != want {
+		t.Fatalf("events: %s", got)
+	}
+	if got, want := list("SELECT event_type FROM subscription_events WHERE sub='sub_r' ORDER BY event_type"), "git.main_updated notice.posted"; got != want {
+		t.Fatalf("default: %s", got)
+	}
+	if got, want := list("SELECT event_type FROM subscription_events WHERE sub='sub_mine' ORDER BY event_type"), "github.issue.changed github.pr.merged"; got != want {
+		t.Fatalf("a subscription of the owner's: %s", got)
+	}
+}
+
 func TestUpgradeGivesTrackedPRsNoMetadata(t *testing.T) {
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
 	if err != nil {
@@ -221,7 +272,7 @@ func TestPermanentHostexecGrantMigration(t *testing.T) {
  INSERT INTO grants(id,kind,expires_at,revoked_at,expired_at) VALUES('active','hostexec',4102444800000,NULL,NULL),('past','hostexec',1,NULL,NULL),('revoked','hostexec',4102444800000,1,NULL);
  CREATE TABLE operations(kind TEXT,state TEXT,args BLOB);
  INSERT INTO operations VALUES('hostexec.grant','pending','{"expires":"future","never":false,"reason":"x"}');
- CREATE TABLE events (seq INTEGER PRIMARY KEY); CREATE TABLE rooms (id TEXT PRIMARY KEY); CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT, parent TEXT, goal TEXT, created_at INTEGER, closed_at INTEGER); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);
+ CREATE TABLE events (seq INTEGER PRIMARY KEY, type TEXT); CREATE TABLE rooms (id TEXT PRIMARY KEY); CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT, parent TEXT, goal TEXT, created_at INTEGER, closed_at INTEGER); CREATE TABLE uploads (sha256 TEXT); CREATE TABLE archives (session TEXT, repo TEXT, ref TEXT, commit_sha TEXT, created_at INTEGER, expires_at INTEGER, retry_at INTEGER);
  CREATE TABLE hosts(name TEXT); CREATE TABLE turns(id TEXT); CREATE TABLE pr_owners (repo TEXT, number INTEGER, session TEXT, goal TEXT, approved_head TEXT, branch TEXT); CREATE TABLE repos (repo TEXT PRIMARY KEY);`)
 	if err != nil {
 		t.Fatal(err)
@@ -247,7 +298,7 @@ func TestOpenRootsGetTheAskGrant(t *testing.T) {
 	defer db.Close()
 	_, err = db.Exec(`CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO meta VALUES('schema_version','61');
  CREATE TABLE pr_owners (repo TEXT, number INTEGER, session TEXT, goal TEXT, approved_head TEXT, branch TEXT); CREATE TABLE repos (repo TEXT PRIMARY KEY);
- CREATE TABLE events (seq INTEGER PRIMARY KEY); CREATE TABLE rooms (id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT 'open');
+ CREATE TABLE events (seq INTEGER PRIMARY KEY, type TEXT); CREATE TABLE rooms (id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT 'open');
  CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT, parent TEXT, created_at INTEGER, closed_at INTEGER, goal TEXT);
  CREATE TABLE grants (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT NOT NULL, to_kind TEXT NOT NULL, to_id TEXT NOT NULL, hosts BLOB NOT NULL, expires_at INTEGER, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at INTEGER NOT NULL, revoked_at INTEGER, expired_at INTEGER, reason TEXT NOT NULL DEFAULT '');
  INSERT INTO rooms(id) VALUES('room');
