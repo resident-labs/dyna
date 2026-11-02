@@ -378,7 +378,8 @@ func TestEventWakeSkipsOwnEventsAndDMs(t *testing.T) {
 	if got := delivered(); got != before {
 		t.Fatalf("own post or a DM reached the subscriber: %d then %d", before, got)
 	}
-	if _, problem := s.Post(ctx, sessionCaller(rootID), contract.PostRequest{Room: room, Text: "for everyone"}); problem != nil {
+	// The owner last wrote to root in its DM, so root names the feed.
+	if _, problem := s.Post(ctx, sessionCaller(rootID), contract.PostRequest{Room: room, Text: "for everyone", Home: contract.Conversation{Kind: contract.ConversationFeed}}); problem != nil {
 		t.Fatal(problem)
 	}
 	pass(t, s, ctx)
