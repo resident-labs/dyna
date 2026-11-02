@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -14,6 +15,14 @@ import (
 const quiet = `(EXISTS (SELECT 1 FROM rooms WHERE id=s.room AND paused_at IS NOT NULL) OR NOT EXISTS (SELECT 1 FROM deliveries WHERE to_kind='session' AND to_id=s.id AND wake=1 AND state='pending'))
 AND EXISTS (SELECT 1 FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND ended_at<=? AND id=(SELECT id FROM turns WHERE session=s.id ORDER BY started_at DESC, rowid DESC LIMIT 1))`
 
+// BoxUpdateNoticeID is the client ID of the notice that a box's update is held up, one per box per binary.
+func BoxUpdateNoticeID(box contract.BoxID, binary string) string {
+	return "box-update:" + string(box) + ":" + binary
+}
+
+// boxUpdateNotice finds that notice among deliveries. It is not work: it holds no close and does not pass to the parent.
+const boxUpdateNotice = `EXISTS (SELECT 1 FROM events e WHERE e.seq=d.seq AND e.client_id LIKE 'box-update:%')`
+
 func (s *Store) CanDispatch(ctx context.Context, id contract.SessionID) (bool, error) {
 	var ok bool
 	err := s.Read().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL AND s.state='open' AND b.want='run' AND b.state='ready')`, id).Scan(&ok)
@@ -22,6 +31,38 @@ func (s *Store) CanDispatch(ctx context.Context, id contract.SessionID) (bool, e
 
 // StopQuiet requests stops for candidates that nothing needs and that have been quiet since the cutoff.
 func (s *Store) StopQuiet(ctx context.Context, ids []contract.SessionID, cutoff time.Time) ([]contract.SessionID, error) {
+	return s.stopFree(ctx, ids, quiet, cutoff.UnixMilli())
+}
+
+// StopStale requests stops for boxes on an old binary as soon as nothing needs them, with no wait. A wake on its way does not
+// hold one back: its delivery stays stored, Dispatch refuses a box that is not want='run', and WakeStopped starts it again.
+// The stop applies the update, so a notice that it was coming and that no turn read is dropped.
+func (s *Store) StopStale(ctx context.Context, ids []contract.SessionID) ([]contract.SessionID, error) {
+	stopped, err := s.stopFree(ctx, ids, `1`)
+	if err != nil || len(stopped) == 0 {
+		return stopped, err
+	}
+	data, err := json.Marshal(stopped)
+	if err != nil {
+		return stopped, err
+	}
+	return stopped, s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `DELETE FROM deliveries AS d WHERE d.to_kind='session' AND d.to_id IN (SELECT value FROM json_each(?)) AND d.state='pending' AND `+boxUpdateNotice, string(data))
+		return err
+	})
+}
+
+// WakeStopped starts a stopped box again when a wake is waiting for it, which a stale stop leaves on purpose. The rows are
+// the record, so a box stopped just before an engine restart still comes back. A paused room waits for its resume.
+func (s *Store) WakeStopped(ctx context.Context) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE boxes SET want='run' WHERE want='stop' AND state='stopped' AND EXISTS (SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND s.state='open' AND s.closed_at IS NULL AND r.paused_at IS NULL AND EXISTS (SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=s.id AND d.wake=1 AND d.state='pending'))`)
+		return err
+	})
+}
+
+// stopFree requests stops for the boxes nothing needs, of those that also pass rule.
+func (s *Store) stopFree(ctx context.Context, ids []contract.SessionID, rule string, args ...any) ([]contract.SessionID, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -42,7 +83,7 @@ func (s *Store) StopQuiet(ctx context.Context, ids []contract.SessionID, cutoff 
 		if err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, `UPDATE boxes SET want='stop' WHERE session IN (SELECT value FROM json_each(?)) AND want='run' AND state='ready' AND EXISTS (SELECT 1 FROM sessions s WHERE s.id=boxes.session AND s.closed_at IS NULL AND s.state!='closing' AND `+quiet+`) RETURNING session`, string(data), cutoff.UnixMilli())
+		rows, err := tx.QueryContext(ctx, `UPDATE boxes SET want='stop' WHERE session IN (SELECT value FROM json_each(?)) AND want='run' AND state='ready' AND EXISTS (SELECT 1 FROM sessions s WHERE s.id=boxes.session AND s.closed_at IS NULL AND s.state!='closing' AND `+rule+`) RETURNING session`, append([]any{string(data)}, args...)...)
 		if err != nil {
 			return err
 		}
@@ -63,7 +104,7 @@ func (s *Store) StopQuiet(ctx context.Context, ids []contract.SessionID, cutoff 
 // and no input or operation is on its way to it.
 const closable = `s.parent IS NOT NULL AND s.closed_at IS NULL AND s.state='open'
 AND r.paused_at IS NULL AND (b.state='failed' OR (b.want='stop' AND b.state='stopped'))
-AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=s.id AND d.state='pending' AND NOT ` + jobRunningNotice + `)
+AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=s.id AND d.state='pending' AND NOT ` + jobRunningNotice + ` AND NOT ` + boxUpdateNotice + `)
 AND NOT EXISTS (SELECT 1 FROM operations o WHERE o.by_kind='session' AND o.by_id=s.id AND o.state IN ('pending','approved','running'))`
 
 // aged is the normal wait. A host at its floor skips it, along with whatever only the 7-day close waits for.
@@ -140,11 +181,19 @@ func (s *Store) MarkDormantClosing(ctx context.Context, id contract.SessionID, c
 	return changed, err
 }
 
-// WakeTerminal reverses a quiet stop when a terminal opens.
+// WakeTerminal reverses a stop when a terminal opens, and tells the box loop, since a stale stop can leave a wake waiting.
 func (s *Store) WakeTerminal(ctx context.Context, id contract.BoxID) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE boxes SET want='run' WHERE id=? AND want='stop'`, id)
-		return err
+		var session contract.SessionID
+		err := tx.QueryRowContext(ctx, `UPDATE boxes SET want='run' WHERE id=? AND want='stop' RETURNING session`, id).Scan(&session)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		s.wakePending = append(s.wakePending, session)
+		return nil
 	})
 }
 

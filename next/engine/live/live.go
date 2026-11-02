@@ -34,6 +34,7 @@ type Session struct {
 	activity      contract.TurnActivity
 	activityOrder uint64
 	channel       *Channel
+	stale         bool
 	computer      *computerState
 	shell         *shellWatch
 	terminals     int
