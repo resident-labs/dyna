@@ -1,7 +1,7 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, segmentDuration, steerInput, timelineInput, timelineAnswers, timelineInputText, timelineSegments, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout } from "./timeline.ts";
+import { compactionNote, summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, segmentDuration, steerInput, timelineInput, timelineAnswers, timelineInputText, timelineSegments, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout } from "./timeline.ts";
 import type { TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
 
 const steer = (id: string, at = ""): TranscriptItem => ({ id: `steer:${id}`, event: id, seq: 6, turn: "t", at, kind: "steer", from: { kind: "owner" } });
@@ -240,4 +240,11 @@ test("an answered question reads in the thread as its text", () => {
   const input = { at: "", id: "e", seq: 1, room: "r", type: "question.answered", from: { kind: "owner" }, text: "Question: Which?" } as const;
   assert.equal(timelineInputText(input), "Question: Which?");
   assert.equal(timelineInputText({ ...input, more: true }, "Question: Which?\n\nAnswer: This"), "Question: Which?\n\nAnswer: This");
+});
+
+test("a compaction is one line that says how large the conversation was", () => {
+  assert.equal(compactionNote({ tokens: 153400 }), "Compacted the conversation at 153k tokens");
+  assert.equal(compactionNote({}), "Compacted the conversation");
+  const item = { id: "c", turn: "t", kind: "compaction", at: "2026-11-01T00:00:00Z" } as const;
+  assert.deepEqual(deriveTimelineGroups([item]), [{ kind: "item", id: "c", item }]);
 });

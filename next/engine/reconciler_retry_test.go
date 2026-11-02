@@ -179,7 +179,10 @@ type retryView struct{}
 
 func (retryView) OpenTerminal(contract.SessionID) bool { return false }
 func (retryView) SessionClosed(contract.SessionID)     {}
-func (retryView) Connected(contract.SessionID) bool    { return false }
+func (retryView) CompactBeforeStop(context.Context, contract.SessionID) bool {
+	return false
+}
+func (retryView) Connected(contract.SessionID) bool { return false }
 
 func TestReconcilerResumesInterruptedCreate(t *testing.T) {
 	s, _, sid, ctx := setup(t)

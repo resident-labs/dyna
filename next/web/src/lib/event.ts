@@ -53,6 +53,7 @@ const bodies: Record<string, Check> = {
   "session.started": object({ session: string, name: string, parent: optional(string), profile: string, goal: optional(string), doneWhen: optional(string), brief: optional(string) }),
   "session.moved": object({ session: string, newParent: string }),
   "session.closed": object({ session: string, reason: optional(oneOf("dormant", "disk")), archive: optional(string), unheld: optional(nullable(array(string))) }),
+  "session.compacted": object({ session: string, turn: string, usage, tokensBefore: optional(number), tokensAfter: optional(number), error: optional(string) }),
   "computer.changed": object({ session: string, to: computerState }),
   "box.changed": object({ box: string, session: string, host: optional(string), from: optional(boxState), to: boxState, cause, reason: optional(string) }),
   "turn.started": object({ session: string, turn: string, inputs: nullable(array(string)) }),

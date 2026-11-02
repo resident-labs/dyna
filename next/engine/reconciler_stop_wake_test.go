@@ -94,7 +94,10 @@ type openTerminalView struct{}
 
 func (openTerminalView) OpenTerminal(contract.SessionID) bool { return true }
 func (openTerminalView) SessionClosed(contract.SessionID)     {}
-func (openTerminalView) Connected(contract.SessionID) bool    { return false }
+func (openTerminalView) CompactBeforeStop(context.Context, contract.SessionID) bool {
+	return false
+}
+func (openTerminalView) Connected(contract.SessionID) bool { return false }
 
 type stopCountingHost struct {
 	fakeBoxes

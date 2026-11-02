@@ -134,26 +134,3 @@ func (s *Store) UntrackIssue(ctx context.Context, repo contract.RepoName, number
 		return err
 	})
 }
-
-// ContextIssue is one tracked open issue. It holds nothing from GitHub's free text, so the snapshot needs no wrapper.
-type ContextIssue struct {
-	Repo   contract.RepoName
-	Number int
-}
-
-func (s *Store) ContextIssues(ctx context.Context, id contract.SessionID) ([]ContextIssue, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT repo,number FROM issue_owners WHERE session=? AND state='open' ORDER BY repo,number`, id)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []ContextIssue
-	for rows.Next() {
-		var i ContextIssue
-		if err := rows.Scan(&i.Repo, &i.Number); err != nil {
-			return nil, err
-		}
-		out = append(out, i)
-	}
-	return out, rows.Err()
-}
