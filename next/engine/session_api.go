@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"slices"
 	"time"
@@ -238,6 +239,9 @@ func (s *Service) Stale(id contract.SessionID) bool {
 // managedSession loads a target and checks the caller's authority over it.
 func (s *Service) managedSession(ctx context.Context, caller contract.Principal, id contract.SessionID) (store.Session, *contract.Error) {
 	session, err := s.store.Session(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return store.Session{}, &contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("session %s is closed or does not exist; a crew closes itself when its run ends", id)}
+	}
 	if err != nil {
 		return store.Session{}, failure(err)
 	}

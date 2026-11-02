@@ -78,7 +78,7 @@ func TestASessionAddsToItsRoomAtOnce(t *testing.T) {
 		t.Fatalf("%+v %v", list, problem)
 	}
 	list, problem = s.SkillList(ctx, worker, contract.AddonListRequest{})
-	if problem != nil || len(list.Items) != 4 || !list.Items[0].BuiltIn || !list.Items[1].BuiltIn || !list.Items[2].BuiltIn || list.Items[3].Name != "pdf" {
+	if problem != nil || len(list.Items) != 5 || !list.Items[0].BuiltIn || !list.Items[1].BuiltIn || !list.Items[2].BuiltIn || !list.Items[3].BuiltIn || list.Items[4].Name != "pdf" {
 		t.Fatalf("%+v %v", list, problem)
 	}
 	if _, problem := s.MCPRemove(ctx, worker, contract.AddonRemoveRequest{Name: "docs"}); problem != nil {
@@ -208,7 +208,7 @@ func TestTheOwnerAddsGloballyWithoutAsking(t *testing.T) {
 		t.Fatal(problem)
 	}
 	list, problem := s.AddonList(ctx, ownerCaller, contract.AddonListRequest{})
-	if problem != nil || len(list.Items) != 4 || !list.Items[3].Disabled {
+	if problem != nil || len(list.Items) != 5 || !list.Items[4].Disabled {
 		t.Fatalf("%+v %v", list, problem)
 	}
 	if _, problem := s.AddonSetEnabled(ctx, ownerCaller, contract.AddonSetEnabledRequest{Kind: contract.AddonSkill, Name: "none", Room: room}); problem == nil || problem.Code != contract.ErrNotFound {
