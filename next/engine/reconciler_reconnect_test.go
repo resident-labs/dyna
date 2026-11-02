@@ -108,7 +108,8 @@ func TestReconnectAfterHostLossBeforePass(t *testing.T) {
 		for range messages {
 		}
 	}()
-	pass(contract.BoxLost)
+	// A box whose agent holds its channel is not lost, whatever the heartbeat says.
+	pass(contract.BoxReady)
 	setHost("ready")
 	pass(contract.BoxReady)
 }
