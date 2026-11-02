@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Builds next/ from this checkout's HEAD and installs it on the trial host. Run it on that host:
-# v1's `dyna job run` wrapper is gone from main. See docs/m1-run.md.
+# Builds next/ from this checkout's HEAD and installs it on the trial host. Run it on that host. See docs/m1-run.md.
 set -euo pipefail
 
 prefix="$HOME/.local/opt/dyna-next"
