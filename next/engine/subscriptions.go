@@ -149,7 +149,8 @@ func (s *Service) subscriptionSession(ctx context.Context, caller contract.Princ
 }
 
 // subscriptionAccess is the authority over a subscription. The machine is the owner's, a room is root's, and a
-// session is its own and its ancestors'. Waking a session takes the same authority over it. A Run is the
+// session is its own and its ancestors'. A session may wake itself and whom it may address (store.receiver): its parent
+// and sessions under it, or for root any session under it. A Run is the
 // owner's or root's alone, because its box reads GitHub with the engine's token: root can already reach that
 // token through its host grant (decision 6), and no other session can.
 func (s *Service) subscriptionAccess(ctx context.Context, caller contract.Principal, sub contract.Subscription) *contract.Error {
@@ -183,8 +184,14 @@ func (s *Service) subscriptionAccess(ctx context.Context, caller contract.Princi
 	if sub.Scope == contract.ScopeSession && !manages(sub.Session) {
 		return forbidden()
 	}
-	if sub.Wake != "" && !manages(sub.Wake) {
-		return forbidden()
+	if sub.Wake != "" && sub.Wake != caller.Session {
+		reach, err := s.store.Reaches(ctx, caller, sub.Wake)
+		if err != nil {
+			return failure(err)
+		}
+		if !reach {
+			return &contract.Error{Code: contract.ErrForbidden, Message: "a session can wake only itself, its parent and sessions under its parent"}
+		}
 	}
 	return nil
 }

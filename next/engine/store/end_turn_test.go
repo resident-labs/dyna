@@ -31,7 +31,7 @@ func endTurnFixture(t *testing.T, channels []contract.ReplyChannel, sent contrac
 	if err := s.CreateRoom(ctx, "room", "room", now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.writer.ExecContext(ctx, "INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('parent','room','parent','p','open','',0),('child','room','child','p','open','',0); INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES('a','parent','','agent','ready','','',0,0),('b','child','','agent','ready','','',0,0)"); err != nil {
+	if _, err = s.writer.ExecContext(ctx, "INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent) VALUES('parent','room','parent','p','open','',0,NULL),('child','room','child','p','open','',0,'parent'); INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES('a','parent','','agent','ready','','',0,0),('b','child','','agent','ready','','',0,0)"); err != nil {
 		t.Fatal(err)
 	}
 	for i, channel := range channels {

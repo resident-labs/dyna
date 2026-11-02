@@ -43,58 +43,15 @@ func pendingTo(t *testing.T, s *Service, ctx context.Context, session contract.S
 	return n
 }
 
-func TestChildPostToDeadParentIsRefused(t *testing.T) {
-	s, room, _, worker, kid, ctx := receiveTree(t)
-	from := contract.Principal{Kind: contract.PrincipalSession, Session: kid}
-	before := pendingTo(t, s, ctx, worker)
-	for _, c := range []struct {
-		state  contract.BoxState
-		reason string
-		want   string
-	}{
-		{contract.BoxFailed, "host removed", "your parent worker can't receive: its box failed (host removed). Deliver to root (mention root) until it's back."},
-		{contract.BoxLost, "", "your parent worker can't receive: its box was lost. Deliver to root (mention root) until it's back."},
-		{contract.BoxPending, "no-ready-host", "your parent worker can't receive: its box can't be placed (no-ready-host). Deliver to root (mention root) until it's back."},
-	} {
-		setBox(t, s, ctx, worker, c.state, c.reason)
-		_, problem := s.Post(ctx, from, contract.PostRequest{Room: room, Text: "result", Mentions: []string{"@worker"}})
-		if problem == nil || problem.Code != contract.ErrConflict || problem.Message != c.want {
-			t.Fatalf("%s: %+v", c.state, problem)
-		}
-	}
-	if n := pendingTo(t, s, ctx, worker); n != before {
-		t.Fatalf("refused posts queued %d inputs", n-before)
-	}
-	// A post that names root instead goes through.
-	if _, problem := s.Post(ctx, from, contract.PostRequest{Room: room, Text: "result", Mentions: []string{"@root"}}); problem != nil {
-		t.Fatal(problem)
-	}
-}
-
-func TestChildPostToClosingParentIsRefused(t *testing.T) {
-	s, room, _, worker, kid, ctx := receiveTree(t)
-	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "UPDATE sessions SET state='closing' WHERE id=?", worker)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	_, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: kid}, contract.PostRequest{Room: room, Text: "result", Mentions: []string{"@worker"}})
-	want := "your parent worker can't receive: it is closing. Deliver to root (mention root) until it's back."
-	if problem == nil || problem.Message != want {
-		t.Fatalf("post: %+v", problem)
-	}
-}
-
 func TestChildPostResumesAfterParentRecovers(t *testing.T) {
 	s, room, _, worker, kid, ctx := receiveTree(t)
 	from := contract.Principal{Kind: contract.PrincipalSession, Session: kid}
 	setBox(t, s, ctx, worker, contract.BoxFailed, "host removed")
-	if _, problem := s.Post(ctx, from, contract.PostRequest{Room: room, Text: "result", Mentions: []string{"@worker"}}); problem == nil {
-		t.Fatal("post to a failed parent went through")
+	before := pendingTo(t, s, ctx, worker)
+	if _, problem := s.Post(ctx, from, contract.PostRequest{Room: room, Text: "result", Mentions: []string{"@worker"}}); problem != nil || pendingTo(t, s, ctx, worker) != before {
+		t.Fatalf("post to a failed parent: %+v", problem)
 	}
 	setBox(t, s, ctx, worker, contract.BoxStopped, "")
-	before := pendingTo(t, s, ctx, worker)
 	if _, problem := s.Post(ctx, from, contract.PostRequest{Room: room, Text: "result", Mentions: []string{"@worker"}}); problem != nil {
 		t.Fatal(problem)
 	}
