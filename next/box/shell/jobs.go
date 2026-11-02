@@ -117,6 +117,7 @@ type job struct {
 	finished      bool
 	ended         time.Time
 	background    bool
+	aside         bool // the foreground wait ended because a message arrived for the session
 	stopped       bool
 	skipping      bool // inside a line that was cut; drop it to its newline
 }
@@ -232,6 +233,7 @@ type Config struct {
 type Server struct {
 	cfg      Config
 	closed   chan struct{}
+	aside    chan struct{} // closes when a message arrives for the session, and StepAside replaces it
 	mu       sync.Mutex
 	jobs     []*job
 	viewNext int
@@ -251,7 +253,16 @@ func New(cfg Config) *Server {
 	if cfg.now == nil {
 		cfg.now = time.Now
 	}
-	return &Server{cfg: cfg, closed: make(chan struct{})}
+	return &Server{cfg: cfg, closed: make(chan struct{}), aside: make(chan struct{})}
+}
+
+// StepAside ends the foreground wait of every command running in the foreground, as its limit would, so the call returns
+// and Pi reads the message that arrived. A job already in the background is unaffected.
+func (s *Server) StepAside() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	close(s.aside)
+	s.aside = make(chan struct{})
 }
 
 func (s *Server) find(id contract.ShellJobID) (*job, bool) {
@@ -279,7 +290,8 @@ func (s *Server) startHost(r Run, out io.Writer) *hostProcess {
 	return p
 }
 
-// run starts a command and waits up to the foreground limit. A job still running then continues in the background.
+// run starts a command and waits up to the foreground limit, or until a message arrives. A job still running then continues
+// in the background.
 func (s *Server) run(cancel <-chan struct{}, r Run) (*job, error) {
 	j := &job{id: s.cfg.newID(), command: r.Command, host: r.Host, started: s.cfg.now(), now: s.cfg.now, owner: -1, done: make(chan struct{})}
 	j.description = Mask(r.Description)
@@ -295,6 +307,7 @@ func (s *Server) run(cancel <-chan struct{}, r Run) (*job, error) {
 	j.proc = proc
 	s.mu.Lock()
 	s.jobs = append(s.dropOldFinished(), j)
+	aside := s.aside
 	s.mu.Unlock()
 	go func() {
 		code, signal := proc.Wait()
@@ -315,6 +328,7 @@ func (s *Server) run(cancel <-chan struct{}, r Run) (*job, error) {
 			s.report(j)
 		}
 	}()
+	stepped := false
 	select {
 	case <-j.done:
 		if host, ok := proc.(*hostProcess); ok && host.refused != nil {
@@ -323,10 +337,13 @@ func (s *Server) run(cancel <-chan struct{}, r Run) (*job, error) {
 		}
 		return j, nil
 	case <-s.cfg.After(foregroundLimit):
+	case <-aside:
+		stepped = true
 	case <-cancel:
 	}
 	j.mu.Lock()
 	j.background = !j.finished
+	j.aside = stepped && j.background
 	watch := j.background && s.cfg.Running != nil
 	j.mu.Unlock()
 	if watch {

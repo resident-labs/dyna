@@ -232,6 +232,7 @@ func Run(ctx context.Context) error {
 	var h boxHarness
 	var crew *Crew            // a crew's box runs a script, which a reload replaces
 	var files func() []string // the session files to keep sending
+	var steered func()        // a crew's script takes no input, so its workers' commands never step aside
 	if hello.Workflow != nil {
 		open := func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string) (crewWorker, error) {
 			args, err := modelArgs(profile.Model, profile.CompactTokens)
@@ -270,7 +271,7 @@ func Run(ctx context.Context) error {
 			return err
 		}
 		session.Activity = activity.set
-		h, files = session, func() []string { return []string{session.SessionFile()} }
+		h, files, steered = session, func() []string { return []string{session.SessionFile()} }, jobs.StepAside
 	}
 	defer h.Close()
 	steps.Done("pi start")
@@ -281,7 +282,7 @@ func Run(ctx context.Context) error {
 	ticks := time.NewTicker(transcriptInterval)
 	defer ticks.Stop()
 	go transcript.Run(ctx, ticks.C, files)
-	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, files: files}, Setup: setup, Attach: client.Attach, setupErr: setupErr}
+	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, files: files}, Setup: setup, Attach: client.Attach, Steered: steered, setupErr: setupErr}
 	var closing atomic.Bool
 	ownerInput := computer.NewInput(computer.URL)
 	go ownerInput.Run(ctx)

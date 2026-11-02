@@ -68,6 +68,7 @@ const answers = {
 	failed: { output: "no\n", job: "job_2", running: false, status: "exit 2", exit_code: 2 },
 	stopped: { output: "", job: "job_3", running: false, status: "stopped" },
 	running: { output: "", job: "job_4", running: true, status: "running" },
+	stepped: { output: "building\n", job: "job_5", running: true, status: "running", message_arrived: true },
 };
 globalThis.fetch = async (url, init) => {
 	if (url.endsWith("/dyna/")) return { json: async () => ({ error: { message: "down" } }) };
@@ -103,6 +104,7 @@ console.log(JSON.stringify({
 		return input.limit;
 	}),
 	moved: await call("bash", "i", undefined, { command: "running" }),
+	stepped: await call("bash", "j", undefined, { command: "stepped" }),
 	asked,
 	exposure: [registered.bash.exposure, registered.job.exposure],
 	names: Object.keys(registered),
@@ -160,8 +162,8 @@ func TestExtensionBashAndJobTools(t *testing.T) {
 		}
 	}
 	var got struct {
-		Done, Failed, Stopped, Running, Nested, Host, Refused, List, Moved result
-		Asked                                                              []struct {
+		Done, Failed, Stopped, Running, Nested, Host, Refused, List, Moved, Stepped result
+		Asked                                                                       []struct {
 			URL  string
 			Body map[string]any
 		}
@@ -197,6 +199,9 @@ func TestExtensionBashAndJobTools(t *testing.T) {
 	}
 	if want := "[job job_4] The job is in the background. You can end your turn and Dyna will wake you when it completes."; got.Moved.IsError || got.Moved.Content[0].Text != want {
 		t.Fatalf("moved %+v", got.Moved)
+	}
+	if want := "building\n[job job_5] A message arrived for you, so this command moved to the background, where it keeps running. Read the message now. job output reads its new output, and Dyna will wake you when it completes."; got.Stepped.IsError || got.Stepped.Content[0].Text != want {
+		t.Fatalf("stepped aside %+v", got.Stepped)
 	}
 	if got.Refused.Thrown != "no_grant: no matching host-exec grant" {
 		t.Fatalf("refused %+v", got.Refused)
