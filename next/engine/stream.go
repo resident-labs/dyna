@@ -116,7 +116,34 @@ const (
 
 var quotedDynaMarker = regexp.MustCompile(`(?im)^([ \t]*)\[[ \t]*dyna[ \t]*\]`)
 
-func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-chan contract.BoxMessage, *contract.Error) {
+// applyUpdate runs for a box on an old binary each time its box loop wakes. Between turns it stops the box, and when something on
+// the list holds the box up past its turn it says what, once per box per binary.
+func (s *Service) applyUpdate(ctx context.Context, session store.Session) error {
+	stopping, err := s.store.StopStale(ctx, []contract.SessionID{session.ID})
+	if err != nil {
+		return err
+	}
+	if len(stopping) > 0 {
+		s.reconciler.Kick()
+		return nil
+	}
+	held, err := s.store.Responsibilities(ctx, session.ID)
+	if err != nil {
+		return err
+	}
+	text := room.BoxUpdateNotice(held)
+	if text == "" {
+		return nil
+	}
+	notice, err := s.engineEvent(session.Room, contract.SessionNotice{Session: session.ID, Text: text, ClientID: store.BoxUpdateNoticeID(session.Box, s.binary)})
+	if err != nil {
+		return err
+	}
+	return s.store.SendSessionNotice(ctx, notice, session.ID)
+}
+
+// BoxChannel connects a box. binary is the checksum of the running box agent, empty from one too old to report it.
+func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, binary string) (<-chan contract.BoxMessage, *contract.Error) {
 	if caller.Kind != contract.PrincipalSession {
 		return nil, forbidden()
 	}
@@ -145,6 +172,8 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 	}
 	channel := live.NewChannel(stop, ctx.Done())
 	handle.SetChannel(channel)
+	stale := binary != "" && s.binary != "" && binary != s.binary
+	handle.SetStale(stale)
 	previous.Close()
 	if stopped {
 		_ = s.computerEvent(context.Background(), session.ID, roomID, contract.ComputerStopped)
@@ -256,6 +285,13 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 					continue
 				case <-ctx.Done():
 					reason, cause = streamCanceled, ctx.Err()
+					return
+				}
+			}
+			// This comes before dispatch, or a waiting delivery would start the next turn each time and a busy box would never update.
+			if stale {
+				if err := s.applyUpdate(ctx, session); err != nil {
+					reason, cause = streamAdmissionFailed, err
 					return
 				}
 			}

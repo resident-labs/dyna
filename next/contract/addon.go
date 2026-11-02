@@ -123,10 +123,12 @@ type BoxNoticeRequest struct {
 
 type BoxNoticeResponse struct{}
 
-// SessionNotice tells a session and the owner what its box could not set up. It waits for the session's next turn and wakes nobody.
+// SessionNotice tells a session and the owner what its box could not set up, or what holds up its update. It waits for the
+// session's next turn and wakes nobody.
 type SessionNotice struct {
-	Session SessionID `json:"session"`
-	Text    string    `json:"text"`
+	Session  SessionID `json:"session"`
+	Text     string    `json:"text"`
+	ClientID string    `json:"clientId,omitempty"` // sends it once
 }
 
 func (SessionNotice) EventType() EventType { return "session.notice" }

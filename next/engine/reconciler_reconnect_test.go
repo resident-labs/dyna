@@ -38,7 +38,7 @@ func TestConnectedLostInventoryErrorIsDelayed(t *testing.T) {
 	}
 	passLifecycle(t, s, ctx)
 	channelCtx, cancel := context.WithCancel(ctx)
-	messages, problem := s.BoxChannel(channelCtx, caller)
+	messages, problem := s.BoxChannel(channelCtx, caller, "")
 	if problem != nil {
 		cancel()
 		t.Fatal(problem)
@@ -98,7 +98,7 @@ func TestReconnectAfterHostLossBeforePass(t *testing.T) {
 	}
 	setHost("unreachable")
 	channelCtx, cancel := context.WithCancel(ctx)
-	messages, problem := s.BoxChannel(channelCtx, caller)
+	messages, problem := s.BoxChannel(channelCtx, caller, "")
 	if problem != nil {
 		cancel()
 		t.Fatal(problem)
@@ -157,7 +157,7 @@ func TestLostBoxChannelReconnect(t *testing.T) {
 				pass(contract.BoxLost)
 			}
 			channelCtx, cancel := context.WithCancel(ctx)
-			messages, problem := s.BoxChannel(channelCtx, caller)
+			messages, problem := s.BoxChannel(channelCtx, caller, "")
 			if problem != nil {
 				cancel()
 				t.Fatal(problem)

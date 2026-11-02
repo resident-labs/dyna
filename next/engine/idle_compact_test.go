@@ -31,7 +31,7 @@ func newQuietBox(t *testing.T) *quietBox {
 func (b *quietBox) connect(t *testing.T) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(b.ctx)
-	channel, problem := b.s.BoxChannel(ctx, b.caller)
+	channel, problem := b.s.BoxChannel(ctx, b.caller, "")
 	if problem != nil {
 		t.Fatal(problem)
 	}

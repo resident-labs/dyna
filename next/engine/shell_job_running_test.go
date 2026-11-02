@@ -76,7 +76,7 @@ func TestRunningJobWakesAnIdleSession(t *testing.T) {
 
 	channelCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	messages, problem := s.BoxChannel(channelCtx, jobCaller(sid))
+	messages, problem := s.BoxChannel(channelCtx, jobCaller(sid), "")
 	if problem != nil {
 		t.Fatal(problem)
 	}
