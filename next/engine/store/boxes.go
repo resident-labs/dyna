@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -28,6 +29,7 @@ type LifecycleBox struct {
 	Paused   bool
 	Deleting bool
 	Limits   contract.RoomLimits
+	Only     []string // its room's rule
 }
 
 func (s *Store) Boxes(ctx context.Context) ([]box.Box, error) {
@@ -47,7 +49,7 @@ func (s *Store) LifecycleBoxes(ctx context.Context) ([]LifecycleBox, error) {
 }
 
 func (s *Store) lifecycleBoxes(ctx context.Context, activeOnly bool) ([]LifecycleBox, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT id,session,host,image,size,state,reason,slice,created_at,updated_at,want,due_at,failures,(SELECT room FROM sessions WHERE id=boxes.session),(SELECT r.cpus FROM rooms r JOIN sessions s ON s.room=r.id WHERE s.id=boxes.session),(SELECT r.mem_bytes FROM rooms r JOIN sessions s ON s.room=r.id WHERE s.id=boxes.session),EXISTS(SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND r.paused_at IS NOT NULL),EXISTS(SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND r.state='deleting') FROM boxes WHERE NOT ? OR NOT (state='deleted' AND EXISTS (SELECT 1 FROM sessions WHERE sessions.id=boxes.session AND sessions.closed_at IS NOT NULL)) ORDER BY (SELECT created_at FROM sessions WHERE id=boxes.session),id", activeOnly)
+	rows, err := s.Read().QueryContext(ctx, "SELECT id,session,host,image,size,state,reason,slice,created_at,updated_at,want,due_at,failures,(SELECT room FROM sessions WHERE id=boxes.session),(SELECT r.cpus FROM rooms r JOIN sessions s ON s.room=r.id WHERE s.id=boxes.session),(SELECT r.mem_bytes FROM rooms r JOIN sessions s ON s.room=r.id WHERE s.id=boxes.session),EXISTS(SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND r.paused_at IS NOT NULL),EXISTS(SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND r.state='deleting'),(SELECT r.only_hosts FROM rooms r JOIN sessions s ON s.room=r.id WHERE s.id=boxes.session) FROM boxes WHERE NOT ? OR NOT (state='deleted' AND EXISTS (SELECT 1 FROM sessions WHERE sessions.id=boxes.session AND sessions.closed_at IS NOT NULL)) ORDER BY (SELECT created_at FROM sessions WHERE id=boxes.session),id", activeOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +60,11 @@ func (s *Store) lifecycleBoxes(ctx context.Context, activeOnly bool) ([]Lifecycl
 		var host sql.NullString
 		var size contract.BoxSizeName
 		var created, updated, due int64
-		if err := rows.Scan(&b.ID, &b.Session, &host, &b.Image, &size, &b.State, &b.Reason, &b.Slice, &created, &updated, &b.Want, &due, &b.Failures, &b.Room, &b.Limits.CPUs, &b.Limits.MemBytes, &b.Paused, &b.Deleting); err != nil {
+		var only string
+		if err := rows.Scan(&b.ID, &b.Session, &host, &b.Image, &size, &b.State, &b.Reason, &b.Slice, &created, &updated, &b.Want, &due, &b.Failures, &b.Room, &b.Limits.CPUs, &b.Limits.MemBytes, &b.Paused, &b.Deleting, &only); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(only), &b.Only); err != nil {
 			return nil, err
 		}
 		b.Host = contract.HostName(host.String)

@@ -186,6 +186,35 @@ func TestRemoveContainerLeavesVolumeForMove(t *testing.T) {
 		t.Fatalf("commands %v", r.calls)
 	}
 }
+func TestANewMachinesKeyStaysOutOfTheOwnersList(t *testing.T) {
+	r := &runner{dead: true}
+	h := newTestHost(t, r)
+	h.TrustNewKey()
+	if err := h.AddForward(context.Background(), box.Forward{HostPath: "/h", EnginePath: "/e"}); err != nil {
+		t.Fatal(err)
+	}
+	masters := 0
+	for _, call := range r.calls {
+		if slices.Contains(call, "-M") {
+			masters++
+		}
+		joined := strings.Join(call, " ")
+		if !strings.Contains(joined, "StrictHostKeyChecking=accept-new") || !strings.Contains(joined, "UserKnownHostsFile="+h.socket+".known") {
+			t.Fatalf("%v", call)
+		}
+		if call[len(call)-1] != "user@host" && !strings.Contains(joined, " user@host ") {
+			t.Fatalf("no destination after the options: %v", call)
+		}
+	}
+	if masters != 1 {
+		t.Fatalf("%d masters: %v", masters, r.calls)
+	}
+	plain := newTestHost(t, &runner{})
+	if slices.ContainsFunc(plain.base(), func(arg string) bool { return strings.Contains(arg, "StrictHostKeyChecking") }) {
+		t.Fatal("a hand-added host keeps the owner's known_hosts")
+	}
+}
+
 func TestRemoveVolumeAcceptsMissingVolume(t *testing.T) {
 	r := &runner{status: 1}
 	h := newTestHost(t, r)

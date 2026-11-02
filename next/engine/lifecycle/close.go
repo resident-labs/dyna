@@ -46,7 +46,7 @@ func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox, host
 		}
 		row.Box, row.DueAt = next, time.Time{}
 	}
-	if row.Deleting && r.roomHosts != nil && row.Host != "" && host != box.HostReady {
+	if row.Want == store.WantDiscard && r.roomHosts != nil && row.Host != "" && host != box.HostReady {
 		return r.abandon(ctx, row)
 	}
 	if row.Reason == closeNotConnected && r.view.Connected(row.Session) {
