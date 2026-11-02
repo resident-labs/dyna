@@ -26,6 +26,14 @@ type Preparer struct {
 	Dir    string
 }
 
+// Path places a path from a tool call in the working directory, where Pi's own file tools place it.
+func (p Preparer) Path(path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(p.Dir, path)
+}
+
 func (p Preparer) Prepare(ctx context.Context, in tools.PostInput) (contract.PostRequest, []contract.VisualCheck, error) {
 	req := contract.PostRequest{Room: in.Room, Text: in.Text, Mentions: in.Mentions, Home: in.Home, ReplyTo: in.ReplyTo, ClientID: in.ClientID, VisualUpdate: in.VisualUpdate, VisualReply: in.VisualReply}
 	if (in.VisualUpdate != "" || in.AllowNet) && in.HTML == "" {
@@ -42,10 +50,7 @@ func (p Preparer) Prepare(ctx context.Context, in tools.PostInput) (contract.Pos
 		return req, nil, fmt.Errorf("a post can carry at most 16 attachments")
 	}
 	for _, path := range in.Paths {
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(p.Dir, path)
-		}
-		file, err := p.Upload(ctx, path)
+		file, err := p.Upload(ctx, p.Path(path))
 		if err != nil {
 			return req, nil, err
 		}
@@ -54,11 +59,7 @@ func (p Preparer) Prepare(ctx context.Context, in tools.PostInput) (contract.Pos
 	if in.HTML == "" {
 		return req, nil, nil
 	}
-	htmlPath := in.HTML
-	if !filepath.IsAbs(htmlPath) {
-		htmlPath = filepath.Join(p.Dir, htmlPath)
-	}
-	data, err := visual.ReadFile(htmlPath)
+	data, err := visual.ReadFile(p.Path(in.HTML))
 	if err != nil {
 		return req, nil, err
 	}
