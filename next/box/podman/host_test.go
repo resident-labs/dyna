@@ -545,8 +545,7 @@ func TestCancelledHeartbeatDoesNotWaitForHostState(t *testing.T) {
 }
 
 func TestHeartbeatThreeMisses(t *testing.T) {
-	r := &runner{fail: true}
-	h := newTestHost(t, r)
+	h := goneHost(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ticks := make(chan time.Time)

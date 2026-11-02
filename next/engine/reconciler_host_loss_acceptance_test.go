@@ -50,17 +50,6 @@ func TestReconcilerRecoversLostHost(t *testing.T) {
 			if _, problem := s.BoxHello(ctx, caller, contract.BoxHelloRequest{}); problem != nil {
 				t.Fatal(problem)
 			}
-			channelCtx, cancel := context.WithCancel(ctx)
-			messages, problem := s.BoxChannel(channelCtx, caller, "")
-			if problem != nil {
-				cancel()
-				t.Fatal(problem)
-			}
-			defer func() {
-				cancel()
-				for range messages {
-				}
-			}()
 			session, err := s.store.Session(ctx, sid)
 			if err != nil {
 				t.Fatal(err)
@@ -88,8 +77,20 @@ func TestReconcilerRecoversLostHost(t *testing.T) {
 			pass()
 			b, err := s.store.Box(ctx, session.Box)
 			if err != nil || b.State != contract.BoxLost || host.inspections != 0 {
-				t.Fatalf("unreachable with channel: box=%+v inspections=%d err=%v", b, host.inspections, err)
+				t.Fatalf("unreachable without channel: box=%+v inspections=%d err=%v", b, host.inspections, err)
 			}
+			// The box agent reconnects once its host is back.
+			channelCtx, cancel := context.WithCancel(ctx)
+			messages, problem := s.BoxChannel(channelCtx, caller, "")
+			if problem != nil {
+				cancel()
+				t.Fatal(problem)
+			}
+			defer func() {
+				cancel()
+				for range messages {
+				}
+			}()
 			setHost("ready")
 			pass()
 			b, err = s.store.Box(ctx, session.Box)
