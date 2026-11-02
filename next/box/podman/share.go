@@ -24,15 +24,47 @@ grep -Eq '^[[:space:]]*user_allow_other' /etc/fuse.conf 2>/dev/null || { echo "u
 	// a running box relies on: a box bound to a mount that stops loses /box/shared until it restarts. So this starts a mount
 	// only where there is none, and a deploy leaves a mount on its old binary. A mount that died leaves a dead entry, which
 	// must go first.
-	shareScript = shareNeeds + `mountpoint -q -- "$1" 2>/dev/null && exit 0
-if ! systemctl --user -q is-active dyna-share.service; then
-  fusermount3 -uz -- "$1" 2>/dev/null
-  mkdir -p -- "$1" "$2" || exit 1
-  systemd-run --user --quiet --collect --unit=dyna-share.service -- "$3" share mount --server "$4" --dir "$1" --cache "$2" || exit 1
+	shareScript = shareNeeds + `up() { mountpoint -q -- "$1" 2>/dev/null; }
+if ! up "$1"; then
+  if ! systemctl --user -q is-active dyna-share.service; then
+    fusermount3 -uz -- "$1" 2>/dev/null
+    mkdir -p -- "$1" "$2" || exit 1
+    systemd-run --user --quiet --collect --unit=dyna-share.service -- "$3" share mount --server "$4" --dir "$1" --cache "$2" || exit 1
+  fi
+  for _ in {1..100}; do up "$1" && break; sleep 0.1; done
+  if ! up "$1"; then
+    echo "the mount did not come up"
+    journalctl --user -u dyna-share.service -n 5 -o cat --no-pager 2>/dev/null
+    exit 1
+  fi
 fi
-for _ in {1..100}; do mountpoint -q -- "$1" 2>/dev/null && exit 0; sleep 0.1; done
-echo "the mount did not come up"
-journalctl --user -u dyna-share.service -n 5 -o cat --no-pager 2>/dev/null
+` + podmanSeesScript
+	// podmanSeesScript makes sure Podman sees the mount at $1, which is up. Rootless Podman runs every container from a mount
+	// namespace of its own, which its pause process holds and which starts as a copy of the host's. A mount made later reaches
+	// it only when the folder's parent is a shared mount, which systemd makes of / but WSL and some containers do not. Without
+	// it a box fails with "statfs ...: no such file or directory", or binds a dead copy of a mount that has since come back.
+	// Both mount commands print the device of whatever is mounted at the folder, so they agree only on the same live mount.
+	// Podman cannot take a mount into a namespace that exists, so a new one, made by podman system migrate, is the cure, and
+	// that stops every running container. It waits until none runs here, and until then no box can start on this host. A lock
+	// in the cache folder $2 keeps two box starts from renewing it one after the other, the second stopping the first's box.
+	podmanSeesScript = `sees() {
+  want=$(mountpoint -d -- "$1" 2>/dev/null) && [ -n "$want" ] && [ "$(podman unshare mountpoint -d -- "$1" 2>/dev/null)" = "$want" ]
+}
+sees "$1" && exit 0
+mkdir -p -- "$2" && exec 9>"$2/podman-namespace.lock" && flock 9 || exit 1
+sees "$1" && exit 0
+running=$(podman ps -q) || { echo "podman ps failed"; exit 1; }
+if [ -n "$running" ]; then
+  echo "Podman's namespace is older than the mount and cannot see it; it is renewed once no container runs on this host"
+  exit 1
+fi
+if ! out=$(podman system migrate 2>&1); then
+  echo "podman system migrate failed"
+  printf '%s\n' "$out" | tail -n 3
+  exit 1
+fi
+sees "$1" && exit 0
+echo "Podman cannot see the mount even in a new namespace"
 exit 1
 `
 	// shareServerScript starts the server of the rooms' data on the engine's own machine. A user service holds this too, so it
