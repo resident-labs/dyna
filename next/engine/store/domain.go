@@ -652,6 +652,18 @@ func (s *Store) DrainDispatch() {
 }
 
 func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn contract.TurnID, started contract.Event, replay bool) (contract.TurnID, []FeedInput, contract.ProfileName, error) {
+	return s.dispatch(ctx, session, turn, started, replay, nil)
+}
+
+// DispatchStale is Dispatch for a box waiting to update: it opens no turn unless something on the list needs the box. The box
+// loop looks first, but a wake can undo the stop and the job holding the box can end after it looks, so the write that opens
+// the turn decides. A refusal wakes the box loop, which requests the stop.
+func (s *Store) DispatchStale(ctx context.Context, session contract.SessionID, turn contract.TurnID, started contract.Event, replay bool) (contract.TurnID, []FeedInput, contract.ProfileName, error) {
+	return s.dispatch(ctx, session, turn, started, replay, s.openTerminals([]contract.SessionID{session}))
+}
+
+// dispatch takes a stale box's open terminals, and nil for any other box.
+func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn contract.TurnID, started contract.Event, replay bool, stale map[contract.SessionID]bool) (contract.TurnID, []FeedInput, contract.ProfileName, error) {
 	s.dispatchMu.RLock()
 	defer s.dispatchMu.RUnlock()
 	if s.draining {
@@ -719,6 +731,17 @@ func (s *Store) Dispatch(ctx context.Context, session contract.SessionID, turn c
 			}
 			if active == "" {
 				return nil
+			}
+			if stale != nil {
+				held, err := s.responsibilities(ctx, tx, []contract.SessionID{session}, stale)
+				if err != nil {
+					return err
+				}
+				if !held[session].NeedsBox() {
+					active = ""
+					s.wakePending = append(s.wakePending, session)
+					return nil
+				}
 			}
 			if _, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=0 WHERE id=?", session); err != nil {
 				return err
