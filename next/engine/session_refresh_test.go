@@ -107,7 +107,7 @@ func TestRefreshHeldByJobGetsOneNoticePerMark(t *testing.T) {
 		t.Fatalf("a job did not hold the box: stops=%d want=%s turns=%d", host.stops, boxWant(t, s, ctx, sid), turnCount(t, s, ctx, sid))
 	}
 
-	if _, problem := s.ShellJobEnded(ctx, boxCaller(sid), contract.ShellJobEndedRequest{Job: testJob, Tail: "built"}); problem != nil {
+	if _, problem := s.ShellJobEnded(ctx, boxCaller(sid), contract.ShellJobEndedRequest{Job: testJob, End: jobExited, Tail: "built"}); problem != nil {
 		t.Fatal(problem)
 	}
 	waitWant(t, s, ctx, sid, "stop")
@@ -152,7 +152,7 @@ func TestRefreshOutlastsReconnect(t *testing.T) {
 	if !s.Stale(sid) {
 		t.Fatal("a reconnect lost the mark")
 	}
-	if _, problem := s.ShellJobEnded(ctx, boxCaller(sid), contract.ShellJobEndedRequest{Job: testJob}); problem != nil {
+	if _, problem := s.ShellJobEnded(ctx, boxCaller(sid), contract.ShellJobEndedRequest{Job: testJob, End: jobExited}); problem != nil {
 		t.Fatal(problem)
 	}
 	waitWant(t, s, ctx, sid, "stop")
@@ -398,7 +398,7 @@ func TestSelfRefreshHeldByJobDoesNotLoop(t *testing.T) {
 		t.Fatalf("notices=%d", got)
 	}
 
-	if _, problem := s.ShellJobEnded(ctx, boxCaller(sid), contract.ShellJobEndedRequest{Job: testJob, Tail: "built"}); problem != nil {
+	if _, problem := s.ShellJobEnded(ctx, boxCaller(sid), contract.ShellJobEndedRequest{Job: testJob, End: jobExited, Tail: "built"}); problem != nil {
 		t.Fatal(problem)
 	}
 	waitWant(t, s, ctx, sid, "stop")

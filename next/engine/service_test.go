@@ -1280,7 +1280,7 @@ func TestShellJobEndWakesOnceAndSteersARunningTurn(t *testing.T) {
 	if _, ok := (<-channel).Body.(contract.TurnStart); !ok {
 		t.Fatal("expected start")
 	}
-	ended := contract.ShellJobEndedRequest{Job: "job_1", Description: "Build the bundle", End: &contract.ShellJobEnd{Kind: contract.ShellJobSignaled, Signal: "SIGTERM"}, ExitCode: -1, Tail: "boom"}
+	ended := contract.ShellJobEndedRequest{Job: "job_1", Description: "Build the bundle", End: &contract.ShellJobEnd{Kind: contract.ShellJobSignaled, Signal: "SIGTERM"}, Tail: "boom"}
 	for range 2 { // the box agent retries after a lost reply
 		if _, e = s.ShellJobEnded(ctx, caller, ended); e != nil {
 			t.Fatal(e)
@@ -1303,21 +1303,30 @@ func TestShellJobEndWakesOnceAndSteersARunningTurn(t *testing.T) {
 	}
 }
 
-// LEGACY(v1-transfer): this test, a box agent from before End. Remove after the transfer.
-func TestShellJobEndFromAnAgentWithoutIt(t *testing.T) {
-	stopped := contract.ShellJobEnd{Kind: contract.ShellJobStopped}
-	for _, tt := range []struct {
-		req  contract.ShellJobEndedRequest
-		want contract.ShellJobEnd
-	}{
-		{contract.ShellJobEndedRequest{ExitCode: -1, End: &stopped}, stopped},
-		{contract.ShellJobEndedRequest{}, contract.ShellJobEnd{Kind: contract.ShellJobExited}},
-		{contract.ShellJobEndedRequest{ExitCode: 3}, contract.ShellJobEnd{Kind: contract.ShellJobExited, Code: 3}},
-		{contract.ShellJobEndedRequest{ExitCode: -1}, contract.ShellJobEnd{Kind: contract.ShellJobSignaled}},
-	} {
-		if got := shellJobEnd(tt.req); got != tt.want {
-			t.Errorf("%+v: got %+v, want %+v", tt.req, got, tt.want)
-		}
+// jobExited is the End of a job that exited cleanly.
+var jobExited = &contract.ShellJobEnd{Kind: contract.ShellJobExited}
+
+func TestShellJobEndedNeedsEnd(t *testing.T) {
+	s, _, session, ctx := setup(t)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	if _, e := s.ShellJobEnded(ctx, caller, contract.ShellJobEndedRequest{Job: "job_1"}); e == nil || e.Code != contract.ErrInvalid {
+		t.Fatalf("got %v", e)
+	}
+}
+
+// A running box agent still sends exitCode, and the engine ignores it.
+func TestShellJobEndedIgnoresExitCode(t *testing.T) {
+	s, _, session, ctx := setup(t)
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	if _, e := s.ShellJobEnded(ctx, caller, contract.ShellJobEndedRequest{Job: "job_1", End: jobExited, ExitCode: 3}); e != nil {
+		t.Fatal(e)
+	}
+	var body []byte
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT body FROM events WHERE type='shell.job.ended'").Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "exitCode") {
+		t.Fatalf("saved %s", body)
 	}
 }
 

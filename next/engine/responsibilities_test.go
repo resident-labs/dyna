@@ -238,7 +238,7 @@ func TestAJobOnTheListHoldsOffACheckinForAsLongAsItRuns(t *testing.T) {
 	r.advance(room.CheckinStuck + time.Hour)
 	r.pass()
 	r.wantCheckins(r.lead, 0)
-	if _, e := r.s.ShellJobEnded(r.ctx, asSession(r.child), contract.ShellJobEndedRequest{Job: "job_1"}); e != nil {
+	if _, e := r.s.ShellJobEnded(r.ctx, asSession(r.child), contract.ShellJobEndedRequest{Job: "job_1", End: jobExited}); e != nil {
 		t.Fatal(e)
 	}
 	r.turn(r.child, "")
