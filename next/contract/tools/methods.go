@@ -208,6 +208,7 @@ var methodTable = []MethodEntry{
 	),
 	method(contract.MethodSessionWork, contract.ScopeRead, OwnerAccess),
 	method(contract.MethodShellJobEnded, contract.ScopeRead, BoxAccess),
+	method(contract.MethodShellJobRunning, contract.ScopeRead, BoxAccess),
 	method(contract.MethodShellOutput, contract.ScopeRead, BoxAccess),
 	method(contract.MethodSkillList, contract.ScopeRead, UserAccess,
 		act("skill", "list", typ[contract.AddonListRequest](), "List the built-in skills and those saved globally and to room.", "skill list"),

@@ -7,6 +7,7 @@ import (
 )
 
 func TestRenderDelivery(t *testing.T) {
+	quiet0, quiet1, quiet12, quiet90 := 0, 1, 12, 90
 	tests := []struct {
 		body     contract.EventBody
 		want     string
@@ -29,6 +30,11 @@ func TestRenderDelivery(t *testing.T) {
 		// LEGACY(v1-transfer): this case, a shell.job.ended event without End. Remove after the transfer.
 		{contract.ShellJobEnded{Job: "job", ExitCode: 3, Tail: "tail"}, "Your shell job job failed with exit code 3. Last output:\ntail", false},
 		{contract.ShellJobEnded{Job: "job", Tail: "tail"}, "Your shell job job has completed. Last output:\ntail", false},
+		{contract.ShellJobRunning{Job: "job", Description: "Build", RanMinutes: 30, QuietMinutes: &quiet12, Tail: "a\nb"}, "Your shell job 'Build' has been running for 30 minutes. Last output 12 minutes ago:\na\nb", false},
+		{contract.ShellJobRunning{Job: "job", RanMinutes: 15}, "Your shell job job has been running for 15 minutes. It has written no output.", false},
+		{contract.ShellJobRunning{Job: "job", RanMinutes: 60, QuietMinutes: &quiet0}, "Your shell job job has been running for 1 hour. Last output under a minute ago.", false},
+		{contract.ShellJobRunning{Job: "job", RanMinutes: 120, QuietMinutes: &quiet90, Tail: "x"}, "Your shell job job has been running for 2 hours. Last output 1 hour 30 minutes ago:\nx", false},
+		{contract.ShellJobRunning{Job: "job", RanMinutes: 61, QuietMinutes: &quiet1}, "Your shell job job has been running for 1 hour 1 minute. Last output 1 minute ago.", false},
 		{contract.HostDiskLow{Host: "h", FreeBytes: 149 << 30, FloorBytes: 100 << 30}, "Host h is low on disk: 149 GiB free, 100 GiB wanted. At the floor, new boxes wait and the oldest stopped boxes close.", false},
 		{contract.OpRequested{}, "", true},
 		{contract.IssueClosedEvent{Repo: "o/r", Number: 1, URL: "url"}, "Issue o/r#1 closed. url", false},

@@ -458,6 +458,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodTranscriptRead, c, a.service.TranscriptRead)
 	call(mux, contract.MethodSessionWork, c, a.service.SessionWork)
 	call(mux, contract.MethodShellJobEnded, c, a.service.ShellJobEnded)
+	call(mux, contract.MethodShellJobRunning, c, a.service.ShellJobRunning)
 	mux.HandleFunc("GET /v1/events", func(w http.ResponseWriter, r *http.Request) {
 		c := requestCaller(r.Context(), c)
 		if !user(c) || !hasScope(c, contract.ScopeRead) {

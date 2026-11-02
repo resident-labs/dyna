@@ -69,6 +69,7 @@ const bodies: Record<string, Check> = {
   "question.answered": object({ id: string, session: string, question: string, answer: string }),
   "question.withdrawn": object({ id: string, session: string }),
   "shell.job.ended": object({ session: string, job: string, exitCode: number, tail: string, description: optional(string), end: jobEnd }),
+  "shell.job.running": object({ session: string, job: string, ranMinutes: number, tail: string, description: optional(string), quietMinutes: optional(number) }),
   "box.pressure": object({ box: string, kind: oneOf("high", "max") }),
   "host.disk_low": object({ host: string, freeBytes: number, floorBytes: number }),
   "grant.expired": object({ grant: string }),
