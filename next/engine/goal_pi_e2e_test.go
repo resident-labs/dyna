@@ -149,7 +149,7 @@ func TestCheckinReachesRealPiAndItsGoalToolReachesTheEngine(t *testing.T) {
 	if _, problem := r.s.BoxHello(r.ctx, lead, contract.BoxHelloRequest{}); problem != nil {
 		t.Fatal(problem)
 	}
-	channel, problem := r.s.BoxChannel(ctx, lead)
+	channel, problem := r.s.BoxChannel(ctx, lead, "")
 	if problem != nil {
 		t.Fatal(problem)
 	}
