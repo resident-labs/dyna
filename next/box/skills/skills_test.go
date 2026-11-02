@@ -31,11 +31,15 @@ func TestParseRefusesWhatPiWouldNotLoad(t *testing.T) {
 
 func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
 	items := BuiltIn()
-	if len(items) != 2 || items[0].Name != "dyna-extend" || items[0].Description != "Use when you need to add a skill or mcp server to dyna" || !items[0].BuiltIn {
+	if len(items) != 3 || items[0].Name != "dyna-extend" || items[0].Description != "Use when you need to add a skill or mcp server to dyna" || !items[0].BuiltIn {
 		t.Fatalf("%+v", items)
 	}
 	if !IsBuiltIn("dyna-extend") || IsBuiltIn("other") {
 		t.Fatal("IsBuiltIn")
+	}
+	nodes := items[2]
+	if nodes.Name != "dyna-nodes" || nodes.Description != "Use when you need to add nodes to Dyna, or a room needs its own or disposable machines" {
+		t.Fatalf("%+v", nodes)
 	}
 	dir := t.TempDir()
 	if err := Install(dir); err != nil {
@@ -46,6 +50,15 @@ func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"dyna skill save", "dyna package add", "dyna mcp add", "next box start", "unless the owner tells you otherwise", ".pi/skills"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("the skill does not say %q", want)
+		}
+	}
+	data, err = os.ReadFile(filepath.Join(dir, "dyna-nodes", File))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"create NAME SIZE", "destroy NAME", "list ", "--per-session", "--max", "--idle", "room hosts", "--only", "Podman 5", "FUSE", "user_allow_other", "OpenSSH", "SSH key", "/home/pip/.local/share/dyna-next-host", "dormant session keeps its node", "#!/usr/bin/env bash"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("the skill does not say %q", want)
 		}

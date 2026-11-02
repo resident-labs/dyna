@@ -34,6 +34,7 @@ import (
 //	<Data>/backups/                                 local copies of the store
 //	<Data>/archive/                                 the read-only v1 archive
 //	<Data>/connect/                                 Connect credentials
+//	<Data>/pools/<name>/script                      a node pool's script, which runs here and no box can reach
 //	<Data>/cliproxy/, <Data>/cliproxy/auth-v2/      the model proxy and its sign-in folder
 //	<Data>/git/<owner>/<repo>.git                   repository mirrors, which rooms share
 //	<HostData>/instructions/global/AGENTS.md        the global copy a box mounts
@@ -112,6 +113,15 @@ func (l Layout) Archive() string { return filepath.Join(l.Data, "archive") }
 
 // Connect is the folder of Connect credentials.
 func (l Layout) Connect() string { return filepath.Join(l.Data, "connect") }
+
+// Pools is the folder of node pools.
+func (l Layout) Pools() string { return filepath.Join(l.Data, "pools") }
+
+// Pool is one pool's folder, where its script runs. The name is checked before it gets here.
+func (l Layout) Pool(name string) string { return filepath.Join(l.Pools(), name) }
+
+// PoolScript is a pool's script.
+func (l Layout) PoolScript(name string) string { return filepath.Join(l.Pool(name), "script") }
 
 // Proxy is the model proxy's folder.
 func (l Layout) Proxy() string { return filepath.Join(l.Data, "cliproxy") }
