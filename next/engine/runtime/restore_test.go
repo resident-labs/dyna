@@ -348,6 +348,10 @@ func TestInspectDoesNotWaitForTheBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := &Boxes{Store: inspectStore{st}, Layout: box.Layout{Data: t.TempDir(), HostData: "/host"}, Version: "v2", Runtime: t.TempDir(), hosts: map[contract.HostName]*podman.Host{"arch": host}}
+	b.machineIDFile = t.TempDir() + "/machine-id"
+	if err := os.WriteFile(b.machineIDFile, []byte(strings.Repeat("b", 32)), 0600); err != nil {
+		t.Fatal(err)
+	}
 	b.binOnce.Do(func() { b.binSum = "sum" })
 	ctx, stop := context.WithTimeout(ctx, 5*time.Second)
 	defer stop()
