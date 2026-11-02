@@ -28,7 +28,8 @@ const (
 	keepFinished    = 20
 	retryStart      = time.Second
 	retryMax        = 30 * time.Second
-	statusLines     = 5 // output lines in a running job's status
+	statusLines     = 5    // output lines in a running job's status
+	maxTimeout      = 7200 // seconds, as for a host run
 )
 
 // nextMark is the running time at which a job reports next: 15 and 30 minutes, then each hour.
@@ -119,6 +120,7 @@ type job struct {
 	background    bool
 	aside         bool // the foreground wait ended because a message arrived for the session
 	stopped       bool
+	timedOut      int  // the timeout in seconds, when it stopped the job
 	skipping      bool // inside a line that was cut; drop it to its newline
 }
 
@@ -197,6 +199,9 @@ func (j *job) status() string {
 	}
 	switch j.end.Kind {
 	case contract.ShellJobStopped:
+		if j.timedOut > 0 {
+			return timeoutNote(j.timedOut)
+		}
 		return "stopped"
 	case contract.ShellJobSignaled:
 		return "signal " + j.end.Signal
@@ -212,8 +217,10 @@ type Run struct {
 	Cwd         string            `json:"cwd"` // absolute in the box; on a host, from its login folder
 	CallID      string            `json:"callId"`
 	Host        contract.HostName `json:"host"`    // empty: this box
-	Timeout     int               `json:"timeout"` // seconds, for a host run; 0: the engine's default
+	Timeout     int               `json:"timeout"` // seconds; 0: none in the box, the engine's default on a host
 }
+
+func timeoutNote(seconds int) string { return fmt.Sprintf("stopped after its %d s timeout", seconds) }
 
 // Config sets what the tests replace.
 type Config struct {
@@ -320,14 +327,17 @@ func (s *Server) run(cancel <-chan struct{}, r Run) (*job, error) {
 		if j.stopped {
 			j.end = &contract.ShellJobEnd{Kind: contract.ShellJobStopped}
 		}
-		// Until the web understands stopped endings, do not wake on an explicit stop.
-		report := j.background && !j.stopped
+		// Until the web understands stopped endings, do not wake on an explicit stop. A timeout wakes, as the agent did not see it.
+		report := j.background && (!j.stopped || j.timedOut > 0)
 		j.mu.Unlock()
 		close(j.done)
 		if report {
 			s.report(j)
 		}
 	}()
+	if r.Host == "" && r.Timeout > 0 {
+		go s.expire(j, r.Timeout) // the engine ends a host run at its timeout
+	}
 	stepped := false
 	select {
 	case <-j.done:
@@ -350,6 +360,26 @@ func (s *Server) run(cancel <-chan struct{}, r Run) (*job, error) {
 		go s.watch(j)
 	}
 	return j, nil
+}
+
+// expire stops a job at its timeout, in the foreground or the background, as job stop would.
+func (s *Server) expire(j *job, seconds int) {
+	select {
+	case <-s.cfg.After(time.Duration(seconds) * time.Second):
+	case <-j.done:
+		return
+	case <-s.closed:
+		return
+	}
+	j.mu.Lock()
+	expired := !j.finished && !j.stopped
+	if expired {
+		j.stopped, j.timedOut = true, seconds
+	}
+	j.mu.Unlock()
+	if expired {
+		s.stop(j)
+	}
 }
 
 // forget drops a job that never ran.
@@ -403,6 +433,12 @@ func (s *Server) report(j *job) {
 	j.mu.Lock()
 	text := Mask(string(j.output)) // mask first: cutting first could split a token
 	tail := strings.ToValidUTF8(text[max(0, len(text)-tailLimit):], "")
+	if j.timedOut > 0 {
+		if tail != "" && !strings.HasSuffix(tail, "\n") {
+			tail += "\n"
+		}
+		tail += "[" + timeoutNote(j.timedOut) + "]"
+	}
 	req := contract.ShellJobEndedRequest{Job: j.id, Description: j.description, End: j.end, ExitCode: j.exit, Tail: tail}
 	j.mu.Unlock()
 	for delay := retryStart; s.cfg.Report(req) != nil; delay = min(delay*2, retryMax) {
