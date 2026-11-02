@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -228,10 +229,8 @@ func (a *API) handler(c Caller) http.Handler {
 			return contract.OpSubmitResponse{}, forbidden()
 		}
 		if box(c) {
-			if req.Operation.Room == "" {
-				req.Operation.Room = c.Room
-			} else if req.Operation.Room != c.Room {
-				return contract.OpSubmitResponse{}, forbidden()
+			if problem := pinRoom(&req.Operation.Room, c); problem != nil {
+				return contract.OpSubmitResponse{}, problem
 			}
 			if grant, ok := req.Operation.Args.(contract.HostexecGrantArgs); ok {
 				grant.Room = c.Room
@@ -298,24 +297,8 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodIssueStatus, c, a.service.IssueStatus)
 	call(mux, contract.MethodIssueTrack, c, a.service.IssueTrack)
 	call(mux, contract.MethodIssueUntrack, c, a.service.IssueUntrack)
-	call(mux, contract.MethodPost, c, func(ctx context.Context, p contract.Principal, req contract.PostRequest) (contract.PostResponse, *contract.Error) {
-		c := requestCaller(ctx, c)
-		if box(c) {
-			if req.Room == "" {
-				req.Room = c.Room
-			} else if req.Room != c.Room {
-				return contract.PostResponse{}, forbidden()
-			}
-		}
-		return a.service.Post(ctx, p, req)
-	})
-	call(mux, contract.MethodEventsList, c, func(ctx context.Context, p contract.Principal, req contract.EventsListRequest) (contract.EventsListResponse, *contract.Error) {
-		c := requestCaller(ctx, c)
-		if box(c) && req.Room != c.Room {
-			return contract.EventsListResponse{}, forbidden()
-		}
-		return a.service.EventsList(ctx, p, req)
-	})
+	call(mux, contract.MethodPost, c, a.service.Post)
+	call(mux, contract.MethodEventsList, c, a.service.EventsList)
 	call(mux, contract.MethodShellOutput, c, a.service.ShellOutput)
 	call(mux, contract.MethodBoxStats, c, a.service.BoxStats)
 	call(mux, contract.MethodBoxStatsReport, c, a.service.BoxStatsReport)
@@ -642,6 +625,37 @@ func allows(access tools.Access, c Caller) bool {
 	return false
 }
 
+// pinRoom holds a session to its own room: an omitted room becomes the caller's, and any other is refused.
+func pinRoom(room *contract.RoomID, c Caller) *contract.Error {
+	if *room == "" {
+		*room = c.Room
+	}
+	if *room != c.Room {
+		return contract.ForeignRoom(*room, c.Room)
+	}
+	return nil
+}
+
+// roomOf finds the room a request acts in, or nil. A refresh, a track and a subscription scoped to a session or the
+// machine name their target another way, so an omitted room stays omitted: filling it would turn an empty refresh
+// into one of the whole room, and the engine refuses a track or such a subscription that names a room.
+func roomOf(req any) *contract.RoomID {
+	switch r := req.(type) {
+	case *contract.SessionRefreshRequest, *contract.PrTrackRequest, *contract.IssueTrackRequest:
+		return nil
+	case *contract.SubscriptionAddRequest:
+		if r.Scope != contract.ScopeRoom {
+			return nil
+		}
+	}
+	field := reflect.ValueOf(req).Elem().FieldByName("Room")
+	if !field.IsValid() {
+		return nil
+	}
+	room, _ := field.Addr().Interface().(*contract.RoomID)
+	return room
+}
+
 // call registers one method route. The registry's method table is the one
 // authorization source; op.submit and device.scopes name no scope because
 // their handlers check it themselves, by operation kind or for any owner device.
@@ -667,6 +681,12 @@ func call[Req, Resp any](mux *http.ServeMux, m contract.Method, c Caller, fn fun
 		if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
 			writeError(w, invalid())
 			return
+		}
+		if room := roomOf(req); room != nil && box(c) {
+			if problem := pinRoom(room, c); problem != nil {
+				writeError(w, problem)
+				return
+			}
 		}
 		result, err := fn(r.Context(), c.Principal, *req)
 		if err != nil {

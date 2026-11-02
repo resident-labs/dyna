@@ -268,7 +268,7 @@ func (s *Service) roomAccess(ctx context.Context, caller contract.Principal, roo
 		return failure(err)
 	}
 	if session.Room != room {
-		return forbidden()
+		return contract.ForeignRoom(room, session.Room)
 	}
 	return nil
 }

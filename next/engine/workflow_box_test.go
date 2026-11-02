@@ -53,13 +53,14 @@ type crewRequest struct{ task, model, affinity string }
 type crewTool struct{ name, input string }
 
 // crewUpstream stands where the model proxy would be, behind the real route. Each worker's prompt names a task, and a task
-// answers when its gate opens: first with its tools, one a request, and then with text. A task named refuse fails as a
-// provider refusal does.
+// answers when its gate opens: first with its tools, one a request or as many as batch says, and then with text. A task
+// named refuse fails as a provider refusal does.
 type crewUpstream struct {
 	mu       sync.Mutex
 	requests []crewRequest
 	gates    map[string]chan struct{}
 	tools    map[string][]crewTool
+	batch    map[string]int       // how many tools of a task one message carries, when more than one
 	bodies   map[string][2]string // the last system prompt and messages of each task
 }
 
@@ -99,13 +100,15 @@ func (m *crewUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	send := func(name, payload string) { fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, payload) }
 	send("message_start", `{"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","model":"m","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}`)
 	m.mu.Lock()
-	tools := m.tools[task]
+	tools, batch := m.tools[task], max(m.batch[task], 1)
 	m.mu.Unlock()
 	if done := strings.Count(string(body.Messages), `"tool_result"`); done < len(tools) {
-		input, _ := json.Marshal(tools[done].input)
-		send("content_block_start", fmt.Sprintf(`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_%d","name":%q,"input":{}}}`, done, tools[done].name))
-		send("content_block_delta", fmt.Sprintf(`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":%s}}`, input))
-		send("content_block_stop", `{"type":"content_block_stop","index":0}`)
+		for i, tool := range tools[done:min(done+batch, len(tools))] {
+			input, _ := json.Marshal(tool.input)
+			send("content_block_start", fmt.Sprintf(`{"type":"content_block_start","index":%d,"content_block":{"type":"tool_use","id":"toolu_%d","name":%q,"input":{}}}`, i, done+i, tool.name))
+			send("content_block_delta", fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"input_json_delta","partial_json":%s}}`, i, input))
+			send("content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, i))
+		}
 		send("message_delta", `{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":5}}`)
 		send("message_stop", `{"type":"message_stop"}`)
 		return
@@ -238,7 +241,7 @@ func newRealCrew(t *testing.T, files map[string]string) *realCrew {
 	s.SetLayout(layout)
 
 	// The upstream listens on a socket, as the proxy does, and the route in front of it is the engine's.
-	upstream := &crewUpstream{gates: map[string]chan struct{}{}, tools: map[string][]crewTool{}}
+	upstream := &crewUpstream{gates: map[string]chan struct{}{}, tools: map[string][]crewTool{}, batch: map[string]int{}}
 	proxySocket := filepath.Join(data, "proxy.sock")
 	proxyListener, err := net.Listen("unix", proxySocket)
 	if err != nil {

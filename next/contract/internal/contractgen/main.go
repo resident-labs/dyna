@@ -10,6 +10,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -365,13 +366,12 @@ func tsType(e ast.Expr) string {
 				continue
 			}
 			tag, _ := strconv.Unquote(f.Tag.Value)
-			parts := strings.Split(strings.TrimPrefix(tag, "json:\""), "\",")
-			raw := strings.TrimSuffix(parts[0], "\"")
-			name := strings.Split(raw, ",")[0]
+			json := reflect.StructTag(tag).Get("json")
+			name := strings.Split(json, ",")[0]
 			if name == "-" {
 				continue
 			}
-			optional := strings.Contains(tag, "omitempty") || strings.Contains(tag, "omitzero")
+			optional := strings.Contains(json, "omitempty") || strings.Contains(json, "omitzero")
 			fmt.Fprintf(&b, " %s", name)
 			if optional {
 				b.WriteString("?")
