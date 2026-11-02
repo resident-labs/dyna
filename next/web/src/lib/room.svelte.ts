@@ -345,8 +345,8 @@ export class RoomStore {
         void this.readGoals();
         break;
       case "workflow.ended": {
-        const { session, state, failed, failedSteps, usage } = event.body, run = this.workflows.get(session);
-        if (run) this.workflows.set(session, { ...run, state, failed, failedSteps, usage });
+        const { session, state, steps, failed, failedSteps, usage } = event.body, run = this.workflows.get(session);
+        if (run) this.workflows.set(session, { ...run, state, steps, failed, failedSteps, usage, ended: event.at });
         this.runPages.get(session)?.();
         break;
       }

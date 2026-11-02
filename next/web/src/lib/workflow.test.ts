@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { decodeEvent } from "./event.ts";
 import { feedRows } from "./feed.ts";
 import { RunState } from "./run.svelte.ts";
-import { LONG_PHASE, applyStep, branchLink, commitLink, failures, openable, phases, resultBlock, runLine, shownStep, stepTime, stepWord, tokens } from "./workflow.ts";
-import type { Event, WorkflowStatusResponse, WorkflowStep } from "./contract.gen.ts";
+import { LONG_PHASE, STRIP_PHASES, applyStep, branchLink, commitLink, failedNodes, foldable, jsonFields, type Json, nested, openable, pastRuns, phases, reading, runCounts, runLine, runScale, shownFacts, shownStep, stepBody, stepSpan, stepTime, stepWord, strip, tokens } from "./workflow.ts";
+import { runRows } from "./session-tree.ts";
+import type { Event, WorkflowInfo, WorkflowStatusResponse, WorkflowStep } from "./contract.gen.ts";
 
 const usage = { model: "", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 const step = (key: string, fields: Partial<WorkflowStep> = {}): WorkflowStep => ({ key, kind: "agent", name: key, state: "done", usage, started: "2026-01-01T00:00:00Z", ended: "2026-01-01T00:00:04Z", transcript: `${key}.jsonl`, ...fields });
@@ -74,12 +75,136 @@ test("a crew's row says it is a workflow and how it stands", () => {
   assert.equal(runLine({ state: "stopped" }), "Workflow · Stopped");
 });
 
-test("a conflict shows in the merge section alone, and a result reads by what it is", () => {
-  const conflict = step("c", { kind: "log", name: "merge conflict: x", state: "failed" });
-  assert.deepEqual(failures([conflict, step("a", { state: "failed" }), step("b")]).map(item => item.key), ["a"]);
-  assert.deepEqual(resultBlock(`{"found":2}`), { code: true, text: `{\n  "found": 2\n}` });
-  assert.deepEqual(resultBlock("All done"), { code: false, text: "All done" });
-  assert.deepEqual(resultBlock("42"), { code: false, text: "42" });
+test("a child sits under its workflow step and counts in its phase, and a child whose parent is gone stays at the top", () => {
+  const steps = [step("wf", { kind: "workflow", phase: "Build" }), step("a", { parent: "wf", phase: "Inner" }), step("b", { parent: "a", state: "failed" }), step("lost", { parent: "kept-by-resume" }), step("c", { phase: "Build", state: "running" })];
+  const tree = nested(steps);
+  assert.deepEqual(tree.map(node => node.step.key), ["wf", "lost", "c"]);
+  assert.deepEqual(tree[0].children.map(node => [node.step.key, node.children.map(child => child.step.key)]), [["a", ["b"]]]);
+  const [build, other] = phases(steps);
+  assert.deepEqual([build.title, build.nodes.map(node => node.step.key), build.steps.length, build.done, build.running, build.failed], ["Build", ["wf", "c"], 4, 2, 1, 1]);
+  assert.deepEqual([other.title, other.steps.map(item => item.key)], ["Other steps", ["lost"]]);
+  assert.deepEqual(failedNodes(build.nodes).map(node => [node.step.key, node.children[0].children[0].step.key]), [["wf", "b"]]);
+});
+
+test("the strip gives each phase its share and fills it with done, failed, then running", () => {
+  const many = (phase: string, n: number, state: WorkflowStep["state"] = "done") => Array.from({ length: n }, (_, i) => step(`${phase}${state}${i}`, { phase, state }));
+  assert.deepEqual(strip(phases([])), []);
+  assert.deepEqual(strip(phases(many("", 3))), [{ key: "", title: "", share: 100, segments: [{ state: "done", share: 100 }] }]);
+  const parts = strip(phases([...many("A", 15), ...many("A", 3, "failed"), ...many("A", 12, "running"), ...many("B", 10, "running")]));
+  assert.deepEqual(parts.map(part => [part.title, part.share]), [["A", 75], ["B", 25]]);
+  assert.deepEqual(parts[0].segments, [{ state: "done", share: 50 }, { state: "failed", share: 10 }, { state: "running", share: 40 }]);
+  const huge = strip(phases([...many("A", 199), step("x", { phase: "A", state: "failed" })]));
+  assert.equal(huge[0].segments.reduce((sum, segment) => sum + segment.share, 0), 100);
+  assert.deepEqual(huge[0].segments.map(segment => segment.state), ["done", "failed"]);
+  const crowded = Array.from({ length: STRIP_PHASES + 1 }, (_, i) => step(`p${i}`, { phase: `P${i}`, state: i ? "done" : "failed" }));
+  assert.equal(strip(phases(crowded.slice(1))).length, STRIP_PHASES);
+  assert.deepEqual(strip(phases(crowded)).map(part => [part.share, part.segments.map(segment => segment.state)]), [[100, ["done", "failed"]]]);
+});
+
+test("a step's span places it in the run, and a live run's scale moves by the minute", () => {
+  const at = (s: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, s)).toISOString();
+  const scale = runScale({ started: at(0), ended: at(100) }, 0);
+  assert.deepEqual(stepSpan(step("a", { started: at(10), ended: at(40) }), scale, 0), { left: 10, width: 30 });
+  const live = (now: number) => runScale({ started: at(0) }, Date.parse(at(now)));
+  assert.equal(live(10).to, live(50).to);
+  assert.equal(live(61).to - live(50).to, 60_000);
+  const running = stepSpan(step("b", { started: at(30), ended: undefined, state: "running" }), live(45), Date.parse(at(45)));
+  assert.deepEqual(running, { left: 50, width: 25 });
+});
+
+test("a command, a log and a post open in place; a worker opens its transcript, and a waiting one has nothing yet", () => {
+  assert.equal(foldable(step("r", { kind: "run", transcript: undefined })), true);
+  assert.equal(foldable(step("l", { kind: "log", transcript: undefined })), true);
+  assert.equal(foldable(step("p", { kind: "post", transcript: undefined })), true);
+  assert.equal(foldable(step("w", { kind: "workflow", transcript: undefined })), false);
+  assert.equal(foldable(step("a")), false);
+  assert.equal(foldable(step("waiting", { transcript: undefined, state: "running", ended: undefined })), false);
+  assert.equal(foldable(step("lost", { transcript: undefined, state: "failed", reason: "no place" })), true);
+});
+
+test("a step's body shows what it ran and left, with JSON read as fields", () => {
+  const run = step("r", { kind: "run", name: "run: npm test", transcript: undefined });
+  assert.deepEqual(stepBody(run, { detail: "npm test", result: JSON.stringify({ code: 0, stdout: "ok 12\n", stderr: "", durationMs: 40 }) }),
+    [{ label: "Output", kind: "code", text: "ok 12" }]);
+  const json = stepBody(run, { detail: "npm test -- --reporter json", result: JSON.stringify({ code: 0, stdout: `{"passed":3}`, stderr: "" }) });
+  assert.deepEqual(json[0], { kind: "code", label: "Command", text: "npm test -- --reporter json" });
+  assert.deepEqual(json[1], { label: "Output", kind: "fields", fields: [{ label: "Passed", kind: "text", text: "3" }] });
+  const failed = step("f", { kind: "run", state: "failed", reason: "exit code 1: boom", transcript: undefined });
+  assert.deepEqual(stepBody(failed, { detail: "x", result: JSON.stringify({ code: 1, stdout: "", stderr: "boom" }) }).map(part => part.kind), ["reason", "code"]);
+  assert.deepEqual(stepBody(step("e", { kind: "run", transcript: undefined }), { result: JSON.stringify({ code: 3, stdout: "", stderr: "" }) }), [{ label: "Exit code", kind: "text", text: "3" }]);
+  const merged = stepBody(run, { detail: "merge a", result: JSON.stringify({ branch: "v2/run", commit: "a".repeat(40), merged: ["a"], conflicts: [] }) });
+  assert.deepEqual(merged[1], { kind: "fields", fields: [{ label: "Branch", kind: "branch", branch: "v2/run" }, { label: "Commit", kind: "commit", commit: "a".repeat(40) }, { label: "Merged", kind: "list", inline: true, items: [{ label: "", kind: "text", text: "a" }] }] });
+  assert.deepEqual(stepBody(step("l", { kind: "log", transcript: undefined }), { detail: "two\nlines", result: "null" }), [{ kind: "text", text: "two\nlines" }]);
+  assert.deepEqual(stepBody(step("l", { kind: "log", state: "failed", reason: "x: boom", transcript: undefined }), { detail: "x: boom" }), [{ kind: "reason", text: "x: boom" }]);
+  const post = stepBody(step("p", { kind: "post", transcript: undefined }), { detail: "Done.\n\n```json\n{\"found\":2}\n```", result: `{"seq":9}` });
+  assert.deepEqual(post, [{ kind: "markdown", text: "Done." }, { kind: "fields", fields: [{ label: "Found", kind: "text", text: "2" }] }]);
+  assert.deepEqual(stepBody(step("a", { transcript: undefined, state: "failed", reason: "no place" }), { detail: "Read it" }), [{ kind: "reason", text: "no place" }, { kind: "text", text: "Read it", label: "Prompt" }]);
+  assert.deepEqual(stepBody(step("l", { kind: "log", transcript: undefined })), []);
+});
+
+test("a result reads as text or as fields, never as JSON", () => {
+  assert.deepEqual(reading("All done"), { text: "All done" });
+  assert.deepEqual(reading("42"), { text: "42" });
+  assert.deepEqual(reading("{not json"), { text: "{not json" });
+  assert.deepEqual(reading(`{"found":2}`), { fields: [{ label: "Found", kind: "text", text: "2" }] });
+  assert.deepEqual(reading(`{"token": [masked], "ok": true}`), { fields: [{ label: "Token", kind: "text", text: "[masked]" }, { label: "Ok", kind: "text", text: "Yes" }] });
+});
+
+test("scalars read as labelled rows with plain words", () => {
+  const sha = "18b5fa2b8d9825dcdd238bbdcb671334c70eb35b";
+  assert.deepEqual(jsonFields({ filesChanged: 1200, tests_passed: true, "dry-run": false, prUrl: "https://github.com/a/b/pull/1", durationMs: 90_000, nothing: null, blank: "", none: [], commit: "18b5fa2", head: sha, targetBranch: "v2/x", at: "2026-01-01T10:00:00Z" }).map(({ label, ...rest }) => [label, rest.kind, "text" in rest ? rest.kind === "text" && rest.text.length > 0 : true]), [
+    ["Files changed", "text", true], ["Tests passed", "text", true], ["Dry run", "text", true], ["PR URL", "link", true], ["Duration", "text", true], ["Commit", "commit", true], ["Head", "commit", true], ["Target branch", "branch", true], ["At", "text", true],
+  ]);
+  assert.deepEqual(jsonFields({ durationMs: 90_000, count: 1200, ok: false }).map(item => item.kind === "text" && item.text), ["1m 30s", (1200).toLocaleString(), "No"]);
+});
+
+test("lists read as text, objects as groups, and a deep or long value says how much there is", () => {
+  const value = {
+    short: ["a", "b"],
+    files: ["next/web/src/lib/workflow.ts", "next/web/src/lib/ui/RunSteps.svelte", "next/web/src/lib/ui/RunFields.svelte"],
+    many: Array.from({ length: 25 }, (_, i) => `item ${i}`),
+    people: Array.from({ length: 12 }, (_, i) => ({ name: `p${i}` })),
+    reviews: [{ path: "a.go", score: 3 }, { score: 4 }],
+    totals: { passed: 3, nested: { deeper: { deepest: { x: 1, y: 2 }, list: [{ a: 1 }] } } },
+    report: "x".repeat(5000),
+    quoted: `{"inner":[1,2]}`,
+  };
+  const [short, files, many, people, reviews, totals, report, quoted] = jsonFields(value as Json);
+  assert.deepEqual(short, { label: "Short", kind: "list", inline: true, items: [{ label: "", kind: "text", text: "a" }, { label: "", kind: "text", text: "b" }] });
+  assert.equal(files.kind === "list" && files.inline, false);
+  assert.deepEqual([many.kind, many.kind === "text" && many.text], ["text", "25 items"]);
+  assert.deepEqual([people.kind, people.kind === "text" && people.text], ["text", "12 items"]);
+  assert.deepEqual(reviews, { label: "Reviews", kind: "group", fields: [{ label: "a.go", kind: "group", fields: [{ label: "Score", kind: "text", text: "3" }] }, { label: "2", kind: "group", fields: [{ label: "Score", kind: "text", text: "4" }] }] });
+  assert.deepEqual(totals, { label: "Totals", kind: "group", fields: [{ label: "Passed", kind: "text", text: "3" }, { label: "Nested", kind: "group", fields: [{ label: "Deeper", kind: "group", fields: [{ label: "Deepest", kind: "text", text: "2 fields" }, { label: "List", kind: "text", text: "1 item" }] }] }] });
+  assert.deepEqual(report, { label: "Report", kind: "text", text: `${(5000).toLocaleString()} characters` });
+  assert.equal(quoted.kind, "group");
+  assert.deepEqual(jsonFields([{ path: "a" }, { path: "b" }]), [{ label: "Items", kind: "group", fields: [{ label: "", kind: "text", text: "a" }, { label: "", kind: "text", text: "b" }] }]);
+});
+
+test("a result leaves out what the page already shows, whatever the script called it", () => {
+  const sha = "18b5fa2b8d9825dcdd238bbdcb671334c70eb35b";
+  const steps = [step("fix-1"), step("fix-2", { state: "failed" }), step("key-3", { name: "Read the logs" })];
+  const merge = { branch: "v2/s-run", commit: sha, merged: ["fix-1"], conflicts: [{ step: "fix-2", branch: "v2/s-2", files: ["f"] }] };
+  const shown = shownFacts({ name: "sweep", repo: "a/b", commit: "abc1234" }, steps, merge);
+  assert.deepEqual(jsonFields({ merged: ["fix-1"], steps: [{ step: "fix-1", text: "x", files: ["a"] }, { name: "Read the logs" }], outcome: { branch: "v2/s-run", commit: sha, merged: ["fix-1"], conflicts: [] }, branch: "v2/s-run", head: sha, repo: "a/b", count: 3, summary: "Fixed one" }, shown).map(item => item.label), ["Count", "Summary"]);
+  assert.deepEqual(jsonFields({ stepsDone: 3, steps: 3, failed: 1, merged: 1, conflicts: 1 }, shown).map(item => item.label), ["Steps done"]);
+  assert.deepEqual(jsonFields({ steps: [{ branch: "v2/s-worker", commit: "abc", files: ["a"] }], others: ["fix-1", "something else"] }, shown).map(item => item.label), ["Others"]);
+  assert.deepEqual(jsonFields({ steps: ["a"] }).map(item => item.label), ["Steps"]);
+  assert.deepEqual(reading(JSON.stringify({ branch: "v2/s-run", commit: sha, merged: ["fix-1"], conflicts: [{ step: "fix-2", branch: "v2/s-2", files: ["f"] }] }), shown), { fields: [] });
+  assert.deepEqual(reading(`["fix-1","fix-2"]`, shown), { fields: [] });
+});
+
+test("past runs are the ended runs that left the session tree, newest first, and they fold", () => {
+  const run = (session: string, fields: Partial<WorkflowInfo> = {}): WorkflowInfo => status({ session, state: "done", ...fields }).run;
+  const runs = [run("old", { ended: "2026-01-01T01:00:00Z" }), run("live", { state: "running" }), run("closing", { ended: "2026-01-03T00:00:00Z" }), run("new", { state: "failed", ended: "2026-01-02T00:00:00Z" }), run("unended", { started: "2026-01-01T12:00:00Z", state: "stopped" })];
+  const past = pastRuns(runs, new Set(["closing"]));
+  assert.deepEqual(past.map(item => item.session), ["new", "unended", "old"]);
+  assert.deepEqual(runRows([], true), []);
+  assert.deepEqual(runRows(past, false), [{ kind: "runs", count: 3, open: false }]);
+  assert.deepEqual(runRows(past, true).map(row => row.kind === "run" ? row.run.session : row.kind), ["runs", "new", "unended", "old"]);
+  assert.deepEqual(runCounts({ steps: 1, failed: 0 }), ["1 step"]);
+  assert.deepEqual(runCounts({ steps: 60, failed: 4 }), ["60 steps", "4 failed"]);
+  assert.deepEqual(runCounts({ failed: 0 }), []);
 });
 
 test("the run branch and commit link to the repository, and a run with none links nowhere", () => {
@@ -129,6 +254,19 @@ test("rows that arrive during a read go on top of it, and no row means read agai
     await new Promise(done => setTimeout(done));
     assert.deepEqual([run.snapshot.status?.run.state, run.snapshot.steps.length], ["done", 2]);
   } finally { restore(); }
+});
+
+test("a run that ended leaves one row in the room feed and none in a DM, between the work around it", () => {
+  const ended = { seq: 3, id: "e", at: "2026-01-01T00:00:03Z", from: { kind: "engine" }, type: "workflow.ended", body: { run: "wf", session: "crew", name: "sweep", state: "failed", steps: 12, failed: 2, usage } };
+  const decoded = decodeEvent(ended) as Event;
+  assert.ok(decoded);
+  const rows = feedRows([decoded], { kind: "feed" }).filter(row => row.kind !== "day");
+  assert.deepEqual(rows.map(row => row.kind === "run" && [row.key, row.run.name, row.run.state, row.run.steps]), [["run3", "sweep", "failed", 12]]);
+  assert.deepEqual(feedRows([decoded], { kind: "dm", session: "crew" }), []);
+  const old = decodeEvent({ ...ended, body: { ...ended.body, steps: undefined } });
+  assert.ok(old, "an event from before steps were counted still decodes");
+  const late = { ...decoded, seq: 4, at: "2026-01-02T00:00:03Z" } as Event;
+  assert.equal(feedRows([decoded, late], { kind: "feed" }).filter(row => row.kind === "day").length, 2);
 });
 
 test("a step change decodes with seq 0 and adds no row to any conversation", () => {

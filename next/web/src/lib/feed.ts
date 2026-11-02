@@ -1,4 +1,4 @@
-import type { Attachment, BoxState, Card, Conversation, Event, FailureCause, PrChange, PrChanged, PrChangeKind, Principal, PrSummary, SessionCloseReason } from "./contract.gen.ts";
+import type { Attachment, BoxState, Card, Conversation, Event, FailureCause, PrChange, PrChanged, PrChangeKind, Principal, PrSummary, SessionCloseReason, WorkflowEnded } from "./contract.gen.ts";
 import type { BoxFailure } from "./status.ts";
 import type { PendingReason } from "./event.ts";
 import type { Request } from "./room.svelte.ts";
@@ -13,6 +13,8 @@ export type Row =
   | { kind: "more-failures"; key: string; failures: Extract<Row, { kind: "failed" }>[] }
   | { kind: "work"; key: string; events: Event[]; failedSessions: string[]; until?: string }
   | { kind: "request"; key: string; at: string; request: Request }
+  // A workflow run that ended, which links to its page.
+  | { kind: "run"; key: string; at: string; run: WorkflowEnded }
   | { kind: "day"; key: string; at: string }
   | { kind: "new"; key: string };
 
@@ -96,7 +98,7 @@ export function subject(event: Event): string | undefined {
 // Events with no row. Goals show in About and the session list; failures show on the box and turn events they report.
 // A pull request's rows come from github.pr.changed. The typed PR events, issue events, feed items and git.main_updated exist for subscribers and sessions.
 // A running job's status is for the session that owns the job.
-const unshown = new Set<Event["type"]>(["shell.job.running", "workflow.ended", "workflow.step_changed", "session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due", "github.pr.merged", "github.pr.closed", "github.ci.finished", "git.main_updated", "github.issue.opened", "github.comment", "github.label", "github.mention", "github.issue.changed", "github.issue.closed"]);
+const unshown = new Set<Event["type"]>(["shell.job.running", "workflow.step_changed", "session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due", "github.pr.merged", "github.pr.closed", "github.ci.finished", "git.main_updated", "github.issue.opened", "github.comment", "github.label", "github.mention", "github.issue.changed", "github.issue.closed"]);
 
 // Builds the rows of one conversation. Posts and final answers become post rows, a
 // failed turn and a request are each their own row, and all other events between them fold into one work row.
@@ -130,7 +132,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     let more: Extract<Row, { kind: "more-failures" }> | undefined;
     for (const row of deferred) {
       if (row.kind === "notice") dated(row.event.at);
-      else if (row.kind === "request" || row.kind === "restarted") dated(row.at);
+      else if (row.kind === "request" || row.kind === "restarted" || row.kind === "run") dated(row.at);
       else if (row.kind === "failed") {
         dated(row.at); fresh(row.seq, { kind: "session", session: row.session });
         if (++failures > 5) {
@@ -167,7 +169,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     if (event.type === "account.failed" || event.type === "account.quota_low" || event.type === "host.disk_low" || event.type === "question.asked" || event.type === "question.answered" || event.type === "question.withdrawn") continue;
     // A schedule that does its job quietly says nothing. A failure and any post of its own still show.
     if (event.type === "hook.due" || event.type === "hook.finished" && event.body.result !== "failed") continue;
-    const firstAt = work[0]?.at ?? (deferred[0]?.kind === "notice" ? deferred[0].event.at : deferred[0]?.kind === "failed" || deferred[0]?.kind === "request" || deferred[0]?.kind === "restarted" ? deferred[0].at : undefined);
+    const firstAt = work[0]?.at ?? (deferred[0]?.kind === "notice" ? deferred[0].event.at : deferred[0]?.kind === "failed" || deferred[0]?.kind === "request" || deferred[0]?.kind === "restarted" || deferred[0]?.kind === "run" ? deferred[0].at : undefined);
     if (firstAt && new Date(firstAt).toDateString() !== new Date(event.at).toDateString()) flush();
     if (event.type === "post.created") {
       const mentions = event.body.mentions ?? [];
@@ -223,6 +225,11 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     }
     if (event.type === "session.restarted") {
       if (!event.body.imageUpdated) deferred.push({ kind: "restarted", key: `restart${event.seq}`, session: event.body.session, at: event.at });
+      continue;
+    }
+    // A crew's closed session leaves the sessions panel, so its run leaves a line in the room. A crew has no DM of its own.
+    if (event.type === "workflow.ended") {
+      if (home.kind === "feed") deferred.push({ kind: "run", key: `run${event.seq}`, at: event.at, run: event.body });
       continue;
     }
     // Box lifecycle stays out of the feed; only a failed or lost box, or a close that failed to archive,
@@ -517,7 +524,8 @@ export function describe(event: Event, name: Name): string {
       const mem = !memBytes ? "no memory limit" : gb < 1 ? `${Math.max(1, Math.round(memBytes / 2 ** 20))} MB` : `${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB`;
       return `You set the room limit to ${cpu} and ${mem}`;
     }
-    case "workflow.ended": case "workflow.step_changed": case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return ""; // feedRows shows no row for them.
+    case "workflow.ended": return ""; // feedRows gives it a row of its own.
+    case "workflow.step_changed": case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return ""; // feedRows shows no row for them.
     case "box.pressure": return event.body.kind === "max" ? "A session reached its memory limit" : "A session is short of memory";
     case "post.created": return event.body.text;
     case "hook.finished": return `A subscription's run ${event.body.result}: ${event.body.cause ? causes[event.body.cause] : `exit code ${event.body.exitCode}`}`;
