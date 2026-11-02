@@ -123,6 +123,7 @@ type Service interface {
 	ShellJobEnded(context.Context, contract.Principal, contract.ShellJobEndedRequest) (contract.ShellJobEndedResponse, *contract.Error)
 	ShellJobRunning(context.Context, contract.Principal, contract.ShellJobRunningRequest) (contract.ShellJobRunningResponse, *contract.Error)
 	WorkflowRun(context.Context, contract.Principal, contract.WorkflowRunRequest) (contract.WorkflowRunResponse, *contract.Error)
+	WorkflowReload(context.Context, contract.Principal, contract.WorkflowReloadRequest) (contract.WorkflowReloadResponse, *contract.Error)
 	WorkflowStatus(context.Context, contract.Principal, contract.WorkflowStatusRequest) (contract.WorkflowStatusResponse, *contract.Error)
 	WorkflowStep(context.Context, contract.Principal, contract.WorkflowStepRequest) (contract.WorkflowStepResponse, *contract.Error)
 	WorkflowList(context.Context, contract.Principal, contract.WorkflowListRequest) (contract.WorkflowListResponse, *contract.Error)
