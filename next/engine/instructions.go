@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 // SetInstructionsPublisher configures a nonblocking callback before serving requests.
@@ -36,7 +36,7 @@ func (s *Service) instructionsEditor(ctx context.Context, caller contract.Princi
 		return contract.InstructionsSaver{Kind: contract.PrincipalOwner}, nil
 	case contract.PrincipalSession:
 		name, room, err := s.store.RootSession(ctx, caller.Session)
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, store.ErrNotFound) {
 			break
 		}
 		if err != nil {
