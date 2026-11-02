@@ -300,3 +300,83 @@ func TestSkillSaveCarriesTheFolder(t *testing.T) {
 		t.Fatal("a missing folder was sent")
 	}
 }
+
+func arguments(t *testing.T, text string) map[string]json.RawMessage {
+	t.Helper()
+	var args map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(text), &args); err != nil {
+		t.Fatal(err)
+	}
+	return args
+}
+
+func TestASingleActionToolTakesNoAction(t *testing.T) {
+	var method contract.Method
+	server, err := New(func(_ context.Context, m contract.Method, _ []byte) ([]byte, *contract.Error) {
+		method = m
+		return []byte(`{}`), nil
+	}, nil, post.Preparer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := server.call(context.Background(), callParams{Name: "web", Arguments: arguments(t, `{"query":"dyna"}`)}); out.IsError || method != contract.MethodWebSearch {
+		t.Fatalf("%s: %+v", method, out)
+	}
+	out := server.call(context.Background(), callParams{Name: "goal", Arguments: arguments(t, `{}`)})
+	if !out.IsError || !strings.Contains(out.Content[0].Text, "action is required. Valid actions: done, item, journal, list, set") {
+		t.Fatalf("%+v", out)
+	}
+}
+
+func TestAnUnknownFieldListsTheFieldsTheActionTakes(t *testing.T) {
+	server, err := New(func(context.Context, contract.Method, []byte) ([]byte, *contract.Error) {
+		t.Fatal("forwarded an unknown field")
+		return nil, nil
+	}, nil, post.Preparer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, args, want string }{
+		{"post", `{"to":"api-lead"}`, `unknown field "to"; post takes: allowNet, clientId, endTurn, home, html, mentions, paths, replyTo, room, text, visualReply, visualUpdate`},
+		{"session", `{"action":"close","to":"x"}`, `unknown field "to"; session close takes: discard, session`},
+		{"computer", `{"action":"screenshot","to":"x"}`, `unknown field "to"; computer screenshot takes no fields`},
+	} {
+		out := server.call(context.Background(), callParams{Name: tc.name, Arguments: arguments(t, tc.args)})
+		var problem contract.Error
+		if err := json.Unmarshal(out.StructuredContent, &problem); err != nil {
+			t.Fatal(err)
+		}
+		if problem.Code != contract.ErrInvalid || problem.Message != tc.want {
+			t.Errorf("%s: %+v", tc.name, problem)
+		}
+	}
+}
+
+// A relative path starts where Pi's own file tools start, not in the box agent's working directory.
+func TestVisualCheckReadsFromTheWorkingDirectory(t *testing.T) {
+	var files []string
+	local := func(_ context.Context, handler tools.BoxHandler, raw []byte) (result, *contract.Error) {
+		var req tools.FileRequest
+		if err := json.Unmarshal(raw, &req); err != nil || handler != tools.VisualCheck {
+			t.Fatalf("%d: %v", handler, err)
+		}
+		files = append(files, req.File)
+		return result{}, nil
+	}
+	server, err := New(func(context.Context, contract.Method, []byte) ([]byte, *contract.Error) {
+		t.Fatal("a box tool reached the engine")
+		return nil, nil
+	}, local, post.Preparer{Dir: "/box/work/repo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []string{"visuals/plan.html", "/box/shared/plan.html"} {
+		quoted, _ := json.Marshal(file)
+		if out := server.call(context.Background(), callParams{Name: "visual", Arguments: map[string]json.RawMessage{"file": quoted}}); out.IsError {
+			t.Fatalf("%+v", out)
+		}
+	}
+	if len(files) != 2 || files[0] != "/box/work/repo/visuals/plan.html" || files[1] != "/box/shared/plan.html" {
+		t.Fatalf("%q", files)
+	}
+}

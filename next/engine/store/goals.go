@@ -19,10 +19,21 @@ const goalListLimit = 200
 // goalJournalLimit is how many entries a journal read returns.
 const goalJournalLimit = 50
 
-// GoalRefusal is a request the caller can fix, with the fix in its message.
-type GoalRefusal struct{ Message string }
+// GoalRefusal is a request the caller can fix, with the fix in its message. Missing marks a request that names something absent.
+type GoalRefusal struct {
+	Message string
+	Missing bool
+}
 
 func (e *GoalRefusal) Error() string { return e.Message }
+
+// goalMissing refuses a goal the room does not hold.
+func goalMissing(goal contract.GoalID) *GoalRefusal {
+	if goal == "" {
+		return &GoalRefusal{Message: "goal is required; goal list shows the room's goals"}
+	}
+	return &GoalRefusal{Message: fmt.Sprintf("goal %s not found; goal list shows the room's goals", goal), Missing: true}
+}
 
 // goalNumber reads the n of "g<n>".
 func goalNumber(id contract.GoalID) (int64, error) {
@@ -32,7 +43,7 @@ func goalNumber(id contract.GoalID) (int64, error) {
 			return n, nil
 		}
 	}
-	return 0, sql.ErrNoRows
+	return 0, goalMissing(id)
 }
 
 func goalID(number int64) contract.GoalID { return contract.GoalID(fmt.Sprintf("g%d", number)) }
@@ -50,7 +61,11 @@ func openGoal(ctx context.Context, tx *sql.Tx, tree room.Tree, caller contract.P
 	}
 	var holder contract.SessionID
 	var state contract.GoalState
-	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(session,''),state FROM goals WHERE room=? AND number=?", id, number).Scan(&holder, &state); err != nil {
+	err = tx.QueryRowContext(ctx, "SELECT COALESCE(session,''),state FROM goals WHERE room=? AND number=?", id, number).Scan(&holder, &state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, "", goalMissing(goal)
+	}
+	if err != nil {
 		return 0, "", err
 	}
 	if !tree.CanTend(caller, holder) {
@@ -68,7 +83,7 @@ func checkHolder(ctx context.Context, tx *sql.Tx, tree room.Tree, caller contrac
 		return &GoalRefusal{Message: "root holds no goals; name the session that will do the work"}
 	}
 	if !tree.HoldsGoals(holder) {
-		return sql.ErrNoRows
+		return &GoalRefusal{Message: fmt.Sprintf("session %s not found in this room; session list shows them", holder), Missing: true}
 	}
 	if !tree.CanTend(caller, holder) {
 		return ErrTreeForbidden
@@ -198,7 +213,9 @@ func (s *Store) SetGoalItem(ctx context.Context, req contract.GoalItemRequest, e
 			if _, err := tx.ExecContext(ctx, "INSERT INTO goal_items(room,goal,number,text,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", event.Room, goal, item, body.Text, body.State, at, at); err != nil {
 				return err
 			}
-		} else if err := tx.QueryRowContext(ctx, "UPDATE goal_items SET text=COALESCE(NULLIF(?,''),text),state=COALESCE(NULLIF(?,''),state),updated_at=? WHERE room=? AND goal=? AND number=? RETURNING text,state", req.Text, req.State, at, event.Room, goal, item).Scan(&body.Text, &body.State); err != nil {
+		} else if err := tx.QueryRowContext(ctx, "UPDATE goal_items SET text=COALESCE(NULLIF(?,''),text),state=COALESCE(NULLIF(?,''),state),updated_at=? WHERE room=? AND goal=? AND number=? RETURNING text,state", req.Text, req.State, at, event.Room, goal, item).Scan(&body.Text, &body.State); errors.Is(err, sql.ErrNoRows) {
+			return &GoalRefusal{Message: fmt.Sprintf("goal %s has no item %d; goal list shows its items", req.Goal, item), Missing: true}
+		} else if err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE goals SET updated_at=? WHERE room=? AND number=?", at, event.Room, goal); err != nil {
@@ -272,7 +289,7 @@ func (s *Store) GoalJournal(ctx context.Context, room contract.RoomID, goal cont
 		return nil, err
 	}
 	if !exists {
-		return nil, sql.ErrNoRows
+		return nil, goalMissing(goal)
 	}
 	rows, err := s.Read().QueryContext(ctx, "SELECT at,by_kind,by_id,text FROM goal_journal WHERE room=? AND goal=? ORDER BY number DESC LIMIT ?", room, number, goalJournalLimit)
 	if err != nil {

@@ -46,10 +46,13 @@ func (s *Service) goalRoom(ctx context.Context, caller contract.Principal, room 
 // goalProblem turns a refused goal write into its typed error. The tree checks run inside the write.
 func goalProblem(err error) *contract.Error {
 	var refusal *store.GoalRefusal
-	switch {
-	case errors.As(err, &refusal):
+	if errors.As(err, &refusal) {
+		if refusal.Missing {
+			return &contract.Error{Code: contract.ErrNotFound, Message: refusal.Message}
+		}
 		return invalid(refusal.Message)
-	case errors.Is(err, store.ErrTreeForbidden):
+	}
+	if errors.Is(err, store.ErrTreeForbidden) {
 		return forbidden()
 	}
 	return failure(err)
@@ -149,7 +152,7 @@ func (s *Service) GoalJournal(ctx context.Context, caller contract.Principal, re
 	}
 	entries, err := s.store.GoalJournal(ctx, room, req.Goal)
 	if err != nil {
-		return contract.GoalJournalResponse{}, failure(err)
+		return contract.GoalJournalResponse{}, goalProblem(err)
 	}
 	return contract.GoalJournalResponse{Entries: entries}, nil
 }

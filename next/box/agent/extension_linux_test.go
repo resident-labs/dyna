@@ -18,7 +18,8 @@ const ids = new Set();
 globalThis.fetch = async (_url, init) => {
 	const { id, method, params } = JSON.parse(init.body);
 	ids.add(id);
-	if (method === "tools/list") return { json: async () => ({ result: { tools: [{ name: "post", description: "Post.", inputSchema: { type: "object" }, annotations: {} }] } }) };
+	if (method === "tools/list") return { json: async () => ({ result: { tools: ["post", "visual"].map((name) => ({ name, description: name + ".", inputSchema: { type: "object" }, annotations: {} })) } }) };
+	if (params.name === "visual") return { json: async () => ({ result: { content: [{ type: "text", text: "checked " + params.arguments.file }], isError: true } }) };
 	posts.push(params.arguments);
 	const failed = params.arguments.text === "refused";
 	const output = failed ? { code: "invalid" } : { event: "post_1", seq: 7 };
@@ -29,6 +30,7 @@ const registered = {};
 const { default: load } = await import(process.argv[2]);
 await load({ on: (name, handler) => { handlers[name] = handler; }, registerTool: (definition) => { registered[definition.name] = definition; } });
 const tool = registered.mcp__dyna__post;
+const visual = registered.mcp__dyna__visual;
 const call = async (id, parent, input) => {
 	const event = { toolName: tool.name, toolCallId: id, parentToolCallId: parent, input };
 	handlers.tool_call(event);
@@ -36,6 +38,7 @@ const call = async (id, parent, input) => {
 };
 console.log(JSON.stringify({
 	tool: { name: tool.name, exposure: tool.exposure, description: tool.description },
+	visual: { mode: visual.executionMode, exposure: visual.exposure, postMode: tool.executionMode ?? "", result: await visual.execute("v", { file: "a.html" }) },
 	direct: await call("a", undefined, { text: "done", endTurn: true }),
 	plain: await call("b", undefined, { text: "update" }),
 	failed: await call("c", undefined, { text: "refused", endTurn: true }),
@@ -238,14 +241,30 @@ func TestExtensionEndsTheTurnOnADirectPost(t *testing.T) {
 		Tool struct {
 			Name, Exposure, Description string
 		}
+		Visual struct {
+			Mode, Exposure, PostMode string
+			Result                   struct {
+				IsError bool `json:"isError"`
+				Details struct {
+					Tool string `json:"tool"`
+				} `json:"details"`
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			}
+		}
 		Direct, Plain, Failed, Nested result
 		Calls, IDs                    []string
 	}
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
-	if got.Tool.Name != "mcp__dyna__post" || got.Tool.Exposure != "direct" || got.Tool.Description != "Post." {
+	if got.Tool.Name != "mcp__dyna__post" || got.Tool.Exposure != "direct" || got.Tool.Description != "post." {
 		t.Fatalf("tool %+v", got.Tool)
+	}
+	// A visual check runs its message's calls in order, so a write before it has finished. A post leaves them parallel.
+	if v := got.Visual; v.Mode != "sequential" || v.Exposure != "deferred" || v.PostMode != "" || !v.Result.IsError || v.Result.Details.Tool != "visual" || len(v.Result.Content) != 1 || v.Result.Content[0].Text != "checked a.html" {
+		t.Fatalf("visual %+v", v)
 	}
 	if !got.Direct.Terminate || got.Direct.Details.EndPost != "post_1" || got.Direct.StructuredContent.StructuredContent.TurnContinues {
 		t.Fatalf("direct %+v", got.Direct)
@@ -262,7 +281,7 @@ func TestExtensionEndsTheTurnOnADirectPost(t *testing.T) {
 	if want := []string{"a", "b", "c", "d"}; !slices.Equal(got.Calls, want) {
 		t.Fatalf("call IDs %v, want %v", got.Calls, want)
 	}
-	if len(got.IDs) != 5 {
+	if len(got.IDs) != 6 {
 		t.Fatalf("request IDs must differ: %v", got.IDs)
 	}
 }
