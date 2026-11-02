@@ -19,7 +19,8 @@ import subprocess
 import sys
 import time
 
-LABEL = "dyna"
+# Every runner size is a scale set of its own, dyna-small to dyna-xlarge, and a pool job names one.
+LABEL = "dyna-"
 # Every queued run has a watcher, and they share GITHUB_TOKEN's 1,000 requests an hour.
 POLL = 120
 # A pool that lost its last job can be between jobs, so one quiet look proves nothing.
@@ -35,7 +36,7 @@ def seconds(stamp):
 
 
 def on_pool(job, label):
-    return label in job.get("labels", [])
+    return any(name.startswith(label) for name in job.get("labels", []))
 
 
 def queued_on_pool(jobs, label):

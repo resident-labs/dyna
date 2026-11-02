@@ -11,19 +11,24 @@ import (
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 const repo contract.RepoName = "owner/repo"
 
+const large = contract.BoxSizeLarge
+
 type fakeStore struct {
-	settings []contract.RepoCIHost
-	hosts    []box.Host
-	boxes    []box.Box
+	repos []store.CIRepo
+	hosts []box.Host
+	boxes []box.Box
+	pools []store.Pool
 }
 
-func (s *fakeStore) CIHosts(context.Context) ([]contract.RepoCIHost, error) { return s.settings, nil }
-func (s *fakeStore) Hosts(context.Context) ([]box.Host, error)              { return s.hosts, nil }
-func (s *fakeStore) Boxes(context.Context) ([]box.Box, error)               { return s.boxes, nil }
+func (s *fakeStore) CIRepos(context.Context) ([]store.CIRepo, error) { return s.repos, nil }
+func (s *fakeStore) Hosts(context.Context) ([]box.Host, error)       { return s.hosts, nil }
+func (s *fakeStore) Boxes(context.Context) ([]box.Box, error)        { return s.boxes, nil }
+func (s *fakeStore) Pools(context.Context) ([]store.Pool, error)     { return s.pools, nil }
 
 type fakeDriver struct {
 	runners  []box.Runner
@@ -47,7 +52,7 @@ func (d *fakeDriver) StartRunner(_ context.Context, s box.RunnerSpec) error {
 	if d.startErr != nil {
 		return d.startErr
 	}
-	d.runners = append(d.runners, box.Runner{Name: s.Name, Repo: s.Repo, ID: s.ID, Slot: s.Slot, Running: true})
+	d.runners = append(d.runners, box.Runner{Name: s.Name, Repo: s.Repo, ID: s.ID, Slot: s.Slot, Size: s.Size, Running: true})
 	return nil
 }
 func (d *fakeDriver) ListRunners(ctx context.Context) ([]box.Runner, bool, error) {
@@ -83,19 +88,20 @@ func (a *fakeAPI) RenewLease(_ context.Context, _ contract.RepoName, until time.
 type fakeSets struct {
 	mu        sync.Mutex
 	next      int64
-	names     []string
+	names     []string // runners registered
+	sets      []string // the scale set of each
 	jitErr    error
-	listening map[contract.RepoName]int
+	listening map[string]int // starts of each repository's set, as "repo set"
 	listenErr error
-	deleted   []contract.RepoName
+	deleted   []string
 }
 
-func (s *fakeSets) Listen(ctx context.Context, repo contract.RepoName, _ Scale) error {
+func (s *fakeSets) Listen(ctx context.Context, repo contract.RepoName, set string, _ Scale) error {
 	s.mu.Lock()
 	if s.listening == nil {
-		s.listening = make(map[contract.RepoName]int)
+		s.listening = make(map[string]int)
 	}
-	s.listening[repo]++
+	s.listening[string(repo)+" "+set]++
 	err := s.listenErr
 	s.mu.Unlock()
 	if err != nil {
@@ -104,16 +110,19 @@ func (s *fakeSets) Listen(ctx context.Context, repo contract.RepoName, _ Scale) 
 	<-ctx.Done()
 	return nil
 }
-func (s *fakeSets) JIT(_ context.Context, _ contract.RepoName, name string) (int64, string, error) {
+func (s *fakeSets) JIT(_ context.Context, _ contract.RepoName, set, name string) (int64, string, error) {
 	if s.jitErr != nil {
 		return 0, "", s.jitErr
 	}
 	s.next++
 	s.names = append(s.names, name)
+	s.sets = append(s.sets, set)
 	return s.next, "jit-secret", nil
 }
-func (s *fakeSets) Delete(_ context.Context, repo contract.RepoName) error {
-	s.deleted = append(s.deleted, repo)
+func (s *fakeSets) Delete(_ context.Context, repo contract.RepoName, set string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deleted = append(s.deleted, string(repo)+" "+set)
 	return nil
 }
 
@@ -124,28 +133,34 @@ type fixture struct {
 	api     *fakeAPI
 	sets    *fakeSets
 	now     time.Time
+	kicks   int
 	group   sync.WaitGroup
-}
-
-func setting(host contract.HostName, runners int) contract.RepoCIHost {
-	return contract.RepoCIHost{Repo: repo, Host: host, Runners: runners, Size: contract.BoxSizeLarge}
 }
 
 func readyHost(name contract.HostName, memory int64) box.Host {
 	return box.Host{Name: name, State: box.HostReady, CI: true, CPUs: 16, MemBytes: memory, DiskBytes: 100 * box.GiB, DiskFloor: 20 * box.GiB, CheckedAt: time.Unix(1, 0)}
 }
 
-func newFixture(runners int) *fixture {
+// newFixture turns the repository on with max as its bound, beside one host with ci on.
+func newFixture(max int) *fixture {
 	f := &fixture{api: &fakeAPI{}, sets: &fakeSets{}, now: time.Unix(1_000_000, 0), drivers: map[contract.HostName]*fakeDriver{"pve": {}}}
-	f.store = &fakeStore{settings: []contract.RepoCIHost{setting("pve", runners)}, hosts: []box.Host{readyHost("pve", 64*box.GiB)}}
-	f.pool = &Pool{Store: f.store, GitHub: f.api, Sets: f.sets, Now: func() time.Time { return f.now },
+	f.store = &fakeStore{repos: []store.CIRepo{{Repo: repo, Max: max, Room: "room"}}, hosts: []box.Host{readyHost("pve", 64*box.GiB)}}
+	f.pool = &Pool{Store: f.store, GitHub: f.api, Sets: f.sets, Now: func() time.Time { return f.now }, Kick: func() { f.kicks++ },
 		Hosts: func(_ context.Context, name contract.HostName) (Driver, error) { return f.drivers[name], nil }}
 	return f
 }
 
-func (f *fixture) scale(assigned int) int {
-	return f.pool.scale(context.Background(), repo, assigned)
+func (f *fixture) addHost(host box.Host) *fakeDriver {
+	f.drivers[host.Name] = &fakeDriver{}
+	f.store.hosts = append(f.store.hosts, host)
+	return f.drivers[host.Name]
 }
+
+func (f *fixture) scaleSize(size contract.BoxSizeName, assigned int) int {
+	return f.pool.scale(context.Background(), scaleSet{repo, size}, assigned)
+}
+
+func (f *fixture) scale(assigned int) int { return f.scaleSize(large, assigned) }
 
 func (f *fixture) tick(t *testing.T) {
 	t.Helper()
@@ -161,7 +176,7 @@ func (f *fixture) stop() {
 	f.group.Wait()
 }
 
-func TestRunnersFollowAssignedJobsUpToHostCapacity(t *testing.T) {
+func TestRunnersFollowAssignedJobsUpToTheBound(t *testing.T) {
 	f := newFixture(2)
 	if capacity := f.scale(0); capacity != 2 || len(f.sets.names) != 0 {
 		t.Fatalf("idle pool: capacity %d, registered %v", capacity, f.sets.names)
@@ -171,7 +186,7 @@ func TestRunnersFollowAssignedJobsUpToHostCapacity(t *testing.T) {
 		t.Fatalf("one job: %+v", f.drivers["pve"])
 	}
 	spec := f.drivers["pve"].specs[0]
-	if spec.Config != "jit-secret" || spec.Repo != repo || spec.Size.Name != contract.BoxSizeLarge || !strings.HasPrefix(spec.Name, "dyna-ci-pve-") {
+	if spec.Config != "jit-secret" || spec.Repo != repo || spec.Size.Name != large || !strings.HasPrefix(spec.Name, "dyna-ci-pve-") {
 		t.Fatalf("spec %+v", spec)
 	}
 	f.scale(1)
@@ -180,7 +195,15 @@ func TestRunnersFollowAssignedJobsUpToHostCapacity(t *testing.T) {
 	}
 	f.scale(5)
 	if len(f.drivers["pve"].runners) != 2 || f.drivers["pve"].builds != 1 {
-		t.Fatalf("host cap: %d runners, %d builds", len(f.drivers["pve"].runners), f.drivers["pve"].builds)
+		t.Fatalf("bound: %d runners, %d builds", len(f.drivers["pve"].runners), f.drivers["pve"].builds)
+	}
+}
+
+// With no bound, admission alone decides: a 16-CPU host takes 4 x 16 CPUs of runners, eight large ones.
+func TestWithoutABoundAdmissionDecides(t *testing.T) {
+	f := newFixture(0)
+	if capacity := f.scale(10); capacity != 8 || len(f.drivers["pve"].runners) != 8 {
+		t.Fatalf("capacity %d, runners %d", capacity, len(f.drivers["pve"].runners))
 	}
 }
 
@@ -198,45 +221,18 @@ func TestFinishedRunnerLeavesAndTheNextJobGetsANewOne(t *testing.T) {
 	}
 }
 
-func TestAdmissionPicksTheHostWithMostMemoryAndSpills(t *testing.T) {
-	f := newFixture(1)
-	f.drivers["big"] = &fakeDriver{}
-	f.store.hosts = append(f.store.hosts, readyHost("big", 128*box.GiB))
-	f.store.settings = append(f.store.settings, setting("big", 1))
-	if capacity := f.scale(1); capacity != 2 {
-		t.Fatalf("capacity %d", capacity)
-	}
+func TestAdmissionSpillsToTheNextHostWhenOneIsFull(t *testing.T) {
+	f := newFixture(0)
+	big := readyHost("big", 128*box.GiB)
+	big.CPUs = 2 // 4 x 2 CPUs: one large runner
+	f.addHost(big)
+	f.scale(1)
 	if len(f.drivers["big"].runners) != 1 || len(f.drivers["pve"].runners) != 0 {
 		t.Fatalf("big %d, pve %d", len(f.drivers["big"].runners), len(f.drivers["pve"].runners))
 	}
 	f.scale(2)
 	if len(f.drivers["pve"].runners) != 1 {
 		t.Fatal("the second job did not spill to the other host")
-	}
-}
-
-func TestAddingAHostIsOnlyASetting(t *testing.T) {
-	f := newFixture(1)
-	f.drivers["laptop"] = &fakeDriver{}
-	f.store.hosts = append(f.store.hosts, readyHost("laptop", 32*box.GiB))
-	f.scale(1)
-	if len(f.drivers["laptop"].runners) != 0 {
-		t.Fatal("a host no repository named got a runner")
-	}
-	f.store.settings = append(f.store.settings, setting("laptop", 1))
-	f.scale(2)
-	if len(f.drivers["laptop"].runners) != 1 || f.drivers["laptop"].builds != 1 || !f.drivers["laptop"].egress {
-		t.Fatalf("laptop %+v", f.drivers["laptop"])
-	}
-}
-
-// host_rooms keeps sessions off a host. A repository names its CI hosts itself, so
-// a host held for CI by a dedicated room still serves it.
-func TestAHostKeptFromSessionsStillServesTheRepositoryThatNamesIt(t *testing.T) {
-	f := newFixture(1)
-	f.store.hosts[0].Rooms = []contract.RoomID{"ci-only"}
-	if capacity := f.scale(1); capacity != 1 || len(f.drivers["pve"].runners) != 1 {
-		t.Fatalf("capacity %d, runners %+v", capacity, f.drivers["pve"].runners)
 	}
 }
 
@@ -261,7 +257,7 @@ func TestAnIdleHostGetsNoProxyUntilAJobNeedsIt(t *testing.T) {
 	}
 }
 
-func TestEachRunnerGetsItsOwnProxySlotAndAFinishedOneFreesIt(t *testing.T) {
+func TestEachRunnerGetsItsOwnSlotAndAFinishedOneFreesIt(t *testing.T) {
 	f := newFixture(3)
 	f.scale(3)
 	d := f.drivers["pve"]
@@ -279,8 +275,9 @@ func TestAnotherRepositorysRunnerHoldsItsSlot(t *testing.T) {
 	f := newFixture(1)
 	d := f.drivers["pve"]
 	other := contract.RepoName("owner/other")
-	d.runners = []box.Runner{{Name: "dyna-ci-pve-other", Repo: other, ID: 9, Slot: 0, Running: true}}
-	f.store.settings = append(f.store.settings, contract.RepoCIHost{Repo: other, Host: "pve", Runners: 1, Size: contract.BoxSizeLarge})
+	medium, _ := box.Size(contract.BoxSizeMedium)
+	d.runners = []box.Runner{{Name: "dyna-ci-pve-other", Repo: other, ID: 9, Slot: 0, Size: medium, Running: true}}
+	f.store.repos = append(f.store.repos, store.CIRepo{Repo: other, Room: "room"})
 	f.scale(1)
 	if slot := d.specs[0].Slot; slot != 1 {
 		t.Fatalf("took slot %d, which another repository's runner holds", slot)
@@ -288,9 +285,9 @@ func TestAnotherRepositorysRunnerHoldsItsSlot(t *testing.T) {
 }
 
 func TestAHostWithEverySlotInUseStartsNoRunner(t *testing.T) {
-	f := newFixture(box.RunnerSlots + 1)
+	f := newFixture(0)
 	f.store.hosts[0].CPUs, f.store.hosts[0].MemBytes = 64, 256*box.GiB
-	if capacity := f.scale(box.RunnerSlots + 1); capacity != box.RunnerSlots+1 {
+	if capacity := f.scale(box.RunnerSlots + 1); capacity != box.RunnerSlots {
 		t.Fatalf("capacity %d", capacity)
 	}
 	if got := len(f.drivers["pve"].runners); got != box.RunnerSlots {
@@ -300,7 +297,8 @@ func TestAHostWithEverySlotInUseStartsNoRunner(t *testing.T) {
 
 func TestBelowTheDiskFloorCapacityFallsToWhatIsRunning(t *testing.T) {
 	f := newFixture(3)
-	f.drivers["pve"].runners = []box.Runner{{Name: "dyna-ci-pve-working", Repo: repo, ID: 7, Running: true}}
+	size, _ := box.Size(large)
+	f.drivers["pve"].runners = []box.Runner{{Name: "dyna-ci-pve-working", Repo: repo, ID: 7, Size: size, Running: true}}
 	f.store.hosts[0].DiskBytes = 20*box.GiB + 40*box.GiB - 1 // the floor plus a large request, less one byte
 	if capacity := f.scale(3); capacity != 1 {
 		t.Fatalf("capacity %d, want only the working runner", capacity)
@@ -324,8 +322,8 @@ func TestHostMemoryPressureStopsNewRunners(t *testing.T) {
 
 func TestSessionBoxesCountAgainstCIPlacement(t *testing.T) {
 	f := newFixture(5)
-	large, _ := box.Size(contract.BoxSizeLarge)
-	f.store.boxes = []box.Box{{ID: "b", Host: "pve", State: contract.BoxReady, Image: "image", Size: contract.BoxSize{Name: large.Name, CPUs: 60, MemBytes: large.MemBytes}}}
+	size, _ := box.Size(large)
+	f.store.boxes = []box.Box{{ID: "b", Host: "pve", State: contract.BoxReady, Image: "image", Size: contract.BoxSize{Name: size.Name, CPUs: 60, MemBytes: size.MemBytes}}}
 	f.scale(5)
 	// 4 x 16 CPUs is 64, the box takes 60, and no large runner fits in the rest.
 	if len(f.sets.names) != 0 {
@@ -333,17 +331,14 @@ func TestSessionBoxesCountAgainstCIPlacement(t *testing.T) {
 	}
 }
 
-// A laptop drops off the tailnet mid-job. The pool stops seeing its runners and
-// offers no capacity there. GitHub fails the job when the runner stops
-// answering. The registration of an idle runner goes at the next reap, and that
-// runner exits by itself when the host comes back (proved on a live runner).
-func TestHostDroppingOutLosesCapacityAndReapsItsIdleRunners(t *testing.T) {
-	f := newFixture(1)
-	f.drivers["laptop"] = &fakeDriver{}
-	f.store.hosts = append(f.store.hosts, readyHost("laptop", 128*box.GiB))
-	f.store.settings = append(f.store.settings, setting("laptop", 2))
+// A laptop drops off the tailnet mid-job. The pool stops seeing its runners and offers no capacity there. GitHub fails the
+// job when the runner stops answering. The registration of an idle runner goes at the next reap, and that runner exits by
+// itself when the host comes back (proved on a live runner).
+func TestHostDroppingOutReapsItsIdleRunners(t *testing.T) {
+	f := newFixture(0)
+	f.store.hosts[0].DiskBytes = 0 // pve takes nothing, so both jobs go to the laptop
+	laptop := f.addHost(readyHost("laptop", 128*box.GiB))
 	f.scale(2)
-	laptop := f.drivers["laptop"]
 	if len(laptop.runners) != 2 {
 		t.Fatalf("laptop %d", len(laptop.runners))
 	}
@@ -351,7 +346,7 @@ func TestHostDroppingOutLosesCapacityAndReapsItsIdleRunners(t *testing.T) {
 	f.tick(t)
 
 	f.store.hosts[1].State = box.HostUnreachable
-	if capacity := f.scale(0); capacity != 1 {
+	if capacity := f.scale(0); capacity != 0 {
 		t.Fatalf("capacity %d after the drop", capacity)
 	}
 	f.now = f.now.Add(reapEvery)
@@ -363,45 +358,42 @@ func TestHostDroppingOutLosesCapacityAndReapsItsIdleRunners(t *testing.T) {
 	if len(laptop.removed) != 0 {
 		t.Fatal("touched a host it cannot reach")
 	}
-	// The host is back. Its idle runner has exited; its busy one still holds a slot.
+	// The host is back. Its idle runner has exited; its busy one still runs.
 	f.store.hosts[1].State = box.HostReady
 	laptop.runners = laptop.runners[1:]
-	if capacity := f.scale(2); capacity != 3 {
-		t.Fatalf("capacity %d after the return", capacity)
+	if capacity := f.scale(1); capacity != 8 || len(laptop.runners) != 1 {
+		t.Fatalf("capacity %d, runners %d after the return", capacity, len(laptop.runners))
 	}
 	f.stop()
 }
 
 func TestHostThatStopsAnsweringIsSkippedForTheOthers(t *testing.T) {
-	f := newFixture(1)
-	f.drivers["laptop"] = &fakeDriver{listErr: errors.New("ssh failed")}
-	f.store.hosts = append(f.store.hosts, readyHost("laptop", 128*box.GiB))
-	f.store.settings = append(f.store.settings, setting("laptop", 4))
-	if capacity := f.scale(1); capacity != 1 || len(f.drivers["pve"].runners) != 1 {
-		t.Fatalf("capacity %d, pve %d", capacity, len(f.drivers["pve"].runners))
+	f := newFixture(0)
+	f.addHost(readyHost("laptop", 128*box.GiB)).listErr = errors.New("ssh failed")
+	if f.scale(1); len(f.drivers["pve"].runners) != 1 {
+		t.Fatalf("pve %d", len(f.drivers["pve"].runners))
 	}
 }
 
 func TestFailedStartDeletesRegistrationAndTriesAnotherHost(t *testing.T) {
-	f := newFixture(1)
-	f.drivers["big"] = &fakeDriver{startErr: errors.New("podman failed")}
-	f.store.hosts = append(f.store.hosts, readyHost("big", 128*box.GiB))
-	f.store.settings = append(f.store.settings, setting("big", 1))
+	f := newFixture(0)
+	big := f.addHost(readyHost("big", 128*box.GiB))
+	big.startErr = errors.New("podman failed")
 	f.scale(1)
 	if !slices.Equal(f.api.deleted, []int64{1}) || len(f.drivers["pve"].runners) != 1 {
 		t.Fatalf("deleted %v, pve %d", f.api.deleted, len(f.drivers["pve"].runners))
 	}
 	f.drivers["pve"].runners = nil
 	f.scale(1)
-	if len(f.drivers["big"].specs) != 1 {
-		t.Fatalf("retried the failed host inside the backoff: %d", len(f.drivers["big"].specs))
+	if len(big.specs) != 1 {
+		t.Fatalf("retried the failed host inside the backoff: %d", len(big.specs))
 	}
-	f.drivers["big"].startErr = nil
+	big.startErr = nil
 	f.drivers["pve"].runners = nil
 	f.now = f.now.Add(retryAfter)
 	f.scale(1)
-	if len(f.drivers["big"].runners) != 1 || f.drivers["big"].builds != 2 {
-		t.Fatalf("big %+v", f.drivers["big"])
+	if len(big.runners) != 1 || big.builds != 2 {
+		t.Fatalf("big %+v", big)
 	}
 }
 
@@ -413,7 +405,7 @@ func TestFailedJITStartsNothingAndKeepsTheListener(t *testing.T) {
 	}
 }
 
-func TestOneListenerPerRepositoryRestartsAfterFailure(t *testing.T) {
+func TestEachListenerRestartsAfterFailure(t *testing.T) {
 	f := newFixture(1)
 	f.sets.listenErr = errors.New("session conflict")
 	f.tick(t)
@@ -427,26 +419,28 @@ func TestOneListenerPerRepositoryRestartsAfterFailure(t *testing.T) {
 	f.tick(t)
 	f.tick(t)
 	f.sets.mu.Lock()
-	starts := f.sets.listening[repo]
-	f.sets.mu.Unlock()
-	if starts > 2 {
-		t.Fatalf("started %d listeners", starts)
+	for _, size := range Sizes {
+		if starts := f.sets.listening[string(repo)+" "+SetName(size)]; starts > 2 {
+			t.Errorf("%s started %d listeners", SetName(size), starts)
+		}
 	}
+	f.sets.mu.Unlock()
 	f.stop()
 }
 
-func TestDisablingRemovesRunnersAndTheScaleSetThenGoesQuiet(t *testing.T) {
+func TestTurningOffRemovesRunnersAndEveryScaleSetThenGoesQuiet(t *testing.T) {
 	f := newFixture(2)
 	f.tick(t)
 	f.scale(2)
-	f.store.settings = nil
-	f.tick(t) // cancels the listener and removes the runners
+	f.store.repos = nil
+	f.tick(t) // cancels the listeners and removes the runners
 	if len(f.drivers["pve"].runners) != 0 || !slices.Equal(f.api.deleted, []int64{1, 2}) || f.drivers["pve"].egress {
 		t.Fatalf("driver %+v, deleted %v", f.drivers["pve"], f.api.deleted)
 	}
 	f.group.Wait()
-	f.tick(t) // sees the listener finished
-	if !slices.Equal(f.sets.deleted, []contract.RepoName{repo}) {
+	f.tick(t) // sees the listeners finished
+	slices.Sort(f.sets.deleted)
+	if want := []string{"owner/repo dyna-large", "owner/repo dyna-medium", "owner/repo dyna-small", "owner/repo dyna-xlarge"}; !slices.Equal(f.sets.deleted, want) {
 		t.Fatalf("scale sets deleted: %v", f.sets.deleted)
 	}
 	f.drivers["pve"].listErr = errors.New("a quiet pool must not touch the host")
@@ -458,14 +452,14 @@ func TestAListenerThatFailedAsItsRepositoryLeftStillDeletesTheSet(t *testing.T) 
 	f.sets.listenErr = errors.New("session lost")
 	f.tick(t)
 	f.group.Wait()
-	f.store.settings = nil
+	f.store.repos = nil
 	f.tick(t)
-	if !slices.Equal(f.sets.deleted, []contract.RepoName{repo}) {
+	if len(f.sets.deleted) != len(Sizes) {
 		t.Fatalf("scale sets deleted: %v", f.sets.deleted)
 	}
 }
 
-// A host that hangs inside Tick would hold the lock, and with it --mode github.
+// A host that hangs inside Tick would hold the lock, and with it --off.
 func TestTickGivesUpOnAHostThatHangs(t *testing.T) {
 	f := newFixture(1)
 	f.tick(t)
@@ -475,10 +469,10 @@ func TestTickGivesUpOnAHostThatHangs(t *testing.T) {
 	}
 }
 
-func TestDisablingWhileAHostIsDownKeepsLooking(t *testing.T) {
+func TestTurningOffWhileAHostIsDownKeepsLooking(t *testing.T) {
 	f := newFixture(1)
 	f.scale(1)
-	f.store.settings = nil
+	f.store.repos = nil
 	f.drivers["pve"].listErr = errors.New("ssh failed")
 	if err := f.pool.Tick(context.Background(), &f.group); err == nil {
 		t.Fatal("want the host failure")
@@ -492,7 +486,8 @@ func TestDisablingWhileAHostIsDownKeepsLooking(t *testing.T) {
 
 func TestRestartAdoptsWorkingRunnersAndReapsTheRest(t *testing.T) {
 	f := newFixture(2)
-	f.drivers["pve"].runners = []box.Runner{{Name: "dyna-ci-pve-working", Repo: repo, ID: 7, Running: true}, {Name: "dyna-ci-pve-dead", Repo: repo, ID: 8}}
+	size, _ := box.Size(large)
+	f.drivers["pve"].runners = []box.Runner{{Name: "dyna-ci-pve-working", Repo: repo, ID: 7, Size: size, Running: true}, {Name: "dyna-ci-pve-dead", Repo: repo, ID: 8, Size: size}}
 	f.drivers["pve"].egress = true
 	f.api.list = []Registration{
 		{ID: 7, Name: "dyna-ci-pve-working", Status: "offline"},

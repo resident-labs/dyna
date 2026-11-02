@@ -18,7 +18,7 @@ def stamp(at):
     return datetime.fromtimestamp(at, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if at else None
 
 
-def job(name, status, started=None, completed=None, runner=None, labels=("dyna",)):
+def job(name, status, started=None, completed=None, runner=None, labels=("dyna-medium",)):
     return {"name": name, "status": status, "labels": list(labels), "runner_name": runner,
             "started_at": stamp(started), "completed_at": stamp(completed)}
 

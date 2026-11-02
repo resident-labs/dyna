@@ -125,7 +125,8 @@ func (s *Store) PoolNodes(ctx context.Context) ([]box.Host, error) {
 }
 
 // StartPoolNode records a node before its script runs, so a restart cannot lose count of it. It reports false when the pool is
-// full or this box already has its node, and that check and the row are one write.
+// full or this box already has its node, and that check and the row are one write. A node has ci on: it serves the CI runners
+// of the rooms that name its pool, as it serves their boxes.
 func (s *Store) StartPoolNode(ctx context.Context, p Pool, node box.Host) (bool, error) {
 	started := false
 	err := s.Write(ctx, func(tx *sql.Tx) error {
@@ -133,7 +134,7 @@ func (s *Store) StartPoolNode(ctx context.Context, p Pool, node box.Host) (bool,
 		if err := tx.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM hosts WHERE pool=?1)>=?2 OR (?3!='' AND EXISTS (SELECT 1 FROM hosts WHERE box=?3))", p.Name, p.Max, node.Box).Scan(&taken); err != nil || taken {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO hosts(name,ssh,state,cpus,mem_bytes,disk_bytes,checked_at,pool,box) VALUES(?,'',?,0,0,0,0,?,?)", node.Name, box.HostProvisioning, p.Name, node.Box); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO hosts(name,ssh,state,cpus,mem_bytes,disk_bytes,checked_at,pool,box,ci) VALUES(?,'',?,0,0,0,0,?,?,1)", node.Name, box.HostProvisioning, p.Name, node.Box); err != nil {
 			return err
 		}
 		started = true

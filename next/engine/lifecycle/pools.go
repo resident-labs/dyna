@@ -38,6 +38,47 @@ type Nodes interface {
 	Leave(ctx context.Context, name contract.HostName)
 }
 
+// Runners is the CI pool as admission and the node pools see it. A runner on a host counts against it as a box does and holds
+// a node, and a job that no host takes waits for a node of its room's pool, as a box does.
+type Runners interface {
+	// Runners returns the runners on hosts, as boxes, and the jobs that wait for a node, as pending boxes.
+	Runners() (placed []box.Box, waiting []store.LifecycleBox)
+	// Hold runs drain unless a runner is on the host, and starts no runner meanwhile.
+	Hold(host contract.HostName, drain func() error) error
+}
+
+// SetRunners shows the CI pool's runners to admission and the node pools, before the reconciler runs.
+func (r *Reconciler) SetRunners(runners Runners) { r.runners = runners }
+
+// runnerView returns the runners as admission counts them, and as rows the node pools grow for and keep their nodes for.
+func (r *Reconciler) runnerView() ([]box.Box, []store.LifecycleBox) {
+	if r.runners == nil {
+		return nil, nil
+	}
+	placed, waiting := r.runners.Runners()
+	rows := waiting
+	for _, b := range placed {
+		rows = append(rows, store.LifecycleBox{Box: b})
+	}
+	return placed, rows
+}
+
+// drainHost closes a host to admission once nothing holds it, box or runner.
+func (r *Reconciler) drainHost(ctx context.Context, name contract.HostName) error {
+	if r.runners == nil {
+		return r.store.DrainHost(ctx, name)
+	}
+	return r.runners.Hold(name, func() error { return r.store.DrainHost(ctx, name) })
+}
+
+// candidates are the hosts a row that waits may use. A CI runner takes only hosts with ci on.
+func candidates(row store.LifecycleBox, hosts []box.Host) []box.Host {
+	if row.Image == box.RunnerImage {
+		return box.RunnerHosts(hosts)
+	}
+	return hosts
+}
+
 // poolDelay is the wait after a failure: a minute, doubling to an hour, as a failing create may cost money each time.
 func poolDelay(failures int) time.Duration {
 	return min(time.Minute<<min(failures-1, 6), time.Hour)
@@ -105,7 +146,7 @@ func (r *Reconciler) grow(ctx context.Context, pool store.Pool, own []box.Host, 
 		if !waitsForNode(row, pool) || slices.ContainsFunc(own, func(node box.Host) bool { return node.Box == row.ID }) {
 			continue
 		}
-		if box.Admit(ready, all, row.Box, row.Only...).Host != "" {
+		if box.Admit(candidates(row, ready), all, row.Box, row.Only...).Host != "" {
 			continue // A node came up since this pass read its hosts, and the next pass places the box.
 		}
 		name, err := nodeName(pool.Name)
@@ -155,8 +196,8 @@ func (r *Reconciler) createNode(ctx context.Context, pool store.Pool, node box.H
 		if err != nil {
 			return err
 		}
-		joined.Pool, joined.Box, joined.DiskFloor = node.Pool, node.Box, box.DiskFloor(joined.DiskBytes)
-		if placed := box.Admit([]box.Host{joined}, nil, row.Box, row.Only...); placed.Host == "" {
+		joined.Pool, joined.Box, joined.DiskFloor, joined.CI = node.Pool, node.Box, box.DiskFloor(joined.DiskBytes), true
+		if placed := box.Admit(candidates(row, []box.Host{joined}), nil, row.Box, row.Only...); placed.Host == "" {
 			return fmt.Errorf("the node is too small for a %s box: %s", row.Size.Name, placed.Reason)
 		}
 		return r.store.FinishPoolNode(ctx, joined)
@@ -229,7 +270,7 @@ func (r *Reconciler) shrink(ctx context.Context, pool store.Pool, own []box.Host
 					continue
 				}
 			}
-			err := r.store.DrainHost(ctx, node.Name)
+			err := r.drainHost(ctx, node.Name)
 			var held *store.HostHeldError
 			if errors.As(err, &held) {
 				continue
@@ -355,7 +396,7 @@ func (r *Reconciler) RemoveHost(ctx context.Context, name contract.HostName, dis
 		failed, err = r.discardHost(ctx, name)
 	} else {
 		r.pass.Lock() // A pass places boxes from its own reading of the hosts.
-		err = r.store.DrainHost(ctx, name)
+		err = r.drainHost(ctx, name)
 		r.pass.Unlock()
 	}
 	if err != nil {

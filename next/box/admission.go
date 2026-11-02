@@ -50,6 +50,22 @@ func (h Host) Serves(room contract.RoomID) bool {
 	return !h.NoAgents && (len(h.Rooms) == 0 || slices.Contains(h.Rooms, room))
 }
 
+// RunnerImage marks a CI runner where admission sees it as a box: one on a host, or one that waits for a host.
+const RunnerImage = "runner"
+
+// RunnerHosts are the hosts that take CI runners: ready, with ci on. The agents switch and the room list are for session
+// boxes, so a runner ignores them, and Admit still holds it to its room's rule, as it does the room's boxes.
+func RunnerHosts(hosts []Host) []Host {
+	var open []Host
+	for _, h := range hosts {
+		if h.State == HostReady && h.CI {
+			h.Rooms, h.NoAgents = nil, false
+			open = append(open, h)
+		}
+	}
+	return open
+}
+
 // takes says whether a host may take a new box. A per-session node serves its one box, a shared node the rooms that name its
 // pool, and any other host every room whose rule, if it has one, names it.
 func takes(h Host, id contract.BoxID, only []string) bool {
