@@ -21,22 +21,29 @@ type instructionHost struct {
 // PublishInstructions marks the local commit before starting remote work.
 func (b *Boxes) PublishInstructions(ctx context.Context) {
 	b.instructionSaves.Add(1)
-	go func() {
-		hosts, err := b.Store.Hosts(ctx)
+	go b.publishInstructions(ctx)
+}
+
+// publishInstructions copies the files to every host. An API save and an edit the watch finds both end here. It notes
+// the files first, so the watch does not publish an API save a second time.
+func (b *Boxes) publishInstructions(ctx context.Context) {
+	if _, err := b.instructionsChanged(ctx); err != nil {
+		log.Printf("instructions: %v", err)
+	}
+	hosts, err := b.Store.Hosts(ctx)
+	if err != nil {
+		log.Printf("instructions: list hosts: %v", err)
+		return
+	}
+	for _, record := range hosts {
+		h, err := b.host(ctx, record.Name)
+		if err == nil {
+			err = b.syncInstructions(ctx, h)
+		}
 		if err != nil {
-			log.Printf("instructions: list hosts: %v", err)
-			return
+			log.Printf("host %s: instructions: %v", record.Name, err)
 		}
-		for _, record := range hosts {
-			h, err := b.host(ctx, record.Name)
-			if err == nil {
-				err = b.syncInstructions(ctx, h)
-			}
-			if err != nil {
-				log.Printf("host %s: instructions: %v", record.Name, err)
-			}
-		}
-	}()
+	}
 }
 
 // settle waits out a copy already running, which could still write into a deleted room's folder. Any later copy skips that room.
