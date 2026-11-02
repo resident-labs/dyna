@@ -79,6 +79,8 @@ type fakeClient struct {
 	closed       contract.SessionCloseResponse
 	setProfile   contract.SessionSetProfileRequest
 	restart      contract.SessionRestartRequest
+	refresh      contract.SessionRefreshRequest
+	refreshed    contract.SessionRefreshResponse
 	post         contract.PostRequest
 	events       []contract.Event
 	after        int64
@@ -216,6 +218,10 @@ func (f *fakeClient) SessionResponsibilities(context.Context, contract.SessionRe
 func (f *fakeClient) SessionRestart(_ context.Context, q contract.SessionRestartRequest) (contract.SessionRestartResponse, error) {
 	f.restart = q
 	return contract.SessionRestartResponse{}, nil
+}
+func (f *fakeClient) SessionRefresh(_ context.Context, q contract.SessionRefreshRequest) (contract.SessionRefreshResponse, error) {
+	f.refresh = q
+	return f.refreshed, nil
 }
 func (f *fakeClient) Post(_ context.Context, q contract.PostRequest) (contract.PostResponse, error) {
 	f.post = q
@@ -377,6 +383,30 @@ func TestSessionRestartMapsID(t *testing.T) {
 	help := runCLI(t, f, "session", "restart", "--help")
 	if !strings.Contains(help, "old volume and unpushed work are lost") || !strings.Contains(help, "old host is unavailable") {
 		t.Fatalf("restart help does not explain data loss and orphaned resources: %q", help)
+	}
+}
+func TestSessionRefreshMapsSessionOrRoom(t *testing.T) {
+	f := &fakeClient{refreshed: contract.SessionRefreshResponse{Marked: []contract.SessionID{"s", "t"}}}
+	if out := runCLI(t, f, "session", "refresh", "s"); out != "s\nt\n" {
+		t.Fatalf("%q", out)
+	}
+	if f.refresh.Session != "s" || f.refresh.Room != "" {
+		t.Fatalf("%+v", f.refresh)
+	}
+	f = &fakeClient{}
+	if out := runCLI(t, f, "session", "refresh", "--room", "r"); !strings.Contains(out, "No running box") {
+		t.Fatalf("%q", out)
+	}
+	if f.refresh.Room != "r" || f.refresh.Session != "" {
+		t.Fatalf("%+v", f.refresh)
+	}
+	for _, args := range [][]string{{"session", "refresh"}, {"session", "refresh", "s", "--room", "r"}, {"session", "refresh", "s", "t"}} {
+		if _, err := execCLI(f, args...); err == nil {
+			t.Fatalf("%v: accepted", args)
+		}
+	}
+	if help := runCLI(t, f, "session", "refresh", "--help"); !strings.Contains(help, "keeps its volume, unlike session restart, which discards it") {
+		t.Fatalf("refresh help does not tell it from restart: %q", help)
 	}
 }
 func TestSessionCloseDiscard(t *testing.T) {

@@ -227,8 +227,8 @@ func (s *Service) Connected(id contract.SessionID) bool {
 	return connected
 }
 
-// Stale reports whether a session's box runs an older box agent than the engine. Boxes report on every connection, so this
-// is rebuilt as they reconnect after an engine restart.
+// Stale reports whether a session's box runs an older box agent than the engine or was marked to restart. Boxes report on every
+// connection, so the first is rebuilt as they reconnect after an engine restart. A mark is only in memory and is forgotten.
 func (s *Service) Stale(id contract.SessionID) bool {
 	handle, ok := s.live.LookupSession(id)
 	return ok && handle.Stale()
@@ -362,6 +362,60 @@ func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal,
 	}
 	s.reconciler.Kick()
 	return contract.SessionRestartResponse{}, nil
+}
+
+// SessionRefresh marks running boxes stale, so the rule for an old binary applies to them whatever they run. A box that is not
+// running needs nothing, since it starts fresh. The mark lasts until a new box agent says hello.
+func (s *Service) SessionRefresh(ctx context.Context, caller contract.Principal, req contract.SessionRefreshRequest) (contract.SessionRefreshResponse, *contract.Error) {
+	response := contract.SessionRefreshResponse{Marked: []contract.SessionID{}}
+	if (req.Session == "") == (req.Room == "") {
+		return response, invalid("give a session or a room")
+	}
+	roomID := req.Room
+	if req.Session != "" {
+		session, problem := s.managedSession(ctx, caller, req.Session)
+		if problem != nil {
+			return response, problem
+		}
+		roomID = session.Room
+	} else if problem := s.roomAccess(ctx, caller, roomID); problem != nil {
+		return response, problem
+	}
+	tree, err := s.store.RoomTree(ctx, roomID)
+	if err != nil {
+		return response, failure(err)
+	}
+	if tree.Root() == "" {
+		return response, &contract.Error{Code: contract.ErrNotFound, Message: "room not found"}
+	}
+	running, err := s.store.RunningSessions(ctx, roomID)
+	if err != nil {
+		return response, failure(err)
+	}
+	for _, target := range running {
+		if req.Session != "" && target != req.Session || !tree.CanManage(caller, target) {
+			continue
+		}
+		mark, err := id("refresh_", s.now())
+		if err != nil {
+			return response, failure(err)
+		}
+		handle, problem := s.lockSession(ctx, target)
+		if problem != nil {
+			if problem.Code == contract.ErrNotFound {
+				continue // It closed just now, so it needs nothing.
+			}
+			return response, problem
+		}
+		handle.MarkRefresh(mark)
+		if channel := handle.Channel(); channel != nil {
+			channel.Wake()
+		}
+		handle.Unlock()
+		response.Marked = append(response.Marked, target)
+	}
+	s.reconciler.Kick()
+	return response, nil
 }
 
 // SessionSetProfile moves a session to another profile. A failed session wakes to carry its failed input with it.
