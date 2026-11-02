@@ -727,7 +727,7 @@ func TestGoalLifecycleThroughTheAPI(t *testing.T) {
 	if _, e := r.s.GoalItem(r.ctx, child, contract.GoalItemRequest{Goal: own.Goal, Item: 1, State: contract.GoalItemDone}); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := r.s.GoalItem(r.ctx, child, contract.GoalItemRequest{Goal: own.Goal, Item: 9, State: contract.GoalItemDone}); e == nil || e.Code != contract.ErrNotFound {
+	if _, e := r.s.GoalItem(r.ctx, child, contract.GoalItemRequest{Goal: own.Goal, Item: 9, State: contract.GoalItemDone}); e == nil || e.Code != contract.ErrNotFound || e.Message != "goal "+string(own.Goal)+" has no item 9; goal list shows its items" {
 		t.Fatalf("missing item: %v", e)
 	}
 	if _, e := r.s.GoalItem(r.ctx, child, contract.GoalItemRequest{Goal: own.Goal, Item: 1, State: "maybe"}); e == nil || e.Code != contract.ErrInvalid {
