@@ -167,6 +167,13 @@ func TestDormancyRetriesFailedStop(t *testing.T) {
 	// This test retries a stop on a connected box, not a lost box.
 	attachTestChannel(t, s, sid)
 	h.stopErr = errors.New("unavailable")
+	passLifecycle(t, s, ctx) // A connected box first gets its compaction before the stop.
+	if h.stops != 0 {
+		t.Fatal("the stop did not wait for the compaction")
+	}
+	if _, problem := s.BoxCompacted(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid}, contract.BoxCompactedRequest{Turn: "turn_quiet"}); problem != nil {
+		t.Fatal(problem)
+	}
 	passLifecycle(t, s, ctx)
 	h.stopErr = nil
 	passLifecycle(t, s, ctx)

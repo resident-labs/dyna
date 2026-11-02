@@ -84,6 +84,8 @@ type Service interface {
 	SessionClose(context.Context, contract.Principal, contract.SessionCloseRequest) (contract.SessionCloseResponse, *contract.Error)
 	SessionSetProfile(context.Context, contract.Principal, contract.SessionSetProfileRequest) (contract.SessionSetProfileResponse, *contract.Error)
 	SessionAccount(context.Context, contract.Principal, contract.SessionAccountRequest) (contract.SessionAccountResponse, *contract.Error)
+	SessionResponsibilities(context.Context, contract.Principal, contract.SessionResponsibilitiesRequest) (contract.SessionResponsibilitiesResponse, *contract.Error)
+	BoxCompacted(context.Context, contract.Principal, contract.BoxCompactedRequest) (contract.BoxCompactedResponse, *contract.Error)
 	SessionSetAccount(context.Context, contract.Principal, contract.SessionSetAccountRequest) (contract.SessionSetAccountResponse, *contract.Error)
 	SessionRestart(context.Context, contract.Principal, contract.SessionRestartRequest) (contract.SessionRestartResponse, *contract.Error)
 	SessionSearch(context.Context, contract.Principal, contract.SessionSearchRequest) (contract.SessionSearchResponse, *contract.Error)

@@ -116,6 +116,12 @@ func (s endedSink) TurnOutput(ctx context.Context, result contract.TurnEnded) er
 	return err
 }
 
+// Compacted sends the compaction to the engine's transcript first, since this answer lets the box stop.
+func (s endedSink) Compacted(ctx context.Context, answer contract.BoxCompactedRequest) error {
+	s.transcript.syncLogged(ctx, s.files()...)
+	return s.turnSink.Compacted(ctx, answer)
+}
+
 // closeBox stops Pi and sends the rest of the transcript. It retries a failed sync with backoff, then reports the box archived, so the engine cannot delete the box with unsent bytes.
 func closeBox(ctx context.Context, h io.Closer, transcript *Transcript, files func() []string, after func(time.Duration) <-chan time.Time, archived func(context.Context) error) error {
 	if err := h.Close(); err != nil {

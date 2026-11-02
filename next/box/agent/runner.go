@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness"
 )
+
+// compactLimit bounds a compaction before a quiet stop, as Pi bounds the one in a model transfer.
+const compactLimit = 10 * time.Minute
 
 var (
 	errTurnSettling = errors.New("turn is settling")
@@ -19,6 +23,7 @@ var (
 type turnSink interface {
 	DeliveryDone(context.Context, contract.DeliverySeq) error
 	TurnOutput(context.Context, contract.TurnEnded) error
+	Compacted(context.Context, contract.BoxCompactedRequest) error
 }
 
 // Runner forwards inputs to Pi without maintaining a second input queue.
@@ -47,6 +52,7 @@ type Runner struct {
 	flushing     sync.WaitGroup
 	attaching    context.Context // ends with the turn, so a download cannot outlive it
 	stopAttach   context.CancelFunc
+	compacting   chan struct{} // set during a compaction before a quiet stop; closes when it ends
 }
 
 func (r *Runner) Errors() <-chan error {
@@ -70,6 +76,8 @@ func (r *Runner) Handle(ctx context.Context, message contract.BoxMessage) error 
 		return r.start(ctx, m)
 	case contract.TurnSteer:
 		return r.steer(ctx, m)
+	case contract.Compact:
+		return r.compact(ctx, m)
 	case contract.TurnStop:
 		r.mu.Lock()
 		active, transferring, ready := r.active == m.Turn, r.transferring, r.ready
@@ -93,6 +101,44 @@ func (r *Runner) Handle(ctx context.Context, message contract.BoxMessage) error 
 	default:
 		return fmt.Errorf("unsupported box message")
 	}
+}
+
+// compact runs off the channel, so a wake can reach the runner meanwhile. An engine that restarted may ask again, and the
+// one running answers both.
+func (r *Runner) compact(ctx context.Context, ask contract.Compact) error {
+	r.mu.Lock()
+	if r.compacting != nil {
+		r.mu.Unlock()
+		return nil
+	}
+	if r.active != "" {
+		r.mu.Unlock()
+		return r.Sink.Compacted(ctx, contract.BoxCompactedRequest{Turn: ask.Turn}) // A wake got here first, so the box stays up.
+	}
+	done := make(chan struct{})
+	r.compacting = done
+	r.mu.Unlock()
+	go func() {
+		limited, cancel := context.WithTimeout(ctx, compactLimit)
+		defer cancel()
+		result, err := r.Harness.Compact(limited, ask.OverTokens)
+		if limited.Err() != nil && ctx.Err() == nil {
+			// Pi is still summarizing, and it refuses a prompt until it stops.
+			err = errors.Join(err, r.Harness.Abort(ctx))
+		}
+		r.mu.Lock()
+		r.compacting = nil
+		r.mu.Unlock()
+		close(done)
+		answer := contract.BoxCompactedRequest{Turn: ask.Turn, Compacted: result.Compacted, TokensBefore: result.TokensBefore, TokensAfter: result.TokensAfter, Usage: result.Usage}
+		if err != nil {
+			answer.Error = err.Error()
+		}
+		if err := r.Sink.Compacted(ctx, answer); err != nil {
+			log.Printf("compaction answer: %v", err)
+		}
+	}()
+	return nil
 }
 
 func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
@@ -173,6 +219,21 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 			}
 			return nil
 		}
+		// A wake can land during a compaction. Pi refuses a prompt until that ends, so the turn waits here, where a stop still
+		// reaches it, and nothing has been read yet.
+		compacted := func() {
+			r.mu.Lock()
+			compacting := r.compacting
+			r.mu.Unlock()
+			if compacting == nil {
+				return
+			}
+			preparing()
+			select {
+			case <-compacting:
+			case <-ctx.Done():
+			}
+		}
 		attach := func() error {
 			for i, input := range pending {
 				if len(input.Files) == 0 {
@@ -187,6 +248,7 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 			return nil
 		}
 		prepare := func() error {
+			compacted()
 			attached := attach()
 			r.mu.Lock()
 			stopped := r.stopped

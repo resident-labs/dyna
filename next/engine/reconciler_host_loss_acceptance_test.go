@@ -28,6 +28,9 @@ type disconnectedView struct{}
 func (disconnectedView) Connected(contract.SessionID) bool    { return false }
 func (disconnectedView) OpenTerminal(contract.SessionID) bool { return false }
 func (disconnectedView) SessionClosed(contract.SessionID)     {}
+func (disconnectedView) CompactBeforeStop(context.Context, contract.SessionID) bool {
+	return false
+}
 
 func TestReconcilerRecoversLostHost(t *testing.T) {
 	for _, tc := range []struct {

@@ -75,6 +75,11 @@ export function timelineSegments(turn: string, items: TranscriptItem[]): Timelin
   return segments;
 }
 
+// Dyna: A compaction is one quiet line in its turn, however it came about.
+export function compactionNote({ tokens }: Pick<TranscriptItem, "tokens">): string {
+  return tokens ? `Compacted the conversation at ${Math.round(tokens / 1000)}k tokens` : "Compacted the conversation";
+}
+
 // Dyna: A segment runs from its steer to the next one or the turn's end. The first keeps the whole turn's time.
 export function segmentDuration(segments: TimelineSegment[], index: number, started: string, ended: string): number {
   if (!index) return Date.parse(ended) - Date.parse(started);

@@ -159,6 +159,19 @@ type SessionClosed struct {
 	Session SessionID          `json:"session"`
 	Archive string             `json:"archive,omitempty"` // refs/dyna/archive/<session>, if any
 	Unheld  []GoalID           `json:"unheld,omitempty"`  // open goals left with no holder, because the parent is root (7.4)
+	// Handed is the owed work that moved to the parent.
+	Handed []Responsibility `json:"handed,omitempty"`
+}
+
+// SessionCompacted records one compaction of a quiet box before its stop, or a failed try. Pi writes the compaction itself
+// to the transcript. This records its usage against the session, and the turn, so a quiet period compacts once.
+type SessionCompacted struct {
+	Session      SessionID `json:"session"`
+	Turn         TurnID    `json:"turn"` // the session's last turn when the box was asked
+	TokensBefore int64     `json:"tokensBefore,omitempty"`
+	TokensAfter  int64     `json:"tokensAfter,omitempty"`
+	Usage        Usage     `json:"usage"`
+	Error        string    `json:"error,omitempty"`
 }
 
 type TurnStarted struct {
@@ -181,6 +194,8 @@ type TurnEnded struct {
 	// ShellJobs counts the background shell jobs still running when the turn ended. Each job's
 	// end wakes the session, so the next turn.ended carries the new count.
 	ShellJobs int `json:"shellJobs,omitempty"`
+	// Jobs names the jobs ShellJobs counts. A box agent too old to name them sends only the count.
+	Jobs []ShellJobID `json:"jobs,omitempty"`
 	// EndPosts carries the harness's result to TurnOutputRequest.EndPosts. The event records the same fact in Replies.
 	EndPosts []EventID `json:"-"`
 	// Unread carries the runner's result to TurnOutputRequest.Unread.
@@ -367,8 +382,10 @@ func (SessionRestarted) isEventBody()         {}
 func (SessionMoved) EventType() EventType { return "session.moved" }
 func (SessionMoved) isEventBody()         {}
 
-func (SessionClosed) EventType() EventType { return "session.closed" }
-func (SessionClosed) isEventBody()         {}
+func (SessionClosed) EventType() EventType    { return "session.closed" }
+func (SessionClosed) isEventBody()            {}
+func (SessionCompacted) EventType() EventType { return "session.compacted" }
+func (SessionCompacted) isEventBody()         {}
 
 func (TurnStarted) EventType() EventType { return "turn.started" }
 func (TurnStarted) isEventBody()         {}

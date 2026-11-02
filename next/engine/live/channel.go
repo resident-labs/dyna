@@ -2,6 +2,7 @@ package live
 
 import (
 	"context"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -15,6 +16,11 @@ type Channel struct {
 	watching      uint64
 	shellWatching uint64
 	archiveRetry  bool
+	// The compaction asked of this box before a quiet stop: the last turn it was asked after, whether the box loop still has
+	// to send it, and until when a stop waits for the answer.
+	compactTurn  contract.TurnID
+	compactSend  bool
+	compactUntil time.Time
 }
 
 // Lock is transitional while channel coordination and terminal state remain in engine.
@@ -94,6 +100,26 @@ func (c *Channel) WatchChanges(computer, shell uint64) (bool, bool) {
 	c.watching, c.shellWatching = computer, shell
 	return computerChanged, shellChanged
 }
+
+// AskCompact asks the box loop to send a compaction once per turn, and reports whether the answer is still awaited at now.
+// The caller holds the session lock.
+func (c *Channel) AskCompact(turn contract.TurnID, until, now time.Time) bool {
+	if c.compactTurn != turn {
+		c.compactTurn, c.compactSend, c.compactUntil = turn, true, until
+		c.Wake()
+	}
+	return now.Before(c.compactUntil)
+}
+
+// TakeCompact returns a compaction waiting to be sent. The caller holds the session lock.
+func (c *Channel) TakeCompact() (contract.TurnID, bool) {
+	send := c.compactSend
+	c.compactSend = false
+	return c.compactTurn, send
+}
+
+// CompactAnswered ends the wait for a compaction. The caller holds the session lock.
+func (c *Channel) CompactAnswered() { c.compactUntil = time.Time{} }
 
 func (c *Channel) ResetComputerWatch() { c.watching = 0 }
 func (c *Channel) RetryArchive()       { c.archiveRetry = true }
