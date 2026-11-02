@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -135,15 +136,20 @@ func (r *Reconciler) closeStep(ctx context.Context, row store.LifecycleBox) erro
 	if err != nil {
 		return err
 	}
-	if row.Want == store.WantDiscard || !hadTurns {
+	remove := row.Want == store.WantDiscard || !hadTurns
+	if !remove {
+		err = r.boxes.Start(ctx, row.ID)
+		// A box with no container and no volume on its host has nothing to archive, and starting it fails every time.
+		var nothing box.NothingOnHost
+		remove = errors.As(err, &nothing)
+	}
+	if remove {
 		if err = r.boxes.Remove(ctx, row.ID); err == nil {
 			next := row.Box
 			next.State, next.Reason = contract.BoxDeleted, ""
 			_, err = r.change(ctx, row.Box, next, time.Time{}, row.Failures, "")
 			return err
 		}
-	} else {
-		err = r.boxes.Start(ctx, row.ID)
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()

@@ -1041,15 +1041,23 @@ func inspectContainer(ctx context.Context, host box.HostDriver, id contract.BoxI
 }
 
 func (b *Boxes) Start(ctx context.Context, id contract.BoxID) error {
+	record, err := b.Store.Box(ctx, id)
+	if err != nil {
+		return err
+	}
+	if record.State == contract.BoxClosing && record.Host == "" {
+		return box.NothingOnHost{Box: string(id)}
+	}
 	host, err := b.containerHost(ctx, id)
 	if err != nil {
 		return err
 	}
-	if err := b.syncInstructions(ctx, host); err != nil {
-		return err
+	if record.State == contract.BoxClosing {
+		if err := closingLeftovers(ctx, host, record); err != nil {
+			return err
+		}
 	}
-	record, err := b.Store.Box(ctx, id)
-	if err != nil {
+	if err := b.syncInstructions(ctx, host); err != nil {
 		return err
 	}
 	if err := b.installHost(ctx, record.Host); err != nil {
@@ -1071,6 +1079,18 @@ func (b *Boxes) Start(ctx context.Context, id contract.BoxID) error {
 		}
 	}
 	return host.StartContainer(ctx, id)
+}
+
+// closingLeftovers refuses to start a closing box that has neither container nor volume on its host, as when its create never
+// worked there. Its work would be in the volume, so there is nothing to archive, and a start could only fail every time.
+func closingLeftovers(ctx context.Context, host interface {
+	HoldsBox(context.Context, contract.BoxID) (bool, error)
+}, record box.Box) error {
+	holds, err := host.HoldsBox(ctx, record.ID)
+	if err != nil || holds {
+		return err
+	}
+	return box.NothingOnHost{Box: string(record.ID), Host: string(record.Host)}
 }
 
 // Stop stops a box and, once it is down, the rest of its pod.

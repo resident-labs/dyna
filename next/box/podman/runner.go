@@ -166,7 +166,8 @@ func (h *Host) StartRunner(ctx context.Context, s box.RunnerSpec) error {
 	out, err := h.runInput(ctx, []byte(s.Config+"\n"), args...)
 	var exit remoteExit
 	if errors.As(err, &exit) {
-		return fmt.Errorf("start runner: %w: %s", err, strings.ReplaceAll(strings.TrimSpace(string(out)), s.Config, "***"))
+		// The bare status, since err ends with the output's last lines and only this masks the config in them.
+		return fmt.Errorf("start runner: %w: %s", exit, strings.ReplaceAll(strings.TrimSpace(string(out)), s.Config, "***"))
 	}
 	return err
 }
