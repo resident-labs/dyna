@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
@@ -51,8 +52,8 @@ func (s *Server) Handler() http.Handler {
 		if strings.TrimSpace(run.Command) == "" {
 			return nil, invalid("command is required")
 		}
-		if run.Timeout != 0 && run.Host == "" {
-			return nil, invalid("timeout is for a host run; stop a job in the box with job stop")
+		if run.Timeout < 0 || run.Timeout > maxTimeout {
+			return nil, invalid(fmt.Sprintf("timeout is in seconds, at most %d", maxTimeout))
 		}
 		j, err := s.run(r.Context().Done(), run)
 		if err != nil {
@@ -109,7 +110,7 @@ func (s *Server) jobCall(call JobCall) (any, error) {
 	}
 	j, ok := s.find(call.Job)
 	if !ok {
-		return nil, invalid(fmt.Sprintf("unknown job %q", call.Job))
+		return nil, unknownJob(call.Job)
 	}
 	if call.Action == "stop" {
 		if j.host != "" {
@@ -118,6 +119,19 @@ func (s *Server) jobCall(call JobCall) (any, error) {
 		s.stop(j)
 	}
 	return result(j), nil
+}
+
+var jobID = regexp.MustCompile(`^job_[0-9a-f]{12}$`)
+
+// unknownJob says why a job is not here. The box keeps no record of jobs from before its start or of other boxes.
+func unknownJob(id contract.ShellJobID) error {
+	switch {
+	case id == "":
+		return invalid("job is required for output and stop")
+	case !jobID.MatchString(string(id)):
+		return invalid(fmt.Sprintf("no job %q: a job ID looks like job_1f3a9c0b7d42, and job list shows the current ones", id))
+	}
+	return refusal{contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("no job %s in this box; jobs end when their box restarts, only the last %d finished ones are kept, and job list shows the current ones", id, keepFinished)}}
 }
 
 // result returns the unread output and the job state.

@@ -167,7 +167,7 @@ export default async function (pi) {
 				description: { type: "string", description: "What the command is for, as its title in the Jobs list" },
 				cwd: { type: "string" },
 				host: { type: "string" },
-				timeout: { type: "integer", description: "Seconds a host run may take: 600 by default, at most 7200" },
+				timeout: { type: "integer", description: "Seconds before the command is stopped, at most 7200. A host run stops at 600 by default" },
 			},
 			required: ["command"],
 		},
