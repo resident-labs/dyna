@@ -265,6 +265,26 @@ func TestAnIntervalShorterThanThePassChangesNothing(t *testing.T) {
 	}
 }
 
+func TestAMentionReadsAsWhoWroteIt(t *testing.T) {
+	f, server, _ := started(t)
+	server.AddIssue(fakegithub.Issue{Repo: "owner/repo", Number: 1, Author: "reporter"})
+	f.probe()
+	server.EditIssueAs("x", "owner/repo", 1, func(i *fakegithub.Issue) {
+		i.Comments = []fakegithub.Comment{{ID: 70, Author: "commenter", Body: "@owner-account"}}
+	})
+	server.Mention("owner/repo", 1, "owner-account")
+	server.Mention("owner/repo", 1, "someone-else")
+	probe := f.probe()
+	if got := actions(probe); !slices.Equal(got, []string{"1 commented commenter", "1 mentioned commenter"}) || !probe.Items[1].Outside {
+		t.Fatalf("%q", got)
+	}
+	server.Sleep(time.Minute)
+	server.Mention("owner/repo", 1, "owner-account")
+	if got := actions(f.probe()); !slices.Equal(got, []string{"1 mentioned reporter"}) {
+		t.Fatalf("a mention with no comment is the author's: %q", got)
+	}
+}
+
 func TestParseKeepsWhatARealEventCarries(t *testing.T) {
 	data := []byte(`[{"id":34865516769,"event":"assigned","actor":{"login":"gigamans442"},"assignee":{"login":"gigamans442"},"assigner":{"login":"github-actions[bot]"},"created_at":"2026-11-02T01:17:37Z","issue":{"number":6680,"html_url":"https://github.com/o/r/issues/6680","title":"t","user":{"login":"gigamans442"},"state":"open","labels":[],"assignees":[]}},
 {"id":34865395132,"event":"labeled","actor":{"login":"ludovic111"},"label":{"name":"run-parity","color":"5319E7"},"created_at":"2026-11-02T01:15:03Z","issue":{"number":6503,"html_url":"https://github.com/o/r/pull/6503","pull_request":{"url":"u","merged_at":null},"user":{"login":"ludovic111"},"state":"open"}},

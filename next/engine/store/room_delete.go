@@ -149,6 +149,8 @@ func (s *Store) SetRoomDeleteReason(ctx context.Context, room contract.RoomID, r
 // the triggers that clear post_search and session_search. Archive rows that hold a ref stay until the sweep deletes the ref.
 var deleteRoom = []string{
 	`DELETE FROM subscription_events WHERE sub IN (SELECT id FROM subscriptions WHERE ` + roomSubscriptions + `)`,
+	`DELETE FROM subscription_where WHERE sub IN (SELECT id FROM subscriptions WHERE ` + roomSubscriptions + `)`,
+	`DELETE FROM subscription_queue WHERE sub IN (SELECT id FROM subscriptions WHERE ` + roomSubscriptions + `)`,
 	`DELETE FROM subscription_args WHERE sub IN (SELECT id FROM subscriptions WHERE ` + roomSubscriptions + `)`,
 	`DELETE FROM subscription_files WHERE sub IN (SELECT id FROM subscriptions WHERE ` + roomSubscriptions + `)`,
 	`DELETE FROM subscriptions WHERE ` + roomSubscriptions,

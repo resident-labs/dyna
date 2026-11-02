@@ -27,7 +27,9 @@ const (
 	maxFeedPages = 34
 	// feedOverlap is how far behind its newest item a feed may still show one for the first time.
 	feedOverlap = 2 * time.Minute
-	feedMain    = "main"
+	// mentionGap is how close a comment must be to a mentioned event to be what made it.
+	mentionGap = 15 * time.Second
+	feedMain   = "main"
 )
 
 // listFeed is one of a repository's item feeds. Each lists newest first, 30 to a page.
@@ -202,7 +204,9 @@ func parseEvents(data []byte, repo contract.RepoName, viewer string) ([]entry, e
 		line := entry{key: strconv.FormatInt(event.ID, 10), born: event.CreatedAt, listed: event.CreatedAt}
 		// A merge is also a close, and the merged event says it.
 		merged := event.Issue.PullRequest != nil && event.Issue.PullRequest.MergedAt != nil
-		if action, ok := eventActions[event.Event]; ok && !(action == contract.GitHubClosed && merged) {
+		// GitHub's actor on a mention is who was mentioned, and only the owner's account is news.
+		other := event.Event == "mentioned" && login(event.Actor) != viewer
+		if action, ok := eventActions[event.Event]; ok && !other && !(action == contract.GitHubClosed && merged) {
 			seen := event.Issue.feedItem()
 			// On an assignment or a review request GitHub's actor can be the one assigned, and the one who did it has their own field.
 			actor := cmp.Or(event.ReviewRequester.Login, event.Assigner.Login, login(event.Actor))
@@ -212,6 +216,18 @@ func parseEvents(data []byte, repo contract.RepoName, viewer string) ([]entry, e
 		entries = append(entries, line)
 	}
 	return entries, nil
+}
+
+// mentionedBy finds who wrote a mention, which GitHub's event does not say: the comment that came with it, or else the
+// item's author, for a mention in a body.
+func mentionedBy(fresh []entry, mention contract.GitHubItem, at time.Time) string {
+	for _, line := range slices.Backward(fresh) {
+		isComment := line.item.Action == contract.GitHubCommented || line.item.Action == contract.GitHubReviewCommented
+		if isComment && line.item.Number == mention.Number && line.born.Sub(at).Abs() <= mentionGap {
+			return line.item.Actor
+		}
+	}
+	return mention.Author
 }
 
 // feedRead is what walking one feed found. row is the feed's next stored state, to commit with what fresh leads to.
@@ -414,6 +430,10 @@ func (c *Client) Probe(ctx context.Context, repo contract.RepoName, rows map[str
 		}
 		if seen := probe.Seen[line.item.Number]; seen != nil {
 			line.item.Author = seen.Author
+		}
+		if line.item.Action == contract.GitHubMentioned {
+			line.item.Actor = mentionedBy(fresh, line.item, line.born)
+			line.item.Outside = line.item.Actor != c.Viewer()
 		}
 		probe.Items = append(probe.Items, line.item)
 	}

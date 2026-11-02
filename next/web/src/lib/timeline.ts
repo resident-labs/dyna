@@ -24,7 +24,7 @@ function eventInput(event: Event): TimelineInput | undefined {
     case "session.failed": return { kind: "failed", text: `${event.body.failures?.map(failure => failure.name).join(", ") || "A session"} failed` };
     case "shell.job.ended": return line(`Background job ${event.body.description || event.body.job} ended`);
     case "shell.job.running": return line(`Background job ${event.body.description || event.body.job} still running`);
-    case "pr.opened": return line(`PR opened: ${event.body.url}`);
+    case "github.pr.opened": return line(`PR opened: ${event.body.url}`);
     case "goal.set": return line(`Goal ${event.body.goal} set: ${event.body.text}`);
     case "session.profile_changed": return line(`Model changed to ${event.body.profile}`);
     case "session.restarted": return line(event.body.imageUpdated ? "Box image updated" : "Box replaced");

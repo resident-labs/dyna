@@ -62,6 +62,7 @@ type SessionProfileChanged struct {
 func (SessionProfileChanged) EventType() EventType { return "session.profile_changed" }
 func (SessionProfileChanged) isEventBody()         {}
 
+// PostCreated is a post in a room.
 type PostCreated struct {
 	Text        string       `json:"text"`
 	Turn        TurnID       `json:"turn,omitempty"`
@@ -126,6 +127,7 @@ type VisualCheck struct {
 	Detail string            `json:"detail,omitempty"`
 }
 
+// SessionStarted is a session starting, with its goal and brief.
 type SessionStarted struct {
 	Session  SessionID   `json:"session"`
 	Name     string      `json:"name"`
@@ -136,6 +138,7 @@ type SessionStarted struct {
 	Brief    string      `json:"brief,omitempty"`
 }
 
+// SessionRestarted is a session's box being replaced or updated.
 type SessionRestarted struct {
 	Session SessionID `json:"session"`
 	// ImageUpdated marks a new container on the same volume, as opposed to a box restarted from nothing.
@@ -154,6 +157,7 @@ const (
 	SessionCloseDisk    SessionCloseReason = "disk"
 )
 
+// SessionClosed is a session closing, with what it handed on.
 type SessionClosed struct {
 	Reason  SessionCloseReason `json:"reason,omitempty"`
 	Session SessionID          `json:"session"`
@@ -182,6 +186,7 @@ type TurnStarted struct {
 
 type TurnOutcome string // "completed" | "failed" | "stopped"
 
+// TurnEnded is a session's turn ending.
 type TurnEnded struct {
 	Session SessionID    `json:"session"`
 	Turn    TurnID       `json:"turn"`
@@ -318,7 +323,7 @@ const (
 	PressureMax  PressureKind = "max"
 )
 
-// BoxPressure reports memory pressure in a box. It wakes nobody.
+// HostDiskLow is a host running low on disk.
 type HostDiskLow struct {
 	Host       HostName `json:"host"`
 	FreeBytes  int64    `json:"freeBytes"`
@@ -328,6 +333,7 @@ type HostDiskLow struct {
 func (HostDiskLow) EventType() EventType { return "host.disk_low" }
 func (HostDiskLow) isEventBody()         {}
 
+// BoxPressure reports memory pressure in a box. It wakes nobody.
 type BoxPressure struct {
 	Box  BoxID        `json:"box"`
 	Kind PressureKind `json:"kind"`
