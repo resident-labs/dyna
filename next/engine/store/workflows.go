@@ -210,6 +210,12 @@ func (s *Store) WorkflowStep(ctx context.Context, run contract.WorkflowRunID, ke
 	return scanWorkflowStep(s.Read().QueryRowContext(ctx, "SELECT "+workflowStepColumns+" FROM workflow_steps WHERE run=? AND key=?", run, key))
 }
 
+// WorkflowStepOutput reads the prompt, command or text a row ran, and its stored result.
+func (s *Store) WorkflowStepOutput(ctx context.Context, run contract.WorkflowRunID, key string) (detail, result string, err error) {
+	err = s.Read().QueryRowContext(ctx, "SELECT detail,result FROM workflow_steps WHERE run=? AND key=?", run, key).Scan(&detail, &result)
+	return detail, result, err
+}
+
 // WorkerTranscript is where one worker's transcript lies. Session is the crew that ran it: a resumed run keeps a finished step's
 // row, but the file stays with the run that wrote it. Turn is empty until the file's first user record reaches the engine.
 type WorkerTranscript struct {
@@ -260,6 +266,7 @@ func (s *Store) WorkflowSummary(ctx context.Context, run contract.WorkflowRunID)
 	if err != nil {
 		return summary, err
 	}
+	summary.Steps = len(steps)
 	for _, step := range steps {
 		summary.Usage.InputTokens += step.Usage.InputTokens
 		summary.Usage.OutputTokens += step.Usage.OutputTokens
