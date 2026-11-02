@@ -177,6 +177,11 @@ func Run(ctx context.Context, cfg Config) error {
 	boxes := &Boxes{Store: st, HeartbeatStore: st, Runtime: cfg.Runtime, Layout: layout, Version: cfg.Version, PiTarball: pi, Context: boxCtx}
 	service := engine.New(st, boxes, profiles, time.Now)
 	service.SetLayout(layout)
+	binary, err := boxes.binarySum()
+	if err != nil {
+		return fmt.Errorf("hash binary: %w", err)
+	}
+	service.SetBinary(binary)
 	service.SetMaxDepth(cfg.SessionMaxDepth)
 	service.Reconciler().SetHostMemory(boxes.hostMemory)
 	service.Reconciler().SetHostRestoring(boxes.restoring)
