@@ -30,6 +30,7 @@ import (
 	"github.com/resident-labs/dyna/engine/connect"
 	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/images"
+	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/model"
 	"github.com/resident-labs/dyna/engine/prs"
 	"github.com/resident-labs/dyna/engine/store"
@@ -186,6 +187,7 @@ func Run(ctx context.Context, cfg Config) error {
 	service.Reconciler().SetHostMemory(boxes.hostMemory)
 	service.Reconciler().SetHostRestoring(boxes.restoring)
 	service.Reconciler().SetRoomHosts(boxes)
+	service.Reconciler().SetNodes(poolHosts{Script: lifecycle.Script{Layout: layout}, boxes: boxes})
 	service.SetGitIdentity(cfg.GitName, cfg.GitEmail)
 	service.SetHostexecRunner(boxes)
 	service.SetHookRunner(boxes, boxes.hostMemory)
@@ -219,7 +221,7 @@ func Run(ctx context.Context, cfg Config) error {
 	service.SetUsage(quotas)
 	connections := proxy.Connections(managementKey, st, time.Now)
 	accounts := engine.NewAccountActions(service, connections, quotas)
-	if err := service.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": accounts.Entry(), "addon.global": service.AddonGlobal(), "pr.open": service.PrOpen(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport), "hostexec.grant": service.HostexecGrant(), "hostexec.run": service.HostexecRunEntry()}, cfg.ApprovalsExpiry); err != nil {
+	if err := service.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": accounts.Entry(), "addon.global": service.AddonGlobal(), "pr.open": service.PrOpen(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport), "hostexec.grant": service.HostexecGrant(), "hostexec.run": service.HostexecRunEntry(), "pool.add": service.PoolAddEntry(), "room.hosts": service.RoomHostsEntry()}, cfg.ApprovalsExpiry); err != nil {
 		return err
 	}
 	go func() {

@@ -21,6 +21,7 @@ var toolkits = map[string]Toolkit{
 	"mcp":          {Name: "mcp", Title: "MCP servers", Destructive: true, OpenWorld: true},
 	"op":           {Name: "op", Title: "Operations", Destructive: true},
 	"package":      {Name: "package", Title: "Pi packages", Destructive: true, OpenWorld: true},
+	"pool":         {Name: "pool", Title: "Node pools", Destructive: true, OpenWorld: true},
 	"post":         {Name: "post", Title: "Posts", Destructive: true},
 	"pr":           {Name: "pr", Title: "Pull requests", Destructive: true, OpenWorld: true},
 	"question":     {Name: "question", Title: "Questions for the owner"},

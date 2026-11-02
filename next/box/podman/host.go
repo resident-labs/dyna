@@ -54,6 +54,7 @@ type Host struct {
 	restored            bool
 	masterReset         bool
 	generation          atomic.Uint64
+	hostKeys            []string // ssh options for a machine whose key nobody has yet
 }
 
 // New returns one driver per host. runtime is Dyna v2's private runtime directory.
@@ -100,7 +101,20 @@ func (h *Host) lock(ctx context.Context) error {
 }
 func (h *Host) unlock() { <-h.gate }
 func (h *Host) base() []string {
-	return []string{"ssh", "-S", h.socket, "-o", "ControlMaster=no", "-o", "StreamLocalBindUnlink=yes"}
+	return append([]string{"ssh", "-S", h.socket, "-o", "ControlMaster=no", "-o", "StreamLocalBindUnlink=yes"}, h.hostKeys...)
+}
+
+// TrustNewKey is for a disposable machine. Its host key cannot be known before a script creates it, and its address may be one
+// another machine had, so it takes the first key it meets into a list of its own, and the owner's known_hosts stays out of it.
+func (h *Host) TrustNewKey() {
+	h.hostKeys = []string{"-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=" + h.socket + ".known"}
+}
+
+// Close ends the master, and with it the forwards, for a host that is leaving.
+func (h *Host) Close(ctx context.Context) {
+	_ = h.control(ctx, "exit")
+	_ = os.Remove(h.socket)
+	_ = os.Remove(h.socket + ".known")
 }
 
 // TerminalArgv uses the same SSH transport as other host operations.
@@ -139,7 +153,8 @@ func (h *Host) ensure(ctx context.Context) error {
 		if err := os.Remove(h.socket); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		args := []string{"ssh", "-M", "-N", "-f", "-S", h.socket, "-o", "ControlMaster=yes", "-o", "ControlPersist=10m", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3", "-o", "StreamLocalBindUnlink=yes", h.destination}
+		args := append([]string{"ssh", "-M", "-N", "-f", "-S", h.socket, "-o", "ControlMaster=yes", "-o", "ControlPersist=10m", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3", "-o", "StreamLocalBindUnlink=yes"}, h.hostKeys...)
+		args = append(args, h.destination)
 		// ssh has no limit of its own on a host that accepts and then stalls, and this holds the gate.
 		startCtx, cancel := context.WithTimeout(ctx, masterStart)
 		defer cancel()

@@ -3,7 +3,7 @@ CREATE TABLE connect_connector (id INTEGER PRIMARY KEY CHECK(id=1), missing INTE
 CREATE TABLE connect_attempt (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL, expires INTEGER NOT NULL);
 CREATE TABLE connect_link_state (id INTEGER PRIMARY KEY CHECK(id=1), epoch INTEGER NOT NULL CHECK(epoch>=0), linked INTEGER NOT NULL CHECK(linked IN (0,1)), generation INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE connect_nonces (nonce TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
-CREATE TABLE rooms (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, cpus INTEGER NOT NULL, mem_bytes INTEGER NOT NULL, paused_at INTEGER, state TEXT NOT NULL DEFAULT 'open', reason TEXT NOT NULL DEFAULT '');
+CREATE TABLE rooms (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, cpus INTEGER NOT NULL, mem_bytes INTEGER NOT NULL, paused_at INTEGER, state TEXT NOT NULL DEFAULT 'open', reason TEXT NOT NULL DEFAULT '', only_hosts TEXT NOT NULL DEFAULT '[]');
 CREATE TABLE repos (repo TEXT PRIMARY KEY, default_room TEXT NOT NULL REFERENCES rooms(id), main_head TEXT NOT NULL DEFAULT '');
 CREATE TABLE room_repos (room TEXT NOT NULL REFERENCES rooms(id), repo TEXT NOT NULL REFERENCES repos(repo), is_default INTEGER NOT NULL, PRIMARY KEY(room, repo));
 CREATE UNIQUE INDEX room_repos_default ON room_repos(room) WHERE is_default = 1;
@@ -24,7 +24,8 @@ CREATE INDEX events_room_home ON events(room, home, seq) WHERE home IS NOT NULL;
 CREATE INDEX events_type_seq ON events(type, seq);
 CREATE TABLE deliveries (to_kind TEXT NOT NULL, to_id TEXT NOT NULL, seq INTEGER NOT NULL REFERENCES events(seq), surface TEXT NOT NULL, reply_kind TEXT NOT NULL, reply_target_kind TEXT NOT NULL, reply_target_id TEXT NOT NULL, reply_home TEXT NOT NULL, reply_to TEXT NOT NULL, wake INTEGER NOT NULL, state TEXT NOT NULL, turn TEXT, queue TEXT, handoff_from TEXT, PRIMARY KEY(to_kind, to_id, seq));
 CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT NOT NULL REFERENCES sessions(id), started_at INTEGER NOT NULL, ended_at INTEGER, outcome TEXT NOT NULL, model TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL, cache_write_tokens INTEGER NOT NULL, shell_jobs INTEGER NOT NULL DEFAULT -1, started_seq INTEGER, stop_requested_at INTEGER, sections BLOB, dispatched_model TEXT NOT NULL DEFAULT '');
-CREATE TABLE hosts (name TEXT PRIMARY KEY, ssh TEXT NOT NULL, state TEXT NOT NULL, cpus INTEGER NOT NULL, mem_bytes INTEGER NOT NULL, disk_bytes INTEGER NOT NULL, checked_at INTEGER NOT NULL, maintained_at INTEGER NOT NULL DEFAULT 0, engine_host INTEGER, disk_floor INTEGER NOT NULL DEFAULT 21474836480, disk_low_since INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE hosts (name TEXT PRIMARY KEY, ssh TEXT NOT NULL, state TEXT NOT NULL, cpus INTEGER NOT NULL, mem_bytes INTEGER NOT NULL, disk_bytes INTEGER NOT NULL, checked_at INTEGER NOT NULL, maintained_at INTEGER NOT NULL DEFAULT 0, engine_host INTEGER, disk_floor INTEGER NOT NULL DEFAULT 21474836480, disk_low_since INTEGER NOT NULL DEFAULT 0, pool TEXT NOT NULL DEFAULT '', box TEXT NOT NULL DEFAULT '');
+CREATE TABLE pools (name TEXT PRIMARY KEY, max INTEGER NOT NULL, per_session INTEGER NOT NULL, idle_ms INTEGER NOT NULL, failures INTEGER NOT NULL DEFAULT 0, retry_at INTEGER NOT NULL DEFAULT 0, problem TEXT NOT NULL DEFAULT '', told TEXT NOT NULL DEFAULT '[]');
 CREATE TABLE disk_warnings (host TEXT PRIMARY KEY, at INTEGER NOT NULL);
 CREATE TABLE room_shared (room TEXT PRIMARY KEY, bytes INTEGER NOT NULL, measured_at INTEGER NOT NULL);
 CREATE TABLE host_rooms (host TEXT NOT NULL REFERENCES hosts(name), room TEXT NOT NULL REFERENCES rooms(id), PRIMARY KEY(host, room));
