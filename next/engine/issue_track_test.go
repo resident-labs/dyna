@@ -26,7 +26,7 @@ func (r *prRig) track(t *testing.T, issue fakegithub.Issue) {
 // issueWakes returns the waking deliveries to a session that carry issue changes, as one list of changes per delivery.
 func (r *prRig) issueWakes(t *testing.T, to contract.SessionID) [][]contract.IssueChange {
 	t.Helper()
-	rows, err := r.s.store.Read().QueryContext(r.ctx, "SELECT e.type,e.body FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.type IN ('issue.changed','pr.changed') AND d.to_id=? AND d.wake=1 ORDER BY e.seq", to)
+	rows, err := r.s.store.Read().QueryContext(r.ctx, "SELECT e.type,e.body FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.type IN ('github.issue.changed','github.pr.changed') AND d.to_id=? AND d.wake=1 ORDER BY e.seq", to)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func (r *prRig) issueWakes(t *testing.T, to contract.SessionID) [][]contract.Iss
 		if err := json.Unmarshal(data, &body); err != nil {
 			t.Fatal(err)
 		}
-		if kind == "pr.changed" {
+		if kind == "github.pr.changed" {
 			out = append(out, body.Issues)
 			continue
 		}
@@ -111,7 +111,7 @@ func TestATrackedIssueStartsFromABaseline(t *testing.T) {
 	if got := r.issueWakes(t, r.child); len(got) != 0 {
 		t.Fatalf("a baseline woke %+v", got)
 	}
-	if got := r.eventCount(t, "issue.changed"); got != 0 {
+	if got := r.eventCount(t, "github.issue.changed"); got != 0 {
 		t.Fatalf("a baseline made %d events", got)
 	}
 	r.clock.add(11 * time.Minute)
@@ -142,16 +142,16 @@ func TestAMixedPassGivesOneEventAndOneWake(t *testing.T) {
 		i.Comments = []fakegithub.Comment{{ID: 1, Author: "owner-account", Body: "looks bad"}}
 	})
 	r.github.EditIssue("owner/repo", 4, func(i *fakegithub.Issue) { i.State = "CLOSED" })
-	before := r.eventCount(t, "pr.changed")
+	before := r.eventCount(t, "github.pr.changed")
 	r.pass(t)
-	if got := r.eventCount(t, "pr.changed") - before; got != 1 {
-		t.Fatalf("%d pr.changed events", got)
+	if got := r.eventCount(t, "github.pr.changed") - before; got != 1 {
+		t.Fatalf("%d github.pr.changed events", got)
 	}
-	// The typed event sits beside the pr.changed for subscribers and tells nobody by itself.
-	if got := r.eventCount(t, "issue.changed"); got != 1 {
-		t.Fatalf("%d issue.changed events beside the pr.changed", got)
+	// The typed event sits beside the github.pr.changed for subscribers and tells nobody by itself.
+	if got := r.eventCount(t, "github.issue.changed"); got != 1 {
+		t.Fatalf("%d github.issue.changed events beside the github.pr.changed", got)
 	}
-	if got := r.deliveryCount(t, "issue.changed", r.child, true) + r.deliveryCount(t, "issue.changed", r.child, false); got != 0 {
+	if got := r.deliveryCount(t, "github.issue.changed", r.child, true) + r.deliveryCount(t, "github.issue.changed", r.child, false); got != 0 {
 		t.Fatalf("the owner has %d deliveries of the typed event", got)
 	}
 	got := r.wakes(t, r.child)
@@ -169,11 +169,11 @@ func TestAMixedPassGivesOneEventAndOneWake(t *testing.T) {
 	}
 }
 
-// subscribe adds a room subscription on issue.changed that wakes a session.
+// subscribe adds a room subscription on github.issue.changed that wakes a session.
 func (r *prRig) subscribe(t *testing.T, to contract.SessionID) {
 	t.Helper()
 	wake := sessionCaller(to)
-	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"issue.changed"}, Wake: &wake}); e != nil {
+	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.issue.changed"}, Wake: &wake}); e != nil {
 		t.Fatalf("%+v", e)
 	}
 }
@@ -193,10 +193,10 @@ func TestASubscriberHearsEveryIssueChangeOnceAndTheOwnerOneWake(t *testing.T) {
 	if got := len(r.wakes(t, r.child)); got != 1 {
 		t.Fatalf("the owner woke %d times", got)
 	}
-	if got := r.deliveryCount(t, "issue.changed", r.root, true); got != 1 {
+	if got := r.deliveryCount(t, "github.issue.changed", r.root, true); got != 1 {
 		t.Fatalf("the subscriber heard %d times", got)
 	}
-	if got := r.deliveryCount(t, "issue.changed", r.child, true) + r.deliveryCount(t, "issue.changed", r.child, false); got != 0 {
+	if got := r.deliveryCount(t, "github.issue.changed", r.child, true) + r.deliveryCount(t, "github.issue.changed", r.child, false); got != 0 {
 		t.Fatalf("the owner heard the typed event %d times", got)
 	}
 
@@ -208,10 +208,10 @@ func TestASubscriberHearsEveryIssueChangeOnceAndTheOwnerOneWake(t *testing.T) {
 	r.clock.add(11 * time.Minute)
 	r.pass(t)
 	r.dispatch(t)
-	if got := r.deliveryCount(t, "issue.changed", r.root, true); got != 2 {
+	if got := r.deliveryCount(t, "github.issue.changed", r.root, true); got != 2 {
 		t.Fatalf("the subscriber heard %d times", got)
 	}
-	if got := r.deliveryCount(t, "issue.changed", r.child, true); got != 1 {
+	if got := r.deliveryCount(t, "github.issue.changed", r.child, true); got != 1 {
 		t.Fatalf("the owner heard the issue-only pass %d times", got)
 	}
 }
@@ -226,9 +226,9 @@ func TestAnOwnerSubscribedToIssueChangedHearsOnePass(t *testing.T) {
 	r.pass(t)
 	r.dispatch(t)
 	if got := len(r.wakes(t, r.child)); got != 1 {
-		t.Fatalf("%d pr.changed wakes", got)
+		t.Fatalf("%d github.pr.changed wakes", got)
 	}
-	if got := r.deliveryCount(t, "issue.changed", r.child, true) + r.deliveryCount(t, "issue.changed", r.child, false); got != 0 {
+	if got := r.deliveryCount(t, "github.issue.changed", r.child, true) + r.deliveryCount(t, "github.issue.changed", r.child, false); got != 0 {
 		t.Fatalf("the owner heard one pass twice: %d", got)
 	}
 	// Its own subscription on an issue-only pass adds nothing to the delivery it already has.
@@ -236,7 +236,7 @@ func TestAnOwnerSubscribedToIssueChangedHearsOnePass(t *testing.T) {
 	r.clock.add(11 * time.Minute)
 	r.pass(t)
 	r.dispatch(t)
-	if got := r.deliveryCount(t, "issue.changed", r.child, true); got != 1 {
+	if got := r.deliveryCount(t, "github.issue.changed", r.child, true); got != 1 {
 		t.Fatalf("%d deliveries", got)
 	}
 }
@@ -248,19 +248,19 @@ func TestAQuietIssueChangeWakesNoSubscriber(t *testing.T) {
 	r.github.EditIssue("owner/repo", 1, func(i *fakegithub.Issue) { i.Title = "first" })
 	r.pass(t)
 	r.dispatch(t)
-	if got := r.deliveryCount(t, "issue.changed", r.root, true); got != 1 {
+	if got := r.deliveryCount(t, "github.issue.changed", r.root, true); got != 1 {
 		t.Fatalf("the subscriber heard %d times", got)
 	}
 	// Inside the window a new title moves the row and has nothing to tell yet.
 	r.github.EditIssue("owner/repo", 1, func(i *fakegithub.Issue) { i.Title = "second" })
 	r.clock.add(61 * time.Second)
-	before := r.eventCount(t, "issue.changed")
+	before := r.eventCount(t, "github.issue.changed")
 	r.pass(t)
 	r.dispatch(t)
-	if got := r.eventCount(t, "issue.changed"); got != before+1 {
+	if got := r.eventCount(t, "github.issue.changed"); got != before+1 {
 		t.Fatalf("no quiet refresh: %d events, was %d", got, before)
 	}
-	if got := r.deliveryCount(t, "issue.changed", r.root, true); got != 1 {
+	if got := r.deliveryCount(t, "github.issue.changed", r.root, true); got != 1 {
 		t.Fatalf("a quiet change woke the subscriber: %d", got)
 	}
 }
@@ -275,7 +275,7 @@ func TestIssuesAloneGiveOneIssueChangedForAPass(t *testing.T) {
 	if got := r.issueWakes(t, r.child); len(got) != 1 || len(got[0]) != 2 {
 		t.Fatalf("wakes %+v", got)
 	}
-	if got := r.eventCount(t, "issue.changed"); got != 1 {
+	if got := r.eventCount(t, "github.issue.changed"); got != 1 {
 		t.Fatalf("%d events", got)
 	}
 }
@@ -285,7 +285,7 @@ func TestAPassWithNoNewsStoresNothing(t *testing.T) {
 	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1, Meta: fakegithub.Meta{Labels: []string{"a"}}})
 	r.track(t, fakegithub.Issue{Repo: "owner/repo", Number: 2})
 	counts := func() string {
-		return fmt.Sprint(r.eventCount(t, "pr.changed"), r.eventCount(t, "issue.changed"))
+		return fmt.Sprint(r.eventCount(t, "github.pr.changed"), r.eventCount(t, "github.issue.changed"))
 	}
 	before := counts()
 	for range 3 {
@@ -734,7 +734,7 @@ func TestARepositoryWithOnlyIssuesIsReadOnItsOwn(t *testing.T) {
 func TestIssueClosedIsAnOwnedEventOnce(t *testing.T) {
 	r := newPRRig(t)
 	wake := sessionCaller(r.root)
-	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"issue.closed"}, Wake: &wake}); e != nil {
+	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.issue.closed"}, Wake: &wake}); e != nil {
 		t.Fatalf("%+v", e)
 	}
 	r.track(t, fakegithub.Issue{Repo: "owner/repo", Number: 1})
@@ -744,13 +744,13 @@ func TestIssueClosedIsAnOwnedEventOnce(t *testing.T) {
 	r.clock.add(11 * time.Minute)
 	r.pass(t)
 	r.dispatch(t)
-	if got := r.eventCount(t, "issue.closed"); got != 1 {
+	if got := r.eventCount(t, "github.issue.closed"); got != 1 {
 		t.Fatalf("%d events", got)
 	}
-	if got := r.deliveryCount(t, "issue.closed", r.root, true); got != 1 {
+	if got := r.deliveryCount(t, "github.issue.closed", r.root, true); got != 1 {
 		t.Fatalf("the subscriber heard %d times", got)
 	}
-	if got := r.deliveryCount(t, "issue.closed", r.child, true) + r.deliveryCount(t, "issue.closed", r.child, false); got != 0 {
+	if got := r.deliveryCount(t, "github.issue.closed", r.child, true) + r.deliveryCount(t, "github.issue.closed", r.child, false); got != 0 {
 		t.Fatalf("the owner heard twice: %d", got)
 	}
 }

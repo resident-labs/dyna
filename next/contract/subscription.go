@@ -11,12 +11,13 @@ const (
 
 // SubscriptionAddRequest creates one subscription (spec 8.5). The engine picks its ID. Exactly one of
 // On and Every, and exactly one of Wake and Run, is set. Scope room names Room, scope session names
-// Session, and scope machine names neither.
+// Session, and scope machine names neither. Where filters On, as key=value, key!=value and text~value, all of which must hold.
 type SubscriptionAddRequest struct {
 	Scope   SubscriptionScope `json:"scope"`
 	Room    RoomID            `json:"room,omitempty"`
 	Session SessionID         `json:"session,omitempty"`
 	On      []EventType       `json:"on,omitempty"`
+	Where   []string          `json:"where,omitempty"`
 	Every   DurationMS        `json:"every,omitempty"`
 	Wake    *Principal        `json:"wake,omitempty"`
 	Run     *RunSpec          `json:"run,omitempty"`
@@ -82,7 +83,7 @@ type HookDue struct {
 	Subscription SubscriptionID `json:"subscription"`
 }
 
-// NoticePosted is an engine notice to a room. The default subscription wakes root on it.
+// NoticePosted is an engine notice to a room, which the default subscription wakes root on.
 type NoticePosted struct {
 	Text string `json:"text"`
 }
@@ -93,7 +94,3 @@ func (HookDue) EventType() EventType      { return "hook.due" }
 func (HookDue) isEventBody()              {}
 func (NoticePosted) EventType() EventType { return "notice.posted" }
 func (NoticePosted) isEventBody()         {}
-
-// OwnedBy names the session that owns a repository event, or nothing when none does. A repository event has
-// this method so the default subscription can leave an owned event to its owner and wake root on the rest (spec 7.6).
-func (e PrOpened) OwnedBy() SessionID { return e.Session }

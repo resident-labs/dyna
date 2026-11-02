@@ -75,12 +75,6 @@ func decodeEventBody(t EventType, data json.RawMessage) (EventBody, error) {
 			return nil, err
 		}
 		return v, nil
-	case "ci.finished":
-		var v CIFinished
-		if err := json.Unmarshal(data, &v); err != nil {
-			return nil, err
-		}
-		return v, nil
 	case "computer.changed":
 		var v ComputerChanged
 		if err := json.Unmarshal(data, &v); err != nil {
@@ -99,8 +93,74 @@ func decodeEventBody(t EventType, data json.RawMessage) (EventBody, error) {
 			return nil, err
 		}
 		return v, nil
-	case "github.item":
-		var v GitHubItem
+	case "git.main_updated":
+		var v GitMainUpdated
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case "github.ci.finished":
+		var v CIFinished
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case "github.comment":
+		var v GitHubComment
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case "github.issue.changed":
+		var v IssueChanged
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case "github.issue.closed":
+		var v IssueClosedEvent
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case "github.issue.opened":
+		var v IssueOpenedEvent
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case "github.label":
+		var v GitHubLabel
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case "github.mention":
+		var v GitHubMention
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case "github.pr.changed":
+		var v PrChanged
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case "github.pr.closed":
+		var v PrClosedEvent
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case "github.pr.merged":
+		var v PrMergedEvent
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case "github.pr.opened":
+		var v PrOpened
 		if err := json.Unmarshal(data, &v); err != nil {
 			return nil, err
 		}
@@ -159,18 +219,6 @@ func decodeEventBody(t EventType, data json.RawMessage) (EventBody, error) {
 			return nil, err
 		}
 		return v, nil
-	case "issue.changed":
-		var v IssueChanged
-		if err := json.Unmarshal(data, &v); err != nil {
-			return nil, err
-		}
-		return v, nil
-	case "issue.closed":
-		var v IssueClosedEvent
-		if err := json.Unmarshal(data, &v); err != nil {
-			return nil, err
-		}
-		return v, nil
 	case "notice.posted":
 		var v NoticePosted
 		if err := json.Unmarshal(data, &v); err != nil {
@@ -201,30 +249,6 @@ func decodeEventBody(t EventType, data json.RawMessage) (EventBody, error) {
 			return nil, err
 		}
 		return v, nil
-	case "pr.changed":
-		var v PrChanged
-		if err := json.Unmarshal(data, &v); err != nil {
-			return nil, err
-		}
-		return v, nil
-	case "pr.closed":
-		var v PrClosedEvent
-		if err := json.Unmarshal(data, &v); err != nil {
-			return nil, err
-		}
-		return v, nil
-	case "pr.merged":
-		var v PrMergedEvent
-		if err := json.Unmarshal(data, &v); err != nil {
-			return nil, err
-		}
-		return v, nil
-	case "pr.opened":
-		var v PrOpened
-		if err := json.Unmarshal(data, &v); err != nil {
-			return nil, err
-		}
-		return v, nil
 	case "question.answered":
 		var v QuestionAnswered
 		if err := json.Unmarshal(data, &v); err != nil {
@@ -239,12 +263,6 @@ func decodeEventBody(t EventType, data json.RawMessage) (EventBody, error) {
 		return v, nil
 	case "question.withdrawn":
 		var v QuestionWithdrawn
-		if err := json.Unmarshal(data, &v); err != nil {
-			return nil, err
-		}
-		return v, nil
-	case "repo.main_updated":
-		var v RepoMainUpdated
 		if err := json.Unmarshal(data, &v); err != nil {
 			return nil, err
 		}
@@ -454,7 +472,7 @@ func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs, error) {
 	}
 }
 
-var eventBodyTypes = []EventType{"account.failed", "account.quota_low", "box.changed", "box.pressure", "checkin.due", "ci.finished", "computer.changed", "connect.connector", "conversation.read", "github.item", "goal.ended", "goal.item_changed", "goal.set", "grant.expired", "hook.due", "hook.finished", "host.disk_low", "image.built", "image.failed", "issue.changed", "issue.closed", "notice.posted", "op.decided", "op.ran", "op.requested", "post.created", "pr.changed", "pr.closed", "pr.merged", "pr.opened", "question.answered", "question.asked", "question.withdrawn", "repo.main_updated", "room.deleted", "room.deleting", "room.limits_changed", "room.paused", "room.resumed", "session.closed", "session.compacted", "session.failed", "session.moved", "session.notice", "session.profile_changed", "session.restarted", "session.started", "shell.job.ended", "shell.job.running", "transcript.changed", "turn.activity", "turn.ended", "turn.started", "workflow.ended", "workflow.step_changed"}
+var eventBodyTypes = []EventType{"account.failed", "account.quota_low", "box.changed", "box.pressure", "checkin.due", "computer.changed", "connect.connector", "conversation.read", "git.main_updated", "github.ci.finished", "github.comment", "github.issue.changed", "github.issue.closed", "github.issue.opened", "github.label", "github.mention", "github.pr.changed", "github.pr.closed", "github.pr.merged", "github.pr.opened", "goal.ended", "goal.item_changed", "goal.set", "grant.expired", "hook.due", "hook.finished", "host.disk_low", "image.built", "image.failed", "notice.posted", "op.decided", "op.ran", "op.requested", "post.created", "question.answered", "question.asked", "question.withdrawn", "room.deleted", "room.deleting", "room.limits_changed", "room.paused", "room.resumed", "session.closed", "session.compacted", "session.failed", "session.moved", "session.notice", "session.profile_changed", "session.restarted", "session.started", "shell.job.ended", "shell.job.running", "transcript.changed", "turn.activity", "turn.ended", "turn.started", "workflow.ended", "workflow.step_changed"}
 
 func (m BoxMessage) MarshalJSON() ([]byte, error) {
 	if m.Body == nil {
@@ -557,6 +575,66 @@ func (m *BoxMessage) UnmarshalJSON(data []byte) error {
 }
 
 var boxMessageTypes = []BoxMessageType{"archive", "box.stats.ask", "compact", "computer.input", "computer.watch.start", "computer.watch.stop", "shell.watch.start", "shell.watch.stop", "turn.start", "turn.steer", "turn.stop"}
+
+var eventDocs = map[EventType]string{"account.failed": "",
+	"account.quota_low":       "",
+	"box.changed":             "",
+	"box.pressure":            "reports memory pressure in a box",
+	"checkin.due":             "a report of sessions that hold open goals with nothing moving them",
+	"computer.changed":        "",
+	"connect.connector":       "reports a missing or restored tunnel connector",
+	"conversation.read":       "",
+	"git.main_updated":        "a repository's default branch moving",
+	"github.ci.finished":      "one CI result on a tracked PR's head",
+	"github.comment":          "a new comment on an issue or a pull request, inline ones included",
+	"github.issue.changed":    "one pass's changes on the tracked issues of one session",
+	"github.issue.closed":     "an issue closed",
+	"github.issue.opened":     "an issue opened",
+	"github.label":            "a label added to or taken off an issue or a pull request",
+	"github.mention":          "the owner's GitHub account mentioned on an issue or a pull request",
+	"github.pr.changed":       "one pass's changes on the tracked PRs of one session",
+	"github.pr.closed":        "a pull request closed without merging",
+	"github.pr.merged":        "a pull request merged",
+	"github.pr.opened":        "a pull request opened, by a session or on GitHub",
+	"goal.ended":              "",
+	"goal.item_changed":       "",
+	"goal.set":                "records a new goal, an edit or a new holder",
+	"grant.expired":           "",
+	"hook.due":                "what a scheduled Wake delivers, since a schedule has no event of its own",
+	"hook.finished":           "ends one Run (spec 8.5) and wakes nobody",
+	"host.disk_low":           "a host running low on disk",
+	"image.built":             "",
+	"image.failed":            "",
+	"notice.posted":           "an engine notice to a room, which the default subscription wakes root on",
+	"op.decided":              "an operation approved or denied",
+	"op.ran":                  "an operation finished",
+	"op.requested":            "",
+	"post.created":            "a post in a room",
+	"question.answered":       "a question answered",
+	"question.asked":          "",
+	"question.withdrawn":      "",
+	"room.deleted":            "a live event with sequence 0: the room's rows are gone, so no row can hold it",
+	"room.deleting":           "records the owner's delete",
+	"room.limits_changed":     "",
+	"room.paused":             "",
+	"room.resumed":            "",
+	"session.closed":          "a session closing, with what it handed on",
+	"session.compacted":       "records one compaction of a quiet box before its stop, or a failed try",
+	"session.failed":          "a session or a box failing, told to To as soon as the engine sees it",
+	"session.moved":           "",
+	"session.notice":          "tells a session and the owner what its box could not set up, or what holds up its update",
+	"session.profile_changed": "tells a session that its profile, and so its model, changed",
+	"session.restarted":       "a session's box being replaced or updated",
+	"session.started":         "a session starting, with its goal and brief",
+	"shell.job.ended":         "reports a background shell job that ended",
+	"shell.job.running":       "reports a background shell job still running",
+	"transcript.changed":      "an owner-only live notification; it contains no transcript text",
+	"turn.activity":           "live only",
+	"turn.ended":              "a session's turn ending",
+	"turn.started":            "",
+	"workflow.ended":          "closes a run",
+	"workflow.step_changed":   "carries a journal row to the run page",
+}
 
 // AllOpKinds lists every operation kind.
 var AllOpKinds = []OpKind{"accounts.action", "addon.global", "hostexec.grant", "hostexec.run", "pr.open"}

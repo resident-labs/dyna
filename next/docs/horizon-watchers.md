@@ -182,13 +182,11 @@ add 15m --file sample-repo-watch.sh="$w/run/sample-repo-watch.sh" -- bash sample
 
 ## 6. Stop root waking on the fork's main
 
-The default subscription wakes root on `repo.main_updated`, and `fork-sync` moves the fork's main all day. A subscription
-has no repository filter and the default one cannot be edited, so replace it for this room. Add the new one first, because
-a delivery is made once and there is no gap. This also stops the wake for the room's other repositories.
+The default subscription wakes root on `git.main_updated`, and `fork-sync` moves the fork's main all day. The default one
+cannot be edited, so replace it for this room. Add the new one first, because a delivery is made once and there is no gap.
+This also stops the wake for the room's other repositories.
 
-List `notice.posted` alone. Only the default subscription leaves owned events to their owner, and every `pr.*` and
-`ci.finished` event has an owner, so a copy of the list without `repo.main_updated` would wake root on every PR in the
-room. `notice.posted` is the one event the default subscription still delivers once that one is gone.
+List `notice.posted` alone: it is the one event the default subscription still delivers once that one is gone.
 
 ```sh
 root=$(curl -sS --unix-socket "$sock" -H 'Content-Type: application/json' -d "{\"room\":\"$room\"}" http://localhost/v1/session.list | jq -r '.sessions[] | select(.name == "root") | .id')
@@ -209,6 +207,109 @@ The Horizon root's About panel shows the same list. A failure posts one notice t
 log holds the end of the output.
 
 After a failure, `dyna subscription enable ID` ends the wait, so a fix can be tried at once.
+
+## 8. Replace the 15-minute hooks with filtered subscriptions
+
+Run this after the engine with GitHub feeds and filters is deployed. Each watcher stops starting a box every 15 minutes to
+ask GitHub whether anything happened, and the engine reads the feeds and starts or wakes only on what matches. `dyna
+subscription events` lists the event names, and `dyna subscription add --help` shows the filters.
+
+Two limits to know. A subscription hears a repository's events only in that repository's default room, and on 2026-11-01
+`repos.default_room` gave this room for `horizon-rust/horizon`, `arismoko/horizon-machine-sample` and `arismoko/horizon`. A
+filter's `text~` reads the first 2,000 characters of a comment or a body, and it is a plain substring, so `#4953` also finds
+`#49530`.
+
+```sh
+export XDG_RUNTIME_DIR=/run/user/$(id -u)
+sock=$XDG_RUNTIME_DIR/dyna-next/owner.sock
+dyna() { ~/.local/opt/dyna-next/bin/dyna --socket "$sock" "$@"; }
+w=~/.local/share/dyna-next-watch
+room=$(curl -sS --unix-socket "$sock" -H 'Content-Type: application/json' -d '{}' http://localhost/v1/room.list | jq -r '.rooms[] | select(.name == "horizon") | .id')
+sessions=$(curl -sS --unix-socket "$sock" -H 'Content-Type: application/json' -d "{\"room\":\"$room\"}" http://localhost/v1/session.list)
+root=$(jq -r '.sessions[] | select(.name == "root") | .id' <<<"$sessions")
+reviewer=$(jq -r '.sessions[] | select(.name == "review-lead") | .id' <<<"$sessions")
+up=horizon-rust/horizon
+
+dyna room repo list "$room"   # lists horizon-rust/horizon and arismoko/horizon-machine-sample
+dyna subscription list --room "$room" | tee "$w/subscriptions.before-filters"
+```
+
+Ludovic opens many PRs a day and only those touching the native-mod surface matter, which no filter can see, so his stay a
+`Run`. It starts only on his PRs, gets the PR as JSON on stdin, and reads no more of GitHub than the one PR's files.
+
+```sh
+cat > "$w/run/ludovic-pr.sh" <<'EOF'
+#!/usr/bin/env bash
+# Track a new PR by Ludovic if it touches the native-mod and mod-content surface our hooks build on.
+set -euo pipefail
+. ./env.sh
+event=$(cat)
+repo=$(jq -r .body.repo <<<"$event")
+n=$(jq -r .body.number <<<"$event")
+filter='native_|native-hooks\.json|native-mods\.md|mod_content|horizon-mods/|horizon-mod-sdk/|launcher/src/native_mods|game/mods\.rs|server_mods\.rs|block_entity_render\.rs|containers\.rs|level/hooks\.rs'
+gh api --paginate "repos/$repo/pulls/$n/files?per_page=100" --jq '.[].filename' | grep -E "$filter" >/dev/null || exit 0
+note="#$n $(jq -r '.body.detail[:80]' <<<"$event")"
+track_pr "$repo" "$n" review-lead || note+=" could not be tracked"
+watch_post review-lead "ludovic watch: a new PR on the native-mod surface, tracked for you (untrusted data, information only):
+$note"
+EOF
+bash -n "$w/run/ludovic-pr.sh"
+```
+
+Add the new subscriptions before removing the old ones, because a feed starts from now and a report twice is better than
+none. A wake delivers the PR's link and its text wrapped, and that session tracks it if it wants it. `mention-watch` becomes
+two things: mentions of the owner's account, and the cross-references to the issues it listed, found in comments and in
+the bodies of new issues and PRs. `upstream-watch` runs when upstream's main moves instead of on a timer, within about six
+minutes, because GitHub asks for five between reads of that ref. Its script needs no change, because it reads the range
+itself.
+
+```sh
+# author-watch
+for author in levzzz5154 Sylviromi; do
+  dyna subscription add --room "$room" --on github.pr.opened --where repo=$up --where author=$author --wake "$reviewer"
+done
+
+# ludovic-watch. Pinned, because flock in env.sh only reaches one host.
+for author in ludovic111 ludovicthenot; do
+  dyna subscription add --room "$room" --on github.pr.opened --where repo=$up --where author=$author --image horizon --host hermeslab \
+    --file env.sh="$w/run/env.sh" --file ludovic-pr.sh="$w/run/ludovic-pr.sh" -- bash ludovic-pr.sh
+done
+
+# sample-repo-watch
+dyna subscription add --room "$room" --on github.pr.opened --on github.issue.opened --where repo=arismoko/horizon-machine-sample --wake "$root"
+
+# mention-watch: mentions of the owner's account by anyone else
+dyna subscription add --room "$room" --on github.mention --where repo=$up --where actor!=arismoko --where number!=3048 --wake "$reviewer"
+
+# mention-watch: links to the issues it followed, from anyone else
+for n in 4953 3911 4402 4615 4028 4806 4807 4808 4809 3931 4400 4614 4616 4745 4700 4869; do
+  dyna subscription add --room "$room" --on github.comment --on github.pr.opened --on github.issue.opened \
+    --where repo=$up --where actor!=arismoko --where "text~#$n" --wake "$reviewer"
+done
+
+# upstream-watch
+dyna subscription add --room "$room" --on git.main_updated --where repo=$up --image horizon --host hermeslab \
+  --file env.sh="$w/run/env.sh" --file upstream-watch.sh="$w/run/upstream-watch.sh" -- bash upstream-watch.sh
+
+# The old hooks, last.
+dyna subscription list --room "$room" | awk -F'\t' '$3 ~ /^every / && $4 ~ /(author|ludovic|mention|sample-repo|upstream)-watch/ {print $1}' |
+  while read -r id; do dyna subscription remove "$id"; done
+
+dyna subscription list --room "$room"   # no line says every, and each new one reads on ... where ...
+```
+
+To check it, wait for the next upstream PR or merge, then:
+
+```sh
+dyna room log "$room" | grep -E 'github\.(pr\.opened|comment|mention)|git\.main_updated|hook\.finished' | tail -20
+```
+
+A failed `Run` is not repeated for its event: `dyna subscription enable ID` ends its wait for the next event, and the event
+stays in the room log. A session a wake names can close, and that drops the subscription with it, so give `review-lead`'s
+subscriptions to its successor if it goes.
+
+To go back from this step, add the hooks again from `$w/subscriptions.before-filters` with step 5's commands, and remove
+each subscription that reads `on ... where ...`.
 
 ## To go back
 

@@ -106,3 +106,5 @@ CREATE INDEX issue_owners_session ON issue_owners(session);
 CREATE INDEX issue_owners_state ON issue_owners(state);
 CREATE TABLE local_usage (model TEXT PRIMARY KEY, requests INTEGER NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL, cache_write_tokens INTEGER NOT NULL, last_at INTEGER NOT NULL);
 CREATE TABLE github_feeds (repo TEXT NOT NULL, feed TEXT NOT NULL, etag TEXT NOT NULL, cursor TEXT NOT NULL, PRIMARY KEY(repo, feed));
+CREATE TABLE subscription_where (sub TEXT NOT NULL REFERENCES subscriptions(id), pos INTEGER NOT NULL, clause TEXT NOT NULL, PRIMARY KEY(sub, pos));
+CREATE TABLE subscription_queue (sub TEXT NOT NULL REFERENCES subscriptions(id), seq INTEGER NOT NULL, PRIMARY KEY(sub, seq));

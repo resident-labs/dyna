@@ -595,7 +595,7 @@ test("a session counts once: a broken box, then waiting, then a running turn, th
   assert.deepEqual(store.counts, { sessions: 2, waiting: 0, failed: 0, working: 2, idle: 0 });
 });
 
-test("tracked PRs come from pr.list, then pr.changed, and an older list never undoes an event", async () => {
+test("tracked PRs come from pr.list, then github.pr.changed, and an older list never undoes an event", async () => {
   const pr = { repo: "o/r", number: 7, url: "u", title: "t", author: "a", session: "s", draft: false, state: "open", head: "h", review: "", ci: "pending", merge: "" } as const;
   const other = { ...pr, number: 8 };
   const original = globalThis.fetch;
@@ -604,7 +604,7 @@ test("tracked PRs come from pr.list, then pr.changed, and an older list never un
   try {
     const store = new RoomStore("r", () => () => {});
     await store.open();
-    store.apply(event(11, { type: "pr.changed", body: { session: "s", changes: [{ pr: { ...pr, ci: "failure" }, kinds: ["ci_failed"], outside: false }] } }));
+    store.apply(event(11, { type: "github.pr.changed", body: { session: "s", changes: [{ pr: { ...pr, ci: "failure" }, kinds: ["ci_failed"], outside: false }] } }));
     answer(new Response(JSON.stringify({ prs: [pr, other] })));
     await new Promise(done => setTimeout(done));
     assert.equal(store.prs.get("o/r#7")?.ci, "failure");

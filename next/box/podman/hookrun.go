@@ -52,7 +52,12 @@ func runArgs(c box.RunContainer) []string {
 		}
 		args = append(args, "--volume", v)
 	}
-	return append(append(args, c.Image, "--"), c.Command...)
+	command := c.Command
+	if c.Event != "" {
+		args = append(args, "--env", "DYNA_EVENT="+string(c.Event))
+		command = append([]string{"/bin/sh", "-c", `exec "$@" < ` + RunFolder + "/" + box.RunEventFile, "dyna-run"}, command...)
+	}
+	return append(append(args, c.Image, "--"), command...)
 }
 
 // PutRunFiles writes a Run's files into its host folder, which the box mounts read-only.

@@ -61,7 +61,7 @@ func (b *Boxes) boot(ctx context.Context, h *podman.Host, spec box.RunSpec, imag
 	if spec.Room != "" {
 		mounts = append(mounts, shared, box.Mount{HostPath: b.Layout.HostCache(), BoxPath: "/box/cache"})
 	}
-	return h.StartRun(ctx, box.RunContainer{ID: string(spec.ID), Image: image, Size: spec.Size, Command: spec.Command, Mounts: mounts})
+	return h.StartRun(ctx, box.RunContainer{ID: string(spec.ID), Image: image, Size: spec.Size, Command: spec.Command, Mounts: mounts, Event: spec.Event})
 }
 
 // runImage resolves a Run's image the way a session's is: base, or a folder of the room's default repository.
