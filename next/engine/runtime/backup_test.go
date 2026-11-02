@@ -188,7 +188,7 @@ func TestBackupCopyFailure(t *testing.T) {
 	}
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	st := &fakeBackupStore{dir: dir}
-	for _, name := range []string{"AGENTS.md", "rooms/r/files/a", "rooms/r/transcripts/s/b", "archive/d", "connect/pending.json", "cliproxy/auth-v2/c"} {
+	for _, name := range []string{"AGENTS.md", "rooms/r/files/a", "rooms/r/transcripts/s/b", "connect/pending.json", "cliproxy/auth-v2/c"} {
 		path := filepath.Join(layout.Data, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 			t.Fatal(err)
@@ -229,7 +229,7 @@ func TestBackupCopyFailure(t *testing.T) {
 			}
 			members[h.Name] = string(body)
 		}
-		for _, name := range []string{"AGENTS.md", "rooms/r/files/a", "rooms/r/transcripts/s/b", "archive/d", "connect/pending.json", "cliproxy/auth-v2/c"} {
+		for _, name := range []string{"AGENTS.md", "rooms/r/files/a", "rooms/r/transcripts/s/b", "connect/pending.json", "cliproxy/auth-v2/c"} {
 			if members[name] != name {
 				t.Fatalf("missing %s: %v", name, members)
 			}

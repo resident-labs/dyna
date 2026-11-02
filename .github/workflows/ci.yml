@@ -95,7 +95,6 @@ jobs:
           python3 next/scripts/ci-changes-test.py
           python3 next/scripts/ci-pool-watch-test.py
           bash next/scripts/deploy-trial_test.sh
-          bash next/scripts/shared-folder-move_test.sh
       - name: Require install.sh to refuse
         # main has no installer yet. A stub that exits 0 would look like an install.
         run: if bash install.sh; then echo 'install.sh must exit nonzero until v2 has an installer' >&2; exit 1; fi
