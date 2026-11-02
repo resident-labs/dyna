@@ -21,7 +21,8 @@
   import QuestionCard from "./QuestionCard.svelte";
   import { deriveTimelineGroups, finalTimelineItem, ownPost, postDestination, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, steerInput, timelineAnswers, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief } from "../timeline.ts";
 
-  let { session, roomName, store, operate, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { startingBrief?: string; session: string; roomName: string; store: RoomStore; operate: boolean; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
+  // With step, the thread reads one worker of a crew: its transcript alone, and nothing that was sent to the crew.
+  let { session, step, roomName, store, operate, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { startingBrief?: string; session: string; step?: string; roomName: string; store: RoomStore; operate: boolean; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
   const view = untrack(() => store.window({ kind: "dm", session }));
   view.onunsent = request => onunsent(request);
   view.onsettled = request => onsettled(request);
@@ -34,7 +35,7 @@
   export async function send(request: PostRequest) { atBottom = true; await view.post(request); }
   // A closed session can have a transcript with no DM events, so the thread is empty only when neither has anything.
   export const empty = () => view.ready && !view.ordered.length && !loading && !turns.length;
-  let asking = $derived(store.pendingQuestions(session));
+  let asking = $derived(step ? [] : store.pendingQuestions(session));
   let turns: TranscriptTurn[] = $state([]);
   let pendingBrief = $derived(pendingStartBrief(startingBrief, turns));
   let expandedTurns: Record<string, boolean> = $state({});
@@ -84,8 +85,8 @@
   }
   let loaded = $state(false);
   let destroyed = false;
-  let queuedPosts = $derived(queuedTimelinePosts(view.posts(), turns));
-  let pendingPosts = $derived([...view.pendingPosts.values()]);
+  let queuedPosts = $derived(step ? [] : queuedTimelinePosts(view.posts(), turns));
+  let pendingPosts = $derived(step ? [] : [...view.pendingPosts.values()]);
   let quiet = $derived(!turns.length && !queuedPosts.length && !pendingPosts.length && !pendingBrief && !asking.length);
   // The first message after a turn may start a new day. It waits outside any turn, so its day mark is here too.
   let waitingSince = $derived(queuedPosts[0]?.at ?? pendingPosts[0]?.at);
@@ -94,7 +95,7 @@
     if (loading) { if (!older) pending = true; return; }
     loading = true;
     try {
-      const page = await call("transcript.read", { session, before: older ? before : undefined });
+      const page = await call("transcript.read", { session, step, before: older ? before : undefined });
       if (destroyed) return;
       const incoming = page.turns ?? [];
       if (older) {
@@ -159,7 +160,7 @@
     void (async () => {
       let cursor = pageKind.cursor(turn);
       for (;;) {
-        const page = await call("transcript.read", { session, turn: turn.id, page: pageKind.page, cursor });
+        const page = await call("transcript.read", { session, step, turn: turn.id, page: pageKind.page, cursor });
         const next = page.turns?.[0];
         if (!next) throw new Error("Missing transcript page");
         turns = turns.map(item => item.id === turn.id ? { ...item, items: mergeTimelineItems(item.items ?? [], next.items ?? []), ...pageKind.patch(next) } : item);
@@ -177,7 +178,7 @@
     void (async () => {
       let after = turn.after;
       while (after) {
-        const page = await call("transcript.read", { session, turn: turn.id, afterItem: after });
+        const page = await call("transcript.read", { session, step, turn: turn.id, afterItem: after });
         const next = page.turns?.[0];
         if (!next || next.after === after) throw new Error("Transcript input cursor did not advance");
         turns = turns.map(item => item.id === turn.id ? { ...item, ...next, after: next.after, inputs: mergeTimelineInputs(item.inputs ?? [], next.inputs ?? []), items: mergeTimelineItems(item.items ?? [], next.items ?? []),
@@ -208,7 +209,7 @@
       let offset: number | undefined = 0, value = "";
       try {
         do {
-          const page: TranscriptReadResponse = await call("transcript.read", { session, turn, item, part, offset });
+          const page: TranscriptReadResponse = await call("transcript.read", { session, step, turn, item, part, offset });
           value += page.chunk ?? "";
           offset = page.nextOffset;
         } while (offset !== undefined);
@@ -333,7 +334,7 @@
 {#if mediaIndex !== undefined}<MediaViewer room={store.room} {loadVisual} items={media} initial={mediaIndex} name={mediaName} root={mediaRoot} onclose={() => mediaIndex = undefined} onjump={key => scroller.querySelector<HTMLElement>(`[data-media-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "center" })} />{/if}
 
 <div class="thread-frame" bind:clientWidth={frameWidth}>
-{#if frameWidth >= 880}<TimelineMinimap turns={minimapTurns} current={currentTurn} onselect={(id) => scroller.querySelector<HTMLElement>(`article[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" })} />{/if}
+{#if frameWidth >= 880 && !step}<TimelineMinimap turns={minimapTurns} current={currentTurn} onselect={(id) => scroller.querySelector<HTMLElement>(`article[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" })} />{/if}
 <div class="thread" bind:this={scroller} onscroll={scrolled}>
   <div class="body" bind:this={content} onclickcapture={() => { clicked = performance.now(); }}>
     {#if before && loaded}<div class="skeleton" aria-hidden="true"><i></i></div>{/if}
@@ -392,7 +393,7 @@
       {#snippet unsent()}<p class="owner-note unsent" role="alert">Not sent<button class="retry" onclick={() => void view.retry(post.id)}>Retry</button><button class="retry" onclick={() => view.discard(post.id)}>Discard</button></p>{/snippet}
       {@render ownerMessage(pendingKey(post.id), undefined, !post.failed, body, post.failed ? unsent : undefined)}
     {/each}
-    {#if loaded && !failed && quiet}<p class="muted empty">The conversation will appear here.</p>{/if}
+    {#if loaded && !failed && quiet}<p class="muted empty">{step ? "The worker's transcript will appear here." : "The conversation will appear here."}</p>{/if}
     {#if failed}<p class="muted" role="alert">The conversation did not load. <button class="retry" onclick={() => void load()}>Try again</button></p>{/if}
   </div>
   {#if !atBottom}<div class="latest-bar"><button class="latest" onclick={() => scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" })}>Jump to latest</button></div>{/if}

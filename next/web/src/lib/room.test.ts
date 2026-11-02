@@ -680,3 +680,63 @@ test("a box that returns reads back the open turn session.list left out", async 
     assert.equal(room.running("s"), true);
   } finally { server.restore(); }
 });
+
+test("step rows reach only the open run page, and the run's end and a new connection make it read again", async () => {
+  const original = globalThis.fetch;
+  const asked: string[] = [];
+  let hello = () => {};
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const method = String(input).split("/").at(-1) ?? "";
+    asked.push(method);
+    const lists: Record<string, object> = { "session.list": { sessions: [{ id: "crew", name: "crew-1", parent: "", profile: "p", boxState: "ready", turn: "t", goal: "", startedAt: "", lastRead: 0 }], seq: 5 }, "room.list": { rooms: [] }, "workflow.list": { runs: [run] } };
+    return new Response(JSON.stringify(lists[method] ?? {}));
+  }) as typeof fetch;
+  const usage = { model: "", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+  const run = { run: "wf", room: "r", session: "crew", name: "crew", profiles: ["p"], state: "running" as const, failed: 0, usage, started: "" };
+  const step = { key: "a", kind: "agent" as const, name: "a", state: "running" as const, usage, started: "" };
+  try {
+    const store = new RoomStore("r", (_room, _after, _apply, _factory, _schedule, opened) => { hello = opened ?? (() => {}); return () => {}; });
+    await store.open();
+    assert.equal(store.workflows.get("crew")?.state, "running");
+    const window = store.window({ kind: "feed" });
+    await new Promise(done => setTimeout(done));
+    const seen: unknown[] = [];
+    const stop = store.watchRun("crew", row => seen.push(row));
+    store.apply({ seq: 0, id: "s", at: "", from: { kind: "engine" }, type: "workflow.step_changed", body: { run: "wf", session: "crew", step } });
+    store.apply({ seq: 0, id: "o", at: "", from: { kind: "engine" }, type: "workflow.step_changed", body: { run: "wf2", session: "other", step } });
+    assert.deepEqual(seen, [step]);
+    assert.equal(window.ordered.length, 0);
+    store.apply(event(6, { type: "workflow.ended", body: { run: "wf", session: "crew", name: "crew", state: "failed", failed: 2, failedSteps: ["a", "b"], usage } }));
+    assert.deepEqual(seen, [step, undefined]);
+    assert.equal(store.workflows.get("crew")?.state, "failed");
+    // The run outlives its crew's close, so a closed crew's page keeps its place.
+    store.apply(event(7, { type: "session.closed", body: { session: "crew" } }));
+    assert.equal(store.workflows.has("crew"), true);
+    hello();
+    assert.deepEqual(seen, [step, undefined, undefined]);
+    stop();
+    store.apply({ seq: 0, id: "s2", at: "", from: { kind: "engine" }, type: "workflow.step_changed", body: { run: "wf", session: "crew", step } });
+    assert.equal(seen.length, 3);
+  } finally { globalThis.fetch = original; }
+});
+
+test("a closed crew past the list asks for itself once, and a plain session stays a thread", async () => {
+  const original = globalThis.fetch;
+  const calls: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const method = String(input).split("/").at(-1) ?? "";
+    if (method !== "workflow.status") return new Response("{}");
+    const { session } = JSON.parse(String(init?.body)) as { session: string };
+    calls.push(session);
+    if (session === "plain") return new Response(JSON.stringify({ code: "not_found", message: "no" }), { status: 404 });
+    return new Response(JSON.stringify({ run: { run: "wf", room: "r", session, name: "old-run", profiles: [], state: "done", failed: 0, usage: {}, started: "" }, steps: [] }));
+  }) as typeof fetch;
+  try {
+    const store = new RoomStore("r", () => () => {});
+    await store.readWorkflow("plain");
+    await store.readWorkflow("plain");
+    await store.readWorkflow("old");
+    assert.deepEqual(calls, ["plain", "old"]);
+    assert.deepEqual([store.workflows.has("plain"), store.workflows.get("old")?.state, store.names.get("old")], [false, "done", "old-run"]);
+  } finally { globalThis.fetch = original; }
+});

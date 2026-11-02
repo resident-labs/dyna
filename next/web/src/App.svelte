@@ -16,6 +16,7 @@
   import { linkCode } from "./lib/devices.ts";
   import Feed from "./lib/ui/Feed.svelte";
   import SessionThread from "./lib/ui/SessionThread.svelte";
+  import WorkflowRun from "./lib/ui/WorkflowRun.svelte";
   import StatusPill from "./lib/ui/StatusPill.svelte";
   import Composer from "./lib/ui/Composer.svelte";
   import SessionRow from "./lib/ui/SessionRow.svelte";
@@ -29,6 +30,7 @@
   import { boxReason, count, quoted, turnReason, waits, type Quote } from "./lib/feed.ts";
   import { sessionActions, sessionTree, type TreeRow } from "./lib/session-tree.ts";
   import { activityLabel } from "./lib/steps.ts";
+  import { runLine } from "./lib/workflow.ts";
   import { FileDraft } from "./lib/attach.svelte.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
   import type { Size } from "./lib/computerInput.ts";
@@ -466,6 +468,11 @@
       default: return reason ? waits[reason] : starting(id) ? "Starting" : store?.boxes.get(id) === "stopped" ? "Asleep" : "";
     }
   };
+  // A crew's row says it is a workflow and how its run stands. What needs the owner keeps its words after that.
+  const rowLine = (id: string) => {
+    const run = store?.workflows.get(id), line = status(id) || goalLine(id);
+    return !run ? line : !line || starting(id) || store?.status(id) === "working" ? runLine(run, starting(id)) : `Workflow · ${line}`;
+  };
   // What the session works on, for its row in the list: the first open item of its first goal, or that goal.
   const goalLine = (id: string) => {
     const goal = store?.goals.get(id)?.at(-1);
@@ -607,6 +614,9 @@
   let closed = $derived(!!session && !!store?.ready && !store.sessions.has(session));
   // A closed session keeps its history to read, with no composer. One with no history at all never existed.
   let missing = $derived(closed && !!(session ? thread : view)?.empty());
+  // A crew's page is its run, and a crew takes no messages. A closed crew past workflow.list's newest runs says so when asked.
+  let crew = $derived(!!session && !!store?.workflows.has(session));
+  $effect(() => { if (closed && session && !crew) void store?.readWorkflow(session); });
   let about = $derived(!!session && !closed && (tabs.get(key) ?? "about") === "about");
   // room.list gives the feed's read position. Opening a session's DM shows the owner its failure, which clears the mark.
   // This device was revoked while its page stayed open.
@@ -722,7 +732,7 @@
         onactive={event => { toggle = event.currentTarget; void showPanel(true, event.detail > 0); }} />
       {:else if unavailable === "unreachable"}<Blocked kind="unreachable" onretry={reopen} />
       {:else if store && !unavailable}
-        {#if session}{#key session}<SessionThread bind:this={thread} {store} {session} {roomName} {navigate} operate={attention.can("operate")} startingBrief={startingBriefs[session]} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{/key}{:else}{#key key}<Feed bind:this={view} {store} {home} {navigate} admin={attention.can("admin")} operate={attention.can("operate") && !closed} waiting={quotes[key]} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
+        {#if session}{#key session}{#if crew}<WorkflowRun {store} {session} {roomName} {navigate} operate={attention.can("operate")} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{:else}<SessionThread bind:this={thread} {store} {session} {roomName} {navigate} operate={attention.can("operate")} startingBrief={startingBriefs[session]} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{/if}{/key}{:else}{#key key}<Feed bind:this={view} {store} {home} {navigate} admin={attention.can("admin")} operate={attention.can("operate") && !closed} waiting={quotes[key]} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
           onforward={forward} onclosed={() => composer?.focus()} onjobs={item => void jobsTool?.show(item)}
           />{/key}{/if}
         <!-- The open thread or feed stays mounted behind the error, as it tells the page the session has no history. -->
@@ -733,7 +743,8 @@
       {#if deleting}<p class="paused" role="status"><span>This room is being deleted.</span></p>
       {:else if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
         {#if attention.can("operate")}<button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button>{/if}</p>{/if}
-      {#if attention.can("operate")}<Composer bind:this={composerBox} bind:element={composer} bind:value={() => savedDrafts.draft(key, drafts[key]),text => { drafts[key] = text; savedDrafts.save(key, text); clearReplacement(); }} onsend={send} thread={!!session} placeholder={"Message " + title}
+      {#if crew}<!-- The run page has the stop. -->
+      {:else if attention.can("operate")}<Composer bind:this={composerBox} bind:element={composer} bind:value={() => savedDrafts.draft(key, drafts[key]),text => { drafts[key] = text; savedDrafts.save(key, text); clearReplacement(); }} onsend={send} thread={!!session} placeholder={"Message " + title}
         quote={quotes[key]} replacement={replaced[key]} onundo={() => { quotes[key] = undoForward({ quote: quotes[key], previous: replaced[key] }).quote; clearReplacement(); }} onunquote={() => { quotes[key] = undefined; clearReplacement(); }} sessions={mentions} files={files(key)} {stop} />
       {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
     {/if}
@@ -769,7 +780,7 @@
           onclick={openSession} oncontextmenu={event => act(event, item.session, item.parent, new DOMRect(event.clientX, event.clientY), "start")}
           onkeydown={event => { void walkTree(event); if (parent) fold(event, item.session); }}
           aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{34 + depth * 14 + (hidden ? String(hidden).length * 7 : 0)}px">
-          <SessionRow name={item.name} root={!item.parent} {state} {dot} line={status(item.session) || goalLine(item.session)} {mark} /></a>
+          <SessionRow name={item.name} root={!item.parent} {state} {dot} line={rowLine(item.session)} {mark} /></a>
           {#if jobs(item.session)}<button type="button" class="watch" aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
             title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={async event => { if (!wide.current) await showPanel(false, event.detail > 0); void jobsTool?.show(item.session); }}><Icon name="terminal" /></button>{/if}
           {#if attention.can("computers") && store?.computers.has(item.session)}<button type="button" class="watch" class:open={watching === item.session} data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}

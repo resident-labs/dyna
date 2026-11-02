@@ -9,6 +9,8 @@ const (
 	MethodWorkflowPin       Method = "workflow.pin"
 	MethodWorkflowStepStart Method = "workflow.step_start"
 	MethodWorkflowStepEnd   Method = "workflow.step_end"
+	// MethodWorkflowStepTranscript names a running worker's session file, so its transcript opens before the worker ends.
+	MethodWorkflowStepTranscript Method = "workflow.step_transcript"
 )
 
 // WorkerHeader names the worker of a crew's model call. A crew is one session with many conversations, and each needs its
@@ -57,7 +59,8 @@ type WorkflowRunResponse struct {
 	Box     BoxID         `json:"box"`
 }
 
-// WorkflowInfo is one run. Failed counts failed steps and FailedSteps names them, at most 20.
+// WorkflowInfo is one run. Failed counts failed steps and FailedSteps names them, at most 20. Result is the script's return
+// value, or why it threw.
 type WorkflowInfo struct {
 	Run         WorkflowRunID `json:"run"`
 	Room        RoomID        `json:"room"`
@@ -92,12 +95,33 @@ type WorkflowStep struct {
 	Ended      time.Time         `json:"ended,omitzero"`
 }
 
+// WorkflowStatusRequest names a run, or the crew session that hosts it.
 type WorkflowStatusRequest struct {
-	Run WorkflowRunID `json:"run"`
+	Run     WorkflowRunID `json:"run,omitempty"`
+	Session SessionID     `json:"session,omitempty"`
 }
+
+// WorkflowStatusResponse carries the run's newest merge() result, when it has one.
 type WorkflowStatusResponse struct {
 	Run   WorkflowInfo   `json:"run"`
 	Steps []WorkflowStep `json:"steps"`
+	Merge *WorkflowMerge `json:"merge,omitempty"`
+}
+
+// WorkflowMerge is what merge() returns and stores as its step's result.
+type WorkflowMerge struct {
+	Branch    string             `json:"branch"`
+	Commit    string             `json:"commit"`
+	Merged    []string           `json:"merged"`
+	Conflicts []WorkflowConflict `json:"conflicts"`
+}
+
+// WorkflowConflict is a step that did not merge. A failed step has a reason and no files, because it left nothing to merge.
+type WorkflowConflict struct {
+	Step   string   `json:"step"`
+	Branch string   `json:"branch,omitempty"`
+	Files  []string `json:"files"`
+	Reason string   `json:"reason,omitempty"`
 }
 
 // WorkflowListRequest names a room. A session may omit it for its own.
@@ -162,6 +186,13 @@ type WorkflowStepEndRequest struct {
 }
 type WorkflowStepEndResponse struct{}
 
+// WorkflowStepTranscriptRequest names a running step's worker file, as transcript.append names it.
+type WorkflowStepTranscriptRequest struct {
+	Key        string `json:"key"`
+	Transcript string `json:"transcript"`
+}
+type WorkflowStepTranscriptResponse struct{}
+
 // WorkflowEnded closes a run. The final reply tells the caller; this is the room's record of it.
 type WorkflowEnded struct {
 	Run         WorkflowRunID `json:"run"`
@@ -175,3 +206,14 @@ type WorkflowEnded struct {
 
 func (WorkflowEnded) EventType() EventType { return "workflow.ended" }
 func (WorkflowEnded) isEventBody()         {}
+
+// WorkflowStepChanged carries a journal row to the run page. It is live only, like TurnActivity: never stored, delivered to
+// nobody, and the journal stays the record, so a page that missed one reads workflow.status again.
+type WorkflowStepChanged struct {
+	Run     WorkflowRunID `json:"run"`
+	Session SessionID     `json:"session"`
+	Step    WorkflowStep  `json:"step"`
+}
+
+func (WorkflowStepChanged) EventType() EventType { return "workflow.step_changed" }
+func (WorkflowStepChanged) isEventBody()         {}

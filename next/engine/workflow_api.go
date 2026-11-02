@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"path/filepath"
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
+	"github.com/resident-labs/dyna/harness"
 	"github.com/resident-labs/dyna/room"
 )
 
@@ -115,7 +118,13 @@ func (s *Service) workflowInfo(ctx context.Context, run store.WorkflowRun) (cont
 }
 
 func (s *Service) WorkflowStatus(ctx context.Context, caller contract.Principal, req contract.WorkflowStatusRequest) (contract.WorkflowStatusResponse, *contract.Error) {
-	run, err := s.store.WorkflowRun(ctx, req.Run)
+	var run store.WorkflowRun
+	var err error
+	if req.Run != "" {
+		run, err = s.store.WorkflowRun(ctx, req.Run)
+	} else {
+		run, err = s.store.SessionWorkflow(ctx, req.Session)
+	}
 	if err != nil {
 		return contract.WorkflowStatusResponse{}, failure(err)
 	}
@@ -130,7 +139,20 @@ func (s *Service) WorkflowStatus(ctx context.Context, caller contract.Principal,
 	if err != nil {
 		return contract.WorkflowStatusResponse{}, failure(err)
 	}
-	return contract.WorkflowStatusResponse{Run: info, Steps: steps}, nil
+	merge, err := s.store.WorkflowMerge(ctx, run.ID)
+	if err != nil {
+		return contract.WorkflowStatusResponse{}, failure(err)
+	}
+	info.Result = harness.Mask(info.Result)
+	for i := range steps {
+		maskStep(&steps[i])
+	}
+	return contract.WorkflowStatusResponse{Run: info, Steps: steps, Merge: merge}, nil
+}
+
+// maskStep covers what a read can show: a step's name quotes its command and its reason quotes the command's output.
+func maskStep(step *contract.WorkflowStep) {
+	step.Name, step.Reason = harness.Mask(step.Name), harness.Mask(step.Reason)
 }
 
 func (s *Service) WorkflowList(ctx context.Context, caller contract.Principal, req contract.WorkflowListRequest) (contract.WorkflowListResponse, *contract.Error) {
@@ -196,6 +218,9 @@ func (s *Service) WorkflowStepStart(ctx context.Context, caller contract.Princip
 	if err != nil {
 		return contract.WorkflowStepStartResponse{}, failure(err)
 	}
+	if stored.State == "" {
+		s.publishStep(ctx, run, req.Key)
+	}
 	return stored, nil
 }
 
@@ -210,7 +235,39 @@ func (s *Service) WorkflowStepEnd(ctx context.Context, caller contract.Principal
 	if err := s.store.EndWorkflowStep(ctx, run.ID, req, s.now()); err != nil {
 		return contract.WorkflowStepEndResponse{}, failure(err)
 	}
+	s.publishStep(ctx, run, req.Key)
 	return contract.WorkflowStepEndResponse{}, nil
+}
+
+func (s *Service) WorkflowStepTranscript(ctx context.Context, caller contract.Principal, req contract.WorkflowStepTranscriptRequest) (contract.WorkflowStepTranscriptResponse, *contract.Error) {
+	run, problem := s.callerWorkflow(ctx, caller)
+	if problem != nil {
+		return contract.WorkflowStepTranscriptResponse{}, problem
+	}
+	if !filepath.IsLocal(req.Transcript) {
+		return contract.WorkflowStepTranscriptResponse{}, invalid("transcript path must be local")
+	}
+	if err := s.store.SetWorkflowStepTranscript(ctx, run.ID, req.Key, req.Transcript); err != nil {
+		return contract.WorkflowStepTranscriptResponse{}, failure(err)
+	}
+	s.publishStep(ctx, run, req.Key)
+	return contract.WorkflowStepTranscriptResponse{}, nil
+}
+
+// publishStep tells open run pages about a step. The journal already holds it, so a failure here costs a page one update.
+func (s *Service) publishStep(ctx context.Context, run store.WorkflowRun, key string) {
+	step, err := s.store.WorkflowStep(ctx, run.ID, key)
+	if err != nil {
+		log.Printf("workflow %s step %s: %v", run.ID, key, err)
+		return
+	}
+	maskStep(&step)
+	event, err := s.event(run.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.WorkflowStepChanged{Run: run.ID, Session: run.Session, Step: step})
+	if err != nil {
+		log.Printf("workflow %s step %s: %v", run.ID, key, err)
+		return
+	}
+	s.live.Publish(run.Room, event, false)
 }
 
 // boxWorkflow is what a hello tells a crew's box. A profile removed since the run started is left out, so a call to it fails.
