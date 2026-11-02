@@ -117,23 +117,23 @@
     </section>
   {/if}
   {#if subscriptions.length}<section><HooksRow {subscriptions} name={id => store.names.get(id) ?? id} /></section>{/if}
-  {#if open?.startedAt}<p class="times"><time datetime={open.startedAt} title={fullTime(open.startedAt)}>Started {ago(open.startedAt)}</time>{#if open.lastTurnAt}<time datetime={open.lastTurnAt} title={fullTime(open.lastTurnAt)}>Last turn {ago(open.lastTurnAt)}</time>{/if}</p>{/if}
-  {#if open?.parent}
-    <div class="closebox">
-      {#if confirming}
-        {#if handed}<p class="handed">{handed}</p>{/if}
-        <p class="note">{archiveNote}</p>
-        <div class="confirm">
-          <button type="button" class="close-button" disabled={closing} onclick={() => { confirming = false; }}>Cancel</button>
-          <button type="button" class="close-button danger" disabled={closing} onclick={close}>Close session</button>
-        </div>
-      {:else}
-        <button type="button" class="close-button" onclick={confirmClose}>Close session…</button>
-        <p class="note">{archiveNote}</p>
-      {/if}
-      {#if closeFailed}<span class="failed">The session did not close. Try again.</span>{/if}
+  {#if open?.startedAt || open?.parent}
+    <div class="endnote">
+      {#if open?.startedAt}<p class="times"><time datetime={open.startedAt} title={fullTime(open.startedAt)}>Started {ago(open.startedAt)}</time>{#if open.lastTurnAt}<time datetime={open.lastTurnAt} title={fullTime(open.lastTurnAt)}>Last turn {ago(open.lastTurnAt)}</time>{/if}</p>{/if}
+      {#if open?.parent && !confirming}<button type="button" class="close-link" onclick={confirmClose}>Close session</button>{/if}
     </div>
   {/if}
+  {#if confirming}
+    <div class="closebox">
+      {#if handed}<p class="handed">{handed}</p>{/if}
+      <p class="note">{archiveNote}</p>
+      <div class="confirm">
+        <button type="button" class="close-button" disabled={closing} onclick={() => { confirming = false; }}>Cancel</button>
+        <button type="button" class="close-button danger" disabled={closing} onclick={close}>Close session</button>
+      </div>
+    </div>
+  {/if}
+  {#if closeFailed}<p class="failed">The session did not close. Try again.</p>{/if}
 </div>
 
 <style>
@@ -158,7 +158,10 @@
   .dropped { text-decoration: line-through; }
   a, button { padding: 0; border: 0; border-radius: 4px; background: none; color: var(--focus); font: inherit; text-decoration: none; cursor: pointer; }
   .failed { display: block; }
-  .closebox { display: grid; gap: 8px; justify-items: start; padding-top: 16px; border-top: 1px solid var(--line); }
+  .endnote { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+  .close-link { flex: none; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+  .close-link:hover { color: var(--danger); text-decoration: none; }
+  .closebox { display: grid; gap: 8px; justify-items: start; padding: 12px; border-radius: 8px; background: var(--raised); }
   .close-button { height: 28px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); font-size: 13px; font-weight: 500; }
   .close-button:hover { background: var(--hover); text-decoration: none; }
   .close-button:disabled { background: none; color: var(--muted); cursor: default; text-decoration: none; }
