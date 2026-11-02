@@ -31,7 +31,7 @@ func TestParseRefusesWhatPiWouldNotLoad(t *testing.T) {
 
 func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
 	items := BuiltIn()
-	if len(items) != 3 || items[0].Name != "dyna-extend" || items[0].Description != "Use when you need to add a skill or mcp server to dyna" || !items[0].BuiltIn {
+	if len(items) != 4 || items[0].Name != "dyna-extend" || items[0].Description != "Use when you need to add a skill or mcp server to dyna" || !items[0].BuiltIn {
 		t.Fatalf("%+v", items)
 	}
 	if !IsBuiltIn("dyna-extend") || IsBuiltIn("other") {
@@ -61,6 +61,37 @@ func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
 	for _, want := range []string{"create NAME SIZE", "destroy NAME", "list ", "--per-session", "--max", "--idle", "room hosts", "--only", "Podman 5", "FUSE", "user_allow_other", "OpenSSH", "SSH key", "/home/pip/.local/share/dyna-next-host", "dormant session keeps its node", "#!/usr/bin/env bash"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("the skill does not say %q", want)
+		}
+	}
+}
+
+func TestTheWorkflowSkillSaysWhatTheCodeDoes(t *testing.T) {
+	data, err := builtIn.ReadFile("dyna-workflows/" + File)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := Parse(data)
+	if err != nil || meta.Name != "dyna-workflows" || !strings.HasPrefix(meta.Description, "Use when you write, test or resume a Dyna workflow") {
+		t.Fatalf("%+v %v", meta, err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"`JSON.parse(args)`", "`{code, stdout, stderr, durationMs}`", "`check` defaults to `true`", "`{failed: true, step, reason}`",
+		"`{step, text, branch, commit, files}`", "`{step, output, branch, commit, files}`", "`{branch, commit, merged, conflicts}`", "`r.output.issues`",
+		"A session ID is not a mention", "`merge()` reads `commit`, not the tip of `branch`", "A resume is a new session", "through any chain of resumes",
+		"the run ended first", "needs no polling", "Nothing wakes a worker", "only through the prompt", "one worker per 512 MiB", "holds a box slot",
+		"dry run of one group", "give up in 40 seconds", "still reports done",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the skill does not say %q", want)
+		}
+	}
+	if lines := strings.Count(text, "\n"); lines > 150 {
+		t.Errorf("the skill is %d lines", lines)
+	}
+	for _, word := range []string{"you must", "always", "never"} {
+		if strings.Contains(strings.ToLower(text), word) {
+			t.Errorf("the skill says %q: it states facts", word)
 		}
 	}
 }

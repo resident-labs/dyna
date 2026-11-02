@@ -147,7 +147,7 @@ func UploadHTTP(ctx context.Context, client *http.Client, room contract.RoomID, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return attachment, fmt.Errorf("upload %s: %s", name, resp.Status)
+		return attachment, fmt.Errorf("upload %s: %s: %s", name, resp.Status, contract.ReadError(resp.Body).Message)
 	}
 	err = json.NewDecoder(resp.Body).Decode(&attachment)
 	return attachment, err
