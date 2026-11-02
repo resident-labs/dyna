@@ -277,7 +277,7 @@ func TestUntrackedItemsAreQuietEventsForSubscribers(t *testing.T) {
 		t.Fatalf("%d events with no subscriber", got)
 	}
 	wake := sessionCaller(r.root)
-	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.label"}, Wake: &wake}); e != nil {
+	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.label"}, Wake: string(wake.Session)}); e != nil {
 		t.Fatalf("%+v", e)
 	}
 	r.github.EditAs("alice", "owner/repo", 9, func(p *fakegithub.Pull) { p.Meta.Labels = []string{"bug"} })
@@ -308,7 +308,7 @@ func TestUntrackedItemsAreQuietEventsForSubscribers(t *testing.T) {
 func TestDeployOnExistingStateReplaysNothing(t *testing.T) {
 	r := newPRRig(t)
 	wake := sessionCaller(r.root)
-	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.label"}, Wake: &wake}); e != nil {
+	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.label"}, Wake: string(wake.Session)}); e != nil {
 		t.Fatalf("%+v", e)
 	}
 	// Rows that a poll has read, with years of feed behind them and no cursor.

@@ -1,8 +1,14 @@
 import type { SubscriptionInfo } from "./contract.gen.ts";
 import { count } from "./feed.ts";
 
-const period = (ms: number): string => {
-  const minutes = Math.round(ms / 60_000);
+const units: Record<string, number> = { h: 3_600_000, m: 60_000, s: 1_000, ms: 1 };
+
+// A schedule as the engine writes it, such as "1h", "1h30m" or "15m", in milliseconds.
+export const durationMs = (text: string): number =>
+  [...text.matchAll(/(\d+(?:\.\d+)?)(ms|h|m|s)/g)].reduce((sum, [, value, unit]) => sum + Number(value) * units[unit], 0);
+
+const period = (every: string): string => {
+  const minutes = Math.round(durationMs(every) / 60_000);
   if (minutes < 60) return `Every ${minutes} min`;
   const hours = minutes / 60;
   return Number.isInteger(hours) ? `Every ${hours} h` : `Every ${minutes} min`;
@@ -17,7 +23,7 @@ export const subscriptionWhen = ({ subscription }: SubscriptionInfo): string => 
 
 // What a subscription does. A Run reads as its command, and a wake as the session it wakes.
 export const subscriptionAction = ({ subscription }: SubscriptionInfo, name: (session: string) => string): string =>
-  subscription.run ? `Runs ${subscription.run.command?.join(" ") ?? ""}` : `Wakes ${subscription.wake?.session ? name(subscription.wake.session) : "a session"}`;
+  subscription.run ? `Runs ${subscription.run.command?.join(" ") ?? ""}` : `Wakes ${subscription.wake ? name(subscription.wake) : "a session"}`;
 
 // Where a subscription stands, for the owner to read at a glance. Nothing to say reads as nothing.
 export function subscriptionState(info: SubscriptionInfo): string {

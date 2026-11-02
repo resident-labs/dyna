@@ -237,7 +237,7 @@ var methodTable = []MethodEntry{
 	),
 	// Adding one takes admin: a Run reads GitHub with the engine's token, and an operate device should not be able to start that.
 	method(contract.MethodSubscriptionAdd, contract.ScopeAdmin, UserAccess,
-		act("subscription", "add", typ[contract.SubscriptionAddRequest](), "Add a subscription. Scope is room or session, or machine for the owner. Set one of on and every, and one of wake and run. where filters github.* and git.* events: each entry is key=value, key!=value or text~value, on repo, author, actor, label or number, and all must hold. Only the owner or root adds a run; it runs in a small box, and an event gets its own run, as JSON on stdin with DYNA_EVENT set to its type.", "subscription add"),
+		act("subscription", "add", typ[contract.SubscriptionAddRequest](), "Add a subscription. Scope is room or session, or machine for the owner. Set one of on and every, and one of wake and run. every is a duration string such as 1h. session and wake take a session's name in the room or its ID, so an hourly wake is {scope: session, session: upstream-sync, every: 1h, wake: upstream-sync}. where filters github.* and git.* events: each entry is key=value, key!=value or text~value, on repo, author, actor, label or number, and all must hold. Only the owner or root adds a run; it runs in a small box, and an event gets its own run, as JSON on stdin with DYNA_EVENT set to its type.", "subscription add"),
 	),
 	method(contract.MethodSubscriptionList, contract.ScopeRead, UserAccess,
 		act("subscription", "list", typ[contract.SubscriptionListRequest](), "List the subscriptions in room with their next firing and last result.", "subscription list"),

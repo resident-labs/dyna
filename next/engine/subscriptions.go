@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -55,15 +56,29 @@ func checkRun(run *contract.RunSpec) *contract.Error {
 	return nil
 }
 
+// checkEvery reads a schedule: a duration string of at least a minute.
+func checkEvery(every contract.Duration) (time.Duration, *contract.Error) {
+	period, err := every.Parse()
+	if err != nil {
+		return 0, invalid(fmt.Sprintf(`every %q is not a duration; give a string such as "1h", "15m" or "90s"`, string(every)))
+	}
+	if period < minEvery {
+		return 0, invalid(fmt.Sprintf(`every %q is under a minute; a schedule fires at most once a minute, so every is at least "1m"`, string(every)))
+	}
+	return period, nil
+}
+
 func checkSubscriptionShape(req contract.SubscriptionAddRequest) *contract.Error {
-	if (len(req.On) > 0) == (req.Every > 0) || req.Every < 0 {
+	if (len(req.On) > 0) == (req.Every != "") {
 		return invalid("set exactly one of on and every")
 	}
-	if (req.Wake != nil) == (req.Run != nil) {
+	if (req.Wake != "") == (req.Run != nil) {
 		return invalid("set exactly one of wake and run")
 	}
-	if req.Every > 0 && req.Every < contract.DurationMS(minEvery.Milliseconds()) {
-		return invalid("a schedule fires at most once a minute")
+	if req.Every != "" {
+		if _, problem := checkEvery(req.Every); problem != nil {
+			return problem
+		}
 	}
 	for i, kind := range req.On {
 		if !room.Deliverable(kind) || slices.Contains(req.On[:i], kind) {
@@ -79,18 +94,58 @@ func checkSubscriptionShape(req contract.SubscriptionAddRequest) *contract.Error
 			return invalid(err.Error())
 		}
 	}
-	if len(req.Where) > 0 && (req.Every > 0 || slices.ContainsFunc(req.On, func(kind contract.EventType) bool {
+	if len(req.Where) > 0 && (req.Every != "" || slices.ContainsFunc(req.On, func(kind contract.EventType) bool {
 		return !strings.HasPrefix(string(kind), "github.") && !strings.HasPrefix(string(kind), "git.")
 	})) {
 		return invalid("where filters github.* and git.* events: dyna subscription events lists them")
-	}
-	if req.Wake != nil && (req.Wake.Kind != contract.PrincipalSession || req.Wake.Session == "") {
-		return invalid("wake must name a session")
 	}
 	if req.Run != nil {
 		return checkRun(req.Run)
 	}
 	return nil
+}
+
+// callerSession is the calling session. A closed one has no authority over a subscription.
+func (s *Service) callerSession(ctx context.Context, caller contract.Principal) (store.Session, *contract.Error) {
+	self, err := s.store.Session(ctx, caller.Session)
+	if errors.Is(err, store.ErrNotFound) {
+		return self, forbidden()
+	}
+	if err != nil {
+		return self, failure(err)
+	}
+	return self, nil
+}
+
+// subscriptionSession finds the open session ref names: its ID, or its name in room, with or without an @ as a post
+// mention has. With no room it looks in the caller's own room. The owner has no room of its own, so with no room the
+// owner names a session by ID.
+func (s *Service) subscriptionSession(ctx context.Context, caller contract.Principal, id contract.RoomID, ref string) (store.Session, *contract.Error) {
+	session, err := s.store.Session(ctx, contract.SessionID(ref))
+	if err == nil {
+		return session, nil
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return session, failure(err)
+	}
+	if id == "" && caller.Kind == contract.PrincipalSession {
+		self, problem := s.callerSession(ctx, caller)
+		if problem != nil {
+			return self, problem
+		}
+		id = self.Room
+	}
+	if id == "" {
+		return session, invalid(fmt.Sprintf("unknown session %q; with no room, name a session by its ses_… ID", ref))
+	}
+	session, err = s.store.SessionByName(ctx, id, strings.TrimPrefix(ref, "@"))
+	if errors.Is(err, store.ErrNotFound) {
+		return session, invalid(fmt.Sprintf("unknown session %q in this room", ref))
+	}
+	if err != nil {
+		return session, failure(err)
+	}
+	return session, nil
 }
 
 // subscriptionAccess is the authority over a subscription. The machine is the owner's, a room is root's, and a
@@ -108,9 +163,9 @@ func (s *Service) subscriptionAccess(ctx context.Context, caller contract.Princi
 	if err != nil {
 		return failure(err)
 	}
-	self, err := s.store.Session(ctx, caller.Session)
-	if err != nil {
-		return failure(err)
+	self, problem := s.callerSession(ctx, caller)
+	if problem != nil {
+		return problem
 	}
 	if self.Room != sub.Room {
 		return forbidden()
@@ -128,7 +183,7 @@ func (s *Service) subscriptionAccess(ctx context.Context, caller contract.Princi
 	if sub.Scope == contract.ScopeSession && !manages(sub.Session) {
 		return forbidden()
 	}
-	if sub.Wake != nil && !manages(sub.Wake.Session) {
+	if sub.Wake != "" && !manages(sub.Wake) {
 		return forbidden()
 	}
 	return nil
@@ -147,45 +202,60 @@ func (s *Service) SubscriptionAdd(ctx context.Context, caller contract.Principal
 			return contract.SubscriptionAddResponse{}, invalid("unknown host")
 		}
 	}
-	sub := contract.Subscription{Scope: req.Scope, Room: req.Room, Session: req.Session, On: req.On, Where: req.Where, Every: req.Every, Wake: req.Wake, Run: req.Run}
+	sub := contract.Subscription{Scope: req.Scope, Room: req.Room, On: req.On, Where: req.Where, Run: req.Run}
+	if req.Every != "" {
+		period, _ := checkEvery(req.Every)
+		sub.Every = contract.DurationOf(period)
+	}
 	switch req.Scope {
 	case contract.ScopeMachine:
 		if req.Room != "" || req.Session != "" {
-			return contract.SubscriptionAddResponse{}, invalid("a machine subscription names no room or session")
+			return contract.SubscriptionAddResponse{}, invalid("scope machine takes no room and no session")
 		}
 		if req.Run != nil && req.Run.Image != box.BaseImage {
 			return contract.SubscriptionAddResponse{}, invalid("a machine run has no repository, so its image is base")
 		}
 	case contract.ScopeRoom:
-		if req.Room == "" || req.Session != "" {
-			return contract.SubscriptionAddResponse{}, invalid("a room subscription names its room and no session")
+		if req.Room == "" {
+			return contract.SubscriptionAddResponse{}, invalid("scope room needs room")
 		}
-		if err := s.store.RoomOpen(ctx, req.Room); err != nil {
-			if errors.Is(err, store.ErrNotFound) {
-				return contract.SubscriptionAddResponse{}, invalid("unknown room")
-			}
-			return contract.SubscriptionAddResponse{}, failure(err)
+		if req.Session != "" {
+			return contract.SubscriptionAddResponse{}, invalid("scope room takes no session; a session's subscription is scope session")
 		}
 	case contract.ScopeSession:
-		if req.Session == "" || req.Room != "" {
-			return contract.SubscriptionAddResponse{}, invalid("a session subscription names its session and no room")
+		if req.Session == "" {
+			return contract.SubscriptionAddResponse{}, invalid("scope session needs session: a session name or ID")
 		}
-		session, err := s.store.Session(ctx, req.Session)
-		if err != nil {
-			return contract.SubscriptionAddResponse{}, failure(err)
-		}
-		sub.Room = session.Room
 	default:
 		return contract.SubscriptionAddResponse{}, invalid("scope must be machine, room or session")
 	}
-	if req.Wake != nil {
-		target, err := s.store.Session(ctx, req.Wake.Session)
-		if err != nil {
+	if req.Room != "" {
+		if err := s.store.RoomOpen(ctx, req.Room); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return contract.SubscriptionAddResponse{}, invalid(fmt.Sprintf("unknown room %q", string(req.Room)))
+			}
 			return contract.SubscriptionAddResponse{}, failure(err)
 		}
-		if req.Scope != contract.ScopeMachine && target.Room != sub.Room {
-			return contract.SubscriptionAddResponse{}, invalid("wake must name a session in the subscription's room")
+	}
+	if req.Scope == contract.ScopeSession {
+		session, problem := s.subscriptionSession(ctx, caller, req.Room, req.Session)
+		if problem != nil {
+			return contract.SubscriptionAddResponse{}, problem
 		}
+		if req.Room != "" && session.Room != req.Room {
+			return contract.SubscriptionAddResponse{}, invalid(fmt.Sprintf("session %q is not in room %s", req.Session, string(req.Room)))
+		}
+		sub.Session, sub.Room = session.ID, session.Room
+	}
+	if req.Wake != "" {
+		target, problem := s.subscriptionSession(ctx, caller, sub.Room, req.Wake)
+		if problem != nil {
+			return contract.SubscriptionAddResponse{}, problem
+		}
+		if req.Scope != contract.ScopeMachine && target.Room != sub.Room {
+			return contract.SubscriptionAddResponse{}, invalid(fmt.Sprintf("wake %q is not in the subscription's room", req.Wake))
+		}
+		sub.Wake = target.ID
 	}
 	if problem := s.subscriptionAccess(ctx, caller, sub); problem != nil {
 		return contract.SubscriptionAddResponse{}, problem
@@ -207,9 +277,9 @@ func (s *Service) SubscriptionAdd(ctx context.Context, caller contract.Principal
 
 func (s *Service) SubscriptionList(ctx context.Context, caller contract.Principal, req contract.SubscriptionListRequest) (contract.SubscriptionListResponse, *contract.Error) {
 	if req.Room == "" && caller.Kind == contract.PrincipalSession {
-		session, err := s.store.Session(ctx, caller.Session)
-		if err != nil {
-			return contract.SubscriptionListResponse{}, failure(err)
+		session, problem := s.callerSession(ctx, caller)
+		if problem != nil {
+			return contract.SubscriptionListResponse{}, problem
 		}
 		req.Room = session.Room
 	}
@@ -259,6 +329,9 @@ func subscriptionInfo(sub store.Subscription) contract.SubscriptionInfo {
 // ownedSubscription loads a subscription for a change. The default one stays, and only the owner turns it off.
 func (s *Service) ownedSubscription(ctx context.Context, caller contract.Principal, id contract.SubscriptionID) (store.Subscription, *contract.Error) {
 	sub, err := s.store.SubscriptionByID(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return sub, &contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("unknown subscription %q", string(id))}
+	}
 	if err != nil {
 		return sub, failure(err)
 	}

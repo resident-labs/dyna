@@ -18,11 +18,11 @@ func TestAWhereKeepsANonMatchingEventFromWakingOrRunning(t *testing.T) {
 	r.s.now = r.clock.Now
 	wake := sessionCaller(r.child)
 	r.pass(t)
-	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.pr.opened"}, Where: []string{"author=levzzz5154"}, Wake: &wake}); e != nil {
+	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.pr.opened"}, Where: []string{"author=levzzz5154"}, Wake: string(wake.Session)}); e != nil {
 		t.Fatalf("%+v", e)
 	}
 	run := runRequest(r.room)
-	run.Every, run.On, run.Where = 0, []contract.EventType{"github.pr.opened"}, []string{"author=levzzz5154"}
+	run.Every, run.On, run.Where = "", []contract.EventType{"github.pr.opened"}, []string{"author=levzzz5154"}
 	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, run); e != nil {
 		t.Fatalf("%+v", e)
 	}
@@ -67,7 +67,7 @@ func TestEachEventGetsItsOwnRunWithTheEventOnStdin(t *testing.T) {
 	r.s.now = r.clock.Now
 	r.pass(t)
 	run := runRequest(r.room)
-	run.Every, run.On = 0, []contract.EventType{"github.comment"}
+	run.Every, run.On = "", []contract.EventType{"github.comment"}
 	id, e := r.s.SubscriptionAdd(r.ctx, prOwner, run)
 	if e != nil {
 		t.Fatalf("%+v", e)
@@ -145,10 +145,10 @@ func TestSubscriptionAddRefusesWhatCannotFire(t *testing.T) {
 		"an old name":         {On: []contract.EventType{"pr.merged"}},
 		"a bad key":           {On: []contract.EventType{"github.pr.opened"}, Where: []string{"writer=x"}},
 		"a bad operator":      {On: []contract.EventType{"github.pr.opened"}, Where: []string{"author~x"}},
-		"a schedule's filter": {Every: contract.DurationMS(time.Hour.Milliseconds()), Where: []string{"author=x"}},
+		"a schedule's filter": {Every: "1h", Where: []string{"author=x"}},
 		"an event with none":  {On: []contract.EventType{"notice.posted"}, Where: []string{"author=x"}},
 	} {
-		req.Scope, req.Room, req.Wake = contract.ScopeRoom, r.room, &wake
+		req.Scope, req.Room, req.Wake = contract.ScopeRoom, r.room, string(wake.Session)
 		if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, req); e == nil || e.Code != contract.ErrInvalid {
 			t.Errorf("%s: %+v", name, e)
 		}
@@ -163,7 +163,7 @@ func TestSubscriptionAddRefusesWhatCannotFire(t *testing.T) {
 func TestAChangeWithNoNewsFiresNoSubscription(t *testing.T) {
 	r := newPRRig(t)
 	wake := sessionCaller(r.root)
-	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.pr.changed"}, Wake: &wake}); e != nil {
+	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.pr.changed"}, Wake: string(wake.Session)}); e != nil {
 		t.Fatalf("%+v", e)
 	}
 	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1, Rollup: "PENDING"})
@@ -186,7 +186,7 @@ func TestAChangeWithNoNewsFiresNoSubscription(t *testing.T) {
 func TestStreamEventsReachSubscribersOnTrackedItemsToo(t *testing.T) {
 	r := newPRRig(t)
 	wake := sessionCaller(r.root)
-	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.comment"}, Where: []string{"text~#4953"}, Wake: &wake}); e != nil {
+	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.comment"}, Where: []string{"text~#4953"}, Wake: string(wake.Session)}); e != nil {
 		t.Fatalf("%+v", e)
 	}
 	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})
@@ -207,7 +207,7 @@ func TestStreamEventsReachSubscribersOnTrackedItemsToo(t *testing.T) {
 func TestAMentionOfTheOwnerByAnotherFiresAndOneByTheOwnerDoesNot(t *testing.T) {
 	r := newPRRig(t)
 	wake := sessionCaller(r.root)
-	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.mention"}, Where: []string{"actor!=owner-account"}, Wake: &wake}); e != nil {
+	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.mention"}, Where: []string{"actor!=owner-account"}, Wake: string(wake.Session)}); e != nil {
 		t.Fatalf("%+v", e)
 	}
 	r.github.AddIssue(fakegithub.Issue{Repo: "owner/repo", Number: 3, Author: "stranger"})
