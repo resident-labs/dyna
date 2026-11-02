@@ -49,7 +49,7 @@ func TestFieldDescriptionsComeFromTheContract(t *testing.T) {
 	}
 	for _, tc := range []struct{ tool, field, want string }{
 		{"post", "room", "A room_… ID, from your instructions. Omitted, it is your own room."},
-		{"post", "home", "Sessions post to the feed; a dm home is accepted from the owner only."},
+		{"post", "home", "A session may name only its own DM, {kind: dm}. With no home, a post that names no session goes to the owner's conversation with you: where this turn's reply to the owner goes, else where the owner last wrote to you, else the feed. One that names sessions goes to the feed."},
 		{"room", "home", "home narrows the log to one owner DM: {kind: dm, session: ses_…}."},
 		{"visual", "file", "Absolute, or relative to your working directory."},
 	} {
