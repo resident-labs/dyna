@@ -64,6 +64,16 @@ const (
 	FailureTurn = "turn"
 )
 
+// FailureSettle is how long a box must stay up after a failure before it counts as recovered. A box that comes back and goes
+// again within it, as on a host that keeps dropping out, is the failure its ancestors already heard of, not a new one.
+const FailureSettle = 10 * time.Minute
+
+// recovering reports a box failure that is told and whose box is back, but not for long enough to count as recovered. The
+// record stays until then, along with any turn the box took down.
+func (s CheckinSession) recovering(now time.Time) bool {
+	return s.Failure != FailureBox && s.FailureTold == FailureBox && now.Sub(s.BoxChanged) < FailureSettle
+}
+
 // canRead reports whether a report sent here would reach a model.
 func (s CheckinSession) canRead(now time.Time) bool {
 	broken := s.Box == contract.BoxFailed || s.Box == contract.BoxLost
@@ -185,7 +195,8 @@ type FailurePlan struct {
 // PlanFailures picks who hears of each new failure. The parent hears first, or the nearest ancestor that can read, with root
 // as the last resort. There is no wait and no rate limit, because a failed session stops until someone acts; each failure
 // goes out once. settled holds every session whose recorded failure changes, sent or not: a recovered session clears its
-// record, and a turn failure left behind by a box failure is old news.
+// record, and a turn failure left behind by a box failure is old news. A box counts as recovered only after FailureSettle, so
+// a box that keeps coming back and going again is told once.
 func PlanFailures(sessions []CheckinSession, now time.Time) (plans []FailurePlan, settled map[contract.SessionID]string) {
 	byID := make(map[contract.SessionID]*CheckinSession, len(sessions))
 	for i := range sessions {
@@ -194,7 +205,7 @@ func PlanFailures(sessions []CheckinSession, now time.Time) (plans []FailurePlan
 	settled = make(map[contract.SessionID]string)
 	index := make(map[contract.SessionID]int)
 	for _, s := range sessions {
-		if s.Closing || s.Failure == s.FailureTold {
+		if s.Closing || s.Failure == s.FailureTold || s.recovering(now) {
 			continue
 		}
 		settled[s.ID] = s.Failure
