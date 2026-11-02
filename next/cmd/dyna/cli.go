@@ -515,10 +515,21 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		}
 		return nil
 	}}
-	removeHost := &cobra.Command{Use: "remove NAME", Short: "Remove a host with nothing on it", Long: "Remove a host and its forward. It refuses while a box is on the host, and says what is. A pool's node goes back through its script.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := getClient().HostRemove(cmd.Context(), contract.HostRemoveRequest{Host: contract.HostName(args[0])})
-		return err
+	var discardBoxes bool
+	removeHost := &cobra.Command{Use: "remove NAME [--discard-boxes]", Short: "Remove a host with nothing on it", Long: "Remove a host and its forward. It refuses while a box is on the host, and says what is. A pool's node goes back through its script.\n\n" +
+		"With --discard-boxes it removes the host with its boxes, as a host lost for good, whether or not the host answers. Every box on it becomes failed with reason \"host removed\", and its volume is deleted: work that was not pushed is lost. On a host that does not answer, the volumes go with the machine. Each session's parent hears of the failure once, and `dyna session restart SESSION` gives the session a new, empty box on another host. A session being closed is closed without its archive. It prints the sessions to restart.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		r, err := getClient().HostRemove(cmd.Context(), contract.HostRemoveRequest{Host: contract.HostName(args[0]), DiscardBoxes: discardBoxes})
+		if err != nil {
+			return err
+		}
+		for _, session := range r.Failed {
+			if _, err := fmt.Fprintln(cmd.OutOrStdout(), session); err != nil {
+				return err
+			}
+		}
+		return nil
 	}}
+	removeHost.Flags().BoolVar(&discardBoxes, "discard-boxes", false, "Fail every box on the host and delete its volume; work not pushed is lost")
 	host.AddCommand(add, limitHost, list, removeHost)
 	root.AddCommand(host)
 	root.AddCommand(poolCommand(getClient))

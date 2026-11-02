@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -262,13 +263,20 @@ func (s *Service) RoomHostsEntry() approve.Entry {
 	})
 }
 
-// HostRemove removes a host with nothing on it. Only the owner reaches it.
+// HostRemove removes a host with nothing on it, or with DiscardBoxes, with its boxes failed as on a host lost for good. Only
+// the owner reaches it.
 func (s *Service) HostRemove(ctx context.Context, caller contract.Principal, req contract.HostRemoveRequest) (contract.HostRemoveResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalOwner {
 		return contract.HostRemoveResponse{}, forbidden()
 	}
-	if err := s.reconciler.RemoveHost(ctx, req.Host); err != nil {
-		return contract.HostRemoveResponse{}, failure(err)
+	failed, err := s.reconciler.RemoveHost(ctx, req.Host, req.DiscardBoxes)
+	if err != nil {
+		problem := failure(err)
+		var held *store.HostHeldError
+		if errors.As(err, &held) && slices.ContainsFunc(held.Held, func(what string) bool { return strings.HasPrefix(what, "session ") }) {
+			problem.Message += "; --discard-boxes fails those boxes and removes the host anyway, and work not pushed is lost"
+		}
+		return contract.HostRemoveResponse{Failed: failed}, problem
 	}
-	return contract.HostRemoveResponse{}, nil
+	return contract.HostRemoveResponse{Failed: failed}, nil
 }
