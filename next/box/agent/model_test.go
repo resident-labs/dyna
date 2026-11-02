@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -110,6 +112,60 @@ func TestModelRouteWaitsForTheEngineSocket(t *testing.T) {
 				t.Fatalf("response %d %q", out.Code, out.Body.String())
 			}
 		})
+	}
+}
+
+// An engine that exits with a model call held in its drain closes the connection before any response headers. That call reached
+// no provider, so it goes again, whole. A git request streams, so it does not, and neither does a call that failed after its
+// headers.
+func TestModelRouteSendsAgainACallDroppedBeforeItsHeaders(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "engine.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var bodies []string
+	drops, headersFirst := 0, false
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(body))
+		drop, headers := drops > 0, headersFirst
+		drops--
+		mu.Unlock()
+		if headers {
+			w.WriteHeader(http.StatusOK)
+			w.(http.Flusher).Flush()
+		}
+		if drop {
+			conn, _, _ := w.(http.Hijacker).Hijack()
+			conn.Close()
+			return
+		}
+		w.Write(body)
+	})}
+	go server.Serve(listener)
+	t.Cleanup(func() { server.Close() })
+	route := ModelRoute(socket)
+	send := func(path string, dropped int, afterHeaders bool) (*httptest.ResponseRecorder, []string) {
+		mu.Lock()
+		bodies, drops, headersFirst = nil, dropped, afterHeaders
+		mu.Unlock()
+		out := httptest.NewRecorder()
+		route.ServeHTTP(out, httptest.NewRequest("POST", "http://localhost"+path, strings.NewReader("payload")))
+		mu.Lock()
+		defer mu.Unlock()
+		return out, bodies
+	}
+	if out, got := send("/v1/messages", 2, false); out.Code != http.StatusOK || out.Body.String() != "payload" || !slices.Equal(got, []string{"payload", "payload", "payload"}) {
+		t.Fatalf("model call: %d %q, the engine saw %q", out.Code, out.Body.String(), got)
+	}
+	if out, got := send("/git/owner/repo.git/git-receive-pack", 1, false); out.Code != http.StatusBadGateway || len(got) != 1 {
+		t.Fatalf("git request: %d, the engine saw %q", out.Code, got)
+	}
+	if out, got := send("/v1/messages", 1, true); out.Code != http.StatusOK || out.Body.String() != "" || len(got) != 1 {
+		t.Fatalf("a call that failed after its headers: %d %q, the engine saw %q", out.Code, out.Body.String(), got)
 	}
 }
 
