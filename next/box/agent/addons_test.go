@@ -71,10 +71,15 @@ func (b *addonBox) settings(t *testing.T) (trust string, packages []string) {
 	}
 	var parsed struct {
 		DefaultProjectTrust string   `json:"defaultProjectTrust"`
+		SteeringMode        string   `json:"steeringMode"`
 		Packages            []string `json:"packages"`
 	}
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatal(err)
+	}
+	// Messages that arrive during one tool call reach the model together.
+	if parsed.SteeringMode != "all" {
+		t.Fatalf("steering mode %q", parsed.SteeringMode)
 	}
 	return parsed.DefaultProjectTrust, parsed.Packages
 }

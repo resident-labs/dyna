@@ -103,6 +103,53 @@ func TestSlowCommandMovesToBackgroundAndReportsItsEnd(t *testing.T) {
 	}
 }
 
+// A message for the session ends the foreground wait at once, as the limit would. The job keeps running and reports its end,
+// and a later message leaves it alone.
+func TestAMessageMovesAForegroundCommandToTheBackground(t *testing.T) {
+	r := newRig("building\n", syscall.SIGKILL)
+	answered := make(chan string)
+	go func() {
+		_, body := call(t, r.server.Handler(), "/run", `{"command":"make"}`)
+		answered <- body
+	}()
+	<-r.timers // the command waits in the foreground
+	r.server.StepAside()
+	if body := <-answered; !strings.Contains(body, `"running":true`) || !strings.Contains(body, `"message_arrived":true`) || !strings.Contains(body, "building") {
+		t.Fatalf("run = %s", body)
+	}
+	r.server.StepAside()
+	if running := r.server.Running(); len(running) != 1 {
+		t.Fatalf("running = %v, want the moved job", running)
+	}
+	r.proc.exit <- 3
+	if report := <-r.reports; report.Job != "job_1" || report.ExitCode != 3 {
+		t.Fatalf("unexpected report %+v", report)
+	}
+}
+
+// A message before a command starts does not cut its wait, and a command that reaches its limit says nothing of a message.
+func TestALaterCommandWaitsItsFullLimit(t *testing.T) {
+	r := newRig("", syscall.SIGKILL)
+	r.server.StepAside()
+	answered := make(chan string)
+	go func() {
+		_, body := call(t, r.server.Handler(), "/run", `{"command":"make"}`)
+		answered <- body
+	}()
+	timer := <-r.timers
+	select {
+	case body := <-answered:
+		t.Fatalf("answered before its limit: %s", body)
+	case <-time.After(50 * time.Millisecond):
+	}
+	timer.fire <- time.Time{}
+	if body := <-answered; !strings.Contains(body, `"running":true`) || strings.Contains(body, "message_arrived") {
+		t.Fatalf("run = %s", body)
+	}
+	r.proc.exit <- 0
+	<-r.reports
+}
+
 func TestFastCommandReturnsItsExitWithoutReport(t *testing.T) {
 	r := newRig("ok\n", syscall.SIGKILL)
 	r.proc.exit <- 0
