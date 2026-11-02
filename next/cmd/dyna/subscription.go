@@ -29,22 +29,23 @@ func runFiles(specs []string) ([]contract.RunFile, error) {
 	return files, nil
 }
 
+// subscriptionScope reads the scope flags. --session with --room finds the session by its name in that room.
 func subscriptionScope(machine bool, room, session string) (contract.SubscriptionScope, error) {
 	switch {
 	case machine && room == "" && session == "":
 		return contract.ScopeMachine, nil
-	case !machine && session != "" && room == "":
+	case !machine && session != "":
 		return contract.ScopeSession, nil
-	case !machine && room != "" && session == "":
+	case !machine && room != "":
 		return contract.ScopeRoom, nil
 	}
-	return "", fmt.Errorf("give exactly one of --machine, --room and --session")
+	return "", fmt.Errorf("give one of --machine, --room and --session; --session with --room finds the session in that room")
 }
 
 func describeSubscription(info contract.SubscriptionInfo) string {
 	sub := info.Subscription
-	when := "every " + (time.Duration(sub.Every) * time.Millisecond).String()
-	if sub.Every == 0 {
+	when := "every " + string(sub.Every)
+	if sub.Every == "" {
 		names := make([]string, 0, len(sub.On))
 		for _, kind := range sub.On {
 			names = append(names, string(kind))
@@ -60,8 +61,8 @@ func describeSubscription(info contract.SubscriptionInfo) string {
 		if sub.Run.Host != "" {
 			action = "run " + sub.Run.Image + " on " + string(sub.Run.Host) + ": " + strings.Join(sub.Run.Command, " ")
 		}
-	} else if sub.Wake != nil {
-		action = "wake " + string(sub.Wake.Session)
+	} else if sub.Wake != "" {
+		action = "wake " + string(sub.Wake)
 	}
 	state := []string{}
 	if info.Disabled {
@@ -98,11 +99,13 @@ func printEventTypes(out io.Writer) error {
 func subscriptionCommand(get func() *socketClient) *cobra.Command {
 	root := &cobra.Command{Use: "subscription", Short: "Typed subscriptions: wake a session or run a small box on events or on a schedule"}
 	var machine bool
-	var room, session, image, size, host, wake string
+	var room, session, image, size, host, wake, every string
 	var on, where, files []string
-	var every time.Duration
-	add := &cobra.Command{Use: "add (--machine | --room ROOM | --session SESSION) (--on TYPE [--where FILTER] | --every DURATION) (--wake SESSION | [--image NAME] [--size SIZE] [--host HOST] [--file BOXPATH=LOCALPATH] -- COMMAND [ARG...])", Short: "Add a subscription",
+	add := &cobra.Command{Use: "add (--machine | --room ROOM | [--room ROOM] --session SESSION) (--on TYPE [--where FILTER] | --every DURATION) (--wake SESSION | [--image NAME] [--size SIZE] [--host HOST] [--file BOXPATH=LOCALPATH] -- COMMAND [ARG...])", Short: "Add a subscription",
 		Long: `Add a subscription: an event or a schedule, any filters, and one action, which wakes a session or runs a small box.
+
+--every takes a duration such as 1h, 15m or 90s, of at least 1m. --session and --wake take a session's name in --room, or its
+ses_… ID.
 
 --where keeps only the github.* and git.* events it matches, and the engine checks it before anything starts. Each --where is one of
 key=value, key!=value or text~value, and all of them must hold. Keys are repo, author, actor, label and number. text~ is a plain
@@ -112,7 +115,8 @@ A Run fired by an event gets that event as JSON on stdin, with DYNA_EVENT set to
 empty stdin and no DYNA_EVENT. Any text with "outside": true beside it came from outside and is untrusted.
 
 dyna subscription events lists the event types.`,
-		Example: `  dyna subscription add --room ROOM --on github.pr.opened --where author=levzzz5154 --wake SESSION
+		Example: `  dyna subscription add --room ROOM --session upstream-sync --every 1h --wake upstream-sync
+  dyna subscription add --room ROOM --on github.pr.opened --where author=levzzz5154 --wake SESSION
   dyna subscription add --room ROOM --on github.mention --where actor!=arismoko --wake SESSION
   dyna subscription add --room ROOM --on github.comment --where 'text~#4953' --where repo=horizon-rust/horizon --wake SESSION
   dyna subscription add --room ROOM --on git.main_updated --where repo=horizon-rust/horizon --image horizon --file upstream-watch.sh=upstream-watch.sh -- bash upstream-watch.sh`,
@@ -121,12 +125,9 @@ dyna subscription events lists the event types.`,
 			if err != nil {
 				return err
 			}
-			req := contract.SubscriptionAddRequest{Scope: scope, Room: contract.RoomID(room), Session: contract.SessionID(session), Where: where, Every: contract.DurationMS(every.Milliseconds())}
+			req := contract.SubscriptionAddRequest{Scope: scope, Room: contract.RoomID(room), Session: session, Where: where, Every: contract.Duration(every), Wake: wake}
 			for _, kind := range on {
 				req.On = append(req.On, contract.EventType(kind))
-			}
-			if wake != "" {
-				req.Wake = &contract.Principal{Kind: contract.PrincipalSession, Session: contract.SessionID(wake)}
 			}
 			if len(args) > 0 {
 				run := contract.RunSpec{Command: args, Image: image, Size: contract.BoxSizeName(size), Host: contract.HostName(host)}
@@ -142,12 +143,12 @@ dyna subscription events lists the event types.`,
 			return err
 		}}
 	add.Flags().BoolVar(&machine, "machine", false, "Machine scope")
-	add.Flags().StringVar(&room, "room", "", "Room scope")
-	add.Flags().StringVar(&session, "session", "", "Session scope")
+	add.Flags().StringVar(&room, "room", "", "Room scope, or with --session the session's room")
+	add.Flags().StringVar(&session, "session", "", "Session scope: a session name in --room, or a ses_… ID")
 	add.Flags().StringArrayVar(&on, "on", nil, "Event type (repeatable); dyna subscription events lists them")
 	add.Flags().StringArrayVar(&where, "where", nil, "Filter as key=value, key!=value or text~value (repeatable; all must hold)")
-	add.Flags().DurationVar(&every, "every", 0, "Schedule, at least one minute")
-	add.Flags().StringVar(&wake, "wake", "", "Session ID to wake")
+	add.Flags().StringVar(&every, "every", "", "Schedule as a duration such as 1h, 15m or 90s, of at least 1m")
+	add.Flags().StringVar(&wake, "wake", "", "Session to wake: a name in --room, or a ses_… ID")
 	add.Flags().StringVar(&image, "image", "base", "Run image: base, or an image folder of the room's default repository")
 	add.Flags().StringVar(&size, "size", string(contract.BoxSizeSmall), "Run box size: small or agent")
 	add.Flags().StringVar(&host, "host", "", "Run on this host only, for a script that needs file locks; any host by default")

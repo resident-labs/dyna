@@ -19,12 +19,13 @@ func TestSubscriptionScopeTakesExactlyOne(t *testing.T) {
 		{machine: true, want: contract.ScopeMachine},
 		{room: "r", want: contract.ScopeRoom},
 		{session: "s", want: contract.ScopeSession},
+		{room: "r", session: "s", want: contract.ScopeSession},
 	} {
 		if got, err := subscriptionScope(c.machine, c.room, c.session); err != nil || got != c.want {
 			t.Errorf("%+v: %q %v", c, got, err)
 		}
 	}
-	for _, c := range [][3]string{{"", "", ""}, {"", "r", "s"}, {"m", "r", ""}} {
+	for _, c := range [][3]string{{"", "", ""}, {"m", "r", ""}, {"m", "", "s"}} {
 		if _, err := subscriptionScope(c[0] != "", c[1], c[2]); err == nil {
 			t.Errorf("%v: accepted", c)
 		}
@@ -48,10 +49,10 @@ func TestRunFilesReadLocalPaths(t *testing.T) {
 func TestSubscriptionListLine(t *testing.T) {
 	next := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
 	line := describeSubscription(contract.SubscriptionInfo{
-		Subscription: contract.Subscription{ID: "sub_a", Scope: contract.ScopeRoom, Every: 1800000, Run: &contract.RunSpec{Command: []string{"bash", "watch.sh"}, Image: "horizon"}},
+		Subscription: contract.Subscription{ID: "sub_a", Scope: contract.ScopeRoom, Every: "30m", Run: &contract.RunSpec{Command: []string{"bash", "watch.sh"}, Image: "horizon"}},
 		Failures:     2, Last: contract.HookFailed, NextAt: &next,
 	})
-	for _, want := range []string{"sub_a", "every 30m0s", "run horizon: bash watch.sh", "last failed", "2 failures", "next "} {
+	for _, want := range []string{"sub_a", "every 30m", "run horizon: bash watch.sh", "last failed", "2 failures", "next "} {
 		if !strings.Contains(line, want) {
 			t.Errorf("%q lacks %q", line, want)
 		}

@@ -149,7 +149,7 @@ func (s *Service) fireDue(ctx context.Context) error {
 	}
 	var failures []error
 	for _, sub := range due {
-		if sub.Wake != nil {
+		if sub.Wake != "" {
 			event, err := s.event(sub.Room, engineSender, contract.HookDue{Subscription: sub.ID})
 			if err == nil {
 				err = s.store.FireScheduledWake(ctx, sub, event)
@@ -377,7 +377,7 @@ func (s *Service) finishRun(ctx context.Context, run store.HookRun, sub store.Su
 	default:
 		body.Result = contract.HookFailed
 		outcome.Failures = sub.Failures + 1
-		outcome.HoldUntil = now.Add(backoff(time.Duration(sub.Every)*time.Millisecond, outcome.Failures))
+		outcome.HoldUntil = now.Add(backoff(sub.Period, outcome.Failures))
 		body.Failures = outcome.Failures
 		body.RetryAt = &outcome.HoldUntil
 	}
