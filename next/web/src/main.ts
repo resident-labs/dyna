@@ -10,6 +10,7 @@ import App from "./App.svelte";
 import ConnectScreen from "./lib/ui/ConnectScreen.svelte";
 import "./app.css";
 import "./lib/theme.svelte.ts";
+import { zoomed } from "./lib/viewport.ts";
 // As v1's viewport.ts: a phone's keyboard and browser bars shrink the visible area, and 100dvh follows neither on
 // every browser. --app-height carries the visible height, so the composer stays above the keyboard.
 const viewport = window.visualViewport;
@@ -18,7 +19,7 @@ const viewport = window.visualViewport;
 // visible height; the shell keeps its size while zoomed, so the reader pans over it, and fits again at scale 1.
 const fit = () => {
   const height = viewport?.height ?? window.innerHeight, style = document.documentElement.style;
-  if (height <= 0 || Math.abs((viewport?.scale ?? 1) - 1) > 0.01) return;
+  if (height <= 0 || zoomed(viewport?.scale)) return;
   style.setProperty("--app-height", `${Math.round(height)}px`);
   style.setProperty("--keyboard", `${Math.max(0, Math.round(window.innerHeight - height))}px`);
 };
