@@ -8,13 +8,13 @@
   import { endCause, failed, jobGroups, jobTime, jobTitle } from "../jobs.ts";
   import { ShellWatches, type ShellJob } from "../shell.ts";
   // The room header's Jobs tool (dock design C). Its slot never moves; only its counts change: the running jobs as a
-  // muted count, then the failures the owner has not opened, in the failed tone; only a failure gets a mark. A click opens a popover under
+  // muted count. A failed job shows in the list, not on the button, since the owner has nothing to do about it. A click opens a popover under
   // it, or a sheet on a phone, with the jobs grouped by session; a job opens as a dock tab (onopen), or on a phone as
   // a full-height sheet. The lists watch each session's jobs only while they are open and the page is visible.
   type JobSession = { id: string; name: string; root: boolean; running: number };
-  let { sessions, allSessions, failures, allFailures, phone, onopen, onseen }: {
-    sessions: JobSession[]; allSessions: JobSession[]; failures: string[]; allFailures: string[]; phone: boolean;
-    onopen: (session: JobSession, job: ShellJob) => void; onseen: (key: string) => void;
+  let { sessions, allSessions, phone, onopen }: {
+    sessions: JobSession[]; allSessions: JobSession[]; phone: boolean;
+    onopen: (session: JobSession, job: ShellJob) => void;
   } = $props();
 
   let open = $state(false);
@@ -31,7 +31,7 @@
   $effect(() => () => watches.sync(new Set()));
 
   let running = $derived(sessions.reduce((sum, session) => sum + session.running, 0));
-  let summary = $derived([running && `${running} running`, failures.length && `${failures.length} failed`].filter(Boolean).join(", ") || "No jobs running");
+  let summary = $derived(running ? `${running} running` : "No jobs running");
   let names = $derived(new Map(listSessions.map(session => [session.id, session])));
   let groups = $derived(jobGroups([...watches.jobs].filter(([id]) => !only || id === only).map(([id, jobs]) => ({ id, jobs: jobs.values() }))));
   let listed = $derived(groups.flatMap(group => group.jobs.concat(group.older)));
@@ -56,8 +56,6 @@
     (opener?.isConnected ? opener : button)?.focus();
   }
   function pick(session: JobSession, job: ShellJob) {
-    const key = `${session.id}/${job.job}`;
-    if (allFailures.includes(key)) onseen(key);
     if (phone) { shown = { session, job: job.job }; return; }
     open = false;
     onopen(session, job);
@@ -86,11 +84,9 @@
 <svelte:document onvisibilitychange={() => { visible = document.visibilityState === "visible"; }}
   onpointerdown={event => { if (open && !phone && event.target instanceof Node && !root?.contains(event.target)) open = false; }} />
 <span class="jobs" bind:this={root}>
-  <button type="button" class="open" class:live={running || failures.length} class:phone bind:this={button} aria-haspopup="dialog" aria-expanded={open}
+  <button type="button" class="open" class:live={running > 0} class:phone bind:this={button} aria-haspopup="dialog" aria-expanded={open}
     aria-label={`Jobs, ${summary}`} title={summary} onclick={() => { if (open) void close(); else void show(); }}>
-    <Icon name="briefcase" />{#if phone}{#if failures.length}<span class="corner"><StatusPill tone="failed" dot label="Failed" /></span>{/if}
-    {:else}{#if running}<span class="n">{running}</span>{/if}
-      {#if failures.length}<StatusPill tone="failed" label={`${failures.length} failed`} />{/if}{/if}</button>
+    <Icon name="briefcase" />{#if !phone && running}<span class="n">{running}</span>{/if}</button>
   {#if open}
     {#if phone}<button type="button" class="scrim" tabindex="-1" aria-label="Close the jobs" onclick={() => void close()}></button>{/if}
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions (the arrow keys and Escape act on the whole list) -->
@@ -124,8 +120,7 @@
   .open.live { color: var(--text); }
   .open:hover, .open[aria-expanded="true"] { background: var(--selected); color: var(--text); }
   .open:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
-  .open.phone { position: relative; justify-content: center; width: 44px; height: 44px; padding: 0; }
-  .corner { position: absolute; top: 4px; right: 2px; }
+  .open.phone { justify-content: center; width: 44px; height: 44px; padding: 0; }
   .n { font-variant-numeric: tabular-nums; }
   .sheet.full { top: 0; border: 0; border-radius: 0; padding-top: env(safe-area-inset-top); }
   .scrim { all: unset; position: fixed; inset: 0; z-index: 5; background: var(--scrim); }
