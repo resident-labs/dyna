@@ -33,23 +33,30 @@ type WorkflowRun struct {
 	Result      string
 	Resume      contract.WorkflowRunID
 	Version     int
+	StatusLines []contract.WorkflowStatusLine // the script's latest status() lines, oldest first
 	Started     time.Time
 	Ended       time.Time
 }
 
-const workflowColumns = "id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,result,version,started_at,ended_at"
+// workflowStatusLines is how many status() lines a run keeps.
+const workflowStatusLines = 20
+
+const workflowColumns = "id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,result,version,status_lines,started_at,ended_at"
 
 func scanWorkflow(row interface{ Scan(...any) error }) (WorkflowRun, error) {
 	var run WorkflowRun
-	var profiles string
+	var profiles, lines string
 	var started, ended int64
-	err := row.Scan(&run.ID, &run.Room, &run.Session, &run.Name, &run.Description, &run.Script, &run.Args, &profiles, &run.Repo, &run.Commit, &run.Image, &run.State, &run.Result, &run.Version, &started, &ended)
+	err := row.Scan(&run.ID, &run.Room, &run.Session, &run.Name, &run.Description, &run.Script, &run.Args, &profiles, &run.Repo, &run.Commit, &run.Image, &run.State, &run.Result, &run.Version, &lines, &started, &ended)
 	if err != nil {
 		return run, err
 	}
 	run.Started = time.UnixMilli(started).UTC()
 	if ended != 0 {
 		run.Ended = time.UnixMilli(ended).UTC()
+	}
+	if err := json.Unmarshal([]byte(lines), &run.StatusLines); err != nil {
+		return run, err
 	}
 	return run, json.Unmarshal([]byte(profiles), &run.Profiles)
 }
@@ -76,8 +83,8 @@ func insertWorkflow(ctx context.Context, tx *sql.Tx, session contract.SessionID,
 	if err != nil || run.Resume == "" {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(run,key,parent,kind,name,phase,profile,detail,state,result,transcript,started_at,ended_at)
-		SELECT ?,key,parent,kind,name,phase,profile,detail,state,result,transcript,started_at,ended_at FROM workflow_steps WHERE run=? AND state=? AND kind!=?`,
+	_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(run,key,parent,kind,name,phase,lane,profile,detail,state,result,transcript,started_at,ended_at)
+		SELECT ?,key,parent,kind,name,phase,lane,profile,detail,state,result,transcript,started_at,ended_at FROM workflow_steps WHERE run=? AND state=? AND kind!=?`,
 		run.ID, run.Resume, contract.WorkflowStepDone, contract.WorkflowStepWorkflow)
 	return err
 }
@@ -174,7 +181,7 @@ func (s *Store) PinWorkflowImage(ctx context.Context, session contract.SessionID
 
 // StartWorkflowStep returns a step's stored outcome, or records it as running when it has none, under the script version that
 // asked. A step that was running when its box went has no outcome, so it runs again. A workflow step always does, and its inner
-// steps find their results.
+// steps find their results. A lane is not part of a key, so a stored step that had none takes the one its script now gives it.
 func (s *Store) StartWorkflowStep(ctx context.Context, run contract.WorkflowRunID, req contract.WorkflowStepStartRequest, at time.Time) (contract.WorkflowStepStartResponse, error) {
 	var stored contract.WorkflowStepStartResponse
 	err := s.Write(ctx, func(tx *sql.Tx) error {
@@ -184,14 +191,49 @@ func (s *Store) StartWorkflowStep(ctx context.Context, run contract.WorkflowRunI
 			return err
 		}
 		if (stored.State == contract.WorkflowStepDone || stored.State == contract.WorkflowStepFailed) && req.Kind != contract.WorkflowStepWorkflow {
-			return nil
+			if req.Lane == "" {
+				return nil
+			}
+			_, err := tx.ExecContext(ctx, "UPDATE workflow_steps SET lane=? WHERE run=? AND key=? AND lane=''", req.Lane, run, req.Key)
+			return err
 		}
 		stored = contract.WorkflowStepStartResponse{}
-		_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(run,key,parent,kind,name,phase,profile,detail,state,started_at,version) VALUES(?,?,?,?,?,?,?,?,?,?,?)
-			ON CONFLICT(run,key) DO UPDATE SET state=excluded.state,reason='',transcript='',started_at=excluded.started_at,ended_at=0,version=excluded.version`, run, req.Key, req.Parent, req.Kind, req.Name, req.Phase, req.Profile, req.Detail, contract.WorkflowStepRunning, at.UnixMilli(), req.Version)
+		_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(run,key,parent,kind,name,phase,lane,profile,detail,state,started_at,version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+			ON CONFLICT(run,key) DO UPDATE SET state=excluded.state,lane=excluded.lane,reason='',transcript='',started_at=excluded.started_at,ended_at=0,version=excluded.version`, run, req.Key, req.Parent, req.Kind, req.Name, req.Phase, req.Lane, req.Profile, req.Detail, contract.WorkflowStepRunning, at.UnixMilli(), req.Version)
 		return err
 	})
 	return stored, err
+}
+
+// SetWorkflowStatus adds a status() line to a run, which keeps the latest workflowStatusLines of them.
+func (s *Store) SetWorkflowStatus(ctx context.Context, run contract.WorkflowRunID, text string, at time.Time) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		var data string
+		if err := tx.QueryRowContext(ctx, "SELECT status_lines FROM workflow_runs WHERE id=?", run).Scan(&data); err != nil {
+			return err
+		}
+		var lines []contract.WorkflowStatusLine
+		if err := json.Unmarshal([]byte(data), &lines); err != nil {
+			return err
+		}
+		lines = append(lines, contract.WorkflowStatusLine{Text: text, At: at.UTC()})
+		if extra := len(lines) - workflowStatusLines; extra > 0 {
+			lines = lines[extra:]
+		}
+		kept, err := json.Marshal(lines)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE workflow_runs SET status_lines=? WHERE id=?", string(kept), run)
+		return err
+	})
+}
+
+// WorkflowCounts counts a run's steps, its running steps and its failed steps.
+func (s *Store) WorkflowCounts(ctx context.Context, run contract.WorkflowRunID) (steps, running, failed int, err error) {
+	err = s.Read().QueryRowContext(ctx, "SELECT COUNT(*),COUNT(CASE WHEN state=? THEN 1 END),COUNT(CASE WHEN state=? THEN 1 END) FROM workflow_steps WHERE run=?",
+		contract.WorkflowStepRunning, contract.WorkflowStepFailed, run).Scan(&steps, &running, &failed)
+	return steps, running, failed, err
 }
 
 // EndWorkflowStep stores a step's outcome. A retried report writes the same row.
@@ -222,12 +264,12 @@ func (s *Store) SetWorkflowStepTranscript(ctx context.Context, run contract.Work
 // workflowStepMore says a step holds more than its row: what it ran beyond the words its name quotes, or what a command wrote.
 const workflowStepMore = `ifnull(trim(detail,char(32,9,10,13)) NOT IN ('',substr(name,length(kind)+3)) OR CASE WHEN kind='run' AND json_valid(result) THEN ifnull(json_extract(result,'$.stdout'),'')!='' OR ifnull(json_extract(result,'$.stderr'),'')!='' OR ifnull(json_extract(result,'$.code'),0)!=0 OR json_type(result,'$.conflicts')='array' ELSE 0 END,0)`
 
-const workflowStepColumns = "key,parent,kind,name,phase,profile,version,state,reason,transcript," + workflowStepMore + ",input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_at,ended_at"
+const workflowStepColumns = "key,parent,kind,name,phase,lane,profile,version,state,reason,transcript," + workflowStepMore + ",input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_at,ended_at"
 
 func scanWorkflowStep(row interface{ Scan(...any) error }, extra ...any) (contract.WorkflowStep, error) {
 	var step contract.WorkflowStep
 	var started, ended int64
-	if err := row.Scan(append([]any{&step.Key, &step.Parent, &step.Kind, &step.Name, &step.Phase, &step.Profile, &step.Version, &step.State, &step.Reason, &step.Transcript, &step.More, &step.Usage.InputTokens, &step.Usage.OutputTokens, &step.Usage.CacheReadTokens, &step.Usage.CacheWriteTokens, &started, &ended}, extra...)...); err != nil {
+	if err := row.Scan(append([]any{&step.Key, &step.Parent, &step.Kind, &step.Name, &step.Phase, &step.Lane, &step.Profile, &step.Version, &step.State, &step.Reason, &step.Transcript, &step.More, &step.Usage.InputTokens, &step.Usage.OutputTokens, &step.Usage.CacheReadTokens, &step.Usage.CacheWriteTokens, &started, &ended}, extra...)...); err != nil {
 		return step, err
 	}
 	step.Started = time.UnixMilli(started).UTC()

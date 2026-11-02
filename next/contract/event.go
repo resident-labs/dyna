@@ -127,7 +127,7 @@ type VisualCheck struct {
 	Detail string            `json:"detail,omitempty"`
 }
 
-// SessionStarted is a session starting, with its goal and brief.
+// SessionStarted is a session starting, with its goal and brief. Workflow marks a crew, whose page is its run.
 type SessionStarted struct {
 	Session  SessionID   `json:"session"`
 	Name     string      `json:"name"`
@@ -136,6 +136,7 @@ type SessionStarted struct {
 	Goal     string      `json:"goal,omitempty"`
 	DoneWhen string      `json:"doneWhen,omitempty"`
 	Brief    string      `json:"brief,omitempty"`
+	Workflow bool        `json:"workflow,omitempty"`
 }
 
 // SessionRestarted is a session's box being replaced or updated.

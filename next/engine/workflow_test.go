@@ -710,6 +710,77 @@ func TestAStepChangeIsLiveAndQuiet(t *testing.T) {
 	}
 }
 
+// A status() line stays on its run with a short history and reaches open pages live, a step change carries the run's counts,
+// and a step keeps the lane its script gave it, a kept step included.
+func TestAStatusLineAndALaneStayOnTheRun(t *testing.T) {
+	w := setupWorkflow(t)
+	started, crew := w.start(w.owner, workflowScript)
+	start := w.turn(crew)
+	subscription, live := w.live.Subscribe(w.room, 64)
+	defer w.live.Unsubscribe(subscription)
+	for i := range 22 {
+		if _, problem := w.WorkflowSetStatus(w.ctx, crew, contract.WorkflowSetStatusRequest{Text: fmt.Sprintf("wave %d:\n  token=hunter2", i)}); problem != nil {
+			t.Fatal(problem)
+		}
+	}
+	if _, problem := w.WorkflowSetStatus(w.ctx, contract.Principal{Kind: contract.PrincipalSession, Session: w.root}, contract.WorkflowSetStatusRequest{Text: "x"}); problem == nil || problem.Code != contract.ErrForbidden {
+		t.Fatalf("a session that is not a crew: %+v", problem)
+	}
+	if _, problem := w.WorkflowStepStart(w.ctx, crew, contract.WorkflowStepStartRequest{Key: "a", Kind: contract.WorkflowStepAgent, Name: "write", Phase: "write", Lane: "g1", Detail: "work"}); problem != nil {
+		t.Fatal(problem)
+	}
+	w.step(crew, "b", contract.WorkflowStepFailed, "refused")
+	lines, steps := 0, []contract.WorkflowStepChanged{}
+	for len(live) > 0 {
+		switch body := (<-live).Body.(type) {
+		case contract.WorkflowStatusChanged:
+			if body.Session != started.Session || !strings.HasPrefix(body.Status, "wave ") || strings.Contains(body.Status, "hunter2") || strings.Contains(body.Status, "\n") {
+				t.Fatalf("live line %+v", body)
+			}
+			lines++
+		case contract.WorkflowStepChanged:
+			steps = append(steps, body)
+		}
+	}
+	if lines != 22 || len(steps) != 3 || steps[0].Step.Lane != "g1" || steps[2].Steps != 2 || steps[2].Running != 1 || steps[2].Failed != 1 {
+		t.Fatalf("%d live lines, steps %+v", lines, steps)
+	}
+	status, problem := w.WorkflowStatus(w.ctx, w.owner, contract.WorkflowStatusRequest{Run: started.Run})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if n := len(status.StatusLines); n != 20 || !strings.HasPrefix(status.StatusLines[0].Text, "wave 2:") || status.Run.Status != status.StatusLines[n-1].Text ||
+		!strings.HasPrefix(status.Run.Status, "wave 21:") || strings.Contains(status.Run.Status, "hunter2") || status.Run.StatusAt.IsZero() || status.Run.Running != 1 {
+		t.Fatalf("status %+v, lines %+v", status.Run, status.StatusLines)
+	}
+	if status.Steps[0].Lane != "g1" || status.Steps[0].Phase != "write" || status.Steps[1].Lane != "" {
+		t.Fatalf("steps %+v", status.Steps)
+	}
+	if runs, problem := w.WorkflowList(w.ctx, w.owner, contract.WorkflowListRequest{Room: w.room}); problem != nil || runs.Runs[0].Status != status.Run.Status || runs.Runs[0].Running != 1 {
+		t.Fatalf("list %+v, %+v", runs, problem)
+	}
+	w.step(crew, "c", contract.WorkflowStepDone, "")
+	if _, problem := w.TurnOutput(w.ctx, crew, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnCompleted, Model: "m"}); problem != nil {
+		t.Fatal(problem)
+	}
+	if _, problem := w.WorkflowSetStatus(w.ctx, crew, contract.WorkflowSetStatusRequest{Text: "late"}); problem == nil {
+		t.Fatal("an ended run took a line")
+	}
+	// A lane is not part of a key: a resumed script that now tags a kept step finds it, and the step takes the lane.
+	next, problem := w.WorkflowRun(w.ctx, w.owner, contract.WorkflowRunRequest{Room: w.room, Script: workflowScript, Resume: started.Run})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	second := contract.Principal{Kind: contract.PrincipalSession, Session: next.Session}
+	if stored, problem := w.WorkflowStepStart(w.ctx, second, contract.WorkflowStepStartRequest{Key: "c", Kind: contract.WorkflowStepAgent, Lane: "g2"}); problem != nil || stored.State != contract.WorkflowStepDone {
+		t.Fatalf("kept step %+v, %+v", stored, problem)
+	}
+	resumed, problem := w.WorkflowStatus(w.ctx, w.owner, contract.WorkflowStatusRequest{Run: next.Run})
+	if problem != nil || len(resumed.Steps) != 1 || resumed.Steps[0].Lane != "g2" || resumed.Run.Status != "" || len(resumed.StatusLines) != 0 {
+		t.Fatalf("resumed %+v, %+v", resumed, problem)
+	}
+}
+
 // A closed crew's page reads everything from the journal, by its session, because that is all a page has.
 func TestAnEndedRunReadsFromItsJournal(t *testing.T) {
 	w := setupWorkflow(t)
