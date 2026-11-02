@@ -1,5 +1,4 @@
 import type { SubscriptionInfo } from "./contract.gen.ts";
-import { count } from "./feed.ts";
 
 const units: Record<string, number> = { h: 3_600_000, m: 60_000, s: 1_000, ms: 1 };
 
@@ -14,11 +13,12 @@ const period = (every: string): string => {
   return Number.isInteger(hours) ? `Every ${hours} h` : `Every ${minutes} min`;
 };
 
-// What fires a subscription, as one short phrase. A long list of events reads as its count; the row's title holds them.
-export const subscriptionWhen = ({ subscription }: SubscriptionInfo): string => {
+// What fires a subscription, as one short phrase. A long list of events reads as its count, unless `whole` asks for every
+// event, as the hooks list does.
+export const subscriptionWhen = ({ subscription }: SubscriptionInfo, whole = false): string => {
   const on = subscription.on ?? [];
   const where = subscription.where?.length ? ` where ${subscription.where.join(", ")}` : "";
-  return subscription.every ? period(subscription.every) : on.length > 2 ? `On ${on.length} events${where}` : `On ${on.join(", ")}${where}`;
+  return subscription.every ? period(subscription.every) : on.length > 2 && !whole ? `On ${on.length} events${where}` : `On ${on.join(", ")}${where}`;
 };
 
 // What a subscription does. A Run reads as its command, and a wake as the session it wakes.
@@ -65,26 +65,30 @@ export function hookName(command: readonly string[] | null | undefined): { name:
 
 const failing = (info: SubscriptionInfo) => !info.disabled && (!!info.failures || info.last === "failed");
 
-// The closed line of a room's subscriptions: "6 hooks", then how they stand. Hooks are the ones that run something, so
-// only those can pass or fail. A wake has no result and joins the count only when no hook does. Disabled ones count for
-// nothing here. A failure is never folded away, and a hook that has not run yet stops the line from claiming "all passing".
-export function subscriptionSummary(list: readonly SubscriptionInfo[]): { count: string; health: string; failing: boolean } {
-  const live = list.filter(info => !info.disabled), hooks = live.filter(info => info.subscription.run);
-  if (!hooks.length) return { count: live.length ? count(live.length, "wake") : list.length ? `${list.length} off` : "", health: "", failing: false };
+// What the list shows: every hook, and every wake that is on. A disabled wake does nothing and has nothing to tell.
+const listed = (info: SubscriptionInfo) => !!info.subscription.run || !info.disabled;
+
+// The room's subscriptions as one line, "Hooks 11", then how they stand. The count is the rows the list shows, so it
+// never disagrees with them. Hooks are the ones that run something, so only those can pass or fail, and a disabled one
+// counts for nothing there. A failure is never folded away, and a hook that has not run yet stops the line from claiming
+// "all passing".
+export function subscriptionSummary(list: readonly SubscriptionInfo[]): { count: number; health: string; failing: boolean } {
+  const shown = list.filter(listed), hooks = shown.filter(info => info.subscription.run && !info.disabled);
   const failed = hooks.filter(failing).length;
-  const health = failed ? `${failed} failing` : hooks.every(info => info.last === "passed") ? "all passing" : "";
-  return { count: count(hooks.length, "hook"), health, failing: failed > 0 };
+  const health = failed ? `${failed} failing` : hooks.length && hooks.every(info => info.last === "passed") ? "all passing" : "";
+  return { count: shown.length, health, failing: failed > 0 };
 }
 
 // The opened list: failures first, then hooks, then wakes, and disabled hooks last. A disabled wake does nothing and has
 // nothing to tell, so it stays out. A row is a name, what fires it and what is wrong, with nothing for a healthy hook. Two
 // hooks from one script show the first argument that tells them apart.
 export function subscriptionRows(list: readonly SubscriptionInfo[], name: (session: string) => string) {
-  const rows = list.filter(info => info.subscription.run || !info.disabled).map(info => {
+  const rows = list.filter(listed).map(info => {
     const run = info.subscription.run;
     const hook = run ? hookName(run.command) : { name: subscriptionAction(info, name), args: [] };
     const state = subscriptionState(info);
-    return { id: info.subscription.id, name: hook.name, args: hook.args, when: subscriptionWhen(info), state: state === "Passing" ? "" : state, failing: failing(info), disabled: !!info.disabled, wake: !run,
+    return { id: info.subscription.id, name: hook.name, args: hook.args, when: subscriptionWhen(info), fires: subscriptionWhen(info, true), command: run?.command?.join(" ") ?? "",
+      state: state === "Passing" ? "" : state, failing: failing(info), disabled: !!info.disabled, wake: !run,
       title: [run ? subscriptionAction(info, name) : "", info.subscription.on?.join(", ") ?? ""].filter(Boolean).join("\n") };
   });
   const rank = (row: typeof rows[number]) => row.failing ? 0 : row.disabled ? 3 : row.wake ? 2 : 1;
