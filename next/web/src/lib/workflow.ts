@@ -117,7 +117,7 @@ export const runWords: Record<WorkflowState, { word: string; tone?: Tone }> = {
 // A crew's line in the session list.
 export const runLine = (run: Pick<WorkflowInfo, "state">, starting = false): string => `Workflow · ${starting ? "Starting" : runWords[run.state].word}`;
 
-// What a run that ended came to, after its state: its feed row and its row in the past runs. A run from before steps were
+// What a run that ended came to, after its state: its feed row and its row in the header's Past runs. A run from before steps were
 // counted has no figure.
 export const runCounts = ({ steps, failed }: { steps?: number; failed: number }): string[] => [...steps ? [count(steps, "step")] : [], ...failed ? [`${failed} failed`] : []];
 

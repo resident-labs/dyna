@@ -1,13 +1,9 @@
-import type { BoxState, Responsibility, ResponsibilityKind, SessionStarted, WorkflowInfo } from "./contract.gen.ts";
+import type { BoxState, Responsibility, ResponsibilityKind, SessionStarted } from "./contract.gen.ts";
 import { count } from "./feed.ts";
 import { urgency, type Status } from "./status.ts";
 
-type SessionRow = { kind: "session"; session: SessionStarted; depth: number; parent: boolean; hidden: number; state: Status; dot: Status; mark?: string }
+export type TreeRow = { kind: "session"; session: SessionStarted; depth: number; parent: boolean; hidden: number; state: Status; dot: Status; mark?: string }
   | { kind: "idle"; key: string; depth: number; count: number; open: boolean };
-export type TreeRow = SessionRow | { kind: "runs"; count: number; open: boolean } | { kind: "run"; run: WorkflowInfo };
-
-// A room's past runs fold at the end of its session list, where each ran until its crew closed.
-export const runRows = (runs: WorkflowInfo[], open: boolean): TreeRow[] => runs.length ? [{ kind: "runs", count: runs.length, open }, ...open ? runs.map(run => ({ kind: "run" as const, run })) : []] : [];
 
 // The sessions under id, nearest first. A close takes them along, and a move cannot go under them.
 export function descendants(sessions: SessionStarted[], id: string): string[] {
@@ -84,7 +80,7 @@ const folds: Record<Status, string> = { waiting: "A folded session waits for you
 
 // Index the tree once, then aggregate each subtree before emitting visible rows.
 export function sessionTree(sessions: SessionStarted[], own: Map<string, Status>, starting: (id: string) => boolean,
-  focus: string | undefined, folded: ReadonlySet<string>, openIdle: ReadonlySet<string>): SessionRow[] {
+  focus: string | undefined, folded: ReadonlySet<string>, openIdle: ReadonlySet<string>): TreeRow[] {
   const byId = new Map(sessions.map(item => [item.session, item]));
   const children = new Map<string | undefined, SessionStarted[]>();
   for (const item of sessions) {
@@ -113,7 +109,7 @@ export function sessionTree(sessions: SessionStarted[], own: Map<string, Status>
   const subtree = (id: string): Summary => summary.get(id) ?? { size: 1, top: "idle", quiet: true, inside: "idle" };
   const keep = new Set<string>();
   for (let id = focus; id && byId.has(id) && !keep.has(id); id = byId.get(id)?.parent) keep.add(id);
-  const rows: SessionRow[] = [];
+  const rows: TreeRow[] = [];
   function walk(parent: string | undefined, depth: number): void {
     const kids = (children.get(parent) ?? []).sort((a, b) => {
       const x = subtree(a.session), y = subtree(b.session);
