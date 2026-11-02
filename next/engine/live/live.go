@@ -36,6 +36,7 @@ type Session struct {
 	channel       *Channel
 	stale         bool
 	refresh       string
+	refreshWake   bool
 	computer      *computerState
 	shell         *shellWatch
 	terminals     int
