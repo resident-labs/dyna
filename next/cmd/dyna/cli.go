@@ -42,6 +42,7 @@ type client interface {
 	Upload(context.Context, contract.RoomID, string) (contract.Attachment, error)
 	HostAdd(context.Context, contract.HostAddRequest) (contract.HostAddResponse, error)
 	HostSetLimits(context.Context, contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, error)
+	HostSet(context.Context, contract.HostSetRequest) (contract.HostSetResponse, error)
 	HostRemove(context.Context, contract.HostRemoveRequest) (contract.HostRemoveResponse, error)
 	PoolAdd(context.Context, contract.PoolAddRequest) (contract.PoolAddResponse, error)
 	PoolList(context.Context, contract.PoolListRequest) (contract.PoolListResponse, error)
@@ -108,7 +109,7 @@ type requestType interface {
 		contract.SessionListRequest |
 		contract.SessionResponsibilitiesRequest |
 		contract.GoalSetRequest | contract.GoalListRequest | contract.GoalItemRequest | contract.GoalDoneRequest | contract.GoalJournalRequest |
-		contract.PoolAddRequest | contract.PoolListRequest | contract.PoolRemoveRequest | contract.RoomHostsRequest | contract.HostRemoveRequest |
+		contract.PoolAddRequest | contract.PoolListRequest | contract.PoolRemoveRequest | contract.RoomHostsRequest | contract.HostRemoveRequest | contract.HostSetRequest |
 		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostSetLimitsRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomDeleteRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.ComposeListRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.SessionRefreshRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest | contract.PrListRequest | contract.PrStatusRequest | contract.PrTrackRequest | contract.PrUntrackRequest
 }
 type responseType interface {
@@ -125,7 +126,7 @@ type responseType interface {
 		contract.SessionListResponse |
 		contract.SessionResponsibilitiesResponse |
 		contract.GoalSetResponse | contract.GoalListResponse | contract.GoalItemResponse | contract.GoalDoneResponse | contract.GoalJournalResponse |
-		contract.PoolAddResponse | contract.PoolListResponse | contract.PoolRemoveResponse | contract.RoomHostsResponse | contract.HostRemoveResponse |
+		contract.PoolAddResponse | contract.PoolListResponse | contract.PoolRemoveResponse | contract.RoomHostsResponse | contract.HostRemoveResponse | contract.HostSetResponse |
 		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.HostSetLimitsResponse | contract.HostListResponse | contract.RoomCreateResponse | contract.RoomDeleteResponse | contract.RoomRepoAddResponse | contract.RepoCISetResponse | contract.RoomReposResponse | contract.ComposeListResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.SessionRefreshResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse | contract.PrListResponse | contract.PrStatusResponse | contract.PrTrackResponse | contract.PrUntrackResponse
 }
 
@@ -257,6 +258,9 @@ func (c *socketClient) RoomCreate(ctx context.Context, q contract.RoomCreateRequ
 }
 func (c *socketClient) HostSetLimits(ctx context.Context, q contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, error) {
 	return call[contract.HostSetLimitsRequest, contract.HostSetLimitsResponse](ctx, c, contract.MethodHostSetLimits, q)
+}
+func (c *socketClient) HostSet(ctx context.Context, q contract.HostSetRequest) (contract.HostSetResponse, error) {
+	return call[contract.HostSetRequest, contract.HostSetResponse](ctx, c, contract.MethodHostSet, q)
 }
 func (c *socketClient) RoomDelete(ctx context.Context, q contract.RoomDeleteRequest) (contract.RoomDeleteResponse, error) {
 	return call[contract.RoomDeleteRequest, contract.RoomDeleteResponse](ctx, c, contract.MethodRoomDelete, q)
@@ -400,6 +404,24 @@ func defaultSocket() string {
 	return filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "dyna", "owner.sock")
 }
 
+// hostSwitch reads a host switch flag, which is on or off.
+func hostSwitch(name, value string) (*bool, error) {
+	switch value {
+	case "on":
+		return new(true), nil
+	case "off":
+		return new(false), nil
+	}
+	return nil, fmt.Errorf("--%s takes on or off, not %q", name, value)
+}
+
+func onOff(on bool) string {
+	if on {
+		return "on"
+	}
+	return "off"
+}
+
 func addCLI(root *cobra.Command, getClient func() client) {
 	hostexec := &cobra.Command{Use: "hostexec"}
 	var runHost, cwd string
@@ -464,12 +486,21 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	var ssh string
 	var hostRooms []string
 	var admin bool
-	add := &cobra.Command{Use: "add NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	var addAgents, addCI string
+	add := &cobra.Command{Use: "add NAME", Long: "Add a host. With --agents on (the default) new session boxes may land on it; with --ci on (default off) the CI pool may start runners there for a repository that names it.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		rooms := make([]contract.RoomID, len(hostRooms))
 		for i, room := range hostRooms {
 			rooms[i] = contract.RoomID(room)
 		}
-		result, err := getClient().HostAdd(cmd.Context(), contract.HostAddRequest{Name: contract.HostName(args[0]), SSH: ssh, OwnerOnlyAdmin: admin, Rooms: rooms})
+		agents, err := hostSwitch("agents", addAgents)
+		if err != nil {
+			return err
+		}
+		ci, err := hostSwitch("ci", addCI)
+		if err != nil {
+			return err
+		}
+		result, err := getClient().HostAdd(cmd.Context(), contract.HostAddRequest{Name: contract.HostName(args[0]), SSH: ssh, OwnerOnlyAdmin: admin, Rooms: rooms, Agents: agents, CI: *ci})
 		if err == nil && result.NoSwap {
 			fmt.Fprintln(cmd.ErrOrStderr(), "Warning: host has no swap; memory pressure can kill box processes.")
 		}
@@ -478,6 +509,30 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	add.Flags().StringSliceVar(&hostRooms, "room", nil, "Room ID allowed on this host (repeatable; default: all rooms)")
 	add.Flags().StringVar(&ssh, "ssh", "", "SSH destination")
 	add.Flags().BoolVar(&admin, "owner-only-admin", false, "Only the owner has host admin rights")
+	add.Flags().StringVar(&addAgents, "agents", "on", "on or off: whether new session boxes may land on this host")
+	add.Flags().StringVar(&addCI, "ci", "off", "on or off: whether the CI pool may start runners on this host")
+	var setAgents, setCI string
+	setHost := &cobra.Command{Use: "set NAME [--agents on|off] [--ci on|off]", Short: "Turn a host's agents and CI switches", Long: "Turn a host's two switches. With agents off no new session box lands on the host; its room list still says which rooms it serves while agents are on. With ci off the CI pool starts no new runner there, though a repository still names it, and runners come back when ci is on again. Both off disables the host and keeps it registered. Boxes and runners already on the host stay until they stop, and a stopped box there waits until agents are on again.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		req := contract.HostSetRequest{Host: contract.HostName(args[0])}
+		var err error
+		if cmd.Flags().Changed("agents") {
+			if req.Agents, err = hostSwitch("agents", setAgents); err != nil {
+				return err
+			}
+		}
+		if cmd.Flags().Changed("ci") {
+			if req.CI, err = hostSwitch("ci", setCI); err != nil {
+				return err
+			}
+		}
+		if req.Agents == nil && req.CI == nil {
+			return fmt.Errorf("pass --agents on|off, --ci on|off or both")
+		}
+		_, err = getClient().HostSet(cmd.Context(), req)
+		return err
+	}}
+	setHost.Flags().StringVar(&setAgents, "agents", "", "on or off: whether new session boxes may land on this host")
+	setHost.Flags().StringVar(&setCI, "ci", "", "on or off: whether the CI pool may start runners on this host")
 	var limitRooms []string
 	var limitAll bool
 	limitHost := &cobra.Command{Use: "limit NAME", Short: "Set the rooms a host serves", Long: "Replace the rooms a host serves. Boxes already on the host stay there. A room delete refuses while it is the only room of a host, so this is how to clear that refusal.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
@@ -509,6 +564,9 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			if h.Pool != "" {
 				state += "\tpool " + h.Pool
 			}
+			if h.Name != contract.ControlPlane {
+				state += "\tagents " + onOff(h.Agents) + "\tci " + onOff(h.CI)
+			}
 			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", h.Name, humanize.IBytes(uint64(h.DiskUsed)), humanize.IBytes(uint64(h.DiskBytes)), state); err != nil {
 				return err
 			}
@@ -530,7 +588,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		return nil
 	}}
 	removeHost.Flags().BoolVar(&discardBoxes, "discard-boxes", false, "Fail every box on the host and delete its volume; work not pushed is lost")
-	host.AddCommand(add, limitHost, list, removeHost)
+	host.AddCommand(add, setHost, limitHost, list, removeHost)
 	root.AddCommand(host)
 	root.AddCommand(poolCommand(getClient))
 
