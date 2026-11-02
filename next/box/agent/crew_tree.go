@@ -154,7 +154,7 @@ func (c *Crew) restore(ctx context.Context, call crewCall, reply crewReply) crew
 	if _, err := runGit(ctx, c.config.Workdir, "", "fetch", "--update-head-ok", "origin", "+refs/heads/"+saved.Branch+":refs/heads/"+saved.Branch); err != nil {
 		reason := fmt.Sprintf("stored work on %s did not come back: %s", saved.Branch, err)
 		payload, _ := json.Marshal(reason)
-		return c.step(ctx, crewCall{Op: "failed", Parent: call.Parent, Phase: call.Phase, Payload: payload}, stepInfo{kind: contract.WorkflowStepLog, detail: reason}, func(context.Context, string) stepOutcome {
+		return c.step(ctx, crewCall{Op: "failed", Parent: call.Parent, Phase: call.Phase, Payload: payload, run: call.run}, stepInfo{kind: contract.WorkflowStepLog, detail: reason}, func(context.Context, string) stepOutcome {
 			return stepOutcome{reason: reason}
 		})
 	}
@@ -210,7 +210,7 @@ func (c *Crew) mergeCall(ctx context.Context, call crewCall) crewReply {
 			continue // Its failed step is in the journal already.
 		}
 		payload, _ := json.Marshal(conflict)
-		entry := crewCall{Op: "conflict", Parent: call.Parent, Phase: call.Phase, Payload: payload}
+		entry := crewCall{Op: "conflict", Parent: call.Parent, Phase: call.Phase, Payload: payload, run: call.run}
 		c.step(ctx, entry, stepInfo{kind: contract.WorkflowStepLog, label: "merge conflict: " + conflict.Step}, func(context.Context, string) stepOutcome {
 			return stepOutcome{reason: "conflicts in " + strings.Join(conflict.Files, ", ")}
 		})

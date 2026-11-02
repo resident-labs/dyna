@@ -112,6 +112,7 @@ const (
 	streamSectionsSaveFailed   streamStopReason = "sections_save_failed"
 	streamModelSaveFailed      streamStopReason = "model_save_failed"
 	streamStopReadFailed       streamStopReason = "stop_read_failed"
+	streamWorkflowReadFailed   streamStopReason = "workflow_read_failed"
 )
 
 var quotedDynaMarker = regexp.MustCompile(`(?im)^([ \t]*)\[[ \t]*dyna[ \t]*\]`)
@@ -157,6 +158,11 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 	if err := s.store.WakeLostInventory(ctx, session.Box); err != nil {
 		return nil, failure(err)
 	}
+	_, err = s.store.SessionWorkflow(ctx, session.ID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, failure(err)
+	}
+	crew := err == nil
 	ctx, stop := context.WithCancel(ctx)
 	handle, problem := s.lockSession(ctx, session.ID)
 	if problem != nil {
@@ -233,6 +239,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 		replay := true
 		archiveSent := false
 		var stopSent contract.TurnID
+		reloadSent := 1 // a crew's box says hello with its run's script, and a run starts on version 1
 		for {
 			if !handle.Lock() {
 				return
@@ -297,6 +304,23 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 				if err := s.applyUpdate(ctx, session, update); err != nil {
 					reason, cause = streamAdmissionFailed, err
 					return
+				}
+			}
+			// A reload reaches a crew's box on its next channel too, which ignores a version it already runs.
+			if crew {
+				run, err := s.store.SessionWorkflow(ctx, session.ID)
+				if err != nil {
+					reason, cause = streamWorkflowReadFailed, err
+					return
+				}
+				if run.State == contract.WorkflowRunning && run.Version != reloadSent {
+					select {
+					case out <- contract.BoxMessage{Body: contract.WorkflowReload{Workflow: *s.boxWorkflow(run, current.Size.MemBytes)}}:
+						reloadSent = run.Version
+					case <-ctx.Done():
+						reason, cause = streamCanceled, ctx.Err()
+						return
+					}
 				}
 			}
 			allowed, err := s.store.CanDispatch(ctx, session.ID)

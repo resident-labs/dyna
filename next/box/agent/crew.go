@@ -74,21 +74,45 @@ type CrewConfig struct {
 // Crew runs a workflow in place of a session's Pi: to the runner it is a harness whose one turn is the script. Workers are Pi
 // processes in this box, so the session, its box and its socket stay what they are for any other session. The engine's
 // journal, not this process, holds what has finished. A restarted box runs the script again and stored steps return at once.
+// A reload runs a new version in the same turn, and a step still running here is joined, not started again.
 type Crew struct {
-	config CrewConfig
-	host   string
-	slots  chan struct{}
-	limits map[contract.ProfileName]chan struct{}
-	builds *buildLock
-	shims  string
-	repo   sync.Mutex // the changes to the one repository that all trees share
+	config  CrewConfig
+	host    string
+	slots   chan struct{}
+	builds  *buildLock
+	shims   string
+	repo    sync.Mutex    // the changes to the one repository that all trees share
+	reloads chan struct{} // a newer version of the script is waiting
 
 	mu       sync.Mutex
+	workflow contract.BoxWorkflow // the newest version of the script, which a reload replaces
+	limits   map[contract.ProfileName]chan struct{}
+	running  map[string]*runningStep // by key, the steps this box is running
 	taken    map[contract.DeliverySeq]bool
 	delivery contract.DeliverySeq // workers carry it, so the engine files their transcripts under the crew's turn
-	seen     map[string]int       // calls to each step hash in this execution of the script
 	turn     contract.TurnID
 	stop     context.CancelFunc
+}
+
+// runningStep is one step in this box. A call with its key waits for its reply.
+type runningStep struct {
+	done  chan struct{}
+	reply crewReply
+}
+
+// execution is one run of one version of the script in its own host.
+type execution struct {
+	version int
+	mu      sync.Mutex
+	seen    map[string]int // calls to each step hash
+}
+
+// number is the version of the script that made a call, or 0 for a call made outside a script.
+func (e *execution) number() int {
+	if e == nil {
+		return 0
+	}
+	return e.version
 }
 
 var _ harness.Harness = (*Crew)(nil)
@@ -107,13 +131,36 @@ func NewCrew(config CrewConfig) (*Crew, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Crew{config: config, host: host, slots: make(chan struct{}, max(config.Workflow.Workers, 1)), limits: make(map[contract.ProfileName]chan struct{}), builds: builds, shims: shims, taken: make(map[contract.DeliverySeq]bool)}
-	for _, profile := range config.Workflow.Profiles {
-		if profile.MaxConcurrent > 0 {
+	c := &Crew{config: config, host: host, slots: make(chan struct{}, max(config.Workflow.Workers, 1)), builds: builds, shims: shims, reloads: make(chan struct{}, 1),
+		workflow: config.Workflow, limits: make(map[contract.ProfileName]chan struct{}), running: make(map[string]*runningStep), taken: make(map[contract.DeliverySeq]bool)}
+	c.addLimits(config.Workflow.Profiles)
+	return c, nil
+}
+
+// addLimits gives each profile with a limit its own slots. A profile that has them keeps them, with the steps that hold them.
+func (c *Crew) addLimits(profiles []contract.WorkflowProfile) {
+	for _, profile := range profiles {
+		if _, ok := c.limits[profile.Name]; !ok && profile.MaxConcurrent > 0 {
 			c.limits[profile.Name] = make(chan struct{}, profile.MaxConcurrent)
 		}
 	}
-	return c, nil
+}
+
+// Reload makes workflow the script this crew runs, when it is newer than the one it has. The running script's host stops and
+// the new version starts in its place, in the same turn. Steps already running go on, so a call with one of their keys waits
+// for that step, and any the new version does not call stop when the run ends.
+func (c *Crew) Reload(workflow contract.BoxWorkflow) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if workflow.Version <= c.workflow.Version {
+		return
+	}
+	c.workflow = workflow
+	c.addLimits(workflow.Profiles)
+	select {
+	case c.reloads <- struct{}{}:
+	default:
+	}
 }
 
 // Export sets what every process of this box inherits from now on: the build lock's shims, and one Cargo target folder for all
@@ -197,12 +244,13 @@ func (c *Crew) Start(ctx context.Context, id contract.TurnID, inputs []contract.
 		c.taken[input.Delivery] = true
 		c.delivery = input.Delivery
 	}
-	c.turn, c.stop, c.seen = id, cancel, make(map[string]int)
+	c.turn, c.stop = id, cancel
+	profiles := c.workflow.Profiles
 	c.mu.Unlock()
 	started()
 	result := contract.TurnEnded{Turn: id, Outcome: contract.TurnCompleted}
-	if len(c.config.Workflow.Profiles) > 0 {
-		result.Usage.Model = c.config.Workflow.Profiles[0].Model.ID
+	if len(profiles) > 0 {
+		result.Usage.Model = profiles[0].Model.ID
 	}
 	var final string
 	var err error
@@ -239,6 +287,7 @@ type crewCall struct {
 	Key     string          `json:"key"`    // workflow_end
 	Value   json.RawMessage `json:"value"`  // end, workflow_end
 	Reason  string          `json:"reason"` // end, workflow_end
+	run     *execution      // the execution that made the call
 }
 
 type crewReply struct {
@@ -249,21 +298,41 @@ type crewReply struct {
 	stored bool   // the journal had it, so this box may never have run it
 }
 
-// script runs the host and serves its calls until it reports an end, which is the only way it succeeds.
+// script runs the newest version of the script and serves its calls until it reports an end, which is the only way it
+// succeeds. A reload stops that version's host and runs the next one. Steps keep running across it, and stop with the script.
 func (c *Crew) script(ctx context.Context) (string, error) {
+	work, cancel := context.WithCancel(ctx)
+	var steps sync.WaitGroup
+	defer steps.Wait()
+	defer cancel()
+	for first := true; ; first = false {
+		c.mu.Lock()
+		workflow := c.workflow
+		c.mu.Unlock()
+		if !first {
+			log.Printf("workflow %s: running version %d", workflow.Run, workflow.Version)
+		}
+		final, reloaded, err := c.execute(ctx, work, &steps, workflow)
+		if !reloaded {
+			return final, err
+		}
+	}
+}
+
+// execute runs one version in its own host and serves its calls, until the script reports an end or a newer version arrives.
+// A step this version started replies to its host, so a stopped host's replies go nowhere.
+func (c *Crew) execute(ctx, work context.Context, steps *sync.WaitGroup, workflow contract.BoxWorkflow) (string, bool, error) {
 	calls, hostOut, err := os.Pipe()
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	defer calls.Close()
 	hostIn, replies, err := os.Pipe()
 	if err != nil {
 		hostOut.Close()
-		return "", err
+		return "", false, err
 	}
 	defer replies.Close()
-	work, cancel := context.WithCancel(ctx)
-	defer cancel()
 	var problems tail
 	host := exec.CommandContext(ctx, "node", c.host)
 	host.Dir, host.Stderr, host.ExtraFiles = c.config.Workdir, &problems, []*os.File{hostOut, hostIn}
@@ -271,7 +340,7 @@ func (c *Crew) script(ctx context.Context) (string, error) {
 	hostOut.Close()
 	hostIn.Close()
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	defer func() { _ = host.Process.Kill(); _ = host.Wait() }()
 	var writing sync.Mutex
@@ -281,29 +350,55 @@ func (c *Crew) script(ctx context.Context) (string, error) {
 		defer writing.Unlock()
 		_ = reply.Encode(value)
 	}
-	args := c.config.Workflow.Args
+	args := workflow.Args
 	if args == "" {
 		args = "null"
 	}
-	send(map[string]string{"script": c.config.Workflow.Script, "args": args})
-	var steps sync.WaitGroup
-	defer steps.Wait()
-	defer cancel()
-	decoder := json.NewDecoder(calls)
+	send(map[string]string{"script": workflow.Script, "args": args})
+	run := &execution{version: workflow.Version, seen: make(map[string]int)}
+	read, stopped := make(chan crewCall), make(chan struct{})
+	defer close(stopped)
+	ended := make(chan struct{})
+	go func() {
+		defer close(ended)
+		decoder := json.NewDecoder(calls)
+		for {
+			var call crewCall
+			if decoder.Decode(&call) != nil {
+				return
+			}
+			select {
+			case read <- call:
+			case <-stopped:
+				return
+			}
+		}
+	}()
 	for {
 		var call crewCall
-		if err := decoder.Decode(&call); err != nil {
-			if ctx.Err() != nil {
-				return "", ctx.Err()
+		select {
+		case <-c.reloads:
+			c.mu.Lock()
+			newer := c.workflow.Version != workflow.Version
+			c.mu.Unlock()
+			if newer {
+				return "", true, nil
 			}
-			return "", fmt.Errorf("the script host stopped: %s", strings.TrimSpace(problems.String()))
+			continue
+		case <-ended:
+			if ctx.Err() != nil {
+				return "", false, ctx.Err()
+			}
+			return "", false, fmt.Errorf("the script host stopped: %s", strings.TrimSpace(problems.String()))
+		case call = <-read:
 		}
+		call.run = run
 		switch call.Op {
 		case "end":
 			if call.Reason != "" {
-				return "", errors.New(call.Reason)
+				return "", false, errors.New(call.Reason)
 			}
-			return finalText(call.Value), nil
+			return finalText(call.Value), false, nil
 		case "log", "failed":
 			// Inline, so a script's last lines reach the journal before its end does.
 			info := stepInfo{kind: contract.WorkflowStepLog, detail: finalText(call.Payload)}
@@ -368,10 +463,13 @@ func (c *Crew) stepKey(call crewCall, profile contract.ProfileName) string {
 	data, _ := json.Marshal([]any{call.Op, canonical(call.Payload), canonical(call.Opts), call.Parent, profile})
 	sum := sha256.Sum256(data)
 	key := hex.EncodeToString(sum[:])
-	c.mu.Lock()
-	ordinal := c.seen[key]
-	c.seen[key]++
-	c.mu.Unlock()
+	ordinal := 0
+	if run := call.run; run != nil {
+		run.mu.Lock()
+		ordinal = run.seen[key]
+		run.seen[key]++
+		run.mu.Unlock()
+	}
 	if ordinal > 0 {
 		sum = sha256.Sum256(fmt.Appendf(nil, "%s#%d", key, ordinal))
 		key = hex.EncodeToString(sum[:])
@@ -407,18 +505,42 @@ type stepOutcome struct {
 	usage      contract.Usage
 }
 
-// step journals one call: a stored outcome returns at once, and anything else runs and stores its own. A step cut off by the
-// end of the script or of the box stores nothing, so it runs again.
+// step journals one call: a stored outcome returns at once, a step running in this box is joined, and anything else runs and
+// stores its own. A step cut off by the end of the script or of the box stores nothing, so it runs again.
 func (c *Crew) step(ctx context.Context, call crewCall, info stepInfo, work func(context.Context, string) stepOutcome) crewReply {
 	if info.phase == "" {
 		info.phase = call.Phase
 	}
 	key, name := c.stepKey(call, info.profile), info.name()
+	// After a reload, the new version's call waits for the step the old one started, and its worker.
+	c.mu.Lock()
+	if joined, ok := c.running[key]; ok {
+		c.mu.Unlock()
+		select {
+		case <-joined.done:
+			return joined.reply
+		case <-ctx.Done():
+			return crewReply{Error: "the run stopped", Step: name}
+		}
+	}
+	own := &runningStep{done: make(chan struct{})}
+	c.running[key] = own
+	c.mu.Unlock()
+	own.reply = c.journal(ctx, call, key, name, info, work)
+	c.mu.Lock()
+	delete(c.running, key)
+	c.mu.Unlock()
+	close(own.done)
+	return own.reply
+}
+
+// journal returns a step's stored outcome, or runs the step under the version that called it and stores what it did.
+func (c *Crew) journal(ctx context.Context, call crewCall, key, name string, info stepInfo, work func(context.Context, string) stepOutcome) crewReply {
 	detail := info.detail
 	if len(detail) > stepDetailBytes {
 		detail = strings.ToValidUTF8(detail[:stepDetailBytes], "")
 	}
-	stored, err := c.config.Engine.WorkflowStepStart(ctx, contract.WorkflowStepStartRequest{Key: key, Parent: call.Parent, Kind: info.kind, Name: name, Phase: info.phase, Profile: info.profile, Detail: detail})
+	stored, err := c.config.Engine.WorkflowStepStart(ctx, contract.WorkflowStepStartRequest{Key: key, Parent: call.Parent, Kind: info.kind, Name: name, Phase: info.phase, Profile: info.profile, Detail: detail, Version: call.run.number()})
 	if err != nil {
 		return crewReply{Error: err.Error(), Step: name}
 	}
@@ -476,9 +598,12 @@ func (c *Crew) agentCall(ctx context.Context, call crewCall) crewReply {
 	refused := strictOpts(call.Opts, &opts)
 	var prompt string
 	_ = json.Unmarshal(call.Payload, &prompt)
+	c.mu.Lock()
+	profiles := c.workflow.Profiles
+	c.mu.Unlock()
 	var profile *contract.WorkflowProfile
-	for i := range c.config.Workflow.Profiles {
-		if listed := &c.config.Workflow.Profiles[i]; opts.Profile == "" || listed.Name == opts.Profile {
+	for i := range profiles {
+		if listed := &profiles[i]; opts.Profile == "" || listed.Name == opts.Profile {
 			profile = listed
 			break
 		}
@@ -527,7 +652,10 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 		}
 		prompt += "\n\nEnd with only one JSON value that matches this JSON Schema, with no other text:\n" + string(opts.Schema)
 	}
-	for _, slots := range []chan struct{}{c.slots, c.limits[profile.Name]} {
+	c.mu.Lock()
+	profileSlots := c.limits[profile.Name]
+	c.mu.Unlock()
+	for _, slots := range []chan struct{}{c.slots, profileSlots} {
 		release, err := acquire(ctx, slots)
 		if err != nil {
 			return stepOutcome{reason: err.Error()}
@@ -775,7 +903,7 @@ func (c *Crew) workflowCall(ctx context.Context, call crewCall) crewReply {
 	}
 	info := stepInfo{kind: contract.WorkflowStepWorkflow, detail: body.Ref}
 	key, name := c.stepKey(call, ""), info.name()
-	if _, err := c.config.Engine.WorkflowStepStart(ctx, contract.WorkflowStepStartRequest{Key: key, Parent: call.Parent, Kind: info.kind, Name: name, Phase: call.Phase, Detail: body.Ref}); err != nil {
+	if _, err := c.config.Engine.WorkflowStepStart(ctx, contract.WorkflowStepStartRequest{Key: key, Parent: call.Parent, Kind: info.kind, Name: name, Phase: call.Phase, Detail: body.Ref, Version: call.run.number()}); err != nil {
 		return crewReply{Error: err.Error(), Step: name}
 	}
 	script, err := os.ReadFile(path)

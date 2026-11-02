@@ -486,6 +486,146 @@ func TestAResumedRunKeepsFinishedStepsAndTheFixedCommit(t *testing.T) {
 	}
 }
 
+// A reload gives a running run its next script version. The run keeps both, its models follow the new profiles, the crew's
+// channel carries the new version to the box, and each step records the version that started it.
+func TestAReloadGivesARunningRunItsNextVersion(t *testing.T) {
+	w := setupWorkflow(t)
+	first := "export const meta = { name: 'sweep', profiles: ['fast'] }\nreturn await agent('look')\n"
+	second := "export const meta = { name: 'sweep', profiles: ['fast', 'deep'], description: 'with a reviewer' }\nreturn await agent('look again')\n"
+	started, crew := w.start(contract.Principal{Kind: contract.PrincipalSession, Session: w.root}, first)
+	channel, problem := testChannel(t, w.Service, w.ctx, crew)
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	next := func(want string) contract.BoxMessageBody {
+		t.Helper()
+		for {
+			select {
+			case message := <-channel:
+				if string(message.Body.BoxMessageType()) == want {
+					return message.Body
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatalf("no %s reached the crew", want)
+			}
+		}
+	}
+	next("turn.start")
+	start := func(key string, version int) {
+		t.Helper()
+		if _, problem := w.WorkflowStepStart(w.ctx, crew, contract.WorkflowStepStartRequest{Key: key, Kind: contract.WorkflowStepAgent, Name: key, Detail: "work", Version: version}); problem != nil {
+			t.Fatal(problem)
+		}
+	}
+	start("old", 1)
+	allowed := func() []string {
+		t.Helper()
+		session, err := w.store.Session(w.ctx, started.Session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		models, _, err := w.AllowedModels(w.ctx, session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return models
+	}
+	if slices.Contains(allowed(), crewDeepModel) {
+		t.Fatal("the first version lists no deep profile")
+	}
+
+	reloaded, problem := w.WorkflowReload(w.ctx, contract.Principal{Kind: contract.PrincipalSession, Session: w.root}, contract.WorkflowReloadRequest{Run: started.Run, Script: second})
+	if problem != nil || reloaded.Version != 2 || reloaded.Run != started.Run {
+		t.Fatalf("reload %+v, %+v", reloaded, problem)
+	}
+	reload := next("workflow.reload").(contract.WorkflowReload).Workflow
+	if reload.Version != 2 || reload.Script != second || len(reload.Profiles) != 2 || reload.Profiles[1].Model.ID != crewDeepModel || reload.Workers < 4 {
+		t.Fatalf("the box got %+v", reload)
+	}
+	if !slices.Contains(allowed(), crewDeepModel) {
+		t.Fatal("the run's models did not follow its new profiles")
+	}
+	start("new", 2)
+	status, problem := w.WorkflowStatus(w.ctx, w.owner, contract.WorkflowStatusRequest{Run: started.Run})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if status.Run.Version != 2 || status.Run.Description != "with a reviewer" || !slices.Equal(status.Run.Profiles, []contract.ProfileName{"fast", "deep"}) {
+		t.Fatalf("run %+v", status.Run)
+	}
+	versions := map[string]int{}
+	for _, step := range status.Steps {
+		versions[step.Key] = step.Version
+	}
+	if versions["old"] != 1 || versions["new"] != 2 {
+		t.Fatalf("step versions %v", versions)
+	}
+	var kept []string
+	rows, err := w.store.Read().QueryContext(w.ctx, "SELECT script FROM workflow_scripts WHERE run=? ORDER BY version", started.Run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var script string
+		if err := rows.Scan(&script); err != nil {
+			t.Fatal(err)
+		}
+		kept = append(kept, script)
+	}
+	if rows.Close(); !slices.Equal(kept, []string{first, second}) {
+		t.Fatalf("the run keeps %q", kept)
+	}
+	// A replacement box's hello carries the newest version.
+	run, err := w.store.WorkflowRun(w.ctx, started.Run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hello := w.boxWorkflow(run, 4<<30); hello.Version != 2 || hello.Script != second {
+		t.Fatalf("hello %+v", hello)
+	}
+}
+
+// A reload keeps what the crew's session and box were made for, and only the owner or root reloads a run that is still going.
+func TestAReloadIsCheckedLikeAStart(t *testing.T) {
+	w := setupWorkflow(t)
+	for _, repo := range []contract.RepoName{"owner/one", "owner/two"} {
+		if err := w.store.AddRoomRepo(w.ctx, w.room, repo, repo == "owner/one"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script := "export const meta = { name: 'sweep', profiles: ['fast'], size: 'small' }\nreturn 1\n"
+	started, crew := w.start(w.owner, script)
+	reload := func(caller contract.Principal, script string) *contract.Error {
+		_, problem := w.WorkflowReload(w.ctx, caller, contract.WorkflowReloadRequest{Run: started.Run, Script: script})
+		return problem
+	}
+	for name, c := range map[string]struct {
+		script, says string
+	}{
+		"repo":            {"export const meta = { name: 'sweep', profiles: ['fast'], size: 'small', repo: 'owner/two' }", `a reload keeps the run's meta.repo, which is "owner/one", and this script has "owner/two"`},
+		"name":            {"export const meta = { name: 'other', profiles: ['fast'], size: 'small' }", `meta.name, which is "sweep", and this script has "other"`},
+		"size":            {"export const meta = { name: 'sweep', profiles: ['fast'] }", `meta.size, which is "small", and this script has unset`},
+		"unknown profile": {"export const meta = { name: 'sweep', profiles: ['nobody'], size: 'small' }", "unknown profile nobody"},
+		"no meta":         {"return 2", "export const meta"},
+	} {
+		if problem := reload(w.owner, c.script); problem == nil || problem.Code != contract.ErrInvalid || !strings.Contains(problem.Message, c.says) {
+			t.Errorf("%s: %+v", name, problem)
+		}
+	}
+	if problem := reload(crew, script); problem == nil || problem.Code != contract.ErrForbidden {
+		t.Fatalf("the crew itself: %+v", problem)
+	}
+	if run, err := w.store.WorkflowRun(w.ctx, started.Run); err != nil || run.Version != 1 || run.Script != script {
+		t.Fatalf("a refused reload changed the run: %+v, %v", run, err)
+	}
+	if _, problem := w.SessionClose(w.ctx, w.owner, contract.SessionCloseRequest{Session: started.Session}); problem != nil {
+		t.Fatal(problem)
+	}
+	if problem := reload(w.owner, script); problem == nil || problem.Code != contract.ErrConflict || !strings.Contains(problem.Message, "resume") {
+		t.Fatalf("an ended run: %+v", problem)
+	}
+}
+
 func TestOnlyACrewWritesAJournal(t *testing.T) {
 	w := setupWorkflow(t)
 	root := contract.Principal{Kind: contract.PrincipalSession, Session: w.root}
