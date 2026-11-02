@@ -12,6 +12,9 @@ type Channel struct {
 	stop          context.CancelFunc
 	wake          chan struct{}
 	input         chan contract.ComputerInputBatch
+	asks          chan uint64
+	asked         uint64
+	answers       map[uint64]chan contract.BoxReading
 	done          <-chan struct{}
 	watching      uint64
 	shellWatching uint64
@@ -54,7 +57,8 @@ func (s *Session) SetChannel(channel *Channel) { s.channel = channel }
 
 // NewChannel makes a box channel. The caller holds its session lock.
 func NewChannel(stop context.CancelFunc, done <-chan struct{}) *Channel {
-	return &Channel{stop: stop, done: done, wake: make(chan struct{}, 1), input: make(chan contract.ComputerInputBatch, 64)}
+	return &Channel{stop: stop, done: done, wake: make(chan struct{}, 1), input: make(chan contract.ComputerInputBatch, 64),
+		asks: make(chan uint64, 8), answers: make(map[uint64]chan contract.BoxReading)}
 }
 
 // Wake notifies a box loop. The caller holds the session lock.
@@ -74,6 +78,31 @@ func (c *Channel) Close() {
 
 func (c *Channel) WakeSignal() <-chan struct{}                { return c.wake }
 func (c *Channel) Inputs() <-chan contract.ComputerInputBatch { return c.input }
+func (c *Channel) Asks() <-chan uint64                        { return c.asks }
+
+// AskStats queues a question for the box and returns where its answer arrives. A full queue means the box stopped
+// reading, so nothing arrives and the wait runs out. The caller holds the session lock, and later calls ForgetStats.
+func (c *Channel) AskStats() (uint64, <-chan contract.BoxReading) {
+	c.asked++
+	answer := make(chan contract.BoxReading, 1)
+	select {
+	case c.asks <- c.asked:
+		c.answers[c.asked] = answer
+	default:
+	}
+	return c.asked, answer
+}
+
+// AnswerStats gives an answer to its question. The caller holds the session lock.
+func (c *Channel) AnswerStats(ask uint64, reading contract.BoxReading) {
+	if answer, ok := c.answers[ask]; ok {
+		delete(c.answers, ask)
+		answer <- reading
+	}
+}
+
+// ForgetStats drops a question nobody waits for any more. The caller holds the session lock.
+func (c *Channel) ForgetStats(ask uint64) { delete(c.answers, ask) }
 
 // SendInput queues a batch. The caller holds the session lock.
 func (c *Channel) SendInput(ctx context.Context, batch contract.ComputerInputBatch) *contract.Error {

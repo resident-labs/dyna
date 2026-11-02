@@ -1,44 +1,30 @@
 <script lang="ts">
-  import { SvelteMap } from "svelte/reactivity";
   import AccountMenu from "./AccountMenu.svelte";
+  import BoxFacts from "./BoxFacts.svelte";
+  import FoldRow from "./FoldRow.svelte";
+  import HooksRow from "./HooksRow.svelte";
   import ProfileMenu from "./ProfileMenu.svelte";
   import StatusPill from "./StatusPill.svelte";
-  import { boxReason, boxWords, count, fromNow, fullTime, waits } from "../feed.ts";
+  import WrapText from "./WrapText.svelte";
+  import { fromNow, fullTime } from "../feed.ts";
   import { call } from "../client.ts";
-  import { onHost } from "../hosts.ts";
-  import { failed } from "../jobs.ts";
-  import { closeNote, descendants, handNote, holdsText } from "../session-tree.ts";
-  import { subscriptionAction, subscriptionState, subscriptionWhen } from "../subscriptions.ts";
-  import { watchShell, type ShellJob } from "../shell.ts";
+  import { closeNote, descendants, handNote, holdRows } from "../session-tree.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { Responsibility, SessionAccountResponse, SessionResponsibilitiesResponse, SubscriptionInfo } from "../contract.gen.ts";
-  // What a DM's session is, as design A's About tab: its goal, then one label and value per fact the engine reports.
-  // A row without a value does not show. Jobs opens the dock's list on this session, and stays while the box is ready so a
-  // finished job can be reached. It counts the jobs the engine lists, as that list does, because session.list's count can
-  // lag, and a job's shell.job.ended takes it off at once; until they load, or with none running, it reads Jobs.
-  let { store, room, session, switchable, navigate, onjobs, onclosed }: {
-    store: RoomStore; room: string; session: string; switchable: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onjobs: (event: MouseEvent) => void; onclosed: () => void;
+  // What a DM's session is, in the order the owner asks: who it is, the box it runs in, then what it holds. Anything long
+  // folds to a line or two, so the first two never leave the screen. A row without a value does not show, and a session
+  // holding nothing simply ends after the box. The header and the composer already show the turn, its stop and the jobs.
+  // `shown` is false while the panel is closed, and stops the box's figures.
+  let { store, room, session, switchable, shown, navigate, onclosed }: {
+    store: RoomStore; room: string; session: string; switchable: boolean; shown: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onclosed: () => void;
   } = $props();
   let open = $derived(store.sessions.get(session));
   let goals = $derived(store.goals.get(session) ?? []);
   let parent = $derived(open?.parent && store.names.get(open.parent));
-  let box = $derived(store.boxes.get(session));
-  let host = $derived(store.hosts.get(session));
-  let failure = $derived(store.boxFailures.get(session));
-  let reason = $derived(store.pendingReasons.get(session));
-  let hasJobs = $derived(box === "ready" && store.hadJobs.has(session));
-  const listed = new SvelteMap<string, ShellJob>();
-  let visible = $state(document.visibilityState === "visible");
-  $effect(() => {
-    if (!hasJobs || !visible) return;
-    const stop = watchShell(session, listed, closed => { if (closed) listed.clear(); });
-    return () => { stop(); listed.clear(); };
-  });
-  // The two relative times stay roughly true while the panel stays open.
+  // The relative time stays roughly true while the panel stays open.
   let now = $state(Date.now());
   $effect(() => { const timer = setInterval(() => { now = Date.now(); }, 30_000); return () => clearInterval(timer); });
-  let running = $derived([...listed.values()].filter(job => job.running && !store.endedJobs.has(`${session}/${job.job}`)).length);
-  let failures = $derived([...listed.values()].filter(failed).length);
+  const ago = (at: string) => fromNow(at, Math.max(now, Date.parse(at)));
   // Closing ends this session and every session under it. The engine archives their work first, deepest child first.
   let archiveNote = $derived(closeNote(descendants([...store.sessions.values()], session).map(id => store.names.get(id) ?? id)));
   // Only the owner gets an answer, so anyone else sees no Account row. A profile change can drop the choice.
@@ -65,8 +51,8 @@
       if (asked === session) { holds = answer.items ?? []; plan = answer.close; }
     }, () => { if (asked === session) { holds = []; plan = undefined; } });
   }
-  $effect(() => { void box; void open?.lastTurnAt; void goals.length; void store.running(session); void loadHolds(); });
-  let held = $derived(holdsText(holds));
+  $effect(() => { void store.boxes.get(session); void open?.lastTurnAt; void goals.length; void store.running(session); void loadHolds(); });
+  let held = $derived(holdRows(holds));
   let handed = $derived(plan ? handNote(plan.handed ?? [], store.names.get(plan.to) ?? "the parent") : "");
   let confirming = $state(false);
   let closing = $state(false);
@@ -84,49 +70,54 @@
   }
 </script>
 
-<svelte:document onvisibilitychange={() => { visible = document.visibilityState === "visible"; }} />
 <div class="about">
-  {#each goals as goal (goal.id)}
-    <h3>Goal</h3>
-    <p class="goal" class:joined={goal.doneWhen || goal.items?.length}>{goal.text}</p>
-    {#if goal.doneWhen}<p class="goal when muted" class:joined={goal.items?.length}>Done when {goal.doneWhen}</p>{/if}
-    {#if goal.items?.length}<ul class="items">{#each goal.items as item (item.number)}<li class:muted={item.state !== "open"} class:dropped={item.state === "dropped"}>{item.state === "done" ? "Done · " : ""}{item.text}</li>{/each}</ul>{/if}
-  {:else}
-    {#if open?.goal}<h3>Goal</h3><p class="goal">{open.goal}</p>{/if}
-  {/each}
-  <dl>
-    {#if store.running(session)}<dt>Turn</dt><dd>{#if store.stopping.has(session)}Stopping{:else}Running · <button type="button" onclick={() => store.stop(session)}>Stop</button>{/if}
-      {#if store.stopFailed.has(session)}<span class="failed">The stop did not reach the engine.</span>{/if}</dd>{/if}
+  <dl class="facts">
     {#if parent && open?.parent}<dt>Parent</dt><dd><a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(open.parent)}`} onclick={navigate}>{parent}</a></dd>{/if}
     {#if open?.profile}<dt>Profile</dt><dd><ProfileMenu {session} profile={open.profile} {switchable} /></dd>{/if}
     {#if account}<dt>Account</dt><dd><AccountMenu {session} {account} {switchable} onchanged={loadAccount} /></dd>{/if}
-    {#if box}<dt>Box</dt><dd>{#if failure}<StatusPill tone="failed" word label={onHost("Failed", host)} /> · {boxReason(failure)}{:else if reason === "room-host"}<StatusPill tone="warning" word label={waits[reason]} />{:else}{reason ? waits[reason] : onHost(boxWords[box], host)}{/if}</dd>{/if}
-    {#if hasJobs}<dt>Jobs</dt><dd><button type="button" onclick={onjobs}>{running ? `${count(running, "job")} running` : "Jobs"}</button>{#if failures}{" · "}<StatusPill tone="failed" label="{failures} failed" word />{/if}</dd>{/if}
-    {#if held}<dt>Holds</dt><dd>{held}</dd>{/if}
-    {#if open?.startedAt}<dt>Started</dt><dd class="muted"><time datetime={open.startedAt} title={fullTime(open.startedAt)}>{fromNow(open.startedAt, Math.max(now, Date.parse(open.startedAt)))}</time></dd>{/if}
-    {#if open?.lastTurnAt}<dt>Last turn</dt><dd class="muted"><time datetime={open.lastTurnAt} title={fullTime(open.lastTurnAt)}>{fromNow(open.lastTurnAt, Math.max(now, Date.parse(open.lastTurnAt)))}</time></dd>{/if}
   </dl>
-  {#if subscriptions.length}
-    <h3 class="after">Subscriptions</h3>
-    <ul class="subscriptions">
-      {#each subscriptions as item (item.subscription.id)}
-        {@const state = subscriptionState(item)}
-        <li><span>{subscriptionWhen(item)}</span><span class="muted">{subscriptionAction(item, id => store.names.get(id) ?? id)}{#if state}{" · "}{state}{/if}</span></li>
+  {#key session}<BoxFacts {store} {session} {shown} />{/key}
+  {#if goals.length || open?.goal}
+    <section>
+      <h3>{goals.length > 1 ? "Goals" : "Goal"}{#if goals.length > 1}<span>{goals.length}</span>{/if}</h3>
+      {#each goals as goal (goal.id)}
+        {@const items = goal.items?.filter(item => item.state === "open").length}
+        <FoldRow more={Boolean(goal.doneWhen || goal.items?.length)}>
+          {#snippet head()}<WrapText text={goal.text} />{/snippet}
+          {#snippet aside()}{#if items}{items} open{/if}{/snippet}
+          {#if goal.doneWhen}<p class="when">Done when: <WrapText text={goal.doneWhen} /></p>{/if}
+          {#if goal.items?.length}<ul>{#each goal.items as item (item.number)}<li class:quiet={item.state !== "open"} class:dropped={item.state === "dropped"}>{item.state === "done" ? "Done · " : ""}<WrapText text={item.text} /></li>{/each}</ul>{/if}
+        </FoldRow>
+      {:else}
+        {#if open?.goal}<FoldRow>{#snippet head()}<WrapText text={open?.goal ?? ""} />{/snippet}</FoldRow>{/if}
       {/each}
-    </ul>
+    </section>
   {/if}
+  {#if held.length}
+    <section>
+      <h3>Holds</h3>
+      {#each held as row (row.kind)}
+        <FoldRow>
+          {#snippet head()}<WrapText text={row.text} />{/snippet}
+          {#snippet aside()}{#if row.blocked}<StatusPill tone="blocked" word label="Blocked" />{/if}{/snippet}
+        </FoldRow>
+      {/each}
+    </section>
+  {/if}
+  {#if subscriptions.length}<section><HooksRow {subscriptions} name={id => store.names.get(id) ?? id} /></section>{/if}
+  {#if open?.startedAt}<p class="times"><time datetime={open.startedAt} title={fullTime(open.startedAt)}>Started {ago(open.startedAt)}</time>{#if open.lastTurnAt}<time datetime={open.lastTurnAt} title={fullTime(open.lastTurnAt)}>Last turn {ago(open.lastTurnAt)}</time>{/if}</p>{/if}
   {#if open?.parent}
     <div class="closebox">
       {#if confirming}
-        {#if handed}<p class="note">{handed}</p>{/if}
-        <p class="note muted">{archiveNote}</p>
+        {#if handed}<p class="handed">{handed}</p>{/if}
+        <p class="note">{archiveNote}</p>
         <div class="confirm">
           <button type="button" class="close-button" disabled={closing} onclick={() => { confirming = false; }}>Cancel</button>
           <button type="button" class="close-button danger" disabled={closing} onclick={close}>Close session</button>
         </div>
       {:else}
         <button type="button" class="close-button" onclick={confirmClose}>Close session…</button>
-        <p class="note muted">{archiveNote}</p>
+        <p class="note">{archiveNote}</p>
       {/if}
       {#if closeFailed}<span class="failed">The session did not close. Try again.</span>{/if}
     </div>
@@ -134,24 +125,24 @@
 </div>
 
 <style>
-  .about { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; font-size: 14px; }
-  h3 { margin: 0 0 4px; color: var(--muted); font-size: 12.5px; font-weight: 400; }
-  .goal { margin: 0 0 16px; line-height: 1.45; overflow-wrap: anywhere; }
-  .goal.joined { margin-bottom: 4px; }
-  .when { font-size: 12.5px; }
-  .items { display: grid; gap: 4px; margin: 0 0 16px; padding: 0 0 0 16px; line-height: 1.45; overflow-wrap: anywhere; }
+  .about { display: flex; flex-direction: column; gap: 16px; flex: 1; min-height: 0; overflow-y: auto; padding: 16px; font-size: 14px; }
+  /* An empty list of facts, as for a session still loading, takes no gap. */
+  .about :global(.facts:empty) { display: none; }
+  h3 { display: flex; align-items: baseline; gap: 6px; margin: 0 0 4px; font-size: 13px; font-weight: 600; line-height: 20px; }
+  h3 span { color: var(--muted); font-size: 12.5px; font-weight: 400; font-variant-numeric: tabular-nums; }
+  section { min-width: 0; }
+  p { margin: 0; }
+  .when, .note, .handed, .times, .failed { color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+  .handed { color: var(--text); }
+  .when { overflow-wrap: break-word; }
+  /* Each time stays whole, so a narrow panel stacks them instead of leaving "ago" alone on a line. */
+  .times { display: flex; flex-wrap: wrap; gap: 0 12px; }
+  ul { display: grid; gap: 4px; margin: 0; padding: 0 0 0 16px; line-height: 1.45; overflow-wrap: break-word; }
+  .quiet { color: var(--muted); }
   .dropped { text-decoration: line-through; }
-  dl { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 8px 12px; margin: 0; }
-  dt { color: var(--muted); font-size: 12.5px; line-height: 20px; }
-  dd { margin: 0; line-height: 20px; overflow-wrap: anywhere; }
-  .muted { color: var(--muted); }
-  .after { margin-top: 16px; }
-  .subscriptions { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
-  .subscriptions li { display: grid; }
   a, button { padding: 0; border: 0; border-radius: 4px; background: none; color: var(--focus); font: inherit; text-decoration: none; cursor: pointer; }
-  .failed { display: block; color: var(--muted); font-size: 12.5px; }
-  .closebox { display: grid; gap: 8px; justify-items: start; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
-  .note { margin: 0; font-size: 12.5px; line-height: 1.45; }
+  .failed { display: block; }
+  .closebox { display: grid; gap: 8px; justify-items: start; padding-top: 16px; border-top: 1px solid var(--line); }
   .close-button { height: 28px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); font-size: 13px; font-weight: 500; }
   .close-button:hover { background: var(--hover); text-decoration: none; }
   .close-button:disabled { background: none; color: var(--muted); cursor: default; text-decoration: none; }

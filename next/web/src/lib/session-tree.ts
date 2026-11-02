@@ -25,12 +25,20 @@ export function closeNote(names: string[]): string {
 }
 
 const holdingNames: Record<ResponsibilityKind, string> = {
-  turn: "turn", shell_job: "shell job", terminal: "terminal", workflow: "workflow run", goal: "goal", pr: "PR", issue: "issue", question: "question", child: "child",
+  turn: "turn", shell_job: "shell job", terminal: "terminal", workflow: "workflow run", goal: "goal", pr: "PR", issue: "issue", question: "question", child: "child session",
 };
+// Each of these shows elsewhere: the turn in the thread, jobs under the header's icon, and goals in the list just above.
+const shownElsewhere: ResponsibilityKind[] = ["turn", "shell_job", "goal"];
 
-// What a session still holds, as the engine lists it. A running turn has its own row, so it is not repeated here.
-export function holdsText(items: Responsibility[]): string {
-  return items.filter(item => item.kind !== "turn").map(item => [holdingNames[item.kind], item.id].filter(Boolean).join(" ")).join(", ");
+// What a session still holds, as the engine lists it, for About: one row per kind, so that a lead with ten children takes
+// a line and not ten. A kind with a blocked item says so.
+export function holdRows(items: Responsibility[]): { kind: ResponsibilityKind; text: string; blocked: boolean }[] {
+  const listed = items.filter(item => !shownElsewhere.includes(item.kind));
+  return [...Map.groupBy(listed, item => item.kind)].map(([kind, group]) => {
+    const ids = group.flatMap(item => item.id ? [item.id] : []).join(", ");
+    const text = group.length > 1 ? `${count(group.length, holdingNames[kind])}${ids ? `: ${ids}` : ""}` : [holdingNames[kind], ids].filter(Boolean).join(" ");
+    return { kind, text: text[0].toUpperCase() + text.slice(1), blocked: group.some(item => item.blocked) };
+  });
 }
 
 // What a close hands over, as "This hands 2 goals and 1 PR to root." Nothing to hand over needs no sentence.

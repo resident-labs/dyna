@@ -310,6 +310,8 @@ func (a *API) handler(c Caller) http.Handler {
 		return a.service.EventsList(ctx, p, req)
 	})
 	call(mux, contract.MethodShellOutput, c, a.service.ShellOutput)
+	call(mux, contract.MethodBoxStats, c, a.service.BoxStats)
+	call(mux, contract.MethodBoxStatsReport, c, a.service.BoxStatsReport)
 	mux.HandleFunc("GET /v1/shell/watch", func(w http.ResponseWriter, r *http.Request) {
 		c := requestCaller(r.Context(), c)
 		w.Header().Set("Cache-Control", "no-store")

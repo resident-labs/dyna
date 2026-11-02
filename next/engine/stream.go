@@ -182,6 +182,12 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal) (<-
 					case <-ctx.Done():
 						return
 					}
+				case ask := <-channel.Asks():
+					select {
+					case out <- contract.BoxMessage{Body: contract.BoxStatsAsk{Ask: ask}}:
+					case <-ctx.Done():
+						return
+					}
 				case <-ctx.Done():
 					return
 				}

@@ -42,7 +42,7 @@
   {#if !switchable}<span class="names">{label.name}{#if label.detail}<small>{label.detail}</small>{/if}</span>{:else}
   <button type="button" class="open" bind:this={button} aria-disabled={busy} aria-haspopup="menu" aria-expanded={open} aria-label={`Profile: ${label.name} ${label.detail}. Change profile`}
     onclick={() => void show(!open)} onkeydown={event => { if (event.key === "ArrowDown") { event.preventDefault(); void show(true); } }}>
-    <span class="names">{label.name}{#if label.detail}<small>{label.detail}</small>{/if}</span><Icon name="chevron" /></button>{/if}
+    <span class="names"><span class="name">{label.name}<Icon name="chevron" /></span>{#if label.detail}<small>{label.detail}</small>{/if}</span></button>{/if}
   {#if open && profiles}
     <MenuList label="Profiles" items={rows} keyOf={entry => entry.name} checked={profile} anchor={root} onchoose={name => void choose(name)} onclose={refocus => void show(false, refocus)}>
       {#snippet row(entry)}<span class="names">{entry.shown.name}<small>{entry.shown.detail}</small></span>{/snippet}
@@ -54,8 +54,10 @@
 <style>
   .menu { position: relative; }
   .open { display: inline-flex; align-items: start; gap: 4px; max-width: 100%; margin: 0 -4px; padding: 0 4px; border: 0; border-radius: 4px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
-  .open :global(svg) { flex: none; width: 14px; height: 14px; margin-top: 3px; color: var(--muted); }
+  .open :global(svg) { flex: none; width: 14px; height: 14px; color: var(--muted); }
   .names { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
+  /* The chevron stays by the name, however long the line under it. */
+  .name { display: flex; align-items: center; gap: 4px; }
   small { color: var(--muted); font-size: 12.5px; line-height: 18px; }
   .open:hover:not([aria-disabled="true"]), .open[aria-expanded="true"] { background: var(--hover); }
   .open[aria-disabled="true"] { opacity: 0.6; cursor: default; }
