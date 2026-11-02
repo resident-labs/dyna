@@ -1151,6 +1151,10 @@ func removeHostBox(ctx context.Context, h box.HostDriver, record box.Box, forwar
 	if err := h.RemoveStackVolumes(ctx, record.ID); err != nil {
 		return err
 	}
+	// A box closed before it was created never got a slice, so there is none to remove.
+	if record.Slice == "" {
+		return nil
+	}
 	return h.RemoveSlice(ctx, record.Slice)
 }
 
