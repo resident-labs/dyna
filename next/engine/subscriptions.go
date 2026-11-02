@@ -184,7 +184,7 @@ func (s *Service) subscriptionAccess(ctx context.Context, caller contract.Princi
 		return forbidden()
 	}
 	if sub.Wake != "" && !manages(sub.Wake) {
-		return forbidden()
+		return &contract.Error{Code: contract.ErrForbidden, Message: "a session can wake only itself and its descendants"}
 	}
 	return nil
 }

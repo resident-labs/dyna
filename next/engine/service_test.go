@@ -328,7 +328,7 @@ func TestFailedTurnReturnsInputsWithoutWaking(t *testing.T) {
 }
 
 func TestPostAcrossRooms(t *testing.T) {
-	s, source, sender, ctx := setup(t)
+	s, source, _, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	other, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "other", RootProfile: "test"})
 	if e != nil {
@@ -343,12 +343,13 @@ func TestPostAcrossRooms(t *testing.T) {
 		t.Fatal(e)
 	}
 	<-channel
-	_, e = s.Post(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sender}, contract.PostRequest{Room: source, Text: "cross-room", Mentions: []string{"@other:target"}})
+	// Only the owner reaches another room: a session's mentions stay in its chain of command.
+	_, e = s.Post(ctx, owner, contract.PostRequest{Room: source, Text: "cross-room", Mentions: []string{"@other:target"}})
 	if e != nil {
 		t.Fatal(e)
 	}
 	steer := (<-channel).Body.(contract.TurnSteer)
-	if inputBody(steer.Input.Text) != "cross-room" || steer.Input.Reply.Kind != contract.ReplyPost || steer.Input.Reply.Target.Session != sender {
+	if inputBody(steer.Input.Text) != "cross-room" || steer.Input.Reply.Kind != contract.ReplyFinal || steer.Input.Reply.Target.Kind != contract.PrincipalOwner {
 		t.Fatalf("got %+v", steer)
 	}
 }

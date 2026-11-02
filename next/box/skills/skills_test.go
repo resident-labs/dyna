@@ -78,7 +78,7 @@ func TestTheWorkflowSkillSaysWhatTheCodeDoes(t *testing.T) {
 	for _, want := range []string{
 		"`JSON.parse(args)`", "`{code, stdout, stderr, durationMs}`", "`check` defaults to `true`", "`{failed: true, step, reason}`",
 		"`{step, text, branch, commit, files}`", "`{step, output, branch, commit, files}`", "`{branch, commit, merged, conflicts}`", "`r.output.issues`",
-		"A session ID is not a mention", "`merge()` reads `commit`, not the tip of `branch`", "A resume is a new session", "through any chain of resumes",
+		"A crew reports only to its parent", "`merge()` reads `commit`, not the tip of `branch`", "A resume is a new session", "through any chain of resumes",
 		"the run ended first", "needs no polling", "Nothing wakes a worker", "only through the prompt", "one worker per 512 MiB", "holds a box slot",
 		"dry run of one group", "give up in 40 seconds", "still reports done",
 		"Reload is for a running run, resume for an ended one", "`dyna workflow reload RUN FILE`", "no second one starts", "runs on until the run ends",

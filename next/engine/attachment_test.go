@@ -26,7 +26,7 @@ func uploadFile(t *testing.T, s *Service, room contract.RoomID, name, media, bod
 
 // A mention can deliver a post to another room. That session reads this file and no other session there does.
 func TestDeliveryGrantsThatPostsFileAcrossRooms(t *testing.T) {
-	s, roomA, sessionA, ctx := setup(t)
+	s, roomA, _, ctx := setup(t)
 	s.SetLayout(box.Layout{Data: t.TempDir()})
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	roomB, e := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "other", RootProfile: "test"})
@@ -42,8 +42,8 @@ func TestDeliveryGrantsThatPostsFileAcrossRooms(t *testing.T) {
 		t.Fatal(e)
 	}
 	file := uploadFile(t, s, roomA, "note.txt", "text/plain", "for named only")
-	sender := contract.Principal{Kind: contract.PrincipalSession, Session: sessionA}
-	if _, problem := s.Post(ctx, sender, contract.PostRequest{Room: roomA, Text: "see this", Attachments: []contract.Attachment{file}, Mentions: []string{"other:named"}}); problem != nil {
+	// Only the owner reaches another room: a session's mentions stay in its chain of command.
+	if _, problem := s.Post(ctx, owner, contract.PostRequest{Room: roomA, Text: "see this", Attachments: []contract.Attachment{file}, Mentions: []string{"other:named"}}); problem != nil {
 		t.Fatal(problem)
 	}
 	read := func(session contract.SessionID) *httptest.ResponseRecorder {
