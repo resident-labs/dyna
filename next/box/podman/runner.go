@@ -46,6 +46,8 @@ func buildFolder(slot int) string { return path.Join("ci", strconv.Itoa(slot)) }
 // and rm run in Podman's user namespace, where the job's files live.
 const buildScript = `b="$1"; limit="$2"
 mkdir -p -- "$b"
+# The runner's user must pass through the cache root and ci/ to reach its folder; a box may have made them 700.
+chmod a+rx -- "$(dirname -- "$(dirname -- "$b")")" "$(dirname -- "$b")"
 podman unshare chown 1001:1001 "$b"
 kb=$(podman unshare du -sk "$b" | cut -f1)
 if [ "$kb" -gt "$limit" ]; then podman unshare find "$b" -mindepth 1 -delete; fi`
