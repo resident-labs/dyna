@@ -87,7 +87,7 @@ test("a disabled hook never fails the line, and only hooks pass", () => {
 });
 
 test("the list spells out every event that fires a row, and a hook's whole command", () => {
-  const many = info({ on: ["github.ci.finished", "notice.posted", "github.pr.closed"], where: ["repo=o/r"], wake: { kind: "session", session: "ses_root" } });
+  const many = info({ on: ["github.ci.finished", "notice.posted", "github.pr.closed"], where: ["repo=o/r"], wake: "ses_root" });
   const [row] = subscriptionRows([many], () => "root");
   assert.equal(row.when, "On 3 events where repo=o/r");
   assert.equal(row.fires, "On github.ci.finished, notice.posted, github.pr.closed where repo=o/r");
