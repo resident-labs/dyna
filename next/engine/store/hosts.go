@@ -64,11 +64,12 @@ func (e *HostHeldError) Error() string {
 }
 
 // hostHeld reads what keeps a host, so nothing that needs it goes with it. A deleted box holds nothing, though it keeps its host.
-func hostHeld(ctx context.Context, tx *sql.Tx, host contract.HostName) error {
-	held, err := listIDs[string](ctx, tx, `SELECT 'session '||s.name||' ('||b.state||')' FROM boxes b JOIN sessions s ON s.id=b.session WHERE b.host=?1 AND b.state!='deleted'
+// Without boxes, only what is not a box counts, for a removal that discards the boxes.
+func hostHeld(ctx context.Context, tx *sql.Tx, host contract.HostName, boxes bool) error {
+	held, err := listIDs[string](ctx, tx, `SELECT 'session '||s.name||' ('||b.state||')' FROM boxes b JOIN sessions s ON s.id=b.session WHERE ?2 AND b.host=?1 AND b.state!='deleted'
 		UNION ALL SELECT 'CI of '||repo FROM repo_ci_hosts WHERE host=?1
 		UNION ALL SELECT 'a subscription run' FROM subscription_runs WHERE host=?1
-		UNION ALL SELECT 'the --only rule of room '||r.id FROM rooms r, json_each(r.only_hosts) j WHERE j.value=?1`, host)
+		UNION ALL SELECT 'the --only rule of room '||r.id FROM rooms r, json_each(r.only_hosts) j WHERE j.value=?1`, host, boxes)
 	if err != nil {
 		return err
 	}
@@ -81,7 +82,7 @@ func hostHeld(ctx context.Context, tx *sql.Tx, host contract.HostName) error {
 // DrainHost stops admission to a host that holds nothing, in one write with that check, so no box can land on it afterwards.
 func (s *Store) DrainHost(ctx context.Context, host contract.HostName) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		if err := hostHeld(ctx, tx, host); err != nil {
+		if err := hostHeld(ctx, tx, host, true); err != nil {
 			return err
 		}
 		result, err := tx.ExecContext(ctx, "UPDATE hosts SET state='draining' WHERE name=? AND state!='provisioning'", host)
@@ -99,7 +100,7 @@ func (s *Store) DrainHost(ctx context.Context, host contract.HostName) error {
 // RemoveHost deletes a host that holds nothing. Its deleted boxes let go of it, and what it still owed a deleted room goes with it.
 func (s *Store) RemoveHost(ctx context.Context, host contract.HostName) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		if err := hostHeld(ctx, tx, host); err != nil {
+		if err := hostHeld(ctx, tx, host, true); err != nil {
 			return err
 		}
 		for _, step := range []string{
