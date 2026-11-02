@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,7 +20,7 @@ func TestUpgradeGivesTrackedPRsNoMetadata(t *testing.T) {
 	}
 	defer db.Close()
 	before := schema[:strings.Index(schema, "CREATE TABLE issue_owners")]
-	if _, err = db.Exec(strings.Replace(before, ", meta TEXT NOT NULL DEFAULT '', meta_wake_at INTEGER NOT NULL DEFAULT 0", "", 1)); err != nil {
+	if _, err = db.Exec(withLastHost(strings.Replace(before, ", meta TEXT NOT NULL DEFAULT '', meta_wake_at INTEGER NOT NULL DEFAULT 0", "", 1))); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = db.Exec(`INSERT INTO meta(key,value) VALUES ('schema_version','67');
@@ -255,6 +256,60 @@ func TestOpenRootsGetTheAskGrant(t *testing.T) {
 // oldQuestions is what the step for meanwhile and blocked added to the questions table.
 const oldQuestions = ", meanwhile TEXT NOT NULL DEFAULT '', blocked INTEGER NOT NULL DEFAULT 0"
 
+// The move's rollback undoes this one step, so it must name it.
+func TestMoveScriptUndoesTheRightStep(t *testing.T) {
+	script, err := os.ReadFile("../../scripts/shared-folder-move.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(steps[69], "\n"), "RENAME COLUMN last_host TO run_host") || !strings.Contains(string(script), `= 70 ] || die "this undoes schema 70 only"`) {
+		t.Fatal("the rollback in scripts/shared-folder-move.sh does not match step 69")
+	}
+}
+
+// withLastHost puts back the column that step 69 renames.
+func withLastHost(schema string) string {
+	return strings.Replace(schema, "run_host TEXT", "last_host TEXT", 1)
+}
+
+// The sizes of the old per-host folders say nothing about the central one, so the next measure starts the table again.
+func TestUpgradeMakesOneSizePerRoom(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	const central = "CREATE TABLE room_shared (room TEXT PRIMARY KEY, bytes INTEGER NOT NULL, measured_at INTEGER NOT NULL);"
+	if !strings.Contains(schema, central) {
+		t.Fatal("schema.sql lost the central sizes")
+	}
+	old := strings.Replace(withLastHost(schema), central, "CREATE TABLE room_shared (room TEXT NOT NULL, host TEXT NOT NULL REFERENCES hosts(name), bytes INTEGER NOT NULL, measured_at INTEGER NOT NULL, PRIMARY KEY(room, host));", 1)
+	if _, err = db.Exec(old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`INSERT INTO meta(key,value) VALUES ('schema_version','69');
+		INSERT INTO hosts(name,ssh,state,cpus,mem_bytes,disk_bytes,checked_at) VALUES('h','h','ready',1,1,1,0);
+		INSERT INTO room_shared(room,host,bytes,measured_at) VALUES('r','h',7,0);
+		INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+		INSERT INTO subscriptions(id,scope,room,every_ms,wake_kind,wake_id,run_image,run_size,created_at,last_host) VALUES('s','room','r',1000,'','','base','small',0,'h')`); err != nil {
+		t.Fatal(err)
+	}
+	if err = upgrade(db, floorVersion, floorCommit, steps, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = compareSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	var rows int
+	if err = db.QueryRow("SELECT count(*) FROM room_shared").Scan(&rows); err != nil || rows != 0 {
+		t.Fatalf("rows = %d, err = %v", rows, err)
+	}
+	var pin string
+	if err = db.QueryRow("SELECT run_host FROM subscriptions WHERE id='s'").Scan(&pin); err != nil || pin != "" {
+		t.Fatalf("a Run's last host became its pin: %q, err = %v", pin, err)
+	}
+}
+
 func TestUpgradeLeavesOldQuestionsWithoutAPlan(t *testing.T) {
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.db"))
 	if err != nil {
@@ -264,7 +319,7 @@ func TestUpgradeLeavesOldQuestionsWithoutAPlan(t *testing.T) {
 	if !strings.Contains(schema, oldQuestions) {
 		t.Fatal("schema.sql lost the question columns")
 	}
-	if _, err = db.Exec(strings.Replace(beforeWorkflows, oldQuestions, "", 1)); err != nil {
+	if _, err = db.Exec(withLastHost(strings.Replace(beforeWorkflows, oldQuestions, "", 1))); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = db.Exec(`INSERT INTO meta(key,value) VALUES ('schema_version','65');
@@ -352,7 +407,7 @@ func TestUpgradeTrackedPRsFrom64(t *testing.T) {
 		}
 		old = append(old, line)
 	}
-	if _, err = db.Exec(strings.Join(old, "\n")); err != nil {
+	if _, err = db.Exec(withLastHost(strings.Join(old, "\n"))); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = db.Exec(`INSERT INTO meta(key,value) VALUES ('schema_version','64');

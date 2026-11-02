@@ -199,9 +199,7 @@ func (s *Service) beginRun(ctx context.Context, sub store.Subscription, now time
 	return nil
 }
 
-// placeRun picks a host the way admission picks one for a box. /box/shared belongs to a host, so a Run stays
-// where the subscription's last Run was, or else where the room's root is, for as long as that host is ready.
-// It waits there rather than move off a busy host and lose what earlier Runs kept. An empty host means wait.
+// placeRun picks a host the way admission picks one for a box. An empty host means wait.
 func (s *Service) placeRun(ctx context.Context, sub store.Subscription, id contract.BoxID, size contract.BoxSize) (contract.HostName, error) {
 	hosts, err := s.store.Hosts(ctx)
 	if err != nil {
@@ -240,14 +238,8 @@ func (s *Service) placeRun(ctx context.Context, sub store.Subscription, id contr
 			hosts[i].MemUsed = s.hookMemory(hosts[i].Name)
 		}
 	}
-	home := sub.LastHost
-	if home == "" && sub.Room != "" {
-		if home, err = s.store.RootBoxHost(ctx, sub.Room); err != nil {
-			return "", err
-		}
-	}
-	if i := slices.IndexFunc(hosts, func(h box.Host) bool { return h.Name == home && h.State == box.HostReady }); i >= 0 {
-		hosts = hosts[i : i+1]
+	if pin := sub.Run.Host; pin != "" {
+		hosts = slices.DeleteFunc(hosts, func(h box.Host) bool { return h.Name != pin })
 	}
 	return box.Admit(hosts, boxes, box.Box{ID: id, Room: sub.Room, Size: size}).Host, nil
 }

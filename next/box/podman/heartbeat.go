@@ -8,12 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
 
 type Load struct {
 	CPUUsed                                float64
 	MemBytes, MemUsed, DiskBytes, DiskUsed int64
+	ShareUp                                bool // The host's shared mount is up.
 }
 
 // LocalDisk reads the disk at path on this machine with the host probe. It returns zeros when the probe fails.
@@ -41,7 +43,7 @@ func parseDisk(out []byte) (bytes, used int64) {
 
 // Heartbeat reports load on each good tick and reports unreachable after three misses.
 // Each good probe also reads the dyna budget slices and calls onPressure once per episode. The caller owns the ticks.
-func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, data string, report func(reachable bool, load Load), onPressure func(slice string, kind contract.PressureKind)) {
+func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box.Layout, report func(reachable bool, load Load), onPressure func(slice string, kind contract.PressureKind)) {
 	misses := 0
 	seen := make(map[string]*slicePressure)
 	var prevTime time.Time
@@ -53,7 +55,7 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, data strin
 			return
 		case now := <-ticks:
 			probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			out, err := h.runUnbounded(probeCtx, nil, "bash", "-c", heartbeatScript, "dyna", data)
+			out, err := h.runUnbounded(probeCtx, nil, "bash", "-c", heartbeatScript, "dyna", layout.HostData, layout.HostShareMount())
 			cancel()
 			if err != nil {
 				misses++
@@ -64,7 +66,11 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, data strin
 			}
 			misses = 0
 			load.DiskBytes, load.DiskUsed = parseDisk(out)
+			load.ShareUp = false
 			for _, line := range strings.Split(string(out), "\n") {
+				if line == shareUpLine {
+					load.ShareUp = true
+				}
 				if strings.HasPrefix(line, "dyna-load ") {
 					var used, current int64
 					if n, _ := fmt.Sscanf(line, "dyna-load %d %d", &current, &used); n == 2 {

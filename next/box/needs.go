@@ -18,6 +18,15 @@ type Image struct {
 }
 
 // MissingDevice identifies a need that the selected host cannot supply.
+// ShareDown says a host's mount of the shared folders is down, so a box cannot start there.
+type ShareDown struct {
+	Host, Reason string
+}
+
+func (e ShareDown) Error() string {
+	return fmt.Sprintf("the shared folder is not available on host %s: %s", e.Host, e.Reason)
+}
+
 type MissingDevice struct {
 	Need Need
 	Host string

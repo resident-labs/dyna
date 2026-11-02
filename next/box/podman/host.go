@@ -182,7 +182,7 @@ func (h *Host) bind(ctx context.Context, f box.Forward) error {
 	if f.Box != "" {
 		_, err = h.execute(ctx, "bash", "-c", `mkdir -p -- "$1" && chmod 0700 -- "$1" && rm -f -- "$2"`, "dyna", filepath.Dir(f.HostPath), f.HostPath)
 	} else {
-		_, err = h.execute(ctx, "rm", "-f", "--", f.HostPath)
+		_, err = h.execute(ctx, "bash", "-c", `mkdir -p -- "$1" && rm -f -- "$2"`, "dyna", filepath.Dir(f.HostPath), f.HostPath)
 	}
 	if err != nil {
 		return err
@@ -339,24 +339,9 @@ func (h *Host) executeInput(ctx context.Context, input []byte, argv ...string) (
 }
 
 // Maintain removes dangling images and compacts caches without deleting borrowed objects.
-func (h *Host) Maintain(ctx context.Context, layout box.Layout) ([]contract.RoomShared, error) {
-	out, err := h.runUnbounded(ctx, nil, "bash", "-c", `podman image prune -f >/dev/null || exit; for repo in "$1"/*/*.git; do [ -d "$repo" ] || continue; git -C "$repo" gc --no-prune >/dev/null || exit; done; for dir in "$2"/*/"$3"; do [ -d "$dir" ] || continue; size=$(du -sb -- "$dir") || exit; room=${dir%/*}; printf '%s\0%s\0' "${room##*/}" "${size%%$'\t'*}"; done`, "dyna-maintain", layout.HostGitRoot(), layout.HostRooms(), box.SharedFolder)
-	if err != nil {
-		return nil, err
-	}
-	var sizes []contract.RoomShared
-	parts := strings.Split(string(out), "\x00")
-	if len(parts)%2 != 1 || parts[len(parts)-1] != "" {
-		return nil, errors.New("invalid room size output")
-	}
-	for i := 0; i < len(parts)-1; i += 2 {
-		bytes, err := strconv.ParseInt(parts[i+1], 10, 64)
-		if err != nil || bytes < 0 || parts[i] == "" {
-			return nil, errors.New("invalid room size output")
-		}
-		sizes = append(sizes, contract.RoomShared{Room: contract.RoomID(parts[i]), Bytes: bytes})
-	}
-	return sizes, nil
+func (h *Host) Maintain(ctx context.Context, layout box.Layout) error {
+	_, err := h.runUnbounded(ctx, nil, "bash", "-c", `podman image prune -f >/dev/null || exit; for repo in "$1"/*/*.git; do [ -d "$repo" ] || continue; git -C "$repo" gc --no-prune >/dev/null || exit; done`, "dyna-maintain", layout.HostGitRoot())
+	return err
 }
 
 // RemoveRoom deletes a room's folder. It runs in the user namespace, since a box can leave read-only folders and files
@@ -396,10 +381,8 @@ func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 	args := append([]string{"podman", "--cgroup-manager=systemd", "create", "--name", string(c.Box)}, userns...)
 	args = append(args, "--user", "1000:1000", "--label", "dyna.box="+string(c.Box), "--cgroup-parent="+c.Slice, "--cgroupns=private", "--systemd=always", "--stop-signal", "SIGTERM", "--entrypoint", "/usr/bin/tini", "--tmpfs", "/run/dyna:mode=1777", "--env", "HOME=/box/home", "--env", "PI_CODING_AGENT_DIR=/box/pi", "--volume", "dyna-box-"+string(c.Box)+":/box")
 	for _, m := range c.Mounts {
-		if !m.ReadOnly || m.MakeDir {
-			if _, err := h.run(ctx, "bash", "-c", `if [ ! -e "$1" ]; then mkdir -p -m 0700 -- "$1"; fi`, "dyna", m.HostPath); err != nil {
-				return err
-			}
+		if err := h.makeMountFolder(ctx, m); err != nil {
+			return err
 		}
 		v := m.HostPath + ":" + m.BoxPath
 		if m.ReadOnly {
