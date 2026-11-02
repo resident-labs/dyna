@@ -116,9 +116,9 @@ const (
 
 var quotedDynaMarker = regexp.MustCompile(`(?im)^([ \t]*)\[[ \t]*dyna[ \t]*\]`)
 
-// applyUpdate runs for a box on an old binary each time its box loop wakes. Between turns it stops the box, and when something on
-// the list holds the box up past its turn it says what, once per box per binary.
-func (s *Service) applyUpdate(ctx context.Context, session store.Session) error {
+// applyUpdate runs for a stale box each time its box loop wakes. Between turns it stops the box, and when something on the list
+// holds the box up past its turn it says what, once per box per update: the binary it waits for, or the mark that asked for it.
+func (s *Service) applyUpdate(ctx context.Context, session store.Session, update string) error {
 	stopping, err := s.store.StopStale(ctx, []contract.SessionID{session.ID})
 	if err != nil {
 		return err
@@ -135,7 +135,7 @@ func (s *Service) applyUpdate(ctx context.Context, session store.Session) error 
 	if text == "" {
 		return nil
 	}
-	notice, err := s.engineEvent(session.Room, contract.SessionNotice{Session: session.ID, Text: text, ClientID: store.BoxUpdateNoticeID(session.Box, s.binary)})
+	notice, err := s.engineEvent(session.Room, contract.SessionNotice{Session: session.ID, Text: text, ClientID: store.BoxUpdateNoticeID(session.Box, update)})
 	if err != nil {
 		return err
 	}
@@ -289,8 +289,12 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 				}
 			}
 			// This comes before dispatch, or a waiting delivery would start the next turn each time and a busy box would never update.
-			if stale {
-				if err := s.applyUpdate(ctx, session); err != nil {
+			update := s.binary
+			if !stale {
+				update = handle.Refresh()
+			}
+			if update != "" {
+				if err := s.applyUpdate(ctx, session, update); err != nil {
 					reason, cause = streamAdmissionFailed, err
 					return
 				}
