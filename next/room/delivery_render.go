@@ -42,11 +42,18 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 	case contract.SessionFailed:
 		return renderFailures(b), nil
 	case contract.SessionClosed:
-		goals := make([]string, len(b.Unheld))
-		for i, goal := range b.Unheld {
-			goals[i] = string(goal)
+		var did []string
+		if len(b.Handed) > 0 {
+			did = append(did, "handed you "+ResponsibilityNames(b.Handed))
 		}
-		return fmt.Sprintf("Session %s closed and left goals with no holder: %s.", b.Session, strings.Join(goals, ", ")), nil
+		if len(b.Unheld) > 0 {
+			goals := make([]string, len(b.Unheld))
+			for i, goal := range b.Unheld {
+				goals[i] = string(goal)
+			}
+			did = append(did, "left goals with no holder: "+strings.Join(goals, ", "))
+		}
+		return fmt.Sprintf("Session %s closed and %s.", b.Session, strings.Join(did, " and ")), nil
 	case contract.HostDiskLow:
 		return fmt.Sprintf("Host %s is low on disk: %d GiB free, %d GiB wanted. At the floor, new boxes wait and the oldest stopped boxes close.", b.Host, b.FreeBytes>>30, b.FloorBytes>>30), nil
 	case contract.PrOpened:

@@ -804,8 +804,9 @@ func TestClosedSessionsGoalsGoToItsParentButNotToRoot(t *testing.T) {
 		t.Fatalf("after the lead closed: %+v %v", goals, e)
 	}
 	closed := eventBodies[contract.SessionClosed](r, "session.closed", r.root)
-	if len(closed) != 1 || closed[0].Session != r.lead || len(closed[0].Unheld) != 1 || closed[0].Unheld[0] != "g1" {
-		t.Fatalf("root's notice: %+v", closed)
+	// The lead never read the child's notice, so that came up to root with the rest of its inputs.
+	if len(closed) != 2 || closed[0].Session != r.child || closed[1].Session != r.lead || len(closed[1].Unheld) != 1 || closed[1].Unheld[0] != "g1" {
+		t.Fatalf("root's notices: %+v", closed)
 	}
 
 	// Only root or the owner can pick up an unheld goal, and it wakes the new holder.
