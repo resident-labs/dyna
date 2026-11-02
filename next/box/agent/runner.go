@@ -32,7 +32,9 @@ type Runner struct {
 	Sink    turnSink
 	Setup   func(context.Context) error
 	// Attach stores an input's files in the box before Pi reads the input. It fails only when its context ends.
-	Attach   func(context.Context, contract.TurnInput) (contract.TurnInput, error)
+	Attach func(context.Context, contract.TurnInput) (contract.TurnInput, error)
+	// Steered hears each input Pi has queued for the running turn, so a command waiting in the foreground can step aside.
+	Steered  func()
 	setupErr error
 	// What the last transfer applied. Both start empty, so a new Pi process runs its transfer on the first turn:
 	// box.hello started Pi on the session's profile, and only Pi knows whether the conversation fits that model.
@@ -391,7 +393,9 @@ func (r *Runner) forward(ctx context.Context, input contract.TurnSteer) error {
 	var err error
 	switch input.Queue {
 	case contract.QueueSteer:
-		err = r.Harness.Steer(ctx, input.Input)
+		if err = r.Harness.Steer(ctx, input.Input); err == nil && r.Steered != nil {
+			r.Steered()
+		}
 	case contract.QueueFollowUp:
 		err = r.Harness.FollowUp(ctx, input.Input)
 	default:
