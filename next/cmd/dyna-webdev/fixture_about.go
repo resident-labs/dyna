@@ -97,7 +97,7 @@ func (d devService) SubscriptionList(ctx context.Context, p contract.Principal, 
 	}
 	hook := func(id string, minutes int, command ...string) contract.SubscriptionInfo {
 		return contract.SubscriptionInfo{Last: contract.HookPassed, Subscription: contract.Subscription{ID: contract.SubscriptionID(id), Scope: contract.ScopeRoom, Room: req.Room,
-			Every: contract.DurationMS(minutes * 60_000), Run: &contract.RunSpec{Command: command, Image: "base", Size: contract.BoxSizeSmall}}}
+			Every: contract.DurationOf(time.Duration(minutes) * time.Minute), Run: &contract.RunSpec{Command: command, Image: "base", Size: contract.BoxSizeSmall}}}
 	}
 	retired := hook("sub_digest", 1440, "python3", "nightly_digest.py")
 	retired.Disabled = true

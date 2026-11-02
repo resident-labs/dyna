@@ -118,7 +118,7 @@ func pass(t *testing.T, s *Service, ctx context.Context) {
 }
 
 func runRequest(room contract.RoomID) contract.SubscriptionAddRequest {
-	return contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: room, Every: contract.DurationMS((30 * time.Minute).Milliseconds()),
+	return contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: room, Every: "30m",
 		Run: &contract.RunSpec{Command: []string{"sh", "watch.sh"}, Image: "base", Size: contract.BoxSizeSmall, Files: []contract.RunFile{{Path: "watch.sh", Body: "echo hi"}}}}
 }
 
@@ -171,8 +171,8 @@ func listed(t *testing.T, s *Service, ctx context.Context, room contract.RoomID,
 
 func TestSubscriptionShapeRefusals(t *testing.T) {
 	s, room, worker, ctx := setup(t)
-	wake := &contract.Principal{Kind: contract.PrincipalSession, Session: worker}
-	every := contract.DurationMS(time.Hour.Milliseconds())
+	wake := string(worker)
+	every := contract.Duration("1h")
 	run := &contract.RunSpec{Command: []string{"true"}, Image: "base", Size: contract.BoxSizeSmall}
 	base := contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: room}
 	for name, change := range map[string]func(*contract.SubscriptionAddRequest){
@@ -182,7 +182,7 @@ func TestSubscriptionShapeRefusals(t *testing.T) {
 		"no trigger":    func(r *contract.SubscriptionAddRequest) { r.Wake = wake },
 		"both actions":  func(r *contract.SubscriptionAddRequest) { r.Every, r.Wake, r.Run = every, wake, run },
 		"no action":     func(r *contract.SubscriptionAddRequest) { r.Every = every },
-		"too often":     func(r *contract.SubscriptionAddRequest) { r.Every, r.Wake = 1000, wake },
+		"too often":     func(r *contract.SubscriptionAddRequest) { r.Every, r.Wake = "1s", wake },
 		"unknown event": func(r *contract.SubscriptionAddRequest) { r.On, r.Wake = []contract.EventType{"nope.done"}, wake },
 		"live event":    func(r *contract.SubscriptionAddRequest) { r.On, r.Wake = []contract.EventType{"turn.activity"}, wake },
 		"run on a hook": func(r *contract.SubscriptionAddRequest) { r.On, r.Run = []contract.EventType{"hook.finished"}, run },
@@ -235,12 +235,10 @@ func TestSubscriptionAuthority(t *testing.T) {
 	if problem != nil {
 		t.Fatal(problem)
 	}
-	every := contract.DurationMS(time.Hour.Milliseconds())
-	wakeOf := func(id contract.SessionID) *contract.Principal {
-		return &contract.Principal{Kind: contract.PrincipalSession, Session: id}
-	}
-	scoped := func(id contract.SessionID, wake *contract.Principal) contract.SubscriptionAddRequest {
-		return contract.SubscriptionAddRequest{Scope: contract.ScopeSession, Session: id, Every: every, Wake: wake}
+	every := contract.Duration("1h")
+	wakeOf := func(id contract.SessionID) string { return string(id) }
+	scoped := func(id contract.SessionID, wake string) contract.SubscriptionAddRequest {
+		return contract.SubscriptionAddRequest{Scope: contract.ScopeSession, Session: string(id), Every: every, Wake: wake}
 	}
 	machine := contract.SubscriptionAddRequest{Scope: contract.ScopeMachine, Every: every, Wake: wakeOf(worker)}
 	roomWake := contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: room, Every: every, Wake: wakeOf(worker)}
@@ -252,7 +250,7 @@ func TestSubscriptionAuthority(t *testing.T) {
 		"session on the machine":        {sessionCaller(rootID), machine, contract.ErrForbidden},
 		"non-root on the room":          {sessionCaller(worker), roomWake, contract.ErrForbidden},
 		"non-root adds a run":           {sessionCaller(worker), runRequest(room), contract.ErrForbidden},
-		"non-root adds a session run":   {sessionCaller(worker), contract.SubscriptionAddRequest{Scope: contract.ScopeSession, Session: worker, Every: every, Run: runRequest(room).Run}, contract.ErrForbidden},
+		"non-root adds a session run":   {sessionCaller(worker), contract.SubscriptionAddRequest{Scope: contract.ScopeSession, Session: string(worker), Every: every, Run: runRequest(room).Run}, contract.ErrForbidden},
 		"child wakes its parent":        {sessionCaller(child.Session), scoped(child.Session, wakeOf(worker)), contract.ErrForbidden},
 		"child owns its parent's scope": {sessionCaller(child.Session), scoped(worker, wakeOf(child.Session)), contract.ErrForbidden},
 		"root of another room":          {sessionCaller(rootID), contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: other.Room, Every: every, Run: runRequest(room).Run}, contract.ErrForbidden},
@@ -323,7 +321,7 @@ func recordNotice(t *testing.T, s *Service, ctx context.Context, room contract.R
 func TestDefaultSubscriptionWakesRoot(t *testing.T) {
 	s, room, root, ctx := setupRoot(t)
 	info := listed(t, s, ctx, room, store.DefaultSubscriptionID(room))
-	if !info.Default || info.Subscription.Wake == nil || info.Subscription.Wake.Session != root {
+	if !info.Default || info.Subscription.Wake != root {
 		t.Fatalf("default subscription: %+v", info)
 	}
 	before := pendingWakes(t, s, ctx, root)
@@ -355,7 +353,7 @@ func TestDefaultSubscriptionWakesRoot(t *testing.T) {
 
 func TestEventWakeSkipsOwnEventsAndDMs(t *testing.T) {
 	s, room, worker, ctx := setup(t)
-	addSubscription(t, s, ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeSession, Session: worker, On: []contract.EventType{"post.created"}, Wake: &contract.Principal{Kind: contract.PrincipalSession, Session: worker}})
+	addSubscription(t, s, ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeSession, Session: string(worker), On: []contract.EventType{"post.created"}, Wake: string(worker)})
 	pass(t, s, ctx)
 	var delivered func() int
 	delivered = func() int {
@@ -393,7 +391,7 @@ func TestEventRunCoalescesAndWaits(t *testing.T) {
 	s, room, _, ctx := setup(t)
 	runs, c := withRuns(t, s)
 	req := runRequest(room)
-	req.Every, req.On = 0, []contract.EventType{"notice.posted"}
+	req.Every, req.On = "", []contract.EventType{"notice.posted"}
 	id := addSubscription(t, s, ctx, req)
 	pass(t, s, ctx)
 	if runs.count() != 0 {
@@ -427,7 +425,7 @@ func TestScheduleDoesNotOverlap(t *testing.T) {
 	s, room, _, ctx := setup(t)
 	runs, c := withRuns(t, s)
 	req := runRequest(room)
-	req.Every = contract.DurationMS((10 * time.Minute).Milliseconds())
+	req.Every = "10m"
 	addSubscription(t, s, ctx, req)
 	pass(t, s, ctx)
 	if runs.count() != 0 {
@@ -672,7 +670,7 @@ func TestPausedRoomDoesNotFire(t *testing.T) {
 	s, room, root, ctx := setupRoot(t)
 	runs, c := withRuns(t, s)
 	id := addSubscription(t, s, ctx, runRequest(room))
-	wake := addSubscription(t, s, ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: room, Every: contract.DurationMS(time.Hour.Milliseconds()), Wake: &contract.Principal{Kind: contract.PrincipalSession, Session: root}})
+	wake := addSubscription(t, s, ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: room, Every: "1h", Wake: string(root)})
 	if _, problem := s.RoomPause(ctx, ownerCaller, contract.RoomPauseRequest{Room: room, Paused: true}); problem != nil {
 		t.Fatal(problem)
 	}
@@ -710,7 +708,7 @@ func TestPausedRoomDoesNotFire(t *testing.T) {
 func TestScheduledWakeDoesNotStack(t *testing.T) {
 	s, room, root, ctx := setupRoot(t)
 	_, c := withRuns(t, s)
-	addSubscription(t, s, ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: room, Every: contract.DurationMS(time.Hour.Milliseconds()), Wake: &contract.Principal{Kind: contract.PrincipalSession, Session: root}})
+	addSubscription(t, s, ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: room, Every: "1h", Wake: string(root)})
 	before := pendingWakes(t, s, ctx, root)
 	for range 4 {
 		c.add(time.Hour)
@@ -890,7 +888,7 @@ func TestRoomLimitHoldsARun(t *testing.T) {
 
 func TestSessionCloseEndsItsSubscriptions(t *testing.T) {
 	s, room, worker, ctx := setup(t)
-	id := addSubscription(t, s, ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeSession, Session: worker, Every: contract.DurationMS(time.Hour.Milliseconds()), Wake: &contract.Principal{Kind: contract.PrincipalSession, Session: worker}})
+	id := addSubscription(t, s, ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeSession, Session: string(worker), Every: "1h", Wake: string(worker)})
 	event, err := s.event(room, engineSender, contract.SessionClosed{Session: worker})
 	if err != nil {
 		t.Fatal(err)
@@ -901,7 +899,7 @@ func TestSessionCloseEndsItsSubscriptions(t *testing.T) {
 	if _, err := s.store.SubscriptionByID(ctx, id); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("subscription outlived its session: %v", err)
 	}
-	if _, problem := s.SubscriptionAdd(ctx, ownerCaller, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: room, Every: contract.DurationMS(time.Hour.Milliseconds()), Wake: &contract.Principal{Kind: contract.PrincipalSession, Session: worker}}); problem == nil || problem.Code != contract.ErrNotFound {
+	if _, problem := s.SubscriptionAdd(ctx, ownerCaller, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: room, Every: "1h", Wake: string(worker)}); problem == nil || problem.Code != contract.ErrInvalid {
 		t.Fatalf("waking a closed session: %v", problem)
 	}
 }

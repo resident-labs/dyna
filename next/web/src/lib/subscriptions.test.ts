@@ -8,9 +8,10 @@ const info = (subscription: Partial<SubscriptionInfo["subscription"]>, rest: Par
   ({ subscription: { id: "sub_a", scope: "room", ...subscription }, ...rest });
 
 test("a subscription says when it fires", () => {
-  assert.equal(subscriptionWhen(info({ every: 1_800_000 })), "Every 30 min");
-  assert.equal(subscriptionWhen(info({ every: 7_200_000 })), "Every 2 h");
-  assert.equal(subscriptionWhen(info({ every: 5_400_000 })), "Every 90 min");
+  assert.equal(subscriptionWhen(info({ every: "30m" })), "Every 30 min");
+  assert.equal(subscriptionWhen(info({ every: "2h" })), "Every 2 h");
+  assert.equal(subscriptionWhen(info({ every: "1h30m" })), "Every 90 min");
+  assert.equal(subscriptionWhen(info({ every: "1m30s" })), "Every 2 min");
   assert.equal(subscriptionWhen(info({ on: ["notice.posted", "github.pr.merged"] })), "On notice.posted, github.pr.merged");
   assert.equal(subscriptionWhen(info({ on: ["github.ci.finished", "notice.posted", "github.pr.closed"] })), "On 3 events");
 });
@@ -18,7 +19,7 @@ test("a subscription says when it fires", () => {
 test("a subscription says what it does", () => {
   const name = (session: string) => session === "ses_root" ? "root" : "?";
   assert.equal(subscriptionAction(info({ run }), name), "Runs bash watch.sh");
-  assert.equal(subscriptionAction(info({ wake: { kind: "session", session: "ses_root" } }), name), "Wakes root");
+  assert.equal(subscriptionAction(info({ wake: "ses_root" }), name), "Wakes root");
 });
 
 test("a subscription's state puts the worst news first", () => {
@@ -51,8 +52,8 @@ test("a hook with no command still has a name", () => {
   assert.deepEqual(hookName(["bash"]), { name: "Hook", args: [] });
 });
 
-const hook = (rest: Partial<SubscriptionInfo> = {}, command = ["bash", "watch.sh"]) => info({ run: { ...run, command }, every: 900_000 }, rest);
-const wake = (rest: Partial<SubscriptionInfo> = {}) => info({ wake: { kind: "session", session: "ses_root" }, on: ["notice.posted"] }, rest);
+const hook = (rest: Partial<SubscriptionInfo> = {}, command = ["bash", "watch.sh"]) => info({ run: { ...run, command }, every: "15m" }, rest);
+const wake = (rest: Partial<SubscriptionInfo> = {}) => info({ wake: "ses_root", on: ["notice.posted"] }, rest);
 const summary = (list: SubscriptionInfo[]) => { const line = subscriptionSummary(list); return [line.count, line.health].filter(Boolean).join(", "); };
 
 test("the closed line counts the hooks that are on, and says how they stand", () => {
