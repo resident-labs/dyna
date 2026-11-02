@@ -55,31 +55,42 @@ const hook = (rest: Partial<SubscriptionInfo> = {}, command = ["bash", "watch.sh
 const wake = (rest: Partial<SubscriptionInfo> = {}) => info({ wake: { kind: "session", session: "ses_root" }, on: ["notice.posted"] }, rest);
 const summary = (list: SubscriptionInfo[]) => { const line = subscriptionSummary(list); return [line.count, line.health].filter(Boolean).join(", "); };
 
-test("the closed line counts the hooks that are on, and says how they stand", () => {
-  assert.equal(summary(Array.from({ length: 6 }, () => hook({ last: "passed" }))), "6 hooks, all passing");
-  assert.equal(summary([hook({ last: "passed" })]), "1 hook, all passing");
-  assert.equal(summary([...Array.from({ length: 5 }, () => hook({ last: "passed" })), hook({ last: "failed", failures: 1 })]), "6 hooks, 1 failing");
+test("the line counts every row the list shows, and says how the hooks stand", () => {
+  assert.equal(summary(Array.from({ length: 6 }, () => hook({ last: "passed" }))), "6, all passing");
+  assert.equal(summary([hook({ last: "passed" })]), "1, all passing");
+  assert.equal(summary([...Array.from({ length: 5 }, () => hook({ last: "passed" })), hook({ last: "failed", failures: 1 })]), "6, 1 failing");
   assert.equal(subscriptionSummary([hook({ last: "failed", failures: 3 })]).failing, true);
 });
 
+test("the count matches the list, wakes and disabled hooks included", () => {
+  // The owner's case: 3 hooks on and 8 more rows of wakes and disabled hooks read "3 hooks" over a list of 11.
+  const list = [...Array.from({ length: 3 }, () => hook({ last: "passed" })), ...Array.from({ length: 6 }, () => wake()), hook({ disabled: true }), hook({ disabled: true }), wake({ disabled: true })];
+  assert.equal(subscriptionRows(list, () => "root").length, 11);
+  assert.equal(summary(list), "11, all passing");
+});
+
 test("a hook that has not run keeps the line from saying all passing", () => {
-  assert.equal(summary([hook({ last: "passed" }), hook()]), "2 hooks");
+  assert.equal(summary([hook({ last: "passed" }), hook()]), "2");
 });
 
 test("a running hook is still judged by its last result", () => {
-  assert.equal(summary([hook({ running: true, last: "passed" })]), "1 hook, all passing");
-  assert.equal(summary([hook({ running: true, failures: 2, last: "failed" })]), "1 hook, 1 failing");
+  assert.equal(summary([hook({ running: true, last: "passed" })]), "1, all passing");
+  assert.equal(summary([hook({ running: true, failures: 2, last: "failed" })]), "1, 1 failing");
 });
 
-test("a disabled hook and a wake stay out of the count", () => {
-  assert.equal(summary([hook({ last: "passed" }), hook({ disabled: true, failures: 4, last: "failed" }), wake(), wake({ disabled: true })]), "1 hook, all passing");
-});
-
-test("with no hook on, the line says what there is", () => {
-  assert.equal(summary([wake()]), "1 wake");
-  assert.equal(summary([wake(), wake()]), "2 wakes");
-  assert.equal(summary([hook({ disabled: true }), wake({ disabled: true })]), "2 off");
+test("a disabled hook never fails the line, and only hooks pass", () => {
+  assert.equal(summary([hook({ last: "passed" }), hook({ disabled: true, failures: 4, last: "failed" }), wake(), wake({ disabled: true })]), "3, all passing");
+  assert.equal(summary([wake(), wake()]), "2");
+  assert.equal(summary([hook({ disabled: true }), wake({ disabled: true })]), "1");
   assert.equal(summary([]), "");
+});
+
+test("the list spells out every event that fires a row, and a hook's whole command", () => {
+  const many = info({ on: ["github.ci.finished", "notice.posted", "github.pr.closed"], where: ["repo=o/r"], wake: { kind: "session", session: "ses_root" } });
+  const [row] = subscriptionRows([many], () => "root");
+  assert.equal(row.when, "On 3 events where repo=o/r");
+  assert.equal(row.fires, "On github.ci.finished, notice.posted, github.pr.closed where repo=o/r");
+  assert.equal(subscriptionRows([hook()], () => "root")[0].command, "bash watch.sh");
 });
 
 test("a disabled wake stays out of the list", () => {
