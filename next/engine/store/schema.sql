@@ -4,7 +4,7 @@ CREATE TABLE connect_attempt (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT
 CREATE TABLE connect_link_state (id INTEGER PRIMARY KEY CHECK(id=1), epoch INTEGER NOT NULL CHECK(epoch>=0), linked INTEGER NOT NULL CHECK(linked IN (0,1)), generation INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE connect_nonces (nonce TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
 CREATE TABLE rooms (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, cpus INTEGER NOT NULL, mem_bytes INTEGER NOT NULL, paused_at INTEGER, state TEXT NOT NULL DEFAULT 'open', reason TEXT NOT NULL DEFAULT '', only_hosts TEXT NOT NULL DEFAULT '[]');
-CREATE TABLE repos (repo TEXT PRIMARY KEY, default_room TEXT NOT NULL REFERENCES rooms(id), main_head TEXT NOT NULL DEFAULT '');
+CREATE TABLE repos (repo TEXT PRIMARY KEY, default_room TEXT NOT NULL REFERENCES rooms(id), main_head TEXT NOT NULL DEFAULT '', ci INTEGER NOT NULL DEFAULT 0, ci_max INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE room_repos (room TEXT NOT NULL REFERENCES rooms(id), repo TEXT NOT NULL REFERENCES repos(repo), is_default INTEGER NOT NULL, PRIMARY KEY(room, repo));
 CREATE UNIQUE INDEX room_repos_default ON room_repos(room) WHERE is_default = 1;
 CREATE TABLE sessions (id TEXT PRIMARY KEY, room TEXT NOT NULL REFERENCES rooms(id), name TEXT NOT NULL, parent TEXT REFERENCES sessions(id), profile TEXT NOT NULL, state TEXT NOT NULL, goal TEXT NOT NULL, created_at INTEGER NOT NULL, closed_at INTEGER, repo TEXT NOT NULL DEFAULT '', shell_jobs INTEGER NOT NULL DEFAULT 0, model_retry_at INTEGER NOT NULL DEFAULT 0, model_retries INTEGER NOT NULL DEFAULT 0, close_reason TEXT NOT NULL DEFAULT '', compose TEXT NOT NULL DEFAULT '');
@@ -30,7 +30,6 @@ CREATE TABLE disk_warnings (host TEXT PRIMARY KEY, at INTEGER NOT NULL);
 CREATE TABLE room_shared (room TEXT PRIMARY KEY, bytes INTEGER NOT NULL, measured_at INTEGER NOT NULL);
 CREATE TABLE host_rooms (host TEXT NOT NULL REFERENCES hosts(name), room TEXT NOT NULL REFERENCES rooms(id), PRIMARY KEY(host, room));
 CREATE TABLE host_labels (host TEXT NOT NULL REFERENCES hosts(name), label TEXT NOT NULL, PRIMARY KEY(host, label));
-CREATE TABLE repo_ci_hosts (repo TEXT NOT NULL REFERENCES repos(repo), host TEXT NOT NULL REFERENCES hosts(name), runners INTEGER NOT NULL, size TEXT NOT NULL, PRIMARY KEY(repo, host));
 CREATE TABLE boxes (id TEXT PRIMARY KEY, session TEXT NOT NULL UNIQUE REFERENCES sessions(id), host TEXT REFERENCES hosts(name), image TEXT NOT NULL, size TEXT NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL, slice TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, want TEXT NOT NULL DEFAULT 'run', due_at INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX boxes_host_state ON boxes(host, state);
 CREATE TABLE operations (id TEXT PRIMARY KEY, kind TEXT NOT NULL, room TEXT REFERENCES rooms(id), by_kind TEXT NOT NULL, by_id TEXT NOT NULL, class TEXT NOT NULL, state TEXT NOT NULL, card BLOB NOT NULL, args BLOB NOT NULL, args_sha256 BLOB NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, decision BLOB, result BLOB);

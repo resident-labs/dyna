@@ -1,8 +1,10 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 
 	"github.com/resident-labs/dyna/contract"
@@ -14,45 +16,49 @@ var ErrRoomNotFound = errors.New("unknown room")
 // ErrRepoNotFound means no room lists the repository.
 var ErrRepoNotFound = errors.New("unknown repository")
 
-// SetRepoCI replaces a repository's runner hosts. A repository with none is in
-// GitHub mode, and one with any is in box mode.
-func (s *Store) SetRepoCI(ctx context.Context, repo contract.RepoName, hosts []contract.RepoCIHost) error {
+// SetRepoCI turns a repository's CI runners on or off. Max bounds them across sizes, and zero leaves them to admission.
+func (s *Store) SetRepoCI(ctx context.Context, repo contract.RepoName, on bool, max int) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		var exists int
-		if err := tx.QueryRowContext(ctx, "SELECT 1 FROM repos WHERE repo=?", repo).Scan(&exists); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return ErrRepoNotFound
-			}
+		result, err := tx.ExecContext(ctx, "UPDATE repos SET ci=?, ci_max=? WHERE repo=?", on, max, repo)
+		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM repo_ci_hosts WHERE repo=?", repo); err != nil {
-			return err
-		}
-		for _, host := range hosts {
-			if _, err := tx.ExecContext(ctx, "INSERT INTO repo_ci_hosts(repo,host,runners,size) VALUES(?,?,?,?)", repo, host.Host, host.Runners, host.Size); err != nil {
-				return err
-			}
+		if n, err := result.RowsAffected(); err != nil || n == 0 {
+			return cmp.Or(err, ErrRepoNotFound)
 		}
 		return nil
 	})
 }
 
-// CIHosts lists the runner hosts of repositories in box mode.
-func (s *Store) CIHosts(ctx context.Context) ([]contract.RepoCIHost, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT repo,host,runners,size FROM repo_ci_hosts ORDER BY repo,host")
+// CIRepo is a repository whose CI runs on Dyna's runners, with its room and that room's rule, which its runners follow as
+// the room's boxes do.
+type CIRepo struct {
+	Repo contract.RepoName
+	Max  int
+	Room contract.RoomID
+	Only []string
+}
+
+// CIRepos lists the repositories whose CI is on.
+func (s *Store) CIRepos(ctx context.Context) ([]CIRepo, error) {
+	rows, err := s.Read().QueryContext(ctx, "SELECT p.repo, p.ci_max, p.default_room, r.only_hosts FROM repos p JOIN rooms r ON r.id=p.default_room WHERE p.ci=1 ORDER BY p.repo")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var hosts []contract.RepoCIHost
+	var repos []CIRepo
 	for rows.Next() {
-		var host contract.RepoCIHost
-		if err := rows.Scan(&host.Repo, &host.Host, &host.Runners, &host.Size); err != nil {
+		var repo CIRepo
+		var only string
+		if err := rows.Scan(&repo.Repo, &repo.Max, &repo.Room, &only); err != nil {
 			return nil, err
 		}
-		hosts = append(hosts, host)
+		if err := json.Unmarshal([]byte(only), &repo.Only); err != nil {
+			return nil, err
+		}
+		repos = append(repos, repo)
 	}
-	return hosts, rows.Err()
+	return repos, rows.Err()
 }
 
 // RoomRepos returns the repositories listed by a room.

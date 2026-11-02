@@ -3,12 +3,9 @@ package engine
 import (
 	"context"
 	"errors"
-	"fmt"
 	"regexp"
-	"slices"
 	"strings"
 
-	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 )
@@ -52,32 +49,10 @@ func (s *Service) RoomRepoAdd(ctx context.Context, caller contract.Principal, re
 
 // RepoCISet chooses where a repository's CI runs. Only the owner reaches it.
 func (s *Service) RepoCISet(ctx context.Context, caller contract.Principal, req contract.RepoCISetRequest) (contract.RepoCISetResponse, *contract.Error) {
-	if req.Mode != contract.CIGitHub && req.Mode != contract.CIBox {
-		return contract.RepoCISetResponse{}, invalid("mode must be github or box")
+	if req.Max < 0 || !req.On && req.Max != 0 {
+		return contract.RepoCISetResponse{}, invalid("max is a number of runners, for a repository that is on")
 	}
-	if (req.Mode == contract.CIBox) != (len(req.Hosts) > 0) {
-		return contract.RepoCISetResponse{}, invalid("box mode needs at least one host, and github mode takes none")
-	}
-	known, err := s.store.Hosts(ctx)
-	if err != nil {
-		return contract.RepoCISetResponse{}, failure(err)
-	}
-	seen := make(map[contract.HostName]bool)
-	for _, host := range req.Hosts {
-		exists := slices.ContainsFunc(known, func(h box.Host) bool { return h.Name == host.Host && h.State != box.HostRemoved })
-		if _, sized := box.Size(host.Size); !exists || !sized || seen[host.Host] || host.Repo != req.Repo || host.Runners < 1 {
-			return contract.RepoCISetResponse{}, invalid("each host needs a known name, a size, and at least one runner, once")
-		}
-		if host.Runners > box.RunnerSlots {
-			return contract.RepoCISetResponse{}, invalid(fmt.Sprintf("a host runs at most %d runners", box.RunnerSlots))
-		}
-		// GitHub gives a job to any idle runner of a scale set, so mixed sizes would be a lottery.
-		if host.Size != req.Hosts[0].Size {
-			return contract.RepoCISetResponse{}, invalid("all hosts of a repository use one runner size")
-		}
-		seen[host.Host] = true
-	}
-	if err := s.store.SetRepoCI(ctx, req.Repo, req.Hosts); err != nil {
+	if err := s.store.SetRepoCI(ctx, req.Repo, req.On, req.Max); err != nil {
 		if errors.Is(err, store.ErrRepoNotFound) {
 			return contract.RepoCISetResponse{}, invalid("unknown repository")
 		}
