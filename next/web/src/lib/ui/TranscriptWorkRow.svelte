@@ -112,7 +112,7 @@
           {#if !item.failed}
             <div class="diff-summary"><span class="add">+{lines.filter(line => line.startsWith("+") && !line.startsWith("+++")).length}</span><span class="remove">−{lines.filter(line => line.startsWith("-") && !line.startsWith("---")).length}</span></div>
           {/if}
-          <pre class="diff">{#each (expandedContent[item.id + "/diff"] ? lines : lines.slice(0, 12)) as line}<span class:add={line.startsWith("+")} class:remove={line.startsWith("-")}>{line}&#10;</span>{/each}</pre>{#if lines.length > 12 && !expandedContent[item.id + "/diff"]}<button onclick={() => expandedContent[item.id + "/diff"] = true}>Show all</button>{/if}
+          <pre class="diff">{#each (expandedContent[item.id + "/diff"] ? lines : lines.slice(0, 12)) as line}<span class:add={line.startsWith("+")} class:remove={line.startsWith("-")}>{line}</span>{/each}</pre>{#if lines.length > 12 && !expandedContent[item.id + "/diff"]}<button onclick={() => expandedContent[item.id + "/diff"] = true}>Show all</button>{/if}
         {/if}
         {#if !item.diff || item.failed}
         {#each parts as name}
@@ -184,6 +184,10 @@
   .diff-summary { display: flex; gap: 6px; align-items: center; font: inherit; }
   .add, .diff .add { color: var(--success); }
   .remove, .diff .remove { color: var(--danger); }
+  /* One block per line: Svelte collapses a trailing newline in a span, which ran the lines together. */
+  .diff span { display: block; min-height: 1lh; }
+  .diff .add { background: color-mix(in oklab, var(--success) 12%, transparent); }
+  .diff .remove { background: color-mix(in oklab, var(--danger) 12%, transparent); }
   .time { margin-left: auto; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
   button { border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
   button:hover { color: var(--text); }
