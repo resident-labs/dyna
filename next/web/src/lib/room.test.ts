@@ -652,8 +652,8 @@ test("step rows reach only the open run page, and the run's end and a new connec
     await new Promise(done => setTimeout(done));
     const seen: unknown[] = [];
     const stop = store.watchRun("crew", row => seen.push(row));
-    store.apply({ seq: 0, id: "s", at: "", from: { kind: "engine" }, type: "workflow.step_changed", body: { run: "wf", session: "crew", step } });
-    store.apply({ seq: 0, id: "o", at: "", from: { kind: "engine" }, type: "workflow.step_changed", body: { run: "wf2", session: "other", step } });
+    store.apply({ seq: 0, id: "s", at: "", from: { kind: "engine" }, type: "workflow.step_changed", body: { run: "wf", session: "crew", step, steps: 1, running: 1, failed: 0 } });
+    store.apply({ seq: 0, id: "o", at: "", from: { kind: "engine" }, type: "workflow.step_changed", body: { run: "wf2", session: "other", step, steps: 1, running: 1, failed: 0 } });
     assert.deepEqual(seen, [step]);
     assert.equal(window.ordered.length, 0);
     store.apply(event(6, { type: "workflow.ended", body: { run: "wf", session: "crew", name: "crew", state: "failed", failed: 2, failedSteps: ["a", "b"], usage } }));
@@ -665,7 +665,7 @@ test("step rows reach only the open run page, and the run's end and a new connec
     hello();
     assert.deepEqual(seen, [step, undefined, undefined]);
     stop();
-    store.apply({ seq: 0, id: "s2", at: "", from: { kind: "engine" }, type: "workflow.step_changed", body: { run: "wf", session: "crew", step } });
+    store.apply({ seq: 0, id: "s2", at: "", from: { kind: "engine" }, type: "workflow.step_changed", body: { run: "wf", session: "crew", step, steps: 1, running: 1, failed: 0 } });
     assert.equal(seen.length, 3);
   } finally { globalThis.fetch = original; }
 });

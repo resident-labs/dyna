@@ -35,6 +35,8 @@ const (
 	// commandOutputBytes is how much of each output stream run() returns.
 	commandOutputBytes = 64 << 10
 	stepNameRunes      = 80
+	// laneRunes bounds a step's lane, which names a subject rather than describing it.
+	laneRunes = 80
 )
 
 //go:embed crew_host.js
@@ -46,6 +48,7 @@ type crewEngine interface {
 	WorkflowStepStart(context.Context, contract.WorkflowStepStartRequest) (contract.WorkflowStepStartResponse, error)
 	WorkflowStepEnd(context.Context, contract.WorkflowStepEndRequest) error
 	WorkflowStepTranscript(context.Context, contract.WorkflowStepTranscriptRequest) error
+	WorkflowSetStatus(context.Context, contract.WorkflowSetStatusRequest) error
 	WorkflowPost(context.Context, contract.PostRequest) (contract.PostResponse, error)
 }
 
@@ -276,12 +279,14 @@ func (c *Crew) Start(ctx context.Context, id contract.TurnID, inputs []contract.
 	return result, nil
 }
 
-// crewCall is one line from the script host. Payload and Opts identify a step, with Parent, the enclosing workflow's key.
+// crewCall is one line from the script host. Payload and Opts identify a step, with Parent, the enclosing workflow's key. Lane
+// comes out of the script's options before they reach here, so tagging a step with its subject keeps its key.
 type crewCall struct {
 	ID      int64           `json:"id"`
 	Op      string          `json:"op"`
 	Parent  string          `json:"parent"`
 	Phase   string          `json:"phase"`
+	Lane    string          `json:"lane"`
 	Payload json.RawMessage `json:"payload"`
 	Opts    json.RawMessage `json:"opts"`
 	Key     string          `json:"key"`    // workflow_end
@@ -408,6 +413,12 @@ func (c *Crew) execute(ctx, work context.Context, steps *sync.WaitGroup, workflo
 				}
 				return stepOutcome{}
 			})
+		case "status":
+			// Not a step, so nothing replays it: a resumed script writes its lines again as it reaches them. The run goes on
+			// without one that did not land.
+			if err := c.config.Engine.WorkflowSetStatus(work, contract.WorkflowSetStatusRequest{Text: finalText(call.Payload)}); err != nil {
+				log.Printf("workflow status: %v", err)
+			}
 		default:
 			steps.Go(func() {
 				out := c.handle(work, call)
@@ -540,7 +551,11 @@ func (c *Crew) journal(ctx context.Context, call crewCall, key, name string, inf
 	if len(detail) > stepDetailBytes {
 		detail = strings.ToValidUTF8(detail[:stepDetailBytes], "")
 	}
-	stored, err := c.config.Engine.WorkflowStepStart(ctx, contract.WorkflowStepStartRequest{Key: key, Parent: call.Parent, Kind: info.kind, Name: name, Phase: info.phase, Profile: info.profile, Detail: detail, Version: call.run.number()})
+	lane := strings.TrimSpace(call.Lane)
+	if runes := []rune(lane); len(runes) > laneRunes {
+		lane = string(runes[:laneRunes])
+	}
+	stored, err := c.config.Engine.WorkflowStepStart(ctx, contract.WorkflowStepStartRequest{Key: key, Parent: call.Parent, Kind: info.kind, Name: name, Phase: info.phase, Lane: lane, Profile: info.profile, Detail: detail, Version: call.run.number()})
 	if err != nil {
 		return crewReply{Error: err.Error(), Step: name}
 	}

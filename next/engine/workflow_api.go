@@ -180,7 +180,27 @@ func metaText(value string) string {
 
 func (s *Service) workflowInfo(ctx context.Context, run store.WorkflowRun) (contract.WorkflowInfo, error) {
 	summary, err := s.store.WorkflowSummary(ctx, run.ID)
-	return contract.WorkflowInfo{Run: run.ID, Room: run.Room, Session: run.Session, Name: run.Name, Description: run.Description, Profiles: run.Profiles, Repo: run.Repo, Commit: run.Commit, Version: run.Version, State: run.State, Result: run.Result, Steps: summary.Steps, Failed: summary.Failed, FailedSteps: summary.FailedSteps, Usage: summary.Usage, Started: run.Started, Ended: run.Ended}, err
+	if err != nil {
+		return contract.WorkflowInfo{}, err
+	}
+	_, running, _, err := s.store.WorkflowCounts(ctx, run.ID)
+	info := contract.WorkflowInfo{Run: run.ID, Room: run.Room, Session: run.Session, Name: run.Name, Description: run.Description, Profiles: run.Profiles, Repo: run.Repo, Commit: run.Commit, Version: run.Version, State: run.State, Result: run.Result, Steps: summary.Steps, Running: running, Failed: summary.Failed, FailedSteps: summary.FailedSteps, Usage: summary.Usage, Started: run.Started, Ended: run.Ended}
+	if n := len(run.StatusLines); n > 0 {
+		info.Status, info.StatusAt = harness.Mask(run.StatusLines[n-1].Text), run.StatusLines[n-1].At
+	}
+	return info, err
+}
+
+// statusLineRunes bounds a status() line: one line that a run's header and the Runs list show whole or nearly.
+const statusLineRunes = 200
+
+// statusLine is a script's status() text as one line.
+func statusLine(text string) string {
+	line := strings.Join(strings.Fields(text), " ")
+	if runes := []rune(line); len(runes) > statusLineRunes {
+		line = string(runes[:statusLineRunes-1]) + "…"
+	}
+	return line
 }
 
 func (s *Service) WorkflowStatus(ctx context.Context, caller contract.Principal, req contract.WorkflowStatusRequest) (contract.WorkflowStatusResponse, *contract.Error) {
@@ -213,7 +233,11 @@ func (s *Service) WorkflowStatus(ctx context.Context, caller contract.Principal,
 	for i := range steps {
 		maskStep(&steps[i])
 	}
-	return contract.WorkflowStatusResponse{Run: info, Steps: steps, Merge: merge}, nil
+	lines := make([]contract.WorkflowStatusLine, 0, len(run.StatusLines))
+	for _, line := range run.StatusLines {
+		lines = append(lines, contract.WorkflowStatusLine{Text: harness.Mask(line.Text), At: line.At})
+	}
+	return contract.WorkflowStatusResponse{Run: info, Steps: steps, Merge: merge, StatusLines: lines}, nil
 }
 
 // WorkflowStep reads what a journal row leaves out, for the run page. A closed crew keeps it.
@@ -336,15 +360,44 @@ func (s *Service) WorkflowStepTranscript(ctx context.Context, caller contract.Pr
 	return contract.WorkflowStepTranscriptResponse{}, nil
 }
 
-// publishStep tells open run pages about a step. The journal already holds it, so a failure here costs a page one update.
+// WorkflowSetStatus keeps a script's status() line on its run and tells open pages. An empty line clears it, so the page
+// counts the steps again.
+func (s *Service) WorkflowSetStatus(ctx context.Context, caller contract.Principal, req contract.WorkflowSetStatusRequest) (contract.WorkflowSetStatusResponse, *contract.Error) {
+	run, problem := s.callerWorkflow(ctx, caller)
+	if problem != nil {
+		return contract.WorkflowSetStatusResponse{}, problem
+	}
+	if run.State != contract.WorkflowRunning {
+		return contract.WorkflowSetStatusResponse{}, invalid("no running run for this line")
+	}
+	text := statusLine(req.Text)
+	if err := s.store.SetWorkflowStatus(ctx, run.ID, text, s.now()); err != nil {
+		return contract.WorkflowSetStatusResponse{}, failure(err)
+	}
+	event, err := s.event(run.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.WorkflowStatusChanged{Run: run.ID, Session: run.Session, Status: harness.Mask(text)})
+	if err != nil {
+		log.Printf("workflow %s status: %v", run.ID, err)
+		return contract.WorkflowSetStatusResponse{}, nil
+	}
+	s.live.Publish(run.Room, event, false)
+	return contract.WorkflowSetStatusResponse{}, nil
+}
+
+// publishStep tells open run pages about a step, and the Runs list about the run's counts. The journal already holds it, so a
+// failure here costs a page one update.
 func (s *Service) publishStep(ctx context.Context, run store.WorkflowRun, key string) {
 	step, err := s.store.WorkflowStep(ctx, run.ID, key)
 	if err != nil {
 		log.Printf("workflow %s step %s: %v", run.ID, key, err)
 		return
 	}
+	steps, running, failed, err := s.store.WorkflowCounts(ctx, run.ID)
+	if err != nil {
+		log.Printf("workflow %s step %s: %v", run.ID, key, err)
+		return
+	}
 	maskStep(&step)
-	event, err := s.event(run.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.WorkflowStepChanged{Run: run.ID, Session: run.Session, Step: step})
+	event, err := s.event(run.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.WorkflowStepChanged{Run: run.ID, Session: run.Session, Step: step, Steps: steps, Running: running, Failed: failed})
 	if err != nil {
 		log.Printf("workflow %s step %s: %v", run.ID, key, err)
 		return

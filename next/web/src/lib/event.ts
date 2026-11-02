@@ -51,7 +51,7 @@ const bodies: Record<string, Check> = {
   "post.created": object({ text: string, home: conversation, turn: optional(string), mentions: optional(nullable(array(principal))), replyTo: optional(string), clientId: optional(string),
     attachments: optional(nullable(array(object({ name: string, media: string, bytes: number, sha256: string, visual: optional(nullable(visual)) })))) }),
   "session.restarted": object({ session: string, imageUpdated: optional(boolean) }),
-  "session.started": object({ session: string, name: string, parent: optional(string), profile: string, goal: optional(string), doneWhen: optional(string), brief: optional(string) }),
+  "session.started": object({ session: string, name: string, parent: optional(string), profile: string, goal: optional(string), doneWhen: optional(string), brief: optional(string), workflow: optional(boolean) }),
   "session.moved": object({ session: string, newParent: string }),
   "session.closed": object({ session: string, reason: optional(oneOf("dormant", "disk")), archive: optional(string), unheld: optional(nullable(array(string))) }),
   "session.compacted": object({ session: string, turn: string, usage, tokensBefore: optional(number), tokensAfter: optional(number), error: optional(string) }),
@@ -103,8 +103,9 @@ const bodies: Record<string, Check> = {
   "goal.item_changed": object({ goal: string, item: number, text: string, state: oneOf("open", "done", "dropped") }),
   "goal.ended": object({ goal: string, session: optional(string), state: oneOf("active", "done", "dropped"), summary: string }),
   "workflow.ended": object({ run: string, session: string, name: string, state: oneOf("running", "done", "failed", "stopped"), steps: optional(number), failed: number, failedSteps: optional(nullable(array(string))), usage }),
-  "workflow.step_changed": object({ run: string, session: string, step: object({ key: string, parent: optional(string), kind: oneOf("agent", "run", "post", "workflow", "log"), name: string, phase: optional(string), profile: optional(string), more: optional(boolean),
-    state: oneOf("running", "done", "failed"), reason: optional(string), transcript: optional(string), usage, started: string, ended: optional(string) }) }),
+  "workflow.step_changed": object({ run: string, session: string, step: object({ key: string, parent: optional(string), kind: oneOf("agent", "run", "post", "workflow", "log"), name: string, phase: optional(string), lane: optional(string), profile: optional(string), more: optional(boolean),
+    state: oneOf("running", "done", "failed"), reason: optional(string), transcript: optional(string), usage, started: string, ended: optional(string) }), steps: number, running: number, failed: number }),
+  "workflow.status_changed": object({ run: string, session: string, status: string }),
   "checkin.due": object({ session: string, children: nullable(array(object({ session: string, name: string, parent: optional(string), state: oneOf("idle", "stopped", "blocked"), reason: optional(string),
     idle: number, silent: optional(boolean), asking: optional(boolean), goal: string, text: string, open: number }))) }),
   "image.built": object({ host: string, repo: string, name: string, tag: string, seconds: number }),
@@ -119,7 +120,7 @@ export function decodeEvent(value: unknown): Event | undefined {
   const record = value as Record<string, unknown>;
   const body = typeof record.type === "string" && Object.hasOwn(bodies, record.type) ? bodies[record.type] : undefined;
   // Live-only events are never stored and have seq 0.
-  if (!Number.isSafeInteger(record.seq) || Number(record.seq) < (record.type === "turn.activity" || record.type === "conversation.read" || record.type === "transcript.changed" || record.type === "workflow.step_changed" ? 0 : 1) || !string(record.id) ||
+  if (!Number.isSafeInteger(record.seq) || Number(record.seq) < (record.type === "turn.activity" || record.type === "conversation.read" || record.type === "transcript.changed" || record.type === "workflow.step_changed" || record.type === "workflow.status_changed" ? 0 : 1) || !string(record.id) ||
       !string(record.at) || !optional(string)(record.room) || !principal(record.from) || !body?.(record.body)) {
     return skip(value);
   }
