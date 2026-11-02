@@ -1,11 +1,11 @@
 ---
 name: dyna-workflows
-description: Use when you write, test or resume a Dyna workflow, a script that fans work out to Pi workers in one box. It gives every script call's return and failure, resume, worktrees and merge, and what a worker knows.
+description: Use when you write, test or resume a Dyna workflow, or reload a running one, a script that fans work out to Pi workers in one box. It gives every script call's return and failure, reload and resume, worktrees and merge, and what a worker knows.
 ---
 
 # Dyna workflows
 
-A workflow is a script that fans work out to Pi workers in one box. `dyna workflow run FILE [--args JSON] [--resume RUN]`, or the `workflow` tool, starts it as a child session, a crew. Only the owner or a room's root starts one. Its end, whether a return, a throw or a stop, reaches whoever started it as a reply, so a run needs no polling.
+A workflow is a script that fans work out to Pi workers in one box. `dyna workflow run FILE [--args JSON] [--resume RUN]`, or the `workflow` tool, starts it as a child session, a crew, and `dyna workflow reload RUN FILE` changes a running one. Only the owner or a room's root starts one. Its end, whether a return, a throw or a stop, reaches whoever started it as a reply, so a run needs no polling.
 
 Every script begins with `export const meta = {...}`: a pure literal (no variables, calls or interpolation) that the engine reads before any box exists.
 
@@ -43,11 +43,19 @@ return { merged: merged.merged, conflicts: merged.conflicts, empty: written.filt
 
 A failed call throws an `Error` with `.step` and `.reason`. An uncaught throw ends the run as `failed`. A script that returns ends `done`, however many steps failed; its value, up to 1 MiB, is the reply.
 
-## Resume
+## Reload and resume
+
+Reload is for a running run, resume for an ended one. Both go by step key: a hash of the step's kind, prompt or command, options, profile and enclosing `workflow()` step, not its order. A key that matches a finished step returns the stored result, so a changed prompt, command or option reruns that step alone.
+
+`dyna workflow reload RUN FILE`, or the tool's `reload` action, gives a running run a new script. Only the owner or a room's root reloads one.
+
+- The same crew, box, main tree, branches and journal carry on. The crew stops the old script and runs the new one from its start.
+- A key whose step is running joins it: the call waits for the worker already at work, and no second one starts. A new key starts a step. A running step the new script does not call runs on until the run ends, and then fails with `the run ended first`.
+- `meta.name`, `meta.repo` and `meta.size` stay as the run has them, and a reload that changes one is refused. `profiles` and `description` may change, and the run's models follow the new profiles.
+- The run keeps every version of its script, and each step records the version that started it.
 
 `--resume RUN` names an ended run of the same room and repository. A resume is a new session, possibly on another host, with the same pinned commit.
 
-- A step's key is a hash of its kind, prompt or command, options, profile and enclosing `workflow()` step, not its order. A key that matches a finished step returns the stored result, so a changed prompt, command or option reruns that step alone.
 - Failed steps and steps the end cut off run again. Main-tree files are not kept. Worktree branches are, and the new run can push to the branches of the runs it resumes, through any chain of resumes.
 - A step reruns only when its own key changes. A reviewer whose prompt is unchanged keeps its old verdict after the code under it changed; a prompt that names the commit it reviews ties the verdict to that code.
 

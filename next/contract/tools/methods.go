@@ -261,6 +261,9 @@ var methodTable = []MethodEntry{
 		act("workflow", "list", typ[contract.WorkflowListRequest](), "List the room's workflow runs, newest first. Omit room for your own.", "workflow list"),
 	),
 	method(contract.MethodWorkflowPin, contract.ScopeRead, BoxAccess),
+	method(contract.MethodWorkflowReload, contract.ScopeOperate, UserAccess,
+		act("workflow", "reload", typ[contract.WorkflowReloadRequest](), workflowReloadHelp, "workflow reload"),
+	),
 	method(contract.MethodWorkflowRun, contract.ScopeOperate, UserAccess,
 		act("workflow", "run", typ[contract.WorkflowRunRequest](), workflowHelp, "workflow run"),
 	),
@@ -273,7 +276,9 @@ var methodTable = []MethodEntry{
 	method(contract.MethodWorkflowStepStart, contract.ScopeRead, BoxAccess),
 }
 
-const workflowHelp = "Start a workflow: a script that fans work out to Pi workers in one box, as a child session. Only the owner or root starts one, and its end reaches the starter as a reply. script is JavaScript that begins with export const meta = {name, profiles, description, size, repo}, a pure literal. args is JSON text, and the script reads it parsed as the global args. Globals: agent(prompt, {profile, schema, label, phase, timeout, worktree}), run(command, {cwd, env, timeout, check}), parallel(thunks), pipeline(items, ...stages), merge(results, {base}), workflow(path, args), post(to, text, data), phase(title) and log(...). resume names an ended run, whose finished steps with unchanged keys return their stored results. The dyna-workflows skill gives every call's return and failure, resume, worktrees and what a worker knows."
+const workflowHelp = "Start a workflow: a script that fans work out to Pi workers in one box, as a child session. Only the owner or root starts one, and its end reaches the starter as a reply. script is JavaScript that begins with export const meta = {name, profiles, description, size, repo}, a pure literal. args is JSON text, and the script reads it parsed as the global args. Globals: agent(prompt, {profile, schema, label, phase, timeout, worktree}), run(command, {cwd, env, timeout, check}), parallel(thunks), pipeline(items, ...stages), merge(results, {base}), workflow(path, args), post(to, text, data), phase(title) and log(...). resume names an ended run, whose finished steps with unchanged keys return their stored results; reload changes a running one. The dyna-workflows skill gives every call's return and failure, resume, worktrees and what a worker knows."
+
+const workflowReloadHelp = "Give a running workflow run a new script. Only the owner or root reloads one. The crew stops the old script and runs the new one in the same box, on the same branches and journal: a call whose step key finished returns its stored result, one whose step is still running waits for that step's worker, and a new key starts. Running steps the new script does not call run on until the run ends. meta must keep the run's name, repo and size; profiles and description may change. Reload is for a live run; resume, on run, starts a new run from an ended one."
 
 var methodRows = buildMethodRows(methodTable)
 

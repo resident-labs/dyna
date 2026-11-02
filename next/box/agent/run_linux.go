@@ -230,6 +230,7 @@ func Run(ctx context.Context) error {
 	activity := &activity{}
 	transcript := NewTranscript(client, sessions)
 	var h boxHarness
+	var crew *Crew            // a crew's box runs a script, which a reload replaces
 	var files func() []string // the session files to keep sending
 	if hello.Workflow != nil {
 		open := func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string) (crewWorker, error) {
@@ -255,7 +256,7 @@ func Run(ctx context.Context) error {
 		if len(hello.Repos) > 0 {
 			config.Branch, config.Base = hello.Repos[0].Branch, hello.Repos[0].Commit
 		}
-		crew, err := NewCrew(config)
+		crew, err = NewCrew(config)
 		if err != nil {
 			return err
 		}
@@ -337,6 +338,11 @@ func Run(ctx context.Context) error {
 				if stopWatch != nil {
 					stopWatch()
 					stopWatch = nil
+				}
+				return nil
+			case contract.WorkflowReload:
+				if crew != nil {
+					crew.Reload(body.Workflow)
 				}
 				return nil
 			}
