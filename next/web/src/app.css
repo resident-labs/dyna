@@ -57,6 +57,10 @@ aside.members { display: flex; flex-direction: column; border-right: 0; border-l
 /* Settings covers the room: floating terminals stay inside main's stacking context, under Settings, and keep running. */
 .shell.settings main { isolation: isolate; }
 .label { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+/* A side panel's facts: one short label and one value to a row. */
+.facts { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 8px 12px; margin: 0; }
+.facts dt { color: var(--muted); font-size: 12.5px; line-height: 20px; }
+.facts dd { min-width: 0; margin: 0; line-height: 20px; overflow-wrap: anywhere; }
 /* A card on Home's grid: a machine now, model usage later. */
 .card { container-type: inline-size; min-width: 0; padding: 12px 14px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
 .card h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 16px; line-height: 1.25; font-weight: 600; }
