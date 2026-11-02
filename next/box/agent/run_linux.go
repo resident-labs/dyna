@@ -335,7 +335,7 @@ func Run(ctx context.Context) error {
 			if _, ok := message.Body.(contract.Archive); ok {
 				closing.Store(true)
 				return closeBox(ctx, h, transcript, files, time.After, func(ctx context.Context) error {
-					return archiveAndReport(ctx, "/box/work", hello.Session, hello.Repos, runGit, time.After, client.ArchiveDone)
+					return archiveAndReport(ctx, "/box/work", hello.Session, hello.Repos, runGit, archiveLimit, time.After, client.ArchiveDone)
 				})
 			}
 			return runner.Handle(ctx, message)

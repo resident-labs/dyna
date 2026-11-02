@@ -102,6 +102,49 @@ func (s *Store) CompleteArchives(ctx context.Context, session contract.SessionID
 	})
 }
 
+// OpenAncestor finds the nearest ancestor that is not closing, and whether that is the parent. Root never closes this way.
+func (s *Store) OpenAncestor(ctx context.Context, id contract.SessionID) (ancestor contract.SessionID, direct bool, err error) {
+	direct = true
+	for {
+		var state string
+		if err := s.Read().QueryRowContext(ctx, "SELECT p.id,p.state FROM sessions c JOIN sessions p ON p.id=c.parent WHERE c.id=?", id).Scan(&id, &state); err != nil {
+			return "", false, err
+		}
+		if state != "closing" {
+			return id, direct, nil
+		}
+		direct = false
+	}
+}
+
+// HoldArchive ends a close's retries in one write. The reconciler then stops the box. The notice wakes to, and moved, when
+// given, records the session moving there. A close that changed meanwhile keeps going, and nothing is sent.
+func (s *Store) HoldArchive(ctx context.Context, session, to contract.SessionID, notice contract.Event, moved *contract.Event) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `UPDATE boxes SET want='hold',due_at=0 WHERE session=? AND state='closing' AND want='close'`, session)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil || n != 1 {
+			return err
+		}
+		if moved != nil {
+			if _, err := tx.ExecContext(ctx, "UPDATE sessions SET parent=? WHERE id=?", to, session); err != nil {
+				return err
+			}
+			if _, err := s.AppendEvent(tx, *moved); err != nil {
+				return err
+			}
+		}
+		seq, err := s.AppendEvent(tx, notice)
+		if err != nil {
+			return err
+		}
+		return s.InsertDelivery(ctx, tx, seq, notice.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: to}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
+	})
+}
+
 // SetArchiveRetry records a retry only if the observed close intent still matches.
 func (s *Store) SetArchiveRetry(ctx context.Context, id contract.BoxID, want BoxWant, due time.Time, reason string, event contract.Event) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
@@ -124,10 +167,10 @@ func (s *Store) SetArchiveRetry(ctx context.Context, id contract.BoxID, want Box
 	})
 }
 
-// SetClosingReason records an archive failure without deleting the box.
+// SetClosingReason records and counts an archive failure without deleting the box. An empty reason clears the last one for a retry.
 func (s *Store) SetClosingReason(ctx context.Context, id contract.BoxID, reason string, event contract.Event) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, "UPDATE boxes SET reason=?,updated_at=? WHERE id=? AND state=?", reason, event.Time.UnixMilli(), id, contract.BoxClosing)
+		result, err := tx.ExecContext(ctx, "UPDATE boxes SET reason=?,updated_at=?,failures=failures+(?!='') WHERE id=? AND state=?", reason, event.Time.UnixMilli(), reason, id, contract.BoxClosing)
 		if err != nil {
 			return err
 		}

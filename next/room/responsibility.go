@@ -31,6 +31,11 @@ func ResponsibilityName(item contract.Responsibility) string {
 // BoxRestartedNotice tells a session that asked to restart its own box that it has.
 const BoxRestartedNotice = "Your box restarted on the current version. Your files and conversation are kept."
 
+// ArchiveLeftOutNotice tells a closing session's parent what its archive did not carry.
+func ArchiveLeftOutNotice(session string, left contract.ArchiveLeftOut) string {
+	return fmt.Sprintf("The archive of session %s left out %d untracked files too large to carry, %d MiB in all, which go with its volume: %s.", session, left.Files, left.Bytes>>20, strings.Join(left.Paths, ", "))
+}
+
 // BoxUpdateNotice tells a session what holds its box on an old binary. It is empty when nothing outlasts the turn: the box then
 // stops as the turn ends, before anything could read this. A crew's run ends with its turn, so it counts as that turn.
 func BoxUpdateNotice(held []contract.Responsibility) string {
