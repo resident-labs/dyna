@@ -22,7 +22,6 @@ type layoutRule struct {
 	stdlibOnly bool
 }
 
-// LEGACY(v1-transfer): the migrate row of layoutRules, for the migrate package. Remove after the transfer.
 // layoutRules is the table in spec section 2. cmd/dyna is not listed, so it may import anything.
 var layoutRules = map[string]layoutRule{
 	"contract": {stdlibOnly: true},
@@ -30,7 +29,6 @@ var layoutRules = map[string]layoutRule{
 	"harness":  {imports: []string{"contract"}},
 	"box":      {imports: []string{"contract", "harness"}},
 	"engine":   {imports: []string{"room", "box", "harness", "contract", "web"}},
-	"migrate":  {imports: []string{"contract", "engine/store"}},
 }
 
 // violation returns why pkg may not import imp, or "" when it may.

@@ -34,7 +34,7 @@ Only the owner can reopen a settled owner decision. Sources and history are in [
 3. **No secret in a box, with one exception by owner decision.** Model calls, git, GitHub writes and host commands go through the engine. The engine knows the caller by its socket. The exception is root: its default host exec includes the control plane, which holds the model sign-ins and the GitHub token (settled decision 1).
 4. **Small and legible.** v1 has about 260,000 lines of Go (without tests) in 138 packages. v2 targets under 60,000 Go lines at the cutover, in nine top-level packages, with no compatibility code. Reports also count web lines, but they do not count against the Go target (root, 2026-10-31).
 5. **Fast, honest tests.** The repository holds fast unit tests, plus one or two fast integration tests for each important owner-facing feature. A person or agent checks each milestone end to end by hand in a sandbox (section 10).
-6. **A clean cutover.** One bundle, one commit, no rollback. The store guard protects every other install.
+6. **A clean cutover.** Rooms rebuilt by hand, no import and no rollback. The store guard protects every other install.
 7. **Useful to any owner (r9).** Any repository and toolchain (images from `.dyna/images/`), any Linux host with rootless Podman and SSH, and every model account that CLIProxyAPI supports.
 
 ### Non-goals
@@ -61,13 +61,12 @@ next/                    module github.com/resident-labs/dyna (go 1.26), no go.w
   box/                   hosts, images, budgets, boxes, and the box agent
   harness/               the Pi adapter and the fake harness
   room/                  pure room rules: tree, addresses, delivery, reply channels, wake
-  migrate/               bundle import (removed after the migration, section 8)
   web/                   the ported Svelte app; types generated from contract/
   docs/                  this spec and the guides
   third_party/cliproxyapi/  vendored CLIProxyAPI fork: its own Go module, our patches, DYNA.md
 ```
 
-Main has no v1 tree. The old module (`dyna-agent`) and `cmd/dyna-export` exist only at tag `v1-final`, where the exporter imports that tag's `next/contract` through a `replace` directive (section 8).
+Main has no v1 tree. The old module (`dyna-agent`) and `cmd/dyna-export` exist only at tag `v1-final`.
 
 **One binary, three roles.**
 
@@ -77,7 +76,7 @@ Main has no v1 tree. The old module (`dyna-agent`) and `cmd/dyna-export` exist o
 | `dyna box-agent` | in each box | turn runner, shell server, the `dyna` MCP server (7.9), transcript stream, model and git routes into the box |
 | `dyna <noun> <verb>` | anywhere | the CLI. In a box it uses the box socket. On the control plane it uses the owner socket. On the owner's desktop it uses the owner socket through an SSH forward (`--socket`, decision 14). |
 
-**Dependency direction.** `contract` imports nothing from the module. `room` imports only `contract`, and it does no I/O: it decides, and the engine acts. `harness` imports only `contract`. `box` imports `contract` and `harness`, because the box agent runs the adapters. `engine` imports `room`, `box`, `harness` and `contract`. `engine/runtime` also imports `web`, which only embeds the built assets. `cmd/dyna` wires them. `engine/store` imports `contract`, `room` and `box`, and nothing else from the module. `migrate` imports `contract` and `engine/store`. A unit test enforces this with `go list -deps`.
+**Dependency direction.** `contract` imports nothing from the module. `room` imports only `contract`, and it does no I/O: it decides, and the engine acts. `harness` imports only `contract`. `box` imports `contract` and `harness`, because the box agent runs the adapters. `engine` imports `room`, `box`, `harness` and `contract`. `engine/runtime` also imports `web`, which only embeds the built assets. `cmd/dyna` wires them. `engine/store` imports `contract`, `room` and `box`, and nothing else from the module. A unit test enforces this with `go list -deps`.
 
 Sub-packages are the area lead's choice. The expected ones are `engine/store`, `engine/api`, `engine/approve`, `engine/model`, `engine/git`, `engine/sched`, `engine/lifecycle`, `box/podman`, `box/fakehost`, `harness/pi` and `harness/fakeharness`.
 
@@ -89,7 +88,7 @@ Third-party Go dependencies are allowed only with a reason in the PR. Expected: 
 
 ### 3.1 Rules
 
-`contract/` owns types crossing process boundaries or stored as typed bodies. It uses named closed sets and validates unknown values once at the API or import boundary. Times use `time.Time`; durations use integer milliseconds. `go generate ./contract` generates union codecs and the TypeScript client; CI checks freshness. Within v2 the API is additive for release skew; only the bundle is versioned.
+`contract/` owns types crossing process boundaries or stored as typed bodies. It uses named closed sets and validates unknown values once at the API boundary. Times use `time.Time`; durations use integer milliseconds. `go generate ./contract` generates union codecs and the TypeScript client; CI checks freshness. Within v2 the API is additive for release skew.
 
 ### 3.2 Identifiers and principals
 
@@ -110,10 +109,6 @@ The engine stores an event once and creates one delivery per recipient. A delive
 Agent writes that need a decision are typed operations. The engine registry supplies the class, card, check and executor. The owner's own operations and `auto` operations run at once; `owner` operations wait for the owner, including for root. The engine rechecks before execution and fails stale cards without running. Pending operations expire after 24 hours by default; identical pending requests from the same caller return the existing operation. Waiting, decision and execution emit typed events.
 
 Grants add powers outside the session tree. A new room grants root `ask-owner` and `hostexec` on all hosts, with no expiry, and subscribes it to notices. Only the owner grants host exec. Section 6 describes the rules.
-
-### 3.6 Bundle
-
-The versioned bundle has `global.json`, one `rooms/<name>.json` per room and a read-only `archive/`. Contract types define its contents. Import refuses unknown versions or fields, missing files and mismatched counts. Section 8 specifies the cutover.
 
 ### 3.7 API
 
@@ -739,51 +734,25 @@ A waiting question means the session is not finished. It is on the session's lis
 
 Only a `blocked` question excuses a session from check-ins, and only such a session counts as moving for its ancestors' stalls. A session with any other open question stalls like any session, and the report says it has an open question.
 
-## 8. Migration bundle and cutover
-<!-- LEGACY(v1-transfer): sections 8.1 to 8.3 and the import half of 8.4, the bundle and cutover plan. Remove after the transfer. -->
+## 8. Moving from v1
 
-### 8.1 Bundle parts
-
-The bundle has mode 0700. It contains no raw secrets but does contain device token hashes; never post or attach it. `global.json` holds the version, source, rendered standing instructions, cleaned settings, profiles, hosts, account labels and limits, devices and token hashes, repositories, skills, machine subscriptions and counts. `rooms/<name>.json` holds repositories, limits, color, active goals and items without holders, open and goal-linked issues with D-numbers and the next issue number, open PR ownership, unanswered questions, room and session subscriptions, handoff cards and counts. The exporter renders v1 rules as numbered Markdown list items and verifies IDs and text against SQL. The global bundle and each room bundle carry their own instruction string. After the store commit, the importer writes each file unchanged by rename, using the new room ID. At cutover `subagentMaxDepth` becomes `--session.max-depth`.
-
-Sessions are not imported. Each imported author is `ImportedAuthor{Kind, Label}`, with kind `owner`, `session` or `engine` and the v1 address as display-only text. Only new room roots get real session IDs. An unanswered question whose asker is gone goes to root; root assigns unheld goals. Each open session gets a handoff card with name, profile, parent, goals, archive ref and last post, capped at 2,000 characters. Sessions, turns, harness conversations, CI results, shell output and jobs do not carry over. `archive/` holds feeds, files, transcripts, finished goals and closed issues, with a manifest of paths, sizes and hashes; it is never imported.
-
-### 8.2 How the exporter gets the types
-
-Main has no v1 tree (owner, 2026-11-01). `cmd/dyna-export` exists only at annotated tag `v1-final` (`4f2192eb24`), and it imports that tag's `next/contract` through `go.mod` replaces. The contract uses only the standard library. Build the exporter at `v1-final`, inside `cmd/dyna-export`, as `docs/migrate.md` shows. The exporter is frozen there while `contract` and the importer move on, so changes to bundle types must keep accepting its output; `docs/migrate.md` holds the rule.
-
-### 8.3 Cutover steps
-
-There is no rollback. The owner performs steps 1, 2 and 11; an external Opus agent performs steps 3–10 from a prepared prompt.
-
-0. **Gate:** M3 and the self-hosting trial pass. A terra agent exports a copy of the latest daily backup and imports it in a sandbox box. Every count matches SQL on that backup. The owner approves a card with every feature in section 9 and its result.
-1. Disable auto-update on every install, including the hourly hook.
-2. Run `dyna pause --all`, stop new turns and the merge service, and wait for running turns to end.
-3. Commit dirty or unmerged open-session trees to `refs/dyna/archive/<session>`; keep the refs 30 days.
-4. Stop v1. Take a final SQLite backup and copy it to the desktop archive and hermeslab.
-5. Tag `v1-final` already exists at `4f2192eb24`, before M3. Its exporter's bundle must still pass this `next/` importer (8.2).
-6. Build the exporter at that tag on hermeslab; run it read-only against the final backup on the desktop. `dyna-export verify` compares counts with SQL; any mismatch stops cutover. Copy the bundle and Connect secrets (`machine.key`, `jwks.json`, `link.json`, `tunnel-token`) to the engine host over SSH with mode 0600.
-7. Make one commit moving `next/*` to the root; the old tree left main before cutover. The owner merges it on GitHub.
-8. Build and install v2 on hermeslab. Replace the trial `dyna-next` user unit and copy its CLIProxyAPI auth folder into the new data folder. Use `KillMode=mixed`, `TimeoutStopSec` over 60 seconds, and `--web.listen 127.0.0.1:7457` for the existing tunnel.
-9. `dyna import <bundle>` writes the store in one transaction and records the bundle hash. It copies Connect secrets separately with mode 0600 and deletes the source copies. Move the desktop v1 data to `~/.local/share/dyna-v1/`; the owner deletes it after the first good week.
-10. Start the engine. Each room root starts in a box and receives `migrate.handoff` with open goals, PRs, questions, issue count and cards.
-11. The owner checks the trial CLIProxyAPI sign-ins and opens a room from a paired device, then re-enables auto-update.
+The bundle import planned here never ran. The owner's rooms were rebuilt by hand, `dyna import` only ever took `--dry-run`, and no other v1 install needs an import (owner, 2026-11-01). The plan and the bundle check it used are at tag `v2-import-last`, in sections 8.1 to 8.3 of this file and in `docs/migrate.md`.
 
 ### 8.4 Upgrade guard and other installs
 
-Before opening a store, v2 refuses a folder with `dyna.db` but no `store.db` with `store_from_v1`, the path, a no-rollback warning and export/import instructions pointing to `v1-final` and `docs/migrate.md`. The v2 install script, once it exists, detects v1 and offers the export and import after one confirmation; until then `install.sh` on main only refuses and points here. Import refuses an unknown version, missing file, unknown field, count mismatch or existing `store.db`.
+Before opening a store, v2 refuses a folder with `dyna.db` but no `store.db` with `store_from_v1` and the path. The message says that no import exists and names `v1-final`, the last v1 source, and `v2-import-last`. `install.sh` on main only refuses, until v2 has an installer.
 
-Delete `migrate/` only after the owner's installs import. Tag that commit `v2-import-last` and name it in `floor.go` under the upgrade-floor rule. Thereafter the guard directs other installs to build that tag for import. The guard stays.
+`migrate/`, the bundle types and `dyna import` left main after `v2-import-last`, the last commit with them, which `floor.go` names under the upgrade-floor rule. The guard stays.
 
 ### 8.5 Hooks as typed subscriptions
 
-A subscription has machine, room or session scope; exactly one of event types (`On`) and schedule (`Every`); any filters; and exactly one of `Wake` and `Run`. A `Run` carries command, image, size and files, runs in a small box, never on a host, and ends in typed `hook.finished`. Store subscriptions, event types, filters, arguments and files in their tables; `imports` records bundle hash, version, source commit and time.
+A subscription has machine, room or session scope; exactly one of event types (`On`) and schedule (`Every`); any filters; and exactly one of `Wake` and `Run`. A `Run` carries command, image, size and files, runs in a small box, never on a host, and ends in typed `hook.finished`. Store subscriptions, event types, filters, arguments and files in their tables.
 
 `Where` filters the `github.*` and `git.*` events of `On`. Each entry is `key=value`, `key!=value` or `text~value`, and all must hold of one thing in the event. Keys are `repo`, `author`, `actor`, `label` and `number`, matched exactly. `text~` is a plain substring of a comment or a body, as far as the 2,000 characters an event keeps. A field the event does not have meets neither `=` nor `!=`. The engine checks a filter at dispatch, before anything starts, so an event that fails it starts no box and wakes nobody. `dyna subscription events` lists each event with one line from its type's doc comment, and an unknown name in `On` is refused.
 
 A subscription fires only on news: a change with no change kinds fires nothing. A `Run` fired by an event gets that event as JSON on stdin, with `DYNA_EVENT` set to its type. Each event has its own `Run`, and a subscription's Runs go one at a time, oldest first, from `subscription_queue`, which holds at most 256; a burst past that stays in the room log and starts no `Run`. A failed `Run` is not repeated for its event, and the next waits out the failure's backoff. A scheduled `Run` gets empty stdin and no `DYNA_EVENT`. GitHub text in the JSON sits beside an `outside` flag, `true` for anyone but the owner's account, and a script treats it as untrusted, as `watch_post` does.
 
-Engine timers remain scheduled tasks. The updater replaces the self-update hook. Librarian hooks are not imported. The horizon upstream-watch becomes a `Run` on `git.main_updated` with its script as a `RunFile`. A default room subscription wakes root on `notice.posted` and `git.main_updated`.
+Engine timers remain scheduled tasks. The updater replaces the self-update hook. Librarian hooks did not carry over. The horizon upstream-watch becomes a `Run` on `git.main_updated` with its script as a `RunFile`. A default room subscription wakes root on `notice.posted` and `git.main_updated`.
 
 ### 8.6 Open points
 
@@ -791,7 +760,7 @@ Before cutover, horizon's root confirms whether upstream-watch needs desktop sta
 
 ## 9. Feature map
 
-All M1–M3 features below are cutover gates. Imported data is not the same as a working feature.
+All M1–M3 features below are cutover gates.
 
 - **M1 and M2:** The thin slice and trial features are in section 11.
 - **M3:** goals and check-ins (done, section 7.4), questions, issues, thin PR approval and GitHub merges, the Actions runner pool, typed subscriptions, settings, accounts, backups, remote access, Connect and device scopes, web push, desktop, skills, install guard, manual update, command palette and workflows. Add arch, lt-24-005, Boat and pve only after each passes the host check and real-box QA. The relay remains unchanged. Remote access precedes workflows. Daily maintenance includes backups, archive-ref expiry, host pruning and closing eligible boxes stopped for seven days; root, sessions whose list holds them (7.4) and sessions with pending input are excluded.
@@ -886,11 +855,11 @@ Deliver the tree and reply channels, dormancy, operations, host exec, images, pr
 
 Gate on tree, reply, approval, host-exec, admission, transcript, git, archive and terminal behavior. Manually check the web, host exec, subtree close, dormant wake, reconnect, computer and terminal.
 
-### M3: bundle import and self-hosting
+### M3: self-hosting
 
-Deliver durable account affinity, GitHub approval and CI, `gh` routing, goals, issues, questions, instructions, subscriptions, accounts, backups, remote access, desktop, workflows, import and cutover. Build the box reconciler first, then remote access before workflows. Expand the M2 trial as features land. Dry-run the export and import against SQL counts before the section 8 gate.
+Deliver durable account affinity, GitHub approval and CI, `gh` routing, goals, issues, questions, instructions, subscriptions, accounts, backups, remote access, desktop, workflows and cutover. Build the box reconciler first, then remote access before workflows. Expand the M2 trial as features land.
 
-Gate on bundle validation, routing, account isolation, GitHub safety, PR approval and workflow replay. Manually prove a v2 PR, `gh`, Connect, host recovery and handoff. Require one full working day in all rooms without a blocking failure, `.dyna/images/` merged in every active repository, one real horizon trial task, and an fl-rea workflow with multiple agents sharing files.
+Gate on routing, account isolation, GitHub safety, PR approval and workflow replay. Manually prove a v2 PR, `gh`, Connect, host recovery and handoff. Require one full working day in all rooms without a blocking failure, `.dyna/images/` merged in every active repository, one real horizon trial task, and an fl-rea workflow with multiple agents sharing files.
 
 ## 12. Team and ownership
 
@@ -900,7 +869,7 @@ Room rules govern builder and reviewer profiles, design checks, UI process and r
 |---|---|---|
 | Spec, contract, engine core and integration | dyna:lead-rewrite | `docs/`, `contract/`, `engine/` |
 | Boxes, hosts, images, harness and host exec | dyna:node-shell | `box/`, `harness/`, `engine/hostexec` |
-| Room rules, identity, migration and exporter | dyna:code-architectural | `room/`, `migrate/`, `cmd/dyna-export` at `v1-final` |
+| Room rules and identity | dyna:code-architectural | `room/` |
 | Web port | dyna:next-web-lead; design approval by dyna:lead-rewrite | `web/` |
 
 Each area owner plans the milestone for lead review and reports to the lead. One writer owns each folder at a time. v1 is off main; its last source is tag `v1-final`.
