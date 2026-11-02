@@ -15,15 +15,16 @@ import (
 // issueFor returns an issue for this caller. Free text on an issue by anyone but the owner's account reaches a session wrapped (decision 13).
 func issueFor(caller contract.Principal, i store.TrackedIssue, viewer string) contract.IssueSummary {
 	summary := i.IssueSummary
-	if caller.Kind != contract.PrincipalSession || summary.Author == viewer {
+	writer := textWriter(summary.Author, viewer, i.Meta)
+	if caller.Kind != contract.PrincipalSession || writer == "" {
 		return summary
 	}
-	summary.Title = room.WrapExternal(summary.Author, summary.Title)
+	summary.Title = room.WrapExternal(writer, summary.Title)
 	if summary.Milestone != "" {
-		summary.Milestone = room.WrapExternal(summary.Author, summary.Milestone)
+		summary.Milestone = room.WrapExternal(writer, summary.Milestone)
 	}
 	if len(summary.Labels) > 0 {
-		summary.Labels = []string{room.WrapExternal(summary.Author, strings.Join(summary.Labels, ", "))}
+		summary.Labels = []string{room.WrapExternal(writer, strings.Join(summary.Labels, ", "))}
 	}
 	return summary
 }
@@ -69,8 +70,8 @@ func (s *Service) IssueStatus(ctx context.Context, caller contract.Principal, re
 	return contract.IssueStatusResponse{Issue: issueFor(caller, issue, s.prViewer())}, nil
 }
 
-// IssueTrack has PrTrack's rules. An issue has one repository, so the room must list that one. Its read is one GraphQL
-// query, which costs quota where a PR's ETag read may not, so tracking an issue the session already owns reads nothing.
+// IssueTrack has PrTrack's rules. An issue has one repository, so the room must list that one. Tracking an issue the session
+// already owns reads nothing, so a hook can repeat it over a list.
 func (s *Service) IssueTrack(ctx context.Context, caller contract.Principal, req contract.IssueTrackRequest) (contract.IssueTrackResponse, *contract.Error) {
 	owner, e := s.prTracker(ctx, caller, contract.PrTrackRequest(req))
 	if e != nil {
@@ -102,11 +103,10 @@ func (s *Service) IssueTrack(ctx context.Context, caller contract.Principal, req
 			return contract.IssueTrackResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "the repository of this issue is not in your room; the owner can track it for you"}
 		}
 	}
-	row := store.TrackedIssue{IssueSummary: contract.IssueSummary{Repo: repo, Number: req.Number, URL: seen.URL, Title: seen.Meta.Title, Author: seen.Author, Session: owner.ID, State: seen.State}}
+	row := store.TrackedIssue{IssueSummary: contract.IssueSummary{Repo: repo, Number: req.Number, URL: seen.URL, Title: seen.Title, Author: seen.Author, Session: owner.ID, State: contract.IssueState(seen.State)}, Meta: seen.Meta}
 	if err := s.store.TrackIssue(ctx, row); err != nil {
 		return contract.IssueTrackResponse{}, failure(err)
 	}
-	s.resetPRPoll(repo)
 	stored, e := s.trackedIssue(ctx, caller, repo, req.Number)
 	if e != nil {
 		return contract.IssueTrackResponse{}, e

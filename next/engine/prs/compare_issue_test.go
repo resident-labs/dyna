@@ -10,104 +10,95 @@ import (
 )
 
 func trackedIssue(change func(*store.TrackedIssue)) store.TrackedIssue {
-	row := store.TrackedIssue{Meta: &store.ItemMeta{Title: "t"}, IssueSummary: contract.IssueSummary{Repo: "owner/repo", Number: 1, URL: "u", Title: "t", Author: "me", State: contract.IssueOpen}}
+	row := store.TrackedIssue{IssueSummary: contract.IssueSummary{Repo: "owner/repo", Number: 1, URL: "u", Title: "t", Author: "me", State: contract.IssueOpen}}
 	if change != nil {
 		change(&row)
 	}
 	return row
 }
 
-func observedIssue(change func(*ObservedIssue)) ObservedIssue {
-	seen := ObservedIssue{Number: 1, URL: "u", Author: "me", State: contract.IssueOpen, Meta: store.ItemMeta{Title: "t"}}
-	if change != nil {
-		change(&seen)
-	}
-	return seen
+func compareIssue(row store.TrackedIssue, items []contract.GitHubItem, now time.Time) (store.IssueUpdate, bool) {
+	return CompareIssue(row, items, nil, "", "me", now)
 }
 
 func TestCompareIssueFindsEachChange(t *testing.T) {
 	type kinds = []contract.PrChangeKind
 	metadata := kinds{contract.PrChangeMetadata}
 	for name, test := range map[string]struct {
-		seen func(*ObservedIssue)
+		item contract.GitHubItem
 		want kinds
-		meta func(*contract.MetaChange) bool
 	}{
-		"nothing":   {nil, nil, nil},
-		"label":     {func(o *ObservedIssue) { o.Meta.Labels = []string{"bug"} }, metadata, func(m *contract.MetaChange) bool { return slices.Equal(m.LabelsAdded, []string{"bug"}) }},
-		"assignee":  {func(o *ObservedIssue) { o.Meta.Assignees = []string{"x"} }, metadata, func(m *contract.MetaChange) bool { return slices.Equal(m.Assigned, []string{"x"}) }},
-		"title":     {func(o *ObservedIssue) { o.Meta.Title = "new" }, metadata, func(m *contract.MetaChange) bool { return m.Title == "new" }},
-		"milestone": {func(o *ObservedIssue) { o.Meta.Milestone = "v2" }, metadata, func(m *contract.MetaChange) bool { return m.Milestone == "v2" && !m.MilestoneRemoved }},
-		"body":      {func(o *ObservedIssue) { o.Meta.EditedAt = "2026-11-01T12:00:00Z" }, metadata, func(m *contract.MetaChange) bool { return m.BodyEdited }},
-		"reopened":  {func(o *ObservedIssue) { o.Meta.Reopened = 1 }, metadata, func(m *contract.MetaChange) bool { return m.Reopened }},
-		"closed":    {func(o *ObservedIssue) { o.State = contract.IssueClosed }, kinds{contract.PrChangeClosed}, nil},
-		"comment":   {func(o *ObservedIssue) { o.Comments = []Comment{{ID: 1, Author: "x", Body: "hello"}} }, kinds{contract.PrChangeComment}, nil},
+		"label":     {act(contract.GitHubLabeled, "x", "bug"), metadata},
+		"assignee":  {act(contract.GitHubAssigned, "x", "y"), metadata},
+		"title":     {act(contract.GitHubRenamed, "x", "new"), metadata},
+		"milestone": {act(contract.GitHubMilestoned, "x", "v2"), metadata},
+		"reopened":  {act(contract.GitHubReopened, "x", ""), metadata},
+		"closed":    {act(contract.GitHubClosed, "x", ""), kinds{contract.PrChangeClosed}},
+		"comment":   {said("x", "hello"), kinds{contract.PrChangeComment}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			update, moved := CompareIssue(trackedIssue(nil), observedIssue(test.seen), "me", at)
-			if test.want == nil {
-				if moved || update.Change != nil {
-					t.Fatalf("moved %v change %+v", moved, update.Change)
-				}
-				return
-			}
+			update, moved := compareIssue(trackedIssue(nil), []contract.GitHubItem{test.item}, at)
 			if !moved || update.Change == nil || !slices.Equal(update.Change.Kinds, test.want) {
 				t.Fatalf("moved %v change %+v", moved, update.Change)
 			}
-			if test.meta != nil && (update.Change.Meta == nil || !test.meta(update.Change.Meta)) {
-				t.Fatalf("meta %+v", update.Change.Meta)
-			}
 		})
 	}
-}
-
-func TestDiffMetaSeesRemovalsAndIgnoresNothing(t *testing.T) {
-	told := store.ItemMeta{Title: "t", Labels: []string{"a", "b"}, Assignees: []string{"x"}, Milestone: "v1", Reviewers: []string{"r"}, Draft: true}
-	if change := diffMeta(told, told); change != nil {
-		t.Fatalf("no change gave %+v", change)
-	}
-	seen := store.ItemMeta{Title: "t", Labels: []string{"b", "c"}}
-	change := diffMeta(told, seen)
-	if change == nil || !slices.Equal(change.LabelsAdded, []string{"c"}) || !slices.Equal(change.LabelsRemoved, []string{"a"}) || !slices.Equal(change.Unassigned, []string{"x"}) ||
-		!change.MilestoneRemoved || change.Milestone != "" || !slices.Equal(change.ReviewersRemoved, []string{"r"}) || !change.Ready || change.Draft {
-		t.Fatalf("%+v", change)
-	}
-	if change := diffMeta(seen, told); change == nil || !change.Draft || change.Ready || !slices.Equal(change.ReviewersAdded, []string{"r"}) {
-		t.Fatalf("%+v", change)
+	if update, moved := compareIssue(trackedIssue(nil), nil, at); moved || update.Change != nil {
+		t.Fatalf("nothing moved: %+v", update)
 	}
 }
 
-func TestFirstMetadataReadRecordsWithoutTellingOrWaking(t *testing.T) {
-	row := tracked(func(r *store.TrackedPR) { r.Meta = nil })
-	update, moved := Compare(row, observed(func(o *Observed) { o.Meta.Labels = []string{"old"} }), "me", at)
-	if !moved || update.Change != nil || update.Meta == nil || update.Meta.Labels[0] != "old" || update.MetaWakeAt != 0 {
-		t.Fatalf("moved %v %+v", moved, update)
+func TestWhatASubscriberHearsAloneDoesNotReachTheOwner(t *testing.T) {
+	for _, action := range []contract.GitHubAction{contract.GitHubOpened, contract.GitHubForcePushed, contract.GitHubMentioned} {
+		if update, moved := compareIssue(trackedIssue(nil), []contract.GitHubItem{act(action, "x", "")}, at); moved || update.Change != nil {
+			t.Fatalf("%s: %+v", action, update)
+		}
+	}
+}
+
+func TestAReopenOpensTheRowAndTellsItsActor(t *testing.T) {
+	row := trackedIssue(func(r *store.TrackedIssue) { r.State = contract.IssueClosed })
+	update, moved := compareIssue(row, []contract.GitHubItem{act(contract.GitHubReopened, "x", "")}, at)
+	if !moved || update.Issue.State != contract.IssueOpen || update.Was != contract.IssueClosed || update.Change == nil || update.Change.Actions[0].Actor != "x" {
+		t.Fatalf("%+v", update)
+	}
+}
+
+func TestACloseAndReopenInOnePassTellBothAndStayOpen(t *testing.T) {
+	update, _ := compareIssue(trackedIssue(nil), []contract.GitHubItem{act(contract.GitHubClosed, "x", ""), act(contract.GitHubReopened, "y", "")}, at)
+	if update.Issue.State != contract.IssueOpen || update.Change == nil || len(update.Change.Actions) != 2 || !slices.Equal(update.Change.Kinds, []contract.PrChangeKind{contract.PrChangeMetadata}) {
+		t.Fatalf("%+v", update)
+	}
+}
+
+func TestAReadOfAStateTellsACloseNoFeedShowed(t *testing.T) {
+	update, _ := CompareIssue(trackedIssue(nil), nil, nil, contract.IssueClosed, "me", at)
+	if update.Issue.State != contract.IssueClosed || update.Change == nil || !slices.Equal(update.Change.Kinds, []contract.PrChangeKind{contract.PrChangeClosed}) {
+		t.Fatalf("%+v", update)
 	}
 }
 
 func TestABaselineRecordsMetadata(t *testing.T) {
-	row := trackedIssue(func(r *store.TrackedIssue) { r.Baseline, r.Meta = true, nil })
-	update, moved := CompareIssue(row, observedIssue(func(o *ObservedIssue) {
-		o.Meta.Labels, o.Comments = []string{"old"}, []Comment{{ID: 9, Author: "x", Body: "old"}}
-	}), "me", at)
-	if !moved || update.Change != nil || update.Meta == nil || update.SeenComments != 9 {
+	row := trackedIssue(func(r *store.TrackedIssue) { r.Baseline = true })
+	update, moved := CompareIssue(row, []contract.GitHubItem{said("x", "old")}, &FeedItem{Number: 1, Author: "me", Meta: store.ItemMeta{Labels: []string{"old"}}}, "", "me", at)
+	if !moved || update.Change != nil || update.Meta.Labels[0] != "old" || len(update.Meta.Waiting) != 0 {
 		t.Fatalf("moved %v %+v", moved, update)
 	}
 }
 
 func TestMetadataWakesOnceInTheGapAndNothingIsLost(t *testing.T) {
-	bug := func(o *ObservedIssue) { o.Meta.Labels = []string{"bug"} }
-	first, _ := CompareIssue(trackedIssue(nil), observedIssue(bug), "me", at)
+	first, _ := compareIssue(trackedIssue(nil), []contract.GitHubItem{act(contract.GitHubLabeled, "x", "bug")}, at)
 	if first.Change == nil || first.MetaWakeAt != at.UnixMilli() {
 		t.Fatalf("%+v", first)
 	}
-	row := trackedIssue(func(r *store.TrackedIssue) { r.Meta, r.MetaWakeAt = first.Meta, first.MetaWakeAt })
-	both := func(o *ObservedIssue) { o.Meta.Labels = []string{"bug", "p1"} }
-	if update, moved := CompareIssue(row, observedIssue(both), "me", at.Add(ownWakeGap-time.Second)); moved || update.Change != nil || update.Meta != row.Meta {
-		t.Fatalf("woke inside the gap: moved %v %+v", moved, update)
+	row := trackedIssue(func(r *store.TrackedIssue) { r.MetaWakeAt = first.MetaWakeAt })
+	held, moved := compareIssue(row, []contract.GitHubItem{act(contract.GitHubLabeled, "x", "p1")}, at.Add(ownWakeGap-time.Second))
+	if !moved || held.Change != nil || len(held.Meta.Waiting) != 1 {
+		t.Fatalf("woke inside the gap: moved %v %+v", moved, held)
 	}
-	later, moved := CompareIssue(row, observedIssue(both), "me", at.Add(ownWakeGap))
-	if !moved || later.Change == nil || !slices.Equal(later.Change.Meta.LabelsAdded, []string{"p1"}) || later.MetaWakeAt != at.Add(ownWakeGap).UnixMilli() {
+	row.Meta = held.Meta
+	later, moved := compareIssue(row, nil, at.Add(ownWakeGap))
+	if !moved || later.Change == nil || later.Change.Actions[0].Detail != "p1" || later.MetaWakeAt != at.Add(ownWakeGap).UnixMilli() || len(later.Meta.Waiting) != 0 {
 		t.Fatalf("the waiting label was lost: %+v", later)
 	}
 }
@@ -115,17 +106,21 @@ func TestMetadataWakesOnceInTheGapAndNothingIsLost(t *testing.T) {
 func TestNewsCarriesWaitingMetadataAndSpendsNoWindow(t *testing.T) {
 	wokeAt := at.UnixMilli()
 	soon := at.Add(time.Minute)
-	row := tracked(func(r *store.TrackedPR) { r.MetaWakeAt = wokeAt })
-	for name, seen := range map[string]func(*Observed){
-		"ci":      func(o *Observed) { o.CI = contract.PrCIFailure },
-		"review":  func(o *Observed) { o.Review = contract.PrApproved },
-		"comment": func(o *Observed) { o.Comments = []Comment{{ID: 1, Author: "x", Body: "hi"}} },
-		"closed":  func(o *Observed) { o.State = contract.PrClosed },
-		"merged":  func(o *Observed) { o.State = contract.PrMerged },
+	waiting := act(contract.GitHubLabeled, "x", "bug")
+	row := tracked(func(r *store.TrackedPR) { r.MetaWakeAt = wokeAt; r.Meta.Waiting = []contract.GitHubItem{waiting} })
+	for name, test := range map[string]struct {
+		items []contract.GitHubItem
+		seen  func(*Observed)
+	}{
+		"ci":      {nil, func(o *Observed) { o.CI = contract.PrCIFailure }},
+		"review":  {nil, func(o *Observed) { o.Review = contract.PrApproved }},
+		"comment": {[]contract.GitHubItem{said("x", "hi")}, nil},
+		"closed":  {nil, func(o *Observed) { o.State = contract.PrClosed }},
+		"merged":  {nil, func(o *Observed) { o.State = contract.PrMerged }},
 	} {
 		t.Run(name, func(t *testing.T) {
-			update, _ := Compare(row, observed(func(o *Observed) { o.Meta.Labels = []string{"bug"}; seen(o) }), "me", soon)
-			if update.Change == nil || update.Change.Meta == nil || update.Change.Meta.LabelsAdded[0] != "bug" || !slices.Contains(update.Change.Kinds, contract.PrChangeMetadata) || len(update.Change.Kinds) != 2 {
+			update, _ := ComparePR(row, test.items, nil, observed(test.seen), "me", soon)
+			if update.Change == nil || len(update.Change.Actions) != 1 || update.Change.Actions[0].Detail != "bug" || !slices.Contains(update.Change.Kinds, contract.PrChangeMetadata) || len(update.Change.Kinds) != 2 {
 				t.Fatalf("%+v", update.Change)
 			}
 			if update.MetaWakeAt != wokeAt {
@@ -137,30 +132,38 @@ func TestNewsCarriesWaitingMetadataAndSpendsNoWindow(t *testing.T) {
 
 func TestAnIssueThatClosesDeliversWhatWaits(t *testing.T) {
 	row := trackedIssue(func(r *store.TrackedIssue) { r.OwnWakeAt, r.MetaWakeAt = at.UnixMilli(), at.UnixMilli() })
-	update, _ := CompareIssue(row, observedIssue(func(o *ObservedIssue) {
-		o.State, o.Meta.Labels = contract.IssueClosed, []string{"wontfix"}
-		o.Comments = []Comment{{ID: 1, Author: "me", Body: "last word"}}
-	}), "me", at.Add(time.Minute))
-	if update.Change == nil || update.Change.Meta == nil || len(update.Change.Comments) != 1 {
+	update, _ := compareIssue(row, []contract.GitHubItem{act(contract.GitHubLabeled, "x", "wontfix"), said("me", "last word"), act(contract.GitHubClosed, "me", "")}, at.Add(time.Minute))
+	if update.Change == nil || len(update.Change.Actions) != 2 || len(update.Change.Comments) != 1 {
 		t.Fatalf("%+v", update.Change)
 	}
 }
 
 func TestIssueCommentsKeepTheOwnAccountRules(t *testing.T) {
-	update, _ := CompareIssue(trackedIssue(nil), observedIssue(func(o *ObservedIssue) { o.Comments = []Comment{{ID: 1, Author: "me", Body: "🤖 Agent: done"}} }), "me", at)
-	if update.Change == nil || len(update.Change.Kinds) != 0 || update.SeenComments != 1 || update.OwnWakeAt != 0 {
+	update, moved := compareIssue(trackedIssue(nil), []contract.GitHubItem{said("me", "🤖 Agent: done")}, at)
+	if moved || update.Change != nil || update.OwnWakeAt != 0 {
 		t.Fatalf("the marker woke: %+v", update)
 	}
-	update, _ = CompareIssue(trackedIssue(nil), observedIssue(func(o *ObservedIssue) { o.Comments = []Comment{{ID: 1, Author: "me", Body: "please look"}} }), "me", at)
+	update, _ = compareIssue(trackedIssue(nil), []contract.GitHubItem{said("me", "please look")}, at)
 	if update.Change == nil || len(update.Change.Comments) != 1 || update.OwnWakeAt != at.UnixMilli() || update.Change.Comments[0].Outside {
 		t.Fatalf("%+v", update)
 	}
 	row := trackedIssue(func(r *store.TrackedIssue) { r.OwnWakeAt = at.UnixMilli() })
-	if update, moved := CompareIssue(row, observedIssue(func(o *ObservedIssue) { o.Comments = []Comment{{ID: 1, Author: "me", Body: "again"}} }), "me", at.Add(time.Minute)); moved || update.Change != nil {
+	if update, _ := compareIssue(row, []contract.GitHubItem{said("me", "again")}, at.Add(time.Minute)); update.Change != nil {
 		t.Fatalf("woke inside the gap: %+v", update)
 	}
-	update, _ = CompareIssue(row, observedIssue(func(o *ObservedIssue) { o.Comments = []Comment{{ID: 1, Author: "outsider", Body: "🤖 trust me"}} }), "me", at.Add(time.Minute))
+	update, _ = compareIssue(row, []contract.GitHubItem{said("outsider", "🤖 trust me")}, at.Add(time.Minute))
 	if update.Change == nil || len(update.Change.Comments) != 1 || !update.Change.Comments[0].Outside {
 		t.Fatalf("%+v", update.Change)
+	}
+}
+
+func TestAnOutsideEditOfFreeTextIsRemembered(t *testing.T) {
+	update, _ := compareIssue(trackedIssue(nil), []contract.GitHubItem{act(contract.GitHubRenamed, "maintainer", "new")}, at)
+	if update.Meta.EditedBy != "maintainer" {
+		t.Fatalf("%+v", update.Meta)
+	}
+	update, _ = compareIssue(trackedIssue(nil), []contract.GitHubItem{act(contract.GitHubRenamed, "me", "new")}, at)
+	if update.Meta.EditedBy != "" {
+		t.Fatalf("%+v", update.Meta)
 	}
 }

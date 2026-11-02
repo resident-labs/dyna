@@ -47,11 +47,11 @@ type prRig struct {
 
 var prOwner = contract.Principal{Kind: contract.PrincipalOwner}
 
-// connect makes a fresh client and poll, as an engine restart would.
+// connect makes a fresh client and poller, as an engine restart would.
 func (r *prRig) connect() {
 	client := &prs.Client{Token: fakegithub.Token, Endpoint: r.github.Endpoint(), Transport: http.DefaultTransport, Now: r.clock.Now}
 	r.poll = &prs.Poller{Store: r.s.store, GitHub: client, Now: r.clock.Now}
-	r.s.SetPRTracking(client, r.poll)
+	r.s.SetPRTracking(client)
 }
 
 func newPRRig(t *testing.T) *prRig {
@@ -89,7 +89,7 @@ func (r *prRig) pass(t *testing.T) {
 	}
 }
 
-// settle polls past a PR's first read, so later checks see only their own change.
+// settle passes a PR's first read, so later checks see only their own change.
 func (r *prRig) settle(t *testing.T) {
 	t.Helper()
 	r.pass(t)
@@ -137,7 +137,8 @@ func TestEveryWakeKindReachesTheOwningSession(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := newPRRig(t)
-			r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 7})
+			// Checks are running, so the query reads what no feed shows.
+			r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 7, Rollup: "PENDING"})
 			r.settle(t)
 			if got := r.wakes(t, r.child); len(got) != 0 {
 				t.Fatalf("woke before any change: %+v", got)
@@ -272,29 +273,70 @@ func TestASessionAnsweringWithoutTheMarkerStaysTenMinutesApart(t *testing.T) {
 	}
 }
 
+// billable counts the REST reads and queries that spent quota. A 304 does not.
+func (r *prRig) billable() (rest, graphql int) {
+	graphql, all, cached := r.github.Counts()
+	return all - cached, graphql
+}
+
 func TestPollBudget(t *testing.T) {
 	r := newPRRig(t)
 	for number := 1; number <= 20; number++ {
 		r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: number})
 	}
-	// Something changes every minute, the worst case: the poll never backs off.
-	for second := 0; second < 3600; second += 10 {
-		r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) { p.Title = fmt.Sprintf("title %d", second/60) })
+	r.settle(t)
+	r.pass(t)
+	restBefore, graphqlBefore := r.billable()
+	sizes := len(r.github.QuerySizes())
+	// One PR changes every minute, the worst case: two feeds answer anew and the query reads that PR alone.
+	for minute := range 60 {
+		r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) { p.Title = fmt.Sprintf("title %d", minute) })
 		r.pass(t)
-		r.clock.add(10 * time.Second)
+		r.clock.add(time.Minute)
 	}
-	graphql, rest, _ := r.github.Counts()
-	if rest != 0 || graphql >= 300 || graphql < 50 {
-		t.Fatalf("%d queries and %d REST reads in the hour", graphql, rest)
+	rest, graphql := r.billable()
+	if spent := rest - restBefore + graphql - graphqlBefore; spent >= 300 || graphql-graphqlBefore != 60 {
+		t.Fatalf("%d REST reads and %d queries in the hour", rest-restBefore, graphql-graphqlBefore)
 	}
-	for _, size := range r.github.QuerySizes() {
-		if size != 20 {
+	for _, size := range r.github.QuerySizes()[sizes:] {
+		if size != 1 {
 			t.Fatalf("a query asked for %d PRs", size)
 		}
 	}
 }
 
-// pollTimes runs the poll for a span and says when each query went out, in seconds.
+func TestAQuietHourSpendsNoQuota(t *testing.T) {
+	r := newPRRig(t)
+	for number := 1; number <= 20; number++ {
+		r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: number})
+	}
+	r.pass(t)
+	r.clock.add(11 * time.Minute)
+	r.pass(t)
+	rest, graphql := r.billable()
+	for range 60 {
+		r.pass(t)
+		r.clock.add(time.Minute)
+	}
+	if nowRest, nowGraphQL := r.billable(); nowRest != rest || nowGraphQL != graphql {
+		t.Fatalf("%d REST reads and %d queries in a quiet hour", nowRest-rest, nowGraphQL-graphql)
+	}
+}
+
+func TestARestartCostsNoMoreThanItsViewer(t *testing.T) {
+	r := newPRRig(t)
+	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})
+	r.settle(t)
+	r.pass(t)
+	rest, graphql := r.billable()
+	r.connect()
+	r.pass(t)
+	if nowRest, nowGraphQL := r.billable(); nowRest != rest || nowGraphQL != graphql+1 {
+		t.Fatalf("%d REST reads and %d queries after a restart", nowRest-rest, nowGraphQL-graphql)
+	}
+}
+
+// pollTimes runs a pass every ten seconds for a span and says when a query went out, in seconds.
 func (r *prRig) pollTimes(t *testing.T, seconds int, each func(second int)) []int {
 	t.Helper()
 	var times []int
@@ -313,65 +355,25 @@ func (r *prRig) pollTimes(t *testing.T, seconds int, each func(second int)) []in
 	return times
 }
 
-func TestPollBacksOffAndResets(t *testing.T) {
-	r := newPRRig(t)
-	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})
-	// Quiet: 60, then 120, 240, 480, and 600 from there.
-	if got, want := fmt.Sprint(r.pollTimes(t, 2200, nil)), "[0 60 180 420 900 1500 2100]"; got != want {
-		t.Fatalf("polls at %s, want %s", got, want)
-	}
-	r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) { p.Rollup = "PENDING" })
-	r.clock.add(10 * time.Minute)
-	// The change shows at the next poll and brings the wait back to a minute.
-	if got, want := fmt.Sprint(r.pollTimes(t, 300, nil)), "[0 60 180]"; got != want {
-		t.Fatalf("polls at %s, want %s", got, want)
-	}
-}
-
-func TestDefaultBranchMoveResetsThePoll(t *testing.T) {
-	r := newPRRig(t)
-	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})
-	r.github.SetMain("owner/repo", "main1")
-	r.pollTimes(t, 1000, nil)
-	r.clock.add(10 * time.Minute)
-	r.github.SetMain("owner/repo", "main2")
-	if got, want := fmt.Sprint(r.pollTimes(t, 100, nil)), "[0 60]"; got != want {
-		t.Fatalf("polls at %s, want %s", got, want)
-	}
-}
-
-func TestPushResetsThePollWithinAMinute(t *testing.T) {
-	r := newPRRig(t)
-	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})
-	r.pollTimes(t, 1000, nil)
-	got := r.pollTimes(t, 90, func(second int) {
-		// Pushing every ten seconds must not poll any faster.
-		r.poll.Reset("owner/repo")
-	})
-	if len(got) == 0 || got[0] > 60 || len(got) > 2 {
-		t.Fatalf("polls at %v", got)
-	}
-}
-
 func TestLowQuotaWaitsTenMinutesAndRefusesABox(t *testing.T) {
 	r := newPRRig(t)
 	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})
 	reset := r.clock.Now().Add(time.Hour)
 	r.github.SetQuota(5000, 999, reset)
 	r.github.Add(fakegithub.Pull{Repo: "owner/repo", Number: 2})
-	// Even a change every step, or a push, stays ten minutes apart.
+	// Even a change every step stays ten minutes apart.
 	got := r.pollTimes(t, 1500, func(second int) {
 		r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) { p.Title = fmt.Sprint(second) })
-		r.poll.Reset("owner/repo")
 	})
 	if want := "[0 600 1200]"; fmt.Sprint(got) != want {
-		t.Fatalf("polls at %v, want %s", got, want)
+		t.Fatalf("reads at %v, want %s", got, want)
 	}
+	_, rest, _ := r.github.Counts()
 	_, e := r.s.PrTrack(r.ctx, sessionCaller(r.child), contract.PrTrackRequest{Number: 2})
 	if e == nil || e.Code != contract.ErrGitHubQuota || !strings.Contains(e.Message, reset.UTC().Format(time.RFC3339)) {
 		t.Fatalf("%+v", e)
 	}
-	if _, rest, _ := r.github.Counts(); rest != 0 {
+	if _, after, _ := r.github.Counts(); after != rest {
 		t.Fatal("the refused call reached GitHub")
 	}
 	if _, e := r.s.PrTrack(r.ctx, prOwner, contract.PrTrackRequest{Repo: "owner/repo", Number: 2, Session: r.child}); e != nil {
@@ -395,11 +397,11 @@ func TestSessionTracksAForkPROnAnUpstreamNoRoomLists(t *testing.T) {
 	if e != nil || status.PR.CI != contract.PrCIFailure || status.PR.State != contract.PrOpen {
 		t.Fatalf("%+v %+v", status, e)
 	}
-	r.github.Edit("upstream/repo", 50, func(p *fakegithub.Pull) { p.Rollup = "SUCCESS" })
-	r.pollTimes(t, 1000, nil)
+	// A push to the fork moves the upstream PR on its feed, and nothing need tell the engine about it.
+	r.github.Edit("upstream/repo", 50, func(p *fakegithub.Pull) { p.Head, p.Rollup = "abc2", "SUCCESS" })
+	r.clock.add(16 * time.Minute)
+	r.pass(t)
 	r.github.Edit("upstream/repo", 50, func(p *fakegithub.Pull) { p.Head, p.Rollup = "def", "FAILURE" })
-	// The poll has backed off; a push to the fork must bring the upstream PR's next read within a minute.
-	r.poll.Reset("owner/repo")
 	r.clock.add(61 * time.Second)
 	r.pass(t)
 	got := r.wakes(t, r.child)
@@ -579,6 +581,7 @@ func TestOutsideTextReachesASessionWrapped(t *testing.T) {
 
 func TestSnapshotShowsOpenPRState(t *testing.T) {
 	r := newPRRig(t)
+	r.pass(t)
 	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1, Rollup: "FAILURE", ReviewDecision: "CHANGES_REQUESTED", Mergeable: "CONFLICTING", MergeState: "DIRTY"})
 	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 2, Draft: true, Rollup: "SUCCESS", ReviewDecision: "APPROVED"})
 	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 3, State: "MERGED"})
@@ -635,21 +638,25 @@ func TestOpenPRHoldsAQuietSessionAndAMergedOneDoesNot(t *testing.T) {
 	}
 }
 
-func TestPollFailureBacksOffAndChangesNothing(t *testing.T) {
+func TestAFailedReadMovesNoCursorSoTheNewsComesAgain(t *testing.T) {
 	r := newPRRig(t)
 	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})
+	r.settle(t)
+	r.github.EditAs("alice", "owner/repo", 1, func(p *fakegithub.Pull) { p.Meta.Labels = []string{"bug"} })
+	before := r.eventCount(t, "pr.changed")
 	r.poll.GitHub.Token = "wrong"
 	r.pass(t)
-	if got, err := r.s.store.PR(r.ctx, "owner/repo", 1); err != nil || got.Baseline || got.CI != "" {
-		t.Fatalf("%+v %v", got, err)
+	if got := r.eventCount(t, "pr.changed"); got != before {
+		t.Fatalf("%d events", got-before)
 	}
-	var count int
-	if err := r.s.store.Read().QueryRow("SELECT count(*) FROM events WHERE type='pr.changed'").Scan(&count); err != nil || count != 0 {
-		t.Fatalf("%d events: %v", count, err)
+	r.poll.GitHub.Token = fakegithub.Token
+	r.pass(t)
+	if got := r.wakes(t, r.child); len(got) != 1 || got[0].Changes[0].Actions[0].Actor != "alice" {
+		t.Fatalf("wakes %+v", got)
 	}
 }
 
-func TestUntrackStopsThePollOfAnUnlistedRepository(t *testing.T) {
+func TestUntrackStopsReadingAnUnlistedRepository(t *testing.T) {
 	r := newPRRig(t)
 	r.github.Add(fakegithub.Pull{Repo: "upstream/repo", Number: 1, HeadRepo: "owner/repo"})
 	if _, e := r.s.PrTrack(r.ctx, sessionCaller(r.child), contract.PrTrackRequest{Repo: "upstream/repo", Number: 1}); e != nil {
@@ -660,12 +667,13 @@ func TestUntrackStopsThePollOfAnUnlistedRepository(t *testing.T) {
 		t.Fatalf("%+v", e)
 	}
 	r.clock.add(time.Hour)
-	before := len(r.github.QuerySizes())
+	r.github.HideRepo("upstream/repo")
+	graphql, _, _ := r.github.Counts()
+	sent := len(r.github.SentETags())
 	r.pass(t)
-	// Only the room's own repository is left, and it asks for no PR.
-	sizes := r.github.QuerySizes()
-	if len(sizes) != before+1 || sizes[len(sizes)-1] != 0 {
-		t.Fatalf("queries %v", sizes)
+	// Only the room's own repository is left, and all it asks is whether its feeds moved.
+	if now, _, _ := r.github.Counts(); now != graphql || len(r.github.SentETags())-sent != 5 {
+		t.Fatalf("%d queries, %d conditional reads", now-graphql, len(r.github.SentETags())-sent)
 	}
 }
 
@@ -698,7 +706,7 @@ func (r *prRig) dispatch(t *testing.T) {
 
 func TestOwnedPREventsAreEmittedOnceAndLeaveRootAlone(t *testing.T) {
 	r := newPRRig(t)
-	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})
+	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1, Rollup: "PENDING"})
 	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 2})
 	r.settle(t)
 	r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) { p.Rollup = "FAILURE" })
