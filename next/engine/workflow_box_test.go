@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	"github.com/resident-labs/dyna/engine/api"
 	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/model"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 const (
@@ -188,8 +190,13 @@ type realCrew struct {
 	sockets  *api.Sockets
 	runtime  string
 	image    string
-	origin   string // the repository's bare remote, when the room has one
-	cache    string // what the host would keep of it, which a box clones from
+	data     string // the engine's store folder
+	proxy    string // the upstream's socket, where the model proxy would be
+	drain    *model.Drain
+	routed   atomic.Int64 // model calls that reached the engine's route, held or not
+	remote   *url.URL     // git's own server for the repository, behind the engine's git route
+	origin   string       // the repository's bare remote, when the room has one
+	cache    string       // what the host would keep of it, which a box clones from
 	created  []contract.BoxID
 }
 
@@ -224,55 +231,50 @@ func newRealCrew(t *testing.T, files map[string]string) *realCrew {
 	if image == "" || binary == "" {
 		t.Skip("DYNA_BOX_TEST_IMAGE and DYNA_BOX_TEST_BINARY name a dyna-base image and a dyna build; this test runs a real box")
 	}
-	s, room, _, base := setup(t)
-	s.profiles = crewProfiles{}
-	ctx, cancel := context.WithTimeout(base, 15*time.Minute)
-	t.Cleanup(cancel)
-	var root contract.SessionID
-	if err := s.store.Read().QueryRowContext(ctx, "SELECT id FROM sessions WHERE room=? AND parent IS NULL", room).Scan(&root); err != nil {
-		t.Fatal(err)
-	}
 	data, err := os.MkdirTemp("", "dyna-wf-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(data) })
-	layout := box.Layout{Data: filepath.Join(data, "data"), HostData: filepath.Join(data, "host")}
-	s.SetLayout(layout)
-
-	// The upstream listens on a socket, as the proxy does, and the route in front of it is the engine's.
-	upstream := &crewUpstream{gates: map[string]chan struct{}{}, tools: map[string][]crewTool{}, batch: map[string]int{}}
-	proxySocket := filepath.Join(data, "proxy.sock")
-	proxyListener, err := net.Listen("unix", proxySocket)
+	c := &realCrew{t: t, data: filepath.Join(data, "store"), runtime: filepath.Join(data, "rt"), image: image, drain: model.NewDrain()}
+	st, err := store.Open(c.data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy := &http.Server{Handler: upstream}
+	// This closes the newest engine's store, which a restart replaces.
+	t.Cleanup(func() {
+		if c.s != nil {
+			st = c.s.store
+		}
+		if err := st.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	s, room, _, base := setupStore(t, st)
+	ctx, cancel := context.WithTimeout(base, 15*time.Minute)
+	t.Cleanup(cancel)
+	c.s, c.ctx, c.room = s, ctx, room
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT id FROM sessions WHERE room=? AND parent IS NULL", room).Scan(&c.root); err != nil {
+		t.Fatal(err)
+	}
+	c.layout = box.Layout{Data: filepath.Join(data, "data"), HostData: filepath.Join(data, "host")}
+
+	// The upstream listens on a socket, as the proxy does, and the route in front of it is the engine's.
+	c.upstream = &crewUpstream{gates: map[string]chan struct{}{}, tools: map[string][]crewTool{}, batch: map[string]int{}}
+	c.proxy = filepath.Join(data, "proxy.sock")
+	proxyListener, err := net.Listen("unix", c.proxy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := &http.Server{Handler: c.upstream}
 	go proxy.Serve(proxyListener)
 	t.Cleanup(func() { _ = proxy.Close() })
-	server := api.New(boxService{Service: s}, func(c api.Caller) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			session, err := s.store.Session(r.Context(), c.Principal.Session)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusServiceUnavailable)
-				return
-			}
-			allowed, crew, err := s.AllowedModels(r.Context(), session)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusServiceUnavailable)
-				return
-			}
-			model.Handler(proxySocket, "client-key", string(session.ID), allowed, []string{"account"}, "", crew).ServeHTTP(w, r)
-		})
-	})
-	server.SetFilesRoute(func(c api.Caller) http.Handler { return s.Files(c.Principal, c.Room) })
-	c := &realCrew{t: t, s: s, ctx: ctx, room: room, root: root, layout: layout, upstream: upstream, runtime: filepath.Join(data, "rt"), image: image}
 	if files != nil {
-		c.addRepo(server, filepath.Join(data, "git"), files)
+		c.addRepo(filepath.Join(data, "git"), files)
 	}
-	c.sockets = api.NewSockets(server, c.runtime, uint32(os.Getuid()), nil)
-	t.Cleanup(func() { _ = c.sockets.Close() })
-	bin := filepath.Join(layout.HostBin(), "current")
+	c.configure()
+	c.serve()
+	bin := filepath.Join(c.layout.HostBin(), "current")
 	if err := os.MkdirAll(bin, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -297,6 +299,81 @@ func newRealCrew(t *testing.T, files map[string]string) *realCrew {
 	return c
 }
 
+// configure sets on a new service what the runtime sets as the engine starts.
+func (c *realCrew) configure() {
+	c.s.profiles = crewProfiles{}
+	c.s.SetLayout(c.layout)
+	if c.origin != "" {
+		c.s.SetRepositories(crewRepos{c.origin, c.cache})
+		c.s.SetGitIdentity("Crew Test", "crew@dyna.invalid")
+	}
+}
+
+// serve opens the engine's sockets with its real routes. The drain holds the model route, as the runtime's does.
+func (c *realCrew) serve() {
+	s, drain := c.s, c.drain
+	server := api.New(boxService{Service: s}, func(caller api.Caller) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			c.routed.Add(1)
+			drain.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				session, err := s.store.Session(r.Context(), caller.Principal.Session)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusServiceUnavailable)
+					return
+				}
+				allowed, crew, err := s.AllowedModels(r.Context(), session)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusServiceUnavailable)
+					return
+				}
+				model.Handler(c.proxy, "client-key", string(session.ID), allowed, []string{"account"}, "", crew).ServeHTTP(w, r)
+			})).ServeHTTP(w, r)
+		})
+	})
+	server.SetFilesRoute(func(caller api.Caller) http.Handler { return s.Files(caller.Principal, caller.Room) })
+	if c.remote != nil {
+		server.SetGitRoute(func(caller api.Caller) http.Handler {
+			return enginegit.Handler(c.remote, http.DefaultTransport, "test-token", caller.Principal.Session, caller.Room, s.store)
+		})
+	}
+	sockets := api.NewSockets(server, c.runtime, uint32(os.Getuid()), nil)
+	c.sockets = sockets
+	c.t.Cleanup(func() { _ = sockets.Close() })
+}
+
+// stopEngine ends the engine as its process exits once the drain is over: the sockets close with whatever they still hold, and
+// so does the store.
+func (c *realCrew) stopEngine() {
+	c.t.Helper()
+	if err := c.sockets.Close(); err != nil {
+		c.t.Fatal(err)
+	}
+	if err := c.s.store.Close(); err != nil {
+		c.t.Fatal(err)
+	}
+}
+
+// startEngine is a new engine process on the same folder. It opens the sockets of the boxes that were running, as the runtime's
+// restore does.
+func (c *realCrew) startEngine(running ...contract.WorkflowRunResponse) {
+	c.t.Helper()
+	st, err := store.Open(c.data)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	c.s = New(st, fakeBoxes{}, fakeProfiles{}, setupNow)
+	c.configure()
+	resetLifecycle(c.s)
+	c.drain = model.NewDrain()
+	c.serve()
+	for _, run := range running {
+		if err := c.sockets.AddBox(run.Box, run.Session, c.room); err != nil {
+			c.t.Fatal(err)
+		}
+	}
+	passLifecycle(c.t, c.s, c.ctx)
+}
+
 // git runs git on the test's side, in dir.
 func (c *realCrew) git(dir string, args ...string) string {
 	c.t.Helper()
@@ -311,7 +388,7 @@ func (c *realCrew) git(dir string, args ...string) string {
 }
 
 // addRepo gives the room a repository holding files, behind the engine's own route.
-func (c *realCrew) addRepo(server *api.API, root string, files map[string]string) {
+func (c *realCrew) addRepo(root string, files map[string]string) {
 	c.t.Helper()
 	c.origin, c.cache = filepath.Join(root, "owner", "repo.git"), filepath.Join(root, "cache", "owner", "repo.git")
 	seed := filepath.Join(root, "seed")
@@ -338,18 +415,13 @@ func (c *realCrew) addRepo(server *api.API, root string, files map[string]string
 	backend := &cgi.Handler{Path: filepath.Join(c.git(root, "--exec-path"), "git-http-backend"), Env: []string{"GIT_PROJECT_ROOT=" + root, "GIT_HTTP_EXPORT_ALL=1"}}
 	remote := httptest.NewServer(backend)
 	c.t.Cleanup(remote.Close)
-	upstream, err := url.Parse(remote.URL)
-	if err != nil {
+	var err error
+	if c.remote, err = url.Parse(remote.URL); err != nil {
 		c.t.Fatal(err)
 	}
-	server.SetGitRoute(func(caller api.Caller) http.Handler {
-		return enginegit.Handler(upstream, http.DefaultTransport, "test-token", caller.Principal.Session, caller.Room, c.s.store)
-	})
 	if err := c.s.store.AddRoomRepo(c.ctx, c.room, "owner/repo", true); err != nil {
 		c.t.Fatal(err)
 	}
-	c.s.SetRepositories(crewRepos{c.origin, c.cache})
-	c.s.SetGitIdentity("Crew Test", "crew@dyna.invalid")
 }
 
 func (c *realCrew) containers(label string) []string {
@@ -683,6 +755,72 @@ func TestWorkflowInARealBox(t *testing.T) {
 	if got := count("SELECT COUNT(*) FROM sessions"); got != sessionsBefore+2 {
 		t.Fatalf("%d sessions after two runs, %d before", got, sessionsBefore)
 	}
+}
+
+const crewRestart = `export const meta = { name: 'restart', profiles: ['fast'], size: 'medium' }
+phase('work')
+const tasks = ['task-r1', 'task-r2', 'task-r3']
+const results = await parallel(tasks.map((task) => () => agent('Work on ' + task, { label: task })))
+const after = await run('echo after', { label: 'after the restart' })
+return { results, after: after.stdout.trim() }
+`
+
+// engineDown is how long the engine is gone. hermeslab's engine took 1 to 2 seconds from its exit to its host forwards being
+// back, which Pi's own three retries, 2, 4 and 8 seconds apart, cover. This is longer than all of them, so the box must hold
+// the calls.
+const engineDown = 20 * time.Second
+
+// The engine restarts in the middle of a run. Three workers are at the model as it stops: their calls finish in the drain, each
+// worker runs a tool, and its next call waits in the drain until the sockets close on it. A new engine opens the same store, and
+// the run ends done with no failed step, each worker having asked the model twice.
+func TestWorkflowSurvivesAnEngineRestart(t *testing.T) {
+	c := newRealCrew(t, nil)
+	tasks := []string{"task-r1", "task-r2", "task-r3"}
+	for _, task := range tasks {
+		c.upstream.tools[task] = []crewTool{shellTool("sleep 1")}
+	}
+	c.upstream.hold(tasks...)
+	started := c.start(contract.Principal{Kind: contract.PrincipalOwner}, crewRestart, "")
+	c.wait("three workers at the model", func() bool { return c.upstream.count() == len(tasks) })
+	routed := c.routed.Load()
+
+	// The engine stops as the runtime's does: no new turns, and new model calls wait while admitted ones finish.
+	c.s.store.DrainDispatch()
+	drained := c.drain.Begin()
+	c.upstream.release(tasks...)
+	select {
+	case <-drained:
+	case <-time.After(60 * time.Second):
+		t.Fatal("the admitted calls did not finish in the drain")
+	}
+	c.wait("each worker's next call, held", func() bool { return c.routed.Load() == routed+int64(len(tasks)) })
+	c.stopEngine()
+	time.Sleep(engineDown)
+	c.startEngine(started)
+
+	c.wait("the run's end", func() bool { return c.status(started.Run).Run.State != contract.WorkflowRunning })
+	final := c.status(started.Run)
+	for _, step := range final.Steps {
+		if step.State != contract.WorkflowStepDone {
+			t.Errorf("step %s is %s: %s", step.Name, step.State, step.Reason)
+		}
+	}
+	if final.Run.State != contract.WorkflowDone || final.Run.Failed != 0 {
+		t.Fatalf("run %+v", final.Run)
+	}
+	if want := `{"results":["found task-r1","found task-r2","found task-r3"],"after":"after"}`; final.Run.Result != want {
+		t.Fatalf("result %s", final.Run.Result)
+	}
+	asked := map[string]int{}
+	for _, request := range c.upstream.since(0) {
+		asked[request.task]++
+	}
+	for _, task := range tasks {
+		if asked[task] != 2 {
+			t.Fatalf("the model was asked %v", asked)
+		}
+	}
+	c.closed(started.Session)
 }
 
 func shellTool(command string) crewTool {
