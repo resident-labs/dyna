@@ -109,12 +109,13 @@ func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, eve
 		surface = "in the room feed"
 	}
 	frame := fmt.Sprintf("[Dyna] From %s, %s.", sender, surface)
-	if delivery.HandoffFrom != "" {
-		origin, err := s.framePrincipal(ctx, viewer, contract.Principal{Kind: contract.PrincipalSession, Session: delivery.HandoffFrom})
+	// A session's input to a parent that can't receive comes up to the nearest ancestor that can.
+	if delivery.MeantFor != "" {
+		name, _, _, err := s.store.FrameSession(ctx, viewer, delivery.MeantFor)
 		if err != nil {
 			return "", nil, err
 		}
-		frame += fmt.Sprintf(" This input was handed over when %s closed.", origin)
+		frame += fmt.Sprintf(" For %s, which can't receive (%s).", name, delivery.Why)
 	}
 	var files []contract.TurnFile
 	if post, ok := event.Body.(contract.PostCreated); ok && len(post.Attachments) > 0 {

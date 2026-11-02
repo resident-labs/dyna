@@ -67,7 +67,7 @@ type MethodEntry struct {
 type PostInput struct {
 	Room         contract.RoomID       `json:"room" desc:"A room_… ID, from your instructions. Omitted, it is your own room."`
 	Text         string                `json:"text"`
-	Mentions     []string              `json:"mentions,omitempty" desc:"Session names that receive the post, such as api-lead; the roles root, parent, children and siblings; or room:name in another room. IDs are not names."`
+	Mentions     []string              `json:"mentions,omitempty" desc:"Who receives the post: parent, children, or your parent or one of your own children by name or ID. A session reaches only its parent and its own children, and the engine refuses any other mention; your parent passes things on. With no mentions, the post goes to the owner."`
 	Home         contract.Conversation `json:"home,omitempty" desc:"A session may name only its own DM, {kind: dm}. With no home, a post that names no session goes to the owner's conversation with you: where this turn's reply to the owner goes, else where the owner last wrote to you, else the feed. One that names sessions goes to the feed."`
 	ReplyTo      contract.EventID      `json:"replyTo,omitempty"`
 	ClientID     string                `json:"clientId,omitempty"`

@@ -178,6 +178,14 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		if err != nil {
 			return contract.PostResponse{}, invalid(err.Error())
 		}
+		// Siblings and other rooms are never in a session's chain of command. The store refuses any other session outside it.
+		if caller.Kind == contract.PrincipalSession && (address.Kind == room.AddressSiblings || address.Room != "") {
+			err := s.store.OutsideChain(ctx, caller.Session)
+			if problem := chainProblem(err); problem != nil {
+				return contract.PostResponse{}, problem
+			}
+			return contract.PostResponse{}, failure(err)
+		}
 		names := make(map[string]contract.SessionID)
 		if address.Kind == room.AddressName {
 			targetRoom := req.Room
@@ -191,6 +199,13 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 				}
 			}
 			session, err := s.store.SessionByName(ctx, targetRoom, address.Name)
+			if errors.Is(err, store.ErrNotFound) {
+				// A session's ID names it too.
+				session, err = s.store.Session(ctx, contract.SessionID(address.Name))
+				if err == nil && session.Room != targetRoom {
+					err = store.ErrNotFound
+				}
+			}
 			if errors.Is(err, store.ErrNotFound) {
 				return contract.PostResponse{}, invalid("unknown session @" + address.Name)
 			}
@@ -221,9 +236,8 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if errors.As(err, &superseded) {
 		return contract.PostResponse{}, &contract.Error{Code: contract.ErrVisualSuperseded, Message: "visual has a newer version", Visual: &contract.VisualSuperseded{Event: superseded.Event, Version: superseded.Version, Seq: superseded.Seq}}
 	}
-	var cant *store.CantReceiveError
-	if errors.As(err, &cant) {
-		return contract.PostResponse{}, &contract.Error{Code: contract.ErrConflict, Message: cant.Message}
+	if problem := chainProblem(err); problem != nil {
+		return contract.PostResponse{}, problem
 	}
 	if errors.Is(err, store.ErrVisualNoAuthor) {
 		return contract.PostResponse{}, invalid("visual has no session author")
@@ -238,6 +252,15 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		return contract.PostResponse{}, failure(err)
 	}
 	return contract.PostResponse{Event: id, Seq: seq}, nil
+}
+
+// chainProblem answers a refusal from the store's chain of command, and is nil for any other error.
+func chainProblem(err error) *contract.Error {
+	var chain *store.ChainError
+	if errors.As(err, &chain) {
+		return &contract.Error{Code: contract.ErrForbidden, Message: chain.Message}
+	}
+	return nil
 }
 
 func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req contract.EventsListRequest) (contract.EventsListResponse, *contract.Error) {
