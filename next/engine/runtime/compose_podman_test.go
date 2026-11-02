@@ -229,7 +229,7 @@ func TestComposeStackOnRealPodman(t *testing.T) {
 		t.Fatalf("%d keep-id copies after the pull", copies)
 	}
 	// A first start makes the same host calls as a new box, minus the socket forward this test has no use for.
-	if err := b.Recreate(ctx, spec, oldImage, slice); err != nil {
+	if err := b.Recreate(ctx, spec, oldImage); err != nil {
 		t.Fatal(err)
 	}
 	if copies := mappedCopies(t, spec.Stack.Sidecars[0].Image); copies != 1 {
@@ -305,7 +305,7 @@ func TestComposeStackOnRealPodman(t *testing.T) {
 	t.Log("a swap replaces every container, and the volumes stay")
 	before := exists("inspect", "--format", "{{.Id}}", db)
 	spec.Stack = stack("two")
-	if err := b.Recreate(ctx, spec, newImage, slice); err != nil {
+	if err := b.Recreate(ctx, spec, newImage); err != nil {
 		t.Fatal(err)
 	}
 	boxSays("new", "cat /box/woke-on")

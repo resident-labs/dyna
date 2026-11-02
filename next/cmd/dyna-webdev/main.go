@@ -304,7 +304,7 @@ func (devService) ShellWatch(ctx context.Context, _ contract.SessionID) (<-chan 
 		Started: now.Add(-2 * time.Hour), Ended: now.Add(-2*time.Hour + 12*time.Second)}
 	out <- contract.ShellJobOutput{Job: "j3", Command: "go vet ./...", Text: "", Reset: true,
 		Started: now.Add(-5 * time.Minute), Ended: now.Add(-5*time.Minute + 38*time.Second)}
-	out <- contract.ShellJobOutput{Job: "j1", Command: "go test ./engine/...", ExitCode: 1, Text: "--- FAIL: TestShellWatch (0.01s)\nFAIL\n", Reset: true,
+	out <- contract.ShellJobOutput{Job: "j1", Command: "go test ./engine/...", End: &contract.ShellJobEnd{Kind: contract.ShellJobExited, Code: 1}, ExitCode: 1, Text: "--- FAIL: TestShellWatch (0.01s)\nFAIL\n", Reset: true,
 		Started: now.Add(-3 * time.Minute), Ended: now.Add(-3*time.Minute + 38*time.Second)}
 	out <- contract.ShellJobOutput{Job: "j2", Command: run, Running: true, Text: "VITE v7.1.3  ready in 312 ms\n", Reset: true, Started: now.Add(-2 * time.Minute)}
 	go func() {
@@ -560,7 +560,7 @@ func (b *boxes) MaintainHost(context.Context, contract.HostName) error {
 	return nil
 }
 
-func (b *boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, _, _ string) error {
+func (b *boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, _ string) error {
 	return b.Start(ctx, spec.Box)
 }
 func (b *boxes) Remove(ctx context.Context, id contract.BoxID) error {

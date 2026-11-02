@@ -19,7 +19,7 @@ func (s *Service) ShellJobEnded(ctx context.Context, caller contract.Principal, 
 	if err != nil {
 		return contract.ShellJobEndedResponse{}, failure(err)
 	}
-	event, err := s.event(session.Room, caller, contract.ShellJobEnded{Session: session.ID, Job: req.Job, Description: req.Description, End: req.End, ExitCode: req.ExitCode, Tail: req.Tail})
+	event, err := s.event(session.Room, caller, contract.ShellJobEnded{Session: session.ID, Job: req.Job, Description: req.Description, End: shellJobEnd(req), ExitCode: req.ExitCode, Tail: req.Tail})
 	if err != nil {
 		return contract.ShellJobEndedResponse{}, failure(err)
 	}
@@ -27,6 +27,18 @@ func (s *Service) ShellJobEnded(ctx context.Context, caller contract.Principal, 
 		return contract.ShellJobEndedResponse{}, failure(err)
 	}
 	return contract.ShellJobEndedResponse{}, nil
+}
+
+// LEGACY(v1-transfer): filling End from the exit code, for a box agent from before End. Remove after the transfer.
+// shellJobEnd is how a job ended. -1 is the exit code of a job a signal ended.
+func shellJobEnd(req contract.ShellJobEndedRequest) contract.ShellJobEnd {
+	if req.End != nil {
+		return *req.End
+	}
+	if req.ExitCode == -1 {
+		return contract.ShellJobEnd{Kind: contract.ShellJobSignaled}
+	}
+	return contract.ShellJobEnd{Kind: contract.ShellJobExited, Code: req.ExitCode}
 }
 
 // ShellJobRunning tells a session about a background job of its own that is still running.

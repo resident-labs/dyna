@@ -491,7 +491,7 @@ export function describe(event: Event, name: Name): string {
     case "shell.job.running": return "";
     case "shell.job.ended": {
       const who = name(event.body.session), job = event.body.description ? `job "${event.body.description}"` : "job";
-      if (event.body.end?.kind === "stopped") return `${who} stopped its ${job}`;
+      if (event.body.end.kind === "stopped") return `${who} stopped its ${job}`;
       return failed(event.body) ? `${who}'s ${job} failed: ${endCause(event.body, who)}` : `${who}'s ${job} finished`;
     }
     case "op.decided": return `${event.body.decision.by.session ? name(event.body.decision.by.session) : "You"} ${event.body.decision.approved ? "approved" : "denied"} a request`;

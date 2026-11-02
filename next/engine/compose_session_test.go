@@ -185,10 +185,10 @@ func (h *stackWakeHost) CurrentImage(context.Context, contract.SessionID, contra
 	return box.Image{Tag: h.image, Stack: &box.Stack{Hash: h.wanted}}, nil
 }
 
-func (h *stackWakeHost) Recreate(ctx context.Context, spec BoxSpec, image, oldSlice string) error {
+func (h *stackWakeHost) Recreate(ctx context.Context, spec BoxSpec, image string) error {
 	h.stack = spec.Stack
 	h.running = spec.Stack.Hash
-	return h.imageWakeHost.Recreate(ctx, spec, image, oldSlice)
+	return h.imageWakeHost.Recreate(ctx, spec, image)
 }
 
 // A sidecar's image or definition can change while the box's own image does not. It follows the same rule: the box swaps

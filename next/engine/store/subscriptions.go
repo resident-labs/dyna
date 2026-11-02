@@ -11,9 +11,7 @@ import (
 	"github.com/resident-labs/dyna/room"
 )
 
-// defaultEventsJSON lists what wakes root by default: engine notices and the default branch moving (spec 7.2, 8.5).
-const defaultEventsJSON = `["notice.posted","git.main_updated"]`
-
+// defaultEvents lists what wakes root by default: engine notices and the default branch moving (spec 7.2, 8.5).
 var defaultEvents = []contract.EventType{"notice.posted", "git.main_updated"}
 
 // maxQueuedRuns bounds the events waiting for a subscription's Runs. A burst past it stays in the room log but starts no Run.
