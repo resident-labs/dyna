@@ -39,7 +39,7 @@
       </div>
     {:else if rendered && kind === "markdown"}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-      <div class="scroll" tabindex="0" role="region" aria-label={file.name}><div class="page"><Markdown rhythm="thread" text={preview.text} /></div></div>
+      <div class="scroll" tabindex="0" role="region" aria-label={file.name}><div class="page"><Markdown rhythm="thread" text={preview.text} mentions={false} /></div></div>
     {:else}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
       <pre class="scroll" tabindex="0" role="region" aria-label={file.name}>{preview.text}</pre>

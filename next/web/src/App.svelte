@@ -26,6 +26,7 @@
   import VirtualList from "./lib/ui/VirtualList.svelte";
   import Icon from "./lib/ui/Icon.svelte";
   import Avatar, { setSessionLabels } from "./lib/ui/Avatar.svelte";
+  import { setMentionLinks } from "./lib/ui/Markdown.svelte";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
   import { boxReason, count, quoted, turnReason, waits, type Quote } from "./lib/feed.ts";
   import { sessionActions, sessionTree, type TreeRow } from "./lib/session-tree.ts";
@@ -48,7 +49,7 @@
   import NewSession from "./lib/ui/NewSession.svelte";
   import NewRoom from "./lib/ui/NewRoom.svelte";
   import { Attention } from "./lib/attention.svelte.ts";
-  import { mentionable, parseMentions } from "./lib/mentions.ts";
+  import { mentionable, mentionTargets, parseMentions } from "./lib/mentions.ts";
   import { distinctInitials } from "./lib/identity.ts";
   import { computerPlace, fitted, type Rect } from "./lib/float.ts";
   import { pinPage } from "./lib/viewport.ts";
@@ -193,12 +194,15 @@
   });
   // A room that failed to open is unavailable, for the same reasons as the page or its own; later load errors show inside the feed.
   let unavailable: BlockedState | "room" | undefined = $derived(!store || store.ready || store.error === undefined ? undefined : blockedBy(store.error) ?? "room");
-  function navigate(event: MouseEvent & { currentTarget: HTMLAnchorElement }) {
+  const navigate = (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => go(event, event.currentTarget.href);
+  function go(event: MouseEvent, href: string) {
     if (event.button || event.metaKey || event.ctrlKey || event.shiftKey) return;
     event.preventDefault();
-    history.pushState(null, "", event.currentTarget.href);
+    history.pushState(null, "", href);
     follow();
   }
+  let mentioned = $derived(store ? mentionTargets(store.names, store.sessions) : new Map<string, string>());
+  setMentionLinks(() => ({ room: store?.room ?? "", sessions: mentioned, open: go }));
   // A link to a DM closes a phone's panel. When wide, the link may leave with the list as About opens, and focus goes to the panel.
   function openSession(event: MouseEvent & { currentTarget: HTMLAnchorElement }) {
     navigate(event);
