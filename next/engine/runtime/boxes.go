@@ -516,10 +516,10 @@ func (b *Boxes) hostRepos(ctx context.Context, name contract.HostName) (map[cont
 	if err != nil {
 		return nil, nil, err
 	}
-	var limited []contract.RoomID
+	var host box.Host
 	for _, record := range hosts {
 		if record.Name == name {
-			limited = record.Rooms
+			host = record
 		}
 	}
 	rooms, err := b.Store.OpenRooms(ctx)
@@ -529,7 +529,8 @@ func (b *Boxes) hostRepos(ctx context.Context, name contract.HostName) (map[cont
 	repos := make(map[contract.RepoName]contract.RoomID)
 	var pairs []roomRepo
 	for _, room := range rooms {
-		if len(limited) > 0 && !slices.Contains(limited, room) {
+		// A host with agents off serves no room, so it builds no room's images.
+		if !host.Serves(room) {
 			continue
 		}
 		listed, err := b.Store.RoomRepos(ctx, room)
@@ -584,7 +585,7 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool,
 	if err != nil {
 		return false, err
 	}
-	record.Rooms = req.Rooms
+	record.Rooms, record.NoAgents, record.CI = req.Rooms, req.Agents != nil && !*req.Agents, req.CI
 	if err := b.Store.AddHost(ctx, record); err != nil {
 		return false, err
 	}

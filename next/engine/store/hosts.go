@@ -15,7 +15,7 @@ import (
 
 func (s *Store) AddHost(ctx context.Context, h box.Host) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "INSERT INTO hosts (name, ssh, state, cpus, mem_bytes, disk_bytes, checked_at, engine_host) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", h.Name, h.SSH, h.State, h.CPUs, h.MemBytes, h.DiskBytes, h.CheckedAt.UnixMilli(), h.EngineHost)
+		_, err := tx.ExecContext(ctx, "INSERT INTO hosts (name, ssh, state, cpus, mem_bytes, disk_bytes, checked_at, engine_host, agents, ci) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", h.Name, h.SSH, h.State, h.CPUs, h.MemBytes, h.DiskBytes, h.CheckedAt.UnixMilli(), h.EngineHost, !h.NoAgents, h.CI)
 		if err != nil {
 			return err
 		}
@@ -50,6 +50,22 @@ func (s *Store) SetHostRooms(ctx context.Context, host contract.HostName, rooms 
 			}
 		}
 		return nil
+	})
+}
+
+// SetHostSwitches turns a host's agents switch, its CI switch or both; nil leaves one as it is. Boxes and runners already on
+// the host stay.
+func (s *Store) SetHostSwitches(ctx context.Context, host contract.HostName, agents, ci *bool) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "UPDATE hosts SET agents=coalesce(?2,agents), ci=coalesce(?3,ci) WHERE name=?1", host, agents, ci)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err == nil && n == 0 {
+			err = fmt.Errorf("host %s: %w", host, ErrNotFound)
+		}
+		return err
 	})
 }
 
@@ -289,7 +305,7 @@ func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
 }
 
 func (s *Store) hosts(ctx context.Context, where string) ([]box.Host, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT h.name, h.ssh, h.state, h.cpus, h.mem_bytes, h.disk_bytes, h.disk_floor, h.checked_at, h.maintained_at, h.engine_host, h.pool, h.box, hr.room FROM hosts h LEFT JOIN host_rooms hr ON hr.host=h.name WHERE `+where+` ORDER BY h.name,hr.room`)
+	rows, err := s.Read().QueryContext(ctx, `SELECT h.name, h.ssh, h.state, h.cpus, h.mem_bytes, h.disk_bytes, h.disk_floor, h.checked_at, h.maintained_at, h.engine_host, h.pool, h.box, h.agents, h.ci, hr.room FROM hosts h LEFT JOIN host_rooms hr ON hr.host=h.name WHERE `+where+` ORDER BY h.name,hr.room`)
 	if err != nil {
 		return nil, err
 	}
@@ -299,10 +315,12 @@ func (s *Store) hosts(ctx context.Context, where string) ([]box.Host, error) {
 		var h box.Host
 		var checked, maintained int64
 		var room sql.NullString
-		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &h.DiskFloor, &checked, &maintained, &h.EngineHost, &h.Pool, &h.Box, &room); err != nil {
+		var agents bool
+		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &h.DiskFloor, &checked, &maintained, &h.EngineHost, &h.Pool, &h.Box, &agents, &h.CI, &room); err != nil {
 			return nil, err
 		}
 		if len(hosts) == 0 || hosts[len(hosts)-1].Name != h.Name {
+			h.NoAgents = !agents
 			h.CheckedAt = time.UnixMilli(checked)
 			if maintained != 0 {
 				h.MaintainedAt = time.UnixMilli(maintained)

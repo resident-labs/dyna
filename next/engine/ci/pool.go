@@ -155,9 +155,10 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 		if p.Memory != nil {
 			host.MemUsed = p.Memory(host.Name)
 		}
-		// host_rooms places sessions. A repository names its CI hosts outright, so a
-		// host kept away from sessions can still serve it.
-		host.Rooms = nil
+		// host_rooms and the agents switch place sessions. A repository names its CI
+		// hosts outright, so a host kept away from sessions can still serve it. Its
+		// CI switch is what keeps new runners off it.
+		host.Rooms, host.NoAgents = nil, false
 		driver, err := p.Hosts(ctx, host.Name)
 		var runners []box.Runner
 		var egress bool
@@ -429,12 +430,14 @@ func (p *Pool) place(ctx context.Context, repo contract.RepoName, assigned int, 
 		}
 	}
 	request := box.Box{ID: "dyna-ci-request", Size: size}
-	// open lists hosts with room for one more, and the rows that name them.
+	// open lists hosts with room for one more, and the rows that name them. A host
+	// with CI off keeps the runners it has, and they finish their jobs, but gets
+	// no new one.
 	open := func() []box.Host {
 		var hosts []box.Host
 		for _, row := range rows {
 			host := view.hosts[row.Host]
-			if host != nil && mine[row.Host] < row.Runners && !p.Now().Before(p.retry[row.Host]) {
+			if host != nil && host.host.CI && mine[row.Host] < row.Runners && !p.Now().Before(p.retry[row.Host]) {
 				hosts = append(hosts, host.host)
 			}
 		}
@@ -442,10 +445,10 @@ func (p *Pool) place(ctx context.Context, repo contract.RepoName, assigned int, 
 	}
 	capacity := 0
 	for _, row := range rows {
-		// A host below its disk floor or out of memory reports only what it holds,
-		// so GitHub stops assigning it more.
+		// A host below its disk floor, out of memory or with CI off reports only
+		// what it holds, so GitHub stops assigning it more.
 		capacity += mine[row.Host]
-		if host := view.hosts[row.Host]; host != nil && box.Admit([]box.Host{host.host}, boxes, request).Host != "" {
+		if host := view.hosts[row.Host]; host != nil && host.host.CI && box.Admit([]box.Host{host.host}, boxes, request).Host != "" {
 			capacity = capacity - mine[row.Host] + max(row.Runners, mine[row.Host])
 		}
 	}

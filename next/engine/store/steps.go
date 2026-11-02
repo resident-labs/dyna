@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 78
+const schemaVersion = 79
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
@@ -29,6 +29,13 @@ var steps = map[int][]string{
 	// A post to a parent that can't receive goes up to the nearest ancestor that can, and keeps whom it was for and why. Close no
 	// longer hands inputs over, so no row names a handoff.
 	77: {`ALTER TABLE deliveries RENAME COLUMN handoff_from TO meant_for`, `ALTER TABLE deliveries ADD COLUMN meant_why TEXT NOT NULL DEFAULT ''`},
+	// A host has two switches: agents for session boxes and ci for CI runners. A host that a repository already runs CI on
+	// keeps it, and every host keeps its agents.
+	78: {
+		`ALTER TABLE hosts ADD COLUMN agents INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE hosts ADD COLUMN ci INTEGER NOT NULL DEFAULT 0`,
+		`UPDATE hosts SET ci=1 WHERE name IN (SELECT host FROM repo_ci_hosts)`,
+	},
 }
 
 // upgrade applies each future numbered step in the same transaction as its version.

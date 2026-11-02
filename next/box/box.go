@@ -32,9 +32,13 @@ type Host struct {
 	MaintainedAt        time.Time
 	Labels              []string
 	Rooms               []contract.RoomID
-	CheckedAt           time.Time
-	Pool                string         // the pool that holds this node
-	Box                 contract.BoxID // the one box a per-session node serves
+	// Two switches, each zero at its default: NoAgents keeps new session boxes off the host, and CI lets the CI pool start
+	// runners there. Rooms decides which rooms the host serves while agents are on.
+	NoAgents  bool
+	CI        bool
+	CheckedAt time.Time
+	Pool      string         // the pool that holds this node
+	Box       contract.BoxID // the one box a per-session node serves
 }
 type Box struct {
 	ID      contract.BoxID

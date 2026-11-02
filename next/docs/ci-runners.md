@@ -30,25 +30,25 @@ that no job waits for a pool that does not exist yet.
    engine cannot answer a host key prompt. A laptop or any host that logs out needs
    `sudo loginctl enable-linger USER` first, because rootless containers stop with
    the user's session.
-3. Keep sessions off a CI host. With no `--room`, every room's boxes can land on a
-   host, and admission prefers the host with the most free memory. A host limited
-   to one room takes no other room's boxes, and a paused room places none at all.
-   So give the host a room of its own and pause it. Do this before adding the host,
-   because a new room's root session needs a box, and it must land somewhere else:
-
-   ```sh
-   dyna room create ci-only --root-profile PROFILE   # prints the room's ID
-   dyna room pause ROOM
-   ```
+3. Keep sessions off a CI host with `--agents off`. A host has two switches:
+   `agents`, on by default, lets new session boxes land there, and `ci`, off by
+   default, lets the pool start runners there. With agents on, every room's boxes
+   can land on a host its room list allows, and admission prefers the host with the
+   most free memory, so a CI host wants agents off and ci on.
 
 4. Add the host. `--ssh` must be `user@address`, as the engine's user would type it:
 
    ```sh
-   dyna host add pve --ssh build@ADDRESS --owner-only-admin --room ROOM
+   dyna host add pve --ssh build@ADDRESS --owner-only-admin --agents off --ci on
    ```
 
+   For a host already added, `dyna host set pve --agents off --ci on` does the
+   same. Boxes already on it stay until they stop. `dyna host list` shows both
+   switches.
+
 5. Turn the repository on. COUNT is the most runners at once on that host, at most
-   16. A repository names its hosts outright, so `--room` does not apply to it:
+   16. A repository names its hosts outright, so the room list does not apply to
+   it, but the pool starts a runner only on a host with ci on:
 
    ```sh
    dyna room repo ci resident-labs/dyna --mode box --host pve=4
@@ -69,6 +69,9 @@ needs a second scale set, which is not built.
   `true`. New runs use GitHub-hosted runners. Jobs already on the pool finish. The
   switch only reaches `ci-runner.sh`, so a branch that sets `runs-on: dyna` itself
   still gets a runner. To stop every job, use `--mode github`.
+- **Take one host out:** `dyna host set pve --ci off`. The pool starts no new
+  runner there and counts only the runners it has, which finish their jobs. The
+  repository keeps naming the host, and runners come back with `--ci on`.
 - **Remove the pool:** `dyna room repo ci resident-labs/dyna --mode github`. The
   next tick kills that repository's runners, even mid-job, and deletes its scale
   set and registrations. The host's proxy goes with its last runner. On pve that
@@ -146,7 +149,7 @@ so the runner passes `--network=none` every time. A session box passes no networ
 flag, so on such a host it runs in the host's network: it can reach the LAN and the
 host's loopback services, see host abstract sockets, listen on the host's addresses,
 and reach every other box on that host. `dyna host add` does not check for this.
-Do not add a host like pve while sessions can be placed on it.
+Add a host like pve with `--agents off`, so no session is placed on it.
 
 pve is an LXC guest with no `/dev/net/tun`. pasta and slirp4netns cannot start
 there, which is why the way out is a proxy and not a filtered network.
