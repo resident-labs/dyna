@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -12,6 +12,7 @@ import {
 import { getModel } from "@earendil-works/pi-ai/compat";
 import { Type } from "typebox";
 import { describe, expect, test } from "vitest";
+import { DefaultResourceLoader } from "../src/core/resource-loader.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
@@ -251,6 +252,88 @@ describe("system prompt updates", () => {
 			expect(harness.session.messages.filter((message) => message.role === "system")).toHaveLength(1);
 		} finally {
 			harness.cleanup();
+		}
+	});
+	test("an AGENTS.md or skill edit during a run reaches the next request as a context update", async () => {
+		const root = mkdtempSync(join(tmpdir(), "pi-prompt-resources-"));
+		const cwd = join(root, "work");
+		const agentDir = join(root, "agent");
+		mkdirSync(cwd, { recursive: true });
+		mkdirSync(join(agentDir, "skills"), { recursive: true });
+		const instructions = join(cwd, "AGENTS.md");
+		writeFileSync(instructions, "Use tabs.");
+		const resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager: SettingsManager.inMemory() });
+		await resourceLoader.reload();
+		const tool = (name: string, run: () => void): AgentTool => ({
+			name,
+			label: name,
+			description: `${name} description`,
+			parameters: Type.Object({}),
+			execute: async () => {
+				run();
+				return { content: [{ type: "text", text: name }], details: {} };
+			},
+		});
+		const tools = [
+			tool("read", () => {}),
+			tool("edit_instructions", () => writeFileSync(instructions, "Use spaces.")),
+			tool("add_skill", () => {
+				mkdirSync(join(agentDir, "skills", "mid-run"));
+				writeFileSync(
+					join(agentDir, "skills", "mid-run", "SKILL.md"),
+					"---\nname: mid-run\ndescription: A skill added mid-run\n---\nUse it.",
+				);
+			}),
+		];
+		const harness = await createHarness({
+			resourceLoader,
+			tools,
+			initialActiveToolNames: tools.map((value) => value.name),
+		});
+		try {
+			// Faux response callbacks swallow thrown assertions, and the context they see keeps growing.
+			const requests: TranscriptContext[] = [];
+			harness.setResponses(
+				[
+					fauxToolCall("edit_instructions", {}),
+					fauxToolCall("add_skill", {}),
+					fauxToolCall("read", {}),
+					undefined,
+				].map((call) => (providerContext: TranscriptContext) => {
+					requests.push(JSON.parse(JSON.stringify(providerContext)));
+					return call ? fauxAssistantMessage([call], { stopReason: "toolUse" }) : fauxAssistantMessage("done");
+				}),
+			);
+			await harness.session.prompt("work");
+			expect(requests).toHaveLength(4);
+
+			const updates = requests.map((request) =>
+				request.messages.flatMap((message) =>
+					message.role === "user" && typeof message.content !== "string"
+						? message.content.flatMap((part) =>
+								part.type === "text" && part.text.startsWith("[Context update]") ? [part.text] : [],
+							)
+						: [],
+				),
+			);
+			expect(updates.map((texts) => texts.length)).toEqual([0, 1, 2, 2]);
+			expect(updates[1]?.[0]).toContain(`Changed section file:${instructions}`);
+			expect(updates[1]?.[0]).toContain("-Use tabs.");
+			expect(updates[1]?.[0]).toContain("+Use spaces.");
+			expect(updates[2]?.[1]).toContain("A skill added mid-run");
+			expect(updates[2]?.[1]).not.toContain("Use spaces.");
+
+			// The head stays byte for byte the same, so the cached prefix holds.
+			const heads = requests.map((request) => request.messages.filter((message) => message.role === "system"));
+			for (const head of heads) expect(JSON.stringify(head)).toBe(JSON.stringify(heads[0]));
+			expect(heads[0]).toHaveLength(1);
+			const head = heads[0]?.[0];
+			if (head?.role !== "system") throw new Error("expected system message");
+			expect(getSystemMessageText(head)).toContain("Use tabs.");
+			expect(getSystemMessageText(head)).not.toContain("A skill added mid-run");
+		} finally {
+			harness.cleanup();
+			rmSync(root, { recursive: true, force: true });
 		}
 	});
 });
