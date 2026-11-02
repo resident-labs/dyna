@@ -17,6 +17,8 @@ type Result struct {
 	Running  bool                `json:"running"`
 	Status   string              `json:"status"`
 	ExitCode *int                `json:"exit_code,omitempty"`
+	// MessageArrived marks a bash call that returned early because a message arrived for the session.
+	MessageArrived bool `json:"message_arrived,omitempty"`
 }
 
 // Listed is one row of the job list.
@@ -56,7 +58,9 @@ func (s *Server) Handler() http.Handler {
 		if err != nil {
 			return nil, err
 		}
-		return result(j), nil
+		answer := result(j)
+		answer.MessageArrived = answer.Running && j.aside
+		return answer, nil
 	}))
 	mux.HandleFunc("POST /job", serve(func(_ *http.Request, call JobCall) (any, error) {
 		return s.jobCall(call)

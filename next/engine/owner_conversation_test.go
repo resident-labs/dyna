@@ -167,3 +167,46 @@ func TestFrameSaysWherePostsToTheOwnerGo(t *testing.T) {
 		t.Fatalf("a final frame: %q %v", frame, err)
 	}
 }
+
+// An input that joins a running turn is framed for that turn: its posts line names where the turn owes the owner its reply,
+// and its own reply target joins the turn's replies.
+func TestASteerIsFramedForTheTurnItJoins(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	ownerPost(t, s, ctx, contract.PostRequest{Room: room, Text: "in private", Home: dmHome(worker)})
+	ch, problem := testChannel(t, s, ctx, boxCaller(worker))
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	start := (<-ch).Body.(contract.TurnStart)
+	frame := func(what string) string {
+		t.Helper()
+		steer, ok := (<-ch).Body.(contract.TurnSteer)
+		if !ok || steer.Queue != contract.QueueSteer {
+			t.Fatalf("%s: %+v", what, steer)
+		}
+		line, _, _ := strings.Cut(steer.Input.Text, "\n")
+		return line
+	}
+	if _, problem := s.ShellJobEnded(ctx, boxCaller(worker), contract.ShellJobEndedRequest{Job: "job_1", Description: "Build", End: jobExited}); problem != nil {
+		t.Fatal(problem)
+	}
+	if line := frame("a job's end"); !strings.HasSuffix(line, " Posts to the owner go to your DM.") {
+		t.Fatalf("a job's end: %q", line)
+	}
+	ownerPost(t, s, ctx, contract.PostRequest{Room: room, Text: "and in the open", Mentions: []string{"worker"}})
+	if line := frame("a mention"); !strings.HasSuffix(line, " Your final response goes to the owner in the feed.") {
+		t.Fatalf("a mention: %q", line)
+	}
+	if _, problem := s.TurnOutput(ctx, boxCaller(worker), contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnCompleted, Final: "done"}); problem != nil {
+		t.Fatal(problem)
+	}
+	ended := eventsOf[contract.TurnEnded](t, s, ctx, room)
+	replies := ended[len(ended)-1].Replies
+	for _, home := range []contract.Conversation{dmHome(worker), feedHome} {
+		if !slices.ContainsFunc(replies, func(reply contract.FinalReply) bool {
+			return reply.Reply.Target == theOwner && reply.Reply.Home == home
+		}) {
+			t.Fatalf("no reply to the owner in %+v: %+v", home, replies)
+		}
+	}
+}
