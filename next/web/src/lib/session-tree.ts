@@ -30,30 +30,32 @@ const holdingNames: Record<ResponsibilityKind, string> = {
 // Each of these shows elsewhere: the turn in the thread, jobs under the header's icon, and goals in the list just above.
 const shownElsewhere: ResponsibilityKind[] = ["turn", "shell_job", "goal"];
 
-// A PR or issue reads as org/repo#6216 in the list.
-function holdItem(id?: string): { repo: string; number: string }[] {
+// A PR or issue reads as org/repo#6216, and links to it on GitHub.
+function githubItem(kind: "pr" | "issue", id?: string): { label: string; href: string } | undefined {
   const match = id?.match(/^([\w.-]+\/[\w.-]+)#(\d+)$/);
-  return match ? [{ repo: match[1], number: match[2] }] : [];
+  return match ? { label: `${match[1]}#${match[2]}`, href: `https://github.com/${match[1]}/${kind === "pr" ? "pull" : "issues"}/${match[2]}` } : undefined;
 }
+const holdLabels: Record<ResponsibilityKind, [one: string, many: string]> = {
+  turn: ["Turn", "Turns"], shell_job: ["Shell job", "Shell jobs"], terminal: ["Terminal", "Terminals"], workflow: ["Workflow run", "Workflow runs"], goal: ["Goal", "Goals"],
+  pr: ["PR", "PRs"], issue: ["Issue", "Issues"], question: ["Question", "Questions"], child: ["Child session", "Child sessions"],
+};
 
 // What a session still holds, as the engine lists it, for About: one row per kind, so that a lead with ten children takes
-// a line and not ten. A kind with a blocked item says so.
-export type HoldLink = { label: string; href: string; title: string; internal?: boolean };
-export function holdRows(items: Responsibility[], sessionHref: (name: string) => string | undefined = () => undefined): { kind: ResponsibilityKind; text: string; blocked: boolean; repo?: string; links?: HoldLink[] }[] {
+// a line and not ten. The row is a label and the count of the items it lists, so the two cannot disagree. Each item keeps
+// its whole name and its link: a PR or issue to GitHub, a child to its session when the room still lists it. A kind with
+// a blocked item says so. A row opens a list only when its items have something to show, so a bare Terminal stays a line.
+export type HoldItem = { label: string; href?: string; internal?: boolean; blocked: boolean };
+export type HoldRow = { kind: ResponsibilityKind; label: string; count: number; blocked: boolean; items: HoldItem[]; opens: boolean };
+export function holdRows(items: Responsibility[], sessionHref: (name: string) => string | undefined = () => undefined): HoldRow[] {
   const listed = items.filter(item => !shownElsewhere.includes(item.kind));
   return [...Map.groupBy(listed, item => item.kind)].map(([kind, group]) => {
-    if (kind === "pr" || kind === "issue") {
-      const named = group.flatMap(item => holdItem(item.id)), repos = new Set(named.map(item => item.repo));
-      if (named.length === group.length) return { kind, text: count(group.length, holdingNames[kind]), blocked: group.some(item => item.blocked), repo: repos.size === 1 ? named[0].repo : undefined,
-        links: named.map(({ repo, number }) => ({ label: repos.size === 1 ? `#${number}` : `${repo.split("/")[1]}#${number}`, title: `${repo}#${number}`, href: `https://github.com/${repo}/${kind === "pr" ? "pull" : "issues"}/${number}` })) };
-    }
-    if (kind === "child") {
-      const links = group.flatMap(({ id }) => { const href = id ? sessionHref(id) : undefined; return id && href ? [{ label: id, href, title: id, internal: true }] : []; });
-      if (links.length === group.length) return { kind, text: count(group.length, holdingNames[kind]), blocked: group.some(item => item.blocked), links };
-    }
-    const ids = group.flatMap(item => item.id ? [item.id] : []).join(", ");
-    const text = group.length > 1 ? `${count(group.length, holdingNames[kind])}${ids ? `: ${ids}` : ""}` : [holdingNames[kind], ids].filter(Boolean).join(" ");
-    return { kind, text: text[0].toUpperCase() + text.slice(1), blocked: group.some(item => item.blocked) };
+    const rows = group.map(({ id, blocked }): HoldItem => {
+      const linked = (kind === "pr" || kind === "issue") ? githubItem(kind, id) : undefined;
+      if (linked) return { ...linked, blocked: !!blocked };
+      const href = kind === "child" && id ? sessionHref(id) : undefined;
+      return { label: id || holdLabels[kind][0], ...(href ? { href, internal: true } : {}), blocked: !!blocked };
+    });
+    return { kind, label: holdLabels[kind][group.length === 1 ? 0 : 1], count: group.length, blocked: rows.some(row => row.blocked), items: rows, opens: group.some(item => item.id) };
   });
 }
 

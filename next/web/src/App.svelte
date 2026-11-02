@@ -39,6 +39,7 @@
   import TermDock from "./lib/ui/TermDock.svelte";
   import Home from "./lib/ui/Home.svelte";
   import Palette from "./lib/ui/Palette.svelte";
+  import ConfirmHost from "./lib/ui/ConfirmHost.svelte";
   import { remember, visits, type Item } from "./lib/palette.ts";
   import type { SearchCall } from "./lib/search.svelte.ts";
   import { MediaQuery, SvelteMap, SvelteSet } from "svelte/reactivity";
@@ -651,6 +652,7 @@
 
 <svelte:window onkeydown={cycle} onclickcapture={dismissRequests} onfocusin={formEvent} oninput={formEvent} onpagehide={() => savedDrafts.flush()} />
 {#if palette}<Palette {rooms} {room} search={searchPosts} onclose={closePalette} onopen={paletteOpen} />{/if}
+<ConfirmHost />
 {#snippet sheetHandle(of: string)}
   <button type="button" class="handle" aria-label={sheetFull ? `Shrink the ${of} sheet` : `Expand the ${of} sheet`}
     onpointerdown={drag} onclick={() => { if (!dragged) sheetFull = !sheetFull; dragged = false; }}></button>

@@ -2,6 +2,7 @@
   import { onMount, tick, type Snippet } from "svelte";
   import { APIError, call, SignedOut } from "../client.ts";
   import { addonDetail, addonKind, addonKinds, addonOrigin, addonScopes, draftReady, emptyDraft, mcpRequest, packageRequest, skillRequest, type AddonDraft } from "../addons.ts";
+  import { confirm } from "../modal.ts";
   import Icon from "./Icon.svelte";
   import type { Addon, AddonKind, RoomSummary } from "../contract.gen.ts";
   // Settings > Skills & tools. Built-ins, what every room shares and what each room holds, one card per scope. A device without
@@ -11,7 +12,6 @@
   let loaded = $state(false), failed = $state(false), busy = $state(false);
   let draft: AddonDraft | undefined = $state();
   let addButton: HTMLButtonElement | undefined = $state();
-  let removing: string | undefined = $state();
   // One failed change, in the engine's words, under the row or the form it belongs to.
   let problem: { id: string; text: string } | undefined = $state();
   let scopes = $derived(addonScopes(items, rooms));
@@ -37,10 +37,19 @@
     const form = draft;
     void act("form", () => form.kind === "skill" ? call("skill.save", skillRequest(form)) : form.kind === "package" ? call("package.add", packageRequest(form)) : call("mcp.add", mcpRequest(form)), () => void closeForm());
   }
-  const remove = (item: Addon) => {
+  // The shared confirm runs the removal and keeps a refusal in the engine's words. The row is gone after, so focus goes to Add.
+  async function remove(item: Addon) {
     const request = { ...where(item), name: item.name };
-    void act(rowId(item), () => item.kind === "skill" ? call("skill.remove", request) : item.kind === "package" ? call("package.remove", request) : call("mcp.remove", request), () => { removing = undefined; void tick().then(() => addButton?.focus()); });
-  };
+    problem = undefined;
+    const ok = await confirm({ title: `Remove ${item.name}?`, message: item.room ? "Sessions in this room stop getting it at their next box start." : "Sessions in every room stop getting it at their next box start.",
+      action: "Remove", failed: words,
+      run: () => (item.kind === "skill" ? call("skill.remove", request) : item.kind === "package" ? call("package.remove", request) : call("mcp.remove", request))
+        .catch((error: unknown) => { if (error instanceof SignedOut) signedout(); throw error; }) });
+    if (!ok) return;
+    await reload();
+    await tick();
+    addButton?.focus();
+  }
   const toggle = (item: Addon, enabled: boolean) => act(rowId(item), () => call("addon.set_enabled", { kind: item.kind, name: item.name, room: item.room, enabled }));
   const sourceLabel: Record<AddonKind, string> = { skill: "Link", package: "Source", mcp: "URL or command" };
   const sourceHint: Record<AddonKind, string> = {
@@ -90,14 +99,8 @@
                 <span class="line">{addonOrigin(item, Date.now())}</span>
               </span>
               {#if admin && !item.builtIn}
-                {#if removing === id}
-                  <span class="ask">Remove?
-                    <span class="choices"><button type="button" class="btn danger" disabled={busy} onclick={() => remove(item)}>Remove</button>
-                    <button type="button" class="btn ghost" disabled={busy} onclick={() => { removing = undefined; }}>Cancel</button></span></span>
-                {:else}
-                  <span class="acts"><label class="switch"><input type="checkbox" checked={!item.disabled} disabled={busy} aria-label={`Enable ${item.name}`} onchange={event => void toggle(item, event.currentTarget.checked)} />On</label>
-                    <button type="button" class="btn ghost" aria-label={`Remove ${item.name}`} onclick={() => { problem = undefined; removing = id; }}>Remove</button></span>
-                {/if}
+                <span class="acts"><label class="switch"><input type="checkbox" checked={!item.disabled} disabled={busy} aria-label={`Enable ${item.name}`} onchange={event => void toggle(item, event.currentTarget.checked)} />On</label>
+                  <button type="button" class="btn ghost" aria-label={`Remove ${item.name}`} aria-haspopup="dialog" disabled={busy} onclick={() => void remove(item)}>Remove</button></span>
               {:else if item.disabled}<span class="badge">Off</span>{/if}
             </div>
             {#if problem?.id === id}<p class="problem" role="alert">{problem.text}</p>{/if}
@@ -129,7 +132,6 @@
   .line { min-width: 0; color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
   .detail { color: var(--text); }
   .acts, .choices { flex: none; display: inline-flex; align-items: center; gap: 4px; }
-  .ask { flex: none; display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; font-weight: 500; }
   .switch { display: inline-flex; align-items: center; gap: 6px; padding: 0 6px; color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; }
   .switch input { appearance: none; display: grid; place-items: center; width: 16px; height: 16px; margin: 0; border: 1px solid var(--firm); border-radius: 4px; background: none; cursor: pointer; }
   .switch input:checked { border-color: var(--focus); background: var(--focus); }
@@ -157,7 +159,7 @@
     .body { padding: 12px 16px; }
     .row { flex-wrap: wrap; padding: 6px 8px; }
     .lines { flex-basis: calc(100% - 32px); }
-    .acts, .ask { width: 100%; margin-left: 32px; }
+    .acts { width: 100%; margin-left: 32px; }
     .acts .btn { padding: 0 10px; }
     .switch { padding-left: 0; }
     .problem { padding-left: 40px; }

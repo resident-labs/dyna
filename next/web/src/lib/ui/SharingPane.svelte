@@ -2,13 +2,14 @@
   import { onMount, type Snippet } from "svelte";
   import { call } from "../client.ts";
   import { allowedOrigin } from "../connect.ts";
+  import { confirm } from "../modal.ts";
   import type { ConnectStatusResponse, Device } from "../contract.gen.ts";
   import DevicesPane from "./DevicesPane.svelte";
   import Icon from "./Icon.svelte";
   import StatusPill from "./StatusPill.svelte";
   let { devices, failed, reload, signedout, bar }: { devices: readonly Device[] | undefined; failed: boolean; reload: () => void; signedout: () => void; bar: Snippet<[string, number | undefined, Snippet | undefined]> } = $props();
   let status: ConnectStatusResponse | undefined = $state();
-  let confirm = $state(false), busy = $state(false), problem = $state(false);
+  let busy = $state(false), problem = $state(false);
   let timer: ReturnType<typeof setTimeout>;
   let routes = $derived(status?.routes ?? []);
   let tunnel = $derived(status?.tunnel);
@@ -40,9 +41,14 @@
   }
   async function act(method: "connect.unlink" | "connect.cancel") {
     busy = true;
-    try { await call(method, {}); confirm = false; await refresh(); }
+    try { await call(method, {}); await refresh(); }
     catch { problem = true; }
     busy = false;
+  }
+  // The shared confirm runs the unlink and keeps a refusal in its own words; the status then says where Connect stands.
+  async function unlink() {
+    problem = false;
+    if (await confirm({ title: "Turn off Connect?", message: "Connect sign-ins end. Paired devices stay.", action: "Turn off", run: () => call("connect.unlink", {}), failed: "Connect did not turn off. Try again." })) await refresh();
   }
 </script>
 {#snippet sectionBar(title: string, count?: number, action?: Snippet)}
@@ -65,8 +71,7 @@
         {#if tunnel === location.origin}<p>This browser uses it</p>{/if}
         <dl class="key-values">{#if tunnel}<dt>Address</dt><dd><code>{tunnel}</code></dd>{/if}{#if status.relay}<dt>Sign-in service</dt><dd><code>{status.relay}</code></dd>{/if}<dt>Machine key</dt><dd><code>{status.fingerprint}</code></dd></dl>
         {#if status.connectorMissing}<p>The Connect connector is not running.</p>{/if}
-        {#if confirm}<p>Turn off Connect? Connect sign-ins end. Paired devices stay.</p><div class="actions"><button disabled={busy} onclick={() => void act("connect.unlink")}>Turn off</button><button disabled={busy} onclick={() => { confirm = false; }}>Cancel</button></div>
-        {:else}<button class="unlink" onclick={() => { confirm = true; }}>Turn off Connect…</button>{/if}
+        <button class="unlink" aria-haspopup="dialog" disabled={busy} onclick={() => void unlink()}>Turn off Connect…</button>
       {:else if status.attempt.state === "pending"}
         <p>Waiting for your approval.</p><p>Code <code>{status.code}</code></p><p>Key fingerprint <code>{status.fingerprint}</code></p>
         <p>Check the code and fingerprint on the approval page, then approve with your passkey.</p>
@@ -103,7 +108,6 @@
   code { font: 13px var(--mono); overflow-wrap: anywhere; }
   button, a { min-height: 32px; padding: 4px 10px; border: 1px solid var(--firm); border-radius: 6px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
   a { display: inline-flex; align-items: center; text-decoration: none; }
-  .actions { display: flex; gap: 8px; }
   @container detail (max-width: 500px) { .key-values { grid-template-columns: minmax(0, 1fr); gap: 4px; } .key-values dd + dt { margin-top: 8px; } }
   @media (hover: none) { button, a { min-height: 44px; } }
   @media (max-width: 640px) { .ways-body { padding: 12px 16px; } .section-head { flex-wrap: wrap; padding: 12px 16px; } .section-head span:not(:first-child) { flex-basis: auto; } }
