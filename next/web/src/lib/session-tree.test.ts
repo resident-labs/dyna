@@ -14,32 +14,42 @@ test("a session's actions follow what the engine takes", () => {
 test("the list holds what shows nowhere else, one row per kind", () => {
   const needs = (kind: Responsibility["kind"], id?: string): Responsibility => ({ kind, group: "needs_box", id });
   const owes = (kind: Responsibility["kind"], id?: string, blocked?: boolean): Responsibility => ({ kind, group: "owes_work", id, blocked });
+  const line = (rows: ReturnType<typeof holdRows>) => rows.map(row => `${row.label} ${row.count}`);
   assert.deepEqual(holdRows([]), []);
   assert.deepEqual(holdRows([needs("turn", "turn_1"), needs("shell_job", "job_7f3b"), owes("goal", "g1")]), [], "the thread, the header and the goals show these");
-  assert.deepEqual(holdRows([needs("terminal"), owes("pr", "o/r#6")]).map(row => row.text), ["Terminal", "1 PR"]);
-  assert.deepEqual(holdRows([owes("child", "a"), owes("pr", "o/r#6"), owes("child", "b")]).map(row => row.text), ["2 child sessions: a, b", "1 PR"]);
-  assert.deepEqual(holdRows([owes("child"), owes("child")]).map(row => row.text), ["2 child sessions"]);
+  assert.deepEqual(line(holdRows([needs("terminal"), owes("pr", "o/r#6")])), ["Terminal 1", "PR 1"]);
+  assert.deepEqual(line(holdRows([owes("child", "a"), owes("pr", "o/r#6"), owes("child", "b")])), ["Child sessions 2", "PR 1"]);
+  assert.deepEqual(line(holdRows([owes("child"), owes("child")])), ["Child sessions 2"]);
 });
 
-test("PRs and issues link to GitHub, naming the repo once when they share one", () => {
+test("a row counts exactly the items it lists", () => {
   const owes = (kind: Responsibility["kind"], id?: string): Responsibility => ({ kind, group: "owes_work", id });
-  const [prs, issues] = holdRows([owes("pr", "o/r#6"), owes("pr", "o/r#7"), owes("issue", "o/r#8"), owes("issue", "o/s#9")]);
-  assert.equal(prs.repo, "o/r");
-  assert.deepEqual(prs.links, [{ label: "#6", title: "o/r#6", href: "https://github.com/o/r/pull/6" }, { label: "#7", title: "o/r#7", href: "https://github.com/o/r/pull/7" }]);
-  assert.equal(issues.repo, undefined);
-  assert.deepEqual(issues.links?.map(link => [link.label, link.href]), [["r#8", "https://github.com/o/r/issues/8"], ["s#9", "https://github.com/o/s/issues/9"]]);
+  const many = [...Array.from({ length: 11 }, (_, i) => owes("child", `c${i}`)), owes("pr", "o/r#1"), owes("pr", "bad id"), owes("question")];
+  for (const row of holdRows(many)) assert.equal(row.count, row.items.length, row.kind);
+  assert.deepEqual(holdRows(many).map(row => row.count), [11, 2, 1]);
+});
+
+test("only a row whose items have names opens a list", () => {
+  const owes = (kind: Responsibility["kind"], id?: string): Responsibility => ({ kind, group: "owes_work", id });
+  assert.deepEqual(holdRows([owes("terminal"), owes("question", "q1"), owes("child")]).map(row => [row.kind, row.opens]), [["terminal", false], ["question", true], ["child", false]]);
+});
+
+test("PRs and issues link to GitHub by their whole name", () => {
+  const owes = (kind: Responsibility["kind"], id?: string): Responsibility => ({ kind, group: "owes_work", id });
+  const [prs, issues] = holdRows([owes("pr", "o/r#6"), owes("pr", "o/r#7"), owes("issue", "o/r#8"), owes("issue", "o/s#9"), owes("issue", "not a ref")]);
+  assert.deepEqual(prs.items, [{ label: "o/r#6", href: "https://github.com/o/r/pull/6", blocked: false }, { label: "o/r#7", href: "https://github.com/o/r/pull/7", blocked: false }]);
+  assert.deepEqual(issues.items.map(item => [item.label, item.href]), [["o/r#8", "https://github.com/o/r/issues/8"], ["o/s#9", "https://github.com/o/s/issues/9"], ["not a ref", undefined]]);
 });
 
 test("a child links to its session, and one it cannot find stays text", () => {
   const owes = (id: string): Responsibility => ({ kind: "child", group: "owes_work", id });
   const href = (name: string) => name === "lead" ? "/r/room/s/ses_lead" : undefined;
-  assert.deepEqual(holdRows([owes("lead")], href).map(row => [row.text, row.links]), [["1 child session", [{ label: "lead", href: "/r/room/s/ses_lead", title: "lead", internal: true }]]]);
-  assert.deepEqual(holdRows([owes("lead"), owes("gone")], href).map(row => [row.text, row.links]), [["2 child sessions: lead, gone", undefined]]);
+  assert.deepEqual(holdRows([owes("lead"), owes("gone")], href)[0].items, [{ label: "lead", href: "/r/room/s/ses_lead", internal: true, blocked: false }, { label: "gone", blocked: false }]);
 });
 
 test("a kind with a blocked item says so", () => {
   const rows = holdRows([{ kind: "question", group: "owes_work", id: "q1" }, { kind: "question", group: "owes_work", id: "q2", blocked: true }]);
-  assert.deepEqual(rows.map(row => [row.text, row.blocked]), [["2 questions: q1, q2", true]]);
+  assert.deepEqual(rows.map(row => [row.label, row.count, row.blocked, row.items.map(item => item.blocked)]), [["Questions", 2, true, [false, true]]]);
 });
 
 test("a close counts children as sessions", () => {
