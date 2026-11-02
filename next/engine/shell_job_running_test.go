@@ -144,7 +144,7 @@ func TestEndedJobSendsNoStatusAndTakesBackAnUnreadOne(t *testing.T) {
 	turn := startTurn(t, s, ctx, room, sid)
 	reportRunning(t, s, ctx, sid, 30)
 	oneDelivery(t, s, ctx, string(sid)+" quiet pending")
-	if _, problem := s.ShellJobEnded(ctx, jobCaller(sid), contract.ShellJobEndedRequest{Job: statusJob, Tail: "built"}); problem != nil {
+	if _, problem := s.ShellJobEnded(ctx, jobCaller(sid), contract.ShellJobEndedRequest{Job: statusJob, End: jobExited, Tail: "built"}); problem != nil {
 		t.Fatal(problem)
 	}
 	if got := jobStatusDeliveries(t, s, ctx); len(got) != 0 {
@@ -185,7 +185,7 @@ func TestOtherJobsKeepTheirStatus(t *testing.T) {
 	if _, problem := s.ShellJobRunning(ctx, jobCaller(sid), contract.ShellJobRunningRequest{Job: "job_other", RanMinutes: 15}); problem != nil {
 		t.Fatal(problem)
 	}
-	if _, problem := s.ShellJobEnded(ctx, jobCaller(sid), contract.ShellJobEndedRequest{Job: "job_other"}); problem != nil {
+	if _, problem := s.ShellJobEnded(ctx, jobCaller(sid), contract.ShellJobEndedRequest{Job: "job_other", End: jobExited}); problem != nil {
 		t.Fatal(problem)
 	}
 	oneDelivery(t, s, ctx, string(sid)+" quiet pending")
