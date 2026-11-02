@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/resident-labs/dyna/box/shell"
@@ -112,21 +113,31 @@ func (c *Client) post(ctx context.Context, method contract.Method, body []byte) 
 	return data, nil
 }
 
+// callProblem words a tool call that failed on the box socket. An engine restart closes the socket mid-call,
+// and the call may have taken effect before that.
+func callProblem(err error) *contract.Error {
+	message := err.Error()
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
+		message = "The engine connection closed during this call, so its result is unknown."
+	}
+	return &contract.Error{Code: contract.ErrUnavailable, Message: message}
+}
+
 // forward sends an agent tool call once. It does not queue or retry a creation.
 func (c *Client) forward(ctx context.Context, method contract.Method, body []byte) ([]byte, *contract.Error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://dyna/v1/"+string(method), bytes.NewReader(body))
 	if err != nil {
-		return nil, &contract.Error{Code: contract.ErrUnavailable, Message: err.Error()}
+		return nil, callProblem(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, &contract.Error{Code: contract.ErrUnavailable, Message: err.Error()}
+		return nil, callProblem(err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, outgoingLimit))
 	if err != nil {
-		return nil, &contract.Error{Code: contract.ErrUnavailable, Message: err.Error()}
+		return nil, callProblem(err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var problem contract.Error
