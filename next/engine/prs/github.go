@@ -1,4 +1,4 @@
-// Package prs reads tracked pull requests and issues from GitHub inside the request budget of spec 7.7 and tells their sessions what changed.
+// Package prs watches GitHub's repository feeds inside the request budget of spec 7.7 and tells sessions what changed on their pull requests and issues.
 package prs
 
 import (
@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,6 +37,7 @@ type Client struct {
 	graphql quota
 	etags   map[string]cachedRead
 	viewer  string
+	resting map[string]time.Time // when a feed that asked for a longer X-Poll-Interval may be read again
 }
 
 type cachedRead struct {
@@ -62,7 +62,7 @@ func (q *quota) lowAt(now time.Time) bool {
 	return q.low && now.Before(q.reset) || now.Before(q.until)
 }
 
-// Viewer is the token's GitHub login as of the last poll, which is the owner's account (decision 13).
+// Viewer is the token's GitHub login, which is the owner's account (decision 13).
 func (c *Client) Viewer() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -115,7 +115,8 @@ func (c *Client) send(ctx context.Context, q *quota, method, path string, input 
 		return nil, nil, ErrPaused
 	}
 	target := *c.Endpoint
-	target.Path = strings.TrimRight(target.Path, "/") + path
+	resource, query, _ := strings.Cut(path, "?")
+	target.Path, target.RawQuery = strings.TrimRight(target.Path, "/")+resource, query
 	var body io.Reader
 	if input != nil {
 		body = bytes.NewReader(input)
@@ -140,6 +141,14 @@ func (c *Client) send(ctx context.Context, q *quota, method, path string, input 
 	if err != nil {
 		return nil, nil, err
 	}
+	limit, limitErr := strconv.Atoi(response.Header.Get("X-RateLimit-Limit"))
+	remaining, remainingErr := strconv.Atoi(response.Header.Get("X-RateLimit-Remaining"))
+	reset, resetErr := strconv.ParseInt(response.Header.Get("X-RateLimit-Reset"), 10, 64)
+	if limitErr == nil && remainingErr == nil && resetErr == nil {
+		c.mu.Lock()
+		q.note(limit, remaining, time.Unix(reset, 0))
+		c.mu.Unlock()
+	}
 	if response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusTooManyRequests {
 		if response.Header.Get("Retry-After") != "" || response.Header.Get("X-RateLimit-Remaining") == "0" {
 			c.refused(q, response.Header)
@@ -147,6 +156,46 @@ func (c *Client) send(ctx context.Context, q *quota, method, path string, input 
 		}
 	}
 	return response, data, nil
+}
+
+// get reads one REST path. A 304 returns no body, and does not count against the quota.
+func (c *Client) get(ctx context.Context, path, etag string) (http.Header, []byte, error) {
+	response, data, err := c.send(ctx, &c.rest, http.MethodGet, path, nil, etag)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch response.StatusCode {
+	case http.StatusOK:
+		return response.Header, data, nil
+	case http.StatusNotModified:
+		return response.Header, nil, nil
+	case http.StatusNotFound, http.StatusMovedPermanently, http.StatusFound, http.StatusTemporaryRedirect:
+		return nil, nil, ErrNotFound
+	}
+	return nil, nil, fmt.Errorf("GitHub HTTP %d", response.StatusCode)
+}
+
+// cached reads one REST path, sending the ETag of its last answer.
+func (c *Client) cached(ctx context.Context, path string) ([]byte, error) {
+	c.mu.Lock()
+	last := c.etags[path]
+	c.mu.Unlock()
+	header, data, err := c.get(ctx, path, last.etag)
+	if err != nil {
+		return nil, err
+	}
+	if data == nil {
+		return last.body, nil
+	}
+	if etag := header.Get("ETag"); etag != "" {
+		c.mu.Lock()
+		if c.etags == nil {
+			c.etags = map[string]cachedRead{}
+		}
+		c.etags[path] = cachedRead{etag: etag, body: data}
+		c.mu.Unlock()
+	}
+	return data, nil
 }
 
 // Pull is a PR as one REST read gives it, when a PR is first tracked.
@@ -160,57 +209,22 @@ type Pull struct {
 	Draft    bool
 	State    contract.PrState
 	Head     string
+	Meta     store.ItemMeta
 }
 
-// Pull reads one PR. It sends the ETag of its last answer, and a 304 does not count against the quota.
+// Pull reads one PR.
 func (c *Client) Pull(ctx context.Context, repo contract.RepoName, number int) (Pull, error) {
 	if !ValidRepo(repo) || number <= 0 {
 		return Pull{}, ErrNotFound
 	}
-	path := fmt.Sprintf("/repos/%s/pulls/%d", repo, number)
-	c.mu.Lock()
-	cached := c.etags[path]
-	c.mu.Unlock()
-	response, data, err := c.send(ctx, &c.rest, http.MethodGet, path, nil, cached.etag)
+	data, err := c.cached(ctx, fmt.Sprintf("/repos/%s/pulls/%d", repo, number))
 	if err != nil {
 		return Pull{}, err
 	}
-	limit, limitErr := strconv.Atoi(response.Header.Get("X-RateLimit-Limit"))
-	remaining, remainingErr := strconv.Atoi(response.Header.Get("X-RateLimit-Remaining"))
-	reset, resetErr := strconv.ParseInt(response.Header.Get("X-RateLimit-Reset"), 10, 64)
-	if limitErr == nil && remainingErr == nil && resetErr == nil {
-		c.mu.Lock()
-		c.rest.note(limit, remaining, time.Unix(reset, 0))
-		c.mu.Unlock()
-	}
-	switch response.StatusCode {
-	case http.StatusNotModified:
-		data = cached.body
-	case http.StatusOK:
-		c.mu.Lock()
-		if c.etags == nil {
-			c.etags = map[string]cachedRead{}
-		}
-		if etag := response.Header.Get("ETag"); etag != "" {
-			c.etags[path] = cachedRead{etag: etag, body: data}
-		}
-		c.mu.Unlock()
-	case http.StatusNotFound, http.StatusMovedPermanently, http.StatusFound, http.StatusTemporaryRedirect:
-		return Pull{}, ErrNotFound
-	default:
-		return Pull{}, fmt.Errorf("GitHub HTTP %d", response.StatusCode)
-	}
 	var payload struct {
-		Number  int    `json:"number"`
-		HTMLURL string `json:"html_url"`
-		Title   string `json:"title"`
-		Draft   bool   `json:"draft"`
-		State   string `json:"state"`
-		Merged  bool   `json:"merged"`
-		User    *struct {
-			Login string `json:"login"`
-		} `json:"user"`
-		Head struct {
+		restItem
+		Merged bool `json:"merged"`
+		Head   struct {
 			SHA  string `json:"sha"`
 			Repo *struct {
 				FullName contract.RepoName `json:"full_name"`
@@ -228,19 +242,39 @@ func (c *Client) Pull(ctx context.Context, repo contract.RepoName, number int) (
 	if payload.Number != number || !ValidRepo(payload.Base.Repo.FullName) {
 		return Pull{}, errors.New("GitHub answer has no such pull request")
 	}
-	pull := Pull{Repo: payload.Base.Repo.FullName, Number: payload.Number, URL: payload.HTMLURL, Title: payload.Title, Author: ghost, Draft: payload.Draft, State: contract.PrOpen, Head: payload.Head.SHA}
-	if payload.User != nil {
-		pull.Author = payload.User.Login
-	}
+	item := payload.feedItem()
+	pull := Pull{Repo: payload.Base.Repo.FullName, Number: number, URL: item.URL, Title: item.Title, Author: item.Author, Draft: item.Draft, State: contract.PrOpen, Head: payload.Head.SHA, Meta: item.Meta}
 	if payload.Head.Repo != nil {
 		pull.HeadRepo = payload.Head.Repo.FullName
 	}
 	if payload.Merged {
 		pull.State = contract.PrMerged
-	} else if payload.State == "closed" {
+	} else if item.State == "closed" {
 		pull.State = contract.PrClosed
 	}
 	return pull, nil
+}
+
+// Issue reads one issue when it is first tracked, and returns the repository's name as GitHub gives it. A PR's number is no issue.
+func (c *Client) Issue(ctx context.Context, repo contract.RepoName, number int) (contract.RepoName, FeedItem, error) {
+	if !ValidRepo(repo) || number <= 0 {
+		return "", FeedItem{}, ErrNotFound
+	}
+	data, err := c.cached(ctx, fmt.Sprintf("/repos/%s/issues/%d", repo, number))
+	if err != nil {
+		return "", FeedItem{}, err
+	}
+	var item restItem
+	if err := json.Unmarshal(data, &item); err != nil {
+		return "", FeedItem{}, fmt.Errorf("GitHub answer: %w", err)
+	}
+	if item.Number != number || item.PullRequest != nil {
+		return "", FeedItem{}, ErrNotFound
+	}
+	if _, name, ok := strings.Cut(item.RepositoryURL, "/repos/"); ok && ValidRepo(contract.RepoName(name)) {
+		repo = contract.RepoName(name)
+	}
+	return repo, item.feedItem(), nil
 }
 
 // ghost is GitHub's name for an account that no longer exists.
@@ -264,151 +298,42 @@ func validPart(part string) bool {
 	return true
 }
 
-// Comment is one review, inline comment or conversation comment on a PR.
-type Comment struct {
+// Review is one submitted review, which no repository feed shows.
+type Review struct {
 	ID     int64
 	Author string
 	Body   string
 	URL    string
 }
 
-// Observed is one PR as one poll read it. An empty Merge means GitHub has not worked it out.
+// Observed is what a feed cannot show of one PR. An empty Merge means GitHub has not worked it out.
 type Observed struct {
-	Number         int
-	URL            string
-	Title          string
-	Author         string
-	Draft          bool
-	State          contract.PrState
-	Head           string
-	HeadRepo       contract.RepoName
-	Review         contract.PrReview
-	CI             contract.PrCI
-	Merge          contract.PrMerge
-	FailedChecks   []string
-	Reviews        []Comment
-	ReviewComments []Comment
-	Comments       []Comment
-	Meta           store.ItemMeta
+	Number       int
+	State        contract.PrState
+	Head         string
+	HeadRepo     contract.RepoName
+	Review       contract.PrReview
+	CI           contract.PrCI
+	Merge        contract.PrMerge
+	FailedChecks []string
+	Reviews      []Review
 }
 
-// ObservedIssue is one issue as one poll read it. Its title is in Meta.
-type ObservedIssue struct {
-	Number   int
-	URL      string
-	Author   string
-	State    contract.IssueState
-	Comments []Comment
-	Meta     store.ItemMeta
-}
-
-// Snapshot is one poll of one repository. Repo is the name GitHub gives it. A number missing from PRs or Issues is one GitHub no longer has.
-type Snapshot struct {
-	Repo   contract.RepoName
-	Viewer string
-	Main   string
-	PRs    map[int]Observed
-	Issues map[int]ObservedIssue
-}
-
-// metaFields is the metadata a poll reads on PRs and issues alike. lastEditedAt says a body changed without reading it, and
-// the reopen count says an item came back between two polls, which its state cannot.
-const metaFields = `labels(first:100){nodes{name}} assignees(first:20){nodes{login}} milestone{title} lastEditedAt timelineItems(itemTypes:[REOPENED_EVENT],first:0){totalCount}`
-
-// commentFields is what a poll reads of a conversation.
-const commentFields = `comments(last:10){nodes{fullDatabaseId body url author{login}}}`
-
-// pullFields is everything a poll reads per PR.
-const pullFields = `number url title isDraft state merged author{login} headRefOid headRepository{nameWithOwner} mergeable mergeStateStatus reviewDecision
+// pullFields is everything a read asks per PR.
+const pullFields = `number state merged headRefOid headRepository{nameWithOwner} mergeable mergeStateStatus reviewDecision
 latestOpinionatedReviews(first:20,writersOnly:true){nodes{state}}
 commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:50){nodes{__typename ...on CheckRun{name conclusion} ...on StatusContext{context state}}}}}}}
-reviews(last:10){nodes{fullDatabaseId state body url author{login} comments(last:20){nodes{fullDatabaseId body url author{login}}}}}
-reviewRequests(first:20){nodes{requestedReviewer{__typename ...on User{login} ...on Bot{login} ...on Mannequin{login} ...on Team{combinedSlug}}}}
-` + commentFields + ` ` + metaFields
-
-// issueFields is everything a poll reads per issue.
-const issueFields = `number url title state author{login} ` + commentFields + ` ` + metaFields
+reviews(last:10){nodes{fullDatabaseId state body url author{login}}}`
 
 type gqlAuthor struct {
 	Login string `json:"login"`
 }
 
-type gqlComment struct {
-	ID     string     `json:"fullDatabaseId"`
-	State  string     `json:"state"`
-	Body   string     `json:"body"`
-	URL    string     `json:"url"`
-	Author *gqlAuthor `json:"author"`
-}
-
-type gqlMeta struct {
-	Labels struct {
-		Nodes []struct {
-			Name string `json:"name"`
-		} `json:"nodes"`
-	} `json:"labels"`
-	Assignees struct {
-		Nodes []gqlAuthor `json:"nodes"`
-	} `json:"assignees"`
-	Milestone *struct {
-		Title string `json:"title"`
-	} `json:"milestone"`
-	LastEditedAt  string `json:"lastEditedAt"`
-	TimelineItems struct {
-		TotalCount int `json:"totalCount"`
-	} `json:"timelineItems"`
-}
-
-// meta sorts the names, because GitHub's order means nothing and a change in it is no change.
-func (m gqlMeta) meta(title string) store.ItemMeta {
-	meta := store.ItemMeta{Title: title, EditedAt: m.LastEditedAt, Reopened: m.TimelineItems.TotalCount}
-	for _, label := range m.Labels.Nodes {
-		meta.Labels = append(meta.Labels, label.Name)
-	}
-	for _, assignee := range m.Assignees.Nodes {
-		meta.Assignees = append(meta.Assignees, assignee.Login)
-	}
-	if m.Milestone != nil {
-		meta.Milestone = m.Milestone.Title
-	}
-	slices.Sort(meta.Labels)
-	slices.Sort(meta.Assignees)
-	return meta
-}
-
-type gqlIssue struct {
-	gqlMeta
-	Number   int        `json:"number"`
-	URL      string     `json:"url"`
-	Title    string     `json:"title"`
-	State    string     `json:"state"`
-	Author   *gqlAuthor `json:"author"`
-	Comments struct {
-		Nodes []gqlComment `json:"nodes"`
-	} `json:"comments"`
-}
-
-func (i gqlIssue) observed() ObservedIssue {
-	seen := ObservedIssue{Number: i.Number, URL: i.URL, Author: login(i.Author), State: contract.IssueOpen, Meta: i.meta(i.Title)}
-	if i.State == "CLOSED" {
-		seen.State = contract.IssueClosed
-	}
-	for _, node := range i.Comments.Nodes {
-		seen.Comments = append(seen.Comments, comment(node))
-	}
-	return seen
-}
-
 type gqlPull struct {
-	gqlMeta
-	Number         int        `json:"number"`
-	URL            string     `json:"url"`
-	Title          string     `json:"title"`
-	IsDraft        bool       `json:"isDraft"`
-	State          string     `json:"state"`
-	Merged         bool       `json:"merged"`
-	Author         *gqlAuthor `json:"author"`
-	HeadRefOid     string     `json:"headRefOid"`
+	Number         int    `json:"number"`
+	State          string `json:"state"`
+	Merged         bool   `json:"merged"`
+	HeadRefOid     string `json:"headRefOid"`
 	HeadRepository *struct {
 		NameWithOwner contract.RepoName `json:"nameWithOwner"`
 	} `json:"headRepository"`
@@ -439,66 +364,31 @@ type gqlPull struct {
 	} `json:"commits"`
 	Reviews struct {
 		Nodes []struct {
-			gqlComment
-			Comments struct {
-				Nodes []gqlComment `json:"nodes"`
-			} `json:"comments"`
+			ID     string     `json:"fullDatabaseId"`
+			State  string     `json:"state"`
+			Body   string     `json:"body"`
+			URL    string     `json:"url"`
+			Author *gqlAuthor `json:"author"`
 		} `json:"nodes"`
 	} `json:"reviews"`
-	Comments struct {
-		Nodes []gqlComment `json:"nodes"`
-	} `json:"comments"`
-	ReviewRequests struct {
-		Nodes []struct {
-			RequestedReviewer *struct {
-				Login        string `json:"login"`
-				CombinedSlug string `json:"combinedSlug"`
-			} `json:"requestedReviewer"`
-		} `json:"nodes"`
-	} `json:"reviewRequests"`
 }
 
-// Poll reads every given PR and issue and the default branch head in one GraphQL query (spec 7.7). A failure to find one
-// leaves the others usable, as GitHub answers such a query with partial data.
-func (c *Client) Poll(ctx context.Context, repo contract.RepoName, numbers, issues []int) (Snapshot, error) {
-	owner, name, ok := strings.Cut(string(repo), "/")
-	if !ok || !ValidRepo(repo) {
-		return Snapshot{}, fmt.Errorf("invalid repository %q", repo)
-	}
-	var fields strings.Builder
-	for _, number := range numbers {
-		fmt.Fprintf(&fields, "pr%d:pullRequest(number:%d){...pull}\n", number, number)
-	}
-	for _, number := range issues {
-		fmt.Fprintf(&fields, "issue%d:issue(number:%d){...issue}\n", number, number)
-	}
-	query := "query($owner:String!,$name:String!){viewer{login} rateLimit{limit remaining resetAt} repository(owner:$owner,name:$name){nameWithOwner defaultBranchRef{target{oid}}\n" + fields.String() + "}}"
-	// GitHub refuses a fragment nothing uses, and a repository with nothing tracked asks only for its head.
-	if len(numbers) > 0 {
-		query += "\nfragment pull on PullRequest{" + pullFields + "}"
-	}
-	if len(issues) > 0 {
-		query += "\nfragment issue on Issue{" + issueFields + "}"
-	}
-	input, err := json.Marshal(map[string]any{"query": query, "variables": map[string]string{"owner": owner, "name": name}})
+// graphQL runs one query and returns its repository, which is nil for a query that names none.
+func (c *Client) graphQL(ctx context.Context, query string, variables map[string]string) (map[string]json.RawMessage, error) {
+	input, err := json.Marshal(map[string]any{"query": query, "variables": variables})
 	if err != nil {
-		return Snapshot{}, err
+		return nil, err
 	}
 	response, data, err := c.send(ctx, &c.graphql, http.MethodPost, "/graphql", input, "")
 	if err != nil {
-		return Snapshot{}, err
+		return nil, err
 	}
 	if response.StatusCode != http.StatusOK {
-		return Snapshot{}, fmt.Errorf("GitHub HTTP %d", response.StatusCode)
+		return nil, fmt.Errorf("GitHub HTTP %d", response.StatusCode)
 	}
 	var payload struct {
 		Data struct {
-			Viewer    gqlAuthor `json:"viewer"`
-			RateLimit *struct {
-				Limit     int       `json:"limit"`
-				Remaining int       `json:"remaining"`
-				ResetAt   time.Time `json:"resetAt"`
-			} `json:"rateLimit"`
+			Viewer     gqlAuthor                  `json:"viewer"`
 			Repository map[string]json.RawMessage `json:"repository"`
 		} `json:"data"`
 		Errors []struct {
@@ -507,91 +397,74 @@ func (c *Client) Poll(ctx context.Context, repo contract.RepoName, numbers, issu
 		} `json:"errors"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return Snapshot{}, fmt.Errorf("GitHub answer: %w", err)
-	}
-	c.mu.Lock()
-	if rate := payload.Data.RateLimit; rate != nil {
-		c.graphql.note(rate.Limit, rate.Remaining, rate.ResetAt)
+		return nil, fmt.Errorf("GitHub answer: %w", err)
 	}
 	if payload.Data.Viewer.Login != "" {
+		c.mu.Lock()
 		c.viewer = payload.Data.Viewer.Login
+		c.mu.Unlock()
 	}
-	c.mu.Unlock()
 	for _, failure := range payload.Errors {
 		if failure.Type == "RATE_LIMITED" {
 			c.refused(&c.graphql, response.Header)
-			return Snapshot{}, ErrPaused
+			return nil, ErrPaused
 		}
 	}
-	if payload.Data.Repository == nil {
+	if payload.Data.Repository == nil && variables != nil {
 		message := "repository not readable"
 		if len(payload.Errors) > 0 {
 			message = strings.ReplaceAll(payload.Errors[0].Message, c.Token, "***")
 			if payload.Errors[0].Type == "NOT_FOUND" {
-				return Snapshot{}, fmt.Errorf("%w: %s", ErrNotFound, message)
+				return nil, fmt.Errorf("%w: %s", ErrNotFound, message)
 			}
 		}
-		return Snapshot{}, fmt.Errorf("GitHub: %s", message)
+		return nil, fmt.Errorf("GitHub: %s", message)
 	}
-	snapshot := Snapshot{Repo: repo, Viewer: payload.Data.Viewer.Login, PRs: make(map[int]Observed, len(numbers)), Issues: make(map[int]ObservedIssue, len(issues))}
-	if raw := payload.Data.Repository["nameWithOwner"]; raw != nil {
-		if err := json.Unmarshal(raw, &snapshot.Repo); err != nil {
-			return Snapshot{}, fmt.Errorf("GitHub answer: %w", err)
-		}
+	return payload.Data.Repository, nil
+}
+
+// LoadViewer asks who the token is, once, because a quiet pass makes no query that would say.
+func (c *Client) LoadViewer(ctx context.Context) error {
+	if c.Viewer() != "" {
+		return nil
 	}
-	var branch *struct {
-		Target struct {
-			Oid string `json:"oid"`
-		} `json:"target"`
+	_, err := c.graphQL(ctx, "query{viewer{login}}", nil)
+	return err
+}
+
+// Read asks for what the feeds cannot show of each given PR, in one query for the repository. A PR it cannot find is left out,
+// as GitHub answers such a query with partial data.
+func (c *Client) Read(ctx context.Context, repo contract.RepoName, numbers []int) (map[int]*Observed, error) {
+	if len(numbers) == 0 {
+		return nil, nil
 	}
-	if raw := payload.Data.Repository["defaultBranchRef"]; raw != nil {
-		if err := json.Unmarshal(raw, &branch); err != nil {
-			return Snapshot{}, fmt.Errorf("GitHub answer: %w", err)
-		}
+	owner, name, ok := strings.Cut(string(repo), "/")
+	if !ok || !ValidRepo(repo) {
+		return nil, fmt.Errorf("invalid repository %q", repo)
 	}
-	if branch != nil {
-		snapshot.Main = branch.Target.Oid
-	}
+	var fields strings.Builder
 	for _, number := range numbers {
-		raw := payload.Data.Repository[fmt.Sprintf("pr%d", number)]
+		fmt.Fprintf(&fields, "pr%d:pullRequest(number:%d){...pull}\n", number, number)
+	}
+	query := "query($owner:String!,$name:String!){viewer{login} repository(owner:$owner,name:$name){\n" + fields.String() + "}}\nfragment pull on PullRequest{" + pullFields + "}"
+	repository, err := c.graphQL(ctx, query, map[string]string{"owner": owner, "name": name})
+	if err != nil {
+		return nil, err
+	}
+	pulls := make(map[int]*Observed, len(numbers))
+	for _, number := range numbers {
+		raw := repository[fmt.Sprintf("pr%d", number)]
 		if raw == nil || string(raw) == "null" {
 			continue
 		}
 		var pull gqlPull
 		if err := json.Unmarshal(raw, &pull); err != nil {
-			return Snapshot{}, fmt.Errorf("GitHub answer: %w", err)
+			return nil, fmt.Errorf("GitHub answer: %w", err)
 		}
-		snapshot.PRs[number] = pull.observed()
+		seen := pull.observed()
+		pulls[number] = &seen
 	}
-	for _, number := range issues {
-		raw := payload.Data.Repository[fmt.Sprintf("issue%d", number)]
-		if raw == nil || string(raw) == "null" {
-			continue
-		}
-		var issue gqlIssue
-		if err := json.Unmarshal(raw, &issue); err != nil {
-			return Snapshot{}, fmt.Errorf("GitHub answer: %w", err)
-		}
-		snapshot.Issues[number] = issue.observed()
-	}
-	return snapshot, nil
-}
-
-// Issue reads one issue when it is first tracked, in the query the poll uses, so tracking adds no REST read. It returns the
-// repository's name as GitHub gives it. GitHub has no issue at a PR's number.
-func (c *Client) Issue(ctx context.Context, repo contract.RepoName, number int) (contract.RepoName, ObservedIssue, error) {
-	if !ValidRepo(repo) || number <= 0 {
-		return "", ObservedIssue{}, ErrNotFound
-	}
-	snapshot, err := c.Poll(ctx, repo, nil, []int{number})
-	if err != nil {
-		return "", ObservedIssue{}, err
-	}
-	issue, found := snapshot.Issues[number]
-	if !found {
-		return "", ObservedIssue{}, ErrNotFound
-	}
-	return snapshot.Repo, issue, nil
+	return pulls, nil
 }
 
 func login(author *gqlAuthor) string {
@@ -601,14 +474,8 @@ func login(author *gqlAuthor) string {
 	return author.Login
 }
 
-func comment(node gqlComment) Comment {
-	// GitHub's IDs are decimal strings. A malformed one reads as 0, which is never newer than a cursor.
-	id, _ := strconv.ParseInt(node.ID, 10, 64)
-	return Comment{ID: id, Author: login(node.Author), Body: node.Body, URL: node.URL}
-}
-
 func (p gqlPull) observed() Observed {
-	seen := Observed{Number: p.Number, URL: p.URL, Title: p.Title, Author: login(p.Author), Draft: p.IsDraft, State: contract.PrOpen, Head: p.HeadRefOid, CI: contract.PrCINone}
+	seen := Observed{Number: p.Number, State: contract.PrOpen, Head: p.HeadRefOid, CI: contract.PrCINone}
 	if p.Merged {
 		seen.State = contract.PrMerged
 	} else if p.State == "CLOSED" {
@@ -669,21 +536,9 @@ func (p gqlPull) observed() Observed {
 		if review.State == "PENDING" {
 			continue
 		}
-		seen.Reviews = append(seen.Reviews, comment(review.gqlComment))
-		for _, inline := range review.Comments.Nodes {
-			seen.ReviewComments = append(seen.ReviewComments, comment(inline))
-		}
+		// GitHub's IDs are decimal strings. A malformed one reads as 0, which is never newer than a cursor.
+		id, _ := strconv.ParseInt(review.ID, 10, 64)
+		seen.Reviews = append(seen.Reviews, Review{ID: id, Author: login(review.Author), Body: review.Body, URL: review.URL})
 	}
-	for _, node := range p.Comments.Nodes {
-		seen.Comments = append(seen.Comments, comment(node))
-	}
-	seen.Meta = p.meta(p.Title)
-	seen.Meta.Draft = p.IsDraft
-	for _, node := range p.ReviewRequests.Nodes {
-		if reviewer := node.RequestedReviewer; reviewer != nil {
-			seen.Meta.Reviewers = append(seen.Meta.Reviewers, reviewer.Login+reviewer.CombinedSlug)
-		}
-	}
-	slices.Sort(seen.Meta.Reviewers)
 	return seen
 }
