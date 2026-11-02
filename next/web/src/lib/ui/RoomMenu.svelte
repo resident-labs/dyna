@@ -4,7 +4,7 @@
   import StatusPill from "./StatusPill.svelte";
   // The room's less frequent actions. On a phone they sit behind the header's button; elsewhere a right click on the
   // room's rail icon opens them at the pointer, and focus returns to that icon.
-  let { phone, paused, operate, admin, onpause, oninstructions, onterminal, oncomputer, onrequests, onjobs, onruns, jobFailed = false, waiting = 0 }: { phone: boolean; onrequests?: () => void; onjobs?: () => void; onruns?: () => void; jobFailed?: boolean; waiting?: number; paused: boolean; operate: boolean; admin: boolean; onpause: () => void; oninstructions: () => void; onterminal?: () => void; oncomputer?: () => void } = $props();
+  let { phone, paused, operate, admin, onpause, oninstructions, onterminal, oncomputer, onrequests, onjobs, onruns, waiting = 0 }: { phone: boolean; onrequests?: () => void; onjobs?: () => void; onruns?: () => void; waiting?: number; paused: boolean; operate: boolean; admin: boolean; onpause: () => void; oninstructions: () => void; onterminal?: () => void; oncomputer?: () => void } = $props();
   let open = $state(false);
   let root: HTMLDivElement;
   let button: HTMLButtonElement | undefined = $state();
@@ -29,7 +29,7 @@
   // A page the menu opened returns focus here when it closes.
   export function focus(options?: FocusOptions) { button?.focus(options); }
   let waitingLabel = $derived(`${waiting} ${waiting === 1 ? "request" : "requests"} waiting`);
-  let menuLabel = $derived(["Room menu", waiting ? waitingLabel : "", jobFailed ? "a job failed" : ""].filter(Boolean).join(", "));
+  let menuLabel = $derived(["Room menu", waiting ? waitingLabel : ""].filter(Boolean).join(", "));
   // Up and Down move between entries, Home and End jump, Escape closes and Tab leaves.
   function move(event: KeyboardEvent) {
     const all = items();
@@ -46,11 +46,11 @@
   {#if phone}<button type="button" class="open" bind:this={button} aria-haspopup="menu" aria-expanded={open} aria-controls="room-menu"
     aria-label={menuLabel} title={menuLabel}
     onclick={() => void show(!open)} onkeydown={event => { if (event.key === "ArrowDown") { event.preventDefault(); void show(true); } }}>
-    <Icon name="more" />{#if waiting}<StatusPill tone="warning" label="Requests waiting" count={waiting} />{/if}{#if jobFailed}<StatusPill tone="failed" label="A job failed" dot />{/if}</button>{/if}
+    <Icon name="more" />{#if waiting}<StatusPill tone="warning" label="Requests waiting" count={waiting} />{/if}</button>{/if}
   {#if open}
     <div class="list" class:pointer={at} style:left={at && `${at.x}px`} style:top={at && `${at.y}px`} role="menu" id="room-menu" aria-label="Room menu" tabindex="-1" bind:this={list} onkeydown={move} use:atPointer={!!at}>
       {#if onrequests}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onrequests(); }}>Requests{#if waiting}<StatusPill tone="warning" label="Requests waiting" count={waiting} />{/if}</button>{/if}
-      {#if onjobs}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onjobs(); }}>Jobs{#if jobFailed}<StatusPill tone="failed" label="A job failed" dot />{/if}</button>{/if}
+      {#if onjobs}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onjobs(); }}>Jobs</button>{/if}
       {#if onruns}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onruns(); }}>Past runs</button>{/if}
       {#if onterminal}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onterminal(); }}>Terminal</button>{/if}
       {#if oncomputer}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); oncomputer(); }}>Computer</button>{/if}
