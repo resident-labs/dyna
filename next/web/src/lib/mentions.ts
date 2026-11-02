@@ -7,6 +7,24 @@
 // named root that is not the room's root, gets no mention.
 const groups = new Set(["parent", "children", "siblings"]);
 export const mentionable = ({ name, parent }: { name: string; parent?: string }) => !groups.has(name) && !(name === "root" && parent);
+const opensName = (before: string | undefined) => !before || " \t\n(".includes(before);
+// The name an @ opens, given the character before it and the text after it. Empty when it opens none.
+export function mentionName(before: string | undefined, after: string): string {
+  return opensName(before) ? (/^[A-Za-z0-9._:-]+/.exec(after)?.[0] ?? "").replace(/(?<=.)[.,;:!?]+$/, "") : "";
+}
+// Where the first @ that can open a name stands in the text, or -1.
+export function mentionStart(text: string): number {
+  for (let at = text.indexOf("@"); at >= 0; at = text.indexOf("@", at + 1)) if (opensName(text[at - 1])) return at;
+  return -1;
+}
+// The session each @name shown in a post opens, as id by name. Names outlive closed sessions, so a closed session still
+// opens, unless an open session has its name now.
+export function mentionTargets(names: Iterable<[string, string]>, sessions: ReadonlyMap<string, { name: string; parent?: string }>): Map<string, string> {
+  const targets = new Map<string, string>();
+  for (const [id, name] of names) if (!sessions.has(id) && mentionable({ name })) targets.set(name, id);
+  for (const [id, session] of sessions) if (mentionable(session)) targets.set(session.name, id);
+  return targets;
+}
 export function parseMentions(draft: string, sessions: Iterable<{ name: string; parent?: string }>): { text: string; mentions: string[] } {
   const names = new Set([...sessions].filter(mentionable).map(({ name }) => name));
   const mentions: string[] = [];
@@ -24,8 +42,8 @@ export function parseMentions(draft: string, sessions: Iterable<{ name: string; 
       continue;
     }
     if (!code && text[i] === "\\" && text[i + 1] === "@") continue;
-    if (!code && text[i] === "@" && (i === 0 || " \t\n(".includes(text[i - 1]))) {
-      const name = (/^[A-Za-z0-9._:-]+/.exec(text.slice(i + 1))?.[0] ?? "").replace(/(?<=.)[.,;:!?]+$/, "");
+    if (!code && text[i] === "@") {
+      const name = mentionName(text[i - 1], text.slice(i + 1));
       if (names.has(name) && !mentions.includes(name)) mentions.push(name);
     }
     out += text[i];
