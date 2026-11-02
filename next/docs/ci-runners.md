@@ -1,9 +1,11 @@
 # CI runners
 
-Dyna serves a repository's GitHub Actions jobs from one runner scale set, named
-`dyna`. Workflows say `runs-on: dyna`. The engine holds one long poll per
-repository. For each job GitHub assigns, admission picks a CI host and the engine
-starts one ephemeral runner container there. The container ends with its job.
+Dyna serves a repository's GitHub Actions jobs from one runner scale set per size,
+named `dyna-small`, `dyna-medium`, `dyna-large` and `dyna-xlarge`, the box sizes. A
+workflow picks the size with `runs-on: dyna-large`, and plain `dyna` names no set.
+The engine holds one long poll per set. For each job GitHub assigns, admission picks
+a host as it picks one for a box, and the engine starts one ephemeral runner
+container of that size there. The container ends with its job.
 
 This replaces v1's local CI. What stays is that CI work runs in a capped container,
 off the owner's machine, and that a fork's change cannot decide its own checks. What
@@ -13,8 +15,8 @@ free-disk rule becomes the disk floor boxes use.
 
 ## Turn it on
 
-The pool does nothing until both of these are true: the repository is in box mode
-on the engine, and the owner sets the repository variable. The order matters, so
+The pool does nothing until both of these are true: the repository is on at the
+engine, and the owner sets the repository variable. The order matters, so
 that no job waits for a pool that does not exist yet.
 
 1. The engine's `GH_TOKEN` needs admin on the repository, and Actions variables
@@ -46,35 +48,58 @@ that no job waits for a pool that does not exist yet.
    same. Boxes already on it stay until they stop. `dyna host list` shows both
    switches.
 
-5. Turn the repository on. COUNT is the most runners at once on that host, at most
-   16. A repository names its hosts outright, so the room list does not apply to
-   it, but the pool starts a runner only on a host with ci on:
+5. Turn the repository on. `--max` is the most runners it has at once, across
+   sizes; without it, admission alone decides:
 
    ```sh
-   dyna room repo ci resident-labs/dyna --mode box --host pve=4
+   dyna room repo ci resident-labs/dyna --on --max 4
    ```
 
-   The first job builds the runner image on the host, which takes some minutes.
-   Check that the lease variable `DYNA_CI_POOL_UNTIL` appears on the repository.
-6. Set the repository variable `DYNA_CI_SELF_HOSTED` to `true`.
+   The first job on a host builds the runner image there, which takes some
+   minutes. Check that the lease variable `DYNA_CI_POOL_UNTIL` appears on the
+   repository.
+6. Set the repository variable `DYNA_CI_SELF_HOSTED` to `true`, and give each pool
+   job its size, as `runs-on: dyna-medium`.
 
-Adding a host later is steps 2 to 4, then the same command with one more `--host`.
-Nothing else changes. Use the same size for every host: GitHub gives a job to any
-idle runner of a scale set, so one set cannot promise a job a size. A second size
-needs a second scale set, which is not built.
+Adding a host later is steps 2 to 4. Nothing else changes: no repository names its
+hosts.
+
+## Where a runner goes
+
+A runner is placed as a box is, by the same `box.Admit`: a ready host with ci on,
+with room for the runner's CPUs and memory and a free disk floor, the one with the
+most free memory. Runners and boxes count against each other there, and several
+runners share a host while it has room, up to 16, one per slot. A host with ci off
+gets no new runner. The agents switch and the room list keep sessions off a host,
+so a runner ignores both.
+
+The repository's room is its default room, and its rule (`dyna room hosts ROOM
+--only POOL,HOST`) holds its runners as it holds its boxes. When no host takes a
+job and the rule names a pool that can grow, the job waits for a node, as a box
+does: the pool makes one of the runner's size, the next poll places the runner
+there, and the pool takes the node back once nothing has held it for `--idle`. A
+per-session pool makes a node for each job, and the node goes when its runner
+does. A node has ci on from the start. While a node can still come, GitHub sees
+capacity for it, so the job is assigned and waits.
+
+What GitHub sees as a set's capacity is its runners, plus what admission would
+still take, plus the nodes the room's pools could add, within `--max`. A host below
+its disk floor or above 80% memory adds nothing, so GitHub stops assigning jobs
+there.
 
 ## Turn it off
 
 - **Stop new jobs now:** delete `DYNA_CI_SELF_HOSTED`, or set it to anything but
   `true`. New runs use GitHub-hosted runners. Jobs already on the pool finish. The
-  switch only reaches `ci-runner.sh`, so a branch that sets `runs-on: dyna` itself
-  still gets a runner. To stop every job, use `--mode github`.
+  switch only reaches `ci-runner.sh`, so a branch that sets `runs-on: dyna-large`
+  itself still gets a runner. To stop every job, use `--off`.
 - **Take one host out:** `dyna host set pve --ci off`. The pool starts no new
-  runner there and counts only the runners it has, which finish their jobs. The
-  repository keeps naming the host, and runners come back with `--ci on`.
-- **Remove the pool:** `dyna room repo ci resident-labs/dyna --mode github`. The
-  next tick kills that repository's runners, even mid-job, and deletes its scale
-  set and registrations. The host's proxy goes with its last runner. On pve that
+  runner there, and the runners it has finish their jobs. Its proxy goes with the
+  last of them. Runners come back with `--ci on`. `dyna host remove` refuses a host
+  while a runner is on it.
+- **Remove the pool:** `dyna room repo ci resident-labs/dyna --off`. The next tick
+  kills that repository's runners, even mid-job, and deletes its four scale sets
+  and its registrations. The host's proxy goes with its last runner. On pve that
   took under a minute. GitHub still shows a killed job in progress for about 11
   minutes, then ends it. A queued job has nothing left to serve it, so it waits for
   `pool-watch`, or cancel it by hand.
@@ -96,18 +121,18 @@ and Podman's default `/dev/shm`. A job installs its own tools, and a test must n
 lean on the machine it runs on. A test that skips when a tool is missing passes
 without running, so `next` installs Node for the tests in `box/agent`.
 
-`next` fits `medium`, though `--size` defaults to `large`. In a `medium` container on
-pve it took 2 minutes from a cold cache, and peaked at 2.6 of 6 GiB of tmpfs and 4
-of 8 GiB of memory.
+`next` fits `medium`, so its jobs say `dyna-medium`. In a `medium` container on pve
+it took 2 minutes from a cold cache, and peaked at 2.6 of 6 GiB of tmpfs and 4 of 8
+GiB of memory.
 
 ## What a runner can touch
 
 Each runner is a rootless Podman container, built from
 `next/box/images/ci-runner` and set in `next/box/podman/runner.go`:
 
-- **Host:** no host mounts, no Podman socket, no capabilities, `no-new-privileges`,
-  a read-only image. Its process runs as a subordinate UID on the host, not as the host
-  user.
+- **Host:** one host mount, the host's cache, below. No Podman socket, no
+  capabilities, `no-new-privileges`, a read-only image. Its process runs as a
+  subordinate UID on the host, not as the host user.
 - **Network:** `--network=none`. It has only loopback and no route. The only way
   out is an HTTPS proxy, reached over a Unix socket in the `dyna-ci-egress` volume.
   The proxy (`next/box/egress`) runs on the host and refuses everything but port
@@ -124,13 +149,18 @@ Each runner is a rootless Podman container, built from
   alone on the host gets all of it, and an idle job's long poll takes nothing.
 - **Disk:** `/home/runner` and `/tmp` are each a tmpfs capped at three quarters of
   the memory limit, and `/dev/shm` is Podman's default, 64 MB and `noexec`. All of it
-  counts against that limit. The one exception is `/cache`
-  (`DYNA_CI_CACHE`): a volume per repository and runner slot that outlives the job,
-  so a build folder such as `CARGO_TARGET_DIR=$DYNA_CI_CACHE/target` stays warm, as on
-  upstream projects' own runners. A slot runs one job at a time, so no two jobs share
-  a cache at once, and only the repository's own pushes and pull requests reach the
-  pool. Before a job starts, a cache over 40 GiB is emptied. Everything else a job
-  wrote dies with it.
+  counts against that limit. The one write path that outlives the job is its build
+  folder in the host's cache. `/cache` (`DYNA_CI_CACHE`) is the host's cache, the
+  folder its boxes mount at `/box/cache`, every room's alike, mounted read-only: a
+  job reads what the boxes fetched, and cannot change what they build from. Inside
+  it, `/cache/ci/N` (`DYNA_CI_BUILD`) is the build folder of the runner's slot, the
+  one writable mount, so a folder such as `CARGO_TARGET_DIR=$DYNA_CI_BUILD/target`
+  stays warm, as on upstream projects' own runners. A slot holds one running runner
+  on its host, and the pool gives slots out under its lock, so two jobs never share
+  a build folder at once, whatever their sizes or repositories. A job sees the other
+  slots' folders read-only. Only the repository's own pushes and pull requests reach
+  the pool. Before a job starts, a build folder over 40 GiB is emptied. Everything
+  else a job wrote dies with it.
 - **Secrets:** the only one is its JIT config. It reaches `podman run` on standard
   input, never argv. Podman keeps it in the container's config, and conmon has it
   in its environment, both readable only by the host user, until the container
@@ -166,7 +196,7 @@ second, so the third is the one that holds:
 3. `job-started.sh` is in the runner image, so no pull request can edit it. It runs
    before any step, reads the head repository from the event GitHub sent, and
    refuses any job that is not a push, a manual run, or a pull request from this
-   repository. If an approved fork rewrites `runs-on: dyna`, this is what stops it.
+   repository. If an approved fork rewrites `runs-on: dyna-large`, this is what stops it.
 
 A refusal has to kill the runner's worker. The runner treats a failed hook as a
 failed step and carries on, so a step with `if: always()` and any action's pre
@@ -195,9 +225,9 @@ it outside any job container.
 - **No pool at all:** the engine renews `DYNA_CI_POOL_UNTIL` every 5 minutes for
   10 minutes, only while a poll is alive and some host has capacity. Once it
   expires, new runs use GitHub-hosted runners.
-- **Pool is busy:** a job past COUNT stays queued on GitHub and takes the next free
-  runner. It can wait as long as it needs: nothing cancels a job for waiting while
-  the pool is working.
+- **Pool is busy:** a job past what the hosts hold, or past `--max`, stays queued on
+  GitHub and takes the next free runner. It can wait as long as it needs: nothing
+  cancels a job for waiting while the pool is working.
 - **Pool dies after a run was routed to it, or cannot start runners:** GitHub would
   let the job wait 24 hours. The `pool-watch` job, on a hosted runner, steps in once
   the run has had work queued and no progress for 20 minutes. It then looks at pool

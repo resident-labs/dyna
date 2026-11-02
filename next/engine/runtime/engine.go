@@ -189,6 +189,9 @@ func Run(ctx context.Context, cfg Config) error {
 	service.Reconciler().SetHostRestoring(boxes.restoring)
 	service.Reconciler().SetRoomHosts(boxes)
 	service.Reconciler().SetNodes(poolHosts{Script: lifecycle.Script{Layout: layout}, boxes: boxes})
+	runners := &ci.Pool{Store: st, Hosts: boxes.ciDriver, Sets: &ci.Sets{Token: token}, Memory: boxes.hostMemory, Now: time.Now, Kick: service.Reconciler().Kick,
+		GitHub: &ci.GitHub{Token: token, Endpoint: &url.URL{Scheme: "https", Host: "api.github.com"}, Transport: http.DefaultTransport, Now: time.Now}}
+	service.Reconciler().SetRunners(runners)
 	service.SetGitIdentity(cfg.GitName, cfg.GitEmail)
 	service.SetHostexecRunner(boxes)
 	service.SetHookRunner(boxes, boxes.hostMemory)
@@ -403,9 +406,7 @@ func Run(ctx context.Context, cfg Config) error {
 		defer close(ciDone)
 		ticks := time.NewTicker(30 * time.Second)
 		defer ticks.Stop()
-		github := &ci.GitHub{Token: token, Endpoint: &url.URL{Scheme: "https", Host: "api.github.com"}, Transport: http.DefaultTransport, Now: time.Now}
-		pool := &ci.Pool{Store: st, Hosts: boxes.ciDriver, GitHub: github, Sets: &ci.Sets{Token: token, Name: ci.Name}, Memory: boxes.hostMemory, Now: time.Now}
-		pool.Run(ctx, ticks.C)
+		runners.Run(ctx, ticks.C)
 	}()
 	defer func() { <-ciDone }()
 	prDone := make(chan struct{})

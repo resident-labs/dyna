@@ -83,7 +83,6 @@ func (e *HostHeldError) Error() string {
 // Without boxes, only what is not a box counts, for a removal that discards the boxes.
 func hostHeld(ctx context.Context, tx *sql.Tx, host contract.HostName, boxes bool) error {
 	held, err := listIDs[string](ctx, tx, `SELECT 'session '||s.name||' ('||b.state||')' FROM boxes b JOIN sessions s ON s.id=b.session WHERE ?2 AND b.host=?1 AND b.state!='deleted'
-		UNION ALL SELECT 'CI of '||repo FROM repo_ci_hosts WHERE host=?1
 		UNION ALL SELECT 'a subscription run' FROM subscription_runs WHERE host=?1
 		UNION ALL SELECT 'the --only rule of room '||r.id FROM rooms r, json_each(r.only_hosts) j WHERE j.value=?1`, host, boxes)
 	if err != nil {

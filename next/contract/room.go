@@ -9,13 +9,6 @@ type RoomLimits struct {
 	MemBytes int64 `json:"memBytes"`
 }
 
-type CIMode string
-
-const (
-	CIGitHub CIMode = "github"
-	CIBox    CIMode = "box"
-)
-
 type RoomRepo struct {
 	Repo    RepoName `json:"repo"`
 	Default bool     `json:"default"`

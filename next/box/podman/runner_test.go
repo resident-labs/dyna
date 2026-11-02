@@ -20,7 +20,7 @@ import (
 
 func testSpec() box.RunnerSpec {
 	size, _ := box.Size(contract.BoxSizeLarge)
-	return box.RunnerSpec{Name: "dyna-ci-pve-1", Image: "localhost/dyna-ci-runner:abc", Config: "jit-secret", Repo: "owner/repo", ID: 42, Slot: 3, Size: size}
+	return box.RunnerSpec{Name: "dyna-ci-pve-1", Image: "localhost/dyna-ci-runner:abc", Config: "jit-secret", Repo: "owner/repo", ID: 42, Slot: 3, Size: size, Cache: "/data/cache"}
 }
 
 // frameRunner answers every SSH framed command with success and keeps what it saw.
@@ -63,7 +63,8 @@ func TestRunnerArgsKeepTheContainerSealed(t *testing.T) {
 		"--tmpfs /home/runner:rw,exec,U,mode=0755,size=12884901888", "--tmpfs /tmp:rw,exec,mode=1777,size=12884901888",
 		"--cgroup-parent=dyna-ci.slice", "--env ACTIONS_RUNNER_INPUT_JITCONFIG", "--env DYNA_CI_REPO=owner/repo",
 		"--label dyna.ci.slot=3", "--mount type=volume,source=dyna-ci-egress,destination=/run/dyna-egress,subpath=3,ro",
-		"--mount type=volume,source=dyna-ci-cache-owner-repo-3,destination=/cache", "--env DYNA_CI_CACHE=/cache",
+		"--label dyna.ci.size=large", "--mount type=bind,source=/data/cache,destination=/cache,ro",
+		"--mount type=bind,source=/data/cache/ci/3,destination=/cache/ci/3", "--env DYNA_CI_CACHE=/cache", "--env DYNA_CI_BUILD=/cache/ci/3",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("args miss %q: %s", want, joined)
@@ -107,6 +108,10 @@ func TestStartRunnerRefusesUnsafeInput(t *testing.T) {
 		func(s *box.RunnerSpec) { s.Image = "" },
 		func(s *box.RunnerSpec) { s.Slot = -1 },
 		func(s *box.RunnerSpec) { s.Slot = box.RunnerSlots },
+		func(s *box.RunnerSpec) { s.Cache = "" },
+		func(s *box.RunnerSpec) { s.Cache = "data/cache" },
+		func(s *box.RunnerSpec) { s.Cache = "/data/cache,destination=/etc" },
+		func(s *box.RunnerSpec) { s.Size = contract.BoxSize{Name: "huge"} },
 	} {
 		spec := testSpec()
 		change(&spec)
@@ -128,14 +133,16 @@ func TestEgressAloneHasHostNetworkAndNoCapabilities(t *testing.T) {
 func TestListRunnersSeparatesTheProxy(t *testing.T) {
 	h, runner := newFrameHost(t)
 	runner.reply = []byte(`[
-{"Names":["dyna-ci-pve-1"],"State":"running","Labels":{"dyna.ci":"runner","dyna.ci.repo":"owner/repo","dyna.ci.id":"42","dyna.ci.slot":"3"}},
+{"Names":["dyna-ci-pve-1"],"State":"running","Labels":{"dyna.ci":"runner","dyna.ci.repo":"owner/repo","dyna.ci.id":"42","dyna.ci.slot":"3","dyna.ci.size":"medium"}},
 {"Names":["dyna-ci-pve-2"],"State":"created","Labels":{"dyna.ci":"runner","dyna.ci.repo":"owner/repo","dyna.ci.id":"43","dyna.ci.slot":"0"}},
 {"Names":["dyna-ci-egress"],"State":"running","Labels":{"dyna.ci":"egress"}}]`)
 	found, egress, err := h.ListRunners(context.Background())
 	if err != nil || !egress || len(found) != 2 {
 		t.Fatalf("%+v %v %v", found, egress, err)
 	}
-	if found[0] != (box.Runner{Name: "dyna-ci-pve-1", Repo: "owner/repo", ID: 42, Slot: 3, Running: true}) || found[1].Running {
+	medium, _ := box.Size(contract.BoxSizeMedium)
+	large, _ := box.Size(contract.BoxSizeLarge)
+	if found[0] != (box.Runner{Name: "dyna-ci-pve-1", Repo: "owner/repo", ID: 42, Slot: 3, Size: medium, Running: true}) || found[1].Running || found[1].Size != large {
 		t.Fatalf("%+v", found)
 	}
 }
@@ -246,28 +253,5 @@ func TestJobStartedHookKillsTheWorkerOfARefusedJob(t *testing.T) {
 				t.Fatalf("the worker survived: %v: %s", err, out)
 			}
 		})
-	}
-}
-
-func TestEachRepositorySlotHasItsOwnBuildCache(t *testing.T) {
-	if got := cacheName("Owner/My_Repo.git", 7); got != "dyna-ci-cache-owner-my_repo.git-7" {
-		t.Fatalf("cache name %q", got)
-	}
-	if cacheName("a/b", 1) == cacheName("a/b", 2) || cacheName("a/b", 1) == cacheName("a/c", 1) {
-		t.Fatal("two slots or two repositories share a cache")
-	}
-	h, runner := newFrameHost(t)
-	if err := h.StartRunner(context.Background(), testSpec()); err != nil {
-		t.Fatal(err)
-	}
-	prepared := false
-	for _, args := range runner.args {
-		joined := strings.Join(args, " ")
-		if strings.Contains(joined, "podman volume create") && strings.Contains(joined, "dyna-ci-cache-owner-repo-3") {
-			prepared = true
-		}
-	}
-	if !prepared {
-		t.Fatal("the cache volume is not prepared before the runner starts")
 	}
 }

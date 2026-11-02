@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -22,6 +23,7 @@ const (
 	runnerRepoLabel = "dyna.ci.repo"
 	runnerIDLabel   = "dyna.ci.id"
 	runnerSlotLabel = "dyna.ci.slot"
+	runnerSizeLabel = "dyna.ci.size"
 	// egressName names both the proxy container and the volume that carries its sockets.
 	egressName  = "dyna-ci-egress"
 	egressMount = "/run/dyna-egress"
@@ -30,35 +32,23 @@ const (
 	// runnerLimit is the host's own bound, in seconds. A job shares a user with the
 	// entrypoint's timeout, so it can stop that clock. This one is outside the container.
 	runnerLimit = "--timeout=22200" // 6 hours 10 minutes
-	// cacheMount is where a runner finds its slot's build cache, a volume that outlives the job, as
-	// upstream projects keep CARGO_TARGET_DIR on their own runners. One slot runs one job at a time.
+	// cacheMount is where a runner reads the host's cache, the folder the host's boxes mount at /box/cache. It writes only its
+	// slot's build folder there, which outlives the job, as upstream projects keep CARGO_TARGET_DIR on their own runners.
 	cacheMount = "/cache"
-	// cacheLimitKB empties a cache above 40 GiB before the next job starts.
+	// cacheLimitKB empties a build folder above 40 GiB before the next job starts.
 	cacheLimitKB = 40 << 20
 )
 
-// cacheName is the build cache volume of one repository's runner slot.
-func cacheName(repo contract.RepoName, slot int) string {
-	name := strings.Map(func(r rune) rune {
-		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-' {
-			return r
-		}
-		if r >= 'A' && r <= 'Z' {
-			return r + 'a' - 'A'
-		}
-		return '-'
-	}, string(repo))
-	return fmt.Sprintf("dyna-ci-cache-%s-%d", name, slot)
-}
+// buildFolder is a slot's build folder, relative to the host's cache.
+func buildFolder(slot int) string { return path.Join("ci", strconv.Itoa(slot)) }
 
-// cacheScript makes the slot's cache volume, owned by the runner's user, and empties it when it
-// has grown past cacheLimitKB. du and rm run in Podman's user namespace, where the job's files live.
-const cacheScript = `v="$1"; limit="$2"
-podman volume exists "$v" || podman volume create --label dyna.ci=cache "$v" >/dev/null
-m=$(podman volume inspect --format '{{.Mountpoint}}' "$v")
-podman unshare chown 1001:1001 "$m"
-kb=$(podman unshare du -sk "$m" | cut -f1)
-if [ "$kb" -gt "$limit" ]; then podman unshare find "$m" -mindepth 1 -delete; fi`
+// buildScript makes a slot's build folder, owned by the runner's user, and empties it when it has grown past cacheLimitKB. du
+// and rm run in Podman's user namespace, where the job's files live.
+const buildScript = `b="$1"; limit="$2"
+mkdir -p -- "$b"
+podman unshare chown 1001:1001 "$b"
+kb=$(podman unshare du -sk "$b" | cut -f1)
+if [ "$kb" -gt "$limit" ]; then podman unshare find "$b" -mindepth 1 -delete; fi`
 
 // BuildRunnerImage builds or reuses the runner image, and drops any older one.
 func (h *Host) BuildRunnerImage(ctx context.Context) (string, error) {
@@ -136,9 +126,10 @@ func runnerArgs(s box.RunnerSpec) []string {
 	// tmpfs pages count against the memory limit, so one job can never hold more than that. Leaving
 	// a quarter for processes means a full disk is an ordinary write error, not an OOM kill.
 	disk := fmt.Sprintf("size=%d", s.Size.MemBytes/4*3)
+	build := buildFolder(s.Slot)
 	return []string{"podman", "--cgroup-manager=systemd", "run", "--detach", "--rm", runnerLimit, "--name", s.Name,
 		"--label", ciLabel + "=runner", "--label", runnerRepoLabel + "=" + string(s.Repo), "--label", runnerIDLabel + "=" + strconv.FormatInt(s.ID, 10),
-		"--label", runnerSlotLabel + "=" + strconv.Itoa(s.Slot),
+		"--label", runnerSlotLabel + "=" + strconv.Itoa(s.Slot), "--label", runnerSizeLabel + "=" + string(s.Size.Name),
 		"--cgroup-parent=" + runnerSlice,
 		// A host's containers.conf can default to host networking, so this is always explicit.
 		"--network=none", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges", "--user", "1001:1001",
@@ -147,9 +138,12 @@ func runnerArgs(s box.RunnerSpec) []string {
 		"--tmpfs", "/tmp:rw,exec,mode=1777," + disk,
 		// Its slot alone: the proxy limits a job by socket, so a job must not reach another.
 		"--mount", fmt.Sprintf("type=volume,source=%s,destination=%s,subpath=%d,ro", egressName, egressMount, s.Slot),
-		"--mount", fmt.Sprintf("type=volume,source=%s,destination=%s", cacheName(s.Repo, s.Slot), cacheMount),
+		// The host's cache is read-only, so a job cannot change what the boxes build from, and its slot's folder alone is writable.
+		"--mount", fmt.Sprintf("type=bind,source=%s,destination=%s,ro", s.Cache, cacheMount),
+		"--mount", fmt.Sprintf("type=bind,source=%s,destination=%s", filepath.Join(s.Cache, build), path.Join(cacheMount, build)),
 		"--log-driver=k8s-file", "--log-opt=max-size=1m",
-		"--env", "ACTIONS_RUNNER_INPUT_JITCONFIG", "--env", "DYNA_CI_REPO=" + string(s.Repo), "--env", "DYNA_CI_CACHE=" + cacheMount,
+		"--env", "ACTIONS_RUNNER_INPUT_JITCONFIG", "--env", "DYNA_CI_REPO=" + string(s.Repo),
+		"--env", "DYNA_CI_CACHE=" + cacheMount, "--env", "DYNA_CI_BUILD=" + path.Join(cacheMount, build),
 		s.Image}
 }
 
@@ -158,8 +152,11 @@ func (h *Host) StartRunner(ctx context.Context, s box.RunnerSpec) error {
 	if s.Name == "" || strings.HasPrefix(s.Name, "-") || s.Repo == "" || s.Image == "" || s.Config == "" || strings.ContainsAny(s.Config, "\n\x00") || s.Slot < 0 || s.Slot >= box.RunnerSlots {
 		return errors.New("invalid runner")
 	}
-	if _, err := h.run(ctx, "bash", "-c", cacheScript, "dyna-ci-cache", cacheName(s.Repo, s.Slot), strconv.Itoa(cacheLimitKB)); err != nil {
-		return fmt.Errorf("prepare build cache: %w", err)
+	if _, sized := box.Size(s.Size.Name); !sized || !filepath.IsAbs(s.Cache) || strings.ContainsAny(s.Cache, ",=\n\x00") {
+		return errors.New("invalid runner")
+	}
+	if _, err := h.run(ctx, "bash", "-c", buildScript, "dyna-ci-build", filepath.Join(s.Cache, buildFolder(s.Slot)), strconv.Itoa(cacheLimitKB)); err != nil {
+		return fmt.Errorf("prepare build folder: %w", err)
 	}
 	args := append([]string{"bash", "-c", `IFS= read -r ACTIONS_RUNNER_INPUT_JITCONFIG && export ACTIONS_RUNNER_INPUT_JITCONFIG && exec "$@"`, "dyna-runner"}, runnerArgs(s)...)
 	// Podman's output says why it failed, and it never holds the config, which is only in its environment.
@@ -204,7 +201,12 @@ func (h *Host) ListRunners(ctx context.Context) ([]box.Runner, bool, error) {
 		if err != nil {
 			return nil, false, fmt.Errorf("runner %s: %w", r.Names[0], err)
 		}
-		runners = append(runners, box.Runner{Name: r.Names[0], Repo: contract.RepoName(r.Labels[runnerRepoLabel]), ID: id, Slot: slot, Running: r.State == "running"})
+		// A runner an older engine started has no size, and was large unless its repository said otherwise.
+		size, sized := box.Size(contract.BoxSizeName(r.Labels[runnerSizeLabel]))
+		if !sized {
+			size, _ = box.Size(contract.BoxSizeLarge)
+		}
+		runners = append(runners, box.Runner{Name: r.Names[0], Repo: contract.RepoName(r.Labels[runnerRepoLabel]), ID: id, Slot: slot, Size: size, Running: r.State == "running"})
 	}
 	return runners, egress, nil
 }

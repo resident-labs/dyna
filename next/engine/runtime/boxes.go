@@ -145,6 +145,12 @@ func (h ciHost) EnsureEgress(ctx context.Context, image string) error {
 	return h.Host.EnsureEgress(ctx, image, h.boxes.Layout.HostBin())
 }
 
+// StartRunner gives the runner the host's cache, the one its boxes mount at /box/cache.
+func (h ciHost) StartRunner(ctx context.Context, spec box.RunnerSpec) error {
+	spec.Cache = h.boxes.Layout.HostCache()
+	return h.Host.StartRunner(ctx, spec)
+}
+
 func (b *Boxes) ciDriver(ctx context.Context, name contract.HostName) (ci.Driver, error) {
 	h, err := b.host(ctx, name)
 	if err != nil {

@@ -3,11 +3,10 @@ package ci
 import (
 	"testing"
 
-	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
 
-// A host with ci off gets no runner, though a repository still names it, and its runners come back when ci is on again.
+// A host with ci off gets no runner, and its runners come back when ci is on again.
 func TestThePoolSkipsACIOffHost(t *testing.T) {
 	f := newFixture(2)
 	f.store.hosts[0].CI = false
@@ -31,25 +30,18 @@ func TestCIOffLetsRunningJobsFinish(t *testing.T) {
 		t.Fatalf("capacity %d, runners %+v, registered %v", capacity, d.runners, f.sets.names)
 	}
 	f.tick(t)
-	if len(d.runners) != 1 || len(d.removed) != 0 || len(f.api.deleted) != 0 {
-		t.Fatalf("a tick removed the working runner: runners %+v, removed %v, deleted %v", d.runners, d.removed, f.api.deleted)
+	if len(d.runners) != 1 || len(d.removed) != 0 || len(f.api.deleted) != 0 || !d.egress {
+		t.Fatalf("a tick removed the working runner or its proxy: runners %+v, removed %v, deleted %v", d.runners, d.removed, f.api.deleted)
+	}
+	d.runners = nil // its job ended
+	f.tick(t)
+	if d.egress {
+		t.Fatal("a host with ci off kept its proxy after its last runner")
 	}
 }
 
-// With two hosts named, a job goes to the one with ci on, even when the other has more free memory.
-func TestRunnersGoToTheHostWithCIOn(t *testing.T) {
-	f := newFixture(1)
-	f.drivers["big"] = &fakeDriver{}
-	big := readyHost("big", 128*box.GiB)
-	big.CI = false
-	f.store.hosts = append(f.store.hosts, big)
-	f.store.settings = append(f.store.settings, setting("big", 1))
-	if capacity := f.scale(2); capacity != 1 || len(f.drivers["big"].runners) != 0 || len(f.drivers["pve"].runners) != 1 {
-		t.Fatalf("capacity %d, big %d, pve %d", capacity, len(f.drivers["big"].runners), len(f.drivers["pve"].runners))
-	}
-}
-
-// A CI host keeps sessions off with agents off, and the pool still starts its runners. With both switches off it starts none.
+// A CI host keeps sessions off with agents off, and its room list is for sessions too: the pool still starts its runners.
+// With both switches off it starts none.
 func TestAgentsOffStillServesCIAndBothOffServesNothing(t *testing.T) {
 	f := newFixture(1)
 	f.store.hosts[0].NoAgents = true
