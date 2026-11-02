@@ -52,7 +52,7 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 				return approve.ErrInvalid
 			}
 			if _, err := s.repos.Ref(ctx, session.Repo, "refs/heads/"+head); err != nil {
-				return fmt.Errorf("%w: session branch not found", approve.ErrInvalid)
+				return fmt.Errorf("%w: branch %s not found on %s; head names another branch", approve.ErrInvalid, head, session.Repo)
 			}
 			return nil
 		},

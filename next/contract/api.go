@@ -2,6 +2,7 @@ package contract
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -121,6 +122,11 @@ type Error struct {
 	Message string            `json:"message"`
 	Visual  *VisualSuperseded `json:"visual,omitempty"`
 	Limited *RoomLimited      `json:"limited,omitempty"`
+}
+
+// ForeignRoom refuses a session that names a room other than its own.
+func ForeignRoom(room, own RoomID) *Error {
+	return &Error{Code: ErrForbidden, Message: fmt.Sprintf("room %q is not your room; yours is %s", room, own)}
 }
 
 type VisualSuperseded struct {
@@ -552,7 +558,7 @@ type EventsListRequest struct {
 	Limit     int         `json:"limit"`
 	Types     []EventType `json:"types,omitempty"`
 	// Home, a DM, keeps only events whose home is that DM: its posts and the turns that answered in it.
-	Home *Conversation `json:"home,omitempty"`
+	Home *Conversation `json:"home,omitempty" desc:"home narrows the log to one owner DM: {kind: dm, session: ses_…}."`
 }
 type EventsListResponse struct {
 	Events []Event              `json:"events"`
