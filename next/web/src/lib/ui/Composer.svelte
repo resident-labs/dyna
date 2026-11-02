@@ -14,6 +14,7 @@
   import { filesSummary } from "../files-summary.ts";
   import { hue } from "../identity.ts";
   import { mentionToken } from "../mentions.ts";
+  import { holdDrags } from "../viewport.ts";
   // Enter sends and Shift+Enter starts a new line. A touch screen has no Shift+Enter, so there Enter starts a new line
   // and the Send button sends. The action row keeps room for the attach and mention buttons.
   // A forwarded post waits above the text as in v1; the × or Escape removes it.
@@ -111,7 +112,7 @@
   }
 </script>
 
-<div class="composer" class:thread>
+<div class="composer" class:thread {@attach holdDrags}>
   {#if matches.length}
     <div class="mentions" id="{id}-list" role="listbox" aria-label="Sessions">
       <p class="head" aria-hidden="true">Sessions</p>
@@ -197,11 +198,12 @@
   .quoted :global(:is(h1, h2, h3, h4, h5, h6)) { margin: 0; font-size: inherit; }
   .files { margin: 4px 0 0; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .inputline { display: contents; }
-  textarea { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; resize: none; field-sizing: content; min-height: 3em; max-height: 40vh; }
+  textarea { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; resize: none; field-sizing: content; min-height: 3em; max-height: 40vh; overflow-y: auto; overscroll-behavior: contain; }
   /* iOS zooms into a field under 16 px when it takes focus. */
   @media (pointer: coarse) { textarea { font-size: 16px; } }
-  /* A phone keeps most of its screen for the feed: the box grows to a quarter of the visible height, then scrolls; the file tray scrolls too. */
-  @media (max-width: 640px) {
+  /* A phone keeps most of its screen for the feed: the box grows to a quarter of the visible height, then scrolls; the file
+     tray scrolls too. Coarse pointers count, so a phone turned sideways gets this too, and vh would ignore the keyboard. */
+  @media (max-width: 640px), (pointer: coarse) {
     textarea { max-height: calc(var(--app-height, 100dvh) * 0.25); }
   }
   textarea:focus-visible { outline: none; }
@@ -210,7 +212,7 @@
   .keys { flex: 1; }
   .file-summary { margin: 0 0 6px; color: var(--muted); font-size: 12px; }
   .file-summary button { all: unset; color: var(--danger); cursor: pointer; }
-  .tray { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; margin: 0 0 8px; padding: 0; list-style: none; }
+  .tray { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; margin: 0 0 8px; padding: 0; list-style: none; touch-action: pan-x; }
   .chip { box-sizing: border-box; display: flex; align-items: center; gap: 8px; flex: 0 0 min(280px, 100% - 40px); height: 56px; padding: 7px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar); scroll-snap-align: start; }
   .thumbnail, .ext { flex: none; width: 40px; height: 40px; border-radius: 6px; }
   .thumbnail { padding: 0; border: 0; cursor: pointer; overflow: hidden; }
@@ -241,7 +243,7 @@
     .note.over { grid-row: 5; margin: 4px 0 0; }
     .inputline { display: flex; align-items: center; gap: 6px; min-width: 0; grid-column: 2; grid-row: 4; }
     textarea::placeholder { white-space: nowrap; text-overflow: ellipsis; }
-    textarea { min-width: 0; flex: 1; min-height: 40px; max-height: 30vh; padding: 8px 0; }
+    textarea { min-width: 0; flex: 1; min-height: 40px; padding: 8px 0; }
     .actions { display: contents; }
     .actions .attach { grid-column: 1; grid-row: 4; }
     .actions .send { grid-column: 3; grid-row: 4; }
