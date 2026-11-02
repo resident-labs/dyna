@@ -3,27 +3,31 @@
   import type { RoomStore } from "../room.svelte.ts";
   import type { WorkflowStep } from "../contract.gen.ts";
   import { RunState } from "../run.svelte.ts";
-  import { boxReason, formatTime, fullTime } from "../feed.ts";
+  import { boxReason, formatTime, fromNow, fullTime } from "../feed.ts";
   import { formatTimelineDuration } from "../timeline.ts";
-  import { branchLink, commitLink, mergeFields, reading, runWords, runningFor, shortCommit, shownFacts, shownStep, stepTime, stepWord, tokenDetail, tokens, total } from "../workflow.ts";
+  import { FAILED, branchLink, commitLink, countedLine, flow, mergeFields, minutesLabel, openable, reading, runWords, runningFor, shortCommit, shownFacts, shownStep, stepTime, stepTitle, stepWord, tally, tokenDetail, tokens, total } from "../workflow.ts";
   import CollapsibleBody from "./CollapsibleBody.svelte";
   import Icon from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
   import RunFields from "./RunFields.svelte";
+  import RunFlow from "./RunFlow.svelte";
   import RunSteps from "./RunSteps.svelte";
+  import RunTimeline from "./RunTimeline.svelte";
   import SessionThread from "./SessionThread.svelte";
   import StatusPill from "./StatusPill.svelte";
+  import WorkingDot from "./WorkingDot.svelte";
 
   // A crew's page: what the run does while it runs and what it left once it ends, all from the journal, so a closed crew reads the
-  // same. It leads with why a run failed and with a reply, then the steps, then what the steps made. A worker opens in place, in
-  // the session thread, by its step; the page stays behind it, so Back returns to the same folds and the same place.
+  // same. It leads with the run's name, state and figures, its one status line and why it failed, then the run as a flowchart
+  // or a timeline. A node or a bar opens its steps under the chart, and what the steps made follows. A worker opens in place, in
+  // the session thread, by its step; the page stays behind it, so Back returns to the same view and the same place.
   let { store, session, roomName, operate, navigate, onpostlocation, clock = Date.now }: {
     store: RoomStore; session: string; roomName: string; operate: boolean;
     navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onpostlocation: (room: string, seq: number) => void; clock?: () => number;
   } = $props();
   const run = untrack(() => new RunState(session));
-  onMount(() => { const stop = store.watchRun(session, run.apply); void run.read(); return stop; });
-  let { status, steps, failed } = $derived(run.snapshot);
+  onMount(() => { const stop = store.watchRun(session, run.apply, run.say); void run.read(); return stop; });
+  let { status, steps, lines, failed } = $derived(run.snapshot);
   let info = $derived(status?.run);
   let merge = $derived(status?.merge);
   let conflicts = $derived((merge?.conflicts ?? []).filter(conflict => !conflict.reason));
@@ -33,6 +37,49 @@
   let words = $derived(runWords[info?.state ?? "running"]);
   let usage = $derived(total(steps));
   let stuck = $derived(info?.state === "running" && !!broken);
+  let counts = $derived(tally(steps));
+  let settled = $derived(counts.done + counts.failed);
+  // The script's latest line, or the counts when it wrote none or cleared it.
+  let said = $derived(lines.at(-1)?.text ? lines.at(-1) : undefined);
+  let shownLines = $derived(lines.filter(line => line.text));
+  // A line's time counts from the run's first step, which a resumed run kept from before its own start.
+  let origin = $derived(Math.min(Date.parse(info?.started ?? ""), ...steps.map(step => Date.parse(step.started))));
+  let earlier = $state(false);
+  let graph = $derived(flow(steps));
+
+  // The view is the viewer's own choice, kept in this browser. A browser that blocks storage keeps it for the page.
+  const viewKey = "dyna-run-view";
+  let view = $state<"flow" | "timeline">(untrack(() => { try { return localStorage.getItem(viewKey) === "timeline" ? "timeline" : "flow"; } catch { return "flow"; } }));
+  function choose(next: "flow" | "timeline") {
+    view = next;
+    try { localStorage.setItem(viewKey, next); } catch { /* Storage is blocked: the choice lasts for this page. */ }
+  }
+
+  // What a node or a bar opened under the chart: a stage's steps, the failed steps, or one step unfolded.
+  let detail = $state<{ stage: string } | { step: string }>();
+  let detailBox: HTMLElement | undefined = $state();
+  let opened = $derived.by(() => {
+    if (!detail) return undefined;
+    if ("step" in detail) { const key = detail.step, step = steps.find(item => item.key === key); return step && { title: stepTitle(step), steps: [step], opened: [step.key], key }; }
+    const key = detail.stage;
+    if (key === FAILED) return { title: "Failed steps", steps: graph.failed, opened: [], key };
+    const node = graph.nodes.find(item => item.key === key);
+    return node && { title: node.title, steps: node.steps, opened: [], key };
+  });
+  async function reveal() {
+    await tick();
+    detailBox?.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  }
+  function select(stage: string) {
+    detail = detail && "stage" in detail && detail.stage === stage ? undefined : { stage };
+    if (detail) void reveal();
+  }
+  // A worker opens its transcript; any other step unfolds under the chart.
+  function open(step: WorkflowStep) {
+    if (openable(step)) { void show(step); return; }
+    detail = { step: step.key };
+    void reveal();
+  }
 
   // Everything that counts up shares one second, which stops with the run.
   let now = $state(untrack(() => clock()));
@@ -103,13 +150,26 @@
           {#if info.state === "running" && operate && store.running(session)}
             <button type="button" class="stop" disabled={store.stopping.has(session)} onclick={() => store.stop(session)}><Icon name="stop" size={14} />{store.stopping.has(session) ? "Stopping" : "Stop"}</button>
           {/if}
+          <p class="facts">{#if info.ended}<span title={fullTime(info.ended)}>{formatTime(info.ended)}</span>{/if}
+            <span>{formatTimelineDuration(runningFor(info.started, info.ended, now))}</span>
+            {#if steps.length}<span>{counts.running || !settled ? `${settled} of ${steps.length} steps` : `${steps.length} steps`}</span>{/if}
+            {#if tokens(usage)}<span title={tokenDetail(usage)}>{tokens(usage)} tokens</span>{/if}
+            {#if (info.version ?? 1) > 1}<span title="Reloaded {(info.version ?? 1) - 1} {info.version === 2 ? 'time' : 'times'}">script v{info.version}</span>{/if}
+            {#if info.commit}<span class="from">{info.repo ?? ""} at {@render commit(info.commit)}</span>{/if}</p>
         </div>
         {#if info.description}<p class="muted">{info.description}</p>{/if}
-        <p class="facts">{#if info.ended}<span title={fullTime(info.ended)}>{formatTime(info.ended)}</span>{/if}
-          <span>{formatTimelineDuration(runningFor(info.started, info.ended, now))}</span>
-          {#if tokens(usage)}<span title={tokenDetail(usage)}>{tokens(usage)} tokens</span>{/if}
-          {#if (info.version ?? 1) > 1}<span title="Reloaded {(info.version ?? 1) - 1} {info.version === 2 ? 'time' : 'times'}">script v{info.version}</span>{/if}
-          {#if info.commit}<span class="from">{info.repo ?? ""} at {@render commit(info.commit)}</span>{/if}</p>
+        <div class="said" class:script={!!said}>
+          {#if info.state === "running"}<WorkingDot />{/if}
+          {#if shownLines.length > 1}<button type="button" class="line" aria-expanded={earlier} title={earlier ? "Hide what the script said before" : "Show what the script said before"}
+            onclick={() => { earlier = !earlier; }}>{said?.text ?? countedLine({ steps: steps.length, ...counts })}<span class="chevron" class:open={earlier}><Icon name="chevron" size={14} /></span></button>
+          {:else}<p class="line">{said?.text ?? countedLine({ steps: steps.length, ...counts })}</p>{/if}
+          {#if said}<span class="age" title={fullTime(said.at)}>written by the script · {fromNow(said.at, now)}</span>{/if}
+        </div>
+        {#if earlier && shownLines.length > 1}
+          <ol class="history" aria-label="What the script said, newest last">{#each shownLines as line, index (index)}
+            <li class:current={index === shownLines.length - 1}><span class="at" title={fullTime(line.at)}>{minutesLabel(Math.max(0, Date.parse(line.at) - origin))}</span><span>{line.text}</span></li>
+          {/each}</ol>
+        {/if}
         {#if store.stopFailed.has(session)}<p class="trouble" role="alert">The stop did not reach the engine. Try again.</p>{/if}
         {#if stuck && broken}<div class="failure" role="status"><span class="slot"><Icon name="warning" size={16} /></span><span>The box failed: {boxReason(broken)}. The run waits until the session restarts.</span></div>{/if}
       </header>
@@ -117,11 +177,28 @@
       {#if info.state === "failed"}
         <section aria-label="Why the run failed"><div class="failure"><span class="slot"><Icon name="warning" size={16} /></span>
           <div class="why">{#if info.result}<CollapsibleBody><p class="text">{info.result}</p></CollapsibleBody>{:else}<p class="text">The script failed and left no reason.</p>{/if}</div></div></section>
-      {:else if result?.text}
-        <section><h3>Result</h3><CollapsibleBody><Markdown rhythm="thread" text={result.text} /></CollapsibleBody></section>
       {/if}
 
-      <RunSteps {session} {info} {steps} {now} onopen={step => void show(step)} />
+      <section class="views" aria-label="The run">
+        <div class="switch" role="group" aria-label="View">
+          <button type="button" aria-pressed={view === "flow"} onclick={() => choose("flow")}>Flow</button>
+          <button type="button" aria-pressed={view === "timeline"} onclick={() => choose("timeline")}>Timeline</button>
+        </div>
+        {#if !steps.length}<p class="muted">{info.state !== "running" ? "The run ended before its first step." : "The first step will appear here."}</p>
+        {:else if view === "flow"}<RunFlow nodes={graph.nodes} edges={graph.edges} failed={graph.failed} laned={graph.laned} {now} selected={detail && "stage" in detail ? detail.stage : undefined} onselect={select} />
+        {:else}<RunTimeline {info} {steps} {now} onopen={open} />{/if}
+      </section>
+
+      {#if opened}
+        <section class="detail" bind:this={detailBox}>
+          {#key opened.key}<RunSteps {session} {info} steps={opened.steps} {now} title={opened.title} opened={opened.opened} onopen={step => void show(step)} />{/key}
+          <button type="button" class="close" aria-label={`Close ${opened.title}`} title="Close" onclick={() => { detail = undefined; }}><Icon name="close" size={14} /></button>
+        </section>
+      {/if}
+
+      {#if result?.text}
+        <section><h3>Result</h3><CollapsibleBody><Markdown rhythm="thread" text={result.text} /></CollapsibleBody></section>
+      {/if}
 
       {#if merge}
         <section><h3>Merge</h3>
@@ -142,12 +219,36 @@
 
 <style>
   .frame { display: flex; flex-direction: column; flex: 1; min-height: 0; container: run / inline-size; }
-  /* The same column as the session thread, so a worker opens where its row was. */
+  /* Wider than the session thread, so a flowchart's row of stages and a timeline have room. */
   .run { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable both-edges; }
-  .body { display: flex; flex-direction: column; gap: 24px; max-width: 784px; margin: auto; padding: 16px 24px; }
+  .body { display: flex; flex-direction: column; gap: 24px; max-width: 1120px; margin: auto; padding: 16px 24px; }
   .thread { flex: 1; min-height: 0; }
   header { display: flex; flex-direction: column; gap: 4px; }
-  .heading { display: flex; align-items: center; gap: 12px; min-height: 28px; }
+  .heading { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-height: 28px; }
+  .heading .facts { margin-left: auto; }
+  /* The status line: the script's own words, or the counts, in the run's voice under its name. */
+  .said { display: flex; align-items: center; gap: 10px; min-height: 28px; margin-top: 6px; padding: 8px 0; border-block: 1px solid var(--line); }
+  .said .line { all: unset; display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font-size: 15px; overflow-wrap: anywhere; }
+  .said.script .line { color: var(--text); font-weight: 500; }
+  button.line { cursor: pointer; border-radius: 4px; }
+  button.line:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .age { flex: none; margin-left: auto; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .chevron { display: inline-flex; flex: none; color: var(--muted); transform: rotate(-90deg); transition: transform 150ms ease-out; }
+  .chevron.open { transform: none; }
+  .history { margin: 4px 0 0; padding: 0; list-style: none; }
+  .history li { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .history li:first-child { border-top: 0; }
+  .history li.current { color: var(--text); font-weight: 500; }
+  .history .at { font-size: 12.5px; font-weight: 400; font-variant-numeric: tabular-nums; }
+  .views { display: flex; flex-direction: column; gap: 16px; }
+  .switch { display: flex; gap: 4px; }
+  .switch button { padding: 4px 10px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+  .switch button[aria-pressed="true"] { background: var(--selected); color: var(--text); }
+  .switch button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .detail { position: relative; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; }
+  .close { all: unset; position: absolute; top: 10px; right: 10px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 6px; color: var(--muted); cursor: pointer; }
+  .close:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  @media (hover: hover) { .switch button:hover, .close:hover, button.line:hover { background: var(--hover); color: var(--text); } }
   h2 { min-width: 0; margin: 0; overflow: hidden; font-size: 18px; font-weight: 600; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
   h3 { margin: 0 0 8px; font-size: 18px; font-weight: 600; line-height: 1.25; }
   h4 { margin: 12px 0 4px; font-size: 14px; font-weight: 600; line-height: 1.25; }
@@ -191,6 +292,11 @@
   @container run (max-width: 600px) {
     .run { scrollbar-gutter: stable; }
     .body { padding: 12px 16px; }
+    .heading .facts { flex-basis: 100%; margin-left: 0; }
+    .said { flex-wrap: wrap; gap: 2px 10px; }
+    .said .line { flex: 1 1 calc(100% - 20px); font-size: 14px; }
+    .age { margin-left: 17px; }
+    .detail { padding: 8px 12px; }
     .worker-bar { padding: 4px 16px 4px 8px; }
     .worker-failure { padding: 8px 16px 0; }
   }

@@ -4,7 +4,7 @@ import { decodeEvent } from "./event.ts";
 import { feedRows } from "./feed.ts";
 import { RunState } from "./run.svelte.ts";
 import type { Json } from "./json.ts";
-import { LONG_PHASE, READABLE_SPAN, STRIP_PHASES, applyStep, branchLink, commitLink, failedNodes, foldable, jsonFields, nested, openable, pastRuns, phases, reading, runCounts, runLine, runScale, shownFacts, shownStep, spanReads, stepBody, stepSpan, stepTime, stepWord, strip, timed, tokens } from "./workflow.ts";
+import { FAILED, LONG_PHASE, READABLE_SPAN, STRIP_PHASES, applyStep, branchLink, commitLink, countedLine, failedNodes, figures, flow, foldable, jsonFields, minutesLabel, nested, openable, phases, reading, roomRuns, runCounts, runScale, runStatus, shownFacts, shownStep, spanReads, stageOf, stagesOf, stepBody, stepSpan, stepTime, stepTitle, stepWord, strip, timed, timeline, tokens } from "./workflow.ts";
 import type { Event, WorkflowInfo, WorkflowStatusResponse, WorkflowStep } from "./contract.gen.ts";
 
 const usage = { model: "", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
@@ -69,10 +69,12 @@ test("only a worker with a file opens, and the address names it", () => {
   assert.equal(shownStep(""), undefined);
 });
 
-test("a crew's row says it is a workflow and how it stands", () => {
-  assert.equal(runLine({ state: "running" }), "Workflow · Running");
-  assert.equal(runLine({ state: "running" }, true), "Workflow · Starting");
-  assert.equal(runLine({ state: "stopped" }), "Workflow · Stopped");
+test("a run's line is its script's status, or its counts when the script wrote none", () => {
+  assert.deepEqual(runStatus({ status: "Wave 3: 6 of 7 landed", steps: 76, running: 1, failed: 0 }), { text: "Wave 3: 6 of 7 landed", script: true });
+  assert.deepEqual(runStatus({ steps: 76, running: 1, failed: 0 }), { text: "75 of 76 steps · 1 running", script: false });
+  assert.equal(countedLine({ steps: 12, running: 0, failed: 2 }), "12 steps · 2 failed");
+  assert.equal(countedLine({ steps: 1, running: 0, failed: 0 }), "1 step");
+  assert.equal(countedLine({ steps: 0, running: 0, failed: 0 }), "No steps yet");
 });
 
 test("a child sits under its workflow step and counts in its phase, and a child whose parent is gone stays at the top", () => {
@@ -220,11 +222,13 @@ test("a value is left out for repeating the page, never for its key's name", () 
   assert.deepEqual(jsonFields({ steps: 7, failed: 5 }, shown).map(item => item.label), ["Steps", "Failed"], "another number says something else");
 });
 
-test("past runs are the ended runs that left the session tree, newest first", () => {
+test("Runs lists the running runs first, newest first, then the rest, the latest to end first", () => {
   const run = (session: string, fields: Partial<WorkflowInfo> = {}): WorkflowInfo => status({ session, state: "done", ...fields }).run;
-  const runs = [run("old", { ended: "2026-01-01T01:00:00Z" }), run("live", { state: "running" }), run("closing", { ended: "2026-01-03T00:00:00Z" }), run("new", { state: "failed", ended: "2026-01-02T00:00:00Z" }), run("unended", { started: "2026-01-01T12:00:00Z", state: "stopped" })];
-  const past = pastRuns(runs, new Set(["closing"]));
-  assert.deepEqual(past.map(item => item.session), ["new", "unended", "old"]);
+  const runs = [run("old", { ended: "2026-01-01T01:00:00Z" }), run("live", { state: "running" }), run("closing", { ended: "2026-01-03T00:00:00Z" }), run("new", { state: "failed", ended: "2026-01-02T00:00:00Z" }),
+    run("unended", { started: "2026-01-01T12:00:00Z", state: "stopped" }), run("later", { state: "running", started: "2026-01-02T00:00:00Z" })];
+  const { running, past } = roomRuns(runs);
+  assert.deepEqual(running.map(item => item.session), ["later", "live"]);
+  assert.deepEqual(past.map(item => item.session), ["closing", "new", "unended", "old"]);
   assert.deepEqual(runCounts({ steps: 1, failed: 0 }), ["1 step"]);
   assert.deepEqual(runCounts({ steps: 60, failed: 4 }), ["60 steps", "4 failed"]);
   assert.deepEqual(runCounts({ failed: 0 }), []);
@@ -321,4 +325,80 @@ test("a step change decodes with seq 0 and adds no row to any conversation", () 
   assert.ok(said);
   assert.equal(decodeEvent({ ...line, body: { run: "wf", session: "crew" } }), undefined);
   assert.deepEqual(feedRows([{ ...(said as Event), seq: 1 }], { kind: "feed" }).filter(row => row.kind !== "day"), []);
+});
+
+// A step that ran from one minute to another of the run.
+const at = (minute: number) => new Date(Date.UTC(2026, 0, 1) + minute * 60_000).toISOString();
+const ran = (key: string, from: number, to: number | undefined, fields: Partial<WorkflowStep> = {}): WorkflowStep => step(key, { started: at(from), ended: to === undefined ? undefined : at(to), ...to === undefined && { state: "running" }, ...fields });
+
+test("the flowchart counts each lane's moves between stages, loops and skips included, and a failed node joins only on a failure", () => {
+  const steps = [
+    ran("c1", 0, 1, { phase: "contract", lane: "g1" }), ran("c2", 0, 1, { phase: "contract", lane: "g2" }),
+    ran("w1", 1, 3, { phase: "write", lane: "g1" }), ran("w2", 1, 2, { phase: "write", lane: "g2" }), ran("w2b", 2, 3, { phase: "write", lane: "g2" }),
+    ran("r1", 3, 5, { phase: "review", lane: "g1" }), ran("l2", 3, 4, { phase: "land", lane: "g2", kind: "run" }),
+    ran("f1", 5, 6, { phase: "fix", lane: "g1" }), ran("r1b", 6, 7, { phase: "review", lane: "g1", state: "failed" }), ran("r1c", 7, undefined, { phase: "review", lane: "g1" }),
+  ];
+  const graph = flow(steps);
+  assert.deepEqual(graph.nodes.map(node => [node.title, node.done, node.running, node.failed, node.lanes]),
+    [["contract", 2, 0, 0, 2], ["write", 3, 0, 0, 2], ["review", 1, 1, 1, 1], ["land", 1, 0, 0, 1], ["fix", 1, 0, 0, 1]]);
+  assert.deepEqual(graph.nodes[2].live.map(item => item.key), ["r1c"]);
+  assert.deepEqual(graph.edges.map(edge => `${edge.from}>${edge.to}:${edge.count}`).sort(),
+    ["contract>write:2", "fix>review:1", "review>fix:1", "review>\u0000failed:1", "write>land:1", "write>review:1"].sort());
+  assert.deepEqual(graph.failed.map(item => item.key), ["r1b"]);
+  assert.equal(graph.laned, true);
+  assert.equal(stepTitle(steps[0]), "g1");
+  assert.equal(flow(steps.filter(item => item.state !== "failed")).edges.some(edge => edge.to === FAILED), false);
+});
+
+test("without lanes the stages join in the order they first ran, and a stage no lane reached joins its neighbours", () => {
+  const plain = flow([ran("a", 0, 1, { phase: "read" }), ran("b", 1, 2, { phase: "build" }), ran("c", 2, 3, { phase: "read" }), ran("d", 3, 4, { phase: "ship" })]);
+  assert.deepEqual(plain.edges.map(edge => `${edge.from}>${edge.to}:${edge.count}`), ["read>build:0", "build>ship:0"]);
+  assert.equal(plain.laned, false);
+  const mixed = flow([ran("s", 0, 1, { phase: "setup", kind: "run" }), ran("a", 1, 2, { phase: "write", lane: "x" }), ran("b", 2, 3, { phase: "review", lane: "x" })]);
+  assert.deepEqual(mixed.edges.map(edge => `${edge.from}>${edge.to}:${edge.count}`), ["write>review:1", "setup>write:0"]);
+  // One run with no phases at all is one node of every step.
+  assert.deepEqual(flow([ran("a", 0, 1), ran("b", 1, 2)]).nodes.map(node => [node.title, node.steps.length]), [["Steps", 2]]);
+});
+
+test("a child takes its workflow step's stage, and stages take their colours in the order they first ran", () => {
+  const steps = [ran("wf", 0, 3, { kind: "workflow", phase: "build" }), ran("a", 1, 2, { parent: "wf" }), ran("b", 0, 1, { phase: "read" }), ran("c", 2, 3)];
+  assert.equal(stageOf(steps).get("a"), "build");
+  assert.deepEqual(stagesOf(steps).map(stage => [stage.title, stage.colour]), [["build", "var(--stage-1)"], ["read", "var(--stage-2)"], ["Other steps", "var(--muted)"]]);
+});
+
+test("the timeline packs workers into slots, folds the steps a resume kept to the left, and draws commands on a row of their own", () => {
+  const info = { started: at(30), state: "running" as const };
+  const steps = [
+    ran("old1", 0, 10, { phase: "write" }), ran("old2", 5, 20, { phase: "write" }),
+    ran("a", 30, 40, { phase: "review", lane: "g1" }), ran("b", 32, 36, { phase: "review" }), ran("c", 41, 45, { phase: "fix" }), ran("d", 37, undefined, { phase: "review" }),
+    ran("land", 36, 37, { kind: "run", phase: "land" }), ran("note", 38, 38, { kind: "log" }), ran("wait", 44, undefined, { transcript: undefined }),
+  ];
+  const chart = timeline(info, steps, Date.parse(at(50)));
+  const rows = Object.fromEntries(chart.bars.map(bar => [bar.step.key, bar.row]));
+  assert.deepEqual(rows, { old1: 0, old2: 1, a: 0, b: 1, d: 1, c: 0 });
+  assert.equal(chart.rows, 2);
+  assert.equal(chart.fold, 16);
+  const bar = (key: string) => chart.bars.find(item => item.step.key === key)!;
+  assert.equal(bar("old1").left, 0);
+  assert.ok(bar("old2").left + bar("old2").width <= 16.0001 && bar("old1").kept && !bar("a").kept);
+  assert.equal(bar("a").left, 16);
+  assert.equal(chart.now, 100);
+  assert.deepEqual(chart.commands.map(item => item.step.key), ["land"]);
+  assert.equal(chart.resumed, "Resumed at 30m, 2 earlier steps kept");
+  assert.equal(chart.ticks[0].label, "0m");
+  assert.deepEqual(chart.ticks.map(tick => tick.label), ["0m", "30m", "35m", "40m", "45m"]);
+  assert.ok(chart.ticks.every((tick, index) => !index || tick.at >= 16));
+  // A run without workers packs whatever ran, and an ended one has no now line.
+  const commands = timeline({ started: at(0), ended: at(4), state: "done" }, [ran("x", 0, 2, { kind: "run" }), ran("y", 1, 3, { kind: "run" })], Date.parse(at(9)));
+  assert.deepEqual([commands.rows, commands.commands.length, commands.fold, commands.now, commands.resumed], [2, 0, 0, undefined, ""]);
+});
+
+test("the figures split worker time by stage, name the longest step and count what ran before a resume", () => {
+  const steps = [ran("old", 0, 10, { phase: "write" }), ran("a", 30, 45, { phase: "review", profile: "opus" }), ran("b", 30, 35, { phase: "write" }), ran("land", 35, 36, { kind: "run" })];
+  const spent = figures({ started: at(30), ended: at(50) }, steps, Date.parse(at(60)));
+  assert.equal(spent.work, 30 * 60_000);
+  assert.deepEqual(spent.split.map(part => [part.title, part.ms / 60_000]), [["write", 15], ["review", 15]]);
+  assert.equal(spent.longest?.step.key, "a");
+  assert.deepEqual([spent.wall / 60_000, spent.earlier / 60_000], [20, 10]);
+  assert.deepEqual([minutesLabel(28 * 60_000), minutesLabel(60 * 60_000), minutesLabel(125 * 60_000)], ["28m", "1h", "2h 5m"]);
 });
