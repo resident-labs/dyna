@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -32,6 +33,7 @@ import (
 const (
 	engineSocket = "/run/dyna/engine/engine.sock"
 	piDir        = "/box/pi"
+	shellURL     = "http://127.0.0.1:7781/shell/"
 )
 
 //go:embed extension.js
@@ -39,7 +41,7 @@ var extensionSource string
 
 // RenderExtension fills in the values the extension shares with the box agent.
 func RenderExtension() string {
-	return strings.NewReplacer("__DYNA_CALL_ID_ARGUMENT__", contract.ToolCallIDArgument, "__DYNA_MCP_URL__", pi.DynaMCPURL, "__DYNA_ATTACHMENTS__", box.AttachmentFolder).Replace(extensionSource)
+	return strings.NewReplacer("__DYNA_CALL_ID_ARGUMENT__", contract.ToolCallIDArgument, "__DYNA_MCP_URL__", pi.DynaMCPURL, "__DYNA_SHELL_URL__", shellURL, "__DYNA_ATTACHMENTS__", box.AttachmentFolder).Replace(extensionSource)
 }
 
 func modelArgs(model contract.ModelChoice, compactTokens int) ([]string, error) {
@@ -65,10 +67,12 @@ func modelArgs(model contract.ModelChoice, compactTokens int) ([]string, error) 
 
 // piArgs appends the fixed Pi flags to the model flags. "+codemode" adds the
 // codemode tool to Pi's default tools, so it stays active whatever MCP
-// exposure the servers use; "--exclude-tools bash" then removes bash only.
+// exposure the servers use. The extension's bash takes the place of Pi's, and
+// "+bash" keeps it active in a resumed session: Pi restores the tools a
+// transcript recorded, and applies these on top.
 func piArgs(args []string, extensionPath, instructions, modelsPath, sessions, mcpPath string) []string {
 	args = append(args, "--extension", extensionPath, "--append-system-prompt", instructions)
-	return append(args, "--mode", "rpc", "--models-file", modelsPath, "--session-dir", sessions, "--mcp-config", mcpPath, "--tools", "+codemode", "--exclude-tools", "bash")
+	return append(args, "--mode", "rpc", "--models-file", modelsPath, "--session-dir", sessions, "--mcp-config", mcpPath, "--tools", "+codemode,+bash")
 }
 
 // boxHarness is what runs a box's turns: the session's Pi, or a crew.
@@ -79,7 +83,7 @@ type boxHarness interface {
 
 // crewInstructions follow a session's own instructions in each worker.
 func crewInstructions(name, tree string) string {
-	text := "You are one worker of workflow " + name + ", a process in your session's box, not a session of your own. A script started you and reads your final text as your result, so end with text and do not post it with endTurn. A command that outlasts the shell tool's wait becomes a background job and nothing wakes you when it ends, so read it with shell_output until it finishes before you end. Builds in this box take turns, so a job that says it is waiting for the build lock is fine: keep reading it.\n"
+	text := "You are one worker of workflow " + name + ", a process in your session's box, not a session of your own. A script started you and reads your final text as your result, so end with text and do not post it with endTurn. A command that outlasts bash's wait becomes a background job. Its result says Dyna will wake you, but nothing wakes a worker, so read it with job output until it finishes before you end. Builds in this box take turns, so a job that says it is waiting for the build lock is fine: keep reading it.\n"
 	if tree == "" {
 		return text + "Other workers share this box and this working tree: stay within the work your prompt gives you.\n"
 	}
@@ -194,7 +198,7 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	jobs := shell.New(shell.Config{Dir: "/box/work", After: time.After, Report: func(r contract.ShellJobEndedRequest) error { return client.ShellJobEnded(ctx, r) }, Running: func(r contract.ShellJobRunningRequest) error { return client.ShellJobRunning(ctx, r) }})
+	jobs := shell.New(shell.Config{After: time.After, Report: func(r contract.ShellJobEndedRequest) error { return client.ShellJobEnded(ctx, r) }, Running: func(r contract.ShellJobRunningRequest) error { return client.ShellJobRunning(ctx, r) }, Host: func(r shell.Run, out io.Writer) (int, *contract.Error) { return client.HostRun(ctx, r, out) }})
 	defer jobs.Close()
 	client.shellJobs = jobs.Running
 	mux := http.NewServeMux()
@@ -208,7 +212,7 @@ func Run(ctx context.Context) error {
 		return problem
 	}
 	mux.Handle("/dyna/", dynaTools)
-	err = pi.WriteAgentMCPConfig(mcpPath, dynaTools.Description(), "", addedServers)
+	err = pi.WriteAgentMCPConfig(mcpPath, dynaTools.Description(), addedServers)
 	if err != nil {
 		return err
 	}
@@ -230,7 +234,7 @@ func Run(ctx context.Context) error {
 				return nil, err
 			}
 			mcp := filepath.Join(folder, "mcp.json")
-			if err := pi.WriteAgentMCPConfig(mcp, dynaTools.Description(), dir, addedServers); err != nil {
+			if err := pi.WriteAgentMCPConfig(mcp, dynaTools.Description(), addedServers); err != nil {
 				return nil, err
 			}
 			tree := dir

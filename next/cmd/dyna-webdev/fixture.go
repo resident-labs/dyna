@@ -142,7 +142,7 @@ func fixtureTurns() []contract.TranscriptTurn {
 				calls := []contract.TranscriptCall{
 					{Tool: "read", Target: "src/sync/status.ts", Status: contract.TranscriptCallOK},
 					{Tool: "read", Target: "src/ui/SyncBanner.tsx", Status: contract.TranscriptCallOK},
-					{Tool: "mcp__shell__shell", Target: "npm test", Status: contract.TranscriptCallOK},
+					{Tool: "bash", Target: "npm test", Status: contract.TranscriptCallOK},
 				}
 				if j == 2 {
 					calls[0].Status, calls[0].Error = contract.TranscriptCallError, "The file was not found."

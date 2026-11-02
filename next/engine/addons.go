@@ -128,8 +128,8 @@ func checkMCP(name, link, command string, args []string) *contract.Error {
 	switch {
 	case !mcpName.MatchString(name):
 		return invalid("an MCP server name is 1 to 64 letters, digits, underscores or hyphens")
-	case name == "dyna" || name == "shell":
-		return invalid(name + " is the box's own MCP server")
+	case name == "dyna":
+		return invalid("dyna is the box's own MCP server")
 	case (link == "") == (command == ""):
 		return invalid("give a url or a command")
 	case link != "" && len(args) > 0:

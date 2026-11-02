@@ -13,8 +13,8 @@ export function endCause({ end }: Ended, session: string): string {
   if (end?.kind === "stopped") return `Stopped by ${session}`;
   return end?.code ? `Exit ${end.code}` : "Passed";
 }
-// A job's title: the description its session gave, or else its command's first line.
-export const jobTitle = (job: ShellJob) => job.description || job.command.split("\n", 1)[0];
+// A job's title: the description its session gave, or else its command's first line, and the machine of a host run.
+export const jobTitle = (job: ShellJob) => `${job.description || job.command.split("\n", 1)[0]}${job.host ? ` on ${job.host}` : ""}`;
 const rank = (job: ShellJob) => job.running ? 0 : failed(job) ? 1 : 2;
 
 // The jobs list: per session, running jobs, then failed, then the rest, each newest first. Each session's jobs come in

@@ -27,11 +27,12 @@ func TestModelArgsUseConfiguredProviderAndThinking(t *testing.T) {
 	}
 }
 
-func TestPiArgsTurnCodemodeOnAndExcludeBash(t *testing.T) {
+func TestPiArgsTurnCodemodeOnAndKeepBash(t *testing.T) {
 	args := piArgs(nil, "dyna.js", "hello", "models.json", "sessions", "mcp.json")
-	for _, pair := range [][]string{{"--tools", "+codemode"}, {"--exclude-tools", "bash"}} {
-		if i := slices.Index(args, pair[0]); i < 0 || args[i+1] != pair[1] {
-			t.Fatalf("missing %v in %v", pair, args)
-		}
+	if i := slices.Index(args, "--tools"); i < 0 || args[i+1] != "+codemode,+bash" {
+		t.Fatalf("missing codemode or bash in %v", args)
+	}
+	if slices.Contains(args, "--exclude-tools") {
+		t.Fatalf("bash is excluded in %v", args)
 	}
 }

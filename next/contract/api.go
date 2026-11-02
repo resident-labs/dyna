@@ -974,6 +974,7 @@ type ShellOutputResponse struct{}
 // the job's last 64 KiB and replaces what the viewer shows. GET /v1/shell/watch streams these values.
 type ShellJobOutput struct {
 	Description string       `json:"description,omitempty"`
+	Host        HostName     `json:"host,omitempty"` // the machine a host run is on
 	End         *ShellJobEnd `json:"end,omitempty"`
 	Job         ShellJobID   `json:"job"`
 	Command     string       `json:"command"`
