@@ -10,7 +10,7 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
-// abandon stops waiting for a closing box on an offline host, so a deletion never hangs on it.
+// abandon stops waiting for a box being discarded on an offline host, so neither a deletion nor a machine that is gone hangs on it.
 // The store keeps the debt, and the box's resources go when the host returns.
 func (r *Reconciler) abandon(ctx context.Context, row store.LifecycleBox) error {
 	event, err := r.event(row.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{})

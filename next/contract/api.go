@@ -358,6 +358,7 @@ type HostSummary struct {
 	DiskUsed          int64             `json:"diskUsed"`
 	DiskLow           bool              `json:"diskLow"`
 	EngineHost        bool              `json:"engineHost,omitempty"` // this added host is the machine the engine runs on
+	Pool              string            `json:"pool,omitempty"`       // the pool that holds this node
 	BackupCopyEnabled bool              `json:"backupCopyEnabled,omitempty"`
 	BackupCopyAt      time.Time         `json:"backupCopyAt,omitzero"`
 	BackupCopyFailure BackupCopyFailure `json:"backupCopyFailure,omitempty"`

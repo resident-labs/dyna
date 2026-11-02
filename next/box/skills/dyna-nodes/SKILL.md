@@ -1,0 +1,108 @@
+---
+name: dyna-nodes
+description: Use when you need to add nodes to Dyna, or a room needs its own or disposable machines
+---
+
+# Add nodes to Dyna
+
+Dyna decides when a node is needed. A small script, a node pool, knows how to get one, so Boat, EC2 or anything else works and Dyna never knows which. A node is an ordinary host: the host check, heartbeats, the shared folder and images all work as they do on any other.
+
+## The script
+
+Write it in any language. It answers three commands:
+
+```
+pool.sh create NAME SIZE   # prints JSON: {"ssh": "user@host:port"}
+pool.sh destroy NAME
+pool.sh list               # prints a JSON list of names it still has
+```
+
+- `create` returns only when the machine answers SSH. `SIZE` is the box's size: agent, small, medium, large or xlarge. Print the JSON and nothing else on stdout.
+- `destroy` of a name it no longer has still exits 0.
+- `list` names only machines this pool made, so give them a prefix of their own.
+- Anything on stderr ends up in the engine's log and in the failure notice. A non-zero exit is a failure.
+
+The script runs on the engine host as the owner's user, with a timeout of 15 minutes for `create` and 5 minutes for the others, and with no secrets from Dyna. It gets `PATH`, `HOME`, `USER`, `LANG` and `XDG_RUNTIME_DIR`, and it reads what credentials it needs the way the owner's own commands do. Keep it under 64 KiB. No box can reach it.
+
+A new node must pass Dyna's host check, so the script must prepare it, or start from a ready image:
+
+- rootless Podman 5 or later with the systemd cgroup manager, and delegated `cpu`, `memory` and `pids` controllers
+- FUSE, with `user_allow_other` in `/etc/fuse.conf`
+- OpenSSH with stream-local forwarding, `curl` and `git`
+- the engine's SSH key in the node user's `authorized_keys`; Dyna takes the node's host key on first contact
+- the path `/home/pip/.local/share/dyna-next-host` writable by the node's user, so the usual user is `pip`
+- more than 4 GiB of memory, and 25 GiB of free disk or more for the smallest box
+
+A node that fails the check is destroyed and counts as a failed create.
+
+A complete example, which rents a server by name from a made-up `rent` command:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+PREFIX=boat-
+
+case "$1" in
+  create)
+    name=$2 size=$3
+    case "$size" in
+      agent|small) plan=s ;;
+      medium) plan=m ;;
+      *) plan=l ;;
+    esac
+    # A ready image holds Podman, FUSE, the pip user and the engine's public key.
+    address=$(rent create "$PREFIX$name" --plan "$plan" --image dyna-node --output ip)
+    for _ in $(seq 1 60); do
+      nc -z "$address" 22 2>/dev/null && break
+      sleep 5
+    done
+    printf '{"ssh": "pip@%s:22"}\n' "$address"
+    ;;
+  destroy)
+    rent delete "$PREFIX$2" --if-exists
+    ;;
+  list)
+    rent list --output names | sed -n "s/^$PREFIX//p" | jq -R . | jq -s .
+    ;;
+  *)
+    echo "unknown command: $1" >&2
+    exit 2
+    ;;
+esac
+```
+
+## Test it once
+
+Run `create` and `destroy` by hand before you add it, and check that the machine really goes:
+
+```bash
+./boat-pool.sh create test-1 agent
+ssh -p 22 pip@ADDRESS true
+./boat-pool.sh list
+./boat-pool.sh destroy test-1
+./boat-pool.sh list
+```
+
+## Add it
+
+```bash
+dyna pool add boats --script ./boat-pool.sh --per-session --max 6
+dyna room hosts horizon --only boats
+dyna pool list
+```
+
+- `--max` is required. It is the most nodes the pool may hold, counting those being created.
+- `--per-session` gives each box its own node, which goes when the session closes.
+- Without `--per-session`, sessions share nodes, and a node destroyed after it has held no box for `--idle`, 30 minutes by default.
+- `dyna room hosts ROOM --only POOL[,HOST...]` keeps a room's new boxes on one pool and these hosts, and the pool grows only for such a room. A box already placed stays where it is. `--clear` removes the rule.
+- From a box, `dyna pool add` and `dyna room hosts` ask the owner, because the script runs on the engine host and costs money.
+
+## What to expect
+
+- A box waits with `pool-node` while its node comes up.
+- A failed create removes the node and leaves the box waiting with `pool-failed`. The pool tries again after a wait of a minute, doubling up to an hour. `dyna pool list` shows the last problem, and the room gets one notice for each spell of failures.
+- A dormant session keeps its node, because its box is stopped, not gone. The node costs money until the session closes.
+- The pool audits `list` every 10 minutes. A machine Dyna has no record of is reported once and never destroyed. A node the script no longer lists is treated as a lost host, and its box waits for it. If the machine is gone for good, the owner closes the session with `dyna session close --discard`.
+- A Run from a subscription never uses a pool's node.
+- `dyna host remove NAME` removes a node through its script once nothing is on it.
+- `dyna pool remove NAME` needs an empty pool that no room names.

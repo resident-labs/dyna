@@ -309,6 +309,37 @@ func TestAddHostCopiesPreviouslySavedInstructions(t *testing.T) {
 	}
 }
 
+func TestANodeJoinsAndLeavesLikeAHost(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	data, remote := t.TempDir(), t.TempDir()
+	machineID := filepath.Join(t.TempDir(), "machine-id")
+	if err := os.WriteFile(machineID, []byte("0123456789abcdef0123456789abcdef"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	b := &Boxes{Store: addHostStore{}, Runtime: t.TempDir(), Layout: box.Layout{Data: data, HostData: remote}, Version: "dev", Context: ctx, hostRunner: admissionTransport{}, machineIDFile: machineID}
+	b.binOnce.Do(func() { b.binSum = "test-sum" })
+	record, err := poolHosts{boxes: b}.Join(ctx, "boats-1", "ssh://pip@host:22")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.State != box.HostReady || record.SSH != "ssh://pip@host:22" || record.CPUs == 0 || record.EngineHost == nil {
+		t.Fatalf("%+v", record)
+	}
+	b.mu.Lock()
+	joined := b.hosts["boats-1"] != nil && b.beats["boats-1"] != nil
+	b.mu.Unlock()
+	if !joined {
+		t.Fatal("the node has no driver or heartbeat")
+	}
+	poolHosts{boxes: b}.Leave(ctx, "boats-1")
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.hosts["boats-1"] != nil || b.beats["boats-1"] != nil {
+		t.Fatal("the engine kept the node")
+	}
+}
+
 // delayedInstructionStore holds the background publish, which asks first, before it can reach a host.
 type delayedInstructionStore struct {
 	instructionStore
