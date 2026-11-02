@@ -34,12 +34,13 @@ type ReplyChannel struct {
 }
 
 type Delivery struct {
-	Seq         int64        `json:"seq"` // the event
-	To          Principal    `json:"to"`  // a session
-	Surface     Surface      `json:"surface"`
-	Reply       ReplyChannel `json:"reply"`
-	Wake        bool         `json:"wake"` // starts or steers a turn
-	HandoffFrom SessionID    `json:"handoffFrom,omitempty"`
+	Seq      int64        `json:"seq"` // the event
+	To       Principal    `json:"to"`  // a session
+	Surface  Surface      `json:"surface"`
+	Reply    ReplyChannel `json:"reply"`
+	Wake     bool         `json:"wake"`               // starts or steers a turn
+	MeantFor SessionID    `json:"meantFor,omitempty"` // the parent it was sent to, which could not receive, so it went up
+	Why      string       `json:"why,omitempty"`      // what stopped MeantFor, such as "box failed"
 }
 
 const (

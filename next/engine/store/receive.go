@@ -9,86 +9,131 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-// CantReceiveError refuses a child's post to a parent that cannot take it, naming who takes it instead.
-type CantReceiveError struct{ Message string }
+// ChainError refuses a session's message to a session outside its chain of command. Nothing is queued.
+type ChainError struct{ Message string }
 
-func (e *CantReceiveError) Error() string { return e.Message }
+func (e *ChainError) Error() string { return e.Message }
 
-// receiver decides who can receive for a session now: the session itself, or else its nearest ancestor that can, ending at
-// root. why says what stops the session itself, and is empty when it can receive. A session cannot receive while it closes
-// or after, or while its box is failed, lost, or pending because it cannot be placed.
-func receiver(ctx context.Context, tx *sql.Tx, id contract.SessionID) (to contract.SessionID, why string, err error) {
-	for {
-		var parent, state, boxState, reason string
+// receiver decides who receives for a session now, and the chain of command is its one rule. A session may address its
+// parent and any session under its parent: its siblings, its own children and theirs, and so on down. Root, with no
+// parent, may address any session under it. A crew may address only its parent. reach is false for anyone else, such as
+// a grandparent or another branch. The owner and the engine may address any session. What a session sends its parent goes, while the parent cannot receive, to the parent's nearest
+// ancestor that can, ending at root; why then says what stops the parent. Anything else goes where it was sent.
+//
+// A session cannot receive while it closes or after, or while its box is failed, lost, or pending because it cannot be
+// placed.
+func receiver(ctx context.Context, tx rowQuerier, from contract.Principal, to contract.SessionID) (got contract.SessionID, why string, reach bool, err error) {
+	if from.Kind != contract.PrincipalSession {
+		return to, "", true, nil
+	}
+	var parent string
+	var crew, under bool
+	// under: the top of from's reach, its parent or else from itself as root, is an ancestor of to.
+	err = tx.QueryRowContext(ctx, `WITH RECURSIVE f AS (SELECT COALESCE(s.parent,'') AS parent,EXISTS(SELECT 1 FROM workflow_runs w WHERE w.session=s.id) AS crew FROM sessions s WHERE s.id=?),
+		up(id) AS (SELECT parent FROM sessions WHERE id=? AND parent IS NOT NULL UNION SELECT p.parent FROM sessions p JOIN up ON p.id=up.id WHERE p.parent IS NOT NULL)
+		SELECT f.parent,f.crew,EXISTS(SELECT 1 FROM up WHERE up.id=CASE f.parent WHEN '' THEN ? ELSE f.parent END) FROM f`, from.Session, to, from.Session).Scan(&parent, &crew, &under)
+	if err != nil {
+		return "", "", false, err
+	}
+	if parent == "" || string(to) != parent {
+		return to, "", under && !crew, nil
+	}
+	for id := to; ; {
+		var up, state, boxState, reason string
 		var want BoxWant
 		var closed bool
-		err := tx.QueryRowContext(ctx, "SELECT COALESCE(s.parent,''),s.state,s.closed_at IS NOT NULL,COALESCE(b.state,''),COALESCE(b.reason,''),COALESCE(b.want,'') FROM sessions s LEFT JOIN boxes b ON b.session=s.id WHERE s.id=?", id).Scan(&parent, &state, &closed, &boxState, &reason, &want)
+		err := tx.QueryRowContext(ctx, "SELECT COALESCE(s.parent,''),s.state,s.closed_at IS NOT NULL,COALESCE(b.state,''),COALESCE(b.reason,''),COALESCE(b.want,'') FROM sessions s LEFT JOIN boxes b ON b.session=s.id WHERE s.id=?", id).Scan(&up, &state, &closed, &boxState, &reason, &want)
 		if err != nil {
-			return "", "", err
+			return "", "", false, err
 		}
 		stop := cantReceive(state, closed, contract.BoxState(boxState), reason, want)
 		if why == "" {
 			why = stop
 		}
-		if stop == "" || parent == "" {
-			return id, why, nil
+		if stop == "" || up == "" {
+			return id, why, true, nil
 		}
-		id = contract.SessionID(parent)
+		id = contract.SessionID(up)
 	}
 }
 
 func cantReceive(state string, closed bool, box contract.BoxState, reason string, want BoxWant) string {
-	detail := ""
-	if reason != "" {
-		detail = " (" + reason + ")"
-	}
 	switch {
 	case closed:
-		return "it is closed"
+		return "closed"
 	case state == "closing" || want == WantClose || want == WantDiscard:
-		return "it is closing"
+		return "closing"
 	case box == contract.BoxFailed:
-		return "its box failed" + detail
+		return "box failed"
 	case box == contract.BoxLost:
-		return "its box was lost" + detail
+		return "box lost"
 	case box == contract.BoxPending && reason != "":
-		return "its box can't be placed" + detail
+		return "box can't be placed"
 	}
 	return ""
 }
 
-// refuseDeadParent refuses a session's post that reaches its own parent while the parent cannot receive. Nothing waits for
-// a parent that may never come back.
-func refuseDeadParent(ctx context.Context, tx *sql.Tx, from contract.Principal, deliveries []contract.Delivery) error {
-	if from.Kind != contract.PrincipalSession {
-		return nil
+// reroute sends d where receiver says. A delivery that goes past the session it was meant for keeps that session and why.
+func reroute(ctx context.Context, tx *sql.Tx, from contract.Principal, d *contract.Delivery) (reach bool, err error) {
+	if d.To.Kind != contract.PrincipalSession {
+		return true, nil
 	}
-	var parent, parentName string
-	err := tx.QueryRowContext(ctx, "SELECT p.id,p.name FROM sessions c JOIN sessions p ON p.id=c.parent WHERE c.id=?", from.Session).Scan(&parent, &parentName)
-	if err == sql.ErrNoRows {
-		return nil
+	got, why, reach, err := receiver(ctx, tx, from, d.To.Session)
+	if err != nil || !reach {
+		return reach, err
 	}
+	if got != d.To.Session {
+		d.MeantFor, d.Why, d.To.Session = d.To.Session, why, got
+	}
+	return true, nil
+}
+
+// routePost refuses a post that reaches a session outside its author's chain of command, and sends the rest where receiver
+// says.
+func routePost(ctx context.Context, tx *sql.Tx, from contract.Principal, deliveries []contract.Delivery) error {
+	for i := range deliveries {
+		reach, err := reroute(ctx, tx, from, &deliveries[i])
+		if err != nil {
+			return err
+		}
+		if !reach {
+			return chainRefusal(ctx, tx, from.Session)
+		}
+	}
+	return nil
+}
+
+type rowQuerier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+// chainRefusal is the one line that refuses a session's message outside its chain of command.
+func chainRefusal(ctx context.Context, q rowQuerier, session contract.SessionID) error {
+	var parent string
+	var crew bool
+	err := q.QueryRowContext(ctx, "SELECT COALESCE((SELECT p.name FROM sessions p WHERE p.id=s.parent),''),EXISTS(SELECT 1 FROM workflow_runs w WHERE w.session=s.id) FROM sessions s WHERE s.id=?", session).Scan(&parent, &crew)
 	if err != nil {
 		return err
 	}
-	for _, d := range deliveries {
-		if d.To.Kind != contract.PrincipalSession || string(d.To.Session) != parent {
-			continue
-		}
-		to, why, err := receiver(ctx, tx, d.To.Session)
-		if err != nil || why == "" {
-			return err
-		}
-		if string(to) == parent {
-			return &CantReceiveError{Message: fmt.Sprintf("your parent %s can't receive: %s. Nothing above it can take this, so send it again once it's back.", parentName, why)}
-		}
-		var name string
-		if err := tx.QueryRowContext(ctx, "SELECT name FROM sessions WHERE id=?", to).Scan(&name); err != nil {
-			return err
-		}
-		return &CantReceiveError{Message: fmt.Sprintf("your parent %s can't receive: %s. Deliver to %s (mention %s) until it's back.", parentName, why, name, name)}
+	switch {
+	case crew:
+		return &ChainError{Message: fmt.Sprintf("a workflow can message only its parent (%s).", parent)}
+	case parent == "":
+		return &ChainError{Message: "you can message sessions under you; a post that mentions no session goes to the owner."}
 	}
-	return nil
+	return &ChainError{Message: fmt.Sprintf("you can message your parent (%s) and sessions under it; your parent passes anything else on.", parent)}
+}
+
+// OutsideChain refuses a session's mention that by its form names no one in the session's chain of command: a session in
+// another room.
+func (s *Store) OutsideChain(ctx context.Context, session contract.SessionID) error {
+	return chainRefusal(ctx, s.Read(), session)
+}
+
+// Reaches reports whether from may address to now, by receiver's rule.
+func (s *Store) Reaches(ctx context.Context, from contract.Principal, to contract.SessionID) (bool, error) {
+	_, _, reach, err := receiver(ctx, s.Read(), from, to)
+	return reach, err
 }
 
 // dropUndelivered discards what a closing session never read. Its posts stay in the room, but nobody acts on them: replaying
@@ -102,12 +147,12 @@ func (s *Store) dropUndelivered(ctx context.Context, tx *sql.Tx, id contract.Ses
 	if _, err := tx.ExecContext(ctx, "DELETE FROM deliveries WHERE to_kind='session' AND to_id=? AND state IN ('pending','taken')", id); err != nil {
 		return err
 	}
-	to, _, err := receiver(ctx, tx, id)
-	if err != nil || dropped == 0 || to == id {
+	var name, parent string
+	if err := tx.QueryRowContext(ctx, "SELECT name,COALESCE(parent,'') FROM sessions WHERE id=?", id).Scan(&name, &parent); err != nil || dropped == 0 || parent == "" {
 		return err
 	}
-	var name string
-	if err := tx.QueryRowContext(ctx, "SELECT name FROM sessions WHERE id=?", id).Scan(&name); err != nil {
+	to, _, _, err := receiver(ctx, tx, contract.Principal{Kind: contract.PrincipalSession, Session: id}, contract.SessionID(parent))
+	if err != nil {
 		return err
 	}
 	text := fmt.Sprintf("%s closed; %d undelivered messages to it were dropped.", name, dropped)
