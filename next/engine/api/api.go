@@ -656,10 +656,11 @@ func pinRoom(room *contract.RoomID, c Caller) *contract.Error {
 // roomOf finds the room a request acts in, or nil. A refresh, a track and a subscription scoped to a session or the
 // machine name their target another way, so an omitted room stays omitted: filling it would turn an empty refresh
 // into one of the whole room, and the engine refuses a track or a machine subscription that names a room. With no room,
-// a session subscription's session names are looked up in the caller's own room.
+// a session subscription's session names are looked up in the caller's own room. Instructions name any room, or none
+// for the global file, since a room's root edits every one.
 func roomOf(req any) *contract.RoomID {
 	switch r := req.(type) {
-	case *contract.SessionRefreshRequest, *contract.PrTrackRequest, *contract.IssueTrackRequest:
+	case *contract.SessionRefreshRequest, *contract.PrTrackRequest, *contract.IssueTrackRequest, *contract.InstructionsGetRequest, *contract.InstructionsSetRequest:
 		return nil
 	case *contract.SubscriptionAddRequest:
 		if r.Scope != contract.ScopeRoom {
