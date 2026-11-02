@@ -2,7 +2,7 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import type { TranscriptItem, TranscriptPart } from "../contract.gen.ts";
-  import { activeVerb, elapsed, stepTime, titleOf, type StepKind } from "../steps.ts";
+  import { activeVerb, elapsed, stepTime, titleOf, toolPart, type StepKind } from "../steps.ts";
   import { formatTimelineDuration, summarizeWork, timelineItemRunning, workLayout } from "../timeline.ts";
   import Icon, { type IconName } from "./Icon.svelte";
   import TranscriptIcon from "./TranscriptIcon.svelte";
@@ -10,6 +10,7 @@
   import StatusPill from "./StatusPill.svelte";
   import CodemodeScript from "./CodemodeScript.svelte";
   import ReadThumb from "./ReadThumb.svelte";
+  import RunFields from "./RunFields.svelte";
   import { readMedia } from "../media.ts";
 
   let { items, ended, started, now, chunks, onload, onopen, session, onmedia }: {
@@ -116,7 +117,11 @@
         {/if}
         {#if !item.diff || item.failed}
         {#each parts as name}
-          {#if item[name] || chunks[key(item, name)] !== undefined}{@const lines = (chunks[key(item, name)] ?? item[name] ?? "").split("\n")}<pre>{(expandedContent[key(item, name)] ? lines : lines.slice(0, 12)).join("\n")}</pre>{#if lines.length > 12 && !expandedContent[key(item, name)]}<button onclick={() => expandedContent[key(item, name)] = true}>Show all</button>{/if}{/if}
+          {#if item[name] || chunks[key(item, name)] !== undefined}
+            {@const part = toolPart(name, chunks[key(item, name)] ?? item[name] ?? "", title.kind, !!item.more && chunks[key(item, name)] === undefined)}
+            {#if part.text}{@const lines = part.text.split("\n")}<pre>{(expandedContent[key(item, name)] ? lines : lines.slice(0, 12)).join("\n")}</pre>{#if lines.length > 12 && !expandedContent[key(item, name)]}<button onclick={() => expandedContent[key(item, name)] = true}>Show all</button>{/if}{/if}
+            {#if part.fields.length}<div class="fields"><RunFields fields={part.fields} /></div>{/if}
+          {/if}
           {#if item.more && chunks[key(item, name)] === undefined}
             <button disabled={loading[key(item, name)]} onclick={() => void load(item, name)}>{failures[key(item, name)] ? `Could not load ${name}. Try again` : `Show all ${name}`}</button>
           {/if}
@@ -181,6 +186,7 @@
   .target { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .content { margin-left: 30px; padding: 4px 0; }
   pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.625 var(--mono); }
+  .fields { padding: 2px 0; }
   .diff-summary { display: flex; gap: 6px; align-items: center; font: inherit; }
   .add, .diff .add { color: var(--success); }
   .remove, .diff .remove { color: var(--danger); }
