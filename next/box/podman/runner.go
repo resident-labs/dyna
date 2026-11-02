@@ -30,7 +30,35 @@ const (
 	// runnerLimit is the host's own bound, in seconds. A job shares a user with the
 	// entrypoint's timeout, so it can stop that clock. This one is outside the container.
 	runnerLimit = "--timeout=22200" // 6 hours 10 minutes
+	// cacheMount is where a runner finds its slot's build cache, a volume that outlives the job, as
+	// upstream projects keep CARGO_TARGET_DIR on their own runners. One slot runs one job at a time.
+	cacheMount = "/cache"
+	// cacheLimitKB empties a cache above 40 GiB before the next job starts.
+	cacheLimitKB = 40 << 20
 )
+
+// cacheName is the build cache volume of one repository's runner slot.
+func cacheName(repo contract.RepoName, slot int) string {
+	name := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-' {
+			return r
+		}
+		if r >= 'A' && r <= 'Z' {
+			return r + 'a' - 'A'
+		}
+		return '-'
+	}, string(repo))
+	return fmt.Sprintf("dyna-ci-cache-%s-%d", name, slot)
+}
+
+// cacheScript makes the slot's cache volume, owned by the runner's user, and empties it when it
+// has grown past cacheLimitKB. du and rm run in Podman's user namespace, where the job's files live.
+const cacheScript = `v="$1"; limit="$2"
+podman volume exists "$v" || podman volume create --label dyna.ci=cache "$v" >/dev/null
+m=$(podman volume inspect --format '{{.Mountpoint}}' "$v")
+podman unshare chown 1001:1001 "$m"
+kb=$(podman unshare du -sk "$m" | cut -f1)
+if [ "$kb" -gt "$limit" ]; then podman unshare find "$m" -mindepth 1 -delete; fi`
 
 // BuildRunnerImage builds or reuses the runner image, and drops any older one.
 func (h *Host) BuildRunnerImage(ctx context.Context) (string, error) {
@@ -119,8 +147,9 @@ func runnerArgs(s box.RunnerSpec) []string {
 		"--tmpfs", "/tmp:rw,exec,mode=1777," + disk,
 		// Its slot alone: the proxy limits a job by socket, so a job must not reach another.
 		"--mount", fmt.Sprintf("type=volume,source=%s,destination=%s,subpath=%d,ro", egressName, egressMount, s.Slot),
+		"--mount", fmt.Sprintf("type=volume,source=%s,destination=%s", cacheName(s.Repo, s.Slot), cacheMount),
 		"--log-driver=k8s-file", "--log-opt=max-size=1m",
-		"--env", "ACTIONS_RUNNER_INPUT_JITCONFIG", "--env", "DYNA_CI_REPO=" + string(s.Repo),
+		"--env", "ACTIONS_RUNNER_INPUT_JITCONFIG", "--env", "DYNA_CI_REPO=" + string(s.Repo), "--env", "DYNA_CI_CACHE=" + cacheMount,
 		s.Image}
 }
 
@@ -128,6 +157,9 @@ func runnerArgs(s box.RunnerSpec) []string {
 func (h *Host) StartRunner(ctx context.Context, s box.RunnerSpec) error {
 	if s.Name == "" || strings.HasPrefix(s.Name, "-") || s.Repo == "" || s.Image == "" || s.Config == "" || strings.ContainsAny(s.Config, "\n\x00") || s.Slot < 0 || s.Slot >= box.RunnerSlots {
 		return errors.New("invalid runner")
+	}
+	if _, err := h.run(ctx, "bash", "-c", cacheScript, "dyna-ci-cache", cacheName(s.Repo, s.Slot), strconv.Itoa(cacheLimitKB)); err != nil {
+		return fmt.Errorf("prepare build cache: %w", err)
 	}
 	args := append([]string{"bash", "-c", `IFS= read -r ACTIONS_RUNNER_INPUT_JITCONFIG && export ACTIONS_RUNNER_INPUT_JITCONFIG && exec "$@"`, "dyna-runner"}, runnerArgs(s)...)
 	// Podman's output says why it failed, and it never holds the config, which is only in its environment.
