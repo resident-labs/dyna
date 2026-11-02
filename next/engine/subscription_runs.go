@@ -252,7 +252,15 @@ func (s *Service) placeRun(ctx context.Context, sub store.Subscription, id contr
 	if pin := sub.Run.Host; pin != "" {
 		hosts = slices.DeleteFunc(hosts, func(h box.Host) bool { return h.Name != pin })
 	}
-	return box.Admit(hosts, boxes, box.Box{ID: id, Room: sub.Room, Size: size}).Host, nil
+	// A Run follows its room's rule but never takes a pool's node, which goes as soon as no box holds it.
+	hosts = slices.DeleteFunc(hosts, func(h box.Host) bool { return h.Pool != "" })
+	var only []string
+	if sub.Room != "" {
+		if only, err = s.store.RoomOnly(ctx, sub.Room); err != nil {
+			return "", err
+		}
+	}
+	return box.Admit(hosts, boxes, box.Box{ID: id, Room: sub.Room, Size: size}, only...).Host, nil
 }
 
 type runResult struct {

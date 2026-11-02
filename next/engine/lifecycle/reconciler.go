@@ -34,6 +34,9 @@ type Reconciler struct {
 	repos        Repositories
 	roomHosts    RoomHosts
 	roomData     RoomData
+	nodes        Nodes
+	idle         map[contract.HostName]time.Time // when each shared node last held a box, as this engine saw
+	audited      map[string]time.Time            // when each pool last ran list
 	roomSteps    map[string]bool
 	active       map[contract.BoxID]*activeStep
 	hosts        map[contract.HostName]int
@@ -45,7 +48,7 @@ type Reconciler struct {
 
 func New(st *store.Store, boxes BoxAdapter, view View, repos Repositories, event func(contract.RoomID, contract.Principal, contract.EventBody) (contract.Event, error), now func() time.Time) *Reconciler {
 	st.SetTerminals(func(id contract.SessionID) bool { return view.OpenTerminal(id) })
-	return &Reconciler{store: st, boxes: boxes, view: view, repos: repos, event: event, now: now, kick: make(chan struct{}, 1), roomSteps: make(map[string]bool), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool), disconnected: make(map[contract.BoxID]time.Time)}
+	return &Reconciler{store: st, boxes: boxes, view: view, repos: repos, event: event, now: now, kick: make(chan struct{}, 1), roomSteps: make(map[string]bool), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool), disconnected: make(map[contract.BoxID]time.Time), idle: make(map[contract.HostName]time.Time), audited: make(map[string]time.Time)}
 }
 func (r *Reconciler) SetHostMemory(read func(contract.HostName) int64) { r.hostMemory = read }
 
@@ -62,6 +65,9 @@ func (r *Reconciler) SetRoomData(data RoomData) { r.roomData = data }
 
 // SetRoomHosts adds the host side of room deletion before the reconciler runs.
 func (r *Reconciler) SetRoomHosts(hosts RoomHosts) { r.roomHosts = hosts }
+
+// SetNodes turns on pools before the reconciler runs.
+func (r *Reconciler) SetNodes(nodes Nodes) { r.nodes = nodes }
 
 func (r *Reconciler) SetRepositories(repos Repositories) {
 	r.mu.Lock()
@@ -155,6 +161,10 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			hosts[i].MemUsed = r.hostMemory(hosts[i].Name)
 		}
 	}
+	pools, err := r.store.Pools(ctx)
+	if err != nil {
+		return err
+	}
 	hostState := make(map[contract.HostName]box.HostState, len(hosts))
 	for _, host := range hosts {
 		hostState[host.Name] = host.State
@@ -244,11 +254,11 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 		if row.Limits.CPUs > 0 && cpus > 4*row.Limits.CPUs || row.Limits.MemBytes > 0 && memory > 4*row.Limits.MemBytes {
 			placement.Reason = box.PendingRoomLimit
 		} else {
-			placement = box.Admit(hosts, all, b)
+			placement = box.Admit(hosts, all, b, row.Only...)
 		}
 		next := b
 		if placement.Reason != "" {
-			next.State, next.Reason = contract.BoxPending, string(placement.Reason)
+			next.State, next.Reason = contract.BoxPending, string(poolWait(row, placement.Reason, pools))
 		} else if b.Image == "" {
 			next.State, next.Reason, next.Host = contract.BoxCreating, "", placement.Host
 			next.Slice, err = box.SliceName(b.ID)
@@ -324,6 +334,9 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			}
 			r.launch(ctx, row)
 		}
+	}
+	if err := r.poolPass(ctx, pools, rows, all); err != nil {
+		return err
 	}
 	return r.roomPass(ctx, hosts)
 }
