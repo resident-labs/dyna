@@ -13,6 +13,8 @@ const (
 	MethodWorkflowStepEnd   Method = "workflow.step_end"
 	// MethodWorkflowStepTranscript names a running worker's session file, so its transcript opens before the worker ends.
 	MethodWorkflowStepTranscript Method = "workflow.step_transcript"
+	// MethodWorkflowSetStatus keeps a script's status() line on its run.
+	MethodWorkflowSetStatus Method = "workflow.set_status"
 )
 
 // WorkerHeader names the worker of a crew's model call. A crew is one session with many conversations, and each needs its
@@ -74,8 +76,9 @@ type WorkflowReloadResponse struct {
 	Version int           `json:"version"`
 }
 
-// WorkflowInfo is one run. Steps counts its journal, Failed counts failed steps and FailedSteps names them, at most 20. Result
-// is the script's return value, or why it threw. Version is the script version it runs, 1 until a reload.
+// WorkflowInfo is one run. Steps counts its journal, Running and Failed count its running and failed steps, and FailedSteps
+// names the failed, at most 20. Result is the script's return value, or why it threw. Version is the script version it runs, 1
+// until a reload. Status is the script's latest status() line, empty when it wrote none.
 type WorkflowInfo struct {
 	Run         WorkflowRunID `json:"run"`
 	Room        RoomID        `json:"room"`
@@ -91,19 +94,29 @@ type WorkflowInfo struct {
 	Steps       int           `json:"steps,omitempty"`
 	Failed      int           `json:"failed"`
 	FailedSteps []string      `json:"failedSteps,omitempty"`
+	Running     int           `json:"running,omitempty"`
+	Status      string        `json:"status,omitempty"`
+	StatusAt    time.Time     `json:"statusAt,omitzero"`
 	Usage       Usage         `json:"usage"`
 	Started     time.Time     `json:"started"`
 	Ended       time.Time     `json:"ended,omitzero"`
 }
 
+// WorkflowStatusLine is one status() line and when the script wrote it.
+type WorkflowStatusLine struct {
+	Text string    `json:"text"`
+	At   time.Time `json:"at"`
+}
+
 // WorkflowStep is one journal row, without its result. Version is the script version that started it; a step a resumed run
-// kept has none.
+// kept has none. Lane names the subject the step is about, as the script tagged it, and Phase its stage.
 type WorkflowStep struct {
 	Key        string            `json:"key"`
 	Parent     string            `json:"parent,omitempty"`
 	Kind       WorkflowStepKind  `json:"kind"`
 	Name       string            `json:"name"`
 	Phase      string            `json:"phase,omitempty"`
+	Lane       string            `json:"lane,omitempty"`
 	Profile    ProfileName       `json:"profile,omitempty"`
 	Version    int               `json:"version,omitempty"`
 	State      WorkflowStepState `json:"state"`
@@ -121,11 +134,12 @@ type WorkflowStatusRequest struct {
 	Session SessionID     `json:"session,omitempty"`
 }
 
-// WorkflowStatusResponse carries the run's newest merge() result, when it has one.
+// WorkflowStatusResponse carries the run's newest merge() result, when it has one, and its latest status() lines, oldest first.
 type WorkflowStatusResponse struct {
-	Run   WorkflowInfo   `json:"run"`
-	Steps []WorkflowStep `json:"steps"`
-	Merge *WorkflowMerge `json:"merge,omitempty"`
+	Run         WorkflowInfo         `json:"run"`
+	Steps       []WorkflowStep       `json:"steps"`
+	Merge       *WorkflowMerge       `json:"merge,omitempty"`
+	StatusLines []WorkflowStatusLine `json:"statusLines,omitempty"`
 }
 
 // WorkflowStepRequest names one journal row by its crew session, which a closed crew keeps.
@@ -207,6 +221,7 @@ type WorkflowStepStartRequest struct {
 	Kind    WorkflowStepKind `json:"kind"`
 	Name    string           `json:"name"`
 	Phase   string           `json:"phase,omitempty"`
+	Lane    string           `json:"lane,omitempty"`
 	Profile ProfileName      `json:"profile,omitempty"`
 	Detail  string           `json:"detail"`
 	Version int              `json:"version,omitempty"`
@@ -237,6 +252,13 @@ type WorkflowStepTranscriptRequest struct {
 }
 type WorkflowStepTranscriptResponse struct{}
 
+// WorkflowSetStatusRequest is a script's status() line. It is not a step: the run keeps the latest line and a short history,
+// and a resumed script writes its lines again as it runs.
+type WorkflowSetStatusRequest struct {
+	Text string `json:"text"`
+}
+type WorkflowSetStatusResponse struct{}
+
 // WorkflowEnded closes a run. The final reply tells the caller; this is the room's record of it.
 type WorkflowEnded struct {
 	Run         WorkflowRunID `json:"run"`
@@ -252,13 +274,28 @@ type WorkflowEnded struct {
 func (WorkflowEnded) EventType() EventType { return "workflow.ended" }
 func (WorkflowEnded) isEventBody()         {}
 
-// WorkflowStepChanged carries a journal row to the run page. It is live only, like TurnActivity: never stored, delivered to
-// nobody, and the journal stays the record, so a page that missed one reads workflow.status again.
+// WorkflowStepChanged carries a journal row to the run page, with the run's counts after it for the Runs list. It is live
+// only, like TurnActivity: never stored, delivered to nobody, and the journal stays the record, so a page that missed one reads
+// workflow.status again.
 type WorkflowStepChanged struct {
 	Run     WorkflowRunID `json:"run"`
 	Session SessionID     `json:"session"`
 	Step    WorkflowStep  `json:"step"`
+	Steps   int           `json:"steps"`
+	Running int           `json:"running"`
+	Failed  int           `json:"failed"`
 }
 
 func (WorkflowStepChanged) EventType() EventType { return "workflow.step_changed" }
 func (WorkflowStepChanged) isEventBody()         {}
+
+// WorkflowStatusChanged carries a script's new status() line to the run page and the Runs list. It is live only, like
+// WorkflowStepChanged, and the event's time is the line's.
+type WorkflowStatusChanged struct {
+	Run     WorkflowRunID `json:"run"`
+	Session SessionID     `json:"session"`
+	Status  string        `json:"status"`
+}
+
+func (WorkflowStatusChanged) EventType() EventType { return "workflow.status_changed" }
+func (WorkflowStatusChanged) isEventBody()         {}
