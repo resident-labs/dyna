@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"math/big"
+	"net/http"
 	"sync"
 	"time"
 
@@ -62,6 +63,7 @@ type Service struct {
 	imageSize         func(context.Context, contract.RepoName, string) (contract.BoxSizeName, error)
 	approvals         *approve.Service
 	pulls             *prs.Client
+	githubTools       http.Handler
 	hostexec          HostexecRunner
 	hostexecTimeout   func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 	hooks             HookRunner
@@ -135,6 +137,12 @@ func New(st *store.Store, boxes lifecycle.BoxAdapter, profiles Profiles, now fun
 
 // SetGitIdentity configures the commit identity sent to boxes.
 func (s *Service) SetGitIdentity(name, email string) { s.gitName, s.gitEmail = name, email }
+
+// SetGitHubTools gives boxes GitHub's read-only MCP server, before the service starts. Box hellos then offer it to Pi.
+func (s *Service) SetGitHubTools(tools http.Handler) { s.githubTools = tools }
+
+// GitHubTools is the MCP server a box socket serves at /github/, or nil when the engine has no GitHub token.
+func (s *Service) GitHubTools() http.Handler { return s.githubTools }
 
 // SetUsage gives snapshots their usage readings, before the service starts.
 func (s *Service) SetUsage(usage Usage) { s.usage = usage }

@@ -29,6 +29,7 @@ import (
 	"github.com/resident-labs/dyna/engine/compose"
 	"github.com/resident-labs/dyna/engine/connect"
 	enginegit "github.com/resident-labs/dyna/engine/git"
+	"github.com/resident-labs/dyna/engine/githubmcp"
 	"github.com/resident-labs/dyna/engine/images"
 	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/model"
@@ -211,6 +212,15 @@ func Run(ctx context.Context, cfg Config) error {
 	pulls := &prs.Client{Token: token, Endpoint: &url.URL{Scheme: "https", Host: "api.github.com"}, Transport: http.DefaultTransport, Now: time.Now}
 	prPoll := &prs.Poller{Store: st, GitHub: pulls, Now: time.Now}
 	service.SetPRTracking(pulls)
+	if token != "" {
+		// Agents' GitHub reads spend the feeds' quota through pulls, which keeps the feeds' share.
+		// Without them boxes list no github server, and the engine still starts.
+		if tools, err := githubmcp.Handler(ctx, token, pulls.Reads(http.DefaultTransport)); err != nil {
+			log.Printf("GitHub tools for boxes: %v", err)
+		} else {
+			service.SetGitHubTools(tools)
+		}
+	}
 	boxes.Compose = &compose.Files{Layout: layout, Repo: mirror}
 	service.SetCompose(boxes.Compose, mirror.ImageSize)
 	if err := st.RecoverHostexec(ctx, time.Now()); err != nil {
