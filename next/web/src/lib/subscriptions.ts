@@ -69,10 +69,11 @@ export function subscriptionSummary(list: readonly SubscriptionInfo[]): { count:
   return { count: count(hooks.length, "hook"), health, failing: failed > 0 };
 }
 
-// The opened list: failures first, then hooks, then wakes, and disabled ones last. A row is a name, what fires it and what
-// is wrong, with nothing for a healthy hook. Two hooks from one script show the first argument that tells them apart.
+// The opened list: failures first, then hooks, then wakes, and disabled hooks last. A disabled wake does nothing and has
+// nothing to tell, so it stays out. A row is a name, what fires it and what is wrong, with nothing for a healthy hook. Two
+// hooks from one script show the first argument that tells them apart.
 export function subscriptionRows(list: readonly SubscriptionInfo[], name: (session: string) => string) {
-  const rows = list.map(info => {
+  const rows = list.filter(info => info.subscription.run || !info.disabled).map(info => {
     const run = info.subscription.run;
     const hook = run ? hookName(run.command) : { name: subscriptionAction(info, name), args: [] };
     const state = subscriptionState(info);
