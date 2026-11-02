@@ -172,12 +172,15 @@ func (s *Store) SetWorkflowStepTranscript(ctx context.Context, run contract.Work
 	})
 }
 
-const workflowStepColumns = "key,parent,kind,name,phase,profile,state,reason,transcript,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_at,ended_at"
+// workflowStepMore says a step holds more than its row: what it ran beyond the words its name quotes, or what a command wrote.
+const workflowStepMore = `ifnull(trim(detail,char(32,9,10,13)) NOT IN ('',substr(name,length(kind)+3)) OR CASE WHEN kind='run' AND json_valid(result) THEN ifnull(json_extract(result,'$.stdout'),'')!='' OR ifnull(json_extract(result,'$.stderr'),'')!='' OR ifnull(json_extract(result,'$.code'),0)!=0 OR json_type(result,'$.conflicts')='array' ELSE 0 END,0)`
+
+const workflowStepColumns = "key,parent,kind,name,phase,profile,state,reason,transcript," + workflowStepMore + ",input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_at,ended_at"
 
 func scanWorkflowStep(row interface{ Scan(...any) error }, extra ...any) (contract.WorkflowStep, error) {
 	var step contract.WorkflowStep
 	var started, ended int64
-	if err := row.Scan(append([]any{&step.Key, &step.Parent, &step.Kind, &step.Name, &step.Phase, &step.Profile, &step.State, &step.Reason, &step.Transcript, &step.Usage.InputTokens, &step.Usage.OutputTokens, &step.Usage.CacheReadTokens, &step.Usage.CacheWriteTokens, &started, &ended}, extra...)...); err != nil {
+	if err := row.Scan(append([]any{&step.Key, &step.Parent, &step.Kind, &step.Name, &step.Phase, &step.Profile, &step.State, &step.Reason, &step.Transcript, &step.More, &step.Usage.InputTokens, &step.Usage.OutputTokens, &step.Usage.CacheReadTokens, &step.Usage.CacheWriteTokens, &started, &ended}, extra...)...); err != nil {
 		return step, err
 	}
 	step.Started = time.UnixMilli(started).UTC()

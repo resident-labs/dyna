@@ -1,5 +1,6 @@
 import type { WorkflowInfo, WorkflowMerge, WorkflowState, WorkflowStep, WorkflowStepResponse } from "./contract.gen.ts";
 import { count, formatTime } from "./feed.ts";
+import { parsedJson, type Json } from "./json.ts";
 import { formatTimelineDuration } from "./timeline.ts";
 
 type Usage = WorkflowStep["usage"];
@@ -80,6 +81,12 @@ export function runScale(info: Pick<WorkflowInfo, "started" | "ended">, now: num
   const from = Date.parse(info.started);
   return { from, to: info.ended ? Date.parse(info.ended) : from + Math.max(1, Math.ceil((now - from) / 60_000)) * 60_000 };
 }
+// A bar under this share of the column reads as a speck, so it does not draw.
+export const READABLE_SPAN = 10;
+export const spanReads = (span: { width: number }): boolean => span.width >= READABLE_SPAN;
+// The column shows only for a run with a bar to read. A worker that waits has run for no time yet.
+export const timed = (steps: WorkflowStep[], scale: { from: number; to: number }, now: number): boolean => steps.some(step => stepTime(step, now) && spanReads(stepSpan(step, scale, now)));
+
 export function stepSpan(step: WorkflowStep, { from, to }: { from: number; to: number }, now: number): { left: number; width: number } {
   const whole = Math.max(1, to - from), start = Math.max(0, Date.parse(step.started) - from);
   const left = Math.min(100, start / whole * 100);
@@ -122,8 +129,8 @@ export function pastRuns(runs: Iterable<WorkflowInfo>, open: { has: (session: st
 
 // A worker with a file has a transcript to open.
 export const openable = (step: WorkflowStep): boolean => step.kind === "agent" && !!step.transcript;
-// Anything else that ran or ended has what it ran to show, in place. A waiting worker has nothing yet, and a workflow step folds its children.
-export const foldable = (step: WorkflowStep): boolean => !openable(step) && step.kind !== "workflow" && (step.kind !== "agent" || step.state !== "running");
+// A step that holds more than its row opens in place. One with nothing more has nothing to open, and a workflow step folds its children.
+export const foldable = (step: WorkflowStep): boolean => !openable(step) && step.kind !== "workflow" && !!step.more;
 
 // The open worker is in the page's address, so Back closes it and a reload or a link keeps it.
 export const shownStep = (search: string): string | undefined => new URLSearchParams(search).get("step") ?? undefined;
@@ -163,7 +170,6 @@ export const shortCommit = (commit: string): string => commit.slice(0, 7);
 
 // JSON reads for a person here, on any script's shape: no raw JSON shows on the run page. Each value is a labelled row, a short
 // list is text, an object is a group, and what is too deep or too long says how much there is.
-export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 export type Field = { label: string } & ({ kind: "text"; text: string } | { kind: "commit"; commit: string } | { kind: "branch"; branch: string } | { kind: "link"; href: string }
   | { kind: "list"; items: Field[]; inline: boolean } | { kind: "group"; fields: Field[] });
 
@@ -173,11 +179,12 @@ const nothingShown: Shown = { facts: new Set(), names: new Set(), counts: {} };
 
 const DEPTH = 3, LIST = 20, OBJECTS = 10, TEXT = 4000, INLINE = 64, TITLE = 60;
 
-export function shownFacts(info: Pick<WorkflowInfo, "name" | "repo" | "commit">, steps: WorkflowStep[], merge?: WorkflowMerge | null): Shown {
+export function shownFacts(info: Pick<WorkflowInfo, "session" | "name" | "repo" | "commit">, steps: WorkflowStep[], merge?: WorkflowMerge | null): Shown {
   const conflicts = merge?.conflicts ?? [];
   const commits = [info.commit, merge?.commit].flatMap(commit => commit ? [commit, shortCommit(commit)] : []);
   const facts = new Set([...commits, info.repo ?? "", merge?.branch ?? "", ...conflicts.map(conflict => conflict.branch ?? "")].filter(Boolean));
-  const names = new Set([info.name, ...steps.flatMap(step => [step.key, step.name]), ...merge?.merged ?? [], ...conflicts.map(conflict => conflict.step)]);
+  // A worker in its own tree names its branch for its step, so a script's list of what those steps left names them too.
+  const names = new Set([info.name, ...steps.flatMap(step => [step.key, step.name, `v2/${info.session}-${step.key.slice(0, 12)}`]), ...merge?.merged ?? [], ...conflicts.map(conflict => conflict.step)]);
   return { facts, names, counts: { steps: steps.length, failed: tally(steps).failed, ...merge && { merged: merge.merged?.length ?? 0, conflicts: conflicts.length } } };
 }
 
@@ -201,21 +208,8 @@ function humanized(key: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-function parsed(text: string): Json | undefined {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return undefined;
-  // The engine masks a secret's value in place, which leaves "token": [masked] with no quotes.
-  for (const attempt of [trimmed, trimmed.replace(/:\s*\[masked\]/g, ': "[masked]"')]) {
-    try {
-      const value = JSON.parse(attempt) as Json;
-      if (typeof value === "object" && value !== null) return value;
-    } catch { /* Most text is not JSON. */ }
-  }
-  return undefined;
-}
-
 function stringField(label: string, key: string, text: string, depth: number, shown: Shown): Field | undefined {
-  const inner = parsed(text);
+  const inner = parsedJson(text);
   if (inner !== undefined) return field(label, key, inner, depth, shown);
   if (/^https?:\/\/\S+$/.test(text)) return { label, kind: "link", href: text };
   if (/^[0-9a-f]{40}$/.test(text) || /^[0-9a-f]{7,39}$/.test(text) && /commit|sha/i.test(key)) return { label, kind: "commit", commit: text };
@@ -256,11 +250,8 @@ function field(label: string, key: string, value: Json, depth: number, shown: Sh
   return fields.length ? { label, kind: "group", fields } : undefined;
 }
 
-// A value named for a section the page has, as a script's `steps` list of what its steps returned, or the section's own count.
-const sectionCount = (key: string, value: Json, shown: Shown) => shown.counts[key] === value || Array.isArray(value) && !!shown.counts[key];
-
 function objectFields(value: { [key: string]: Json }, depth: number, shown: Shown): Field[] {
-  return Object.entries(value).flatMap(([key, item]) => repeats(item, shown) || sectionCount(key, item, shown) ? [] : field(humanized(key), key, item, depth, shown) ?? []);
+  return Object.entries(value).flatMap(([key, item]) => repeats(item, shown) || shown.counts[key] === item ? [] : field(humanized(key), key, item, depth, shown) ?? []);
 }
 
 export function jsonFields(value: Json, shown: Shown = nothingShown): Field[] {
@@ -271,7 +262,7 @@ export function jsonFields(value: Json, shown: Shown = nothingShown): Field[] {
 // What a script returned or a command wrote: JSON reads as fields, and anything else as the text it is.
 export type Reading = { text: string; fields?: undefined } | { fields: Field[]; text?: undefined };
 export function reading(text: string, shown?: Shown): Reading {
-  const value = parsed(text);
+  const value = parsedJson(text);
   return value === undefined ? { text } : { fields: jsonFields(value, shown) };
 }
 
@@ -313,7 +304,7 @@ export function stepBody(step: WorkflowStep, output?: WorkflowStepResponse): Ste
     if (read?.fields?.length) parts.push({ kind: "fields", fields: read.fields });
   } else if (step.kind === "run") {
     if (detail && step.name !== `run: ${detail}`) parts.push({ kind: "code", label: "Command", text: detail });
-    const value = output?.result ? parsed(output.result) : undefined;
+    const value = output?.result ? parsedJson(output.result) : undefined;
     if (value !== undefined && record(value) && ("stdout" in value || "stderr" in value)) parts.push(...commandParts(step, value));
     else if (value !== undefined) { const fields = jsonFields(value); if (fields.length) parts.push({ kind: "fields", fields }); }
   } else if (detail && detail !== step.reason) {

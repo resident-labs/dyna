@@ -92,6 +92,7 @@ type WorkflowStep struct {
 	State      WorkflowStepState `json:"state"`
 	Reason     string            `json:"reason,omitempty"`
 	Transcript string            `json:"transcript,omitempty"` // the worker's session file, as transcript.append names it
+	More       bool              `json:"more,omitempty"`       // workflow.step holds more than this row says
 	Usage      Usage             `json:"usage"`
 	Started    time.Time         `json:"started"`
 	Ended      time.Time         `json:"ended,omitzero"`
