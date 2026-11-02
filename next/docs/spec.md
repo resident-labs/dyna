@@ -210,9 +210,12 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 ```text
 <data>/rooms/<room>/AGENTS.md                   room instructions
 <data>/rooms/<room>/compose/<name>.yaml         room compose files
+<data>/rooms/<room>/addons.json                 the room's skills, Pi packages and MCP servers
+<data>/rooms/<room>/skills/<name>/              the room's skill folders
 <data>/rooms/<room>/files/<sha256>              attachments and large outputs
 <data>/rooms/<room>/transcripts/<session>/      transcript copies
 <hostdata>/rooms/<room>/instructions/AGENTS.md  the room copy a box mounts
+<hostdata>/rooms/<room>/instructions/addons.tgz the room's add-ons, one file a box unpacks at its start
 <hostdata>/rooms/<room>/shared/                 /box/shared
 ```
 
@@ -221,6 +224,7 @@ Everything else belongs to no single room:
 ```text
 <data>/AGENTS.md                                global instructions
 <data>/compose/<name>.yaml                      global compose files
+<data>/addons.json, <data>/skills/<name>/       global add-ons
 <data>/store.db, <data>/store.lock              the store and its lock
 <data>/backups/                                 local copies of the store
 <data>/archive/                                 the read-only v1 archive
@@ -228,6 +232,7 @@ Everything else belongs to no single room:
 <data>/cliproxy/, <data>/cliproxy/auth-v2/      the model proxy and its sign-in folder
 <data>/git/<owner>/<repo>.git                   repository mirrors
 <hostdata>/instructions/global/AGENTS.md        the global copy a box mounts
+<hostdata>/instructions/global/addons.tgz       the global add-ons, as the room's
 <hostdata>/git/<owner>/<repo>.git               repository caches
 <hostdata>/bin/<version>/dyna                   engine binaries, with a current link
 <hostdata>/cache/                               dependency caches
@@ -613,6 +618,9 @@ Each `contract/tools/` toolkit registers one area tool with a flat `action` enum
 | `question` | ask, list | `question.*`; ask needs the `ask-owner` grant (7.10) | 2 |
 | `workflow` | run, status, list | `workflow.run`, `workflow.status`, `workflow.list` | 2 |
 | `subscription` | list, add, remove | `subscription.*` | 2 |
+| `skill` | save, list, remove | `skill.*` | 2 |
+| `package` | add, list, remove | `package.*` | 2 |
+| `mcp` | add, list, remove | `mcp.*` | 2 |
 
 Every session initially declares all Dyna tools and four shell tools, with `codemode` active (`--tools +codemode`; `codemode.mode` stays `on`, so declared tools stay direct and scripts can call them) and without `tool_search`. Pi waits for direct servers before the first prompt. Maximum-depth starts fail with a typed refusal. Dyna calls use the MCP route; the box resolves names and actions, returning `unknown_action` with valid names. The handler strictly decodes arguments once and returns its typed error unchanged. Room MCP servers use codemode exposure; owner-only methods stay in CLI and web. `session.restart` requires tree access; `room.repos` allows a session its own room. The Dyna MCP timeout is 600 seconds with progress notifications; longer work returns an operation immediately and wakes the session on `op.ran`.
 
@@ -637,9 +645,21 @@ Usage names accounts by provider and number, not identity-bearing labels. Number
 
 The section never reads a provider. It takes the last whole `accounts.quota` reading, and a dispatch that finds that reading past the 5-minute cache age starts one `accounts.quota` read in the background, for the next dispatch. A turn therefore adds no reads to the shared path and never waits for one. The first dispatch after a start has no section.
 
-#### Skills and room MCP servers
+#### Skills, Pi packages and MCP servers
 
-At box start the agent writes the global skill catalog into Pi's skills folder. Skill changes write files and reload resources. Room MCP servers remain after cutover; when ported, the box registers them with codemode exposure at loopback URLs forwarding over the box socket. Additions reload without restart. The engine retains credentials and scans arguments.
+There are three kinds of add-on, because not every skill is a Pi package. A skill is a folder with `SKILL.md`, saved with `dyna skill save PATH` from a folder or a link. A Pi package is an npm or git source Pi installs, added with `dyna package add SOURCE`. An MCP server joins Pi's config, added with `dyna mcp add NAME URL_OR_COMMAND`. Each has `list` and `remove` and a matching tool, and each lands in the caller's room unless it says `--global`. Repository skills stay Pi's: they live in the repository, and Dyna's only part is `defaultProjectTrust: always` in the box's settings, since a box has nobody to answer Pi's trust question. That setting also lets a repository's other `.pi` resources load.
+
+**Store.** The engine keeps each scope in files beside its instructions (4.3): `addons.json` lists the items with who added them and whether they are on, and `skills/<name>/` holds the folders. A save mirrors like instructions, through the same sync, so a host offline during a save catches up the same way. Each scope mirrors as one file, `addons.tgz`, holding its enabled items, in the folders a box already mounts read-only at `/run/dyna/instructions/{global,room}`. Deleting a room removes its add-ons with its folders.
+
+**Box start.** Before Pi starts, the box agent unpacks both bundles, and on a name clash the room wins. It rebuilds `/box/pi/skills`, Pi's own folder, from the built-in skills embedded from `box/skills/<name>/` and the unpacked ones. It writes the packages into `/box/pi/settings.json`, and merges the servers into `mcp.json` with codemode exposure. An item reaches a session at its next box start. Nothing reloads a running box.
+
+**Packages.** The engine pins a source when it is added, to an exact npm version or a git commit, so every box gets the same thing. A range cannot be pinned, so it is refused. The box runs `pi install` once per pinned source per host, into `/box/cache/pi-packages/<hash>` by way of a temporary folder, so racing boxes do not collide, and Pi then loads that folder as a local package. Pi exits when an extension fails to load, so the install also starts Pi once in that folder, and a package that fails there stays out of the box.
+
+**Failures.** A package that fails or an MCP server that does not connect leaves the session running. The box sends `box.notice`, which stores a `session.notice` event: the owner sees it, and the session reads it with its next turn. It wakes nobody, so a box that fails at every start cannot keep paying for turns.
+
+**Who can add.** A session changes its own room at once. Its global change is an `addon.global` operation of class `owner`, which pins and reads everything first, so the owner approves what will land, and a skill's archive waits among the room's files. The owner changes any scope directly. Settings shows every scope, and changing it takes the `admin` scope.
+
+`tool_search` is not part of this. Added servers use codemode exposure and sessions run without `tool_search`, as above. Dyna has no secret store for MCP servers, and `dyna mcp add` takes no headers or environment.
 
 #### Phase plan
 

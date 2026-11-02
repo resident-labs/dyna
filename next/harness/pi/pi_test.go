@@ -42,6 +42,30 @@ func TestOpenUsesWorkDirectory(t *testing.T) {
 	}
 }
 
+// A notify's message is a string where every event has an object, and a failed decode would end the reader, and the box.
+func TestAWarningOutsideATurnReachesTheNotice(t *testing.T) {
+	script := `read -r request
+printf '%s\n' '{"type":"extension_ui_request","id":"a","method":"notify","message":"MCP servers need attention:\n  broken: failed: spawn ENOENT\nRun /mcp to fix.","notifyType":"warning"}'
+printf '%s\n' '{"type":"extension_ui_request","id":"b","method":"notify","message":"just so you know","notifyType":"info"}'
+printf '%s\n' '{"type":"extension_ui_request","id":"c","method":"setStatus","statusKey":"k"}'
+printf '{"id":"1","type":"response","success":true,"data":{"sessionFile":"file"}}\n'
+read -r wait`
+	notices := make(chan string, 4)
+	h, err := Open(context.Background(), "sh", []string{"-c", script}, "", t.TempDir(), func(text string) { notices <- text })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	if got := <-notices; got != "MCP servers need attention:\n  broken: failed: spawn ENOENT" {
+		t.Fatalf("%q", got)
+	}
+	select {
+	case got := <-notices:
+		t.Fatalf("an info line came through: %q", got)
+	default:
+	}
+}
+
 func TestSetPromptSectionsRPC(t *testing.T) {
 	inputReader, inputWriter := io.Pipe()
 	outputReader, outputWriter := io.Pipe()

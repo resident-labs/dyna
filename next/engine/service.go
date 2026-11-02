@@ -11,6 +11,7 @@ import (
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/addons"
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/compose"
 	"github.com/resident-labs/dyna/engine/lifecycle"
@@ -76,6 +77,8 @@ type Service struct {
 	roomData            sync.RWMutex // writers of a room folder share it; removing one takes it alone
 	instructionsMu      sync.Mutex
 	publishInstructions func(context.Context)
+	addons              *addons.Files
+	addonSources        *addons.Sources
 }
 
 // createSession publishes before checking the store, so close can retire the handle.
@@ -121,7 +124,7 @@ func (s *Service) lookupSession(id contract.SessionID) (*live.Session, bool) {
 }
 
 func New(st *store.Store, boxes lifecycle.BoxAdapter, profiles Profiles, now func() time.Time) *Service {
-	s := &Service{hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now, hookPoke: make(chan struct{}, 1)}
+	s := &Service{hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now, hookPoke: make(chan struct{}, 1), addonSources: addons.NewSources()}
 	s.reconciler = lifecycle.New(st, boxes, s, nil, s.event, now)
 	s.reconciler.SetRoomData(s)
 	s.live = live.New(s.deliverWakes)
@@ -178,7 +181,10 @@ func (s *Service) OpenTerminal(id contract.SessionID) bool {
 }
 
 // SetLayout sets where room data is kept, before the service starts.
-func (s *Service) SetLayout(layout box.Layout) { s.layout = layout }
+func (s *Service) SetLayout(layout box.Layout) {
+	s.layout = layout
+	s.addons = &addons.Files{Layout: layout}
+}
 
 func (s *Service) transition(ctx context.Context, room contract.RoomID, b box.Box, state contract.BoxState, reason string, cause contract.FailureCause) (box.Box, error) {
 	event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{Cause: cause})

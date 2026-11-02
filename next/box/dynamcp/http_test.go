@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/resident-labs/dyna/box/post"
+	"github.com/resident-labs/dyna/box/skills"
 	"github.com/resident-labs/dyna/box/visual"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/contract/tools"
@@ -256,5 +257,46 @@ func TestGoalToolRoutesAndDecodesStrictly(t *testing.T) {
 	}
 	if out := call(`{"action":"archive"}`); !strings.Contains(out, "journal") || !strings.Contains(out, "unknown_action") {
 		t.Fatalf("unknown action: %s", out)
+	}
+}
+
+// A box reads a skill's folder itself, because the engine cannot, and a link goes through as it is.
+func TestSkillSaveCarriesTheFolder(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "pdf"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pdf", skills.File), []byte("---\nname: pdf\ndescription: Read PDFs\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var sent []contract.SkillSaveRequest
+	server, err := New(func(_ context.Context, method contract.Method, body []byte) ([]byte, *contract.Error) {
+		var req contract.SkillSaveRequest
+		if err := json.Unmarshal(body, &req); err != nil || method != contract.MethodSkillSave {
+			t.Fatalf("%s: %v", method, err)
+		}
+		sent = append(sent, req)
+		return []byte(`{}`), nil
+	}, nil, post.Preparer{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	save := func(path string) result {
+		quoted, _ := json.Marshal(path)
+		return server.call(context.Background(), callParams{Name: "skill", Arguments: map[string]json.RawMessage{"action": json.RawMessage(`"save"`), "path": quoted, "global": json.RawMessage("true")}})
+	}
+	for _, path := range []string{"pdf", "https://example.test/SKILL.md"} {
+		if out := save(path); out.IsError {
+			t.Fatalf("%s: %+v", path, out)
+		}
+	}
+	if len(sent) != 2 || !sent[0].Global || sent[1].URL != "https://example.test/SKILL.md" || sent[1].Archive != nil {
+		t.Fatalf("%+v", sent)
+	}
+	if meta, err := skills.Inspect(sent[0].Archive); err != nil || meta.Name != "pdf" {
+		t.Fatalf("%+v %v", meta, err)
+	}
+	if out := save("gone"); !out.IsError {
+		t.Fatal("a missing folder was sent")
 	}
 }

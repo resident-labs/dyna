@@ -35,7 +35,7 @@ function eventInput(event: Event): TimelineInput | undefined {
       const { subscription, result, exitCode, cause } = event.body;
       return { kind: result === "failed" ? "failed" : "line", text: `Subscription ${subscription} ${result}${cause ? `: ${causes[cause]}` : `, exit code ${exitCode}`}` };
     }
-    case "notice.posted": return line(event.body.text);
+    case "notice.posted": case "session.notice": return line(event.body.text);
   }
   return undefined;
 }

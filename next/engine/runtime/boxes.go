@@ -22,6 +22,7 @@ import (
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine"
+	"github.com/resident-labs/dyna/engine/addons"
 	"github.com/resident-labs/dyna/engine/api"
 	"github.com/resident-labs/dyna/engine/ci"
 	"github.com/resident-labs/dyna/engine/compose"
@@ -65,6 +66,7 @@ type Boxes struct {
 	Mirror            *enginegit.Mirror
 	Images            *engineimages.Builder
 	Compose           *compose.Files
+	Addons            *addons.Files
 	Context           context.Context
 	Pressure          *engine.Service
 	Proc              string // Proc is the folder with stat and meminfo; empty means /proc.

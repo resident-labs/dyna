@@ -288,7 +288,7 @@ export const eventGroups: Record<Event["type"], string> = {
   "question.asked": "questions", "question.answered": "questions answered", "question.withdrawn": "questions withdrawn",
   "image.built": "images built", "image.failed": "image builds failed", "pr.opened": "pull requests opened", "pr.changed": "pull request updates",
   "pr.merged": "pull requests merged", "pr.closed": "pull requests closed", "ci.finished": "CI results", "repo.main_updated": "default branch moves", "issue.changed": "issue updates", "issue.closed": "issues closed",
-  "hook.finished": "subscription runs", "hook.due": "subscription wakes", "notice.posted": "notices",
+  "hook.finished": "subscription runs", "hook.due": "subscription wakes", "notice.posted": "notices", "session.notice": "box notices",
   "shell.job.ended": "jobs finished", "grant.expired": "host grants expired",
   "host.disk_low": "disk warnings", "conversation.read": "read positions", "workflow.ended": "workflow runs", "workflow.step_changed": "workflow steps",
   "session.failed": "failure notices", "goal.set": "goals set", "goal.item_changed": "goal items changed", "goal.ended": "goals ended", "checkin.due": "check-ins",
@@ -517,6 +517,6 @@ export function describe(event: Event, name: Name): string {
     case "post.created": return event.body.text;
     case "hook.finished": return `A subscription's run ${event.body.result}: ${event.body.cause ? causes[event.body.cause] : `exit code ${event.body.exitCode}`}`;
     case "hook.due": return "A subscription woke a session";
-    case "notice.posted": return event.body.text;
+    case "notice.posted": case "session.notice": return event.body.text;
   }
 }

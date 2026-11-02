@@ -9,6 +9,17 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+// SendSessionNotice stores a notice for its session, which reads it with its next turn.
+func (s *Store) SendSessionNotice(ctx context.Context, notice contract.Event, id contract.SessionID) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		seq, err := s.AppendEvent(tx, notice)
+		if err != nil {
+			return err
+		}
+		return s.InsertDelivery(ctx, tx, seq, notice.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: id}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: false})
+	})
+}
+
 // RestartSession resets a failed box for admission and publishes its transition.
 func (s *Store) RestartSession(ctx context.Context, id contract.SessionID, event, notice contract.Event) (bool, error) {
 	var restarted bool
