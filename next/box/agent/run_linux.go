@@ -194,7 +194,7 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	jobs := shell.New(shell.Config{Dir: "/box/work", After: time.After, Report: func(r contract.ShellJobEndedRequest) error { return client.ShellJobEnded(ctx, r) }})
+	jobs := shell.New(shell.Config{Dir: "/box/work", After: time.After, Report: func(r contract.ShellJobEndedRequest) error { return client.ShellJobEnded(ctx, r) }, Running: func(r contract.ShellJobRunningRequest) error { return client.ShellJobRunning(ctx, r) }})
 	defer jobs.Close()
 	client.shellJobs = jobs.Running
 	mux := http.NewServeMux()

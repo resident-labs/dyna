@@ -207,6 +207,15 @@ func (c *Client) ShellJobEnded(ctx context.Context, req contract.ShellJobEndedRe
 	return err
 }
 
+func (c *Client) ShellJobRunning(ctx context.Context, req contract.ShellJobRunningRequest) error {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	_, err = c.call(ctx, contract.MethodShellJobRunning, body)
+	return err
+}
+
 // Notice tells the session and the owner what this box could not set up.
 func (c *Client) Notice(ctx context.Context, text string) error {
 	body, err := json.Marshal(contract.BoxNoticeRequest{Text: text})
