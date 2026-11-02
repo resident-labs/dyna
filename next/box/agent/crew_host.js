@@ -60,10 +60,23 @@ function install(bridge, argsText, parent, depth) {
   globalThis.log = (...values) =>
     bridge.send(JSON.stringify({ op: "log", parent, phase: current, payload: values.join(" ") }));
   globalThis.console = { log, info: log, warn: log, error: log };
-  globalThis.agent = (prompt, opts) => call({ op: "agent", payload: String(prompt), opts: opts ?? {} });
-  globalThis.run = (command, opts) => call({ op: "run", payload: command, opts: opts ?? {} });
+  // status() is the run's one line of what is happening. It is not a step, so a resume does not replay it.
+  globalThis.status = (text) => {
+    bridge.send(JSON.stringify({ op: "status", payload: String(text) }));
+  };
+  // A lane names the subject a step is about. It leaves the options before they are hashed, so it changes no step's key.
+  const laned = (opts) => {
+    const { lane, ...rest } = opts ?? {};
+    return { opts: rest, lane: lane === undefined || lane === null ? "" : String(lane) };
+  };
+  globalThis.agent = (prompt, opts) => call({ op: "agent", payload: String(prompt), ...laned(opts) });
+  globalThis.run = (command, opts) => call({ op: "run", payload: command, ...laned(opts) });
   globalThis.merge = (results, opts) => call({ op: "merge", payload: results, opts: opts ?? {} });
-  globalThis.post = (to, text, data) => call({ op: "post", payload: { to, text: String(text), data } });
+  globalThis.post = (to, text, data, opts) => {
+    const { opts: rest, lane } = laned(opts);
+    if (Object.keys(rest).length) return Promise.reject(new Error("post takes only {lane} as options"));
+    return call({ op: "post", payload: { to, text: String(text), data }, lane });
+  };
   globalThis.parallel = (thunks) =>
     Promise.all(
       thunks.map(async (thunk, i) => {
