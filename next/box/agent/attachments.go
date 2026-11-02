@@ -84,7 +84,7 @@ func (c *Client) fetchFile(ctx context.Context, file contract.TurnFile) (int64, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return 0, apiError{status: "file download: " + resp.Status}
+		return 0, refusal("file download", resp)
 	}
 	temp, err := os.CreateTemp(filepath.Dir(file.Path), ".fetch-")
 	if err != nil {

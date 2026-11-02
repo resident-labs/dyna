@@ -12,6 +12,7 @@ type RoomRepositories interface {
 	RoomRepos(context.Context, contract.RoomID) ([]contract.RoomRepo, error)
 	Session(context.Context, contract.SessionID) (store.Session, error)
 	OwnsPRBranch(context.Context, contract.RepoName, contract.SessionID, string) (bool, error)
+	ResumedSessions(context.Context, contract.RepoName, contract.SessionID) ([]contract.SessionID, error)
 }
 
 // Hosts supplies the cache connection.

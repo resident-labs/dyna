@@ -30,11 +30,23 @@ type response struct {
 }
 
 type apiError struct {
-	status string
-	code   contract.ErrorCode
+	status  string
+	code    contract.ErrorCode
+	message string // the engine's reason, which may be empty
 }
 
-func (e apiError) Error() string { return e.status }
+func (e apiError) Error() string {
+	if e.message == "" {
+		return e.status
+	}
+	return e.status + ": " + e.message
+}
+
+// refusal is the error of a call the engine refused, and it carries the engine's reason. The queue does not retry one.
+func refusal(call string, resp *http.Response) apiError {
+	problem := contract.ReadError(resp.Body)
+	return apiError{status: call + ": " + resp.Status, code: problem.Code, message: problem.Message}
+}
 
 // Client owns the box socket and a bounded outgoing buffer.
 type Client struct {
@@ -101,16 +113,10 @@ func (c *Client) post(ctx context.Context, method contract.Method, body []byte) 
 		return nil, err
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, outgoingLimit))
-	if err != nil {
-		return nil, err
-	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		var detail contract.Error
-		_ = json.Unmarshal(data, &detail)
-		return nil, apiError{status: fmt.Sprintf("box API %s: %s", method, resp.Status), code: detail.Code}
+		return nil, refusal("box API "+string(method), resp)
 	}
-	return data, nil
+	return io.ReadAll(io.LimitReader(resp.Body, outgoingLimit))
 }
 
 // callProblem words a tool call that failed on the box socket. An engine restart closes the socket mid-call,
@@ -200,7 +206,7 @@ func (c *Client) file(ctx context.Context, hash string, out io.Writer) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return errors.New(resp.Status)
+		return refusal("output file", resp)
 	}
 	_, err = io.Copy(out, resp.Body)
 	return err
