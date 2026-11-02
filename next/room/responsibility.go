@@ -28,6 +28,9 @@ func ResponsibilityName(item contract.Responsibility) string {
 	return label + " " + item.ID
 }
 
+// BoxRestartedNotice tells a session that asked to restart its own box that it has.
+const BoxRestartedNotice = "Your box restarted on the current version. Your files and conversation are kept."
+
 // BoxUpdateNotice tells a session what holds its box on an old binary. It is empty when nothing outlasts the turn: the box then
 // stops as the turn ends, before anything could read this. A crew's run ends with its turn, so it counts as that turn.
 func BoxUpdateNotice(held []contract.Responsibility) string {
