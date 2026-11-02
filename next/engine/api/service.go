@@ -124,6 +124,7 @@ type Service interface {
 	ShellJobRunning(context.Context, contract.Principal, contract.ShellJobRunningRequest) (contract.ShellJobRunningResponse, *contract.Error)
 	WorkflowRun(context.Context, contract.Principal, contract.WorkflowRunRequest) (contract.WorkflowRunResponse, *contract.Error)
 	WorkflowStatus(context.Context, contract.Principal, contract.WorkflowStatusRequest) (contract.WorkflowStatusResponse, *contract.Error)
+	WorkflowStep(context.Context, contract.Principal, contract.WorkflowStepRequest) (contract.WorkflowStepResponse, *contract.Error)
 	WorkflowList(context.Context, contract.Principal, contract.WorkflowListRequest) (contract.WorkflowListResponse, *contract.Error)
 	WorkflowPin(context.Context, contract.Principal, contract.WorkflowPinRequest) (contract.WorkflowPinResponse, *contract.Error)
 	WorkflowStepStart(context.Context, contract.Principal, contract.WorkflowStepStartRequest) (contract.WorkflowStepStartResponse, *contract.Error)

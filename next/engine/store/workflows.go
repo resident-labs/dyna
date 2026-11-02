@@ -172,12 +172,15 @@ func (s *Store) SetWorkflowStepTranscript(ctx context.Context, run contract.Work
 	})
 }
 
-const workflowStepColumns = "key,parent,kind,name,phase,profile,state,reason,transcript,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_at,ended_at"
+// workflowStepMore says a step holds more than its row: what it ran beyond the words its name quotes, or what a command wrote.
+const workflowStepMore = `ifnull(trim(detail,char(32,9,10,13)) NOT IN ('',substr(name,length(kind)+3)) OR CASE WHEN kind='run' AND json_valid(result) THEN ifnull(json_extract(result,'$.stdout'),'')!='' OR ifnull(json_extract(result,'$.stderr'),'')!='' OR ifnull(json_extract(result,'$.code'),0)!=0 OR json_type(result,'$.conflicts')='array' ELSE 0 END,0)`
+
+const workflowStepColumns = "key,parent,kind,name,phase,profile,state,reason,transcript," + workflowStepMore + ",input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_at,ended_at"
 
 func scanWorkflowStep(row interface{ Scan(...any) error }, extra ...any) (contract.WorkflowStep, error) {
 	var step contract.WorkflowStep
 	var started, ended int64
-	if err := row.Scan(append([]any{&step.Key, &step.Parent, &step.Kind, &step.Name, &step.Phase, &step.Profile, &step.State, &step.Reason, &step.Transcript, &step.Usage.InputTokens, &step.Usage.OutputTokens, &step.Usage.CacheReadTokens, &step.Usage.CacheWriteTokens, &started, &ended}, extra...)...); err != nil {
+	if err := row.Scan(append([]any{&step.Key, &step.Parent, &step.Kind, &step.Name, &step.Phase, &step.Profile, &step.State, &step.Reason, &step.Transcript, &step.More, &step.Usage.InputTokens, &step.Usage.OutputTokens, &step.Usage.CacheReadTokens, &step.Usage.CacheWriteTokens, &started, &ended}, extra...)...); err != nil {
 		return step, err
 	}
 	step.Started = time.UnixMilli(started).UTC()
@@ -208,6 +211,12 @@ func (s *Store) WorkflowSteps(ctx context.Context, run contract.WorkflowRunID) (
 // WorkflowStep reads one journal row.
 func (s *Store) WorkflowStep(ctx context.Context, run contract.WorkflowRunID, key string) (contract.WorkflowStep, error) {
 	return scanWorkflowStep(s.Read().QueryRowContext(ctx, "SELECT "+workflowStepColumns+" FROM workflow_steps WHERE run=? AND key=?", run, key))
+}
+
+// WorkflowStepOutput reads the prompt, command or text a row ran, and its stored result.
+func (s *Store) WorkflowStepOutput(ctx context.Context, run contract.WorkflowRunID, key string) (detail, result string, err error) {
+	err = s.Read().QueryRowContext(ctx, "SELECT detail,result FROM workflow_steps WHERE run=? AND key=?", run, key).Scan(&detail, &result)
+	return detail, result, err
 }
 
 // WorkerTranscript is where one worker's transcript lies. Session is the crew that ran it: a resumed run keeps a finished step's
@@ -260,6 +269,7 @@ func (s *Store) WorkflowSummary(ctx context.Context, run contract.WorkflowRunID)
 	if err != nil {
 		return summary, err
 	}
+	summary.Steps = len(steps)
 	for _, step := range steps {
 		summary.Usage.InputTokens += step.Usage.InputTokens
 		summary.Usage.OutputTokens += step.Usage.OutputTokens
