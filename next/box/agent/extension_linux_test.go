@@ -95,6 +95,10 @@ console.log(JSON.stringify({
 	host: await call("bash", "f", undefined, { command: "done", host: "h", cwd: "logs", timeout: 60 }),
 	refused: await call("bash", "g", undefined, { command: "refused", host: "h" }),
 	list: await call("job", "h", undefined, { action: "list" }),
+	searches: [{ query: "goal" }, { query: "goal", limit: 8 }].map((input) => {
+		handlers.tool_call({ toolName: "tool_search", toolCallId: "s", input });
+		return input.limit;
+	}),
 	moved: await call("bash", "i", undefined, { command: "running" }),
 	asked,
 	exposure: [registered.bash.exposure, registered.job.exposure],
@@ -159,10 +163,14 @@ func TestExtensionBashAndJobTools(t *testing.T) {
 			Body map[string]any
 		}
 		Exposure []*string
+		Searches []int
 		Names    []string
 	}
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatalf("%v: %s", err, out)
+	}
+	if !slices.Equal(got.Searches, []int{3, 8}) {
+		t.Fatalf("a search's limit: %v", got.Searches)
 	}
 	if !slices.Equal(got.Names, []string{"bash", "job"}) {
 		t.Fatalf("tools %v", got.Names)
