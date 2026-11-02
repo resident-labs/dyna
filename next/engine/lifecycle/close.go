@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -12,6 +13,11 @@ import (
 
 // archiveRetry spaces out tries on a box whose archive failed, as a full disk makes it do.
 const archiveRetry = 10 * time.Minute
+
+// archiveAttempts is how many failed archive reports end the retries, so a close that cannot archive does not hold a running
+// box for hours. Five reports ten minutes apart, each at most 15 minutes in the box, take under two hours. The box then stops
+// and keeps its volume, because the engine never discards unasked.
+const archiveAttempts = 5
 
 // closeNotConnected marks a box that started for archive and never connected, so it shows as stuck rather than running.
 const closeNotConnected = "box did not connect to archive"
@@ -40,11 +46,11 @@ func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox, host
 	if row.State != contract.BoxClosing {
 		next := row.Box
 		next.State, next.Reason = contract.BoxClosing, ""
-		changed, err := r.change(ctx, row.Box, next, time.Time{}, row.Failures, "")
+		changed, err := r.change(ctx, row.Box, next, time.Time{}, 0, "") // From here failures counts failed archives.
 		if err != nil || !changed {
 			return err
 		}
-		row.Box, row.DueAt = next, time.Time{}
+		row.Box, row.DueAt, row.Failures = next, time.Time{}, 0
 	}
 	if row.Want == store.WantDiscard && r.roomHosts != nil && row.Host != "" && host != box.HostReady {
 		return r.abandon(ctx, row)
@@ -60,12 +66,54 @@ func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox, host
 		return err
 	}
 	if row.Want == store.WantClose && hadTurns && r.view.Connected(row.Session) {
-		if row.Reason == "" || row.Updated.Add(archiveRetry).After(r.now()) {
+		if row.Reason == "" {
+			return nil
+		}
+		if row.Failures >= archiveAttempts {
+			return r.holdArchive(ctx, row)
+		}
+		if row.Updated.Add(archiveRetry).After(r.now()) {
 			return nil
 		}
 		return r.retryArchive(ctx, row)
 	}
 	r.launch(ctx, row)
+	return nil
+}
+
+// holdArchive ends the retries: the box stops with its volume, the session stays closing, and a notice that wakes the parent
+// says how to finish. A closing parent would wait on this session, so the session moves up to its nearest open ancestor.
+// `session close` on a held session starts the archive again.
+func (r *Reconciler) holdArchive(ctx context.Context, row store.LifecycleBox) error {
+	session, err := r.store.Session(ctx, row.Session)
+	if err != nil {
+		return err
+	}
+	to, direct, err := r.store.OpenAncestor(ctx, row.Session)
+	if err != nil {
+		return err
+	}
+	text := fmt.Sprintf("The archive of session %s failed %d times, so its box is stopped and the session stays closing. Its volume is kept. `dyna session close %s` tries the archive again. `dyna session close %s --discard`, which only the owner can run, deletes the volume and whatever was not pushed. Last failure: %s", session.Name, archiveAttempts, row.Session, row.Session, row.Reason)
+	if len(text) > 4096 {
+		text = strings.ToValidUTF8(text[:4096], "")
+	}
+	engine := contract.Principal{Kind: contract.PrincipalEngine}
+	notice, err := r.event(session.Room, engine, contract.SessionNotice{Session: row.Session, Text: text})
+	if err != nil {
+		return err
+	}
+	var moved *contract.Event
+	if !direct {
+		event, err := r.event(session.Room, engine, contract.SessionMoved{Session: row.Session, NewParent: to})
+		if err != nil {
+			return err
+		}
+		moved = &event
+	}
+	if err := r.store.HoldArchive(ctx, row.Session, to, notice, moved); err != nil {
+		return err
+	}
+	r.Kick()
 	return nil
 }
 

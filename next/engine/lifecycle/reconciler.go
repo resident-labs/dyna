@@ -322,7 +322,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			}
 			continue
 		}
-		if row.Want == store.WantRun && (row.Box.State == contract.BoxCreating || row.Box.State == contract.BoxStarting) || row.Want == store.WantStop && row.Box.State == contract.BoxReady {
+		if row.Want == store.WantRun && (row.Box.State == contract.BoxCreating || row.Box.State == contract.BoxStarting) || row.Want == store.WantStop && row.Box.State == contract.BoxReady || row.Want == store.WantHold && row.Box.State == contract.BoxClosing {
 			if !row.DueAt.IsZero() && row.DueAt.After(r.now()) {
 				continue
 			}

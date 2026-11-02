@@ -1005,10 +1005,18 @@ type ComputerChangedResponse struct{}
 type Archive struct{}
 
 type ArchiveDoneRequest struct {
-	Repo    RepoName `json:"repo"`
-	Commit  string   `json:"commit"`
-	Skipped bool     `json:"skipped"`
-	Error   string   `json:"error,omitempty"`
+	Repo    RepoName        `json:"repo"`
+	Commit  string          `json:"commit"`
+	Skipped bool            `json:"skipped"`
+	Error   string          `json:"error,omitempty"`
+	LeftOut *ArchiveLeftOut `json:"leftOut,omitempty"`
+}
+
+// ArchiveLeftOut is what an archive did not carry: untracked files too large for it, which go with the volume.
+type ArchiveLeftOut struct {
+	Files int      `json:"files"`
+	Bytes int64    `json:"bytes"`
+	Paths []string `json:"paths"` // the first few
 }
 type ArchiveDoneResponse struct{}
 
