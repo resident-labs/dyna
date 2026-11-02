@@ -29,7 +29,7 @@ func (instructionStore) Box(_ context.Context, id contract.BoxID) (box.Box, erro
 	return box.Box{ID: id, Host: "host", Session: "session"}, nil
 }
 func (instructionStore) Hosts(context.Context) ([]box.Host, error) {
-	return []box.Host{{Name: "host"}}, nil
+	return engineHosts("host"), nil
 }
 func (instructionStore) Boxes(context.Context) ([]box.Box, error) {
 	return []box.Box{{Session: "session"}}, nil
