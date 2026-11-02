@@ -18,6 +18,7 @@ import (
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/harness"
 )
 
 // Runner is the local SSH process boundary.
@@ -307,6 +308,53 @@ type remoteExit int
 
 func (e remoteExit) Error() string { return fmt.Sprintf("host command exited with status %d", e) }
 
+const (
+	// failureLines and failureBytes bound what a failed command's error carries of its output. Podman ends its stderr with
+	// its own error, so the last lines are the ones that say why.
+	failureLines = 5
+	failureBytes = 512
+	// failureWindow is the end of the output that is read for those lines, so a command that printed a lot costs no more.
+	failureWindow = 8 << 10
+)
+
+// commandFailed is a host command that exited nonzero, with the end of its output, which the frame puts after stdout when
+// the command fails. It unwraps to the bare status, which is what callers compare.
+type commandFailed struct {
+	exit remoteExit
+	tail string
+}
+
+func (e commandFailed) Error() string {
+	if e.tail == "" {
+		return e.exit.Error()
+	}
+	return e.exit.Error() + ": " + e.tail
+}
+func (e commandFailed) Unwrap() error { return e.exit }
+
+// outputTail is the last few lines of a failed command's output on one line, masked like other command output and bounded.
+func outputTail(out []byte) string {
+	cut := len(out) > failureWindow
+	if cut {
+		out = out[len(out)-failureWindow:]
+	}
+	lines := strings.Split(strings.ToValidUTF8(string(out), ""), "\n")
+	if cut {
+		lines = lines[1:] // It starts partway through a line.
+	}
+	var kept []string
+	for i := len(lines) - 1; i >= 0 && len(kept) < failureLines; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			kept = append([]string{line}, kept...)
+		}
+	}
+	tail := harness.Mask(strings.Join(kept, "; "))
+	if len(tail) > failureBytes {
+		tail = "..." + strings.ToValidUTF8(tail[len(tail)-failureBytes:], "")
+	}
+	return tail
+}
+
 func (h *Host) run(ctx context.Context, argv ...string) ([]byte, error) {
 	return h.runInput(ctx, nil, argv...)
 }
@@ -348,7 +396,7 @@ func (h *Host) executeInput(ctx context.Context, input []byte, argv ...string) (
 		return nil, fmt.Errorf("%w: %v", err, sshErr)
 	}
 	if status != 0 {
-		return body, remoteExit(status)
+		return body, commandFailed{exit: remoteExit(status), tail: outputTail(body)}
 	}
 	return body, nil
 }
@@ -463,6 +511,16 @@ func (h *Host) RemoveVolume(ctx context.Context, id contract.BoxID) error {
 		return nil
 	}
 	return err
+}
+
+// HoldsBox says whether this host has a box's container or its volume. Each exists command exits 1 for one that is missing.
+func (h *Host) HoldsBox(ctx context.Context, id contract.BoxID) (bool, error) {
+	_, err := h.run(ctx, "bash", "-c", `podman container exists "$1" && exit 0; status=$?; [ "$status" = 1 ] || exit "$status"; podman volume exists "$2"`, "dyna-holds", string(id), "dyna-box-"+string(id))
+	var exit remoteExit
+	if errors.As(err, &exit) && exit == 1 {
+		return false, nil
+	}
+	return err == nil, err
 }
 func (h *Host) ListContainers(ctx context.Context) ([]box.ContainerStatus, error) {
 	b, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "ps", "--all", "--filter", "label=dyna.box", "--format", "json")
