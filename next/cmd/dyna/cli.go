@@ -55,6 +55,7 @@ type client interface {
 	SessionClose(context.Context, contract.SessionCloseRequest) (contract.SessionCloseResponse, error)
 	SessionSetProfile(context.Context, contract.SessionSetProfileRequest) (contract.SessionSetProfileResponse, error)
 	SessionRestart(context.Context, contract.SessionRestartRequest) (contract.SessionRestartResponse, error)
+	SessionRefresh(context.Context, contract.SessionRefreshRequest) (contract.SessionRefreshResponse, error)
 	Post(context.Context, contract.PostRequest) (contract.PostResponse, error)
 	EventsList(context.Context, contract.EventsListRequest) (contract.EventsListResponse, error)
 	Events(context.Context, contract.RoomID, int64, func(contract.Event) error) error
@@ -102,7 +103,7 @@ type requestType interface {
 		contract.SessionListRequest |
 		contract.SessionResponsibilitiesRequest |
 		contract.GoalSetRequest | contract.GoalListRequest | contract.GoalItemRequest | contract.GoalDoneRequest | contract.GoalJournalRequest |
-		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostSetLimitsRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomDeleteRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.ComposeListRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest | contract.PrListRequest | contract.PrStatusRequest | contract.PrTrackRequest | contract.PrUntrackRequest
+		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostSetLimitsRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomDeleteRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.ComposeListRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.SessionRefreshRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest | contract.PrListRequest | contract.PrStatusRequest | contract.PrTrackRequest | contract.PrUntrackRequest
 }
 type responseType interface {
 	contract.ProxyKeyResponse | contract.ProxyUsageResponse |
@@ -118,7 +119,7 @@ type responseType interface {
 		contract.SessionListResponse |
 		contract.SessionResponsibilitiesResponse |
 		contract.GoalSetResponse | contract.GoalListResponse | contract.GoalItemResponse | contract.GoalDoneResponse | contract.GoalJournalResponse |
-		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.HostSetLimitsResponse | contract.HostListResponse | contract.RoomCreateResponse | contract.RoomDeleteResponse | contract.RoomRepoAddResponse | contract.RepoCISetResponse | contract.RoomReposResponse | contract.ComposeListResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse | contract.PrListResponse | contract.PrStatusResponse | contract.PrTrackResponse | contract.PrUntrackResponse
+		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.HostSetLimitsResponse | contract.HostListResponse | contract.RoomCreateResponse | contract.RoomDeleteResponse | contract.RoomRepoAddResponse | contract.RepoCISetResponse | contract.RoomReposResponse | contract.ComposeListResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.SessionRefreshResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse | contract.PrListResponse | contract.PrStatusResponse | contract.PrTrackResponse | contract.PrUntrackResponse
 }
 
 func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
@@ -264,6 +265,9 @@ func (c *socketClient) SessionClose(ctx context.Context, q contract.SessionClose
 }
 func (c *socketClient) SessionRestart(ctx context.Context, q contract.SessionRestartRequest) (contract.SessionRestartResponse, error) {
 	return call[contract.SessionRestartRequest, contract.SessionRestartResponse](ctx, c, contract.MethodSessionRestart, q)
+}
+func (c *socketClient) SessionRefresh(ctx context.Context, q contract.SessionRefreshRequest) (contract.SessionRefreshResponse, error) {
+	return call[contract.SessionRefreshRequest, contract.SessionRefreshResponse](ctx, c, contract.MethodSessionRefresh, q)
 }
 func (c *socketClient) Post(ctx context.Context, q contract.PostRequest) (contract.PostResponse, error) {
 	return call[contract.PostRequest, contract.PostResponse](ctx, c, contract.MethodPost, q)
@@ -660,6 +664,30 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		_, err := getClient().SessionRestart(cmd.Context(), contract.SessionRestartRequest{Session: contract.SessionID(args[0])})
 		return err
 	}}
+	var refreshRoom string
+	refresh := &cobra.Command{Use: "refresh [SESSION]", Short: "Mark a box to restart once nothing needs it", Long: "Mark a running box to restart once no turn, job or terminal needs it. It keeps its volume, unlike session restart, which discards it.", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if (len(args) == 1) == (refreshRoom != "") {
+			return fmt.Errorf("give a session or --room")
+		}
+		request := contract.SessionRefreshRequest{Room: contract.RoomID(refreshRoom)}
+		if len(args) == 1 {
+			request.Session = contract.SessionID(args[0])
+		}
+		r, err := getClient().SessionRefresh(cmd.Context(), request)
+		if err != nil {
+			return err
+		}
+		if len(r.Marked) == 0 {
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), "No running box to mark.")
+		}
+		for _, id := range r.Marked {
+			if _, err := fmt.Fprintln(cmd.OutOrStdout(), id); err != nil {
+				return err
+			}
+		}
+		return err
+	}}
+	refresh.Flags().StringVar(&refreshRoom, "room", "", "Mark every open session in this room")
 	setProfile := &cobra.Command{Use: "set-profile SESSION PROFILE", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := getClient().SessionSetProfile(cmd.Context(), contract.SessionSetProfileRequest{Session: contract.SessionID(args[0]), Profile: contract.ProfileName(args[1])})
 		return err
@@ -699,7 +727,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	}}
 	composeList.Flags().StringVar(&composeRoom, "room", "", "Room ID")
 	composeList.Flags().StringVar(&composeRepo, "repo", "", "Repository a child would use")
-	session.AddCommand(start, closeCmd, restart, setProfile, composeList)
+	session.AddCommand(start, closeCmd, restart, refresh, setProfile, composeList)
 	root.AddCommand(session)
 	var postRoom, htmlPath, update string
 	var allowNet bool

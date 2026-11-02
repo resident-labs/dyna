@@ -70,6 +70,7 @@ const (
 	MethodSessionAccount          Method = "session.account"
 	MethodSessionSetAccount       Method = "session.set_account"
 	MethodSessionRestart          Method = "session.restart"
+	MethodSessionRefresh          Method = "session.refresh"
 	MethodSessionMove             Method = "session.move"
 	MethodPost                    Method = "post"
 	MethodPostSearch              Method = "post.search"
@@ -482,6 +483,17 @@ type SessionRestartRequest struct {
 	Session SessionID `json:"session"`
 }
 type SessionRestartResponse struct{}
+
+// SessionRefreshRequest names one session, or a room for every open session in it that the caller may manage.
+type SessionRefreshRequest struct {
+	Session SessionID `json:"session,omitempty"`
+	Room    RoomID    `json:"room,omitempty"`
+}
+
+// SessionRefreshResponse lists the sessions marked. A box that is not running needs no mark, so it is not among them.
+type SessionRefreshResponse struct {
+	Marked []SessionID `json:"marked"`
+}
 type PostRequest struct {
 	Room         RoomID       `json:"room"`
 	Text         string       `json:"text"`
