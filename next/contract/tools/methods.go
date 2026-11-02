@@ -180,7 +180,7 @@ var methodTable = []MethodEntry{
 		act("session", "restart", typ[contract.SessionRestartRequest](), "Replace the failed box for session; unpushed work is lost.", "session restart"),
 	),
 	method(contract.MethodSessionRefresh, contract.ScopeOperate, UserAccess,
-		act("session", "refresh", typ[contract.SessionRefreshRequest](), "Mark the running box of session, or of every session in room you may manage, to restart once no turn, job or terminal needs it. It keeps its volume, unlike session restart, which discards it.", "session refresh"),
+		act("session", "refresh", typ[contract.SessionRefreshRequest](), "Mark the running box of session, or of every session in room you may manage, to restart once no turn, job or terminal needs it. It keeps its volume, unlike session restart, which discards it. An agent can call it on itself to pick up new tools: it applies at the end of the turn, and the box comes straight back.", "session refresh"),
 	),
 	method(contract.MethodSessionClose, contract.ScopeOperate, UserAccess,
 		act("session", "close", typ[contract.SessionCloseRequest](), "Close session. Set discard to skip its archive.", "session close"),

@@ -223,6 +223,9 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		// A successful stop is an observed fact even if close cancelled it.
 		ctx = context.WithoutCancel(ctx)
 	}
-	_, err = r.change(ctx, b, next, due, failures, cause)
+	changed, err := r.change(ctx, b, next, due, failures, cause)
+	if changed && err == nil && next.State == contract.BoxStopped {
+		r.view.BoxStopped(ctx, b.Session)
+	}
 	return errors.Join(err, workErr)
 }

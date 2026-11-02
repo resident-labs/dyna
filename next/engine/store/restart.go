@@ -12,6 +12,15 @@ import (
 // SendSessionNotice stores a notice for its session, which reads it with its next turn. A notice with a client ID goes once,
 // and a restart does not change that.
 func (s *Store) SendSessionNotice(ctx context.Context, notice contract.Event, id contract.SessionID) error {
+	return s.sendNotice(ctx, notice, id, false)
+}
+
+// WakeWithNotice is SendSessionNotice with a wake, which starts a turn with the notice, and the box first if it is stopped.
+func (s *Store) WakeWithNotice(ctx context.Context, notice contract.Event, id contract.SessionID) error {
+	return s.sendNotice(ctx, notice, id, true)
+}
+
+func (s *Store) sendNotice(ctx context.Context, notice contract.Event, id contract.SessionID, wake bool) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		if body, ok := notice.Body.(contract.SessionNotice); ok && body.ClientID != "" {
 			var sent bool
@@ -23,7 +32,7 @@ func (s *Store) SendSessionNotice(ctx context.Context, notice contract.Event, id
 		if err != nil {
 			return err
 		}
-		return s.InsertDelivery(ctx, tx, seq, notice.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: id}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: false})
+		return s.InsertDelivery(ctx, tx, seq, notice.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: id}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: wake})
 	})
 }
 
