@@ -96,10 +96,13 @@ func (a addonStart) apply(ctx context.Context) (map[string]pi.MCPServer, []strin
 	}
 	paths, failed := a.install(ctx, packages)
 	// Pi asks before it trusts a repository's own resources, and a box has nobody to ask, so repository skills need this.
+	// Pi reads its steer queue after each tool batch, and "all" takes every message queued since as one batch, where its
+	// default takes one per model request.
 	settings, err := json.Marshal(struct {
 		DefaultProjectTrust string   `json:"defaultProjectTrust"`
+		SteeringMode        string   `json:"steeringMode"`
 		Packages            []string `json:"packages,omitempty"`
-	}{"always", paths})
+	}{"always", "all", paths})
 	if err != nil {
 		return nil, nil, err
 	}

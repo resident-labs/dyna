@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
@@ -240,10 +241,12 @@ func TestRunnerWaitsForStartBeforeReadingSteer(t *testing.T) {
 	<-sink.done
 }
 
+// A replayed steer reaches neither Pi nor the job server again: only the steer Pi queued lets a foreground command step aside.
 func TestRunnerSkipsReplayedSteer(t *testing.T) {
 	h := &harnessFake{started: make(chan struct{}), release: make(chan struct{}), delivered: make(map[contract.DeliverySeq]bool)}
 	sink := &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 1)}
-	runner := &Runner{Harness: h, Sink: sink}
+	var stepped atomic.Int32
+	runner := &Runner{Harness: h, Sink: sink, Steered: func() { stepped.Add(1) }}
 	ctx := context.Background()
 	if err := runner.Handle(ctx, contract.BoxMessage{Body: contract.TurnStart{Turn: "turn_a", Inputs: []contract.TurnInput{{Delivery: 1, Text: "start"}}}}); err != nil {
 		t.Fatal(err)
@@ -264,8 +267,8 @@ func TestRunnerSkipsReplayedSteer(t *testing.T) {
 	sink.mu.Lock()
 	acked := sink.acked[1] && sink.acked[2]
 	sink.mu.Unlock()
-	if count != 1 || !acked {
-		t.Fatalf("steers=%d acked=%v", count, acked)
+	if count != 1 || !acked || stepped.Load() != 1 {
+		t.Fatalf("steers=%d acked=%v stepped aside=%d", count, acked, stepped.Load())
 	}
 }
 

@@ -45,6 +45,7 @@ type toolUpstream struct {
 	tools  map[string][]crewTool
 	bodies []string
 	names  []string // the tools declared in the newest request
+	hold   func()   // when set, runs before each answer, so a test can hold the model while it sends input
 }
 
 var newestTask = regexp.MustCompile(`task-[a-z0-9]+`)
@@ -98,8 +99,11 @@ func (m *toolUpstream) serve(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	tools := m.tools[task]
+	tools, hold := m.tools[task], m.hold
 	m.mu.Unlock()
+	if hold != nil {
+		hold()
+	}
 	var call *crewTool
 	if done < len(tools) {
 		call = &tools[done]
