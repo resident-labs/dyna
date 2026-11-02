@@ -51,6 +51,7 @@
   import { mentionable, parseMentions } from "./lib/mentions.ts";
   import { distinctInitials } from "./lib/identity.ts";
   import { computerPlace, fitted, type Rect } from "./lib/float.ts";
+  import { pinPage } from "./lib/viewport.ts";
   import type { ComputerInput, Conversation, PostRequest } from "./lib/contract.gen.ts";
   // A pairing link leaves the address bar and history at once, whatever this browser's state. Only a signed-out page uses it.
   const move = new URLSearchParams(location.hash.slice(1));
@@ -656,7 +657,7 @@
 {/snippet}
 
 {#if signedOut}<ConnectScreen code={pairCode} />
-{:else}<div class="shell" data-app-ready={roomsLoaded && (!room || !!store?.ready)} class:open={room} class:drawer class:tucked={room && wide.current && tucked} class:settings={inSettings}>
+{:else}<div class="shell" {@attach pinPage} data-app-ready={roomsLoaded && (!room || !!store?.ready)} class:open={room} class:drawer class:tucked={room && wide.current && tucked} class:settings={inSettings}>
   <aside class="rail" aria-label="Rooms" tabindex="-1" bind:this={rail} inert={phone.current && !drawer} role={drawer ? "dialog" : undefined} aria-modal={drawer || undefined}
     onclick={event => { if (drawer && event.target instanceof Element && event.target.closest("a, button")) void showDrawer(false, false); }}>
     <nav aria-label="Rooms"><a class="home" href="/" onclick={navigate} aria-current={room || inSettings ? undefined : "page"} aria-label="Home" title="Home"><Icon name="home" /></a>
