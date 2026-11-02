@@ -498,6 +498,27 @@ func TestWorkflowInARealBox(t *testing.T) {
 		t.Fatal("workers took session or box rows")
 	}
 
+	// A worker names its file as it starts, so its transcript opens while it runs.
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	worker := func(step contract.WorkflowStep) (contract.TranscriptTurn, bool) {
+		got, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: first.Session, Step: step.Key})
+		if problem != nil {
+			t.Fatalf("read %s: %+v", step.Name, problem)
+		}
+		if len(got.Turns) == 0 {
+			return contract.TranscriptTurn{}, false
+		}
+		return got.Turns[0], true
+	}
+	wait("every worker's transcript", func() bool {
+		for _, step := range status(first.Run).Steps {
+			if _, read := worker(step); step.Kind == contract.WorkflowStepAgent && (step.Transcript == "" || !read) {
+				return false
+			}
+		}
+		return true
+	})
+
 	// Each worker keeps its own affinity under the crew's session, and each profile's model passes the route.
 	byTask := map[string]crewRequest{}
 	affinities := map[string]bool{}
@@ -525,6 +546,15 @@ func TestWorkflowInARealBox(t *testing.T) {
 
 	wait("the run's end", func() bool { return status(first.Run).Run.State != contract.WorkflowRunning })
 	final := status(first.Run)
+	// The replacement box's workers are filed under the run's turn too. Its first box is gone, and each still opens.
+	for _, step := range final.Steps {
+		if step.Kind != contract.WorkflowStepAgent || step.State != contract.WorkflowStepDone {
+			continue
+		}
+		if turn, read := worker(step); !read || len(turn.Inputs) != 1 || !strings.Contains(turn.Inputs[0].Text, step.Name) || len(turn.Items) == 0 {
+			t.Fatalf("worker %s reads %+v, %v", step.Name, turn, read)
+		}
+	}
 	asked := map[string]bool{}
 	for _, request := range upstream.since(before) {
 		asked[request.task] = true

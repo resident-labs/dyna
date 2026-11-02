@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -408,5 +410,158 @@ const later = Date.now()`)
 		if _, err := parseWorkflowMeta(script); err == nil {
 			t.Errorf("accepted %s", script)
 		}
+	}
+}
+
+// A step change reaches an open page, leaves no event behind and wakes nobody, and a replay of a stored step sends nothing.
+func TestAStepChangeIsLiveAndQuiet(t *testing.T) {
+	w := setupWorkflow(t)
+	_, crew := w.start(w.owner, workflowScript)
+	w.turn(crew)
+	count := func(query string) (n int) {
+		if err := w.store.Read().QueryRowContext(w.ctx, query).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	events, deliveries := count("SELECT COUNT(*) FROM events"), count("SELECT COUNT(*) FROM deliveries")
+	subscription, live := w.live.Subscribe(w.room, 16)
+	defer w.live.Unsubscribe(subscription)
+	w.step(crew, "a", contract.WorkflowStepRunning, "")
+	if _, problem := w.WorkflowStepTranscript(w.ctx, crew, contract.WorkflowStepTranscriptRequest{Key: "a", Transcript: "a.jsonl"}); problem != nil {
+		t.Fatal(problem)
+	}
+	if _, problem := w.WorkflowStepTranscript(w.ctx, crew, contract.WorkflowStepTranscriptRequest{Key: "a", Transcript: "../a.jsonl"}); problem == nil {
+		t.Fatal("a path outside the crew's folder was taken")
+	}
+	if _, problem := w.WorkflowStepEnd(w.ctx, crew, contract.WorkflowStepEndRequest{Key: "a", State: contract.WorkflowStepFailed, Reason: "refused: password=hunter2", Transcript: "a.jsonl", Usage: contract.Usage{OutputTokens: 5}}); problem != nil {
+		t.Fatal(problem)
+	}
+	if stored, problem := w.WorkflowStepStart(w.ctx, crew, contract.WorkflowStepStartRequest{Key: "a", Kind: contract.WorkflowStepAgent}); problem != nil || stored.State != contract.WorkflowStepFailed {
+		t.Fatalf("a stored step: %+v, %+v", stored, problem)
+	}
+	var got []contract.WorkflowStep
+	for len(live) > 0 {
+		if body, ok := (<-live).Body.(contract.WorkflowStepChanged); ok {
+			got = append(got, body.Step)
+		}
+	}
+	if len(got) != 3 || got[0].State != contract.WorkflowStepRunning || got[0].Transcript != "" || got[1].Transcript != "a.jsonl" || got[2].State != contract.WorkflowStepFailed || !strings.HasPrefix(got[2].Reason, "refused") || strings.Contains(got[2].Reason, "hunter2") || got[2].Usage.OutputTokens != 5 {
+		t.Fatalf("live steps %+v", got)
+	}
+	if after, sent := count("SELECT COUNT(*) FROM events"), count("SELECT COUNT(*) FROM deliveries"); after != events || sent != deliveries {
+		t.Fatalf("events %d to %d, deliveries %d to %d", events, after, deliveries, sent)
+	}
+	if status, problem := w.WorkflowStatus(w.ctx, w.owner, contract.WorkflowStatusRequest{Session: crew.Session}); problem != nil || strings.Contains(status.Steps[0].Reason, "hunter2") {
+		t.Fatalf("status %+v, %+v", status, problem)
+	}
+}
+
+// A closed crew's page reads everything from the journal, by its session, because that is all a page has.
+func TestAnEndedRunReadsFromItsJournal(t *testing.T) {
+	w := setupWorkflow(t)
+	started, crew := w.start(w.owner, workflowScript)
+	start := w.turn(crew)
+	merge := `{"branch":"v2/s-run","commit":"abc","merged":["a"],"conflicts":[{"step":"b","branch":"v2/s-b","files":["f.go"]}]}`
+	for key, result := range map[string]string{"merge": merge, "command": `{"code":0,"stdout":"merged","stderr":"","durationMs":1}`} {
+		if _, problem := w.WorkflowStepStart(w.ctx, crew, contract.WorkflowStepStartRequest{Key: key, Kind: contract.WorkflowStepCommand, Name: key, Detail: key}); problem != nil {
+			t.Fatal(problem)
+		}
+		if _, problem := w.WorkflowStepEnd(w.ctx, crew, contract.WorkflowStepEndRequest{Key: key, State: contract.WorkflowStepDone, Result: result}); problem != nil {
+			t.Fatal(problem)
+		}
+	}
+	if _, problem := w.TurnOutput(w.ctx, crew, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnFailed, Error: "Error: nothing found", Cause: contract.CauseWorkflowFailed, Model: "m"}); problem != nil {
+		t.Fatal(problem)
+	}
+	if err := w.store.Write(w.ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(w.ctx, "UPDATE sessions SET closed_at=1 WHERE id=?", started.Session)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status, problem := w.WorkflowStatus(w.ctx, w.owner, contract.WorkflowStatusRequest{Session: started.Session})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if status.Run.Run != started.Run || status.Run.State != contract.WorkflowFailed || status.Run.Result != "Error: nothing found" || len(status.Steps) != 2 {
+		t.Fatalf("status %+v", status)
+	}
+	if status.Merge == nil || status.Merge.Branch != "v2/s-run" || status.Merge.Commit != "abc" || len(status.Merge.Conflicts) != 1 || !slices.Equal(status.Merge.Conflicts[0].Files, []string{"f.go"}) {
+		t.Fatalf("merge %+v", status.Merge)
+	}
+	if _, problem := w.WorkflowStatus(w.ctx, w.owner, contract.WorkflowStatusRequest{Session: w.root}); problem == nil || problem.Code != contract.ErrNotFound {
+		t.Fatalf("a session with no run: %+v", problem)
+	}
+}
+
+func workerFile(delivery contract.DeliverySeq, text string) string {
+	return fmt.Sprintf(`{"type":"message","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","deliveryId":"%d"}}`+"\n"+
+		`{"type":"message","id":"m","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"%s"}]}}`+"\n", delivery, text)
+}
+
+// One worker reads alone, before it ends and after, as it would in a session of its own. A resumed run keeps the step, and the
+// file stays with the crew that wrote it.
+func TestATranscriptReadsOneWorkerByStep(t *testing.T) {
+	w := setupWorkflow(t)
+	started, crew := w.start(w.owner, workflowScript)
+	start := w.turn(crew)
+	delivery := start.Inputs[0].Delivery
+	read := func(session contract.SessionID, step string) contract.TranscriptTurn {
+		t.Helper()
+		got, problem := w.TranscriptRead(w.ctx, w.owner, contract.TranscriptReadRequest{Session: session, Step: step})
+		if problem != nil || len(got.Turns) != 1 {
+			t.Fatalf("read %+v, %+v", got, problem)
+		}
+		return got.Turns[0]
+	}
+	text := func(turn contract.TranscriptTurn) string {
+		var words []string
+		for _, item := range turn.Items {
+			words = append(words, item.Text)
+		}
+		return strings.Join(words, " ")
+	}
+	w.step(crew, "a", contract.WorkflowStepRunning, "")
+	if got, problem := w.TranscriptRead(w.ctx, w.owner, contract.TranscriptReadRequest{Session: started.Session, Step: "a"}); problem != nil || len(got.Turns) != 0 {
+		t.Fatalf("a worker with no file yet: %+v, %+v", got, problem)
+	}
+	w.step(crew, "b", contract.WorkflowStepRunning, "")
+	for key, path := range map[string]string{"a": "a.jsonl", "b": "b.jsonl"} {
+		if _, problem := w.WorkflowStepTranscript(w.ctx, crew, contract.WorkflowStepTranscriptRequest{Key: key, Transcript: path}); problem != nil {
+			t.Fatal(problem)
+		}
+		if _, problem := appendTranscript(w.Service, w.ctx, crew, path, 0, workerFile(delivery, "from "+key)); problem != nil {
+			t.Fatal(problem)
+		}
+	}
+	turn := read(started.Session, "a")
+	if text(turn) != "from a" || turn.Ended != nil || len(turn.Inputs) != 1 || turn.Inputs[0].Text != "work" || turn.Inputs[0].From.Session != started.Session {
+		t.Fatalf("running worker %+v", turn)
+	}
+	if whole, problem := w.TranscriptRead(w.ctx, w.owner, contract.TranscriptReadRequest{Session: started.Session}); problem != nil || !strings.Contains(text(whole.Turns[0]), "from a") || !strings.Contains(text(whole.Turns[0]), "from b") {
+		t.Fatalf("the crew's own read %+v, %+v", whole, problem)
+	}
+	if _, problem := w.WorkflowStepEnd(w.ctx, crew, contract.WorkflowStepEndRequest{Key: "a", State: contract.WorkflowStepDone, Result: `"ok"`, Transcript: "a.jsonl"}); problem != nil {
+		t.Fatal(problem)
+	}
+	if turn = read(started.Session, "a"); turn.Ended == nil || turn.Outcome != "" {
+		t.Fatalf("ended worker %+v", turn)
+	}
+	if _, problem := w.TranscriptRead(w.ctx, w.owner, contract.TranscriptReadRequest{Session: started.Session, Step: "gone"}); problem == nil || problem.Code != contract.ErrNotFound {
+		t.Fatalf("an unknown step: %+v", problem)
+	}
+	if _, problem := w.TranscriptRead(w.ctx, w.owner, contract.TranscriptReadRequest{Session: w.root, Step: "a"}); problem == nil || problem.Code != contract.ErrNotFound {
+		t.Fatalf("a step of another session: %+v", problem)
+	}
+	if _, problem := w.TurnOutput(w.ctx, crew, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnCompleted, Model: "m"}); problem != nil {
+		t.Fatal(problem)
+	}
+	next, problem := w.WorkflowRun(w.ctx, w.owner, contract.WorkflowRunRequest{Room: w.room, Script: workflowScript, Resume: started.Run})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if turn = read(next.Session, "a"); text(turn) != "from a" {
+		t.Fatalf("a kept step of a resumed run: %+v", turn)
 	}
 }

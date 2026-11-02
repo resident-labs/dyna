@@ -213,6 +213,7 @@ var methodTable = []MethodEntry{
 		act("workflow", "status", typ[contract.WorkflowStatusRequest](), "Show one run and its steps. Step results stay in the journal.", "workflow status"),
 	),
 	method(contract.MethodWorkflowStepEnd, contract.ScopeRead, BoxAccess),
+	method(contract.MethodWorkflowStepTranscript, contract.ScopeRead, BoxAccess),
 	method(contract.MethodWorkflowStepStart, contract.ScopeRead, BoxAccess),
 }
 
