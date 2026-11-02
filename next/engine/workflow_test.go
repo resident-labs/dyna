@@ -323,6 +323,46 @@ func TestClosingACrewStopsItsRun(t *testing.T) {
 	}
 }
 
+func TestAClosedCrewKeepsWhatItsStepsRanAndCountsThem(t *testing.T) {
+	w := setupWorkflow(t)
+	started, crew := w.start(w.owner, workflowScript)
+	w.turn(crew)
+	if _, problem := w.WorkflowStepStart(w.ctx, crew, contract.WorkflowStepStartRequest{Key: "cmd", Kind: contract.WorkflowStepCommand, Name: "run: deploy", Detail: "deploy --token=hunter2"}); problem != nil {
+		t.Fatal(problem)
+	}
+	if _, problem := w.WorkflowStepEnd(w.ctx, crew, contract.WorkflowStepEndRequest{Key: "cmd", State: contract.WorkflowStepDone, Result: `{"code":0,"stdout":"token=hunter2 sent"}`}); problem != nil {
+		t.Fatal(problem)
+	}
+	w.step(crew, "other", contract.WorkflowStepFailed, "refused")
+	if _, problem := w.SessionClose(w.ctx, w.owner, contract.SessionCloseRequest{Session: started.Session}); problem != nil {
+		t.Fatal(problem)
+	}
+	output, problem := w.WorkflowStep(w.ctx, w.owner, contract.WorkflowStepRequest{Session: started.Session, Key: "cmd"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if strings.Contains(output.Detail, "hunter2") || strings.Contains(output.Result, "hunter2") || !strings.HasPrefix(output.Detail, "deploy") || !strings.Contains(output.Result, `"code":0`) {
+		t.Fatalf("output %+v", output)
+	}
+	if _, problem := w.WorkflowStep(w.ctx, w.owner, contract.WorkflowStepRequest{Session: started.Session, Key: "nothing"}); problem == nil || problem.Code != contract.ErrNotFound {
+		t.Fatalf("a step that is not in the journal: %+v", problem)
+	}
+	if _, problem := w.WorkflowStep(w.ctx, w.owner, contract.WorkflowStepRequest{Session: w.root, Key: "cmd"}); problem == nil || problem.Code != contract.ErrNotFound {
+		t.Fatalf("a session with no run: %+v", problem)
+	}
+	status, problem := w.WorkflowStatus(w.ctx, w.owner, contract.WorkflowStatusRequest{Run: started.Run})
+	if problem != nil || status.Run.Steps != 2 {
+		t.Fatalf("run %+v, %+v", status.Run, problem)
+	}
+	listed, problem := w.EventsList(w.ctx, w.owner, contract.EventsListRequest{Room: w.room, Types: []contract.EventType{"workflow.ended"}, Limit: 10})
+	if problem != nil || len(listed.Events) != 1 {
+		t.Fatalf("%+v, %+v", listed, problem)
+	}
+	if ended, ok := listed.Events[0].Body.(contract.WorkflowEnded); !ok || ended.Steps != 2 {
+		t.Fatalf("event %+v", listed.Events[0].Body)
+	}
+}
+
 func TestAResumedRunKeepsFinishedStepsAndTheFixedCommit(t *testing.T) {
 	w := setupWorkflow(t)
 	started, crew := w.start(w.owner, workflowScript)

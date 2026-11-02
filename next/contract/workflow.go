@@ -5,6 +5,7 @@ import "time"
 const (
 	MethodWorkflowRun       Method = "workflow.run"
 	MethodWorkflowStatus    Method = "workflow.status"
+	MethodWorkflowStep      Method = "workflow.step"
 	MethodWorkflowList      Method = "workflow.list"
 	MethodWorkflowPin       Method = "workflow.pin"
 	MethodWorkflowStepStart Method = "workflow.step_start"
@@ -59,8 +60,8 @@ type WorkflowRunResponse struct {
 	Box     BoxID         `json:"box"`
 }
 
-// WorkflowInfo is one run. Failed counts failed steps and FailedSteps names them, at most 20. Result is the script's return
-// value, or why it threw.
+// WorkflowInfo is one run. Steps counts its journal, Failed counts failed steps and FailedSteps names them, at most 20. Result
+// is the script's return value, or why it threw.
 type WorkflowInfo struct {
 	Run         WorkflowRunID `json:"run"`
 	Room        RoomID        `json:"room"`
@@ -72,6 +73,7 @@ type WorkflowInfo struct {
 	Commit      string        `json:"commit,omitempty"`
 	State       WorkflowState `json:"state"`
 	Result      string        `json:"result,omitempty"`
+	Steps       int           `json:"steps,omitempty"`
 	Failed      int           `json:"failed"`
 	FailedSteps []string      `json:"failedSteps,omitempty"`
 	Usage       Usage         `json:"usage"`
@@ -106,6 +108,18 @@ type WorkflowStatusResponse struct {
 	Run   WorkflowInfo   `json:"run"`
 	Steps []WorkflowStep `json:"steps"`
 	Merge *WorkflowMerge `json:"merge,omitempty"`
+}
+
+// WorkflowStepRequest names one journal row by its crew session, which a closed crew keeps.
+type WorkflowStepRequest struct {
+	Session SessionID `json:"session"`
+	Key     string    `json:"key"`
+}
+
+// WorkflowStepResponse is what a row leaves out: the prompt, command or text it ran, and its result as JSON text.
+type WorkflowStepResponse struct {
+	Detail string `json:"detail,omitempty"`
+	Result string `json:"result,omitempty"`
 }
 
 // WorkflowMerge is what merge() returns and stores as its step's result.
@@ -199,6 +213,7 @@ type WorkflowEnded struct {
 	Session     SessionID     `json:"session"`
 	Name        string        `json:"name"`
 	State       WorkflowState `json:"state"`
+	Steps       int           `json:"steps,omitempty"`
 	Failed      int           `json:"failed"`
 	FailedSteps []string      `json:"failedSteps,omitempty"`
 	Usage       Usage         `json:"usage"`

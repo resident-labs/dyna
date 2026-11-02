@@ -13,6 +13,7 @@
   import RequestCard from "./RequestCard.svelte";
   import StatusPill from "./StatusPill.svelte";
   import { boxRow, closedSession, describe, formatTime, shortPaths, dayLabel, feedRows, timeSpan, type Quote, type Row } from "../feed.ts";
+  import { runCounts, runWords } from "../workflow.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { Conversation, PostRequest, Principal } from "../contract.gen.ts";
 
@@ -152,7 +153,7 @@
   };
   const estimate = (item: Item): number => {
     if (item.kind === "post") return postHeight(item);
-    if (item.kind === "day" || item.kind === "new" || item.kind === "notice" || item.kind === "restarted") return 28;
+    if (item.kind === "day" || item.kind === "new" || item.kind === "notice" || item.kind === "restarted" || item.kind === "run") return 28;
     return 59;
   };
   // True once the conversation has loaded with no event at all; a session that never existed reads so.
@@ -237,6 +238,8 @@
         shows as waiting that the store lacks was decided outside the window, so it gets no buttons. -->
       {:else if item.kind === "request"}{@const live = store.requests.get(item.request.id)}
         <RequestCard {admin} request={live ?? item.request} gone={!live && item.request.state === "pending"} {store} {now} feed />
+      {:else if item.kind === "run"}{@const word = runWords[item.run.state]}
+        <a class="run" href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(item.run.session)}`} onclick={navigate}><Icon name="tool" size={14} /><span class="run-line"><strong>{item.run.name}</strong>{" · "}{#if word.tone}<StatusPill tone={word.tone} label={word.word} word />{:else}{word.word}{/if}{#each runCounts({ failed: item.run.failed, steps: item.run.steps ?? store.workflows.get(item.run.session)?.steps }) as part (part)}{` · ${part}`}{/each} <time datetime={item.at}>{formatTime(item.at)}</time></span></a>
       {:else if item.kind === "work"}<WorkRow row={item} {name} {opened} ontoggle={toggle} {transcripts} {transcriptOf} {onjobs} prs={store.prs} onmedia={openStep} />
       {:else if item.kind === "new"}<p class="new"><span>New</span></p>
       {:else if item.kind === "day"}<p class="day"><span>{dayLabel(item.at, Date.now())}</span></p>
@@ -263,6 +266,16 @@
   /* The running turn's steps sit where its work line will fold, in the work list's form. */
   .steps { margin: 4px 16px 4px var(--gutter); padding: 0 0 0 12px; border-left: 1px solid var(--line); list-style: none; color: var(--muted); font-size: 12.5px; }
   .steps li { padding: 1px 0; overflow-wrap: anywhere; }
+  /* A run's line sits where a work row does, past PostRow's avatar. */
+  .run { display: grid; grid-template-columns: 14px minmax(0, 1fr); align-items: start; gap: 10px; padding: 7px 16px 7px 72px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; text-decoration: none; }
+  .run :global(svg) { margin-top: 4px; }
+  .run-line { min-width: 0; padding-top: 3px; overflow-wrap: anywhere; }
+  .run strong { color: var(--text); font-weight: 500; }
+  .run time { margin-left: 8px; opacity: .8; white-space: nowrap; }
+  .run:hover strong { text-decoration: underline; }
+  .run:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  @media (max-width: 640px) { .run { padding-left: 64px; } }
+  @media (hover: none) { .run { min-height: 40px; align-items: center; } }
   /* A centred muted date on a hairline, as in Discord. */
   .day { margin: 16px 16px 4px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; }
   .day::before, .day::after { content: ""; flex: 1; border-top: 1px solid var(--line); }

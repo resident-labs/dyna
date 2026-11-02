@@ -720,6 +720,19 @@ test("step rows reach only the open run page, and the run's end and a new connec
   } finally { globalThis.fetch = original; }
 });
 
+test("a run that ends keeps its place in the list with its end and its step count", async () => {
+  const original = globalThis.fetch;
+  const usage = { model: "", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+  globalThis.fetch = (async () => new Response(JSON.stringify({ run: { run: "wf", room: "r", session: "crew", name: "sweep", profiles: [], state: "running", failed: 0, usage, started: "2026-01-01T00:00:00Z" }, steps: [] }))) as typeof fetch;
+  try {
+    const store = new RoomStore("r", () => () => {});
+    await store.readWorkflow("crew");
+    store.apply({ seq: 5, id: "e", at: "2026-01-01T00:04:00Z", from: { kind: "engine" }, type: "workflow.ended", body: { run: "wf", session: "crew", name: "sweep", state: "done", steps: 12, failed: 2, usage } });
+    const { state, steps, failed, ended } = store.workflows.get("crew") ?? {};
+    assert.deepEqual({ state, steps, failed, ended }, { state: "done", steps: 12, failed: 2, ended: "2026-01-01T00:04:00Z" });
+  } finally { globalThis.fetch = original; }
+});
+
 test("a closed crew past the list asks for itself once, and a plain session stays a thread", async () => {
   const original = globalThis.fetch;
   const calls: string[] = [];

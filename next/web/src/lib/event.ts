@@ -102,7 +102,7 @@ const bodies: Record<string, Check> = {
   "goal.set": object({ goal: string, session: optional(string), text: string, doneWhen: optional(string) }),
   "goal.item_changed": object({ goal: string, item: number, text: string, state: oneOf("open", "done", "dropped") }),
   "goal.ended": object({ goal: string, session: optional(string), state: oneOf("active", "done", "dropped"), summary: string }),
-  "workflow.ended": object({ run: string, session: string, name: string, state: oneOf("running", "done", "failed", "stopped"), failed: number, failedSteps: optional(nullable(array(string))), usage }),
+  "workflow.ended": object({ run: string, session: string, name: string, state: oneOf("running", "done", "failed", "stopped"), steps: optional(number), failed: number, failedSteps: optional(nullable(array(string))), usage }),
   "workflow.step_changed": object({ run: string, session: string, step: object({ key: string, parent: optional(string), kind: oneOf("agent", "run", "post", "workflow", "log"), name: string, phase: optional(string), profile: optional(string),
     state: oneOf("running", "done", "failed"), reason: optional(string), transcript: optional(string), usage, started: string, ended: optional(string) }) }),
   "checkin.due": object({ session: string, children: nullable(array(object({ session: string, name: string, parent: optional(string), state: oneOf("idle", "stopped", "blocked"), reason: optional(string),
