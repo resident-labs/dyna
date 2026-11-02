@@ -243,34 +243,23 @@ func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event c
 			handed = slices.DeleteFunc(all, func(item contract.Responsibility) bool {
 				return item.Kind == contract.ResponsibilityGoal && slices.Contains(unheld, contract.GoalID(item.ID))
 			})
-			result, err := tx.ExecContext(ctx, `INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state,handoff_from)
-SELECT 'session',?,seq,'session','post','','','','',1,'pending',COALESCE(handoff_from,?) FROM deliveries d WHERE d.to_kind='session' AND d.to_id=? AND d.state IN ('pending','taken') AND NOT `+jobRunningNotice+` AND NOT `+boxUpdateNotice+`
-ON CONFLICT(to_kind,to_id,seq) DO NOTHING`, parent, id, id)
-			if err != nil {
-				return err
-			}
-			n, err := result.RowsAffected()
-			if err != nil {
-				return err
-			}
-			if n > 0 {
-				if _, err := tx.ExecContext(ctx, "UPDATE boxes SET want='run' WHERE session=? AND want='stop' AND EXISTS (SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND r.paused_at IS NULL)", parent); err != nil {
-					return err
-				}
-				s.wakePending = append(s.wakePending, parent)
-			}
-			if _, err := tx.ExecContext(ctx, "DELETE FROM deliveries WHERE to_kind='session' AND to_id=? AND state IN ('pending','taken')", id); err != nil {
-				return err
-			}
 		}
 		if body, ok := event.Body.(contract.SessionClosed); ok {
 			body.Unheld, body.Handed = unheld, handed
 			event.Body = body
 		}
 		seq, err := s.AppendEvent(tx, event)
-		// A parent that is closing too names all of this in its own notice.
-		if err != nil || parentClosing || len(unheld)+len(handed) == 0 {
+		if err != nil {
 			return err
+		}
+		if parent != "" {
+			if err := s.dropUndelivered(ctx, tx, id, event.Room, event.Time); err != nil {
+				return err
+			}
+		}
+		// A parent that is closing too names all of this in its own notice.
+		if parentClosing || len(unheld)+len(handed) == 0 {
+			return nil
 		}
 		return s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: parent}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
 	})
@@ -578,6 +567,9 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 				}
 			}
 			event.Body = post
+		}
+		if err := refuseDeadParent(ctx, tx, event.From, deliveries); err != nil {
+			return err
 		}
 		for _, delivery := range deliveries {
 			if delivery.To.Kind != contract.PrincipalSession {
