@@ -36,16 +36,18 @@ export function machines(hosts: HostSummary[]): HostSummary[] {
   return hosts.filter(h => h !== same).map(h => h === plane ? merged : h);
 }
 
+// Figures of 100 or more drop the decimal, so a tile's text stays on one line, and large ones group their digits
+// ("1,348 GB free"). GB counts 2^30 bytes, as v1's GiB did. A meter at 90% of its limit or more is busy.
+export const gb = (bytes: number) => bytes / 2 ** 30;
+export const whole = (n: number) => Math.round(n).toLocaleString();
+export const fixed = (n: number) => n >= 100 ? whole(n) : n.toFixed(1);
+export const meter = (label: string, used: number, limit: number, text: string): Meter =>
+  ({ label, text, percent: Math.min(100, Math.round(used / limit * 100)), busy: used >= 0.9 * limit });
+
 // A host's CPU, memory and disk meters, "3.1 of 16 cores", "9.8 of 31 GB" and "412 GB free"; none while it reports
-// no capacity, and no disk tile without a disk figure. Figures of 100 or more drop the decimal, so a tile's text
-// stays on one line, and large ones group their digits ("1,348 GB free"). A meter at 90% of its limit or more is busy. GB counts 2^30 bytes, as v1's GiB did.
+// no capacity, and no disk tile without a disk figure.
 export function hostMeters(h: HostSummary): Meter[] {
   if (!h.cpus || !h.memBytes) return [];
-  const gb = (bytes: number) => bytes / 2 ** 30;
-  const whole = (n: number) => Math.round(n).toLocaleString();
-  const fixed = (n: number) => n >= 100 ? whole(n) : n.toFixed(1);
-  const meter = (label: string, used: number, limit: number, text: string) =>
-    ({ label, text, percent: Math.min(100, Math.round(used / limit * 100)), busy: used >= 0.9 * limit });
   return [
     meter("CPU", h.cpuUsed, h.cpus, `${fixed(h.cpuUsed)} of ${whole(h.cpus)} cores`),
     meter("Memory", h.memUsed, h.memBytes, `${fixed(gb(h.memUsed))} of ${whole(gb(h.memBytes))} GB`),

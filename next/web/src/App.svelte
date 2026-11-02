@@ -764,7 +764,7 @@
         <button type="button" aria-pressed={about} onclick={() => tabs.set(key, "about")}>About</button></header>
       {:else}<header class="bar"><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.sessions.size + (working ? ` · ${working} working` : "")}</span>{/if}{#if attention.can("operate")}<button type="button" class="tool" title="New session" aria-label="New session" onclick={() => openNew("session")}><Icon name="plus" /></button>{/if}</header>{/if}
       <!-- A long tree renders only its visible rows, through the feed's shared list (spec: long lists are virtual). -->
-      {#if about && session && store}<AboutPanel {store} room={room} {session} switchable={attention.can("operate")} navigate={openSession} onclosed={() => openLocation(room!)} onjobs={async event => { if (!wide.current) await showPanel(false, event.detail > 0); void jobsTool?.show(session); }} />
+      {#if about && session && store}<AboutPanel {store} room={room} {session} switchable={attention.can("operate")} shown={panelShown} navigate={openSession} onclosed={() => openLocation(room!)} />
       {:else if tree.length}<div class="tree"><VirtualList bind:this={sessionList} items={tree} key={treeKey}
         label="Session list" role="group" align="top" estimate={48}>
         {#snippet row(entry: TreeRow)}
@@ -791,8 +791,8 @@
       {:else}<p class="hint">No sessions yet.</p>{/if}
       {#if acting && store}{#key acting}<SessionActions {store} {...acting} onclose={stopActing}
         onclosed={ids => { stopActing(false); if (session && ids.includes(session)) openLocation(room!); }} />{/key}{/if}
-      <!-- The foot polls hosts, so it mounts only while the panel shows; a phone's closed panel polls nothing. -->
-      {#if panelShown}<HostFoot {navigate} />{/if}
+      <!-- The foot polls hosts, so it mounts only while the panel shows; a phone's closed panel polls nothing. About has its own box's load, and the foot's other machines would only sit under it, so it stays on the session list. -->
+      {#if panelShown && !about}<HostFoot {navigate} />{/if}
     </aside>
     {#if watching && !docked && !inSettings && section !== "instructions"}{@render computerView(watching)}{/if}
   {:else if activity.active.length}

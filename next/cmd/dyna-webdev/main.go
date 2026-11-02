@@ -381,12 +381,16 @@ func (d devService) SessionWork(ctx context.Context, p contract.Principal, req c
 	return response, problem
 }
 
-// SessionList shows builder-feed's computer as running, so the computer view can be opened.
+// SessionList shows builder-feed's computer as running, so the computer view can be opened, and the asleep session's box
+// as stopped, since a fake box never goes dormant.
 func (d devService) SessionList(ctx context.Context, p contract.Principal, req contract.SessionListRequest) (contract.SessionListResponse, *contract.Error) {
 	list, problem := d.Service.SessionList(ctx, p, req)
 	for i := range list.Sessions {
 		if list.Sessions[i].Name == "builder-feed" {
 			list.Sessions[i].Computer = contract.ComputerRunning
+		}
+		if list.Sessions[i].ID == fixtureAsleep {
+			list.Sessions[i].BoxState = contract.BoxStopped
 		}
 	}
 	return list, problem
@@ -752,6 +756,7 @@ func seedRoom(ctx context.Context, s *engine.Service, st *store.Store, posts, ag
 		log.Fatal(e.Message)
 	}
 	fixtureSession, fixtureChild, fixtureRoom = fixture.Session, child.Session, room.Room
+	seedAbout(ctx, s, room.Room, lead.Session)
 	// A root has the grant by itself; this one shows a question in Needs you, Requests and a DM.
 	asker := contract.Principal{Kind: contract.PrincipalSession, Session: fixture.Session}
 	fatal(st.CreateGrant(ctx, contract.Grant{ID: "grant_fixture", Kind: contract.GrantAskOwner, Room: room.Room, To: asker, By: owner, Created: time.Now()}))
