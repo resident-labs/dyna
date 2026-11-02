@@ -109,12 +109,12 @@ func TestAResumedRunOwnsTheBranchesOfItsChainAndNoOthers(t *testing.T) {
 }
 
 // The live failure: a script passed root's session ID as post's mention. Length plays no part, and neither does the run's stop.
+// A session's ID names it as its name does.
 func TestAPostMentionsAName(t *testing.T) {
 	w := setupWorkflow(t)
 	_, crew := w.start(w.owner, workflowScript)
 	text := strings.Repeat("x", 4892)
-	_, problem := w.Post(w.ctx, crew, contract.PostRequest{Room: w.room, Text: text, Mentions: []string{string(w.root)}})
-	if problem == nil || problem.Code != contract.ErrInvalid || problem.Message != "unknown session @"+string(w.root) {
+	if _, problem := w.Post(w.ctx, crew, contract.PostRequest{Room: w.room, Text: text, Mentions: []string{string(w.root)}}); problem != nil {
 		t.Fatalf("a session ID as a mention: %+v", problem)
 	}
 	if _, problem := w.Post(w.ctx, crew, contract.PostRequest{Room: w.room, Text: text, Mentions: []string{"root"}}); problem != nil {
