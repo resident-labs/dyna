@@ -92,7 +92,8 @@ func (h *Host) StartRun(ctx context.Context, c box.RunContainer) error {
 	out, err := h.run(ctx, runArgs(c)...)
 	var exit remoteExit
 	if errors.As(err, &exit) {
-		return fmt.Errorf("start run: %w: %s", err, strings.TrimSpace(string(out)))
+		// The bare status, since this gives the whole output and err already ends with its last lines.
+		return fmt.Errorf("start run: %w: %s", exit, strings.TrimSpace(string(out)))
 	}
 	return err
 }
