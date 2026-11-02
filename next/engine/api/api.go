@@ -260,6 +260,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodSessionClose, c, a.service.SessionClose)
 	call(mux, contract.MethodSessionSetProfile, c, a.service.SessionSetProfile)
 	call(mux, contract.MethodSessionAccount, c, a.service.SessionAccount)
+	call(mux, contract.MethodSessionResponsibilities, c, a.service.SessionResponsibilities)
 	call(mux, contract.MethodSessionSetAccount, c, a.service.SessionSetAccount)
 	call(mux, contract.MethodSessionRestart, c, a.service.SessionRestart)
 	call(mux, contract.MethodSessionSearch, c, a.service.SessionSearch)
@@ -427,6 +428,7 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 	})
 	call(mux, contract.MethodBoxHello, c, a.service.BoxHello)
+	call(mux, contract.MethodBoxCompacted, c, a.service.BoxCompacted)
 	call(mux, contract.MethodTurnOutput, c, a.service.TurnOutput)
 	call(mux, contract.MethodTurnActivity, c, a.service.TurnActivity)
 	call(mux, contract.MethodDeliveryDone, c, a.service.DeliveryDone)

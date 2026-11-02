@@ -12,14 +12,6 @@ import (
 var ErrNoAskGrant = errors.New("this session has no ask-owner grant")
 var ErrQuestionNotWaiting = errors.New("question is no longer waiting")
 
-// noOpenQuestion holds for a session s the owner owes no answer. A session that waits for one is not finished, however
-// quiet it is, so whatever closes idle sessions needs this. Its box may still stop: the answer wakes it.
-const noOpenQuestion = `NOT EXISTS (SELECT 1 FROM questions q WHERE q.session=s.id AND q.state='pending')`
-
-// blockedOnQuestion holds for a session s with nothing safe left to do until the owner answers. Only this excuses a quiet
-// session from check-ins: any other question leaves it work to do.
-const blockedOnQuestion = `EXISTS (SELECT 1 FROM questions q WHERE q.session=s.id AND q.state='pending' AND q.blocked=1)`
-
 const questionColumns = "id,room,session,text,state,answer,asked_at,answered_at,meanwhile,blocked"
 
 func scanQuestion(row interface{ Scan(...any) error }) (contract.Question, error) {

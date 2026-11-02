@@ -481,6 +481,9 @@ func TestAReconnectDoesNotRestartTheScript(t *testing.T) {
 type recordingTurnOutput struct{ ended chan contract.TurnEnded }
 
 func (recordingTurnOutput) DeliveryDone(context.Context, contract.DeliverySeq) error { return nil }
+func (recordingTurnOutput) Compacted(context.Context, contract.BoxCompactedRequest) error {
+	return nil
+}
 func (r *recordingTurnOutput) TurnOutput(_ context.Context, result contract.TurnEnded) error {
 	r.ended <- result
 	return nil

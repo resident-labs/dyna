@@ -52,6 +52,7 @@ func TestPlanCheckins(t *testing.T) {
 		{"running turn", func(s []CheckinSession) { c := childOf(s); c.Turn, c.Last = true, ago(time.Hour) }, nil},
 		{"turn past the stuck limit", func(s []CheckinSession) { c := childOf(s); c.Turn, c.Last = true, ago(CheckinStuck) }, []contract.SessionID{"lead"}},
 		{"background job", func(s []CheckinSession) { c := childOf(s); c.Jobs, c.Last = 1, ago(time.Hour) }, nil},
+		{"background job past the stuck limit", func(s []CheckinSession) { c := childOf(s); c.Jobs, c.Last = 1, ago(10*CheckinStuck) }, nil},
 		{"pending input", func(s []CheckinSession) { childOf(s).Pending = true }, nil},
 		{"model retry due", func(s []CheckinSession) { childOf(s).Retrying = true }, nil},
 		{"blocked on the owner's answer", func(s []CheckinSession) { childOf(s).Blocked = true }, nil},

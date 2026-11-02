@@ -73,6 +73,7 @@ const (
 	MethodPostSearch              Method = "post.search"
 	MethodSessionSearch           Method = "session.search"
 	MethodEventsList              Method = "events.list"
+	MethodBoxCompacted            Method = "box.compacted"
 	MethodBoxHello                Method = "box.hello"
 	MethodComputerChanged         Method = "computer.changed"
 	MethodComputerInput           Method = "computer.input"
@@ -461,7 +462,14 @@ type SessionCloseRequest struct {
 	Session SessionID `json:"session"`
 	Discard bool      `json:"discard,omitempty"`
 }
-type SessionCloseResponse struct{}
+
+// SessionCloseResponse says what the close does with what its sessions hold. A close takes the session's subtree along.
+type SessionCloseResponse struct {
+	To     SessionID        `json:"to"`     // the parent that takes the work
+	Handed []Responsibility `json:"handed"` // owed work that moves to To
+	Ended  []Responsibility `json:"ended"`  // what stops or is withdrawn with the close
+}
+
 type SessionSetProfileRequest struct {
 	Session SessionID   `json:"session"`
 	Profile ProfileName `json:"profile"`
@@ -582,6 +590,7 @@ type BoxHelloResponse struct {
 }
 type TurnOutputRequest struct {
 	ShellJobs int          `json:"shellJobs"`
+	Jobs      []ShellJobID `json:"jobs,omitempty"` // the jobs ShellJobs counts
 	Error     string       `json:"error,omitempty"`
 	Cause     FailureCause `json:"cause,omitempty"`
 	Turn      TurnID       `json:"turn"`
@@ -665,6 +674,8 @@ const (
 	TranscriptPost     TranscriptItemKind = "post"
 	TranscriptTooLarge TranscriptItemKind = "too_large"
 	TranscriptSteer    TranscriptItemKind = "steer" // a message a running turn read, at the place it read it
+	// TranscriptCompaction marks where Pi summarized the conversation, whatever asked it to. Tokens is the context size before.
+	TranscriptCompaction TranscriptItemKind = "compaction"
 )
 
 type TranscriptCallStatus string
@@ -708,6 +719,7 @@ type TranscriptItem struct {
 	Seq          int64                   `json:"seq,omitempty"`
 	Home         *Conversation           `json:"home,omitempty"`
 	Bytes        int64                   `json:"bytes,omitempty"`
+	Tokens       int64                   `json:"tokens,omitempty"`
 	Attachments  []Attachment            `json:"attachments,omitempty"`
 	Image        *TranscriptImage        `json:"image,omitempty"`
 	Posts        []TranscriptItem        `json:"posts,omitempty"`
@@ -974,6 +986,24 @@ type ArchiveDoneRequest struct {
 }
 type ArchiveDoneResponse struct{}
 
+// Compact asks a quiet box to compact before it stops, if its context is over OverTokens. Turn is the session's last
+// turn: it names the quiet period, and comes back in BoxCompactedRequest.
+type Compact struct {
+	Turn       TurnID `json:"turn"`
+	OverTokens int64  `json:"overTokens"`
+}
+
+// BoxCompactedRequest answers Compact. Neither Compacted nor Error means the context was small enough to leave alone.
+type BoxCompactedRequest struct {
+	Turn         TurnID `json:"turn"`
+	Compacted    bool   `json:"compacted,omitempty"`
+	Error        string `json:"error,omitempty"`
+	TokensBefore int64  `json:"tokensBefore,omitempty"`
+	TokensAfter  int64  `json:"tokensAfter,omitempty"`
+	Usage        Usage  `json:"usage"`
+}
+type BoxCompactedResponse struct{}
+
 type DeliverySeq int64
 type DeliveryDoneRequest struct {
 	Delivery DeliverySeq `json:"delivery"`
@@ -1014,6 +1044,8 @@ func (TurnSteer) BoxMessageType() BoxMessageType { return "turn.steer" }
 func (TurnSteer) isBoxMessageBody()              {}
 func (TurnStop) BoxMessageType() BoxMessageType  { return "turn.stop" }
 func (TurnStop) isBoxMessageBody()               {}
+func (Compact) BoxMessageType() BoxMessageType   { return "compact" }
+func (Compact) isBoxMessageBody()                {}
 
 type TranscriptFetchRequest struct {
 	Path   string `json:"path"`
