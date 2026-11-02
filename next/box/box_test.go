@@ -45,6 +45,39 @@ func TestTransitions(t *testing.T) {
 		}
 	}
 }
+func TestAdmissionFollowsARoomsRule(t *testing.T) {
+	size, _ := box.Size(contract.BoxSizeSmall)
+	host := func(name contract.HostName, pool string, id contract.BoxID) box.Host {
+		return box.Host{Name: name, State: box.HostReady, CPUs: 8, MemBytes: 32 * box.GiB, DiskBytes: 200 * box.GiB, DiskFloor: 20 * box.GiB, Pool: pool, Box: id}
+	}
+	plain, shared, own, theirs := host("plain", "", ""), host("shared", "boats", ""), host("own", "ships", "box_a"), host("theirs", "ships", "box_b")
+	request := box.Box{ID: "box_a", Room: "room", Size: size}
+	for _, tc := range []struct {
+		hosts []box.Host
+		only  []string
+		want  contract.HostName
+	}{
+		{[]box.Host{plain, shared}, nil, "plain"},
+		{[]box.Host{shared}, nil, ""},
+		{[]box.Host{plain}, []string{"other"}, ""},
+		{[]box.Host{plain, shared}, []string{"boats"}, "shared"},
+		{[]box.Host{plain, shared}, []string{"plain"}, "plain"},
+		{[]box.Host{own}, []string{"ships"}, "own"},
+		{[]box.Host{theirs}, []string{"ships"}, ""},
+	} {
+		p := box.Admit(tc.hosts, nil, request, tc.only...)
+		if p.Host != tc.want || (tc.want == "") != (p.Reason == box.PendingRoomHost) {
+			t.Errorf("%+v: %+v", tc, p)
+		}
+	}
+	// A box already on a host stays there, whatever the rule says now.
+	placed := request
+	placed.Host, placed.State, placed.Image = "plain", contract.BoxStopped, "image"
+	if p := box.Admit([]box.Host{plain}, []box.Box{placed}, placed, "boats"); p.Host != "plain" {
+		t.Fatalf("%+v", p)
+	}
+}
+
 func TestAdmission(t *testing.T) {
 	size, _ := box.Size(contract.BoxSizeSmall)
 	h := box.Host{Name: "host", State: box.HostReady, CPUs: 1, MemBytes: 4 * box.GiB, DiskBytes: 40 * box.GiB, DiskFloor: 20 * box.GiB}

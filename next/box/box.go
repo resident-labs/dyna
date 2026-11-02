@@ -10,8 +10,11 @@ import (
 type HostState string
 
 const (
-	HostChecking    HostState = "checking"
-	HostReady       HostState = "ready"
+	HostChecking HostState = "checking"
+	// HostProvisioning is a pool's node before its script has answered. Only the pool step sees one.
+	HostProvisioning HostState = "provisioning"
+	HostReady        HostState = "ready"
+	// HostDraining takes no new box, on its way out.
 	HostDraining    HostState = "draining"
 	HostUnreachable HostState = "unreachable"
 	HostRemoved     HostState = "removed"
@@ -30,6 +33,8 @@ type Host struct {
 	Labels              []string
 	Rooms               []contract.RoomID
 	CheckedAt           time.Time
+	Pool                string         // the pool that holds this node
+	Box                 contract.BoxID // the one box a per-session node serves
 }
 type Box struct {
 	ID      contract.BoxID

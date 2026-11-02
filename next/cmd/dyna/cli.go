@@ -42,6 +42,11 @@ type client interface {
 	Upload(context.Context, contract.RoomID, string) (contract.Attachment, error)
 	HostAdd(context.Context, contract.HostAddRequest) (contract.HostAddResponse, error)
 	HostSetLimits(context.Context, contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, error)
+	HostRemove(context.Context, contract.HostRemoveRequest) (contract.HostRemoveResponse, error)
+	PoolAdd(context.Context, contract.PoolAddRequest) (contract.PoolAddResponse, error)
+	PoolList(context.Context, contract.PoolListRequest) (contract.PoolListResponse, error)
+	PoolRemove(context.Context, contract.PoolRemoveRequest) (contract.PoolRemoveResponse, error)
+	RoomHosts(context.Context, contract.RoomHostsRequest) (contract.RoomHostsResponse, error)
 	RoomSetLimits(context.Context, contract.RoomSetLimitsRequest) (contract.RoomSetLimitsResponse, error)
 	RoomPause(context.Context, contract.RoomPauseRequest) (contract.RoomPauseResponse, error)
 	SessionStop(context.Context, contract.SessionStopRequest) (contract.SessionStopResponse, error)
@@ -103,6 +108,7 @@ type requestType interface {
 		contract.SessionListRequest |
 		contract.SessionResponsibilitiesRequest |
 		contract.GoalSetRequest | contract.GoalListRequest | contract.GoalItemRequest | contract.GoalDoneRequest | contract.GoalJournalRequest |
+		contract.PoolAddRequest | contract.PoolListRequest | contract.PoolRemoveRequest | contract.RoomHostsRequest | contract.HostRemoveRequest |
 		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostSetLimitsRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomDeleteRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.ComposeListRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.SessionRefreshRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest | contract.PrListRequest | contract.PrStatusRequest | contract.PrTrackRequest | contract.PrUntrackRequest
 }
 type responseType interface {
@@ -119,6 +125,7 @@ type responseType interface {
 		contract.SessionListResponse |
 		contract.SessionResponsibilitiesResponse |
 		contract.GoalSetResponse | contract.GoalListResponse | contract.GoalItemResponse | contract.GoalDoneResponse | contract.GoalJournalResponse |
+		contract.PoolAddResponse | contract.PoolListResponse | contract.PoolRemoveResponse | contract.RoomHostsResponse | contract.HostRemoveResponse |
 		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.HostSetLimitsResponse | contract.HostListResponse | contract.RoomCreateResponse | contract.RoomDeleteResponse | contract.RoomRepoAddResponse | contract.RepoCISetResponse | contract.RoomReposResponse | contract.ComposeListResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.SessionRefreshResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse | contract.PrListResponse | contract.PrStatusResponse | contract.PrTrackResponse | contract.PrUntrackResponse
 }
 
@@ -216,6 +223,21 @@ type commandExit int
 func (e commandExit) Error() string { return fmt.Sprintf("command exited with status %d", e) }
 func (c *socketClient) HostAdd(ctx context.Context, q contract.HostAddRequest) (contract.HostAddResponse, error) {
 	return call[contract.HostAddRequest, contract.HostAddResponse](ctx, c, contract.MethodHostAdd, q)
+}
+func (c *socketClient) HostRemove(ctx context.Context, q contract.HostRemoveRequest) (contract.HostRemoveResponse, error) {
+	return call[contract.HostRemoveRequest, contract.HostRemoveResponse](ctx, c, contract.MethodHostRemove, q)
+}
+func (c *socketClient) PoolAdd(ctx context.Context, q contract.PoolAddRequest) (contract.PoolAddResponse, error) {
+	return call[contract.PoolAddRequest, contract.PoolAddResponse](ctx, c, contract.MethodPoolAdd, q)
+}
+func (c *socketClient) PoolList(ctx context.Context, q contract.PoolListRequest) (contract.PoolListResponse, error) {
+	return call[contract.PoolListRequest, contract.PoolListResponse](ctx, c, contract.MethodPoolList, q)
+}
+func (c *socketClient) PoolRemove(ctx context.Context, q contract.PoolRemoveRequest) (contract.PoolRemoveResponse, error) {
+	return call[contract.PoolRemoveRequest, contract.PoolRemoveResponse](ctx, c, contract.MethodPoolRemove, q)
+}
+func (c *socketClient) RoomHosts(ctx context.Context, q contract.RoomHostsRequest) (contract.RoomHostsResponse, error) {
+	return call[contract.RoomHostsRequest, contract.RoomHostsResponse](ctx, c, contract.MethodRoomHosts, q)
 }
 func (c *socketClient) HostList(ctx context.Context, q contract.HostListRequest) (contract.HostListResponse, error) {
 	return call[contract.HostListRequest, contract.HostListResponse](ctx, c, contract.MethodHostList, q)
@@ -484,14 +506,22 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			if h.Leftovers > 0 {
 				state += fmt.Sprintf("\t%d left from deleted rooms", h.Leftovers)
 			}
+			if h.Pool != "" {
+				state += "\tpool " + h.Pool
+			}
 			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", h.Name, humanize.IBytes(uint64(h.DiskUsed)), humanize.IBytes(uint64(h.DiskBytes)), state); err != nil {
 				return err
 			}
 		}
 		return nil
 	}}
-	host.AddCommand(add, limitHost, list)
+	removeHost := &cobra.Command{Use: "remove NAME", Short: "Remove a host with nothing on it", Long: "Remove a host and its forward. It refuses while a box is on the host, and says what is. A pool's node goes back through its script.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := getClient().HostRemove(cmd.Context(), contract.HostRemoveRequest{Host: contract.HostName(args[0])})
+		return err
+	}}
+	host.AddCommand(add, limitHost, list, removeHost)
 	root.AddCommand(host)
+	root.AddCommand(poolCommand(getClient))
 
 	room := &cobra.Command{Use: "room"}
 	for _, paused := range []bool{true, false} {
@@ -518,7 +548,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	limit.Flags().StringVar(&limitMem, "mem", "", "Memory limit; 0 means unlimited")
 	_ = limit.MarkFlagRequired("cpus")
 	_ = limit.MarkFlagRequired("mem")
-	room.AddCommand(limit)
+	room.AddCommand(limit, roomHostsCommand(getClient))
 	var rootProfile string
 	create := &cobra.Command{Use: "create NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		r, err := getClient().RoomCreate(cmd.Context(), contract.RoomCreateRequest{Name: args[0], RootProfile: contract.ProfileName(rootProfile)})

@@ -220,6 +220,8 @@ func id(prefix string, now time.Time) (string, error) {
 
 func failure(err error) *contract.Error {
 	code := contract.ErrUnavailable
+	var held *store.HostHeldError
+	var used *store.PoolInUseError
 	if errors.Is(err, approve.ErrForbidden) {
 		code = contract.ErrForbidden
 	} else if errors.Is(err, approve.ErrInvalid) {
@@ -232,6 +234,8 @@ func failure(err error) *contract.Error {
 		code = contract.ErrSessionClosing
 	} else if errors.Is(err, store.ErrParentClosing) {
 		code = contract.ErrParentClosing
+	} else if errors.Is(err, store.ErrPoolExists) || errors.As(err, &held) || errors.As(err, &used) {
+		code = contract.ErrConflict
 	} else if errors.Is(err, store.ErrTurnConflict) || errors.Is(err, store.ErrRoomDeleting) || errors.Is(err, store.ErrQuestionNotWaiting) || errors.Is(err, store.ErrPRTracked) || errors.Is(err, store.ErrIssueTracked) {
 		code = contract.ErrConflict
 	} else if errors.Is(err, store.ErrNoAskGrant) {
