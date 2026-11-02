@@ -158,6 +158,14 @@ func (r *AuthRPC) Delete(req AuthDelete, _ *struct{}) error {
 	return nil
 }
 
+// LocalUsage records one finished request of the local client.
+func (r *AuthRPC) LocalUsage(req contract.ProxyUsage, _ *struct{}) error {
+	if err := r.Store.AddLocalUsage(context.Background(), req); err != nil {
+		return errors.New("proxy store unavailable")
+	}
+	return nil
+}
+
 func (r *AuthRPC) OAuthCompleted(req OAuthCompletion, out *OAuthCompletionResult) error {
 	if r.Complete == nil {
 		return errors.New("account completion unavailable")

@@ -20,14 +20,15 @@ import (
 )
 
 type API struct {
-	service Service
-	Build   string
-	model   func(Caller) http.Handler
-	git     func(Caller) http.Handler
-	github  http.Handler
-	web     *Web
-	files   func(Caller) http.Handler
-	connect ConnectOperations
+	service    Service
+	Build      string
+	model      func(Caller) http.Handler
+	localModel http.Handler
+	git        func(Caller) http.Handler
+	github     http.Handler
+	web        *Web
+	files      func(Caller) http.Handler
+	connect    ConnectOperations
 }
 
 type ConnectOperations interface {
@@ -44,6 +45,9 @@ func New(service Service, model func(Caller) http.Handler) *API {
 }
 
 func (a *API) SetFilesRoute(route func(Caller) http.Handler) { a.files = route }
+
+// SetLocalModelRoute configures the owner socket's model route before opening sockets.
+func (a *API) SetLocalModelRoute(route http.Handler) { a.localModel = route }
 
 // SetGitHubRead configures the GitHub route of a Run's socket before opening sockets.
 func (a *API) SetGitHubRead(route http.Handler) { a.github = route }
@@ -248,6 +252,8 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodAccountsSetKey, c, a.service.AccountsSetKey)
 	call(mux, contract.MethodAccountsImportOAuth, c, a.service.AccountsImportOAuth)
 	call(mux, contract.MethodAccountsQuota, c, a.service.AccountsQuota)
+	call(mux, contract.MethodProxyKey, c, a.service.ProxyKey)
+	call(mux, contract.MethodProxyUsage, c, a.service.ProxyUsage)
 	call(mux, contract.MethodRoomCreate, c, a.service.RoomCreate)
 	call(mux, contract.MethodRoomDelete, c, a.service.RoomDelete)
 	call(mux, contract.MethodHostSetLimits, c, a.service.HostSetLimits)
@@ -570,6 +576,10 @@ func (a *API) handler(c Caller) http.Handler {
 	}
 	if box(c) && a.model != nil {
 		mux.HandleFunc("/model/", func(w http.ResponseWriter, r *http.Request) { a.model(c).ServeHTTP(w, r) })
+	}
+	// Never on the web listener, which Connect carries off the host.
+	if owner(c) && !c.Web && a.localModel != nil {
+		mux.Handle("/model/", a.localModel)
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, &contract.Error{Code: contract.ErrNotFound, Message: "route not found"})
