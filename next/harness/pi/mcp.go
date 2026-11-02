@@ -9,6 +9,14 @@ import (
 // DynaMCPURL is where the box agent serves the dyna MCP server.
 const DynaMCPURL = "http://127.0.0.1:7781/dyna/"
 
+// GitHubMCPURL is where the box agent passes GitHub's read-only MCP server through to the engine.
+const GitHubMCPURL = "http://127.0.0.1:7781/github/"
+
+// GitHubServer is the github server's entry: deferred like dyna's tools, and described so the model knows to search for it.
+func GitHubServer() MCPServer {
+	return MCPServer{URL: GitHubMCPURL, Exposure: "deferred", Timeout: 300, Description: "Read-only GitHub through the engine: search code, issues, PRs, commits and repos; read files, branches, tags, releases, PRs with files, diffs and reviews, issues and comments, Actions runs and job logs."}
+}
+
 // MCPServer is one entry of Pi's MCP config, by URL or by command.
 type MCPServer struct {
 	URL      string   `json:"url,omitempty"`
