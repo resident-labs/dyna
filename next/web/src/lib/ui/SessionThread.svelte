@@ -19,7 +19,7 @@
   import TimelineMinimap from "./TimelineMinimap.svelte";
   import PostTarget from "./PostTarget.svelte";
   import QuestionCard from "./QuestionCard.svelte";
-  import { compactionNote, deriveTimelineGroups, finalTimelineItem, ownPost, postDestination, visibleTimelineText, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, steerInput, timelineAnswers, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief } from "../timeline.ts";
+  import { compactionNote, finalTimelineItem, ownPost, postDestination, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief } from "../timeline.ts";
 
   // With step, the thread reads one worker of a crew: its transcript alone, and nothing that was sent to the crew.
   let { session, step, roomName, store, operate, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { startingBrief?: string; session: string; step?: string; roomName: string; store: RoomStore; operate: boolean; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
@@ -290,7 +290,7 @@
   </div>
 {/snippet}
 
-{#snippet postItem(turn: TranscriptTurn, item: TranscriptItem, working = false)}
+{#snippet postItem(turn: TranscriptTurn, item: TranscriptItem)}
   {@const to = item.kind === "post" ? postDestination(item, session, store.room, roomName, id => sender("session", id)) : undefined}
   {#snippet destination()}<div class="post-destination"><PostTarget to={to!} onjump={item.room && item.seq ? () => onpostlocation(item.room!, item.seq!) : undefined} /></div>{/snippet}
   {#snippet content()}
@@ -305,7 +305,7 @@
       {@render destination()}
       {#if item.attachments?.length}{@render content()}{:else}<CollapsibleBody>{@render content()}</CollapsibleBody>{/if}
     </div>
-  {:else}<div class="agent-message" class:working data-media-key={item.id}>{@render body()}</div>{/if}
+  {:else}<div class="agent-message" data-media-key={item.id}>{@render body()}</div>{/if}
 {/snippet}
 
 <!-- What a session read, at the start of a turn or as a steer. Part names the item whose full text loads for it. -->
@@ -346,30 +346,27 @@
     {/if}
     {#each turns as turn, index (turn.id)}
       {@const segments = timelineSegments(turn.id, turn.items ?? [])}
-      {@const answers = timelineAnswers(segments, session)}
       {@render dayMark(turn.started, turns[index - 1]?.started)}
       <article data-turn={turn.id} class:ended={turn.ended || stalled}>
         {#each turn.inputs ?? [] as input (input.id)}{@render inputRow(turn, input.id, "input:" + input.id, input)}{/each}
         {#each segments as segment, position (segment.id)}
           {@const hasWork = (!position && !!turn.olderItems) || segment.items.some(item => item.kind === "tool" || item.kind === "thinking")}
           {#each segment.steers as steer (steer.id)}{@render inputRow(turn, steer.id, steer.id, steerInput(steer))}{/each}
-          <!-- Dyna: Posts and the final answer remain visible outside the work fold. -->
+          <!-- Dyna: Only thoughts and tool calls fold. The agent's text and posts stay in view, in order, around them. -->
           {#if turn.ended && hasWork}
             <button class="work-header" aria-expanded={!!expandedTurns[segment.id]} onclick={() => { expandedTurns[segment.id] = !expandedTurns[segment.id]; if (expandedTurns[segment.id] && turn.olderItems) void readContinuation(turn, "older"); }}>{position ? "Continued" : "Worked"} for {formatTimelineDuration(segmentDuration(segments, position, turn.started, turn.ended))}<span class:open={expandedTurns[segment.id]}><Icon name="chevron" size={14} /></span></button>
           {/if}
-          {#each deriveTimelineGroups(segment.items) as group (group.id)}
+          {#each shownTimelineGroups(segment.items, !!turn.ended && !expandedTurns[segment.id]) as group (group.id)}
             {#if group.kind === "work"}
-              {#if !turn.ended || expandedTurns[segment.id]}
               <TranscriptWorkRow items={group.items} ended={!!turn.ended || stalled} started={turn.started} {now} {chunks} {session} onmedia={key => openMedia(key, 0)}
                 onopen={() => { if (turn.olderItems) void readContinuation(turn, "older"); }}
                 onload={async (item, part) => { if (!await fetchPart(turn.id, item.id, part)) throw new Error("Part did not load"); }} />
-              {/if}
             {:else if group.kind === "posts"}
               {#each group.item.posts ?? [] as post (post.id)}
                 {@render postItem(turn, post)}
               {/each}
             {:else if group.item.kind === "text" || group.item.kind === "post"}
-              {#if group.item.kind === "post" || visibleTimelineText(group.item.id, answers, !!turn.ended, hasWork, !!expandedTurns[segment.id])}{@render postItem(turn, group.item, !!turn.ended && hasWork && group.item.kind === "text" && !answers.has(group.item.id))}{/if}
+              {@render postItem(turn, group.item)}
             {:else if group.item.kind === "compaction"}<p class="muted turn-note">{compactionNote(group.item)}</p>
             {:else if group.item.kind === "too_large"}<p class="muted">This item is too large to show.</p>{/if}
           {/each}
@@ -421,7 +418,6 @@
   .unsent { color: var(--danger); }
   .unsent .retry { color: inherit; }
   .agent-message { min-width: 0; }
-  .agent-message.working { color: var(--muted); }
   .post-destination { display: flex; min-width: 0; margin-bottom: 4px; }
   /* Mirrors .bubble from the other side. */
   .agent-input { align-self: flex-start; max-width: 80%; min-width: 0; padding: 12px 16px; background: var(--raised); border-radius: 12px; }
