@@ -199,11 +199,10 @@ func TestRunnersFollowAssignedJobsUpToTheBound(t *testing.T) {
 	}
 }
 
-// With no bound, admission alone decides: a runner keeps its CPUs busy, so a 64-CPU host takes 64 CPUs of runners, eight
-// large ones.
+// With no bound, admission alone decides: a 64-CPU host takes twice its CPUs of runners, sixteen large ones.
 func TestWithoutABoundAdmissionDecides(t *testing.T) {
 	f := newFixture(0)
-	if capacity := f.scale(10); capacity != 8 || len(f.drivers["pve"].runners) != 8 {
+	if capacity := f.scale(20); capacity != 16 || len(f.drivers["pve"].runners) != 16 {
 		t.Fatalf("capacity %d, runners %d", capacity, len(f.drivers["pve"].runners))
 	}
 }
@@ -225,7 +224,7 @@ func TestFinishedRunnerLeavesAndTheNextJobGetsANewOne(t *testing.T) {
 func TestAdmissionSpillsToTheNextHostWhenOneIsFull(t *testing.T) {
 	f := newFixture(0)
 	big := readyHost("big", 128*box.GiB)
-	big.CPUs = 8 // one large runner
+	big.CPUs = 4 // one large runner
 	f.addHost(big)
 	f.scale(1)
 	if len(f.drivers["big"].runners) != 1 || len(f.drivers["pve"].runners) != 0 {
@@ -362,7 +361,7 @@ func TestHostDroppingOutReapsItsIdleRunners(t *testing.T) {
 	// The host is back. Its idle runner has exited; its busy one still runs.
 	f.store.hosts[1].State = box.HostReady
 	laptop.runners = laptop.runners[1:]
-	if capacity := f.scale(1); capacity != 8 || len(laptop.runners) != 1 {
+	if capacity := f.scale(1); capacity != 16 || len(laptop.runners) != 1 {
 		t.Fatalf("capacity %d, runners %d after the return", capacity, len(laptop.runners))
 	}
 	f.stop()
