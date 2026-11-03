@@ -223,3 +223,34 @@ func TestDiskLowSinceNeedsAnUnbrokenRun(t *testing.T) {
 		}
 	}
 }
+
+// A pool node warns at its floor, and a hand-added host at floor plus headroom, from the stored total.
+func TestDiskWarnPoolNodeWarnsAtFloor(t *testing.T) {
+	ctx := context.Background()
+	s := diskStore(t)
+	if _, err := s.writer.Exec(`INSERT INTO hosts(name,ssh,state,cpus,mem_bytes,disk_bytes,checked_at,pool) VALUES('node','','ready',1,1,0,0,'boats')`); err != nil {
+		t.Fatal(err)
+	}
+	const total = 146 * box.GiB // Floor 20 GiB; a hand-added host warns at 56.5 GiB.
+	for i, step := range []struct {
+		host   contract.HostName
+		free   int64
+		alerts int
+	}{
+		{"node", 50 * box.GiB, 0},
+		{"node", 21 * box.GiB, 0},
+		{"node", 19 * box.GiB, 1},
+		{"h", 50 * box.GiB, 2},
+	} {
+		if err := s.RecordHostHeartbeat(ctx, step.host, true, &step.free, total, time.Unix(int64(i)*3600, 0)); err != nil {
+			t.Fatal(err)
+		}
+		if events, _ := diskAlerts(t, s); events["r1"] != step.alerts {
+			t.Fatalf("step %d: %d alerts, want %d", i, events["r1"], step.alerts)
+		}
+	}
+	hosts, err := s.Hosts(ctx)
+	if err != nil || hosts[0].DiskTotal != total {
+		t.Fatalf("stored total: %+v %v", hosts, err)
+	}
+}
