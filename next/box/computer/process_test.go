@@ -1,13 +1,16 @@
 package computer
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
+	"time"
 )
 
 func TestCgroupLimitAndFallback(t *testing.T) {
@@ -54,42 +57,168 @@ func TestCgroupUnlimitedMemory(t *testing.T) {
 }
 
 func TestLaunchArgs(t *testing.T) {
-	args := strings.Join(launchArgs, " ")
-	for _, flag := range []string{"--headless=new", "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222", "--user-data-dir=/box/computer", "--disable-dev-shm-usage", "--no-first-run", "about:blank"} {
-		if !strings.Contains(args, flag) {
+	browser := strings.Join(browserArgs, " ")
+	for _, flag := range []string{"--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222", "--user-data-dir=/box/computer", "--disable-dev-shm-usage", "--no-first-run", "about:blank"} {
+		if !strings.Contains(browser, flag) {
+			t.Fatalf("missing %s", flag)
+		}
+	}
+	if strings.Contains(browser, "headless") {
+		t.Fatal("Chromium must open a window on the desktop")
+	}
+	desktop := strings.Join(desktopArgs(VNCSocket), " ")
+	for _, flag := range []string{":1 ", "-geometry 1280x800", "-rfbunixpath /run/dyna/vnc.sock", "-rfbport -1", "-SecurityTypes None", "-AcceptSetDesktopSize=0"} {
+		if !strings.Contains(desktop, flag) {
 			t.Fatalf("missing %s", flag)
 		}
 	}
 }
 
-func TestOOMExitReportedOnce(t *testing.T) {
+// fakeDesktop puts an Xvnc, a jwm and a chromium on PATH. Xvnc makes its VNC socket and waits; the others write their
+// arguments and wait. With oom, the first chromium exits at once and counts an OOM kill.
+func fakeDesktop(t *testing.T, oom bool) (*Process, string) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "computer")
-	if err := os.Mkdir(dir, 0700); err != nil {
+	if err := os.Mkdir(filepath.Join(root, "computer"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	fifo := filepath.Join(root, "wait")
-	if err := syscall.Mkfifo(fifo, 0600); err != nil {
-		t.Fatal(err)
+	started := filepath.Join(root, "started")
+	if !oom {
+		if err := os.WriteFile(started, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	script := fmt.Sprintf("#!/bin/sh\nif [ ! -f %q ]; then touch %q; echo 'oom_kill 1' > %q; exit 1; fi\nread x < %q\n", filepath.Join(root, "started"), filepath.Join(root, "started"), filepath.Join(dir, "memory.events"), fifo)
-	if err := os.WriteFile(filepath.Join(root, "chromium"), []byte(script), 0700); err != nil {
-		t.Fatal(err)
+	scripts := map[string]string{
+		"Xvnc":     "#!/bin/sh\nwhile [ \"$1\" != -rfbunixpath ]; do shift; done\ntouch \"$2\"\nexec sleep 600\n",
+		"jwm":      "#!/bin/sh\necho \"$@\" > " + filepath.Join(root, "jwm.args") + "\nexec sleep 600\n",
+		"chromium": fmt.Sprintf("#!/bin/sh\necho \"$DISPLAY $*\" > %q\nif [ ! -f %q ]; then touch %q; echo 'oom_kill 1' > %q; exit 1; fi\nexec sleep 600\n", filepath.Join(root, "chromium.args"), started, started, filepath.Join(root, "computer/memory.events")),
+	}
+	for name, script := range scripts {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(script), 0700); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", root+":"+os.Getenv("PATH"))
-	p := &Process{root: root}
-	defer p.Close()
+	tmp := filepath.Join(root, "tmp")
+	if err := os.MkdirAll(filepath.Join(tmp, ".X11-unix"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	// A killed display's lock and socket.
+	for _, stale := range []string{filepath.Join(tmp, ".X1-lock"), filepath.Join(tmp, ".X11-unix", "X1")} {
+		if err := os.WriteFile(stale, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := &Process{root: root, socket: filepath.Join(root, "run", "vnc.sock"), tmp: tmp}
+	t.Cleanup(p.Close)
+	return p, root
+}
+
+func TestDesktopStartsOnceAndReportsAChromiumExitOnce(t *testing.T) {
+	p, root := fakeDesktop(t, true)
+	var states []bool
+	p.notify = func(running bool) { states = append(states, running) }
 	if _, err := p.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	<-p.done
+	if _, err := os.Stat(filepath.Join(root, "tmp", ".X1-lock")); !os.IsNotExist(err) {
+		t.Fatalf("a stale X lock stays: %v", err)
+	}
+	waitFor(t, func() bool { args, _ := os.ReadFile(filepath.Join(root, "jwm.args")); return len(args) > 0 })
+	if args, err := os.ReadFile(filepath.Join(root, "jwm.args")); err != nil || !strings.Contains(string(args), "-f "+filepath.Join(root, "run", "jwmrc")) {
+		t.Fatalf("jwm args %q: %v", args, err)
+	}
+	if config, err := os.ReadFile(filepath.Join(root, "run", "jwmrc")); err != nil || !bytes.Contains(config, []byte("<TaskList")) {
+		t.Fatalf("jwm config: %v", err)
+	}
+	p.mu.Lock()
+	display := p.display
+	p.mu.Unlock()
+	waitFor(t, func() bool { p.mu.Lock(); defer p.mu.Unlock(); return p.browser == nil })
 	report, err := p.Start(context.Background())
-	if err != nil || !strings.Contains(report, "memory limit") {
+	if err != nil || report != "Chromium was killed by the computer memory limit" {
 		t.Fatalf("report %q: %v", report, err)
+	}
+	waitFor(t, func() bool { args, _ := os.ReadFile(filepath.Join(root, "chromium.args")); return len(args) > 0 })
+	if args, err := os.ReadFile(filepath.Join(root, "chromium.args")); err != nil || !strings.HasPrefix(string(args), ":1 ") {
+		t.Fatalf("Chromium is not on the display: %q, %v", args, err)
 	}
 	report, err = p.Start(context.Background())
 	if err != nil || report != "" {
 		t.Fatalf("second report %q: %v", report, err)
+	}
+	p.mu.Lock()
+	same := p.display == display
+	p.mu.Unlock()
+	if !same || len(states) != 1 || !states[0] {
+		t.Fatalf("the display started again: same=%v states=%v", same, states)
+	}
+}
+
+func TestDesktopExitStopsItsProgramsAndReports(t *testing.T) {
+	p, _ := fakeDesktop(t, false)
+	var states []bool
+	p.notify = func(running bool) { states = append(states, running) }
+	if _, err := p.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	p.mu.Lock()
+	display, wm, browser := p.display, p.wm, p.browser
+	p.mu.Unlock()
+	display.kill()
+	<-wm.done
+	<-browser.done
+	waitFor(t, func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.display == nil && p.wm == nil && p.browser == nil
+	})
+	report, err := p.Start(context.Background())
+	if err != nil || report != "The desktop exited: signal: killed" {
+		t.Fatalf("report %q: %v", report, err)
+	}
+	if len(states) != 3 || !states[0] || states[1] || !states[2] {
+		t.Fatalf("states %v", states)
+	}
+}
+
+func TestStreamCarriesBothWaysUntilTheViewCloses(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "vnc.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = conn.Write([]byte("RFB 003.008\n"))
+		_, _ = io.Copy(io.Discard, conn)
+	}()
+	in, view := io.Pipe()
+	out, screen := io.Pipe()
+	ended := make(chan error, 1)
+	go func() { ended <- Stream(context.Background(), socket, in, screen) }()
+	greeting := make([]byte, 12)
+	if _, err := io.ReadFull(out, greeting); err != nil || string(greeting) != "RFB 003.008\n" {
+		t.Fatalf("greeting %q: %v", greeting, err)
+	}
+	if _, err := view.Write([]byte("RFB 003.008\n")); err != nil {
+		t.Fatal(err)
+	}
+	_ = view.Close()
+	select {
+	case err := <-ended:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stream outlived its view")
+	}
+	if err := Stream(context.Background(), filepath.Join(t.TempDir(), "none.sock"), nil, io.Discard); err == nil || !strings.Contains(err.Error(), "not running") {
+		t.Fatalf("no desktop: %v", err)
 	}
 }
 
@@ -104,4 +233,14 @@ func TestOOMCount(t *testing.T) {
 	if got := oomCount(root); got != 2 {
 		t.Fatalf("oom kills = %d", got)
 	}
+}
+
+func waitFor(t *testing.T, ok func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if ok() {
+			return
+		}
+	}
+	t.Fatal("timed out")
 }
