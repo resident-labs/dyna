@@ -88,6 +88,8 @@ func (f *Files) put(room contract.RoomID, item contract.Addon) error {
 	if err != nil {
 		return err
 	}
+	// A replacement keeps the mark: only SetRootOnly, the owner's, takes it off.
+	item.RootOnly = item.RootOnly || slices.ContainsFunc(items, func(held contract.Addon) bool { return same(item.Kind, item.Name)(held) && held.RootOnly })
 	return f.write(room, append(slices.DeleteFunc(items, same(item.Kind, item.Name)), item))
 }
 
@@ -175,9 +177,10 @@ func (f *Files) SetEnabled(room contract.RoomID, kind contract.AddonKind, name s
 	return f.write(room, items)
 }
 
-// Bundle packs what a box of this scope gets: the list of enabled items and their skill folders. It is nil for a scope
-// that has never held anything, so such a scope mirrors nothing, and a scope emptied later mirrors an empty list.
-func (f *Files) Bundle(room contract.RoomID) ([]byte, error) {
+// Bundle packs what a box of this scope gets: the list of enabled items and their skill folders. Root-only items go in
+// the root bundle and never in the other, which every box mounts. It is nil for a scope that has never held anything,
+// so such a scope mirrors nothing, and a scope emptied later mirrors an empty list.
+func (f *Files) Bundle(room contract.RoomID, rootOnly bool) ([]byte, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	items, found, err := f.read(room)
@@ -185,7 +188,7 @@ func (f *Files) Bundle(room contract.RoomID) ([]byte, error) {
 		return nil, err
 	}
 	archive := skills.NewArchive()
-	enabled := slices.DeleteFunc(items, func(item contract.Addon) bool { return item.Disabled })
+	enabled := slices.DeleteFunc(items, func(item contract.Addon) bool { return item.Disabled || item.RootOnly != rootOnly })
 	list, err := json.Marshal(skills.List{Items: enabled})
 	if err != nil {
 		return nil, err

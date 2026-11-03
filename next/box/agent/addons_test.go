@@ -220,28 +220,11 @@ func TestAHostSkillSaysWhereItsCommandsRun(t *testing.T) {
 	}
 }
 
-func TestRootOnlyItemsReachOnlyRootBoxes(t *testing.T) {
-	for _, root := range []bool{false, true} {
-		b := newAddonBox(t)
-		b.Root = root
-		writeBundle(t, b.Bundles[0], []contract.Addon{
-			{Kind: contract.AddonSkill, Name: "secret", RootOnly: true},
-			{Kind: contract.AddonSkill, Name: "open"},
-			{Kind: contract.AddonMCP, Name: "private", Command: "server", RootOnly: true},
-		}, bundleSkill{"secret", "root"}, bundleSkill{"open", "all"})
-		servers, problems, err := b.apply(context.Background())
-		if err != nil || len(problems) != 0 {
-			t.Fatalf("%v %v", problems, err)
-		}
-		_, statErr := os.Stat(filepath.Join(b.Skills, "secret", skills.File))
-		if got := statErr == nil; got != root {
-			t.Errorf("root=%v: secret skill present=%v", root, got)
-		}
-		if _, got := servers["private"]; got != root {
-			t.Errorf("root=%v: server present=%v", root, got)
-		}
-		if _, err := os.Stat(filepath.Join(b.Skills, "open", skills.File)); err != nil {
-			t.Error(err)
-		}
+func TestOnlyARootBoxReadsTheRootOnlyBundles(t *testing.T) {
+	if got := roomAddons(false).Bundles; len(got) != 2 || strings.Contains(strings.Join(got, " "), "root-addons") {
+		t.Fatalf("%v", got)
+	}
+	if got := roomAddons(true).Bundles; len(got) != 4 || !strings.Contains(strings.Join(got, " "), "/run/dyna/root-addons/room/") {
+		t.Fatalf("%v", got)
 	}
 }
