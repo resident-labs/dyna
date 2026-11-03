@@ -11,6 +11,7 @@ import (
 	"image/png"
 	"io"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -126,6 +127,56 @@ func (c *rfbClient) handshake() error {
 func (c *rfbClient) Close() { _ = c.conn.Close() }
 
 // request asks for an update of r, or of what changed in it since the last one.
+// textKeysyms turns text into the keysyms that type it: Enter and Tab for line breaks and tabs, Latin-1 characters as
+// themselves, and any other character as its Unicode keysym.
+func textKeysyms(text string) []uint32 {
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	var out []uint32
+	for _, c := range text {
+		switch {
+		case c == '\n':
+			out = append(out, 0xff0d)
+		case c == '\t':
+			out = append(out, 0xff09)
+		case c >= 0x20 && c <= 0x7e || c >= 0xa0 && c <= 0xff:
+			out = append(out, uint32(c))
+		default:
+			out = append(out, 0x01000000+uint32(c))
+		}
+	}
+	return out
+}
+
+// TypeText types text on the desktop as VNC key events, a press and a release for each character. xdotool types a
+// character the keyboard map lacks by mapping it onto a spare key, typing it and restoring the map at once, and an app
+// that reads the key after the restore drops it, as in about 2 typings of "é" in 10. Xvnc maps a keysym it lacks onto a
+// spare key itself and keeps it there, and adds Shift where a character needs it, so every character arrives.
+func TypeText(ctx context.Context, socket, text string) error {
+	c, err := dialRFB(ctx, socket, 1)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	var events []byte
+	for _, keysym := range textKeysyms(text) {
+		for _, down := range []byte{1, 0} {
+			events = binary.BigEndian.AppendUint32(append(events, 4, down, 0, 0), keysym)
+		}
+	}
+	if _, err := c.conn.Write(events); err != nil {
+		return err
+	}
+	// The events are Xvnc's once it answers a request sent after them, so the settle that follows sees what they did.
+	if err := c.request(false, Rect{0, 0, 1, 1}); err != nil {
+		return err
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = c.conn.SetReadDeadline(deadline)
+	}
+	_, err = c.update(nil)
+	return err
+}
+
 func (c *rfbClient) request(incremental bool, r Rect) error {
 	message := []byte{3, 0}
 	if incremental {
