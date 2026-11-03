@@ -10,7 +10,7 @@ import (
 func imageArchive(t *testing.T) []byte {
 	t.Helper()
 	archive := skills.NewArchive()
-	if err := archive.Add("Containerfile", 0o600, []byte("FROM ${DYNA_BASE}\n")); err != nil {
+	if err := archive.Add("Containerfile", 0o600, []byte("ARG DYNA_BASE\nFROM ${DYNA_BASE}\n")); err != nil {
 		t.Fatal(err)
 	}
 	data, err := archive.Bytes()
