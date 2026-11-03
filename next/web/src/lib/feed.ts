@@ -545,3 +545,8 @@ export function describe(event: Event, name: Name): string {
     case "notice.posted": case "session.notice": return event.body.text;
   }
 }
+
+// A request that never expires, such as host access, has no expiry; it waits for a decision.
+export const expiryTime = (expires: string | undefined): number => expires ? Date.parse(expires) : Infinity;
+export const byExpiry = (a: { expires?: string }, b: { expires?: string }): number => Math.sign(expiryTime(a.expires) - expiryTime(b.expires)) || 0;
+export const expiryText = (expires: string | undefined, now: number): string => expires ? "Expires " + fromNow(expires, now) : "Waits for a decision";

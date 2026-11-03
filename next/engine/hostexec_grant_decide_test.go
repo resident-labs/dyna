@@ -147,3 +147,42 @@ func TestClosingASessionWithdrawsItsGrantRequest(t *testing.T) {
 		t.Fatal("approved a withdrawn request")
 	}
 }
+
+func TestRootOfAnotherRoomIsRefused(t *testing.T) {
+	r := newGrantRig(t)
+	ctx := t.Context()
+	on := true
+	if _, problem := r.s.RoomSet(ctx, r.owner, contract.RoomSetRequest{Room: r.room, RootApprovesHostexec: &on}); problem != nil {
+		t.Fatal(problem)
+	}
+	created, e := r.s.RoomCreate(ctx, r.owner, contract.RoomCreateRequest{Name: "other", RootProfile: "test"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	tree, err := r.s.store.RoomTree(ctx, created.Room)
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := r.ask()
+	if _, problem := r.s.OpDecide(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: tree.Root()}, contract.OpDecideRequest{ID: op.ID, Approve: true}); problem == nil || problem.Code != contract.ErrForbidden {
+		t.Fatalf("root of another room: %v", problem)
+	}
+}
+
+func TestGrantRecordsWhoDecided(t *testing.T) {
+	r := newGrantRig(t)
+	ctx := t.Context()
+	on := true
+	if _, problem := r.s.RoomSet(ctx, r.owner, contract.RoomSetRequest{Room: r.room, RootApprovesHostexec: &on}); problem != nil {
+		t.Fatal(problem)
+	}
+	op := r.ask()
+	if _, problem := r.s.OpDecide(ctx, r.root, contract.OpDecideRequest{ID: op.ID, Approve: true}); problem != nil {
+		t.Fatal(problem)
+	}
+	waitForOperation(t, r.s, ctx, op.ID, contract.OpDone)
+	grants, err := r.s.store.ListActiveGrants(ctx, r.room, r.worker, r.s.now())
+	if err != nil || len(grants) != 1 || grants[0].By != r.root {
+		t.Fatalf("grant: %+v %v", grants, err)
+	}
+}
