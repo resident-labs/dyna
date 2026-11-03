@@ -69,6 +69,8 @@ func TestRoomSetRootApprovesHostexec(t *testing.T) {
 		if _, err := execCLI(g, args...); err == nil || g.roomSet != nil {
 			t.Fatalf("%v: err=%v sent=%+v", args, err, g.roomSet)
 		}
+	}
+}
 
 func TestHostAddExecOnlyNeedsNoAdminFlag(t *testing.T) {
 	f := &fakeClient{}
@@ -83,7 +85,7 @@ func TestHostAddExecOnlyNeedsNoAdminFlag(t *testing.T) {
 }
 
 func TestHostListShowsExecOnly(t *testing.T) {
-	f := &fakeClient{hosts: []contract.HostSummary{{Name: "omarchy"}}}
+	f := &fakeClient{hosts: []contract.HostSummary{{Name: "omarchy", ExecOnly: true}}}
 	if out := runCLI(t, f, "host", "list"); out != "omarchy\t0 B\t0 B\tok\texec only\n" {
 		t.Fatalf("output=%q", out)
 	}
