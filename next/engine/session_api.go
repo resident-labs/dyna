@@ -25,6 +25,9 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 	if !mentionName.MatchString(req.Name) {
 		return contract.SessionStartResponse{}, invalid("session name must be 1–64 letters, digits, dots, underscores or hyphens and start with a letter or digit")
 	}
+	if sessionID.MatchString(req.Name) {
+		return contract.SessionStartResponse{}, invalid("session name cannot be a session ID")
+	}
 	switch req.Name {
 	case "root", "parent", "children", "siblings":
 		// room.ParseAddress reads these names as roles, so no one could mention the session by its name.
@@ -236,14 +239,37 @@ func (s *Service) Stale(id contract.SessionID) bool {
 	return ok && handle.Stale()
 }
 
-// managedSession loads a target and checks the caller's authority over it.
-func (s *Service) managedSession(ctx context.Context, caller contract.Principal, id contract.SessionID) (store.Session, *contract.Error) {
+// resolveSession resolves a session ID or a name in the caller's room.
+func (s *Service) resolveSession(ctx context.Context, caller contract.Principal, id contract.SessionID) (store.Session, *contract.Error) {
+	if !sessionID.MatchString(string(id)) && caller.Kind == contract.PrincipalSession {
+		self, problem := s.callerSession(ctx, caller)
+		if problem != nil {
+			return store.Session{}, problem
+		}
+		session, err := s.store.SessionByName(ctx, self.Room, string(id))
+		if errors.Is(err, store.ErrNotFound) {
+			return store.Session{}, &contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("no open session named %q in this room", id)}
+		}
+		if err != nil {
+			return store.Session{}, failure(err)
+		}
+		return session, nil
+	}
 	session, err := s.store.Session(ctx, id)
 	if errors.Is(err, store.ErrNotFound) {
-		return store.Session{}, &contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("session %s is closed or does not exist; a crew closes itself when its run ends", id)}
+		return store.Session{}, &contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("session %s is closed or does not exist", id)}
 	}
 	if err != nil {
 		return store.Session{}, failure(err)
+	}
+	return session, nil
+}
+
+// managedSession loads a target and checks the caller's authority over it.
+func (s *Service) managedSession(ctx context.Context, caller contract.Principal, id contract.SessionID) (store.Session, *contract.Error) {
+	session, problem := s.resolveSession(ctx, caller, id)
+	if problem != nil {
+		return store.Session{}, problem
 	}
 	if problem := s.roomAccess(ctx, caller, session.Room); problem != nil {
 		return store.Session{}, problem
@@ -272,9 +298,9 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 // SessionResponsibilities reads a session's list and what a close would do with it now.
 func (s *Service) SessionResponsibilities(ctx context.Context, caller contract.Principal, req contract.SessionResponsibilitiesRequest) (contract.SessionResponsibilitiesResponse, *contract.Error) {
 	var response contract.SessionResponsibilitiesResponse
-	session, err := s.store.Session(ctx, req.Session)
-	if err != nil {
-		return response, failure(err)
+	session, problem := s.resolveSession(ctx, caller, req.Session)
+	if problem != nil {
+		return response, problem
 	}
 	if problem := s.roomAccess(ctx, caller, session.Room); problem != nil {
 		return response, problem
@@ -358,7 +384,7 @@ func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal,
 	if err != nil {
 		return contract.SessionRestartResponse{}, failure(err)
 	}
-	restarted, err := s.store.RestartSession(ctx, req.Session, event, notice)
+	restarted, err := s.store.RestartSession(ctx, session.ID, event, notice)
 	if err != nil {
 		return contract.SessionRestartResponse{}, failure(err)
 	}
@@ -376,6 +402,13 @@ func (s *Service) SessionRefresh(ctx context.Context, caller contract.Principal,
 	response := contract.SessionRefreshResponse{Marked: []contract.SessionID{}}
 	if (req.Session == "") == (req.Room == "") {
 		return response, invalid("give a session or a room")
+	}
+	if req.Session != "" {
+		session, problem := s.resolveSession(ctx, caller, req.Session)
+		if problem != nil {
+			return response, problem
+		}
+		req.Session = session.ID
 	}
 	self := caller.Kind == contract.PrincipalSession && req.Session == caller.Session
 	roomID := req.Room

@@ -11,15 +11,19 @@ import (
 // SessionMove moves a session without changing its box.
 func (s *Service) SessionMove(ctx context.Context, caller contract.Principal, req contract.SessionMoveRequest) (contract.SessionMoveResponse, *contract.Error) {
 	var response contract.SessionMoveResponse
-	session, err := s.store.Session(ctx, req.Session)
+	session, problem := s.resolveSession(ctx, caller, req.Session)
+	if problem != nil {
+		return response, problem
+	}
+	parent, problem := s.resolveSession(ctx, caller, req.NewParent)
+	if problem != nil {
+		return response, problem
+	}
+	event, err := s.event(session.Room, caller, contract.SessionMoved{Session: session.ID, NewParent: parent.ID})
 	if err != nil {
 		return response, failure(err)
 	}
-	event, err := s.event(session.Room, caller, contract.SessionMoved{Session: req.Session, NewParent: req.NewParent})
-	if err != nil {
-		return response, failure(err)
-	}
-	err = s.store.MoveSession(ctx, req.Session, req.NewParent, event, s.maxDepth)
+	err = s.store.MoveSession(ctx, session.ID, parent.ID, event, s.maxDepth)
 	var treeErr *store.TreeError
 	if errors.As(err, &treeErr) {
 		return response, invalid(treeErr.Error())
