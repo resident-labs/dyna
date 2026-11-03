@@ -56,6 +56,15 @@ func (s *Service) HostSet(ctx context.Context, caller contract.Principal, req co
 	if req.Agents == nil && req.CI == nil && !req.ClearCreateProblem {
 		return contract.HostSetResponse{}, invalid("set agents, ci or clear the create problem")
 	}
+	execOnly, err := s.store.ExecOnly(ctx, req.Host)
+	if err != nil {
+		return contract.HostSetResponse{}, failure(err)
+	}
+	if execOnly && (req.Agents != nil && *req.Agents || req.CI != nil && *req.CI) {
+		if err := s.promoteHost(ctx, req.Host, req.OwnerOnlyAdmin); err != nil {
+			return contract.HostSetResponse{}, invalid(err.Error())
+		}
+	}
 	if err := s.store.SetHostSwitches(ctx, req.Host, req.Agents, req.CI, req.ClearCreateProblem); err != nil {
 		return contract.HostSetResponse{}, failure(err)
 	}

@@ -29,6 +29,7 @@ const (
 	CheckHostSlice CheckName = "host slice"
 	CheckForward   CheckName = "stream-local forwarding"
 	CheckShare     CheckName = "FUSE for the shared folder"
+	CheckExec      CheckName = "SSH and bash"
 )
 
 // RequiredError reports a missing or unsupported rootless Podman installation.
@@ -221,4 +222,10 @@ func (h *Host) checkForward(ctx context.Context, o CheckOptions) error {
 		return fmt.Errorf("forward returned the wrong token")
 	}
 	return nil
+}
+
+// CheckExec is the whole check of an exec-only host: it answers over SSH and runs bash.
+func (h *Host) CheckExec(ctx context.Context) error {
+	_, err := h.run(ctx, "bash", "-c", "true")
+	return err
 }

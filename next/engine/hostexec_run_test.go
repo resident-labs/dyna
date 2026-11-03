@@ -27,7 +27,10 @@ type fakeHostexec struct {
 	stopCalled chan struct{}
 }
 
-func (f *fakeHostexec) RunHostexec(context.Context, contract.HostexecRunArgs, contract.OpID) ([]byte, int, bool, error) {
+func (f *fakeHostexec) RunHostexec(_ context.Context, a contract.HostexecRunArgs, _ contract.OpID) ([]byte, int, bool, error) {
+	if a.Collect {
+		return nil, 0, false, nil
+	}
 	close(f.entered)
 	<-f.release
 	return []byte("ok"), 0, false, nil
@@ -95,7 +98,10 @@ type stoppableHostexec struct {
 func newStoppableHostexec() stoppableHostexec {
 	return stoppableHostexec{entered: make(chan struct{}), release: make(chan struct{}), stopped: make(chan struct{}), stops: make(chan string, 4)}
 }
-func (f stoppableHostexec) RunHostexec(context.Context, contract.HostexecRunArgs, contract.OpID) ([]byte, int, bool, error) {
+func (f stoppableHostexec) RunHostexec(_ context.Context, a contract.HostexecRunArgs, _ contract.OpID) ([]byte, int, bool, error) {
+	if a.Collect {
+		return nil, 0, false, nil
+	}
 	close(f.entered)
 	select {
 	case <-f.release:
@@ -222,7 +228,10 @@ type completedHostexec struct {
 	err    error
 }
 
-func (f completedHostexec) RunHostexec(context.Context, contract.HostexecRunArgs, contract.OpID) ([]byte, int, bool, error) {
+func (f completedHostexec) RunHostexec(_ context.Context, a contract.HostexecRunArgs, _ contract.OpID) ([]byte, int, bool, error) {
+	if a.Collect {
+		return nil, 0, false, nil
+	}
 	return f.output, 0, false, f.err
 }
 func (completedHostexec) StopHostexec(context.Context, contract.HostName, string) error { return nil }
