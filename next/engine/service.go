@@ -82,6 +82,7 @@ type Service struct {
 	publishInstructions func(context.Context)
 	addons              *addons.Files
 	images              *images.Store
+	migrator            *images.Migrator
 	addonSources        *addons.Sources
 }
 

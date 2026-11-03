@@ -322,7 +322,7 @@ func checkBuild(context string) (string, error) {
 	if clean := path.Clean(context); strings.HasPrefix(clean, imagesFolder) {
 		name = strings.TrimPrefix(clean, imagesFolder)
 	}
-	if !imageFolder.MatchString(name) || name == "." || name == ".." || name == "ci-runner" {
+	if !imageFolder.MatchString(name) || name == "." || name == ".." || name == contract.CIRunnerImage {
 		return "", fmt.Errorf("build %q: build must name an image of the room (dyna image list)", context)
 	}
 	return name, nil

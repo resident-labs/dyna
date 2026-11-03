@@ -69,6 +69,9 @@ func (b *Boxes) runImage(ctx context.Context, h *podman.Host, spec box.RunSpec) 
 	if err != nil || spec.Image == box.BaseImage {
 		return base, err
 	}
+	if b.Migrator != nil {
+		b.Migrator.Room(ctx, spec.Room, true)
+	}
 	name, tree, data, _, err := b.RoomImages.Context(spec.Room, spec.Image)
 	if err != nil {
 		return "", err
