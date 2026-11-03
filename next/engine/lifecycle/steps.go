@@ -123,7 +123,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		var runtimeErr box.RuntimeCreateError
 		var shareErr box.ShareDown
 		// A mount that is only down for now counts as any host failure; one that cannot ever come up is quarantined at once below.
-		runtimeFailure = !cut && (errors.As(workErr, &runtimeErr) || errors.As(workErr, &shareErr) && !shareErr.Permanent())
+		runtimeFailure = !cut && (errors.As(workErr, &runtimeErr) || errors.As(workErr, &shareErr) && !shareErr.Permanent)
 		if workErr != nil {
 			createPhase = phase
 			log.Printf("box %s: creation failed in %s: %v", b.ID, phase, workErr)
@@ -250,7 +250,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 	}
 	changed, err := r.change(ctx, b, next, due, failures, cause, createPhase, runtimeFailure)
 	var shareDown box.ShareDown
-	if changed && err == nil && errors.As(workErr, &shareDown) && shareDown.Permanent() {
+	if changed && err == nil && errors.As(workErr, &shareDown) && shareDown.Permanent {
 		err = r.store.QuarantineShare(ctx, b)
 	}
 	if changed && err == nil && next.State == contract.BoxStopped {
