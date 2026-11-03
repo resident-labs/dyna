@@ -555,7 +555,11 @@ type PostSearchRequest struct {
 	Before int64  `json:"before,omitempty"`
 	Limit  int    `json:"limit,omitempty"`
 }
+
+// SearchPost is one matching post. Source, when set, names the author of a cross-room post as it was when posted;
+// clients prefer it over Names, which resolves only authors whose session still exists in this store.
 type SearchPost struct {
+	Source *PostSource  `json:"source,omitempty"`
 	Seq    int64        `json:"seq"`
 	Room   RoomID       `json:"room"`
 	Home   Conversation `json:"home"`
