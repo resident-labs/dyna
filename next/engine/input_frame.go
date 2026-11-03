@@ -94,6 +94,16 @@ func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, eve
 		if err != nil {
 			return "", nil, err
 		}
+		// A paired device that names its host says which machine "my screen" means.
+		if event.From.Kind == contract.PrincipalOwner && event.From.Device != "" {
+			host, err := s.store.DeviceHost(ctx, event.From.Device)
+			if err != nil {
+				return "", nil, err
+			}
+			if host != "" {
+				sender += ", on " + string(host)
+			}
+		}
 	}
 	// A Run's post comes through the engine, but a script wrote it, so the frame must not vouch for it.
 	if post, ok := event.Body.(contract.PostCreated); ok && post.Hook != "" {

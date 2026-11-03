@@ -17,6 +17,7 @@ type Device struct {
 	LastSeenAt time.Time
 	ExpiresAt  time.Time
 	Scopes     []contract.Scope
+	Host       contract.HostName // the host the owner says this device is on, or empty
 }
 
 const DeviceLife = 30 * 24 * time.Hour

@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	"slices"
 	"time"
 )
 
@@ -57,7 +59,7 @@ func (s *Service) DeviceList(ctx context.Context, caller contract.Principal, _ c
 		return out, failure(err)
 	}
 	for _, d := range devices {
-		out.Devices = append(out.Devices, contract.Device{ID: d.ID, Name: d.Name, PairedAt: d.PairedAt, LastSeenAt: d.LastSeenAt, ExpiresAt: d.ExpiresAt, Scopes: d.Scopes, Current: d.ID == string(caller.Device)})
+		out.Devices = append(out.Devices, contract.Device{ID: d.ID, Name: d.Name, PairedAt: d.PairedAt, LastSeenAt: d.LastSeenAt, ExpiresAt: d.ExpiresAt, Scopes: d.Scopes, Host: d.Host, Current: d.ID == string(caller.Device)})
 	}
 	return out, nil
 }
@@ -84,6 +86,31 @@ func (s *Service) DeviceSetScopes(ctx context.Context, caller contract.Principal
 		return out, invalid("invalid or duplicate scope")
 	}
 	found, err := s.store.SetDeviceScopes(ctx, req.ID, req.Scopes)
+	if err != nil {
+		return out, failure(err)
+	}
+	if !found {
+		return out, invalid("device not found")
+	}
+	return out, nil
+}
+
+// DeviceSetHost names the host a paired device is on, which must be a registered host or the control plane; no host clears it.
+func (s *Service) DeviceSetHost(ctx context.Context, caller contract.Principal, req contract.DeviceSetHostRequest) (contract.DeviceSetHostResponse, *contract.Error) {
+	var out contract.DeviceSetHostResponse
+	if problem := deviceOwner(caller); problem != nil {
+		return out, problem
+	}
+	if req.Host != "" && req.Host != contract.ControlPlane {
+		hosts, err := s.store.Hosts(ctx)
+		if err != nil {
+			return out, failure(err)
+		}
+		if !slices.ContainsFunc(hosts, func(h box.Host) bool { return h.Name == req.Host }) {
+			return out, invalid("unknown host")
+		}
+	}
+	found, err := s.store.SetDeviceHost(ctx, req.ID, req.Host)
 	if err != nil {
 		return out, failure(err)
 	}

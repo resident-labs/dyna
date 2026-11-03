@@ -102,7 +102,7 @@ func (s *Store) RedeemPairCode(ctx context.Context, code, name string, defaults 
 }
 
 func (s *Store) ListDevices(ctx context.Context, now time.Time) ([]Device, error) {
-	rows, err := s.read.QueryContext(ctx, "SELECT id,name,paired_at,last_seen_at,expires_at FROM devices WHERE revoked_at IS NULL AND expires_at>? ORDER BY paired_at,id", now.UnixMilli())
+	rows, err := s.read.QueryContext(ctx, "SELECT id,name,host,paired_at,last_seen_at,expires_at FROM devices WHERE revoked_at IS NULL AND expires_at>? ORDER BY paired_at,id", now.UnixMilli())
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +111,7 @@ func (s *Store) ListDevices(ctx context.Context, now time.Time) ([]Device, error
 	for rows.Next() {
 		var d Device
 		var paired, seen, expires int64
-		if err := rows.Scan(&d.ID, &d.Name, &paired, &seen, &expires); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.Host, &paired, &seen, &expires); err != nil {
 			return nil, err
 		}
 		d.PairedAt = time.UnixMilli(paired)
@@ -180,4 +180,29 @@ func (s *Store) SetDeviceScopes(ctx context.Context, id string, scopes []contrac
 		return nil
 	})
 	return found, err
+}
+
+// SetDeviceHost names the host a device is on; an empty host clears it. It reports whether the device exists.
+func (s *Store) SetDeviceHost(ctx context.Context, id string, host contract.HostName) (bool, error) {
+	var found bool
+	err := s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "UPDATE devices SET host=? WHERE id=? AND revoked_at IS NULL", host, id)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		found = n > 0
+		return err
+	})
+	return found, err
+}
+
+// DeviceHost is the host a device is on, or empty for none, for a device not found, or for a host that has been removed.
+func (s *Store) DeviceHost(ctx context.Context, id contract.DeviceID) (contract.HostName, error) {
+	var host contract.HostName
+	err := s.Read().QueryRowContext(ctx, "SELECT d.host FROM devices d JOIN hosts h ON h.name=d.host AND h.state!='removed' WHERE d.id=?", id).Scan(&host)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return host, err
 }
