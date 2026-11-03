@@ -766,10 +766,10 @@
       {:else if tree.length}<div class="tree"><VirtualList bind:this={sessionList} items={tree} key={treeKey}
         label="Session list" role="group" align="top" estimate={48}>
         {#snippet row(entry: TreeRow)}
-        {#if entry.kind === "idle"}<button type="button" class="idle" data-key={treeKey(entry)} aria-expanded={entry.open} style:padding-left="{entry.depth * 14}px" onkeydown={walkTree}
+        {#if entry.kind === "idle"}<button type="button" class="idle" data-key={treeKey(entry)} aria-expanded={entry.open} style:--depth={entry.depth} style:padding-left="{6 + entry.depth * 20}px" onkeydown={walkTree}
           onclick={() => { if (!openIdle.delete(entry.key)) openIdle.add(entry.key); }}><Icon name="chevron" size={12} />{count(entry.count, "idle session")}</button>
         {:else}{@const { session: item, depth, parent, hidden, state, dot, mark } = entry}
-        <div class="row">{#if parent}<button type="button" class="fold" aria-expanded={!hidden} style:left="{6 + depth * 14}px"
+        <div class="row" style:--depth={depth}>{#if parent}<button type="button" class="fold" aria-expanded={!hidden} style:left="{6 + depth * 20}px"
           aria-label={hidden ? `Show ${count(hidden, "session")} under ${item.name}` : `Hide the sessions under ${item.name}`}
           title={hidden ? `${count(hidden, "session")} folded` : "Fold"} onclick={() => { if (!folded.delete(item.session)) folded.add(item.session); }}
           onkeydown={event => fold(event, item.session)}><Icon name="chevron" size={12} />{#if hidden}<span>{hidden}</span>{/if}</button>{/if}
@@ -777,7 +777,7 @@
         <a class="member" data-key={item.session} href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.session)}`}
           onclick={openSession} oncontextmenu={event => act(event, item.session, item.parent, new DOMRect(event.clientX, event.clientY), "start")}
           onkeydown={event => { void walkTree(event); if (parent) fold(event, item.session); }}
-          aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{34 + depth * 14 + (hidden ? String(hidden).length * 7 : 0)}px">
+          aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{34 + depth * 20 + (hidden ? String(hidden).length * 7 : 0)}px">
           <SessionRow name={item.name} root={!item.parent} {state} {dot} line={rowLine(item.session)} {mark} /></a>
           {#if jobs(item.session)}<button type="button" class="watch" aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
             title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={async event => { if (!wide.current) await showPanel(false, event.detail > 0); void jobsTool?.show(item.session); }}><Icon name="terminal" /></button>{/if}
@@ -887,6 +887,10 @@
   a.member[aria-current="page"] { background: var(--selected); }
   .tree { flex: 1; min-height: 0; }
   .row { position: relative; display: flex; align-items: center; }
+  /* Each level indents 20 px, and a guide drops from each owner's avatar center (48 px plus 20 per level) through the
+     rows under it, idle folds included, so a deep row shows whose it is. It draws over hover and selection. */
+  .row::before, .idle::before { content: ""; position: absolute; z-index: 1; top: 0; bottom: 0; left: 40px; width: calc(var(--depth) * 20px);
+    background: repeating-linear-gradient(to right, transparent 0 7.5px, var(--line) 7.5px 8.5px, transparent 8.5px 20px); pointer-events: none; }
   /* The chevron sits in the gutter left of the avatar. As in v1, a folded row's hidden count is part of the same
      button, but it sits on the row line beside the chevron. */
   .fold { all: unset; position: absolute; z-index: 1; top: 50%; transform: translateY(-50%); min-width: 16px; min-height: 24px; display: flex; align-items: center; justify-content: center;
@@ -897,7 +901,7 @@
   .row a.member { flex: 1; min-width: 0; }
   /* "N idle sessions" stands for idle siblings until opened. Its chevron sits in the fold gutter and its words line
      up with the names. */
-  .idle { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 12px; width: 100%; height: 32px; color: var(--muted);
+  .idle { all: unset; position: relative; box-sizing: border-box; display: flex; align-items: center; gap: 12px; width: 100%; height: 32px; color: var(--muted);
     font-size: 12.5px; cursor: pointer; }
   .idle :global(svg) { flex: none; width: 16px; }
   .idle[aria-expanded="false"] :global(svg) { transform: rotate(-90deg); }
