@@ -38,7 +38,8 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 			if err != nil {
 				return err
 			}
-			if input.Head != "" {
+			defaulted := input.Head == ""
+			if !defaulted {
 				head = input.Head
 			}
 			allowed, err := enginegit.CanPushBranch(ctx, s.store, session.Repo, who.Session, head)
@@ -52,7 +53,10 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 				return approve.ErrInvalid
 			}
 			if _, err := s.repos.Ref(ctx, session.Repo, "refs/heads/"+head); err != nil {
-				return fmt.Errorf("%w: branch %s not found on %s; head names another branch", approve.ErrInvalid, head, session.Repo)
+				if defaulted {
+					return fmt.Errorf("%w: branch %s not found on %s; head was not given and defaulted to it; head names another branch", approve.ErrInvalid, head, session.Repo)
+				}
+				return fmt.Errorf("%w: branch %s not found on %s", approve.ErrInvalid, head, session.Repo)
 			}
 			return nil
 		},
@@ -66,14 +70,15 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 			if err != nil {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: "session repository unavailable"}
 			}
-			if input := args.(contract.PrOpenArgs); input.Head != "" {
+			input := args.(contract.PrOpenArgs)
+			defaulted := input.Head == ""
+			if !defaulted {
 				head = input.Head
 			}
 			if token == "" {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: "GitHub token is not set"}
 			}
 			// The request has only strings and a boolean, which JSON always encodes.
-			input := args.(contract.PrOpenArgs)
 			input.Head = head
 			body, _ := json.Marshal(input)
 			target := *endpoint
@@ -103,6 +108,9 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 				for _, item := range payload.Errors {
 					parts = append(parts, item.Message)
 				}
+				if defaulted && response.StatusCode == http.StatusUnprocessableEntity {
+					parts = append(parts, "head was not given and defaulted to "+head+"; head names another branch")
+				}
 				return contract.OpResult{Cause: contract.CauseGithubFailed, Error: strings.ReplaceAll(strings.Join(parts, ": "), token, "***")}
 			}
 			if err != nil || payload.Number <= 0 {
@@ -117,9 +125,9 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 				}
 				return s.store.RecordPROpen(ctx, session.Repo, payload.Number, who.Session, head, input.Title, link, event, nil)
 			}()
+			// GitHub created the PR, so a failed record is told in the output and does not fail the call.
 			if err != nil {
-				result.Cause = contract.CauseInternal
-				result.Error = "PR opened but ownership could not be recorded; reconcile before retrying: " + link
+				result.Output = fmt.Sprintf("%s\nPR #%d is open, but recording its owner failed (%v); it is not tracked, and pr track adds it", link, payload.Number, err)
 			}
 			return result
 		},

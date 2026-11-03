@@ -85,6 +85,13 @@ func (s *Service) GoalList(ctx context.Context, caller contract.Principal, req c
 	if e != nil {
 		return contract.GoalListResponse{}, e
 	}
+	if req.Session != "" && !sessionID.MatchString(string(req.Session)) {
+		holder, e := s.resolveSession(ctx, caller, req.Session)
+		if e != nil {
+			return contract.GoalListResponse{}, e
+		}
+		req.Session = holder.ID
+	}
 	goals, err := s.store.ListGoals(ctx, room, req)
 	if err != nil {
 		return contract.GoalListResponse{}, failure(err)
@@ -150,11 +157,11 @@ func (s *Service) GoalJournal(ctx context.Context, caller contract.Principal, re
 			return contract.GoalJournalResponse{}, goalProblem(err)
 		}
 	}
-	entries, err := s.store.GoalJournal(ctx, room, req.Goal)
+	entries, older, err := s.store.GoalJournal(ctx, room, req.Goal)
 	if err != nil {
 		return contract.GoalJournalResponse{}, goalProblem(err)
 	}
-	return contract.GoalJournalResponse{Entries: entries}, nil
+	return contract.GoalJournalResponse{Entries: entries, Older: older}, nil
 }
 
 // FailureNotices tells ancestors of sessions that just failed.
