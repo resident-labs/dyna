@@ -49,6 +49,7 @@ func sift(items []contract.GitHubItem, now time.Time, open bool, ownWakeAt int64
 			own := !item.Outside
 			switch {
 			case item.Text == "" || own && agentWrote(item.Text):
+			case item.Action == contract.GitHubCommented && strings.HasSuffix(item.Actor, "[bot]"):
 			case own && waiting:
 				r.held = append(r.held, item)
 			default:
