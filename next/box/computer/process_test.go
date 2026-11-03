@@ -61,7 +61,7 @@ func TestCgroupUnlimitedMemory(t *testing.T) {
 
 func TestLaunchArgs(t *testing.T) {
 	browser := strings.Join(browserArgs(Profile), " ")
-	for _, flag := range []string{"--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222", "--user-data-dir=/box/computer", "--disable-dev-shm-usage", "--no-first-run", "about:blank"} {
+	for _, flag := range []string{"--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222", "--user-data-dir=/box/computer", "--disable-dev-shm-usage", "--no-first-run", "--load-extension=/opt/dyna/extensions/ubol,/opt/dyna/extensions/isdcac", "about:blank"} {
 		if !strings.Contains(browser, flag) {
 			t.Fatalf("missing %s", flag)
 		}
