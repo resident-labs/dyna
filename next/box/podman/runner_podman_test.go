@@ -42,6 +42,10 @@ func TestRealRunnersKeepTheirOwnBuildFolders(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cache, "gomod", "seed"), []byte("from a box\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	sockets := filepath.Join(dir, "sock")
+	if err := os.Mkdir(sockets, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	stamp := time.Now().UnixNano()
 	image := fmt.Sprintf("localhost/dyna-ci-realtest:%d", stamp)
@@ -61,8 +65,8 @@ func TestRealRunnersKeepTheirOwnBuildFolders(t *testing.T) {
 	small, _ := box.Size(contract.BoxSizeSmall)
 	large, _ := box.Size(contract.BoxSizeLarge)
 	specs := []box.RunnerSpec{
-		{Name: fmt.Sprintf("dyna-ci-realtest-%d-small", stamp), Image: image, Config: "jit", Repo: "owner/repo", ID: 1, Slot: 0, Size: small, Cache: cache},
-		{Name: fmt.Sprintf("dyna-ci-realtest-%d-large", stamp), Image: image, Config: "jit", Repo: "owner/repo", ID: 2, Slot: 1, Size: large, Cache: cache},
+		{Name: fmt.Sprintf("dyna-ci-realtest-%d-small", stamp), Image: image, Config: "jit", Repo: "owner/repo", ID: 1, Slot: 0, Size: small, Cache: cache, BuildCache: sockets},
+		{Name: fmt.Sprintf("dyna-ci-realtest-%d-large", stamp), Image: image, Config: "jit", Repo: "owner/repo", ID: 2, Slot: 1, Size: large, Cache: cache, BuildCache: sockets},
 	}
 	for _, spec := range specs {
 		defer exec.Command("podman", "--cgroup-manager=systemd", "rm", "--force", "--time", "0", spec.Name).Run()
@@ -84,7 +88,7 @@ if touch /cache/gomod/seed 2>/dev/null; then echo wrote a box file; exit 1; fi
 if touch /cache/%s/intrude 2>/dev/null; then echo wrote another slot; exit 1; fi
 echo "$DYNA_CI_CACHE $DYNA_CI_BUILD"`, spec.Size.Name, other)
 		out := realPodman(t, "exec", spec.Name, "sh", "-c", script)
-		if want := fmt.Sprintf("from a box\n/cache /cache/%s", buildFolder(spec.Slot)); out != want {
+		if want := "from a box\n/cache /build"; out != want {
 			t.Fatalf("runner %d said %q, want %q", i, out, want)
 		}
 		written, err := os.ReadFile(filepath.Join(cache, buildFolder(spec.Slot), "proof"))

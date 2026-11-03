@@ -3,10 +3,24 @@ FROM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e20
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash ca-certificates chromium coreutils curl findutils fonts-liberation fonts-noto-color-emoji git grep openssh-client procps sed tini \
     && rm -rf /var/lib/apt/lists/*
+RUN case "$(dpkg --print-architecture)" in \
+    amd64) arch=x86_64 sha=45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89 ;; \
+    arm64) arch=aarch64 sha=2b3284d5da3b46a47dc4229e75bb7b88ac4aa99c8d754fb7d2f84997e5a4354a ;; \
+    *) exit 1 ;; esac \
+    && name="sccache-v0.18.0-${arch}-unknown-linux-musl" \
+    && curl -fsSL -o /tmp/sccache.tgz "https://github.com/mozilla/sccache/releases/download/v0.18.0/${name}.tar.gz" \
+    && echo "${sha}  /tmp/sccache.tgz" | sha256sum -c - \
+    && tar -xzf /tmp/sccache.tgz -C /usr/local/bin --strip-components=1 --no-same-owner "${name}/sccache" \
+    && rm /tmp/sccache.tgz
 COPY pi.tgz /tmp/pi.tgz
 RUN npm install --global --ignore-scripts /tmp/pi.tgz && rm /tmp/pi.tgz \
     && mkdir -p /box/home /box/pi /box/work && chown node:node /box /box/home /box/pi /box/work
-ENV HOME=/box/home PI_CODING_AGENT_DIR=/box/pi PATH=/opt/dyna/bin/current:${PATH}
+# Cargo compiles through sccache, which keeps its results in the host's compiler cache behind the box agent. It skips its
+# check of that cache, which would fail every build while the cache is down, and a crate it cannot read or write it compiles.
+# The endpoint ends without a slash because sccache adds one, and the box agent redirects a path with two, which a write does
+# not follow.
+ENV HOME=/box/home PI_CODING_AGENT_DIR=/box/pi PATH=/opt/dyna/bin/current:${PATH} \
+    RUSTC_WRAPPER=sccache SCCACHE_WEBDAV_ENDPOINT=http://127.0.0.1:7781/build-cache SCCACHE_SKIP_CACHE_CHECK=1
 USER node
 WORKDIR /box/home
 ENTRYPOINT ["/usr/bin/tini", "--"]

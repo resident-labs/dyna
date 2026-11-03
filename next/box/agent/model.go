@@ -96,6 +96,20 @@ func modelRoute(transport http.RoundTripper) http.Handler {
 	}
 }
 
+// BuildCacheRoute passes sccache's requests to the host's compiler cache, whose socket the box mounts. It never waits for the
+// socket: a request that fails is a cache miss, and the build compiles the crate itself. sccache counts those, so they are not
+// logged, which while the cache is down would be two lines for every crate.
+func BuildCacheRoute(socket string) http.Handler {
+	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	}}
+	return &httputil.ReverseProxy{
+		Transport:    transport,
+		Rewrite:      func(r *httputil.ProxyRequest) { r.Out.URL.Scheme, r.Out.URL.Host = "http", "build-cache" },
+		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) { w.WriteHeader(http.StatusBadGateway) },
+	}
+}
+
 // ModelProvider describes a generated Pi provider and its API origin.
 type ModelProvider struct {
 	BaseURL string            `json:"baseUrl"`

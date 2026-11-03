@@ -40,9 +40,11 @@ import (
 //	<HostData>/git/<owner>/<repo>.git               repository caches, which rooms share
 //	<HostData>/bin/<version>/dyna                   engine binaries, with a current link
 //	<HostData>/cache/                               dependency caches, which boxes share
+//	<HostData>/cache/build-cache/                   the compiler cache, which boxes and CI runners share through its server
 //	<HostData>/share/rooms/<room>/shared/           /box/shared on another host, through its one mount of <Data>/rooms
 //	<HostData>/share/cache/                         that mount's local cache
 //	<HostData>/sock/share.sock                      the forwarded socket that mount reads through
+//	<HostData>/sock/build-cache/cache.sock          the compiler cache's server, which boxes and CI runners mount
 //	<HostData>/sock/<box>/engine.sock               a box's forwarded socket, gone with the box
 //	<HostData>/runs/<run>/                          a subscription Run's files, gone with the Run
 //
@@ -260,6 +262,19 @@ func (l Layout) HostBinary() string { return filepath.Join(l.HostBin(), "current
 
 // HostCache is the dependency cache folder of a host.
 func (l Layout) HostCache() string { return filepath.Join(l.HostData, "cache") }
+
+// HostBuildCache is the store of a host's compiler cache, among its dependency caches.
+func (l Layout) HostBuildCache() string { return filepath.Join(l.HostCache(), "build-cache") }
+
+// HostBuildCacheSocketFolder is the folder of that store's socket, which the host's boxes and CI runners mount.
+func (l Layout) HostBuildCacheSocketFolder() string {
+	return filepath.Join(l.HostData, "sock", "build-cache")
+}
+
+// HostBuildCacheSocket is the socket that store is served on.
+func (l Layout) HostBuildCacheSocket() string {
+	return filepath.Join(l.HostBuildCacheSocketFolder(), "cache.sock")
+}
 
 // HostSocketFolder is the folder a box mounts for its socket.
 func (l Layout) HostSocketFolder(id contract.BoxID) string {

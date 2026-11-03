@@ -20,7 +20,7 @@ import (
 
 func testSpec() box.RunnerSpec {
 	size, _ := box.Size(contract.BoxSizeLarge)
-	return box.RunnerSpec{Name: "dyna-ci-pve-1", Image: "localhost/dyna-ci-runner:abc", Config: "jit-secret", Repo: "owner/repo", ID: 42, Slot: 3, Size: size, Cache: "/data/cache"}
+	return box.RunnerSpec{Name: "dyna-ci-pve-1", Image: "localhost/dyna-ci-runner:abc", Config: "jit-secret", Repo: "owner/repo", ID: 42, Slot: 3, Size: size, Cache: "/data/cache", BuildCache: "/data/sock/build-cache"}
 }
 
 // frameRunner answers every SSH framed command with success and keeps what it saw.
@@ -64,7 +64,8 @@ func TestRunnerArgsKeepTheContainerSealed(t *testing.T) {
 		"--cgroup-parent=dyna-ci.slice", "--env ACTIONS_RUNNER_INPUT_JITCONFIG", "--env DYNA_CI_REPO=owner/repo",
 		"--label dyna.ci.slot=3", "--mount type=volume,source=dyna-ci-egress,destination=/run/dyna-egress,subpath=3,ro",
 		"--label dyna.ci.size=large", "--mount type=bind,source=/data/cache,destination=/cache,ro",
-		"--mount type=bind,source=/data/cache/ci/3,destination=/cache/ci/3", "--env DYNA_CI_CACHE=/cache", "--env DYNA_CI_BUILD=/cache/ci/3",
+		"--mount type=bind,source=/data/cache/ci/3,destination=/build", "--env DYNA_CI_CACHE=/cache", "--env DYNA_CI_BUILD=/build",
+		"--mount type=bind,source=/data/sock/build-cache,destination=/run/dyna-build-cache,ro",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("args miss %q: %s", want, joined)
