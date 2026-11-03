@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -601,15 +603,12 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 			if err := tx.QueryRowContext(ctx, "SELECT name FROM rooms WHERE id=? AND state='open'", event.Room).Scan(&targetName); err != nil {
 				return err
 			}
-			copyPost := post
-			copyPost.Mentions = nil
-			copyPost.ClientID = ""
-			copyPost.Target = &contract.PostSource{Room: event.Room, RoomName: targetName, SessionName: "root"}
-			copyEvent := event
-			copyEvent.ID = contract.EventID(string(event.ID) + "-sent")
-			copyEvent.Room = sourceRoom
-			copyEvent.Body = copyPost
-			outgoing = &copyEvent
+			var id [16]byte
+			if _, err := rand.Read(id[:]); err != nil {
+				return err
+			}
+			outgoing = &contract.Event{ID: contract.EventID("ev_" + hex.EncodeToString(id[:])), Time: event.Time, Room: sourceRoom, From: event.From,
+				Body: contract.PostSent{Text: post.Text, Target: contract.PostSource{Room: event.Room, RoomName: targetName, SessionName: "root"}}}
 			post.Source = &contract.PostSource{Room: sourceRoom, RoomName: sourceName, SessionName: sessionName}
 			event.Body = post
 		} else {
@@ -638,11 +637,6 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 				return err
 			}
 			event.Body = post
-			if outgoing != nil {
-				copyPost := outgoing.Body.(contract.PostCreated)
-				copyPost.Turn = post.Turn
-				outgoing.Body = copyPost
-			}
 		}
 		seq, err = s.AppendEvent(tx, event)
 		if err != nil {

@@ -269,7 +269,8 @@ export type RoomDeleting = { };
 export type RoomDeleted = { };
 export type SessionProfileChanged = { session: SessionID; profile: ProfileName; };
 export type PostSource = { room: RoomID; roomName: RoomName; sessionName: string; };
-export type PostCreated = { source?: PostSource | null; target?: PostSource | null; text: string; turn?: TurnID; mentions?: Array<Principal> | null; home: Conversation; replyTo?: EventID; attachments?: Array<Attachment> | null; clientId?: string; toolCallId?: string; hook?: SubscriptionID; };
+export type PostSent = { text: string; target: PostSource; };
+export type PostCreated = { source?: PostSource | null; text: string; turn?: TurnID; mentions?: Array<Principal> | null; home: Conversation; replyTo?: EventID; attachments?: Array<Attachment> | null; clientId?: string; toolCallId?: string; hook?: SubscriptionID; };
 export type Attachment = { name: string; media: string; bytes: number; sha256: string; visual?: VisualCard | null; };
 export type VisualCard = { id: EventID; version: number; title: string; height: number; allowNet: boolean; banner: string; thumbnail: string; shots: Array<VisualShot> | null; checks: Array<VisualCheck> | null; };
 export type VisualShot = { width: number; file: string; };
@@ -563,6 +564,7 @@ export type EventBody =
   | { type: "op.ran"; body: OpRan }
   | { type: "op.requested"; body: OpRequested }
   | { type: "post.created"; body: PostCreated }
+  | { type: "post.sent"; body: PostSent }
   | { type: "question.answered"; body: QuestionAnswered }
   | { type: "question.asked"; body: QuestionAsked }
   | { type: "question.withdrawn"; body: QuestionWithdrawn }
