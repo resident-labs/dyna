@@ -55,13 +55,14 @@ func TestAdmissionRechecksIntentAndDeadline(t *testing.T) {
 	}
 	defer s.Close()
 	_, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+ INSERT INTO hosts(name,ssh,state,cpus,mem_bytes,disk_bytes,checked_at) VALUES('h','','ready',4,10000000000,100000000000,0);
  INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('s','r','s','p','open','',0);
  INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at,want,due_at) VALUES('b','s','','agent','pending','','',0,0,'stop',0)`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	size, _ := box.Size(contract.BoxSizeAgent)
-	old := box.Box{ID: "b", Session: "s", Size: size, State: contract.BoxPending}
+	old := box.Box{ID: "b", Session: "s", Host: "h", Size: size, State: contract.BoxPending}
 	next := old
 	next.State = contract.BoxCreating
 	event := contract.Event{ID: "e", Room: "r", Time: time.UnixMilli(100), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{}}
