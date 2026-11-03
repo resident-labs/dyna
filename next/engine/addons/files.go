@@ -143,6 +143,22 @@ func (f *Files) Remove(room contract.RoomID, kind contract.AddonKind, name strin
 	return f.write(room, slices.DeleteFunc(items, same(kind, name)))
 }
 
+// SetRootOnly marks an item for root sessions' boxes only, or for every box again.
+func (f *Files) SetRootOnly(room contract.RoomID, kind contract.AddonKind, name string, rootOnly bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	items, _, err := f.read(room)
+	if err != nil {
+		return err
+	}
+	i := slices.IndexFunc(items, same(kind, name))
+	if i < 0 {
+		return ErrMissing
+	}
+	items[i].RootOnly = rootOnly
+	return f.write(room, items)
+}
+
 // SetEnabled turns an item on or off.
 func (f *Files) SetEnabled(room contract.RoomID, kind contract.AddonKind, name string, enabled bool) error {
 	f.mu.Lock()

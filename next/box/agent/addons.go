@@ -31,14 +31,16 @@ const installTimeout = 3 * time.Minute
 // settings, and servers in its MCP config. It runs before Pi at every box start, so a new item waits for the next one.
 type addonStart struct {
 	Bundles  []string // global, then room: on a clash the later scope wins
+	Root     bool     // the session is root, so items marked root-only apply
 	Skills   string   // Pi's skills folder, which this rebuilds
 	Settings string   // Pi's settings file
 	Cache    string   // one install per source, shared by the host's boxes
 	Install  func(ctx context.Context, dir, source string) error
 }
 
-func roomAddons() addonStart {
+func roomAddons(root bool) addonStart {
 	return addonStart{
+		Root:     root,
 		Bundles:  []string{"/run/dyna/instructions/global/" + box.AddonBundle, "/run/dyna/instructions/room/" + box.AddonBundle},
 		Skills:   "/box/pi/skills",
 		Settings: "/box/pi/settings.json",
@@ -70,6 +72,9 @@ func (a addonStart) apply(ctx context.Context) (map[string]pi.MCPServer, []strin
 			problems = append(problems, fmt.Sprintf("%s: %v", path, err))
 		}
 		for _, item := range items {
+			if item.RootOnly && !a.Root {
+				continue
+			}
 			chosen[string(item.Kind)+" "+item.Name] = chosenAddon{item, dir}
 		}
 	}

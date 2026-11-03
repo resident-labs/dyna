@@ -159,7 +159,7 @@ func Run(ctx context.Context) error {
 			return err
 		}
 	}
-	addedServers, problems, err := roomAddons().apply(ctx)
+	addedServers, problems, err := roomAddons(hello.Root).apply(ctx)
 	if err != nil {
 		return err
 	}
