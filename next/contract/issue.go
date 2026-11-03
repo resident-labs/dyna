@@ -89,7 +89,8 @@ func (IssueChanged) EventType() EventType { return "github.issue.changed" }
 func (IssueChanged) isEventBody()         {}
 
 // Waking reports whether any change needs the session's attention.
-func (b IssueChanged) Waking() bool { return issuesWake(b.Changes) }
+func (b IssueChanged) Waking() bool     { return issuesWake(b.Changes) }
+func (b IssueChanged) WakesOwner() bool { return issuesWake(b.Changes) }
 
 func issuesWake(changes []IssueChange) bool {
 	for _, change := range changes {

@@ -1,5 +1,7 @@
 package contract
 
+import "slices"
+
 const (
 	MethodPrList    Method = "pr.list"
 	MethodPrStatus  Method = "pr.status"
@@ -48,7 +50,7 @@ const (
 	PrMergeConflict PrMerge = "conflict"
 )
 
-// PrChangeKind is one change that wakes the PR's owning session.
+// PrChangeKind is one change that wakes the PR's owning session, except PrChangePushed, which tells subscribers only.
 type PrChangeKind string
 
 const (
@@ -61,7 +63,14 @@ const (
 	PrChangeClosed           PrChangeKind = "closed"
 	PrChangeComment          PrChangeKind = "comment"
 	PrChangeMetadata         PrChangeKind = "metadata"
+	PrChangePushed           PrChangeKind = "pushed" // the head moved and Push has the shas; the owner made the push, so only subscribers hear it
 )
+
+// PrPush is a tracked PR's head moving, as one pass read it. Before is the head last stored, so pushes between two reads are one move.
+type PrPush struct {
+	Before string `json:"before"`
+	After  string `json:"after"`
+}
 
 // PrSummary is what Dyna last read about a tracked PR. Repo is the PR's base repository, which may not be a room repository.
 type PrSummary struct {
@@ -134,9 +143,10 @@ type PrChange struct {
 	Comments     []PrComment    `json:"comments,omitempty"`
 	MoreComments int            `json:"moreComments,omitempty"`
 	Actions      []GitHubItem   `json:"actions,omitempty"`
+	Push         *PrPush        `json:"push,omitempty"` // set exactly when Kinds has PrChangePushed
 }
 
-// PrChanged is one pass's changes on the tracked PRs of one session. Issues holds its issues that moved in the same pass.
+// PrChanged is one pass's changes on the tracked PRs of one session. Issues holds its issues that moved in the same pass. A subscriber also hears a push (kind pushed) with its before and after head, which the owner does not.
 type PrChanged struct {
 	Session SessionID     `json:"session"`
 	Changes []PrChange    `json:"changes"`
@@ -167,10 +177,20 @@ func (CIFinished) isEventBody()             {}
 func (GitMainUpdated) EventType() EventType { return "git.main_updated" }
 func (GitMainUpdated) isEventBody()         {}
 
-// Waking reports whether any change needs the session's attention.
+// Waking reports whether any change is news to someone: the owner, or a subscriber, who also hears pushes.
 func (b PrChanged) Waking() bool {
 	for _, change := range b.Changes {
 		if len(change.Kinds) > 0 {
+			return true
+		}
+	}
+	return issuesWake(b.Issues)
+}
+
+// WakesOwner reports whether any change needs the owning session. A push is its own act, so a push alone does not.
+func (b PrChanged) WakesOwner() bool {
+	for _, change := range b.Changes {
+		if slices.ContainsFunc(change.Kinds, func(kind PrChangeKind) bool { return kind != PrChangePushed }) {
 			return true
 		}
 	}

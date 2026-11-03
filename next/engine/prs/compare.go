@@ -211,6 +211,11 @@ func ComparePR(row store.TrackedPR, items []contract.GitHubItem, listed *FeedIte
 		return update, update.SeenReviews != row.SeenReviews || !reflect.DeepEqual(update.Meta, row.Meta)
 	}
 	change := contract.PrChange{PR: next, Kinds: found.kinds(kinds), FailedChecks: failed, Outside: next.Author != "" && next.Author != viewer, Actions: found.actions}
+	// A first read has no head to move from. A push is told to subscribers only, and spends no wake window.
+	if row.Head != "" && next.Head != row.Head && next.State == contract.PrOpen {
+		change.Kinds = append(change.Kinds, contract.PrChangePushed)
+		change.Push = &contract.PrPush{Before: row.Head, After: next.Head}
+	}
 	change.Comments, change.MoreComments = found.shown()
 	if found.ownNews {
 		update.OwnWakeAt = now.UnixMilli()
