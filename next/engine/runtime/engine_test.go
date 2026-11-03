@@ -88,6 +88,16 @@ func TestHostAddRefusesMissingPodman(t *testing.T) {
 	}
 }
 
+func TestHostAddWithoutTheFlagNamesItAndWhoNeedsIt(t *testing.T) {
+	f := &fakeRegistrar{}
+	s := serviceWithHosts{boxes: f}
+	_, problem := s.HostAdd(context.Background(), contract.Principal{Kind: contract.PrincipalOwner}, contract.HostAddRequest{Name: "host", SSH: "user@host"})
+	want := "--owner-only-admin is required: it confirms that only the owner administers the machine, which a host that runs boxes or CI runners needs; a host added with --agents off --ci off (exec only) does not"
+	if problem == nil || problem.Code != contract.ErrInvalid || problem.Message != want || f.called {
+		t.Fatalf("problem=%+v called=%v", problem, f.called)
+	}
+}
+
 func TestHostAddChecksNameAndSSHAtTheBoundary(t *testing.T) {
 	off := false
 	for _, req := range []contract.HostAddRequest{
