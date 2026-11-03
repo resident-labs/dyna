@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -53,6 +54,19 @@ func (s *Service) OpList(ctx context.Context, caller contract.Principal, req con
 	ops, err := s.approvals.List(ctx, caller, req.Room)
 	if err != nil {
 		return contract.OpListResponse{}, failure(err)
+	}
+	if caller.Kind == contract.PrincipalSession {
+		session, err := s.store.Session(ctx, caller.Session)
+		if err != nil {
+			return contract.OpListResponse{}, failure(err)
+		}
+		// A pending root-only add-on request carries what the item is, so a session that is not root does not see it.
+		if !session.Root {
+			ops = slices.DeleteFunc(ops, func(op contract.Operation) bool {
+				args, ok := op.Args.(contract.AddonGlobalArgs)
+				return ok && args.RootOnly
+			})
+		}
 	}
 	return contract.OpListResponse{Operations: ops}, nil
 }
