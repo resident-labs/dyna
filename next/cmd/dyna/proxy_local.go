@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -94,8 +96,14 @@ func proxyEnv(tool string, port int, key string) string {
 	return out.String()
 }
 
+// maxLocalRequestBytes is one more than the engine takes (32 MiB), so the engine refuses an oversized request in its own words.
+const maxLocalRequestBytes = 32<<20 + 1
+
 // serveModelRoute forwards the model route and nothing else: the rest of the owner
 // socket would give anything that can reach this port full owner power. The engine checks the key.
+// It reads each request in full first: the transport otherwise reads the harness's connection while the
+// reply streams back, and the server closes that body when the first chunk goes out, which cuts the
+// reply off with the owner socket closed under it.
 func serveModelRoute(ctx context.Context, listener net.Listener, transport http.RoundTripper) error {
 	forward := &httputil.ReverseProxy{
 		Rewrite:       func(r *httputil.ProxyRequest) { r.Out.URL.Scheme, r.Out.URL.Host = "http", "dyna" },
@@ -103,7 +111,15 @@ func serveModelRoute(ctx context.Context, listener net.Listener, transport http.
 		FlushInterval: -1,
 	}
 	mux := http.NewServeMux()
-	mux.Handle("/model/", forward)
+	mux.HandleFunc("/model/", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxLocalRequestBytes))
+		if err != nil {
+			http.Error(w, "The request could not be read.", http.StatusRequestEntityTooLarge)
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		forward.ServeHTTP(w, r)
+	})
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	stop := context.AfterFunc(ctx, func() { _ = server.Close() })
 	defer stop()
