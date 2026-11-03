@@ -207,8 +207,11 @@ func (r *Reconciler) createNode(ctx context.Context, pool store.Pool, node box.H
 			return err
 		}
 		joined.Pool, joined.Box, joined.DiskFloor, joined.CI = node.Pool, node.Box, box.DiskFloor(joined.DiskBytes), true
+		if joined.Problem != "" {
+			return fmt.Errorf("the node cannot take session boxes: %s", joined.Problem)
+		}
 		if placed := box.Admit(candidates(row, []box.Host{joined}), nil, row.Box, row.Only...); placed.Host == "" {
-			return fmt.Errorf("the node is too small for a %s box: %s", row.Size.Name, placed.Reason)
+			return fmt.Errorf("the node is too small for a box of size %s: %s", row.Size.Name, placed.Reason)
 		}
 		return r.store.FinishPoolNode(ctx, joined)
 	}()

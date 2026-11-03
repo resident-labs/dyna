@@ -271,7 +271,7 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 		if failure == "" || to == contract.BoxFailed && cause == contract.CauseCreateFailed && runtimeFailure {
 			_, err = tx.ExecContext(ctx, `UPDATE hosts SET
 				create_failures=CASE WHEN ?='' THEN 0 ELSE create_failures+1 END,
-				create_problem=CASE WHEN ?='' THEN '' WHEN create_failures+1>=3 THEN 'create_failed' ELSE create_problem END
+				create_problem=CASE WHEN ?='' THEN CASE WHEN create_problem='create_failed' THEN '' ELSE create_problem END WHEN create_failures+1>=3 THEN 'create_failed' ELSE create_problem END
 				WHERE name=? AND create_generation=(SELECT create_generation FROM boxes WHERE id=?)`, failure, failure, b.Host, b.ID)
 			if err != nil {
 				return err
