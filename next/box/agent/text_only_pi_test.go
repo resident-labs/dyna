@@ -1,4 +1,4 @@
-package pi_test
+package agent_test
 
 import (
 	"bufio"
