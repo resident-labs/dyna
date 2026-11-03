@@ -81,13 +81,17 @@ func (p *execProcess) GroupAlive() bool { return syscall.Kill(-p.cmd.Process.Pid
 
 func (p *execProcess) Signal(sig syscall.Signal) { _ = syscall.Kill(-p.cmd.Process.Pid, sig) }
 
-// hostProcess is one command on a host. The engine runs it and answers when it ends. A signal ends the call, and the engine
-// then stops the command on the host.
+// hostProcess is one command on a host. The engine runs it and answers when it ends. A signal asks the engine to stop it,
+// and SIGKILL also stops waiting for the answer. A call that only ends stops nothing, since the box's connection to the
+// engine can drop while the run is fine.
 type hostProcess struct {
-	done    chan struct{}
-	cancel  context.CancelFunc
-	code    int
-	refused *contract.Error // the engine ran nothing
+	done     chan struct{}
+	cancel   context.CancelFunc // ends the call
+	stop     func()             // asks the engine to stop the run
+	stopOnce sync.Once
+	stopped  chan struct{} // closes once the stop was asked, or was not needed
+	code     int
+	refused  *contract.Error // the engine ran nothing
 }
 
 func (p *hostProcess) Wait() (int, string) {
@@ -97,7 +101,22 @@ func (p *hostProcess) Wait() (int, string) {
 
 func (p *hostProcess) GroupAlive() bool { return false }
 
-func (p *hostProcess) Signal(syscall.Signal) { p.cancel() }
+func (p *hostProcess) Signal(sig syscall.Signal) {
+	p.stopOnce.Do(func() {
+		select {
+		case <-p.done:
+			close(p.stopped)
+		default:
+			go func() {
+				defer close(p.stopped)
+				p.stop()
+			}()
+		}
+	})
+	if sig == syscall.SIGKILL {
+		p.cancel()
+	}
+}
 
 type job struct {
 	id          contract.ShellJobID
@@ -221,6 +240,7 @@ type Run struct {
 	CallID      string            `json:"callId"`
 	Host        contract.HostName `json:"host"`    // empty: this box
 	Timeout     int               `json:"timeout"` // seconds; 0: none in the box, the engine's default on a host
+	ClientID    string            `json:"-"`       // set by the job server for a host run, which HostStop names
 }
 
 func timeoutNote(seconds int) string { return fmt.Sprintf("stopped after its %d s timeout", seconds) }
@@ -231,9 +251,11 @@ type Config struct {
 	Report func(contract.ShellJobEndedRequest) error // called when a background job ends; retried until it succeeds
 	// Running is called at each mark of a background job's running time. A failed call is not retried: the next mark says more.
 	Running func(contract.ShellJobRunningRequest) error
-	// Host runs a command on a host through the engine and returns its exit code. All its output comes as the run ends,
-	// and the engine stops the command when the context ends.
+	// Host runs a command on a host through the engine and returns its exit code. All its output comes as the run ends.
+	// Ending the context ends only the call.
 	Host func(context.Context, Run, io.Writer) (int, *contract.Error)
+	// HostStop asks the engine to stop the run that Host started with that client ID.
+	HostStop func(ctx context.Context, clientID string) error
 
 	newID func() contract.ShellJobID
 	start func(command, cwd, callID string, out io.Writer) (process, error)
@@ -289,8 +311,18 @@ func (s *Server) find(id contract.ShellJobID) (*job, bool) {
 
 // startHost hands a command to the engine. A refusal also goes in the output, in case the call has moved to the background.
 func (s *Server) startHost(r Run, out io.Writer) *hostProcess {
+	var id [16]byte
+	_, _ = rand.Read(id[:])
+	r.ClientID = hex.EncodeToString(id[:])
 	ctx, cancel := context.WithCancel(context.Background())
-	p := &hostProcess{done: make(chan struct{}), cancel: cancel}
+	p := &hostProcess{done: make(chan struct{}), cancel: cancel, stopped: make(chan struct{})}
+	p.stop = func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), stopGrace)
+		defer cancel()
+		if err := s.cfg.HostStop(stopCtx, r.ClientID); err != nil {
+			log.Printf("host run %s: stop: %v", r.ClientID, err)
+		}
+	}
 	go func() {
 		defer close(p.done)
 		defer cancel()
@@ -498,13 +530,21 @@ func (s *Server) Running() []contract.ShellJobID {
 	return running
 }
 
-// Close kills every job group, as the agent stops.
+// Close kills every job group, as the agent stops. It waits for each host run's stop to reach the engine, which takes at
+// most the stop grace period.
 func (s *Server) Close() {
 	close(s.closed)
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var stops []chan struct{}
 	for _, j := range s.jobs {
 		j.proc.Signal(syscall.SIGKILL)
+		if host, ok := j.proc.(*hostProcess); ok {
+			stops = append(stops, host.stopped)
+		}
+	}
+	s.mu.Unlock()
+	for _, stopped := range stops {
+		<-stopped
 	}
 }
 

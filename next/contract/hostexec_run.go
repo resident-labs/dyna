@@ -10,19 +10,28 @@ import (
 const (
 	MethodHostexecList Method    = "hostexec.list"
 	MethodHostexecRun  Method    = "hostexec.run"
+	MethodHostexecStop Method    = "hostexec.stop"
 	ErrNoGrant         ErrorCode = "no_grant"
 )
 
 // HostexecRunRequest runs Command on Host with bash -c.
 type HostexecRunRequest struct {
-	Host    HostName   `json:"host"`
-	Command string     `json:"command"`
-	Cwd     string     `json:"cwd"`
-	Timeout DurationMS `json:"timeout"`
+	Host     HostName   `json:"host"`
+	Command  string     `json:"command"`
+	Cwd      string     `json:"cwd"`
+	Timeout  DurationMS `json:"timeout"`
+	ClientID string     `json:"clientId,omitempty"` // at most 64 characters; names the run for HostexecStopRequest
 }
 type HostexecRunResponse struct {
 	Operation Operation `json:"operation"`
 }
+
+// HostexecStopRequest stops the caller's own run that its HostexecRunRequest named ClientID. A call that only went away
+// stops nothing, since the box's connection to the engine can drop while the run is fine.
+type HostexecStopRequest struct {
+	ClientID string `json:"clientId"`
+}
+type HostexecStopResponse struct{}
 type HostexecListRequest struct{}
 type HostexecListResponse struct {
 	Grants []Grant `json:"grants"`
