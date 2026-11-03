@@ -140,6 +140,10 @@ func registry() ([]tool, map[string]map[string]action, error) {
 			readOnly = readOnly && a.readOnly
 			help = append(help, verb+": "+a.help)
 			for key, value := range requestProperties(a) {
+				// A field several actions take is described once, in the toolkit's table, unless it carries its own.
+				if value.Description == "" {
+					value.Description = metadata.Fields[key]
+				}
 				if old, ok := props[key]; ok && !reflect.DeepEqual(old, value) {
 					return nil, nil, fmt.Errorf("%s.%s: incompatible property %s", name, verb, key)
 				}
@@ -159,6 +163,9 @@ func registry() ([]tool, map[string]map[string]action, error) {
 		var required []string
 		if len(verbs) > 1 {
 			required = []string{"action"}
+		}
+		if metadata.Description != "" {
+			help = append([]string{metadata.Description}, help...)
 		}
 		result = append(result, tool{Name: name, Title: metadata.Title, Description: strings.Join(help, "\n"), InputSchema: schema{Type: "object", Properties: props, Required: required}, Annotations: annotations{ReadOnly: readOnly, Destructive: metadata.Destructive, Idempotent: metadata.Idempotent, OpenWorld: metadata.OpenWorld}})
 	}

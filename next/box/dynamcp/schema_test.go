@@ -62,6 +62,40 @@ func TestFieldDescriptionsComeFromTheContract(t *testing.T) {
 	}
 }
 
+// A field several actions take is described once in the toolkit's table and reads the same for each, still naming the
+// actions that take it; what every action shares opens the tool's description once.
+func TestSharedFieldsAndTheToolDescriptionComeFromTheToolkit(t *testing.T) {
+	list, _, err := registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range list {
+		if item.Name != "computer" {
+			continue
+		}
+		props := item.InputSchema.Properties
+		for field, want := range map[string]string{
+			"status": "A few words on what this is for, shown to the owner watching the computer. For click, drag, key, launch, move, open, scroll, stop and type.",
+			"x":      "Desktop pixels from the top left of the 1280x800 desktop. For click, move, screenshot and scroll.",
+			"width":  "A region's width, with x, y and height. For screenshot.",
+			"button": "left (default), middle or right. For click.",
+		} {
+			if got := props[field].Description; got != want {
+				t.Errorf("%s: %q", field, got)
+			}
+		}
+		if !strings.HasPrefix(props["keys"].Description, "Key names: ") || !strings.HasSuffix(props["keys"].Description, "For click, drag, key and scroll.") {
+			t.Errorf("keys: %q", props["keys"].Description)
+		}
+		const opening = "The box desktop is 1280x800, with Chromium in a window and a taskbar; any action but stop starts it.\n"
+		if !strings.HasPrefix(item.Description, opening) || strings.Count(item.Description, "The box desktop is") != 1 {
+			t.Fatalf("description %q", item.Description)
+		}
+		return
+	}
+	t.Fatal("no computer tool")
+}
+
 // A property only some of a tool's actions take names them, since the actions share one schema and each decodes strictly:
 // pr open takes no repo.
 func TestAPropertySomeActionsTakeNamesThem(t *testing.T) {
