@@ -13,6 +13,12 @@ import (
 func (s *Service) HostexecGrant() approve.Entry {
 	return approve.Entry{
 		Scope: contract.ScopeAdmin,
+		// The request waits for a decision, or for its session to close. A room setting also lets its root decide.
+		NoExpiry: true,
+		RootDecides: func(ctx context.Context, room contract.RoomID) (bool, error) {
+			_, on, err := s.store.RoomRootApprovesHostexec(ctx, room)
+			return on, err
+		},
 		Class: func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassOwner },
 
 		// The title is the phrase after the asker's name, as for every card: "<session> asks for host access".
@@ -71,6 +77,9 @@ func (s *Service) HostexecGrant() approve.Entry {
 			if unknown {
 				body += "\nA host here may hold the model sign-ins. Approve only if you trust this session with them."
 			}
+			if name, on, err := s.store.RoomRootApprovesHostexec(ctx, a.Room); err == nil && on {
+				body += "\nWaiting for " + name + "'s root or the owner."
+			}
 			return contract.Card{Title: "asks for host access", Target: target, Body: body}
 		},
 		Check: func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
@@ -86,14 +95,23 @@ func (s *Service) HostexecGrant() approve.Entry {
 			err := json.Unmarshal(data, &a)
 			return a, err
 		},
-		Execute: func(ctx context.Context, _ contract.OpID, args contract.OpArgs, _ contract.Principal) contract.OpResult {
+		Execute: func(ctx context.Context, op contract.OpID, args contract.OpArgs, _ contract.Principal) contract.OpResult {
 			a := args.(contract.HostexecGrantArgs)
 			now := s.now()
 			value, err := id("grant_", now)
 			if err != nil {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
 			}
-			g := contract.Grant{ID: contract.GrantID(value), Kind: contract.GrantHostExec, Room: a.Room, To: a.To, Hosts: a.Hosts, Reason: a.Reason, By: contract.Principal{Kind: contract.PrincipalOwner}, Created: now}
+			// The grant records who decided it: the owner, or the room's root. An owner's own request has no decision.
+			by := contract.Principal{Kind: contract.PrincipalOwner}
+			record, err := s.store.Operation(ctx, op)
+			if err != nil {
+				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
+			}
+			if record.Operation.Decision != nil {
+				by = record.Operation.Decision.By
+			}
+			g := contract.Grant{ID: contract.GrantID(value), Kind: contract.GrantHostExec, Room: a.Room, To: a.To, Hosts: a.Hosts, Reason: a.Reason, By: by, Created: now}
 			err = s.store.CreateGrant(ctx, g)
 			if err != nil {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}

@@ -68,6 +68,7 @@ type fakeClient struct {
 	host         contract.HostAddRequest
 	hostLimit    *contract.HostSetLimitsRequest
 	hostSet      *contract.HostSetRequest
+	roomSet      *contract.RoomSetRequest
 	hostNoSwap   bool
 	room         contract.RoomCreateRequest
 	limits       contract.RoomSetLimitsRequest
@@ -209,6 +210,10 @@ func (f *fakeClient) HostSetLimits(_ context.Context, q contract.HostSetLimitsRe
 func (f *fakeClient) HostSet(_ context.Context, q contract.HostSetRequest) (contract.HostSetResponse, error) {
 	f.hostSet = &q
 	return contract.HostSetResponse{}, nil
+}
+func (f *fakeClient) RoomSet(_ context.Context, q contract.RoomSetRequest) (contract.RoomSetResponse, error) {
+	f.roomSet = &q
+	return contract.RoomSetResponse{}, nil
 }
 func (f *fakeClient) RoomCreate(_ context.Context, q contract.RoomCreateRequest) (contract.RoomCreateResponse, error) {
 	f.room = q

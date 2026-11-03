@@ -35,6 +35,29 @@ func (s *Store) StopRequested(ctx context.Context, session contract.SessionID) (
 	return turn, err
 }
 
+// SetRoomRootApprovesHostexec turns the room's setting that lets its root decide host exec grant requests.
+func (s *Store) SetRoomRootApprovesHostexec(ctx context.Context, room contract.RoomID, on bool) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "UPDATE rooms SET root_approves_hostexec=? WHERE id=? AND state='open'", on, room)
+		if err != nil {
+			return err
+		}
+		if n, err := result.RowsAffected(); err != nil || n == 0 {
+			if err == nil {
+				err = sql.ErrNoRows
+			}
+			return err
+		}
+		return nil
+	})
+}
+
+// RoomRootApprovesHostexec reads a room's name and whether its root may decide host exec grant requests.
+func (s *Store) RoomRootApprovesHostexec(ctx context.Context, room contract.RoomID) (name string, on bool, err error) {
+	err = s.Read().QueryRowContext(ctx, "SELECT name,root_approves_hostexec FROM rooms WHERE id=?", room).Scan(&name, &on)
+	return
+}
+
 func (s *Store) PauseRoom(ctx context.Context, room contract.RoomID, paused bool, event contract.Event) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		var at *int64

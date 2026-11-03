@@ -222,9 +222,6 @@ func Run(ctx context.Context, cfg Config) error {
 		proxy.Supervise(proxyCtx, executable, st, accounts.CompleteOAuth, connections)
 	}()
 	shutdown.cleanup("model proxy", func() { stopProxy(); <-done })
-	if err := service.ExpireHostexecGrantRequests(ctx); err != nil {
-		return fmt.Errorf("expire host grant requests: %w", err)
-	}
 	boxes.Mirror = mirror
 	boxes.Images = &images.Builder{Recorder: service, Now: time.Now}
 	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes, quotas: quotas, AccountActions: accounts}, func(c api.Caller) http.Handler {
