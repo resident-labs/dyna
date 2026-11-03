@@ -338,6 +338,8 @@ func TestRunnerOnlyARefusedModelFailsTheTurn(t *testing.T) {
 			if got := <-sink.done; got.Outcome != tc.outcome || got.Cause != tc.cause {
 				t.Fatalf("turn: %+v", got)
 			}
+			// The sink hears the result before the runner clears the turn, so wait for the turn to end before the next one.
+			runner.turns.Wait()
 			// A transfer that failed stays pending: the next turn tries again.
 			if err := runner.Handle(context.Background(), turnStart(1, modelB, 0)); err != nil {
 				t.Fatal(err)
@@ -449,6 +451,8 @@ func TestRunnerStopCancelsATransfer(t *testing.T) {
 	if want := []string{"abort"}; !reflect.DeepEqual(h.calls, want) {
 		t.Fatalf("Pi saw inputs of a stopped turn: %v", h.calls)
 	}
+	// The sink hears the result before the runner clears the turn, so wait for the turn to end before the next one.
+	runner.turns.Wait()
 	// Pi stayed on its model, so the next turn transfers again.
 	h.entered = make(chan struct{})
 	h.release <- harness.ModelTransfer{Path: "switched"}
