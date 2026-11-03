@@ -26,7 +26,20 @@ func TestCloseListedSessionByName(t *testing.T) {
 	if name == "" {
 		t.Fatal("session missing from list")
 	}
+	if _, problem := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: string(started.Session), Profile: "test"}); problem == nil || problem.Code != contract.ErrInvalid {
+		t.Fatalf("ID-shaped name: %v", problem)
+	}
+	other, problem := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "other", RootProfile: "test"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if _, problem := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: other.Room, Name: "elsewhere", Profile: "test"}); problem != nil {
+		t.Fatal(problem)
+	}
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: root}
+	if _, problem := s.SessionClose(ctx, caller, contract.SessionCloseRequest{Session: "elsewhere"}); problem == nil || problem.Code != contract.ErrNotFound {
+		t.Fatalf("other room name: %v", problem)
+	}
 	if _, problem := s.SessionClose(ctx, caller, contract.SessionCloseRequest{Session: contract.SessionID(name)}); problem != nil {
 		t.Fatalf("close listed session %q: %v", name, problem)
 	}
