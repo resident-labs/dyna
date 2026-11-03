@@ -150,7 +150,11 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 	}
 	card := entry.Card(ctx, input.Args, who)
 	if !immediate && entry.RootApproves != "" {
-		if name, on, err := s.Store.RoomRootApproves(ctx, input.Room, entry.RootApproves); err == nil && on {
+		name, on, err := s.Store.RoomRootApproves(ctx, input.Room, entry.RootApproves)
+		if err != nil {
+			return contract.Operation{}, err
+		}
+		if on {
 			card.Body += "\nWaiting for " + name + "'s root or the owner."
 		}
 	}
