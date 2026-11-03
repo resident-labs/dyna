@@ -107,6 +107,7 @@ func TestQuestionThroughTheAPI(t *testing.T) {
 
 type questionProfiles struct{}
 
+func (questionProfiles) TextOnlyModels() []contract.TextOnlyModel  { return nil }
 func (questionProfiles) List() []contract.ProfileSummary           { return nil }
 func (questionProfiles) CompactionTokens(contract.ProfileName) int { return 0 }
 func (questionProfiles) Model(contract.ProfileName) (contract.ModelChoice, []string, error) {
