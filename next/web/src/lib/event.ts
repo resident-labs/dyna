@@ -48,7 +48,7 @@ const bodies: Record<string, Check> = {
   "connect.connector": object({ missing: boolean }),
   "account.failed": object({ accountId: string, reason: oneOf("sign_in_rejected", "refresh_failed") }),
   "account.quota_low": object({ accountId: string, window: string, remainingPercent: number, floor: number }),
-  "post.created": object({ text: string, home: conversation, turn: optional(string), mentions: optional(nullable(array(principal))), replyTo: optional(string), clientId: optional(string),
+  "post.created": object({ text: string, home: conversation, source: optional(nullable(object({ room: string, roomName: string, sessionName: string }))), turn: optional(string), mentions: optional(nullable(array(principal))), replyTo: optional(string), clientId: optional(string),
     attachments: optional(nullable(array(object({ name: string, media: string, bytes: number, sha256: string, visual: optional(nullable(visual)) })))) }),
   "session.restarted": object({ session: string, imageUpdated: optional(boolean) }),
   "session.started": object({ session: string, name: string, parent: optional(string), profile: string, goal: optional(string), doneWhen: optional(string), brief: optional(string), workflow: optional(boolean) }),

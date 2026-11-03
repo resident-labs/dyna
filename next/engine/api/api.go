@@ -649,7 +649,9 @@ func call[Req, Resp any](mux *http.ServeMux, m contract.Method, c Caller, fn fun
 			return
 		}
 		if room := roomOf(req); room != nil && box(c) {
-			if problem := pinRoom(room, c); problem != nil {
+			if m == contract.MethodPost && *room != "" {
+				// Post alone authorizes its narrow cross-room exception in the service and store.
+			} else if problem := pinRoom(room, c); problem != nil {
 				writeError(w, problem)
 				return
 			}
@@ -676,7 +678,7 @@ func forbidden() *contract.Error {
 func writeError(w http.ResponseWriter, err *contract.Error) {
 	status := http.StatusInternalServerError
 	switch err.Code {
-	case contract.ErrInvalid:
+	case contract.ErrInvalid, contract.ErrCrossRoomAttachment:
 		status = http.StatusBadRequest
 	case contract.ErrForbidden, contract.ErrNoGrant:
 		status = http.StatusForbidden
