@@ -115,24 +115,77 @@ type ModelProvider struct {
 	BaseURL string            `json:"baseUrl"`
 	APIKey  string            `json:"apiKey"`
 	Headers map[string]string `json:"headers,omitempty"`
+	Models  []ModelDefinition `json:"models,omitempty"`
+}
+
+type ModelDefinition struct {
+	ID               string             `json:"id"`
+	API              string             `json:"api"`
+	Reasoning        bool               `json:"reasoning"`
+	Input            []string           `json:"input"`
+	ContextWindow    int                `json:"contextWindow"`
+	MaxTokens        int                `json:"maxTokens"`
+	ThinkingLevelMap map[string]*string `json:"thinkingLevelMap,omitempty"`
+	Compat           map[string]bool    `json:"compat,omitempty"`
+	PromptCache      map[string]int     `json:"promptCache,omitempty"`
+	InputLimits      *modelInputLimits  `json:"inputLimits,omitempty"`
+}
+
+type modelInputLimits struct {
+	MaxRequestBytes int              `json:"maxRequestBytes"`
+	Images          modelImageLimits `json:"images"`
+}
+type modelImageLimits struct {
+	MaxPerRequest int              `json:"maxPerRequest"`
+	Resize        modelImageResize `json:"resize"`
+}
+type modelImageResize struct {
+	MaxWidth    int `json:"maxWidth"`
+	MaxHeight   int `json:"maxHeight"`
+	MaxBytes    int `json:"maxBytes"`
+	JPEGQuality int `json:"jpegQuality"`
 }
 
 type ModelsConfig struct {
 	Providers map[string]ModelProvider `json:"providers"`
 }
 
-func Models() ModelsConfig {
+func Models(textOnly ...contract.TextOnlyModel) ModelsConfig {
 	origin := "http://127.0.0.1:7781"
-	return ModelsConfig{Providers: map[string]ModelProvider{
+	config := ModelsConfig{Providers: map[string]ModelProvider{
 		"anthropic": {BaseURL: origin, APIKey: "box"},
 		"openai":    {BaseURL: origin + "/v1", APIKey: "box"},
 	}}
+	for _, entry := range textOnly {
+		provider := config.Providers[string(entry.Provider)]
+		model := ModelDefinition{ID: entry.Model, Reasoning: true, Input: []string{"text"}, MaxTokens: 128000}
+		model.InputLimits = &modelInputLimits{Images: modelImageLimits{Resize: modelImageResize{MaxWidth: 2000, MaxHeight: 2000, MaxBytes: 4718592, JPEGQuality: 80}}}
+		level := func(s string) *string { return &s }
+		// Pi ai 1.4.0-dyna.13.228dd4febd41, catalog openai/gpt-5.5.
+		switch entry.Provider {
+		case contract.ModelProviderOpenAI:
+			model.API, model.ContextWindow = "openai-responses", 272000
+			model.Compat = map[string]bool{"supportsStrictMode": true, "supportsOpenAIGrammarTools": true, "supportsAdditionalTools": true, "supportsToolSearch": true, "supportsMidConvoSystemMessages": true}
+			model.ThinkingLevelMap = map[string]*string{"off": level("none"), "minimal": nil, "low": level("low"), "medium": level("medium"), "high": level("high"), "xhigh": level("xhigh"), "max": nil}
+			model.InputLimits.MaxRequestBytes, model.InputLimits.Images.MaxPerRequest = 536870912, 1500
+		// Pi ai 1.4.0-dyna.13.228dd4febd41, catalog anthropic/claude-opus-4-8.
+		case contract.ModelProviderAnthropic:
+			model.API, model.ContextWindow = "anthropic-messages", 1000000
+			model.Compat = map[string]bool{"supportsMidConvoSystemMessages": true, "supportsMidConvoToolChanges": true, "forceAdaptiveThinking": true, "supportsTemperature": false, "supportsStrictTools": true}
+			model.ThinkingLevelMap = map[string]*string{"xhigh": level("xhigh"), "max": level("max")}
+			model.PromptCache = map[string]int{"short": 300, "long": 3600}
+			model.InputLimits.MaxRequestBytes, model.InputLimits.Images.MaxPerRequest = 33554432, 600
+		}
+		provider.Models = append(provider.Models, model)
+		config.Providers[string(entry.Provider)] = provider
+	}
+	return config
 }
 
 // WorkerModels is one crew worker's configuration. The engine's route reads the header, so each worker holds its own account
 // affinity although a crew is one session.
-func WorkerModels(worker string) ModelsConfig {
-	config := Models()
+func WorkerModels(worker string, textOnly ...contract.TextOnlyModel) ModelsConfig {
+	config := Models(textOnly...)
 	for name, provider := range config.Providers {
 		provider.Headers = map[string]string{contract.WorkerHeader: worker}
 		config.Providers[name] = provider

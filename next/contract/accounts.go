@@ -193,6 +193,7 @@ type Profile struct {
 	Name          ProfileName   `json:"name"`
 	Provider      ModelProvider `json:"provider"`
 	Model         string        `json:"model"`
+	Images        *bool         `json:"images,omitempty"`
 	Thinking      ThinkingLevel `json:"thinking"`
 	AllowedModels []string      `json:"allowedModels"`
 	CompactTokens int           `json:"compactTokens"`
