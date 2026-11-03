@@ -167,8 +167,13 @@ func (s *Store) RecordHostHeartbeat(ctx context.Context, name contract.HostName,
 // warnDisk alerts room roots once per low spell. A spell ends a tenth above the warn level and diskAlertGap after its alert, so a host that hovers stays quiet.
 func (s *Store) warnDisk(ctx context.Context, tx *sql.Tx, name contract.HostName, free, floor, total int64, at time.Time) error {
 	var pool string
-	if err := tx.QueryRowContext(ctx, "SELECT pool FROM hosts WHERE name=?", name).Scan(&pool); err != nil && err != sql.ErrNoRows {
+	var execOnly bool
+	if err := tx.QueryRowContext(ctx, "SELECT pool, exec_only FROM hosts WHERE name=?", name).Scan(&pool, &execOnly); err != nil && err != sql.ErrNoRows {
 		return err
+	}
+	// An exec-only host has no disk figures to warn about.
+	if execOnly {
+		return nil
 	}
 	warn := box.DiskWarn(floor, total, pool != "")
 	if free >= warn+warn/10 {

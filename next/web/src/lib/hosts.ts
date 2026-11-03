@@ -20,6 +20,9 @@ export function hang(button: Pick<DOMRect, "top" | "right" | "bottom">, width: n
   return `${up ? `top: auto; bottom: ${height - button.top + gap}px` : `top: ${button.bottom + gap}px`}; right: ${Math.max(12, width - button.right)}px; max-height: min(560px, 70vh, ${up ? above : below}px)`;
 }
 
+// A host's low-disk mark. An exec-only host has no disk figures, so it is never low.
+export const diskLow = (h: HostSummary) => h.diskLow && !h.execOnly;
+
 // One tile on a Home card: the label, the percent large with an optional muted unit after it, a bar, and the text.
 export type Meter = { label: string; text: string; percent: number; busy: boolean; unit?: string };
 
@@ -32,7 +35,7 @@ export function machines(hosts: HostSummary[]): HostSummary[] {
   const same = hosts.find(h => h.engineHost);
   if (!plane || !same || !hostMeters(plane).length) return hosts;
   const merged = { ...plane, name: same.name, reachable: same.reachable, lastSeen: same.lastSeen, boxes: plane.boxes + same.boxes, runners: same.runners,
-    diskLow: plane.diskLow || same.diskLow, sessions: [...plane.sessions ?? [], ...same.sessions ?? []], engineHost: true };
+    diskLow: diskLow(plane) || diskLow(same), sessions: [...plane.sessions ?? [], ...same.sessions ?? []], engineHost: true };
   return hosts.filter(h => h !== same).map(h => h === plane ? merged : h);
 }
 
@@ -75,9 +78,9 @@ export const sharedSize = (bytes: number) => `${Math.round(bytes / 2 ** 30).toLo
 // attention; then the reachable ones that report load, busiest first by the higher of CPU and memory.
 export function hostLoads(hosts: HostSummary[]): { name: string; reachable: boolean; diskLow: boolean; meters: Meter[] }[] {
   const load = (meters: Meter[]) => Math.max(...meters.map(m => m.percent));
-  const loads = hosts.filter(h => h.reachable).map(h => ({ name: h.name, reachable: true, diskLow: h.diskLow, meters: hostMeters(h).slice(0, 2) }))
+  const loads = hosts.filter(h => h.reachable).map(h => ({ name: h.name, reachable: true, diskLow: diskLow(h), meters: hostMeters(h).slice(0, 2) }))
     .filter(h => h.diskLow || h.meters.length).sort((a, b) => Number(b.diskLow) - Number(a.diskLow) || load(b.meters) - load(a.meters));
-  return [...hosts.filter(h => !h.reachable).map(h => ({ name: h.name, reachable: false, diskLow: h.diskLow, meters: [] })), ...loads].slice(0, 3);
+  return [...hosts.filter(h => !h.reachable).map(h => ({ name: h.name, reachable: false, diskLow: diskLow(h), meters: [] })), ...loads].slice(0, 3);
 }
 
 // host.list as machines, now and then every 10 s to match the engine's beat, only while the page is visible. A tick skips while a

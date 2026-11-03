@@ -67,3 +67,20 @@ func TestHostListDiskLowMatchesEngineWarnLevel(t *testing.T) {
 		}
 	}
 }
+
+// An exec-only host has no disk figures, so host list never calls it low on disk.
+func TestHostListExecOnlyIsNeverDiskLow(t *testing.T) {
+	s, _, _, ctx := setup(t)
+	if err := s.store.AddHost(ctx, box.Host{Name: "omarchy", State: box.HostReady, NoAgents: true, ExecOnly: true, CheckedAt: s.now()}); err != nil {
+		t.Fatal(err)
+	}
+	list, problem := s.HostList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.HostListRequest{})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	for _, h := range list.Hosts {
+		if h.Name == "omarchy" && (!h.ExecOnly || h.DiskLow) {
+			t.Fatalf("%+v", h)
+		}
+	}
+}
