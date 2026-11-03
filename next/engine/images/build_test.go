@@ -9,11 +9,15 @@ import (
 )
 
 type fakeHost struct {
-	calls int
-	err   error
+	calls  int
+	err    error
+	exists bool
 }
 
-func (h *fakeHost) Build(context.Context, string, string, []byte) error { h.calls++; return h.err }
+func (h *fakeHost) Build(context.Context, string, string, []byte) (bool, error) {
+	h.calls++
+	return !h.exists && h.err == nil, h.err
+}
 
 type fakeRecorder struct{ body contract.EventBody }
 
@@ -46,5 +50,16 @@ func TestBuildRecordsSuccess(t *testing.T) {
 	body, ok := recorder.body.(contract.ImageBuilt)
 	if err != nil || !ok || body.Tag != tag || host.calls != 1 {
 		t.Fatalf("body %+v, error %v", recorder.body, err)
+	}
+}
+
+// Every engine start checks each image, so one that already exists records nothing.
+func TestBuildRecordsNothingForAnImageThatExists(t *testing.T) {
+	host := &fakeHost{exists: true}
+	recorder := &fakeRecorder{}
+	b := &Builder{Recorder: recorder, Now: func() time.Time { return time.Unix(1, 0) }}
+	tag, err := b.Build(context.Background(), host, "room", "host", "owner/repo", "toolchain", "base", "tree", nil)
+	if err != nil || tag == "" || recorder.body != nil {
+		t.Fatalf("tag %q, body %+v, error %v", tag, recorder.body, err)
 	}
 }
