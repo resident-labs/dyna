@@ -36,9 +36,10 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 	if problem != nil {
 		return contract.HostListResponse{}, problem
 	}
+	runners := s.reconciler.RunnerCounts()
 	result := contract.HostListResponse{Hosts: []contract.HostSummary{{Name: contract.ControlPlane, Sessions: sessions[contract.ControlPlane], Shared: shared, BackupCopyAt: status.LastSuccess, BackupCopyFailure: copyFailure}}}
 	for _, host := range hosts {
-		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, Sessions: sessions[host.Name], Shared: []contract.RoomShared{}, Pool: host.Pool, Agents: !host.NoAgents, CI: host.CI, CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.CheckedAt.IsZero() && host.DiskBytes < box.DiskWarn(host.DiskFloor), EngineHost: host.EngineHost != nil && *host.EngineHost, Leftovers: leftovers[host.Name]})
+		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, Sessions: sessions[host.Name], Shared: []contract.RoomShared{}, Pool: host.Pool, Agents: !host.NoAgents, CI: host.CI, Runners: runners[host.Name], CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.CheckedAt.IsZero() && host.DiskBytes < box.DiskWarn(host.DiskFloor), EngineHost: host.EngineHost != nil && *host.EngineHost, Leftovers: leftovers[host.Name]})
 	}
 	return result, nil
 }
