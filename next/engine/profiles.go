@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -23,6 +24,7 @@ type profile struct {
 	Cost          int                    `json:"cost"`
 	Provider      contract.ModelProvider `json:"provider"`
 	Model         string                 `json:"model"`
+	Images        bool                   `json:"images"`
 	AllowedModels []string               `json:"allowedModels"`
 	Thinking      contract.ThinkingLevel `json:"thinking"`
 	CompactTokens int                    `json:"compactTokens,omitempty"`
@@ -33,9 +35,10 @@ type profile struct {
 // wake hook calls non-blocking Kick, then takes wakeMu. wakeMu is a leaf lock.
 // No box IO runs while the profile lock is held.
 type ProfileConfig struct {
-	mu      sync.RWMutex
-	path    string
-	entries map[contract.ProfileName]profile
+	mu       sync.RWMutex
+	path     string
+	entries  map[contract.ProfileName]profile
+	textOnly []contract.TextOnlyModel
 }
 
 // LoadProfiles validates configuration at the file boundary.
@@ -45,11 +48,19 @@ func LoadProfiles(path string) (*ProfileConfig, error) {
 		return nil, err
 	}
 	defer file.Close()
-	var profiles map[contract.ProfileName]profile
-	decoder := json.NewDecoder(file)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&profiles); err != nil {
+	var raw map[contract.ProfileName]json.RawMessage
+	if err := json.NewDecoder(file).Decode(&raw); err != nil {
 		return nil, err
+	}
+	profiles := make(map[contract.ProfileName]profile, len(raw))
+	for name, data := range raw {
+		p := profile{Images: true}
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&p); err != nil {
+			return nil, fmt.Errorf("profile %q: %w", name, err)
+		}
+		profiles[name] = p
 	}
 	if len(profiles) == 0 {
 		return nil, fmt.Errorf("profiles: no profiles")
@@ -57,7 +68,7 @@ func LoadProfiles(path string) (*ProfileConfig, error) {
 	if err := validateProfiles(profiles); err != nil {
 		return nil, err
 	}
-	return &ProfileConfig{path: path, entries: profiles}, nil
+	return &ProfileConfig{path: path, entries: profiles, textOnly: textOnlyModels(profiles)}, nil
 }
 
 func validateProfiles(profiles map[contract.ProfileName]profile) error {
@@ -95,10 +106,42 @@ func (p *ProfileConfig) List() []contract.ProfileSummary {
 	defer p.mu.RUnlock()
 	result := make([]contract.ProfileSummary, 0, len(p.entries))
 	for name, profile := range p.entries {
-		result = append(result, contract.ProfileSummary{Name: name, Provider: profile.Provider, Model: profile.Model, Thinking: profile.Thinking, Description: profile.Description, Taste: profile.Taste, Diagnostics: profile.Diagnostics, Intelligence: profile.Intelligence, Cost: profile.Cost, AllowedModels: slices.Clone(profile.AllowedModels), CompactTokens: profile.CompactTokens, MaxConcurrent: profile.MaxConcurrent})
+		var images *bool
+		if !profile.Images {
+			images = &profile.Images
+		}
+		result = append(result, contract.ProfileSummary{Name: name, Provider: profile.Provider, Model: profile.Model, Images: images, Thinking: profile.Thinking, Description: profile.Description, Taste: profile.Taste, Diagnostics: profile.Diagnostics, Intelligence: profile.Intelligence, Cost: profile.Cost, AllowedModels: slices.Clone(profile.AllowedModels), CompactTokens: profile.CompactTokens, MaxConcurrent: profile.MaxConcurrent})
 	}
 	slices.SortFunc(result, func(a, b contract.ProfileSummary) int { return strings.Compare(string(a.Name), string(b.Name)) })
 	return result
+}
+
+func textOnlyModels(profiles map[contract.ProfileName]profile) []contract.TextOnlyModel {
+	seen := map[contract.TextOnlyModel]bool{}
+	for _, p := range profiles {
+		if !p.Images {
+			for _, id := range append(slices.Clone(p.AllowedModels), p.Model) {
+				seen[contract.TextOnlyModel{Provider: p.Provider, Model: id}] = true
+			}
+		}
+	}
+	result := make([]contract.TextOnlyModel, 0, len(seen))
+	for model := range seen {
+		result = append(result, model)
+	}
+	slices.SortFunc(result, func(a, b contract.TextOnlyModel) int {
+		if n := strings.Compare(string(a.Provider), string(b.Provider)); n != 0 {
+			return n
+		}
+		return strings.Compare(a.Model, b.Model)
+	})
+	return result
+}
+
+func (p *ProfileConfig) TextOnlyModels() []contract.TextOnlyModel {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return slices.Clone(p.textOnly)
 }
 
 func (s *Service) ProfileList(ctx context.Context, who contract.Principal, _ contract.ProfileListRequest) (contract.ProfileListResponse, *contract.Error) {
@@ -212,6 +255,7 @@ func (p *ProfileConfig) updateLocked(name contract.ProfileName, value *profile, 
 		return failure(err)
 	}
 	p.entries = next
+	p.textOnly = textOnlyModels(next)
 	return nil
 }
 
@@ -224,7 +268,8 @@ func (s *Service) ProfileSet(ctx context.Context, who contract.Principal, req co
 		return contract.ProfileSetResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "profile configuration is read-only"}
 	}
 	v := req.Profile
-	err := p.update(v.Name, &profile{Description: v.Description, Taste: v.Taste, Diagnostics: v.Diagnostics, Intelligence: v.Intelligence, Cost: v.Cost, Provider: v.Provider, Model: v.Model, AllowedModels: slices.Clone(v.AllowedModels), Thinking: v.Thinking, CompactTokens: v.CompactTokens, MaxConcurrent: v.MaxConcurrent}, req.Create)
+	images := v.Images == nil || *v.Images
+	err := p.update(v.Name, &profile{Description: v.Description, Taste: v.Taste, Diagnostics: v.Diagnostics, Intelligence: v.Intelligence, Cost: v.Cost, Provider: v.Provider, Model: v.Model, Images: images, AllowedModels: slices.Clone(v.AllowedModels), Thinking: v.Thinking, CompactTokens: v.CompactTokens, MaxConcurrent: v.MaxConcurrent}, req.Create)
 	if err == nil && !req.Create {
 		// An edit can move every session on the profile to another model at its next turn.
 		if sessions, readErr := s.store.SessionsOnProfile(ctx, v.Name); readErr == nil {
