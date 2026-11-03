@@ -132,7 +132,7 @@
     <button type="button" onclick={event => { event.currentTarget.closest("dialog")?.close(); copy(); }}><Icon name="copy" />Copy text</button></dialog>{/if}
   {#if row.first}
     <Avatar kind={row.from.kind} name={author} {root} size={40} />
-    <p class="name">{#if row.from.session}<a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(row.from.session)}`} onclick={navigate} style:--hue={hue(author)}>{author}</a>{:else}<strong class={row.from.kind} style:--hue={hue(author)}>{author}</strong>{/if}
+    <p class="name">{#if row.from.session}<a href={`/r/${encodeURIComponent(row.source?.room ?? room)}/s/${encodeURIComponent(row.from.session)}`} onclick={navigate} style:--hue={hue(author)}>{author}</a>{:else}<strong class={row.from.kind} style:--hue={hue(author)}>{author}</strong>{/if}
       <time datetime={row.at} title={fullTime(row.at)}>{formatTime(row.at)}</time>{#if to}<PostTarget {to} />{/if}</p>
   {:else}
     <time class="follow-time" datetime={row.at} title={fullTime(row.at)}>{clock(row.at)}</time>

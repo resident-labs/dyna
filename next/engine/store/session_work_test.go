@@ -20,6 +20,9 @@ func TestSessionWorkPagesTurns(t *testing.T) {
 	if err := s.CreateRoom(ctx, "r", "r", time.Unix(1, 0)); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.CreateRoom(ctx, "other", "other", time.Unix(1, 0)); err != nil {
+		t.Fatal(err)
+	}
 	_, err = s.writer.Exec("INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('s','r','s','p','open','',0)")
 	if err != nil {
 		t.Fatal(err)
@@ -48,6 +51,9 @@ func TestSessionWorkPagesTurns(t *testing.T) {
 				return err
 			}
 			if i == 2 {
+				if _, err = s.AppendEvent(tx, contract.Event{ID: "cross", Time: time.Unix(1, 0), Room: "other", From: session, Body: contract.PostCreated{Text: "cross"}}); err != nil {
+					return err
+				}
 				if _, err = appendEvent(fmt.Sprintf("end%d", i), session, contract.TurnEnded{Session: "s", Turn: turn, Outcome: contract.TurnCompleted}); err != nil {
 					return err
 				}
@@ -59,7 +65,7 @@ func TestSessionWorkPagesTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 	page, more, total, err := s.SessionWork(ctx, "s", "", 2)
-	if err != nil || total != 3 || !more || len(page) != 2 || page[0].Started.ID != "start3" || page[0].Ended != nil || len(page[0].Posts) != 1 || len(page[0].Inputs) != 1 || page[1].Ended == nil {
+	if err != nil || total != 3 || !more || len(page) != 2 || page[0].Started.ID != "start3" || page[0].Ended != nil || len(page[0].Posts) != 1 || len(page[0].Inputs) != 1 || page[1].Ended == nil || len(page[1].Posts) != 2 || page[1].Posts[1].ID != "cross" {
 		t.Fatalf("page=%+v more=%v err=%v", page, more, err)
 	}
 	page, more, total, err = s.SessionWork(ctx, "s", "turn2", 2)
