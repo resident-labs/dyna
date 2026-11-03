@@ -115,7 +115,7 @@ func addonCommands(get func() *socketClient) []*cobra.Command {
 
 	skill := &cobra.Command{Use: "skill", Short: "Skills: instructions an agent reads when they apply"}
 	var skillFlags addonFlags
-	skillSave := &cobra.Command{Use: "save PATH", Short: "Save a folder with SKILL.md, a link to one, or HOST:PATH to copy it from a host over SSH", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	skillSave := &cobra.Command{Use: "save PATH", Short: "Save a folder with SKILL.md, a link to one, or HOST:PATH to copy it from a host over SSH (a local folder with a colon needs ./)", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		req, err := skills.Request(args[0], "", contract.RoomID(skillFlags.room), skillFlags.global)
 		if err != nil {
 			return err

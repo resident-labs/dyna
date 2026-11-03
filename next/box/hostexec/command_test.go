@@ -83,3 +83,28 @@ func TestCollectReadsBackAndRemoves(t *testing.T) {
 		t.Fatalf("empty folder gave %q", out)
 	}
 }
+
+// A collect run's stderr stays apart from its stdout, so a tar warning cannot corrupt the archive.
+func TestCollectRunKeepsStderrApart(t *testing.T) {
+	a := CollectArgs(contract.HostexecRunArgs{}, "op1")
+	a.Argv = []string{"bash", "-c", "echo data; echo warn >&2"}
+	if out := strings.TrimSpace(bashOfStdout(t, a)); out != "data" {
+		t.Fatalf("out %q", out)
+	}
+}
+
+func bashOfStdout(t *testing.T, a contract.HostexecRunArgs) string {
+	t.Helper()
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "systemd-run"), []byte("#!/bin/bash\nwhile [ \"$1\" != -- ]; do shift; done; shift; exec \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	args := RunArgs(a, "op1")
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin", "TMPDIR=" + t.TempDir()}
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
