@@ -21,6 +21,7 @@ import (
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
+	"github.com/tidwall/gjson"
 )
 
 type directResponseTestError struct {
@@ -944,5 +945,32 @@ func TestWriteErrorResponse_ContextCanceledUses499(t *testing.T) {
 
 	if recorder.Code != clienterror.StatusClientClosedRequest {
 		t.Fatalf("status = %d, want %d", recorder.Code, clienterror.StatusClientClosedRequest)
+	}
+}
+
+// A request that finds every credential cooling after an upstream overload must say the upstream
+// was overloaded in the typed error fields, not report the generic status code.
+func TestBuildErrorResponseBodyWithError_CooldownKeepsUpstreamErrorCode(t *testing.T) {
+	bodies := map[string]string{
+		"nested": `{"error":{"type":"service_unavailable_error","code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}`,
+		"flat":   `{"type":"error","code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later.","sequence_number":0}`,
+	}
+	for name, upstream := range bodies {
+		t.Run(name, func(t *testing.T) {
+			cause := &coreauth.Error{Message: upstream, HTTPStatus: http.StatusServiceUnavailable}
+			err := coreauth.WithCause(&coreauth.Error{Code: "auth_unavailable", Message: "no auth available", HTTPStatus: http.StatusServiceUnavailable}, cause)
+			body := BuildErrorResponseBodyWithError(http.StatusServiceUnavailable, err.Error(), err)
+			if got := gjson.GetBytes(body, "error.code").String(); got != "server_is_overloaded" {
+				t.Fatalf("error.code = %q, want server_is_overloaded; body %s", got, body)
+			}
+			if got := gjson.GetBytes(body, "error.type").String(); got != "server_error" {
+				t.Fatalf("error.type = %q, want server_error; body %s", got, body)
+			}
+		})
+	}
+
+	plain := BuildErrorResponseBodyWithError(http.StatusServiceUnavailable, "no auth available", &coreauth.Error{Code: "auth_unavailable", Message: "no auth available", HTTPStatus: http.StatusServiceUnavailable})
+	if got := gjson.GetBytes(plain, "error.code").String(); got != "internal_server_error" {
+		t.Fatalf("error.code without an upstream cause = %q, want internal_server_error", got)
 	}
 }

@@ -17,6 +17,9 @@ func TestMask(t *testing.T) {
 		"password: $PASSWORD",
 		"secret = some_long_identifier_name",
 		"key: \"id\"",
+		"(`{\"contract\": \"collect\", \"out\": \"output\", \"scope\": \"block\", \"key\": \"state\"}`): the key is a .",
+		"'key' => 'state',",
+		"\"key\" => \"a_long_array_key_name\",",
 	}
 	for _, in := range unchanged {
 		if got := Mask(in); got != in {
