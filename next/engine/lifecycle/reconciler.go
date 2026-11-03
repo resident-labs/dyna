@@ -130,7 +130,7 @@ func (r *Reconciler) cancel(id contract.BoxID) <-chan struct{} {
 	r.mu.Unlock()
 	return step.done
 }
-func (r *Reconciler) change(ctx context.Context, old, next box.Box, due time.Time, failures int, cause contract.FailureCause) (bool, error) {
+func (r *Reconciler) change(ctx context.Context, old, next box.Box, due time.Time, failures int, cause contract.FailureCause, runtimeFailure ...bool) (bool, error) {
 	session, err := r.store.Session(ctx, old.Session)
 	if err != nil {
 		return false, err
@@ -140,7 +140,7 @@ func (r *Reconciler) change(ctx context.Context, old, next box.Box, due time.Tim
 		return false, err
 	}
 	if old.State == contract.BoxCreating && (next.State == contract.BoxStarting || next.State == contract.BoxFailed || next.State == contract.BoxPending) {
-		return true, r.store.FinishCreate(ctx, old, next.Image, next.Reason, due, failures, event)
+		return true, r.store.FinishCreate(ctx, old, next.Image, next.Reason, due, failures, event, len(runtimeFailure) > 0 && runtimeFailure[0])
 	}
 	return r.store.SetBoxLifecycle(ctx, old, next, due, failures, event)
 }

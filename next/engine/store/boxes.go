@@ -185,7 +185,7 @@ func (s *Store) SetBoxLifecycle(ctx context.Context, old, next box.Box, due time
 }
 
 // FinishCreate records the host result without overwriting a concurrent hello.
-func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure string, due time.Time, failures int, event contract.Event) error {
+func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure string, due time.Time, failures int, event contract.Event, runtimeFailure ...bool) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		var state contract.BoxState
 		if err := tx.QueryRowContext(ctx, `SELECT state FROM boxes WHERE id=?`, b.ID).Scan(&state); err != nil {
@@ -240,7 +240,7 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 		}
 		// Count completed failed creations, not their retry attempts. The generation fences
 		// a result that was already in flight when the owner cleared the problem.
-		if failure == "" || to == contract.BoxFailed && cause == contract.CauseCreateFailed {
+		if failure == "" || to == contract.BoxFailed && cause == contract.CauseCreateFailed && len(runtimeFailure) > 0 && runtimeFailure[0] {
 			_, err = tx.ExecContext(ctx, `UPDATE hosts SET
 				create_failures=CASE WHEN ?='' THEN 0 ELSE create_failures+1 END,
 				create_problem=CASE WHEN ?='' THEN '' WHEN create_failures+1>=3 THEN 'create_failed' ELSE create_problem END

@@ -697,7 +697,7 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 		return "", err
 	}
 	if err := b.Sockets.AddBox(spec.Box, spec.Session, session.Room); err != nil {
-		return "", err
+		return "", box.RuntimeCreateError{Err: err}
 	}
 	ok := false
 	var forwarded, sliced, created, stacked bool
@@ -728,12 +728,12 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	spec.Needs, spec.Stack = image.Needs, image.Stack
 	slice, c := b.container(spec, image.Tag, shared)
 	if err = h.EnsureSlice(ctx, slice); err != nil {
-		return "", err
+		return "", box.RuntimeCreateError{Err: err}
 	}
 	sliced = true
 	steps.Done("slice")
 	if err = h.AddForward(ctx, forward); err != nil {
-		return "", err
+		return "", box.RuntimeCreateError{Err: err}
 	}
 	forwarded = true
 	steps.Done("forward")
@@ -750,6 +750,8 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 			missing.Host = string(spec.Host)
 			return "", missing
 		}
+		// Container create can implicitly pull a missing image; its errors are not
+		// safely distinguishable from image errors at this boundary.
 		return "", err
 	}
 	created = true
@@ -761,7 +763,7 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 		steps.Done("sidecars")
 	}
 	if err = h.StartContainer(ctx, spec.Box); err != nil {
-		return "", err
+		return "", box.RuntimeCreateError{Err: err}
 	}
 	steps.Done("container start")
 	ok = true

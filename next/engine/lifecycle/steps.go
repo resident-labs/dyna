@@ -45,6 +45,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 	var due time.Time
 	failures := row.Failures
 	var cause contract.FailureCause
+	var runtimeFailure bool
 	var workErr error
 	switch {
 	case row.Want == store.WantHold:
@@ -115,6 +116,8 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			next.Image, workErr = r.boxes.Create(createCtx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources})
 			steps.Done("create")
 		}
+		var runtimeErr box.RuntimeCreateError
+		runtimeFailure = errors.As(workErr, &runtimeErr)
 		if errors.Is(context.Cause(createCtx), context.DeadlineExceeded) && ctx.Err() == nil {
 			workErr = fmt.Errorf("%s timed out after 15 minutes: %w", phase, context.DeadlineExceeded)
 		}
@@ -234,7 +237,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		// A successful stop is an observed fact even if close cancelled it.
 		ctx = context.WithoutCancel(ctx)
 	}
-	changed, err := r.change(ctx, b, next, due, failures, cause)
+	changed, err := r.change(ctx, b, next, due, failures, cause, runtimeFailure)
 	if changed && err == nil && next.State == contract.BoxStopped {
 		r.view.BoxStopped(ctx, b.Session)
 	}
