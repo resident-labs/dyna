@@ -28,8 +28,9 @@ that no job waits for a pool that does not exist yet.
    copies the Dyna binary across, and `jq`, `socat` and the rest live in the
    runner image. The engine's key must be a plain one in the
    host user's `authorized_keys`. A key with a forced command cannot run
-   anything. SSH once by hand as the engine's user, because the
-   engine cannot answer a host key prompt. A laptop or any host that logs out needs
+   anything. The engine takes the host's key on first
+   contact (`StrictHostKeyChecking=accept-new`) and keeps it in a known-hosts file
+   of its own, so no prompt and no manual SSH are needed. A laptop or any host that logs out needs
    `sudo loginctl enable-linger USER` first, because rootless containers stop with
    the user's session.
 3. Keep sessions off a CI host with `--agents off`. A host has two switches:
